@@ -372,6 +372,86 @@ mutate artifact archiveArtifact {
   }
 }
 
+/// Bring a Library artifact index row back out of the Bin (memql#4784) -- the exact inverse of
+/// archiveArtifact, and the write that makes archiving a door rather than a one-way door. Nothing
+/// was destroyed by the archive, so nothing has to be reconstructed here: the row keeps its labels,
+/// its folder, its provenance and its sourceConceptRef throughout, and this write only flips the
+/// flag back. updatedAt advances because a restore IS a change a person made.
+///
+/// THE BACKING FILE IS NOT RESTORED BY AN AUTOMATION, and that asymmetry with the archive path is
+/// deliberate. archiveFileOnArtifactArchive rides `node.updated` on v1:library:artifact filtered on
+/// `archived == true`; a mirror of it filtered on `archived == false` would fire on essentially
+/// EVERY artifact update, since almost no artifact is archived -- and, with the archive automation
+/// already in place, the two together close the cycle that automation's own header warns about
+/// (each write publishes an event the other subscribes to, and both being idempotent does not stop
+/// the events). So restore is a CLIENT-DRIVEN PAIR, exactly as the recursive archive walk is: the
+/// Bin calls this and restoreLibraryFile together, and a re-run of an interrupted restore simply
+/// finds the half that already landed absent from its next plan.
+mutate artifact restoreArtifact {
+  args {
+    artifactId  string!
+  }
+  update {
+    id: args.artifactId
+    archived: false
+    updatedAt: now
+  }
+}
+
+/// Bring a Library file back out of the Bin (memql#4784) -- the inverse of archiveLibraryFile, and
+/// the second half of the client-driven restore pair restoreArtifact's header describes. The bytes
+/// never went anywhere: an archive is an append-only re-version carrying archived=true, so this
+/// write is a re-version carrying false and the blobUrl, the provenance and every earlier version
+/// are exactly where they were.
+mutate file restoreLibraryFile {
+  args {
+    fileId  string!
+  }
+  update {
+    id: args.fileId
+    archived: false
+  }
+}
+
+/// Bring a folder back out of the Bin (memql#4784) -- the inverse of archiveLibraryFolder. The
+/// CLIENT drives the recursive walk here too, and in the opposite ORDER from the archive: parents
+/// OUTWARD-first, so a restored item never appears under a parent that is still archived. A folder
+/// restored on its own comes back empty and that is the honest result -- its contents are their own
+/// rows and each one is its own decision, which is what lets somebody take one file back out of the
+/// Bin without undoing everything they filed there.
+mutate folder restoreLibraryFolder {
+  args {
+    folderId  string!
+  }
+  update {
+    id: args.folderId
+    archived: false
+  }
+}
+
+/// Record how a file's copy stands against the machine it was pushed from (epic memql#4783). Called
+/// by the cockpit's verify lane, which is the only party that can see the origin at all -- the
+/// engine knows what it received and when, and nothing more.
+///
+/// IT ONLY EVER FLAGS. There is no state here that removes, hides or supersedes the MemQL copy, and
+/// that is the epic's load-bearing invariant rather than an omission: a backup whose copy follows
+/// the original into the bin is not a backup. origin_gone is a LABEL on a file that is still whole
+/// and still downloadable.
+///
+/// Deliberately NOT a data-origins mirror (memql#4378). A mirror reconciles deletions and a
+/// connector owns its concept; this retains and flags, and Library files stay native.
+mutate file setLibraryFileLinkState {
+  args {
+    fileId     string!
+    linkState  enum("synced", "stale", "origin_gone")!
+  }
+  update {
+    id: args.fileId
+    linkState: args.linkState
+    linkCheckedAt: now
+  }
+}
+
 /// Write one chunk of a Library file's extracted text, ready for embedding. Owner-acted: ownerUserId
 /// is stamped from actor.userId, and the analysis pass runs under the file owner, so a chunk always
 /// lands owned by the same person as its file. artifactId is resolved by the pass through

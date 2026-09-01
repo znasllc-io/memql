@@ -10,6 +10,7 @@ import (
 	"github.com/znasllc-io/memql/component/harness/actionplan"
 	"github.com/znasllc-io/memql/component/harness/parambind"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // actionReplayEnabled gates the whole action-library emission path behind the
@@ -214,12 +215,12 @@ func bestRef(actionID string, payload map[string]any) string {
 	if payload != nil {
 		switch v := payload["version"].(type) {
 		case float64:
-			if iv := clampFloatToInt(v); iv >= 1 {
+			if iv := num.Float64OrZero(v); iv >= 1 {
 				ref = actionpin.Ref{ID: actionID, Version: iv}
 			}
 		case json.Number:
 			if n, err := v.Int64(); err == nil && n >= 1 {
-				ref = actionpin.Ref{ID: actionID, Version: clampToInt(n)}
+				ref = actionpin.Ref{ID: actionID, Version: num.ClampInt64(n)}
 			}
 		}
 	}

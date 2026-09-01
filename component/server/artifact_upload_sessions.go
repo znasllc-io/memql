@@ -389,6 +389,29 @@ func (h *ArtifactHandler) handleUploadInit(w http.ResponseWriter, r *http.Reques
 		http.Error(w, msg, status)
 		return
 	}
+
+	// --- the KEYED version target (epic memql#4783, design E) ---
+	//
+	// This route needs it MORE than the one-shot route does, not less: the
+	// watched folder in the epic's own scenario holds client video, every file
+	// in it is past the one-shot threshold, and so every re-push a watcher
+	// makes arrives here. A keyed resolve on the one-shot path alone would
+	// version small files and duplicate large ones -- working in the demo and
+	// broken for the feature it was built for.
+	//
+	// Same precedence as there: only when the caller named nothing, and after
+	// verifyProvenance has checked the machine half against their own fleet.
+	if targetArtifact == nil {
+		keyedArtifact, keyedHead, keyedStatus, keyedMsg := h.resolveKeyedVersionTarget(ctx,
+			strings.TrimSpace(req.UploadedFromWorkerId), strings.TrimSpace(req.UploadedFromPath))
+		if keyedStatus != 0 {
+			http.Error(w, keyedMsg, keyedStatus)
+			return
+		}
+		if keyedHead != nil {
+			targetArtifact, head = keyedArtifact, keyedHead
+		}
+	}
 	if status, msg := h.checkQuota(ctx, req.Size); status != 0 {
 		http.Error(w, msg, status)
 		return
@@ -669,11 +692,26 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 	// days -- the head it started against may not be the head any more, and
 	// freezing init-time facts would write a version row describing bytes
 	// that were already superseded by somebody else.
+	// The link, stamped on both branches below and from the same evidence the
+	// one-shot route uses (epic memql#4783): a session that named a
+	// (machine, path) delivered bytes that equalled the origin at the moment
+	// they finished arriving. Best effort -- the upload is done, and a file
+	// that is stored and unlabelled beats a 500 that says it is not.
+	stampLink := func() {
+		if session.UploadedFromWorkerId == "" || session.UploadedFromPath == "" {
+			return
+		}
+		if err := h.store.SetFileLinkState(ctx, session.FileId, libraryLinkStateSynced); err != nil {
+			h.logger.Warn("stamp library file link state", "error", err, "fileId", session.FileId)
+		}
+	}
+
 	if session.TargetArtifactId != "" {
 		artifactId, version, ok := h.completeVersionSession(w, r, session)
 		if !ok {
 			return
 		}
+		stampLink()
 		if err := h.sessions.Complete(ctx, session.ID); err != nil {
 			h.logger.Error("mark upload session completed", "error", err, "uploadId", uploadId)
 		}
@@ -700,6 +738,7 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 		http.Error(w, fmt.Sprintf("failed to create library file: %v", err), http.StatusInternalServerError)
 		return
 	}
+	stampLink()
 
 	artifactId := h.waitForPromotion(ctx, session.FileId)
 	if artifactId == "" {

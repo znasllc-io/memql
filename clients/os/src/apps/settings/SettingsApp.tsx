@@ -9,6 +9,7 @@ import type { OsAppProps } from "../../system/registry";
 import { AppsIndexSection } from "./AppsIndexSection";
 import { ClusterSection } from "./ClusterSection";
 import { DiagnosticsSection } from "./DiagnosticsSection";
+import { IntegrationsSection } from "./IntegrationsSection";
 import { ConnectionHistoryProvider } from "./useConnectionHistory";
 
 // Settings (spec D12): the app that PROVES the sections pattern, and since
@@ -17,9 +18,11 @@ import { ConnectionHistoryProvider } from "./useConnectionHistory";
 // Every app's title-bar gear deep-links to a section in its own manifest;
 // this app is the reference, and its Apps section is the directory.
 //
-// Everything here is READ-ONLY against the engine. The one write the epic
-// introduces is the theme-pack choice, which goes to DesktopStore and never
-// to the cluster.
+// Everything here is READ-ONLY against the engine. The one write the
+// settings-app epic introduced is the theme-pack choice, which goes to
+// DesktopStore and never to the cluster; Integrations (issue #4826) reads the
+// node's integration registry and states in surface why it does not yet
+// save.
 
 export function SettingsApp({ sectionId }: OsAppProps) {
   // The history provider wraps the WHOLE app, not the Diagnostics section:
@@ -34,6 +37,7 @@ function sectionFor(sectionId: string) {
   if (sectionId === "apps") return <AppsIndexSection />;
   if (sectionId === "cluster") return <ClusterSection />;
   if (sectionId === "diagnostics") return <DiagnosticsSection />;
+  if (sectionId === "integrations") return <IntegrationsSection />;
   return <AboutSection />;
 }
 

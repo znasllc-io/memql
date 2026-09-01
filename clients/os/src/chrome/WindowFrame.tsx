@@ -5,7 +5,7 @@ import { useAsk } from "../ask/AskProvider";
 import { SurfaceRefused } from "../kit/RankStates";
 import type { Rect } from "../system/placement";
 import { sectionsForRole, type OsAppManifest } from "../system/registry";
-import { roleAdmits } from "../system/roles";
+import { requirementFloor, roleAdmits } from "../system/roles";
 import type { OsWindow } from "../system/windows";
 import { useOs } from "./state";
 
@@ -158,7 +158,7 @@ export function WindowFrame({
           ) : (
             <SurfaceRefused
               surface={manifest.name}
-              required={manifest.roles?.min ?? ""}
+              required={requirementFloor(manifest.roles)}
               actorRole={actorRole}
             />
           )}

@@ -322,7 +322,12 @@ type roleLadder struct {
 // alternative, treating unknown as "no opinion" and passing the row, is
 // how an unrecognised role becomes a permission.
 func (l roleLadder) rankOf(slug string) int {
-	slug = strings.ToLower(strings.TrimSpace(slug))
+	// CASE-SENSITIVE, matching the shell's roleRungOf and auth.RoleRank. Every
+	// slug in play is a lowercase value the cluster wrote -- the catalog's
+	// `slug`, the user row's `role` enum -- so folding case buys nothing real
+	// and widens what counts as a match. A role string that differs from what
+	// the cluster stored is one it did not store.
+	slug = strings.TrimSpace(slug)
 	if slug == "" {
 		return 0
 	}
@@ -367,7 +372,7 @@ func (e *MemQLEngine) rankLadder(ctx context.Context) roleLadder {
 		if payload == nil {
 			continue
 		}
-		slug := strings.ToLower(strings.TrimSpace(stringFromAny(payload["slug"])))
+		slug := strings.TrimSpace(stringFromAny(payload["slug"]))
 		if slug == "" {
 			continue
 		}
@@ -392,7 +397,7 @@ func (e *MemQLEngine) rankLadder(ctx context.Context) roleLadder {
 		// DATA every consumer needs its own translation table -- which is
 		// how the two ladders diverged in the first place.
 		for _, alias := range rankAliasList(payload["aliases"]) {
-			alias = strings.ToLower(strings.TrimSpace(alias))
+			alias = strings.TrimSpace(alias)
 			if alias == "" {
 				continue
 			}

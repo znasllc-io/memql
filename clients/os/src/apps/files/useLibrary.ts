@@ -1,7 +1,7 @@
 import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
-import { ARTIFACT_CONCEPT, FOLDER_CONCEPT } from "./concepts";
+import { ARTIFACT_CONCEPT, FILE_CONCEPT, FOLDER_CONCEPT } from "./concepts";
 
 // The Files feeds: TWO retained collections at the app root -- the Library's
 // index rows and its folder rows -- shared by the browse, the tree, the
@@ -30,6 +30,26 @@ import { ARTIFACT_CONCEPT, FOLDER_CONCEPT } from "./concepts";
 export interface LibraryFeeds {
   artifacts: LiveCollectionHandle<Row>;
   folders: LiveCollectionHandle<Row>;
+  /**
+   * The backing file rows, for the ORIGIN LINK STATES (epic memql#4783).
+   *
+   * A THIRD CONCEPT, which is not a violation of the one-feed rule: that rule
+   * is per CONCEPT -- two subscriptions over the same one are free to disagree
+   * about what the cluster holds, and two concepts cannot.
+   *
+   * It has to be its own feed rather than a field on the index, and the reason
+   * is a cycle. `linkState` lives on v1:library:file and is deliberately NOT
+   * promoted to v1:library:artifact: forwarding it would need an automation on
+   * `node.updated` for the file, and the artifact->file archive automation
+   * already runs the other way -- the pair closes a loop where each write
+   * publishes an event the other subscribes to, which that automation's own
+   * header warns about by name.
+   *
+   * `v1:library:file` broadcasts created AND updated (component/node/routing.go),
+   * so a state the cockpit's verify lane reports lands on the row somebody is
+   * looking at, live, with no engine change.
+   */
+  files: LiveCollectionHandle<Row>;
 }
 
 export function useLibraryFeeds(): LibraryFeeds {
@@ -63,5 +83,20 @@ export function useLibraryFeeds(): LibraryFeeds {
     },
   }));
 
-  return { artifacts, folders };
+  const files = useLiveCollection<Row>("files:files", (connection) => ({
+    concept: FILE_CONCEPT,
+    seed: async (cursor, signal) => {
+      const result = await connection.query.libraryFilesForOwner(
+        {},
+        { signal, ...(cursor !== "" ? { cursor } : {}) },
+      );
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
+    },
+    reread: async (rowId, signal) => {
+      const row = await getRowByConceptAndId(connection.query, FILE_CONCEPT, rowId, { signal });
+      return (row as Row) ?? null;
+    },
+  }));
+
+  return { artifacts, folders, files };
 }

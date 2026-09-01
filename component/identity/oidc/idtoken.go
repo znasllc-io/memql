@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // ID-TOKEN VERIFICATION, AND WHY IT IS NOT REUSED FROM component/identity/verifier
@@ -322,7 +324,11 @@ func boolClaim(c jwt.MapClaims, key string) bool {
 func timeClaim(c jwt.MapClaims, key string) time.Time {
 	switch v := c[key].(type) {
 	case float64:
-		return time.Unix(int64(v), 0).UTC()
+		// narrowing: SATURATE -- an id_token's numeric date is the upstream
+		// provider's JSON, and a bare conversion is implementation-defined out
+		// of range (memql#4779). Saturating keeps the ordering the expiry
+		// comparison reads.
+		return time.Unix(num.ClampFloat64ToInt64(v), 0).UTC()
 	case int64:
 		return time.Unix(v, 0).UTC()
 	}

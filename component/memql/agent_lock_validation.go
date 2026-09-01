@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // conceptAgentsAgent / conceptAgentsAgentRole are the canonical
@@ -275,14 +276,22 @@ func intFromCapabilitiesField(caps map[string]any, key string) int {
 // intFromAny coerces a JSON-unmarshaled numeric to int. JSON numbers
 // land as float64; typed callers may pass int / int64. Returns 0 for
 // missing / unparseable inputs.
+// intFromAny reads a capability payload's numeric field.
+//
+// SATURATES out of range (memql#4779), and this is the exact twin of the site
+// memql#4778 fixed: `maxSkills` on a role, plus `maxHumans` on a space. Both
+// are CAPS read through `> 0` guards, so the two other answers each state
+// something false -- zero says "this role may hold no skills at all", and a
+// bare conversion inverts the ranking outright, presenting the least
+// restrictive role in the catalog as the most.
 func intFromAny(v any) int {
 	switch x := v.(type) {
 	case float64:
-		return int(x)
+		return num.ClampFloat64(x)
 	case int:
 		return x
 	case int64:
-		return int(x)
+		return num.ClampInt64(x)
 	case int32:
 		return int(x)
 	}

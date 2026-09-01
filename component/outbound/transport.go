@@ -76,11 +76,15 @@ func (t *EmailTransport) Deliver(ctx context.Context, req Request) error {
 	if sender == nil {
 		return errors.New("email transport: no email integration registered")
 	}
+	// The zero SendAs -- the deployment's configured mailbox (email design
+	// D5). An outbound row is a product's own delivery, not a campaign, so
+	// there is no operator-declared sending identity to resolve and the
+	// concept carries no field that could name one.
 	return sender.Send(ctx, email.Message{
 		To:       req.Target,
 		Subject:  req.Subject,
 		TextBody: req.Payload,
-	})
+	}, email.SendAs{})
 }
 
 func (t *EmailTransport) resolveSender() email.Sender {

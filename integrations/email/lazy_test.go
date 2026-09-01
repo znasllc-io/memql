@@ -14,7 +14,7 @@ type stubSender struct {
 	count atomic.Int32
 }
 
-func (s *stubSender) Send(_ context.Context, _ Message) error {
+func (s *stubSender) Send(_ context.Context, _ Message, _ SendAs) error {
 	s.count.Add(1)
 	return nil
 }
@@ -34,7 +34,7 @@ func TestLazySender_PrefersEnvResolvedWhenNotLogSender(t *testing.T) {
 	)
 
 	msg := Message{To: "a@b.c", Subject: "s", TextBody: "t"}
-	if err := lazy.Send(context.Background(), msg); err != nil {
+	if err := lazy.Send(context.Background(), msg, SendAs{}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 	if envSender.count.Load() != 1 {
@@ -86,7 +86,7 @@ func TestLazySender_FallsThroughToMemqlGraph(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // GraphSender.Send will fail fast on this ctx, that's fine
 
-	_ = lazy.Send(ctx, msg) // first call resolves + delegates
+	_ = lazy.Send(ctx, msg, SendAs{}) // first call resolves + delegates
 
 	if _, ok := lazy.resolved.(*GraphSender); !ok {
 		t.Fatalf("expected resolved Sender to be *GraphSender, got %T", lazy.resolved)
@@ -116,7 +116,7 @@ func TestLazySender_FallsThroughToMemqlSMTPWhenGraphIncomplete(t *testing.T) {
 		nil,
 	)
 
-	_ = lazy.Send(context.Background(), Message{To: "a@b.c", Subject: "s", TextBody: "t"})
+	_ = lazy.Send(context.Background(), Message{To: "a@b.c", Subject: "s", TextBody: "t"}, SendAs{})
 
 	if _, ok := lazy.resolved.(*SMTPSender); !ok {
 		t.Fatalf("expected resolved Sender to be *SMTPSender, got %T", lazy.resolved)
@@ -133,7 +133,7 @@ func TestLazySender_FallsBackToLogWhenNothingConfigured(t *testing.T) {
 	)
 
 	msg := Message{To: "a@b.c", Subject: "s", TextBody: "t"}
-	if err := lazy.Send(context.Background(), msg); err != nil {
+	if err := lazy.Send(context.Background(), msg, SendAs{}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 	if _, ok := lazy.resolved.(*LogSender); !ok {
@@ -157,7 +157,7 @@ func TestLazySender_ResolvesOnlyOnce(t *testing.T) {
 
 	msg := Message{To: "a@b.c", Subject: "s", TextBody: "t"}
 	for i := 0; i < 5; i++ {
-		_ = lazy.Send(context.Background(), msg)
+		_ = lazy.Send(context.Background(), msg, SendAs{})
 	}
 
 	// Each resolve attempt looks up several keys; what matters is
@@ -167,7 +167,7 @@ func TestLazySender_ResolvesOnlyOnce(t *testing.T) {
 		t.Fatalf("resolver was never consulted")
 	}
 	for i := 0; i < 5; i++ {
-		_ = lazy.Send(context.Background(), msg)
+		_ = lazy.Send(context.Background(), msg, SendAs{})
 	}
 	if calls.Load() != first {
 		t.Fatalf("resolver was consulted again after the first Send (first=%d, total=%d)", first, calls.Load())
@@ -184,7 +184,7 @@ func TestLazySender_ResolverErrorTreatedAsMissing(t *testing.T) {
 	)
 
 	msg := Message{To: "a@b.c", Subject: "s", TextBody: "t"}
-	if err := lazy.Send(context.Background(), msg); err != nil {
+	if err := lazy.Send(context.Background(), msg, SendAs{}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 	if _, ok := lazy.resolved.(*LogSender); !ok {

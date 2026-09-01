@@ -7,7 +7,11 @@ package harness
 // scorers and the eval harness can compute metrics over hand-built traces
 // in a unit test.
 
-import "time"
+import (
+	"time"
+
+	"github.com/znasllc-io/memql/core/num"
+)
 
 // PlanMetrics is the per-plan rollup the eval harness scores and the
 // cockpit surfaces. Every field is derived from the Trace.
@@ -97,17 +101,27 @@ func toolCallsFromData(ev TraceEvent) int {
 
 // intFromData reads an integer-ish field from observation data, tolerating
 // the float64 JSON-decode shape.
+// intFromData reads a harness event's numeric field.
+//
+// SATURATES out of range (memql#4779), because `toolCalls` is read through a
+// `> 0` guard and a wrapped negative answers it wrong.
+//
+// HONEST LIMIT: `tokens` and `tokenCost` are ACCUMULATED (`m.TokenCost += ...`),
+// so a saturated MaxInt added twice still overflows the running total. Reaching
+// that needs two events each carrying a number above ~9.2e18; the narrowing is
+// what this issue is about, and the accumulator's own bound is a separate
+// question nobody has had to answer yet.
 func intFromData(data map[string]any, key string) int {
 	if data == nil {
 		return 0
 	}
 	switch v := data[key].(type) {
 	case float64:
-		return int(v)
+		return num.ClampFloat64(v)
 	case int:
 		return v
 	case int64:
-		return int(v)
+		return num.ClampInt64(v)
 	}
 	return 0
 }

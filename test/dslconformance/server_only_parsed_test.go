@@ -181,9 +181,46 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// ungated projection of the contact fields off the wire, and the app
 		// reads the same row through clientAccountById.
 		{Path: "accounts/queries.memql", Name: "existingSelfAccount"}: true,
-		{Path: "identity/queries.memql", Name: "activeUsers"}:         true,
-		{Path: "identity/queries.memql", Name: "userByEmail"}:         true,
-		{Path: "identity/queries.memql", Name: "userByIdSystem"}:      true,
+
+		// epic memql#4819 / memql#4820 D15. The six campaign-lifecycle and
+		// progress writers. Every one of them is reached ONLY through the
+		// `campaign*` builtins, which do the authorization first -- an owned-tier
+		// read of the campaign under the CALLER's own actor -- and then run the
+		// preflight the send depends on. The header of dsl/campaigns/mutations.memql
+		// has claimed since memql#3348 that they are "only ever reached through the
+		// builtins", and until now NOTHING enforced it: a browser holding a
+		// campaign id could flip its status to "sending" with no send job behind
+		// it, or stamp counters that never happened, desyncing the row from the
+		// engine. Caller-scoping is not the missing piece (they are already
+		// owner-stamped and a caller can only reach their own rows); what is
+		// missing is that a caller may not perform these transitions AT ALL,
+		// which is what @serverOnly says and a tier cannot.
+		{Path: "campaigns/mutations.memql", Name: "startCampaign"}:          true,
+		{Path: "campaigns/mutations.memql", Name: "pauseCampaign"}:          true,
+		{Path: "campaigns/mutations.memql", Name: "resumeCampaign"}:         true,
+		{Path: "campaigns/mutations.memql", Name: "scheduleCampaign"}:       true,
+		{Path: "campaigns/mutations.memql", Name: "updateCampaignProgress"}: true,
+		{Path: "campaigns/mutations.memql", Name: "recordCampaignDelivery"}: true,
+		// memql#4823. The open/click writer. Its HTTP callers are an
+		// unauthenticated mail client fetching an image and an unauthenticated
+		// browser following a redirect, so there is no actor to scope by and the
+		// only authorization is the HMAC-signed token the handler verifies before
+		// it derives a single argument. @serverOnly is the second wall: even
+		// holding a valid token, nothing client-reachable can write this row.
+		{Path: "campaigns/mutations.memql", Name: "recordEngagementEvent"}: true,
+		// memql#4829. The engine's own account of what it made of an event-email
+		// rule -- which bundle and construct it generated, whether activation
+		// succeeded, and how many times the rule has fired. The value of these
+		// fields is precisely that they are the ENGINE's observation rather than a
+		// claim: a caller who could set status:"active" would be asserting a live
+		// automation that does not exist, and one who could set firedCount would
+		// be editing the evidence. The rule's FORM stays client-writable through
+		// createEmailRule / updateEmailRule / setEmailRuleStatus.
+		{Path: "campaigns/mutations.memql", Name: "recordEmailRuleGeneration"}: true,
+		{Path: "campaigns/mutations.memql", Name: "recordEmailRuleFiring"}:     true,
+		{Path: "identity/queries.memql", Name: "activeUsers"}:                  true,
+		{Path: "identity/queries.memql", Name: "userByEmail"}:                  true,
+		{Path: "identity/queries.memql", Name: "userByIdSystem"}:               true,
 		// memql#3217. The complete-set sibling of activeUsers, behind the
 		// startup per-user seed sweep. @serverOnly for activeUsers' reason
 		// minus most of the exposure -- its projection is userIdRef (row.id

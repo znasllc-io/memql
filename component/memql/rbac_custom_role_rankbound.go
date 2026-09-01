@@ -10,6 +10,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // validateRbacCustomRoleRankBound is the E1.4 (memql#2072) rank-bound guard
@@ -161,21 +162,28 @@ func (e *MemQLEngine) lookupRoleRankBySlug(ctx context.Context, slug string) (in
 // distinction to treat a rank-absent write as "unchanged" rather than rank 0.
 // (The package's intFromAny returns 0 for both, which would conflate "rank not
 // set" with "rank 0".)
+//
+// SATURATES out of range (memql#4779), and of every site in that sweep this is
+// the one where the answer decides an authorization outcome. The value is a
+// privilege RANK, and `CanCreatePrincipal` is literally `targetRank <
+// actor.Rank` -- so a narrowing that flips the sign flips the result of the
+// check. Saturation is the only one of the three answers that preserves the
+// ordering the comparison is reading.
 func intWithOkFromAny(v any) (int, bool) {
 	switch n := v.(type) {
 	case int:
 		return n, true
 	case int64:
-		return int(n), true
+		return num.ClampInt64(n), true
 	case int32:
 		return int(n), true
 	case float64:
-		return int(n), true
+		return num.ClampFloat64(n), true
 	case float32:
-		return int(n), true
+		return num.ClampFloat64(float64(n)), true
 	case json.Number:
 		if i, err := n.Int64(); err == nil {
-			return int(i), true
+			return num.ClampInt64(i), true
 		}
 	}
 	return 0, false

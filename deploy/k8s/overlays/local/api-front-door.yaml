@@ -230,6 +230,20 @@ spec:
                 name: bff-http
                 port:
                   number: 8085
+          - path: /t/c/
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
+          - path: /t/o/
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
           # END generated bff HTTP paths
           #
           # The h2c catch-all, and the ONE rule below the markers that is not

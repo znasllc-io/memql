@@ -7,8 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // store.go -- the engine seam.
@@ -36,6 +38,42 @@ import (
 // whose authority a given read runs under -- which is the one question
 // this design turns on. A store that picked the actor itself would make
 // that invisible exactly where it matters most.
+//
+// # The ORIGIN, unlike the actor, IS the store's business (memql#4820)
+//
+// The actor answers "whose rows may this touch". Internal origin answers a
+// different question -- "did this call arrive over the wire" -- and the two
+// are deliberately independent (component/auth/call_origin.go). Nine of this
+// domain's mutations carry @serverOnly, which means the executor refuses them
+// outright unless auth.OriginFromContext(ctx).IsInternal(). The refusal is
+// the whole point: `startCampaign` moving a campaign to `sending` with no
+// send job behind it, or `updateCampaignProgress` stamping counters for
+// deliveries that never happened, is a write a caller may not perform even on
+// a row they own perfectly.
+//
+// So there are TWO exec paths here, and the split is not decoration:
+//
+//	exec            the ordinary write. Reaches every mutation that is not
+//	                @serverOnly, on the context it was handed.
+//	execServerOnly  stamps internal origin INLINE, on the one Execute that
+//	                needs it, for the nine that are.
+//
+// Stamping everything through one path would be strictly worse in both
+// directions. It would mark contexts that have no business being marked, and
+// it would erase the only place a reader can see WHICH writes this package
+// claims are engine-initiated. The stamp is never bound to a variable and
+// never returned: a marked context that flows on is how memql#2879's hole was
+// reachable, where a trusted frame stamped internal and a later frame in the
+// same tree ran caller-submitted source on the inherited context.
+//
+// A NOTE ON WHAT THE GATE CANNOT SEE. The repo's
+// TestEveryGoCallerOfAServerOnlyConstructStampsInternalOrigin matches
+// `mutation <name>(` inside STRING LITERALS. `SetCampaignStatus` builds its
+// call from a mutationName VARIABLE, so three of the nine -- startCampaign,
+// pauseCampaign, resumeCampaign -- are invisible to it. They are routed
+// through execServerOnly anyway, because the runtime gate is real whether or
+// not a test can see the call, and TestServerOnlyWritesStampInternalOrigin in
+// this package is what pins them.
 
 // Engine is the narrow engine surface the sending engine needs. Kept to
 // one method so tests fake it with flat row envelopes (the outbound
@@ -104,7 +142,52 @@ type Campaign struct {
 	// (memql#3459). The job row carries a copy for the operator to look at;
 	// this is the one the worker compares against the clock.
 	ScheduledAt time.Time
+
+	// SenderIdentityID names the mailbox this campaign sends AS
+	// (memql#4821). Empty is the ordinary case and means the env-configured
+	// default -- which is exactly what every campaign did before identities
+	// existed, so plurality is additive. The engine NEVER infers it from
+	// AccountID: the app prefills the picker from the account's identities,
+	// and prefill is UX while resolution is explicit (design D4).
+	SenderIdentityID string
+
+	// AccountID is the client this campaign is FOR. A record, never a
+	// visibility scope (accounts D1). It reaches the send path for exactly
+	// one reason: {{accountName}} (design D10).
+	AccountID string
+
+	// TrackOpens and TrackClicks decide whether the HTML part carries a
+	// pixel and rewritten links (memql#4823).
+	//
+	// Read with a TRUE default rather than off the raw row, and that is
+	// load-bearing. The concept declares @default("true"), and a concept
+	// @default is never applied on insert -- so every campaign row written
+	// before these fields existed, and every one written by a client that
+	// omits them, carries no value at all. Reading a missing key as `false`
+	// would silently turn tracking off for the whole existing corpus while
+	// the schema said it was on.
+	TrackOpens  bool
+	TrackClicks bool
 }
+
+// SenderIdentity is a declared sending mailbox (memql#4821). No secret
+// material: authentication stays the cluster's one credential, and this row
+// is the operator's statement that the mailbox exists and may be used.
+type SenderIdentity struct {
+	ID          string
+	OwnerUserID string
+	Address     string
+	FromName    string
+	ReplyTo     string
+	AccountID   string
+	Status      string
+	Notes       string
+}
+
+// Disabled reports whether this identity has been retired. Retiring is a
+// status flip and never a delete, because past campaigns name the row and
+// the reputation history is keyed on its address.
+func (s SenderIdentity) Disabled() bool { return s.Status == "disabled" }
 
 // Template is the authored content.
 type Template struct {
@@ -128,6 +211,17 @@ type Recipient struct {
 	Email              string
 	DisplayName        string
 	SubscriptionStatus string
+
+	// Fields is the per-recipient merge data an import carried in
+	// (memql#4822): every CSV column that was not `email` or a display name,
+	// verbatim, reachable from a template as {{fields.<key>}}.
+	//
+	// Enumerable and nothing more. The renderer walks these keys to build a
+	// replacer; it never evaluates a path, so a key that is not present
+	// leaves its tag in the body as literal text rather than resolving to
+	// something. That is the whole reason this is a map rather than an
+	// expression context.
+	Fields map[string]any
 }
 
 // LedgerEntry is the slim delivery projection the resume diff runs over.
@@ -221,7 +315,59 @@ func (s *Store) CampaignByID(ctx context.Context, campaignID string) (Campaign, 
 		ReplyTo:     str(r, "replyTo"),
 		Status:      str(r, "status"),
 		ScheduledAt: parseTime(str(r, "scheduledAt")),
+
+		SenderIdentityID: bare(str(r, "senderIdentityId")),
+		AccountID:        bare(str(r, "accountId")),
+		TrackOpens:       booleanOr(r, "trackOpens", true),
+		TrackClicks:      booleanOr(r, "trackClicks", true),
 	}, true, nil
+}
+
+// SenderIdentityByID reads one sending identity. COMPOSITE tier
+// (owner-or-cluster-owner), and the send path issues it under the CAMPAIGN
+// OWNER'S borrowed actor -- so an identity the owner cannot read is an
+// identity the send refuses to use, which is the same answer as it not
+// existing. That equivalence is deliberate: the alternative is a send path
+// that can reach a mailbox declaration its own operator cannot see.
+func (s *Store) SenderIdentityByID(ctx context.Context, senderIdentityID string) (SenderIdentity, bool, error) {
+	rows, err := s.rows(ctx, call("query", "senderIdentityById", arg{"senderIdentityId", senderIdentityID}))
+	if err != nil || len(rows) == 0 {
+		return SenderIdentity{}, false, err
+	}
+	r := rows[0]
+	return SenderIdentity{
+		ID:          bare(str(r, "id")),
+		OwnerUserID: bare(str(r, "ownerUserId")),
+		Address:     str(r, "address"),
+		FromName:    str(r, "fromName"),
+		ReplyTo:     str(r, "replyTo"),
+		AccountID:   bare(str(r, "accountId")),
+		// No @default is applied on insert, so an identity row written
+		// without a status is ACTIVE -- the value the schema promises. The
+		// alternative reading, "unknown means disabled", would refuse every
+		// campaign naming an identity created through a path that omitted
+		// the field, and the refusal is terminal.
+		Status: strOr(r, "status", "active"),
+		Notes:  str(r, "notes"),
+	}, true, nil
+}
+
+// AccountName resolves one account's display name. COMPOSITE tier, issued
+// under the campaign owner's actor.
+//
+// Its ONLY caller is the {{accountName}} merge tag (design D10), and it
+// returns "" rather than an error for an account that does not resolve. That
+// is the tag's documented behaviour -- an untied campaign renders it empty --
+// and it means a client the operator archived cannot stop a send.
+func (s *Store) AccountName(ctx context.Context, accountID string) (string, error) {
+	if strings.TrimSpace(accountID) == "" {
+		return "", nil
+	}
+	rows, err := s.rows(ctx, call("query", "clientAccountById", arg{"accountId", accountID}))
+	if err != nil || len(rows) == 0 {
+		return "", err
+	}
+	return str(rows[0], "name"), nil
 }
 
 // ScheduledJobs returns every send job still waiting for its time, oldest
@@ -275,16 +421,29 @@ func (s *Store) RosterPage(ctx context.Context, audienceID, cursor string) ([]Re
 	}
 	out := make([]Recipient, 0, len(rows))
 	for _, r := range rows {
-		canonical := str(r, "id")
-		out = append(out, Recipient{
-			ID:                 bare(canonical),
-			CanonicalID:        canonical,
-			Email:              str(r, "email"),
-			DisplayName:        str(r, "displayName"),
-			SubscriptionStatus: str(r, "subscriptionStatus"),
-		})
+		out = append(out, recipientFromRow(r))
 	}
 	return out, next, nil
+}
+
+// recipientFromRow projects one recipientFull row.
+//
+// Shared by the roster walk and the by-id read rather than written twice: the
+// two used to be the same code path (the by-id read WAS a roster walk), and
+// splitting them without sharing the projection is how one of them comes to
+// carry `fields` and the other not -- which would make a merge tag resolve on
+// the campaign path and render empty on the single-recipient one, with
+// nothing anywhere saying why.
+func recipientFromRow(r map[string]any) Recipient {
+	canonical := str(r, "id")
+	return Recipient{
+		ID:                 bare(canonical),
+		CanonicalID:        canonical,
+		Email:              str(r, "email"),
+		DisplayName:        str(r, "displayName"),
+		SubscriptionStatus: str(r, "subscriptionStatus"),
+		Fields:             objectField(r, "fields"),
+	}
 }
 
 // Roster reads the whole audience by walking every page. OWNED tier.
@@ -324,9 +483,21 @@ const rosterWalkCap = 100000
 // the memql#3460 lesson in one line: measuring a bounded page and calling it
 // a total is how the 5000 ceiling came to be load-bearing.
 func (s *Store) RosterSize(ctx context.Context, audienceID string) (int, error) {
-	res, err := s.engine.Execute(ctx, call("query", "audienceRosterSize", arg{"audienceId", audienceID}))
+	return s.count(ctx, call("query", "audienceRosterSize", arg{"audienceId", audienceID}))
+}
+
+// count issues a `count` query and lifts the aggregate off the result.
+//
+// Every stats bucket that CAN go through here does, and the reason is the
+// memql#3460 lesson generalized: a count is exact at any audience size, while
+// the length of a bounded read is a truncation wearing a number's clothes.
+// The portal counted a capped page of delivery rows client-side and
+// under-reported every campaign past the bound, silently, which is what
+// campaignStats replaces.
+func (s *Store) count(ctx context.Context, q string) (int, error) {
+	res, err := s.engine.Execute(ctx, q)
 	if err != nil {
-		return 0, fmt.Errorf("campaigns: query audienceRosterSize: %w", err)
+		return 0, fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
 	}
 	for _, row := range memql.MaterializeRows(res) {
 		if _, ok := row["count"]; ok {
@@ -334,6 +505,77 @@ func (s *Store) RosterSize(ctx context.Context, audienceID string) (int, error) 
 		}
 	}
 	return 0, nil
+}
+
+// DeliveryCountByStatus is the exact number of this campaign's deliveries in
+// one status. OWNED tier.
+func (s *Store) DeliveryCountByStatus(ctx context.Context, campaignID, status string) (int, error) {
+	return s.count(ctx, call("query", "campaignDeliveryCountByStatus",
+		arg{"campaignId", campaignID}, arg{"status", status}))
+}
+
+// SkipCountByReason counts the skipped deliveries carrying any of the named
+// reasons. A LIST rather than one call per reason because the skipped bucket
+// is reported in three groups and three round trips beat seven.
+func (s *Store) SkipCountByReason(ctx context.Context, campaignID string, reasons []string) (int, error) {
+	if len(reasons) == 0 {
+		return 0, nil
+	}
+	return s.count(ctx, call("query", "campaignSkipCountByReason",
+		arg{"campaignId", campaignID}, arg{"skipReasons", reasons}))
+}
+
+// ConsentCountByKind counts this campaign's consent events of one kind --
+// the bounce, complaint and one-click-withdraw figures. OWNED tier.
+//
+// Read from the CONSENT stream rather than from delivery rows, and that is
+// not a preference: a bounce arrives after the transport accepted the
+// message, so the delivery row says `sent` and correctly stays that way. It
+// cannot answer this question at all.
+func (s *Store) ConsentCountByKind(ctx context.Context, campaignID, kind string) (int, error) {
+	return s.count(ctx, call("query", "campaignConsentCountByKind",
+		arg{"campaignId", campaignID}, arg{"kind", kind}))
+}
+
+// EngagementCountByKind is the TOTAL opens or clicks -- every recorded hit,
+// exact. The UNIQUE figure cannot be a count (the engine has no DISTINCT),
+// which is why EngagementDeliveryRefs exists beside it.
+func (s *Store) EngagementCountByKind(ctx context.Context, campaignID, kind string) (int, error) {
+	return s.count(ctx, call("query", "campaignEngagementCountByKind",
+		arg{"campaignId", campaignID}, arg{"kind", kind}))
+}
+
+// engagementRefsBound mirrors the `paginate` on campaignEngagementRefs.
+//
+// Unlike ledgerPageBound this is a real ceiling on a genuinely unbounded set
+// -- engagement rows accumulate per hit, with no per-recipient collapse -- so
+// reaching it is EXPECTED on a large campaign rather than evidence of drift.
+// That is why the caller reports "unmeasured" instead of refusing.
+const engagementRefsBound = 5000
+
+// EngagementDeliveryRefs reads the delivery references behind a campaign's
+// engagement events, for folding a UNIQUE figure in Go.
+//
+// The second return value reports that the read came back AT the bound. The
+// caller must treat that as UNMEASURED rather than as a number: a fold over
+// a truncated page produces a unique count that is lower than the truth and
+// indistinguishable from a correct one, which is the same "a bounded read of
+// an unbounded set is a truncation" rule LedgerFor refuses on. The difference
+// in response -- report versus refuse -- is that a missing engagement figure
+// costs a blank in a stats panel, while a truncated ledger re-mails people.
+func (s *Store) EngagementDeliveryRefs(ctx context.Context, campaignID, kind string) ([]string, bool, error) {
+	rows, err := s.rows(ctx, call("query", "campaignEngagementRefs",
+		arg{"campaignId", campaignID}, arg{"kind", kind}))
+	if err != nil {
+		return nil, false, err
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if id := bare(str(r, "deliveryId")); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out, len(rows) >= engagementRefsBound, nil
 }
 
 // LedgerFor reads the delivery ledger for exactly the recipients named,
@@ -499,6 +741,19 @@ type Delivery struct {
 	SentAt        time.Time
 	Attempts      int
 	NextAttemptAt time.Time
+
+	// EmailRuleID names the event rule that produced this send, when one did
+	// (memql#4829). EMPTY on every ordinary campaign delivery, which is the
+	// overwhelming majority -- so it is rendered only when set, like
+	// SkipReason and LastError beside it.
+	//
+	// It exists because "which rule mailed this person" is the first question
+	// anybody asks about automated mail, and the campaign id alone cannot
+	// answer it: a rule's sends carry no campaign of their own. Threading it
+	// as far as the builtin's reply and no further -- which is where it sat
+	// until the concept gained the field -- meant the answer existed for the
+	// length of one HTTP response.
+	EmailRuleID string
 }
 
 // RecordDelivery writes the ledger row. OWNED tier: issue under the
@@ -516,6 +771,9 @@ func (s *Store) RecordDelivery(ctx context.Context, d Delivery) error {
 	if d.SkipReason != "" {
 		args = append(args, arg{"skipReason", d.SkipReason})
 	}
+	if d.EmailRuleID != "" {
+		args = append(args, arg{"emailRuleId", d.EmailRuleID})
+	}
 	if d.LastError != "" {
 		args = append(args, arg{"lastError", truncateError(d.LastError)})
 	}
@@ -525,7 +783,7 @@ func (s *Store) RecordDelivery(ctx context.Context, d Delivery) error {
 	if !d.NextAttemptAt.IsZero() {
 		args = append(args, arg{"nextAttemptAt", d.NextAttemptAt.UTC().Format(time.RFC3339)})
 	}
-	return s.exec(ctx, call("mutation", "recordCampaignDelivery", args...))
+	return s.execServerOnly(ctx, call("mutation", "recordCampaignDelivery", args...))
 }
 
 // CampaignProgress is the counter set stamped onto the campaign row.
@@ -536,6 +794,17 @@ type CampaignProgress struct {
 	FailedCount    *int
 	LastError      *string
 	CompletedAt    *time.Time
+
+	// SkippedCount is the number of recipients suppressed rather than
+	// mailed (memql#4823).
+	//
+	// The worker has computed it per JOB since memql#3348 and had nowhere on
+	// the campaign to put it, so the single number an operator most wants --
+	// the gap between the audience and what actually left -- lived only on
+	// v1:campaigns:sendJob, a clusterOwner-tier row a browser cannot read.
+	// recipientCount minus sentCount minus this minus failedCount is what is
+	// still outstanding, and without it that subtraction has no third term.
+	SkippedCount *int
 }
 
 // UpdateCampaignProgress stamps live counters onto the campaign. OWNED
@@ -545,10 +814,11 @@ func (s *Store) UpdateCampaignProgress(ctx context.Context, campaignID string, p
 	args = appendStr(args, "status", p.Status)
 	args = appendInt(args, "recipientCount", p.RecipientCount)
 	args = appendInt(args, "sentCount", p.SentCount)
+	args = appendInt(args, "skippedCount", p.SkippedCount)
 	args = appendInt(args, "failedCount", p.FailedCount)
 	args = appendStr(args, "lastError", p.LastError)
 	args = appendTime(args, "completedAt", p.CompletedAt)
-	return s.exec(ctx, call("mutation", "updateCampaignProgress", args...))
+	return s.execServerOnly(ctx, call("mutation", "updateCampaignProgress", args...))
 }
 
 // ScheduleCampaign commits a campaign to a time. OWNED tier: the caller's
@@ -558,7 +828,7 @@ func (s *Store) UpdateCampaignProgress(ctx context.Context, campaignID string, p
 // only a transition -- and the value it carries is the one the drain
 // worker treats as authoritative when it decides whether a send is due.
 func (s *Store) ScheduleCampaign(ctx context.Context, campaignID string, at time.Time) error {
-	return s.exec(ctx, call("mutation", "scheduleCampaign",
+	return s.execServerOnly(ctx, call("mutation", "scheduleCampaign",
 		arg{"campaignId", campaignID},
 		arg{"scheduledAt", at.UTC().Format(time.RFC3339)},
 	))
@@ -567,7 +837,7 @@ func (s *Store) ScheduleCampaign(ctx context.Context, campaignID string, at time
 // SetCampaignStatus drives the operator-visible lifecycle transitions.
 // OWNED tier.
 func (s *Store) SetCampaignStatus(ctx context.Context, mutationName, campaignID string) error {
-	return s.exec(ctx, call("mutation", mutationName, arg{"campaignId", campaignID}))
+	return s.execServerOnly(ctx, call("mutation", mutationName, arg{"campaignId", campaignID}))
 }
 
 // RecordSuppression adds an address's digest to the cluster-wide list.
@@ -602,19 +872,239 @@ func (s *Store) SetRecipientSubscription(ctx context.Context, recipientID, statu
 	return s.exec(ctx, call("mutation", "setRecipientSubscription", args...))
 }
 
-// RecipientByID reads one recipient. OWNED tier -- the unsubscribe
-// endpoint uses it to resolve the address the signed token names.
-func (s *Store) RecipientByID(ctx context.Context, audienceID, recipientID string) (Recipient, bool, error) {
-	roster, err := s.Roster(ctx, audienceID)
+// AddRecipient inserts one address into an audience. OWNED tier: issued
+// under the CALLER'S own actor, which is what stamps ownerUserId.
+//
+// `fields` carries every CSV column that was not the address or a display
+// name, verbatim (memql#4822). Keys are QUOTED in the rendered object
+// literal, because a spreadsheet header is "Company Name" or "2026 spend" far
+// more often than it is an identifier -- and a bare key there is a parse
+// error at call time, which is the failure mode a fake-engine test suite
+// cannot see (memql#3035's shape).
+func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email, displayName, source string, fields map[string]string) error {
+	args := []arg{
+		{"recipientId", recipientID},
+		{"audienceId", audienceID},
+		{"email", email},
+	}
+	if displayName != "" {
+		args = append(args, arg{"displayName", displayName})
+	}
+	if source != "" {
+		args = append(args, arg{"source", source})
+	}
+	if len(fields) > 0 {
+		args = append(args, arg{"fields", fields})
+	}
+	return s.exec(ctx, call("mutation", "addRecipient", args...))
+}
+
+// ConsentRecord is one append-only consent event.
+type ConsentRecord struct {
+	EventID     string
+	EmailDigest string
+	Source      string
+	Reason      string
+	RecipientID string
+	CampaignID  string
+	OccurredAt  time.Time
+}
+
+// RecordConsent appends one consent event of the given kind. OWNED tier: the
+// row belongs to the CAMPAIGN'S owner, so the caller supplies that actor --
+// the unsubscribe path derives it from the signed token, the feedback path
+// from the send job, and the import path is already running as the owner.
+//
+// One method over five mutations rather than five methods, because the
+// argument list is identical apart from `reason` and the kind is a value the
+// caller already holds. Splitting them would mean five near-identical bodies
+// whose only difference is a string literal.
+func (s *Store) RecordConsent(ctx context.Context, kind string, c ConsentRecord) error {
+	mutation, ok := consentMutations[kind]
+	if !ok {
+		return fmt.Errorf("campaigns: %q is not a consent kind", kind)
+	}
+	if SuppressReasonRequired(kind, c.Reason) {
+		// The mutation declares reason as required, so this would be refused
+		// at the engine anyway. Refusing here names the caller instead of the
+		// construct, which is what the operator reading the log needs.
+		return fmt.Errorf("campaigns: a %q consent event needs a reason", kind)
+	}
+	args := []arg{
+		{"eventId", c.EventID},
+		{"emailDigest", c.EmailDigest},
+		{"source", c.Source},
+	}
+	if c.Reason != "" {
+		args = append(args, arg{"reason", c.Reason})
+	}
+	if c.RecipientID != "" {
+		args = append(args, arg{"recipientId", c.RecipientID})
+	}
+	if c.CampaignID != "" {
+		args = append(args, arg{"campaignId", c.CampaignID})
+	}
+	if !c.OccurredAt.IsZero() {
+		args = append(args, arg{"occurredAt", c.OccurredAt.UTC().Format(time.RFC3339)})
+	}
+	return s.exec(ctx, call("mutation", mutation, args...))
+}
+
+// consentMutations maps a kind onto its writer. The five are separate
+// mutations rather than one taking a kind argument, because each STAMPS its
+// kind -- so a caller cannot write an event claiming to be something it is
+// not, and the append-only stream stays trustworthy without a validation
+// step.
+var consentMutations = map[string]string{
+	ConsentGrant:     "recordConsentGrant",
+	ConsentWithdraw:  "recordConsentWithdraw",
+	ConsentBounce:    "recordConsentBounce",
+	ConsentComplaint: "recordConsentComplaint",
+	ConsentSuppress:  "recordConsentSuppress",
+}
+
+// LibraryFileRef is what the CSV import needs off the Library: where the
+// bytes are and what the row says they are.
+type LibraryFileRef struct {
+	FileID   string
+	Name     string
+	MimeType string
+	Size     int
+	BlobURL  string
+	Archived bool
+}
+
+// LibraryFileForArtifact resolves a Library artifact id to its backing file
+// row. OWNED tier throughout, under the CALLER'S own actor.
+//
+// THE ARTIFACT ID IS NOT A CAPABILITY, and the two reads are what make that
+// true. libraryArtifactById and libraryFileById both gate on
+// ownerUserId==actor.userId, so a file the caller cannot read is a file this
+// cannot import -- which is the same answer as it not existing. Reading the
+// bytes under the engine's own identity and trusting the caller's id would be
+// a read primitive for anybody's uploads.
+//
+// The backing file is resolved from the index row's OWN sourceConceptRef
+// rather than by re-deriving createArtifact's id expression in Go: that
+// coupling is the one component/sitepublish deliberately avoids, and the
+// reason is the same here.
+func (s *Store) LibraryFileForArtifact(ctx context.Context, artifactID string) (LibraryFileRef, string, error) {
+	rows, err := s.rows(ctx, call("query", "libraryArtifactById", arg{"artifactId", artifactID}))
 	if err != nil {
+		return LibraryFileRef{}, "", err
+	}
+	if len(rows) == 0 {
+		return LibraryFileRef{}, fmt.Sprintf("no Library artifact %q is visible to this caller", artifactID), nil
+	}
+	artifact := rows[0]
+	if boolean(artifact, "archived") {
+		return LibraryFileRef{}, fmt.Sprintf("artifact %q is archived", artifactID), nil
+	}
+	if kind := str(artifact, "kind"); kind != "file" {
+		return LibraryFileRef{}, fmt.Sprintf(
+			"artifact %q is a %s; only an uploaded FILE carries the bytes to import", artifactID, kind), nil
+	}
+	fileID, ok := libraryFileIDFromRef(str(artifact, "sourceConceptRef"))
+	if !ok {
+		return LibraryFileRef{}, fmt.Sprintf(
+			"artifact %q names backing row %q, which is not a v1:library:file",
+			artifactID, str(artifact, "sourceConceptRef")), nil
+	}
+
+	fileRows, err := s.rows(ctx, call("query", "libraryFileById", arg{"fileId", fileID}))
+	if err != nil {
+		return LibraryFileRef{}, "", err
+	}
+	if len(fileRows) == 0 {
+		return LibraryFileRef{}, fmt.Sprintf(
+			"artifact %q names backing file %q, which is not visible to this caller", artifactID, fileID), nil
+	}
+	f := fileRows[0]
+	return LibraryFileRef{
+		FileID:   bare(str(f, "id")),
+		Name:     str(f, "name"),
+		MimeType: str(f, "mimeType"),
+		Size:     integer(f, "size"),
+		BlobURL:  str(f, "blobUrl"),
+		Archived: boolean(f, "archived"),
+	}, "", nil
+}
+
+// libraryFileIDFromRef parses `v1:library:file:<id>` into the bare id.
+func libraryFileIDFromRef(ref string) (string, bool) {
+	const prefix = "v1:library:file:"
+	ref = strings.TrimSpace(ref)
+	if !strings.HasPrefix(ref, prefix) {
+		return "", false
+	}
+	id := strings.TrimPrefix(ref, prefix)
+	return id, id != ""
+}
+
+// EngagementEvent is one recorded open or click (memql#4823).
+type EngagementEvent struct {
+	CampaignID string
+	DeliveryID string
+	Kind       string
+	URL        string
+	OccurredAt time.Time
+}
+
+// RecordEngagementEvent appends one open or click. OWNED tier AND
+// @serverOnly, which is an unusual pair worth stating.
+//
+// The tier says the row belongs to the campaign's owner, so the caller must
+// supply that owner's actor -- the tracking handler derives it from the
+// signed token, never from the request. The @serverOnly says the mutation is
+// unreachable over the wire at all, which is what stops an unauthenticated
+// endpoint's shape (a mail client fetching an image) from becoming a
+// client-reachable writer of somebody else's rows. Neither would be
+// sufficient alone: the tier without the annotation would let any
+// authenticated caller inflate their own campaign's numbers, and the
+// annotation without the tier would leave the row owned by nobody.
+func (s *Store) RecordEngagementEvent(ctx context.Context, e EngagementEvent) error {
+	args := []arg{
+		{"campaignId", e.CampaignID},
+		{"deliveryId", e.DeliveryID},
+		{"kind", e.Kind},
+	}
+	if e.URL != "" {
+		args = append(args, arg{"url", e.URL})
+	}
+	if !e.OccurredAt.IsZero() {
+		args = append(args, arg{"occurredAt", e.OccurredAt.UTC().Format(time.RFC3339)})
+	}
+	return s.execServerOnly(ctx, call("mutation", "recordEngagementEvent", args...))
+}
+
+// RecipientByID reads ONE recipient by its own id. COMPOSITE tier.
+//
+// A single-row read through `recipientById`, which is what it should always
+// have been. It used to walk the whole audience roster and match in Go,
+// because no by-id query existed and every read on v1:campaigns:recipient was
+// audience-scoped -- so a caller that held a recipient id and nothing else
+// had to find the audience first. That cost the unsubscribe endpoint a
+// roster walk per click, and it cost the single-recipient send a bounded
+// scan across the caller's audiences that REFUSED past its bound: a correct
+// answer that gets slower as an operator succeeds, and that gives up at
+// exactly the point somebody has enough audiences to care.
+//
+// THE TIER CONJUNCT IS WHAT MAKES AN UNSCOPED BY-ID READ SAFE, and it is the
+// reason this can drop the audience argument rather than merely hide it. The
+// query gates on (ownerUserId==actor.userId || actor.isClusterOwner==true),
+// so a recipient the caller does not own is simply NOT FOUND -- the same
+// answer campaignById gives, from the same predicate. The id is not a
+// capability, and passing an audience alongside it never made it one; the
+// audience was a search key, not a check.
+//
+// `false` therefore means both "no such row" and "not yours", which is the
+// correct answer for both.
+func (s *Store) RecipientByID(ctx context.Context, recipientID string) (Recipient, bool, error) {
+	rows, err := s.rows(ctx, call("query", "recipientById", arg{"recipientId", recipientID}))
+	if err != nil || len(rows) == 0 {
 		return Recipient{}, false, err
 	}
-	for _, r := range roster {
-		if r.ID == recipientID {
-			return r, true, nil
-		}
-	}
-	return Recipient{}, false, nil
+	return recipientFromRow(rows[0]), true, nil
 }
 
 // --- plumbing -----------------------------------------------------------
@@ -645,6 +1135,29 @@ func call(kind, name string, args ...arg) string {
 				quoted = append(quoted, langparser.QuoteString(item))
 			}
 			rendered = append(rendered, a.name+": ["+strings.Join(quoted, ", ")+"]")
+		case map[string]string:
+			// An object literal, with QUOTED KEYS and a comma after every
+			// pair. Both halves are load-bearing and neither is style:
+			//
+			//   - a spreadsheet header is "Company Name" or "2026 spend" far
+			//     more often than it is an identifier, and the parser accepts
+			//     a quoted key precisely so arbitrary text can be one;
+			//   - without the separators the block lexes into a single
+			//     identifier, the lint and the boot pass, and every call
+			//     fails at render (memql#4265's shape).
+			//
+			// Keys are SORTED so the rendered call is reproducible, which is
+			// what lets a test assert on it at all.
+			keys := make([]string, 0, len(v))
+			for k := range v {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			pairs := make([]string, 0, len(keys))
+			for _, k := range keys {
+				pairs = append(pairs, langparser.QuoteString(k)+": "+langparser.QuoteString(v[k]))
+			}
+			rendered = append(rendered, a.name+": {"+strings.Join(pairs, ", ")+"}")
 		default:
 			rendered = append(rendered, a.name+": "+langparser.QuoteString(fmt.Sprintf("%v", v)))
 		}
@@ -744,6 +1257,28 @@ func (s *Store) exec(ctx context.Context, q string) error {
 	return nil
 }
 
+// execServerOnly runs one @serverOnly mutation with internal origin stamped
+// INLINE, as the argument to the single Execute that needs it (memql#4820).
+//
+// Only the nine @serverOnly writers come through here. The stamp is what the
+// engine's gate looks for, so without it the call does not degrade -- it fails
+// every time, on every cluster, with `function X is server-only and cannot be
+// called by a client` and a WARN nobody reads. That is the failure mode this
+// exists to prevent, and it is why the routing is per-mutation rather than a
+// blanket applied to `exec`.
+//
+// The actor still comes from the caller's ctx, untouched. Origin and identity
+// answer different questions and this function only answers one of them: a
+// delivery row written through here is still owned by whoever the ctx says,
+// which for the drain worker is the campaign's owner and for nobody is a
+// widening.
+func (s *Store) execServerOnly(ctx context.Context, q string) error {
+	if _, err := s.engine.Execute(auth.ContextWithInternalOrigin(ctx), q); err != nil {
+		return fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
+	}
+	return nil
+}
+
 // firstWords names the construct in an error without echoing its
 // arguments, which can carry a recipient's address.
 func firstWords(q string) string {
@@ -784,6 +1319,63 @@ func boolean(m map[string]any, key string) bool {
 	}
 }
 
+// booleanOr reads a boolean that has a NON-FALSE default, which `boolean`
+// structurally cannot express.
+//
+// A concept-level @default is never applied on insert (authoring rules), so a
+// field declared @default("true") is simply ABSENT from every row written
+// before it existed and from every write that omits it. `boolean` collapses
+// absent and false into one answer, and for trackOpens / trackClicks the two
+// are opposite: absent means the documented default (on), false means an
+// operator turned it off. Reading absent as false would silently disable
+// tracking across the whole existing corpus while the schema still said it
+// was enabled -- the memql#4823 shape of "a declared default nothing writes".
+func booleanOr(m map[string]any, key string, fallback bool) bool {
+	v, present := m[key]
+	if !present || v == nil {
+		return fallback
+	}
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		switch strings.TrimSpace(strings.ToLower(t)) {
+		case "true":
+			return true
+		case "false":
+			return false
+		default:
+			return fallback
+		}
+	default:
+		return fallback
+	}
+}
+
+// objectField reads a nested object off a row.
+//
+// Returns nil for anything that is not a map, INCLUDING a JSON-ish shape the
+// engine handed back some other way -- there is deliberately no re-parsing
+// here. The one consumer is the merge-tag replacer, and a field it cannot
+// enumerate simply contributes no tags, which leaves them literal in the body
+// and reported by the test send. Guessing at a decode would be the one way to
+// resolve a tag to the wrong value silently.
+func objectField(m map[string]any, key string) map[string]any {
+	if v, ok := m[key].(map[string]any); ok {
+		return v
+	}
+	return nil
+}
+
+// strOr is the string twin of booleanOr, for a field whose absence means a
+// value other than the empty string.
+func strOr(m map[string]any, key, fallback string) string {
+	if v := strings.TrimSpace(str(m, key)); v != "" {
+		return v
+	}
+	return fallback
+}
+
 // bare normalizes a stored canonical id to the short form.
 //
 // Every id field on these concepts is an @relationship, so the engine
@@ -803,14 +1395,21 @@ func str(m map[string]any, key string) string {
 	return ""
 }
 
+// integer reads a campaign row's numeric field.
+//
+// SATURATES out of range (memql#4779). Every value read through here is a
+// count or a rate -- sentCount, attempts, ratePerMinute, the deliverability
+// tallies -- and two of the readings depend on the order: `sentCount > 0` is
+// the guard that stops a campaign being sent twice, and a wrapped negative
+// would answer "nothing sent yet".
 func integer(m map[string]any, key string) int {
 	switch v := m[key].(type) {
 	case int:
 		return v
 	case int64:
-		return int(v)
+		return num.ClampInt64(v)
 	case float64:
-		return int(v)
+		return num.ClampFloat64(v)
 	case string:
 		var n int
 		_, _ = fmt.Sscanf(v, "%d", &n)

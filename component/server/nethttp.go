@@ -999,6 +999,54 @@ func UnsubscribePaths() []string {
 	return pathsWithBase("/unsubscribe")
 }
 
+// TrackingPaths declares the campaign open- and click-tracking endpoints
+// (GET /t/o/{token} and GET /t/c/{token}, memql#4823), mounted on the bff.
+//
+// Why the endpoints are HTTP at all: the same exception UnsubscribePaths is,
+// and the owner approved these two by name as documented exceptions in the
+// program design record (2026-09-01-email-campaigns-program-design.md, P3).
+// The caller is the RECIPIENT'S MAIL CLIENT fetching an image out of a
+// message body, or their BROWSER following a link in one. Neither will ever
+// speak gRPC to us: an <img src> is a GET or it is not a pixel, and a
+// rewritten href is a URL or it is not a link. There is no gRPC form of that
+// conversation, exactly as there is none for /unsubscribe.
+//
+// PREFIXES, not UnsubscribePaths' exact form, and the token is what decides
+// it. /unsubscribe carries its token in a QUERY parameter, so nothing
+// legitimate is ever mounted beneath it and an open prefix there would bless
+// a future /unsubscribe/<anything> nobody reviewed. These two carry the token
+// as a PATH SEGMENT -- the mail client fetches /t/o/<token> -- so the mount
+// has to be the prefix and the handler parses the token out of the full path
+// itself, the same shape SpaceAttachmentPaths and SitesBundlePaths already
+// take for the same reason.
+//
+// THE TOKEN MUST BE A SINGLE PATH SEGMENT, and that is a constraint on the
+// token's ENCODING rather than a property of this declaration. The
+// self-authenticated exemption these routes rely on is bounded to exactly one
+// further segment under the mount (verifier.isSelfAuthenticated), and Go's
+// mux splits on "/" as well -- so a token containing a slash is not merely
+// mis-parsed, it is not exempted, and the mail client's unauthenticated GET
+// is 401'd before the handler ever runs. Standard base64 emits "/"; base64url
+// and the dot-delimited shape the unsubscribe token already uses
+// (u2.<keyId>....<tag>) do not. Nothing here can check that, which is why it
+// is written down here.
+//
+// Two entries from one declaration rather than two functions, because they
+// are one decision: both are minted by the same key ring under one context
+// string, both are mounted by the same handler, and a reviewer asking "what
+// does tracking expose" should get one answer.
+//
+// The literals must agree with campaigns.TrackingOpenPath and
+// campaigns.TrackingClickPath, which is what the renderer builds the URLs in
+// the message body from -- the same coupling UnsubscribePaths already has
+// with campaigns.UnsubscribePath, kept the same way (a literal here, not an
+// import) because component/server has no other reason to depend on
+// component/campaigns. If the two ever disagree the front door routes a path
+// no mail client fetches and the pixel 404s with nothing anywhere saying so.
+func TrackingPaths() []string {
+	return append(pathsWithBase("/t/o/"), pathsWithBase("/t/c/")...)
+}
+
 // SitesBundlePaths returns the path prefix the atomic bundle-publish
 // endpoint mounts under (POST /sites/{id}/bundles, memql#3713), served by
 // SiteBundleHandler on the bff.

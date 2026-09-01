@@ -51,7 +51,14 @@ cloud-run-env.yaml
 # .idea/
 # .vscode/
 __debug*
-bin/
+# ANCHORED (memql#4784). This rule is for `make cockpit`'s output at the
+# repository root, but a BARE `bin/` matches a directory called `bin` at ANY
+# depth -- and it silently swallowed MemQL OS's Bin app the day that app was
+# written. Nothing complained: the registry imported it, the bundle built from
+# the working tree, every test passed, and only CI would have found that the
+# module was not in the repository at all. There is exactly one build-output
+# `bin/` here and it is this one.
+/bin/
 /memql
 /memql-service
 /bridge-agent
@@ -144,6 +151,15 @@ node_modules/
 # component/portal/doc.go).
 clients/portal/dist/
 clients/os/dist/
+
+# Vite's dependency pre-bundle cache. It normally lives under a package's own
+# node_modules and is covered by the rule above; it lands HERE when a vite
+# config is run with a `root` above the package -- which is what a scratch QA
+# harness does, and those are how the two client trees get looked at in a real
+# browser (memql#4826). Untracked and uncommittable rather than a thing every
+# such session has to remember to sweep: a build cache in a large PR is
+# exactly what nobody reviews.
+clients/.vite/
 
 # macOS
 .DS_Store

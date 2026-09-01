@@ -125,6 +125,27 @@ func HandlerAuthorizedPaths() []string {
 	// "not valid" page and performs no write. There is no unauthenticated
 	// path through the handler that reaches a mutation.
 	paths = append(paths, UnsubscribePaths()...)
+	// GET /t/o/{token} + GET /t/c/{token} -- the campaign open- and
+	// click-tracking endpoints (memql#4823). Authorized by the HMAC-signed
+	// token in the PATH, never by a bearer, which is the same posture the
+	// /unsubscribe entry above records and the reason the two are listed
+	// together. Fails closed in the only sense available to a route a mail
+	// client dials: a request with no token, or with one whose tag does not
+	// verify, records nothing. There is no unauthenticated path through the
+	// handler that reaches a mutation.
+	//
+	// The two shapes of "nothing" differ by endpoint on purpose, and neither
+	// is a leak. The pixel ALWAYS answers the 1x1 GIF, valid signature or
+	// not, because a mail client that gets a 404 renders a broken-image icon
+	// in somebody's inbox -- and because an answer that varied with
+	// signature validity would turn the endpoint into an oracle for probing
+	// tokens. The click endpoint 302s only on a valid signature and
+	// otherwise renders the plain "link not valid" page, never a 500.
+	//
+	// The signature is also what makes the redirect safe: the destination
+	// URL is inside the signed payload rather than in a query parameter, so
+	// there is no unsigned input for an open redirect to aim.
+	paths = append(paths, TrackingPaths()...)
 	// POST /sites/{id}/bundles -- the atomic bundle-publish endpoint
 	// (memql#3713). Appended rather than written inline for the same
 	// reason as the two entries above: the prefix has to agree with what
@@ -202,7 +223,24 @@ func SelfAuthenticatedPaths() []string {
 	// row is read, and the identity the handler then impersonates comes
 	// out of the signed payload rather than out of a parameter, so an
 	// unsigned request cannot aim it anywhere (memql#3348).
-	return append(InboundWebhookPaths(), UnsubscribePaths()...)
+	// GET /t/o/{token} + GET /t/c/{token} -- the campaign tracking pair
+	// (memql#4823), here for exactly the reason /unsubscribe is. The mail
+	// client that fetches the pixel, and the browser that follows a
+	// rewritten link, hold no MemQL credential and never will, so the
+	// bearer verifier has to step aside or the request is 401'd before the
+	// handler's own check runs. The authorization is the HMAC-signed token:
+	// it is verified before any row is read, and the delivery and campaign
+	// the handler then records against come out of the signed payload
+	// rather than out of a parameter, so an unsigned request cannot aim it
+	// anywhere.
+	//
+	// The one-segment bound this tier is matched with (see
+	// verifier.isSelfAuthenticated) is not incidental here -- it is what
+	// the token has to be encoded to fit. TrackingPaths' own comment says
+	// so, because this is the layer that would silently 401 a token
+	// carrying a slash.
+	paths := append(InboundWebhookPaths(), UnsubscribePaths()...)
+	return append(paths, TrackingPaths()...)
 }
 
 // ContractRoutes returns the request paths HandlerWithOptions registers.

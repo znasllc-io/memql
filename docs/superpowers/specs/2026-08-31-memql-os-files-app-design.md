@@ -359,6 +359,48 @@ forever; a deletion at the origin flags and never deletes. Cross-repo split:
 the watcher and scheduling live in `memql-cockpit`; the states, rollup and
 UI live here.
 
+### E1. The engine half, as built (epic memql#4783)
+
+Landed: the `(machine, path)` re-push, the link-state model, and the Files
+surfacing. The cockpit half -- the watcher, the scheduling and the origin
+liveness answers -- stays in `memql-cockpit` and is unchanged by this.
+
+- **`libraryFileByUploadedFrom(workerId, path)`** is the key read. Both args
+  are guarded, so a half-supplied key returns the owner's whole live file set
+  rather than a coincidental match on the other half. It excludes ARCHIVED
+  rows: the key names the LIVE copy, and a re-push that versioned an archived
+  row would write new bytes straight into the Bin -- the person would see
+  nothing arrive and the backup would report success.
+- **`resolveKeyedVersionTarget` runs only where the caller named nothing.**
+  Somebody pointing at a row in the inspector has made a decision, and a key
+  that quietly disagreed would write their bytes somewhere else. It runs AFTER
+  `verifyProvenance`, so the machine half has been checked against the caller's
+  own fleet before it is used to find anything. A resolve that FAILS refuses
+  the upload rather than falling through to "a new file": a silent fallback
+  grows a duplicate on every failed read and reports success each time.
+- **BOTH ROUTES, and the chunked one matters more.** The epic's own scenario is
+  a person producing client video; every file in that watched folder is past
+  the one-shot threshold, so every re-push a watcher makes arrives on the
+  session route. A keyed resolve on the one-shot path alone versions small
+  files and duplicates large ones -- working in a demo and broken for the
+  feature it was built for.
+- **`linkState` / `linkCheckedAt` live on `v1:library:file` and are NOT
+  promoted to the index.** Forwarding them needs an automation on the file's
+  `node.updated`, and `archiveFileOnArtifactArchive` already runs the other
+  way -- the pair closes the cycle that automation's own header warns about.
+  The Files app therefore reads a third feed rather than a wider index row.
+- **The engine writes exactly ONE of the three states.** An upload naming a
+  `(machine, path)` is stamped `synced`, because at the instant those exact
+  bytes arrived the copy did equal the origin -- which is the strongest
+  evidence available and makes the feature visible before any watcher exists.
+  `stale` and `origin_gone` are answers only something looking at the origin
+  can give, so the cockpit reports them through `setLibraryFileLinkState`.
+- **ABSENT IS NOT A FOURTH STATE.** "We do not track this file" and "we track
+  it and it is fine" are different answers and must not share a spelling.
+- **The invariant holds in code:** nothing in this epic removes, hides or
+  supersedes a copy. `origin_gone` is a LABEL on a file that is still whole and
+  still downloadable.
+
 ## F. Testing
 
 - Engine: dslconformance dimensions for the new promotion args; a

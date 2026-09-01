@@ -274,23 +274,28 @@ func TestAMirroredNumberTooWideForIntSaturates(t *testing.T) {
 	}
 }
 
-func TestTheIntegerClampsKeepSignAndOrdering(t *testing.T) {
+// TestMapIntKeepsSignAndOrdering pins the site's answer through its own
+// decoder. The narrowing lives in core/num now and is tested there; what this
+// file asserts is that an inventory count still SATURATES, because a wrapped
+// negative reads as "none in stock" for a location that has plenty.
+func TestMapIntKeepsSignAndOrdering(t *testing.T) {
 	t.Parallel()
-	if got := clampInt64ToInt(math.MaxInt64); got != math.MaxInt {
-		t.Errorf("clampInt64ToInt(MaxInt64) = %d, want %d", got, math.MaxInt)
+	row := func(v any) map[string]any { return map[string]any{"n": v} }
+	if got := mapInt(row(int64(math.MaxInt64)), "n"); got != math.MaxInt {
+		t.Errorf("mapInt(MaxInt64) = %d, want %d", got, math.MaxInt)
 	}
-	if got := clampInt64ToInt(math.MinInt64); got != math.MinInt {
-		t.Errorf("clampInt64ToInt(MinInt64) = %d, want %d", got, math.MinInt)
+	if got := mapInt(row(int64(math.MinInt64)), "n"); got != math.MinInt {
+		t.Errorf("mapInt(MinInt64) = %d, want %d", got, math.MinInt)
 	}
-	if got := clampFloat64ToInt(math.Inf(1)); got != math.MaxInt {
-		t.Errorf("clampFloat64ToInt(+Inf) = %d, want %d", got, math.MaxInt)
+	if got := mapInt(row(math.Inf(1)), "n"); got != math.MaxInt {
+		t.Errorf("mapInt(+Inf) = %d, want %d", got, math.MaxInt)
 	}
-	if got := clampFloat64ToInt(math.Inf(-1)); got != math.MinInt {
-		t.Errorf("clampFloat64ToInt(-Inf) = %d, want %d", got, math.MinInt)
+	if got := mapInt(row(math.Inf(-1)), "n"); got != math.MinInt {
+		t.Errorf("mapInt(-Inf) = %d, want %d", got, math.MinInt)
 	}
 	// Truncation toward zero is the behaviour the bare conversion had, and
 	// the clamp must not have changed it for values that always fitted.
-	if got := clampFloat64ToInt(-7.9); got != -7 {
-		t.Errorf("clampFloat64ToInt(-7.9) = %d, want -7", got)
+	if got := mapInt(row(-7.9), "n"); got != -7 {
+		t.Errorf("mapInt(-7.9) = %d, want -7", got)
 	}
 }

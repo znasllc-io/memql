@@ -5,7 +5,8 @@ import { RankMark, RoleTag } from "../../src/kit/RankMark";
 import { PeerRowReadOnly, SurfaceRefused } from "../../src/kit/RankStates";
 import { OS_REGISTRY } from "../../src/apps/registry";
 import { appsForRole, sectionsForRole, widgetsForRole } from "../../src/system/registry";
-import { roleAdmits, roleLadder, roleRank, setRoleLadder } from "../../src/system/roles";
+import { roleAdmits, roleRank, setRoleLadder } from "../../src/system/roles";
+import type { RoleRequirement } from "../../src/system/roles";
 import { SEEDED_LADDER } from "../seededLadder";
 
 // THE LADDER AS CLUSTER STATE (epic memql#4832, D1), and the surfaces that
@@ -48,18 +49,24 @@ describe("every shipped role requirement names a real rung", () => {
   // silent and total outage of one app.
   it("resolves every app, section and widget requirement", () => {
     const unresolved: string[] = [];
-    const check = (label: string, min: string | undefined) => {
-      if (min === undefined) return;
-      if (roleRank(min) < 0) unresolved.push(`${label} -> ${min}`);
+    // BOTH FORMS. `{ min }` names one slug; `{ any }` names a set, and every
+    // member has to resolve -- a set with one unresolvable member silently
+    // narrows rather than failing, which is the quieter of the two bugs.
+    const check = (label: string, requirement: RoleRequirement | undefined) => {
+      if (requirement === undefined) return;
+      const slugs = "any" in requirement ? [...requirement.any] : [requirement.min];
+      for (const slug of slugs) {
+        if (roleRank(slug) < 0) unresolved.push(`${label} -> ${slug}`);
+      }
     };
     for (const app of OS_REGISTRY.apps) {
-      check(`app ${app.id}`, app.roles?.min);
+      check(`app ${app.id}`, app.roles);
       for (const section of app.sections ?? []) {
-        check(`section ${app.id}/${section.id}`, section.roles?.min);
+        check(`section ${app.id}/${section.id}`, section.roles);
       }
     }
     for (const widget of OS_REGISTRY.widgets) {
-      check(`widget ${widget.id}`, widget.roles?.min);
+      check(`widget ${widget.id}`, widget.roles);
     }
     expect(unresolved).toEqual([]);
   });

@@ -44,9 +44,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // spaceConceptPrefix is the canonical id prefix for v1:cognition:space
@@ -134,7 +135,7 @@ func (d *Integration) sweepSpace(ctx context.Context, userId string, space map[s
 	for _, sid := range partitionIdForms(spaceRowId) {
 		parts, err := d.queryRows(ctx, "spaceParticipants", map[string]any{
 			"partitionId": sid,
-			"status":  "active",
+			"status":      "active",
 		})
 		if err != nil {
 			stats.recordError(fmt.Errorf("sweep(%s): list participants: %w", sid, err))
@@ -180,7 +181,7 @@ func (d *Integration) sweepSpace(ctx context.Context, userId string, space map[s
 			}
 			args := map[string]any{
 				"participantId": participantId,
-				"partitionId":       sid,
+				"partitionId":   sid,
 				"state":         "idle",
 				"label":         "Inactive",
 				"reason":        "daily space rolled over",
@@ -241,7 +242,7 @@ func (d *Integration) sweepSpace(ctx context.Context, userId string, space map[s
 	}
 	if err := d.execMutation(ctx, "rolloverDailySpace", map[string]any{
 		"partitionId": spaceRowId,
-		"payload": payload,
+		"payload":     payload,
 	}); err != nil {
 		stats.recordError(fmt.Errorf("sweep(%s): mark rolled over: %w", spaceRowId, err))
 		return
@@ -358,38 +359,23 @@ func rolloverAction(prefs map[string]any) string {
 
 // intFromPrefs reads an int-ish preference value (JSON numbers decode
 // as float64).
+//
+// ZERO is this site's answer to an out-of-range value, and it is deliberate
+// rather than the shared default: preference values are small counts, and
+// every caller here already reads 0 as "unset" through its own `> 0` guard,
+// so an absurd number lands on exactly the path an absent field does.
 func intFromPrefs(prefs map[string]any, key string) int {
 	switch v := prefs[key].(type) {
 	case int:
 		return v
 	case int64:
-		return clampInt64(v)
+		return num.Int64OrZero(v)
 	case float64:
-		// Guard the float -> int narrowing. float64(math.MaxInt) rounds UP to
-		// 2^63 on a 64-bit build, so a strict `> math.MaxInt` would let exactly
-		// 2^63 slip through to a saturating int(v); reject at the boundary (and
-		// NaN) instead. A preference count out of int range is nonsense anyway.
-		if math.IsNaN(v) || v >= math.MaxInt || v <= math.MinInt {
-			return 0
-		}
-		return int(v)
+		return num.Float64OrZero(v)
 	case json.Number:
 		if n, err := v.Int64(); err == nil {
-			return clampInt64(n)
+			return num.Int64OrZero(n)
 		}
 	}
 	return 0
-}
-
-// clampInt64 narrows an int64 to int, returning 0 when the value does not
-// fit the platform int. On a 64-bit build (int is int64) the guard never
-// fires and this is int(v); it protects the 32-bit narrowing flagged by
-// go/incorrect-integer-conversion. Preference values are small counts, so
-// an out-of-range value is nonsense and the zero default -- which callers
-// already treat as "unset" via their `> 0` guards -- is the safe reading.
-func clampInt64(v int64) int {
-	if v > math.MaxInt || v < math.MinInt {
-		return 0
-	}
-	return int(v)
 }

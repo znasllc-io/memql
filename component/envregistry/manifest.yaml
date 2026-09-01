@@ -371,6 +371,13 @@ variables:
     default: "MemQL"
     description: "Display name shown in the From header of transactional mail. (Legacy name `MAIL_FROM_NAME` still accepted.)"
 
+  - name: MEMQL_EMAIL_NDR_POLL_SECONDS
+    component: email
+    scope: node
+    optional: true
+    default: "300"
+    description: "How often the Graph mailbox reader lists the sending mailbox for delivery reports (memql#4824). 0 disables it. Active only on a node whose sender is Microsoft Graph AND where campaigns are enabled: on Graph a failed delivery comes back as a multipart/report DSN mailed to the sending mailbox rather than as a webhook, so without this reader the suppression list starves on the transport the deployment actually sends on. Staged rows carry source='graph-mailbox'; list `graph-mailbox=rfc3464` in MEMQL_CAMPAIGNS_FEEDBACK_SOURCES to act on them. A non-integer value falls back to the default rather than to off. The mailbox must also be reachable with Graph Mail.Read under the same ApplicationAccessPolicy that scopes Mail.Send."
+
   # --- campaign sending engine (memql#3348) ---
 
   - name: MEMQL_CAMPAIGNS_ENABLED

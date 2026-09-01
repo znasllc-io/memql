@@ -14,6 +14,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // EngineStore is the production Store implementation. Reads + writes
@@ -372,14 +373,20 @@ func rowString(row map[string]any, key string) string {
 	return ""
 }
 
+// rowInt reads a worker row's numeric field.
+//
+// SATURATES out of range (memql#4779). `activeCount` is compared as a uint32
+// against the machine's concurrency (`uint32(ActiveCount) >= MaxConcurrent`),
+// so a negative becomes roughly four billion and takes a healthy machine out
+// of the fleet -- silently, and only under load.
 func rowInt(row map[string]any, key string) int {
 	switch v := row[key].(type) {
 	case float64:
-		return int(v)
+		return num.ClampFloat64(v)
 	case int:
 		return v
 	case int64:
-		return int(v)
+		return num.ClampInt64(v)
 	}
 	return 0
 }
@@ -411,8 +418,9 @@ func rowStringMap(row map[string]any, key string) map[string]string {
 		case bool:
 			out[k] = fmt.Sprintf("%t", t)
 		case float64:
-			if t == float64(int64(t)) {
-				out[k] = fmt.Sprintf("%d", int64(t))
+			// narrowing: GUARDED -- num.WholeInt64 IS the guard (memql#4779).
+			if whole, ok := num.WholeInt64(t); ok {
+				out[k] = fmt.Sprintf("%d", whole)
 			} else {
 				out[k] = fmt.Sprintf("%g", t)
 			}
@@ -544,7 +552,17 @@ func (s *EngineStore) DelegationPolicy(ctx context.Context, ownerUserId string) 
 		MaxConcurrentSessions:  intFrom(row["maxConcurrentSessions"]),
 		WorkspaceRoot:          stringFrom(row["workspaceRoot"]),
 	}
+	// The seconds are bounded before they become a Duration, and that bound
+	// is a DOMAIN rule rather than part of the narrowing (memql#4779):
+	// time.Duration is int64 NANOSECONDS, so any seconds count above about
+	// 9.2e9 overflows the multiply and lands somewhere arbitrary -- which a
+	// saturating read makes reachable where a wrapping one merely made it
+	// differently wrong. A credential that outlives the cluster is not a
+	// lifetime anyone meant, so it is capped at the longest one that is.
 	if secs := intFrom(row["credentialLifetimeSeconds"]); secs > 0 {
+		if secs > maxCredentialLifetimeSeconds {
+			secs = maxCredentialLifetimeSeconds
+		}
 		policy.CredentialLifetime = time.Duration(secs) * time.Second
 	}
 	// Zero reads as the DEFAULT rather than as "none": a zero here
@@ -566,14 +584,19 @@ func stringFrom(v any) string {
 	return s
 }
 
+// intFrom reads a delegation-policy field.
+//
+// SATURATES out of range (memql#4779). Both readings are `> 0` guards, and
+// `MaxConcurrentSessions` carries an explicit `<= 0 -> 1` normalization whose
+// comment already says zero is the wrong answer here.
 func intFrom(v any) int {
 	switch n := v.(type) {
 	case int:
 		return n
 	case int64:
-		return int(n)
+		return num.ClampInt64(n)
 	case float64:
-		return int(n)
+		return num.ClampFloat64(n)
 	}
 	return 0
 }
@@ -652,6 +675,15 @@ func (s *EngineStore) SharedInferenceWorkers(ctx context.Context) ([]Candidate, 
 // systemFleetActor is the subject the cluster's own model calls act as. It is
 // not a user id and resolves to no identity row; its only purpose is to be a
 // legible `sub` in an audit line.
+// maxCredentialLifetimeSeconds bounds the delegation policy's own field
+// before it becomes a time.Duration.
+//
+// It is 8h because that is what the MINT side already enforces
+// (appSessionCredentialMaxTTL in component/identity/http/node_bootstrap.go),
+// so a policy asking for longer was never realizable -- this is the read side
+// agreeing with the write side rather than a new rule.
+const maxCredentialLifetimeSeconds = 8 * 60 * 60
+
 const systemFleetActor = "system:fleet-inference"
 
 func systemFleetContext(ctx context.Context) context.Context {

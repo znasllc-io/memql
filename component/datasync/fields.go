@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // fields.go -- reading a materialized engine row.
@@ -35,6 +37,12 @@ func stringField(row map[string]any, key string) string {
 	return ""
 }
 
+// intField reads a sync-health row's numeric field.
+//
+// SATURATES out of range (memql#4779). These are health counters -- attempts,
+// lagSeconds, driftCount, outboxDepth, deadLetterCount -- displayed rather
+// than allocated against, and zero is the dangerous answer here: it reads as
+// "healthy" for a connector that is anything but.
 func intField(row map[string]any, key string) int {
 	if row == nil {
 		return 0
@@ -43,9 +51,9 @@ func intField(row map[string]any, key string) int {
 	case int:
 		return v
 	case int64:
-		return int(v)
+		return num.ClampInt64(v)
 	case float64:
-		return int(v)
+		return num.ClampFloat64(v)
 	case string:
 		n, err := strconv.Atoi(strings.TrimSpace(v))
 		if err != nil {

@@ -36,7 +36,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
@@ -44,6 +43,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 const (
@@ -349,6 +349,11 @@ func (c *RefreshCron) spawnRefreshPlan(ctx context.Context, row map[string]any) 
 
 // intField reads an int-valued field, tolerating the float64 JSON
 // decode shape. Returns def when missing / wrong type.
+//
+// THE CALLER'S DEFAULT is also this site's answer to an out-of-range value,
+// and the signature is why: every caller already names the value it wants
+// when the field is absent, and a refresh cadence of 2^63 days is as absent
+// as no cadence at all.
 func intField(m map[string]any, key string, def int) int {
 	if m == nil {
 		return def
@@ -357,27 +362,11 @@ func intField(m map[string]any, key string, def int) int {
 	case int:
 		return v
 	case int64:
-		return clampInt64ToInt(v, def)
+		return num.Int64Or(v, def)
 	case float64:
-		// Bound the float before narrowing so the int64() conversion
-		// can't overflow, then funnel through the single guarded sink.
-		if v > math.MaxInt32 || v < math.MinInt32 {
-			return def
-		}
-		return clampInt64ToInt(int64(v), def)
+		return num.Float64Or(v, def)
 	}
 	return def
-}
-
-// clampInt64ToInt narrows an int64 to int, returning def when the value
-// falls outside the 32-bit range (the worst-case int width) so the
-// conversion is provably safe on every platform. This is the single
-// narrowing sink intField funnels through.
-func clampInt64ToInt(v int64, def int) int {
-	if v > math.MaxInt32 || v < math.MinInt32 {
-		return def
-	}
-	return int(v)
 }
 
 // domainNameOrId returns the human name when present, else the id.

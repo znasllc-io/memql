@@ -100,6 +100,25 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		"component/identity":          "identity store internals, server-initiated",
 		"component/identity/adminops": "identity-admin write surface -- REQUEST-DERIVED, one of the two exceptions here; its precondition (every path is downstream of the owner/admin gate in the same function) is asserted by component/identity/adminops/gate_test.go, memql#3324",
 		"component/identity/pat":      "personal-access-token store, server-initiated",
+		// The campaigns sending engine and the event-email rule runtime (epic
+		// memql#4819). SERVER-INITIATED, not request-derived: the callers are a
+		// drain worker on a ticker, an unauthenticated tracking endpoint whose
+		// only authorization is a signed token, and an authored automation the
+		// scheduler fired -- none of them an HTTP handler acting on a caller's
+		// argument.
+		//
+		// The stamp is not a widening. Every mutation it is for is @serverOnly
+		// (memql#4820 D15): the six campaign lifecycle and progress writers, the
+		// engagement writer, and the two that record what the engine made of a
+		// rule. Origin defaults to CLIENT and the function validator refuses an
+		// unstamped @serverOnly write with only a WARN -- so without the stamp
+		// the worker's counters silently never land, the tracking pixel records
+		// nothing, and a rule's status stays draft with the reason in one
+		// replica's log. That is the shape of bug that survives a release, which
+		// is why these two packages stamp rather than being exempted from the
+		// annotation.
+		"component/campaigns":  "campaign drain worker, tracking endpoints and consent writers -- server-initiated; every write it stamps for is @serverOnly (memql#4820)",
+		"component/emailrules": "event-email rule generation, activation and firing -- server-initiated; the callers are the authoring pipeline and an authored automation, and the three writes it stamps for are @serverOnly (memql#4829)",
 		// The custom-domain reconciliation sweep (epic memql#4805). SERVER-
 		// INITIATED, and not one of the request-derived exceptions: the caller
 		// is a scheduled automation, not an HTTP handler, and the six writes it

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // analytics.go -- the four commerce questions, answered from the mirror.
@@ -187,9 +188,14 @@ func availableQuantity(level map[string]any) (int, bool) {
 		if !ok || fmt.Sprintf("%v", q["name"]) != "available" {
 			continue
 		}
+		// SATURATES out of range (memql#4779). A vendor-supplied inventory
+		// count that wrapped negative reads as "out of stock" for a location
+		// that has plenty -- and this file sits 200 lines from a guarded
+		// helper it simply did not use, which is the whole shape of the
+		// recurrence this sweep closes.
 		switch v := q["quantity"].(type) {
 		case float64:
-			return int(v), true
+			return num.ClampFloat64(v), true
 		case int:
 			return v, true
 		case string:

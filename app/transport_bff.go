@@ -44,5 +44,15 @@ func (a *App) transportBFF() {
 	// MEMQL_INBOUND_SOURCE_ALLOWLIST it answers 404 to everything.
 	a.mountInboundEndpoints()
 	a.mountUnsubscribeEndpoint()
+	// Campaign open + click tracking (GET /t/o/{token}, GET /t/c/{token},
+	// memql#4823). Bff-only for the same reason the unsubscribe endpoint
+	// above is: the caller is the recipient's mail client or browser, and
+	// this is the node the front door already routes external traffic to.
+	//
+	// BEFORE createHTTPServer(), like every mount above it.
+	// requireUnsealedSurface fatals on a route registered after the
+	// surface is asserted, so a mount that drifts below this line does not
+	// silently fail to route -- it refuses to boot.
+	a.mountTrackingEndpoints()
 	a.createHTTPServer()
 }

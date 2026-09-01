@@ -21,7 +21,13 @@ Design: `docs/superpowers/specs/2026-08-26-memql-os-desktop-shell-design.md`.
   hold the mic to talk, tap it to keep listening.
 - **Roles**: one predicate (`system/roles.ts`) gates apps and app sections
   from `MyAccess.clusterRole`. Presentation only — row authz stays the
-  engine's.
+  engine's. A requirement is a LADDER MINIMUM (`{ min }`) or an explicit SET
+  (`{ any }`), and the set form exists for exactly one reason: Settings ->
+  Integrations is owner-or-developer and the ladder puts `admin` between the
+  two, so `{ min: "developer" }` cannot leave it out (epic memql#4819).
+  The minimum stays the default and the common case — reach for the set only
+  when a requirement is genuinely non-monotonic, and say why where you
+  declare it.
 - **Theming**: `--os-*` token packs on the root (`data-os-theme`); mode
   (light/dark/system) is orthogonal. The wallpaper (the memory field) paints
   from tokens and from the pack's own field parameters. A pack is DATA, and
@@ -37,8 +43,8 @@ Design: `docs/superpowers/specs/2026-08-26-memql-os-desktop-shell-design.md`.
 Pure state machines live in `src/system/` (tested without React); chrome
 in `src/chrome/`; the app/widget contracts in `src/system/registry.ts`;
 the shared kit in `src/kit/`. Every app is real: Settings, Fleet, Users,
-Deployables, Training and Files (#4721) -- the last stub went with Files,
-and `StubApp` with it.
+Deployables, Training, Files (#4721), Accounts (#4800) and Campaigns
+(#4827) -- the last stub went with Files, and `StubApp` with it.
 
 ## Right-click belongs to the shell
 
@@ -476,9 +482,17 @@ rules rather than repetitions of the five before it.
   promotion into `kit/`: the kit is the OS's shared VOCABULARY (rows, chips,
   notices, the live list), and a picker over one domain's concept is not
   vocabulary. Putting it there would make every app depend on a concept most
-  of them otherwise know nothing about. `useAccountOptions` keys its
-  collection on one string, so four surfaces mounting it at once share one
-  subscription rather than opening four.
+  of them otherwise know nothing about. `useAccountOptions` opens ONE
+  COLLECTION PER MOUNTING COMPONENT, so five surfaces mounting a picker at
+  once open five subscriptions -- `live/useLiveCollection.ts` memoises on
+  `[connection, key]` and constructs a collection per component; it does NOT
+  call the SDK's shared `LiveRegistry`. That is accepted ACROSS apps and is
+  not accepted INSIDE one, and the difference is what the two feeds decide:
+  two readings inside one app would be free to disagree while deciding
+  whether a form or a list renders, which is why `AccountsApp` retains
+  exactly one and passes it down. `apps/accounts/tie.tsx` is the long form of
+  this and is the account to trust -- this bullet claimed the opposite until
+  memql#4827.
 
 - **THE LEDGER IS AN ON-DEMAND READ, AND ALL FOUR BANDS ARE, DELIBERATELY.**
   Three of the four rolled-up concepts DO broadcast (`v1:platform:site`,
@@ -528,6 +542,268 @@ Training's domain tag is likewise render-and-filter only, which is what the
 design asks for: nothing about routing, attachment or agent behaviour
 consults `knowledgeDomain.accountId`, and `domainsForAccount` is the only
 query in the tree that mentions it.
+## The Bin, the seventh app and the only dock FIXTURE (memql#4784)
+
+`src/apps/bin/` is the archive: everything you threw away, what it was, and
+where it came from. Five things about it are new rules rather than repetitions
+of the six apps before it.
+
+- **A TRASH CAN THAT CANNOT DESTROY ANYTHING IS A DIFFERENT OBJECT, and the
+  app says so on the page.** Every trash can anybody has used is a waiting room
+  for deletion; an archive in MemQL is an append-only re-version carrying
+  `archived=true`, so the bytes stay, every earlier version stays, and there is
+  no expiry anywhere in the product. A surface that looked like a trash can and
+  quietly behaved differently would be read as one -- so the difference is
+  stated in the header line, in the empty state, and in the settings section
+  where somebody goes looking for the retention control that does not exist.
+  An absent control with no account of itself reads as something nobody got
+  round to building.
+
+- **ONE DRAG CONTEXT NOW SPANS THE SHELL** (`chrome/dragScope.tsx`). The desk
+  and the dock owned a `DndContext` each and are SIBLINGS in the layout, so a
+  drag begun on a desk icon or in a Files window could never resolve a drop in
+  the dock -- dnd-kit only considers droppables inside the context the drag
+  started in. That was invisible until something needed to cross the line.
+  Handlers claim an id PREFIX and register a REF: a hook that re-registered
+  when its closure changed would re-register on every render of the desktop,
+  and its cleanup would unregister mid-drag. The alternative -- native HTML5
+  dnd for this one target -- is the two-implementations-of-one-behaviour shape
+  the arrival-cue section warns about, with "the desk icon can be dragged to
+  the Bin but the Files row cannot" as the bug nobody notices for a month.
+
+- **A FIXTURE IS NOT A PIN.** `dockFixture` on the manifest puts the Bin in
+  the dock in every session and keeps it OUT of the pin list -- including out
+  of a stored desktop document that names it, because a fixture that is also a
+  pin can be dragged out of the strip and lost. Pins roam with the desktop; a
+  fixture is a property of the shell, so no upgrade path and no corrupt
+  document can leave somebody without one. Its context menu offers no pin
+  control at all rather than a disabled one.
+
+- **THE BIN IS NOT DRAWN AS A DANGEROUS THING.** Amber is `warn` and red is
+  `error` everywhere here, and an archive is neither. The drop target lights in
+  the ACCENT, like every other "yes, here" affordance in the OS. (The CONFIRM
+  keeps the shell's existing confirm language, matching the Files inspector --
+  two different confirms for one action is worse than a colour that leans
+  cautious.) A **folder** dropped on the Bin is REFUSED and told where to go:
+  archiving a folder is a recursive walk whose confirm names the live count
+  inside it, and a dock icon cannot count that. A file from the COMPUTER is
+  refused out loud, and `stopPropagation` runs in both drag phases -- the dock
+  sits over the desk plate, whose own handler would otherwise upload it at the
+  exact moment somebody meant to throw something away.
+
+- **THE STORY LEADS, AND IT IS SAID EXACTLY ONCE.** Where a file came from is
+  the fact that decides whether you still want it -- a client's laptop in March
+  is a different decision from an agent's output yesterday -- so the row's
+  quiet middle is the provenance and the detail panel's header is the machine
+  block: its name, its presence, the absolute path (selectable in one gesture,
+  because the reader is a window away from a file manager on that machine), and
+  the origin link state. Where a machine is named the header SENTENCE stands
+  down, rather than announcing the same machine twice in eighty pixels. The
+  rows carry no presence dot at all: it means "is that machine reachable right
+  now" everywhere in this shell, which beside an archived row is both
+  irrelevant and misleading -- a file whose origin is gone would show green for
+  as long as the machine that no longer holds it stays awake.
+
+Two smaller things. The list merges TWO feeds (`apps/bin/mergedView.ts`), and
+`useLiveView` cannot do that: it caches against ONE upstream snapshot's
+identity, so a folder arriving while the artifacts are unchanged folds into
+nothing -- the list never moves, nothing errors, the folder is simply missing.
+And "was filed in" resolves against the ARCHIVED folders, because
+`libraryFolders` carries `archived != true` and a folder that went to the Bin
+with its contents is invisible to every other surface in the product.
+
+### Origin link states, in Files (epic memql#4783)
+
+A file pushed from a watched folder on a fleet machine carries a state against
+its origin -- `synced`, `stale`, `origin_gone` -- rendered as a chip on the row
+and rolled up as a dot on the folder. Three rules:
+
+- **ABSENT IS NOT A STATE.** A browser upload has no origin to link to and
+  every file stored before the field existed has no member. Reading either as
+  `synced` puts an in-sync badge on every file in the Library.
+- **`synced` DRAWS NOTHING on a folder.** The reason to mark a folder is to
+  make somebody open it, and a green mark on every backed-up folder is noise
+  that makes the few needing attention invisible. The rollup reports the WORST
+  beneath it, through every ancestor, so the top of a deep tree does not look
+  clean.
+- **The states come from a THIRD feed over `v1:library:file`**, not from the
+  index. Promoting `linkState` onto `v1:library:artifact` needs an automation
+  on the file's `node.updated`, and the artifact-to-file archive automation
+  already runs the other way -- the pair closes a loop where each write
+  publishes an event the other subscribes to. Three concepts at one app root is
+  not a violation of the one-feed rule: that rule is per CONCEPT, and two
+  concepts cannot disagree.
+
+
+## Campaigns, the eighth app (epic memql#4827 / #4828 / #4830)
+
+`src/apps/campaigns/` is mail: the audiences it goes to, the copy it is made
+of, the mailboxes it leaves from, the sends themselves, and the rules that
+send one message when something happens in the cluster. It is the first app
+whose subject LEAVES the cluster, and six things about it are new rules
+rather than repetitions of the seven before it.
+
+- **A HEARTBEAT IS NOT NEWS, AND THIS IS THE SHARPEST CASE OF IT SO FAR.**
+  Fleet's heartbeat moves every fifteen seconds and the Domains sweep every
+  two minutes; the drain worker writes `sentCount` / `failedCount` /
+  `skippedCount` on every batch of every running send. Naming one in
+  `campaignFingerprint` would ring every row in the list, repeatedly, for the
+  whole duration of every send in the cluster -- arriving exactly when
+  somebody is watching. `recipientCount` is out for a second reason: the
+  preflight freezes it at the same instant the status flips, so it would fire
+  a second cue for a change the status already announced. The fingerprint is
+  `name | status | scheduledAt | audienceId | templateId | senderIdentityId |
+  accountId | lastError`.
+
+  **The counters must still RE-RENDER live**, which is the whole point of the
+  send bar filling under the person watching it. Re-rendering and ringing are
+  different statements and the fingerprint is the only thing that separates
+  them, so `test/campaigns/app.test.tsx` pins BOTH: a counter tick leaves
+  `data-arrival` null AND puts the new figure on screen; a rename rings. A
+  test of one half passes against a cue that fires on everything.
+
+- **THE LIVE/ON-DEMAND SPLIT IS A VOLUME ARGUMENT, AND IT IS RECORDED RATHER
+  THAN INFERRED.** `campaign`, `audience`, `template`, `senderIdentity` and
+  `emailRule` carry broadcast rules: one row per thing a person authored.
+  `delivery`, `engagementEvent` and `recipient` are EXCLUSIONS with their
+  reasons written down in `RoutingExclusions()` -- one delivery row per
+  recipient per send, one engagement row per open (mail clients prefetch the
+  pixel), and, the surprising one, an audience roster, because hand-editing
+  is human-paced but a 20,000-address CSV import is a 20,000-event burst
+  proportional to a FILE rather than to anything a person did.
+
+  So the ledger, the stats and the roster are on-demand reads that print when
+  they were read and offer to look again, and they SAY WHAT THAT COSTS: an
+  address added in another window does not appear, and an unsubscribe does not
+  flip a row. A `LiveList` over any of them would render "Loading from the
+  cluster" and then a list that silently never moved -- worse than a plain one,
+  because the caption would be claiming wiring that is not there.
+
+- **AN ABSENT FIGURE IS AN EM DASH WITH A REASON, NEVER A ZERO.**
+  `campaignStats` reports a unique open or click count as UNMEASURED when the
+  fold behind it hit its bound, and reports no soft-bounce figure at all
+  because nothing measures one per campaign. A `0` there would be this window
+  inventing a fact about somebody's send -- and a zero open rate is a thing
+  operators act on. `Figure` is `{value: number | null, absentBecause}`, an
+  absent key and an explicit null are the same answer, and a rate is OF
+  DELIVERED rather than of the audience: an open rate over the whole roster
+  silently punishes a campaign for its suppressions, which is the opposite of
+  what suppressing was for.
+
+- **A SEND IS A BAR, NOT A ROW OF STAT CARDS.** Four numbers in four boxes
+  makes a person add them up to learn the one thing they came for. One band,
+  the width of the panel, partitions the audience into `sent | skipped |
+  failed | pending` -- which is literally what happened to it -- with a legend
+  giving the exact figures beneath. It makes the SKIPPED slice visible, the
+  compliance-relevant number nobody goes looking for. `pending` is DERIVED
+  rather than read, so the slices always sum to the whole and the band can
+  never show a gap that reads as a rendering fault; the counts CLAMP at zero,
+  because when a frozen estimate and live observations disagree the
+  observations win. It is `flex-grow` and four token colours, not a chart
+  library, and it carries `role="img"` with an `aria-label` stating the
+  figures in words -- a bar a screen reader cannot read is a bar that excluded
+  somebody, and the picture's whole content is proportion. Engagement sits
+  BELOW it, smaller, as a rate of delivered plus the raw unique-of-total: it
+  is a different question about the sent slice only, and a fifth segment would
+  put two denominators in one band.
+
+- **THE IMPORT REPORT IS A PANEL THE PERSON DISMISSES.** The operator's next
+  action after a CSV import is fixing the file -- open it, go to line 412 --
+  so the outcome sentence and the sample bad lines with their numbers stay on
+  screen until they say they are done. A toast puts that evidence on a timer,
+  which is the reason this shell has none. The upload itself rides
+  `items/edgeUpload.ts` like every other transfer in the OS
+  (`test/files/onePath.test.ts` fails the build on a second speaker), so
+  chunking, resume, retry and verbatim refusals apply with nothing new
+  learning them; the artifact id then goes to the engine, which reads the file
+  under the CALLER'S OWN actor. The id is not a capability.
+
+- **MERGE TAGS SHOW WHAT THEY RENDER TO, WHICH IS DOCUMENTATION THAT CANNOT
+  GO STALE.** Four base tags are a closed set the renderer knows;
+  `{{fields.*}}` is not, because those exist only because somebody's CSV had a
+  `company` column. No list in this repo could know that, so the strip samples
+  a real recipient from a chosen audience -- which is the only way an operator
+  discovers `fields.*` at all, and which also catches the case a spelling
+  check cannot, a column present but blank for the person you sampled.
+  Clicking inserts at the cursor and leaves the cursor after the tag. The test
+  send's UNRESOLVED list renders in the same vocabulary, right where the
+  copy is being written: a typo'd `{{fields.compnay}}` goes out as its own
+  literal text and looks like nothing from this side, so this is the only
+  check that catches it before the whole audience does.
+
+- **THE RULES BUILDER IS A SENTENCE, AND THE DELIVERY LANE IS NEVER A
+  TOGGLE.** "When a *[thing]* is *[created / changes]* -- optionally *[only
+  when ...]* -- email *[template]* to *[who]*." Six labelled boxes would make
+  somebody assemble that meaning themselves, from parts that only mean
+  anything together. The `who` control is the ONLY place the recipient mode is
+  chosen and the two delivery lanes are a CONSEQUENCE of it: each choice says
+  in one plain line what it does -- "no unsubscribe footer, and the do-not-mail
+  list is not consulted" versus "the do-not-mail list is checked before each
+  message, an unsubscribe link is attached, every outcome is recorded" -- as an
+  EFFECT rather than as a term of art. The words "operational lane" and
+  "marketing lane" appear nowhere in the surface, and a test asserts that.
+  Trigger concepts come from the LIVE registry (`listConcepts`, the SDK's own
+  `ConceptsListMsg` accessor; the OS had none before this surface), because a
+  fixed list would make the newest half of a cluster's schema untriggerable
+  with no way to tell. A rule whose bundle failed validation or whose circuit
+  breaker tripped renders the ENGINE'S OWN SENTENCE, never a paraphrase.
+
+- **A CLUSTER-WIDE FACT IS A BANNER OVER THE LIST, NEVER A STATUS ON EACH
+  ROW.** `authoredAutomationsEnabled` is a global hard stop: with it off, the
+  scheduler's `GlobalGate` suppresses every firing for every owner on every
+  node, checked before owner-gating and before the breaker -- and NOTHING about
+  a rule row changes. Every rule still reads `active`, which is true: they are
+  active AND inert, all of them at once. Painting "halted" onto each row would
+  claim something about each rule that is not true of any of them, so the fact
+  is stated once, above the thing it applies to. Without it an operator reads a
+  list of active rules that send nothing and has nowhere on screen to find out
+  why, which is the exact silent failure this app exists to remove.
+
+  **ABSENT IS NOT FALSE, and that half is bigger than the banner.** A missing
+  settings row, a shape that stops projecting the field, and a failed read are
+  all *unknown*; only an explicit `false` shows the banner. The SDK's `rowBool`
+  answers `false` for a missing key, so reading the switch through it would put
+  "your rules are halted" on every fresh cluster there is -- `kit`'s `boolOr`
+  with a `true` fallback is the honest read, and it matches what the engine's
+  own gate does with an absent row. A read that FAILED says quietly that it
+  could not check, rather than claiming the switch is on: "we could not check"
+  is a fact about this window, not about the cluster. Three tests pin the
+  silences and one pins the appearance, because the silences are the half that
+  turns a banner into a scare.
+
+- **TWO THINGS WEAR THE STATUS `paused`, AND ONLY ONE IS SOMEBODY'S
+  DECISION.** `setEmailRuleStatus` is the operator's stop button; a rule can
+  also stop after its runs kept failing, and the failure that did it is on
+  `lastError`. Saying "you paused this" over the second case throws away the
+  only diagnostic there is and is wrong about who did it. The reading is made
+  from the EVIDENCE rather than from a mechanism the browser cannot observe --
+  a paused rule carrying a run failure is reported as paused *with* that
+  failure, and the copy never names who stopped it.
+
+### What it deliberately does not do
+
+**There is no delete anywhere in this app, and every surface says why rather
+than leaving somebody hunting for one.** An audience is archived because every
+delivery record names it; a campaign is cancelled because what already went
+out stays sent; a mailbox is retired because past campaigns name the row and
+the reputation and warmup history are keyed on its address. Removing any of
+them orphans the evidence a deliverability review is made of.
+
+**A test send is a CAMPAIGN operation, so the template editor borrows one.**
+`campaignTestSend` renders the campaign's template through the campaign's
+resolved sending identity; there is no such thing as testing copy with no
+sender. The editor therefore mounts the campaign detail's own panel against a
+campaign that uses the template, and says "no campaign uses this template yet"
+rather than showing a disabled control with no account of itself.
+
+**Senders live here rather than in Settings -> Integrations**, even though the
+two sit next to each other. Integrations is about CREDENTIALS -- the things an
+operator rotates from a shell -- and a sending identity carries none: it is a
+campaigns record saying a mailbox exists and may be used. What it cannot do is
+make a mailbox sendable; that is the tenant's own policy, and an address
+declared here but missing from it comes back as the provider's own 403 on the
+campaign's `lastError`.
+
 ## Packages, inside Deployables (epic memql#4794)
 
 `src/apps/deployables/packages/` is the other half of what a deployable IS: a

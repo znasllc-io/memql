@@ -28,6 +28,7 @@ import { SessionProvider, useSession } from "./access";
 import { Desktop } from "./Desktop";
 import { suppressBrowserMenu } from "./browserMenu";
 import { Dock } from "./Dock";
+import { ShellDragScope } from "./dragScope";
 import { gridForViewport, OsProvider, useOs } from "./state";
 import { LauncherOverlay } from "./LauncherOverlay";
 import { PhoneShell } from "./PhoneShell";
@@ -318,8 +319,15 @@ function DesktopChrome({
       data-layout={layout}
       onContextMenu={suppressBrowserMenu}
     >
-      <Desktop viewport={viewport} placement={placement} uploads={uploads} />
-      <Dock onOpenLauncher={() => setLauncherOpen(true)} onSignOut={onSignOut} />
+      {/* ONE DRAG CONTEXT OVER BOTH (epic memql#4784). The desktop and the
+          dock are siblings, and each used to own a DndContext of its own --
+          which meant a drag begun on a desk icon or in a Files window could
+          never resolve a drop in the dock at all. The Bin is the first target
+          on the far side of that line. */}
+      <ShellDragScope>
+        <Desktop viewport={viewport} placement={placement} uploads={uploads} />
+        <Dock onOpenLauncher={() => setLauncherOpen(true)} onSignOut={onSignOut} />
+      </ShellDragScope>
       <LauncherOverlay
         open={launcherOpen}
         onClose={() => setLauncherOpen(false)}

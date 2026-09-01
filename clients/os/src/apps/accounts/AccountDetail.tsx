@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { FileText, GraduationCap, Rocket, UserPlus } from "lucide-react";
+import { FileText, GraduationCap, Rocket, Send, UserPlus } from "lucide-react";
 
 import { Button, Caption, Check, Fact, Facts, Input, Notice, Panel, Subhead,
   PeerRowReadOnly,
 } from "../../kit";
 import { rowString } from "@znasllc-io/memql-sdk-core/client";
 import { flatten } from "../../kit/rows";
+import { useAccountCampaignsRollup } from "../campaigns/useCampaigns";
 import type { ArchiveAccountState, UpdateAccountState } from "./actions";
 import { accountIsArchived, accountIsSelf, accountName, type AccountRow } from "./rows";
 import { useSession } from "../../chrome/access";
@@ -244,6 +245,23 @@ function Ledger({
   account: AccountRow;
   rollups: ReturnType<typeof useAccountRollups>;
 }) {
+  // THE FIFTH BAND, AND ITS READ LIVES IN THE CAMPAIGNS APP. `tie.tsx` states
+  // the rule for the other direction -- a tie surface belongs to the domain
+  // that owns the concept -- and this is the same rule read the other way
+  // round: the ledger renders the band, and the read that fills it is the
+  // campaigns app's to own. It answers in this ledger's own `Rollup`
+  // vocabulary so five bands can settle independently and print one read time
+  // between them.
+  //
+  // IT IS ON-DEMAND EVEN THOUGH `v1:campaigns:campaign` DOES BROADCAST, and
+  // that is the ledger's stated consistency reason rather than a liveness one.
+  // `v1:knowledge:knowledgeDomain` carries no rule and nothing broadcasts it,
+  // so the Knowledge band could never be live -- and a ledger where four bands
+  // move and the fifth silently does not is worse than one where none do,
+  // because the reader has no way to tell which kind of band they are looking
+  // at. Consistency across a composite surface beat liveness on part of it.
+  const campaigns = useAccountCampaignsRollup(account.id);
+
   const bands: BandSpec[] = useMemo(
     () => [
       {
@@ -282,8 +300,29 @@ function Ledger({
         owner: "Users",
         line: (row) => rowString(flatten(row), "inviteeEmail"),
       },
+      {
+        key: "campaigns",
+        title: "Campaigns",
+        noun: "campaign",
+        icon: <Send size={15} aria-hidden />,
+        // Shaped into this ledger's vocabulary. The campaigns reader answers
+        // with the same {value, state, error, readAt} triple the four above
+        // use, so the refusal case renders identically -- A REFUSAL IS NOT A
+        // ZERO holds for this band exactly as it does for the guests one.
+        rollup: {
+          rows: campaigns.value,
+          state: campaigns.state,
+          error: campaigns.error,
+          readAt: campaigns.readAt,
+        },
+        owner: "Campaigns",
+        // It counts CAMPAIGNS and not sends: a band reading "4,182" would be
+        // counting delivery rows, which is a number about one busy week rather
+        // than about the client.
+        line: (row) => rowString(flatten(row), "name"),
+      },
     ],
-    [rollups],
+    [rollups, campaigns],
   );
 
   const readAt = bands.map((b) => b.rollup.readAt).filter((t) => t !== "")[0] ?? "";
@@ -292,7 +331,14 @@ function Ledger({
     <section className="os-account-ledger" aria-label={`What belongs to ${accountName(account)}`}>
       <div className="os-account-ledger-head">
         <Subhead>What is theirs</Subhead>
-        <Button onClick={rollups.reload}>Re-read</Button>
+        <Button
+          onClick={() => {
+            rollups.reload();
+            campaigns.reload();
+          }}
+        >
+          Re-read
+        </Button>
       </div>
 
       <div className="os-account-bands">

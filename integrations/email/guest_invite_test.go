@@ -8,13 +8,17 @@ import (
 )
 
 // captureSender drops every Send into a slice so tests can assert on
-// the rendered body.
+// the rendered body -- and records the identity each one was sent under, so
+// a caller that started passing a non-default SendAs is visible here rather
+// than only at the wire.
 type captureSender struct {
-	sent []Message
+	sent   []Message
+	sentAs []SendAs
 }
 
-func (c *captureSender) Send(_ context.Context, m Message) error {
+func (c *captureSender) Send(_ context.Context, m Message, as SendAs) error {
 	c.sent = append(c.sent, m)
+	c.sentAs = append(c.sentAs, as)
 	return nil
 }
 

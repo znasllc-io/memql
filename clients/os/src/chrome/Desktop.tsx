@@ -1,15 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  DndContext,
-  PointerSensor,
-  pointerWithin,
-  useDraggable,
-  useDroppable,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-  type DragStartEvent,
-} from "@dnd-kit/core";
+import { useDraggable, useDroppable, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 
 import { newShortId } from "@znasllc-io/memql-sdk-core/client";
 
@@ -32,6 +22,8 @@ import { useOsConnection } from "../live/connection";
 import { useSession } from "./access";
 import { ContextMenu, type MenuEntry } from "./ContextMenu";
 import { DeskPager } from "./DeskPager";
+import { BIN_DROPPABLE_ID, type BinDropPayload } from "../apps/bin/concepts";
+import { useShellDragClaim } from "./dragScope";
 import { useOs } from "./state";
 import { WindowFrame } from "./WindowFrame";
 
@@ -45,6 +37,10 @@ import { WindowFrame } from "./WindowFrame";
 // Library mutations, the popover is a live view the popover itself retains,
 // and remove-from-desk removes the shortcut only. The desk stays
 // subscription-free until a popover opens.
+
+// Stable by construction -- it is a dependency of the desk's registration
+// effect, and an array rebuilt each render would re-register on every one.
+const DESK_DRAG_PREFIXES = ["window:", "item:"] as const;
 
 export const CELL_W = 96;
 export const CELL_H = 104;
@@ -98,7 +94,7 @@ export function Desktop({
   const pendingFiles = useRef(new Map<string, File>());
   const cancelHandoff = useRef<(() => void) | null>(null);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
   const desks = state.shell.desks;
   const activeIndex = Math.max(0, desks.findIndex((d) => d.id === state.shell.activeDeskId));
 
@@ -330,6 +326,13 @@ export function Desktop({
   );
 
   // ---- shell drags: icons, folders, window swap/throw ----
+  //
+  // The DndContext lives at the shell root now (chrome/dragScope.tsx), because
+  // the Bin is in the DOCK and a drag begun here has to be able to reach it.
+  // The desk claims its own id prefixes; the dock claims `pin:`; neither can
+  // see the other's drops.
+  useShellDragClaim(DESK_DRAG_PREFIXES, { onDragStart, onDragEnd });
+
   function onDragStart(event: DragStartEvent) {
     setDraggingWindow(String(event.active.id).startsWith("window:"));
   }
@@ -361,6 +364,11 @@ export function Desktop({
     if (id.startsWith("item:")) {
       const itemId = id.slice("item:".length);
       const surface = state.surfaces[state.shell.activeDeskId];
+      // The Bin owns this drop (epic memql#4784). It is the dock's droppable,
+      // reachable now that one DndContext spans the shell, and the desk
+      // deliberately does not act: archiving is a write with a confirm and a
+      // refusal to render, and both live where the gesture ended.
+      if (overId === BIN_DROPPABLE_ID) return;
       if (overId?.startsWith("folder:")) {
         const folderItemId = overId.slice("folder:".length);
         const folderItem = surface?.items[folderItemId];
@@ -451,12 +459,7 @@ export function Desktop({
   }
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={pointerWithin}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-    >
+    <>
       <div className="os-desktop" data-os-desktop data-dragging-window={draggingWindow || undefined}>
         <MemoryField seed={wallpaper.seed} field={wallpaper} />
         <div
@@ -516,7 +519,7 @@ export function Desktop({
           />
         ) : null}
       </div>
-    </DndContext>
+    </>
   );
 }
 
@@ -692,7 +695,17 @@ function SurfaceItem({
 }) {
   const { actions, registry } = useOs();
   const { presence } = useMachines();
-  const draggable = useDraggable({ id: `item:${item.id}` });
+  // The drag carries what the Bin needs to name and archive this, because the
+  // dock holds neither the Library feed nor the desktop document (memql#4784).
+  const draggable = useDraggable({
+    id: `item:${item.id}`,
+    data: {
+      artifactId: item.kind === "file" ? (item.artifactId ?? "") : "",
+      name: item.kind === "file" ? item.title || item.id : item.kind === "folder" ? item.name : item.id,
+      folder: item.kind === "folder",
+      deskItemId: item.id,
+    } satisfies BinDropPayload,
+  });
   const folderDrop = useDroppable({
     id: `folder:${item.id}`,
     disabled: item.kind !== "folder",

@@ -5,6 +5,56 @@ import { QueryClient, type QueryCallOptions } from "./query.js";
 import type { Result } from "./types.js";
 import { renderMemQLValue } from "./memqlValue.js";
 
+/** Generate an event-email rule's automation construct and arm it (memql#4829). The generator is a DETERMINISTIC template over the rule's form -- the LLM authoring path stays off, because a rule that mails strangers is not a place for a model to improvise and a deterministic generator is one a person can read the output of. The generated .memql goes through the ordinary authoring pipeline: bundle, validate, activate. Activation takes effect IMMEDIATELY rather than at next boot. The rule row records the bundle and construct it produced; on refusal it records the engine's own sentence on lastError and the rule goes to 'failed' rather than silently staying draft. */
+export interface CampaignActivateEmailRuleArgs {
+  /** The rule to generate and arm. The caller must own it: the generated construct runs under the AUTHOR's envelope, so who armed it decides what it can read. */
+  emailRuleId: string;
+}
+
+export function buildCampaignActivateEmailRule(args: CampaignActivateEmailRuleArgs): string {
+  const parts: string[] = [];
+  parts.push("emailRuleId: " + renderMemQLValue(args.emailRuleId));
+  return "builtin campaignActivateEmailRule(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignActivateEmailRule(args: CampaignActivateEmailRuleArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignActivateEmailRule = function (this: QueryClient, args: CampaignActivateEmailRuleArgs = {} as CampaignActivateEmailRuleArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignActivateEmailRule", buildCampaignActivateEmailRule(args), opts);
+};
+
+/** Import recipients into an audience from a CSV file already uploaded to the Library (memql#4822). The file is read SERVER-SIDE under the caller's own actor, so a file the caller cannot read is a file this cannot import -- the artifact id is not a capability. The header row must carry an `email` column (case-insensitive; `displayName` and `name` are also recognized) and EVERY OTHER COLUMN lands verbatim in the recipient's `fields` map, reachable from a template as {{fields.<key>}}. Per row: the address is normalized and shape-validated, deduplicated against the audience's existing recipients AND against earlier rows of the same file (first occurrence wins). The import refuses WHOLE when the resulting roster would exceed MEMQL_CAMPAIGNS_MAX_AUDIENCE -- it never silently truncates, because a partially-imported list is one nobody knows is partial. Returns {added, duplicates, invalid, total} plus up to 20 sample invalid lines with their line numbers, so the operator's next action is fixing the file rather than guessing at it. Each added recipient also gets a consent grant event with source 'import'. */
+export interface CampaignImportRecipientsArgs {
+  /** The audience to import into. The caller must be able to read it. */
+  audienceId: string;
+  /** v1:library:artifact.id of the uploaded CSV. Read under the caller's actor -- an artifact the caller cannot read is not found. */
+  artifactId: string;
+  /** Whether the first row is a header. Defaults true. A file with no header cannot be imported: the column mapping IS the header, and guessing which column holds addresses is how an import mails the wrong list. */
+  hasHeader?: boolean;
+}
+
+export function buildCampaignImportRecipients(args: CampaignImportRecipientsArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  if (args.hasHeader !== undefined) parts.push("hasHeader: " + renderMemQLValue(args.hasHeader));
+  return "builtin campaignImportRecipients(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignImportRecipients(args: CampaignImportRecipientsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignImportRecipients = function (this: QueryClient, args: CampaignImportRecipientsArgs = {} as CampaignImportRecipientsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignImportRecipients", buildCampaignImportRecipients(args), opts);
+};
+
 /** Pause a running campaign send. The delivery ledger is untouched, so resuming continues exactly where it stopped -- 'where it stopped' is the set of recipients with no delivery row, not a cursor that could go stale. */
 export interface CampaignPauseSendArgs {
   /** The campaign to pause. The caller must own it. */
@@ -47,6 +97,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaignResumeSend = function (this: QueryClient, args: CampaignResumeSendArgs = {} as CampaignResumeSendArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaignResumeSend", buildCampaignResumeSend(args), opts);
+};
+
+/** Retire an event-email rule's generated construct (memql#4829). The automation stops firing and the bundle is retired; the RULE row survives with its history, because a rule somebody turned off is a different thing from one that never existed. Used by delete and by edit-and-regenerate, which retires the old bundle before arming the new one -- so a rule is never armed twice. */
+export interface CampaignRetireEmailRuleArgs {
+  /** The rule whose construct should be retired. */
+  emailRuleId: string;
+}
+
+export function buildCampaignRetireEmailRule(args: CampaignRetireEmailRuleArgs): string {
+  const parts: string[] = [];
+  parts.push("emailRuleId: " + renderMemQLValue(args.emailRuleId));
+  return "builtin campaignRetireEmailRule(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignRetireEmailRule(args: CampaignRetireEmailRuleArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignRetireEmailRule = function (this: QueryClient, args: CampaignRetireEmailRuleArgs = {} as CampaignRetireEmailRuleArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignRetireEmailRule", buildCampaignRetireEmailRule(args), opts);
 };
 
 /** Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Authorization is the owned-tier read of the campaign, exactly as for starting one by hand. */
@@ -94,6 +166,53 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaignStartSend = function (this: QueryClient, args: CampaignStartSendArgs = {} as CampaignStartSendArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaignStartSend", buildCampaignStartSend(args), opts);
+};
+
+/** The outcome breakdown for one campaign (memql#4823): recipients, pending, sent, failed, the skipped bucket split into suppressed / unsubscribed / other, hard bounces, complaints, one-click unsubscribes, and opens and clicks as both total and unique. Computed SERVER-SIDE from the delivery ledger, the campaign's consent events and its engagement events -- every bucket that can be an exact COUNT is one, at any audience size. This replaces counting a capped page of rows in the browser, which under-reported every campaign past the page bound and did so silently. Two figures are honest about their limits rather than rounded into a number: a unique open/click count is folded from a bounded read and is reported as UNMEASURED rather than as a wrong number when that bound is reached, and soft bounces are absent entirely because nothing measures them per campaign -- an absent figure and a zero are different answers. */
+export interface CampaignStatsArgs {
+  /** The campaign to report on. The caller must be able to read it. */
+  campaignId: string;
+}
+
+export function buildCampaignStats(args: CampaignStatsArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  return "builtin campaignStats(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignStats(args: CampaignStatsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignStats = function (this: QueryClient, args: CampaignStatsArgs = {} as CampaignStatsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignStats", buildCampaignStats(args), opts);
+};
+
+/** Send one test copy of a campaign to a named address (memql#4822). Renders the campaign's template against a synthetic recipient -- display name 'Test Recipient', the address you name, and the `fields` of the audience's first real recipient when one exists, so {{fields.*}} show the shape they will actually have. The subject is prefixed '[Test] ', the message goes through the campaign's resolved sending identity, and the unsubscribe footer carries an obviously-inert token. It writes NO delivery row and touches NO counter, so a test send can never make a campaign look partly sent; it does consume the ordinary send-rate token bucket, because a test is a real message to a real mailbox. Returns the list of merge tags it could not resolve -- the check that catches a typo'd {{fields.compnay}} before the whole audience gets it. `to` is REQUIRED and never defaults to the caller's own address: a builtin that mails somewhere you did not name is one you have to remember the default of. */
+export interface CampaignTestSendArgs {
+  /** The campaign to render. The caller must be able to read it. */
+  campaignId: string;
+  /** Where to send the test. Required and validated -- there is deliberately no default. */
+  to: string;
+}
+
+export function buildCampaignTestSend(args: CampaignTestSendArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  parts.push("to: " + renderMemQLValue(args.to));
+  return "builtin campaignTestSend(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignTestSend(args: CampaignTestSendArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignTestSend = function (this: QueryClient, args: CampaignTestSendArgs = {} as CampaignTestSendArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignTestSend", buildCampaignTestSend(args), opts);
 };
 
 /** One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both. */
@@ -431,6 +550,31 @@ declare module "./query.js" {
 
 QueryClient.prototype.inferenceStatus = function (this: QueryClient, args: InferenceStatusArgs = {} as InferenceStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("inferenceStatus", buildInferenceStatus(args), opts);
+};
+
+/** Set one of an integration's configuration values from an operator surface (memql#4825). OWNER OR DEVELOPER ONLY, which is stricter than reading the status report: wiring up what this cluster talks to is a developer's job, and administering people -- what an admin is for -- is a different one. Three things this does that a client calling setGlobalVariable itself cannot. The row NAME is derived from the integration's declared manifest rather than taken from the caller, so a mistyped variable cannot become a row the resolver never reads and a save that reports success and changes nothing. The row ID reuses the seeder's derivation, so the write UPDATES the row an installed cluster already has instead of adding a second row carrying the same name. And a credential is sealed server-side under the cluster master key, which exists on nodes and must never exist in a browser -- the plaintext crosses the wire once and is never sent back. Afterwards the node discards its resolved sender, so the change takes effect on its next send with no restart; other replicas pick it up on their own next send, and the reply says so rather than implying the fleet moved at once. */
+export interface IntegrationConfigureArgs {
+  /** The manifest slot to set, e.g. senderAddress or clientSecret. A slot NAME, never an environment variable: the name is stable across a rename of the variable behind it, which is the whole reason a surface keys on it. */
+  slot: string;
+  /** The plaintext value. Sealed before storage when the slot is a credential, and never read back by any surface -- what a client can learn afterwards is that the slot is set, from where, and the command that rotates it. */
+  value: string;
+}
+
+export function buildIntegrationConfigure(args: IntegrationConfigureArgs): string {
+  const parts: string[] = [];
+  parts.push("slot: " + renderMemQLValue(args.slot));
+  parts.push("value: " + renderMemQLValue(args.value));
+  return "builtin integrationConfigure(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    integrationConfigure(args: IntegrationConfigureArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.integrationConfigure = function (this: QueryClient, args: IntegrationConfigureArgs = {} as IntegrationConfigureArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("integrationConfigure", buildIntegrationConfigure(args), opts);
 };
 
 /** Report this node's integration registry: every plug-in the running binary registered, and for the email integration the resolved sender mode plus a slot-by-slot account of which settings and credentials are configured and where each came from. Credential VALUES are never included -- only presence, source and (for stored secrets) a fingerprint. Pass probe=true to additionally run a live, non-sending reachability check (Microsoft Graph: acquire a client-credentials token; SMTP: connect, EHLO, STARTTLS, AUTH, QUIT) and report its verdict; probe=false (the default) answers the configuration question only. */

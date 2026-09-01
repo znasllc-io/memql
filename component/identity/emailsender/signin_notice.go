@@ -66,12 +66,13 @@ func (s *EngineEmailSender) SendNewSignIn(ctx context.Context, in identity.SignI
 			slog.String("ip", in.SourceIP))
 	}
 
+	// The zero SendAs -- the deployment's configured mailbox (email D5).
 	return sender.Send(ctx, email.Message{
 		To:       in.Email,
 		Subject:  subject,
 		TextBody: buildNewSignInText(brand, in),
 		HTMLBody: buildNewSignInHTML(brand, in),
-	})
+	}, email.SendAs{})
 }
 
 // signInFacts renders the three lines a reader actually judges by.
@@ -198,12 +199,13 @@ func (s *EngineEmailSender) SendSignInDisabledNotice(ctx context.Context, in mag
 		return s.noSender("sign-in-disabled notice", in.Email, subject)
 	}
 
+	// The zero SendAs -- the deployment's configured mailbox (email D5).
 	return sender.Send(ctx, email.Message{
 		To:       in.Email,
 		Subject:  subject,
 		TextBody: buildSignInDisabledText(brand),
 		HTMLBody: buildSignInDisabledHTML(brand),
-	})
+	}, email.SendAs{})
 }
 
 func buildSignInDisabledText(brand string) string {

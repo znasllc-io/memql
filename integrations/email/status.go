@@ -109,6 +109,16 @@ type Setting struct {
 	Source  string `json:"source"`
 	EnvVar  string `json:"envVar"`
 	Purpose string `json:"purpose"`
+	// Lane names which way-of-being-configured this slot belongs to
+	// ("graph" / "smtp"). A settings surface groups by it: showing eleven
+	// flat fields invites an operator to fill in half of each lane, which is
+	// the one arrangement that resolves to nothing.
+	Lane string `json:"lane"`
+	// Required reports whether the lane can work without it.
+	Required bool `json:"required"`
+	// Reason is the sentence to render under the field when something is
+	// wrong with it, and empty when nothing is.
+	Reason string `json:"reason,omitempty"`
 	// Editable reports whether the portal may write this setting through
 	// setGlobalVariable. False for a value the resolver only ever reads out
 	// of the environment.
@@ -123,6 +133,10 @@ type Credential struct {
 	Source  string `json:"source"`
 	EnvVar  string `json:"envVar"`
 	Purpose string `json:"purpose"`
+	// Lane / Required / Reason carry the same meaning they do on Setting.
+	Lane     string `json:"lane"`
+	Required bool   `json:"required"`
+	Reason   string `json:"reason,omitempty"`
 	// Rotate is the operator command that changes this credential. The
 	// portal shows it instead of offering a field, because there is
 	// deliberately no path from a browser to a secret write.
@@ -140,48 +154,25 @@ type IntegrationReport struct {
 	// Configured / Health are AnswerUnknown / HealthUnknown for every
 	// integration that publishes no self-report, which today is all of them
 	// except email. That is reported as ignorance, never as a failure.
-	Configured  string       `json:"configured"`
-	Health      string       `json:"health"`
-	Detail      string       `json:"detail"`
-	Mode        string       `json:"mode"`
-	Settings    []Setting    `json:"settings"`
-	Credentials []Credential `json:"credentials"`
-	Probed      bool         `json:"probed"`
-}
-
-// emailSlots names every env var the email lane reads, with the prose the
-// portal renders beside it. Kept as one table so the report, the docs and the
-// resolver cannot drift on what the lane actually consults.
-type slotSpec struct {
-	name    string
-	envVar  string
-	legacy  string
-	purpose string
-	secret  bool
-}
-
-func graphSlotSpecs() []slotSpec {
-	keys := DefaultGraphEnvKeys()
-	legacy := LegacyGraphEnvKeys()
-	return []slotSpec{
-		{name: "tenantId", envVar: keys.TenantId, legacy: legacy.TenantId, purpose: "Entra tenant the app registration lives in. An identifier, not a secret."},
-		{name: "clientId", envVar: keys.ClientId, legacy: legacy.ClientId, purpose: "Application (client) id of the Entra app registration. An identifier, not a secret."},
-		{name: "senderAddress", envVar: keys.SenderAddr, legacy: legacy.SenderAddr, purpose: "The mailbox mail is sent AS. Bound to the credential's Graph permission -- changing it is a deliverability decision."},
-		{name: "fromName", envVar: keys.FromName, legacy: legacy.FromName, purpose: "Display name on the From header. Purely presentational; a campaign may override it per send."},
-		{name: "clientSecret", envVar: keys.ClientSecret, legacy: legacy.ClientSecret, purpose: "Client-credentials secret for the app registration.", secret: true},
-	}
-}
-
-func smtpSlotSpecs() []slotSpec {
-	keys := DefaultEnvKeys()
-	return []slotSpec{
-		{name: "smtpHost", envVar: keys.Host, purpose: "Relay hostname."},
-		{name: "smtpPort", envVar: keys.Port, purpose: "Relay port. Defaults to 587 (STARTTLS submission) when unset."},
-		{name: "smtpUsername", envVar: keys.Username, purpose: "Relay username. An identifier, not a secret."},
-		{name: "smtpFromAddress", envVar: keys.FromAddr, purpose: "Envelope and header From address."},
-		{name: "smtpFromName", envVar: keys.FromName, purpose: "Display name on the From header."},
-		{name: "smtpPassword", envVar: keys.Password, purpose: "Relay password.", secret: true},
-	}
+	Configured string `json:"configured"`
+	Health     string `json:"health"`
+	// State is the SINGLE machine-readable verdict a surface paints a badge
+	// from: needs_configuration | configured | unhealthy (memql#4825). It is
+	// not a third opinion beside Configured and Health -- it is the two
+	// combined, because "configured but the provider refuses us" is neither
+	// of those words on its own. AnswerUnknown-equivalent is the EMPTY
+	// string: an integration that publishes no self-report has no state, and
+	// an unknown value must be read as unknown rather than as any member of
+	// the set.
+	State string `json:"state"`
+	// Reasons is why State is not `configured`, one entry per thing a person
+	// would have to do. Empty when there is nothing to say.
+	Reasons     []ConfigReason `json:"reasons"`
+	Detail      string         `json:"detail"`
+	Mode        string         `json:"mode"`
+	Settings    []Setting      `json:"settings"`
+	Credentials []Credential   `json:"credentials"`
+	Probed      bool           `json:"probed"`
 }
 
 // rotateCommand is the operator instruction the portal shows next to a secret
@@ -196,6 +187,10 @@ func rotateCommand(envVar string) string {
 type resolvedConfig struct {
 	graph GraphConfig
 	smtp  SMTPConfig
+	// resolution is the manifest walk this was folded from -- kept so the
+	// report can name what is MISSING as well as what resolved, which is the
+	// half a value-only struct cannot carry.
+	resolution ConfigResolution
 	// mode is what NewSenderFromEnv + LazySender.resolve would settle on for
 	// this process, reproduced here rather than guessed. "graph" | "smtp" |
 	// "log".
@@ -204,72 +199,27 @@ type resolvedConfig struct {
 	modeSource string
 }
 
-// describer resolves slots from the two tiers the email lane reads, in the
-// order the lane reads them.
+// describer resolves the manifest from the two tiers the email lane reads,
+// in the order the lane reads them.
 type describer struct {
-	reader        env.EnvReader
-	resolveVar    VariableResolver
-	resolveSecret SecretResolver
+	resolver ConfigResolver
 }
 
 func newDescriber(sender Sender) *describer {
-	d := &describer{reader: env.NewEnvReader("")}
+	reader := env.NewEnvReader("")
+	d := &describer{resolver: ConfigResolver{
+		Env: func(name string) (string, bool) { return reader.String(name) },
+	}}
 	if lazy, ok := sender.(*LazySender); ok && lazy != nil {
-		d.resolveVar = lazy.resolveVar
-		d.resolveSecret = lazy.resolveSecret
+		d.resolver.Vars = lazy.resolveVar
+		d.resolver.Secrets = lazy.resolveSecret
 	}
 	return d
 }
 
-// fromEnv returns the first non-empty environment value across the primary
-// and legacy names.
-func (d *describer) fromEnv(names ...string) string {
-	for _, name := range names {
-		if name == "" {
-			continue
-		}
-		if v, ok := d.reader.String(name); ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
-}
-
-// fromRows returns the first non-empty stored value. Variables and secrets
-// are separate stores; `secret` picks which one is consulted.
-func (d *describer) fromRows(ctx context.Context, secret bool, names ...string) string {
-	var resolve func(context.Context, string) (string, error)
-	switch {
-	case secret && d.resolveSecret != nil:
-		resolve = d.resolveSecret
-	case !secret && d.resolveVar != nil:
-		resolve = d.resolveVar
-	default:
-		return ""
-	}
-	for _, name := range names {
-		if name == "" {
-			continue
-		}
-		if v, err := resolve(ctx, name); err == nil && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
-}
-
 // slot resolves one slot to (value, source).
-func (d *describer) slot(ctx context.Context, spec slotSpec) (string, string) {
-	if v := d.fromEnv(spec.envVar, spec.legacy); v != "" {
-		return v, SourceEnv
-	}
-	if v := d.fromRows(ctx, spec.secret, spec.envVar, spec.legacy); v != "" {
-		if spec.secret {
-			return v, SourceGlobalSecret
-		}
-		return v, SourceGlobalVariable
-	}
-	return "", SourceUnset
+func (d *describer) slot(ctx context.Context, spec ConfigSlot) (string, string) {
+	return d.resolver.ResolveSlot(ctx, spec)
 }
 
 // resolve reproduces the sender-selection algorithm (NewSenderFromEnv then
@@ -279,94 +229,45 @@ func (d *describer) slot(ctx context.Context, spec slotSpec) (string, string) {
 // real path caches its answer behind a sync.Once on the first Send, and a
 // status read must neither trigger that resolution early nor be answered by a
 // cache that predates a credential the operator has since seeded.
+//
+// What it no longer reproduces is the LIST (memql#4825). Both walks now run
+// over EmailConfigManifest, so the reporter and the resolver cannot disagree
+// about which slots exist, which are secret, or which a lane requires --
+// while the walk itself, which is the part that had to stay separate, still
+// is.
 func (d *describer) resolve(ctx context.Context) resolvedConfig {
-	out := resolvedConfig{mode: "log", modeSource: SourceUnset}
-
-	graphSpecs := graphSlotSpecs()
-	values := make(map[string]string, len(graphSpecs))
-	sources := make(map[string]string, len(graphSpecs))
-	for _, spec := range graphSpecs {
-		v, src := d.slot(ctx, spec)
-		values[spec.name] = v
-		sources[spec.name] = src
+	res := resolveEmailConfig(ctx, d.resolver)
+	out := resolvedConfig{
+		resolution: res,
+		graph:      graphConfigFrom(res),
+		smtp:       smtpConfigFrom(res),
+		mode:       "log",
+		modeSource: SourceUnset,
 	}
-	out.graph = GraphConfig{
-		TenantId:     values["tenantId"],
-		ClientId:     values["clientId"],
-		ClientSecret: values["clientSecret"],
-		SenderAddr:   values["senderAddress"],
-		FromName:     values["fromName"],
-	}
-
-	smtpSpecs := smtpSlotSpecs()
-	svalues := make(map[string]string, len(smtpSpecs))
-	ssources := make(map[string]string, len(smtpSpecs))
-	for _, spec := range smtpSpecs {
-		v, src := d.slot(ctx, spec)
-		svalues[spec.name] = v
-		ssources[spec.name] = src
-	}
-	port := svalues["smtpPort"]
-	if port == "" {
-		port = "587"
-	}
-	out.smtp = SMTPConfig{
-		Host:     svalues["smtpHost"],
-		Port:     port,
-		Username: svalues["smtpUsername"],
-		Password: svalues["smtpPassword"],
-		FromAddr: svalues["smtpFromAddress"],
-		FromName: svalues["smtpFromName"],
-	}
-
-	// The four required Graph slots, all from one lane. The real resolver
-	// tries env wholesale first and only then the stored rows, so a
-	// configuration split across the two does NOT resolve -- and the report
-	// has to say that rather than showing five present slots and a log-only
-	// sender with no explanation.
-	graphRequired := []string{"tenantId", "clientId", "clientSecret", "senderAddress"}
-	if laneComplete(sources, graphRequired, SourceEnv) {
-		out.mode, out.modeSource = "graph", SourceEnv
-		return out
-	}
-	smtpRequired := []string{"smtpHost", "smtpFromAddress"}
-	if laneComplete(ssources, smtpRequired, SourceEnv) {
-		out.mode, out.modeSource = "smtp", SourceEnv
-		return out
-	}
-	if laneComplete(sources, graphRequired, SourceGlobalVariable, SourceGlobalSecret) {
-		out.mode, out.modeSource = "graph", SourceGlobalVariable
-		return out
-	}
-	if laneComplete(ssources, smtpRequired, SourceGlobalVariable, SourceGlobalSecret) {
-		out.mode, out.modeSource = "smtp", SourceGlobalVariable
-		return out
+	if res.Active != "" {
+		out.mode, out.modeSource = res.Active, res.ActiveSource
 	}
 	return out
-}
-
-// laneComplete reports whether every required slot resolved, and did so from
-// one of the allowed sources.
-func laneComplete(sources map[string]string, required []string, allowed ...string) bool {
-	for _, name := range required {
-		src := sources[name]
-		match := false
-		for _, a := range allowed {
-			if src == a {
-				match = true
-				break
-			}
-		}
-		if !match {
-			return false
-		}
-	}
-	return true
 }
 
 // emailReport builds the email integration's line, optionally running a live
 // probe. `probe` is opt-in because it costs a network round trip to a third
 // party and an operations console re-reads on every navigation.
+//
+// # State and reasons (memql#4825)
+//
+// The report carries a machine-readable State and, when it is not
+// StateConfigured, the REASONS -- one per required slot that resolved
+// nowhere, plus one per lane whose values are split across tiers. An OS
+// Settings surface renders from those rather than from the prose Detail,
+// because prose is for a person to read and a control that highlights the
+// field responsible needs the field's name.
+//
+// Configured / Health survive alongside State and are not redundant with it.
+// Configured answers "is there enough to work with", Health answers "does the
+// far end accept us", and State is the SINGLE verdict a surface paints a
+// badge from -- which needs the two combined, since a configured integration
+// whose probe failed is neither of the two words on its own.
 func (i *Integration) emailReport(ctx context.Context, probe bool) IntegrationReport {
 	d := newDescriber(i.sender)
 	cfg := d.resolve(ctx)
@@ -379,36 +280,49 @@ func (i *Integration) emailReport(ctx context.Context, probe bool) IntegrationRe
 		Probed:       probe,
 		Settings:     []Setting{},
 		Credentials:  []Credential{},
+		Reasons:      cfg.resolution.Reasons(),
+	}
+	if report.Reasons == nil {
+		report.Reasons = []ConfigReason{}
 	}
 
-	for _, spec := range append(graphSlotSpecs(), smtpSlotSpecs()...) {
-		value, source := d.slot(ctx, spec)
-		if spec.secret {
-			report.Credentials = append(report.Credentials, Credential{
-				Name:    spec.name,
-				Present: source != SourceUnset,
-				Source:  source,
-				EnvVar:  spec.envVar,
-				Purpose: spec.purpose,
-				Rotate:  rotateCommand(spec.envVar),
+	for _, lane := range cfg.resolution.Lanes {
+		for _, resolved := range lane.Slots {
+			spec := resolved.Slot
+			if spec.Secret {
+				report.Credentials = append(report.Credentials, Credential{
+					Name:     spec.Name,
+					Present:  resolved.Source != SourceUnset,
+					Source:   resolved.Source,
+					EnvVar:   spec.EnvVar,
+					Purpose:  spec.Purpose,
+					Lane:     lane.Lane.Name,
+					Required: spec.Required,
+					Reason:   slotReason(lane, resolved),
+					Rotate:   rotateCommand(spec.EnvVar),
+				})
+				continue
+			}
+			report.Settings = append(report.Settings, Setting{
+				Name:     spec.Name,
+				Value:    resolved.Value,
+				Source:   resolved.Source,
+				EnvVar:   spec.EnvVar,
+				Purpose:  spec.Purpose,
+				Lane:     lane.Lane.Name,
+				Required: spec.Required,
+				Reason:   slotReason(lane, resolved),
+				// A setting the environment supplies cannot be overridden from
+				// the graph -- the resolver reads env first and stops. Saying so
+				// is the difference between a disabled field and a silent no-op.
+				Editable: resolved.Source != SourceEnv,
 			})
-			continue
 		}
-		report.Settings = append(report.Settings, Setting{
-			Name:    spec.name,
-			Value:   value,
-			Source:  source,
-			EnvVar:  spec.envVar,
-			Purpose: spec.purpose,
-			// A setting the environment supplies cannot be overridden from
-			// the graph -- the resolver reads env first and stops. Saying so
-			// is the difference between a disabled field and a silent no-op.
-			Editable: source != SourceEnv,
-		})
 	}
 
 	if cfg.mode == "log" {
 		report.Configured = AnswerNo
+		report.State = StateNeedsConfiguration
 		// Two different facts share this one resolved mode, and the console
 		// must not render them the same way (memql#4477). On a local install
 		// log-only is what was asked for, and DEGRADED -- running, answering,
@@ -417,6 +331,16 @@ func (i *Integration) emailReport(ctx context.Context, probe bool) IntegrationRe
 		// integration, and an amber row there reads as a known dev posture.
 		if DeliveryRequired() {
 			report.Health = HealthUnhealthy
+			// UNHEALTHY, not needs_configuration. The distinction is the
+			// whole of memql#4477: this install is not merely unconfigured,
+			// it is actively refusing every send, and a surface that painted
+			// it the same amber as a fresh cluster would say "finish setup"
+			// about a cluster whose mail is broken.
+			report.State = StateUnhealthy
+			report.Reasons = append(report.Reasons, ConfigReason{
+				Code:   ReasonRefused,
+				Detail: RefuseLogOnly("send").Error(),
+			})
 			report.Detail = "No sender is configured and this install must deliver mail, so every send is refused rather than written to the log. " +
 				RefuseLogOnly("send").Error() + ". " +
 				"Both lanes must resolve from ONE source -- the resolver takes Graph or SMTP wholesale from the environment, or wholesale from stored rows, and will not mix them."
@@ -429,6 +353,7 @@ func (i *Integration) emailReport(ctx context.Context, probe bool) IntegrationRe
 	}
 
 	report.Configured = AnswerYes
+	report.State = StateConfigured
 	report.Detail = fmt.Sprintf("Sending via %s, configured from %s.", cfg.mode, cfg.modeSource)
 	if !probe {
 		report.Health = HealthUnknown
@@ -446,8 +371,34 @@ func (i *Integration) emailReport(ctx context.Context, probe bool) IntegrationRe
 		return report
 	}
 	report.Health = HealthUnhealthy
+	report.State = StateUnhealthy
+	report.Reasons = append(report.Reasons, ConfigReason{
+		Code:   ReasonProbeFailed,
+		Lane:   cfg.mode,
+		Detail: detail,
+	})
 	report.Detail += " " + detail
 	return report
+}
+
+// slotReason is the per-slot sentence a settings surface renders under the
+// field. Empty for a slot that is fine, and empty for an OPTIONAL slot that
+// is unset -- an optional value nobody set is a normal state, and marking it
+// would train an operator to ignore the marks that mean something.
+//
+// It is built from the slot's DECLARATION only. Never from its value: a
+// reason about a secret that quoted the secret would put it on the wire,
+// which is the one thing this surface may not do (see the file header, and
+// TestStatusNeverLeaksACredential, which sweeps the whole serialized reply).
+func slotReason(lane LaneResolution, resolved SlotResolution) string {
+	if !resolved.Slot.Required || resolved.Source != SourceUnset {
+		if lane.Split && resolved.Slot.Required {
+			return fmt.Sprintf("Present, but the %s lane's values are not all in the same place, so none of them is used. "+
+				"Move them together: wholly into the environment, or wholly into stored settings.", lane.Lane.Name)
+		}
+		return ""
+	}
+	return fmt.Sprintf("Required by the %s lane and not set anywhere. Set %s.", lane.Lane.Name, resolved.Slot.EnvVar)
 }
 
 // runProbe performs a live reachability check that DOES NOT SEND MAIL.
@@ -567,9 +518,14 @@ func registryRollCall(emailLine IntegrationReport) []IntegrationReport {
 			Capabilities: []string{},
 			Configured:   AnswerUnknown,
 			Health:       HealthUnknown,
-			Detail:       "Registered on this node. This integration publishes no configuration self-report, so whether its credentials resolved is not knowable from here.",
-			Settings:     []Setting{},
-			Credentials:  []Credential{},
+			// No State, deliberately. The closed set has no member meaning
+			// "nobody asked", and inventing one here would let a surface
+			// paint a badge over an integration that has published nothing.
+			// The empty string is what a renderer must treat as unknown.
+			Detail:      "Registered on this node. This integration publishes no configuration self-report, so whether its credentials resolved is not knowable from here.",
+			Reasons:     []ConfigReason{},
+			Settings:    []Setting{},
+			Credentials: []Credential{},
 		})
 	}
 	// Sorted by name with email first: email is the one line with an answer,
@@ -591,11 +547,29 @@ func sortReportsByName(reports []IntegrationReport) {
 // asking" is then nobody -- which must not be treated as a trusted internal
 // call (component/auth's ActorEnvelopeMap makes the same choice, memql#2801).
 //
-// Owner and admin only. The reply carries no secret, but it does carry the
+// Owner, developer and admin. The reply carries no secret, but it does carry the
 // operational shape of the deployment -- which mailbox it sends as, which
 // relay it talks to, which credentials are seeded -- and the probe reaches
 // out to a third party on the caller's say-so. Neither belongs to every
-// authenticated reader. Builtins cannot express this gate in the DSL (the
+// authenticated reader.
+//
+// DEVELOPER joined them for memql#4826, and its absence was a real defect
+// rather than a tightening. Program decision P6 gates integration
+// configuration owner-or-developer -- wiring up what the cluster talks to is
+// a developer's concern, administering PEOPLE is an admin's -- and the OS
+// Settings section that renders this report declares exactly that role set.
+// So the role the section exists FOR was the one role the engine refused, and
+// the section would have rendered a refusal to its intended audience while
+// serving somebody it does not offer itself to.
+//
+// Admin is KEPT rather than removed to match P6 exactly, and the asymmetry is
+// deliberate: P6 is about who may CONFIGURE, and this is a read that carries
+// no secret. Narrowing an existing read to make a sentence symmetrical would
+// take a capability away from every admin in every deployment to fix a
+// documentation shape, and the OS surface already declines to offer the
+// section to them.
+//
+// Builtins cannot express this gate in the DSL (the
 // annotation set is @description/@enabled/@disabled/@executor/@alias/@args/
 // @sdk, and the coarse gRPC data-plane gate classifies every builtin as a
 // read), so Go is the only place it can live.
@@ -604,8 +578,8 @@ func statusAuthorized(ctx context.Context) error {
 	if !ok || ac == nil {
 		return fmt.Errorf("email.status: no authenticated caller")
 	}
-	if ac.Role == auth.RoleOwner || ac.Role == auth.RoleAdmin {
+	if ac.Role == auth.RoleOwner || ac.Role == auth.RoleAdmin || ac.Role == auth.RoleDeveloper {
 		return nil
 	}
-	return fmt.Errorf("email.status: role %q may not read integration configuration (owner or admin required)", string(ac.Role))
+	return fmt.Errorf("email.status: role %q may not read integration configuration (owner, developer or admin required)", string(ac.Role))
 }

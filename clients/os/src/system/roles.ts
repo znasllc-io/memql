@@ -49,17 +49,36 @@ export interface RoleRung {
 }
 
 /**
- * A surface's role requirement. `min` is a role SLUG rather than a member of
- * a closed union, because the set of roles is now cluster state and a union
- * would put the closed set back one type further out. A slug that names no
- * rung admits NOBODY (see roleAdmits), and `rolesContract.test.ts` fails the
- * build if any shipped manifest names one.
+ * What a surface asks of the actor's cluster role. Absent = every signed-in
+ * user.
  *
- * Absent = every signed-in user.
+ * TWO FORMS, AND THE LADDER IS STILL THE DEFAULT. `{ min }` is a floor on the
+ * cluster's ladder, and it is the right shape for almost everything here:
+ * this cluster's authority accumulates, so a surface an admin may use is one
+ * an owner may use as well, and a floor keeps a rung added later from having
+ * to be pasted into every list that already existed.
+ *
+ * `{ any }` is the escape from that monotonicity, and it exists because ONE
+ * requirement genuinely is not monotonic. Integration credentials (P6 of the
+ * email-campaigns program) are gated owner-or-developer and explicitly NOT
+ * admin: wiring up what the cluster talks to is a developer's concern, while
+ * an admin's is USER ADMINISTRATION. `{ min: "developer" }` is the nearest
+ * the ladder can come and it admits admin -- so approximating it would show
+ * an admin a section of forms the engine refuses one by one, which is a worse
+ * answer than not offering the section.
+ *
+ * Reach for the set form only when a rung in the MIDDLE is deliberately left
+ * out. A set that is really a contiguous top of the ladder is a `min` written
+ * the long way, and it silently stops admitting whatever rung is added above
+ * it.
+ *
+ * BOTH FORMS NAME SLUGS RATHER THAN A CLOSED UNION (epic memql#4832), because
+ * the set of roles is cluster state now and a union would put the closed set
+ * back one type further out. A slug that names no rung admits NOBODY -- see
+ * roleAdmits -- and `rankLadder.test.tsx` fails the build if any shipped
+ * manifest names one.
  */
-export interface RoleRequirement {
-  min: string;
-}
+export type RoleRequirement = { min: string } | { any: readonly string[] };
 
 /**
  * Kept as an alias so the many `ClusterRole` annotations across the shell
@@ -98,15 +117,24 @@ export function roleLadderLoaded(): boolean {
   return ladder.length > 0;
 }
 
-/** The rung a role slug names, resolving aliases. Null when unknown. */
+/**
+ * The rung a role slug names, resolving aliases. Null when unknown.
+ *
+ * CASE-SENSITIVE, deliberately. Every slug in play is a lowercase value the
+ * cluster wrote -- the catalog's `slug`, the user row's `role` enum -- so
+ * folding case buys nothing real and costs the property `roles_any.test.ts`
+ * pins by name: `"Owner"` must be unrankable. A role string that differs from
+ * what the cluster reported is a string the cluster did not report, and
+ * normalising it is how a typo quietly becomes a permission.
+ */
 export function roleRungOf(role: string): RoleRung | null {
-  const slug = role.trim().toLowerCase();
+  const slug = role.trim();
   if (!slug) return null;
   for (const rung of ladder) {
-    if (rung.slug.toLowerCase() === slug) return rung;
+    if (rung.slug === slug) return rung;
   }
   for (const rung of ladder) {
-    if (rung.aliases.some((a) => a.trim().toLowerCase() === slug)) return rung;
+    if (rung.aliases.some((a) => a.trim() === slug)) return rung;
   }
   return null;
 }
@@ -124,17 +152,50 @@ export function roleRank(role: string): number {
 
 /**
  * An unknown or empty actor role admits only requirement-free surfaces:
- * a role we cannot rank must not unlock anything gated. The same is true
- * before the ladder loads, and true of a requirement naming a role the
- * cluster does not have -- a floor that cannot be resolved is not a floor
- * that admits everyone, which is exactly the fail-OPEN the engine's own
+ * a role we cannot rank must not unlock anything gated. That holds for both
+ * forms -- and an EMPTY `any` set admits nobody at all, which is the
+ * fail-closed reading of "these roles, and this is none of them".
+ *
+ * The same is true before the ladder loads, and true of a requirement naming
+ * a role the cluster does not have: a floor that cannot be resolved is not a
+ * floor that admits everyone, which is exactly the fail-OPEN the engine's own
  * rankFloorAdmits exists to avoid.
  */
 export function roleAdmits(actorRole: string, requirement?: RoleRequirement): boolean {
   if (!requirement) return true;
   const actor = roleRank(actorRole);
   if (actor < 0) return false;
+  if ("any" in requirement) {
+    // Rank EQUALITY rather than slug equality, so a legacy slug on the actor
+    // (`writer`) and the catalog slug in the set (`user`) name the same rung
+    // and match -- the alias resolution both sides already go through.
+    return requirement.any.some((role) => {
+      const named = roleRank(role);
+      return named >= 0 && named === actor;
+    });
+  }
   const floor = roleRank(requirement.min);
   if (floor < 0) return false;
   return actor >= floor;
+}
+
+/**
+ * The floor a requirement states, for a surface that has to NAME it -- the
+ * refused-surface panel is the one caller.
+ *
+ * The set form has no single floor, so it reports its weakest member: that is
+ * the honest thing to show somebody who was refused, since it is the least
+ * they could hold and still be admitted. Returns "" when there is nothing to
+ * name.
+ */
+export function requirementFloor(requirement?: RoleRequirement): string {
+  if (!requirement) return "";
+  if ("any" in requirement) {
+    const ranked = requirement.any
+      .map((slug) => ({ slug, rank: roleRank(slug) }))
+      .filter((r) => r.rank >= 0)
+      .sort((a, b) => a.rank - b.rank);
+    return ranked[0]?.slug ?? "";
+  }
+  return requirement.min;
 }

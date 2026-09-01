@@ -37,6 +37,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // Integration exposes knowledge-base capabilities to the DSL.
@@ -471,6 +472,14 @@ func quoteString(s string) string {
 	return langparser.QuoteString(s)
 }
 
+// intArg reads a numeric tool arg.
+//
+// THE CALLER'S DEFAULT, out of range (memql#4779). These are the chunking
+// geometry -- chunkSize and overlap -- and Chunk() walks a rune index with
+// `end := i + size`, which a saturated MaxInt overflows. Chunk's own
+// re-normalization catches a zero and a negative but cannot catch that, so
+// saturating here would turn a bad argument into a wrong answer instead of a
+// refused one. Every caller already names the size it wants.
 func intArg(args map[string]any, key string, fallback int) int {
 	v, ok := args[key]
 	if !ok {
@@ -480,13 +489,13 @@ func intArg(args map[string]any, key string, fallback int) int {
 	case int:
 		return n
 	case int64:
-		return int(n)
+		return num.Int64Or(n, fallback)
 	case int32:
 		return int(n)
 	case float64:
-		return int(n)
+		return num.Float64Or(n, fallback)
 	case float32:
-		return int(n)
+		return num.Float64Or(float64(n), fallback)
 	}
 	return fallback
 }

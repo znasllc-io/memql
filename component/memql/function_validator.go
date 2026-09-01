@@ -10,6 +10,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // functionValidator validates and resolves function references in MemQL expressions.
@@ -301,9 +302,18 @@ func validateArgType(value any, expectedType string) bool {
 		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 			return true
 		case float64:
-			return float64(int64(n)) == n
+			// narrowing: GUARDED -- num.WholeInt64 IS the guard. The expression
+			// this replaces, `float64(int64(n)) == n`, has an UNDEFINED result
+			// for an n outside int64 (memql#4779): it asks whether an
+			// implementation-defined value equals the original. On amd64 it
+			// answered "not a whole number", which is the safe direction and is
+			// why nobody noticed -- and it is still the answer here, now
+			// because an int64 cannot hold the value rather than by accident.
+			_, whole := num.WholeInt64(n)
+			return whole
 		case float32:
-			return float32(int32(n)) == n
+			_, whole32 := num.WholeInt64(float64(n))
+			return whole32
 		}
 		return false
 	case "bool", "boolean":
