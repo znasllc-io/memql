@@ -469,3 +469,30 @@ func laneSlot(lane LaneResolution, name string) (ConfigSlot, bool) {
 	}
 	return ConfigSlot{}, false
 }
+
+// SlotByName finds a slot by its stable machine name.
+//
+// The NAME, never the env var: a surface keys on the name precisely so an
+// operator can rename the variable behind a slot without every client losing
+// the value it was rendering, and a lookup by variable would undo that.
+func (m ConfigManifest) SlotByName(name string) (ConfigSlot, bool) {
+	want := strings.TrimSpace(name)
+	for _, s := range m.Slots() {
+		if s.Name == want {
+			return s, true
+		}
+	}
+	return ConfigSlot{}, false
+}
+
+// SlotNames lists every configurable slot, in declared order. Used to make a
+// refusal actionable -- "that is not a setting, these are" beats "unknown
+// setting", and the list is one a caller cannot get wrong twice.
+func (m ConfigManifest) SlotNames() []string {
+	slots := m.Slots()
+	out := make([]string, 0, len(slots))
+	for _, s := range slots {
+		out = append(out, s.Name)
+	}
+	return out
+}

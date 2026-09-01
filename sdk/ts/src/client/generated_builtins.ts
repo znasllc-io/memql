@@ -552,6 +552,31 @@ QueryClient.prototype.inferenceStatus = function (this: QueryClient, args: Infer
   return this.executeNamed("inferenceStatus", buildInferenceStatus(args), opts);
 };
 
+/** Set one of an integration's configuration values from an operator surface (memql#4825). OWNER OR DEVELOPER ONLY, which is stricter than reading the status report: wiring up what this cluster talks to is a developer's job, and administering people -- what an admin is for -- is a different one. Three things this does that a client calling setGlobalVariable itself cannot. The row NAME is derived from the integration's declared manifest rather than taken from the caller, so a mistyped variable cannot become a row the resolver never reads and a save that reports success and changes nothing. The row ID reuses the seeder's derivation, so the write UPDATES the row an installed cluster already has instead of adding a second row carrying the same name. And a credential is sealed server-side under the cluster master key, which exists on nodes and must never exist in a browser -- the plaintext crosses the wire once and is never sent back. Afterwards the node discards its resolved sender, so the change takes effect on its next send with no restart; other replicas pick it up on their own next send, and the reply says so rather than implying the fleet moved at once. */
+export interface IntegrationConfigureArgs {
+  /** The manifest slot to set, e.g. senderAddress or clientSecret. A slot NAME, never an environment variable: the name is stable across a rename of the variable behind it, which is the whole reason a surface keys on it. */
+  slot: string;
+  /** The plaintext value. Sealed before storage when the slot is a credential, and never read back by any surface -- what a client can learn afterwards is that the slot is set, from where, and the command that rotates it. */
+  value: string;
+}
+
+export function buildIntegrationConfigure(args: IntegrationConfigureArgs): string {
+  const parts: string[] = [];
+  parts.push("slot: " + renderMemQLValue(args.slot));
+  parts.push("value: " + renderMemQLValue(args.value));
+  return "builtin integrationConfigure(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    integrationConfigure(args: IntegrationConfigureArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.integrationConfigure = function (this: QueryClient, args: IntegrationConfigureArgs = {} as IntegrationConfigureArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("integrationConfigure", buildIntegrationConfigure(args), opts);
+};
+
 /** Report this node's integration registry: every plug-in the running binary registered, and for the email integration the resolved sender mode plus a slot-by-slot account of which settings and credentials are configured and where each came from. Credential VALUES are never included -- only presence, source and (for stored secrets) a fingerprint. Pass probe=true to additionally run a live, non-sending reachability check (Microsoft Graph: acquire a client-credentials token; SMTP: connect, EHLO, STARTTLS, AUTH, QUIT) and report its verdict; probe=false (the default) answers the configuration question only. */
 export interface IntegrationStatusArgs {
   probe?: boolean;

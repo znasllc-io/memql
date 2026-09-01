@@ -26,6 +26,11 @@ func init() {
 			return nil, err
 		}
 		lazySender := NewLazySender(envSender, pctx.ResolveSystemVariable, pctx.ResolveSystemSecret, pctx.Logger)
-		return NewIntegration(lazySender, pctx.Logger), nil
+		// The engine is attached for the `configure` capability (memql#4825).
+		// pctx.Engine is the same surface every other plug-in writes through,
+		// so nothing new is trusted here -- what makes the write safe is the
+		// owner-or-developer gate and the fact that the row NAME is derived
+		// from the manifest rather than taken from the caller.
+		return NewIntegration(lazySender, pctx.Logger).WithConfigWriter(NewConfigWriter(pctx.Engine)), nil
 	})
 }

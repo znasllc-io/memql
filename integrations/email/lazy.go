@@ -49,7 +49,15 @@ type LazySender struct {
 	resolveVar    VariableResolver
 	resolveSecret SecretResolver
 
-	once     sync.Once
+	// mu guards the resolution below. It was a sync.Once until memql#4825,
+	// and the Once was exactly right while configuration could only arrive
+	// before the process started. It stopped being right the moment an
+	// operator could set a credential from Settings: a Once cannot be reset,
+	// so a correct save on a node that had already sent one message would
+	// flip the console to "configured" while every subsequent send kept going
+	// to the log -- the silent half-working state this whole surface exists to
+	// remove.
+	mu       sync.Mutex
 	resolved Sender
 }
 
@@ -92,7 +100,11 @@ func (l *LazySender) Send(ctx context.Context, msg Message, as SendAs) error {
 // act a send performs, so it runs the same sync.Once and produces the same
 // answer; it is not a second resolution path.
 func (l *LazySender) Resolve(ctx context.Context) Sender {
-	l.once.Do(func() { l.resolved = l.resolve(ctx) })
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.resolved == nil {
+		l.resolved = l.resolve(ctx)
+	}
 	if l.resolved == nil {
 		// Defensive -- resolve always returns at least a LogSender.
 		l.resolved = NewLogSender(l.logger)
@@ -169,4 +181,42 @@ func (l *LazySender) resolve(ctx context.Context) Sender {
 		}
 	}
 	return l.envResolved // LogSender baseline
+}
+
+// Invalidate discards the resolved sender so the next Send or Resolve reads
+// the tiers again. Reports whether it changed anything: false means this
+// wrapper had not resolved yet, so there was nothing to discard and the next
+// resolution was always going to be fresh.
+//
+// It is what makes "resolved at use time" true after a write. Without it a
+// credential set from Settings is a correct row that this process never looks
+// at again, and the operator is told it is configured while nothing changes.
+//
+// It does NOT reach other replicas. Each resolves lazily on its own next
+// send, which is the same eventual consistency the env path has always had --
+// and the honest thing for a surface to say is that it takes effect per node
+// on that node's next send, which is what Configure's reply says.
+func (l *LazySender) Invalidate() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	had := l.resolved != nil
+	l.resolved = nil
+	return had
+}
+
+// ResolvedFromEnvironment reports whether the sender this wrapper resolved (or
+// would resolve) comes from the ENVIRONMENT rather than from stored rows.
+//
+// A surface needs it to tell the truth about a save: env outranks rows, so on
+// a node configured by environment a stored value is recorded and then ignored
+// -- and "saved, and it will take effect" would be a lie there.
+func (l *LazySender) ResolvedFromEnvironment() bool {
+	if l == nil || l.envResolved == nil {
+		return false
+	}
+	_, isLog := l.envResolved.(*LogSender)
+	return !isLog
 }
