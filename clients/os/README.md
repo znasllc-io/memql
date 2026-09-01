@@ -325,6 +325,17 @@ the three apps before it.
   transport names that failure explicitly when it happens anyway -- an HTML
   body means the site answered, not the cluster.
 
+- **A WINDOW SITS INSIDE THE DESK PLATE, AND THE DESK PLATE TAKES FILE
+  DROPS.** `Desktop.tsx`'s `onHostDrop` turns a dropped file into a Library
+  artifact and a desk icon, and a `WindowFrame` renders inside it -- so an
+  app's own drop target must `stopPropagation`, or ONE file is uploaded TWICE,
+  to two different places, and the second upload is one nobody asked for.
+  Stop it on `dragover` too, and stop it even when the target is DISABLED:
+  otherwise the desk's own dragover allows the drop and dropping a file on a
+  visibly-disabled control produces a desktop icon, which is a stranger answer
+  than nothing happening. "Nothing happens where nothing is offered" is the
+  same rule the right-click section states.
+
 - **An app that uploads somewhere the shell's provider does not point at
   builds its own, from a CAPABILITY.** `items/upload.ts`'s `UploadHandle` is
   generic over its result now, because the desk's drops return a Library
