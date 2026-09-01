@@ -67,7 +67,9 @@ describe("the settings-section contract", () => {
   // Six since Ask voice (memql#4747) added its own section beside Appearance.
   // Ask is CHROME rather than an app, so its preferences have nowhere else to
   // live, and folding them into Appearance would file "hold Space to talk"
-  // under how the desktop looks.
+  // under how the desktop looks. Seven since Integrations (memql#4826) --
+  // per-integration configuration lives in Settings rather than in the app
+  // windows that consume it, because a credential is not a campaigns record.
   it("Settings itself declares its sections", () => {
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
     expect(settings?.sections?.map((s) => s.id)).toEqual([
@@ -77,7 +79,17 @@ describe("the settings-section contract", () => {
       "apps",
       "cluster",
       "diagnostics",
+      "integrations",
     ]);
     expect(settings?.sections?.find((s) => s.id === "cluster")?.roles).toEqual({ min: "admin" });
+    // THE TWO GATE FORMS ARE PINNED SEPARATELY, because they are different
+    // statements and the difference is the point. Cluster is a ladder MINIMUM
+    // (admin and above). Integrations is a SET, and it deliberately excludes
+    // admin -- a `{ min: "developer" }` here would admit admin and quietly
+    // widen a gate the program decided on (P6). A test that only checked
+    // "developer can reach it" would pass against exactly that mistake.
+    expect(settings?.sections?.find((s) => s.id === "integrations")?.roles).toEqual({
+      any: ["owner", "developer"],
+    });
   });
 });

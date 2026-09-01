@@ -4625,3 +4625,488 @@ a.os-button {
     }
   }
 }
+
+/* ---- campaigns: the app's own surfaces (epic memql#4827) ----
+ *
+ * Two things live here that the kit does not have, and everything else the app
+ * renders is the shared vocabulary -- rows, panels, notices, chips, facts,
+ * form fields -- which is the measure Deployables set and every app since has
+ * kept.
+ *
+ * THE SEND BAR IS THE ONE OWNED VISUAL IDEA. Four numbers in four boxes is the
+ * templated answer and it makes a person add them up to learn how far through
+ * a send is. One band divided proportionally IS that answer, and it makes the
+ * SKIPPED slice visible -- the compliance-relevant figure nobody goes looking
+ * for. Plain flex, no chart library: this is four proportions in a row.
+ *
+ * THE SENTENCE BUILDER IS THE OTHER. A rule's six fields are six clauses of
+ * one English sentence, and laying them out as six labelled boxes would make
+ * somebody assemble the meaning themselves every time.
+ */
+
+.os-campaign-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.os-campaign-detail-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.os-campaign-form {
+  display: grid;
+  /* Two columns where there is room, one where there is not. `auto-fit` with a
+   * min track rather than a media query: this form renders inside a WINDOW,
+   * and a window's width is not the viewport's. */
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px 12px;
+  margin: 8px 0;
+}
+
+.os-campaign-actions,
+.os-campaign-filters,
+.os-campaign-tracking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.os-campaign-tracking {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+}
+.os-campaign-filters {
+  margin: 2px 0 6px;
+}
+
+.os-campaign-schedule {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--os-line);
+}
+
+.os-campaign-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-plate);
+}
+
+.os-campaign-confirm-line {
+  margin: 0;
+  font-size: var(--os-text-md);
+}
+
+/* ---- the send bar ---------------------------------------------------------
+ *
+ * The band, its legend, and the engagement pair beneath. Colours come from the
+ * shell's own status vocabulary and nothing new is introduced: accent is what
+ * worked (the same hue as a live dot), amber is warn, red is error, and the
+ * rail tint is what has not happened yet.
+ */
+
+.os-send {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+
+.os-send-bar {
+  display: flex;
+  width: 100%;
+  height: 14px;
+  border-radius: var(--os-radius-xs);
+  overflow: hidden;
+  /* The ground shows through where no segment is drawn, which only happens on
+   * an empty bar -- the four slices otherwise sum to the whole by
+   * construction, so the band can never show a gap that reads as a fault. */
+  background: var(--os-rail);
+  border: 1px solid var(--os-line);
+}
+
+.os-send-bar[data-empty] {
+  background: transparent;
+}
+
+.os-send-seg {
+  display: block;
+  min-width: 2px;
+  flex-basis: 0;
+  /* The fill is a TRANSITION, so a segment that grows mid-send slides rather
+   * than jumping. It is the medium duration rather than the cue duration: this
+   * is a value changing, not news arriving. */
+  transition: flex-grow var(--os-duration-med) var(--os-ease);
+}
+
+.os-send-seg[data-outcome="sent"],
+.os-send-swatch[data-outcome="sent"] {
+  background: var(--os-accent);
+}
+.os-send-seg[data-outcome="skipped"],
+.os-send-swatch[data-outcome="skipped"] {
+  background: var(--os-warn);
+}
+.os-send-seg[data-outcome="failed"],
+.os-send-swatch[data-outcome="failed"] {
+  background: var(--os-error);
+}
+.os-send-seg[data-outcome="pending"],
+.os-send-swatch[data-outcome="pending"] {
+  background: var(--os-rail-hover);
+}
+
+.os-send-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.os-send-legend-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--os-text-sm);
+}
+
+.os-send-swatch {
+  /* A baseline-aligned run of text needs the swatch nudged onto it -- an
+   * inline-block sits on the baseline by its bottom edge, which puts a square
+   * a couple of pixels low beside 12px text. */
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  transform: translateY(1px);
+}
+
+.os-send-legend-label {
+  color: var(--os-muted);
+}
+
+.os-send-legend-count {
+  font-family: var(--os-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.os-send-engagement {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--os-line);
+}
+
+.os-send-engagement-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* Deliberately SMALLER than the bar's own figures: engagement is a different
+ * question, about the sent slice only, and typography is what says so without
+ * a second heading. */
+.os-send-engagement-rate {
+  font-size: var(--os-text-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.os-send-engagement-label {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  text-transform: lowercase;
+}
+
+.os-send-engagement-note {
+  max-width: 40ch;
+}
+
+/* ---- the ledger and the roster ---- */
+
+.os-campaign-ledger,
+.os-campaign-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  background: var(--os-line);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  overflow: hidden;
+}
+
+.os-campaign-ledger-row,
+.os-campaign-roster-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  background: var(--os-plate);
+  font-size: var(--os-text-sm);
+}
+
+.os-campaign-ledger-address,
+.os-campaign-roster-address {
+  flex: 1 1 16ch;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.os-campaign-ledger-outcome {
+  color: var(--os-muted);
+}
+.os-campaign-ledger-row[data-outcome="failed"] .os-campaign-ledger-outcome {
+  color: var(--os-error);
+}
+.os-campaign-ledger-row[data-outcome="skipped"] .os-campaign-ledger-outcome {
+  color: var(--os-warn);
+}
+
+/* An address that cannot be mailed keeps its facts and loses its ink -- the
+ * same `current` / `dim` split the shared row uses. */
+.os-campaign-roster-row:not([data-sendable]) .os-campaign-roster-address {
+  color: var(--os-muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--os-line);
+}
+
+.os-campaign-roster-name {
+  color: var(--os-muted);
+}
+
+/* ---- the import report ----
+ *
+ * A PANEL, NOT A TOAST. The operator's next action is fixing the file, so the
+ * evidence stays on screen until they say they are done with it.
+ */
+
+.os-campaign-import-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 6px 0;
+  padding: 0;
+  list-style: none;
+  max-height: 220px;
+  /* Its own scroll region, so twenty bad lines cannot push the dismiss control
+   * off the bottom of a window. */
+  overflow-y: auto;
+}
+
+.os-campaign-import-lines li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: var(--os-text-xs);
+  min-width: 0;
+}
+
+.os-campaign-import-lines li > .os-mono {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.os-campaign-import-line {
+  flex: 0 0 auto;
+  color: var(--os-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- the template editor and its merge tags ---- */
+
+.os-campaign-editor {
+  display: grid;
+  /* The tag panel wants a fixed-ish column and the body wants the rest; below
+   * a window width that cannot hold both, they stack with the body first. */
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 260px);
+  gap: 12px;
+  margin: 8px 0;
+}
+
+@media (max-width: 720px) {
+  .os-campaign-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.os-campaign-editor-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.os-campaign-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-plate);
+  color: var(--os-ink);
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-sm);
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.os-campaign-tagpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-raised);
+  min-width: 0;
+}
+
+.os-campaign-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.os-campaign-tag {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--os-line);
+  border-radius: 999px;
+  background: var(--os-plate);
+  color: var(--os-ink);
+  font-size: var(--os-text-xs);
+  cursor: pointer;
+  text-align: left;
+}
+
+.os-campaign-tag:hover {
+  border-color: var(--os-accent);
+}
+
+/* A tag that exists only because an import carried the column. The accent
+ * border is what makes `fields.*` DISCOVERABLE -- it is the half of the set
+ * nothing else in the product could tell somebody about. */
+.os-campaign-tag[data-from-import] {
+  border-color: var(--os-accent-soft);
+  background: var(--os-accent-soft);
+}
+
+/* A tag the test send could not resolve. Warn rather than error: the message
+ * went out, and the tag will render as its own text. */
+.os-campaign-tag[data-unresolved] {
+  border-color: var(--os-warn);
+  cursor: default;
+}
+
+.os-campaign-tag-arrow {
+  color: var(--os-muted);
+}
+
+.os-campaign-tag-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--os-muted);
+}
+
+.os-campaign-test-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--os-line);
+}
+
+/* ---- the rules sentence ----
+ *
+ * The controls sit INLINE in a line of prose, so the rule is assembled by
+ * reading rather than by the reader. `align-items: baseline` is what keeps a
+ * select sitting on the same line as the words around it; without it the text
+ * rides above the control and the sentence stops reading as one.
+ */
+
+.os-campaign-sentence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-raised);
+  font-size: var(--os-text-md);
+  line-height: 2;
+}
+
+.os-campaign-sentence-word {
+  color: var(--os-muted);
+}
+
+.os-campaign-sentence .os-select {
+  /* Wide enough to read, never so wide it breaks the line into a form. */
+  max-width: 22ch;
+}
+
+.os-campaign-who {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.os-campaign-roles {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.os-campaign-more {
+  margin: 8px 0;
+}
+
+.os-campaign-more > summary {
+  cursor: pointer;
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+}
+
+.os-campaign-rule-sentence {
+  flex: 1 1 24ch;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.os-campaign-rule-headline {
+  margin: 6px 0;
+  font-size: var(--os-text-md);
+}

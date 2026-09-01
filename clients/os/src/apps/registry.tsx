@@ -4,6 +4,7 @@ import {
   GraduationCap,
   MonitorSmartphone,
   Rocket,
+  Send,
   Settings as SettingsIcon,
   Sparkles,
   Users,
@@ -14,6 +15,8 @@ import { useAsk } from "../ask/AskProvider";
 import type { OsAppManifest, OsRegistry, OsWidgetManifest } from "../system/registry";
 import { AccountsApp } from "./accounts/AccountsApp";
 import { ACCOUNTS_SECTIONS } from "./accounts/settings";
+import { CampaignsApp } from "./campaigns/CampaignsApp";
+import { CAMPAIGNS_SECTIONS } from "./campaigns/settings";
 import { DeployablesApp } from "./deployables/DeployablesApp";
 import { DEPLOYABLES_SECTIONS } from "./deployables/settings";
 import { FilesApp } from "./files/FilesApp";
@@ -43,6 +46,14 @@ const settings: OsAppManifest = {
     { id: "apps", name: "Apps" },
     { id: "cluster", name: "Cluster", roles: { min: "admin" } },
     { id: "diagnostics", name: "Diagnostics" },
+    // OWNER OR DEVELOPER, AND EXPLICITLY NOT ADMIN (program decision P6).
+    // This is the first section in the shell whose gate a ladder MINIMUM
+    // cannot express: `{ min: "developer" }` would admit admin, and the
+    // decision is that configuring an integration is a developer's job and an
+    // owner's prerogative rather than a rank. `roleAdmits`' `any` form is what
+    // says exactly that, and it is presentation over a gate the status
+    // capability's own `statusAuthorized` remains the authority on.
+    { id: "integrations", name: "Integrations", roles: { any: ["owner", "developer"] } },
   ],
   settingsSection: "appearance",
   component: SettingsApp,
@@ -198,6 +209,31 @@ const accounts: OsAppManifest = {
   component: AccountsApp,
 };
 
+// Campaigns, in full (epic memql#4827 / #4828 / #4830). Writing mail, sending
+// it, and knowing what happened. Campaigns is first and is therefore the
+// section a window opens on: a campaign is what this app is for, and the other
+// four are the things a campaign is made of.
+//
+// The section list is CAMPAIGNS_SECTIONS rather than a literal, for the reason
+// its six siblings are: the gear and the manifest must offer the same set, and
+// a second copy of the list is one that can disagree.
+//
+// NO manifest role. Every operator-facing campaigns concept declares the
+// composite tier (`@rowAuthz(owner="ownerUserId", clusterOwner)`), so every
+// signed-in person has campaigns of their own to read and the engine decides
+// how far each list reaches. Gating here would be presentation pretending to
+// be authorization -- and the writes that DO carry a gate carry it in the
+// engine: the send builtins authorize by reading the campaign under the
+// caller's own actor before any preflight runs.
+const campaigns: OsAppManifest = {
+  id: "campaigns",
+  name: "Campaigns",
+  icon: Send,
+  sections: CAMPAIGNS_SECTIONS,
+  settingsSection: "settings",
+  component: CampaignsApp,
+};
+
 function AskWidgetBody() {
   const { transport, voice, settings } = useAsk();
   return (
@@ -214,6 +250,6 @@ const askWidget: OsWidgetManifest = {
 };
 
 export const OS_REGISTRY: OsRegistry = {
-  apps: [accounts, files, deployables, fleet, users, training, settings],
+  apps: [accounts, campaigns, files, deployables, fleet, users, training, settings],
   widgets: [askWidget],
 };
