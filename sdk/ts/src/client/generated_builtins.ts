@@ -200,6 +200,31 @@ QueryClient.prototype.commerceStock = function (this: QueryClient, args: Commerc
   return this.executeNamed("commerceStock", buildCommerceStock(args), opts);
 };
 
+/** The reachable half of creating a binding: mint the ownership token, prefill the account tie, and write the row. `createCustomDomain` itself is @serverOnly precisely so this is the only way in -- a caller who chooses their own verification token proves nothing by publishing it. */
+export interface CustomDomainAddArgs {
+  /** The v1:platform:site row this domain should serve. */
+  siteId: string;
+  /** The client's own fully qualified host, e.g. www.acme.com or acme.com. */
+  hostname: string;
+}
+
+export function buildCustomDomainAdd(args: CustomDomainAddArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("hostname: " + renderMemQLValue(args.hostname));
+  return "builtin customDomainAdd(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    customDomainAdd(args: CustomDomainAddArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.customDomainAdd = function (this: QueryClient, args: CustomDomainAddArgs = {} as CustomDomainAddArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("customDomainAdd", buildCustomDomainAdd(args), opts);
+};
+
 /** List every registered concept with its data state (mirror | origin | native), the system where its changes are made, and the connectors it depends on. Produced from the live concept registry, never persisted. Feeds the portal's Data origins page. */
 export interface DataOriginsArgs {
 }

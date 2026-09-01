@@ -39,6 +39,11 @@ type Site struct {
 // the edge should not be able to reach the rest of the graph.
 type QueryExecutor interface {
 	SiteByHostname(ctx context.Context, hostname string) (*Site, error)
+	// SiteForCustomDomain resolves a hostname through a LIVE
+	// v1:platform:customDomain binding to the site it names (epic memql#4805,
+	// design D8). A miss -- no binding, or one that is not live -- is
+	// (nil, nil), exactly like SiteByHostname's.
+	SiteForCustomDomain(ctx context.Context, hostname string) (*Site, error)
 }
 
 // Resolver maps a request Host to a Site.
@@ -116,6 +121,30 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 		site, err := r.exec.SiteByHostname(ctx, key)
 		if err != nil {
 			return nil, err
+		}
+
+		// THE CUSTOM-DOMAIN ALIAS (epic memql#4805, design D8). One extra
+		// step, asked ONLY on a miss, so a hostname this cluster serves as
+		// <slug>.<domain> costs exactly what it did before -- and a site's own
+		// hostname always wins, which is the ordering that matters: a binding
+		// can never take traffic away from a deployable already answering on
+		// that name.
+		//
+		// Everything downstream is unchanged. The Site this returns is the
+		// same row, so per-site CSP, the runtime-config document and the
+		// /_memql/* apiProxy behave identically on the client's origin -- and
+		// because the API is same-origin there, a custom domain has no CORS
+		// story at all.
+		//
+		// A MISS HERE IS ALSO CACHED, by the shared write below: without that,
+		// a scanner walking random hostnames would drive TWO queries per
+		// request instead of one, which would make the alias step an
+		// amplifier rather than a lookup.
+		if site == nil {
+			site, err = r.exec.SiteForCustomDomain(ctx, key)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		// A MISS IS CACHED TOO. Without this, a scanner walking random hostnames

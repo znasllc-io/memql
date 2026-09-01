@@ -30,9 +30,12 @@ export function ActionsSection({ domain }: { domain: string }) {
           about the zip -- belongs beside the deployable it happened to.
         </Caption>
         <Caption>
-          Status changes, rollback and deletion stay in the portal for now. So do custom apex
-          hostnames and second domains: each needs its own DNS record and its own certificate,
-          which no window can create.
+          Status changes, rollback and deletion stay in the portal for now.
+        </Caption>
+        <Caption>
+          A client's own domain is not one of them any more. Open a deployable and use its Domains
+          panel: this cluster shows you the two DNS records to create, tells you which one is still
+          wrong until both check out, and then provisions the route and the certificate itself.
         </Caption>
       </Panel>
     </div>

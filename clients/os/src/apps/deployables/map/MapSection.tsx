@@ -41,6 +41,7 @@ export function MapSection({
   onSelectSite,
   viewerUserId,
   canPublish,
+  clusterDomain,
   onAsk,
   onReseed,
 }: {
@@ -52,6 +53,8 @@ export function MapSection({
   onSelectSite: (siteId: string) => void;
   viewerUserId: string;
   canPublish: boolean;
+  /** The domain this cluster serves, threaded to the detail's Domains panel. */
+  clusterDomain: string;
   onAsk?: (tag: string) => void;
   onReseed: () => void;
 }) {
@@ -86,6 +89,7 @@ export function MapSection({
           site={only}
           viewerUserId={viewerUserId}
           canPublish={canPublish}
+          clusterDomain={clusterDomain}
           onAsk={onAsk}
         />
       ) : chosen.length > 1 ? (

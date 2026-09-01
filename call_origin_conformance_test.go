@@ -100,6 +100,25 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		"component/identity":          "identity store internals, server-initiated",
 		"component/identity/adminops": "identity-admin write surface -- REQUEST-DERIVED, one of the two exceptions here; its precondition (every path is downstream of the owner/admin gate in the same function) is asserted by component/identity/adminops/gate_test.go, memql#3324",
 		"component/identity/pat":      "personal-access-token store, server-initiated",
+		// The custom-domain reconciliation sweep (epic memql#4805). SERVER-
+		// INITIATED, and not one of the request-derived exceptions: the caller
+		// is a scheduled automation, not an HTTP handler, and the six writes it
+		// stamps for are the engine's own account of what it saw in DNS and at
+		// the API server.
+		//
+		// The stamp is not a widening. Every one of those mutations is
+		// @serverOnly over a clusterOwner-tier concept, so what internal origin
+		// buys is the ability to call them AT ALL -- origin defaults to CLIENT
+		// and the function validator refuses. Without it the sweep fails every
+		// write with a WARN in the log and every binding sits in `pending_dns`
+		// forever, which is the shape of bug that survives a release.
+		//
+		// It is deliberately NOT stamped on the two reads the `customDomainAdd`
+		// capability makes: those run under the CALLER's own actor
+		// (Store.callerRows), because "which deployables may YOU act on" is a
+		// different question from "which exist", and stamping there would hand
+		// a caller-scoped read the engine's escape.
+		"integrations/customdomain": "the custom-domain reconciliation sweep, server-initiated; its six @serverOnly writers are refused without it",
 		// REQUEST-DERIVED, and the THIRD exception. The redeem path
 		// (component/identity/http/webauthn_recovery.go) calls Store.Resolve on
 		// an UNAUTHENTICATED request context -- the shape call_origin.go warns

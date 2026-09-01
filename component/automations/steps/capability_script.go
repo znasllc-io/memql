@@ -195,6 +195,18 @@ var capabilityScriptAllowlist = map[string]string{
 	// graph runs it and dsl_agreement_test.go asserts every action belongs to a
 	// real install.
 	"install.e2eBaseline": "scripts/install/e2e-baseline.sh",
+
+	// Custom domains (epic memql#4805). The pair that applies and removes the
+	// exact-host Ingress + cert-manager Certificate for a client's own domain.
+	//
+	// REGISTERED HERE IS WHAT MAKES THEM REACHABLE AT ALL, and that matters
+	// more for these two than for most: their only caller is the engine's own
+	// reconciliation sweep, so an unregistered id would leave every binding
+	// sitting in `issuing` forever while the scripts ran perfectly from a
+	// human shell -- the exact "silently inert on the engine path while
+	// looking healthy everywhere else" failure this map's other entries name.
+	"domain.bind":   "scripts/deploy/bind-custom-domain.sh",
+	"domain.unbind": "scripts/deploy/unbind-custom-domain.sh",
 }
 
 // scriptParamKey is the reserved rendered-arg key that names the capability
@@ -297,52 +309,15 @@ func (r *capabilityScriptRunner) scriptPath(id string) (string, error) {
 // result envelope. The capability id (shell.script / shell.exec ...) is
 // informational here -- the `script` arg selects the backend.
 func (r *capabilityScriptRunner) Invoke(ctx context.Context, args map[string]any) (any, error) {
-	idVal, ok := args[scriptParamKey]
-	if !ok {
-		return nil, fmt.Errorf("shell capability requires a %q argument naming the capability script to run (the action's argTemplate must render %q)", scriptParamKey, scriptParamKey)
-	}
-	id, ok := idVal.(string)
-	if !ok || strings.TrimSpace(id) == "" {
-		return nil, fmt.Errorf("shell capability %q argument must be a non-empty string, got %T", scriptParamKey, idVal)
-	}
-
-	path, err := r.scriptPath(id)
+	// One implementation, two readings of it. `run` resolves the id, execs the
+	// script and parses the envelope; what differs between an ACTION dispatch
+	// and a reconciler's call is only what a non-ok envelope means. Here it is
+	// an error, because a failed step must stop the automation rather than let
+	// the next one build on a clone that did not happen. RunCapabilityScript
+	// returns the envelope instead, for a caller whose job is to record it.
+	res, err := r.run(ctx, args)
 	if err != nil {
 		return nil, err
-	}
-
-	// Every arg except `script` becomes a single `--name=value` argv flag
-	// (never interpolated into a command line). Keys are sorted so the argv --
-	// and therefore the result fingerprint -- is deterministic for a given
-	// input. Non-string values are JSON-encoded so the script can decode them.
-	keys := make([]string, 0, len(args))
-	for k := range args {
-		if k == scriptParamKey {
-			continue
-		}
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	flags := make([]string, 0, len(keys))
-	for _, k := range keys {
-		ev, eerr := encodeFlagValue(args[k])
-		if eerr != nil {
-			return nil, fmt.Errorf("capability-script %q: encode param %q: %w", id, k, eerr)
-		}
-		flags = append(flags, "--"+k+"="+ev)
-	}
-
-	stdout, stderr, runErr := runCapabilityScript(ctx, path, flags)
-
-	// The script emits its result envelope on stdout even on failure (the
-	// contract's EXIT trap guarantees it). Parse stdout first; only when there
-	// is genuinely no envelope do we surface the raw exec error + stderr.
-	res, perr := deploycontrol.ParseCapabilityResult(stdout)
-	if perr != nil {
-		if runErr != nil {
-			return nil, fmt.Errorf("capability-script %q (%s) failed: %v\nstderr:\n%s", id, path, runErr, truncateForError(stderr))
-		}
-		return nil, fmt.Errorf("capability-script %q (%s): %v\nstderr:\n%s", id, path, perr, truncateForError(stderr))
 	}
 	if cerr := res.Err(); cerr != nil {
 		return nil, cerr
@@ -419,4 +394,101 @@ func truncateForError(b []byte) string {
 		return s[:max] + "\n... (truncated)"
 	}
 	return s
+}
+
+// RunCapabilityScript runs one allowlisted capability script with structured
+// params and returns its parsed envelope.
+//
+// # Why this is exported when Invoke above is the ordinary path
+//
+// An automation ACTION step dispatches a capability and gets back a result or
+// an error; a step that errors ABORTS the run, which is the right shape for a
+// deploy pipeline where a failed clone must not be followed by a build. It is
+// the wrong shape for a RECONCILER, whose whole job is to look at the world,
+// find it not as it should be, and write down what it saw. A custom domain on
+// a cluster with no ACME issuer refuses issuance every two minutes forever
+// (design D7), and each refusal has to reach the row as a typed failureReason
+// -- so the caller needs the ENVELOPE, not an error that ended the run before
+// it could record anything.
+//
+// It is the SAME runner, the SAME allowlist and the SAME
+// deploycontrol.ParseCapabilityResult the action path uses. That is the point:
+// a second copy of the resolution, the confinement check and the argv
+// construction would be a copy that drifts, and this map is the security
+// boundary for both callers rather than for one of them.
+//
+// The returned error is reserved for the script not RUNNING -- an unknown id, a
+// path that escapes the root, a missing backend, output carrying no envelope.
+// A script that ran and refused comes back as a CapabilityResult with OK
+// false, which the caller reads through Err() or Error.Code.
+func RunCapabilityScript(ctx context.Context, id string, params map[string]any) (deploycontrol.CapabilityResult, error) {
+	runner := newCapabilityScriptRunner()
+	// NO CAPACITY HINT. `len(params)+1` is arithmetic on a length in an
+	// allocation size, which CodeQL's go/allocation-size-overflow flags -- and
+	// the hint buys nothing here: a capability script takes a handful of
+	// params, so the map is small whatever it is sized at. The COPY is the
+	// part that matters, so this never mutates the caller's map.
+	args := map[string]any{}
+	for k, v := range params {
+		if k == scriptParamKey {
+			continue
+		}
+		args[k] = v
+	}
+	args[scriptParamKey] = id
+	return runner.run(ctx, args)
+}
+
+// run is Invoke's body up to the point the two callers diverge: it resolves
+// and executes the script and parses the envelope, and leaves the decision of
+// what a non-ok envelope MEANS to its caller.
+func (r *capabilityScriptRunner) run(ctx context.Context, args map[string]any) (deploycontrol.CapabilityResult, error) {
+	idVal, ok := args[scriptParamKey]
+	if !ok {
+		return deploycontrol.CapabilityResult{}, fmt.Errorf("shell capability requires a %q argument naming the capability script to run (the action's argTemplate must render %q)", scriptParamKey, scriptParamKey)
+	}
+	id, ok := idVal.(string)
+	if !ok || strings.TrimSpace(id) == "" {
+		return deploycontrol.CapabilityResult{}, fmt.Errorf("shell capability %q argument must be a non-empty string, got %T", scriptParamKey, idVal)
+	}
+
+	path, err := r.scriptPath(id)
+	if err != nil {
+		return deploycontrol.CapabilityResult{}, err
+	}
+
+	// Every arg except `script` becomes a single `--name=value` argv flag
+	// (never interpolated into a command line). Keys are sorted so the argv --
+	// and therefore the result fingerprint -- is deterministic for a given
+	// input. Non-string values are JSON-encoded so the script can decode them.
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		if k == scriptParamKey {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	flags := make([]string, 0, len(keys))
+	for _, k := range keys {
+		ev, eerr := encodeFlagValue(args[k])
+		if eerr != nil {
+			return deploycontrol.CapabilityResult{}, fmt.Errorf("capability-script %q: encode param %q: %w", id, k, eerr)
+		}
+		flags = append(flags, "--"+k+"="+ev)
+	}
+
+	stdout, stderr, runErr := runCapabilityScript(ctx, path, flags)
+
+	// The script emits its result envelope on stdout even on failure (the
+	// contract's EXIT trap guarantees it). Parse stdout first; only when there
+	// is genuinely no envelope do we surface the raw exec error + stderr.
+	res, perr := deploycontrol.ParseCapabilityResult(stdout)
+	if perr != nil {
+		if runErr != nil {
+			return deploycontrol.CapabilityResult{}, fmt.Errorf("capability-script %q (%s) failed: %v\nstderr:\n%s", id, path, runErr, truncateForError(stderr))
+		}
+		return deploycontrol.CapabilityResult{}, fmt.Errorf("capability-script %q (%s): %v\nstderr:\n%s", id, path, perr, truncateForError(stderr))
+	}
+	return res, nil
 }

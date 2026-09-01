@@ -68,7 +68,12 @@ reads as the organisation's rather than a tenant's, and `mail` is where a mail
 host would land if one is ever added.
 
 Any other hostname -- a custom apex, a different domain -- stays
-**cluster-owner-only** and hand-certified, as before.
+**cluster-owner-only**, as before -- but no longer hand-certified. A client's
+own domain is bound through the custom-domain flow: the Domains panel on the
+deployable shows the two DNS records to create, the cluster verifies them and
+says which one is still wrong, and the exact-host Ingress and Certificate are
+provisioned once both check out (epic memql#4805,
+[front-door.md](front-door.md#custom-domains-a-clients-own-name)).
 
 ---
 

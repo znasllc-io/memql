@@ -295,7 +295,10 @@ Three things worth knowing before you run it:
   cluster-unique, and not one of `api`, `identity`, `mcp`, `portal`, `www`,
   `admin`, `mail` or the apex, under the domain the cluster serves (derived
   through `component/frontdoor`, so it cannot disagree with the front door's
-  own hosts). Any other hostname stays cluster-owner-only and hand-certified,
+  own hosts). Any other hostname stays cluster-owner-only; a CLIENT's own
+  domain is bound through the custom-domain flow, which verifies two DNS
+  records and then provisions its exact-host Ingress and Certificate itself
+  (epic memql#4805, [front-door.md](front-door.md#custom-domains-a-clients-own-name)),
   for the reason [Limits](#limits) gives. Hostname UNIQUENESS binds every
   caller including a cluster owner: the edge resolves a request Host to one
   row, so a second live row on the same hostname makes which site answers

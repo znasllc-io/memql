@@ -97,6 +97,31 @@ shape site siteFull {
   row.createdAt
 }
 
+/// Full projection of v1:platform:customDomain -- what the Domains panel renders and what the
+/// verification sweep reads to decide its next move (epic memql#4805).
+///
+/// EVERY FIELD THE PANEL NEEDS IS HERE, and that is a rule rather than a convenience: a concept
+/// field is not a readable field, and a projection that omitted `token` or `failureDetail` would
+/// hand the guidance panel a row with nothing to render and no error to explain it. `token` is
+/// projected on purpose -- it is the value the client has to publish in DNS, so a panel that could
+/// not show it could not do its job. The tier is clusterOwner, so only an operator ever reads it.
+@row
+shape customDomain customDomainFull {
+  row.id
+  siteId
+  hostname
+  accountId
+  token
+  status
+  failureReason
+  failureDetail
+  lastCheckedAt
+  verifiedAt
+  issuedAt
+  removedAt
+  row.createdAt
+}
+
 /// Full projection of v1:platform:outboxEntry -- what the drain worker needs to deliver an entry
 /// and what the operator's dead-letter queue renders.
 @row

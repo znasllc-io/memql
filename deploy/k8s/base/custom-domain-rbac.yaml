@@ -1,0 +1,86 @@
+# RBAC for custom domains (epic memql#4805, design D6).
+#
+# WHAT THIS GRANTS, AND WHY IT IS THIS NARROW
+#
+# When a client's own domain has passed BOTH DNS checks, the reconciliation
+# sweep provisions exactly two objects for it -- an exact-host Ingress that
+# routes the hostname to the edge, and a cert-manager Certificate that gets it a
+# certificate over HTTP-01 -- and removes the same two when the binding is taken
+# down. That is the complete set of API calls this feature can make. Two kinds,
+# one namespace, no wildcard verb, no wildcard resource, and no ClusterRole.
+#
+# THE SUBJECT IS memql-engine, the ServiceAccount every engine Deployment
+# already runs as, rather than a new one. The sweep fires from the automations
+# cron leader, which is elected across the mesh rather than pinned to a node
+# type, so the grant has to reach whichever replica wins -- and a new
+# ServiceAccount would mean either binding it to every Deployment (the same
+# blast radius, spelled twice) or pinning the sweep to one node type, which is
+# a topology decision made to satisfy a Role.
+#
+# WHY THE ENGINE REACHES THE API AT ALL, when the design specifies a capability
+# script. The engine runtime image is gcr.io/distroless/base-debian12: no bash,
+# no kubectl, and no scripts/ tree -- `.dockerignore` keeps deploy/k8s out of
+# the build context and nothing mounts the repository. A sweep that could only
+# dispatch the script would leave every binding in `issuing` forever on every
+# deployed cluster while passing every test and running perfectly from a
+# developer's shell. This is the same wall memql#4257 hit with deploy-control,
+# and the same answer it reached: plain HTTPS to the API server with the pod's
+# own ServiceAccount, which is what kubectl does underneath, minus kubectl.
+# scripts/deploy/bind-custom-domain.sh remains the operator's path and the
+# cockpit surface's, and applies the identical objects.
+#
+# NO client-go, deliberately and provably (design D2): no k8s.io dependency
+# exists anywhere in this workspace, and the substrate is
+# component/deploycontrol.ClusterAPI -- net/http and the projected token.
+#
+# WHY create/update/patch/delete AND NOT resourceNames. The object names are
+# derived per binding (`custom-domain-<domainId>`), so the set is not knowable
+# when this file is written; Kubernetes RBAC also ignores resourceNames for
+# `list`, which would make a rule read as narrower than it is. Two named kinds
+# in the mesh's own namespace is the honest scope. What bounds the privilege is
+# what the code does with it: two object shapes, both composed in Go from a
+# hostname the graph has already verified.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: memql-custom-domain
+  namespace: memql
+  labels:
+    app.kubernetes.io/part-of: memql
+    app.kubernetes.io/name: custom-domain
+rules:
+  # The route. `get` is what makes the apply idempotent and what reads back
+  # what is actually there; `delete` is the unbind half.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  # The certificate. `get` is load-bearing beyond the apply: `issuing` becomes
+  # `live` ONLY when a read of this object's Ready condition says so, because
+  # applying a Certificate is not the same as holding one -- a status that went
+  # live on the apply would tell somebody their domain was serving while
+  # browsers were still being handed the controller's self-signed default.
+  #
+  # NOTE what is absent: no grant on `secrets`. The TLS Secret cert-manager
+  # writes is read by the ingress controller, never by the engine, and a grant
+  # to read certificate private keys is not one this feature needs to do its
+  # job.
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memql-custom-domain
+  namespace: memql
+  labels:
+    app.kubernetes.io/part-of: memql
+    app.kubernetes.io/name: custom-domain
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: memql-custom-domain
+subjects:
+  - kind: ServiceAccount
+    name: memql-engine
+    namespace: memql

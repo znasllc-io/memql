@@ -552,6 +552,279 @@ mutate packState setPackEnabled {
   }
 }
 
+// ---- Custom domains (epic memql#4805) ----
+//
+// THE GRAPH HOLDS THE STATE MACHINE and these six writes are its whole
+// vocabulary: one create, one remove a person makes, and four the sweep makes
+// on their behalf. Everything the cluster actually does -- two DNS lookups, an
+// Ingress, a Certificate -- hangs off a status this file writes.
+//
+// THE CREATE IS @serverOnly, AND THE REASON IS THE TOKEN. `token` is the value
+// a client publishes at `TXT _memql-verify.<hostname>` to prove they control
+// the name, so a caller who chooses it proves nothing: one constant published
+// under a thousand domains would verify all of them. It is minted in Go
+// (integrations/customdomain) and this mutation is how that mint reaches the
+// row. The client-reachable surface is the `customDomainAdd` builtin, which is
+// the same split sitePublishFromArtifact already uses -- a write that needs Go
+// is reached through a capability, not by widening a mutation.
+//
+// THE FOUR SWEEP WRITERS ARE @serverOnly for the reason the outbox writers
+// below are: actor.userId scoping has nobody to scope to. They are the
+// deployment's own reconciliation state, written by the engine under its
+// operator identity with internal origin stamped -- origin defaults to CLIENT,
+// and a missed stamp refuses every call with only a WARN in the log.
+//
+// REMOVE IS NOT @serverOnly, and the asymmetry is deliberate. It writes no
+// credential and decides nothing the tier has not already decided: an operator
+// asks for the binding to come down, the row goes to `removing`, and the sweep
+// dispatches the unbind. Making it a builtin too would put a Go hop in front of
+// a status write for no gain.
+
+/// Record a new custom-domain binding, pending its DNS records. @serverOnly: the token this writes
+/// is the ownership proof a caller must not choose. `customDomainAdd` (dsl/platform/builtins.memql)
+/// is the reachable surface.
+///
+/// The row lands `pending_dns` with no failureReason -- "created, nothing looked at yet" is a
+/// different statement from "we looked and the record is missing", and the panel says so. The three
+/// D10 guards (a hostname under the cluster's own domain, a front-door collision, more domains than
+/// the per-site maximum) run in Go beside this write, for the same reason the site hostname policy
+/// does: the domain comes from the environment, the maximum is env-tunable, and the collision needs
+/// a read.
+///
+/// actor.userId scoping is not the fix, and could not be. There is nothing to scope to --
+/// v1:platform:customDomain is clusterOwner tier and carries no owner field -- but the deeper reason
+/// is that ownership is not the property in question. What has to hold is that the token was MINTED
+/// rather than supplied, and only the Go frame that minted it knows that; a client-reachable create
+/// taking a caller's token is a verification primitive that verifies nothing, however well scoped.
+@serverOnly
+@description("Create a custom-domain binding in v1:platform:customDomain, pending DNS verification. The ownership token is minted server-side.")
+mutate customDomain createCustomDomain {
+  args {
+    domainId   string!
+    siteId     string!
+    hostname   string!  @maxLength(253) @pattern("^[a-z0-9][a-z0-9.-]*[a-z0-9]$")
+    token      string!
+    accountId  string
+  }
+  insert {
+    accept { siteId, hostname, token, accountId }
+    stamp {
+      id:             args.domainId
+      status:         "pending_dns"
+      failureReason:  ""
+      failureDetail:  ""
+    }
+  }
+}
+
+/// Ask for a binding to come down. The row walks to `removing`; the sweep dispatches the unbind
+/// script, and `markCustomDomainRemoved` closes the walk.
+///
+/// THE HOSTNAME STOPS RESOLVING AT THIS WRITE, not at the Ingress deletion: `liveCustomDomainByHostname`
+/// filters `status=="live"`, so the edge stops answering the moment this lands. That ordering is the
+/// point -- an operator removing a binding because it is being abused should not have to wait for
+/// kubectl.
+@description("Start removing a custom-domain binding. The row walks to `removing` and the reconciliation sweep takes the Ingress and Certificate away.")
+mutate customDomain removeCustomDomain {
+  args {
+    domainId  string!
+  }
+  update {
+    id:             args.domainId
+    status:         "removing"
+    failureReason:  ""
+    failureDetail:  ""
+  }
+}
+
+/// What the sweep saw when a check did not pass. The row stays (or lands) in `verifying` and carries
+/// the typed reason plus what was actually observed.
+///
+/// `lastCheckedAt` is written on EVERY pass, including the ones that change nothing else, which is
+/// what lets the panel say "checked 40 seconds ago, still not pointing" rather than leaving somebody
+/// unable to tell a stuck sweep from a stuck record.
+///
+/// actor.userId scoping is not the fix and there is nobody to scope to: the caller is the
+/// reconciliation sweep, running under the engine's own operator identity, so actor.userId is empty
+/// for every legitimate caller and a self-scoped filter would match nothing. The concept's
+/// clusterOwner tier is the access decision. What @serverOnly adds over it is the WIRE -- without it
+/// these become typed SDK methods whose only use is to tell the Domains panel something about the
+/// cluster's DNS that nobody checked.
+@serverOnly
+@description("Record a failed custom-domain verification pass: the typed reason, what was observed, and when the sweep looked.")
+mutate customDomain recordCustomDomainCheck {
+  args {
+    domainId       string!
+    failureReason  string!
+    failureDetail  string
+    lastCheckedAt  datetime!
+  }
+  update {
+    accept { failureReason, lastCheckedAt }
+    stamp {
+      id:             args.domainId
+      status:         "verifying"
+      failureDetail:  args.failureDetail ?? ""
+    }
+  }
+}
+
+/// Both DNS checks passed: the name is proved and it points here. The row moves to `issuing` and the
+/// next sweep pass dispatches the bind script.
+///
+/// `verifiedAt` is written once and never cleared. An issuance that fails afterwards does not
+/// un-prove control of the name, and clearing it would restart a walk that is already past this
+/// stage.
+///
+/// actor.userId scoping is not the fix and there is nobody to scope to: the caller is the
+/// reconciliation sweep, running under the engine's own operator identity, so actor.userId is empty
+/// for every legitimate caller and a self-scoped filter would match nothing. The concept's
+/// clusterOwner tier is the access decision. What @serverOnly adds over it is the WIRE -- without it
+/// these become typed SDK methods whose only use is to tell the Domains panel something about the
+/// cluster's DNS that nobody checked.
+@serverOnly
+@description("Promote a custom domain to `issuing` after both DNS checks pass, stamping when the name was verified.")
+mutate customDomain markCustomDomainVerified {
+  args {
+    domainId       string!
+    verifiedAt     datetime!
+    lastCheckedAt  datetime!
+  }
+  update {
+    accept { verifiedAt, lastCheckedAt }
+    stamp {
+      id:             args.domainId
+      status:         "issuing"
+      failureReason:  ""
+      failureDetail:  ""
+    }
+  }
+}
+
+/// Provisioning did not go through. The row STAYS in `issuing` and carries the typed reason plus the
+/// capability envelope's own detail.
+///
+/// IT DOES NOT FALL BACK TO `verifying`, and that is the honest reading: the DNS is verified, so
+/// re-running the two lookups would prove nothing that is not already proven, and a status that
+/// walked backwards would make the panel look like it had lost ground. `issuing` plus
+/// `no_acme_issuer` says exactly what is true -- this cluster is trying to issue and cannot -- which
+/// is the answer a local k3d install should get forever rather than a pretend success (design D7).
+///
+/// RETRIES RIDE THE SCHEDULE, and re-applying is safe because the bind script is idempotent: a
+/// second `kubectl apply` of an unchanged Certificate is a no-op, so cert-manager's own ACME backoff
+/// stays the thing that governs Let's Encrypt, not this loop.
+///
+/// actor.userId scoping is not the fix and there is nobody to scope to: the caller is the
+/// reconciliation sweep, running under the engine's own operator identity, so actor.userId is empty
+/// for every legitimate caller and a self-scoped filter would match nothing. The concept's
+/// clusterOwner tier is the access decision. What @serverOnly adds over it is the WIRE -- without it
+/// these become typed SDK methods whose only use is to tell the Domains panel something about the
+/// cluster's DNS that nobody checked.
+@serverOnly
+@description("Record a refused or failed certificate issuance on a custom domain, keeping it in `issuing` so the next sweep pass retries.")
+mutate customDomain recordCustomDomainIssuanceFailure {
+  args {
+    domainId       string!
+    failureReason  string!
+    failureDetail  string
+    lastCheckedAt  datetime!
+  }
+  update {
+    accept { failureReason, lastCheckedAt }
+    stamp {
+      id:             args.domainId
+      status:         "issuing"
+      failureDetail:  args.failureDetail ?? ""
+    }
+  }
+}
+
+/// The objects are applied and the certificate is not Ready yet. The ordinary state for the first
+/// minute of an HTTP-01 order, and NOT a failure: it writes no failureReason, so the panel shows
+/// `issuing` with a plain note rather than something a person should go and fix.
+///
+/// `lastCheckedAt` still moves, which is the point -- "asked 30 seconds ago, still waiting" and
+/// "nothing has looked at this in an hour" are different situations and the panel has to be able to
+/// tell them apart.
+///
+/// actor.userId scoping is not the fix and there is nobody to scope to: the caller is the
+/// reconciliation sweep, running under the engine's own operator identity, so actor.userId is empty
+/// for every legitimate caller and a self-scoped filter would match nothing. The concept's
+/// clusterOwner tier is the access decision. What @serverOnly adds over it is the WIRE -- without it
+/// these become typed SDK methods whose only use is to tell the Domains panel something about the
+/// cluster's DNS that nobody checked.
+@serverOnly
+@description("Record an issuance pass that applied the objects and is waiting for the certificate to become Ready. Clears any previous failure and moves lastCheckedAt.")
+mutate customDomain recordCustomDomainIssuingProgress {
+  args {
+    domainId       string!
+    note           string
+    lastCheckedAt  datetime!
+  }
+  update {
+    id:             args.domainId
+    status:         "issuing"
+    failureReason:  ""
+    failureDetail:  args.note ?? ""
+    lastCheckedAt:  args.lastCheckedAt
+  }
+}
+
+/// The certificate came back Ready: the edge now resolves this hostname to its site.
+///
+/// actor.userId scoping is not the fix and there is nobody to scope to: the caller is the
+/// reconciliation sweep, running under the engine's own operator identity, so actor.userId is empty
+/// for every legitimate caller and a self-scoped filter would match nothing. The concept's
+/// clusterOwner tier is the access decision. What @serverOnly adds over it is the WIRE -- without it
+/// these become typed SDK methods whose only use is to tell the Domains panel something about the
+/// cluster's DNS that nobody checked.
+@serverOnly
+@description("Mark a custom domain live once its certificate is Ready. The edge resolves the hostname to its site from this write on.")
+mutate customDomain markCustomDomainLive {
+  args {
+    domainId       string!
+    issuedAt       datetime!
+    lastCheckedAt  datetime!
+  }
+  update {
+    accept { issuedAt, lastCheckedAt }
+    stamp {
+      id:             args.domainId
+      status:         "live"
+      failureReason:  ""
+      failureDetail:  ""
+    }
+  }
+}
+
+/// The unbind completed. Terminal, and the row STAYS -- the history is the audit, so a binding this
+/// cluster once served is still answerable after it is gone.
+///
+/// actor.userId scoping is not the fix and there is nobody to scope to: the caller is the
+/// reconciliation sweep, running under the engine's own operator identity, so actor.userId is empty
+/// for every legitimate caller and a self-scoped filter would match nothing. The concept's
+/// clusterOwner tier is the access decision. What @serverOnly adds over it is the WIRE -- without it
+/// these become typed SDK methods whose only use is to tell the Domains panel something about the
+/// cluster's DNS that nobody checked.
+@serverOnly
+@description("Close a custom domain's walk once the Ingress and Certificate are gone. The row survives with its terminal status; nothing deletes.")
+mutate customDomain markCustomDomainRemoved {
+  args {
+    domainId       string!
+    removedAt      datetime!
+    lastCheckedAt  datetime!
+  }
+  update {
+    accept { removedAt, lastCheckedAt }
+    stamp {
+      id:             args.domainId
+      status:         "removed"
+      failureReason:  ""
+      failureDetail:  ""
+    }
+  }
+}
+
 // ---- The sync runtime's writes (epic memql#4378) ----
 //
 // Every one is @serverOnly, and for the same reason the shopify mirror's

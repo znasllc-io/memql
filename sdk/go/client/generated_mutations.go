@@ -11641,6 +11641,29 @@ func RemoveAgentFromSpaceBuild(args RemoveAgentFromSpaceArgs) string {
 	return b.String()
 }
 
+// RemoveCustomDomain -- Ask for a binding to come down. The row walks to `removing`; the sweep dispatches the unbind script, and `markCustomDomainRemoved` closes the walk.
+// THE HOSTNAME STOPS RESOLVING AT THIS WRITE, not at the Ingress deletion: `liveCustomDomainByHostname` filters `status=="live"`, so the edge stops answering the moment this lands. That ordering is the point -- an operator removing a binding because it is being abused should not have to wait for kubectl.
+//
+// Bound concept: v1:platform:customDomain (machine-readable: BoundConcepts["removeCustomDomain"] in generated_concepts.go).
+type RemoveCustomDomainArgs struct {
+	DomainId string
+}
+
+// RemoveCustomDomain calls the engine mutation removeCustomDomain.
+func (qc *QueryClient) RemoveCustomDomain(ctx context.Context, args RemoveCustomDomainArgs) (*Result, error) {
+	call := RemoveCustomDomainBuild(args)
+	return qc.executeNamed(ctx, "removeCustomDomain", call)
+}
+
+func RemoveCustomDomainBuild(args RemoveCustomDomainArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation removeCustomDomain(")
+	b.WriteString("domainId: ")
+	b.WriteString(quoteMemQL(args.DomainId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RenameLibraryFolder -- Rename a folder. One field on one row: names are display labels, not namespaces (design D3), so nothing else is touched, no uniqueness is checked, and every artifact filed under the folder is oblivious -- they point at the id, and the id does not change.
 //
 // Bound concept: v1:library:folder (machine-readable: BoundConcepts["renameLibraryFolder"] in generated_concepts.go).

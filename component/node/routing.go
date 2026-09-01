@@ -229,6 +229,30 @@ func defaultRoutingRules() []RoutingRule {
 		// the consumer.
 		{Pattern: "graph.node.created.v1:platform:site", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:platform:site", TargetType: ""},
+		// Custom domains (epic memql#4805). TWO consumers on two different
+		// nodes, which is why the rule is needed twice over:
+		//
+		//   * component/edge's invalidation subscriber, exactly as for the
+		//     site pair above. A binding is written wherever the OS shell's
+		//     connection terminates and read on every edge replica's own
+		//     resolver cache, and `removeCustomDomain` stops a hostname
+		//     resolving at the instant it is written -- so without this rule
+		//     an unbound domain keeps being served by every replica but one
+		//     until the TTL backstop expires.
+		//   * the OS Deployables app's Domains panel. These rows are written
+		//     by the reconciliation sweep -- on whichever replica the
+		//     automations cron leader elected -- and read on the bff-served
+		//     surface somebody is watching while they wait for DNS to
+		//     propagate. Default-deny leaves that panel correct on load and
+		//     frozen afterwards, which is the failure that looks like it is
+		//     working.
+		//
+		// Volume is one event per state transition per bound hostname -- a
+		// handful over the minutes a domain takes to go live, then nothing --
+		// so this is nowhere near the ground v1:worker:invocation is excluded
+		// on. The sweep's no-change passes write no row at all.
+		{Pattern: "graph.node.created.v1:platform:customDomain", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:platform:customDomain", TargetType: ""},
 		// ---- The browser-facing completion (memql#4542) -------------------
 		//
 		// Everything from here to the end of this block was added by ONE

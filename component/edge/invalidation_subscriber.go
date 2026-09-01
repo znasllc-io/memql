@@ -29,6 +29,19 @@ const SiteInvalidationSubscriberComponent = common.ComponentName("edge.siteInval
 // exists to prevent.
 const sitePattern = "graph.node.*.v1:platform:site"
 
+// customDomainPattern is the same shape for v1:platform:customDomain (epic
+// memql#4805). The resolver's cache is keyed by HOSTNAME and a custom-domain
+// row carries one, so the existing handler evicts the right entry with no
+// change at all -- what it needed was to be reached.
+//
+// IT MATTERS MORE HERE THAN FOR SITES, because of what the statuses mean.
+// `removeCustomDomain` stops the hostname resolving at the instant it is
+// written, and that write lands wherever the OS shell's connection terminates
+// while the cached resolution lives on every edge replica. Without this rule
+// the domain an operator just unbound keeps being served, by every replica but
+// one, until the TTL backstop expires.
+const customDomainPattern = "graph.node.*.v1:platform:customDomain"
+
 // invalidator is the narrow write the subscriber needs -- Resolver.Invalidate
 // only, not the read side, so a test can stub it without a QueryExecutor.
 type invalidator interface {
@@ -108,13 +121,23 @@ func (s *SiteInvalidationSubscriber) Start(_ context.Context) {
 			return
 		}
 		s.running.Store(true)
-		s.unsubscribe = s.bus.Subscribe(
+		unsubSite := s.bus.Subscribe(
 			sitePattern,
 			s.handle,
 			events.WithSubscriberName("edge.siteInvalidationSubscriber"),
 		)
+		unsubDomain := s.bus.Subscribe(
+			customDomainPattern,
+			s.handle,
+			events.WithSubscriberName("edge.customDomainInvalidationSubscriber"),
+		)
+		s.unsubscribe = func() {
+			unsubSite()
+			unsubDomain()
+		}
 		close(s.doneCh)
-		s.logger.Info("site invalidation subscriber active", "pattern", sitePattern)
+		s.logger.Info("site invalidation subscriber active",
+			"patterns", sitePattern+", "+customDomainPattern)
 	})
 }
 

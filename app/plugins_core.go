@@ -31,6 +31,14 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/actionsearch"
 	_ "github.com/znasllc-io/memql/integrations/avatardirect"
 	_ "github.com/znasllc-io/memql/integrations/chat"
+	// Custom domains (epic memql#4805). Registered on every node type, like
+	// release above and for the same reason: the two builtins are declared in
+	// dsl/platform/builtins.memql, which every binary loads, and a capability
+	// present in the DSL and absent from the registry is a boot-time
+	// resolution failure. Gating it by build tag would additionally make the
+	// `add` capability's availability depend on which replica a browser's
+	// stream landed on.
+	_ "github.com/znasllc-io/memql/integrations/customdomain"
 	_ "github.com/znasllc-io/memql/integrations/dailyspace"
 	_ "github.com/znasllc-io/memql/integrations/database"
 	_ "github.com/znasllc-io/memql/integrations/deployversion"

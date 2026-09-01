@@ -2399,6 +2399,94 @@ QueryClient.prototype.currentUser = function (this: QueryClient, args: CurrentUs
   return this.executeNamed("currentUser", buildCurrentUser(args), opts);
 };
 
+/** One custom domain by its own row id -- the seam the sweep re-reads through and the panel's gap-recovery read. */
+// Bound concept: v1:platform:customDomain (machine-readable: BoundConcepts["customDomainById"] in generated_concepts.ts).
+export interface CustomDomainByIdArgs {
+  domainId: string;
+}
+
+export function buildCustomDomainById(args: CustomDomainByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("domainId: " + renderMemQLValue(args.domainId));
+  return "query customDomainById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    customDomainById(args: CustomDomainByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.customDomainById = function (this: QueryClient, args: CustomDomainByIdArgs = {} as CustomDomainByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("customDomainById", buildCustomDomainById(args), opts);
+};
+
+/** Every custom domain this cluster knows about. The sweep's read, and the panel's live seed.
+NO STATUS FILTER, and that is what makes it usable as a live collection's seed: a subscription delivers every row the concept writes, so a seed narrowed to non-terminal rows would give the browser a list that grows a `live` row the first time one is touched and never has one on load. The sweep does its own narrowing in Go, over a set this small enough to be honest about -- one row per bound hostname, not per request. */
+// Bound concept: v1:platform:customDomain (machine-readable: BoundConcepts["customDomainsAll"] in generated_concepts.ts).
+export interface CustomDomainsAllArgs {
+}
+
+export function buildCustomDomainsAll(args: CustomDomainsAllArgs): string {
+  void args;
+  return "query customDomainsAll()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    customDomainsAll(args?: CustomDomainsAllArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.customDomainsAll = function (this: QueryClient, args: CustomDomainsAllArgs = {} as CustomDomainsAllArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("customDomainsAll", buildCustomDomainsAll(args), opts);
+};
+
+/** Every custom domain bound to one deployable, including removed ones. What the Domains panel lists.
+REMOVED ROWS ARE INCLUDED DELIBERATELY. The concept's rows survive removal because the history is the audit, and a list that hid them would make "we un-bound acme.com last Tuesday" a fact only the database remembers. The panel renders a removed row with its terminal status rather than dropping it, so the walk somebody watched stays where they watched it. */
+// Bound concept: v1:platform:customDomain (machine-readable: BoundConcepts["customDomainsForSite"] in generated_concepts.ts).
+export interface CustomDomainsForSiteArgs {
+  siteId: string;
+}
+
+export function buildCustomDomainsForSite(args: CustomDomainsForSiteArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  return "query customDomainsForSite(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    customDomainsForSite(args: CustomDomainsForSiteArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.customDomainsForSite = function (this: QueryClient, args: CustomDomainsForSiteArgs = {} as CustomDomainsForSiteArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("customDomainsForSite", buildCustomDomainsForSite(args), opts);
+};
+
+/** Every binding the reconciliation sweep still has work for: everything but `live` and `removed`.
+UNPAGINATED, DELIBERATELY, and the narrowing is what makes that defensible. `customDomainsAll` carries a page size because it backs a list somebody scrolls; a SWEEP that read a page would silently never reconcile the bindings past it, and the symptom is a domain that verifies for nobody with nothing in any log to say why. The set here is bounded by how many domains are in flight at once -- a cluster can serve five hundred and have none of them here -- rather than by how many it has ever bound.
+The two settled statuses are excluded rather than filtered out in Go, so a pass over a cluster with nothing happening does no DNS lookups and reads almost nothing. NO `sort`, and the parser is right to insist: a sorted query is a bounded one, and this read is deliberately unbounded. Order costs nothing here either -- the sweep advances each binding independently, so no row's outcome depends on which was looked at first. */
+// Bound concept: v1:platform:customDomain (machine-readable: BoundConcepts["customDomainsToReconcile"] in generated_concepts.ts).
+export interface CustomDomainsToReconcileArgs {
+}
+
+export function buildCustomDomainsToReconcile(args: CustomDomainsToReconcileArgs): string {
+  void args;
+  return "query customDomainsToReconcile()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    customDomainsToReconcile(args?: CustomDomainsToReconcileArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.customDomainsToReconcile = function (this: QueryClient, args: CustomDomainsToReconcileArgs = {} as CustomDomainsToReconcileArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("customDomainsToReconcile", buildCustomDomainsToReconcile(args), opts);
+};
+
 /** The internal note on one customer. */
 // Bound concept: v1:commerce:customerNote (machine-readable: BoundConcepts["customerNoteFor"] in generated_concepts.ts).
 export interface CustomerNoteForArgs {
@@ -3929,6 +4017,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.liveAppSessionsForUser = function (this: QueryClient, args: LiveAppSessionsForUserArgs = {} as LiveAppSessionsForUserArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("liveAppSessionsForUser", buildLiveAppSessionsForUser(args), opts);
+};
+
+/** Resolve a request Host to the site a LIVE custom domain binds it to (design D8). The edge's one extra resolution step, asked only after siteByHostname misses.
+`status=="live"` is the whole security property of this read. A row reaches `live` only after both DNS checks passed AND the certificate came back Ready, so a hostname answering here is one whose owner proved control of the name and whose traffic this cluster can actually terminate TLS for. Every other status resolves to nothing, which is why a removal takes effect at the speed of a row write rather than at the speed of an Ingress deletion. */
+// Bound concept: v1:platform:customDomain (machine-readable: BoundConcepts["liveCustomDomainByHostname"] in generated_concepts.ts).
+export interface LiveCustomDomainByHostnameArgs {
+  hostname: string;
+}
+
+export function buildLiveCustomDomainByHostname(args: LiveCustomDomainByHostnameArgs): string {
+  const parts: string[] = [];
+  parts.push("hostname: " + renderMemQLValue(args.hostname));
+  return "query liveCustomDomainByHostname(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    liveCustomDomainByHostname(args: LiveCustomDomainByHostnameArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.liveCustomDomainByHostname = function (this: QueryClient, args: LiveCustomDomainByHostnameArgs = {} as LiveCustomDomainByHostnameArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("liveCustomDomainByHostname", buildLiveCustomDomainByHostname(args), opts);
 };
 
 /** Returns the magic-link request whose tokenHash matches the argument. Zero or one result. */

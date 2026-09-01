@@ -75,6 +75,20 @@ var pluginKinds = map[string]moduleKind{
 	"embedding":     kindComponent, // see the note below
 	"deployversion": kindComponent,
 	"sitePublish":   kindComponent, // see the note below
+	// Custom domains (epic memql#4805). A COMPONENT by this table's own test:
+	// does turning it off remove a feature, or break the engine?
+	//
+	// It breaks it. The two builtins are declared in dsl/platform/builtins.memql,
+	// which EVERY binary loads, and a capability present in the DSL and absent
+	// from the registry is a boot-time resolution failure -- the same reason
+	// `release` above is registered on every node type. The sweep automation
+	// loads everywhere too.
+	//
+	// It is also not an integration: it calls nobody's API. It reads public
+	// DNS and this cluster's own Kubernetes API server, which is the same
+	// relationship `database` has to Postgres rather than the one `shopify`
+	// has to Shopify.
+	"customDomain": kindComponent,
 	// The data-origins runtime (epic memql#4378): the inbound dispatcher
 	// and the backfill / reconciliation runners.
 	//

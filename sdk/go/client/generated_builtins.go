@@ -273,6 +273,34 @@ func CommerceStockBuild(args CommerceStockArgs) string {
 	return b.String()
 }
 
+// CustomDomainAdd -- The reachable half of creating a binding: mint the ownership token, prefill the account tie, and write the row. `createCustomDomain` itself is @serverOnly precisely so this is the only way in -- a caller who chooses their own verification token proves nothing by publishing it.
+type CustomDomainAddArgs struct {
+	// The v1:platform:site row this domain should serve.
+	SiteId string
+	// The client's own fully qualified host, e.g. www.acme.com or acme.com.
+	Hostname string
+}
+
+// CustomDomainAdd calls the engine builtin customDomainAdd.
+func (qc *QueryClient) CustomDomainAdd(ctx context.Context, args CustomDomainAddArgs) (*Result, error) {
+	call := CustomDomainAddBuild(args)
+	return qc.executeNamed(ctx, "customDomainAdd", call)
+}
+
+func CustomDomainAddBuild(args CustomDomainAddArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin customDomainAdd(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("hostname: ")
+	b.WriteString(quoteMemQL(args.Hostname))
+	b.WriteString(")")
+	return b.String()
+}
+
 // DataOrigins -- List every registered concept with its data state (mirror | origin | native), the system where its changes are made, and the connectors it depends on. Produced from the live concept registry, never persisted. Feeds the portal's Data origins page.
 type DataOriginsArgs struct {
 }

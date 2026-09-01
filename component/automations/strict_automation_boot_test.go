@@ -77,8 +77,10 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // installInstance, repairInstance and the bringUpInstance composition over the first
 // two (epic memql#4463); 41 -> 42 with deprovisionInstance, the lifecycle's
 // destructive verb (memql#4469); 42 -> 43 with seedSelfAccount, the accounts
-// domain's boot seed for the owner's own company (epic memql#4800).
-const shippedAutomationCount = 43
+// domain's boot seed for the owner's own company (epic memql#4800); 43 -> 44
+// with reconcileCustomDomains, the custom-domain verification + provisioning
+// sweep (epic memql#4805).
+const shippedAutomationCount = 44
 
 // TestStrictAutomationBoot_MalformedAutomationRefusesBoot is the core
 // acceptance test: a malformed automation injected as a throwaway domain (the

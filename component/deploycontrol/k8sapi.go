@@ -83,6 +83,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -122,10 +123,14 @@ const (
 
 // inClusterExecutor implements Executor against the Kubernetes API server
 // using the pod's own ServiceAccount.
+//
+// The transport is *ClusterAPI, shared with every other in-process caller that
+// needs the API server (component/customdomain's provisioner is the second).
+// ONE implementation of the token read, the CA pool and the request loop: a
+// second copy is a copy that stops re-reading the projected token, and the
+// symptom of that is a substrate that works on the day it is deployed.
 type inClusterExecutor struct {
-	base   string // https://host:port
-	token  string
-	client *http.Client
+	*ClusterAPI
 	// repoRoot is retained ONLY so the git-dependent verbs can say whether a
 	// checkout was configured at all. Empty is the deployed case.
 	repoRoot string
@@ -155,6 +160,35 @@ func InClusterAvailable() bool {
 // re-read is in tokenNow() below rather than here; this field is the fallback
 // for the case where the file becomes unreadable later.
 func newInClusterExecutor(repoRoot string) (*inClusterExecutor, error) {
+	api, err := NewClusterAPI()
+	if err != nil {
+		return nil, err
+	}
+	return &inClusterExecutor{ClusterAPI: api, repoRoot: repoRoot}, nil
+}
+
+// ClusterAPI is a minimal Kubernetes API-server client authenticated with the
+// pod's own projected ServiceAccount.
+//
+// It is the whole of this repository's in-cluster write substrate, and it is
+// deliberately small: a request method, a token that is re-read, and the
+// cluster CA. Everything above it composes paths and bodies. See the header of
+// this file for why the API server rather than kubectl, a sidecar or client-go
+// -- the reasoning applies unchanged to every caller, which is why this is one
+// type rather than one per feature.
+type ClusterAPI struct {
+	base   string // https://host:port
+	token  string
+	client *http.Client
+}
+
+// NewClusterAPI builds the API-server client from the pod's projected
+// ServiceAccount. It reads the token ONCE here, which is a deliberate
+// limitation worth stating: a projected token is refreshed in place by the
+// kubelet, so a long-lived process holding the first read would eventually
+// present an expired one. The re-read is in tokenNow() below; this field is
+// the fallback for the case where the file becomes unreadable later.
+func NewClusterAPI() (*ClusterAPI, error) {
 	host := strings.TrimSpace(os.Getenv("KUBERNETES_SERVICE_HOST"))
 	port := strings.TrimSpace(os.Getenv("KUBERNETES_SERVICE_PORT"))
 	if port == "" {
@@ -179,10 +213,9 @@ func newInClusterExecutor(repoRoot string) (*inClusterExecutor, error) {
 		// carries a cluster-admin-adjacent bearer token is not a fallback.
 		return nil, fmt.Errorf("%s: cluster CA at %s parsed to zero certificates", ReasonNoClusterAPI, saCACertPath)
 	}
-	return &inClusterExecutor{
-		base:     "https://" + net_JoinHostPort(host, port),
-		token:    strings.TrimSpace(string(tok)),
-		repoRoot: repoRoot,
+	return &ClusterAPI{
+		base:  "https://" + net_JoinHostPort(host, port),
+		token: strings.TrimSpace(string(tok)),
 		client: &http.Client{
 			Timeout: k8sRequestTimeout,
 			Transport: &http.Transport{
@@ -190,6 +223,15 @@ func newInClusterExecutor(repoRoot string) (*inClusterExecutor, error) {
 			},
 		},
 	}, nil
+}
+
+// Do issues one API-server request and returns the body. The exported form of
+// `do`, for callers outside this file.
+//
+// `path` is everything after the API server's host, e.g.
+// `apis/networking.k8s.io/v1/namespaces/memql/ingresses/x`.
+func (e *ClusterAPI) Do(ctx context.Context, method, path, contentType string, body []byte) ([]byte, error) {
+	return e.do(ctx, method, path, contentType, body)
 }
 
 // net_JoinHostPort brackets an IPv6 literal. Spelled out rather than importing
@@ -206,7 +248,7 @@ func net_JoinHostPort(host, port string) string {
 // kubelet rewrites the file well before expiry -- so a process that caches the
 // first read starts 401ing after the token's lifetime, which for a deploy
 // console is "the console worked on the day it was deployed".
-func (e *inClusterExecutor) tokenNow() string {
+func (e *ClusterAPI) tokenNow() string {
 	if b, err := os.ReadFile(saTokenPath); err == nil {
 		if t := strings.TrimSpace(string(b)); t != "" {
 			return t
@@ -220,7 +262,7 @@ func (e *inClusterExecutor) tokenNow() string {
 // message ("applications.argoproj.io \"memql\" is forbidden: User
 // \"system:serviceaccount:memql:memql-deploy\" cannot patch resource") is the
 // single most useful thing an operator can be handed when the RBAC is wrong.
-func (e *inClusterExecutor) do(ctx context.Context, method, path, contentType string, body []byte) ([]byte, error) {
+func (e *ClusterAPI) do(ctx context.Context, method, path, contentType string, body []byte) ([]byte, error) {
 	var rdr io.Reader
 	if body != nil {
 		rdr = bytes.NewReader(body)
@@ -241,9 +283,45 @@ func (e *inClusterExecutor) do(ctx context.Context, method, path, contentType st
 	defer func() { _ = resp.Body.Close() }()
 	out, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return out, fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(out)))
+		// A TYPED error, carrying the code. Callers that branch on a status --
+		// "absent is success" on a delete is the first -- were left matching
+		// the rendered string, which reads a 500 whose BODY mentions 404 as a
+		// successful deletion. The API server's message stays in the text
+		// because it is the single most useful thing an operator can be handed
+		// when the RBAC is wrong.
+		return out, &StatusError{
+			Method: method,
+			Path:   path,
+			Code:   resp.StatusCode,
+			Status: resp.Status,
+			Body:   strings.TrimSpace(string(out)),
+		}
 	}
 	return out, readErr
+}
+
+// StatusError is a non-2xx response from the API server.
+//
+// It exists so a caller can branch on the CODE rather than on the rendered
+// message. The one that needs it today is a delete treating NotFound as
+// success -- unbinding twice is a legitimate thing for a retry to do, and a
+// string match for "404" would also swallow a 500 that merely mentioned one.
+type StatusError struct {
+	Method string
+	Path   string
+	Code   int
+	Status string
+	Body   string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("%s %s: %s: %s", e.Method, e.Path, e.Status, e.Body)
+}
+
+// IsNotFound reports whether err is a 404 from the API server.
+func IsNotFound(err error) bool {
+	var se *StatusError
+	return errors.As(err, &se) && se.Code == http.StatusNotFound
 }
 
 // argoPath composes the collection or single-resource path for one of the

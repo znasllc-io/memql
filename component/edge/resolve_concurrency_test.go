@@ -38,6 +38,13 @@ func (b *blockingExec) SiteByHostname(_ context.Context, hostname string) (*Site
 	return b.rows[hostname], nil
 }
 
+// The alias step's stub. It answers nothing: this test is about how many times
+// the SLOW PATH is entered for one key, and a second read that also returned a
+// site would change what is being measured.
+func (b *blockingExec) SiteForCustomDomain(_ context.Context, _ string) (*Site, error) {
+	return nil, nil
+}
+
 // Concurrent misses for ONE hostname must collapse to a single query. This
 // is the same shape as integrations/cognition's cache-miss singleflight
 // groups (e.g. recentUtterSF / spaceInfoSF in prompt_context_cache.go):
