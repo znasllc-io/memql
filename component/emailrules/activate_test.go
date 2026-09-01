@@ -25,8 +25,8 @@ type fakeEngine struct {
 	// noTemplate makes templateById answer empty, which is what an
 	// unreadable template looks like from the author's envelope.
 	noTemplate bool
-	activate func(owner, bundleID string) error
-	retire   func(owner, bundleID string) error
+	activate   func(owner, bundleID string) error
+	retire     func(owner, bundleID string) error
 }
 
 func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {

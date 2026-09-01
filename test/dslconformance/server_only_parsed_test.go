@@ -218,9 +218,9 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// createEmailRule / updateEmailRule / setEmailRuleStatus.
 		{Path: "campaigns/mutations.memql", Name: "recordEmailRuleGeneration"}: true,
 		{Path: "campaigns/mutations.memql", Name: "recordEmailRuleFiring"}:     true,
-		{Path: "identity/queries.memql", Name: "activeUsers"}:         true,
-		{Path: "identity/queries.memql", Name: "userByEmail"}:         true,
-		{Path: "identity/queries.memql", Name: "userByIdSystem"}:      true,
+		{Path: "identity/queries.memql", Name: "activeUsers"}:                  true,
+		{Path: "identity/queries.memql", Name: "userByEmail"}:                  true,
+		{Path: "identity/queries.memql", Name: "userByIdSystem"}:               true,
 		// memql#3217. The complete-set sibling of activeUsers, behind the
 		// startup per-user seed sweep. @serverOnly for activeUsers' reason
 		// minus most of the exposure -- its projection is userIdRef (row.id
