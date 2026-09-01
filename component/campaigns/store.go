@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -36,6 +37,42 @@ import (
 // whose authority a given read runs under -- which is the one question
 // this design turns on. A store that picked the actor itself would make
 // that invisible exactly where it matters most.
+//
+// # The ORIGIN, unlike the actor, IS the store's business (memql#4820)
+//
+// The actor answers "whose rows may this touch". Internal origin answers a
+// different question -- "did this call arrive over the wire" -- and the two
+// are deliberately independent (component/auth/call_origin.go). Nine of this
+// domain's mutations carry @serverOnly, which means the executor refuses them
+// outright unless auth.OriginFromContext(ctx).IsInternal(). The refusal is
+// the whole point: `startCampaign` moving a campaign to `sending` with no
+// send job behind it, or `updateCampaignProgress` stamping counters for
+// deliveries that never happened, is a write a caller may not perform even on
+// a row they own perfectly.
+//
+// So there are TWO exec paths here, and the split is not decoration:
+//
+//	exec            the ordinary write. Reaches every mutation that is not
+//	                @serverOnly, on the context it was handed.
+//	execServerOnly  stamps internal origin INLINE, on the one Execute that
+//	                needs it, for the nine that are.
+//
+// Stamping everything through one path would be strictly worse in both
+// directions. It would mark contexts that have no business being marked, and
+// it would erase the only place a reader can see WHICH writes this package
+// claims are engine-initiated. The stamp is never bound to a variable and
+// never returned: a marked context that flows on is how memql#2879's hole was
+// reachable, where a trusted frame stamped internal and a later frame in the
+// same tree ran caller-submitted source on the inherited context.
+//
+// A NOTE ON WHAT THE GATE CANNOT SEE. The repo's
+// TestEveryGoCallerOfAServerOnlyConstructStampsInternalOrigin matches
+// `mutation <name>(` inside STRING LITERALS. `SetCampaignStatus` builds its
+// call from a mutationName VARIABLE, so three of the nine -- startCampaign,
+// pauseCampaign, resumeCampaign -- are invisible to it. They are routed
+// through execServerOnly anyway, because the runtime gate is real whether or
+// not a test can see the call, and TestServerOnlyWritesStampInternalOrigin in
+// this package is what pins them.
 
 // Engine is the narrow engine surface the sending engine needs. Kept to
 // one method so tests fake it with flat row envelopes (the outbound
@@ -525,7 +562,7 @@ func (s *Store) RecordDelivery(ctx context.Context, d Delivery) error {
 	if !d.NextAttemptAt.IsZero() {
 		args = append(args, arg{"nextAttemptAt", d.NextAttemptAt.UTC().Format(time.RFC3339)})
 	}
-	return s.exec(ctx, call("mutation", "recordCampaignDelivery", args...))
+	return s.execServerOnly(ctx, call("mutation", "recordCampaignDelivery", args...))
 }
 
 // CampaignProgress is the counter set stamped onto the campaign row.
@@ -548,7 +585,7 @@ func (s *Store) UpdateCampaignProgress(ctx context.Context, campaignID string, p
 	args = appendInt(args, "failedCount", p.FailedCount)
 	args = appendStr(args, "lastError", p.LastError)
 	args = appendTime(args, "completedAt", p.CompletedAt)
-	return s.exec(ctx, call("mutation", "updateCampaignProgress", args...))
+	return s.execServerOnly(ctx, call("mutation", "updateCampaignProgress", args...))
 }
 
 // ScheduleCampaign commits a campaign to a time. OWNED tier: the caller's
@@ -558,7 +595,7 @@ func (s *Store) UpdateCampaignProgress(ctx context.Context, campaignID string, p
 // only a transition -- and the value it carries is the one the drain
 // worker treats as authoritative when it decides whether a send is due.
 func (s *Store) ScheduleCampaign(ctx context.Context, campaignID string, at time.Time) error {
-	return s.exec(ctx, call("mutation", "scheduleCampaign",
+	return s.execServerOnly(ctx, call("mutation", "scheduleCampaign",
 		arg{"campaignId", campaignID},
 		arg{"scheduledAt", at.UTC().Format(time.RFC3339)},
 	))
@@ -567,7 +604,7 @@ func (s *Store) ScheduleCampaign(ctx context.Context, campaignID string, at time
 // SetCampaignStatus drives the operator-visible lifecycle transitions.
 // OWNED tier.
 func (s *Store) SetCampaignStatus(ctx context.Context, mutationName, campaignID string) error {
-	return s.exec(ctx, call("mutation", mutationName, arg{"campaignId", campaignID}))
+	return s.execServerOnly(ctx, call("mutation", mutationName, arg{"campaignId", campaignID}))
 }
 
 // RecordSuppression adds an address's digest to the cluster-wide list.
@@ -600,6 +637,42 @@ func (s *Store) SetRecipientSubscription(ctx context.Context, recipientID, statu
 		args = append(args, arg{"unsubscribedAt", at.UTC().Format(time.RFC3339)})
 	}
 	return s.exec(ctx, call("mutation", "setRecipientSubscription", args...))
+}
+
+// EngagementEvent is one recorded open or click (memql#4823).
+type EngagementEvent struct {
+	CampaignID string
+	DeliveryID string
+	Kind       string
+	URL        string
+	OccurredAt time.Time
+}
+
+// RecordEngagementEvent appends one open or click. OWNED tier AND
+// @serverOnly, which is an unusual pair worth stating.
+//
+// The tier says the row belongs to the campaign's owner, so the caller must
+// supply that owner's actor -- the tracking handler derives it from the
+// signed token, never from the request. The @serverOnly says the mutation is
+// unreachable over the wire at all, which is what stops an unauthenticated
+// endpoint's shape (a mail client fetching an image) from becoming a
+// client-reachable writer of somebody else's rows. Neither would be
+// sufficient alone: the tier without the annotation would let any
+// authenticated caller inflate their own campaign's numbers, and the
+// annotation without the tier would leave the row owned by nobody.
+func (s *Store) RecordEngagementEvent(ctx context.Context, e EngagementEvent) error {
+	args := []arg{
+		{"campaignId", e.CampaignID},
+		{"deliveryId", e.DeliveryID},
+		{"kind", e.Kind},
+	}
+	if e.URL != "" {
+		args = append(args, arg{"url", e.URL})
+	}
+	if !e.OccurredAt.IsZero() {
+		args = append(args, arg{"occurredAt", e.OccurredAt.UTC().Format(time.RFC3339)})
+	}
+	return s.execServerOnly(ctx, call("mutation", "recordEngagementEvent", args...))
 }
 
 // RecipientByID reads one recipient. OWNED tier -- the unsubscribe
@@ -739,6 +812,28 @@ func cursorFromResult(res any) string {
 
 func (s *Store) exec(ctx context.Context, q string) error {
 	if _, err := s.engine.Execute(ctx, q); err != nil {
+		return fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
+	}
+	return nil
+}
+
+// execServerOnly runs one @serverOnly mutation with internal origin stamped
+// INLINE, as the argument to the single Execute that needs it (memql#4820).
+//
+// Only the nine @serverOnly writers come through here. The stamp is what the
+// engine's gate looks for, so without it the call does not degrade -- it fails
+// every time, on every cluster, with `function X is server-only and cannot be
+// called by a client` and a WARN nobody reads. That is the failure mode this
+// exists to prevent, and it is why the routing is per-mutation rather than a
+// blanket applied to `exec`.
+//
+// The actor still comes from the caller's ctx, untouched. Origin and identity
+// answer different questions and this function only answers one of them: a
+// delivery row written through here is still owned by whoever the ctx says,
+// which for the drain worker is the campaign's owner and for nobody is a
+// widening.
+func (s *Store) execServerOnly(ctx context.Context, q string) error {
+	if _, err := s.engine.Execute(auth.ContextWithInternalOrigin(ctx), q); err != nil {
 		return fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
 	}
 	return nil

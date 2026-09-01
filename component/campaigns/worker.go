@@ -656,7 +656,7 @@ func (w *Worker) deliver(ctx context.Context, msg email.Message) error {
 	if w.sendHook != nil {
 		return w.sendHook(ctx, sender, msg)
 	}
-	return sender.Send(ctx, msg)
+	return sender.Send(ctx, msg, email.SendAs{})
 }
 
 // nowUTC is the worker's clock, tolerating a zero-valued Worker. Tests

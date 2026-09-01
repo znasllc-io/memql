@@ -246,13 +246,20 @@ func argOf(q, name string) string {
 
 // recordingSender captures every message instead of delivering it, and
 // can be told to fail.
+//
+// It records the SendAs beside the message (memql#4821). The identity is a
+// PARAMETER rather than a header on the message, so a fake that dropped it
+// would leave every identity-resolution assertion reaching for a value it
+// cannot see -- which is how "the campaign sends as the right mailbox"
+// becomes untestable while looking covered.
 type recordingSender struct {
-	mu   sync.Mutex
-	sent []email.Message
-	fail func(n int) error
+	mu     sync.Mutex
+	sent   []email.Message
+	sentAs []email.SendAs
+	fail   func(n int) error
 }
 
-func (s *recordingSender) Send(_ context.Context, msg email.Message) error {
+func (s *recordingSender) Send(_ context.Context, msg email.Message, as email.SendAs) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n := len(s.sent)
@@ -262,7 +269,18 @@ func (s *recordingSender) Send(_ context.Context, msg email.Message) error {
 		}
 	}
 	s.sent = append(s.sent, msg)
+	s.sentAs = append(s.sentAs, as)
 	return nil
+}
+
+// identities returns the SendAs each captured message went out under, in
+// order.
+func (s *recordingSender) identities() []email.SendAs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]email.SendAs, len(s.sentAs))
+	copy(out, s.sentAs)
+	return out
 }
 
 func (s *recordingSender) count() int {

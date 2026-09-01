@@ -196,6 +196,18 @@ var reachedThroughAggregate = map[string]declaration{
 		server.InboundWebhookPaths},
 	"UnsubscribePaths": {"appended by HandlerAuthorizedPaths() and SelfAuthenticatedPaths()",
 		server.UnsubscribePaths},
+	"TrackingPaths": {"appended by HandlerAuthorizedPaths() and SelfAuthenticatedPaths() " +
+		"(GET /t/o/{token} + GET /t/c/{token}, memql#4823). Owner-approved documented HTTP " +
+		"exceptions in the email-campaigns program design record (P3), on the same reasoning " +
+		"as the /unsubscribe entry above: the caller is the recipient's mail client fetching " +
+		"a pixel or their browser following a rewritten link, so the other party dictates the " +
+		"wire. Both lists, for the two different things they buy -- HandlerAuthorizedPaths() " +
+		"certifies the routes authorize themselves and fail closed, which is what lets " +
+		"SelfAuthenticatedPaths() make the bearer verifier step aside on the bff. Routing " +
+		"them is not optional: an unrouted /t/o/ does not 404, it hands an HTTP/1.1 image " +
+		"request to the h2c catch-all, and the failure surfaces as a broken image in a " +
+		"recipient's inbox with nothing on our side naming the cause.",
+		server.TrackingPaths},
 	"SitesBundlePaths": {"appended by HandlerAuthorizedPaths() (POST /sites/{id}/bundles, " +
 		"memql#3713). A documented HTTP exception, not an oversight: CLAUDE.md's " +
 		"endpoint-protocol table carries a row for it, on the same 'multipart maps poorly to " +
