@@ -90,6 +90,17 @@ type fakeEngine struct {
 	// accounts backs clientAccountById, keyed by bare id.
 	accounts map[string]map[string]any
 
+	// emailRules backs emailRuleById (memql#4829), keyed by bare id. Its one
+	// consumer is sendToRecipient resolving which audience a rule mails.
+	emailRules map[string]map[string]any
+
+	// libraryArtifacts / libraryFiles back the CSV import's two owner-gated
+	// reads (memql#4822), keyed by bare id. Absent means "not visible to
+	// this caller", which is the same answer the real queries give and is
+	// what makes the "an artifact id is not a capability" assertion possible.
+	libraryArtifacts map[string]map[string]any
+	libraryFiles     map[string]map[string]any
+
 	calls []recordedCall
 }
 
@@ -149,6 +160,27 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 		return rowsEnvelope(nil), nil
 	case strings.HasPrefix(q, "query clientAccountById"):
 		if row, ok := e.accounts[argOf(q, "accountId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query emailRuleById"):
+		if row, ok := e.emailRules[argOf(q, "emailRuleId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query audiences("):
+		rows := make([]map[string]any, 0, 1)
+		if len(e.roster) > 0 {
+			rows = append(rows, map[string]any{"id": "v1:campaigns:audience:" + testAudience})
+		}
+		return rowsEnvelope(rows), nil
+	case strings.HasPrefix(q, "query libraryArtifactById"):
+		if row, ok := e.libraryArtifacts[argOf(q, "artifactId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query libraryFileById"):
+		if row, ok := e.libraryFiles[argOf(q, "fileId")]; ok {
 			return rowsEnvelope([]map[string]any{row}), nil
 		}
 		return rowsEnvelope(nil), nil

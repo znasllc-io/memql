@@ -470,9 +470,21 @@ const rosterWalkCap = 100000
 // the memql#3460 lesson in one line: measuring a bounded page and calling it
 // a total is how the 5000 ceiling came to be load-bearing.
 func (s *Store) RosterSize(ctx context.Context, audienceID string) (int, error) {
-	res, err := s.engine.Execute(ctx, call("query", "audienceRosterSize", arg{"audienceId", audienceID}))
+	return s.count(ctx, call("query", "audienceRosterSize", arg{"audienceId", audienceID}))
+}
+
+// count issues a `count` query and lifts the aggregate off the result.
+//
+// Every stats bucket that CAN go through here does, and the reason is the
+// memql#3460 lesson generalized: a count is exact at any audience size, while
+// the length of a bounded read is a truncation wearing a number's clothes.
+// The portal counted a capped page of delivery rows client-side and
+// under-reported every campaign past the bound, silently, which is what
+// campaignStats replaces.
+func (s *Store) count(ctx context.Context, q string) (int, error) {
+	res, err := s.engine.Execute(ctx, q)
 	if err != nil {
-		return 0, fmt.Errorf("campaigns: query audienceRosterSize: %w", err)
+		return 0, fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
 	}
 	for _, row := range memql.MaterializeRows(res) {
 		if _, ok := row["count"]; ok {
@@ -480,6 +492,77 @@ func (s *Store) RosterSize(ctx context.Context, audienceID string) (int, error) 
 		}
 	}
 	return 0, nil
+}
+
+// DeliveryCountByStatus is the exact number of this campaign's deliveries in
+// one status. OWNED tier.
+func (s *Store) DeliveryCountByStatus(ctx context.Context, campaignID, status string) (int, error) {
+	return s.count(ctx, call("query", "campaignDeliveryCountByStatus",
+		arg{"campaignId", campaignID}, arg{"status", status}))
+}
+
+// SkipCountByReason counts the skipped deliveries carrying any of the named
+// reasons. A LIST rather than one call per reason because the skipped bucket
+// is reported in three groups and three round trips beat seven.
+func (s *Store) SkipCountByReason(ctx context.Context, campaignID string, reasons []string) (int, error) {
+	if len(reasons) == 0 {
+		return 0, nil
+	}
+	return s.count(ctx, call("query", "campaignSkipCountByReason",
+		arg{"campaignId", campaignID}, arg{"skipReasons", reasons}))
+}
+
+// ConsentCountByKind counts this campaign's consent events of one kind --
+// the bounce, complaint and one-click-withdraw figures. OWNED tier.
+//
+// Read from the CONSENT stream rather than from delivery rows, and that is
+// not a preference: a bounce arrives after the transport accepted the
+// message, so the delivery row says `sent` and correctly stays that way. It
+// cannot answer this question at all.
+func (s *Store) ConsentCountByKind(ctx context.Context, campaignID, kind string) (int, error) {
+	return s.count(ctx, call("query", "campaignConsentCountByKind",
+		arg{"campaignId", campaignID}, arg{"kind", kind}))
+}
+
+// EngagementCountByKind is the TOTAL opens or clicks -- every recorded hit,
+// exact. The UNIQUE figure cannot be a count (the engine has no DISTINCT),
+// which is why EngagementDeliveryRefs exists beside it.
+func (s *Store) EngagementCountByKind(ctx context.Context, campaignID, kind string) (int, error) {
+	return s.count(ctx, call("query", "campaignEngagementCountByKind",
+		arg{"campaignId", campaignID}, arg{"kind", kind}))
+}
+
+// engagementRefsBound mirrors the `paginate` on campaignEngagementRefs.
+//
+// Unlike ledgerPageBound this is a real ceiling on a genuinely unbounded set
+// -- engagement rows accumulate per hit, with no per-recipient collapse -- so
+// reaching it is EXPECTED on a large campaign rather than evidence of drift.
+// That is why the caller reports "unmeasured" instead of refusing.
+const engagementRefsBound = 5000
+
+// EngagementDeliveryRefs reads the delivery references behind a campaign's
+// engagement events, for folding a UNIQUE figure in Go.
+//
+// The second return value reports that the read came back AT the bound. The
+// caller must treat that as UNMEASURED rather than as a number: a fold over
+// a truncated page produces a unique count that is lower than the truth and
+// indistinguishable from a correct one, which is the same "a bounded read of
+// an unbounded set is a truncation" rule LedgerFor refuses on. The difference
+// in response -- report versus refuse -- is that a missing engagement figure
+// costs a blank in a stats panel, while a truncated ledger re-mails people.
+func (s *Store) EngagementDeliveryRefs(ctx context.Context, campaignID, kind string) ([]string, bool, error) {
+	rows, err := s.rows(ctx, call("query", "campaignEngagementRefs",
+		arg{"campaignId", campaignID}, arg{"kind", kind}))
+	if err != nil {
+		return nil, false, err
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if id := bare(str(r, "deliveryId")); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out, len(rows) >= engagementRefsBound, nil
 }
 
 // LedgerFor reads the delivery ledger for exactly the recipients named,
@@ -682,6 +765,17 @@ type CampaignProgress struct {
 	FailedCount    *int
 	LastError      *string
 	CompletedAt    *time.Time
+
+	// SkippedCount is the number of recipients suppressed rather than
+	// mailed (memql#4823).
+	//
+	// The worker has computed it per JOB since memql#3348 and had nowhere on
+	// the campaign to put it, so the single number an operator most wants --
+	// the gap between the audience and what actually left -- lived only on
+	// v1:campaigns:sendJob, a clusterOwner-tier row a browser cannot read.
+	// recipientCount minus sentCount minus this minus failedCount is what is
+	// still outstanding, and without it that subtraction has no third term.
+	SkippedCount *int
 }
 
 // UpdateCampaignProgress stamps live counters onto the campaign. OWNED
@@ -691,6 +785,7 @@ func (s *Store) UpdateCampaignProgress(ctx context.Context, campaignID string, p
 	args = appendStr(args, "status", p.Status)
 	args = appendInt(args, "recipientCount", p.RecipientCount)
 	args = appendInt(args, "sentCount", p.SentCount)
+	args = appendInt(args, "skippedCount", p.SkippedCount)
 	args = appendInt(args, "failedCount", p.FailedCount)
 	args = appendStr(args, "lastError", p.LastError)
 	args = appendTime(args, "completedAt", p.CompletedAt)
@@ -746,6 +841,206 @@ func (s *Store) SetRecipientSubscription(ctx context.Context, recipientID, statu
 		args = append(args, arg{"unsubscribedAt", at.UTC().Format(time.RFC3339)})
 	}
 	return s.exec(ctx, call("mutation", "setRecipientSubscription", args...))
+}
+
+// AddRecipient inserts one address into an audience. OWNED tier: issued
+// under the CALLER'S own actor, which is what stamps ownerUserId.
+//
+// `fields` carries every CSV column that was not the address or a display
+// name, verbatim (memql#4822). Keys are QUOTED in the rendered object
+// literal, because a spreadsheet header is "Company Name" or "2026 spend" far
+// more often than it is an identifier -- and a bare key there is a parse
+// error at call time, which is the failure mode a fake-engine test suite
+// cannot see (memql#3035's shape).
+func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email, displayName, source string, fields map[string]string) error {
+	args := []arg{
+		{"recipientId", recipientID},
+		{"audienceId", audienceID},
+		{"email", email},
+	}
+	if displayName != "" {
+		args = append(args, arg{"displayName", displayName})
+	}
+	if source != "" {
+		args = append(args, arg{"source", source})
+	}
+	if len(fields) > 0 {
+		args = append(args, arg{"fields", fields})
+	}
+	return s.exec(ctx, call("mutation", "addRecipient", args...))
+}
+
+// ConsentRecord is one append-only consent event.
+type ConsentRecord struct {
+	EventID     string
+	EmailDigest string
+	Source      string
+	Reason      string
+	RecipientID string
+	CampaignID  string
+	OccurredAt  time.Time
+}
+
+// RecordConsent appends one consent event of the given kind. OWNED tier: the
+// row belongs to the CAMPAIGN'S owner, so the caller supplies that actor --
+// the unsubscribe path derives it from the signed token, the feedback path
+// from the send job, and the import path is already running as the owner.
+//
+// One method over five mutations rather than five methods, because the
+// argument list is identical apart from `reason` and the kind is a value the
+// caller already holds. Splitting them would mean five near-identical bodies
+// whose only difference is a string literal.
+func (s *Store) RecordConsent(ctx context.Context, kind string, c ConsentRecord) error {
+	mutation, ok := consentMutations[kind]
+	if !ok {
+		return fmt.Errorf("campaigns: %q is not a consent kind", kind)
+	}
+	if SuppressReasonRequired(kind, c.Reason) {
+		// The mutation declares reason as required, so this would be refused
+		// at the engine anyway. Refusing here names the caller instead of the
+		// construct, which is what the operator reading the log needs.
+		return fmt.Errorf("campaigns: a %q consent event needs a reason", kind)
+	}
+	args := []arg{
+		{"eventId", c.EventID},
+		{"emailDigest", c.EmailDigest},
+		{"source", c.Source},
+	}
+	if c.Reason != "" {
+		args = append(args, arg{"reason", c.Reason})
+	}
+	if c.RecipientID != "" {
+		args = append(args, arg{"recipientId", c.RecipientID})
+	}
+	if c.CampaignID != "" {
+		args = append(args, arg{"campaignId", c.CampaignID})
+	}
+	if !c.OccurredAt.IsZero() {
+		args = append(args, arg{"occurredAt", c.OccurredAt.UTC().Format(time.RFC3339)})
+	}
+	return s.exec(ctx, call("mutation", mutation, args...))
+}
+
+// consentMutations maps a kind onto its writer. The five are separate
+// mutations rather than one taking a kind argument, because each STAMPS its
+// kind -- so a caller cannot write an event claiming to be something it is
+// not, and the append-only stream stays trustworthy without a validation
+// step.
+var consentMutations = map[string]string{
+	ConsentGrant:     "recordConsentGrant",
+	ConsentWithdraw:  "recordConsentWithdraw",
+	ConsentBounce:    "recordConsentBounce",
+	ConsentComplaint: "recordConsentComplaint",
+	ConsentSuppress:  "recordConsentSuppress",
+}
+
+// LibraryFileRef is what the CSV import needs off the Library: where the
+// bytes are and what the row says they are.
+type LibraryFileRef struct {
+	FileID   string
+	Name     string
+	MimeType string
+	Size     int
+	BlobURL  string
+	Archived bool
+}
+
+// LibraryFileForArtifact resolves a Library artifact id to its backing file
+// row. OWNED tier throughout, under the CALLER'S own actor.
+//
+// THE ARTIFACT ID IS NOT A CAPABILITY, and the two reads are what make that
+// true. libraryArtifactById and libraryFileById both gate on
+// ownerUserId==actor.userId, so a file the caller cannot read is a file this
+// cannot import -- which is the same answer as it not existing. Reading the
+// bytes under the engine's own identity and trusting the caller's id would be
+// a read primitive for anybody's uploads.
+//
+// The backing file is resolved from the index row's OWN sourceConceptRef
+// rather than by re-deriving createArtifact's id expression in Go: that
+// coupling is the one component/sitepublish deliberately avoids, and the
+// reason is the same here.
+func (s *Store) LibraryFileForArtifact(ctx context.Context, artifactID string) (LibraryFileRef, string, error) {
+	rows, err := s.rows(ctx, call("query", "libraryArtifactById", arg{"artifactId", artifactID}))
+	if err != nil {
+		return LibraryFileRef{}, "", err
+	}
+	if len(rows) == 0 {
+		return LibraryFileRef{}, fmt.Sprintf("no Library artifact %q is visible to this caller", artifactID), nil
+	}
+	artifact := rows[0]
+	if boolean(artifact, "archived") {
+		return LibraryFileRef{}, fmt.Sprintf("artifact %q is archived", artifactID), nil
+	}
+	if kind := str(artifact, "kind"); kind != "file" {
+		return LibraryFileRef{}, fmt.Sprintf(
+			"artifact %q is a %s; only an uploaded FILE carries the bytes to import", artifactID, kind), nil
+	}
+	fileID, ok := libraryFileIDFromRef(str(artifact, "sourceConceptRef"))
+	if !ok {
+		return LibraryFileRef{}, fmt.Sprintf(
+			"artifact %q names backing row %q, which is not a v1:library:file",
+			artifactID, str(artifact, "sourceConceptRef")), nil
+	}
+
+	fileRows, err := s.rows(ctx, call("query", "libraryFileById", arg{"fileId", fileID}))
+	if err != nil {
+		return LibraryFileRef{}, "", err
+	}
+	if len(fileRows) == 0 {
+		return LibraryFileRef{}, fmt.Sprintf(
+			"artifact %q names backing file %q, which is not visible to this caller", artifactID, fileID), nil
+	}
+	f := fileRows[0]
+	return LibraryFileRef{
+		FileID:   bare(str(f, "id")),
+		Name:     str(f, "name"),
+		MimeType: str(f, "mimeType"),
+		Size:     integer(f, "size"),
+		BlobURL:  str(f, "blobUrl"),
+		Archived: boolean(f, "archived"),
+	}, "", nil
+}
+
+// libraryFileIDFromRef parses `v1:library:file:<id>` into the bare id.
+func libraryFileIDFromRef(ref string) (string, bool) {
+	const prefix = "v1:library:file:"
+	ref = strings.TrimSpace(ref)
+	if !strings.HasPrefix(ref, prefix) {
+		return "", false
+	}
+	id := strings.TrimPrefix(ref, prefix)
+	return id, id != ""
+}
+
+// AudienceIDs lists the caller's audiences, newest first. COMPOSITE tier.
+//
+// One caller, and it is the fallback half of sendToRecipient's recipient
+// search -- see that file for why a search is needed at all. Bounded by the
+// query's own `paginate 50` and NOT walked with a cursor, deliberately: the
+// caller of this is already in a bounded scan that refuses past its cap, and
+// paging further would turn a bounded fallback into an unbounded one.
+func (s *Store) AudienceIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.rows(ctx, "query audiences()")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if audienceID := bare(str(r, "id")); audienceID != "" {
+			out = append(out, audienceID)
+		}
+	}
+	return out, nil
+}
+
+// EmailRuleAudience reads which audience an event-email rule mails, or "" for
+// a rule in one of the other recipient modes. COMPOSITE tier.
+func (s *Store) EmailRuleAudience(ctx context.Context, emailRuleID string) (string, error) {
+	rows, err := s.rows(ctx, call("query", "emailRuleById", arg{"emailRuleId", emailRuleID}))
+	if err != nil || len(rows) == 0 {
+		return "", err
+	}
+	return bare(str(rows[0], "audienceId")), nil
 }
 
 // EngagementEvent is one recorded open or click (memql#4823).
@@ -827,6 +1122,29 @@ func call(kind, name string, args ...arg) string {
 				quoted = append(quoted, langparser.QuoteString(item))
 			}
 			rendered = append(rendered, a.name+": ["+strings.Join(quoted, ", ")+"]")
+		case map[string]string:
+			// An object literal, with QUOTED KEYS and a comma after every
+			// pair. Both halves are load-bearing and neither is style:
+			//
+			//   - a spreadsheet header is "Company Name" or "2026 spend" far
+			//     more often than it is an identifier, and the parser accepts
+			//     a quoted key precisely so arbitrary text can be one;
+			//   - without the separators the block lexes into a single
+			//     identifier, the lint and the boot pass, and every call
+			//     fails at render (memql#4265's shape).
+			//
+			// Keys are SORTED so the rendered call is reproducible, which is
+			// what lets a test assert on it at all.
+			keys := make([]string, 0, len(v))
+			for k := range v {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			pairs := make([]string, 0, len(keys))
+			for _, k := range keys {
+				pairs = append(pairs, langparser.QuoteString(k)+": "+langparser.QuoteString(v[k]))
+			}
+			rendered = append(rendered, a.name+": {"+strings.Join(pairs, ", ")+"}")
 		default:
 			rendered = append(rendered, a.name+": "+langparser.QuoteString(fmt.Sprintf("%v", v)))
 		}

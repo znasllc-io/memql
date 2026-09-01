@@ -52,14 +52,39 @@ func TestTrackingTokenRoundTrips(t *testing.T) {
 // containing a slash is 401'd before the handler runs -- which reaches the
 // recipient as a broken image, with nothing on our side saying why.
 func TestTrackingTokenIsOnePathSegment(t *testing.T) {
-	p := trackingPayload()
-	p.URL = "https://acme.test/a/b/c?q=/slashes/everywhere"
-	token, err := MintTrackingToken(trackSecretA, p)
-	if err != nil {
-		t.Fatalf("mint: %v", err)
+	// Both kinds, and a URL stuffed with the characters that would break the
+	// encoding if any part of the token were raw rather than base64url. An
+	// open token's url segment is EMPTY, which is a different encoding path
+	// from a click's and is worth covering separately.
+	cases := map[string]TrackingPayload{
+		"a click carrying a slash-heavy url": {
+			DeliveryID: "v1:campaigns:delivery:d-1", CampaignID: "camp-1", Kind: EngagementClick,
+			URL: "https://acme.test/a/b/c?q=/slashes/everywhere#frag",
+		},
+		"an open with no url at all": {
+			DeliveryID: "v1:campaigns:delivery:d-1", CampaignID: "camp-1", Kind: EngagementOpen,
+		},
+		"ids that are canonical and contain colons": {
+			DeliveryID: "v1:campaigns:delivery:d/1", CampaignID: "v1:campaigns:campaign:c/1",
+			Kind: EngagementOpen,
+		},
 	}
-	if strings.ContainsAny(token, "/?#") {
-		t.Errorf("the token contains a character that ends a path segment: %q", token)
+	for name, p := range cases {
+		token, err := MintTrackingToken(trackSecretA, p)
+		if err != nil {
+			t.Fatalf("%s: mint: %v", name, err)
+		}
+		if strings.ContainsAny(token, "/?#") {
+			t.Errorf("%s: the token contains a character that ends a path segment: %q\n"+
+				"The bff verifier's self-authenticated exemption for these two mounts is bounded to ONE "+
+				"further segment, and Go's mux splits on / as well -- so such a token is not mis-parsed, "+
+				"it is 401'd before the handler runs. Every pixel would answer 401, every campaign would "+
+				"report zero opens, and zero is a completely plausible number, which is why nothing would "+
+				"report it. Standard base64 emits /; base64url does not.", name, token)
+		}
+		if _, err := ParseTrackingToken([]string{trackSecretA}, token); err != nil {
+			t.Errorf("%s: the minted token does not verify: %v", name, err)
+		}
 	}
 }
 

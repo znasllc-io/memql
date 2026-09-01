@@ -117,6 +117,23 @@ type Worker struct {
 	// connector configured at runtime cannot answer from).
 	shopifyConfigured func() bool
 
+	// Object storage for the CSV import (memql#4822), resolved LAZILY and
+	// once. The worker is constructed on every node type and receives no
+	// blob client, so an eager resolution would either build an Azure client
+	// on nodes that never import or fail construction on a cluster with no
+	// blob storage -- which is why unconfigured storage is a per-call
+	// refusal rather than a boot failure.
+	//
+	// EVERY FIELD HERE IS NIL-TOLERANT, deliberately: newTestWorker builds a
+	// Worker by struct literal, so a field that had to be set there would
+	// panic seventeen tests that have nothing to do with importing.
+	// newBlobReader nil means defaultBlobReader.
+	newBlobReader func(ctx context.Context) (blobReader, string, error)
+	blobOnce      sync.Once
+	blob          blobReader
+	blobContainer string
+	blobErr       error
+
 	// reputation accumulates the per-domain counters this replica observes
 	// (memql#3462), flushed once per drain pass.
 	reputation *reputationCollector
@@ -805,7 +822,11 @@ func (w *Worker) stampCampaignError(ownerCtx context.Context, campaignID, reason
 func (w *Worker) stampProgress(systemCtx, ownerCtx context.Context, job SendJob) {
 	sent, skipped, failed := job.SentCount, job.SkippedCount, job.FailedCount
 	jobPatch := SendJobPatch{SentCount: &sent, SkippedCount: &skipped, FailedCount: &failed}
-	campaignPatch := CampaignProgress{SentCount: &sent, FailedCount: &failed}
+	// The SAME three counters on both rows since memql#4823. They were
+	// deliberately identical apart from `skipped`, which was on the job and
+	// not the campaign -- so the number an operator most needs was the one
+	// number their browser could not read.
+	campaignPatch := CampaignProgress{SentCount: &sent, SkippedCount: &skipped, FailedCount: &failed}
 	// Only carried when it is known. The count is taken once, at send time,
 	// and a zero here would blank a figure the operator is watching rather
 	// than leave it alone.
@@ -835,7 +856,7 @@ func (w *Worker) completeJob(systemCtx, ownerCtx context.Context, job SendJob, c
 	sentStatus := "sent"
 	campaignPatch := CampaignProgress{
 		Status: &sentStatus, CompletedAt: &now,
-		SentCount: &sent, FailedCount: &failed,
+		SentCount: &sent, SkippedCount: &skipped, FailedCount: &failed,
 	}
 	if job.RecipientCount > 0 {
 		count := job.RecipientCount

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // unsubscribe.go -- the RFC 8058 one-click endpoint.
@@ -168,9 +170,20 @@ func (h *UnsubscribeHandler) servePost(rw http.ResponseWriter, r *http.Request) 
 	h.render(rw, http.StatusOK, pageDone, "")
 }
 
-// suppress performs the two writes an opt-out is made of: the
-// cluster-wide list (authoritative, consulted at every send) and the
-// operator's own recipient row (their view of their audience).
+// suppress performs the writes an opt-out is made of: the cluster-wide list
+// (authoritative, consulted at every send), the operator's own recipient row
+// (their view of their audience), and -- since memql#4820 -- the CONSENT
+// EVENT that records the withdrawal itself.
+//
+// The consent row is not a duplicate of the other two, and the difference is
+// what an export has to answer. The suppression row says the address is on a
+// do-not-mail list and the recipient row says this membership is
+// unsubscribed; NEITHER says WHEN the person withdrew or BY WHAT MEANS. That
+// is the question a regulator, a client audit or a re-import asks, and
+// v1:campaigns:consentEvent is the only place with an answer. The whole
+// concept shipped in memql#4141 with no production writer at all, which meant
+// every consent stream in every deployment was empty and the export answered
+// "no record" for people who had explicitly opted out.
 //
 // The recipient row is read FIRST because it is the only place the
 // address lives -- the token deliberately does not carry it, so a leaked
@@ -206,6 +219,27 @@ func (h *UnsubscribeHandler) suppress(ctx context.Context, ownerUserID, recipien
 	if digest != "" {
 		if err := h.store.RecordSuppression(h.system(ctx), digest, "unsubscribed", EmailDomain(addr), campaignID, ""); err != nil {
 			return err
+		}
+		// source "one_click": this arrived through the RFC 8058 endpoint,
+		// which is a fact about HOW consent was withdrawn and is exactly what
+		// distinguishes it from an operator honouring a support ticket by
+		// hand. Written under the OWNER's actor, which the signed token is
+		// the only source of -- the request itself carries none.
+		if err := h.store.RecordConsent(ownerCtx, ConsentWithdraw, ConsentRecord{
+			EventID:     id.NewShortId(),
+			EmailDigest: digest,
+			Source:      "one_click",
+			RecipientID: recipientID,
+			CampaignID:  campaignID,
+			OccurredAt:  h.now().UTC(),
+		}); err != nil {
+			// The person IS unsubscribed by the two writes around this one.
+			// A missing consent row is a gap in the audit trail, not a reason
+			// to report a failed opt-out -- and reporting one here would make
+			// the handler log "this address is still mailable" about an
+			// address that is not.
+			h.logger.Warn("campaigns: recorded an unsubscribe but could not append its consent event",
+				"campaign", campaignID, "error", err)
 		}
 	}
 	return h.store.SetRecipientSubscription(ownerCtx, recipientID, "unsubscribed", h.now().UTC())

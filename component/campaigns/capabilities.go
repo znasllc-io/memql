@@ -10,6 +10,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // capabilities.go -- the DSL-callable surface.
@@ -108,6 +109,44 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 				"kind":       "string (required) - hard_bounce | soft_bounce | complaint",
 				"campaignId": "string (optional) - the campaign the report came from",
 				"note":       "string (optional) - the provider's classification",
+			},
+		},
+		{
+			Name:        "importRecipients",
+			Description: "Import recipients into an audience from a CSV already uploaded to the Library. Read server-side under the caller's own actor, so an artifact the caller cannot read is not found. A header row naming `email` is required; every other column lands verbatim in the recipient's fields. Refuses the WHOLE import when the resulting roster would exceed MEMQL_CAMPAIGNS_MAX_AUDIENCE rather than truncating.",
+			Handler:     w.handleImportRecipients,
+			ArgsSchema: map[string]string{
+				"audienceId": "string (required) - the audience to import into",
+				"artifactId": "string (required) - v1:library:artifact.id of the uploaded CSV",
+				"hasHeader":  "bool (optional) - must be true or omitted; the column mapping IS the header",
+			},
+		},
+		{
+			Name:        "testSend",
+			Description: "Send one test copy of a campaign to a named address. Writes no delivery row and touches no counter; consumes the ordinary send-rate bucket. Returns the merge tags it could not resolve. Deliberately works on a campaign that has already been sent.",
+			Handler:     w.handleTestSend,
+			ArgsSchema: map[string]string{
+				"campaignId": "string (required) - the campaign to render",
+				"to":         "string (required) - where to send the test; never defaults to the caller",
+			},
+		},
+		{
+			Name:        "stats",
+			Description: "The outcome breakdown for one campaign, computed server-side. Every bucket that can be an exact count is one. Unique opens and clicks are folded from a bounded read and are reported as UNMEASURED rather than as a wrong number when that bound is reached; soft bounces are absent entirely, because nothing measures them per campaign.",
+			Handler:     w.handleStats,
+			ArgsSchema: map[string]string{
+				"campaignId": "string (required) - the campaign to report on",
+			},
+		},
+		{
+			Name:        "sendToRecipient",
+			Description: "Send ONE message to ONE audience recipient through the campaign machinery: suppression checked at the point of send, the RFC 8058 unsubscribe pair attached, the resolved sending identity applied, and the outcome ledgered. The marketing lane's primitive for event-triggered mail; deliberately not a free-form sendEmail.",
+			Handler:     w.handleSendToRecipient,
+			ArgsSchema: map[string]string{
+				"templateId":       "string (required) - v1:campaigns:template.id supplying the subject and bodies",
+				"recipientId":      "string (required) - v1:campaigns:recipient.id to send to",
+				"senderIdentityId": "string (optional) - the identity to send as; empty is the configured default",
+				"emailRuleId":      "string (optional) - the rule this send came from; also names the audience to resolve the recipient in",
 			},
 		},
 	}
@@ -418,6 +457,34 @@ func (w *Worker) handleSuppress(ctx context.Context, args map[string]any, _ int)
 	}
 	if err := w.store.RecordSuppression(w.systemActorContext(ctx), digest, reason, EmailDomain(addr), "", argString(args, "note")); err != nil {
 		return nil, fmt.Errorf("campaigns.suppress: %w", err)
+	}
+	// The consent event behind the operator's decision (memql#4820).
+	//
+	// Source "operator", and the reason is REQUIRED on this kind alone --
+	// `recordConsentSuppress` declares it so, and rightly: an operator adding
+	// an address to a cluster-wide list is the one consent transition with no
+	// external evidence behind it. A recipient's withdrawal is self-evident
+	// and a provider's bounce carries a payload; this is somebody's judgement
+	// and the stream has to record what it was.
+	//
+	// It runs under the CALLER'S OWN actor, so the row belongs to the admin
+	// who made the call. That is deliberate and it is the only honest owner
+	// available: the suppression is cluster-wide and belongs to no campaign,
+	// so there is no campaign owner to file it under, and a row written under
+	// the engine's synthetic operator would be readable by cluster owners
+	// alone -- invisible to the admin who is answerable for it.
+	if err := w.store.RecordConsent(ctx, ConsentSuppress, ConsentRecord{
+		EventID:     id.NewShortId(),
+		EmailDigest: digest,
+		Source:      "operator",
+		Reason:      reason,
+		OccurredAt:  w.nowUTC(),
+	}); err != nil {
+		// The address IS suppressed. A missing audit line is not a reason to
+		// report a failed suppression -- that would invite the operator to
+		// retry a write that already succeeded.
+		w.logger.Warn("campaigns: suppressed an address but could not append its consent event",
+			"domain", EmailDomain(addr), "reason", reason, "error", err)
 	}
 	return resultNode("campaignSuppression", map[string]any{
 		"suppressed": true,
