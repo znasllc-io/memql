@@ -280,6 +280,14 @@ func GenerateAutomation(r Rule) (string, error) {
 	b.WriteString("    builtin emailRuleFire (\n")
 	fmt.Fprintf(&b, "      emailRuleId: %s\n", langparser.QuoteString(r.ID))
 	b.WriteString("      nodeId: id\n")
+	// `event: event` is a RUNTIME REFERENCE, not the literal string "event".
+	// The step evaluator's isRuntimeReference (component/automations/steps/
+	// function.go) names `event` explicitly alongside `$`-prefixed values and
+	// `steps.`/`item.` roots, so the whole envelope is bound at fire time.
+	// Worth stating: a value that is NOT on that list lands in the call as
+	// literal text, and a rule that passed the parser would then hand the
+	// builtin the four characters "event" and mail nobody, per firing,
+	// forever.
 	b.WriteString("      event: event\n")
 	b.WriteString("    )\n")
 	b.WriteString("  }\n")
