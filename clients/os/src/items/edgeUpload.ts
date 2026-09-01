@@ -146,14 +146,24 @@ export class EdgeUploadProvider implements UploadProvider {
         this.resume.forget(file);
         return null;
       }
+      // The inventory route's shape (memql#4782): status open|completed|
+      // abandoned, staged: [{n, size}] sorted by n. Anything but an OPEN
+      // session is a fresh start -- a completed one already landed its file,
+      // and re-dropping means the person wants it uploaded again.
       const payload = (await response.json()) as {
-        uploadId?: unknown;
+        status?: unknown;
         chunkSize?: unknown;
-        stagedChunks?: unknown;
+        staged?: unknown;
       };
+      if (payload.status !== "open") {
+        this.resume.forget(file);
+        return null;
+      }
       const chunkSize = typeof payload.chunkSize === "number" && payload.chunkSize > 0 ? payload.chunkSize : CHUNK_BYTES;
-      const staged = Array.isArray(payload.stagedChunks)
-        ? payload.stagedChunks.filter((n): n is number => typeof n === "number")
+      const staged = Array.isArray(payload.staged)
+        ? payload.staged
+            .map((entry) => (entry && typeof entry === "object" ? (entry as { n?: unknown }).n : null))
+            .filter((n): n is number => typeof n === "number")
         : [];
       return { uploadId: remembered, chunkSize, stagedChunks: staged };
     } catch (err) {

@@ -60,9 +60,17 @@ function fakeWire(opts: { staged?: number[]; failChunkOnce?: number; refuseInit?
       return new Response("", { status: 201 });
     }
     if (url.endsWith("/uploads/up-1") && method === "GET") {
-      return new Response(JSON.stringify({ uploadId: "up-1", chunkSize: CHUNK_BYTES, stagedChunks: opts.staged ?? [] }), {
-        status: 200,
-      });
+      // The real inventory shape (memql#4782): status + staged [{n, size}].
+      return new Response(
+        JSON.stringify({
+          uploadId: "up-1",
+          status: "open",
+          size: 0,
+          chunkSize: CHUNK_BYTES,
+          staged: (opts.staged ?? []).map((n) => ({ n, size: CHUNK_BYTES })),
+        }),
+        { status: 200 },
+      );
     }
     if (url.endsWith("/uploads/up-1/complete") && method === "POST") {
       return new Response(JSON.stringify({ artifactId: "art-big", fileId: "file-big" }), {

@@ -184,7 +184,7 @@ describe("Ask (spec K bullet 5)", () => {
     openFromLauncher("Files");
     fireEvent.click(screen.getByRole("button", { name: "Ask about Files" }));
     const sheet2 = screen.getByRole("dialog", { name: "Ask" });
-    expect(within(sheet2).getByText(/app:artifacts/)).toBeTruthy();
+    expect(within(sheet2).getByText(/app:files/)).toBeTruthy();
 
     const widget = document.querySelector("[data-os-widget='ask']") as HTMLElement;
     expect(within(widget).getByRole("textbox", { name: "Ask" })).toBeTruthy();
