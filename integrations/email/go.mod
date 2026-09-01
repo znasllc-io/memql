@@ -11,6 +11,7 @@ require (
 	github.com/znasllc-io/memql/component/database v0.0.0
 	github.com/znasllc-io/memql/component/language v0.0.0
 	github.com/znasllc-io/memql/component/memql v0.0.0
+	github.com/znasllc-io/memql/component/secret v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
 )
 
@@ -63,7 +64,6 @@ require (
 	github.com/znasllc-io/memql/component/metrics v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/provenance v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/safety v0.0.0 // indirect
-	github.com/znasllc-io/memql/component/secret v0.0.0 // indirect
 	github.com/znasllc-io/memql/docs v0.0.0 // indirect
 	github.com/znasllc-io/memql/dsl v0.0.0 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
