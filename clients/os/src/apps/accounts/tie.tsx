@@ -20,12 +20,23 @@ import { ACCOUNT_CONCEPT, accountFromRow, type AccountRow } from "./rows";
 /**
  * The account list, for a picker.
  *
- * A SEPARATE COLLECTION FROM THE APP'S, and deliberately so: `useLiveCollection`
- * keys by identity, so a surface in Files and the Accounts window open beside
- * it share nothing and neither can unmount the other's feed. The linger in
- * `useLiveCollection` means the second retain of the same key reuses one
- * collection and issues no new read, so mounting this in four apps at once
- * costs one subscription, not four.
+ * ONE COLLECTION PER MOUNTING COMPONENT, and it is worth being exact about
+ * that rather than assuming the key shares it. The SDK HAS a registry that
+ * shares a collection by key (`LiveRegistry.collection`), and
+ * `live/useLiveCollection.ts` does not call it -- it constructs a
+ * `LiveCollection` per component, memoised on `[connection, key]`. So four
+ * apps mounting a picker at once open four subscriptions over this concept,
+ * not one.
+ *
+ * That is accepted here and is NOT accepted inside the Accounts app itself,
+ * and the difference is what the two feeds decide. Two readings inside one
+ * app would be free to disagree about the registry while deciding whether a
+ * form or a list renders, which is why AccountsApp retains exactly one and
+ * passes it down. Across apps there is nothing to disagree about: each window
+ * renders its own picker from its own snapshot, an account list is small, and
+ * the alternative -- routing four apps' feeds through one shared retain -- is
+ * a shell-level change that would want to move every app's collection at once
+ * rather than being invented for this picker.
  *
  * `includeArchived: true` for the reason the app's own feed asks for
  * everything: a picker must be able to show an archived client that a row is

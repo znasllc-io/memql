@@ -91,9 +91,12 @@ export function fakeConnection(seed: FakeSeed = {}) {
       libraryItemsForAccount: rollup(seed.libraryItemsForAccount),
       domainsForAccount: rollup(seed.domainsForAccount),
       invitationsForAccount: rollup(seed.invitationsForAccount),
-      createClientAccount: vi.fn(async () => rowsResult([])),
-      updateClientAccount: vi.fn(async () => rowsResult([])),
-      archiveClientAccount: vi.fn(async () => rowsResult([])),
+      // TYPED ARGS, so `.mock.calls[0][0]` is a record rather than `never` --
+      // a test that asserts WHICH arguments a write received cannot do it
+      // through a `vi.fn(async () => ...)` whose parameter list is empty.
+      createClientAccount: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
+      updateClientAccount: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
+      archiveClientAccount: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
       executeNamed: vi.fn(async (_name: string, filter: string) => {
         const match = /id==(\S+)/.exec(filter);
         const wanted = match?.[1] ?? "";

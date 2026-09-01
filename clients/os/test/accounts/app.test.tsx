@@ -32,9 +32,9 @@ function mount(connection: Conn, sectionId = "accounts") {
   const view = render(
     withSession(
       <AccountsApp
-        appId="accounts"
         sectionId={sectionId}
         navigate={navigate}
+        askContext={() => {}}
         store={memoryStore()}
       />,
     ),
@@ -329,7 +329,7 @@ describe("writes", () => {
     fireEvent.click(screen.getByText("Add client"));
 
     await waitFor(() => expect(conn.query.createClientAccount).toHaveBeenCalled());
-    const args = conn.query.createClientAccount.mock.calls[0]?.[0] as Record<string, unknown>;
+    const args = conn.query.createClientAccount.mock.calls[0]?.[0] ?? {};
     expect(args.domain).toBeUndefined();
     expect(args.notes).toBeUndefined();
   });

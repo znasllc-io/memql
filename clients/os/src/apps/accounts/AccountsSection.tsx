@@ -25,19 +25,23 @@ import type { ArchiveAccountState, CreateAccountState, UpdateAccountState } from
 // them as new. Revealing rows is not the cluster sending them.
 
 export function AccountsSection({
+  feed,
   showArchived,
   onToggleArchived,
   create,
   update,
   archive,
 }: {
+  /** The app root's ONE feed. Not retained here -- see AccountsApp for why a
+   *  second collection over this concept is the failure to avoid. */
+  feed: ReturnType<typeof useAccounts>;
   showArchived: boolean;
   onToggleArchived: (next: boolean) => void;
   create: CreateAccountState;
   update: UpdateAccountState;
   archive: ArchiveAccountState;
 }) {
-  const { source: collection, snapshot, reseed } = useAccounts();
+  const { source: collection, snapshot, reseed } = feed;
   const [openId, setOpenId] = useState("");
   const [adding, setAdding] = useState(false);
 

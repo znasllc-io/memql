@@ -39,6 +39,17 @@ export function AccountsApp({
   const create = useCreateAccount();
   const update = useUpdateAccount();
   const archive = useArchiveAccount();
+  // ONE FEED, TWO SURFACES -- retained here at the app root and passed down.
+  //
+  // `useLiveCollection` constructs a collection per COMPONENT (it memoises on
+  // `[connection, key]` inside the hook; the SDK's shared LiveRegistry is not
+  // what it calls). So a second `useAccounts()` -- in the first-run gate, say,
+  // beside the list's -- would open a second subscription and run a second
+  // seed over the same concept, and the two would then be free to disagree
+  // about what the registry currently holds. That is the failure the
+  // Deployables app records for its map-and-list pair, and it is worse here:
+  // the two readings decide whether a FORM or a LIST renders.
+  const feed = useAccounts();
 
   function updateSettings(patch: Partial<AccountsSettings>) {
     const next = { ...settings, ...patch, version: 1 as const };
@@ -72,6 +83,7 @@ export function AccountsApp({
 
   return (
     <AccountsSurface
+      feed={feed}
       settings={settings}
       update={update}
       create={create}
@@ -84,10 +96,11 @@ export function AccountsApp({
 /**
  * The Accounts section, or the first-run card standing in for it (D7).
  *
- * THE GATE READS THE SELF ROW OFF THE FEED THE LIST ALREADY HOLDS. A separate
- * `clientAccountById` read for the gate would be a second source of truth for
- * the same row -- and the one that decides whether a form or a list renders,
- * which is the worst place for the two to disagree. It also means the card
+ * THE GATE READS THE SELF ROW OFF THE ONE FEED, which the app root retains
+ * and hands to both surfaces. A separate read for the gate -- a second
+ * collection, or a `clientAccountById` -- would be a second source of truth
+ * for the row that decides whether a form or a list renders, which is the
+ * worst place in the app for two readings to disagree. It also means the card
  * yields the moment the save's broadcast lands, with nothing to invalidate.
  *
  * WHILE THE FEED IS STILL SEEDING, NEITHER RENDERS. An unconfigured self row
@@ -96,19 +109,21 @@ export function AccountsApp({
  * company was named months ago.
  */
 function AccountsSurface({
+  feed,
   settings,
   update,
   create,
   archive,
   onToggleArchived,
 }: {
+  feed: ReturnType<typeof useAccounts>;
   settings: AccountsSettings;
   update: ReturnType<typeof useUpdateAccount>;
   create: ReturnType<typeof useCreateAccount>;
   archive: ReturnType<typeof useArchiveAccount>;
   onToggleArchived: (next: boolean) => void;
 }) {
-  const { snapshot } = useAccounts();
+  const { snapshot } = feed;
 
   const self: AccountRow | null = useMemo(() => {
     const found = snapshot.rows.map(accountFromRow).find((a) => a.id === SELF_ACCOUNT_ID);
@@ -134,6 +149,7 @@ function AccountsSurface({
 
   return (
     <AccountsSection
+      feed={feed}
       showArchived={settings.showArchived}
       onToggleArchived={onToggleArchived}
       create={create}
