@@ -23,9 +23,12 @@ import {
 import { useMachines } from "../../live/machines";
 import type { LiveView } from "../../live/liveView";
 import type { LiveCollectionHandle } from "../../live/useLiveCollection";
+import { useDraggable } from "@dnd-kit/core";
 import { SOURCE_VALUES } from "./concepts";
 import type { FilesFilter, KindFilter } from "./filters";
 import type { FolderTree, TreeNode } from "./fold";
+import { LINK_LABEL, LINK_SENTENCE, type LinkState } from "./links";
+import type { BinDropPayload } from "../bin/concepts";
 import { artifactFingerprint, artifactName, fileStory, type ArtifactRow } from "./rows";
 import { accountIsArchived, accountName } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
@@ -60,6 +63,8 @@ export function BrowseSection({
   setFilter,
   selectedId,
   onSelect,
+  linkByFileId,
+  folderLinks,
   confirmBeforeArchive,
   askContext,
   tasks,
@@ -76,6 +81,10 @@ export function BrowseSection({
   setFilter: (next: FilesFilter) => void;
   selectedId: string;
   onSelect: (id: string) => void;
+  /** Origin link state by backing file id (epic memql#4783). */
+  linkByFileId: Map<string, LinkState | "">;
+  /** The worst link state anywhere beneath each folder -- the rail's badge. */
+  folderLinks: Map<string, LinkState>;
   confirmBeforeArchive: boolean;
   askContext: (tag: string) => void;
   tasks: UploadTask[];
@@ -101,6 +110,31 @@ export function BrowseSection({
   // and the archive flow -- confirm naming the LIVE count, then the
   // children-first walk with in-surface progress (design B5/D11).
   const [folderMenu, setFolderMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
+  // The file row's own menu (memql#4784 AC). A THIRD entry point onto the one
+  // archive action the inspector already carries -- not a second flow: the
+  // same mutation, the same confirm setting, the same in-surface refusal. The
+  // AC names a right-click because that is the gesture people reach for on a
+  // row, and it had no menu at all.
+  const [rowMenu, setRowMenu] = useState<{ x: number; y: number; row: ArtifactRow } | null>(null);
+  const [rowArchive, setRowArchive] = useState<ArtifactRow | null>(null);
+  const [rowNote, setRowNote] = useState("");
+
+  const archiveOneRow = async (row: ArtifactRow) => {
+    const query = connection?.query ?? null;
+    if (query === null) {
+      setRowNote("Not connected to the cluster, so nothing was archived.");
+      return;
+    }
+    setRowArchive(null);
+    setRowNote("");
+    try {
+      // Nothing is patched locally: the archive broadcasts, the row leaves
+      // this list on the same feed, and it arrives in the Bin.
+      await query.archiveArtifact({ artifactId: row.id });
+    } catch (err: unknown) {
+      setRowNote(err instanceof Error ? err.message : String(err));
+    }
+  };
   const [renamingFolderId, setRenamingFolderId] = useState("");
   const [pendingArchive, setPendingArchive] = useState<string>("");
   const [archiveProgress, setArchiveProgress] = useState<{ done: number; total: number } | null>(null);
@@ -343,6 +377,7 @@ export function BrowseSection({
               key={node.folder.id}
               node={node}
               counts={counts}
+              folderLinks={folderLinks}
               currentId={searching ? null : filter.folderId}
               renamingFolderId={renamingFolderId}
               onScope={(folderId) => patch({ folderId, search: "" })}
@@ -438,8 +473,14 @@ export function BrowseSection({
                 searching={searching}
                 folderNameOf={folderNameOf}
                 presence={presence}
+                linkState={
+                  row.kind === "file"
+                    ? (linkByFileId.get(row.sourceConceptRef.split(":").pop() ?? "") ?? "")
+                    : ""
+                }
                 open={selectedId === row.id}
                 onToggle={() => onSelect(selectedId === row.id ? "" : row.id)}
+                onMenu={(x, y) => setRowMenu({ x, y, row })}
               />
             )}
           />
@@ -460,6 +501,51 @@ export function BrowseSection({
         )}
       </div>
 
+      {rowMenu !== null ? (
+        <ContextMenu
+          x={rowMenu.x}
+          y={rowMenu.y}
+          label="File"
+          entries={[
+            {
+              id: "archive",
+              // "Move to Bin" rather than "Delete": the action's name has to be
+              // what it DOES, and nothing here deletes. It keeps that name
+              // through the whole flow, which is why the confirm below says
+              // Archive and the Bin says the item is in it.
+              label: rowMenu.row.archived ? "Already in the Bin" : "Move to Bin",
+              disabled: connection === null || rowMenu.row.archived,
+              onSelect: () =>
+                confirmBeforeArchive
+                  ? setRowArchive(rowMenu.row)
+                  : void archiveOneRow(rowMenu.row),
+            },
+          ]}
+          onClose={() => setRowMenu(null)}
+        />
+      ) : null}
+      {rowArchive !== null ? (
+        <Notice
+          tone="warn"
+          sentence={`Move "${artifactName(rowArchive)}" to the Bin?`}
+          next="Nothing is deleted -- it keeps its bytes, its history and everywhere it came from, and the Bin can put it back."
+        >
+          <div className="os-files-confirm">
+            <Button tone="danger" onClick={() => void archiveOneRow(rowArchive)}>
+              Move to Bin
+            </Button>
+            <Button onClick={() => setRowArchive(null)}>Cancel</Button>
+          </div>
+        </Notice>
+      ) : null}
+      {rowNote !== "" ? (
+        <Notice
+          tone="error"
+          sentence="The archive was refused."
+          next="The file is where it was."
+          detail={rowNote}
+        />
+      ) : null}
       {folderMenu !== null ? (
         <ContextMenu
           x={folderMenu.x}
@@ -572,6 +658,7 @@ function UploadPlaceholder({ task }: { task: UploadTask }) {
 function RailNode({
   node,
   counts,
+  folderLinks,
   currentId,
   renamingFolderId,
   onScope,
@@ -581,6 +668,9 @@ function RailNode({
 }: {
   node: TreeNode;
   counts: Map<string, number>;
+  /** The WORST origin link state anywhere beneath this folder (epic
+   *  memql#4783), or absent -- which is most folders, and draws nothing. */
+  folderLinks: Map<string, LinkState>;
   currentId: string | null;
   renamingFolderId: string;
   onScope: (folderId: string) => void;
@@ -637,6 +727,25 @@ function RailNode({
               {marker.label}
             </Chip>
           ) : null}
+          {/* THE ROLLUP DOT, and it is a dot rather than a count on purpose:
+              the reason to mark a folder is to make somebody open it, and a
+              folder holding one missing file needs opening exactly as much as
+              one holding forty. `synced` draws nothing at all -- a green mark
+              on every backed-up folder is noise that makes the few that need
+              attention invisible. */}
+          {(() => {
+            const rollup = folderLinks.get(node.folder.id);
+            if (rollup === undefined || rollup === "synced") return null;
+            return (
+              <span
+                className="os-files-node-link"
+                data-link={rollup}
+                title={`Something in here: ${LINK_SENTENCE[rollup]}`}
+                role="img"
+                aria-label={`Something in this folder is ${LINK_LABEL[rollup]}`}
+              />
+            );
+          })()}
           <span className="os-files-node-count">{count > 0 ? count : ""}</span>
         </button>
       )}
@@ -644,6 +753,7 @@ function RailNode({
         <RailNode
           key={child.folder.id}
           node={child}
+          folderLinks={folderLinks}
           counts={counts}
           currentId={currentId}
           renamingFolderId={renamingFolderId}
@@ -663,20 +773,58 @@ function FileLine({
   searching,
   folderNameOf,
   presence,
+  linkState,
   open,
   onToggle,
+  onMenu,
 }: {
   row: ArtifactRow;
   tick: "added" | "updated" | null;
   searching: boolean;
   folderNameOf: (folderId: string) => string;
   presence: (workerId: string) => { name?: string; online: boolean } | null;
+  /** The origin link state (epic memql#4783), or "" for a file with no origin
+   *  to link to -- which is most of them, and renders nothing. */
+  linkState: LinkState | "";
   open: boolean;
   onToggle: () => void;
+  onMenu: (x: number, y: number) => void;
 }) {
   const story = fileStory(row, row.producedByWorkerId ? presence(row.producedByWorkerId) : null);
   const extraLabels = row.labels.length > 2 ? row.labels.length - 2 : 0;
+  // DRAGGABLE TO THE BIN (memql#4784). The payload travels with the drag,
+  // because the dock holds no Library feed of its own.
+  //
+  // The listeners go on a WRAPPER rather than on the row button, and dnd-kit's
+  // `attributes` are deliberately not spread: they set role="button" and a
+  // tabIndex, which on a div wrapping a button is a second interactive element
+  // announcing the same thing. That costs the keyboard drag, which is the
+  // right trade here -- archiving already has two keyboard-reachable routes
+  // (the inspector's Archive button and the row's own action), and neither of
+  // them is a drag.
+  const draggable = useDraggable({
+    id: `artifact:${row.id}`,
+    data: {
+      artifactId: row.id,
+      name: artifactName(row),
+      folder: false,
+      deskItemId: "",
+    } satisfies BinDropPayload,
+  });
   return (
+    <div
+      ref={draggable.setNodeRef}
+      className="os-files-line"
+      data-dragging={draggable.isDragging || undefined}
+      onContextMenu={(event) => {
+        // The shell's right-click rule: a surface with its own menu says so,
+        // and stops the root handler from re-enabling the browser's.
+        event.preventDefault();
+        event.stopPropagation();
+        onMenu(event.clientX, event.clientY);
+      }}
+      {...draggable.listeners}
+    >
     <ListRow
       icon={kindGlyph(row.kind)}
       name={artifactName(row)}
@@ -705,7 +853,16 @@ function FileLine({
           {row.validationStatus}
         </Chip>
       ) : null}
+      {linkState === "" ? null : (
+        <Chip
+          tone={linkState === "synced" ? "neutral" : "accent"}
+          title={LINK_SENTENCE[linkState]}
+        >
+          {LINK_LABEL[linkState]}
+        </Chip>
+      )}
       {row.archived ? <Chip tone="muted">archived</Chip> : null}
     </ListRow>
+    </div>
   );
 }

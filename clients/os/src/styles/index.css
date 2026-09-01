@@ -5144,3 +5144,227 @@ a.os-button {
   margin: 6px 0;
   font-size: var(--os-text-md);
 }
+/* ===========================================================================
+ * The Bin (memql#4784)
+ * ===========================================================================
+ *
+ * THE BIN IS NOT DRAWN AS A DANGEROUS THING, because it does not do one.
+ * Amber is `warn` and red is `error` everywhere in this shell, and an archive
+ * is neither -- the bytes stay, the history stays, and the item comes back on
+ * one click. So the drop target lights in the ACCENT, the same colour every
+ * other "yes, here" affordance in the OS uses. Dressing it in red would teach
+ * people that archiving is destructive, which is the one thing about this
+ * surface that is not true.
+ */
+
+/* ---- the dock fixture ---- */
+.os-dock-fixture {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/*
+ * The drop target OFFERS ITSELF WHEN THE DRAG STARTS, not when the pointer
+ * arrives: somebody dragging a file has to be able to see where it can go
+ * before they have gone there. `data-armed` is any compatible drag anywhere in
+ * the shell; `data-over` is the pointer actually here.
+ *
+ * Both are box-shadow rings rather than backgrounds, which is this shell's own
+ * cue language (the arrival ring uses the same mechanism, and for the same
+ * reason: a background under an opaque plate announces nothing).
+ */
+.os-dock-bin[data-armed] {
+  color: var(--os-ink);
+  box-shadow: inset 0 0 0 1px var(--os-line);
+}
+.os-dock-bin[data-over] {
+  color: var(--os-accent);
+  box-shadow: inset 0 0 0 2px var(--os-accent);
+  transform: translateY(-3px) scale(1.06);
+}
+
+/*
+ * The Bin's one voice: the confirm, the report and the refusal all render
+ * here, above the icon the gesture ended on. Never a toast -- this shell has
+ * none, and a refusal that floats away is one nobody can re-read.
+ *
+ * Right-aligned to the fixture so it grows LEFT, back across the dock, rather
+ * than off the edge of the viewport.
+ */
+.os-dock-bubble {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  width: min(340px, calc(100vw - 32px));
+  z-index: 41;
+  border-radius: var(--os-radius);
+  box-shadow: var(--os-shadow-float);
+  background: var(--os-plate);
+}
+.os-dock-bubble .os-notice {
+  margin: 0;
+}
+.os-dock-bubble-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* ---- the app ---- */
+.os-bin {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  height: 100%;
+}
+
+/*
+ * THE INVARIANT, AS PROSE. Body ink at the base size rather than a muted
+ * caption or a bordered callout: it is the one thing about this surface that
+ * differs from every trash can the reader has used, and dressing it as a
+ * notice would make it look like a warning about something going wrong. It
+ * reads as the app talking, because that is what it is.
+ */
+.os-bin-lede {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--os-ink);
+  font-size: var(--os-text-sm);
+  line-height: 1.55;
+}
+
+.os-bin-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: stretch;
+}
+.os-bin-list {
+  flex: 1 1 320px;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.os-bin-row-glyph {
+  display: inline-flex;
+  color: var(--os-muted);
+}
+/* The row's quiet middle is WHERE IT CAME FROM, not when it was archived --
+ * the fact that decides whether somebody still wants it. It yields first when
+ * the row is tight, because the name and the state cluster must not. */
+.os-bin-row-from {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+
+/* ---- the detail panel ---- */
+.os-bin-detail {
+  flex: 1 1 300px;
+  max-width: 380px;
+  min-width: 240px;
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-self: flex-start;
+  max-height: 100%;
+}
+.os-bin-story {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--os-ink);
+  font-size: var(--os-text-sm);
+}
+
+/*
+ * WHERE IT CAME FROM: the block this app exists to show, given a plate of its
+ * own so it reads as a place rather than another row of facts.
+ */
+.os-bin-machine {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border-radius: var(--os-radius-sm);
+  background: var(--os-raised);
+}
+.os-bin-machine-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.os-bin-machine-name {
+  color: var(--os-ink);
+  font-weight: 500;
+}
+/*
+ * The absolute path, selectable IN ONE GESTURE. Somebody reading this is a
+ * window away from a file manager on the machine it names, and the useful
+ * thing to hand them is the path itself -- a click selects the whole of it,
+ * so it never has to be dragged across character by character. It wraps
+ * rather than truncating: half a path is not a path.
+ */
+.os-bin-machine-path {
+  margin: 0;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  overflow-wrap: anywhere;
+  user-select: all;
+  cursor: text;
+}
+
+.os-bin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ---- dragging a row out of Files (memql#4784) ---- */
+.os-files-line {
+  touch-action: none;
+}
+.os-files-line[data-dragging] {
+  opacity: 0.55;
+}
+
+/* ---- the folder's origin-link rollup (epic memql#4783) ---- *
+ *
+ * A DOT, not a count: the reason to mark a folder is to make somebody open
+ * it, and one missing file in there is as much reason as forty. `synced`
+ * draws NOTHING at all -- a green mark on every backed-up folder is noise
+ * that would make the few needing attention invisible.
+ *
+ * `stale` takes the accent because it resolves itself the next time that
+ * machine pushes; `origin_gone` takes warn because it does not, and somebody
+ * has to decide what to do about it. Neither is an error: the copy here is
+ * whole, which is the entire point of keeping it.
+ */
+.os-files-node-link {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--os-accent);
+}
+.os-files-node-link[data-link="origin_gone"] {
+  background: var(--os-warn);
+}

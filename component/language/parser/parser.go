@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/core/baseparser"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // Parser converts tokens into an AST.
@@ -3743,8 +3744,12 @@ func attrNumericString(attr *Attribute) string {
 	case int64:
 		return strconv.FormatInt(v, 10)
 	case float64:
-		if v == float64(int64(v)) {
-			return strconv.FormatInt(int64(v), 10)
+		// narrowing: GUARDED -- num.WholeInt64 IS the guard, and it replaces
+		// `float64(int64(v)) == v`, whose result is undefined for a v outside
+		// int64 (memql#4779). A value that is whole but too large renders through
+		// the float branch, which is the honest answer for it.
+		if whole, ok := num.WholeInt64(v); ok {
+			return strconv.FormatInt(whole, 10)
 		}
 		return strconv.FormatFloat(v, 'f', -1, 64)
 	}
@@ -8075,6 +8080,12 @@ func (p *Parser) reconstructTokens(start, end int) string {
 // int conversion is implementation-defined in Go), but only an
 // integer-typed bound check counts as guarding the int32 narrowing
 // -- the float-guarded `int32(n)` form is what CodeQL flagged.
+// narrowing: GUARDED -- and deliberately NOT core/num's, for two reasons that
+// are both about this being the parser. The bound is int32 because that is the
+// DOMAIN rule for a MemQL annotation argument, not a portability proxy; and the
+// answer is ok=false, a fourth answer core/num does not offer because it only
+// makes sense where the caller can say "that literal is not usable" -- which a
+// parser can and a payload decoder cannot (memql#4779).
 func numericAsInt(v any) (int, bool) {
 	switch n := v.(type) {
 	case int64:

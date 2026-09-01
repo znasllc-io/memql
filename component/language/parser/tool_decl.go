@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // parseToolDecl parses a struct-form `tool NAME { ... }` declaration.
@@ -272,8 +273,13 @@ func attrArgString(attr *ast.Attribute, name string) string {
 		return strconv.FormatInt(s, 10)
 	case float64:
 		// Integer-valued floats render without decimal noise.
-		if s == float64(int64(s)) {
-			return strconv.FormatInt(int64(s), 10)
+		//
+		// narrowing: GUARDED -- num.WholeInt64 IS the guard, replacing
+		// `s == float64(int64(s))`, whose result is undefined for an s outside
+		// int64 (memql#4779). A whole float too large for an int64 renders
+		// through the float branch, which is the honest answer for it.
+		if whole, ok := num.WholeInt64(s); ok {
+			return strconv.FormatInt(whole, 10)
 		}
 		return strconv.FormatFloat(s, 'f', -1, 64)
 	}

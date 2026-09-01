@@ -10,6 +10,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // functionValidator validates and resolves function references in MemQL expressions.
@@ -288,9 +289,18 @@ func validateArgType(value any, expectedType string) bool {
 		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 			return true
 		case float64:
-			return float64(int64(n)) == n
+			// narrowing: GUARDED -- num.WholeInt64 IS the guard. The expression
+			// this replaces, `float64(int64(n)) == n`, has an UNDEFINED result
+			// for an n outside int64 (memql#4779): it asks whether an
+			// implementation-defined value equals the original. On amd64 it
+			// answered "not a whole number", which is the safe direction and is
+			// why nobody noticed -- and it is still the answer here, now
+			// because an int64 cannot hold the value rather than by accident.
+			_, whole := num.WholeInt64(n)
+			return whole
 		case float32:
-			return float32(int32(n)) == n
+			_, whole32 := num.WholeInt64(float64(n))
+			return whole32
 		}
 		return false
 	case "bool", "boolean":
@@ -939,6 +949,30 @@ func (v *functionValidator) expandExpression(expr ExpressionNode) (ExpressionNod
 	return v.expandExpressionWithArgs(expr, nil)
 }
 
+// argFilterFieldPath reports the caller-argument path a comparison's FIELD
+// names, when the field is an `args.<path>` reference rather than a row field.
+//
+// `args` ONLY, deliberately. The other spelling an author might expect here is
+// `ctx.<path>`, and it cannot reach this walker: validateFieldReference
+// normalizes a `ctx` HEAD to `payload` before anything downstream sees it
+// (parser.go), because in field position `ctx.X` is the retired longhand for a
+// payload property rather than a caller argument. Accepting it here would read
+// one spelling as two different things depending on which side of a comparison
+// it landed on.
+func argFilterFieldPath(field FieldReference) (string, bool) {
+	if len(field.Parts) < 2 {
+		return "", false
+	}
+	if !strings.EqualFold(strings.TrimSpace(field.Parts[0]), "args") {
+		return "", false
+	}
+	path := strings.TrimSpace(strings.Join(field.Parts[1:], "."))
+	if path == "" {
+		return "", false
+	}
+	return path, true
+}
+
 // expandExpressionWithArgs recursively expands function calls, with optional args context
 // for substituting arg() references.
 func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args map[string]any) (ExpressionNode, error) {
@@ -1280,6 +1314,57 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		return &ArgRefExpression{Path: node.Path}, nil
 
 	case *ComparisonExpression:
+		// A caller argument on the LEFT of the comparison (memql#4814).
+		//
+		// The arm below binds `<row field> == args.X`, which is how every
+		// argumented filter in the tree is written -- because the natural
+		// thing to compare a row against is an argument. The mirror shape has
+		// no row field at all: `args.includeArchived == true` is a caller FLAG
+		// that widens or narrows the whole read, and dsl/accounts'
+		// clientAccountsAll is the first construct to need one.
+		//
+		// Nothing bound it, and the failure was invisible until the query was
+		// first RUN. The parser lowers `args.X` to an ArgRef only when NO
+		// comparison operator follows (checkArgTerminatingOperator), so on the
+		// left it stays a FieldReference; this function had a branch for a
+		// comparison's VALUE and none for its FIELD; and the filter compiler
+		// knows `row.`, `payload.`, `provenance.` and `actor.` and nothing
+		// else, so the whole read died at `field "args.includeArchived" is not
+		// supported`. Not the term -- the READ, since a filter that will not
+		// compile returns no rows at all.
+		//
+		// Folding to a query-time boolean constant is `actor.<field>`'s own
+		// treatment (resolveActorComparisonsToConstants, #1659) applied to the
+		// other envelope, and for the same reason: neither operand is a row
+		// field, so the comparison has one answer for the entire scan.
+		//
+		// AN ABSENT ARGUMENT RESOLVES nil AND FAILS THE COMPARISON rather than
+		// erroring, which is the difference from the value arm below and is
+		// deliberate. A required argument is already refused up front
+		// (validateArgsAgainstSchema), so absence here can only be an OPTIONAL
+		// argument -- and an optional flag that widens a read must not widen it
+		// when nobody asked. `args.x==true` is therefore false when omitted,
+		// false when passed false, and true when passed true; the middle case
+		// is exactly what a `when(args.x) { ... }` guard cannot express, since
+		// that guard drops on ABSENCE and keeps a present `false`.
+		if path, ok := argFilterFieldPath(node.Field); ok && args != nil {
+			// Absent -> nil. compareScalarValues treats nil as "no value",
+			// which fails every comparison without erroring.
+			left, _ := getNestedValue(args, path)
+			right := node.Value
+			if argRef, isRef := right.(*ArgReference); isRef {
+				value, exists := getNestedValue(args, argRef.Path)
+				if !exists {
+					return nil, fmt.Errorf("required argument %q not provided", argRef.Path)
+				}
+				right = value
+			}
+			match, cmpErr := compareScalarValues(left, node.Operator, right)
+			if cmpErr != nil {
+				return nil, fmt.Errorf("filter term %s: %w", node.Field.Raw, cmpErr)
+			}
+			return &constantBoolExpression{value: match}, nil
+		}
 		// Check if the comparison value is an ArgRefExpression that needs substitution
 		if argRef, ok := node.Value.(*ArgReference); ok && args != nil {
 			value, exists := getNestedValue(args, argRef.Path)

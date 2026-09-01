@@ -24,6 +24,7 @@ import (
 	"github.com/uptrace/bun"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 const (
@@ -494,6 +495,13 @@ func asString(v any) string {
 	return s
 }
 
+// asInt reads a numeric tool arg.
+//
+// SATURATES out of range (memql#4779). Its one caller is `count`, a page size
+// the handler then clamps at both ends itself (`<= 0 -> default`,
+// `> max -> max`), so every answer is safe here -- saturation is chosen
+// because it is the one that survives that clamp as the value the caller
+// actually asked for.
 func asInt(v any) int {
 	switch n := v.(type) {
 	case int:
@@ -501,11 +509,11 @@ func asInt(v any) int {
 	case int32:
 		return int(n)
 	case int64:
-		return int(n)
+		return num.ClampInt64(n)
 	case float64:
-		return int(n)
+		return num.ClampFloat64(n)
 	case float32:
-		return int(n)
+		return num.ClampFloat64(float64(n))
 	}
 	return 0
 }

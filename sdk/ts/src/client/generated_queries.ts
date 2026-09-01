@@ -3863,6 +3863,49 @@ QueryClient.prototype.knowledgeDomainsAll = function (this: QueryClient, args: K
   return this.executeNamed("knowledgeDomainsAll", buildKnowledgeDomainsAll(args), opts);
 };
 
+/** The Bin's population: the caller's ARCHIVED artifact index rows, newest first (memql#4784).
+`archived == true` rather than the `!= true` spelling its siblings use, and the asymmetry is not a slip. Every artifact promoted before memql#4340 has no `archived` member at all, so `!= true` is the null-safe way to ask "not archived" and returns them; asking "IS archived" is a positive test, and a row with no member genuinely is not archived. The two are inverses of each other in meaning but not in spelling, and `== false` -- which looks like the third member of the family -- is the one that silently excludes every pre-field row and belongs to neither.
+A DEDICATED READ rather than a client-side fold over libraryArtifactsByLens, which is what the Files app browse does. The reasoning inverts here: Files needs the whole population because its archived TOGGLE has to answer from a set that does not depend on when you looked, while the Bin IS the archived set and nothing in the window ever shows anything else. Seeding it from the whole Library would pull every row the person owns to render the few they threw away. The live feed still works, because a subscription is scoped by CONCEPT rather than by query: an archive arrives as an update, the fold admits it, and the row rises in the Bin at the moment it leaves Files. */
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArchivedArtifacts"] in generated_concepts.ts).
+export interface LibraryArchivedArtifactsArgs {
+}
+
+export function buildLibraryArchivedArtifacts(args: LibraryArchivedArtifactsArgs): string {
+  void args;
+  return "query libraryArchivedArtifacts()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryArchivedArtifacts(args?: LibraryArchivedArtifactsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryArchivedArtifacts = function (this: QueryClient, args: LibraryArchivedArtifactsArgs = {} as LibraryArchivedArtifactsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryArchivedArtifacts", buildLibraryArchivedArtifacts(args), opts);
+};
+
+/** The folders in the Bin (memql#4784). libraryFolders carries `archived != true`, so the default tree read cannot see these at all -- an archived folder is invisible to every other surface in the product, which is exactly why the Bin needs its own read rather than a filter over one.
+Unbounded for the same reason libraryFolders is, and it matters more here: the Bin renders each archived item under the folder it was filed in, so a truncated page would file rows under a parent that did not arrive and show them at the root as orphans -- indistinguishable from items that really were at the root. */
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryArchivedFolders"] in generated_concepts.ts).
+export interface LibraryArchivedFoldersArgs {
+}
+
+export function buildLibraryArchivedFolders(args: LibraryArchivedFoldersArgs): string {
+  void args;
+  return "query libraryArchivedFolders()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryArchivedFolders(args?: LibraryArchivedFoldersArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryArchivedFolders = function (this: QueryClient, args: LibraryArchivedFoldersArgs = {} as LibraryArchivedFoldersArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryArchivedFolders", buildLibraryArchivedFolders(args), opts);
+};
+
 /** Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactById"] in generated_concepts.ts).
 export interface LibraryArtifactByIdArgs {
@@ -4013,6 +4056,33 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryFileById = function (this: QueryClient, args: LibraryFileByIdArgs = {} as LibraryFileByIdArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryFileById", buildLibraryFileById(args), opts);
+};
+
+/** Resolve the live file a machine pushed from a given path -- the (machine, path) key the watched-folder backup versions on (epic memql#4783, design E).
+THIS IS THE WHOLE IDENTITY STORY, and it is why a browser upload cannot have one. The pair is honest only where the uploader could name it: a cockpit push names its own verified worker registration and the absolute path the file occupied, while a browser physically cannot name a machine and sends neither. Matching on filename instead would silently merge two different files, which is the reasoning memql#4721's D5 already settled and this read does not reopen -- the browser's answer to the same question stays what it is, the person naming the target artifact from its own inspector.
+ARCHIVED ROWS ARE EXCLUDED, deliberately. The key names the LIVE copy, and a re-push that versioned an archived row would write new bytes straight into the Bin -- the person would see nothing arrive and the backup would report success. Excluding them means a re-push after an archive starts a fresh file, which is a coherent reading of "they threw it away and it is still in the folder being watched"; resurrecting the row they archived is not.
+Both arguments are guarded, so a call missing either returns the owner's whole live file set rather than a coincidental match on the other half. */
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFileByUploadedFrom"] in generated_concepts.ts).
+export interface LibraryFileByUploadedFromArgs {
+  workerId: string;
+  path: string;
+}
+
+export function buildLibraryFileByUploadedFrom(args: LibraryFileByUploadedFromArgs): string {
+  const parts: string[] = [];
+  parts.push("workerId: " + renderMemQLValue(args.workerId));
+  parts.push("path: " + renderMemQLValue(args.path));
+  return "query libraryFileByUploadedFrom(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryFileByUploadedFrom(args: LibraryFileByUploadedFromArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryFileByUploadedFrom = function (this: QueryClient, args: LibraryFileByUploadedFromArgs = {} as LibraryFileByUploadedFromArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryFileByUploadedFrom", buildLibraryFileByUploadedFrom(args), opts);
 };
 
 /** List the chunks of one Library file, for the analysis pass to confirm what it wrote and for a similarity hit to resolve back to its file. Gated by ownerUserId==actor.userId; payload.fileId narrows to the one file. The frontend orders by seq, which is monotonic in file order. */

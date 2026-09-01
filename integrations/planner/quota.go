@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/num"
 	"log/slog"
-	"math"
 	"strconv"
 	"strings"
 )
@@ -176,46 +176,17 @@ func entInt(v any) int {
 	case int:
 		return n
 	case int64:
-		return clampToInt(n)
+		return num.ClampInt64(n)
 	case float64:
-		return clampFloatToInt(n)
+		return num.Float64OrZero(n)
 	case float32:
-		return clampFloatToInt(float64(n))
+		return num.Float64OrZero(float64(n))
 	case json.Number:
 		i, _ := n.Int64()
-		return clampToInt(i)
+		return num.ClampInt64(i)
 	case string:
 		i, _ := strconv.Atoi(strings.TrimSpace(n))
 		return i
 	}
 	return 0
-}
-
-// clampToInt narrows an int64 to int, clamping at the platform int bounds so a
-// 32-bit build cannot silently overflow on a large value
-// (go/incorrect-integer-conversion). On a 64-bit build int == int64, so the
-// guards are never taken and the value passes through unchanged.
-func clampToInt(i int64) int {
-	if i > math.MaxInt {
-		return math.MaxInt
-	}
-	if i < math.MinInt {
-		return math.MinInt
-	}
-	return int(i)
-}
-
-// clampFloatToInt truncates a float toward zero into int. It bounds the
-// float to the 32-bit range (exactly representable in float64) and then
-// funnels through clampToInt -- the int->int narrowing sink -- rather than
-// converting the float to int directly. A direct int(float64) is flagged
-// by go/incorrect-integer-conversion because the float carries no provable
-// integer bound; routing through the int64 sink keeps the narrowing safe
-// and recognizable. The planner only coerces small quota / count
-// magnitudes through here.
-func clampFloatToInt(f float64) int {
-	if math.IsNaN(f) || f > math.MaxInt32 || f < math.MinInt32 {
-		return 0
-	}
-	return clampToInt(int64(f))
 }

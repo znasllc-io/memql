@@ -51,7 +51,14 @@ cloud-run-env.yaml
 # .idea/
 # .vscode/
 __debug*
-bin/
+# ANCHORED (memql#4784). This rule is for `make cockpit`'s output at the
+# repository root, but a BARE `bin/` matches a directory called `bin` at ANY
+# depth -- and it silently swallowed MemQL OS's Bin app the day that app was
+# written. Nothing complained: the registry imported it, the bundle built from
+# the working tree, every test passed, and only CI would have found that the
+# module was not in the repository at all. There is exactly one build-output
+# `bin/` here and it is this one.
+/bin/
 /memql
 /memql-service
 /bridge-agent

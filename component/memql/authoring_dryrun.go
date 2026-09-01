@@ -41,6 +41,7 @@ import (
 	"sync"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // DryRunMode selects the side-effect tier the sandbox runs under.
@@ -369,8 +370,10 @@ func renderDryRunMemQLValue(v any) string {
 		return languageParser.QuoteString(val)
 	case float64:
 		// JSON numbers decode to float64; render integers without a trailing .0.
-		if val == float64(int64(val)) {
-			return strconv.FormatInt(int64(val), 10)
+		//
+		// narrowing: GUARDED -- num.WholeInt64 IS the guard (memql#4779).
+		if whole, ok := num.WholeInt64(val); ok {
+			return strconv.FormatInt(whole, 10)
 		}
 		return strconv.FormatFloat(val, 'f', -1, 64)
 	case int:

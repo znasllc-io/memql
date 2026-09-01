@@ -329,6 +329,77 @@ file-backed, the backing `v1:library:file` is archived with it.
 > Postgres, `!= true` keeps rows whose payload has no `archived` key at all --
 > every artifact promoted before the field existed. The equality spelling would
 > drop them, emptying every existing Library on deploy.
+>
+> The Bin's own read spells it the other way -- `libraryArchivedArtifacts`
+> filters `archived == true` -- and that asymmetry is correct rather than an
+> oversight. "Not archived" has to be null-safe because a row with no key is
+> not archived; "IS archived" is a positive test, and the same row genuinely
+> fails it. The two are inverses in meaning and not in spelling.
+
+### Restore (memql#4784)
+
+`restoreArtifact`, `restoreLibraryFile` and `restoreLibraryFolder` take things
+back out. Nothing was destroyed, so nothing is reconstructed: each is a
+re-version carrying `archived: false`, and the row arrives with its labels, its
+folder, its provenance and every earlier version exactly where they were.
+
+**The pair is CLIENT-DRIVEN, and that is not a shortcut.** Archiving an
+artifact archives its backing file through `archiveFileOnArtifactArchive`; the
+mirror of that automation cannot exist, because it would ride `node.updated`
+filtered on `archived == false` -- essentially every artifact update -- and
+together with the archive automation the two close a cycle where each write
+publishes an event the other subscribes to. So the Bin calls both mutations,
+index first, exactly as the recursive archive walk calls its own writes.
+Re-running an interrupted restore is idempotent: whatever landed is simply
+absent from the next plan.
+
+**A folder comes back EMPTY.** Everything that was inside it is its own row and
+its own decision, which is what lets somebody take one file back without
+undoing everything they filed away.
+
+**Nothing expires.** There is no retention sweep, no quota-driven cleanup and
+no expiry anywhere in the product: archived items accumulate and are kept until
+somebody acts. Archived file bytes DO count against the user quota (see
+`StorageFootprint`), which is the one place the accumulation is visible.
+
+---
+
+## Origin link states (epic memql#4783)
+
+A file pushed from a fleet machine carries `uploadedFromWorkerId` and
+`uploadedFromPath`, and those two together are the key a re-push resolves on:
+uploading the same path from the same machine again versions the SAME logical
+file rather than adding a row. Both upload routes do it -- and the chunked one
+matters more, because a watched folder of client video is entirely above the
+one-shot threshold.
+
+`linkState` records how the copy stands against that machine:
+
+| State | Means |
+|---|---|
+| absent | No origin link. A browser upload has none to have. |
+| `synced` | Matched the origin when it was last checked. |
+| `stale` | The machine has newer bytes that have not arrived. |
+| `origin_gone` | Not at that path any more, or the machine is unreachable. |
+
+**Absent is not a fourth state.** "We do not track this file" and "we track it
+and it is fine" are different answers, and a reader that collapsed them would
+badge the whole Library as in sync.
+
+**The engine writes exactly one of them.** An upload naming a `(machine, path)`
+is stamped `synced` -- at the instant those exact bytes arrived the copy did
+equal the origin, which is the strongest evidence there is. The other two are
+answers only something looking at the origin can give, so the cockpit's verify
+lane reports them through `setLibraryFileLinkState`; `linkCheckedAt` says when.
+
+**It only ever FLAGS.** A deletion or a disconnection at the origin sets
+`origin_gone` and never archives, moves or deletes the copy. That is the whole
+point of a backup, and it is why this is deliberately not a data-origins mirror
+(memql#4378): a mirror reconciles deletions, a backup retains and flags.
+
+**A re-push after archiving starts a fresh file.** The key read excludes
+archived rows, so new bytes never land in a row nobody can see -- which would
+show the person nothing arriving while the backup reported success.
 
 ---
 

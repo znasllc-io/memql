@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // parsePolicyDecl parses a struct-form `policy NAME { ... }`
@@ -98,6 +99,18 @@ func (p *Parser) parsePolicyDecl(attrs []*ast.Attribute) (*ast.PolicyDecl, error
 // float64 (the langparser's literal numeric type); convert to int
 // for the PolicyDecl int fields. Returns (0, false) when the value
 // isn't a number.
+// attrIntValue reads an integer annotation argument.
+//
+// SATURATES out of range (memql#4779). These are latency BUDGETS
+// (@maxLatencyMs, @maxTimeToFirstTokenMs), and a budget that wrapped negative
+// would read as "every provider is too slow" -- a policy that routes nowhere,
+// from a number a person typed into a .memql file.
+//
+// The same package already answers this question in `numericAsInt`
+// (parser.go), which reports ok=false instead. The two are not being unified
+// here: this one's `bool` means "the attribute carried a number", and folding
+// the range question into it would make a 2^63 budget indistinguishable from
+// an absent annotation.
 func attrIntValue(attr *ast.Attribute) (int, bool) {
 	if attr == nil || attr.Value == nil {
 		return 0, false
@@ -106,9 +119,9 @@ func attrIntValue(attr *ast.Attribute) (int, bool) {
 	case int:
 		return v, true
 	case int64:
-		return int(v), true
+		return num.ClampInt64(v), true
 	case float64:
-		return int(v), true
+		return num.ClampFloat64(v), true
 	case string:
 		n, err := strconv.Atoi(strings.TrimSpace(v))
 		if err != nil {

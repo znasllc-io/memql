@@ -13,6 +13,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // MutationExecutor executes MemQL mutation (insert) steps.
@@ -838,8 +839,11 @@ func toInt(v any) (int64, bool) {
 	case int64:
 		return n, true
 	case float64:
-		if float64(int64(n)) == n {
-			return int64(n), true
+		// narrowing: GUARDED -- num.WholeInt64 IS the guard. It replaces
+		// `float64(int64(n)) == n`, whose result is undefined for an n outside
+		// int64 (memql#4779); the refusal below is unchanged.
+		if whole, ok := num.WholeInt64(n); ok {
+			return whole, true
 		}
 		return 0, false
 	default:

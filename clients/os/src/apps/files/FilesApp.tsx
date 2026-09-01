@@ -11,6 +11,10 @@ import type { OsAppProps } from "../../system/registry";
 import { BrowseSection } from "./BrowseSection";
 import { applyFilters, DEFAULT_FILTER, type FilesFilter } from "./filters";
 import { foldFolderTree } from "./fold";
+import { rowString } from "@znasllc-io/memql-sdk-core/client";
+
+import { flatten } from "../../kit/rows";
+import { foldFolderLinkStates, linkStateOf, type LinkState } from "./links";
 import { artifactFromRow, folderFromRow, isContentKind, type ArtifactRow } from "./rows";
 import {
   DEFAULT_FILES_SETTINGS,
@@ -52,7 +56,7 @@ export function FilesApp({
     [uploads, authSource],
   );
 
-  const { artifacts, folders } = useLibraryFeeds();
+  const { artifacts, folders, files } = useLibraryFeeds();
 
   // The tree flow's folder port: one Library mutation, the id minted here
   // (the mutationCreateSpace pattern). The live feed delivers the row.
@@ -108,6 +112,20 @@ export function FilesApp({
     [artifacts.snapshot],
   );
 
+  // The origin link states (epic memql#4783), keyed by the file id the index
+  // row points at. Folded from the file feed rather than read per row: one
+  // pass over a snapshot the app already holds, and the rollup below needs
+  // every file anyway.
+  const linkByFileId = useMemo(() => {
+    const byId = new Map<string, LinkState | "">();
+    for (const raw of files.snapshot.rows) {
+      const row = flatten(raw);
+      const id = rowString(row, "id").split(":").pop() ?? "";
+      if (id !== "") byId.set(id, linkStateOf(raw));
+    }
+    return byId;
+  }, [files.snapshot]);
+
   // The tree, from the folders feed. Archived folders are dropped HERE as
   // well as by the read's own conjunct, because an archive flip arrives as an
   // UPDATE: the read excludes it and the subscription does not.
@@ -117,6 +135,25 @@ export function FilesApp({
         folders.snapshot.rows.map(folderFromRow).filter((f) => f.id !== "" && !f.archived),
       ),
     [folders.snapshot],
+  );
+
+  // The folder badges: the WORST state anywhere beneath each folder. Computed
+  // over the artifact index rather than the file rows, because filing lives on
+  // the INDEX -- a file row's own folderId is the initial filing only and a
+  // later move deliberately never comes back to it.
+  const folderLinks = useMemo(
+    () =>
+      foldFolderLinkStates(
+        content.map((row) => ({
+          folderId: row.folderId,
+          state:
+            row.kind === "file"
+              ? (linkByFileId.get(row.sourceConceptRef.split(":").pop() ?? "") ?? "")
+              : "",
+        })),
+        (folderId) => tree.byId.get(folderId)?.folder.parentFolderId ?? "",
+      ),
+    [content, linkByFileId, tree],
   );
 
   function update(patch: Partial<FilesSettings>) {
@@ -148,6 +185,8 @@ export function FilesApp({
       setFilter={setFilter}
       selectedId={selectedId}
       onSelect={setSelectedId}
+      linkByFileId={linkByFileId}
+      folderLinks={folderLinks}
       confirmBeforeArchive={settings.confirmBeforeArchive}
       askContext={askContext}
       tasks={tasks}

@@ -36,6 +36,7 @@ import (
 	componentAuth "github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 const (
@@ -158,10 +159,10 @@ func (i *Integration) searchHandler(ctx context.Context, args map[string]any, ta
 		pm["_similarity"] = similarity
 		merged, _ := json.Marshal(pm)
 		results = append(results, memorynodes.MemoryNode{
-			ID:        id,
-			Concept:   memorynodes.ConceptActionsAction,
-			Type:      memorynodes.NodeTypeObject,
-			Payload:   merged,
+			ID:      id,
+			Concept: memorynodes.ConceptActionsAction,
+			Type:    memorynodes.NodeTypeObject,
+			Payload: merged,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -246,17 +247,22 @@ func vectorLiteral(vec []float32) string {
 }
 
 // toInt coerces a JSON-decoded numeric arg to int.
+//
+// SATURATES out of range (memql#4779). Its one caller is `k`, the top-k
+// retrieval count, read through `ok && k > 0` -- so a wrapped negative would
+// quietly fall back to the default instead of returning the enormous result
+// set that was asked for, and saturation keeps the two apart.
 func toInt(v any) (int, bool) {
 	switch t := v.(type) {
 	case int:
 		return t, true
 	case int64:
-		return int(t), true
+		return num.ClampInt64(t), true
 	case float64:
-		return int(t), true
+		return num.ClampFloat64(t), true
 	case json.Number:
 		if n, err := t.Int64(); err == nil {
-			return int(n), true
+			return num.ClampInt64(n), true
 		}
 	}
 	return 0, false

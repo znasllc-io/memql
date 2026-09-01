@@ -20,6 +20,7 @@ import (
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/safety"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // argPlaceholderPattern is the shape of a `$args.<key>` reference in a tool
@@ -1052,8 +1053,12 @@ func encodeForRawSubstitution(value any) string {
 	case string:
 		return v
 	case float64:
-		if v == float64(int64(v)) {
-			return fmt.Sprintf("%d", int64(v))
+		// narrowing: GUARDED -- num.WholeInt64 IS the guard, replacing
+		// `v == float64(int64(v))`, whose result is undefined for a v outside
+		// int64 (memql#4779). A whole float too large renders through %v, which
+		// carries an exponent and therefore re-parses as a float.
+		if whole, ok := num.WholeInt64(v); ok {
+			return fmt.Sprintf("%d", whole)
 		}
 		return fmt.Sprintf("%v", v)
 	case bool:
@@ -1145,8 +1150,12 @@ func encodeForMemqlSubstitution(value any) string {
 	case string:
 		return languageParser.QuoteString(v)
 	case float64:
-		if v == float64(int64(v)) {
-			return fmt.Sprintf("%d", int64(v))
+		// narrowing: GUARDED -- num.WholeInt64 IS the guard, replacing
+		// `v == float64(int64(v))`, whose result is undefined for a v outside
+		// int64 (memql#4779). A whole float too large renders through %v, which
+		// carries an exponent and therefore re-parses as a float.
+		if whole, ok := num.WholeInt64(v); ok {
+			return fmt.Sprintf("%d", whole)
 		}
 		return fmt.Sprintf("%v", v)
 	case bool:

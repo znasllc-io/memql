@@ -149,6 +149,13 @@ without one is normal.
 - [MemQL Language](docs/public/language/memql.md) · [Functions](docs/public/language/functions.md)
 - [MemQL Authoring Rules & Gotchas](docs/public/language/authoring-rules.md) -- read before writing `.memql` files
 - [Node Identifier Conventions](docs/public/concepts/identifiers.md) -- canonical `{concept}:{shortId}` internally vs the BARE-ids client contract at every wire seam (the engine bare-ifies on egress and resolves bare args on inbound; clients never compose, parse or compare canonical ids), the `(concept, id)` keying rule, anti-patterns
+- [`core/num`](core/num/num.go) -- the ONE narrowing from a decoded payload
+  number to a Go `int`, in three NAMED answers (saturate / zero /
+  caller-default). Read it before writing a `func …(v any) int`: a bare
+  `int(x)` in a `float64` or `int64` arm is implementation-defined out of range
+  and answers with the integer indefinite value, and
+  `TestEveryPayloadNarrowingCarriesAnAnswer` fails the build on one that
+  declares no answer (memql#4779)
 - [LLM cost control (defense in depth)](docs/public/ai/llm-cost-control.md) -- read before touching `ai_guard.go`, an LLM loop, or an automation that drives model calls
 - [Tool ↔ Knowledge Domain Pattern](docs/public/concepts/tool-knowledge-domain-pattern.md) -- when a capability has operational knowledge, put it in a knowledge domain the tool requires, not in the agent prompt template
 - [Environment variables](docs/public/operate/env-vars.md) -- bootstrap envelope vs. concept-stored config; how to add / rotate / override
@@ -1946,7 +1953,15 @@ schema does not say.
   (memql#4340) and `fileChunk` holds its embeddings. All three declare
   `@rowAuthz(owner="ownerUserId", clusterOwner)`. The index's `source` enum is
   the UNION of every backing concept's own, because promotions pass the backing
-  value straight through ([library.md](docs/public/operate/library.md)).
+  value straight through ([library.md](docs/public/operate/library.md)). An
+  archive is a soft delete and a RESTORE is its plain inverse (memql#4784) --
+  but the restore is a CLIENT-DRIVEN PAIR, because `archiveFileOnArtifactArchive`
+  runs artifact->file and a mirror of it would fire on every artifact update
+  and close a cycle. `file.linkState` (epic memql#4783) records how a copy
+  stands against the machine it was pushed from: the engine stamps `synced` on
+  any upload naming a `(uploadedFromWorkerId, uploadedFromPath)` -- which is
+  also the key a re-push versions on, on BOTH upload routes -- and only ever
+  FLAGS, so a deletion at the origin never touches the copy.
 - **Cluster** (`dsl/cluster/concepts.memql`) -- `node`, `nodeType`,
   `spawnEvent`, `cluster` / `database` / `identityProvider`, plus the deploy
   pair: `deployment` (append-only, one timeline per deploymentId; the

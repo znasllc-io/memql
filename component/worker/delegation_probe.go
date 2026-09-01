@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // delegation_probe.go answers the planner's two live delegation
@@ -313,35 +313,11 @@ func intFromRow(v any) int {
 	case int:
 		return n
 	case int64:
-		return clampInt64(n)
+		return num.ClampInt64(n)
 	case float64:
-		switch {
-		case math.IsNaN(n):
-			return 0
-		case n >= math.MaxInt:
-			return math.MaxInt
-		case n <= math.MinInt:
-			return math.MinInt
-		}
-		// Through clampInt64 rather than a bare int(n): the float bounds
-		// above cannot be exact, because float64 has no representation of
-		// math.MaxInt and rounds it up to 2^63, so a value in the gap passes
-		// the guard and then converts. The integer bound is exact.
-		return clampInt64(int64(n))
+		return num.ClampFloat64(n)
 	}
 	return 0
-}
-
-// clampInt64 narrows an int64 to int without wrapping: exact on a 64-bit
-// build, where int is already 64 bits, and saturating on a 32-bit one.
-func clampInt64(v int64) int {
-	if v > math.MaxInt {
-		return math.MaxInt
-	}
-	if v < math.MinInt {
-		return math.MinInt
-	}
-	return int(v)
 }
 
 // firstConnectedRunning returns the id of a worker on THIS replica that

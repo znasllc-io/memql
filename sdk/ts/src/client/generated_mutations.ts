@@ -6631,6 +6631,73 @@ QueryClient.prototype.resolveApprovalRequest = function (this: QueryClient, args
   return this.executeNamed("resolveApprovalRequest", buildResolveApprovalRequest(args), opts);
 };
 
+/** Bring a Library artifact index row back out of the Bin (memql#4784) -- the exact inverse of archiveArtifact, and the write that makes archiving a door rather than a one-way door. Nothing was destroyed by the archive, so nothing has to be reconstructed here: the row keeps its labels, its folder, its provenance and its sourceConceptRef throughout, and this write only flips the flag back. updatedAt advances because a restore IS a change a person made.
+THE BACKING FILE IS NOT RESTORED BY AN AUTOMATION, and that asymmetry with the archive path is deliberate. archiveFileOnArtifactArchive rides `node.updated` on v1:library:artifact filtered on `archived == true`; a mirror of it filtered on `archived == false` would fire on essentially EVERY artifact update, since almost no artifact is archived -- and, with the archive automation already in place, the two together close the cycle that automation's own header warns about (each write publishes an event the other subscribes to, and both being idempotent does not stop the events). So restore is a CLIENT-DRIVEN PAIR, exactly as the recursive archive walk is: the Bin calls this and restoreLibraryFile together, and a re-run of an interrupted restore simply finds the half that already landed absent from its next plan. */
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["restoreArtifact"] in generated_concepts.ts).
+export interface RestoreArtifactArgs {
+  artifactId: string;
+}
+
+export function buildRestoreArtifact(args: RestoreArtifactArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  return "mutation restoreArtifact(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    restoreArtifact(args: RestoreArtifactArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.restoreArtifact = function (this: QueryClient, args: RestoreArtifactArgs = {} as RestoreArtifactArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("restoreArtifact", buildRestoreArtifact(args), opts);
+};
+
+/** Bring a Library file back out of the Bin (memql#4784) -- the inverse of archiveLibraryFile, and the second half of the client-driven restore pair restoreArtifact's header describes. The bytes never went anywhere: an archive is an append-only re-version carrying archived=true, so this write is a re-version carrying false and the blobUrl, the provenance and every earlier version are exactly where they were. */
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["restoreLibraryFile"] in generated_concepts.ts).
+export interface RestoreLibraryFileArgs {
+  fileId: string;
+}
+
+export function buildRestoreLibraryFile(args: RestoreLibraryFileArgs): string {
+  const parts: string[] = [];
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  return "mutation restoreLibraryFile(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    restoreLibraryFile(args: RestoreLibraryFileArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.restoreLibraryFile = function (this: QueryClient, args: RestoreLibraryFileArgs = {} as RestoreLibraryFileArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("restoreLibraryFile", buildRestoreLibraryFile(args), opts);
+};
+
+/** Bring a folder back out of the Bin (memql#4784) -- the inverse of archiveLibraryFolder. The CLIENT drives the recursive walk here too, and in the opposite ORDER from the archive: parents OUTWARD-first, so a restored item never appears under a parent that is still archived. A folder restored on its own comes back empty and that is the honest result -- its contents are their own rows and each one is its own decision, which is what lets somebody take one file back out of the Bin without undoing everything they filed there. */
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["restoreLibraryFolder"] in generated_concepts.ts).
+export interface RestoreLibraryFolderArgs {
+  folderId: string;
+}
+
+export function buildRestoreLibraryFolder(args: RestoreLibraryFolderArgs): string {
+  const parts: string[] = [];
+  parts.push("folderId: " + renderMemQLValue(args.folderId));
+  return "mutation restoreLibraryFolder(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    restoreLibraryFolder(args: RestoreLibraryFolderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.restoreLibraryFolder = function (this: QueryClient, args: RestoreLibraryFolderArgs = {} as RestoreLibraryFolderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("restoreLibraryFolder", buildRestoreLibraryFolder(args), opts);
+};
+
 /** Retire a bundle: status -> retired and retiredAt stamped. Used when a new version supersedes it or the user removes the capability. The authored runtime (#959) unregisters its constructs on this transition. */
 // Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["retireAuthoringBundle"] in generated_concepts.ts).
 export interface RetireAuthoringBundleArgs {
@@ -7698,6 +7765,33 @@ declare module "./query.js" {
 
 QueryClient.prototype.setGlobalVariable = function (this: QueryClient, args: SetGlobalVariableArgs = {} as SetGlobalVariableArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("setGlobalVariable", buildSetGlobalVariable(args), opts);
+};
+
+/** Record how a file's copy stands against the machine it was pushed from (epic memql#4783). Called by the cockpit's verify lane, which is the only party that can see the origin at all -- the engine knows what it received and when, and nothing more.
+IT ONLY EVER FLAGS. There is no state here that removes, hides or supersedes the MemQL copy, and that is the epic's load-bearing invariant rather than an omission: a backup whose copy follows the original into the bin is not a backup. origin_gone is a LABEL on a file that is still whole and still downloadable.
+Deliberately NOT a data-origins mirror (memql#4378). A mirror reconciles deletions and a connector owns its concept; this retains and flags, and Library files stay native. */
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["setLibraryFileLinkState"] in generated_concepts.ts).
+export interface SetLibraryFileLinkStateArgs {
+  fileId: string;
+  // Enum: synced | stale | origin_gone
+  linkState: string;
+}
+
+export function buildSetLibraryFileLinkState(args: SetLibraryFileLinkStateArgs): string {
+  const parts: string[] = [];
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  parts.push("linkState: " + renderMemQLValue(args.linkState));
+  return "mutation setLibraryFileLinkState(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setLibraryFileLinkState(args: SetLibraryFileLinkStateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setLibraryFileLinkState = function (this: QueryClient, args: SetLibraryFileLinkStateArgs = {} as SetLibraryFileLinkStateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setLibraryFileLinkState", buildSetLibraryFileLinkState(args), opts);
 };
 
 /** Advance a Library file through the analysis lifecycle: the new status, and whatever the pass learned along with it (a summary, how much of the file is embedded, or why it failed). Every field but the status is optional and an absent one is NOT written, so a later transition cannot blank a summary an earlier one recorded. Handler-invoked by the analysis pass, which runs under the file owner's actor; the read-merge preserves ownerUserId and every byte fact. */
