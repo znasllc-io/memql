@@ -358,11 +358,16 @@ func (e *MemQLEngine) rankLadder(ctx context.Context) roleLadder {
 	if db == nil {
 		return ladder
 	}
+	// Same collapse as principalRoles below. The role catalog is small and
+	// re-seeded on every boot, so its version count grows with UPTIME rather
+	// than with usage -- which is exactly the kind of growth nobody notices
+	// until a long-lived cluster gets slow.
 	var nodes []memorynodes.MemoryNode
 	if err := db.NewSelect().
 		Model(&nodes).
+		DistinctOn("id").
 		Where("concept = ?", conceptRbacRole).
-		OrderExpr(`"createdAt" DESC`).
+		OrderExpr(`id ASC, "createdAt" DESC`).
 		Scan(ctx); err != nil {
 		return ladder
 	}
@@ -424,11 +429,26 @@ func (e *MemQLEngine) principalRoles(ctx context.Context) map[string]string {
 	if db == nil {
 		return out
 	}
+	// COLLAPSED IN SQL, and that is not a micro-optimisation.
+	//
+	// MemQL rows are append-only, so this table holds every VERSION of every
+	// user -- and `v1:identity:user` is the concept that churns hardest,
+	// updated on `lastSeenAt` often enough that clients/os deliberately does
+	// not broadcast its `updated` events. Scanning it whole would read
+	// thousands of rows to answer a question about a few dozen people, on
+	// EVERY read of a rank-declaring concept.
+	//
+	// `DISTINCT ON (id) ... ORDER BY id, createdAt DESC` is the same collapse
+	// executor_filter.go performs on the ordinary read path, so the version
+	// this resolves a role from is the version a read of that user returns.
+	// Deduplicating in Go afterwards would have given the same answer for the
+	// same rows; it would not have stopped the database sending them.
 	var nodes []memorynodes.MemoryNode
 	if err := db.NewSelect().
 		Model(&nodes).
+		DistinctOn("id").
 		Where("concept = ?", conceptIdentityUser).
-		OrderExpr(`"createdAt" DESC`).
+		OrderExpr(`id ASC, "createdAt" DESC`).
 		Scan(ctx); err != nil {
 		return out
 	}
@@ -437,12 +457,13 @@ func (e *MemQLEngine) principalRoles(ctx context.Context) map[string]string {
 		if id == "" {
 			continue
 		}
-		if _, dup := out[id]; dup {
-			// Append-only, newest first: keep the current version.
-			continue
-		}
 		payload := rankRowPayload(nodes[i])
 		if payload == nil {
+			// Unreadable payload: the principal EXISTS but its role cannot be
+			// read, which ranks it 0 rather than dropping it. Dropping would
+			// make its rows unowned-looking to the gate; ranking it lowest
+			// makes them visible to everyone above 0 and writable by nobody,
+			// which is the conservative reading of "we cannot tell".
 			out[id] = ""
 			continue
 		}
