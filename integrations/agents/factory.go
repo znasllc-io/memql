@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"time"
 
@@ -839,18 +840,66 @@ func boolField(payload map[string]any, key string) bool {
 // intFromAnyLoose handles the float64 default JSON unmarshal produces
 // for numeric payload fields, plus typed int variants for callers
 // that pass them directly.
+//
+// Every narrowing SATURATES rather than wrapping (memql#4777, CWE-190/681).
+// `int` is 32 bits on a 32-bit build, and an out-of-range float64 -> int
+// conversion is implementation-defined in Go rather than merely wrong. The
+// int64 arm is genuinely reachable: core/baseparser.ParseNumericLiteral and
+// both literal decoders in component/automations return int64 for an integer
+// literal, and those values reach a role row's payload.
+//
+// Saturating is the right direction, and zero would be the wrong one. The
+// single caller is maxSkills, a cap handed straight to the
+// agentFactoryAnalyze prompt: truncation does not just lose magnitude there,
+// it INVERTS the ordering the value exists to express -- a role declaring
+// 2^32+1 would present to the model as the most restrictive role in the
+// catalog rather than the least -- and a zero would read as "this role may
+// hold no skills at all".
 func intFromAnyLoose(v any) int {
 	switch x := v.(type) {
 	case float64:
-		return int(x)
+		return clampFloat64ToInt(x)
 	case int:
 		return x
 	case int64:
-		return int(x)
+		return clampInt64ToInt(x)
 	case int32:
 		return int(x)
 	}
 	return 0
+}
+
+// clampInt64ToInt narrows an int64 to int without wrapping: exact on a
+// 64-bit build, where int is already 64 bits, and saturating on a 32-bit one.
+func clampInt64ToInt(v int64) int {
+	if v > math.MaxInt {
+		return math.MaxInt
+	}
+	if v < math.MinInt {
+		return math.MinInt
+	}
+	return int(v)
+}
+
+// clampFloat64ToInt narrows a float64 to int without wrapping. NaN has no
+// ordering and so no clamp: it becomes the same zero an absent field does.
+//
+// The last step goes through clampInt64ToInt rather than a bare int(v)
+// because the float comparisons above CANNOT be exact -- float64 has no
+// representation of math.MaxInt and rounds it UP to 2^63, so a value in that
+// gap passes the guard and then converts. Narrowing in the integer domain,
+// where the bound is exact, is the step that is actually provable -- to a
+// reader and to a static analyser alike.
+func clampFloat64ToInt(v float64) int {
+	switch {
+	case math.IsNaN(v):
+		return 0
+	case v >= math.MaxInt:
+		return math.MaxInt
+	case v <= math.MinInt:
+		return math.MinInt
+	}
+	return clampInt64ToInt(int64(v))
 }
 
 func stringField(m map[string]any, key string) string {

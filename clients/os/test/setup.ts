@@ -51,10 +51,24 @@ if (!window.matchMedia) {
 }
 
 // ResizeObserver: the wallpaper canvas observes its parent.
+//
+// The parameters are DECLARED even though jsdom lays nothing out and so can
+// never fire the callback. A shim narrower than the API it stands in for is
+// not privately incomplete: CodeQL resolves the global to this class, and so
+// read the correct production call `new ResizeObserver(resize)` in
+// MemoryField as passing a superfluous argument. A gap in a test double
+// surfaced as an alert against application code that was right (memql#4777).
+//
+// `implements ResizeObserver` is the half tsc can check -- a renamed or
+// missing method fails at the edit. It deliberately does NOT cover the
+// constructor, because TypeScript accepts a signature with FEWER parameters
+// anywhere one with more is wanted; that half is held by this comment and by
+// CodeQL.
 if (!(globalThis as { ResizeObserver?: unknown }).ResizeObserver) {
-  class ResizeObserverShim {
-    observe() {}
-    unobserve() {}
+  class ResizeObserverShim implements ResizeObserver {
+    constructor(_callback: ResizeObserverCallback) {}
+    observe(_target: Element, _options?: ResizeObserverOptions) {}
+    unobserve(_target: Element) {}
     disconnect() {}
   }
   (globalThis as { ResizeObserver?: unknown }).ResizeObserver = ResizeObserverShim;
