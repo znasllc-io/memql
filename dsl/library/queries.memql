@@ -392,6 +392,61 @@ query fileChunk libraryFileChunksForFile {
   shape   libraryFileChunkFull
 }
 
+// ---- fileVersion: the history reads (epic memql#4806) ----
+
+/// The superseded versions of one Library file, newest first -- the Files inspector's history
+/// panel (design D1). The HEAD IS NOT HERE: the newest version is the v1:library:file row itself,
+/// which the caller already holds, and the panel folds the two together. Owned:
+/// ownerUserId==actor.userId gates the row set and payload.fileId narrows it to the one file, so a
+/// version of somebody else's file is a version that does not exist.
+///
+/// PAGED AT 200 RATHER THAN UNBOUNDED, and the panel is told which it got. The head's own
+/// versionNumber says how many versions exist, so a caller comparing that number against the rows
+/// it received can state the boundary out loud instead of quietly showing a prefix -- which is what
+/// an unbounded read would do the day the watched-folder epic (#4783) starts pushing a version per
+/// save.
+@actor
+query fileVersion libraryFileVersionsForFile {
+  args {
+    fileId  string!
+  }
+  filter  ownerUserId==actor.userId && fileId==args.fileId
+  sort     "versionNumber", "desc"
+  paginate 200
+  shape   libraryFileVersionFull
+}
+
+/// One superseded version of one file, by its number -- what GET /artifacts/{id}/content?version={n}
+/// resolves through (design D8). Owned: the caller's own actor decides, so an older version of
+/// another person's file comes back as the empty result a missing one does, and the route answers
+/// both with the same 404 the rest of that path answers with.
+///
+/// Keyed on (fileId, versionNumber) rather than on the row id: the id is derived from that pair in
+/// Go, and re-deriving it here to read it back would put the convention in a second place that can
+/// disagree with the first.
+@unbounded("one version of one file, gated to the owner and narrowed by (fileId, versionNumber) -- bounded to a single row by construction")
+@actor
+query fileVersion libraryFileVersionByNumber {
+  args {
+    fileId         string!
+    versionNumber  int!
+  }
+  filter  ownerUserId==actor.userId && fileId==args.fileId && versionNumber==args.versionNumber
+  shape   libraryFileVersionFull
+}
+
+/// The sizes of every superseded version the caller holds -- the history half of the storage quota
+/// (epic memql#4806, design D9). Superseding destroys nothing, so those bytes are as real as a head
+/// file's and count exactly like them; a quota that ignored them would refuse a person with numbers
+/// they cannot see. UNBOUNDED for its siblings' reason: a truncated page fails OPEN, admitting an
+/// upload the quota should refuse. Owner-scoped, two fields per row.
+@unbounded("quota enforcement must sum EVERY superseded version the owner holds -- a truncated page fails open, admitting an upload the quota should refuse; owner-scoped and two fields per row")
+@actor
+query fileVersion libraryFileVersionSizesForOwner {
+  filter  ownerUserId==actor.userId
+  shape   libraryFileVersionSize
+}
+
 // ---- folder: the Files app's tree reads (memql#4781) ----
 
 /// The caller's whole folder tree, live (memql#4781, design B1). Owned: ownerUserId==actor.userId

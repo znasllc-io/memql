@@ -53,6 +53,11 @@ type CreateParams struct {
 	BlobPath               string
 	FileId                 string
 	ChunkSize              int64
+	// TargetArtifactId is set when this session uploads a NEW VERSION of an
+	// existing artifact (epic memql#4806): complete then supersedes rather
+	// than creates, and FileId above is that artifact's EXISTING file id.
+	// Blank is the ordinary fresh upload.
+	TargetArtifactId string
 }
 
 // Row is the projection the chunk / inventory / complete handlers decide on.
@@ -70,6 +75,7 @@ type Row struct {
 	BlobPath               string
 	FileId                 string
 	ChunkSize              int64
+	TargetArtifactId       string
 	Status                 string
 }
 
@@ -113,6 +119,9 @@ func (s *Store) Create(ctx context.Context, p CreateParams) error {
 	}
 	if v := strings.TrimSpace(p.UploadedFromPath); v != "" {
 		args["uploadedFromPath"] = v
+	}
+	if v := strings.TrimSpace(p.TargetArtifactId); v != "" {
+		args["targetArtifactId"] = v
 	}
 	return s.executeServerOnly(ctx, "createUploadSession", args)
 }
@@ -161,6 +170,7 @@ func (s *Store) ByID(ctx context.Context, uploadId string) (*Row, error) {
 		BlobPath:               fieldString(r, "blobPath"),
 		FileId:                 fieldString(r, "fileId"),
 		ChunkSize:              fieldInt64(r, "chunkSize"),
+		TargetArtifactId:       fieldString(r, "targetArtifactId"),
 		Status:                 fieldString(r, "status"),
 	}, nil
 }

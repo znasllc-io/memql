@@ -305,7 +305,23 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// is deliberately unstamped so row admission stays the per-chunk
 		// owner check.
 		"component/server/uploadsession": "chunked-upload session store -- REQUEST-DERIVED; preconditions (stamp is required by @serverOnly, dies inside one call, and the writes never name an owner) asserted by component/server/uploadsession/store_internal_origin_test.go, memql#4782",
-		"component/memql":                "seed materialiser and authoring capability store, both boot-time",
+		// REQUEST-DERIVED, the uploadsession shape one concept along: a
+		// package holding ONE stamp and nothing else. The @serverOnly pair
+		// it satisfies (createLibraryFileVersion / supersedeLibraryFileHead)
+		// guards blobUrl for the same reason -- a caller-authored storage
+		// path would name another user's object, and GET
+		// /artifacts/{id}/content?version={n} would stream it -- plus the
+		// head's 'analyzing' status stamp, which is what stops a supersede
+		// re-firing indexFileOnCreate and wiping the artifact's labels.
+		// Asserted in component/server/fileversion/store_internal_origin_test.go:
+		// the constructs really are @serverOnly in the loaded registry; no
+		// Store method returns a context; and no rendered write names
+		// ownerUserId. This package holds no reads AT ALL -- every version
+		// read runs unstamped through component/server's own store, under
+		// the caller's actor -- which is the strongest form of the third
+		// property its sibling asserts.
+		"component/server/fileversion": "library file-version supersede store -- REQUEST-DERIVED; preconditions (stamp is required by @serverOnly, dies inside one call, no write names an owner, and the package holds no reads) asserted by component/server/fileversion/store_internal_origin_test.go, memql#4806",
+		"component/memql":              "seed materialiser and authoring capability store, both boot-time",
 		// SERVER-INITIATED, not request-derived -- the same class as
 		// integrations/agent/worker below rather than the three exceptions
 		// above, and the distinction is worth stating because this package

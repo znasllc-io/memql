@@ -189,7 +189,85 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"domainId": "string (required) -- the knowledge domain to train into",
 			},
 		},
+		{
+			Name: "restampFileArtifact",
+			Description: "Re-stamp a file-backed Library artifact index row from its backing v1:library:file (epic memql#4806). " +
+				"The upload route calls it after a supersede: a new version changes facts the INDEX carries -- the title when " +
+				"the bytes arrived under a different name, the format and mimeType, and the updatedAt watermark the Library " +
+				"sorts and pulses on -- and without this the list shows the old name until the analysis pass happens to finish. " +
+				"Idempotent and information-free: it copies what the file row already says, carrying labels / archived / folderId " +
+				"forward exactly as the analysis pass's own re-stamp does. The file is read under the CALLER's actor, so it can " +
+				"only ever touch an artifact they own.",
+			Handler: i.handleRestampFileArtifact,
+			ArgsSchema: map[string]string{
+				"fileId": "string (required) -- the v1:library:file row id, which must belong to the acting user",
+			},
+		},
 	}
+}
+
+// restampResult is what the re-stamp answers with. `restamped` false is not
+// an error: the re-stamp is best-effort by construction (a file whose index
+// row has not been promoted yet, or whose carry-forward read failed, is
+// skipped rather than written over), and the caller -- the upload route --
+// has already stored the bytes and moved the head by the time it asks.
+type restampResult struct {
+	FileId    string `json:"fileId"`
+	Restamped bool   `json:"restamped"`
+}
+
+// handleRestampFileArtifact re-versions the artifact index row for one file.
+//
+// It is a thin wrapper over the analysis pass's own restampArtifact, and
+// deliberately so: two re-stamps of the same row that disagreed about what to
+// carry forward would be the memql#4288 hazard with two authors instead of
+// one. The owner threading is the same as every other capability here -- the
+// file loads under the CALLER's actor through libraryFileById, so a file that
+// is not theirs is a file that is not there, and the write then runs under
+// the owner resolved from the row itself.
+func (i *Integration) handleRestampFileArtifact(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if i == nil || i.engine == nil {
+		return nil, fmt.Errorf("library.restampFileArtifact: integration not initialized")
+	}
+	fileId := strings.TrimSpace(asString(args["fileId"]))
+	if fileId == "" {
+		return nil, fmt.Errorf("library.restampFileArtifact: 'fileId' is required")
+	}
+	file, err := i.loadFile(ctx, fileId)
+	if err != nil {
+		return nil, fmt.Errorf("library.restampFileArtifact: %w", err)
+	}
+	if file == nil {
+		// Absent and not-yours are one answer, for the reason every other
+		// Library read gives: the caller's own actor decided, and the
+		// response must not reintroduce the distinction authorization
+		// just erased.
+		return nil, fmt.Errorf("library.restampFileArtifact: no such file")
+	}
+	owner := stringField(file, "ownerUserId")
+	if owner == "" {
+		return nil, fmt.Errorf("library.restampFileArtifact: the file row names no owner")
+	}
+	before, promoted := i.artifactForFile(ctx, fileId)
+	i.restampArtifact(withUserActor(ctx, owner), fileId)
+	return wrapRestampResult(restampResult{
+		FileId:    fileId,
+		Restamped: promoted && before != nil,
+	})
+}
+
+func wrapRestampResult(r restampResult) ([]memorynodes.MemoryNode, error) {
+	payload, err := json.Marshal(r)
+	if err != nil {
+		return nil, fmt.Errorf("library.restampFileArtifact: marshal result: %w", err)
+	}
+	return []memorynodes.MemoryNode{{
+		ID:        fmt.Sprintf("library:restamp:%s:%d", r.FileId, time.Now().UnixNano()),
+		Concept:   resultConcept,
+		Type:      memorynodes.NodeTypeObject,
+		CreatedAt: time.Now().UTC(),
+		Payload:   payload,
+	}}, nil
 }
 
 // editResult is the payload returned by handleEditDocument /

@@ -17,6 +17,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/server/fileversion"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -81,6 +82,28 @@ const (
 	libraryFormWorkerNameKey = "uploadedFromWorkerName"
 	libraryFormPathKey       = "uploadedFromPath"
 
+	// libraryFormTargetKey names the artifact this upload is a NEW VERSION of
+	// (epic memql#4806, design D7). Absent is the ordinary case: a fresh
+	// upload, minting a file row and an artifact of its own. Present makes
+	// this a supersede -- the artifact keeps its id, its filing and its
+	// labels, the Files list still shows one row, and the outgoing head is
+	// frozen as a version row first.
+	//
+	// The person NAMES the target, which is the whole identity story: a
+	// browser upload carries no honest machine or path identity, and guessing
+	// by filename would silently merge two different files (#4721's D5
+	// reasoning, unchanged). The key-matched half lives in #4783 and resolves
+	// to this same seam.
+	libraryFormTargetKey = "targetArtifactId"
+
+	// libraryVersionQueryKey selects which version of a file the content
+	// route serves (design D8). Absent means the head, which is what every
+	// caller written before versions existed sends. A QUERY PARAMETER rather
+	// than a new path because the front-door path set is GENERATED
+	// (memql#3703) and a new path shape would change it; both spellings live
+	// under the one /artifacts/{id}/content rule that already exists.
+	libraryVersionQueryKey = "version"
+
 	// DefaultLibraryMaxUploadBytes is the cap when MEMQL_LIBRARY_MAX_UPLOAD_BYTES
 	// is unset. 4 GiB since memql#4782 (design D9): the chunked session path
 	// carries big files -- videos are the named case -- in bounded 16 MiB
@@ -118,6 +141,11 @@ const (
 	// libraryFileConcept is the concept whose canonical node id the promotion
 	// automation writes into v1:library:artifact.sourceConceptRef.
 	libraryFileConcept = "v1:library:file"
+
+	// libraryKindFile is the artifact index's kind for a file-backed row --
+	// the discriminator the content route branches on and the only kind that
+	// carries upload versions.
+	libraryKindFile = "file"
 
 	// libraryStatusReady / libraryStatusFailed are the two terminal lifecycle
 	// values this handler itself writes. `analyzing` belongs to the analysis
@@ -227,7 +255,14 @@ type LibraryArtifactRow struct {
 	Summary          string
 }
 
-// LibraryFileRow is the v1:library:file projection the download path needs.
+// LibraryFileRow is the v1:library:file projection the download path needs --
+// and, since epic memql#4806, the projection a SUPERSEDE freezes.
+//
+// The version fields are here rather than on a second read because the
+// supersede has already read this row under the caller's actor to verify the
+// target, and the snapshot it writes must be the OUTGOING head's own facts:
+// its name, its bytes, its hash, its provenance and the moment it arrived. A
+// second read could see a different head.
 type LibraryFileRow struct {
 	ID       string
 	Name     string
@@ -235,6 +270,42 @@ type LibraryFileRow struct {
 	Size     int
 	BlobUrl  string
 	Status   string
+	// Sha256 is blank when nothing has measured it yet (a chunked upload
+	// whose analysis pass has not streamed the blob). Never "no hash exists".
+	Sha256  string
+	Format  string
+	Summary string
+	// VersionNumber is 1 for every file uploaded before versions existed:
+	// those rows have no member at all, and the reader that turned absence
+	// into 0 would render "v0" on most of the Library.
+	VersionNumber int
+	// VersionUploadedAt is when THIS head's bytes arrived. Deliberately not
+	// the row's createdAt, which an append-only update moves on every status
+	// transition.
+	VersionUploadedAt      string
+	UploadedFromWorkerId   string
+	UploadedFromWorkerName string
+	UploadedFromPath       string
+}
+
+// LibraryFileVersionRow is one superseded version, as the history read and
+// the ?version={n} resolve return it.
+type LibraryFileVersionRow struct {
+	ID                     string
+	FileId                 string
+	VersionNumber          int
+	Name                   string
+	MimeType               string
+	Size                   int
+	Sha256                 string
+	BlobUrl                string
+	Format                 string
+	Summary                string
+	UploadedFromWorkerId   string
+	UploadedFromWorkerName string
+	UploadedFromPath       string
+	UploadedAt             string
+	SupersededAt           string
 }
 
 // LibraryExportBody is a text-bearing backing row rendered for download.
@@ -292,10 +363,66 @@ type LibraryStore interface {
 	OwnedWorker(ctx context.Context, workerId string) (*LibraryWorkerRef, error)
 	// StorageFootprint sums the CALLER's Library storage (memql#4782,
 	// design C4): stored file bytes -- archived included, retention is real
-	// -- and the declared sizes of their open upload sessions. Both reads
+	// -- the bytes of every SUPERSEDED version (epic memql#4806, design D9:
+	// superseding destroys nothing, so those bytes are as real as a head's),
+	// and the declared sizes of their open upload sessions. All three reads
 	// are deliberately unbounded (a truncated page fails the quota OPEN),
-	// and both run under the caller's actor.
-	StorageFootprint(ctx context.Context) (fileBytes, sessionBytes int64, err error)
+	// and all three run under the caller's actor.
+	StorageFootprint(ctx context.Context) (fileBytes, versionBytes, sessionBytes int64, err error)
+
+	// FileVersion resolves ONE superseded version by (fileId, versionNumber)
+	// under the caller's actor. Returns nil when absent or denied -- the
+	// content route cannot tell those apart, and must not.
+	FileVersion(ctx context.Context, fileId string, versionNumber int) (*LibraryFileVersionRow, error)
+
+	// SupersedeFile freezes the outgoing head as a version row and then moves
+	// the head onto new bytes (epic memql#4806). ONE method because the ORDER
+	// is a design decision rather than a caller's choice: a crash between the
+	// two writes may duplicate a version, never lose one. Runs the two
+	// @serverOnly mutations through component/server/fileversion.
+	SupersedeFile(ctx context.Context, snap LibraryVersionSnapshot, head LibraryHeadMove) error
+
+	// RestampFileArtifact re-versions the artifact index row from its backing
+	// file, so a new version's name, format and watermark reach the Library
+	// list immediately rather than whenever the analysis pass finishes.
+	// Idempotent and information-free; best-effort at every call site.
+	RestampFileArtifact(ctx context.Context, fileId string) error
+}
+
+// LibraryVersionSnapshot is the OUTGOING head, frozen. Mirrors
+// fileversion.Snapshot field for field, declared here because
+// component/server's seam is stated entirely in this package's own types --
+// the same reason LibraryFileCreateParams exists beside createLibraryFile.
+type LibraryVersionSnapshot struct {
+	VersionId              string
+	FileId                 string
+	VersionNumber          int
+	Name                   string
+	MimeType               string
+	Size                   int64
+	Sha256                 string
+	BlobUrl                string
+	Format                 string
+	Summary                string
+	UploadedFromWorkerId   string
+	UploadedFromWorkerName string
+	UploadedFromPath       string
+	UploadedAt             string
+}
+
+// LibraryHeadMove is the new bytes a superseded file's head moves onto.
+type LibraryHeadMove struct {
+	FileId                 string
+	VersionNumber          int
+	Name                   string
+	MimeType               string
+	Size                   int64
+	Sha256                 string
+	BlobUrl                string
+	Format                 string
+	UploadedFromWorkerId   string
+	UploadedFromWorkerName string
+	UploadedFromPath       string
 }
 
 // LibraryAnalysisRequest is the whole of what the analysis pass needs to run.
@@ -345,10 +472,17 @@ type LibraryAnalyzer interface {
 }
 
 // ArtifactUploadResponse is the 201 body: the two ids the caller needs to find
-// what it just created, on both sides of the promotion.
+// what it just created, on both sides of the promotion, and which version it
+// landed as.
+//
+// VersionNumber is 1 for a fresh upload and N for a supersede, so a client
+// that named a target can say "Version 3 uploaded" without a second read.
+// Always present rather than omitempty: a missing field would read as "this
+// build does not do versions", and every upload this build takes has one.
 type ArtifactUploadResponse struct {
-	ArtifactId string `json:"artifactId"`
-	FileId     string `json:"fileId"`
+	ArtifactId    string `json:"artifactId"`
+	FileId        string `json:"fileId"`
+	VersionNumber int    `json:"versionNumber"`
 }
 
 // ArtifactHandlerOptions configures an ArtifactHandler.
@@ -569,6 +703,18 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
+	// --- the version target, resolved BEFORE any byte is stored (D7) ---
+	//
+	// Named by the person, never guessed: a browser upload carries no honest
+	// machine or path identity, and matching by filename would silently merge
+	// two different files. Absent is the ordinary case and leaves everything
+	// below exactly as it was.
+	targetArtifact, head, status, msg := h.resolveVersionTarget(ctx, strings.TrimSpace(r.FormValue(libraryFormTargetKey)))
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
+
 	// --- provenance, verified BEFORE any byte is stored (memql#4781, D5) ---
 	//
 	// A claim that fails verification refuses the WHOLE upload: dropping the
@@ -582,9 +728,9 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	workerId := strings.TrimSpace(r.FormValue(libraryFormWorkerIdKey))
 	workerName := strings.TrimSpace(r.FormValue(libraryFormWorkerNameKey))
 	fromPath := strings.TrimSpace(r.FormValue(libraryFormPathKey))
-	resolvedName, status, msg := h.verifyProvenance(ctx, workerId, workerName, fromPath)
-	if status != 0 {
-		http.Error(w, msg, status)
+	resolvedName, provStatus, provMsg := h.verifyProvenance(ctx, workerId, workerName, fromPath)
+	if provStatus != 0 {
+		http.Error(w, provMsg, provStatus)
 		return
 	}
 	workerName = resolvedName
@@ -592,8 +738,8 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// The quota (memql#4782, design C4): stored bytes plus open sessions'
 	// declared sizes plus THIS file. Checked before any byte reaches
 	// storage, like every other refusal on this path.
-	if status, msg := h.checkQuota(ctx, int64(len(data))); status != 0 {
-		http.Error(w, msg, status)
+	if quotaStatus, quotaMsg := h.checkQuota(ctx, int64(len(data))); quotaStatus != 0 {
+		http.Error(w, quotaMsg, quotaStatus)
 		return
 	}
 
@@ -601,6 +747,14 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// The storage path the concept documents, verbatim:
 	// library/{userId}/{fileId}/{name}.
 	objectName := fmt.Sprintf("library/%s/%s/%s", userId, fileId, name)
+	if head != nil {
+		// A new version keeps the file's identity -- same row, same artifact,
+		// same folder, same labels -- and lands at a path no version has ever
+		// used, which is what makes "superseding never touches stored bytes"
+		// true by construction rather than by care (design D6).
+		fileId = head.ID
+		objectName = libraryVersionObjectName(userId, fileId, name)
+	}
 
 	// --- the bytes, then the row. Never the other way round. ---
 	//
@@ -631,7 +785,63 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.store.CreateFile(ctx, LibraryFileCreateParams{
+	// --- STORAGE FAILED, AND THE FILE IS ALREADY THERE ---
+	//
+	// A supersede whose bytes did not land must not touch the head. The row
+	// exists, holds the PREVIOUS version, and is downloadable; failing the
+	// request and changing nothing is the honest outcome. (A fresh upload
+	// still writes its row and marks it failed, below -- there the owner has
+	// nothing else to look at, and failureReason is the only place the
+	// failure can be seen.)
+	if head != nil && storageErr != "" {
+		http.Error(w, storageErr, storageStatus)
+		return
+	}
+
+	newVersion := 1
+	if head != nil {
+		// --- the supersede: freeze the outgoing head, then move it (D3) ---
+		newVersion = head.VersionNumber + 1
+		if err := h.store.SupersedeFile(ctx,
+			LibraryVersionSnapshot{
+				VersionId:     fileversion.DerivedVersionId(fileId, head.VersionNumber),
+				FileId:        fileId,
+				VersionNumber: head.VersionNumber,
+				Name:          head.Name,
+				MimeType:      head.MimeType,
+				Size:          int64(head.Size),
+				Sha256:        head.Sha256,
+				BlobUrl:       head.BlobUrl,
+				Format:        head.Format,
+				Summary:       head.Summary,
+				// The outgoing version's OWN provenance, frozen with it. A
+				// file first pushed from a laptop and then replaced from a
+				// browser has one version that names the laptop and one that
+				// names nothing, which is what actually happened.
+				UploadedFromWorkerId:   head.UploadedFromWorkerId,
+				UploadedFromWorkerName: head.UploadedFromWorkerName,
+				UploadedFromPath:       head.UploadedFromPath,
+				UploadedAt:             head.VersionUploadedAt,
+			},
+			LibraryHeadMove{
+				FileId:                 fileId,
+				VersionNumber:          newVersion,
+				Name:                   name,
+				MimeType:               mimeType,
+				Size:                   int64(len(data)),
+				Sha256:                 digest,
+				BlobUrl:                blobUrl,
+				Format:                 format,
+				UploadedFromWorkerId:   workerId,
+				UploadedFromWorkerName: workerName,
+				UploadedFromPath:       fromPath,
+			}); err != nil {
+			h.logger.Error("supersede library file", "error", err, "fileId", fileId,
+				"artifactId", targetArtifact.ID, "version", newVersion)
+			http.Error(w, fmt.Sprintf("failed to record the new version: %v", err), http.StatusInternalServerError)
+			return
+		}
+	} else if err := h.store.CreateFile(ctx, LibraryFileCreateParams{
 		FileId:   fileId,
 		Name:     name,
 		MimeType: mimeType,
@@ -672,6 +882,33 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// WAITED for rather than derived. Deriving it -- concat("artifact-",
 	// hash(ref)) -- would put a copy of a DSL expression in Go, and the copy
 	// would be the thing that is wrong the day the expression changes.
+	//
+	// A SUPERSEDE WAITS FOR NOTHING: the artifact was resolved before a byte
+	// moved, and no promotion runs -- the head update deliberately does not
+	// re-enter `stored`, which is what stops indexFileOnCreate re-firing and
+	// wiping the labels (design D4). It is re-stamped instead, so the new
+	// version's name and format reach the list now rather than whenever the
+	// analysis pass finishes.
+	if head != nil {
+		h.restampAfterSupersede(ctx, fileId, targetArtifact.ID)
+		h.applyLabels(ctx, targetArtifact.ID, r.FormValue(libraryFormLabelsKey))
+		h.startAnalysis(userId, targetArtifact.ID, LibraryFileCreateParams{
+			FileId:   fileId,
+			Name:     name,
+			MimeType: mimeType,
+			Size:     len(data),
+			Sha256:   digest,
+			BlobUrl:  blobUrl,
+			Format:   format,
+		}, data)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(ArtifactUploadResponse{
+			ArtifactId: targetArtifact.ID, FileId: fileId, VersionNumber: newVersion,
+		})
+		return
+	}
+
 	artifactId := h.waitForPromotion(ctx, fileId)
 	if artifactId == "" {
 		// The labels go with it, and that is worth naming rather than leaving
@@ -697,7 +934,108 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(ArtifactUploadResponse{ArtifactId: artifactId, FileId: fileId})
+	_ = json.NewEncoder(w).Encode(ArtifactUploadResponse{
+		ArtifactId: artifactId, FileId: fileId, VersionNumber: 1,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// versions (epic memql#4806)
+// ---------------------------------------------------------------------------
+
+// resolveVersionTarget runs design D7's three gates on a targetArtifactId,
+// before a byte moves, all under the CALLER's own actor. A blank target is
+// the ordinary case and answers (nil, nil, 0, "") -- a fresh upload.
+//
+// FAIL FAST IS THE POINT, on both routes. The one-shot path has already read
+// the body by the time it gets here, but the chunked path calls this at INIT:
+// discovering a foreign target after somebody has streamed gigabytes is the
+// outcome this ordering exists to prevent.
+//
+// The refusals are deliberately different shapes, because they are different
+// facts. An unresolvable target is 404 -- "not yours" and "not there" come
+// back from the graph as the same empty result and the response must not
+// reintroduce the distinction authorization just erased, which is the posture
+// the whole download route already takes. A non-file target is 400 and NAMES
+// THE FLOW that does version documents: the person asking is not wrong, they
+// are in the wrong place.
+func (h *ArtifactHandler) resolveVersionTarget(ctx context.Context, targetArtifactId string) (*LibraryArtifactRow, *LibraryFileRow, int, string) {
+	targetArtifactId = strings.TrimSpace(targetArtifactId)
+	if targetArtifactId == "" {
+		return nil, nil, 0, ""
+	}
+	artifact, err := h.store.Artifact(ctx, targetArtifactId)
+	if err != nil {
+		h.logger.Error("resolve version target", "error", err, "artifactId", targetArtifactId)
+		return nil, nil, http.StatusInternalServerError, "lookup failed"
+	}
+	if artifact == nil {
+		return nil, nil, http.StatusNotFound, "not found"
+	}
+	if artifact.Kind != libraryKindFile {
+		return nil, nil, http.StatusBadRequest, fmt.Sprintf(
+			"%q is a %s, and only files carry upload versions. A document is versioned by editing it, "+
+				"which appends a version through the document history rather than through this route.",
+			targetArtifactId, artifact.Kind)
+	}
+	head, err := h.store.File(ctx, artifact.SourceConceptRef)
+	if err != nil {
+		h.logger.Error("resolve version target file", "error", err,
+			"artifactId", targetArtifactId, "sourceConceptRef", artifact.SourceConceptRef)
+		return nil, nil, http.StatusInternalServerError, "lookup failed"
+	}
+	if head == nil {
+		return nil, nil, http.StatusNotFound, "not found"
+	}
+	// The BARE id, taken from the artifact's own canonical sourceConceptRef
+	// rather than from the row's projected id: every write below targets a
+	// file by the bare id createLibraryFile was given, and the ref is the
+	// value the promotion wrote, so it is the one spelling that cannot
+	// depend on how a read chose to render an id.
+	head.ID = strings.TrimPrefix(artifact.SourceConceptRef, libraryFileConcept+":")
+	if head.ID == "" {
+		return nil, nil, http.StatusNotFound, "not found"
+	}
+	// ABSENT IS VERSION 1, normalised HERE rather than trusted from the read.
+	// Every file uploaded before this epic carries no versionNumber at all,
+	// and a supersede that took that as 0 would freeze the outgoing head as
+	// "version 0" and move the head to 1 -- renumbering a file nobody
+	// touched. The store normalises too; this is the point of USE, which is
+	// where the rule has to hold for any store.
+	head.VersionNumber = headVersionNumber(head.VersionNumber)
+	return artifact, head, 0, ""
+}
+
+// libraryVersionObjectName composes the storage path for a version after the
+// first: library/{userId}/{fileId}/{key}/{name}.
+//
+// The key is a FRESH short id per upload attempt, not the version number, and
+// that is a correctness decision rather than a style one. Two supersedes of
+// one file racing each other both read the same head, so both would compute
+// the same version number -- and the second Upload would overwrite the
+// first's bytes at a shared path, leaving a head row whose name, size and
+// hash describe a different file's content. A per-attempt key makes every
+// upload's bytes untouchable by every other, which is what the durability
+// invariant actually needs; the version NUMBER is a fact about a row, and it
+// lives on the row.
+//
+// (The race still costs one of the two uploads its place as the head -- the
+// later head write wins and the loser's bytes are left unreferenced. That is
+// a lost upload, which is visible, rather than a corrupted one, which is not.)
+func libraryVersionObjectName(userId, fileId, name string) string {
+	return fmt.Sprintf("library/%s/%s/%s/%s", userId, fileId, id.NewShortId(), name)
+}
+
+// restampAfterSupersede pushes the new version's facts onto the artifact
+// index row. Best-effort and logged, never fatal: the bytes are stored and
+// the head has moved by the time this runs, so a failed re-stamp costs a
+// stale title in the list until the analysis pass's own re-stamp lands --
+// which is a delay, not a loss.
+func (h *ArtifactHandler) restampAfterSupersede(ctx context.Context, fileId, artifactId string) {
+	if err := h.store.RestampFileArtifact(ctx, fileId); err != nil {
+		h.logger.Warn("re-stamp artifact after supersede", "error", err,
+			"fileId", fileId, "artifactId", artifactId)
+	}
 }
 
 // tooLarge answers the cap. 413, with the limit named -- a caller that cannot
@@ -833,11 +1171,41 @@ func (h *ArtifactHandler) handleContent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if artifact.Kind == "file" {
+	if artifact.Kind == libraryKindFile {
 		h.serveFileBytes(w, r, artifact)
 		return
 	}
+	// A version selector on a non-file kind is a 400 rather than a silent
+	// fall-through to the rendered body: the caller asked for something this
+	// artifact does not have, and serving the current text instead would
+	// answer a different question than the one asked.
+	if strings.TrimSpace(r.URL.Query().Get(libraryVersionQueryKey)) != "" {
+		http.Error(w, fmt.Sprintf(
+			"%q is a %s, and only files carry upload versions.", artifact.ID, artifact.Kind),
+			http.StatusBadRequest)
+		return
+	}
 	h.serveRenderedBody(w, r, artifact)
+}
+
+// requestedVersion reads the ?version={n} selector (design D8).
+//
+// Absent is the head, which is what every caller written before versions
+// existed sends -- so ok is true with n == 0. A present-but-unreadable value
+// is a 400 naming what it should be: coercing it to the head would serve
+// somebody the newest bytes when they asked for an old one, under a 200.
+func requestedVersion(r *http.Request) (int, bool, string) {
+	raw := strings.TrimSpace(r.URL.Query().Get(libraryVersionQueryKey))
+	if raw == "" {
+		return 0, true, ""
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, false, fmt.Sprintf(
+			"%s must be a version number of 1 or more; %q is not one. Omit it for the current version.",
+			libraryVersionQueryKey, raw)
+	}
+	return n, true, ""
 }
 
 // serveFileBytes streams a file artifact's stored bytes. No redirect: the
@@ -845,6 +1213,12 @@ func (h *ArtifactHandler) handleContent(w http.ResponseWriter, r *http.Request) 
 // caller in its own right.
 func (h *ArtifactHandler) serveFileBytes(w http.ResponseWriter, r *http.Request, artifact *LibraryArtifactRow) {
 	ctx := r.Context()
+
+	wantVersion, ok, msg := requestedVersion(r)
+	if !ok {
+		http.Error(w, msg, http.StatusBadRequest)
+		return
+	}
 
 	row, err := h.store.File(ctx, artifact.SourceConceptRef)
 	if err != nil {
@@ -856,6 +1230,40 @@ func (h *ArtifactHandler) serveFileBytes(w http.ResponseWriter, r *http.Request,
 	if row == nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
+	}
+
+	// An OLDER version: resolved through the owner-gated version read, so a
+	// version of a file the caller may not see does not resolve -- and the
+	// answer is the same 404 every other refusal on this route gives. The
+	// head is served unchanged when the number IS the head's, so a client
+	// that names the current version explicitly gets the same bytes, the
+	// same headers and the same Range support as one that names none.
+	if wantVersion > 0 && wantVersion != headVersionNumber(row.VersionNumber) {
+		fileId := strings.TrimPrefix(artifact.SourceConceptRef, libraryFileConcept+":")
+		version, err := h.store.FileVersion(ctx, fileId, wantVersion)
+		if err != nil {
+			h.logger.Error("library file version lookup failed", "error", err,
+				"artifactId", artifact.ID, "fileId", fileId, "version", wantVersion)
+			http.Error(w, "lookup failed", http.StatusInternalServerError)
+			return
+		}
+		if version == nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		// A version row IS a file row for the purposes of serving bytes: a
+		// name, a type, a size and a path. Building one here rather than
+		// giving the streamer a second shape keeps Range, Content-Length and
+		// the buffered fallback on exactly one code path -- the alternative
+		// is two download implementations that drift.
+		row = &LibraryFileRow{
+			ID:       version.ID,
+			Name:     version.Name,
+			MimeType: version.MimeType,
+			Size:     version.Size,
+			BlobUrl:  version.BlobUrl,
+			Status:   libraryStatusReady,
+		}
 	}
 	// The constant-memory path (memql#4782, design C5): stream, with
 	// Content-Length from the ROW, honouring a single-range Range. The
@@ -1219,12 +1627,17 @@ func (s *EngineLibraryStore) CreateFile(ctx context.Context, p LibraryFileCreate
 // contract), while a materialized row's id is canonical.
 const libraryWorkerConcept = "v1:worker:registration"
 
-// StorageFootprint sums the caller's stored file bytes and open-session
-// declared bytes through the two unbounded quota reads (memql#4782). Both
-// run under the caller's actor; both are @unbounded in the DSL precisely so
+// StorageFootprint sums the caller's stored file bytes, their SUPERSEDED
+// versions' bytes and their open sessions' declared bytes, through the three
+// unbounded quota reads (memql#4782, epic memql#4806 design D9). All run
+// under the caller's actor; all three are @unbounded in the DSL precisely so
 // this sum cannot silently undercount past a page boundary and fail the
 // quota open.
-func (s *EngineLibraryStore) StorageFootprint(ctx context.Context) (int64, int64, error) {
+//
+// The version half is not optional politeness: superseding destroys nothing,
+// so those bytes are as real as a head file's, and a quota that ignored them
+// would refuse a person using numbers they cannot see anywhere.
+func (s *EngineLibraryStore) StorageFootprint(ctx context.Context) (int64, int64, int64, error) {
 	sum := func(fn string) (int64, error) {
 		res, err := s.exec(ctx, fn, nil)
 		if err != nil {
@@ -1238,13 +1651,17 @@ func (s *EngineLibraryStore) StorageFootprint(ctx context.Context) (int64, int64
 	}
 	fileBytes, err := sum("libraryFileSizesForOwner")
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
+	}
+	versionBytes, err := sum("libraryFileVersionSizesForOwner")
+	if err != nil {
+		return 0, 0, 0, err
 	}
 	sessionBytes, err := sum("openUploadSessionsForOwner")
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
-	return fileBytes, sessionBytes, nil
+	return fileBytes, versionBytes, sessionBytes, nil
 }
 
 // OwnedWorker resolves a registration in the caller's own fleet through
@@ -1412,7 +1829,99 @@ func (s *EngineLibraryStore) File(ctx context.Context, fileRef string) (*Library
 		Size:     rowInt(r, "size"),
 		BlobUrl:  rowString(r, "blobUrl"),
 		Status:   rowString(r, "status"),
+		Sha256:   rowString(r, "sha256"),
+		Format:   rowString(r, "format"),
+		Summary:  rowString(r, "summary"),
+		// ABSENT IS 1 (epic memql#4806): every file uploaded before the
+		// field existed has no member at all, and a supersede that read
+		// that as 0 would freeze the outgoing head as "version 0" and
+		// move the head to 1 -- renumbering a file that never moved.
+		VersionNumber:          headVersionNumber(rowInt(r, "versionNumber")),
+		VersionUploadedAt:      rowString(r, "versionUploadedAt"),
+		UploadedFromWorkerId:   rowString(r, "uploadedFromWorkerId"),
+		UploadedFromWorkerName: rowString(r, "uploadedFromWorkerName"),
+		UploadedFromPath:       rowString(r, "uploadedFromPath"),
 	}, nil
+}
+
+// headVersionNumber reads a file row's versionNumber, treating absent (and
+// any nonsense below 1) as version 1.
+//
+// The rule has ONE implementation on each side of the wire and this is the
+// server's; the Files app carries the other, and both cite the reason: a row
+// promoted before versions existed carries no member, and every other reading
+// of that absence renumbers files nobody touched.
+func headVersionNumber(raw int) int {
+	if raw < 1 {
+		return 1
+	}
+	return raw
+}
+
+// FileVersion reads one superseded version through libraryFileVersionByNumber.
+// Under the caller's actor, like every other read here: a version of somebody
+// else's file comes back as the nil a missing one does.
+func (s *EngineLibraryStore) FileVersion(ctx context.Context, fileId string, versionNumber int) (*LibraryFileVersionRow, error) {
+	fileId = strings.TrimSpace(fileId)
+	if fileId == "" || versionNumber < 1 {
+		return nil, nil
+	}
+	res, err := s.exec(ctx, "libraryFileVersionByNumber", map[string]any{
+		"fileId":        fileId,
+		"versionNumber": versionNumber,
+	})
+	if err != nil {
+		return nil, err
+	}
+	rows := memql.MaterializeRows(res)
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	r := rows[0]
+	return &LibraryFileVersionRow{
+		ID:                     rowString(r, "id"),
+		FileId:                 rowString(r, "fileId"),
+		VersionNumber:          rowInt(r, "versionNumber"),
+		Name:                   rowString(r, "name"),
+		MimeType:               rowString(r, "mimeType"),
+		Size:                   rowInt(r, "size"),
+		Sha256:                 rowString(r, "sha256"),
+		BlobUrl:                rowString(r, "blobUrl"),
+		Format:                 rowString(r, "format"),
+		Summary:                rowString(r, "summary"),
+		UploadedFromWorkerId:   rowString(r, "uploadedFromWorkerId"),
+		UploadedFromWorkerName: rowString(r, "uploadedFromWorkerName"),
+		UploadedFromPath:       rowString(r, "uploadedFromPath"),
+		UploadedAt:             rowString(r, "uploadedAt"),
+		SupersededAt:           rowString(r, "supersededAt"),
+	}, nil
+}
+
+// SupersedeFile runs the two @serverOnly version writes through the
+// fileversion store, which owns the internal-origin stamp and the order.
+func (s *EngineLibraryStore) SupersedeFile(ctx context.Context, snap LibraryVersionSnapshot, head LibraryHeadMove) error {
+	if s == nil || s.engine == nil {
+		return fmt.Errorf("engine not configured")
+	}
+	return fileversion.NewStore(s.engine).Supersede(ctx,
+		fileversion.Snapshot(snap), fileversion.Head(head))
+}
+
+// RestampFileArtifact re-versions the artifact index row from its backing
+// file through the libraryRestampFileArtifact builtin -- the same seam
+// AddArtifactLabel uses, for the same reason: the write lives beside the
+// package's other artifact-index writers so the carry-forward has one author.
+func (s *EngineLibraryStore) RestampFileArtifact(ctx context.Context, fileId string) error {
+	fileId = strings.TrimSpace(fileId)
+	if fileId == "" {
+		return fmt.Errorf("fileId is required")
+	}
+	q, err := dslBuiltinCall("libraryRestampFileArtifact", map[string]any{"fileId": fileId})
+	if err != nil {
+		return err
+	}
+	_, err = s.engine.Execute(ctx, q)
+	return err
 }
 
 // ExportBody reads a text-bearing backing row for the export route.

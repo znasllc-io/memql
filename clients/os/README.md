@@ -440,7 +440,22 @@ repetitions of the four apps before it.
   walker's path separator (`TREE_PATH_SEP`, uploadTree.ts) is written as the
   six-character escape for U+001F, never pasted as the byte itself: a
   literal control byte turned the file binary to grep and to every
-  repo-walking gate while its tests stayed green.
+  repo-walking gate while its tests stayed green. `uploadResume.ts`'s own
+  key separator was the second one to be found this way and is now written
+  the same, as the escape for U+0000.
+
+- **A NEW VERSION IS ONE ROW, NOT TWO** (epic memql#4806). "Upload new
+  version" in the inspector sends `targetArtifactId` through the SAME
+  provider every other upload rides -- so chunking, resume, retry, progress
+  and verbatim refusals all apply to it and nothing new learned any of them
+  -- and the artifact keeps its id, its folder and its labels. It
+  deliberately does not go through `useUploadTasks`: those create a
+  placeholder ROW in the list, and a new version must not add a second row
+  to the list it is proving it does not disturb. The history lives in the
+  inspector below the action that grows it, and is a READ rather than a
+  feed: `v1:library:fileVersion` carries no broadcast routing rule, so the
+  panel says when it looked and offers to look again instead of implying a
+  liveness it does not have.
 
 ## Accounts, the sixth app (memql#4800)
 

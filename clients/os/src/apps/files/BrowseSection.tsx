@@ -31,6 +31,7 @@ import { accountIsArchived, accountName } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
 import { ACCOUNT_ANY, ACCOUNT_NONE } from "./filters";
 import { Inspector } from "./Inspector";
+import type { UploadProvider } from "../../items/upload";
 import type { UploadTask, UploadTasksApi } from "./useUploadTasks";
 
 // The browse (design D1): rail, list, inspector -- three readings of the two
@@ -64,6 +65,7 @@ export function BrowseSection({
   tasks,
   uploadFiles,
   uploadTree,
+  uploads,
 }: {
   list: LiveView<ArtifactRow> | null;
   artifacts: LiveCollectionHandle<Row>;
@@ -79,6 +81,11 @@ export function BrowseSection({
   tasks: UploadTask[];
   uploadFiles: UploadTasksApi["uploadFiles"];
   uploadTree: UploadTasksApi["uploadTree"];
+  /** The provider itself, for the inspector's new-version action (memql#4806).
+   *  Deliberately not routed through `uploadFiles`: that creates a placeholder
+   *  ROW in this list, and a new version of an existing artifact must not add
+   *  a second row to the list it is proving it does not disturb. */
+  uploads: UploadProvider;
 }) {
   const { presence } = useMachines();
   const { actions } = useOs();
@@ -446,6 +453,7 @@ export function BrowseSection({
             tree={tree}
             presence={presence}
             confirmBeforeArchive={confirmBeforeArchive}
+            uploads={uploads}
             onAsk={askContext}
             onClose={() => onSelect("")}
           />

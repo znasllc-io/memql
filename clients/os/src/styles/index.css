@@ -2939,6 +2939,189 @@ a.os-button {
   width: 100%;
 }
 
+/* THE VERSION SPINE (epic memql#4806).
+ *
+ * Version numbers are a real sequence -- v3 came after v2 because somebody
+ * uploaded it -- so the history is drawn as a timeline rather than a table: a
+ * hairline rule down the stack with a node per version, filled at the one the
+ * file holds now and hollow below it. It is the one visual device this panel
+ * adds, and it uses no colour the shell did not already have: the line is
+ * --os-line, the current node is --os-accent, and everything superseded
+ * recedes to --os-muted.
+ *
+ * The rule is drawn on each entry rather than once behind the list, so the
+ * last entry can simply not draw one -- a single tall rule would hang past the
+ * final node with nothing under it. */
+.os-files-versions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--os-line);
+}
+.os-files-versions-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.os-files-versions-head .os-caption {
+  margin-left: auto;
+}
+.os-files-versions-only {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+  line-height: 1.5;
+}
+
+.os-files-spine {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.os-files-version {
+  position: relative;
+  display: grid;
+  grid-template-columns: 11px 1fr;
+  gap: 8px;
+  padding-bottom: 10px;
+}
+.os-files-version:last-child {
+  padding-bottom: 0;
+}
+.os-files-version::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 16px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--os-line);
+  /* Present enough to read as a chain at a glance, quiet enough that the
+   * NODES stay the thing the eye lands on. */
+  opacity: 0.9;
+}
+.os-files-version:last-child::before {
+  display: none;
+}
+.os-files-version-node {
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  border-radius: 50%;
+  border: 1px solid var(--os-line);
+  background: var(--os-plate);
+}
+.os-files-version[data-current] .os-files-version-node {
+  border-color: var(--os-accent);
+  background: var(--os-accent);
+}
+
+.os-files-version-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.os-files-version-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.os-files-version-n {
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-sm);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--os-ink);
+}
+.os-files-version-when {
+  margin-left: auto;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  white-space: nowrap;
+}
+.os-files-version-story {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+.os-files-version-story .os-dot {
+  flex-shrink: 0;
+}
+.os-files-version-story span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The current version reads at full ink and everything under it recedes, so
+ * the stack answers "which one is live" before a word of it is read. */
+.os-files-version[data-current] .os-files-version-story {
+  color: var(--os-ink);
+}
+.os-files-version-name {
+  margin: 0;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-files-version-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+}
+.os-files-version-bytes,
+.os-files-version-hash {
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--os-muted);
+}
+.os-files-version-hash {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* THE PER-VERSION DOWNLOAD IS A QUIET AFFORDANCE, NOT A CONTROL PANEL.
+ *
+ * Drawn first as the kit's ordinary bordered button, it stacked four boxes
+ * down the right edge and out-weighed the spine -- which is the one thing this
+ * panel adds and the one thing it should be remembered by. So the border and
+ * the plate come off until the pointer or the keyboard arrives, at which point
+ * it is an ordinary button again. Focus is NEVER quiet: the outline the kit
+ * gives every control is what a keyboard reader navigates by. */
+.os-files-version-meta .os-button {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 3px 5px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--os-muted);
+}
+.os-files-version-meta .os-button:hover:not(:disabled),
+.os-files-version-meta .os-button:focus-visible {
+  border-color: var(--os-line);
+  background: var(--os-raised);
+  color: var(--os-ink);
+}
+.os-files-version-progress {
+  font-family: var(--os-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Upload placeholders (design D3): a landing file is a real row in the list
  * with an honest byte counter -- monospace, tabular, no percentage theater
  * -- and a hairline progress track under it. */

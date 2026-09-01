@@ -67,11 +67,21 @@ type fakeLibraryStore struct {
 	workers      map[string]*LibraryWorkerRef
 	ownedWorkerN int
 
-	// fileBytes / sessionBytes answer StorageFootprint -- the two halves of
-	// the quota sum (memql#4782): stored files (archived included) and open
+	// fileBytes / versionBytes / sessionBytes answer StorageFootprint -- the
+	// three halves of the quota sum (memql#4782, epic memql#4806): stored
+	// files (archived included), every superseded version's bytes, and open
 	// sessions' declared sizes.
 	fileBytes    int64
+	versionBytes int64
 	sessionBytes int64
+
+	// versions models the version chain: fileId -> versionNumber -> row.
+	// supersedes records every SupersedeFile call in order, so a test can
+	// assert what was frozen as well as what the head became.
+	versions     map[string]map[int]*LibraryFileVersionRow
+	supersedes   []supersedeCall
+	restamped    []string
+	supersedeErr error
 
 	// artifactForFile answers ArtifactForFile, but only after promoteAfter
 	// calls -- the promotion is an automation off graph.node.created, so the
@@ -83,6 +93,12 @@ type fakeLibraryStore struct {
 	createErr error
 }
 
+// supersedeCall is one recorded SupersedeFile, both halves.
+type supersedeCall struct {
+	snap LibraryVersionSnapshot
+	head LibraryHeadMove
+}
+
 func newFakeLibraryStore() *fakeLibraryStore {
 	return &fakeLibraryStore{
 		artifacts:       map[string]*LibraryArtifactRow{},
@@ -91,7 +107,69 @@ func newFakeLibraryStore() *fakeLibraryStore {
 		ownerOf:         map[string]string{},
 		artifactForFile: map[string]string{},
 		workers:         map[string]*LibraryWorkerRef{},
+		versions:        map[string]map[int]*LibraryFileVersionRow{},
 	}
+}
+
+// FileVersion models the owner-gated version read: a version of a file the
+// caller may not see comes back as the nil a missing one does. The gate key
+// is the FILE's, because a version row carries the same ownerUserId its file
+// does.
+func (f *fakeLibraryStore) FileVersion(ctx context.Context, fileId string, versionNumber int) (*LibraryFileVersionRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.admits(ctx, LibraryFileConceptRef(fileId)) {
+		return nil, nil
+	}
+	return f.versions[fileId][versionNumber], nil
+}
+
+// SupersedeFile records the pair and applies it, so a follow-up read sees the
+// world the handler just made: the snapshot becomes a version row and the
+// head row takes the new bytes.
+func (f *fakeLibraryStore) SupersedeFile(_ context.Context, snap LibraryVersionSnapshot, head LibraryHeadMove) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.supersedeErr != nil {
+		return f.supersedeErr
+	}
+	f.supersedes = append(f.supersedes, supersedeCall{snap: snap, head: head})
+	if f.versions[snap.FileId] == nil {
+		f.versions[snap.FileId] = map[int]*LibraryFileVersionRow{}
+	}
+	f.versions[snap.FileId][snap.VersionNumber] = &LibraryFileVersionRow{
+		ID:            snap.VersionId,
+		FileId:        snap.FileId,
+		VersionNumber: snap.VersionNumber,
+		Name:          snap.Name,
+		MimeType:      snap.MimeType,
+		Size:          int(snap.Size),
+		Sha256:        snap.Sha256,
+		BlobUrl:       snap.BlobUrl,
+		Format:        snap.Format,
+		Summary:       snap.Summary,
+		UploadedAt:    snap.UploadedAt,
+	}
+	if row := f.files[LibraryFileConceptRef(head.FileId)]; row != nil {
+		row.Name, row.MimeType, row.Size = head.Name, head.MimeType, int(head.Size)
+		row.BlobUrl, row.Sha256, row.Format = head.BlobUrl, head.Sha256, head.Format
+		row.VersionNumber = head.VersionNumber
+		row.Status = "analyzing"
+	}
+	return nil
+}
+
+func (f *fakeLibraryStore) RestampFileArtifact(_ context.Context, fileId string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.restamped = append(f.restamped, fileId)
+	return nil
+}
+
+func (f *fakeLibraryStore) snapshotSupersedes() []supersedeCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]supersedeCall(nil), f.supersedes...)
 }
 
 func (f *fakeLibraryStore) OwnedWorker(ctx context.Context, workerId string) (*LibraryWorkerRef, error) {
@@ -116,10 +194,16 @@ func (f *fakeLibraryStore) setFootprint(fileBytes, sessionBytes int64) {
 	f.fileBytes, f.sessionBytes = fileBytes, sessionBytes
 }
 
-func (f *fakeLibraryStore) StorageFootprint(_ context.Context) (int64, int64, error) {
+func (f *fakeLibraryStore) setVersionBytes(versionBytes int64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.fileBytes, f.sessionBytes, nil
+	f.versionBytes = versionBytes
+}
+
+func (f *fakeLibraryStore) StorageFootprint(_ context.Context) (int64, int64, int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.fileBytes, f.versionBytes, f.sessionBytes, nil
 }
 
 func actorUserId(ctx context.Context) string {
@@ -1148,9 +1232,36 @@ func TestLibraryStoreCallSitesResolveThroughTheRealEngine(t *testing.T) {
 			_, err := store.OwnedWorker(ctx, "wrk-1")
 			return err
 		}},
-		{"storage footprint (libraryFileSizesForOwner + openUploadSessionsForOwner)", func() error {
-			_, _, err := store.StorageFootprint(ctx)
+		{"storage footprint (libraryFileSizesForOwner + libraryFileVersionSizesForOwner + openUploadSessionsForOwner)", func() error {
+			_, _, _, err := store.StorageFootprint(ctx)
 			return err
+		}},
+		{"libraryFileVersionByNumber", func() error {
+			_, err := store.FileVersion(ctx, "file-1", 2)
+			return err
+		}},
+		{"libraryRestampFileArtifact", func() error {
+			return store.RestampFileArtifact(ctx, "file-1")
+		}},
+		{"the supersede pair (createLibraryFileVersion + supersedeLibraryFileHead)", func() error {
+			// Both halves, with the awkward string in every free-text slot:
+			// a version's name, its summary and its machine label all have
+			// to survive rendering, on a path that writes storage paths.
+			return store.SupersedeFile(ctx,
+				LibraryVersionSnapshot{
+					VersionId: "file-1-v1", FileId: "file-1", VersionNumber: 1,
+					Name: awkward, MimeType: "application/pdf", Size: 9,
+					Sha256: strings.Repeat("cd", 32), BlobUrl: "library/u-1/file-1/" + awkward,
+					Format: "pdf", Summary: awkward,
+					UploadedFromWorkerId: "wrk-1", UploadedFromWorkerName: awkward,
+					UploadedFromPath: `C:\Users\O'Brien\"q3" é\nreport.pdf`,
+					UploadedAt:       "2026-08-01T10:00:00Z",
+				},
+				LibraryHeadMove{
+					FileId: "file-1", VersionNumber: 2, Name: awkward,
+					MimeType: "application/pdf", Size: 12,
+					BlobUrl: "library/u-1/file-1/k-9/" + awkward, Format: "pdf",
+				})
 		}},
 		{"setLibraryFileStatus ready", func() error {
 			return store.SetFileStatus(ctx, LibraryFileStatusParams{
@@ -1197,10 +1308,11 @@ func TestLibraryStoreCallSitesResolveThroughTheRealEngine(t *testing.T) {
 		}
 	}
 
-	// A loop that rendered nothing would pass every assertion above. One
-	// call site (StorageFootprint) renders TWO statements -- its two quota
-	// queries -- hence the +1.
-	if want := len(calls) + 1; len(rec.statements) != want {
+	// A loop that rendered nothing would pass every assertion above. Two
+	// call sites render more than one statement -- StorageFootprint runs its
+	// THREE quota queries, and SupersedeFile runs both halves of the pair --
+	// hence the +3.
+	if want := len(calls) + 3; len(rec.statements) != want {
 		t.Fatalf("rendered %d statements for %d call sites (want %d); the store is not calling the engine",
 			len(rec.statements), len(calls), want)
 	}

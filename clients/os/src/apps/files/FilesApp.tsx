@@ -153,6 +153,7 @@ export function FilesApp({
       tasks={tasks}
       uploadFiles={uploadFiles}
       uploadTree={uploadTree}
+      uploads={provider}
     />
   );
 }

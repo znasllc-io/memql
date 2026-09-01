@@ -42,6 +42,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/server/fileversion"
 	"github.com/znasllc-io/memql/component/server/uploadsession"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -253,27 +254,32 @@ func (h *ArtifactHandler) verifyProvenance(ctx context.Context, workerId, worker
 	return workerName, 0, ""
 }
 
-// checkQuota enforces MEMQL_LIBRARY_USER_QUOTA_BYTES (design C4): the sum
-// of the owner's stored file sizes (archived included -- retention is real)
-// plus their open sessions' declared sizes, plus addBytes, must stay at or
-// under the quota. The refusal NAMES BOTH NUMBERS, because a caller who
-// cannot see them can only bisect for them. Returns (0, "") when admitted.
+// checkQuota enforces MEMQL_LIBRARY_USER_QUOTA_BYTES (design C4, extended by
+// epic memql#4806 design D9): the sum of the owner's stored file sizes
+// (archived included -- retention is real), the bytes of every SUPERSEDED
+// version they hold, and their open sessions' declared sizes, plus addBytes,
+// must stay at or under the quota. The refusal NAMES BOTH NUMBERS, because a
+// caller who cannot see them can only bisect for them -- and it names all
+// three things that count, because a person looking at their Library sees
+// one row per file and would otherwise have no way to reconcile the total.
+// Returns (0, "") when admitted.
 func (h *ArtifactHandler) checkQuota(ctx context.Context, addBytes int64) (int, string) {
 	if h.userQuotaBytes <= 0 {
 		return 0, ""
 	}
-	fileBytes, sessionBytes, err := h.store.StorageFootprint(ctx)
+	fileBytes, versionBytes, sessionBytes, err := h.store.StorageFootprint(ctx)
 	if err != nil {
 		h.logger.Error("resolve library storage footprint", "error", err)
 		return http.StatusInternalServerError, "storage quota check failed"
 	}
-	total := fileBytes + sessionBytes + addBytes
+	total := fileBytes + versionBytes + sessionBytes + addBytes
 	if total <= h.userQuotaBytes {
 		return 0, ""
 	}
 	return http.StatusInsufficientStorage, fmt.Sprintf(
 		"storage quota exceeded: this upload would take your Library to %d bytes, over the quota of %d bytes (%s). "+
-			"Stored files -- archived ones included -- and the declared sizes of your open upload sessions all count.",
+			"Stored files -- archived ones included -- every earlier version of them, and the declared sizes of "+
+			"your open upload sessions all count.",
 		total, h.userQuotaBytes, LibraryUserQuotaBytesEnv)
 }
 
@@ -323,6 +329,11 @@ type uploadInitRequest struct {
 	UploadedFromWorkerId   string   `json:"uploadedFromWorkerId"`
 	UploadedFromWorkerName string   `json:"uploadedFromWorkerName"`
 	UploadedFromPath       string   `json:"uploadedFromPath"`
+	// TargetArtifactId makes this session a new VERSION of an existing
+	// artifact rather than a fresh upload (epic memql#4806, design D7). The
+	// three target gates run HERE, at init -- fail-fast, before anybody
+	// streams gigabytes at a target they may not write to.
+	TargetArtifactId string `json:"targetArtifactId"`
 }
 
 type uploadInitResponse struct {
@@ -362,8 +373,14 @@ func (h *ArtifactHandler) handleUploadInit(w http.ResponseWriter, r *http.Reques
 
 	ctx := r.Context()
 
-	// The same three gates the one-shot route runs, in the same order:
-	// provenance (fail fast, before anyone streams gigabytes), then quota.
+	// The same gates the one-shot route runs, in the same order and for the
+	// same reason -- everything that can refuse this upload refuses it before
+	// a byte moves: the version target, then provenance, then quota.
+	targetArtifact, head, status, msg := h.resolveVersionTarget(ctx, strings.TrimSpace(req.TargetArtifactId))
+	if status != 0 {
+		http.Error(w, msg, status)
+		return
+	}
 	workerName, status, msg := h.verifyProvenance(ctx,
 		strings.TrimSpace(req.UploadedFromWorkerId),
 		strings.TrimSpace(req.UploadedFromWorkerName),
@@ -384,6 +401,16 @@ func (h *ArtifactHandler) handleUploadInit(w http.ResponseWriter, r *http.Reques
 	// fileId. This composition is the whole reason createUploadSession is
 	// @serverOnly: a caller-authored path could escape this prefix.
 	blobPath := fmt.Sprintf("library/%s/%s/%s", userId, fileId, name)
+	targetArtifactId := ""
+	if head != nil {
+		// A version keeps the file's identity, so the session carries the
+		// EXISTING file id and stages into a path no version has used. Both
+		// are composed here for the same reason a fresh upload's is: the
+		// client never authors a storage path.
+		fileId = head.ID
+		blobPath = libraryVersionObjectName(userId, fileId, name)
+		targetArtifactId = targetArtifact.ID
+	}
 
 	if err := h.sessions.Create(ctx, uploadsession.CreateParams{
 		UploadId: uploadId, Name: name, Size: req.Size,
@@ -393,6 +420,7 @@ func (h *ArtifactHandler) handleUploadInit(w http.ResponseWriter, r *http.Reques
 		UploadedFromWorkerName: workerName,
 		UploadedFromPath:       strings.TrimSpace(req.UploadedFromPath),
 		BlobPath:               blobPath, FileId: fileId, ChunkSize: h.chunkSizeBytes,
+		TargetArtifactId: targetArtifactId,
 	}); err != nil {
 		h.logger.Error("create upload session", "error", err)
 		http.Error(w, fmt.Sprintf("failed to open upload session: %v", err), http.StatusInternalServerError)
@@ -533,15 +561,26 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 	// A COMPLETED session answers its ids instead of re-running the commit:
 	// the client that died between commit and response re-completes and
 	// gets the same answer. The artifact id derives deterministically from
-	// the source ref, which is what makes this resolvable at all.
+	// the source ref, which is what makes this resolvable at all -- and for
+	// a version session the target was recorded at init, so the answer needs
+	// no derivation. The version NUMBER is read back off the head rather
+	// than remembered, because by now it is a fact about a row.
 	if session.Status != "open" {
-		artifactId, err := h.store.ArtifactForFile(ctx, session.FileId)
-		if err != nil {
-			h.logger.Warn("resolve artifact for completed session", "error", err, "uploadId", uploadId)
+		artifactId := session.TargetArtifactId
+		if artifactId == "" {
+			resolved, err := h.store.ArtifactForFile(ctx, session.FileId)
+			if err != nil {
+				h.logger.Warn("resolve artifact for completed session", "error", err, "uploadId", uploadId)
+			}
+			artifactId = resolved
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(ArtifactUploadResponse{ArtifactId: artifactId, FileId: session.FileId})
+		_ = json.NewEncoder(w).Encode(ArtifactUploadResponse{
+			ArtifactId:    artifactId,
+			FileId:        session.FileId,
+			VersionNumber: h.completedSessionVersion(ctx, session),
+		})
 		return
 	}
 
@@ -621,6 +660,41 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 		UploadedFromWorkerName: session.UploadedFromWorkerName,
 		UploadedFromPath:       session.UploadedFromPath,
 	}
+
+	// --- a VERSION session supersedes instead of creating (epic memql#4806) ---
+	//
+	// The target was gated at init, but the head is re-read HERE, under the
+	// caller's actor, and for two reasons: its version number and its byte
+	// facts are what the snapshot freezes, and a session can sit open for
+	// days -- the head it started against may not be the head any more, and
+	// freezing init-time facts would write a version row describing bytes
+	// that were already superseded by somebody else.
+	if session.TargetArtifactId != "" {
+		artifactId, version, ok := h.completeVersionSession(w, r, session)
+		if !ok {
+			return
+		}
+		if err := h.sessions.Complete(ctx, session.ID); err != nil {
+			h.logger.Error("mark upload session completed", "error", err, "uploadId", uploadId)
+		}
+		h.restampAfterSupersede(ctx, session.FileId, artifactId)
+		for _, label := range session.Labels {
+			if strings.TrimSpace(label) == "" {
+				continue
+			}
+			if err := h.store.AddArtifactLabel(ctx, artifactId, strings.TrimSpace(label)); err != nil {
+				h.logger.Warn("apply session label", "error", err, "artifactId", artifactId, "label", label)
+			}
+		}
+		h.startAnalysis(userId, artifactId, params, nil)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(ArtifactUploadResponse{
+			ArtifactId: artifactId, FileId: session.FileId, VersionNumber: version,
+		})
+		return
+	}
+
 	if err := h.store.CreateFile(ctx, params); err != nil {
 		h.logger.Error("create library file row for session", "error", err, "uploadId", uploadId)
 		http.Error(w, fmt.Sprintf("failed to create library file: %v", err), http.StatusInternalServerError)
@@ -655,7 +729,92 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(ArtifactUploadResponse{ArtifactId: artifactId, FileId: session.FileId})
+	_ = json.NewEncoder(w).Encode(ArtifactUploadResponse{
+		ArtifactId: artifactId, FileId: session.FileId, VersionNumber: 1,
+	})
+}
+
+// completeVersionSession re-gates the target and runs the supersede for a
+// chunked new version. It writes its own refusal and answers ok=false; on
+// success it returns the artifact id and the version number that landed.
+//
+// RE-GATING AT COMPLETE IS NOT PARANOIA. The bytes are already committed, so
+// this cannot refuse them back out of storage -- but the alternative is
+// writing a head update against an artifact the caller has since lost access
+// to, or against a file that has been archived and re-owned. The read costs
+// one query on a path that just moved gigabytes.
+func (h *ArtifactHandler) completeVersionSession(w http.ResponseWriter, r *http.Request, session *uploadsession.Row) (string, int, bool) {
+	ctx := r.Context()
+	targetArtifact, head, status, msg := h.resolveVersionTarget(ctx, session.TargetArtifactId)
+	if status != 0 {
+		http.Error(w, msg, status)
+		return "", 0, false
+	}
+	if head.ID != session.FileId {
+		// The artifact's backing file changed identity under the session.
+		// Nothing in this epic can do that, which is exactly why it is worth
+		// refusing loudly rather than superseding whatever is there now.
+		h.logger.Error("upload session target no longer backs the file it was opened against",
+			"uploadId", session.ID, "sessionFileId", session.FileId, "headFileId", head.ID)
+		http.Error(w, "this upload session's target has changed since it was opened, so nothing was written",
+			http.StatusConflict)
+		return "", 0, false
+	}
+	version := head.VersionNumber + 1
+	if err := h.store.SupersedeFile(ctx,
+		LibraryVersionSnapshot{
+			VersionId:              fileversion.DerivedVersionId(head.ID, head.VersionNumber),
+			FileId:                 head.ID,
+			VersionNumber:          head.VersionNumber,
+			Name:                   head.Name,
+			MimeType:               head.MimeType,
+			Size:                   int64(head.Size),
+			Sha256:                 head.Sha256,
+			BlobUrl:                head.BlobUrl,
+			Format:                 head.Format,
+			Summary:                head.Summary,
+			UploadedFromWorkerId:   head.UploadedFromWorkerId,
+			UploadedFromWorkerName: head.UploadedFromWorkerName,
+			UploadedFromPath:       head.UploadedFromPath,
+			UploadedAt:             head.VersionUploadedAt,
+		},
+		LibraryHeadMove{
+			FileId:        head.ID,
+			VersionNumber: version,
+			Name:          session.Name,
+			MimeType:      session.MimeType,
+			Size:          session.Size,
+			// Sha256 is blank ON PURPOSE and written as such: no handler on
+			// this path ever held the file, and the analysis pass stamps
+			// what it measures. Inheriting the previous version's hash would
+			// be a false integrity claim rather than a missing one (D5).
+			BlobUrl:                session.BlobPath,
+			Format:                 LibraryFormatForMIME(session.MimeType),
+			UploadedFromWorkerId:   session.UploadedFromWorkerId,
+			UploadedFromWorkerName: session.UploadedFromWorkerName,
+			UploadedFromPath:       session.UploadedFromPath,
+		}); err != nil {
+		h.logger.Error("supersede library file for session", "error", err,
+			"uploadId", session.ID, "fileId", head.ID, "version", version)
+		http.Error(w, fmt.Sprintf("failed to record the new version: %v", err), http.StatusInternalServerError)
+		return "", 0, false
+	}
+	return targetArtifact.ID, version, true
+}
+
+// completedSessionVersion answers the version a finished session landed as,
+// read off the head now rather than remembered.
+//
+// Best-effort by design: this only ever runs on the idempotent re-complete
+// path, where the ids are the answer the caller came for and the version is
+// a courtesy. Zero when the head cannot be read, which a client reads as
+// "not stated" rather than as version zero.
+func (h *ArtifactHandler) completedSessionVersion(ctx context.Context, session *uploadsession.Row) int {
+	row, err := h.store.File(ctx, LibraryFileConceptRef(session.FileId))
+	if err != nil || row == nil {
+		return 0
+	}
+	return headVersionNumber(row.VersionNumber)
 }
 
 // ---------------------------------------------------------------------------

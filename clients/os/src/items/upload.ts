@@ -11,6 +11,17 @@ export interface UploadResult {
   fileKind: string;
   /** Library provenance source ("uploaded" on this path). */
   source: string;
+  /**
+   * Which version landed (epic memql#4806). 1 for a fresh upload, N for a new
+   * version of an existing artifact, so a surface can say "Version 3 uploaded"
+   * without a second read.
+   *
+   * OPTIONAL, because two providers here honestly have no answer: the
+   * in-memory stand-in never talked to a cluster, and the attachment route
+   * does not version. Absent means "not stated", which a reader shows as
+   * nothing rather than as version zero.
+   */
+  versionNumber?: number;
 }
 
 /**
@@ -52,6 +63,17 @@ export interface UploadHandle<T = UploadResult> {
 export interface UploadOptions {
   /** Library folder the file lands in. Omitted = the root (design D4/B2). */
   folderId?: string;
+  /**
+   * The artifact this upload is a NEW VERSION of (epic memql#4806). Omitted is
+   * the ordinary case: a fresh upload. Set, and the artifact keeps its id, its
+   * folder and its labels while the previous version is frozen as history.
+   *
+   * IT RIDES THE PROVIDER LIKE EVERY OTHER OPTION, which is the whole point:
+   * the one-path rule (test/files/onePath.test.ts) means a version upload
+   * inherits chunking, resume, retry, progress and verbatim refusals without
+   * a second route speaker learning any of them.
+   */
+  targetArtifactId?: string;
 }
 
 export interface UploadProvider {
@@ -65,7 +87,7 @@ export interface UploadProvider {
 export class InMemoryUploadProvider implements UploadProvider {
   constructor(private readonly delayMs = 30) {}
 
-  upload(file: File, _opts?: UploadOptions): UploadHandle {
+  upload(file: File, opts?: UploadOptions): UploadHandle {
     let cancelled = false;
     const done = new Promise<UploadResult>((resolve, reject) => {
       setTimeout(() => {
@@ -74,7 +96,7 @@ export class InMemoryUploadProvider implements UploadProvider {
           return;
         }
         resolve({
-          artifactId: `local-${file.name}`,
+          artifactId: opts?.targetArtifactId ?? `local-${file.name}`,
           title: file.name,
           fileKind: "file",
           source: "uploaded",

@@ -324,9 +324,83 @@ concept file {
 
   uploadedFromPath  string  @description("Absolute path the file occupied on the uploading machine, as the cockpit reported it (e.g. '/Users/a/Reports/q3.pdf'). Stamped only where honestly known -- a browser upload carries none. Stays on THIS row and is deliberately not promoted to the index: the Files app's inspector reads the file row, and the future watched-folder sync epic keys re-pushes on (uploadedFromWorkerId, uploadedFromPath) read from here (design E).")
 
+  versionNumber  int  @description("Which version of this file the CURRENT row holds -- 1 at upload, incremented by supersedeLibraryFileHead each time somebody uploads a new version at this artifact (epic memql#4806, design D1). The head is always the newest version; every superseded one is its own immutable v1:library:fileVersion row. ABSENT MEANS 1, and it has to: every file uploaded before this field existed has no member at all, and a reader that treated absence as 0 would render 'v0' on every file in the Library. The counter lives here rather than being computed from the version rows because a count is not a version number -- a history read the caller could not complete would silently renumber the head.")
+
+  versionUploadedAt  datetime  @description("RFC3339 moment the CURRENT version's bytes arrived. Stamped at upload and re-stamped on every supersede. NOT the same fact as the row intrinsic createdAt, which is why it is declared: MemQL is append-only, so an update materialises a NEW row and createdAt is the moment of the LAST WRITE -- an analysis status transition moves it. The history panel says 'uploaded 3 weeks ago' from this field; reading createdAt would have it say 'uploaded a minute ago' because the summariser finished a minute ago.")
+
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="uploadedFromWorkerId", target=registration, direction="outgoing")
   @relationship(type="references", field="folderId", target=folder, direction="outgoing")
+}
+
+// ---- fileVersion: what a file used to be (epic memql#4806) ----
+//
+// The engine destroyed nothing before this concept existed -- every write
+// was retained in the hypertable and every upload's bytes sat at their own
+// immutable path -- but none of it was reachable: the query path returns one
+// row per id by design, so there is no client route to an earlier version of
+// a row. That is the whole reason documentVersion exists rather than a
+// documentHistory read, and it is the reason this concept exists too.
+//
+// THE HEAD IS THE FILE ROW. v1:library:file always holds the newest bytes,
+// so every existing reader -- the content route, the analysis pass, the
+// artifact promotion, the Files list -- is unchanged. A supersede snapshots
+// the OUTGOING head into one of these rows and then updates the file in
+// place, which is what keeps the artifact index's sourceConceptRef (and
+// therefore its derived id, and therefore libraryArtifactBySourceConceptRef)
+// pointing at the same string forever. Re-pointing it is where the
+// version-chained-file-rows alternative died; design D1 has the full
+// reasoning.
+//
+// IMMUTABLE ONCE WRITTEN. Nothing in this epic updates a version row and
+// nothing deletes one. Its blobUrl names a path no other version has ever
+// used, so superseding cannot overwrite stored bytes -- the library's D12
+// durability invariant holds here by construction rather than by care.
+
+/// One superseded version of a Library file: the byte facts, the provenance and the two moments
+/// that version had, frozen at the instant it stopped being the head (epic memql#4806, design D1).
+/// The newest version is NEVER one of these rows -- it is the v1:library:file itself, which is what
+/// lets the artifact index, the content route and the analysis pass go on reading exactly one row.
+/// Written only by supersedeLibraryFile through the @serverOnly pair, at the derived id
+/// '<fileId>-v<n>' so a retried supersede re-versions the same row instead of appending a duplicate
+/// to somebody's history. Per-row authz: the composite tier (memql#4312) -- the owner, or a cluster
+/// owner -- matching the file it is a version of.
+@displayCard(primary="name", secondary="summary", tertiary="uploadedAt")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept fileVersion {
+  ownerUserId  string!  @serverSet  @description("v1:identity:user.id that owns the file this version belongs to. Stamped from actor.userId, never accepted as a mutation arg (@serverSet makes that a load-time rejection, memql#3175); the supersede runs under the uploading caller's actor, and the target file was already resolved under that same actor, so the stamped owner is the file's owner by construction. The load-bearing per-row authz key -- it is duplicated here rather than resolved through fileId because the history read admits or denies each version row in its own right, with no join.")
+
+  fileId       string!  @description("v1:library:file.id this is a version of -- the grouping key libraryFileVersionsForFile reads, and the stable identity of the file ACROSS every version. Never changes: the head keeps its id forever, which is the whole point of design D1.")
+
+  versionNumber  int!  @description("Which version this row froze, 1-based. Every version of a file has exactly one number: 1..N-1 live on these rows and N is the head file row's own versionNumber. The pair (fileId, versionNumber) is unique by construction -- the row id derives from it -- so a client folding head-plus-history keys on this and a retried supersede cannot produce two rows claiming the same number.")
+
+  name         string!  @description("The filename THIS version had. Carried rather than resolved from the file row because a new version may arrive under a different name (a person re-exports 'q3-final.pdf' over 'q3.pdf'), and a history that renamed the past would be telling the reader something that did not happen.")
+
+  mimeType     string!  @description("Content type of THIS version's bytes, as uploaded or sniffed. Same reason as name: a version's own facts are frozen with it, never inherited from whatever the head happens to be now.")
+
+  size         int!  @description("Size of THIS version's stored bytes. Counted by the storage quota exactly like a file row's (design D9): retention is real, superseding destroys nothing, and a quota that ignored history would refuse a person using numbers they cannot see.")
+
+  sha256       string  @description("Lowercase hex SHA-256 of THIS version's bytes, when it was measured. Absent means 'not measured', never 'no hash exists' -- a chunked upload's handler never holds the whole file, so the head can be superseded before the analysis pass has streamed the blob. Readers render a dash. A dedup hint and an integrity check, NEVER an access key: knowing it grants nothing, because the content route resolves the version under the caller's own actor and there are no signed URLs anywhere in this design.")
+
+  blobUrl      string!  @description("Where THIS version's bytes live: 'library/{userId}/{fileId}/v{n}/{name}'. A STORAGE PATH, not a URL a browser can fetch -- the bytes only ever reach a viewer through GET /artifacts/{id}/content?version={n}, which re-checks row admission and streams them. The reason the version mutations are @serverOnly: a caller-authored blobUrl could name another user's object, and the content route would then serve it.")
+
+  format       enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")  @description("High-level content classification of THIS version, derived from its own mimeType by the writer that knew it. Frozen with the version for the same reason name and mimeType are.")
+
+  summary      string  @description("The summary the analysis pass had written for THIS version's contents when it was superseded, or empty when the pass never ran or the type was opaque. What lets the history say what each version was ABOUT rather than only how big it was.")
+
+  uploadedFromWorkerId  string  @description("v1:worker:registration.id of the fleet machine THIS version was uploaded from, when the uploader honestly knew it. Frozen per version and never inherited (the epic's own rule): a file first dropped from a browser and later pushed from a laptop has one version that names a machine and one that does not, and saying otherwise would invent provenance. Verified at ITS OWN upload, exactly as v1:library:file.uploadedFromWorkerId documents.")
+
+  uploadedFromWorkerName  string  @description("The fleet's own label for the machine uploadedFromWorkerId names, resolved from the verified registration at the moment THIS version was uploaded. Empty whenever uploadedFromWorkerId is. Frozen deliberately: a machine renamed since is still the machine this version came from under the name the fleet used then.")
+
+  uploadedFromPath  string  @description("Absolute path THIS version occupied on the uploading machine, where honestly known -- a browser upload carries none. The future watched-folder epic (#4783) keys its re-pushes on (uploadedFromWorkerId, uploadedFromPath), and per-version history of that pair is what lets it say which push produced which version.")
+
+  uploadedAt   datetime!  @description("RFC3339 moment THIS version's bytes arrived, copied from the head's versionUploadedAt at snapshot time. Declared rather than read from the row intrinsic createdAt because createdAt on this row is when the SNAPSHOT was written -- which is the supersede moment, not the upload moment. The two are different facts and the history panel shows both.")
+
+  supersededAt  datetime!  @description("RFC3339 moment this version stopped being the head, because a newer one landed. Equal to the row's own createdAt in practice; declared because a reader must not have to know that, and because a future re-write of this row for any reason would move the intrinsic and not this.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", field="fileId", target=file, direction="outgoing")
+  @relationship(type="references", field="uploadedFromWorkerId", target=registration, direction="outgoing")
 }
 
 // ---- fileChunk: the similarity substrate ----
@@ -480,6 +554,8 @@ concept uploadSession {
 
   fileId       string!  @description("The v1:library:file id complete will create -- minted by the engine at init so the blob path, the resume records and the eventual row all agree on one identity before a single byte moves.")
 
+  targetArtifactId  string  @description("The v1:library:artifact this session uploads a NEW VERSION of, when it is a supersede rather than a fresh upload (epic memql#4806, design D7). Empty is the ordinary case and means complete creates a file row; set means complete supersedes the artifact's existing one, and fileId above is then that EXISTING file's id rather than a fresh mint. Recorded at init because the three target gates -- the artifact resolves under the caller's actor, its kind is file, its backing row resolves -- run there, before anybody streams gigabytes; complete must not re-ask the client anything, least of all which artifact it is allowed to write to.")
+
   chunkSize    int!  @description("Chunk size in bytes -- 16 MiB, a constant of the design (D8), not a knob. Recorded on the row so complete and resume compute ceil(size / chunkSize) from what THIS session was opened with, even if the constant ever changes between releases.")
 
   status       enum("open", "completed", "abandoned")!  @description("Lifecycle. open = accepting chunks; completed = the block list committed and the file row exists (terminal); abandoned = declared but unwritten in v1 -- a stopped session needs no write to be abandoned, its staging garbage-collects server-side on Azure's ~7-day clock, and the row itself is inert either way. Stamped 'open' at init and never accepted from args: a caller who could re-open a completed session could drive complete twice.")
@@ -487,5 +563,6 @@ concept uploadSession {
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="folderId", target=folder, direction="outgoing")
   @relationship(type="references", field="fileId", target=file, direction="outgoing")
+  @relationship(type="references", field="targetArtifactId", target=artifact, direction="outgoing")
   @relationship(type="references", field="uploadedFromWorkerId", target=registration, direction="outgoing")
 }
