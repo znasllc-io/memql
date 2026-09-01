@@ -54,8 +54,29 @@ export function UploadSection({
     [onAsk, ready, space.spaceId, uploads],
   );
 
+  // THE DROPZONE CONSUMES THE DROP, ALWAYS, AND THAT IS NOT A DETAIL.
+  //
+  // A WindowFrame renders INSIDE the desk plate, and the desk plate is itself
+  // a file drop target: `Desktop.tsx`'s `onHostDrop` turns a dropped file into
+  // a Library artifact and a desk icon. So a drop here that merely called
+  // `preventDefault` would bubble, and ONE file would be uploaded TWICE, to
+  // two different places -- once into the caller's space for analysis, and
+  // once into the Library as a desktop item nobody asked for.
+  //
+  // Both handlers therefore stop propagation, and both run even when the
+  // dropzone is DISABLED. Letting the desk have the drop in that case would
+  // mean dropping a file on a visibly-disabled control produced a desktop
+  // icon, which is a stranger answer than nothing happening -- and "nothing
+  // happens where nothing is offered" is the shell's own rule.
+  const onDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (ready) setOver(true);
+  };
+
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
+    event.stopPropagation();
     setOver(false);
     accept(event.dataTransfer?.files ?? null);
   };
@@ -96,11 +117,7 @@ export function UploadSection({
         className="os-train-drop"
         data-over={over || undefined}
         data-disabled={!ready || undefined}
-        onDragOver={(e) => {
-          if (!ready) return;
-          e.preventDefault();
-          setOver(true);
-        }}
+        onDragOver={onDragOver}
         onDragLeave={() => setOver(false)}
         onDrop={onDrop}
       >

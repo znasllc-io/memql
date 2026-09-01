@@ -239,6 +239,95 @@ describe("the dropzone", () => {
     expect(screen.queryByText("in the cluster")).toBeNull();
   });
 
+  it("CONSUMES the drop so the desk never also uploads it", async () => {
+    // A WindowFrame renders inside the desk plate, and the desk plate is a
+    // file drop target of its own (`Desktop.tsx`'s `onHostDrop` makes a
+    // Library artifact and a desk icon). A drop here that only called
+    // preventDefault would bubble, and one file would be uploaded twice, to
+    // two different places.
+    //
+    // The ancestor handler here stands in for the desk's. It is a REACHABLE
+    // POSITIVE as well as the assertion: the second case drops on a plain
+    // sibling and shows the same handler does fire when nothing stops it, so
+    // an unfired handler is evidence about the dropzone rather than about the
+    // test.
+    const uploads = fakeUploads();
+    const connection = fakeConnection({ activeSpaceId: "space-daily" });
+    const desk = vi.fn();
+
+    h.connection = connection;
+    const { container } = render(
+      <div onDrop={desk} onDragOver={desk}>
+        {withSession(
+          <TrainingApp
+            sectionId="upload"
+            navigate={vi.fn()}
+            askContext={vi.fn()}
+            store={memStore()}
+            uploads={uploads.provider}
+          />,
+        )}
+        <div data-testid="plain-sibling" />
+      </div>,
+    );
+    await screen.findByText("Choose files");
+
+    const { fireEvent, act } = await import("@testing-library/react");
+    const file = new File(["x"], "notes.pdf", { type: "application/pdf" });
+    const zone = container.querySelector(".os-train-drop") as HTMLElement;
+    await act(async () => {
+      fireEvent.dragOver(zone, { dataTransfer: { types: ["Files"], files: [file] } });
+      fireEvent.drop(zone, { dataTransfer: { types: ["Files"], files: [file] } });
+    });
+
+    expect(uploads.calls).toHaveLength(1);
+    expect(desk).not.toHaveBeenCalled();
+
+    // The reachable positive: the same handler DOES fire for a drop the
+    // dropzone did not consume.
+    await act(async () => {
+      fireEvent.drop(screen.getByTestId("plain-sibling"), {
+        dataTransfer: { types: ["Files"], files: [file] },
+      });
+    });
+    expect(desk).toHaveBeenCalled();
+  });
+
+  it("consumes the drop even when DISABLED, rather than letting the desk have it", async () => {
+    // Dropping a file on a visibly-disabled control must not produce a desktop
+    // icon. "Nothing happens where nothing is offered" is the shell's own rule.
+    const uploads = fakeUploads();
+    const connection = fakeConnection({});
+    const desk = vi.fn();
+
+    h.connection = connection;
+    const { container } = render(
+      <div onDrop={desk} onDragOver={desk}>
+        {withSession(
+          <TrainingApp
+            sectionId="upload"
+            navigate={vi.fn()}
+            askContext={vi.fn()}
+            store={memStore()}
+            uploads={uploads.provider}
+          />,
+        )}
+      </div>,
+    );
+    await screen.findByText(/no active space yet/i);
+
+    const { fireEvent, act } = await import("@testing-library/react");
+    const zone = container.querySelector(".os-train-drop") as HTMLElement;
+    await act(async () => {
+      fireEvent.drop(zone, {
+        dataTransfer: { types: ["Files"], files: [new File(["x"], "a.pdf")] },
+      });
+    });
+
+    expect(uploads.calls).toHaveLength(0);
+    expect(desk).not.toHaveBeenCalled();
+  });
+
   it("refuses to upload, in surface, when there is NO active space", async () => {
     const uploads = fakeUploads();
     const connection = fakeConnection({});
