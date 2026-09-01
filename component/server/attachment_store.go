@@ -79,9 +79,12 @@ func (s *EngineAttachmentStore) CreateAttachment(ctx context.Context, params Att
 
 // CallerOwnsSpace runs queryOwnedSpaceById against the engine. The DSL
 // filter pins payload.ownerUserId==actor.userId; the engine envelope's
-// actor is whoever the caller authenticated as (resolved by the gRPC
-// stream interceptor or HTTP auth middleware that wrapped this
-// request). If the result set is non-empty, the caller owns the space.
+// actor binds from the AccessContext on ctx. Over gRPC the stream
+// interceptor resolves and attaches it. Over HTTP the middleware attaches
+// CLAIMS ONLY -- it never builds an AccessContext -- so the attachment
+// handler resolves one itself at ServeHTTP entry
+// (requestWithResolvedAccess, memql#4843) before any store call reaches
+// here. If the result set is non-empty, the caller owns the space.
 func (s *EngineAttachmentStore) CallerOwnsSpace(ctx context.Context, partitionId string) (bool, error) {
 	if s == nil || s.engine == nil {
 		return false, fmt.Errorf("engine not configured")

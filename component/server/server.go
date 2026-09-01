@@ -371,7 +371,10 @@ func (s *Server) ComponentName() common.ComponentName {
 // ContextWithToken, and no HTTP middleware anywhere calls ContextWithAccess.
 // So auth.AccessFromContext is nil on this path for EVERY caller, including a
 // cluster owner. Gating on it directly would not secure the endpoint -- it
-// would 403 everyone, owner included.
+// would 403 everyone, owner included. (Handler families whose downstream
+// reads bind the actor resolve an AccessContext at their own entry since
+// memql#4843 -- http_access.go's requestWithResolvedAccess; this route does
+// not, and the local resolution below stands.)
 //
 // The gRPC side does the resolution step separately: streamSession.ensureAccess
 // turns claims into an AccessContext (IdentityResolver.LoadFromClaims, else
