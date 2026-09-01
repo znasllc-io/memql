@@ -120,7 +120,13 @@ func (i *Integration) handleSendEmail(ctx context.Context, args map[string]any, 
 		return nil, err
 	}
 
-	if err := i.sender.Send(ctx, msg); err != nil {
+	// The DEFAULT identity, always. `sendEmail` is the transactional
+	// capability -- a DSL author renders a body and asks for it to go out --
+	// and the mailbox it leaves from is a deployment fact, not an argument.
+	// Sending as an arbitrary mailbox is a campaigns decision made against a
+	// stored, operator-declared identity row (design D4), never free text
+	// arriving through a builtin's args map.
+	if err := i.sender.Send(ctx, msg, SendAs{}); err != nil {
 		return nil, fmt.Errorf("email.sendEmail: %w", err)
 	}
 

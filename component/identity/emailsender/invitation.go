@@ -117,12 +117,13 @@ func (s *EngineEmailSender) SendUserInvitation(ctx context.Context, in UserInvit
 		return s.noSender("user invitation", in.Email, subject, slog.String("link", in.LinkURL))
 	}
 
+	// The zero SendAs -- the deployment's configured mailbox (email D5).
 	return sender.Send(ctx, email.Message{
 		To:       in.Email,
 		Subject:  subject,
 		TextBody: buildInvitationText(in),
 		HTMLBody: buildInvitationHTML(in),
-	})
+	}, email.SendAs{})
 }
 
 // roleSentence renders the granted role for both bodies. One function so the

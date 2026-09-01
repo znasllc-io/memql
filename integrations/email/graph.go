@@ -76,8 +76,24 @@ func NewGraphSender(cfg GraphConfig, httpClient *http.Client, logger *slog.Logge
 // implementation stuck in a 401 loop until the cached expiresAt
 // finally passed naturally. One retry is enough; if the refreshed
 // token also 401s the underlying credential is the problem.
-func (g *GraphSender) Send(ctx context.Context, msg Message) error {
+//
+// # Sending as a non-default identity (design D5)
+//
+// A non-zero `as` moves THREE things together -- the `/users/{address}`
+// path segment, the From address and the From display name -- and they are
+// resolved ONCE, in sendOnce, precisely so they cannot move apart. Graph
+// resolves the path segment against the token's tenant and stamps the
+// envelope sender from it, so a path segment that disagreed with the From
+// header would produce a message whose envelope and header name different
+// mailboxes: a DMARC alignment failure that arrives as a deliverability
+// mystery rather than an error. Whether the credential may in fact send as
+// that mailbox is Exchange ApplicationAccessPolicy state we cannot see from
+// here; the honest report is Graph's own 403 on the campaign's lastError.
+func (g *GraphSender) Send(ctx context.Context, msg Message, as SendAs) error {
 	if err := msg.Validate(); err != nil {
+		return err
+	}
+	if err := as.Validate(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(g.cfg.TenantId) == "" ||
@@ -87,8 +103,15 @@ func (g *GraphSender) Send(ctx context.Context, msg Message) error {
 		return errors.New("graph: missing required config (TenantId, ClientId, ClientSecret, SenderAddr)")
 	}
 
+	// Resolved here as well as inside sendOnce, for the log lines only. The
+	// wire value is the one sendOnce computes; this is the same fold over the
+	// same inputs, so the two cannot disagree, and reporting the DEFAULT
+	// mailbox on a send that left from an identity mailbox would make the
+	// node log actively misleading about which reputation took the hit.
+	sendAsAddr, _ := resolveIdentity(as, g.cfg.SenderAddr, g.cfg.FromName)
+
 	// First attempt with whatever's cached.
-	status, body, retryAfter, err := g.sendOnce(ctx, msg, false)
+	status, body, retryAfter, err := g.sendOnce(ctx, msg, as, false)
 	if err != nil {
 		return err
 	}
@@ -97,7 +120,7 @@ func (g *GraphSender) Send(ctx context.Context, msg Message) error {
 			g.logger.Info("email sent via graph",
 				"to", msg.To,
 				"subject", msg.Subject,
-				"sender", g.cfg.SenderAddr)
+				"sender", sendAsAddr)
 		}
 		return nil
 	}
@@ -107,10 +130,10 @@ func (g *GraphSender) Send(ctx context.Context, msg Message) error {
 		if g.logger != nil {
 			g.logger.Warn("graph: sendMail 401 with cached token; forcing token refresh + retry",
 				"to", msg.To,
-				"sender", g.cfg.SenderAddr,
+				"sender", sendAsAddr,
 			)
 		}
-		status, body, retryAfter, err = g.sendOnce(ctx, msg, true)
+		status, body, retryAfter, err = g.sendOnce(ctx, msg, as, true)
 		if err != nil {
 			return err
 		}
@@ -119,7 +142,7 @@ func (g *GraphSender) Send(ctx context.Context, msg Message) error {
 				g.logger.Info("email sent via graph (after token refresh)",
 					"to", msg.To,
 					"subject", msg.Subject,
-					"sender", g.cfg.SenderAddr)
+					"sender", sendAsAddr)
 			}
 			return nil
 		}
@@ -136,7 +159,7 @@ func (g *GraphSender) Send(ctx context.Context, msg Message) error {
 // is true it invalidates the cached access token before fetching a
 // fresh one. Returns the response status, body, and any transport
 // error so the caller can decide whether to retry.
-func (g *GraphSender) sendOnce(ctx context.Context, msg Message, forceRefresh bool) (int, []byte, string, error) {
+func (g *GraphSender) sendOnce(ctx context.Context, msg Message, as SendAs, forceRefresh bool) (int, []byte, string, error) {
 	if forceRefresh {
 		g.invalidateToken()
 	}
@@ -145,8 +168,14 @@ func (g *GraphSender) sendOnce(ctx context.Context, msg Message, forceRefresh bo
 		return 0, nil, "", err
 	}
 
+	// THE resolution, once, at the top -- the three places the identity is
+	// spent below all read these two variables and never g.cfg again. See
+	// Send's comment for why a drift between them is a silent deliverability
+	// failure rather than an error.
+	sendAsAddr, fromName := resolveIdentity(as, g.cfg.SenderAddr, g.cfg.FromName)
+
 	endpoint := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/sendMail",
-		url.PathEscape(g.cfg.SenderAddr))
+		url.PathEscape(sendAsAddr))
 
 	// TWO REQUEST FORMS, chosen by whether the message carries extra
 	// headers (memql#3348).
@@ -164,7 +193,7 @@ func (g *GraphSender) sendOnce(ctx context.Context, msg Message, forceRefresh bo
 	// swapping it wholesale would put the guest-invite lane behind an
 	// untested encoder for no gain.
 	if len(msg.Headers) > 0 {
-		return g.sendMIME(ctx, endpoint, token, msg)
+		return g.sendMIME(ctx, endpoint, token, msg, sendAsAddr, fromName)
 	}
 
 	// Graph takes exactly one body contentType. Prefer HTML when the
@@ -188,8 +217,8 @@ func (g *GraphSender) sendOnce(ctx context.Context, msg Message, forceRefresh bo
 			},
 			"from": map[string]any{
 				"emailAddress": map[string]string{
-					"address": g.cfg.SenderAddr,
-					"name":    g.cfg.FromName,
+					"address": sendAsAddr,
+					"name":    fromName,
 				},
 			},
 		},
@@ -208,8 +237,14 @@ func (g *GraphSender) sendOnce(ctx context.Context, msg Message, forceRefresh bo
 // sendMIME POSTs the message as a base64-encoded RFC 5322 document --
 // Graph's MIME sendMail form. The only path that can carry
 // `List-Unsubscribe`; see sendOnce for why.
-func (g *GraphSender) sendMIME(ctx context.Context, endpoint, token string, msg Message) (int, []byte, string, error) {
-	raw, err := RenderRFC5322(FromHeader(g.cfg.SenderAddr, g.cfg.FromName), msg)
+//
+// The identity arrives ALREADY RESOLVED rather than being re-derived here.
+// This is the third of the three places one send spends it, and the one
+// where a re-derivation would be least visible: the endpoint was built from
+// the resolved address several lines up, so a locally-recomputed From here
+// could disagree with the path segment and nothing would say so.
+func (g *GraphSender) sendMIME(ctx context.Context, endpoint, token string, msg Message, sendAsAddr, fromName string) (int, []byte, string, error) {
+	raw, err := RenderRFC5322(FromHeader(sendAsAddr, fromName), msg)
 	if err != nil {
 		return 0, nil, "", err
 	}

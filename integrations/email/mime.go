@@ -99,12 +99,103 @@ func ValidateExtraHeaders(headers map[string]string) error {
 	return nil
 }
 
-// FromHeader renders the `From:` value for a configured mailbox.
+// FromHeader renders the `From:` value for a mailbox and an optional display
+// name, quoting the name when RFC 5322 requires it (design D6, memql#4821).
+//
+// # Why this grew a grammar
+//
+// It used to interpolate the name verbatim, and that was defensible while the
+// only name it ever saw was `MEMQL_EMAIL_FROM_NAME` -- an operator-set
+// deployment constant, typed once, read by nobody but this function. D6 makes
+// the display name CALLER-INFLUENCED: a campaign's `fromName`, and a sending
+// identity's, both reach here. That is a different kind of input, and the
+// unquoted form is wrong for values a person will legitimately type.
+//
+// RFC 5322 splits a display name into `atom *(atom)` and `quoted-string`. The
+// bare form may not contain a "special" -- `(` `)` `<` `>` `[` `]` `:` `;` `@`
+// `\` `,` `.` `"` -- so a name as ordinary as `Acme, Inc.` or
+// `Support: Billing` is not a valid unquoted phrase. A strict parser reads
+// `Acme, Inc. <a@b>` as a MALFORMED ADDRESS LIST: `Acme` is one address,
+// ` Inc. <a@b>` another. That is not a cosmetic defect -- an unparseable From
+// is a deliverability failure at the receiving end, and it arrives as mail
+// silently not landing rather than as an error anywhere we can see.
+//
+// So a name carrying anything outside the unquoted-safe set is emitted as a
+// quoted-string with `\` and `"` backslash-escaped, which is exactly the
+// grammar's own answer.
+//
+// # What it deliberately does NOT do
+//
+// It does not RFC 2047 encode a non-ASCII name (`=?UTF-8?B?...?=`). The
+// quoted-string carries the raw UTF-8 bytes, which every SMTPUTF8 / RFC 6532
+// transport accepts and which Microsoft Graph -- the only transport that can
+// send as more than one identity, and therefore the only one this parameter
+// really serves -- passes through unchanged. Encoded-words are the stricter
+// answer for a 7-bit-only relay and would be a self-contained follow-up;
+// quoting is what turns the malformed-address-list class from possible into
+// impossible, and that is the defect D6 names.
+//
+// It also does not refuse a control byte, and that is not an oversight: the
+// refusal already exists one layer down and must stay there. RenderRFC5322
+// runs headerUnsafe over the composed value at the moment it is serialized,
+// and SendAs.Validate covers the Graph structured payload, which never reaches
+// the renderer. A second refusal here would be a third place to keep in sync
+// for no additional coverage -- and this function returns a string, so its
+// only way to refuse would be to silently drop the name.
 func FromHeader(addr, displayName string) string {
-	if strings.TrimSpace(displayName) == "" {
+	name := strings.TrimSpace(displayName)
+	if name == "" {
 		return addr
 	}
-	return fmt.Sprintf("%s <%s>", displayName, addr)
+	if displayNameNeedsQuoting(name) {
+		return fmt.Sprintf("%s <%s>", quoteDisplayName(name), addr)
+	}
+	return fmt.Sprintf("%s <%s>", name, addr)
+}
+
+// displayNameNeedsQuoting reports whether a display name is outside the RFC
+// 5322 unquoted `phrase` grammar.
+//
+// Deliberately CONSERVATIVE in the quoting direction: anything that is not a
+// plain ASCII printable, plus every RFC "special", plus every non-ASCII rune,
+// gets quoted. Over-quoting is invisible to a recipient (a quoted-string
+// decodes to the same characters); under-quoting is a malformed address list.
+// Given that asymmetry the only interesting mistake is missing a character,
+// so the predicate is written as an ALLOW-LIST of what may stay bare rather
+// than as a deny-list of specials -- a deny-list is the shape that silently
+// omits the one character nobody thought of.
+func displayNameNeedsQuoting(name string) bool {
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			continue
+		}
+		// The `atext` punctuation an unquoted phrase may carry (RFC 5322
+		// §3.2.3), plus the space that separates atoms. Everything else --
+		// the specials, the controls, and every rune above US-ASCII --
+		// forces the quoted form.
+		if strings.ContainsRune(" !#$%&'*+-/=?^_`{|}~", r) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// quoteDisplayName renders a name as an RFC 5322 quoted-string. Only `\` and
+// `"` need escaping inside one; every other byte stands for itself.
+func quoteDisplayName(name string) string {
+	var b strings.Builder
+	b.Grow(len(name) + 2)
+	b.WriteByte('"')
+	for _, r := range name {
+		if r == '\\' || r == '"' {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 // RenderRFC5322 serializes msg as a complete RFC 5322 message, ready for

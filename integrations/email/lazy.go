@@ -68,7 +68,13 @@ func NewLazySender(envResolved Sender, resolveVar VariableResolver, resolveSecre
 
 // Send delegates to the resolved Sender. Resolution runs at most
 // once across the process lifetime.
-func (l *LazySender) Send(ctx context.Context, msg Message) error {
+//
+// `as` is forwarded UNINTERPRETED. Which identities a transport can honour
+// is a fact about the transport -- Graph accepts any mailbox its credential
+// is scoped to, SMTP exactly one -- so the decision belongs to the concrete
+// Sender this resolves to, and a check here would have to guess which one
+// that will be before it has resolved.
+func (l *LazySender) Send(ctx context.Context, msg Message, as SendAs) error {
 	if l == nil {
 		return fmt.Errorf("email: lazy sender not initialized")
 	}
@@ -77,7 +83,7 @@ func (l *LazySender) Send(ctx context.Context, msg Message) error {
 		// Defensive -- resolve always returns at least a LogSender.
 		l.resolved = NewLogSender(l.logger)
 	}
-	return l.resolved.Send(ctx, msg)
+	return l.resolved.Send(ctx, msg, as)
 }
 
 // resolve picks the best Sender available, in priority order. Env

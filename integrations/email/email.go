@@ -25,7 +25,98 @@ const ComponentName = "email"
 // Sender delivers a single email message. Implementations are expected
 // to be safe for concurrent use.
 type Sender interface {
-	Send(ctx context.Context, msg Message) error
+	Send(ctx context.Context, msg Message, as SendAs) error
+}
+
+// SendAs names the mailbox a message leaves from (design D5, memql#4821).
+//
+// The ZERO VALUE means "the configured default sender", which is what every
+// caller outside the campaigns worker passes -- so plurality is ADDITIVE and
+// no transactional caller had to learn about it. A magic link, a guest invite
+// and an outbound row all keep sending from the one mailbox the deployment
+// authenticated as, and say so by passing nothing.
+//
+// It is a PARAMETER rather than a field on Message, and that placement is the
+// whole design. Message stays From-less: a caller-supplied `From:` header is
+// still refused by the renderer (mime.go's reservedHeaders), because an
+// arbitrary From is a sender the mailbox did not authenticate as and that is
+// exactly the SPF/DKIM alignment the campaign path depends on being
+// structural. An identity is not free text the message carries -- it is a
+// mailbox the transport must actually be able to send as, which is a fact
+// about the TRANSPORT, so it travels beside the message and each Sender
+// decides whether it can honour it. Graph can (a different `/users/{addr}`
+// path); SMTP cannot (AUTH is bound to one mailbox) and refuses.
+//
+// Nothing here validates that the address is a mailbox the credential may
+// send as. It cannot: that is Exchange ApplicationAccessPolicy state in
+// somebody else's tenant, and the honest check is the provider's 403 landing
+// on the campaign's lastError (design D7).
+type SendAs struct {
+	// Address is the mailbox UPN to send as -- the value that becomes both
+	// the Graph `/users/{address}/sendMail` path segment and the address
+	// half of the From header.
+	Address string
+	// FromName is the display name half of the From header. May be set on
+	// its own: a SendAs carrying only a FromName means "the default mailbox,
+	// under this display name", which is what a campaign overriding
+	// `fromName` and nothing else asks for.
+	FromName string
+}
+
+// IsZero reports whether this is the "use the configured default" sentinel.
+//
+// Whitespace counts as empty. A stored identity row whose address is a stray
+// space is not an identity, and treating it as one would build
+// `/users/%20/sendMail` and fail with a message about a mailbox nobody named.
+func (s SendAs) IsZero() bool {
+	return strings.TrimSpace(s.Address) == "" && strings.TrimSpace(s.FromName) == ""
+}
+
+// Validate rejects an identity that cannot be put on a header line.
+//
+// Called by every Sender before the wire, for the same reason Message.Validate
+// is: FromName became CALLER-INFLUENCED with D6 (a campaign's `fromName`
+// reaches it), and the structured Graph payload does not pass through
+// RenderRFC5322's header-injection barrier -- it JSON-encodes the name into a
+// body. So the barrier has to exist here too, or one of the two Graph request
+// forms is checked and the other is not.
+func (s SendAs) Validate() error {
+	if headerUnsafe(s.Address) {
+		return errors.New("email: SendAs.Address contains illegal control characters (header injection)")
+	}
+	if headerUnsafe(s.FromName) {
+		return errors.New("email: SendAs.FromName contains illegal control characters (header injection)")
+	}
+	addr := strings.TrimSpace(s.Address)
+	if addr != "" && !strings.Contains(addr, "@") {
+		return fmt.Errorf("email: SendAs.Address %q is not a valid mailbox address", s.Address)
+	}
+	return nil
+}
+
+// resolveIdentity folds a SendAs over a configured default pair and returns
+// the (address, displayName) actually to be used.
+//
+// ONE function, called once per send, because the alternative is what D6
+// found: an address resolved in three places drifts, and the drift is a
+// message whose envelope says one mailbox and whose From header says another
+// -- which is a DMARC alignment failure that looks like a deliverability
+// mystery rather than a bug.
+//
+// The two halves fall back INDEPENDENTLY. A SendAs carrying only a FromName
+// keeps the default address, which is what "send from the usual mailbox under
+// this campaign's display name" means; an identity carrying only an address
+// takes the deployment's default display name rather than going nameless.
+func resolveIdentity(as SendAs, defaultAddr, defaultName string) (string, string) {
+	addr := strings.TrimSpace(as.Address)
+	if addr == "" {
+		addr = defaultAddr
+	}
+	name := strings.TrimSpace(as.FromName)
+	if name == "" {
+		name = defaultName
+	}
+	return addr, name
 }
 
 // Message is a rendered email ready to go on the wire.
@@ -123,13 +214,41 @@ func NewSMTPSender(cfg SMTPConfig, logger *slog.Logger) *SMTPSender {
 }
 
 // Send delivers msg via SMTP. Blocks until the remote acks or fails.
-func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
+//
+// A non-default `as` is REFUSED here rather than honoured (design D5).
+// SMTP AUTH binds this connection to exactly one mailbox: the relay
+// authenticated s.cfg.Username and will either reject a mismatched envelope
+// sender outright or, worse, accept it and let the receiving domain fail
+// SPF/DMARC -- a message that leaves successfully and lands in a spam folder,
+// which is the failure mode nobody sees. So the refusal is PERMANENT and
+// typed: no amount of waiting turns an SMTP relay into a multi-mailbox one,
+// and a retryable classification would park a campaign forever on an install
+// that can never send it.
+//
+// A SendAs that carries only a display name is fine and is honoured: the
+// address is unchanged, so the authentication story is unchanged, and only
+// the From phrase differs.
+func (s *SMTPSender) Send(ctx context.Context, msg Message, as SendAs) error {
 	if err := msg.Validate(); err != nil {
+		return err
+	}
+	if err := as.Validate(); err != nil {
 		return err
 	}
 
 	from := s.cfg.FromAddr
-	fromHeader := FromHeader(from, s.cfg.FromName)
+	if requested := strings.TrimSpace(as.Address); requested != "" && !strings.EqualFold(requested, strings.TrimSpace(from)) {
+		err := fmt.Errorf(
+			"email: this node sends over SMTP, whose AUTH is bound to the single mailbox %q, so it cannot send as %q. "+
+				"Configure Microsoft Graph (%s, %s, %s, %s -- all four) to send from more than one identity, "+
+				"or point this campaign at the default sending identity",
+			from, requested,
+			DefaultGraphEnvKeys().TenantId, DefaultGraphEnvKeys().ClientId,
+			DefaultGraphEnvKeys().ClientSecret, DefaultGraphEnvKeys().SenderAddr)
+		return &SendError{Permanent: true, Detail: err.Error(), Cause: err}
+	}
+	_, fromName := resolveIdentity(as, from, s.cfg.FromName)
+	fromHeader := FromHeader(from, fromName)
 
 	// Header injection barrier at the wire-format boundary: no header value
 	// reaches the SMTP payload without passing headerUnsafe. msg.Validate()
@@ -219,8 +338,16 @@ func NewLogSender(logger *slog.Logger) *LogSender {
 }
 
 // Send logs the message without attempting delivery, or refuses.
-func (l *LogSender) Send(_ context.Context, msg Message) error {
+//
+// The identity is logged as well as the recipient. On a local install the log
+// line IS the delivered message -- it is the only record that a send happened
+// -- so omitting which mailbox it would have left from would make the one
+// surface an operator can inspect blind to the exact thing D5 added.
+func (l *LogSender) Send(_ context.Context, msg Message, as SendAs) error {
 	if err := msg.Validate(); err != nil {
+		return err
+	}
+	if err := as.Validate(); err != nil {
 		return err
 	}
 	if l.refusal != nil {
@@ -238,9 +365,12 @@ func (l *LogSender) Send(_ context.Context, msg Message) error {
 	if l.logger == nil {
 		return nil
 	}
+	sendAsAddr, sendAsName := resolveIdentity(as, "(configured default)", "")
 	l.logger.Info("email (log-only mode, not delivered)",
 		"to", msg.To,
 		"subject", msg.Subject,
+		"sendAs", sendAsAddr,
+		"fromName", sendAsName,
 		"text", msg.TextBody)
 	return nil
 }
