@@ -62,7 +62,20 @@ export function hiddenSurfaces(registry: OsRegistry, actorRole: string): HiddenS
  * because the ACTOR's role is unrankable (`roleAdmits` refuses to let an
  * unknown role unlock anything). Saying "requires none" there would be
  * true and useless; naming the real cause is what lets someone act on it.
+ *
+ * A SET requirement is rendered as the roles themselves, joined -- "owner or
+ * developer" -- because that is the whole fact. Collapsing it to its lowest
+ * member would print "developer" beside a surface an admin outranks and
+ * still cannot see, which is the one thing somebody reading this table for
+ * an explanation must not be told.
  */
 function requirementOf(requirement?: RoleRequirement): string {
-  return requirement ? requirement.min : "a recognized role";
+  if (!requirement) return "a recognized role";
+  if ("any" in requirement) {
+    // An empty set admits nobody. Rendering it as an empty string would read
+    // as "requires nothing", which is its exact opposite.
+    if (requirement.any.length === 0) return "a role this surface does not name";
+    return requirement.any.join(" or ");
+  }
+  return requirement.min;
 }

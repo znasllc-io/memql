@@ -37,7 +37,11 @@ describe("the manifest", () => {
     expect(deployables?.roles).toBeUndefined();
     const gated = (deployables?.sections ?? []).filter((s) => s.roles !== undefined);
     expect(gated.map((s) => s.id)).toEqual(["actions"]);
-    expect(gated[0]?.roles?.min).toBe("admin");
+    // Whole-requirement equality rather than `?.min`: RoleRequirement is a
+    // union since issue #4826 gave it a set form, and reading `.min` off it
+    // no longer typechecks. The assertion is the same one and is stricter --
+    // it would also catch this becoming a set that happens to contain admin.
+    expect(gated[0]?.roles).toEqual({ min: "admin" });
   });
 
   it("declares the settings section its gear points at", () => {
