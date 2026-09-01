@@ -120,6 +120,41 @@ func TestTouchArtifact_DoesNotSpuriouslyArchive(t *testing.T) {
 	}
 }
 
+// TestTouchArtifact_CarriesFolderIdForward is the memql#4288 hazard
+// arriving with its THIRD field (memql#4781). folderId is index-only --
+// the backing generatedOutput has no counterpart -- so a touchArtifact
+// that names labels and archived but not folderId re-versions the row
+// with the field ABSENT, which reads as root everywhere: editing a
+// document quietly drags its artifact out of the folder the owner filed
+// it in. artifactCarryForward's own comment says a third member lands
+// there; this is the test that makes forgetting that loud.
+func TestTouchArtifact_CarriesFolderIdForward(t *testing.T) {
+	eng := newStubEngine()
+	eng.seedDocument(seededDoc())
+	artifact := seededFileBackedArtifact(false)
+	artifact["folderId"] = "fold-1"
+	eng.seedArtifact(artifact)
+	artifactId := artifact["id"].(string)
+
+	editTheDocument(t, NewIntegration(eng))
+
+	row, ok := eng.artifacts[artifactId]
+	if !ok {
+		t.Fatalf("artifact row %s is gone after a document edit", artifactId)
+	}
+	if got := stringField(row, "folderId"); got != "fold-1" {
+		t.Fatalf("folderId = %q after a document edit, want fold-1 -- touchArtifact must read it "+
+			"back and re-send it exactly as it does labels and archived; createArtifact's bare "+
+			"insert{} keeps only what the call names, so an omitted folderId re-files the artifact "+
+			"at root as a side effect of an edit.\n  row: %v", got, row)
+	}
+	// The first two carried fields must survive alongside the third: a fix
+	// that swapped members would pass the check above.
+	if labels := stringSliceField(row, "labels"); len(labels) != 1 || labels[0] != "reports" {
+		t.Fatalf("labels = %v after a document edit, want [reports]", labels)
+	}
+}
+
 // TestTouchArtifact_CarryForwardSurvivesAnUnpromotedRow: a document with
 // no artifact row yet must still edit cleanly. currentArtifactCarryForward
 // reports (zero, ok=true) for "no row found", which is a legitimate empty

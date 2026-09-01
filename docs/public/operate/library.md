@@ -30,13 +30,22 @@ owner. There is no third answer.
 
 `v1:library:file` is the sixth backing row and the only one with bytes behind
 it. It carries `name`, `mimeType`, `size`, `sha256`, `blobUrl`, `source`,
-`status`, `summary`, `embeddingStatus`, `trainedIntoDomainIds` and `archived`.
+`status`, `summary`, `embeddingStatus`, `trainedIntoDomainIds`, `archived`,
+the initial filing (`folderId`) and the upload provenance trio
+(`uploadedFromWorkerId` / `uploadedFromWorkerName` / `uploadedFromPath`).
 
 The bytes go to blob storage under `library/{userId}/{fileId}/{name}` through
 `integration.storage.upload` -- Azure Blob in the cloud, Azurite locally.
 
 **`sha256` is a dedup hint and never an access key.** Knowing a file's hash
 grants nothing; every read re-resolves ownership.
+
+**The MemQL copy is independent and durable** (memql#4781, design D12). A file
+uploaded from a machine survives that machine's deletion of the original and
+survives the machine disconnecting; archiving in MemQL never touches the
+origin. This is the invariant the future watched-folder backup builds on, and
+it is why the copy here is deliberately NOT a data-origins mirror: a mirror
+reconciles deletions, a backup retains and flags.
 
 ### Uploading -- `POST /artifacts`
 
@@ -79,6 +88,65 @@ to export", so the response cannot be used to probe for rows.
 
 There are **no redirects and no signed storage URLs.** Bytes come through the
 bff. This design adds none.
+
+### Upload provenance
+
+Where a file came FROM is recorded only where it is honestly known
+(memql#4781, design D5). The axis is called **provenance**; "origin" stays
+reserved for the data-origins system (memql#4378).
+
+- A **cockpit push** names the machine: `uploadedFromWorkerId` (the worker
+  registration), `uploadedFromWorkerName` and `uploadedFromPath` ride the
+  upload as form fields.
+- A **browser upload** carries none of the three. A browser physically cannot
+  name a machine or the dropped file's path, and nothing here guesses one
+  from a user agent.
+
+**Claims are verified, and a failed claim refuses the whole upload.** The
+named registration must be one of the CALLER's own machines -- checked under
+the caller's own actor, before any byte reaches storage -- and the stored
+`uploadedFromWorkerName` is resolved from the registration row itself
+(`displayName`, else the reported hostname), so the label the Files app
+renders can never disagree with the fleet page. A silently-dropped claim
+would render as "uploaded here", which is a lie; hence `403`, naming the
+refused registration id.
+
+Promotion forwards the machine id and name into the index's
+`producedByWorkerId` / `producedByWorkerName`, whose meaning generalizes from
+"computer_use only" to "when a machine is known". The **path stays on the
+file row**: the index does not need it, and the sync epic reads the file row.
+
+---
+
+## Folders
+
+The Files app's tree is the **Drive model, not POSIX** (memql#4781, design
+D3): `v1:library:folder` rows plus a `folderId` pointer on the index. Ids,
+never path strings. Sibling name duplicates are allowed -- a folder is a
+collection, not a namespace -- so there is no uniqueness machinery and no
+rename conflict. A move is one row update; a rename touches nothing else. No
+permission tree exists: row authz is unchanged, and a folder confers nothing.
+
+- **Writes:** `createLibraryFolder`, `renameLibraryFolder`,
+  `moveLibraryFolder`, `archiveLibraryFolder`, and `moveArtifactToFolder`
+  (a read-merge, so labels and archived survive a re-filing untouched). All
+  client-reachable; ownership is stamped from the actor.
+- **Reads:** `libraryFolders` (the whole owner tree, unbounded on purpose --
+  the client-side fold needs every row at once) and `libraryFolderById`.
+- **Live:** `graph.node.created/updated.v1:library:folder` carry broadcast
+  routing rules, so the tree moves under a watching browser with no engine
+  work per surface.
+- **The index is the organizational truth.** `file.folderId` is the initial
+  filing only; after promotion, moves update the index and never chase the
+  backing row.
+- **Depth (12) and cycle refusal are the client's in v1** (design D11); the
+  client's tree fold is cycle- and orphan-TOLERANT anyway, rendering a
+  violating folder at root with a marker, so a bad write degrades the
+  picture without breaking it. Server-side cascade + integrity guard is a
+  recorded hardening follow-up.
+- **Archive is client-driven and children-first** (design B5): contents via
+  `archiveArtifact` (whose automation archives backing files), then folders.
+  Idempotent under interruption -- re-running archives the remainder.
 
 ---
 

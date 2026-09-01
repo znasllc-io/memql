@@ -19,6 +19,7 @@ shape artifact artifactFull {
   scope
   labels
   archived
+  folderId
   partitionId
   agentId
   producedByPlanId
@@ -123,6 +124,25 @@ shape file libraryFileFull {
   failureReason
   embeddingStatus
   trainedIntoDomainIds
+  archived
+  folderId
+  uploadedFromWorkerId
+  uploadedFromWorkerName
+  uploadedFromPath
+  row.createdAt
+}
+
+/// Full projection of a Library folder row (memql#4781): every payload field plus the row id and
+/// creation stamp. Backs libraryFolders (the tree read) and libraryFolderById. A concept field is
+/// not a readable field until a shape projects it -- this is the projection, and it carries
+/// parentFolderId and archived precisely because the client-side tree fold and the archive walk
+/// read them.
+@row
+shape folder libraryFolderFull {
+  row.id
+  ownerUserId
+  name
+  parentFolderId
   archived
   row.createdAt
 }

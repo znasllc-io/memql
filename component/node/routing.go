@@ -311,6 +311,22 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.deleted.v1:library:artifact", TargetType: ""},
 		{Pattern: "graph.node.created.v1:library:file", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:library:file", TargetType: ""},
+		// The Files app's folder tree (memql#4781). Folder rows are written
+		// by the bff (the OS's create/rename/move/archive land there) and
+		// read live by every browser watching the tree -- including the
+		// desk-folder popover, which may be dialed to a DIFFERENT replica
+		// than the one that took the write. Without these rules the tree is
+		// correct on load and frozen after, which looks like it is working.
+		//
+		// BROADCAST WITH A CONSUMER TO CHECK, and it was checked: no
+		// automation in the tree triggers on v1:library:folder (verified
+		// over dsl/ at memql#4781, the same sweep the artifact/file rules
+		// above record), so the multi-fire question the library block warns
+		// about does not arise here. No delete rule: nothing hard-deletes a
+		// folder -- archiveLibraryFolder is an UPDATE -- so a delete rule
+		// would be surface nothing sends.
+		{Pattern: "graph.node.created.v1:library:folder", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:library:folder", TargetType: ""},
 		// Authoring rows behind Nexus's Constructs page (memql#4542). A
 		// bundle, its constructs and the dependency edges between them are
 		// written by whichever node ran the authoring promote -- an agent

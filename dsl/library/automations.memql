@@ -199,6 +199,7 @@ automation indexMemoryOnCreate {
 automation indexFileOnCreate {
   args {
     archived any
+    folderId any
     format any
     id any
     mimeType any
@@ -206,6 +207,8 @@ automation indexFileOnCreate {
     ownerUserId any
     source any
     summary any
+    uploadedFromWorkerId any
+    uploadedFromWorkerName any
   }
 
   step persist {
@@ -220,7 +223,19 @@ automation indexFileOnCreate {
       format:           format ?? "other",
       mimeType:         mimeType ?? "",
       live:             false,
-      archived:         archived ?? false
+      archived:         archived ?? false,
+      // The initial filing travels with the promotion (memql#4781, design
+      // B2): the file row is the writer that knew the target folder, and
+      // after this write the INDEX copy is the authoritative one.
+      folderId:         folderId ?? "",
+      // Verified upload provenance generalizes the index's machine fields
+      // (design D5): uploadedFrom* on the file row was verified against the
+      // caller's own registrations at upload time, so forwarding it into
+      // producedByWorkerId/Name is forwarding a fact, not a claim. The PATH
+      // deliberately stays on the file row -- the index does not need it,
+      // and the sync epic reads the file row.
+      producedByWorkerId:   uploadedFromWorkerId ?? "",
+      producedByWorkerName: uploadedFromWorkerName ?? ""
     )
   }
 }

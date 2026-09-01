@@ -389,3 +389,33 @@ query fileChunk libraryFileChunksForFile {
   paginate 50
   shape   libraryFileChunkFull
 }
+
+// ---- folder: the Files app's tree reads (memql#4781) ----
+
+/// The caller's whole folder tree, live (memql#4781, design B1). Owned: ownerUserId==actor.userId
+/// gates the row set; `archived != true` is the null-safe soft-delete filter, for the reason
+/// libraryArtifacts spells out at length. UNBOUNDED ON PURPOSE: the OS folds (folders, artifacts)
+/// snapshots into a tree client-side, and a truncated page would silently re-parent every folder
+/// whose ancestor fell off the edge -- the fold is orphan-tolerant, so nothing would LOOK broken,
+/// which is exactly why the truncation must not happen. The set is small by construction: folders
+/// are hand-made organizational rows, bounded by one person's patience, not by data volume.
+@unbounded("the caller's whole folder tree -- the client-side tree fold needs every row at once, and a truncated page silently renders missing ancestors' children at root as orphans; owner-scoped and hand-created, so the set is small by construction. No sort either: the fold orders by (name, id) itself, because a picture that depended on wire order would reshuffle while somebody watches")
+@actor
+query folder libraryFolders {
+  filter  ownerUserId==actor.userId && archived!=true
+  shape   libraryFolderFull
+}
+
+/// Fetch one folder by id, gated to the caller. Owned: ownerUserId==actor.userId is the
+/// load-bearing guard. Backs the desk-folder popover's name refresh and the Files app's
+/// breadcrumb resolve; archived rows ARE returned here -- a caller asking about a specific id
+/// deserves the honest answer, and the archived field says which kind it got.
+@unbounded("library folder by id (guarded), gated to the owner -- bounded to a single row")
+@actor
+query folder libraryFolderById {
+  args {
+    folderId  string!
+  }
+  filter  when(args.folderId) { row.id==args.folderId } && ownerUserId==actor.userId
+  shape   libraryFolderFull
+}
