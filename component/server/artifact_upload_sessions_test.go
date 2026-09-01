@@ -65,7 +65,7 @@ func (f *fakeSessionStore) Create(ctx context.Context, p uploadsession.CreatePar
 		MimeType: p.MimeType, FolderId: p.FolderId, Labels: append([]string(nil), p.Labels...),
 		UploadedFromWorkerId: p.UploadedFromWorkerId, UploadedFromWorkerName: p.UploadedFromWorkerName,
 		UploadedFromPath: p.UploadedFromPath, BlobPath: p.BlobPath, FileId: p.FileId,
-		ChunkSize: p.ChunkSize, Status: "open",
+		ChunkSize: p.ChunkSize, TargetArtifactId: p.TargetArtifactId, Status: "open",
 	}
 	return nil
 }

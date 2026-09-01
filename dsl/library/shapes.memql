@@ -130,7 +130,44 @@ shape file libraryFileFull {
   uploadedFromWorkerId
   uploadedFromWorkerName
   uploadedFromPath
+  versionNumber
+  versionUploadedAt
   row.createdAt
+}
+
+/// Full projection of one superseded version of a Library file (epic memql#4806). Backs
+/// libraryFileVersionsForFile -- the history panel's read -- and libraryFileVersionById, which the
+/// content route resolves ?version={n} through. A concept field is not a readable field until a
+/// shape projects it, so this carries every fact the panel renders AND the blobUrl the download
+/// streams: the route re-checks row admission through the query, then reads the path off the
+/// admitted row.
+@row
+shape fileVersion libraryFileVersionFull {
+  row.id
+  ownerUserId
+  fileId
+  versionNumber
+  name
+  mimeType
+  size
+  sha256
+  blobUrl
+  format
+  summary
+  uploadedFromWorkerId
+  uploadedFromWorkerName
+  uploadedFromPath
+  uploadedAt
+  supersededAt
+  row.createdAt
+}
+
+/// The quota projection of a file version: the stored size, and nothing a sum does not need.
+/// Mirrors libraryFileSize, because superseded bytes count exactly like head bytes (design D9).
+@row
+shape fileVersion libraryFileVersionSize {
+  row.id
+  size
 }
 
 /// Full projection of a Library folder row (memql#4781): every payload field plus the row id and
@@ -167,6 +204,7 @@ shape uploadSession uploadSessionFull {
   blobPath
   fileId
   chunkSize
+  targetArtifactId
   status
   row.createdAt
 }

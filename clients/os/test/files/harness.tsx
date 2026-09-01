@@ -87,6 +87,8 @@ export interface FakeSeed {
   folders?: Row[];
   machines?: Row[];
   files?: Row[];
+  /** Superseded version rows, answering libraryFileVersionsForFile. */
+  versions?: Row[];
   byId?: Record<string, Row>;
   /** Refusal sentences, keyed by construct name (e.g. archiveArtifact). */
   refuse?: Record<string, string>;
@@ -111,6 +113,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call === "query libraryFolders()") return rowsResult(seed.folders ?? []);
       if (call === "query myWorkersWithStatus()") return rowsResult(seed.machines ?? []);
       if (call.startsWith("query libraryFileById(")) return rowsResult(seed.files ?? []);
+      if (call.startsWith("query libraryFileVersionsForFile(")) return rowsResult(seed.versions ?? []);
       if (call.startsWith("mutation ") || call.startsWith("builtin ")) return rowsResult([]);
 
       const match = /id==(\S+)/.exec(call);
@@ -198,6 +201,52 @@ export function artifactRow(over: Partial<Row> & { id: string }): Row {
     labels: [],
     archived: false,
     folderId: "",
+    createdAt: "2026-08-20T10:00:00Z",
+    ...over,
+  };
+}
+
+/** A v1:library:file head row, at whatever version the caller names. */
+export function fileRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    ownerUserId: "u-me",
+    name: `${over.id}.bin`,
+    mimeType: "application/octet-stream",
+    size: 1024,
+    sha256: "",
+    blobUrl: `library/u-me/${over.id}/${over.id}.bin`,
+    source: "uploaded",
+    format: "other",
+    status: "ready",
+    summary: "",
+    archived: false,
+    folderId: "",
+    uploadedFromWorkerId: "",
+    uploadedFromWorkerName: "",
+    uploadedFromPath: "",
+    versionNumber: 1,
+    versionUploadedAt: "2026-08-20T10:00:00Z",
+    createdAt: "2026-08-20T10:00:00Z",
+    ...over,
+  };
+}
+
+/** One superseded v1:library:fileVersion row. */
+export function versionRow(over: Partial<Row> & { id: string; fileId: string; versionNumber: number }): Row {
+  return {
+    ownerUserId: "u-me",
+    name: `${over.fileId}.bin`,
+    mimeType: "application/octet-stream",
+    size: 512,
+    sha256: "",
+    blobUrl: `library/u-me/${over.fileId}/v${over.versionNumber}/${over.fileId}.bin`,
+    format: "other",
+    summary: "",
+    uploadedFromWorkerId: "",
+    uploadedFromWorkerName: "",
+    uploadedFromPath: "",
+    uploadedAt: "2026-08-01T10:00:00Z",
+    supersededAt: "2026-08-20T10:00:00Z",
     createdAt: "2026-08-20T10:00:00Z",
     ...over,
   };

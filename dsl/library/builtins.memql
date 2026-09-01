@@ -80,6 +80,23 @@ builtin libraryRemoveArtifactLabel {
   label       string!
 }
 
+/// Re-stamp a file-backed artifact index row from its backing v1:library:file (epic memql#4806).
+/// The upload route calls it after a supersede, because a new version changes facts the INDEX
+/// carries -- the title when the new bytes arrived under a different name, the format and mimeType,
+/// the updatedAt watermark the Library sorts on and the fingerprint the Files list pulses from.
+/// Without it the list would go on showing the old name until the analysis pass happened to finish.
+///
+/// Idempotent and information-free: it copies what the file row already says, carrying the
+/// index-only fields (labels, archived, folderId) forward exactly as the analysis pass's own
+/// re-stamp does. A failed carry-forward read SKIPS the write rather than writing zeroes over real
+/// values -- a stale watermark is the documented price, wiping labels is not.
+@executor("integration.library.restampFileArtifact")
+@args(profile="object")
+@description("Re-stamp a file-backed Library artifact index row from its backing file row, so a new version's name, format and watermark reach the list immediately. Idempotent; reads the file under the caller's own actor, so it can only ever touch an artifact they own.")
+builtin libraryRestampFileArtifact {
+  fileId  string!
+}
+
 // ---- the analysis / search / train half (memql#4342) ----
 //
 // Three builtins, and the first one is the odd one out: it is a second

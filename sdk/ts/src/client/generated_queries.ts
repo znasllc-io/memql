@@ -3869,6 +3869,74 @@ QueryClient.prototype.libraryFileSizesForOwner = function (this: QueryClient, ar
   return this.executeNamed("libraryFileSizesForOwner", buildLibraryFileSizesForOwner(args), opts);
 };
 
+/** One superseded version of one file, by its number -- what GET /artifacts/{id}/content?version={n} resolves through (design D8). Owned: the caller's own actor decides, so an older version of another person's file comes back as the empty result a missing one does, and the route answers both with the same 404 the rest of that path answers with.
+Keyed on (fileId, versionNumber) rather than on the row id: the id is derived from that pair in Go, and re-deriving it here to read it back would put the convention in a second place that can disagree with the first. */
+// Bound concept: v1:library:fileVersion (machine-readable: BoundConcepts["libraryFileVersionByNumber"] in generated_concepts.ts).
+export interface LibraryFileVersionByNumberArgs {
+  fileId: string;
+  versionNumber: number;
+}
+
+export function buildLibraryFileVersionByNumber(args: LibraryFileVersionByNumberArgs): string {
+  const parts: string[] = [];
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  parts.push("versionNumber: " + renderMemQLValue(args.versionNumber));
+  return "query libraryFileVersionByNumber(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryFileVersionByNumber(args: LibraryFileVersionByNumberArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryFileVersionByNumber = function (this: QueryClient, args: LibraryFileVersionByNumberArgs = {} as LibraryFileVersionByNumberArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryFileVersionByNumber", buildLibraryFileVersionByNumber(args), opts);
+};
+
+/** The sizes of every superseded version the caller holds -- the history half of the storage quota (epic memql#4806, design D9). Superseding destroys nothing, so those bytes are as real as a head file's and count exactly like them; a quota that ignored them would refuse a person with numbers they cannot see. UNBOUNDED for its siblings' reason: a truncated page fails OPEN, admitting an upload the quota should refuse. Owner-scoped, two fields per row. */
+// Bound concept: v1:library:fileVersion (machine-readable: BoundConcepts["libraryFileVersionSizesForOwner"] in generated_concepts.ts).
+export interface LibraryFileVersionSizesForOwnerArgs {
+}
+
+export function buildLibraryFileVersionSizesForOwner(args: LibraryFileVersionSizesForOwnerArgs): string {
+  void args;
+  return "query libraryFileVersionSizesForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryFileVersionSizesForOwner(args?: LibraryFileVersionSizesForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryFileVersionSizesForOwner = function (this: QueryClient, args: LibraryFileVersionSizesForOwnerArgs = {} as LibraryFileVersionSizesForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryFileVersionSizesForOwner", buildLibraryFileVersionSizesForOwner(args), opts);
+};
+
+/** The superseded versions of one Library file, newest first -- the Files inspector's history panel (design D1). The HEAD IS NOT HERE: the newest version is the v1:library:file row itself, which the caller already holds, and the panel folds the two together. Owned: ownerUserId==actor.userId gates the row set and payload.fileId narrows it to the one file, so a version of somebody else's file is a version that does not exist.
+PAGED AT 200 RATHER THAN UNBOUNDED, and the panel is told which it got. The head's own versionNumber says how many versions exist, so a caller comparing that number against the rows it received can state the boundary out loud instead of quietly showing a prefix -- which is what an unbounded read would do the day the watched-folder epic (#4783) starts pushing a version per save. */
+// Bound concept: v1:library:fileVersion (machine-readable: BoundConcepts["libraryFileVersionsForFile"] in generated_concepts.ts).
+export interface LibraryFileVersionsForFileArgs {
+  fileId: string;
+}
+
+export function buildLibraryFileVersionsForFile(args: LibraryFileVersionsForFileArgs): string {
+  const parts: string[] = [];
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  return "query libraryFileVersionsForFile(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryFileVersionsForFile(args: LibraryFileVersionsForFileArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryFileVersionsForFile = function (this: QueryClient, args: LibraryFileVersionsForFileArgs = {} as LibraryFileVersionsForFileArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryFileVersionsForFile", buildLibraryFileVersionsForFile(args), opts);
+};
+
 /** List the caller's Library files, newest first, gated by ownerUserId==actor.userId. The file-level read behind the Artifacts page's upload and training surfaces -- the artifact index is what the list renders, and this is what answers questions the index does not carry (analysis status, embedding coverage, which domains a file was trained into). */
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFilesForOwner"] in generated_concepts.ts).
 export interface LibraryFilesForOwnerArgs {

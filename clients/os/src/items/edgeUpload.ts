@@ -14,11 +14,19 @@
 // Azure's ~7-day clock; the client's only cleanup is its own resume ledger,
 // purged on the same clock.
 //
-// RESUME IS RE-DROP. localStorage maps (name, size, lastModified) to the
-// open session; on a re-drop the provider reads the staged inventory and
-// uploads only the missing chunks. A remembered session the server no longer
-// answers for falls back to a fresh one -- resume is an optimization, never
-// a precondition.
+// RESUME IS RE-DROP. localStorage maps (name, size, lastModified) -- plus the
+// target artifact, when the upload is a new VERSION of one -- to the open
+// session; on a re-drop the provider reads the staged inventory and uploads
+// only the missing chunks. A remembered session the server no longer answers
+// for falls back to a fresh one -- resume is an optimization, never a
+// precondition.
+//
+// A NEW VERSION IS THE SAME TRANSFER WITH ONE MORE FIELD (epic memql#4806).
+// `targetArtifactId` rides the same form and the same init body, so chunking,
+// resume, per-chunk retry, progress and verbatim refusals all apply to a
+// version exactly as they apply to a first upload -- which is what the one
+// upload path is FOR. Nothing below branches on it except the two places that
+// have to: the field itself, and the resume key.
 
 import type { UploadHandle, UploadOptions, UploadProgress, UploadProvider, UploadResult } from "./upload";
 import { LocalResumeStore, type ResumeStore } from "./uploadResume";
@@ -109,6 +117,9 @@ export class EdgeUploadProvider implements UploadProvider {
     // The destination folder rides the same form (design B2): the upload
     // route is the writer that knows it, and promotion forwards it.
     if (opts?.folderId) body.append("folderId", opts.folderId);
+    // A new version of an existing artifact (epic memql#4806): the cluster
+    // keeps the artifact's id, filing and labels, and freezes what was there.
+    if (opts?.targetArtifactId) body.append("targetArtifactId", opts.targetArtifactId);
     const response = await this.fetchImpl(this.path, {
       method: "POST",
       body,
@@ -117,11 +128,16 @@ export class EdgeUploadProvider implements UploadProvider {
       signal,
     });
     if (!response.ok) throw new Error(await refusalFrom(response));
-    const payload = (await response.json()) as { artifactId?: unknown };
-    const artifactId = typeof payload.artifactId === "string" ? payload.artifactId : "";
-    if (!artifactId) throw new Error("Upload landed but named no artifact.");
+    const landed = readUploadResponse(await response.json());
+    if (!landed.artifactId) throw new Error("Upload landed but named no artifact.");
     report({ sentBytes: file.size, totalBytes: file.size });
-    return { artifactId, title: file.name, fileKind: "file", source: "uploaded" };
+    return {
+      artifactId: landed.artifactId,
+      title: file.name,
+      fileKind: "file",
+      source: "uploaded",
+      ...(landed.versionNumber === undefined ? {} : { versionNumber: landed.versionNumber }),
+    };
   }
 
   // ---- the chunked session ----
@@ -132,8 +148,12 @@ export class EdgeUploadProvider implements UploadProvider {
 
   /** The remembered session's staged inventory, or null when it is gone --
    *  which is a fresh start, never a failure. */
-  private async recallSession(file: File, signal: AbortSignal): Promise<SessionFacts | null> {
-    const remembered = this.resume.recall(file);
+  private async recallSession(
+    file: File,
+    opts: UploadOptions | undefined,
+    signal: AbortSignal,
+  ): Promise<SessionFacts | null> {
+    const remembered = this.resume.recall(file, opts?.targetArtifactId);
     if (remembered === null) return null;
     try {
       const response = await this.fetchImpl(this.sessionUrl(remembered), {
@@ -143,7 +163,7 @@ export class EdgeUploadProvider implements UploadProvider {
         signal,
       });
       if (!response.ok) {
-        this.resume.forget(file);
+        this.resume.forget(file, opts?.targetArtifactId);
         return null;
       }
       // The inventory route's shape (memql#4782): status open|completed|
@@ -156,7 +176,7 @@ export class EdgeUploadProvider implements UploadProvider {
         staged?: unknown;
       };
       if (payload.status !== "open") {
-        this.resume.forget(file);
+        this.resume.forget(file, opts?.targetArtifactId);
         return null;
       }
       const chunkSize = typeof payload.chunkSize === "number" && payload.chunkSize > 0 ? payload.chunkSize : CHUNK_BYTES;
@@ -168,7 +188,7 @@ export class EdgeUploadProvider implements UploadProvider {
       return { uploadId: remembered, chunkSize, stagedChunks: staged };
     } catch (err) {
       if (signal.aborted) throw err;
-      this.resume.forget(file);
+      this.resume.forget(file, opts?.targetArtifactId);
       return null;
     }
   }
@@ -188,6 +208,10 @@ export class EdgeUploadProvider implements UploadProvider {
         size: file.size,
         mimeType: file.type,
         ...(opts?.folderId ? { folderId: opts.folderId } : {}),
+        // Sent at INIT rather than at complete: the cluster gates the target
+        // here, before a single chunk moves, so a target that is not the
+        // caller's is refused before anybody streams gigabytes at it.
+        ...(opts?.targetArtifactId ? { targetArtifactId: opts.targetArtifactId } : {}),
       }),
     });
     if (!response.ok) throw new Error(await refusalFrom(response));
@@ -195,7 +219,7 @@ export class EdgeUploadProvider implements UploadProvider {
     const uploadId = typeof payload.uploadId === "string" ? payload.uploadId : "";
     if (uploadId === "") throw new Error("The cluster opened no upload session.");
     const chunkSize = typeof payload.chunkSize === "number" && payload.chunkSize > 0 ? payload.chunkSize : CHUNK_BYTES;
-    this.resume.remember(file, uploadId);
+    this.resume.remember(file, uploadId, opts?.targetArtifactId);
     return { uploadId, chunkSize, stagedChunks: [] };
   }
 
@@ -237,7 +261,7 @@ export class EdgeUploadProvider implements UploadProvider {
     signal: AbortSignal,
     report: (progress: UploadProgress) => void,
   ): Promise<UploadResult> {
-    const session = (await this.recallSession(file, signal)) ?? (await this.openSession(file, opts, signal));
+    const session = (await this.recallSession(file, opts, signal)) ?? (await this.openSession(file, opts, signal));
     const totalChunks = Math.ceil(file.size / session.chunkSize);
     const staged = new Set(session.stagedChunks.filter((n) => n >= 1 && n <= totalChunks));
 
@@ -270,10 +294,31 @@ export class EdgeUploadProvider implements UploadProvider {
       signal,
     });
     if (!response.ok) throw new Error(await refusalFrom(response));
-    const payload = (await response.json()) as { artifactId?: unknown };
-    const artifactId = typeof payload.artifactId === "string" ? payload.artifactId : "";
-    if (!artifactId) throw new Error("Upload landed but named no artifact.");
-    this.resume.forget(file);
-    return { artifactId, title: file.name, fileKind: "file", source: "uploaded" };
+    const landed = readUploadResponse(await response.json());
+    if (!landed.artifactId) throw new Error("Upload landed but named no artifact.");
+    this.resume.forget(file, opts?.targetArtifactId);
+    return {
+      artifactId: landed.artifactId,
+      title: file.name,
+      fileKind: "file",
+      source: "uploaded",
+      ...(landed.versionNumber === undefined ? {} : { versionNumber: landed.versionNumber }),
+    };
   }
+}
+
+/**
+ * The 201 body, read defensively: the ids are required and the version is
+ * optional. A cluster that predates versions answers without the field, and
+ * "not stated" must not become version zero -- a surface reading zero would
+ * announce "Version 0 uploaded".
+ */
+function readUploadResponse(raw: unknown): { artifactId: string; versionNumber?: number } {
+  const payload = (raw ?? {}) as { artifactId?: unknown; versionNumber?: unknown };
+  const artifactId = typeof payload.artifactId === "string" ? payload.artifactId : "";
+  const versionNumber =
+    typeof payload.versionNumber === "number" && payload.versionNumber >= 1
+      ? payload.versionNumber
+      : undefined;
+  return versionNumber === undefined ? { artifactId } : { artifactId, versionNumber };
 }

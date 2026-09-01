@@ -31,11 +31,14 @@ owner. There is no third answer.
 `v1:library:file` is the sixth backing row and the only one with bytes behind
 it. It carries `name`, `mimeType`, `size`, `sha256`, `blobUrl`, `source`,
 `status`, `summary`, `embeddingStatus`, `trainedIntoDomainIds`, `archived`,
-the initial filing (`folderId`) and the upload provenance trio
-(`uploadedFromWorkerId` / `uploadedFromWorkerName` / `uploadedFromPath`).
+the initial filing (`folderId`), the upload provenance trio
+(`uploadedFromWorkerId` / `uploadedFromWorkerName` / `uploadedFromPath`) and
+the version pair (`versionNumber` / `versionUploadedAt`, epic memql#4806).
 
 The bytes go to blob storage under `library/{userId}/{fileId}/{name}` through
-`integration.storage.upload` -- Azure Blob in the cloud, Azurite locally.
+`integration.storage.upload` -- Azure Blob in the cloud, Azurite locally. Every
+version after the first lands under `library/{userId}/{fileId}/{key}/{name}`
+with a fresh key per upload, so no upload can ever write over another's bytes.
 
 **`sha256` is a dedup hint and never an access key.** Knowing a file's hash
 grants nothing; every read re-resolves ownership.
@@ -162,6 +165,66 @@ Promotion forwards the machine id and name into the index's
 `producedByWorkerId` / `producedByWorkerName`, whose meaning generalizes from
 "computer_use only" to "when a machine is known". The **path stays on the
 file row**: the index does not need it, and the sync epic reads the file row.
+
+### Versions
+
+A file can be replaced in place. The person **names the target** -- from that
+file's own inspector, or with `targetArtifactId` on the upload -- and the
+result is a new **version** of the same artifact: the same row in the Files
+list, the same id, the same folder, the same labels, the same client tags.
+What was there is **superseded**, never overwritten. Nothing this epic does
+destroys bytes.
+
+**The current version is the file row; every superseded one is a
+`v1:library:fileVersion` row.** That split is the design (epic memql#4806,
+design D1) rather than an implementation detail, and it is why the artifact
+index, the content route and the analysis pass all still read exactly one row:
+`sourceConceptRef` is written once at promotion and never re-points, so the
+index's derived id and `libraryArtifactBySourceConceptRef` are untouched.
+
+- **Uploading a version** -- `POST /artifacts` with `targetArtifactId` in the
+  form, or `POST /artifacts/uploads` with `targetArtifactId` in the init body.
+  Both answer `{artifactId, fileId, versionNumber}`, and both keep the ids
+  they were given. The chunked path gates the target at INIT, before any
+  chunk is staged.
+- **Three refusals, all before a byte is stored.** A target that is not the
+  caller's is `404` (the same answer as "not there", for the reason every
+  refusal on these routes gives). A target backed by something other than a
+  file is `400`, with a sentence saying that a document is versioned by
+  editing it. Over quota is `507`.
+- **Reading a version** -- `GET /artifacts/{id}/content?version={n}`. Omitted
+  means the current one, which is what every caller written before versions
+  sends; naming the current version's own number serves the same bytes with
+  the same headers and the same `Range` support. A version the caller may not
+  see does not resolve, and answers `404`.
+- **The list** -- `libraryFileVersionsForFile` returns the superseded versions
+  newest-first, paged at 200. The head's own `versionNumber` says how many
+  versions exist, so a client that received fewer rows than that can say so
+  rather than showing a prefix as if it were everything.
+
+**Every version is a full citizen.** It re-runs the analysis pass on its own
+bytes, carries its own verified `uploadedFrom*` provenance (never inherited --
+a file first pushed from a laptop and later replaced from a browser has one
+version that names the laptop and one that names nothing), keeps its own name,
+size, hash and summary, and lands with the same arrival cue any other change
+does.
+
+**The quota counts every version.** Retention is real: superseded bytes are as
+real as current ones, and a quota that ignored them would refuse a person
+using numbers they cannot see anywhere. The `507` sentence says so.
+
+**A version's `sha256` can be absent, and absent means "not measured yet".**
+A chunked upload's handler never holds the whole file, so the head lands
+without a hash and the analysis pass stamps it after streaming the committed
+blob. Readers render a dash, never an error -- and the supersede writes that
+blank EXPLICITLY, because leaving the previous version's hash in place would
+be a false integrity claim rather than a missing one.
+
+**What is not here.** No content diffing and no diff viewer; no restore-to-an-
+earlier-version (download it and upload it as a new version, which keeps the
+history honest); no automatic same-file detection for browser uploads --
+identity is explicit here, and key-matched in the watched-folder epic (#4783),
+which uses this same mechanism rather than a second one.
 
 ---
 

@@ -29,10 +29,19 @@ export function planDownload(input: { workerAvailable: boolean; sizeBytes: numbe
   return { path: "buffered" };
 }
 
-/** The edge's same-origin API marker for the content route. */
-export function artifactContentPath(baseUrl: string, artifactId: string): string {
+/**
+ * The edge's same-origin API marker for the content route.
+ *
+ * `version` selects an EARLIER version of a file (epic memql#4806). Omitted --
+ * every existing caller -- means the current one. A QUERY PARAMETER rather
+ * than a path segment because the cluster's front-door path set is generated
+ * from its route table, and a new path shape would change it; both spellings
+ * live under the one /artifacts/{id}/content rule that already exists.
+ */
+export function artifactContentPath(baseUrl: string, artifactId: string, version?: number): string {
   const mount = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
-  return `${mount}_memql/artifacts/${encodeURIComponent(artifactId)}/content`;
+  const path = `${mount}_memql/artifacts/${encodeURIComponent(artifactId)}/content`;
+  return version === undefined ? path : `${path}?version=${encodeURIComponent(String(version))}`;
 }
 
 /**
@@ -56,6 +65,8 @@ async function refusalFrom(response: Response): Promise<string> {
 export interface BufferedDownloadPorts {
   artifactId: string;
   fileName: string;
+  /** An earlier version of this file; omitted means the current one. */
+  version?: number;
   bearer: () => Promise<string | null>;
   fetchImpl?: typeof fetch;
   baseUrl?: string;
@@ -88,7 +99,7 @@ export async function runBufferedDownload(ports: BufferedDownloadPorts): Promise
   const base = ports.baseUrl ?? import.meta.env.BASE_URL;
 
   const token = await ports.bearer();
-  const response = await fetchImpl(artifactContentPath(base, ports.artifactId), {
+  const response = await fetchImpl(artifactContentPath(base, ports.artifactId, ports.version), {
     method: "GET",
     credentials: "same-origin",
     ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),

@@ -3872,6 +3872,75 @@ func LibraryFileSizesForOwnerBuild(args LibraryFileSizesForOwnerArgs) string {
 	return "query libraryFileSizesForOwner()"
 }
 
+// LibraryFileVersionByNumber -- One superseded version of one file, by its number -- what GET /artifacts/{id}/content?version={n} resolves through (design D8). Owned: the caller's own actor decides, so an older version of another person's file comes back as the empty result a missing one does, and the route answers both with the same 404 the rest of that path answers with.
+// Keyed on (fileId, versionNumber) rather than on the row id: the id is derived from that pair in Go, and re-deriving it here to read it back would put the convention in a second place that can disagree with the first.
+//
+// Bound concept: v1:library:fileVersion (machine-readable: BoundConcepts["libraryFileVersionByNumber"] in generated_concepts.go).
+type LibraryFileVersionByNumberArgs struct {
+	FileId        string
+	VersionNumber int
+}
+
+// LibraryFileVersionByNumber calls the engine query libraryFileVersionByNumber.
+func (qc *QueryClient) LibraryFileVersionByNumber(ctx context.Context, args LibraryFileVersionByNumberArgs) (*Result, error) {
+	call := LibraryFileVersionByNumberBuild(args)
+	return qc.executeNamed(ctx, "libraryFileVersionByNumber", call)
+}
+
+func LibraryFileVersionByNumberBuild(args LibraryFileVersionByNumberArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryFileVersionByNumber(")
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("versionNumber: ")
+	b.WriteString(fmt.Sprintf("%v", args.VersionNumber))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryFileVersionSizesForOwner -- The sizes of every superseded version the caller holds -- the history half of the storage quota (epic memql#4806, design D9). Superseding destroys nothing, so those bytes are as real as a head file's and count exactly like them; a quota that ignored them would refuse a person with numbers they cannot see. UNBOUNDED for its siblings' reason: a truncated page fails OPEN, admitting an upload the quota should refuse. Owner-scoped, two fields per row.
+//
+// Bound concept: v1:library:fileVersion (machine-readable: BoundConcepts["libraryFileVersionSizesForOwner"] in generated_concepts.go).
+type LibraryFileVersionSizesForOwnerArgs struct {
+}
+
+// LibraryFileVersionSizesForOwner calls the engine query libraryFileVersionSizesForOwner.
+func (qc *QueryClient) LibraryFileVersionSizesForOwner(ctx context.Context, args LibraryFileVersionSizesForOwnerArgs) (*Result, error) {
+	call := LibraryFileVersionSizesForOwnerBuild(args)
+	return qc.executeNamed(ctx, "libraryFileVersionSizesForOwner", call)
+}
+
+func LibraryFileVersionSizesForOwnerBuild(args LibraryFileVersionSizesForOwnerArgs) string {
+	_ = args
+	return "query libraryFileVersionSizesForOwner()"
+}
+
+// LibraryFileVersionsForFile -- The superseded versions of one Library file, newest first -- the Files inspector's history panel (design D1). The HEAD IS NOT HERE: the newest version is the v1:library:file row itself, which the caller already holds, and the panel folds the two together. Owned: ownerUserId==actor.userId gates the row set and payload.fileId narrows it to the one file, so a version of somebody else's file is a version that does not exist.
+// PAGED AT 200 RATHER THAN UNBOUNDED, and the panel is told which it got. The head's own versionNumber says how many versions exist, so a caller comparing that number against the rows it received can state the boundary out loud instead of quietly showing a prefix -- which is what an unbounded read would do the day the watched-folder epic (#4783) starts pushing a version per save.
+//
+// Bound concept: v1:library:fileVersion (machine-readable: BoundConcepts["libraryFileVersionsForFile"] in generated_concepts.go).
+type LibraryFileVersionsForFileArgs struct {
+	FileId string
+}
+
+// LibraryFileVersionsForFile calls the engine query libraryFileVersionsForFile.
+func (qc *QueryClient) LibraryFileVersionsForFile(ctx context.Context, args LibraryFileVersionsForFileArgs) (*Result, error) {
+	call := LibraryFileVersionsForFileBuild(args)
+	return qc.executeNamed(ctx, "libraryFileVersionsForFile", call)
+}
+
+func LibraryFileVersionsForFileBuild(args LibraryFileVersionsForFileArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryFileVersionsForFile(")
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryFilesForOwner -- List the caller's Library files, newest first, gated by ownerUserId==actor.userId. The file-level read behind the Artifacts page's upload and training surfaces -- the artifact index is what the list renders, and this is what answers questions the index does not carry (analysis status, embedding coverage, which domains a file was trained into).
 //
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFilesForOwner"] in generated_concepts.go).

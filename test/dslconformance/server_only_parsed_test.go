@@ -599,6 +599,21 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// versions would make every one of those gates optional.
 		{Path: "library/mutations.memql", Name: "createUploadSession"}:   true,
 		{Path: "library/mutations.memql", Name: "completeUploadSession"}: true,
+		// The file-version supersede pair (epic memql#4806, design D10) --
+		// the same asset as the session pair above, one concept along.
+		// actor-scoping is again fully in place and again not the question:
+		// ownerUserId is stamped from actor.userId on both, and the target
+		// file was resolved under that same actor before a byte moved. What
+		// a caller must never author is blobUrl, the storage path a version
+		// row carries -- a forged one would name another user's object and
+		// GET /artifacts/{id}/content?version={n} would stream it. The head
+		// mutation additionally stamps status 'analyzing' rather than
+		// 'stored', which is what keeps a supersede from re-firing
+		// indexFileOnCreate and wiping the artifact's labels (the memql#4288
+		// hazard reached through the promotion path); a client-reachable
+		// version would put that back in a caller's hands.
+		{Path: "library/mutations.memql", Name: "createLibraryFileVersion"}: true,
+		{Path: "library/mutations.memql", Name: "supersedeLibraryFileHead"}: true,
 		// The membership half, in cognition because the SPACE is cognition's.
 		// Same gate, different asset: `isGuest` is authorization-relevant, not
 		// decoration, so a client-reachable version would let any authenticated

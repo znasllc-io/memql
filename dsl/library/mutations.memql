@@ -284,6 +284,15 @@ mutate file createLibraryFile {
       status: "stored"
       embeddingStatus: "none"
       archived: false
+      // Every file starts at version 1 and knows when its bytes arrived
+      // (epic memql#4806). STAMPED, not accepted: a caller-chosen version
+      // number would let an upload claim to be version 40 of a file with no
+      // history, and versionUploadedAt is the field the history reads as
+      // "uploaded", which must be the moment the engine saw the bytes rather
+      // than a moment a client chose. now() rather than a bare `now` for the
+      // memql#980 reason the artifact index records.
+      versionNumber: 1
+      versionUploadedAt: now
     }
   }
 }
@@ -555,9 +564,10 @@ mutate uploadSession createUploadSession {
     blobPath  string!
     fileId    string!
     chunkSize int!
+    targetArtifactId  string
   }
   insert {
-    accept { name, size, mimeType, folderId, labels, uploadedFromWorkerId, uploadedFromWorkerName, uploadedFromPath, blobPath, fileId, chunkSize }
+    accept { name, size, mimeType, folderId, labels, uploadedFromWorkerId, uploadedFromWorkerName, uploadedFromPath, blobPath, fileId, chunkSize, targetArtifactId }
     stamp {
       id: args.uploadId
       ownerUserId: actor.userId
@@ -582,5 +592,136 @@ mutate uploadSession completeUploadSession {
   update {
     id: args.uploadId
     status: "completed"
+  }
+}
+
+
+// ---- fileVersion: the supersede pair (epic memql#4806) ----
+//
+// A supersede is TWO writes and there is no transaction across them, so the
+// order is a design decision rather than an accident (design D3): the
+// SNAPSHOT lands first, then the head moves. A crash between them leaves a
+// version row whose facts equal the head's -- the reader's fold keys on
+// versionNumber and the head wins, so one v2 is shown, not two -- and the
+// retry is idempotent, because the snapshot's id derives from
+// (fileId, versionNumber). The other order loses a version's ROW while its
+// bytes stay in storage: history skips a number and nothing says so.
+//
+// Both are @serverOnly, and blobUrl is why: it is a storage path, and a
+// caller-authored one would name another user's object which the content
+// route would then stream under ?version={n}. The internal-origin stamp
+// lives in component/server/fileversion, a package containing nothing else,
+// on the same three preconditions component/server/uploadsession asserts.
+
+/// Freeze the OUTGOING head of a Library file as an immutable version row (epic memql#4806, design
+/// D1). Called by the upload route immediately before it moves the head, with the facts it read off
+/// the head under the caller's own actor -- so nothing here is a claim the caller made. The id is
+/// '<fileId>-v<n>', derived from the pair this row is unique on, which makes a retried supersede
+/// re-version the same row rather than append a duplicate to somebody's history. ownerUserId is
+/// stamped from actor.userId (@serverSet on the concept makes accepting it a load-time rejection):
+/// the target file was resolved under that actor before a byte moved, so the stamped owner is the
+/// file's owner by construction.
+///
+/// @serverOnly, and scoping to actor.userId is not the fix because it is ALREADY in place: the
+/// concept's @serverSet stamps ownerUserId from actor.userId and row authz gates every read of the
+/// result. What a caller must never AUTHOR is blobUrl -- a storage path, composed server-side from
+/// the verified actor and the engine-minted fileId, where a forged value would name another user's
+/// object and GET /artifacts/{id}/content?version={n} would stream it back.
+@actor
+@serverOnly
+mutate fileVersion createLibraryFileVersion {
+  args {
+    versionId      string!
+    fileId         string!
+    versionNumber  int!
+    name           string!
+    mimeType       string!
+    size           int!
+    sha256         string
+    blobUrl        string!
+    format         enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")
+    summary        string
+    uploadedFromWorkerId    string
+    uploadedFromWorkerName  string
+    uploadedFromPath        string
+    uploadedAt     datetime!
+  }
+  insert {
+    accept { fileId, versionNumber, name, mimeType, size, sha256, blobUrl, summary, uploadedFromWorkerId, uploadedFromWorkerName, uploadedFromPath, uploadedAt }
+    stamp {
+      id: args.versionId
+      ownerUserId: actor.userId
+      format: args.format ?? "other"
+      // The moment this version stopped being the head. Stamped rather than
+      // accepted for the reason versionUploadedAt is: it is a fact about when
+      // the engine did something, not about what a caller believes.
+      supersededAt: now
+    }
+  }
+}
+
+/// Move a Library file's head onto newly uploaded bytes (epic memql#4806, design D1). A read-merge,
+/// so ownerUserId, folderId, labels-on-the-index, trainedIntoDomainIds and archived all survive a
+/// new version -- the artifact keeps its id, its filing and its labels, and the Files list still
+/// shows ONE row.
+///
+/// status is stamped 'analyzing', NEVER 'stored', and that is load-bearing (design D4):
+/// indexFileOnCreate filters on status=="stored" and graph.node.created fires on every write, so a
+/// head that re-entered 'stored' would re-run promotion through createArtifact's bare insert{} --
+/// wiping the artifact's labels and re-filing it at the file row's stale initial folderId. That is
+/// the memql#4288 hazard arriving through the promotion path, as a side effect of uploading a new
+/// version.
+///
+/// sha256 is written UNCONDITIONALLY, blank when the caller could not measure it. An absent arg
+/// would read-merge, leaving the PREVIOUS version's hash sitting on these bytes -- not a missing
+/// fact but a false one, on a field that exists to be an integrity check. The chunked path's
+/// analysis pass stamps the real value when it streams the committed blob; until then absent means
+/// 'not measured yet', exactly as the concept says.
+///
+/// summary is cleared for the same reason: it described bytes that are no longer the head.
+///
+/// @serverOnly, and actor.userId scoping is not the fix here either -- it is already in place, and
+/// the owner is exactly who must not call this directly. Two of the values it writes are not the
+/// caller's to choose: blobUrl is a storage path (a forged one points the content route at somebody
+/// else's bytes) and the 'analyzing' status is what stops a supersede re-firing indexFileOnCreate,
+/// whose bare insert{} promotion would wipe the artifact's labels and re-file it at the file row's
+/// stale initial folder. Both gates would become optional the moment this were client-reachable.
+@serverOnly
+mutate file supersedeLibraryFileHead {
+  args {
+    fileId         string!
+    versionNumber  int!
+    name           string!
+    mimeType       string!
+    size           int!
+    sha256         string
+    blobUrl        string!
+    format         enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")
+    uploadedFromWorkerId    string
+    uploadedFromWorkerName  string
+    uploadedFromPath        string
+  }
+  update {
+    id: args.fileId
+    args.name
+    args.mimeType
+    args.size
+    args.blobUrl
+    args.versionNumber
+    sha256: args.sha256 ?? ""
+    format: args.format ?? "other"
+    summary: ""
+    failureReason: ""
+    status: "analyzing"
+    embeddingStatus: "none"
+    // Provenance is per-version and never inherited (the epic's rule): a
+    // version pushed from a laptop names the laptop, and the browser upload
+    // that replaces it names nothing. Writing the blanks explicitly is what
+    // makes the second case true -- a read-merge that omitted them would
+    // leave the laptop's name on bytes that came from a browser.
+    uploadedFromWorkerId: args.uploadedFromWorkerId ?? ""
+    uploadedFromWorkerName: args.uploadedFromWorkerName ?? ""
+    uploadedFromPath: args.uploadedFromPath ?? ""
+    versionUploadedAt: now
   }
 }
