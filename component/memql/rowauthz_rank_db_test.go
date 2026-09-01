@@ -327,19 +327,18 @@ func TestCreateRoleAcceptsAliases(t *testing.T) {
 	slug := "lead-" + suffix
 	alias := "legacylead-" + suffix
 
-	// The rank-bound guard (memql#2072) resolves the CREATOR's rank through
-	// auth.UserIdentityFromContext, which reads the token's claims rather than
-	// the AccessContext -- so the claims have to carry the role, or the
-	// creator ranks 0 and may author nothing.
-	seeder := "alias-seeder-" + suffix
-	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{
-		UserId: seeder, Role: auth.RoleOwner,
-	})
-	ctx = auth.ContextWithToken(ctx, &auth.TokenInfo{
-		Subject: seeder,
-		Claims:  map[string]any{"sub": seeder, "role": string(auth.RoleOwner)},
-	})
-	ctx = auth.ContextWithInternalOrigin(ctx)
+	// THE SEED MATERIALIZER'S OWN ACTOR, which is the writer this test is
+	// about -- base roles are written through createRole by exactly this
+	// caller, and its dropped `aliases` is the defect.
+	//
+	// It also sidesteps a dependency that made an earlier version of this test
+	// pass locally and fail in CI. The rank-bound guard (memql#2072) resolves
+	// the CREATOR's rank by reading the role CATALOG, so an ordinary
+	// owner-role caller ranks 400 against a seeded database and 0 against a
+	// fresh one -- and 0 forbids authoring anything. A system actor is exempt
+	// (isSystemActor), so this measures the mutation's accept list rather than
+	// whether the catalog happened to be seeded first.
+	ctx := auth.ContextWithInternalOrigin(systemActorContext(context.Background()))
 	q := fmt.Sprintf(`mutation createRole(roleId: %s, slug: %s, name: %s, rank: 250, aliases: [%s])`,
 		langparser.QuoteString("v1:rbac:role:"+slug),
 		langparser.QuoteString(slug),
