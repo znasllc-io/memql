@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/emailrules"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/memql"
@@ -95,6 +96,21 @@ func (a *App) wireAuthoredRuntime() {
 	a.authoredScheduler = scheduler
 
 	a.Logger.Info("authored-construct runtime initialized (registry + scheduler + breaker)")
+
+	// Event-email rules (memql#4829) are the FIRST production caller of
+	// ActivateApprovedBundle, which shipped with increment 5 and until now had
+	// none anywhere in the tree -- so an authored construct took effect at next
+	// boot, via the re-arm below, and nothing else. For a capability somebody
+	// promotes once that is merely slow; for a rule somebody creates in an app
+	// and expects to fire, it is the feature not working, silently.
+	//
+	// The handoff is here rather than through PluginContext because neither
+	// half fits it: ActivateApprovedBundle is a method on the concrete engine,
+	// and the deps are assembled from this App's registry, scheduler hooks,
+	// catalog promoter and audit sink. It is placed AFTER the registry and
+	// scheduler exist and BEFORE the re-arm, so a rule armed by a re-armed
+	// bundle finds the seam already wired.
+	emailrules.Bind(a.engine, a.AuthoredRuntimeDeps)
 
 	// Boot re-arm (#1039): re-register every already-active bundle across all
 	// owners so their automations fire again after a restart, with no manual

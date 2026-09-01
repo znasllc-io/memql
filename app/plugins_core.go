@@ -81,6 +81,15 @@ import (
 	// PluginContext, so it is wired explicitly in app/engine.go beside
 	// the campaigns worker for the same reason.
 	_ "github.com/znasllc-io/memql/component/datasync"
+	// Event-email rules (memql#4829). It registers the ordinary way for its
+	// three capabilities, and the App additionally hands it the concrete
+	// engine plus the authored-runtime deps through emailrules.Bind, because
+	// activation is a method on *MemQLEngine and the deps are assembled from
+	// the live App -- neither is on PluginContext. Until that Bind happens the
+	// two activation capabilities refuse with a sentence naming the reason,
+	// which on a node type that runs no authored runtime is the permanent and
+	// correct answer.
+	_ "github.com/znasllc-io/memql/component/emailrules"
 	_ "github.com/znasllc-io/memql/integrations/shopify"
 	_ "github.com/znasllc-io/memql/integrations/similarity"
 	_ "github.com/znasllc-io/memql/integrations/telephony"
