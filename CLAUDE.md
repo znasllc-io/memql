@@ -1372,6 +1372,50 @@ and it exists because a plain `owner=` tier has no cluster-owner bypass -- so
 declaring an operator surface plain-owned hides every other user's rows from the
 operator too. The write guard ignores the second argument.
 
+**RANK (epic memql#4832) adds three more ARGUMENTS of the owned tier, not more
+tiers** -- flags for the same reason `clusterOwner` is one: four sites switch on
+the owned tier and a new tier value falls silently out of all four.
+
+- `rankVisible` -- reads widen to "the owner, OR anyone at or above the OWNER'S
+  rank" (D2). Peers included at every rung; the comparison is `<=`.
+- `rankStrict` -- writes widen to "your own row, or one owned by someone
+  STRICTLY below you" (D3), **and narrow: it WITHDRAWS the cluster-owner write
+  escape**, so peer rows are read-only owner-to-owner included. Requires
+  `rankVisible`.
+- `unowned="<role>"` -- a PRESENT but EMPTY owner is the deployment's row, which
+  has no rank to compare; this names the actor rank from which it is readable.
+  An ABSENT owner key stays denied.
+
+The owner's rank is resolved **per request** from the principal table and never
+stamped on the row: promoting somebody retroactively changes who may see rows
+they already own. The SQL half pushes down as an `in` list, because a
+post-filter-only rank term makes a page of peer-owned rows read as EXHAUSTION to
+the cursor. **An unresolvable rank floor DENIES** -- the natural spelling
+(`actorRank >= rankOf(slug)`) reads correctly and fails open, since every rank
+clears 0.
+
+D4: `MaintenanceActor`, the seed materializer, an automation's system actor and
+borrowed authority carry `AccessContext.Unranked` and the rank rules do not
+govern them -- without it every retention sweep and boot seed becomes a
+peer-write and stops.
+
+**`@requiresRank("<role>")` is the SURFACE half** (D6): an actor-rank FLOOR on a
+query / mutation / logic, enforced at execution and validated at LOAD. It gates
+WHO MAY CALL; `@rowAuthz` still decides WHICH ROWS come back. It is the enforced
+counterpart to MemQL OS's per-surface `roles: { min }`, which stays and is now a
+mirror -- both permanent, neither a stand-in for the other. Declared on the
+CONSTRUCT because a surface is a set of constructs and an app id from a browser
+is a claim, not a fact.
+
+**One role ladder, and the shell holds none of it** (D1). `v1:rbac:role` carries
+`rank` plus `aliases` (the user row's `writer`/`reader` are aliases of the
+catalog's `user`/`viewer`), the OS reads `activeRoles`, and
+`component/auth/role_ladder_client_parity_test.go` fails the build if a client
+ships an ordering of its own or the three readings disagree. **developer (300)
+outranks admin (200)** -- every `roles: { min: "admin" }` written under the old
+OS ordering changed meaning when this landed, and each was re-read against what
+it was trying to say.
+
 The partition dimension that historically gated tenant isolation is retired in
 #56 (phases 1-7 landed; phase 8 sweeps the remaining cross-repo stragglers + the
 DSL `partition="*"` automation kwarg). The `partition` wire field is already

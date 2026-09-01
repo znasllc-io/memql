@@ -58,6 +58,64 @@ The two reported states that are not buckets: **`srvOnly`**, checked
 first as above, and **`other`** — everything the classifier did not
 place. `other` is by far the largest column and is not a finding.
 
+### RANK is not a fifth bucket (epic memql#4832)
+
+`rankVisible`, `rankStrict` and `unowned="<role>"` are **arguments of the
+owned tier**, exactly as `clusterOwner` is. They widen who the owned
+bucket admits; they do not create a bucket, and every construct over a
+concept carrying them is still classified **owned** and still has to carry
+the owner conjunct.
+
+- **`rankVisible`** — reads admit rows owned by anyone at or *below* the
+  caller's rank. Peers included at every rung (`<=`).
+- **`rankStrict`** — writes admit rows owned by someone *strictly* below,
+  plus your own unconditionally. It also **withdraws the cluster-owner
+  write escape**: peer rows are read-only owner-to-owner included, which
+  is what makes [ownership transfer](#ownership-transfer) necessary rather
+  than optional.
+- **`unowned="<role>"`** — a row whose owner field is *present and empty*
+  is the deployment's, not a principal's, so it has no rank to compare.
+  This names the actor rank from which such a row is readable. An
+  **absent** owner key stays denied, which is what the owned tier has
+  always done with one.
+
+Two properties an operator reading a refusal should know:
+
+1. **The owner's rank is resolved per request**, from the principal
+   table, and is never stamped on the row. Promoting somebody
+   retroactively changes who may see the rows they already own, so a
+   stamped rank would be stale the moment any role changed — and stale in
+   the direction of showing too much.
+2. **An unresolvable rank floor denies everybody.** A typo'd role slug in
+   `unowned=` or `@requiresRank` refuses boot, and the runtime backstop
+   refuses the call, because the natural spelling of a floor check
+   (`actorRank >= rankOf(slug)`) reads correctly and fails *open* — every
+   rank clears 0.
+
+**`@requiresRank("<role>")`** is the other half and is not a bucket
+either: it is an actor-rank floor on a *construct*, deciding who may CALL
+it. The tier still decides which rows come back. A caller below the floor
+gets a **refusal, not an empty page** — an empty page is
+indistinguishable from "there is nothing here", which is the answer
+somebody who may not reach the surface should never be handed.
+
+### Ownership transfer
+
+With peer writes refused at every rung, no human can repair another
+human's rows, and an offboarded principal leaves rows no living principal
+can edit. The answer is transfer, not a break-glass write escape: an
+escape is available to everyone who can reach it — the whole cluster-owner
+tier — and would hollow out the rule on the day it shipped.
+
+`integration.identity.transferRowOwnership` is cluster-owner-only,
+narrowable to one concept or one row, and audited once per transfer on
+`v1:identity:auditEvent` under the `rowOwnership` target type. It refuses
+a destination that does not exist or is deactivated (transferring into a
+void leaves the rows exactly as unwritable, with an audit trail saying
+otherwise), skips cluster-owned rows, and excludes self-owned tiers
+entirely — their "owner field" is the row's own id, so a transfer would
+rename the row.
+
 > **Payload fields are BARE.** The `payload.` prefix this table used to
 > prescribe was retired by memql#2292 and is hard-failed by
 > `test/dslconformance/conformance_test.go`; a filter written that way does not load.
