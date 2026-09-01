@@ -745,6 +745,21 @@ func (w *Worker) renderOptions(ownerCtx context.Context, campaign Campaign, iden
 	}
 }
 
+// allowSend takes one token from the send-rate bucket.
+//
+// Nil-tolerant for the same reason nowUTC is: a Worker built by struct
+// literal to drive one handler has no limiter, and a nil dereference there
+// would be a panic in a code path that has nothing to do with pacing. A
+// worker with no limiter has no configured rate to respect, so it allows --
+// the alternative, refusing every send, would make an unwired field fail
+// closed in a way no caller could diagnose.
+func (w *Worker) allowSend() bool {
+	if w.limiter == nil {
+		return true
+	}
+	return w.limiter.Allow()
+}
+
 // nowUTC is the worker's clock, tolerating a zero-valued Worker. Tests
 // construct one by struct literal to drive a single handler, and a nil `now`
 // there would be a panic in a code path that has nothing to do with time.

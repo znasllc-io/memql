@@ -58,17 +58,10 @@ import (
 // is a DSL change and is recorded here as the fix rather than worked around
 // more cleverly.
 
-const (
-	// sendToRecipientAudienceScanCap bounds the fallback scan. Ten audiences
-	// covers an operator calling the builtin by hand; past it the honest
-	// answer is a refusal naming the cheap path, not a longer walk.
-	sendToRecipientAudienceScanCap = 10
-
-	// sendToRecipientSource labels the delivery's skip reasons and log lines
-	// so a single-recipient send is distinguishable from a campaign's in the
-	// ledger.
-	sendToRecipientSource = "sendToRecipient"
-)
+// sendToRecipientAudienceScanCap bounds the fallback scan. Ten audiences
+// covers an operator calling the builtin by hand; past it the honest answer
+// is a refusal naming the cheap path, not a longer walk.
+const sendToRecipientAudienceScanCap = 10
 
 func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	templateID := memql.BareShortId(strings.TrimSpace(argString(args, "templateId")))
@@ -186,7 +179,7 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 		return nil, fmt.Errorf("campaigns.sendToRecipient: %w", err)
 	}
 
-	if !w.limiter.Allow() {
+	if !w.allowSend() {
 		return nil, errors.New("campaigns.sendToRecipient: the send-rate limit is exhausted; try again shortly")
 	}
 	now := w.nowUTC()

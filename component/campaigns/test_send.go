@@ -143,7 +143,7 @@ func (w *Worker) handleTestSend(ctx context.Context, args map[string]any, _ int)
 
 	// OUR rate limit, same bucket as a campaign's. A test is a real message
 	// and the provider counts it.
-	if !w.limiter.Allow() {
+	if !w.allowSend() {
 		return nil, errors.New("campaigns.testSend: the send-rate limit is exhausted; try again shortly. " +
 			"A test send consumes the same token bucket a campaign does, because the provider counts it the same way")
 	}
