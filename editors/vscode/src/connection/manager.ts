@@ -102,6 +102,8 @@ export class ConnectionManager {
   // Rebuilt with `conn`, never carried across one. See `get authoring()`.
   private authoringClient: AuthoringClient | undefined;
   private current: ConnectionState = { status: "disconnected" };
+  // The bearer the LIVE stream is authenticated with. See `get bearer()`.
+  private currentBearer: string | undefined;
   private readonly listeners = new Set<StateListener>();
   // Guards against an out-of-order settle: if the user selects cluster A then
   // cluster B before A's handshake finishes, A's completion must not overwrite
@@ -146,6 +148,40 @@ export class ConnectionManager {
 
   get query(): QueryClient | undefined {
     return this.conn?.query;
+  }
+
+  /**
+   * The bearer THIS CONNECTION is authenticated with, or undefined when there
+   * is no connection.
+   *
+   * WHY THE SEAM IS WIDENED AT ALL (memql#4748). `credentials` is private
+   * because nothing outside this class should be choosing a credential -- and
+   * that stays true. What the Library handoff needs is different: the artifact
+   * content route is one of the documented HTTP exceptions
+   * (`GET https://api.<domain>/artifacts/{id}/content`), so the bytes come over
+   * an ordinary HTTPS request rather than the stream, and that request must be
+   * made AS THE SAME ACTOR the stream is. Row authorization is per-caller, so a
+   * second credential resolved independently could authenticate a different
+   * user than the one whose graph rows the same handoff just read -- and the
+   * failure would be a 404 that reads as "the artifact is gone".
+   *
+   * SO IT REPORTS, IT DOES NOT RESOLVE. There is no way in through this getter
+   * to ask for a credential, refresh one, or name a cluster: it answers with
+   * what the current connection already carries, which is exactly the fact an
+   * HTTP call alongside that connection needs.
+   *
+   * KEPT IN STEP WITH THE STREAM, including in place. The SDK rotates the
+   * bearer over the live socket shortly before it expires
+   * (`ConnectionAuth.onTokenExpired`, wired in `connect`), and this is updated
+   * from that same hook -- a cached copy of the DIALLED bearer would go stale
+   * fifteen minutes into a session and produce a 401 on a stream that is
+   * perfectly healthy.
+   *
+   * NEVER LOGGED. It is a credential; the information policy (memql#4194)
+   * covers what reaches the channel, and this value is not in it.
+   */
+  get bearer(): string | undefined {
+    return this.conn === undefined ? undefined : this.currentBearer;
   }
 
   get subscriptions(): SubscriptionManager | undefined {
@@ -283,7 +319,18 @@ export class ConnectionManager {
               // Distinct from the retry above, and both are needed: this one
               // renews a stream we still hold, that one recovers a dial the
               // cluster refused.
-              onTokenExpired: () => this.credentials.forceRefresh(cluster),
+              //
+              // The rotated bearer is recorded as well as returned, so
+              // `get bearer()` keeps describing the credential the stream is
+              // actually carrying (memql#4748). Guarded by the same staleness
+              // token every other publish here is: a hook belonging to a
+              // superseded connect must not overwrite the current connection's
+              // credential on its way out.
+              onTokenExpired: async () => {
+                const fresh = await this.credentials.forceRefresh(cluster);
+                if (fresh !== null && this.latest.isCurrent(token)) this.currentBearer = fresh;
+                return fresh;
+              },
             },
             clientId: "memql-vscode",
             sdkName: "memql-vscode",
@@ -335,6 +382,10 @@ export class ConnectionManager {
     const conn = outcome.value;
     this.conn = conn;
     this.authoringClient = undefined;
+    // The bearer the handshake was accepted with, recorded BEFORE the state is
+    // published: a listener that reacts to "connected" by making an HTTP call
+    // alongside the stream must not find the accessor still empty.
+    this.currentBearer = dialedBearer === "" ? undefined : dialedBearer;
     this.publish({ status: "connected", clusterName: cluster.name, nodeId: conn.nodeId });
     // Not awaited: this resolves only when the socket eventually dies.
     void this.watchForTermination(conn, token, cluster.name);
@@ -383,6 +434,7 @@ export class ConnectionManager {
     // clients over a dead socket even before listeners run.
     this.conn = undefined;
     this.authoringClient = undefined;
+    this.currentBearer = undefined;
     this.publish({
       status: "error",
       clusterName,
@@ -400,5 +452,6 @@ export class ConnectionManager {
     }
     this.conn = undefined;
     this.authoringClient = undefined;
+    this.currentBearer = undefined;
   }
 }

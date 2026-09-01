@@ -786,6 +786,39 @@ smoke("a portal link for an unregistered cluster is refused without side effects
   assert.equal(after, before, "a link must not write clusters.yaml");
 });
 
+smoke("an ARTIFACT link for an unregistered cluster is refused without side effects", async () => {
+  // The same claim as the case above, for the target MemQL OS actually fires
+  // (memql#4748). It is worth stating twice because the artifact path forks
+  // BEFORE the catalog read and could have grown its own way to reach the
+  // registry: a link may offer to add a cluster, and may never add one.
+  const ext = extension();
+  const api = (await ext.activate()) as { handleOpenUri(uri: vscode.Uri): Promise<{ outcome: string }> };
+  const file = path.join(os.homedir(), ".memql", "clusters.yaml");
+  const before = await fs.promises.readFile(file, "utf8").catch(() => "");
+  const result = await api.handleOpenUri(
+    vscode.Uri.parse("vscode://znasllc.memql/open?v=1&cluster=nowhere.test&kind=artifact&id=v1%3Alibrary%3Aartifact%3Ax")
+  );
+  assert.equal(result.outcome, "noCluster");
+  const after = await fs.promises.readFile(file, "utf8").catch(() => "");
+  assert.equal(after, before, "an artifact link must not write clusters.yaml");
+});
+
+smoke("an artifact link with no id is refused by name, like any malformed link", async () => {
+  // The headline bug this epic fixes points the other way too: every artifact
+  // link used to be refused as "missing name", and a link that genuinely says
+  // nothing must still be refused -- now naming the field it is actually
+  // missing.
+  const ext = extension();
+  const api = (await ext.activate()) as {
+    handleOpenUri(uri: vscode.Uri): Promise<{ outcome: string; detail: string }>;
+  };
+  const result = await api.handleOpenUri(
+    vscode.Uri.parse("vscode://znasllc.memql/open?v=1&cluster=a.test&kind=artifact")
+  );
+  assert.equal(result.outcome, "refused");
+  assert.match(result.detail, /\bid\b/);
+});
+
 smoke("a malformed portal link is refused by name", async () => {
   const ext = extension();
   const api = (await ext.activate()) as {

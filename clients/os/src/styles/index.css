@@ -111,6 +111,7 @@ button:not(:disabled):active {
 .os-menu,
 .os-launcher-panel,
 .os-ask-sheet,
+.os-themes,
 .os-widget,
 .os-folder-popover {
   background: var(--os-glass-solid);
@@ -121,6 +122,7 @@ button:not(:disabled):active {
   .os-dock,
   .os-launcher-panel,
   .os-ask-sheet,
+  .os-themes,
   .os-widget {
     background: var(--os-glass);
     -webkit-backdrop-filter: blur(var(--os-blur));
@@ -1052,6 +1054,100 @@ button:not(:disabled):active {
 
 .os-ask-micnote {
   margin: 0;
+}
+.os-ask-micnote[data-note="problem"] {
+  color: var(--os-warn);
+}
+
+/* ---- Ask voice (epic memql#4747) ----------------------------------------
+ *
+ * The mic control's GEOMETRY is unchanged -- spec C promised that when the
+ * foundation shipped the button inert, so voice arrives as state ON the same
+ * 30px circle and never as a panel that appears beside it.
+ *
+ * The level is a RING, and a ring is a box-shadow. That is the shell's
+ * existing cue language, stated for the arrival cue and true for the same
+ * reason here: the button sits on the sheet's own opaque plate, so a
+ * background animation under it costs the same and announces nothing.
+ *
+ * --os-mic-level is written by AskSurface's frame loop, never by React. It is
+ * declared here with a zero default so the ring is well-defined on the first
+ * frame and whenever the mic is closed.
+ */
+.os-ask-mic {
+  --os-mic-level: 0;
+  transition:
+    color var(--os-duration-fast) var(--os-ease),
+    border-color var(--os-duration-fast) var(--os-ease),
+    box-shadow var(--os-duration-fast) var(--os-ease);
+}
+.os-ask-mic:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Opening the device -- often behind the browser's own permission prompt, so
+ * this is an indeterminate wait rather than a measurement of anything. */
+.os-ask-mic[data-voice="starting"] {
+  border-color: var(--os-accent);
+  color: var(--os-accent);
+  animation: os-mic-wake 1.1s var(--os-ease) infinite;
+}
+
+/* Live. The halo tracks the input level; 2px is the floor, so an open
+ * microphone in a silent room still reads as open. */
+.os-ask-mic[data-voice="listening"] {
+  border-color: var(--os-accent);
+  color: var(--os-accent);
+  box-shadow: 0 0 0 calc(2px + var(--os-mic-level) * 9px) var(--os-accent-soft);
+}
+
+/* Stopped listening, still writing it down. Deliberately NOT the accent
+ * border: the device is closed, and a control that still looks live while the
+ * recording indicator has gone out is the one lie this surface must not tell. */
+.os-ask-mic[data-voice="transcribing"] {
+  border-color: var(--os-line);
+  color: var(--os-muted);
+  box-shadow: 0 0 0 3px var(--os-accent-soft);
+}
+
+/* The field is being written by the microphone. Tinting it is what says WHICH
+ * box the words are going into -- with three Ask entry points and a text
+ * field in most windows, that is not obvious from the mic alone.
+ *
+ * A TINT AND NOT A BORDER. The first cut set `border-color: var(--os-accent)`
+ * as well, and looking at it in a browser is the only way that reads wrong:
+ * the live mic ring, the field's border and the send button were then three
+ * accent-coloured things in one 30px-tall row, and the ring -- the one that
+ * is actually carrying information, because it MOVES -- stopped being the
+ * thing the eye went to. The ring is where this row spends its boldness; the
+ * field only has to say "here". */
+.os-ask-field:read-only {
+  background: var(--os-accent-soft);
+}
+
+@keyframes os-mic-wake {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px var(--os-accent-soft);
+  }
+  50% {
+    box-shadow: 0 0 0 5px var(--os-accent-soft);
+  }
+}
+
+/* Reduced motion keeps the CUE and drops the movement -- the same trade the
+ * arrival cue makes. Removing it outright would leave these readers with no
+ * way to tell a live microphone from a dead one, which is a different failure
+ * from the one the setting asks about. */
+@media (prefers-reduced-motion: reduce) {
+  .os-ask-mic[data-voice="starting"] {
+    animation: none;
+    box-shadow: 0 0 0 3px var(--os-accent-soft);
+  }
+  .os-ask-mic {
+    transition: none;
+  }
 }
 
 /* ---- widgets ---- */
@@ -4301,4 +4397,231 @@ a.os-button {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+
+/* ---- Themes: the marketplace drawer (epic memql#4745) -------------------
+ *
+ * A DRAWER, and the one modal surface in this shell that does NOT tint what
+ * is behind it. Every other backdrop here dims the desktop to say "attend to
+ * this"; that would be exactly wrong for a theme store, because the desktop
+ * behind it IS what is being previewed. The backdrop exists only to catch a
+ * click-out.
+ *
+ * The panel takes the right edge rather than the centre for the same reason:
+ * the desk, the dock, the wallpaper and any open window have to stay visible
+ * and visibly restyling while the pointer moves down the list.
+ */
+.os-themes-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 72;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.os-themes {
+  width: min(380px, 100vw);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--os-line);
+  box-shadow: var(--os-shadow-window);
+  animation: os-themes-in var(--os-duration-med) var(--os-ease);
+}
+.os-themes[data-dropping] {
+  outline: 2px dashed var(--os-accent);
+  outline-offset: -8px;
+}
+
+@keyframes os-themes-in {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+}
+
+.os-themes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 14px 0;
+}
+.os-themes-head h2 {
+  margin: 0;
+  font-size: var(--os-text-lg);
+  font-weight: 500;
+}
+.os-themes-hint {
+  margin: 4px 14px 10px;
+}
+
+.os-themes-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+
+.os-themes-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--os-line);
+}
+
+/* ---- one pack ---- */
+.os-theme-card {
+  position: relative;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+}
+.os-theme-card[data-current] {
+  border-color: var(--os-accent);
+}
+.os-theme-choose {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 10px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--os-radius-sm);
+  cursor: pointer;
+}
+.os-theme-choose:hover,
+.os-theme-choose:focus-visible {
+  background: var(--os-accent-soft);
+}
+.os-theme-name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--os-text-base);
+}
+.os-theme-current {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--os-text-xs);
+  color: var(--os-accent);
+}
+.os-theme-by {
+  font-variant-numeric: tabular-nums;
+}
+.os-theme-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+/* ---- the two miniature desktops ----------------------------------------
+ *
+ * Drawn from the pack's own values, so they cannot go stale, and drawn TWICE
+ * so a pack's light mode is visible from a dark desktop. This is the visible
+ * half of the epic's per-pack light + dark verification; the numeric half is
+ * test/themes/contrast.test.ts.
+ */
+.os-theme-minis {
+  display: flex;
+  gap: 6px;
+}
+.os-theme-mini {
+  position: relative;
+  flex: 1;
+  height: 48px;
+  border: 1px solid;
+  border-radius: var(--os-radius-xs);
+  overflow: hidden;
+}
+.os-theme-mini-field {
+  position: absolute;
+  inset: 0;
+  /* The memory field, abstracted to its texture: the same dot colour the
+   * wallpaper paints, as a wash rather than a lattice. A real lattice at this
+   * size is one grey rectangle. */
+  opacity: 0.9;
+}
+.os-theme-mini-window {
+  position: absolute;
+  left: 8px;
+  top: 7px;
+  right: 8px;
+  height: 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid;
+  border-radius: 3px;
+}
+.os-theme-mini-bar {
+  width: 40%;
+  height: 3px;
+  border-radius: 2px;
+}
+.os-theme-mini-line {
+  width: 78%;
+  height: 2px;
+  border-radius: 2px;
+  opacity: 0.7;
+}
+.os-theme-mini-line:last-child {
+  width: 52%;
+}
+.os-theme-mini-dock {
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border: 1px solid;
+  border-radius: 999px;
+}
+.os-theme-mini-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .os-themes {
+    animation: none;
+  }
+}
+
+/* Phone: the drawer is a bottom sheet, because a 380px rail on a 390px
+ * screen is a full-screen overlay pretending to be a drawer -- and there is
+ * no desktop left beside it to preview against anyway. */
+@media (hover: none) and (pointer: coarse) {
+  .os-themes-backdrop {
+    align-items: flex-end;
+  }
+  .os-themes {
+    width: 100%;
+    height: min(78vh, 620px);
+    border-left: 0;
+    border-top: 1px solid var(--os-line);
+    border-radius: var(--os-radius) var(--os-radius) 0 0;
+  }
+  @keyframes os-themes-in {
+    from {
+      transform: translateY(16px);
+      opacity: 0;
+    }
+  }
 }

@@ -46,7 +46,7 @@ export function renderShell({
       ports={{
         store: new LocalDesktopStore(storage),
         disableConnection: true,
-        askTransport: new StubAskTransport(),
+        askTransport: new StubAskTransport(), askVoice: null,
       }}
     />,
   );

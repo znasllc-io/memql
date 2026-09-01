@@ -42,7 +42,7 @@ function renderShell({
       onSignOut={vi.fn()}
       access={access}
       config={CONFIG}
-      ports={{ store: new LocalDesktopStore(storage), disableConnection: true, askTransport: new StubAskTransport() }}
+      ports={{ store: new LocalDesktopStore(storage), disableConnection: true, askTransport: new StubAskTransport(), askVoice: null }}
     />,
   );
   return { view, storage };
@@ -190,7 +190,7 @@ describe("Ask (spec K bullet 5)", () => {
     expect(within(widget).getByRole("textbox", { name: "Ask" })).toBeTruthy();
   });
 
-  it("streams an answer for a text question and renders the mic note", async () => {
+  it("streams an answer for a text question", async () => {
     renderShell();
     fireEvent.click(screen.getByRole("button", { name: "Ask" }));
     const sheet = screen.getByRole("dialog", { name: "Ask" });
@@ -198,9 +198,20 @@ describe("Ask (spec K bullet 5)", () => {
     fireEvent.change(input, { target: { value: "what is this cluster" } });
     fireEvent.click(within(sheet).getByRole("button", { name: "Send" }));
     expect(await within(sheet).findByText(/Ask is not connected/, undefined, { timeout: 4000 })).toBeTruthy();
+  });
 
-    fireEvent.click(within(sheet).getByRole("button", { name: "Ask by voice" }));
-    expect(within(sheet).getByText(/Voice arrives with the Ask voice epic/)).toBeTruthy();
+  // The harness passes askVoice={null} (jsdom has no audio stack), which is
+  // the "this window has no voice wiring" case -- and the rule it pins is
+  // that the control stays PRESENT and accounts for itself, rather than
+  // disappearing or sitting there dead. Voice's own behaviour is tested
+  // against the pure session in test/ask/, with no shell and no DOM.
+  it("an unwired mic control says so instead of going quiet", () => {
+    renderShell();
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    const sheet = screen.getByRole("dialog", { name: "Ask" });
+    const mic = within(sheet).getByRole("button", { name: "Ask by voice" }) as HTMLButtonElement;
+    expect(mic.disabled).toBe(true);
+    expect(within(sheet).getByText(/Voice is not wired up in this window/)).toBeTruthy();
   });
 });
 

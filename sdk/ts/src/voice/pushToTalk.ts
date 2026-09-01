@@ -45,12 +45,6 @@ export interface PushToTalkOptions {
   onPartial?: (p: PartialTranscript) => void;
   // Cancel the session mid-stream.
   signal?: AbortSignal;
-  // For consumers that prefer pull-based delta streaming over the
-  // onPartial callback. Resolves to an AsyncIterable that yields
-  // PartialTranscripts and ends when Complete lands or the session
-  // aborts. When set, onPartial is still invoked first (both work
-  // together).
-  yieldDeltas?: boolean;
 }
 
 // pushToTalk resolves with the FinalTranscript when the server emits
@@ -76,6 +70,15 @@ class TranscriptionSession {
   private readonly dispatcher: Dispatcher;
   private readonly requestId: string;
   private readonly opts: PushToTalkOptions;
+  /**
+   * The live audio reader, held so the session can stop PUMPING when it
+   * stops LISTENING. Without it, every terminal path -- abort, refusal,
+   * completion -- unregisters the reply listener and then goes on reading
+   * the caller's stream and sending chunks into a session the server has
+   * already closed. For a browser that is a microphone still being read
+   * after the person let go of the key.
+   */
+  private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
   constructor(dispatcher: Dispatcher, requestId: string, opts: PushToTalkOptions) {
     this.dispatcher = dispatcher;
@@ -103,6 +106,23 @@ class TranscriptionSession {
           durationMs: numberFromWire(payload.value.durationMs),
           provider: payload.value.provider ?? "",
         });
+      } else if (payload?.kind === "queryError") {
+        // A REFUSED SESSION MUST REJECT, NOT PARK. Every precondition the
+        // server checks on Start answers with a correlated queryError and
+        // never with a Complete: no STT provider configured (Unavailable),
+        // a duplicate request_id (AlreadyExists), a Chunk or End that
+        // arrived before Start (FailedPrecondition). wire.ts's
+        // streamRequestId routes queryError by request_id precisely so a
+        // registerStream listener can see it -- ai/chat.ts and
+        // automationRun.ts both have this branch and this one did not, so
+        // the commonest refusal in the tree ("streaming transcription is
+        // not configured", which is what EVERY cluster with no voice node
+        // answers) left the caller awaiting a promise that could never
+        // settle. Silence is the worst possible rendering of a refusal
+        // whose message names the fix.
+        rejectFinal(
+          new Error(`pushToTalk: ${payload.value.error?.message ?? "(no message)"}`),
+        );
       }
     });
 
@@ -140,6 +160,7 @@ class TranscriptionSession {
       return await finalPromise;
     } finally {
       unregister();
+      this.stopPump();
       if (this.opts.signal) {
         this.opts.signal.removeEventListener("abort", abortListener);
       }
@@ -179,6 +200,7 @@ class TranscriptionSession {
 
   private async pumpAudio(audio: ReadableStream<Uint8Array>): Promise<void> {
     const reader = audio.getReader();
+    this.reader = reader;
     try {
       for (;;) {
         const { value, done } = await reader.read();
@@ -189,12 +211,24 @@ class TranscriptionSession {
         if (value && value.length > 0) this.sendChunk(value);
       }
     } finally {
+      this.reader = null;
       try {
         reader.releaseLock();
       } catch {
         /* ignore */
       }
     }
+  }
+
+  /** Best-effort: end the read loop so no chunk outlives the session. */
+  private stopPump(): void {
+    const reader = this.reader;
+    if (!reader) return;
+    this.reader = null;
+    // cancel() resolves the pending read() with done:true, which unwinds
+    // pumpAudio's loop. It can reject if the stream is already errored --
+    // that is not this session's problem, and it is already ending.
+    void reader.cancel().catch(() => {});
   }
 }
 

@@ -39,6 +39,7 @@ const settings: OsAppManifest = {
   sections: [
     { id: "about", name: "About" },
     { id: "appearance", name: "Appearance" },
+    { id: "ask", name: "Ask" },
     { id: "apps", name: "Apps" },
     { id: "cluster", name: "Cluster", roles: { min: "admin" } },
     { id: "diagnostics", name: "Diagnostics" },
@@ -198,8 +199,10 @@ const accounts: OsAppManifest = {
 };
 
 function AskWidgetBody() {
-  const { transport } = useAsk();
-  return <AskSurface transport={transport} variant="widget" />;
+  const { transport, voice, settings } = useAsk();
+  return (
+    <AskSurface transport={transport} voicePorts={voice} settings={settings} variant="widget" />
+  );
 }
 
 const askWidget: OsWidgetManifest = {

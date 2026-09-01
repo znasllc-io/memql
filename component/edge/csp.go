@@ -174,8 +174,41 @@ func validHost(host string) bool {
 	return true
 }
 
-// securityHeaders writes the baseline hardening set, ported unchanged from
-// component/portal/csp.go.
+// permissionsPolicy is the powerful-features policy every hosted site gets.
+//
+// MICROPHONE IS `self`, AND THE OTHER TWO ARE NOT (memql#4747). The set was
+// `geolocation=(), microphone=(), camera=()` -- ported from the identity
+// service, where nothing has ever needed any of the three. On the EDGE that
+// is a different statement, because the edge serves MemQL OS, whose Ask
+// surface takes dictation. `microphone=()` disables getUserMedia for the
+// document outright: the promise rejects with NotAllowedError before the
+// browser shows a permission prompt at all, which is character-for-character
+// what a person DECLINING the microphone produces. So the feature would have
+// looked implemented, passed every test, worked in `npm run dev` (vite sends
+// no such header) and been dead in every deployed cluster, reporting itself
+// as the user's own choice.
+//
+// The widening is narrow and the browser's own gate is untouched:
+//
+//   - `self` admits the site's own document and no cross-origin frame. The
+//     edge already answers `frame-ancestors 'none'` and X-Frame-Options DENY,
+//     so a hosted page is never embedded, and `self` never reaches a third
+//     party's code.
+//   - The per-origin permission PROMPT still stands. This header decides
+//     whether a page may ASK; the person decides whether it may listen.
+//   - Every hosted bundle arrives through the authenticated publish route
+//     (POST /sites/{id}/bundles, a service-account JWT), so the code this
+//     admits is code the cluster's own operators shipped.
+//
+// Geolocation and camera stay CLOSED, and that asymmetry is the point: a
+// capability is opened when a first-party surface needs it, never
+// speculatively. Anything reaching for the camera should have to change this
+// line and say why, exactly as this change did.
+const permissionsPolicy = "geolocation=(), microphone=(self), camera=()"
+
+// securityHeaders writes the baseline hardening set, ported from
+// component/portal/csp.go -- see permissionsPolicy for the one deliberate
+// divergence.
 //
 // HSTS on TLS only: browsers cache it per host, so emitting it once over
 // http://localhost poisons that host's STS store and forces every later
@@ -185,7 +218,7 @@ func securityHeaders(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-	h.Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+	h.Set("Permissions-Policy", permissionsPolicy)
 	if r != nil && r.TLS != nil {
 		h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 	}

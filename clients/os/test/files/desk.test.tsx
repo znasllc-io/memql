@@ -62,7 +62,7 @@ function renderShellWithFolder(uploads?: UploadProvider) {
       ports={{
         store: new LocalDesktopStore(storageWithFolderShortcut()),
         disableConnection: true,
-        askTransport: new StubAskTransport(),
+        askTransport: new StubAskTransport(), askVoice: null,
         ...(uploads ? { uploads } : {}),
       }}
     />,

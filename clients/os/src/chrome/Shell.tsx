@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { ChromeLayout } from "../app/layout";
 import { AskProvider } from "../ask/AskProvider";
+import { ThemeStore } from "../themes/ThemeStore";
+import { openMicrophone } from "../ask/micCapture";
+import { SdkTranscriber } from "../ask/sdkVoice";
+import type { VoicePorts } from "../ask/voiceSession";
 import { AskSheet } from "../ask/AskSheet";
 import { SdkAskTransport } from "../ask/sdkTransport";
 import { type AskTransport } from "../ask/askController";
@@ -33,6 +37,13 @@ import { PhoneShell } from "./PhoneShell";
 
 export interface ShellPorts {
   askTransport?: AskTransport;
+  /**
+   * Ask's voice wiring. Absent = the shell builds the browser one; `null` =
+   * this window deliberately has none, and the mic control says so. jsdom has
+   * no audio stack, so the suite's harnesses pass null rather than leaving
+   * every Ask test one keystroke away from calling getUserMedia.
+   */
+  askVoice?: VoicePorts | null;
   uploads?: UploadProvider;
   store?: DesktopStore;
   /** Tests: skip dialing the cluster entirely. */
@@ -191,6 +202,17 @@ function ShellTransports({
     () => ports.askTransport ?? new SdkAskTransport(() => connection?.dispatcher ?? null),
     [ports.askTransport, connection],
   );
+  // Voice's two halves: the microphone (pure browser) and the transcription
+  // wire (this shell's one connection). Built here for the same reason the
+  // chat transport is -- one Ask, three entry points, and exactly one place
+  // that knows how to reach the cluster.
+  const askVoice = useMemo<VoicePorts | null>(() => {
+    if (ports.askVoice !== undefined) return ports.askVoice;
+    return {
+      openMicrophone: () => openMicrophone(),
+      transcriber: new SdkTranscriber(() => connection?.dispatcher ?? null),
+    };
+  }, [ports.askVoice, connection]);
   const uploads = useMemo<UploadProvider>(
     () => ports.uploads ?? new EdgeUploadProvider(() => source.bearer()),
     [ports.uploads, source],
@@ -213,7 +235,11 @@ function ShellTransports({
     if (connection === null) return new LocalDesktopStore();
     return new GraphDesktopStore(new LocalDesktopStore(), new SdkDesktopGateway(connection));
   }, [ports.store, connection]);
-  return <AskProvider transport={askTransport}>{children(uploads, desktopStore)}</AskProvider>;
+  return (
+    <AskProvider transport={askTransport} voice={askVoice}>
+      {children(uploads, desktopStore)}
+    </AskProvider>
+  );
 }
 
 function DesktopChrome({
@@ -229,6 +255,10 @@ function DesktopChrome({
 }) {
   const { actions, state } = useOs();
   const [launcherOpen, setLauncherOpen] = useState(false);
+  // Themes is chrome, like Ask -- see themes/ThemeStore.tsx. Opening it
+  // CLOSES the Launcher, because the Launcher is a full-screen glass overlay
+  // and the marketplace's whole gesture is watching this desktop restyle.
+  const [themesOpen, setThemesOpen] = useState(false);
 
   const placement = useMemo<PlacementTokens>(
     () => ({ margin: 28, gutter: 16, dockReserve: 118, maxSoloWidth: 1280 }),
@@ -274,7 +304,15 @@ function DesktopChrome({
     >
       <Desktop viewport={viewport} placement={placement} uploads={uploads} />
       <Dock onOpenLauncher={() => setLauncherOpen(true)} onSignOut={onSignOut} />
-      <LauncherOverlay open={launcherOpen} onClose={() => setLauncherOpen(false)} />
+      <LauncherOverlay
+        open={launcherOpen}
+        onClose={() => setLauncherOpen(false)}
+        onOpenThemes={() => {
+          setLauncherOpen(false);
+          setThemesOpen(true);
+        }}
+      />
+      <ThemeStore open={themesOpen} onClose={() => setThemesOpen(false)} />
       <AskSheet />
     </div>
   );

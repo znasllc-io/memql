@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import { DEFAULT_FIELD, dotAt, generateField, type Field } from "./field";
+import { DEFAULT_FIELD, dotAt, generateField, type Field, type FieldOptions } from "./field";
 
 // The wallpaper canvas. Reads its colors from the theme tokens at paint
 // time (so a theme pack restyles it with zero code), stills itself under
@@ -57,7 +57,21 @@ function paint(canvas: HTMLCanvasElement, field: Field, t: number): void {
   }
 }
 
-export function MemoryField({ seed = 9 }: { seed?: number }) {
+/**
+ * The memory field.
+ *
+ * `seed` and `field` come from the ACTIVE THEME PACK since epic memql#4745 --
+ * a theme is its token set plus its wallpaper parameters, and the wallpaper
+ * is the largest surface any of them touches. The defaults are graphite's, so
+ * a caller that passes nothing paints exactly what the foundation shipped.
+ */
+export function MemoryField({
+  seed = 9,
+  field: options = DEFAULT_FIELD,
+}: {
+  seed?: number;
+  field?: FieldOptions;
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -80,7 +94,7 @@ export function MemoryField({ seed = 9 }: { seed?: number }) {
       canvas.height = Math.max(1, Math.floor(h * dpr));
       canvas.style.width = `${w}px`;
       canvas.style.height = `${h}px`;
-      field = generateField(seed, w, h, DEFAULT_FIELD);
+      field = generateField(seed, w, h, options);
       paint(canvas, field, 0);
     };
 
@@ -121,7 +135,7 @@ export function MemoryField({ seed = 9 }: { seed?: number }) {
       document.removeEventListener("visibilitychange", onVisibility);
       reduced.removeEventListener("change", wake);
     };
-  }, [seed]);
+  }, [seed, options]);
 
   return <canvas ref={canvasRef} className="os-field" data-os-field aria-hidden="true" />;
 }

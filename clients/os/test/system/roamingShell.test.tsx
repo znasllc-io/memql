@@ -72,6 +72,7 @@ function remoteDocument(overrides: Partial<DesktopDocument> = {}): DesktopDocume
     },
     dock: { pinned: ["settings", "fleet"] },
     themePack: "midnight",
+    installedPacks: [],
     ...overrides,
   };
 }
@@ -194,7 +195,7 @@ describe("ids minted against the document", () => {
         onSignOut={vi.fn()}
         access={OWNER}
         config={CONFIG}
-        ports={{ store, disableConnection: true, askTransport: new StubAskTransport() }}
+        ports={{ store, disableConnection: true, askTransport: new StubAskTransport(), askVoice: null }}
       />,
     );
     const seeded = store.load();
@@ -209,7 +210,7 @@ describe("ids minted against the document", () => {
         onSignOut={vi.fn()}
         access={OWNER}
         config={CONFIG}
-        ports={{ store, disableConnection: true, askTransport: new StubAskTransport() }}
+        ports={{ store, disableConnection: true, askTransport: new StubAskTransport(), askVoice: null }}
       />,
     );
     // Through the real surface: right-click the active desk plate, take
@@ -268,7 +269,7 @@ describe("the roaming report", () => {
         onSignOut={vi.fn()}
         access={OWNER}
         config={CONFIG}
-        ports={{ store, disableConnection: true, askTransport: new StubAskTransport() }}
+        ports={{ store, disableConnection: true, askTransport: new StubAskTransport(), askVoice: null }}
       />,
     );
   }

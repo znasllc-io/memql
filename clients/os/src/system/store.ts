@@ -8,6 +8,8 @@ import type { Desk, ShellState } from "./desks";
 import type { DeskSurface, FileEntry, GridPos } from "./desktop";
 import type { DockState } from "./dock";
 import type { DeskId } from "./windows";
+import { isBuiltInId } from "../themes/builtins";
+import { validateThemePack, type OsThemePack } from "../themes/pack";
 
 export interface DesktopDocument {
   version: 1;
@@ -16,6 +18,24 @@ export interface DesktopDocument {
   surfaces: Record<DeskId, DeskSurface>;
   dock: DockState;
   themePack: string;
+  /**
+   * Theme packs installed on this desktop (epic memql#4745). BUILT-INS ARE
+   * NEVER IN HERE -- the bundle already carries them, and a stored copy that
+   * outlived a release would be a stale theme nobody could update.
+   *
+   * `version` is deliberately NOT bumped for this field, which is the
+   * precedent the legacy icon-group lift above set: a bump makes
+   * `sanitizeDocument` reject every document written by an older bundle, and
+   * somebody would lose their desks because a theme list arrived. A new field
+   * is added, sanitized to a default, and read.
+   *
+   * It lives in the DESKTOP document rather than a per-surface store because
+   * it has to roam: graphStore strips only `activeDeskId` from what it shares,
+   * so a theme installed on a laptop is on the desktop at work -- and a stored
+   * `themePack` naming a pack that did not travel with it would resolve back
+   * to graphite on arrival, which reads as the choice being forgotten.
+   */
+  installedPacks: OsThemePack[];
 }
 
 /**
@@ -60,6 +80,7 @@ export function documentFromState(
   surfaces: Record<DeskId, DeskSurface>,
   dock: DockState,
   themePack: string,
+  installedPacks: OsThemePack[] = [],
 ): DesktopDocument {
   return {
     version: 1,
@@ -68,6 +89,7 @@ export function documentFromState(
     surfaces,
     dock,
     themePack,
+    installedPacks,
   };
 }
 
@@ -193,6 +215,16 @@ export function sanitizeDocument(raw: unknown): DesktopDocument | null {
     surfaces,
     dock: { pinned },
     themePack: typeof doc.themePack === "string" && doc.themePack ? doc.themePack : "graphite",
+    // Each pack is re-validated on the way IN, not trusted because it was
+    // stored: this document arrives from localStorage on one machine and from
+    // a graph row on the next, and a pack that was valid when it was written
+    // may have been written by a bundle whose token set has since grown. One
+    // unreadable pack is dropped; the rest of the desktop is untouched.
+    installedPacks: Array.isArray(doc.installedPacks)
+      ? doc.installedPacks
+          .map((pack) => validateThemePack(pack))
+          .flatMap((load) => (load.ok && !isBuiltInId(load.pack.id) ? [load.pack] : []))
+      : [],
   };
 }
 

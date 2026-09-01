@@ -1,7 +1,7 @@
 import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { BUILT_IN_THEMES, resolveThemePack, themePackById } from "../../src/styles/themes";
+import { BUILT_IN_PACKS, resolveThemePack, themePackById } from "../../src/themes/registry";
 import { resetIdsForTest } from "../../src/system/desks";
 import { DESKTOP_STORE_KEY } from "../../src/system/store";
 import { gotoSection, memStorage, openFromLauncher, renderShell } from "./shellHarness";
@@ -16,11 +16,14 @@ beforeEach(() => {
 });
 
 describe("the theme registry", () => {
-  it("ships graphite as the one built-in, with no stylesheet to fetch", () => {
-    expect(BUILT_IN_THEMES.map((t) => t.id)).toEqual(["graphite"]);
-    // No tokensHref is the load-bearing half: the built-in's tokens are in
-    // the bundle, so the shell renders on the first frame offline.
-    expect(themePackById("graphite")?.tokensHref).toBeUndefined();
+  it("ships three built-ins, graphite first", () => {
+    // Graphite is FIRST because it is the fallback: its tokens are the
+    // bundle's unqualified :root block, so it is the one pack that is
+    // guaranteed to render on the first frame, offline, before any of the
+    // theme module has run.
+    expect(BUILT_IN_PACKS.map((t) => t.id)).toEqual(["graphite", "vellum", "cobalt"]);
+    expect(BUILT_IN_PACKS.every((p) => p.builtIn)).toBe(true);
+    expect(themePackById("graphite")?.name).toBe("Graphite");
   });
 
   it("falls back to the built-in for a pack that is no longer installed", () => {
@@ -47,9 +50,21 @@ describe("the Appearance section", () => {
     expect(graphite.getAttribute("aria-checked")).toBe("true");
   });
 
-  it("says the marketplace is coming rather than pretending there is more", () => {
+  it("sends you to the drawer to try one on, rather than previewing here", () => {
+    // This panel is a WINDOW on the desktop it would be previewing, so it
+    // cannot show a preview without previewing itself. An absent affordance
+    // with no account of itself reads as an oversight, so it says where the
+    // preview lives.
     openAppearance();
-    expect(screen.getByText(/marketplace coming soon/i)).toBeTruthy();
+    expect(screen.getByText(/Themes in the Launcher/i)).toBeTruthy();
+  });
+
+  it("lists every built-in pack", () => {
+    openAppearance();
+    const group = screen.getByRole("radiogroup", { name: "Theme" });
+    for (const name of ["Graphite (built in)", "Vellum (built in)", "Cobalt (built in)"]) {
+      expect(within(group).getByRole("radio", { name })).toBeTruthy();
+    }
   });
 
   it("applies the pack as data-os-theme on the document root", () => {

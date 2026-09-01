@@ -17,13 +17,18 @@ Design: `docs/superpowers/specs/2026-08-26-memql-os-desktop-shell-design.md`.
   mutations, and remove-from-desk removes the shortcut and never
   archives. Widgets are desk-resident cards; Ask ships first.
 - **Ask** is chrome, not a module: the dock orb, the desk widget and every
-  title bar open the same streaming surface.
+  title bar open the same streaming surface. It takes dictation (#4747):
+  hold the mic to talk, tap it to keep listening.
 - **Roles**: one predicate (`system/roles.ts`) gates apps and app sections
   from `MyAccess.clusterRole`. Presentation only — row authz stays the
   engine's.
-- **Theming**: `--os-*` token packs on the root and every window/widget/
-  sheet root (`data-os-theme`); mode (light/dark/system) is orthogonal.
-  The wallpaper (the memory field) paints from tokens.
+- **Theming**: `--os-*` token packs on the root (`data-os-theme`); mode
+  (light/dark/system) is orthogonal. The wallpaper (the memory field) paints
+  from tokens and from the pack's own field parameters. A pack is DATA, and
+  Themes in the Launcher is the drawer that sells them (#4745). Windows,
+  widgets and sheets re-inherit the tokens but do NOT carry the attribute --
+  the foundation spec says they do and it is wrong; a per-window mix is three
+  one-line edits away and deliberately not built.
 - **Persistence**: `system/store.ts` (`DesktopStore`) — versioned
   localStorage; desks, items, pins, theme. Never windows.
 - Phone keeps its own chrome (tab bar, one app at a time, Ask sheet);
@@ -591,3 +596,111 @@ entirely, and six greyed-out buttons are six controls somebody has to read past
 to learn they are not for them. The server refuses those writes regardless --
 the presentation is the courtesy, `component/memql/platform_site_status_guard.go`
 is the gate.
+
+## Ask voice (epic memql#4747)
+
+The mic toggle is live: hold it to talk, tap it to keep listening, and the
+transcript lands in the box as you speak. Five things about it are rules the
+next surface that touches audio or the Ask sheet gets wrong by default.
+
+- **`format` IS A LABEL THE SERVER DOES NOT READ.** `AiTranscribeStreamStart`
+  carries one, and the obvious browser capture -- `MediaRecorder`, which
+  yields webm/opus -- can declare `format: "webm"` and look correct. The
+  cluster's default STT provider is `openai-realtime`, and
+  `integrations/stt/openai_realtime.go` passes only `SampleRate` through: it
+  never reads `Format`, and resamples whatever arrives as though it were
+  16 kHz PCM16. Hand it opus and the session opens, chunks flow, and the
+  transcript comes back as plausible nonsense. So `ask/pcm16.ts` is a real
+  resampler -- stateful across capture blocks, box-averaged rather than
+  point-sampled -- and the worklet that feeds it is a buffer and a pipe with
+  no arithmetic in it, because a worklet has no test harness and the
+  arithmetic is the part worth proving.
+
+- **THE EDGE HAD TO STOP FORBIDDING THE MICROPHONE.** `component/edge`
+  answered `Permissions-Policy: microphone=()` on every hosted site, which
+  rejects `getUserMedia` with `NotAllowedError` BEFORE the browser prompts --
+  indistinguishable from the person declining. Voice would have passed every
+  test, worked under `npm run dev` (vite sends no such header), and been dead
+  in every cluster while blaming the user. It is `microphone=(self)` now;
+  camera and geolocation stay closed, and a Go test says why.
+
+- **DELTAS REPLACE THE FIELD; THEY NEVER APPEND.**
+  `AiTranscribeStreamDelta` carries the whole accumulated transcript, not an
+  increment -- the opposite of the chat path in the same component.
+  Appending renders "openopen theopen the fleet". The field is `readOnly`
+  while the mic writes it, never `disabled`, so it stays focusable.
+
+- **THE LEVEL NEVER ENTERS REACT STATE.** It moves at the frame rate; state
+  would re-render the streaming answer log sixty times a second to animate one
+  ring. It is `--os-mic-level`, written from a rAF loop that runs only while
+  the mic is live. The ring itself is a `box-shadow` on the existing 30px
+  button -- the shell's cue language, and the geometry spec C promised would
+  not change when voice landed.
+
+- **A REFUSAL IS A STANDING FACT, NOT A PHASE.** `denied` outlives the
+  attempt that found it, so the control keeps explaining itself while the
+  person types. It covers a genuine refusal AND a Permissions-Policy block,
+  because browsers report them identically -- which is why the sentence names
+  the browser instead of accusing the reader of a choice they may not have
+  made. Text stays fully usable throughout, and nothing is a dialog.
+
+There is no input-LANGUAGE setting and no microphone PICKER, and both
+absences are deliberate: `ai_transcribe_stream.go` accepts `language_hint` and
+discards it (the language is pinned cluster-wide), and every browser already
+offers a per-site input device in the address bar. A control that changes
+nothing is worse than an absent one.
+
+## Themes, the marketplace (epic memql#4745)
+
+`src/themes/` is the pack format, the loader that refuses a broken one, three
+built-in packs, and the drawer that sells them. Five things about it are new
+rules rather than repetitions.
+
+- **A PACK IS DATA, NOT A STYLESHEET.** The foundation's `tokensHref` could
+  be neither validated (a fetched stylesheet is opaque to the page that
+  fetched it) nor trusted (a pack setting `--os-cell-w` breaks the desk grid;
+  one zeroing `--os-duration-cue` disables the arrival cue for a reader who
+  never asked for reduced motion). A pack is JSON carrying VALUES and the
+  shell writes the CSS. Values are whitelisted by character set -- the posture
+  `component/edge`'s `validHost` takes, and for the same reason.
+
+- **A THEME CHANGES HOW THE OS LOOKS, NEVER HOW IT BEHAVES.** The format
+  carries 21 colour/depth tokens twice (dark and light) plus bounded wallpaper
+  parameters. The type scale, the radii, the grid cell and the motion
+  durations are not in it at all. A marketplace must not be able to sell a
+  desktop that will not scroll.
+
+- **THE ACCENT IS NOT A STATUS COLOUR.** Amber is `warn` and red is `error`
+  everywhere in this shell, so an amber-accented pack puts the status hue on
+  every primary button and live dot in the OS. Accents come from the cool half
+  of the wheel; a test refuses a hue between red and yellow.
+
+- **THE STORE IS A DRAWER, BECAUSE THE PRODUCT IS THE DESKTOP.** Pointing at
+  a card restyles the desk, the dock, the wallpaper and every open window
+  behind the panel; leaving snaps them back. That is why the Themes tile
+  CLOSES the Launcher (a full-screen glass overlay would hide the preview),
+  why the drawer takes the right edge, and why its backdrop is the one modal
+  backdrop here that does not tint. Ask is the precedent: a surface whose
+  subject is the desktop itself cannot be a window on the desktop. Focus
+  previews too -- a keyboard reader who could only preview by choosing would
+  be shopping by trying things on permanently. The preview is session state,
+  absent from `documentFromState`, so a pointer cannot roam anybody's machine.
+
+- **A CARD IS TWO MINIATURE DESKTOPS, DRAWN FROM THE PACK'S OWN VALUES.** Not
+  a swatch strip (six colours say nothing about what they do) and not a
+  screenshot (it goes stale, and it cannot show the other mode). The pair is
+  the epic's per-pack light-and-dark verification made visible;
+  `test/themes/contrast.test.ts` is the same verification as a number.
+
+`installedPacks` lives in `DesktopDocument` -- so a theme roams with the desk
+it was installed on -- added WITHOUT bumping `version`, which is the
+icon-group lift's precedent: a bump discards the desktop of anyone on an older
+bundle, and nobody should lose their desks because a theme list arrived. Packs
+are re-validated on the way IN rather than trusted because they were stored.
+
+Where packs come from is a CSP question, not a preference: the edge answers
+`connect-src 'self' ...`, so the OS cannot fetch one from a vendor's origin at
+all. Today they ship in the bundle or arrive as a file somebody drops on the
+drawer; the cluster's own Library is the productized next step, and the
+commerce cut is recorded in
+`docs/superpowers/specs/2026-09-01-os-voice-themes-handoff-design.md`.

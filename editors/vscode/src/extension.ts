@@ -104,7 +104,7 @@ import {
   shouldOfferMemqlTheme,
 } from './theme/themeOffer.js';
 import { CredentialResolver } from './connection/credentials.js';
-import { composeEndpointFromDomain, identityBaseUrlFor } from './connection/endpoint.js';
+import { apiBaseUrlFor, composeEndpointFromDomain, identityBaseUrlFor } from './connection/endpoint.js';
 import { ConnectionManager, type ConnectionState } from './connection/manager.js';
 import {
   COMMAND_RUN,
@@ -237,9 +237,29 @@ import { RunsTreeProvider, type RunsTreeNode } from './views/runsTree.js';
 import { AutomationRunPanel, type AutomationPanelHost } from './webview/automationPanel.js';
 import { ConnectionPanel } from './webview/connectionPanel.js';
 import { ConceptPanel } from './webview/conceptPanel.js';
-import { parseOpenRequest, type OpenRequest } from './handoff/openRequest.js';
+import {
+  describeOpenRequest,
+  openRequestUri,
+  parseOpenRequest,
+  type OpenArtifactRequest,
+  type OpenRequest,
+} from './handoff/openRequest.js';
 import { landingFor, matchCluster, workspaceCandidates } from './handoff/resolve.js';
 import { storePending, takePending } from './handoff/pending.js';
+import {
+  ARTIFACT_DOCUMENT_SCHEME,
+  artifactContentUrl,
+  artifactDelivery,
+  artifactFileName,
+  artifactProvenanceLine,
+  languageIdFor,
+} from './library/artifactDocument.js';
+import {
+  ArtifactDocumentProvider,
+  offerArtifactSave,
+  openArtifactDocument,
+} from './library/artifactDocuments.js';
+import { resolveArtifactMeta } from './library/artifactMeta.js';
 import { ResultPanel, RunPanel, conceptMap, type RunPanelHost } from './webview/runPanel.js';
 
 let client: LanguageClient | undefined;
@@ -544,7 +564,14 @@ export interface MemqlExtensionApi {
  * the redactor, like every other failure in this file (memql#4194).
  */
 export interface HandoffOutcome {
-  outcome: 'refused' | 'untrusted' | 'noCluster' | 'notLoaded' | 'opened';
+  /**
+   * `saved` is the artifact path's own landing (memql#4748): the content was
+   * delivered as a FILE rather than a buffer, because it is binary or past the
+   * size an editor takes. It is distinct from `opened` because nothing is on
+   * screen afterwards -- a caller that treats them as the same cannot tell "it
+   * is in front of you" from "it is on your disk".
+   */
+  outcome: 'refused' | 'untrusted' | 'noCluster' | 'notLoaded' | 'opened' | 'saved';
   detail: string;
 }
 
@@ -613,7 +640,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
     noteDiagnostic(
       connectionOutput,
       'Handoff from portal',
-      `${request.domain} ${request.kind} ${request.name} -> untrusted workspace`
+      `${request.domain} ${describeOpenRequest(request)} -> untrusted workspace`
     );
     window.showWarningMessage('MemQL: trust this workspace to open constructs from the portal.');
     return { outcome: 'untrusted', detail: 'the runtime surface is not registered' };
@@ -638,7 +665,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
     noteDiagnostic(
       connectionOutput,
       'Handoff from portal',
-      `${request.domain} ${request.kind} ${request.name} -> no registered cluster`
+      `${request.domain} ${describeOpenRequest(request)} -> no registered cluster`
     );
     // DETACHED, never awaited (the shape memql#4079 established above). A
     // non-modal notification carrying a BUTTON does not time out -- it sits in
@@ -694,10 +721,34 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
       noteDiagnostic(
         connectionOutput,
         'Handoff from portal',
-        `${cluster.name} ${request.kind} ${request.name} -> not connected (${settled.status})`
+        `${cluster.name} ${describeOpenRequest(request)} -> not connected (${settled.status})`
       );
+      // THE ARTIFACT PATH SAYS ONE MORE THING, and the asymmetry is deliberate
+      // (memql#4748). A construct link is clicked in a browser tab the person
+      // is still looking at, so the select command's own toast lands where they
+      // are. An artifact link is fired by MemQL OS from a desktop the editor
+      // has just covered up: the OS shows "VS Code did not answer" only if the
+      // page is STILL VISIBLE after 2.5s, and taking focus hides it -- so
+      // without a sentence here, a signed-out cluster is a window that came
+      // forward and did nothing, with the one explanation on a surface the
+      // person can no longer see. Non-modal, and it names the cluster rather
+      // than repeating the select command's diagnosis.
+      if (request.target === 'artifact') {
+        void window.showInformationMessage(
+          `MemQL: sign in to ${cluster.name} to open this artifact.`
+        );
+      }
       return { outcome: 'noCluster', detail: why };
     }
+  }
+
+  // 3b. AN ARTIFACT FORKS HERE, before the catalog. An artifact is a ROW, not a
+  //     loaded construct: it has no kind/name in ListConstructs, no origin path,
+  //     and no landing to choose between -- so the catalog read below would
+  //     always miss, and reporting that miss as "this cluster has no artifact
+  //     <id> loaded" would be a sentence about the wrong thing entirely.
+  if (request.target === 'artifact') {
+    return await landOnArtifact(manager, cluster, request);
   }
 
   // 4. LAND ON THE CONSTRUCT. The catalog is the authority for where its file
@@ -707,7 +758,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
     noteDiagnostic(
       connectionOutput,
       'Handoff from portal',
-      `${cluster.name} ${request.kind} ${request.name} -> no dispatcher`
+      `${cluster.name} ${describeOpenRequest(request)} -> no dispatcher`
     );
     return { outcome: 'noCluster', detail: `${cluster.name} is not connected` };
   }
@@ -743,7 +794,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
   noteDiagnostic(
     connectionOutput,
     'Handoff from portal',
-    `${cluster.name} ${request.kind} ${request.name} -> ${landing.kind}`
+    `${cluster.name} ${describeOpenRequest(request)} -> ${landing.kind}`
   );
 
   if (landing.kind === 'notLoaded' || found === undefined) {
@@ -816,6 +867,151 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
     // `${kind} failed`, never the bare landing kind: a caller comparing details
     // must not read a failure as the landing it was aiming for.
     return { outcome: 'noCluster', detail: `${landing.kind} failed` };
+  }
+}
+
+/**
+ * Step 4 for an ARTIFACT: read the row, decide where its content belongs, put
+ * it there (memql#4748).
+ *
+ * THE ROW IS READ BEFORE A SINGLE BYTE IS FETCHED, and the order is the design.
+ * `libraryArtifactById` filters on `ownerUserId == actor.userId`, so it answers
+ * three questions at once -- does this artifact exist, may this person read it,
+ * and what is it -- over the stream that is already open. Only then is there
+ * anything to decide, and the decision (buffer or file) is made from the row's
+ * own `kind` / `format` / `mimeType` / `size`. Downloading first to find out
+ * what arrived is the one shape this must not have: it costs the whole transfer
+ * to answer a question the row already answered, and it costs it in exactly the
+ * case -- a large binary -- where the answer is "do not put this in memory".
+ *
+ * A 404 AFTER ALL THAT MEANS SOMETHING ELSE. The content route makes every
+ * refusal a 404 on purpose (not-found and not-yours are deliberately
+ * indistinguishable), but this path has already established both under the same
+ * actor -- so a 404 here is the third case: the cluster has no downloadable
+ * body for this kind of artifact. `document`-backed artifacts are the live
+ * example; the export route serves note / generated_output / memory bodies and
+ * file bytes, and nothing else.
+ */
+async function landOnArtifact(
+  manager: ConnectionManager,
+  cluster: ClusterConfig,
+  request: OpenArtifactRequest
+): Promise<HandoffOutcome> {
+  const query = manager.query;
+  const bearer = manager.bearer;
+  if (query === undefined || bearer === undefined) {
+    noteDiagnostic(
+      connectionOutput,
+      'Handoff from portal',
+      `${cluster.name} ${describeOpenRequest(request)} -> no connection`
+    );
+    return { outcome: 'noCluster', detail: `${cluster.name} is not connected` };
+  }
+
+  let lookup;
+  try {
+    lookup = await resolveArtifactMeta(query, request.id);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    noteDiagnostic(connectionOutput, `reading artifact ${request.id} from "${cluster.name}" failed`, detail);
+    void offerDetails('error', connectionOutput, `MemQL: ${cluster.name} could not read this artifact.`);
+    return { outcome: 'noCluster', detail: 'the artifact could not be read' };
+  }
+  if (!lookup.found) {
+    noteDiagnostic(
+      connectionOutput,
+      'Handoff from portal',
+      `${cluster.name} ${describeOpenRequest(request)} -> no such artifact`
+    );
+    // ONE SENTENCE FOR TWO CONDITIONS, because the graph gives one answer for
+    // both: an owner-gated query cannot distinguish "there is no such row" from
+    // "that row is not yours", and a message that guessed would be wrong half
+    // the time in the direction that leaks.
+    void window.showInformationMessage(
+      `MemQL: ${cluster.name} has no artifact you can open at that id.`
+    );
+    return { outcome: 'notLoaded', detail: 'no such artifact' };
+  }
+
+  const meta = lookup.meta;
+  const fileName = artifactFileName(meta);
+  const base = apiBaseUrlFor(cluster);
+  if (base === undefined) {
+    noteDiagnostic(
+      connectionOutput,
+      'Handoff from portal',
+      `${cluster.name} ${describeOpenRequest(request)} -> no https address`
+    );
+    void window.showErrorMessage(
+      `MemQL: no https address is known for ${cluster.name}. Give it a domain in ~/.memql/clusters.yaml.`
+    );
+    return { outcome: 'noCluster', detail: 'no https address for the cluster' };
+  }
+
+  const delivery = artifactDelivery(meta);
+  // ONE LINE FOR EVERY HANDOFF, written BEFORE the landing is performed -- the
+  // rule the construct path keeps, and the provenance record the epic asks for:
+  // which cluster, which row, what it is and how big.
+  noteDiagnostic(
+    connectionOutput,
+    'Handoff from portal',
+    `${artifactProvenanceLine(cluster.name, meta)} -> ${delivery.kind} as ${fileName}` +
+      (lookup.archived ? ' (archived)' : '')
+  );
+
+  try {
+    if (delivery.kind === 'editor') {
+      await openArtifactDocument(
+        { cluster: cluster.name, artifactId: request.id, fileName },
+        languageIdFor(meta.format, meta.mimeType)
+      );
+      return { outcome: 'opened', detail: 'artifactDocument' };
+    }
+
+    // SAVE TO DISK, with the reason said out loud BEFORE the dialog. A save
+    // dialog appearing where an editor was expected reads as the wrong thing
+    // having happened; the same dialog after "this is a PDF" reads as the right
+    // one. Detached, because a non-modal notification does not time out and the
+    // dialog must not wait behind it.
+    void window.showInformationMessage(
+      `MemQL: ${fileName} is offered as a file because ${delivery.reason}.`
+    );
+    const saved = await offerArtifactSave({
+      url: artifactContentUrl(base, request.id),
+      bearer,
+      fileName,
+    });
+    if (saved.outcome === 'cancelled') {
+      // NOT AN ERROR, and the same answer openCheckoutFor gives a cancelled
+      // modal: nothing opened, nothing failed, and `refused` is reserved for a
+      // link this extension would not act on at all.
+      noteDiagnostic(
+        connectionOutput,
+        'Handoff from portal',
+        `${cluster.name} ${describeOpenRequest(request)} -> save cancelled`
+      );
+      return { outcome: 'notLoaded', detail: 'cancelled' };
+    }
+    if (saved.outcome === 'failed') {
+      noteDiagnostic(
+        connectionOutput,
+        `saving ${fileName} from "${cluster.name}" failed`,
+        `${saved.failure.reason}: ${saved.failure.detail}`
+      );
+      void offerDetails('error', connectionOutput, `MemQL: ${fileName} could not be saved.`);
+      return { outcome: 'noCluster', detail: `save failed (${saved.failure.reason})` };
+    }
+    void window.showInformationMessage(`MemQL: saved ${fileName}.`);
+    noteDiagnostic(connectionOutput, 'Handoff from portal', `${cluster.name} saved ${fileName}`);
+    return { outcome: 'saved', detail: 'artifactFile' };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    noteDiagnostic(connectionOutput, `opening artifact ${fileName} failed`, detail);
+    void offerDetails('error', connectionOutput, `MemQL: ${fileName} could not be opened.`);
+    // `${kind} failed`, never the bare delivery kind, for the reason the
+    // construct path states: a caller comparing details must not read a failure
+    // as the landing it was aiming for.
+    return { outcome: 'noCluster', detail: `${delivery.kind} failed` };
   }
 }
 
@@ -1555,6 +1751,27 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       void offerDetails('error', connectionOutput, 'MemQL: a cluster document could not be read from its cluster.');
     },
   });
+  // Library artifacts (memql#4748): a file MemQL OS handed over, served
+  // read-only from the cluster that holds it. Same split as cluster documents
+  // -- every decision in library/artifactDocument.ts, this is where the
+  // provider meets the live connection it fetches over.
+  const artifactDocuments = new ArtifactDocumentProvider({
+    connections,
+    // THE REGISTRY RESOLVES THE ADDRESS, not the uri. The document names its
+    // cluster by REGISTRY NAME, and clusters.yaml is the one place that says
+    // what host that cluster is served from -- read per fetch rather than
+    // captured, because an operator may fix a missing domain and reopen the
+    // document without restarting the editor.
+    apiBaseUrl: async (clusterName) => {
+      const result = await readClustersFileSafe(clustersPath);
+      const entry = result.ok ? result.file.clusters.find((c) => c.name === clusterName) : undefined;
+      return entry === undefined ? undefined : apiBaseUrlFor(entry);
+    },
+    onError: (headline, detail) => {
+      noteDiagnostic(connectionOutput, headline, detail);
+      void offerDetails('error', connectionOutput, 'MemQL: a Library artifact could not be read from its cluster.');
+    },
+  });
   // ONE FACTORY, THREE CALL SITES: they all open the same singleton panel and
   // must hand it the same behaviour. The closure reads `connections` when the
   // BUTTON IS PRESSED rather than when the panel was opened, which is the only
@@ -1644,8 +1861,14 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   context.subscriptions.push(
     readonlyMarker,
     clusterDocuments,
+    artifactDocuments,
     window.registerFileDecorationProvider(readonlyMarker),
     workspace.registerTextDocumentContentProvider(CLUSTER_DOCUMENT_SCHEME, clusterDocuments),
+    // A `memql-artifact:` uri with no registered content provider does not fail
+    // loudly: openTextDocument rejects with "cannot open", which reads as the
+    // DOCUMENT being broken rather than as the registration being absent. Same
+    // reasoning as the scheme above, and activation.test.ts pins both.
+    workspace.registerTextDocumentContentProvider(ARTIFACT_DOCUMENT_SCHEME, artifactDocuments),
     languages.registerCodeLensProvider(
       { scheme: CLUSTER_DOCUMENT_SCHEME, language: 'memql' },
       new ClusterDocumentLens()
@@ -2495,15 +2718,16 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // Replayed as a URI so the ONE handler decides again: this window may have a
   // different workspace, a different connection and a different answer, and a
   // shortcut into the landing step would be a second copy of that decision.
+  //
+  // COMPOSED BY THE PARSER'S OWN MODULE (`openRequestUri`), not here. The link
+  // shape now depends on which target the request is -- `name` or `id` -- and a
+  // composer sitting at this call site would be free to fall out of step with
+  // the parser it has to satisfy, which surfaces as a replay refusing its own
+  // request.
   void takePending(context.globalState, Date.now())
     .then((req) => {
       if (req === undefined) return;
-      return handleOpenUri(
-        Uri.parse(
-          `vscode://znasllc.memql/open?v=1&cluster=${encodeURIComponent(req.domain)}` +
-            `&kind=${encodeURIComponent(req.kind)}&name=${encodeURIComponent(req.name)}`
-        )
-      ).then(() => undefined);
+      return handleOpenUri(Uri.parse(openRequestUri(req))).then(() => undefined);
     })
     .catch(noteHandoffFailure);
 }

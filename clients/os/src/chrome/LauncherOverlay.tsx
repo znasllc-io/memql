@@ -6,11 +6,23 @@ import { appsForRole, widgetsForRole } from "../system/registry";
 import { useOs } from "./state";
 
 // The Launcher (spec A): a full-screen glass overlay -- search, the
-// role-filtered app grid, a Widgets tab, and the theme-marketplace tile
-// (visible, coming soon, opens nothing). One of Squada One's three
-// sanctioned appearances is the wordmark row here.
+// role-filtered app grid, a Widgets tab, and the theme-marketplace tile.
+// One of Squada One's three sanctioned appearances is the wordmark row here.
+//
+// The Themes tile is the one tile that does not launch an app. It hands the
+// shell a callback rather than calling `actions.openApp`, because the
+// marketplace is a drawer over the live desktop -- see themes/ThemeStore.tsx
+// for why that is the shape it has to be.
 
-export function LauncherOverlay({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function LauncherOverlay({
+  open,
+  onClose,
+  onOpenThemes,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onOpenThemes: () => void;
+}) {
   const { registry, actorRole, actions } = useOs();
   const [tab, setTab] = useState<"apps" | "widgets">("apps");
   const [query, setQuery] = useState("");
@@ -126,10 +138,13 @@ export function LauncherOverlay({ open, onClose }: { open: boolean; onClose: () 
                 </button>
               );
             })}
-            <button type="button" data-tile className="os-tile os-tile-soon" disabled>
+            {/* Live since epic memql#4745. It is not an app and does not
+                launch one: the marketplace previews against THIS desktop, so
+                it opens a drawer and closes the Launcher on the way. */}
+            <button type="button" data-tile className="os-tile" onClick={onOpenThemes}>
               <Palette size={26} aria-hidden />
               <span>Themes</span>
-              <span className="os-caption">Marketplace -- coming soon</span>
+              <span className="os-caption">Try one on</span>
             </button>
             {apps.length === 0 ? (
               <p className="os-caption os-launcher-empty">No app matches "{query}".</p>
