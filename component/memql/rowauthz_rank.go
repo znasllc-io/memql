@@ -83,11 +83,14 @@ func (*RankScopeExpression) isExpressionNode() {}
 // consumers need a SET -- the SQL term binds one as a parameter list and
 // the row gate tests membership -- and deriving the sets once means the
 // two can never be derived differently.
+// D4's flag is deliberately NOT carried here. The write guard reads
+// AccessContext.Unranked directly (rowAuthzWriteEscapeFor), because the
+// question it answers -- "is this actor governed by the rank rules at all" --
+// is about the ACTOR and not about the scope resolved for them. A copy on the
+// scope would be a second place to keep in step for no reader.
 type rankScope struct {
 	// actorRank is the caller's own rung, 0 when they hold none.
 	actorRank int
-	// unranked marks an actor the rank rules do not govern (D4).
-	unranked bool
 	// readOwners holds every owner id spelling admitted by the READ rule,
 	// writeOwners every spelling admitted by the WRITE rule. Both carry
 	// the canonical AND the bare spelling of each user, for the reason
@@ -257,7 +260,6 @@ func (e *MemQLEngine) resolveRankScope(ctx context.Context) *rankScope {
 		scope.ladder = roleLadder{ranks: map[string]int{}}
 		return scope
 	}
-	scope.unranked = ac.Unranked
 	ladder := e.rankLadder(ctx)
 	scope.ladder = ladder
 	scope.actorRank = ladder.rankOf(string(ac.Role))
