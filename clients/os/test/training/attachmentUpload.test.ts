@@ -39,15 +39,27 @@ describe("attachmentsPath", () => {
 
 describe("EdgeAttachmentUploadProvider", () => {
   it("posts multipart to the marker path with the bearer", async () => {
+    // The mock DECLARES `fetch`'s OWN parameter types, which is what makes
+    // reading them back a narrowing rather than a cast. Two ways to get this
+    // wrong, and `vitest run` notices neither -- it transpiles without
+    // typechecking, so only `tsc -b` (which covers `test/`) sees them: a
+    // `vi.fn(async () => ...)` types `mock.calls[0]` as `[] | undefined`, and
+    // narrowing the input to `string` makes the mock unassignable to
+    // `typeof fetch`, whose first parameter is `RequestInfo | URL`.
     const fetchImpl = vi.fn(
-      async () => new Response(JSON.stringify({ id: "att-1" }), { status: 201 }),
+      async (_url: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ id: "att-1" }), { status: 201 }),
     );
     const provider = new EdgeAttachmentUploadProvider(async () => "tok-123", "/", fetchImpl);
 
     const result = await provider.upload("space-1", fileOf("notes.pdf")).done;
 
     expect(result).toEqual({ attachmentId: "att-1", fileName: "notes.pdf" });
-    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    // `init` is optional on `fetch`, so it is asserted present rather than
+    // read through `?.` -- a chain would let an upload that sent NO init at
+    // all pass every assertion below by evaluating to undefined.
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    if (init === undefined) throw new Error("the upload sent no request init");
     expect(url).toBe("/_memql/spaces/space-1/attachments");
     expect(init.method).toBe("POST");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok-123");
@@ -58,11 +70,13 @@ describe("EdgeAttachmentUploadProvider", () => {
 
   it("sends NO Authorization header when there is no bearer", async () => {
     const fetchImpl = vi.fn(
-      async () => new Response(JSON.stringify({ id: "att-1" }), { status: 201 }),
+      async (_url: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ id: "att-1" }), { status: 201 }),
     );
     const provider = new EdgeAttachmentUploadProvider(async () => null, "/", fetchImpl);
     await provider.upload("space-1", fileOf("notes.pdf")).done;
-    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const [, init] = fetchImpl.mock.calls[0]!;
+    if (init === undefined) throw new Error("the upload sent no request init");
     expect(init.headers).toBeUndefined();
   });
 

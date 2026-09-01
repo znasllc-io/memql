@@ -148,7 +148,14 @@ export function useReviewQueue(domainIds: readonly string[]): ReviewQueue {
       setError(err instanceof Error ? err.message : String(err));
       setState("error");
     } finally {
-      busy.current = false;
+      // ONLY THE CURRENT GENERATION MAY CLEAR THE FLAG. A step whose walk was
+      // superseded mid-flight (the domain list changed, or somebody hit
+      // Re-read) resolves AFTER the replacement step has already claimed it,
+      // and an unconditional clear here would hand a third caller permission
+      // to start while that replacement is still reading -- two walks
+      // advancing one cursor, which skips pages rather than duplicating them.
+      // The row-level dedupe below would hide it completely.
+      if (mine === generation.current) busy.current = false;
     }
   }, [connection]);
 
