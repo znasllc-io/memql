@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // library_restore_4844_db_test.go -- taking things back out of the Bin
@@ -89,7 +91,7 @@ func TestRestorePairReturnsTheArtifactAndFileToTheLibrary(t *testing.T) {
 	// if a refusal ever became a silent no-op -- the row must still be out of
 	// A's default list. Both outcomes are checked so the assertion cannot rot
 	// into vacuity if the refusal shape changes.
-	if _, err := eng.Execute(ctxB, fmt.Sprintf(`mutation restoreArtifact(artifactId: %q)`, artifactId)); err == nil {
+	if _, err := eng.Execute(ctxB, fmt.Sprintf(`mutation restoreArtifact(artifactId: %s)`, langparser.QuoteString(artifactId))); err == nil {
 		if blob := listBlob("after B's restore attempt"); strings.Contains(blob, artifactId) {
 			t.Fatalf("caller B pulled caller A's artifact out of the Bin -- restoreArtifact must be "+
 				"owner-scoped by the composite tier's write guard.\n  A's list: %s", blob)
