@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { FIXTURE_TOKEN } from "./harness";
 import {
   DOMAIN_STEPS,
   domainFingerprint,
@@ -26,7 +27,7 @@ function domain(over: Partial<DomainRow> = {}): DomainRow {
     siteId: "site-shop",
     hostname: "www.acme.com",
     accountId: "",
-    token: "tok-abcdef0123456789",
+    token: FIXTURE_TOKEN,
     status: "pending_dns",
     failureReason: "",
     failureDetail: "",

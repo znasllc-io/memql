@@ -423,7 +423,12 @@ func truncateForError(b []byte) string {
 // false, which the caller reads through Err() or Error.Code.
 func RunCapabilityScript(ctx context.Context, id string, params map[string]any) (deploycontrol.CapabilityResult, error) {
 	runner := newCapabilityScriptRunner()
-	args := make(map[string]any, len(params)+1)
+	// NO CAPACITY HINT. `len(params)+1` is arithmetic on a length in an
+	// allocation size, which CodeQL's go/allocation-size-overflow flags -- and
+	// the hint buys nothing here: a capability script takes a handful of
+	// params, so the map is small whatever it is sized at. The COPY is the
+	// part that matters, so this never mutates the caller's map.
+	args := map[string]any{}
 	for k, v := range params {
 		if k == scriptParamKey {
 			continue

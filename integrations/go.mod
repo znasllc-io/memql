@@ -22,6 +22,7 @@ require (
 	github.com/znasllc-io/memql/component/auth v0.0.0
 	github.com/znasllc-io/memql/component/automations v0.0.0
 	github.com/znasllc-io/memql/component/database v0.0.0
+	github.com/znasllc-io/memql/component/deploycontrol v0.0.0
 	github.com/znasllc-io/memql/component/events v0.0.0
 	github.com/znasllc-io/memql/component/fileprocessor v0.0.0
 	github.com/znasllc-io/memql/component/frontdoor v0.0.0

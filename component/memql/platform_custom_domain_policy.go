@@ -360,6 +360,16 @@ func (e *MemQLEngine) liveCustomDomainIdsForHostname(ctx context.Context, hostna
 // them would make a site permanently unable to bind a sixth domain because it
 // once bound and removed five -- turning an audit trail into a quota.
 //
+// staged-data: MUST-NOT-GATE -- the gate CREATES the violation it would then be
+// unable to detect, exactly as for the hostname probe above. This count is what
+// keeps a site under its ACME ceiling; withhold a staged binding and the count
+// comes back short, the write is admitted, and the site now holds one more
+// domain than the cap allows -- one of which is invisible to the next count as
+// well, so the overflow compounds silently. The cap exists because Let's
+// Encrypt's per-registered-domain limit is shared by every domain on the
+// cluster, so the bug this would cause is issuance failing for domains that
+// have nothing to do with the one that overflowed.
+//
 // The `siteId` predicate is matched in BOTH spellings because the field is an
 // outgoing @relationship: canonicalizeRelationshipFields rewrites it to
 // `v1:platform:site:<id>` on the way in, while a caller passes the bare id.
@@ -419,6 +429,13 @@ type customDomainRow struct {
 }
 
 // latestCustomDomainVersions resolves each candidate id to its LATEST version.
+//
+// staged-data: MUST-NOT-GATE -- it is step two of both probes above and carries
+// their verdict. Withholding a staged version here is the same defect one layer
+// down and is WORSE, because it does not merely hide a row: it would resolve a
+// binding to a STALE version, so a hostname freed by a removal that is still
+// staged would read as taken, and a hostname taken by a staged create would
+// read as free. Both are the uniqueness guarantee inverted.
 func (e *MemQLEngine) latestCustomDomainVersions(ctx context.Context, candidates []string) ([]customDomainRow, error) {
 	db := e.database()
 	if db == nil {
