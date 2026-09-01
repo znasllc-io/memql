@@ -142,10 +142,17 @@ export function PackagesSection({
 
       {archivedCount > 0 || showArchived ? (
         <div className="os-archive-toggle">
-          <Button onClick={() => setShowArchived((v) => !v)} ariaExpanded={showArchived}>
+          {/* Quiet text, not button furniture (DESIGN.md rules 3/10): a view
+              flip below the list, weighted like the sort control. */}
+          <button
+            type="button"
+            className="os-sort"
+            aria-expanded={showArchived}
+            onClick={() => setShowArchived((v) => !v)}
+          >
             <Archive size={12} aria-hidden />{" "}
             {showArchived ? "Show active packages" : `Show archived (${archivedCount})`}
-          </Button>
+          </button>
           <Caption>
             {showArchived
               ? "Archived packages are kept, not deleted. Restoring one puts it back on the active list."

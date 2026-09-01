@@ -1222,16 +1222,22 @@ button:not(:disabled):active {
   font-size: var(--os-text-base);
 }
 
+/* Settings groups (DESIGN.md rule 8). The fieldset SEMANTICS stay -- a
+ * legend names its group to assistive tech better than any div -- but the
+ * legend-breaking-the-border look was a second container language beside
+ * Panel, so the box goes and the legend dresses as a Subhead. One grouping
+ * grammar, everywhere. */
 .os-field-group {
-  margin: 0 0 16px;
-  padding: 12px 14px;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-sm);
+  margin: 0 0 18px;
+  padding: 0;
+  border: 0;
 }
 .os-field-group legend {
-  padding: 0 6px;
-  font-size: var(--os-text-sm);
-  color: var(--os-muted);
+  padding: 0;
+  margin-bottom: 6px;
+  font-size: var(--os-text-base);
+  font-weight: 600;
+  color: var(--os-ink);
 }
 
 .os-choice-row {

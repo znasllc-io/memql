@@ -52,12 +52,10 @@ export function TemplatesSection({
   feeds,
   writes,
   showFiled,
-  onToggleFiled,
 }: {
   feeds: CampaignFeeds;
   writes: CampaignWrites;
   showFiled: boolean;
-  onToggleFiled: (next: boolean) => void;
 }) {
   const [openId, setOpenId] = useState("");
   const [adding, setAdding] = useState(false);
@@ -109,11 +107,6 @@ export function TemplatesSection({
         />
       ) : null}
 
-      <div className="os-campaign-filters">
-        <Check checked={showFiled} onChange={onToggleFiled}>
-          Show archived templates
-        </Check>
-      </div>
 
       <LiveList<TemplateRow>
         key={`templates:${showFiled}`}

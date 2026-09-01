@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Building2, Plus } from "lucide-react";
 
-import { Button, Caption, Check, Chip, Head, Input, LiveList, Notice, Panel, Row as ListRow } from "../../kit";
+import { Button, Caption, Chip, Head, Input, LiveList, Notice, Panel, Row as ListRow } from "../../kit";
 import { useLiveView } from "../../live/liveView";
 import { AccountDetail } from "./AccountDetail";
 import {
@@ -27,7 +27,6 @@ import type { ArchiveAccountState, CreateAccountState, UpdateAccountState } from
 export function AccountsSection({
   feed,
   showArchived,
-  onToggleArchived,
   create,
   update,
   archive,
@@ -36,7 +35,6 @@ export function AccountsSection({
    *  second collection over this concept is the failure to avoid. */
   feed: ReturnType<typeof useAccounts>;
   showArchived: boolean;
-  onToggleArchived: (next: boolean) => void;
   create: CreateAccountState;
   update: UpdateAccountState;
   archive: ArchiveAccountState;
@@ -86,11 +84,6 @@ export function AccountsSection({
         />
       ) : null}
 
-      <div className="os-account-filters">
-        <Check checked={showArchived} onChange={onToggleArchived}>
-          Show archived clients
-        </Check>
-      </div>
 
       {/* Keyed on the filter so flipping it RE-BASELINES the arrival cues.
           Without it, revealing archived rows makes them flash "new" on the
@@ -111,7 +104,7 @@ export function AccountsSection({
         emptyText={
           showArchived
             ? "No clients yet. Add the first one above."
-            : "No active clients. Add one above -- or show archived clients if you are looking for one you filed away."
+            : "No active clients. Add one above -- or turn on archived clients in this app's settings if you are looking for one you filed away."
         }
         renderRow={(account, tick) => (
           <AccountLine

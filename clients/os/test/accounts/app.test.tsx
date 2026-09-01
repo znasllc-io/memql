@@ -18,15 +18,17 @@ type Conn = ReturnType<typeof fakeConnection>;
 
 const ACCOUNT_CONCEPT = "v1:accounts:account";
 
-function memoryStore() {
+function memoryStore(over: Record<string, unknown> = {}) {
   const bag = new Map<string, string>();
-  return new LocalAccountsSettingsStore({
+  const store = new LocalAccountsSettingsStore({
     getItem: (k: string) => bag.get(k) ?? null,
     setItem: (k: string, v: string) => void bag.set(k, v),
   });
+  if (Object.keys(over).length > 0) store.save({ ...store.load(), ...over });
+  return store;
 }
 
-function mount(connection: Conn, sectionId = "accounts") {
+function mount(connection: Conn, sectionId = "accounts", settings: Record<string, unknown> = {}) {
   h.connection = connection;
   const navigate = vi.fn();
   const view = render(
@@ -35,7 +37,7 @@ function mount(connection: Conn, sectionId = "accounts") {
         sectionId={sectionId}
         navigate={navigate}
         askContext={() => {}}
-        store={memoryStore()}
+        store={memoryStore(settings)}
       />,
     ),
   );
@@ -70,18 +72,21 @@ describe("the registry list", () => {
     );
   });
 
-  it("excludes archived clients by default and shows them, marked, under the filter", async () => {
-    const conn = fakeConnection({
+  it("excludes archived clients by default and shows them, marked, under the settings preference", async () => {
+    // The in-surface checkbox is gone (DESIGN.md rules 4/10): archived
+    // visibility is the app-settings preference, like its siblings.
+    const seed = {
       clientAccountsAll: [
         accountRow({ id: "v1:accounts:account:a1", name: "Acme" }),
         accountRow({ id: "v1:accounts:account:z9", name: "Zephyr", status: "archived" }),
       ],
-    });
-    mount(conn);
+    };
+    const first = mount(fakeConnection(seed));
     await screen.findByText("Acme");
     expect(screen.queryByText("Zephyr")).toBeNull();
+    first.view.unmount();
 
-    fireEvent.click(screen.getByLabelText("Show archived clients", { selector: "input" }));
+    mount(fakeConnection(seed), "accounts", { showArchived: true });
     expect(await screen.findByText("Zephyr")).toBeTruthy();
     expect(screen.getByText("archived")).toBeTruthy();
   });
@@ -294,8 +299,7 @@ describe("archiving (D8)", () => {
     const conn = fakeConnection({
       clientAccountsAll: [accountRow({ id: "v1:accounts:account:a1", status: "archived" })],
     });
-    mount(conn);
-    fireEvent.click(screen.getByLabelText("Show archived clients", { selector: "input" }));
+    mount(conn, "accounts", { showArchived: true });
     fireEvent.click(await screen.findByText("Acme Consulting"));
     await screen.findByLabelText("What belongs to Acme Consulting");
     expect(screen.queryByText("Archive this client")).toBeNull();

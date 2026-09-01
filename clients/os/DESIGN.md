@@ -45,9 +45,11 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    generic ("Search", not "Search your Library").
 
 8. **One container language.** `Panel` + `Subhead` + `Field` is the
-   grouping grammar. No fieldset-legend boxes, no bespoke field shapes. A
-   deliberate MOMENT (the Accounts first-run card's eyebrow and headline)
-   may keep its voice; chrome may not.
+   grouping grammar. Settings groups keep their `fieldset` and `legend`
+   SEMANTICS (a legend names its group to assistive tech), but the legend
+   dresses as a Subhead and the legend-breaking-the-border box is gone --
+   one look, not two. A deliberate MOMENT (the Accounts first-run card's
+   eyebrow and headline) may keep its voice; chrome may not.
 
 9. **Real estate belongs to content.** Lists take the window; forms take a
    readable measure; nothing paints half a window of dead space beside a

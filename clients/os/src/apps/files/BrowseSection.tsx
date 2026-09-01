@@ -353,6 +353,9 @@ export function BrowseSection({
     return (
       tree.byId.get(folderId)?.folder.name ??
       archivedFolders.find((f) => f.id === folderId)?.name ??
+      // A desk shortcut knows its folder's name even before the folders feed
+      // has answered -- the double-click-from-the-desk case.
+      deskFolders.find((f) => f.folderId === folderId)?.name ??
       folderId
     );
   };
