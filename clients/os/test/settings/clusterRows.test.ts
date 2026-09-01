@@ -15,13 +15,15 @@ describe("cluster row projections (memql#4742)", () => {
   it("reads the cluster singleton, flattening a payload-nested row", () => {
     const c = clusterFromRow({
       id: "v1:cluster:cluster:abc",
+      // `status` is DELIBERATELY still in the fixture payload: memql#4772
+      // removed the concept field, and a row written before that removal still
+      // carries the key. The projection must ignore it rather than surface it.
       payload: { name: "dev", region: "local", status: "healthy", version: "v1.2.3", provider: "docker-local" },
     });
     expect(c).toEqual({
       id: "v1:cluster:cluster:abc",
       name: "dev",
       region: "local",
-      status: "healthy",
       version: "v1.2.3",
       provider: "docker-local",
     });

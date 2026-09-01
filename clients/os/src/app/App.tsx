@@ -3,8 +3,6 @@ import { useEffect, useState } from "react";
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import { SignIn } from "../chrome/SignIn";
 import { Shell } from "../chrome/Shell";
-import { parseProfileAccess, type ProfileAccess } from "../modules/profile/access";
-import { fetchMyAccess } from "../modules/profile/myAccess";
 import { layoutFromWindow, type ChromeLayout } from "./layout";
 
 export function App() {
@@ -18,7 +16,6 @@ export function App() {
 function OsBoot() {
   const { status, signIn, signOut, config, authSource } = useAuth();
   const [layout, setLayout] = useState<ChromeLayout>(() => layoutFromWindow(window));
-  const [access, setAccess] = useState<ProfileAccess | null>(null);
 
   useEffect(() => {
     const update = () => setLayout(layoutFromWindow(window));
@@ -30,21 +27,14 @@ function OsBoot() {
     };
   }, []);
 
-  useEffect(() => {
-    if (status !== "signed-in") {
-      setAccess(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const facts = await fetchMyAccess(config);
-      if (cancelled) return;
-      setAccess(facts ? parseProfileAccess(facts) : null);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [status, config]);
+  // NO ACCESS FETCH HERE ANY MORE (memql#4775). Boot used to read the session
+  // over HTTP from `{identityUrl}/me/api/profile` -- a route nothing serves --
+  // and hand the null result down as a prop, which is how every role-gated app
+  // came to be invisible to everybody. The Shell now resolves it from the
+  // cluster stream it already dials; see `modules/profile/useResolvedAccess`.
+  //
+  // Nothing replaces it at THIS level on purpose: the read needs the
+  // Connection, and the Connection is created inside the Shell.
 
   if (status === "loading") {
     return (
@@ -56,5 +46,5 @@ function OsBoot() {
   if (status === "signed-out" || status === "unavailable") {
     return <SignIn status={status} onSignIn={signIn} />;
   }
-  return <Shell layout={layout} onSignOut={signOut} access={access} config={config} authSource={authSource} />;
+  return <Shell layout={layout} onSignOut={signOut} config={config} authSource={authSource} />;
 }

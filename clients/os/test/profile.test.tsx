@@ -2,14 +2,14 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { Shell } from "../src/chrome/Shell";
-import { parseProfileAccess } from "../src/modules/profile/access";
+import { accessFromSummary } from "../src/modules/profile/useResolvedAccess";
 import { resetIdsForTest } from "../src/system/desks";
 import { LocalDesktopStore } from "../src/system/store";
 import type { OsRuntimeConfig } from "../src/cluster/config";
 
 // The Profile MODULE is gone (spec A0): its MyAccess facts now surface in
-// Settings -> About and the avatar menu. The parse layer stays -- App.tsx
-// still reads it at boot.
+// Settings -> About and the avatar menu. The parse layer stays -- the Shell
+// reads it from the cluster stream (memql#4775).
 
 const ACCESS = {
   userId: "v1:identity:user:u-42",
@@ -25,15 +25,40 @@ const CONFIG: OsRuntimeConfig = {
   domain: "example.test",
 };
 
-describe("parseProfileAccess", () => {
+describe("accessFromSummary", () => {
+  const summary = { requestId: "r", sessionId: "s", ...ACCESS } as never;
+
   it("reads MyAccess data only -- user id, primaryEmail, clusterRole", () => {
-    expect(parseProfileAccess(ACCESS)).toEqual(ACCESS);
+    expect(accessFromSummary(summary)).toEqual(ACCESS);
   });
 
-  it("rejects a payload that is not the identity shape", () => {
-    expect(parseProfileAccess(null)).toBeNull();
-    expect(parseProfileAccess({ email: "nope" })).toBeNull();
-    expect(parseProfileAccess({ primaryEmail: "a@b.c" })).toBeNull();
+  it("KEEPS THE ROLE when there is no email", () => {
+    // The parser this replaced required all three fields and returned null if
+    // any was blank -- so a credential with no address (a PAT, an operator
+    // key, a service account: the SDK's own type says they exist) erased a
+    // perfectly good role and the shell rendered "You are unknown" to an
+    // owner. An email is what Diagnostics prints, not what any decision reads.
+    const noEmail = { requestId: "r", sessionId: "", userId: "u-1", primaryEmail: "", clusterRole: "owner" } as never;
+    expect(accessFromSummary(noEmail)).toEqual({
+      userId: "u-1",
+      primaryEmail: "",
+      clusterRole: "owner",
+    });
+  });
+
+  it("keeps a user id even when the role is blank, and admits nothing gated", () => {
+    // Fail-closed rather than null: "" ranks nowhere, so no gated surface
+    // opens -- but the user id survives, and owner-scoped client filters
+    // depend on it.
+    const noRole = { requestId: "r", sessionId: "", userId: "u-1", primaryEmail: "a@b.c", clusterRole: "" } as never;
+    expect(accessFromSummary(noRole)?.userId).toBe("u-1");
+    expect(accessFromSummary(noRole)?.clusterRole).toBe("");
+  });
+
+  it("is null only when there is nothing usable", () => {
+    expect(accessFromSummary(null)).toBeNull();
+    const empty = { requestId: "r", sessionId: "", userId: "", primaryEmail: "a@b.c", clusterRole: "" } as never;
+    expect(accessFromSummary(empty)).toBeNull();
   });
 });
 

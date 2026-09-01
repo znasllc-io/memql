@@ -17,7 +17,6 @@ export interface ClusterRow {
   id: string;
   name: string;
   region: string;
-  status: string;
   version: string;
   provider: string;
 }
@@ -28,7 +27,10 @@ export function clusterFromRow(raw: Row): ClusterRow {
     id: rowString(row, "id") ?? "",
     name: rowString(row, "name") ?? "",
     region: rowString(row, "region") ?? "",
-    status: rowString(row, "status") ?? "",
+    // NO `status` KEY. The concept field is gone (memql#4772), so projecting it
+    // would read "" on every row forever -- a declared field with no source,
+    // which reads to a consumer as "this cluster has no value for that" and is
+    // the same defect one level up.
     version: rowString(row, "version") ?? "",
     provider: rowString(row, "provider") ?? "",
   };
@@ -157,8 +159,10 @@ export function stringList(row: Row, key: string): string[] {
 // longer exist. `database.status` was removed as structurally unanswerable --
 // the row lives in the database it describes, so a successful read can only
 // ever say "healthy" -- and `identityProvider.status` / `lastVerifiedAt` were
-// removed for want of an honest writer. Do not reintroduce a health line off
-// either concept.
+// removed for want of an honest writer. `cluster.status` followed them
+// (memql#4772); it outlived the other two only because it had a live consumer,
+// the Settings panel, which was rendering its bootstrap constant as "Status".
+// Do not reintroduce a health line off any of the three.
 
 export interface DatabaseRow {
   id: string;

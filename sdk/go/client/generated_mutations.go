@@ -3184,11 +3184,9 @@ func CreateCapabilityBuild(args CreateCapabilityArgs) string {
 // Bound concept: v1:cluster:cluster (machine-readable: BoundConcepts["createCluster"] in generated_concepts.go).
 type CreateClusterArgs struct {
 	// The singleton row id. Deterministic on purpose -- see the note above.
-	ClusterId string
-	Name      string
-	Region    string
-	// Enum: bootstrapping | healthy | degraded | shutting_down
-	Status             string
+	ClusterId          string
+	Name               string
+	Region             string
 	DatabaseId         string
 	IdentityProviderId string
 	Version            string
@@ -3217,13 +3215,6 @@ func CreateClusterBuild(args CreateClusterArgs) string {
 		}
 		b.WriteString("region: ")
 		b.WriteString(quoteMemQL(args.Region))
-	}
-	if args.Status != "" {
-		if b.Len() > 23 {
-			b.WriteString(", ")
-		}
-		b.WriteString("status: ")
-		b.WriteString(quoteMemQL(args.Status))
 	}
 	if args.DatabaseId != "" {
 		if b.Len() > 23 {

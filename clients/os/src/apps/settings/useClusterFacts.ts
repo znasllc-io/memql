@@ -307,7 +307,19 @@ export function useClusterReport(): ClusterReport {
   if (identity.cluster) {
     lines.push(["Cluster", identity.cluster.name]);
     lines.push(["Region", identity.cluster.region]);
-    lines.push(["Status", identity.cluster.status]);
+    // NO "Status" LINE. `v1:cluster:cluster.status` was removed (memql#4772):
+    // it had one writer that stamped a constant at bootstrap and nothing that
+    // ever refreshed it, so this row told an operator "healthy" with every
+    // node in the cluster down -- a health verdict indistinguishable from a
+    // real one, which is what memql#4766 called unshippable when it was the
+    // database's.
+    //
+    // What is left on this panel IS observed: the deployment's own status and
+    // per-node-type versions and replica counts below come from
+    // `v1:cluster:deployment` rows something actually writes. If a cluster
+    // health line is wanted here, DERIVE it at read time from
+    // `seedNodeTypes` against live `v1:cluster:node` rows -- do not restore a
+    // stored field.
     lines.push(["Provider", identity.cluster.provider]);
     lines.push(["Cluster version", identity.cluster.version]);
   }

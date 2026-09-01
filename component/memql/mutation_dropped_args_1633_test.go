@@ -101,19 +101,27 @@ func TestDroppedArgs1633_WireThrough(t *testing.T) {
 		require.Equal(t, map[string]any{"k": "v"}, payload["metadata"], "metadata must persist (#1633)")
 	})
 
-	t.Run("createCluster honors supplied status", func(t *testing.T) {
-		payload := renderPayload(t, reg, "createCluster", map[string]any{
-			"name": "staging", "environment": "staging", "status": "degraded",
-		})
-		require.Equal(t, "degraded", payload["status"],
-			"caller-supplied status must override the healthy default (#1633)")
-	})
+	// The two `createCluster` status subtests that stood here are GONE with the
+	// field (memql#4772): `v1:cluster:cluster.status` had one writer that
+	// stamped a constant at bootstrap and nothing that ever refreshed it, so
+	// the OS Settings panel rendered a health verdict that was a literal.
+	//
+	// Worth noting what they were actually testing, because it is the reason
+	// they passed for months on a broken field: they proved the ARGUMENT
+	// reached the payload -- which it did -- and said nothing about whether any
+	// caller ever passed it. `bootstrapCluster`, the only caller, never did.
+	// `test/dslconformance/bootstrap_forwards_every_field_test.go` is the gate
+	// that asks that second question, and it is why this one is now closed.
+	//
+	// `createCluster` still has coverage here through its siblings above; it is
+	// the STATUS argument that no longer exists to test.
 
-	t.Run("createCluster defaults status to healthy", func(t *testing.T) {
+	t.Run("createCluster carries region", func(t *testing.T) {
 		payload := renderPayload(t, reg, "createCluster", map[string]any{
-			"name": "staging", "environment": "staging",
+			"clusterId": "c1", "name": "staging", "region": "us-central1",
 		})
-		require.Equal(t, "healthy", payload["status"])
+		require.Equal(t, "us-central1", payload["region"],
+			"caller-supplied region must reach the v1:cluster:cluster payload (#1633)")
 	})
 
 	t.Run("markChunkSuperseded maps reason to supersededReason", func(t *testing.T) {
