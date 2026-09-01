@@ -329,3 +329,46 @@ func TestIndexIsNotCachedButAssetsAre(t *testing.T) {
 		t.Errorf("asset Cache-Control = %q, want a cacheable policy", cc)
 	}
 }
+
+// The microphone is open to the site's own document and to nothing else, and
+// the camera and geolocation stay shut (memql#4747).
+//
+// This is a GATE, not a restatement. Four files in this repo set an identical
+// Permissions-Policy string -- component/identity/{web,abuse}, component/server
+// and this one -- and the obvious tidy-up is to make them agree again. Three of
+// them serve surfaces that have never needed a powerful feature; this one
+// serves MemQL OS, whose Ask surface takes dictation. Re-closing `microphone`
+// here does not break a test elsewhere and does not fail a build: it makes
+// getUserMedia reject with NotAllowedError BEFORE the browser prompts, which is
+// indistinguishable from the person declining. Voice would report itself as
+// refused by the user, in every deployed cluster, while passing every test and
+// working perfectly under `npm run dev` (vite sends no such header).
+//
+// The escape hatch, if a hosted site must genuinely not be allowed to ask: make
+// the policy a function of the SITE the way policyForSite already is, rather
+// than closing it for the platform's own shell.
+func TestHostedSitesMayAskForTheMicrophoneAndNothingElse(t *testing.T) {
+	rec := serve(t,
+		&Site{ID: "s1", Hostname: "os.example.com", Status: "live", Kind: "spa"},
+		map[string]string{"index.html": "ROOT"}, "/")
+
+	policy := rec.Header().Get("Permissions-Policy")
+	if policy == "" {
+		t.Fatal("no Permissions-Policy header")
+	}
+	if !strings.Contains(policy, "microphone=(self)") {
+		t.Errorf("Permissions-Policy does not admit the microphone: %q\n"+
+			"MemQL OS's Ask surface takes dictation; microphone=() rejects\n"+
+			"getUserMedia before the browser prompts, which reads as the\n"+
+			"person having declined.", policy)
+	}
+	// The asymmetry is the point: a capability is opened when a first-party
+	// surface needs it, never speculatively.
+	for _, closed := range []string{"camera=()", "geolocation=()"} {
+		if !strings.Contains(policy, closed) {
+			t.Errorf("Permissions-Policy no longer closes %s: %q\n"+
+				"Opening one is a deliberate change with a surface behind it,\n"+
+				"not a side effect of opening another.", closed, policy)
+		}
+	}
+}

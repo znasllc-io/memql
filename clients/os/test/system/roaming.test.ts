@@ -27,6 +27,7 @@ function doc(overrides: Partial<DesktopDocument> = {}): DesktopDocument {
     surfaces: { "desk-1": { items: {}, positions: {} } },
     dock: { pinned: ["settings"] },
     themePack: "graphite",
+    installedPacks: [],
     ...overrides,
   };
 }

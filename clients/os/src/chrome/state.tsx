@@ -56,12 +56,27 @@ import {
   type DesktopStore,
 } from "../system/store";
 import type { AppId, DeskId, WindowId } from "../system/windows";
+import { applyPackStyles, BUILT_IN_THEME_ID, type OsThemePack } from "../themes/registry";
 
 export interface OsState {
   shell: ShellState;
   surfaces: Record<DeskId, DeskSurface>;
   dock: DockState;
   themePack: string;
+  /** Theme packs installed on this desktop. Built-ins are not in here. */
+  installedPacks: OsThemePack[];
+  /**
+   * A pack being LOOKED AT, not chosen. Session state, deliberately absent
+   * from `documentFromState`: the marketplace previews by applying a pack to
+   * the real desktop while the pointer is over its card, and a preview that
+   * reached the store would roam somebody else's machine to a theme nobody
+   * picked.
+   *
+   * It is state rather than a direct attribute write because the effect that
+   * stamps `data-os-theme` is keyed on this state -- a write from a pointer
+   * handler would be reverted by the next render, intermittently.
+   */
+  previewPack: string | null;
   /**
    * The selected desk item. SESSION state, exactly like windows: it lives
    * here rather than inside the Desktop component so an app surface can
@@ -122,6 +137,12 @@ export interface OsActions {
   removeWidget: (itemId: string) => void;
   sortActiveDesk: () => void;
   setThemePack: (pack: string) => void;
+  /** Add a validated pack, replacing any earlier one with the same id. */
+  installThemePack: (pack: OsThemePack) => void;
+  /** Remove an installed pack. A desktop wearing it falls back to graphite. */
+  removeThemePack: (id: string) => void;
+  /** Look at a pack without choosing it. Null ends the preview. */
+  previewThemePack: (id: string | null) => void;
 }
 
 /**
@@ -190,6 +211,8 @@ export function seedDocument(registry: OsRegistry, grid: GridSize): OsState {
     surfaces: { [shell.activeDeskId]: surface },
     dock: { pinned: ["settings"] },
     themePack: "graphite",
+    installedPacks: [],
+    previewPack: null,
     selectedItemId: null,
   };
 }
@@ -201,7 +224,15 @@ function stateFromDocument(doc: DesktopDocument): OsState {
     windows: {},
     focusedWindowId: null,
   };
-  return { shell, surfaces: doc.surfaces, dock: doc.dock, themePack: doc.themePack, selectedItemId: null };
+  return {
+    shell,
+    surfaces: doc.surfaces,
+    dock: doc.dock,
+    themePack: doc.themePack,
+    installedPacks: doc.installedPacks,
+    previewPack: null,
+    selectedItemId: null,
+  };
 }
 
 /**
@@ -253,6 +284,11 @@ export function adoptDocument(s: OsState, doc: DesktopDocument): OsState {
     surfaces: doc.surfaces,
     dock: doc.dock,
     themePack: doc.themePack,
+    installedPacks: doc.installedPacks,
+    // A preview belongs to the pointer hovering a card on THIS machine. An
+    // arriving desktop says nothing about it, and dropping it would snap the
+    // theme out from under somebody mid-hover.
+    previewPack: s.previewPack,
     // Selection survives adoption only while its item does: the arriving
     // desktop is a statement about ITEMS, and a selection of one it no
     // longer carries would highlight nothing.
@@ -320,7 +356,9 @@ export function OsProvider({
   // reconcile, and a person signing in for the first time would not upload
   // their desktop until they next moved something.
   useEffect(() => {
-    storeRef.current.save(documentFromState(state.shell, state.surfaces, state.dock, state.themePack));
+    storeRef.current.save(
+      documentFromState(state.shell, state.surfaces, state.dock, state.themePack, state.installedPacks),
+    );
   }, [state, store]);
 
   // The store's other direction: a desktop this shell did not produce.
@@ -568,7 +606,23 @@ export function OsProvider({
           const deskId = s.shell.activeDeskId;
           return withSurface(s, deskId, sortSurface(surfaceOf(s, deskId), gridRef.current));
         }),
-      setThemePack: (pack) => set((s) => ({ ...s, themePack: pack })),
+      setThemePack: (pack) => set((s) => ({ ...s, themePack: pack, previewPack: null })),
+      installThemePack: (pack) =>
+        set((s) => ({
+          ...s,
+          installedPacks: [...s.installedPacks.filter((p) => p.id !== pack.id), pack],
+        })),
+      removeThemePack: (id) =>
+        set((s) => ({
+          ...s,
+          installedPacks: s.installedPacks.filter((p) => p.id !== id),
+          // Uninstalling the pack you are WEARING has to take the desktop
+          // somewhere. Graphite is the only answer that always exists: its
+          // tokens are the bundle's unqualified :root.
+          themePack: s.themePack === id ? BUILT_IN_THEME_ID : s.themePack,
+          previewPack: s.previewPack === id ? null : s.previewPack,
+        })),
+      previewThemePack: (id) => set((s) => (s.previewPack === id ? s : { ...s, previewPack: id })),
     };
   }
 
@@ -582,9 +636,25 @@ export function OsProvider({
     [state, registry, actorRole, grid, notice],
   );
 
+  // Every installed pack's CSS, in one style element, kept in step with the
+  // list. Before the attribute effect below: a pack must have its rules in
+  // the document by the time the root names it, or the first frame of a
+  // preview is the previous theme.
   useEffect(() => {
-    document.documentElement.setAttribute("data-os-theme", state.themePack);
-  }, [state.themePack]);
+    applyPackStyles(state.installedPacks);
+  }, [state.installedPacks]);
+
+  useEffect(() => {
+    // The PREVIEW wins while one is open -- that is the marketplace's whole
+    // gesture, and it is why this is one attribute write rather than two
+    // places that could disagree about which theme is on screen.
+    //
+    // The stored id is stamped VERBATIM, never resolved: a desktop roamed
+    // from a machine with a pack this bundle has not installed yet keeps
+    // naming that pack, so it takes effect the moment it arrives instead of
+    // being silently rewritten to graphite behind the person's back.
+    document.documentElement.setAttribute("data-os-theme", state.previewPack ?? state.themePack);
+  }, [state.themePack, state.previewPack]);
 
   return <OsContext.Provider value={value}>{children}</OsContext.Provider>;
 }

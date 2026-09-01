@@ -64,11 +64,16 @@ describe("the settings-section contract", () => {
     expect(settingsSectionProblem(app)).toBeNull();
   });
 
-  it("Settings itself declares the epic's five sections", () => {
+  // Six since Ask voice (memql#4747) added its own section beside Appearance.
+  // Ask is CHROME rather than an app, so its preferences have nowhere else to
+  // live, and folding them into Appearance would file "hold Space to talk"
+  // under how the desktop looks.
+  it("Settings itself declares its sections", () => {
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
     expect(settings?.sections?.map((s) => s.id)).toEqual([
       "about",
       "appearance",
+      "ask",
       "apps",
       "cluster",
       "diagnostics",

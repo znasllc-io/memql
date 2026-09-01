@@ -9,6 +9,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  apiBaseUrlFor,
+  apiBaseUrlFromDomain,
   composeEndpointFromDomain,
   identityBaseUrlFor,
   webSocketUrlFor,
@@ -172,4 +174,49 @@ test("the composed endpoint is one the dialer accepts, and identity's sibling ag
     identityBaseUrlFor({ name: "s", endpoint }),
     "https://identity.example.com",
   );
+});
+
+// -----------------------------------------------------------------------------
+// The https base for the bff's HTTP edge (memql#4748)
+//
+// The third spelling of one convention. `api.<domain>` serves the gRPC/WS front
+// door AND the documented HTTP exceptions -- the Library's
+// `GET /artifacts/{id}/content` among them -- so this must agree with
+// composeEndpointFromDomain about which host that is, and with
+// identityBaseUrlFor about what counts as a domain.
+// -----------------------------------------------------------------------------
+
+test("an https base is the api host under the domain", () => {
+  assert.equal(apiBaseUrlFromDomain("acme.example.com"), "https://api.acme.example.com");
+  // The same normalization the other two apply: a fully-qualified trailing dot
+  // resolves identically over DNS and must not compose a different host.
+  assert.equal(apiBaseUrlFromDomain("  .acme.example.com.  "), "https://api.acme.example.com");
+});
+
+test("an empty domain composes nothing rather than a URL with a hole in it", () => {
+  assert.equal(apiBaseUrlFromDomain(""), "");
+  assert.equal(apiBaseUrlFromDomain("   "), "");
+});
+
+test("a local domain is https too", () => {
+  // No loopback carve-out, unlike webSocketUrlFor: that takes a stored ENDPOINT,
+  // which may be a raw port-forward. A DOMAIN always names the front door, and
+  // the front door is TLS everywhere by the environment-parity rule.
+  assert.equal(apiBaseUrlFromDomain("memql.localhost"), "https://api.memql.localhost");
+});
+
+test("a registered cluster's https base prefers its domain, then its endpoint", () => {
+  assert.equal(
+    apiBaseUrlFor({ name: "c", domain: "acme.example.com", endpoint: "api.other.test:443" }),
+    "https://api.acme.example.com",
+  );
+  // No domain recorded: the endpoint's host is already `api.<domain>` by the
+  // same convention.
+  assert.equal(apiBaseUrlFor({ name: "c", endpoint: "api.acme.example.com:443" }), "https://api.acme.example.com");
+});
+
+test("a cluster naming no host at all has no https base", () => {
+  // Guessing would mean sending a bearer at a host nobody nominated.
+  assert.equal(apiBaseUrlFor({ name: "c", endpoint: "" }), undefined);
+  assert.equal(apiBaseUrlFor({ name: "c", endpoint: "[::1]:50051" }), undefined);
 });

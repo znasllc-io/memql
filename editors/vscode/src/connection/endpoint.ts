@@ -67,6 +67,56 @@ export function composeEndpointFromDomain(domain: string): string {
   const normalized = normalizeDomain(domain);
   return normalized === "" ? "" : `api.${normalized}:${FRONT_DOOR_PORT}`;
 }
+/**
+ * The HTTPS base for the bff's HTTP edge: `https://api.<domain>`.
+ *
+ * THE THIRD SPELLING OF ONE CONVENTION, and deliberately beside the other two
+ * rather than composed at a call site (memql#4748). `composeEndpointFromDomain`
+ * answers the gRPC/WS front door and `identityBaseUrlFor` answers the identity
+ * host; this answers the same `api.` host as an ORDINARY HTTPS ORIGIN, which is
+ * what the documented HTTP exceptions are served from -- the Library's
+ * `GET /artifacts/{id}/content` among them.
+ *
+ * ALWAYS https, with no loopback carve-out. `webSocketUrlFor` has one because
+ * it accepts a stored ENDPOINT, which may be a raw `localhost:50051`
+ * port-forward; this takes a DOMAIN, and a domain always names the front door,
+ * which is TLS everywhere by the environment-parity rule (a local
+ * `api.memql.localhost` is served over 443 with an mkcert certificate exactly
+ * as a cloud cluster is). `identityBaseUrlFor` composes its host the same way
+ * and for the same reason.
+ *
+ * An EMPTY domain composes to "" rather than to `https://api.`, matching
+ * composeEndpointFromDomain: every caller's next question is "did that name
+ * anything", and a URL built around a hole only moves the check downstream.
+ */
+export function apiBaseUrlFromDomain(domain: string): string {
+  const normalized = normalizeDomain(domain);
+  return normalized === "" ? "" : `https://api.${normalized}`;
+}
+
+/**
+ * The HTTPS base for a REGISTERED cluster's HTTP edge, or undefined when
+ * nothing in the entry names one.
+ *
+ * Prefers the recorded `domain` and falls back to the endpoint's own host,
+ * which is already `api.<domain>` by the convention above -- the same two-step
+ * `identityBaseUrlFor` takes, minus the `issuer` step, which names the identity
+ * service and says nothing about where the bff serves HTTP.
+ *
+ * A HOST WITH A PORT LOSES THE PORT, because `hostOf` answers the host. That is
+ * correct for the front door (443, implicit) and wrong for a raw port-forward
+ * -- which is not a case this reaches: the artifact route is served through the
+ * front door, and a cluster registered by a port-forwarded endpoint has no
+ * front door to serve it. Answering with the front door's URL and letting the
+ * fetch fail is better than composing `https://localhost:50051`, which would
+ * fail identically after implying it was ever going to work.
+ */
+export function apiBaseUrlFor(cluster: ClusterConfig): string | undefined {
+  const fromDomain = apiBaseUrlFromDomain(cluster.domain ?? "");
+  if (fromDomain !== "") return fromDomain;
+  const host = hostOf(cluster.endpoint);
+  return host === undefined ? undefined : `https://${host}`;
+}
 
 // identityBaseUrlFor names the identity service a refresh exchange must POST
 // to (memql#3385). It is a DIFFERENT host from the bff the stream dials --

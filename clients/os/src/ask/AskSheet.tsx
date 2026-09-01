@@ -9,7 +9,7 @@ import { AskSurface } from "./AskSurface";
 // close key cannot depend on where focus happens to sit.
 
 export function AskSheet() {
-  const { sheet, closeAsk, transport } = useAsk();
+  const { sheet, closeAsk, transport, voice, settings } = useAsk();
 
   useEffect(() => {
     if (!sheet.open) return;
@@ -38,7 +38,14 @@ export function AskSheet() {
           if (event.key === "Escape") closeAsk();
         }}
       >
-        <AskSurface transport={transport} context={sheet.context} variant="sheet" autoFocus />
+        <AskSurface
+          transport={transport}
+          voicePorts={voice}
+          settings={settings}
+          context={sheet.context}
+          variant="sheet"
+          autoFocus
+        />
       </div>
     </div>
   );

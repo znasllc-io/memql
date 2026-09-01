@@ -109,3 +109,24 @@ if (!(globalThis as { PointerEvent?: unknown }).PointerEvent) {
     value: PointerEventShim,
   });
 }
+
+// Blob.text(): jsdom implements Blob and File but not the async read methods
+// on them, so `await file.text()` rejects with a TypeError that surfaces as a
+// file picker which silently does nothing (epic memql#4745).
+//
+// A SHIM RATHER THAN A CODE CHANGE. `Blob.text()` has been in every browser
+// this shell supports since Safari 14, and reaching for a FileReader in
+// production to satisfy a test environment is the tail wagging the dog -- the
+// same call the trainer's upload and the theme installer both make would then
+// be written the long way in one of them and not the other. This file is
+// where the environment's gaps are filled.
+if (!Blob.prototype.text) {
+  Blob.prototype.text = function text(this: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ""));
+      reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+      reader.readAsText(this);
+    });
+  };
+}

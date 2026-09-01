@@ -46,6 +46,7 @@ var vscodeImportAllowList = []string{
 	"constructs/readonlyDecorations.ts", // FileDecorationProvider + files.readonlyInclude adapter over constructs/readonly.ts
 	"constructs/clusterDocuments.ts",    // TextDocumentContentProvider + CodeLens adapter over constructs/clusterDocument.ts
 	"extension.ts",                      // activation, command registration, LSP client wiring
+	"library/artifactDocuments.ts",      // TextDocumentContentProvider + save dialog adapter over library/artifactDocument.ts
 	"views/clustersTree.ts",             // TreeDataProvider adapter over clusters/ + connection/
 	"views/dataTree.ts",                 // TreeDataProvider adapter over state/conceptsCache.ts
 	"views/constructsTree.ts",           // TreeDataProvider adapter over state/constructCatalog.ts

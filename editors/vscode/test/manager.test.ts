@@ -271,6 +271,86 @@ test("the dial carries an onTokenExpired hook so a LIVE stream can re-auth in pl
   assert.equal(await hook(), "ROTATED");
 });
 
+// -----------------------------------------------------------------------------
+// The bearer accessor (memql#4748)
+//
+// The Library artifact handoff fetches bytes over `GET https://api.<domain>
+// /artifacts/{id}/content` -- one of the documented HTTP exceptions -- and that
+// request has to be made as THE SAME ACTOR the stream is. Row authorization is
+// per-caller, so a second credential resolved independently could authenticate
+// a different user than the one whose rows the same handoff just read, and the
+// failure would be a 404 that reads as "the artifact is gone".
+// -----------------------------------------------------------------------------
+
+test("the bearer accessor reports the credential the stream was accepted with", async () => {
+  const manager = new ConnectionManager(() => Promise.resolve(fakeConn("x")), {
+    resolve: async () => ({ ok: true, bearer: "FIRST" }),
+    forceRefresh: async () => null,
+  });
+
+  assert.equal(manager.bearer, undefined, "there is no bearer before there is a connection");
+  await manager.connect(cluster("local"));
+  assert.equal(manager.bearer, "FIRST");
+});
+
+test("an in-place rotation moves the bearer accessor with the stream", async () => {
+  // The SDK rotates over the LIVE socket shortly before expiry. A cached copy
+  // of the DIALLED bearer would go stale fifteen minutes into a session and
+  // 401 an HTTP call made alongside a perfectly healthy stream.
+  let hook: (() => Promise<string | null>) | undefined;
+  const manager = new ConnectionManager(
+    (opts) => {
+      hook = opts.auth?.onTokenExpired;
+      return Promise.resolve(fakeConn("x"));
+    },
+    {
+      resolve: async () => ({ ok: true, bearer: "FIRST" }),
+      forceRefresh: async () => "ROTATED",
+    },
+  );
+
+  await manager.connect(cluster("local"));
+  assert.equal(manager.bearer, "FIRST");
+  await hook!();
+  assert.equal(manager.bearer, "ROTATED");
+});
+
+test("a torn-down connection hands out no bearer", async () => {
+  // Same rule `query` and `dispatcher` follow: the moment the socket is gone,
+  // nothing that describes it may still be handed out.
+  // A FRESH connection per dial, because a fakeConn's done() stays resolved once
+  // it has been closed -- reusing one would have the second connect torn down by
+  // the first one's termination before the assertion could see it.
+  const conns = [fakeConn("x"), fakeConn("y")];
+  let next = 0;
+  const manager = new ConnectionManager(() => Promise.resolve(conns[next++]!), {
+    resolve: async () => ({ ok: true, bearer: "FIRST" }),
+    forceRefresh: async () => null,
+  });
+
+  await manager.connect(cluster("a"));
+  assert.equal(manager.bearer, "FIRST");
+  await manager.disconnect();
+  assert.equal(manager.bearer, undefined);
+
+  await manager.connect(cluster("b"));
+  assert.equal(manager.bearer, "FIRST");
+  conns[1]!.terminate();
+  await flush();
+  assert.equal(manager.bearer, undefined, "a dropped stream must not leave a bearer behind");
+});
+
+test("a REFUSED credential leaves no bearer to hand out", async () => {
+  const manager = new ConnectionManager(() => Promise.resolve(fakeConn("x")), {
+    resolve: async () => ({ ok: false, reason: "missingCredential", message: "no credential" }),
+    forceRefresh: async () => null,
+  });
+
+  await manager.connect(cluster("a"));
+  assert.equal(manager.state.status, "error");
+  assert.equal(manager.bearer, undefined);
+});
+
 test("an unconfigured cluster (no endpoint) produces the generic not-configured message", async () => {
   let dialed = false;
   const dial: DialFn = () => {

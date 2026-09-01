@@ -138,13 +138,18 @@ test('a portal link can activate the extension, and reaches a handler when it do
   assert.equal(recorded.uriHandlers, 1);
 });
 
-test('the memql-cluster scheme is claimed, so a cluster document has something to open with', () => {
-  // memql#4248. A `memql-cluster:` uri with no registered content provider does
-  // not fail loudly -- openTextDocument rejects with "cannot open", which reads
-  // as the DOCUMENT being broken rather than as the registration being absent.
-  // The host lane opens one for real, but that lane does not run in CI, so this
-  // is the guard that travels with every pull request.
-  assert.deepEqual(recorded.contentProviderSchemes, ['memql-cluster']);
+test('both cluster-served schemes are claimed, so their documents have something to open with', () => {
+  // memql#4248 / memql#4748. A `memql-cluster:` or `memql-artifact:` uri with no
+  // registered content provider does not fail loudly -- openTextDocument rejects
+  // with "cannot open", which reads as the DOCUMENT being broken rather than as
+  // the registration being absent. The host lane opens one for real, but that
+  // lane does not run in CI, so this is the guard that travels with every pull
+  // request.
+  //
+  // The artifact scheme is the one the OS handoff lands on, which makes a
+  // missing registration read as "VS Code did not answer" on a desktop the
+  // editor has already covered up.
+  assert.deepEqual(recorded.contentProviderSchemes, ['memql-cluster', 'memql-artifact']);
 });
 
 test('every file the trees read is watched, so an external edit refreshes them', () => {

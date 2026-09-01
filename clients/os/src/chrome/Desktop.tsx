@@ -25,6 +25,7 @@ import { placeWindows, type PlacementTokens } from "../system/placement";
 import type { DeskSurface, DesktopItem, GridPos } from "../system/desktop";
 import type { Desk } from "../system/desks";
 import { DeskNumeral, MemoryField } from "../wallpaper/MemoryField";
+import { resolveThemePack } from "../themes/registry";
 import { WidgetFrame } from "../widgets/WidgetFrame";
 import { useMachines } from "../live/machines";
 import { useOsConnection } from "../live/connection";
@@ -73,6 +74,16 @@ export function Desktop({
   handoffPorts?: HandoffPorts;
 }) {
   const { state, actions, registry, actorRole, grid } = useOs();
+  // The wallpaper follows the theme, PREVIEW INCLUDED -- pointing at a card
+  // in the marketplace has to restyle the memory field too, or the largest
+  // surface on the screen is the one thing that does not change. Memoized on
+  // the resolved pack because MemoryField rebuilds its lattice whenever these
+  // options change identity, and a new object per render would regenerate the
+  // field on every keystroke anywhere in the shell.
+  const wallpaper = useMemo(
+    () => resolveThemePack(state.previewPack ?? state.themePack, state.installedPacks).wallpaper,
+    [state.previewPack, state.themePack, state.installedPacks],
+  );
   const { config } = useSession();
   const connection = useOsConnection();
   const [menu, setMenu] = useState<DeskMenu | null>(null);
@@ -442,7 +453,7 @@ export function Desktop({
       onDragEnd={onDragEnd}
     >
       <div className="os-desktop" data-os-desktop data-dragging-window={draggingWindow || undefined}>
-        <MemoryField />
+        <MemoryField seed={wallpaper.seed} field={wallpaper} />
         <div
           className="os-plates"
           style={{ transform: `translateX(${-activeIndex * 100}%)` }}
