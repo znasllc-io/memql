@@ -200,7 +200,15 @@ function DomainDetail({ domainId }: { domainId: string }) {
           <ul className="os-train-chunk-rows" aria-label={`Chunks from ${group.label}`}>
             {group.chunks.map((chunk) => (
               <li key={chunk.id} className="os-row" data-dim={chunk.superseded || undefined}>
-                <span className="os-row-name">{chunk.text.trim().slice(0, 80) || "(empty)"}</span>
+                {/* CLAMPED BY CSS, NOT BY A SLICE. A JS slice at a fixed
+                    length cuts mid-word and shows no ellipsis, so the row
+                    reads as broken text rather than as shortened text -- and
+                    it beats the stylesheet's own `text-overflow` to it, which
+                    would have adapted to the window's width. The full text is
+                    on `title`. */}
+                <span className="os-row-name" title={chunk.text.trim()}>
+                  {chunk.text.trim() || "(empty)"}
+                </span>
                 <span className="os-row-state">
                   <Chip tone="muted">{chunk.source || "source unrecorded"}</Chip>
                   {chunk.sourceRef === "" ? null : (

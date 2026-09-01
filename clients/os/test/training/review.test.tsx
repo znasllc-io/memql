@@ -44,6 +44,13 @@ function mount(connection: FakeConnection) {
   );
 }
 
+/** `count` unvalidated chunks, numbered from `from`. */
+function pageOf(from: number, count: number) {
+  return Array.from({ length: count }, (_, i) =>
+    chunkRow({ id: `c-${from + i}`, text: `chunk ${from + i}` }),
+  );
+}
+
 beforeEach(() => {
   h.connection = null;
 });
@@ -121,37 +128,57 @@ describe("the queue", () => {
   });
 
   it("counts the PAGES it read and never claims a total", async () => {
+    // A step stops once it has TARGET_PER_STEP, so a full page of work is one
+    // page read -- and the caption says PAGES, because the walk cannot know
+    // what is behind the ones it has not asked for.
     const connection = fakeConnection({
       domainRows: [domainLiteRow("domain-sales", "unvalidated")],
-      chunkPages: {
-        "domain-sales": [[chunkRow({ id: "c-1" })], [chunkRow({ id: "c-2" })]],
-      },
+      chunkPages: { "domain-sales": [pageOf(0, 30), pageOf(30, 30)] },
     });
     mount(connection);
     await settle(6);
-    expect(screen.getByText(/1 awaiting review in 1 page read/)).toBeTruthy();
+    expect(screen.getByText(/30 awaiting review in 1 page read/)).toBeTruthy();
+  });
+
+  it("gathers a BATCH per step, not one card", async () => {
+    // The first cut stopped as soon as `found` was non-empty, which turned a
+    // queue of forty into forty clicks whenever the first domain in the walk
+    // held a single unvalidated chunk. Two domains, one chunk each, is that
+    // exact shape -- and one step now returns both.
+    const connection = fakeConnection({
+      domainRows: [
+        domainLiteRow("domain-a", "unvalidated"),
+        domainLiteRow("domain-b", "unvalidated"),
+      ],
+      chunkPages: {
+        "domain-a": [[chunkRow({ id: "c-a", text: "From the first domain." })]],
+        "domain-b": [[chunkRow({ id: "c-b", text: "From the second domain." })]],
+      },
+    });
+    mount(connection);
+    await settle(8);
+    expect(screen.getByText("From the first domain.")).toBeTruthy();
+    expect(screen.getByText("From the second domain.")).toBeTruthy();
+    expect(screen.queryByText("Load more")).toBeNull();
   });
 
   it("walks the keyset pages on Load more", async () => {
     const connection = fakeConnection({
       domainRows: [domainLiteRow("domain-sales", "unvalidated")],
       chunkPages: {
-        "domain-sales": [
-          [chunkRow({ id: "c-1", text: "Page one chunk." })],
-          [chunkRow({ id: "c-2", text: "Page two chunk." })],
-        ],
+        "domain-sales": [pageOf(0, 30), [chunkRow({ id: "c-last", text: "Page two chunk." })]],
       },
     });
     mount(connection);
     await settle(6);
-    expect(screen.getByText("Page one chunk.")).toBeTruthy();
+    expect(screen.getByText("chunk 0")).toBeTruthy();
     expect(screen.queryByText("Page two chunk.")).toBeNull();
 
     await click(screen.getByText("Load more"));
     await settle(6);
 
     expect(screen.getByText("Page two chunk.")).toBeTruthy();
-    expect(screen.getByText(/2 awaiting review in 2 pages read/)).toBeTruthy();
+    expect(screen.getByText(/31 awaiting review in 2 pages read/)).toBeTruthy();
     // Every page walked: the control goes away rather than offering a read
     // that would return nothing.
     expect(screen.queryByText("Load more")).toBeNull();

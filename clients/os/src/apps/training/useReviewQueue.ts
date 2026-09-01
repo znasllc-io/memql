@@ -30,13 +30,26 @@ import { chunkAwaitsReview, chunkFromRow, type Chunk } from "./rows";
 // months ago the first page is fifty validated rows. A "load more" that
 // fetched one page and added nothing would read as a dead button.
 //
-// So one step keeps pulling until it has something to show, bounded by
-// PAGES_PER_STEP. The bound is what stops a single click walking a
+// So one step keeps pulling until it has a BATCH worth showing, bounded by
+// PAGES_PER_STEP. The page bound is what stops a single click walking a
 // hundred-thousand-row corpus; the caption says how many pages were read, and
 // never claims a total it has not seen.
+//
+// STOPPING AT THE FIRST CHUNK IS THE OTHER HALF OF THE SAME MISTAKE, and it
+// is the one the first cut made. `domainsWithWork` is walked in order, so a
+// step that stopped as soon as `found` was non-empty returned ONE card
+// whenever the first domain in the list held one unvalidated chunk -- turning
+// a queue of forty into forty clicks, each of them a round trip. "Never
+// empty-handed" has to mean "enough to work on".
+//
+// Whole pages, always: the batch is a floor rather than a cap, because
+// dropping half a page would mean re-reading it to get the rest.
 
-/** Pages one `loadMore` will walk before returning empty-handed. */
+/** Pages one `loadMore` will walk before returning with whatever it has. */
 export const PAGES_PER_STEP = 8;
+
+/** Chunks a step tries to gather before it stops asking for pages. */
+export const TARGET_PER_STEP = 25;
 
 export interface ReviewQueue {
   /** Every chunk this queue has loaded, in read order. A decided chunk STAYS
@@ -122,7 +135,7 @@ export function useReviewQueue(domainIds: readonly string[]): ReviewQueue {
           next === ""
             ? { domainIds: held.domainIds, index: held.index + 1, cursor: "" }
             : { domainIds: held.domainIds, index: held.index, cursor: next };
-        if (found.length > 0) break;
+        if (found.length >= TARGET_PER_STEP) break;
       }
       if (mine !== generation.current) return;
       // EXHAUSTION IS DERIVED FROM WHERE THE WALK ENDED, not from having
