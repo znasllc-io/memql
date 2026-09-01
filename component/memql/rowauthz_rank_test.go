@@ -465,3 +465,54 @@ func TestTheRankFloorSurvivesRegistration(t *testing.T) {
 			"than a missing field in clone()")
 	}
 }
+
+// ---------------------------------------------------------------------
+// Subscriptions (D7 -- the tier covers reads, writes AND live events)
+// ---------------------------------------------------------------------
+
+// TestSubscriptionsInheritTheRankBranch is the third of the three surfaces
+// #4834 names, and it is the one whose absence would be least visible.
+//
+// A `rankVisible` concept that served a peer's row on a READ and dropped the
+// live event for the SAME row would be correct on load and frozen after --
+// the exact shape clients/os/README.md warns about by name. Nothing would
+// error; the list would simply stop moving.
+//
+// It also pins the property that makes that work: the fan-out must run under
+// a context carrying a resolved scope. Without one the rank branch declines to
+// widen -- the safe direction and the wrong answer here -- so this asserts
+// BOTH directions rather than only the admitting one.
+func TestSubscriptionsInheritTheRankBranch(t *testing.T) {
+	rankFixture(t, false, "admin")
+	payload := []byte(`{"ownerUserId":"below","name":"a peer's row"}`)
+
+	actor := &auth.AccessContext{UserId: "me", Role: auth.RoleDeveloper}
+	scope := scopeWith(300, []string{"me", "below"}, []string{"me"})
+
+	// WITH a resolved scope: the event reaches the stream, exactly as the read
+	// path returns the row.
+	withScope := rankCtx(t, auth.RoleDeveloper, "me", false, scope)
+	if got := AdmitSubscriptionRow(withScope, actor, declaredRankConcept, "row-1", payload); got != SubscriptionAdmit {
+		t.Fatalf("a rank-visible row was %s at fan-out but is readable through the read path. "+
+			"A concept whose list is correct on load and frozen afterwards is the failure this "+
+			"case exists for", got)
+	}
+
+	// WITHOUT one: withheld rather than served. This is the direction that
+	// must never invert -- a fan-out that widened on an unresolved scope would
+	// hand out rows the read path refuses.
+	bare := auth.ContextWithAccess(context.Background(), actor)
+	if got := AdmitSubscriptionRow(bare, actor, declaredRankConcept, "row-1", payload); got == SubscriptionAdmit {
+		t.Fatal("a rank-visible row was ADMITTED at fan-out with no resolved scope. The rank " +
+			"branch is a disjunct and must decline to widen when it cannot answer; admitting " +
+			"here would serve rows the read path refuses")
+	}
+
+	// A row above the caller's rank is refused with a scope in hand, which is
+	// the reachable negative for the first case: without it, an implementation
+	// that admitted everything would pass.
+	above := []byte(`{"ownerUserId":"stranger","name":"an owner's row"}`)
+	if got := AdmitSubscriptionRow(withScope, actor, declaredRankConcept, "row-2", above); got == SubscriptionAdmit {
+		t.Fatal("a row owned outside the caller's scope was admitted at fan-out")
+	}
+}

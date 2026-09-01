@@ -996,6 +996,14 @@ type streamSession struct {
 	access       *auth.AccessContext
 	accessLoaded bool
 
+	// rankCtx carries this stream's RESOLVED-ONCE rank scope for the
+	// subscription row gate (epic memql#4832). Guarded by accessMu because it
+	// is the same fact at the same granularity as `access` above -- the stream
+	// caches who the caller is, this caches what they outrank -- and both go
+	// stale together when a role changes, which clients pick up by
+	// reconnecting exactly as the comment above says.
+	rankCtx context.Context
+
 	// Badge expiry gate (memql#2513). For class="badge" shared-
 	// terminal operator grants, badgeExpiresAt carries the current
 	// credential's exp; the per-envelope gate in handleMessage rejects
@@ -1203,7 +1211,7 @@ func (s *streamSession) handleBusEvent(event events.Event) {
 	admission := memqlengine.SubscriptionAdmit
 	if concept, rowId, rowPayload, isGraphRow := graphRowFromEvent(event); isGraphRow {
 		admission = memqlengine.AdmitSubscriptionRow(
-			context.Background(), s.currentAccess(), concept, rowId, rowPayload)
+			s.rankScopeContext(), s.currentAccess(), concept, rowId, rowPayload)
 		switch admission {
 		case memqlengine.SubscriptionDeny:
 			// Dropped silently for the subscriber: being told that a row
@@ -1295,6 +1303,31 @@ func (s *streamSession) currentAccess() *auth.AccessContext {
 	s.accessMu.Lock()
 	defer s.accessMu.Unlock()
 	return s.access
+}
+
+// rankScopeContext returns the base context the row gate runs under at
+// fan-out, carrying a rank scope resolved ONCE for this stream (epic
+// memql#4832).
+//
+// It sits beside currentAccess because it is the same fact at the same
+// granularity: the stream caches who the caller is, and this caches what they
+// outrank. Resolving it per EVENT would put two principal-table scans on every
+// graph event; resolving it per stream costs the same staleness the cached
+// identity already has, and a role change reaches both on the next stream.
+//
+// Falls back to a bare Background context when no engine is wired -- the rank
+// branch then declines to widen, which is the pre-rank behaviour and drops no
+// row any other tier admits.
+func (s *streamSession) rankScopeContext() context.Context {
+	if s.service == nil || s.service.engine == nil {
+		return context.Background()
+	}
+	s.accessMu.Lock()
+	defer s.accessMu.Unlock()
+	if s.rankCtx == nil {
+		s.rankCtx = s.service.engine.SubscriptionRankContext(context.Background())
+	}
+	return s.rankCtx
 }
 
 // ensureAccess resolves the caller's user identity (userId / role /

@@ -116,6 +116,31 @@ func subscriptionReadContext(ctx context.Context, access *auth.AccessContext) co
 //
 // Non-graph topics do not come here: they carry no row to decide about and
 // are gated at SUBSCRIBE time instead (memql#4311).
+// SubscriptionRankContext returns a context carrying a RESOLVED-ONCE rank
+// scope, for a fan-out to reuse across every event on one stream (epic
+// memql#4832).
+//
+// WITHOUT IT THE RANK BRANCH WITHHOLDS ON EVERY SUBSCRIPTION. The branch is a
+// disjunct that declines to widen when no scope is installed -- the safe
+// direction, and here the WRONG answer: a concept declaring `rankVisible`
+// would serve a peer's row on a read and drop the live event for the same
+// row, which is the "correct on load, frozen after" shape clients/os/README.md
+// warns about by name.
+//
+// IT IS CACHED BY THE CALLER, PER STREAM, and that is deliberate rather than
+// lazy. Resolving the scope reads the principal table, and the fan-out runs
+// once per event PER STREAM -- resolving there would put two table scans on
+// every graph event. The stream already caches WHO the caller is
+// (streamSession.currentAccess); caching what they outrank alongside it is the
+// same granularity and the same staleness, which is the honest place to put
+// it: a role change reaches both facts together, on the next stream.
+func (e *MemQLEngine) SubscriptionRankContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return contextWithRankScopeMemo(ctx, e)
+}
+
 func AdmitSubscriptionRow(ctx context.Context, access *auth.AccessContext, conceptName, id string, payload []byte) SubscriptionAdmission {
 	switch rowAuthzAdmits(subscriptionReadContext(ctx, access), conceptName, id, payload) {
 	case rowAuthzAdmit:
