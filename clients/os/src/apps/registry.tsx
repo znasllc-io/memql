@@ -1,4 +1,5 @@
 import {
+  Building2,
   Files as FilesIcon,
   GraduationCap,
   MonitorSmartphone,
@@ -11,6 +12,8 @@ import {
 import { AskSurface } from "../ask/AskSurface";
 import { useAsk } from "../ask/AskProvider";
 import type { OsAppManifest, OsRegistry, OsWidgetManifest } from "../system/registry";
+import { AccountsApp } from "./accounts/AccountsApp";
+import { ACCOUNTS_SECTIONS } from "./accounts/settings";
 import { DeployablesApp } from "./deployables/DeployablesApp";
 import { DEPLOYABLES_SECTIONS } from "./deployables/settings";
 import { FilesApp } from "./files/FilesApp";
@@ -166,6 +169,34 @@ const training: OsAppManifest = {
   component: TrainingApp,
 };
 
+// Accounts, in full (epic memql#4800). The client registry: who this instance
+// does work for, and what of the cluster's is theirs. Accounts is first and is
+// therefore the section a window opens on -- there are two, and the other is
+// the app's own settings.
+//
+// The section list is ACCOUNTS_SECTIONS rather than a literal, for the reason
+// its five siblings are: the gear and the manifest must offer the same set,
+// and a second copy of the list is one that can disagree.
+//
+// NO manifest role. `v1:accounts:account` declares the composite tier
+// (`@rowAuthz(owner="ownerUserId", clusterOwner)`), so every signed-in person
+// has accounts of their own to read and the engine decides how far the list
+// reaches. Gating here would be presentation pretending to be authorization --
+// and the one surface inside that IS gated, the guest-invitation rollup, is
+// gated by the engine's own `requiresOwnerOrAdmin` and renders the refusal
+// rather than hiding the band.
+//
+// NOT always-docked. That is the Bin's distinction (#4784); this is an
+// ordinary app that opens from the launcher like every other one.
+const accounts: OsAppManifest = {
+  id: "accounts",
+  name: "Accounts",
+  icon: Building2,
+  sections: ACCOUNTS_SECTIONS,
+  settingsSection: "settings",
+  component: AccountsApp,
+};
+
 function AskWidgetBody() {
   const { transport } = useAsk();
   return <AskSurface transport={transport} variant="widget" />;
@@ -180,6 +211,6 @@ const askWidget: OsWidgetManifest = {
 };
 
 export const OS_REGISTRY: OsRegistry = {
-  apps: [files, deployables, fleet, users, training, settings],
+  apps: [accounts, files, deployables, fleet, users, training, settings],
   widgets: [askWidget],
 };

@@ -2482,11 +2482,17 @@ a.os-button {
 /* A labelled field in the create form. The label sits ABOVE the control rather
  * than only inside it as a placeholder, because a placeholder is an
  * explanation that disappears the moment somebody starts typing. */
+/* PROMOTED to the kit in epic memql#4800 (three more forms needed it).
+ * `.os-deploy-field` stays as an alias for the reason `.os-machine` and
+ * `.os-fleet` do: the shared BEHAVIOUR is what had to move, and renaming a
+ * selector that nothing else reads buys nothing. */
+.os-form-field,
 .os-deploy-field {
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
+.os-form-field-label,
 .os-deploy-field-label {
   font-size: var(--os-text-xs);
   color: var(--os-muted);
@@ -3020,4 +3026,289 @@ a.os-button {
 }
 .os-folder-popover .os-caption {
   margin: 2px 4px;
+}
+
+/* ---- accounts: the app's own surfaces (epic memql#4800) ----
+ *
+ * Three things live here and nothing else: the LEDGER, the first-run card and
+ * the account label toggles. Everything else the app renders is the shared kit
+ * -- the list rows, the panels, the notices, the chips -- which is the measure
+ * Deployables set and every app since has kept.
+ *
+ * THE LEDGER IS THE ONE OWNED MOMENT. Every other OS app lists what the
+ * cluster owns; this one lists who it works FOR, and the four bands answer the
+ * half only it can: what of all that is theirs. They are drawn as one object
+ * rather than four panels because the thing they add up to is a single fact --
+ * a client's footprint on this instance.
+ */
+.os-account-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.os-account-profile-head,
+.os-account-ledger-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.os-account-form {
+  display: grid;
+  /* Two columns where there is room, one where there is not. `auto-fit` with
+   * a min track rather than a media query: this form renders inside a WINDOW,
+   * and a window's width is not the viewport's -- a breakpoint keyed off the
+   * screen would put two columns in a half-width window on a large display. */
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px 12px;
+  margin: 8px 0;
+}
+
+.os-account-form-actions,
+.os-account-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.os-account-filters {
+  margin: 2px 0 6px;
+}
+
+/* ---- the ledger ---- */
+
+.os-account-ledger {
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  padding: 12px 14px;
+  background: var(--os-raised);
+}
+
+.os-account-bands {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  margin: 10px 0 8px;
+  /* ONE HAIRLINE BETWEEN BANDS, drawn by the gap over a ruled ground rather
+   * than by four borders. Four bordered cards read as four unrelated lists;
+   * a single ruled block reads as one ledger, which is what it is. */
+  background: var(--os-line);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  overflow: hidden;
+}
+
+.os-account-band {
+  background: var(--os-plate);
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.os-account-band-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--os-muted);
+}
+
+.os-account-band-title {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* THE COUNT, in the shell's display face.
+ *
+ * This is the only place in APP content where `--os-font-display` appears --
+ * elsewhere it is chrome alone, the desk numeral and the launcher wordmark.
+ * It earns the exception by being the same KIND of statement the desk numeral
+ * makes (how many, at a glance, read before it is read) and the echo is what
+ * ties the ledger to the shell's own voice rather than importing a new one.
+ *
+ * Line-height under 1 because this face's ascent is generous and the number
+ * has a label directly beneath it; `font-variant-numeric` because a count
+ * that changes must not change width and shift the label under it. */
+.os-account-band-count {
+  margin: 2px 0 0;
+  font-family: var(--os-font-display);
+  font-size: 2.25rem;
+  line-height: 0.9;
+  font-variant-numeric: tabular-nums;
+  color: var(--os-ink);
+}
+.os-account-band[data-state="empty"] .os-account-band-count,
+.os-account-band[data-state="loading"] .os-account-band-count {
+  color: var(--os-muted);
+}
+
+.os-account-band-note {
+  margin: 0;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+.os-account-band-owner {
+  margin: 4px 0 0;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+.os-account-band-rows {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  min-width: 0;
+}
+.os-account-band-rows li {
+  /* A hostname, a filename and an email are all long and all unbreakable.
+   * Truncating keeps the band a fixed shape; the count above it is the fact,
+   * and the rows are evidence for it. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-account-band-more {
+  color: var(--os-muted);
+  font-style: italic;
+}
+
+/* A REFUSAL IS NOT A ZERO. The guest-invitation rollup is owner/admin only,
+ * so below that floor the band says so in the server's own words instead of
+ * rendering a count this window would have invented. */
+.os-account-band[data-state="refused"] {
+  background: color-mix(in srgb, var(--os-error) 6%, var(--os-plate));
+}
+.os-account-band-refused {
+  margin: 4px 0 0;
+  font-size: var(--os-text-base);
+  color: var(--os-ink);
+}
+.os-account-band-detail {
+  margin: 2px 0 0;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  overflow-wrap: anywhere;
+}
+
+/* ---- the first-run card (D7) ---- */
+
+.os-account-firstrun {
+  max-width: 44rem;
+  padding: 22px 24px 20px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-raised);
+}
+
+.os-account-firstrun-eyebrow {
+  margin: 0;
+  font-family: var(--os-font-display);
+  font-size: var(--os-text-sm);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--os-muted);
+}
+
+.os-account-firstrun-title {
+  margin: 4px 0 0;
+  font-size: 1.5rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--os-ink);
+}
+
+.os-account-firstrun-line {
+  margin: 8px 0 0;
+  max-width: 52ch;
+  font-size: var(--os-text-md);
+  line-height: 1.5;
+  color: var(--os-muted);
+}
+
+.os-account-firstrun-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px 12px;
+  margin: 18px 0 14px;
+}
+
+.os-account-firstrun-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+/* ---- the account label toggles (the Files inspector's multiple picker) ---- */
+
+.os-account-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* The shell's one selection language -- the accent-bordered pill -- at chip
+ * size. Deliberately NOT a `<select multiple>`: that control drops every
+ * selection the moment somebody clicks without a modifier, which is the most
+ * destructive interaction available on a picker whose job is "one or two". */
+.os-account-label {
+  padding: 3px 9px;
+  font: inherit;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  background: transparent;
+  border: 1px solid var(--os-line);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    color var(--os-duration-fast) var(--os-ease),
+    border-color var(--os-duration-fast) var(--os-ease),
+    background var(--os-duration-fast) var(--os-ease);
+}
+.os-account-label:hover:not(:disabled) {
+  color: var(--os-ink);
+  border-color: var(--os-rail-hover);
+}
+.os-account-label[data-on] {
+  color: var(--os-accent);
+  border-color: var(--os-accent);
+  background: var(--os-accent-soft);
+}
+.os-account-label:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.os-account-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.os-account-confirm-line {
+  margin: 0;
+  font-size: var(--os-text-md);
+  color: var(--os-ink);
+}
+
+/* The Files inspector's client labels (epic memql#4800). A block of its own
+ * rather than a row in the facts list: it is the one EDITABLE thing on a
+ * surface that is otherwise a reading, and the toggles need room to wrap. */
+.os-files-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
 }

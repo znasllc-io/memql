@@ -1,9 +1,10 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 
 import {
   Button,
   Caption,
   ChoiceStack,
+  Field,
   FormRow,
   Input,
   Notice,
@@ -171,33 +172,5 @@ export function CreateSite({ domain }: { domain: string }) {
         ) : null}
       </FormRow>
     </Panel>
-  );
-}
-
-/**
- * A field with its name ABOVE it, rather than only inside it as a placeholder.
- *
- * The kit's `Input` carries a visually-hidden label, which is right for a
- * control whose purpose is obvious from what surrounds it -- a search box, a
- * rename field beside the thing being renamed. It is not enough for a FORM: a
- * column of boxes reading "shop" and "Storefront" in grey tells a sighted
- * person nothing about which is the name and which the label, and the moment
- * they type, the only explanation they had disappears.
- *
- * `aria-hidden` on the visible text, because `Input` has already given the
- * control its accessible name: without it a screen reader would announce the
- * same field twice.
- *
- * Local to this file. It earns a place in `kit/` the day a second form needs
- * one -- promoting on the first use invents an abstraction from one example.
- */
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="os-deploy-field">
-      <span className="os-deploy-field-label" aria-hidden>
-        {label}
-      </span>
-      <FormRow>{children}</FormRow>
-    </div>
   );
 }

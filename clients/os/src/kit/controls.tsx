@@ -267,6 +267,37 @@ export function FormRow({ children }: { children: ReactNode }) {
   return <div className="os-form-row">{children}</div>;
 }
 
+/**
+ * A field with its name ABOVE it, rather than only inside it as a placeholder.
+ *
+ * The kit's `Input` carries a visually-hidden label, which is right for a
+ * control whose purpose is obvious from what surrounds it -- a search box, a
+ * rename field beside the thing being renamed. It is not enough for a FORM: a
+ * column of boxes reading "shop" and "Storefront" in grey tells a sighted
+ * person nothing about which is the name and which the label, and the moment
+ * they type, the only explanation they had disappears.
+ *
+ * `aria-hidden` on the visible text, because `Input` has already given the
+ * control its accessible name: without it a screen reader would announce the
+ * same field twice.
+ *
+ * PROMOTED FROM apps/deployables (epic memql#4800), where it was local with a
+ * note saying it earns a place here the day a second form needs one. The
+ * Accounts app is three forms -- create, edit, first-run -- so this is that
+ * day. `.os-deploy-field` survives as a CSS alias, because the shared
+ * BEHAVIOUR is what had to move.
+ */
+export function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="os-form-field">
+      <span className="os-form-field-label" aria-hidden>
+        {label}
+      </span>
+      <FormRow>{children}</FormRow>
+    </div>
+  );
+}
+
 export type NoticeTone = "info" | "warn" | "error";
 
 /**
