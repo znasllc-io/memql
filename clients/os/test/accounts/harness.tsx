@@ -75,6 +75,7 @@ export interface FakeSeed {
   /** Pass an Error to make the invitation rollup REFUSE, which is the
    *  interesting case: it is the one band the engine gates. */
   invitationsForAccount?: Row[] | Error;
+  campaignsForAccount?: Row[] | Error;
   byId?: Record<string, Row>;
 }
 
@@ -91,6 +92,12 @@ export function fakeConnection(seed: FakeSeed = {}) {
       libraryItemsForAccount: rollup(seed.libraryItemsForAccount),
       domainsForAccount: rollup(seed.domainsForAccount),
       invitationsForAccount: rollup(seed.invitationsForAccount),
+      // The fifth band (epic memql#4819). Stubbed to EMPTY rather than left
+      // unstubbed, because an unstubbed read throws and the band renders the
+      // refusal -- which would make the "a refusal is not a zero" assertion
+      // below match two elements and fail for a reason that has nothing to do
+      // with what it is testing.
+      campaignsForAccount: rollup(seed.campaignsForAccount),
       // TYPED ARGS, so `.mock.calls[0][0]` is a record rather than `never` --
       // a test that asserts WHICH arguments a write received cannot do it
       // through a `vi.fn(async () => ...)` whose parameter list is empty.
