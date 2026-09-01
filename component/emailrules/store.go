@@ -22,6 +22,7 @@ import (
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // Engine is the sliver of the engine this package needs.
@@ -389,14 +390,30 @@ func str(r map[string]any, key string) string {
 	return ""
 }
 
+// integer reads a rule or bundle row's numeric field.
+//
+// narrowing: SATURATE -- both fields read through here are ORDERINGS, and a
+// wrapped negative does not merely report a wrong number, it changes what the
+// engine does next. `version` is the authoring bundle's, and nextVersion is
+// one past it: a negative would send the version backwards, and
+// PlanBundleActivation refuses a bundle whose version does not exceed the one
+// it supersedes -- so a rule would silently stop being armable. `firedCount`
+// is a monotonic counter written back as +1; a negative would make a rule's
+// own history run backwards in the surface that renders it.
+//
+// Zero would be wrong for the same reason it is right elsewhere: nothing here
+// reads 0 as "unset". A bundle at version 0 is a bundle that has never been
+// written, which is a DIFFERENT state from one whose version we could not
+// read, and collapsing them is what would let an unreadable row supersede a
+// live one.
 func integer(r map[string]any, key string) int {
 	switch v := r[key].(type) {
 	case int:
 		return v
 	case int64:
-		return int(v)
+		return num.ClampInt64(v)
 	case float64:
-		return int(v)
+		return num.ClampFloat64(v)
 	}
 	return 0
 }
