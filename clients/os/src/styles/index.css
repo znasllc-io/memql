@@ -3058,6 +3058,13 @@ a.os-button {
   opacity: 0.55;
   cursor: default;
 }
+/* A PLACE node (Library / Desktop / Archive) opens its own block in the
+ * rail: a breath of space above, nothing louder -- the places read as
+ * sections of one rail, not as three rails. */
+.os-files-place {
+  margin-top: 8px;
+}
+
 /* Rule 6: actions are verbs, nodes are nouns. A rail ACTION sits below a
  * hairline, stays muted, and never wears the node's current highlight. */
 .os-files-node[data-action] {

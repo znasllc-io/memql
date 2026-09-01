@@ -105,16 +105,13 @@ describe("the Files client filter", () => {
     // under every combination of the other filters it behaves as it did
     // before this epic.
     for (const kind of ["all", "file"] as const) {
-      for (const showArchived of [false, true]) {
-        const out = applyFilters(rows, {
-          ...DEFAULT_FILTER,
-          folderId: null,
-          accountId: ACCOUNT_ANY,
-          kind,
-          showArchived,
-        });
-        expect(out.map((r) => r.id)).toContain("f3");
-      }
+      const out = applyFilters(rows, {
+        ...DEFAULT_FILTER,
+        folderId: null,
+        accountId: ACCOUNT_ANY,
+        kind,
+      });
+      expect(out.map((r) => r.id)).toContain("f3");
     }
   });
 });

@@ -70,12 +70,29 @@ export function useLibraryFeeds(): LibraryFeeds {
 
   const folders = useLiveCollection<Row>("files:folders", (connection) => ({
     concept: FOLDER_CONCEPT,
-    seed: async (cursor, signal) => {
-      const result = await connection.query.libraryFolders(
-        {},
-        { signal, ...(cursor !== "" ? { cursor } : {}) },
-      );
-      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
+    // ONE subscription, TWO reads in the seed (epic memql#4842, #4846).
+    // `libraryFolders` carries `archived != true`, and the Archive place has
+    // to list archived folders -- so the seed walks the live read and then
+    // the archived one into a single population. Still one collection and
+    // one subscription over the concept (the Deployables rule is about
+    // subscriptions that can disagree, not about how a seed assembles the
+    // complete truth); the tree fold keeps dropping archived folders
+    // client-side exactly as before.
+    seed: async (_cursor, signal) => {
+      const rows: Row[] = [];
+      for (const read of ["libraryFolders", "libraryArchivedFolders"] as const) {
+        let cursor = "";
+        for (;;) {
+          const result = await connection.query[read](
+            {},
+            { signal, ...(cursor !== "" ? { cursor } : {}) },
+          );
+          rows.push(...result.rows());
+          cursor = result.meta()?.cursor ?? "";
+          if (cursor === "") break;
+        }
+      }
+      return { rows, nextCursor: "" };
     },
     reread: async (rowId, signal) => {
       const row = await getRowByConceptAndId(connection.query, FOLDER_CONCEPT, rowId, { signal });

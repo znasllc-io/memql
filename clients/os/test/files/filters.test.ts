@@ -61,7 +61,7 @@ function ids(filter: Partial<FilesFilter>): string[] {
 describe("applyFilters", () => {
   it("never renders a records-lens row, under every filter combination", () => {
     expect(ids({})).not.toContain("a-note");
-    expect(ids({ kind: "all", source: "all", showArchived: true, search: "standup" })).toEqual([]);
+    expect(ids({ place: "archive", kind: "all", source: "all", search: "standup" })).toEqual([]);
     expect(ids({ folderId: null })).not.toContain("a-note");
   });
 
@@ -71,9 +71,26 @@ describe("applyFilters", () => {
     expect(ids({ folderId: null })).toContain("a-video");
   });
 
-  it("excludes archived rows by default and includes them under the toggle", () => {
+  it("keeps archived rows out of the Library and gives them the Archive place", () => {
     expect(ids({})).not.toContain("a-archived");
-    expect(ids({ showArchived: true })).toContain("a-archived");
+    // The Archive root is the whole archived population, not a tree root.
+    expect(ids({ place: "archive" })).toEqual(["a-archived"]);
+    expect(ids({ place: "archive", folderId: "" })).toContain("a-archived");
+  });
+
+  it("the Desktop place mirrors the desk: loose icons at the root, a desk folder's contents one click in", () => {
+    const desk = {
+      fileArtifactIds: new Set(["a-report"]),
+      folderIds: new Set(["f-vid"]),
+    };
+    const on = (filter: Partial<FilesFilter>) =>
+      applyFilters(ALL, { ...DEFAULT_FILTER, ...filter }, desk).map((r) => r.id);
+    expect(on({ place: "desktop" })).toEqual(["a-report"]);
+    expect(on({ place: "desktop", folderId: "f-vid" })).toEqual(["a-video"]);
+    // A search widens to the whole desktop population -- loose icons and
+    // desk-folder contents alike, never the rest of the Library.
+    expect(on({ place: "desktop", search: "demo" })).toEqual(["a-video"]);
+    expect(on({ place: "desktop", search: "meeting" })).toEqual([]);
   });
 
   it("narrows by kind and by source", () => {

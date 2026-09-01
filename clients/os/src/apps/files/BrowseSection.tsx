@@ -1,5 +1,15 @@
 import { useRef, useState } from "react";
-import { ArrowUpDown, File, FileText, Folder, FolderPlus, HardDrive, Sparkles, Upload } from "lucide-react";
+import {
+  Archive as ArchiveGlyph,
+  File,
+  FileText,
+  Folder,
+  FolderPlus,
+  HardDrive,
+  Monitor,
+  Sparkles,
+  Upload,
+} from "lucide-react";
 import { newShortId, type LiveState, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { ContextMenu } from "../../chrome/ContextMenu";
@@ -10,25 +20,30 @@ import { planArchive, runArchiveWalk } from "./actions/archive";
 import {
   Button,
   Caption,
-  Check,
   Chip,
   formatBytes,
-  Input,
+  Head,
   LiveList,
   Notice,
   ProvenanceDot,
+  Refine,
   Row as ListRow,
   Select,
+  SortControl,
+  type RefineChip,
 } from "../../kit";
 import { useMachines } from "../../live/machines";
 import type { LiveView } from "../../live/liveView";
 import type { LiveCollectionHandle } from "../../live/useLiveCollection";
 import { useDraggable } from "@dnd-kit/core";
 import { SOURCE_VALUES } from "./concepts";
-import type { FilesFilter, KindFilter } from "./filters";
+import type { FilesFilter, FilesPlace, KindFilter } from "./filters";
+import type { FolderRow } from "./rows";
 import type { FolderTree, TreeNode } from "./fold";
 import { LINK_LABEL, LINK_SENTENCE, type LinkState } from "./links";
 import type { BinDropPayload } from "../bin/concepts";
+import { binItemFromArtifact } from "../bin/rows";
+import { planRestore, runRestore } from "../bin/restore";
 import { artifactFingerprint, artifactName, fileStory, type ArtifactRow } from "./rows";
 import { accountIsArchived, accountName } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
@@ -37,8 +52,12 @@ import { Inspector } from "./Inspector";
 import type { UploadProvider } from "../../items/upload";
 import type { UploadTask, UploadTasksApi } from "./useUploadTasks";
 
-// The browse (design D1): rail, list, inspector -- three readings of the two
-// feeds the app root retains, sharing one selection.
+// The browse (design D1, reshaped by epic memql#4842): rail, list, inspector
+// -- three readings of the feeds the app root retains, sharing one selection.
+// The rail offers three PLACES -- Library, Desktop, Archive -- and the top of
+// the section is a Head, a quiet sort, one Refine affordance and the Upload
+// primary (DESIGN.md rules 1-3): filter chrome appears when a question is
+// being asked, never as furniture.
 
 const KIND_TABS: Array<{ value: KindFilter; label: string }> = [
   { value: "all", label: "All" },
@@ -46,6 +65,18 @@ const KIND_TABS: Array<{ value: KindFilter; label: string }> = [
   { value: "document", label: "Documents" },
   { value: "generated_output", label: "Generated" },
 ];
+
+/** A desk folder shortcut, folded from shell state by the app root. */
+export interface DeskFolderShortcut {
+  folderId: string;
+  name: string;
+}
+
+const PLACE_TITLE: Record<FilesPlace, string> = {
+  library: "Library",
+  desktop: "Desktop",
+  archive: "Archive",
+};
 
 export function kindGlyph(kind: string, size = 16) {
   if (kind === "document") return <FileText size={size} aria-hidden />;
@@ -59,6 +90,11 @@ export function BrowseSection({
   foldersState,
   tree,
   content,
+  archivedFolders,
+  deskFolders,
+  deskFileArtifactIds,
+  deskIndexByArtifactId,
+  desksWithItems,
   filter,
   setFilter,
   selectedId,
@@ -77,6 +113,16 @@ export function BrowseSection({
   foldersState: LiveState;
   tree: FolderTree;
   content: ArtifactRow[];
+  /** Archived folders, flat and alphabetical -- the Archive place's children. */
+  archivedFolders: FolderRow[];
+  /** Folder shortcuts on any desk -- the Desktop place's children. */
+  deskFolders: DeskFolderShortcut[];
+  /** Artifact ids of loose desk file icons -- the Desktop root's population. */
+  deskFileArtifactIds: ReadonlySet<string>;
+  /** Which desk (by order) holds each artifact, for the "Desk N" chip. */
+  deskIndexByArtifactId: Map<string, number>;
+  /** How many desks hold items -- the chip renders only past one. */
+  desksWithItems: number;
   filter: FilesFilter;
   setFilter: (next: FilesFilter) => void;
   selectedId: string;
@@ -110,6 +156,13 @@ export function BrowseSection({
   // and the archive flow -- confirm naming the LIVE count, then the
   // children-first walk with in-surface progress (design B5/D11).
   const [folderMenu, setFolderMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
+  // The Archive place's folder menu: Restore is the only verb an archived
+  // folder offers here (epic memql#4842, #4846).
+  const [archivedFolderMenu, setArchivedFolderMenu] = useState<{
+    x: number;
+    y: number;
+    folder: FolderRow;
+  } | null>(null);
   // The file row's own menu (memql#4784 AC). A THIRD entry point onto the one
   // archive action the inspector already carries -- not a second flow: the
   // same mutation, the same confirm setting, the same in-surface refusal. The
@@ -133,6 +186,51 @@ export function BrowseSection({
       await query.archiveArtifact({ artifactId: row.id });
     } catch (err: unknown) {
       setRowNote(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  // Restore, from the Archive place's row menu (epic memql#4842, #4846): the
+  // Bin's client-driven pair, verbatim, so the two archive surfaces cannot
+  // drift apart on what "putting back" means.
+  const restoreOneRow = async (row: ArtifactRow) => {
+    const query = connection?.query ?? null;
+    if (query === null) {
+      setRowNote("Not connected to the cluster, so nothing was restored.");
+      return;
+    }
+    setRowNote("");
+    try {
+      await runRestore(planRestore(binItemFromArtifact(row)), {
+        restoreArtifact: async (artifactId) => {
+          await query.restoreArtifact({ artifactId });
+        },
+        restoreFile: async (fileId) => {
+          await query.restoreLibraryFile({ fileId });
+        },
+        restoreFolder: async (folderId) => {
+          await query.restoreLibraryFolder({ folderId });
+        },
+      });
+    } catch (err: unknown) {
+      setRowNote(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  // Restoring an archived FOLDER restores the folder row alone -- the Bin's
+  // semantics, stated in its own note: anything inside stays archived until
+  // restored itself, each item its own decision.
+  const restoreFolderRow = async (folderId: string) => {
+    const query = connection?.query ?? null;
+    if (query === null) {
+      setArchiveError("Not connected to the cluster, so nothing was restored.");
+      return;
+    }
+    setArchiveError("");
+    try {
+      await query.restoreLibraryFolder({ folderId });
+      if (filter.place === "archive" && filter.folderId === folderId) patch({ folderId: "" });
+    } catch (err: unknown) {
+      setArchiveError(err instanceof Error ? err.message : String(err));
     }
   };
   const [renamingFolderId, setRenamingFolderId] = useState("");
@@ -201,8 +299,10 @@ export function BrowseSection({
   };
 
   // Uploads land in the folder being LOOKED AT; searching means no folder is
-  // being looked at, so the root takes them.
-  const destinationFolderId = filter.search.trim() !== "" ? "" : (filter.folderId ?? "");
+  // being looked at, so the root takes them -- and the Archive place is
+  // nowhere to upload TO, so it hands them to the Library root.
+  const destinationFolderId =
+    filter.search.trim() !== "" || filter.place === "archive" ? "" : (filter.folderId ?? "");
 
   const onDrop = (event: React.DragEvent) => {
     if (!event.dataTransfer.files.length && !event.dataTransfer.items.length) return;
@@ -233,34 +333,75 @@ export function BrowseSection({
 
   // Direct, non-archived counts by folder -- what a person would count.
   const counts = new Map<string, number>();
+  // ...and archived rows counted the same way for the Archive place.
+  const archivedCounts = new Map<string, number>();
+  let archivedTotal = 0;
   for (const row of content) {
-    if (row.archived) continue;
+    if (row.archived) {
+      archivedTotal += 1;
+      archivedCounts.set(row.folderId, (archivedCounts.get(row.folderId) ?? 0) + 1);
+      continue;
+    }
     counts.set(row.folderId, (counts.get(row.folderId) ?? 0) + 1);
   }
+  const deskFileCount = content.filter(
+    (r) => !r.archived && deskFileArtifactIds.has(r.id),
+  ).length;
 
   const folderNameOf = (folderId: string): string => {
     if (folderId === "") return "Library";
-    return tree.byId.get(folderId)?.folder.name ?? folderId;
+    return (
+      tree.byId.get(folderId)?.folder.name ??
+      archivedFolders.find((f) => f.id === folderId)?.name ??
+      folderId
+    );
   };
 
   // Empty and filtered-to-empty are DIFFERENT answers: one is about the
-  // Library, the other about the question just asked of it.
+  // place, the other about the question just asked of it.
   const narrowed =
     searching ||
     filter.kind !== "all" ||
     filter.source !== "all" ||
     filter.accountId !== ACCOUNT_ANY ||
     filter.folderId !== "";
-  const emptyText =
-    content.filter((r) => !r.archived).length === 0 && !narrowed
-      ? "Nothing in your Library yet. Drop a file onto the desk or upload one here."
-      : "Nothing matches. Clear the search or filters to see your files.";
+  const placeCount =
+    filter.place === "archive" ? archivedTotal : filter.place === "desktop" ? deskFileCount : (counts.get("") ?? 0);
+  const emptyText = narrowed
+    ? "Nothing matches. Clear the search or filters to see your files."
+    : filter.place === "desktop"
+      ? "Nothing on your desks. Send a file to the desk from the Library, or drop one onto the desk."
+      : filter.place === "archive"
+        ? "Nothing archived. Archiving from the Library keeps files here, not deleted."
+        : "Nothing in your Library yet. Drop a file onto the desk or upload one here.";
 
-  const scopeLabel = searching
-    ? "Search results across your Library"
-    : filter.folderId === ""
-      ? "Library"
-      : folderNameOf(filter.folderId ?? "");
+  // The Head names the scope ONCE (DESIGN.md rule 7): the place, or the
+  // folder being looked at inside it.
+  const headTitle =
+    !searching && filter.folderId !== "" && filter.folderId !== null
+      ? folderNameOf(filter.folderId)
+      : PLACE_TITLE[filter.place];
+
+  // The Refine chips: every active facet, removable in place (rule 2).
+  const refineChips: RefineChip[] = [];
+  if (filter.kind !== "all") {
+    refineChips.push({
+      id: "kind",
+      label: KIND_TABS.find((t) => t.value === filter.kind)?.label ?? filter.kind,
+      onRemove: () => patch({ kind: "all" }),
+    });
+  }
+  if (filter.source !== "all") {
+    refineChips.push({ id: "source", label: filter.source, onRemove: () => patch({ source: "all" }) });
+  }
+  if (filter.accountId !== ACCOUNT_ANY) {
+    const account = accountOptions.find((a) => a.id === filter.accountId);
+    refineChips.push({
+      id: "client",
+      label: filter.accountId === ACCOUNT_NONE ? "No client" : account ? accountName(account) : "Client",
+      onRemove: () => patch({ accountId: ACCOUNT_ANY }),
+    });
+  }
 
   return (
     <div
@@ -273,100 +414,98 @@ export function BrowseSection({
       }}
       onDrop={onDrop}
     >
-      <div className="os-files-toolbar" role="toolbar" aria-label="Filter files">
-        <div className="os-files-search">
-          <Input
-            id="files-search"
-            label="Search files"
-            placeholder="Search your Library"
-            value={filter.search}
-            onChange={(search) => patch({ search })}
-          />
-        </div>
-        <div className="os-files-kinds" role="radiogroup" aria-label="Kind">
-          {KIND_TABS.map((tab) => (
-            <button
-              key={tab.value}
-              type="button"
-              role="radio"
-              aria-checked={filter.kind === tab.value}
-              className="os-files-kind"
-              title={tab.value === "all" ? "every kind" : tab.value}
-              onClick={() => patch({ kind: tab.value })}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        <Select
-          id="files-source"
-          label="Source"
-          value={filter.source}
-          onChange={(source) => patch({ source: source as FilesFilter["source"] })}
+      {/* THE HEAD IS THE WHOLE TOP (DESIGN.md rules 1-3): the scope's name
+          and count, the quiet sort, one Refine affordance, the Upload
+          primary. The nine-control strip this replaces is the reason rule 2
+          exists. */}
+      <Head title={headTitle} meta={placeCount}>
+        <SortControl
+          ascending={filter.sortAscending}
+          onToggle={() => patch({ sortAscending: !filter.sortAscending })}
+        />
+        <Refine
+          search={filter.search}
+          onSearch={(search) => patch({ search })}
+          chips={refineChips}
+          label="Refine files"
         >
-          <option value="all">Any source</option>
-          {SOURCE_VALUES.map((source) => (
-            <option key={source} value={source}>
-              {source}
-            </option>
-          ))}
-        </Select>
-        {/* THE CLIENT FILTER (epic memql#4800, D5). Client-side over the
-            seeded snapshot like every other facet here -- a row promoted
-            before `accountIds` existed has no key at all, and only the fold
-            reads absence and the empty list as one answer.
-
-            "No client" is a first-class option rather than an absence,
-            because "what still needs filing" is the question somebody asks
-            while they are filing, and it is the only one the other two
-            cannot express. */}
-        <Select
-          id="files-account"
-          label="Client"
-          value={filter.accountId}
-          onChange={(accountId) => patch({ accountId })}
-        >
-          <option value={ACCOUNT_ANY}>Any client</option>
-          <option value={ACCOUNT_NONE}>No client</option>
-          {accountOptions.map((account) => (
-            <option key={account.id} value={account.id}>
-              {accountIsArchived(account) ? `${accountName(account)} (archived)` : accountName(account)}
-            </option>
-          ))}
-        </Select>
-        <Check checked={filter.showArchived} onChange={(showArchived) => patch({ showArchived })}>
-          Archived
-        </Check>
-        <Button
-          onClick={() => patch({ sortAscending: !filter.sortAscending })}
-          ariaLabel={filter.sortAscending ? "Sorted oldest first" : "Sorted newest first"}
-        >
-          <ArrowUpDown size={13} aria-hidden /> {filter.sortAscending ? "Oldest" : "Newest"}
-        </Button>
+          <div className="os-files-kinds" role="radiogroup" aria-label="Kind">
+            {KIND_TABS.map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                role="radio"
+                aria-checked={filter.kind === tab.value}
+                className="os-files-kind"
+                onClick={() => patch({ kind: tab.value })}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <Select
+            id="files-source"
+            label="Source"
+            value={filter.source}
+            onChange={(source) => patch({ source: source as FilesFilter["source"] })}
+          >
+            <option value="all">Any source</option>
+            {SOURCE_VALUES.map((source) => (
+              <option key={source} value={source}>
+                {source}
+              </option>
+            ))}
+          </Select>
+          {/* THE CLIENT FILTER (epic memql#4800, D5). Client-side over the
+              seeded snapshot like every other facet here -- a row promoted
+              before `accountIds` existed has no key at all, and only the fold
+              reads absence and the empty list as one answer. "No client" is a
+              first-class option because "what still needs filing" is the one
+              question the other two cannot express. */}
+          <Select
+            id="files-account"
+            label="Client"
+            value={filter.accountId}
+            onChange={(accountId) => patch({ accountId })}
+          >
+            <option value={ACCOUNT_ANY}>Any client</option>
+            <option value={ACCOUNT_NONE}>No client</option>
+            {accountOptions.map((account) => (
+              <option key={account.id} value={account.id}>
+                {accountIsArchived(account) ? `${accountName(account)} (archived)` : accountName(account)}
+              </option>
+            ))}
+          </Select>
+        </Refine>
         <Button tone="primary" onClick={() => pickRef.current?.click()}>
           <Upload size={13} aria-hidden /> Upload
         </Button>
-        <input
-          ref={pickRef}
-          type="file"
-          multiple
-          hidden
-          aria-label="Pick files to upload"
-          onChange={(event) => {
-            const files = Array.from(event.target.files ?? []);
-            event.target.value = "";
-            if (files.length > 0) uploadFiles(files, destinationFolderId);
-          }}
-        />
-      </div>
+      </Head>
+      <input
+        ref={pickRef}
+        type="file"
+        multiple
+        hidden
+        aria-label="Pick files to upload"
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          event.target.value = "";
+          if (files.length > 0) uploadFiles(files, destinationFolderId);
+        }}
+      />
 
       <div className="os-files-body">
-        <nav className="os-files-rail" aria-label="Folders">
+        {/* THE RAIL'S THREE PLACES (epic memql#4842, #4846): Library is what
+            you have, Desktop is what sits on your desks, Archive is what you
+            archived. Only items PLACED on a desk appear under Desktop; only
+            archived rows under Archive -- the old show-archived checkbox is
+            what this replaces. */}
+        <nav className="os-files-rail" aria-label="Places and folders">
           <button
             type="button"
             className="os-files-node"
-            data-current={!searching && filter.folderId === "" ? true : undefined}
-            onClick={() => patch({ folderId: "", search: "" })}
+            data-current={!searching && filter.place === "library" && filter.folderId === "" ? true : undefined}
+            onClick={() => patch({ place: "library", folderId: "", search: "" })}
           >
             <HardDrive size={14} aria-hidden />
             <span className="os-files-node-name">Library</span>
@@ -378,9 +517,9 @@ export function BrowseSection({
               node={node}
               counts={counts}
               folderLinks={folderLinks}
-              currentId={searching ? null : filter.folderId}
+              currentId={searching || filter.place !== "library" ? null : filter.folderId}
               renamingFolderId={renamingFolderId}
-              onScope={(folderId) => patch({ folderId, search: "" })}
+              onScope={(folderId) => patch({ place: "library", folderId, search: "" })}
               onMenu={(x, y, menuNode) => {
                 // The menu positions inside THIS box, so viewport coords
                 // become box coords -- against the window frame they would
@@ -396,11 +535,87 @@ export function BrowseSection({
               onCancelRename={() => setRenamingFolderId("")}
             />
           ))}
+
+          <button
+            type="button"
+            className="os-files-node os-files-place"
+            data-current={!searching && filter.place === "desktop" && filter.folderId === "" ? true : undefined}
+            onClick={() => patch({ place: "desktop", folderId: "", search: "" })}
+          >
+            <Monitor size={14} aria-hidden />
+            <span className="os-files-node-name">Desktop</span>
+            <span className="os-files-node-count">{deskFileCount > 0 ? deskFileCount : ""}</span>
+          </button>
+          {deskFolders.map((shortcut) => (
+            <button
+              key={shortcut.folderId}
+              type="button"
+              className="os-files-node"
+              style={{ paddingInlineStart: "24px" }}
+              data-current={
+                !searching && filter.place === "desktop" && filter.folderId === shortcut.folderId
+                  ? true
+                  : undefined
+              }
+              onClick={() => patch({ place: "desktop", folderId: shortcut.folderId, search: "" })}
+            >
+              <Folder size={14} aria-hidden />
+              <span className="os-files-node-name">{folderNameOf(shortcut.folderId)}</span>
+              <span className="os-files-node-count">
+                {(counts.get(shortcut.folderId) ?? 0) > 0 ? counts.get(shortcut.folderId) : ""}
+              </span>
+            </button>
+          ))}
+
+          <button
+            type="button"
+            className="os-files-node os-files-place"
+            data-current={!searching && filter.place === "archive" && filter.folderId === "" ? true : undefined}
+            onClick={() => patch({ place: "archive", folderId: "", search: "" })}
+          >
+            <ArchiveGlyph size={14} aria-hidden />
+            <span className="os-files-node-name">Archive</span>
+            <span className="os-files-node-count">{archivedTotal > 0 ? archivedTotal : ""}</span>
+          </button>
+          {archivedFolders.map((folder) => (
+            <button
+              key={folder.id}
+              type="button"
+              className="os-files-node"
+              style={{ paddingInlineStart: "24px" }}
+              data-current={
+                !searching && filter.place === "archive" && filter.folderId === folder.id
+                  ? true
+                  : undefined
+              }
+              onClick={() => patch({ place: "archive", folderId: folder.id, search: "" })}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const rect = rootRef.current?.getBoundingClientRect();
+                setArchivedFolderMenu({
+                  x: event.clientX - (rect?.left ?? 0),
+                  y: event.clientY - (rect?.top ?? 0),
+                  folder,
+                });
+              }}
+            >
+              <Folder size={14} aria-hidden />
+              <span className="os-files-node-name">{folder.name}</span>
+              <span className="os-files-node-count">
+                {(archivedCounts.get(folder.id) ?? 0) > 0 ? archivedCounts.get(folder.id) : ""}
+              </span>
+            </button>
+          ))}
+
           <button
             type="button"
             className="os-files-node"
+            data-action
             disabled={connection === null}
-            onClick={() => void newFolderIn(searching ? "" : (filter.folderId ?? ""))}
+            onClick={() =>
+              void newFolderIn(searching || filter.place !== "library" ? "" : (filter.folderId ?? ""))
+            }
           >
             <FolderPlus size={14} aria-hidden />
             <span className="os-files-node-name">New folder</span>
@@ -412,9 +627,6 @@ export function BrowseSection({
         </nav>
 
         <div className="os-files-list">
-          <p className="os-files-scope os-caption" aria-live="off">
-            {scopeLabel}
-          </p>
           {artifacts.snapshot.error ? (
             <Notice
               tone="error"
@@ -435,7 +647,7 @@ export function BrowseSection({
               sentence={`Archive "${folderNameOf(pendingArchive)}" and its ${
                 planArchive(tree, content, pendingArchive).itemCount
               } items?`}
-              next="Everything inside archives too, children first. Nothing is deleted -- the archived filter brings it all back."
+              next="Everything inside archives too, children first. Nothing is deleted -- it all lives under Archive, where Restore puts it back."
             >
               <div className="os-files-confirm">
                 <Button tone="danger" onClick={() => void runFolderArchive(pendingArchive)}>
@@ -460,19 +672,25 @@ export function BrowseSection({
             <UploadPlaceholder key={task.id} task={task} />
           ))}
           <LiveList<ArtifactRow>
-            key={`${filter.folderId ?? "~"}|${filter.kind}|${filter.source}|${filter.accountId}|${filter.showArchived}|${filter.search}`}
+            key={`${filter.place}|${filter.folderId ?? "~"}|${filter.kind}|${filter.source}|${filter.accountId}|${filter.search}`}
             source={list}
             rowId={(r) => r.id}
             fingerprint={artifactFingerprint}
-            label={scopeLabel}
+            label={headTitle}
             emptyText={emptyText}
             renderRow={(row, tick) => (
               <FileLine
                 row={row}
                 tick={tick}
+                place={filter.place}
                 searching={searching}
                 folderNameOf={folderNameOf}
                 presence={presence}
+                deskIndex={
+                  filter.place === "desktop" && desksWithItems > 1
+                    ? (deskIndexByArtifactId.get(row.id) ?? null)
+                    : null
+                }
                 linkState={
                   row.kind === "file"
                     ? (linkByFileId.get(row.sourceConceptRef.split(":").pop() ?? "") ?? "")
@@ -506,22 +724,52 @@ export function BrowseSection({
           x={rowMenu.x}
           y={rowMenu.y}
           label="File"
+          entries={
+            rowMenu.row.archived
+              ? [
+                  {
+                    id: "restore",
+                    // The Bin's verb, kept verbatim (cohesion): one name for
+                    // one action wherever it appears.
+                    label: "Restore",
+                    disabled: connection === null,
+                    onSelect: () => void restoreOneRow(rowMenu.row),
+                  },
+                ]
+              : [
+                  {
+                    id: "archive",
+                    // "Move to Bin" rather than "Delete": the action's name has
+                    // to be what it DOES, and nothing here deletes. It keeps
+                    // that name through the whole flow, which is why the
+                    // confirm below says the same and the Bin says the item is
+                    // in it.
+                    label: "Move to Bin",
+                    disabled: connection === null,
+                    onSelect: () =>
+                      confirmBeforeArchive
+                        ? setRowArchive(rowMenu.row)
+                        : void archiveOneRow(rowMenu.row),
+                  },
+                ]
+          }
+          onClose={() => setRowMenu(null)}
+        />
+      ) : null}
+      {archivedFolderMenu !== null ? (
+        <ContextMenu
+          x={archivedFolderMenu.x}
+          y={archivedFolderMenu.y}
+          label="Archived folder"
           entries={[
             {
-              id: "archive",
-              // "Move to Bin" rather than "Delete": the action's name has to be
-              // what it DOES, and nothing here deletes. It keeps that name
-              // through the whole flow, which is why the confirm below says
-              // Archive and the Bin says the item is in it.
-              label: rowMenu.row.archived ? "Already in the Bin" : "Move to Bin",
-              disabled: connection === null || rowMenu.row.archived,
-              onSelect: () =>
-                confirmBeforeArchive
-                  ? setRowArchive(rowMenu.row)
-                  : void archiveOneRow(rowMenu.row),
+              id: "restore",
+              label: "Restore",
+              disabled: connection === null,
+              onSelect: () => void restoreFolderRow(archivedFolderMenu.folder.id),
             },
           ]}
-          onClose={() => setRowMenu(null)}
+          onClose={() => setArchivedFolderMenu(null)}
         />
       ) : null}
       {rowArchive !== null ? (
@@ -770,9 +1018,11 @@ function RailNode({
 function FileLine({
   row,
   tick,
+  place,
   searching,
   folderNameOf,
   presence,
+  deskIndex,
   linkState,
   open,
   onToggle,
@@ -780,9 +1030,13 @@ function FileLine({
 }: {
   row: ArtifactRow;
   tick: "added" | "updated" | null;
+  place: FilesPlace;
   searching: boolean;
   folderNameOf: (folderId: string) => string;
   presence: (workerId: string) => { name?: string; online: boolean } | null;
+  /** Which desk holds this row (0-based), when more than one desk holds
+   *  items; null renders nothing. */
+  deskIndex: number | null;
   /** The origin link state (epic memql#4783), or "" for a file with no origin
    *  to link to -- which is most of them, and renders nothing. */
   linkState: LinkState | "";
@@ -842,6 +1096,7 @@ function FileLine({
       {searching && row.folderId !== "" ? (
         <Chip tone="muted">in {folderNameOf(row.folderId)}</Chip>
       ) : null}
+      {deskIndex !== null ? <Chip tone="muted">Desk {deskIndex + 1}</Chip> : null}
       {row.labels.slice(0, 2).map((label) => (
         <Chip key={label} tone="neutral">
           {label}
@@ -861,7 +1116,10 @@ function FileLine({
           {LINK_LABEL[linkState]}
         </Chip>
       )}
-      {row.archived ? <Chip tone="muted">archived</Chip> : null}
+      {/* In the Archive place every row is archived -- the chip would be
+          furniture (DESIGN.md rule 7). It renders only where it is news:
+          an archived row surfacing in a search. */}
+      {row.archived && place !== "archive" ? <Chip tone="muted">archived</Chip> : null}
     </ListRow>
     </div>
   );

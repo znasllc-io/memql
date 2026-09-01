@@ -12,6 +12,7 @@ import { FilesApp } from "../../src/apps/files/FilesApp";
 import type { FilesSettings } from "../../src/apps/files/settings";
 import { DEFAULT_FILES_SETTINGS } from "../../src/apps/files/settings";
 import type { UploadProvider } from "../../src/items/upload";
+import type { DesktopItem } from "../../src/system/desktop";
 
 // The Files app's test harness.
 //
@@ -167,20 +168,72 @@ export const NO_UPLOADS: UploadProvider = {
   upload: () => ({ done: new Promise(() => {}), abort: () => {} }),
 };
 
+/** A seeded desktop document, for tests exercising the Desktop place: one
+ *  desk carrying the given file icons and folder shortcuts. */
+export function deskDocumentWith(desk: {
+  files?: Array<{ artifactId: string; title: string }>;
+  folders?: Array<{ folderId: string; name: string }>;
+}) {
+  const items: Record<string, DesktopItem> = {};
+  const positions: Record<string, { col: number; row: number }> = {};
+  let at = 0;
+  for (const file of desk.files ?? []) {
+    const id = `seed-file-${at}`;
+    items[id] = {
+      kind: "file",
+      id,
+      artifactId: file.artifactId,
+      title: file.title,
+      fileKind: "file",
+      source: "uploaded",
+    };
+    positions[id] = { col: at, row: 0 };
+    at += 1;
+  }
+  for (const folder of desk.folders ?? []) {
+    const id = `seed-folder-${at}`;
+    items[id] = { kind: "folder", id, folderId: folder.folderId, name: folder.name };
+    positions[id] = { col: at, row: 0 };
+    at += 1;
+  }
+  const document = {
+    version: 1 as const,
+    desks: [{ id: "desk-seeded", createdBy: "user" as const }],
+    activeDeskId: "desk-seeded",
+    surfaces: { "desk-seeded": { items, positions } },
+    dock: { pinned: [] },
+    themePack: "graphite",
+    installedPacks: [],
+  };
+  return { load: () => document, save: () => {} };
+}
+
 /** Render the Files app inside the providers it really mounts under. */
 export async function renderFiles(opts: {
   section?: string;
   settings?: Partial<FilesSettings>;
   uploads?: UploadProvider;
+  /** Seed the shell's desktop, for the Desktop place. */
+  desk?: Parameters<typeof deskDocumentWith>[0];
+  /** A standing open intent, delivered as the window would deliver it. */
+  intent?: { id: string; payload: Record<string, unknown> };
+  consumeIntent?: (intentId: string) => void;
 } = {}) {
   const view = render(
     withSession(
-      <OsProvider registry={OS_REGISTRY} actorRole="owner" grid={{ cols: 8, rows: 5 }}>
+      <OsProvider
+        registry={OS_REGISTRY}
+        actorRole="owner"
+        grid={{ cols: 8, rows: 5 }}
+        {...(opts.desk ? { store: deskDocumentWith(opts.desk) } : {})}
+      >
         <MachinesProvider>
           <FilesApp
             sectionId={opts.section ?? "browse"}
             navigate={() => {}}
             askContext={() => {}}
+            intent={opts.intent}
+            consumeIntent={opts.consumeIntent ?? (() => {})}
             store={memSettingsStore(opts.settings ?? {})}
             uploads={opts.uploads ?? NO_UPLOADS}
           />

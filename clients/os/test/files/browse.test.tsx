@@ -89,12 +89,15 @@ describe("the live list and its cue", () => {
     await renderFiles();
     expect(screen.getByText(/Nothing in your Library yet/)).toBeTruthy();
 
-    const search = screen.getByLabelText("Search files") as HTMLInputElement;
+    // The search lives behind the Refine affordance now (DESIGN.md rule 2):
+    // collapsed over an empty library, one click away when asked for.
+    await click(screen.getByRole("button", { name: "Refine files" }));
+    const search = screen.getByPlaceholderText("Search") as HTMLInputElement;
     fireEvent.change(search, { target: { value: "nope" } });
     expect(screen.getByText(/Nothing matches/)).toBeTruthy();
   });
 
-  it("excludes archived rows by default and marks them under the toggle", async () => {
+  it("keeps archived rows out of the Library and lists them under the Archive place", async () => {
     h.connection = fakeConnection({
       artifacts: [
         artifactRow({ id: "a-live", title: "live.bin" }),
@@ -103,9 +106,12 @@ describe("the live list and its cue", () => {
     });
     await renderFiles();
     expect(screen.queryByText(/old\.zip/)).toBeNull();
-    await click(screen.getByLabelText("Archived"));
+    await click(screen.getByRole("button", { name: /^Archive/ }));
     const row = screen.getByRole("button", { name: /old\.zip/ });
-    expect(within(row).getByText("archived")).toBeTruthy();
+    // No "archived" chip inside the Archive place -- every row there is,
+    // and a chip stating the place would be furniture (rule 7).
+    expect(within(row).queryByText("archived")).toBeNull();
+    expect(screen.queryByText(/live\.bin/)).toBeNull();
   });
 });
 
@@ -138,7 +144,12 @@ describe("the folder rail", () => {
     fireEvent.contextMenu(screen.getByRole("button", { name: /Client videos/ }));
     await click(screen.getByRole("menuitem", { name: "Archive" }));
     expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
-    await click(screen.getByRole("button", { name: "Archive" }));
+    // The rail's Archive PLACE is also a button named Archive now, so the
+    // confirm's own action is reached inside its notice.
+    const confirm = screen
+      .getByText(/Archive "Client videos" and its 2 items\?/)
+      .closest(".os-notice") as HTMLElement;
+    await click(within(confirm).getByRole("button", { name: "Archive" }));
     // Contents first, then the folder -- the children-first walk, as real
     // rendered calls.
     expect(connection.callsNamed("archiveArtifact")).toEqual([

@@ -1,14 +1,24 @@
 import { CONTENT_KINDS, SOURCE_VALUES } from "./concepts";
 import { artifactName, isContentKind, type ArtifactRow } from "./rows";
 
-// The list derivation (design D1): kind / source / archived / search / folder
-// scope / sort, as ONE pure fold over the artifacts snapshot.
+// The list derivation (design D1, reshaped by epic memql#4842): place / kind /
+// source / search / folder scope / sort, as ONE pure fold over the artifacts
+// snapshot.
 //
 // CLIENT-SIDE ON PURPOSE. The owner-scoped set is small, and `folderId == ""`
 // cannot match pre-field rows server-side -- a row promoted before folders
 // exist has no member at all, and only a client-side fold reads absence and
 // the empty string as the same answer: the root. (The `archived != true`
 // lesson, applied to the next field.)
+//
+// ===========================================================================
+// PLACES, NOT A CHECKBOX (epic memql#4842, #4846)
+// ===========================================================================
+// The rail offers three places and the fold answers for the one being looked
+// at. Library is what you have; Desktop is the subset sitting on your desks
+// (an id-set handed in by the caller, because desks are shell state and this
+// module stays pure); Archive is what you archived. The old `showArchived`
+// toggle is gone -- archived rows have a place now, not a filter.
 
 /** No client constraint. */
 export const ACCOUNT_ANY = "all";
@@ -18,17 +28,40 @@ export const ACCOUNT_NONE = "none";
 export type KindFilter = "all" | (typeof CONTENT_KINDS)[number];
 export type SourceFilter = "all" | (typeof SOURCE_VALUES)[number];
 
+export const FILES_PLACES = ["library", "desktop", "archive"] as const;
+export type FilesPlace = (typeof FILES_PLACES)[number];
+
+export function isFilesPlace(value: unknown): value is FilesPlace {
+  return (FILES_PLACES as readonly unknown[]).includes(value);
+}
+
+/** What the desk holds, folded from shell state by the caller. */
+export interface DeskMembership {
+  /** Artifact ids of loose desk file icons (uploads in flight excluded). */
+  fileArtifactIds: ReadonlySet<string>;
+  /** Library folder ids with a shortcut on any desk. */
+  folderIds: ReadonlySet<string>;
+}
+
+export const EMPTY_DESK: DeskMembership = {
+  fileArtifactIds: new Set(),
+  folderIds: new Set(),
+};
+
 export interface FilesFilter {
+  /** Which of the rail's three places is being looked at. */
+  place: FilesPlace;
   /**
-   * The folder scope: "" = the root, an id = that folder, null = everywhere.
-   * A non-empty search widens to everywhere on its own -- someone searching
-   * is asking about their Library, not about the folder they happen to be in.
+   * The folder scope: "" = the place's own root, an id = that folder, null =
+   * everywhere. A non-empty search widens to the whole PLACE on its own --
+   * someone searching is asking about the place, not about the folder they
+   * happen to be in. In the Archive place "" already means everything
+   * archived: archived rows are a flat population with folders as an
+   * optional narrowing, not a tree with a root.
    */
   folderId: string | null;
   kind: KindFilter;
   source: SourceFilter;
-  /** Archived rows are EXCLUDED by default and visibly marked when shown. */
-  showArchived: boolean;
   /**
    * The client scope (epic memql#4800): "all" = no account constraint,
    * "none" = only rows with NO client, an id = rows labelled with it.
@@ -44,10 +77,10 @@ export interface FilesFilter {
 }
 
 export const DEFAULT_FILTER: FilesFilter = {
+  place: "library",
   folderId: "",
   kind: "all",
   source: "all",
-  showArchived: false,
   accountId: ACCOUNT_ANY,
   search: "",
   sortAscending: false,
@@ -61,16 +94,47 @@ function matchesSearch(row: ArtifactRow, needle: string): boolean {
   return row.labels.some((label) => label.toLowerCase().includes(q));
 }
 
-export function applyFilters(rows: readonly ArtifactRow[], filter: FilesFilter): ArtifactRow[] {
+/** Whether a row belongs to the Desktop place's population at all: a loose
+ *  desk file, or a file inside a folder that has a desk shortcut. */
+function inDesktop(row: ArtifactRow, desk: DeskMembership): boolean {
+  return desk.fileArtifactIds.has(row.id) || desk.folderIds.has(row.folderId);
+}
+
+export function applyFilters(
+  rows: readonly ArtifactRow[],
+  filter: FilesFilter,
+  desk: DeskMembership = EMPTY_DESK,
+): ArtifactRow[] {
   const searching = filter.search.trim() !== "";
   const kept = rows.filter((row) => {
     // The records lens never renders here, under ANY combination (design D2).
     if (!isContentKind(row.kind)) return false;
-    if (row.archived && !filter.showArchived) return false;
+
+    // The place decides the population before any facet narrows it.
+    if (filter.place === "archive") {
+      if (!row.archived) return false;
+      if (!searching && filter.folderId !== null && filter.folderId !== "" && row.folderId !== filter.folderId) {
+        return false;
+      }
+    } else if (filter.place === "desktop") {
+      if (row.archived) return false;
+      if (searching) {
+        if (!inDesktop(row, desk)) return false;
+      } else if (filter.folderId === "" || filter.folderId === null) {
+        // The Desktop root mirrors the desk: loose file icons. A desk
+        // folder's contents live one click away, exactly as on the desk.
+        if (!desk.fileArtifactIds.has(row.id)) return false;
+      } else if (row.folderId !== filter.folderId) {
+        return false;
+      }
+    } else {
+      if (row.archived) return false;
+      if (!searching && filter.folderId !== null && row.folderId !== filter.folderId) return false;
+    }
+
     if (filter.kind !== "all" && row.kind !== filter.kind) return false;
     if (filter.source !== "all" && row.source !== filter.source) return false;
     if (!matchesSearch(row, filter.search)) return false;
-    if (!searching && filter.folderId !== null && row.folderId !== filter.folderId) return false;
     // THE CLIENT SCOPE READS ABSENCE AND THE EMPTY LIST AS ONE ANSWER, and it
     // has to: every row promoted before `accountIds` existed carries no key at
     // all, so a filter that distinguished them would hide the entire
