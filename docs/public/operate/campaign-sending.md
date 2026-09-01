@@ -480,6 +480,80 @@ everyone's. The tie exists so a rollup can answer "what have we sent for this
 client", and so the identity picker can prefill — not so that a campaign can
 be hidden.
 
+### Adding a sending identity
+
+Creating the row is the last step, not the first. **The row is a declaration
+that a mailbox may be used; it is not what makes the mailbox usable.** Three
+of the four steps below happen in somebody else's tenant, and the engine
+cannot check any of them — the honest verification is a real send, and the
+honest failure report is Graph's own 403 landing on the campaign's
+`lastError`.
+
+1. **Create the mailbox** in the Microsoft 365 tenant that hosts your sending
+   domain — the tenant `MEMQL_EMAIL_AZURE_TENANT_ID` names, which is not
+   necessarily the tenant your Azure subscription lives in. A token issued for
+   the wrong tenant is a 404 on a mailbox that plainly exists.
+
+2. **Add it to the mail-enabled security group behind your
+   `ApplicationAccessPolicy`.** This is the step that is easy to miss and
+   silent when missed, because everything else works: the row saves, the
+   picker offers the mailbox, the campaign starts, and every message fails at
+   the provider.
+
+   ```powershell
+   Connect-ExchangeOnline -Organization <mailbox-tenant-domain>
+   Add-DistributionGroupMember -Identity "memql-mail-senders@<domain>" `
+     -Member "news@<domain>"
+
+   # Verify BOTH directions. A policy that grants is not evidence it denies,
+   # and replication can take ~30 minutes.
+   Test-ApplicationAccessPolicy -Identity "news@<domain>"          -AppId <client-id>
+   Test-ApplicationAccessPolicy -Identity "<a-real-person>@<domain>" -AppId <client-id>
+   # want: Granted, then Denied.
+   ```
+
+   If you have no such group yet, the app is still scoped **tenant-wide** —
+   `Mail.Send` (Application) is literally "Send mail as any user". Create the
+   group and the policy first:
+   [`Mail.Send` is tenant-wide until you scope
+   it](azure-entry-install.md#mailsend-is-tenant-wide-until-you-scope-it).
+
+3. **Publish SPF, DKIM and DMARC for the new mailbox's domain**, if it is a
+   domain this deployment has not sent from before. A new identity on an
+   already-authenticated domain inherits its records and needs nothing here.
+   A new *domain* is a new reputation: see [SPF / DKIM alignment is
+   structural](#spf--dkim-alignment-is-structural), and expect to
+   [warm it](#warming-a-new-sending-domain) — the ramp keys on the identity's
+   normalized address, so a new mailbox starts its own ramp rather than
+   inheriting an established one's rate.
+
+4. **Create the row.**
+
+   ```
+   mutation createSenderIdentity(
+     address:   "news@<domain>",
+     fromName:  "Acme News",
+     replyTo:   "hello@<domain>",
+     accountId: "<account id>"
+   )
+   ```
+
+   `address` is normalized lowercase and is the reputation and warmup key, so
+   two spellings of one mailbox would split its ramp in half. `fromName` is
+   required — a From with no phrase shows the raw mailbox to every recipient.
+
+**`Mail.Read` matters too, and only for the default mailbox.** [The Graph
+mailbox reader](#the-graph-mailbox-reader) reads `MEMQL_EMAIL_SENDER`'s inbox
+for delivery reports, so that mailbox needs `Mail.Read` under the *same*
+policy group. Identity mailboxes do not need it yet: bounces for a send from
+`news@` come back to `news@`, and the reader does not walk them, so a
+non-default identity's hard bounces are not yet feeding suppression. Plan
+around that until it does — the group membership is the only thing to change
+when it lands.
+
+**Retiring one is `status: "disabled"`, never a delete.** See
+[`disabled` is how you retire a mailbox](#disabled-is-how-you-retire-a-mailbox).
+
 ---
 
 ## Importing recipients
