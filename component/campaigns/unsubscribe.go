@@ -188,27 +188,40 @@ func (h *UnsubscribeHandler) servePost(rw http.ResponseWriter, r *http.Request) 
 // The recipient row is read FIRST because it is the only place the
 // address lives -- the token deliberately does not carry it, so a leaked
 // link discloses no mailbox.
+//
+// # ONE read, and it is no longer conditional on the campaign
+//
+// This used to resolve the address by reading the CAMPAIGN, taking its
+// audience, and walking that roster for the id -- because no by-id read
+// existed. It cost a whole-roster walk per click, and it had a failure mode
+// that mattered more: the address was resolvable only when the campaign was.
+// A campaign the operator deleted, or one of the SYNTHETIC ids the
+// single-recipient send stamps, left addr empty -- so the click fell to the
+// row-level opt-out and NEVER REACHED THE CLUSTER SUPPRESSION LIST. The
+// person was removed from the audience that mailed them and remained
+// mailable by every other one, which is the exact thing the cluster list
+// exists to prevent, reached silently, on the path a regulator looks at.
+//
+// `recipientById` carries the same composite tier every other read in the
+// domain does, so the address still comes back only for the owner the SIGNED
+// TOKEN names, and campaignId stays what it always was here: provenance on
+// the suppression row, never a lookup key.
 func (h *UnsubscribeHandler) suppress(ctx context.Context, ownerUserID, recipientID, campaignID string) error {
 	ownerCtx := ownerActorContext(ctx, ownerUserID)
 
-	// Resolve the address. The campaign's audience is the roster to look
-	// in; reading the campaign first keeps this to the two owned-tier
-	// queries the domain already declares rather than adding a
-	// recipient-by-id read whose only caller would be this line.
 	var addr string
-	if campaignID != "" {
-		if campaign, found, err := h.store.CampaignByID(ownerCtx, campaignID); err == nil && found {
-			if rec, ok, rerr := h.store.RecipientByID(ownerCtx, campaign.AudienceID, recipientID); rerr == nil && ok {
-				addr = rec.Email
-			}
-		}
+	if rec, found, err := h.store.RecipientByID(ownerCtx, recipientID); err == nil && found {
+		addr = rec.Email
+	} else if err != nil {
+		h.logger.Warn("campaigns: could not read the recipient behind a valid unsubscribe token",
+			"campaign", campaignID, "error", err)
 	}
 	if addr == "" {
-		// The recipient row is gone, or the campaign is. Nothing further
-		// is possible: with no address there is no digest, and the
-		// cluster list is keyed by digest. The row-level opt-out below
-		// still runs, so the person is removed from the audience that
-		// mailed them.
+		// The recipient row is gone, or it is not readable as the owner the
+		// token names. Nothing further is possible: with no address there is
+		// no digest, and the cluster list is keyed by digest. The row-level
+		// opt-out below still runs, so the person is removed from the
+		// audience that mailed them.
 		if err := h.store.SetRecipientSubscription(ownerCtx, recipientID, "unsubscribed", h.now().UTC()); err != nil {
 			return err
 		}

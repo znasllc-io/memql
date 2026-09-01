@@ -163,6 +163,23 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 			return rowsEnvelope([]map[string]any{row}), nil
 		}
 		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query recipientById"):
+		// MODELS THE TIER, which is the whole point of the query: the row
+		// comes back only to its owner or a cluster owner. A fake that
+		// answered regardless would make "a recipient the caller does not
+		// own is not found" untestable while looking covered -- and that
+		// sentence is the entire safety argument for exposing an unscoped
+		// by-id read.
+		if ac == nil || (ac.UserId != testOwner && !ac.IsClusterOwner()) {
+			return rowsEnvelope(nil), nil
+		}
+		wanted := argOf(q, "recipientId")
+		for _, row := range e.roster {
+			if memql.BareShortId(str(row, "id")) == wanted {
+				return rowsEnvelope([]map[string]any{row}), nil
+			}
+		}
+		return rowsEnvelope(nil), nil
 	case strings.HasPrefix(q, "query emailRuleById"):
 		if row, ok := e.emailRules[argOf(q, "emailRuleId")]; ok {
 			return rowsEnvelope([]map[string]any{row}), nil

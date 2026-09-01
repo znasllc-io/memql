@@ -420,17 +420,29 @@ func (s *Store) RosterPage(ctx context.Context, audienceID, cursor string) ([]Re
 	}
 	out := make([]Recipient, 0, len(rows))
 	for _, r := range rows {
-		canonical := str(r, "id")
-		out = append(out, Recipient{
-			ID:                 bare(canonical),
-			CanonicalID:        canonical,
-			Email:              str(r, "email"),
-			DisplayName:        str(r, "displayName"),
-			SubscriptionStatus: str(r, "subscriptionStatus"),
-			Fields:             objectField(r, "fields"),
-		})
+		out = append(out, recipientFromRow(r))
 	}
 	return out, next, nil
+}
+
+// recipientFromRow projects one recipientFull row.
+//
+// Shared by the roster walk and the by-id read rather than written twice: the
+// two used to be the same code path (the by-id read WAS a roster walk), and
+// splitting them without sharing the projection is how one of them comes to
+// carry `fields` and the other not -- which would make a merge tag resolve on
+// the campaign path and render empty on the single-recipient one, with
+// nothing anywhere saying why.
+func recipientFromRow(r map[string]any) Recipient {
+	canonical := str(r, "id")
+	return Recipient{
+		ID:                 bare(canonical),
+		CanonicalID:        canonical,
+		Email:              str(r, "email"),
+		DisplayName:        str(r, "displayName"),
+		SubscriptionStatus: str(r, "subscriptionStatus"),
+		Fields:             objectField(r, "fields"),
+	}
 }
 
 // Roster reads the whole audience by walking every page. OWNED tier.
@@ -728,6 +740,19 @@ type Delivery struct {
 	SentAt        time.Time
 	Attempts      int
 	NextAttemptAt time.Time
+
+	// EmailRuleID names the event rule that produced this send, when one did
+	// (memql#4829). EMPTY on every ordinary campaign delivery, which is the
+	// overwhelming majority -- so it is rendered only when set, like
+	// SkipReason and LastError beside it.
+	//
+	// It exists because "which rule mailed this person" is the first question
+	// anybody asks about automated mail, and the campaign id alone cannot
+	// answer it: a rule's sends carry no campaign of their own. Threading it
+	// as far as the builtin's reply and no further -- which is where it sat
+	// until the concept gained the field -- meant the answer existed for the
+	// length of one HTTP response.
+	EmailRuleID string
 }
 
 // RecordDelivery writes the ledger row. OWNED tier: issue under the
@@ -744,6 +769,9 @@ func (s *Store) RecordDelivery(ctx context.Context, d Delivery) error {
 	}
 	if d.SkipReason != "" {
 		args = append(args, arg{"skipReason", d.SkipReason})
+	}
+	if d.EmailRuleID != "" {
+		args = append(args, arg{"emailRuleId", d.EmailRuleID})
 	}
 	if d.LastError != "" {
 		args = append(args, arg{"lastError", truncateError(d.LastError)})
@@ -1012,37 +1040,6 @@ func libraryFileIDFromRef(ref string) (string, bool) {
 	return id, id != ""
 }
 
-// AudienceIDs lists the caller's audiences, newest first. COMPOSITE tier.
-//
-// One caller, and it is the fallback half of sendToRecipient's recipient
-// search -- see that file for why a search is needed at all. Bounded by the
-// query's own `paginate 50` and NOT walked with a cursor, deliberately: the
-// caller of this is already in a bounded scan that refuses past its cap, and
-// paging further would turn a bounded fallback into an unbounded one.
-func (s *Store) AudienceIDs(ctx context.Context) ([]string, error) {
-	rows, err := s.rows(ctx, "query audiences()")
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(rows))
-	for _, r := range rows {
-		if audienceID := bare(str(r, "id")); audienceID != "" {
-			out = append(out, audienceID)
-		}
-	}
-	return out, nil
-}
-
-// EmailRuleAudience reads which audience an event-email rule mails, or "" for
-// a rule in one of the other recipient modes. COMPOSITE tier.
-func (s *Store) EmailRuleAudience(ctx context.Context, emailRuleID string) (string, error) {
-	rows, err := s.rows(ctx, call("query", "emailRuleById", arg{"emailRuleId", emailRuleID}))
-	if err != nil || len(rows) == 0 {
-		return "", err
-	}
-	return bare(str(rows[0], "audienceId")), nil
-}
-
 // EngagementEvent is one recorded open or click (memql#4823).
 type EngagementEvent struct {
 	CampaignID string
@@ -1079,19 +1076,34 @@ func (s *Store) RecordEngagementEvent(ctx context.Context, e EngagementEvent) er
 	return s.execServerOnly(ctx, call("mutation", "recordEngagementEvent", args...))
 }
 
-// RecipientByID reads one recipient. OWNED tier -- the unsubscribe
-// endpoint uses it to resolve the address the signed token names.
-func (s *Store) RecipientByID(ctx context.Context, audienceID, recipientID string) (Recipient, bool, error) {
-	roster, err := s.Roster(ctx, audienceID)
-	if err != nil {
+// RecipientByID reads ONE recipient by its own id. COMPOSITE tier.
+//
+// A single-row read through `recipientById`, which is what it should always
+// have been. It used to walk the whole audience roster and match in Go,
+// because no by-id query existed and every read on v1:campaigns:recipient was
+// audience-scoped -- so a caller that held a recipient id and nothing else
+// had to find the audience first. That cost the unsubscribe endpoint a
+// roster walk per click, and it cost the single-recipient send a bounded
+// scan across the caller's audiences that REFUSED past its bound: a correct
+// answer that gets slower as an operator succeeds, and that gives up at
+// exactly the point somebody has enough audiences to care.
+//
+// THE TIER CONJUNCT IS WHAT MAKES AN UNSCOPED BY-ID READ SAFE, and it is the
+// reason this can drop the audience argument rather than merely hide it. The
+// query gates on (ownerUserId==actor.userId || actor.isClusterOwner==true),
+// so a recipient the caller does not own is simply NOT FOUND -- the same
+// answer campaignById gives, from the same predicate. The id is not a
+// capability, and passing an audience alongside it never made it one; the
+// audience was a search key, not a check.
+//
+// `false` therefore means both "no such row" and "not yours", which is the
+// correct answer for both.
+func (s *Store) RecipientByID(ctx context.Context, recipientID string) (Recipient, bool, error) {
+	rows, err := s.rows(ctx, call("query", "recipientById", arg{"recipientId", recipientID}))
+	if err != nil || len(rows) == 0 {
 		return Recipient{}, false, err
 	}
-	for _, r := range roster {
-		if r.ID == recipientID {
-			return r, true, nil
-		}
-	}
-	return Recipient{}, false, nil
+	return recipientFromRow(rows[0]), true, nil
 }
 
 // --- plumbing -----------------------------------------------------------

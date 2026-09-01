@@ -71,6 +71,50 @@ func TestTheUnsubscribeEndpointAppendsAWithdrawEvent(t *testing.T) {
 	}
 }
 
+// TestTheUnsubscribeEndpointResolvesTheAddressWithoutTheCampaign is the
+// correctness half of the by-id read (memql#4829's second gap, reached from
+// the other side).
+//
+// The address used to be resolved by reading the CAMPAIGN, taking its
+// audience and walking that roster. So a click on a link whose campaign no
+// longer resolves -- a deleted campaign, or one of the synthetic ids the
+// single-recipient send stamps -- left the address unknown, fell to the
+// row-level opt-out, and NEVER REACHED THE CLUSTER SUPPRESSION LIST. The
+// person was removed from the audience that mailed them and stayed mailable
+// by every other one: the exact thing the cluster list exists to prevent,
+// silently, on the path a regulator looks at.
+func TestTheUnsubscribeEndpointResolvesTheAddressWithoutTheCampaign(t *testing.T) {
+	engine := &fakeEngine{
+		// NO campaign row at all -- campaignById answers nothing.
+		roster: []map[string]any{recipientRow("r-1", "person@example.test", "subscribed")},
+	}
+	cfg := Config{UnsubscribeSecret: trackSecretA, UnsubscribeBaseURL: "https://api.example.test"}
+	h := NewUnsubscribeHandler(engine, cfg, quietLogger())
+
+	token, err := MintUnsubscribeToken(trackSecretA, testOwner, "r-1", "rule-1")
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	rw := httptest.NewRecorder()
+	h.ServeHTTP(rw, httptest.NewRequest(http.MethodPost, UnsubscribePath+"?token="+token, nil))
+	if rw.Code != http.StatusOK {
+		t.Fatalf("status = %d", rw.Code)
+	}
+
+	digest := EmailDigest("person@example.test")
+	if !wroteContaining(engine, "mutation recordSuppression", `emailDigest: "`+digest+`"`) {
+		t.Errorf("the address never reached the CLUSTER suppression list, so the person stays mailable "+
+			"by every other audience.\ncalls:\n%s", strings.Join(callsWithPrefix(engine, "mutation "), "\n"))
+	}
+	if len(callsWithPrefix(engine, "query audienceRosterForSend")) != 0 {
+		t.Error("the handler walked an audience roster to find one recipient. That cost a whole-roster " +
+			"read per click and was the reason the address was resolvable only when the campaign was")
+	}
+	if len(callsWithPrefix(engine, "query recipientById")) != 1 {
+		t.Error("the recipient was not read by id")
+	}
+}
+
 // TestFeedbackIngestAppendsBounceAndComplaintEvents is the provider's report.
 func TestFeedbackIngestAppendsBounceAndComplaintEvents(t *testing.T) {
 	cases := map[string]string{

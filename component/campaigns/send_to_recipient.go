@@ -31,37 +31,25 @@ import (
 // it. Every message this sends is to somebody already on a list, with copy
 // somebody already authored.
 //
-// # Resolving the recipient, and the gap this works around
+// # Resolving the recipient
 //
-// There is no `recipientById` query in the domain. Every read on
-// v1:campaigns:recipient is scoped by audience -- recipientsForAudience,
-// sendableRecipientsForAudience, audienceRosterForSend, audienceRosterSize --
-// because every existing caller already holds an audience id. This one does
-// not: the builtin's signature is (templateId, recipientId, senderIdentityId,
-// emailRuleId), fixed by the DSL.
+// One read: `recipientById`, under the caller's own actor. It is worth saying
+// what that replaced, because the shape recurs. Until the query existed every
+// read on v1:campaigns:recipient was audience-scoped -- every other caller
+// already held an audience id and this one does not -- so the audience had to
+// be DERIVED: from the emailRule when one named it, and otherwise by walking
+// the caller's audiences and refusing past a bound.
 //
-// So the audience is DERIVED, in two steps, and the order is by cost:
+// A bounded scan standing in for a by-id read is a correct answer that gets
+// SLOWER AS AN OPERATOR SUCCEEDS, and refuses at exactly the point somebody
+// has enough audiences to care. It also made the two paths behave
+// differently for no reason a caller could see: a rule-driven send resolved
+// in one read, the same call by hand took a roster walk per audience.
 //
-//	the rule's audience   emailRuleId names a v1:campaigns:emailRule whose
-//	                      audienceId is exactly the list the rule mails. This
-//	                      is the PRODUCTION path -- an event-email rule in
-//	                      recipientMode=audience -- and it is one extra read.
-//	a bounded scan        otherwise, walk the caller's own audiences and look
-//	                      for the recipient. This is the manual path (an
-//	                      operator or a test calling the builtin directly),
-//	                      and it is bounded rather than cheap.
-//
-// The scan is capped and REFUSES rather than silently answering "not found"
-// past its bound, because "we did not look far enough" and "that recipient
-// does not exist" are different facts and only one of them is the caller's
-// fault. A `recipientById` query would remove the scan entirely; adding one
-// is a DSL change and is recorded here as the fix rather than worked around
-// more cleverly.
-
-// sendToRecipientAudienceScanCap bounds the fallback scan. Ten audiences
-// covers an operator calling the builtin by hand; past it the honest answer
-// is a refusal naming the cheap path, not a longer walk.
-const sendToRecipientAudienceScanCap = 10
+// The tier conjunct on the query is what makes an unscoped by-id read safe --
+// a recipient the caller does not own is simply not found, which is the same
+// answer campaignById gives. The audience was never a check; it was a search
+// key, and there is nothing left on this path that needs the audience itself.
 
 func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	templateID := memql.BareShortId(strings.TrimSpace(argString(args, "templateId")))
@@ -94,9 +82,17 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 		return nil, fmt.Errorf("campaigns.sendToRecipient: template %q is not readable", templateID)
 	}
 
-	recipient, audienceID, err := w.resolveLoneRecipient(ctx, recipientID, emailRuleID)
+	recipient, found, err := w.store.RecipientByID(ctx, recipientID)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: %w", err)
+	}
+	if !found {
+		// "No such row" and "not yours" are one answer here, deliberately.
+		// The composite tier decides it inside the query, so this branch
+		// cannot distinguish them and must not try: an error that said which
+		// would be an existence oracle over every operator's recipients,
+		// reachable by anybody who can call the builtin.
+		return nil, fmt.Errorf("campaigns.sendToRecipient: recipient %q is not readable", recipientID)
 	}
 
 	// A SYNTHETIC campaign, and it is what makes every downstream piece work
@@ -114,7 +110,6 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 		ID:               emailRuleID,
 		OwnerUserID:      ownerUserID,
 		Name:             strings.TrimSpace(tmpl.Subject),
-		AudienceID:       audienceID,
 		TemplateID:       templateID,
 		SenderIdentityID: senderIdentityID,
 		Status:           "sending",
@@ -145,7 +140,7 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 		return nil, fmt.Errorf("campaigns.sendToRecipient: the suppression list could not be consulted, "+
 			"so this send is refused rather than made: %w", err)
 	} else if suppressed {
-		w.recordLoneDelivery(ctx, campaign, recipient, Delivery{
+		w.recordLoneDelivery(ctx, campaign, recipient, emailRuleID, Delivery{
 			Status: "skipped", SkipReason: sup.Reason,
 		})
 		return resultNode("campaignRecipientSend", map[string]any{
@@ -154,7 +149,7 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 		})
 	}
 	if recipient.SubscriptionStatus != "" && recipient.SubscriptionStatus != "subscribed" {
-		w.recordLoneDelivery(ctx, campaign, recipient, Delivery{
+		w.recordLoneDelivery(ctx, campaign, recipient, emailRuleID, Delivery{
 			Status: "skipped", SkipReason: recipient.SubscriptionStatus,
 		})
 		return resultNode("campaignRecipientSend", map[string]any{
@@ -188,7 +183,7 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 	cancel()
 
 	if sendErr != nil {
-		w.recordLoneDelivery(ctx, campaign, recipient, Delivery{
+		w.recordLoneDelivery(ctx, campaign, recipient, emailRuleID, Delivery{
 			Status: "failed", Attempts: 1, LastError: sendErr.Error(),
 		})
 		return nil, fmt.Errorf("campaigns.sendToRecipient: %w", sendErr)
@@ -196,7 +191,7 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 
 	w.reputation.observeAs(now, identity.Label, recipient.Email, "accepted")
 	w.noteActiveIdentity(identity.Label)
-	w.recordLoneDelivery(ctx, campaign, recipient, Delivery{
+	w.recordLoneDelivery(ctx, campaign, recipient, emailRuleID, Delivery{
 		Status: "sent", SentAt: now, Attempts: 1,
 	})
 	return resultNode("campaignRecipientSend", map[string]any{
@@ -208,70 +203,40 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 
 // recordLoneDelivery ledgers one outcome.
 //
+// # The rule id is stamped HERE, from an explicit argument
+//
+// On this path the synthetic campaign's id happens to BE the rule id, so
+// `d.CampaignID` would have carried it by accident. It is passed separately
+// anyway, because that coincidence is a property of one line in the caller
+// and not a thing the ledger should depend on: change what the synthetic
+// campaign id holds and the answer to "which rule mailed this person" would
+// change with it, silently and in a row somebody audits.
+//
+// It is left EMPTY by every other writer in this package, which is what makes
+// the field mean something -- an ordinary campaign delivery carrying a rule
+// id would be a false attribution, and there is no reader that could tell.
+//
+// # One row per (rule, recipient), and that is history rather than safety
+//
+// The delivery id derives from (campaignId, recipientId), so a rule that
+// fires twice for the same person writes a new VERSION of one row rather than
+// two rows. On the campaign path that derivation IS the idempotency
+// mechanism; here nothing reads the ledger to decide whether to send -- an
+// event triggered this, not a roster diff -- so what is lost is the earlier
+// send's record, not correctness. Worth knowing before treating this ledger
+// as a per-send log.
+//
 // Best-effort, and that asymmetry is the campaign path's: the message IS
 // sent, and a failed ledger write must not turn a delivered message into an
 // error the caller retries. Logged loudly instead, because an unrecorded send
 // is invisible everywhere else.
-func (w *Worker) recordLoneDelivery(ctx context.Context, campaign Campaign, recipient Recipient, d Delivery) {
+func (w *Worker) recordLoneDelivery(ctx context.Context, campaign Campaign, recipient Recipient, emailRuleID string, d Delivery) {
 	d.CampaignID = campaign.ID
 	d.RecipientID = recipient.ID
 	d.Email = recipient.Email
+	d.EmailRuleID = emailRuleID
 	if err := w.store.RecordDelivery(ctx, d); err != nil {
 		w.logger.Warn("campaigns.sendToRecipient: could not record the delivery outcome",
-			"recipient", recipient.ID, "status", d.Status, "error", err)
+			"recipient", recipient.ID, "rule", emailRuleID, "status", d.Status, "error", err)
 	}
-}
-
-// resolveLoneRecipient finds one recipient and the audience it belongs to.
-//
-// See the file doc for why this is a search at all. The rule's own audience
-// is tried first because it is the production path and costs one read; the
-// scan is the manual fallback and is bounded.
-func (w *Worker) resolveLoneRecipient(ctx context.Context, recipientID, emailRuleID string) (Recipient, string, error) {
-	if emailRuleID != "" {
-		audienceID, err := w.store.EmailRuleAudience(ctx, emailRuleID)
-		if err != nil {
-			return Recipient{}, "", err
-		}
-		if audienceID != "" {
-			r, found, err := w.store.RecipientByID(ctx, audienceID, recipientID)
-			if err != nil {
-				return Recipient{}, "", err
-			}
-			if found {
-				return r, audienceID, nil
-			}
-			return Recipient{}, "", fmt.Errorf(
-				"recipient %q is not in audience %q, which is the audience rule %q mails",
-				recipientID, audienceID, emailRuleID)
-		}
-	}
-
-	audiences, err := w.store.AudienceIDs(ctx)
-	if err != nil {
-		return Recipient{}, "", err
-	}
-	scanned := 0
-	for _, audienceID := range audiences {
-		if scanned >= sendToRecipientAudienceScanCap {
-			// A REFUSAL, not a "not found". "We did not look far enough" and
-			// "that recipient does not exist" are different facts, and
-			// answering the second when the first is true would make a rule
-			// silently stop mailing people as the operator's audience list
-			// grew.
-			return Recipient{}, "", fmt.Errorf(
-				"recipient %q was not found in the first %d audiences and the search stops there. "+
-					"Pass emailRuleId so the audience is named rather than searched for",
-				recipientID, sendToRecipientAudienceScanCap)
-		}
-		scanned++
-		r, found, err := w.store.RecipientByID(ctx, audienceID, recipientID)
-		if err != nil {
-			return Recipient{}, "", err
-		}
-		if found {
-			return r, audienceID, nil
-		}
-	}
-	return Recipient{}, "", fmt.Errorf("recipient %q is not readable in any of this caller's audiences", recipientID)
 }

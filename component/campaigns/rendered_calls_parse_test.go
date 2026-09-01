@@ -138,7 +138,7 @@ func TestEveryRenderedCallParses(t *testing.T) {
 			return err
 		}},
 		{"deliveryLedgerForCampaign", func() error { _, err := store.Ledger(ctx, awkward); return err }},
-		{"audiences", func() error { _, err := store.AudienceIDs(ctx); return err }},
+		{"recipientById", func() error { _, _, err := store.RecipientByID(ctx, awkward); return err }},
 
 		// identity + accounts (memql#4821, #4822)
 		{"senderIdentityById", func() error { _, _, err := store.SenderIdentityByID(ctx, awkward); return err }},
@@ -238,8 +238,14 @@ func TestEveryRenderedCallParses(t *testing.T) {
 			})
 		}},
 
-		// event-email rules (memql#4829) -- the read sendToRecipient makes
-		{"emailRuleById", func() error { _, err := store.EmailRuleAudience(ctx, awkward); return err }},
+		// event-email rules (memql#4829): the ledger row carries the rule
+		// that produced it, and it must render only when there IS one.
+		{"recordCampaignDelivery (rule-stamped)", func() error {
+			return store.RecordDelivery(ctx, Delivery{
+				CampaignID: awkward, RecipientID: awkward, Email: awkward,
+				Status: "sent", SentAt: now, Attempts: 1, EmailRuleID: awkward,
+			})
+		}},
 	}
 
 	before := 0

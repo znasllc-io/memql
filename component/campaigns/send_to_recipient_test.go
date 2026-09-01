@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // send_to_recipient_test.go -- the marketing lane's primitive (memql#4829,
@@ -189,21 +191,62 @@ func TestSendToRecipientRefusesADisabledIdentity(t *testing.T) {
 	}
 }
 
-// TestSendToRecipientResolvesTheAudienceFromTheRule is the production path:
-// one extra read rather than a scan.
-func TestSendToRecipientResolvesTheAudienceFromTheRule(t *testing.T) {
+// TestSendToRecipientReadsTheRecipientByIdAndNeverScans pins the shape the
+// bounded scan was replaced with.
+//
+// The scan was a correct answer that got slower as an operator succeeded, and
+// refused past its bound at exactly the point somebody had enough audiences
+// to care. A regression to it would still PASS every other test in this file
+// -- the recipient is found either way -- so the assertion has to be about
+// which reads are issued.
+func TestSendToRecipientReadsTheRecipientByIdAndNeverScans(t *testing.T) {
 	engine := recipientSendEngine()
 	w := newTestWorker(t, engine, &recordingSender{})
 
 	if _, err := w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0); err != nil {
 		t.Fatalf("sendToRecipient: %v", err)
 	}
-	if len(callsWithPrefix(engine, "query emailRuleById")) == 0 {
-		t.Error("the rule's audience was not consulted")
+	if len(callsWithPrefix(engine, "query recipientById")) != 1 {
+		t.Errorf("the recipient was not read by id exactly once.\ncalls:\n%s",
+			strings.Join(callsWithPrefix(engine, "query "), "\n"))
+	}
+	for _, scan := range []string{"query audiences(", "query emailRuleById", "query audienceRosterForSend"} {
+		if len(callsWithPrefix(engine, scan)) != 0 {
+			t.Errorf("%s was issued. Nothing on this path needs the audience itself any more: the "+
+				"audience was a SEARCH KEY for the recipient, never a check, and the query's own tier "+
+				"conjunct is what gates the read", scan)
+		}
+	}
+}
+
+// TestARecipientTheCallerDoesNotOwnIsNotFound is the reason an unscoped by-id
+// read is safe to expose at all.
+//
+// The composite tier decides it INSIDE the query, so the row simply does not
+// come back -- the same answer campaignById gives. The refusal must not
+// distinguish "no such row" from "not yours" either, or the builtin becomes
+// an existence oracle over every operator's recipients.
+func TestARecipientTheCallerDoesNotOwnIsNotFound(t *testing.T) {
+	engine := recipientSendEngine()
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+
+	// A different, perfectly valid caller. The recipient row exists and is
+	// readable by its owner; this caller is not its owner.
+	stranger := auth.ContextWithUserActor(context.Background(), "user-stranger")
+	_, err := w.handleSendToRecipient(stranger, sendToRecipientArgs(), 0)
+	if err == nil {
+		t.Fatal("a recipient in an audience the caller does not own was mailed")
+	}
+	if !strings.Contains(err.Error(), "not readable") {
+		t.Errorf("the refusal reads %v; it must be the same sentence a genuinely absent recipient gets", err)
+	}
+	if sender.count() != 0 {
+		t.Error("a message went out")
 	}
 	if len(callsWithPrefix(engine, "query audiences(")) != 0 {
-		t.Error("the fallback audience scan ran even though the rule named its audience. The scan is " +
-			"the manual path and costs a roster walk per audience")
+		t.Error("the handler fell back to scanning audiences when the by-id read came back empty. " +
+			"Not-found and not-yours are one answer here, and neither is a reason to go looking")
 	}
 }
 
@@ -213,7 +256,43 @@ func TestSendToRecipientRefusesAnUnresolvableRecipient(t *testing.T) {
 	w := newTestWorker(t, engine, &recordingSender{})
 
 	if _, err := w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0); err == nil {
-		t.Fatal("a recipient that is in no readable audience was accepted")
+		t.Fatal("a recipient that does not exist was accepted")
+	}
+}
+
+// TestARuleDrivenSendStampsTheRuleOnTheLedgerRow is the first half of
+// memql#4829's ledger question. `emailRuleId` was threaded as far as the
+// builtin's REPLY and no further, so "which rule mailed this person" had an
+// answer for the length of one response.
+func TestARuleDrivenSendStampsTheRuleOnTheLedgerRow(t *testing.T) {
+	engine := recipientSendEngine()
+	w := newTestWorker(t, engine, &recordingSender{})
+
+	if _, err := w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0); err != nil {
+		t.Fatalf("sendToRecipient: %v", err)
+	}
+	if !wroteContaining(engine, "mutation recordCampaignDelivery", `emailRuleId: "`+testEmailRule+`"`) {
+		t.Errorf("the delivery row does not name the rule that produced it.\ncalls:\n%s",
+			strings.Join(callsWithPrefix(engine, "mutation recordCampaignDelivery"), "\n"))
+	}
+}
+
+// TestASendWithNoRuleStampsNoRuleId is the same question from the other side.
+// A send made by hand has no rule behind it, and a stamped one would be a
+// false attribution no reader could detect.
+func TestASendWithNoRuleStampsNoRuleId(t *testing.T) {
+	engine := recipientSendEngine()
+	w := newTestWorker(t, engine, &recordingSender{})
+
+	args := sendToRecipientArgs()
+	delete(args, "emailRuleId")
+	if _, err := w.handleSendToRecipient(importCtx(), args, 0); err != nil {
+		t.Fatalf("sendToRecipient: %v", err)
+	}
+	for _, q := range callsWithPrefix(engine, "mutation recordCampaignDelivery") {
+		if strings.Contains(q, "emailRuleId:") {
+			t.Errorf("a send with no rule stamped one anyway: %s", q)
+		}
 	}
 }
 
@@ -244,5 +323,35 @@ func TestSendToRecipientLedgersAFailure(t *testing.T) {
 	if !wroteContaining(engine, "mutation recordCampaignDelivery", `status: "failed"`) {
 		t.Errorf("the failure was not ledgered.\ncalls:\n%s",
 			strings.Join(callsWithPrefix(engine, "mutation recordCampaignDelivery"), "\n"))
+	}
+}
+
+// TestAnOrdinaryCampaignDeliveryCarriesNoRuleId is the half that catches a
+// stamp applied too widely.
+//
+// It drives the DRAIN WORKER -- a plain campaign send, the overwhelming
+// majority of every delivery row this engine will ever write -- and asserts
+// the field is absent. A stamp that leaked here would attribute thousands of
+// campaign messages to whichever rule id happened to be in scope, and the
+// only reader of `emailRuleId` is somebody asking a question it would then
+// answer confidently and wrongly.
+func TestAnOrdinaryCampaignDeliveryCarriesNoRuleId(t *testing.T) {
+	engine := &fakeEngine{
+		jobs:     []map[string]any{jobRow()},
+		campaign: campaignRow(),
+		template: templateRow(),
+		roster:   []map[string]any{recipientRow("r-1", "person@example.test", "subscribed")},
+	}
+	w := newTestWorker(t, engine, &recordingSender{})
+	w.DrainOnce(context.Background())
+
+	written := callsWithPrefix(engine, "mutation recordCampaignDelivery")
+	if len(written) == 0 {
+		t.Fatal("the drain wrote no delivery row, so this test is checking nothing")
+	}
+	for _, q := range written {
+		if strings.Contains(q, "emailRuleId:") {
+			t.Errorf("an ordinary campaign delivery carries a rule id: %s", q)
+		}
 	}
 }
