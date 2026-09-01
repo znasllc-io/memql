@@ -63,7 +63,7 @@ Minimum to send anything:
 |---|---|
 | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET` | Signs the one-click unsubscribe link. **Required** — a send is refused without it. Rotating it needs the variable below; see [Rotating the unsubscribe signing key](#rotating-the-unsubscribe-signing-key). |
 | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS` | The previous signing key: **verified against, never signed with**. Optional, and unset only on a deployment that has never rotated. |
-| `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` | Public origin the link points at, e.g. `https://api.example.com`. **Required.** Must be externally reachable: the recipient's mail client POSTs to it. |
+| `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` | Public origin the link points at, e.g. `https://api.example.com`. **Required.** Must be externally reachable: the recipient's mail client POSTs to it. It is also the origin the open pixel and click redirects are built from — [tracking](#open-and-click-tracking) introduces no second variable, because two origins that can disagree is two ways for a message to carry a URL nothing serves. |
 | An email sender | `MEMQL_EMAIL_AZURE_*` + `MEMQL_EMAIL_SENDER` (Microsoft Graph), or `SMTP_*`. With neither, the node runs the `LogSender` and a send is refused. |
 
 Tuning (all optional, all documented in [env-vars.md](env-vars.md)):
@@ -78,6 +78,13 @@ in](#feeding-bounces-back-in)), `_WARMUP_ENABLED` and the `_WARMUP_*` ladder
 and thresholds ([warming](#warming-a-new-sending-domain)),
 `_SENDING_IDENTITY`.
 
+On a Microsoft Graph deployment there is one more, and without it the
+suppression list quietly starves on the transport you actually send on:
+`MEMQL_EMAIL_NDR_POLL_SECONDS` (default 300; `0` disables) runs the
+[Graph mailbox reader](#the-graph-mailbox-reader), and the rows it stages
+mean nothing until `graph-mailbox=rfc3464` is listed in
+`MEMQL_CAMPAIGNS_FEEDBACK_SOURCES`.
+
 Rotating the unsubscribe signing key is a two-variable operation, and doing it
 with one variable breaks every link already sent. The procedure is
 [below](#rotating-the-unsubscribe-signing-key).
@@ -85,6 +92,39 @@ with one variable breaks every link already sent. The procedure is
 ---
 
 ## The decisions
+
+### A campaign is one operator's, and the cluster owner can see it
+
+The nine operator-facing concepts — `audience`, `recipient`, `template`,
+`senderIdentity`, `campaign`, `delivery`, `consentEvent`, `engagementEvent`
+and `emailRule` — carry the **composite** tier,
+`@rowAuthz(owner="ownerUserId", clusterOwner)`. Every row's `ownerUserId` is
+stamped from the caller's own actor rather than from an argument, so a
+campaign belongs to whoever made it.
+
+**What the second term buys, and what it deliberately does not.** A cluster
+owner READS every operator's campaigns, and can drive the builtins on them —
+`campaignStartSend`, `campaignPauseSend`, `campaignResumeSend`,
+`campaignScheduleSend`, `campaignStats`, `campaignTestSend` — because each of
+those is gated on "can the caller read the campaign row" and nothing else.
+A cluster owner **cannot** rewrite another operator's campaign directly: the
+write guard ignores the second argument, so `updateCampaign`,
+`createTemplate` and every other row write stays owner-scoped.
+
+That asymmetry is the point. The person who has to answer "why did this
+client's send stop" needs to see the row and to be able to stop it; nobody
+needs to be able to edit somebody else's copy behind their back. Without the
+second term the oversight would not merely be unimplemented — a plain owner
+tier has no cluster-owner escape on the READ path at all, so it would not be
+*expressible*, and every fleet-wide campaigns view would silently render one
+person's subset while looking complete.
+
+Full team sharing — several people editing one campaign — is a deliberate
+non-goal. This is oversight, not sharing.
+
+The four engine concepts (`sendJob`, `suppression`, `reputationWindow`,
+`warmupState`) stay `clusterOwner`-tier and are not readable by an ordinary
+operator at all.
 
 ### Suppression is cluster-wide, not per-account
 
@@ -323,17 +363,23 @@ MemQL does not sign DKIM — the relay does, with the keys published for the
 mailbox it authenticated as. What MemQL guarantees is that it never sets a
 `From` address the relay did not authenticate as:
 
-- the From **address** comes from the configured sender credential, inside the
-  sender, and is not a parameter of the campaign path;
-- `v1:campaigns:campaign` has no from-address field at all. It has `fromName`,
-  a display name only;
+- the From **address** is never a free parameter of a send. It is either the
+  configured sender credential's own mailbox, or the `address` of a
+  [sending identity](#sending-identities) an operator declared as a row —
+  a closed registry, resolved server-side from the campaign, never a string
+  the caller supplies;
+- `v1:campaigns:campaign` still has no from-address field. It has
+  `senderIdentityId`, which names a row, and `fromName`, which is a display
+  name only;
 - `replyTo` is per-campaign and is the correct escape valve: it steers replies
   without touching the authenticated identity.
 
-**Your side of it is DNS.** Publish SPF and DKIM records covering the
-configured mailbox, and a DMARC policy. There is no preflight for this because
-any check the engine could run would be a guess about records it cannot see
-from inside the cluster.
+**Your side of it is DNS, and it is now per identity.** Publish SPF and DKIM
+records covering **every mailbox any identity sends as**, plus a DMARC policy
+for each of those domains. Adding a sending identity for a client's domain
+without their DNS records is the one way to make deliverability worse by
+using this feature. There is no preflight for it, because any check the engine
+could run would be a guess about records it cannot see from inside the cluster.
 
 ### Campaigns do not use the transactional outbox
 
@@ -353,6 +399,268 @@ Campaigns send directly instead, for three reasons:
 
 `delivery.outboundRequestId` stays on the schema for a future queued
 transport.
+
+---
+
+## Sending identities
+
+One deployment, several clients, several mailboxes. A **sending identity**
+(`v1:campaigns:senderIdentity`) is the operator's declaration that a mailbox
+exists in this tenant and that campaigns may send as it:
+
+| Field | Notes |
+|---|---|
+| `address` | the mailbox UPN the Graph application sends as. Normalized lowercase, validated for RFC 5322 shape **and** header safety — a CR or LF here would be header injection into every message the identity sends. It is also the reputation and warmup key, so two spellings of one mailbox would split its ramp in half |
+| `fromName` | the From display name, e.g. `Acme News`. Required: a From with no phrase shows the raw mailbox to every recipient |
+| `replyTo` | default Reply-To for campaigns that set none of their own. A campaign's own always wins |
+| `accountId` | the client this mailbox belongs to. A record, never a filter — see below |
+| `status` | `active` or `disabled` |
+| `notes` | operator provenance. Never a credential |
+
+**There is no secret material on the row, and that is the design.**
+Authentication stays the cluster's one Graph credential; an identity row says
+*this mailbox may be used*, not *here is how to log into it*. Which mailboxes
+the credential may actually send as is a tenant policy question, and no row in
+this graph can answer it.
+
+### Resolution order, and why there is no fallback
+
+```
+campaign.senderIdentityId  →  the operator SAID which mailbox
+(empty)                    →  the env-configured default sender
+```
+
+That is the whole ladder. **The engine never infers an identity from a
+campaign's `accountId`.** The authoring UI prefills the picker from the
+selected account's identities, and prefill is UX while resolution is explicit
+— an engine that guessed would mail a client's list from a mailbox nobody
+chose, and would be right often enough that the wrong case went unnoticed.
+
+An empty `senderIdentityId` is the ordinary case and means exactly what every
+campaign meant before identities existed, so plurality is additive rather than
+a migration.
+
+**A missing or `disabled` identity is refused, never silently defaulted.**
+Falling back to the cluster default would mail a client's audience from the
+wrong mailbox, under the wrong From, against the wrong SPF and DKIM records,
+and nothing would say so — the send would look completely successful. The
+refusal is classified the same way every other preflight refusal is:
+
+| What happened | Kind | What happens |
+|---|---|---|
+| the identity row is missing, or its `status` is `disabled` | authoring | the campaign goes `failed` with the reason on `lastError`; fix the campaign or re-enable the mailbox and start again |
+| this node's sender is SMTP and the campaign names a non-default identity | environment | the send **waits** and retries each tick, reason stamped |
+
+The second is an environment refusal because SMTP AUTH binds to one mailbox:
+a node with the SMTP sender genuinely cannot send as anything else, and a
+node that can may be running elsewhere in the cluster. Failing the campaign
+for a deploy-shaped reason would make an operator re-author a schedule to
+recover from it. The preflight runs at both authoring time and fire time, so
+an identity disabled between the two is caught at the second.
+
+### `disabled` is how you retire a mailbox
+
+Not deletion. Past campaigns name the row, and the reputation history is keyed
+on its address — `derivedSendingIdentity` resolves per send to the identity's
+normalized address, so `reputationWindowsSince` and `warmupStateForIdentity`
+break down per mailbox with no change on their side. They were built for
+plurality and simply start receiving it.
+
+Suppression stays cluster-wide across every identity. Several mailboxes inside
+one operator's tenant are still one legal sender, and an unsubscribe is a
+statement to this deployment's operator — so an address that left one client's
+list is not mailable from another's.
+
+### The account tie is a record, never a scope
+
+`accountId` on a campaign, audience, template or identity says *who this work
+is for*. **No query in this tree narrows a read because of it.** An operator
+sees their own rows whatever account they name, and a cluster owner sees
+everyone's. The tie exists so a rollup can answer "what have we sent for this
+client", and so the identity picker can prefill — not so that a campaign can
+be hidden.
+
+---
+
+## Importing recipients
+
+```
+builtin campaignImportRecipients(audienceId: "<id>", artifactId: "<id>", hasHeader: true)
+```
+
+The file is a CSV already uploaded to the Library. It is read **server-side
+under the caller's own actor**, so a file the caller cannot read is a file
+this cannot import — the artifact id is not a capability.
+
+**A header row is required and the column mapping IS the header.** `email` is
+required (case-insensitive); `displayName` and `name` are recognized; **every
+other column lands verbatim in the recipient's `fields` map**, reachable from
+a template as `{{fields.<key>}}`. There is no positional import, deliberately:
+guessing which column holds addresses is how an import mails the wrong list.
+
+Per row the address is normalized and shape-validated, then de-duplicated
+against the audience's existing recipients **and** against earlier rows of the
+same file — first occurrence wins, so a file listing somebody twice with two
+different names does not produce two recipients.
+
+**The import refuses whole rather than truncating.** If the resulting roster
+would exceed `MEMQL_CAMPAIGNS_MAX_AUDIENCE`, nothing is written. A partially
+imported list is one nobody knows is partial, and the send that follows is a
+silent prefix of the audience the operator meant.
+
+It returns `{added, duplicates, invalid, total}` plus up to twenty sample
+invalid lines **with their line numbers**, so the next action is fixing the
+file rather than guessing at it. Each added recipient gets a consent event
+(`kind: "grant"`, `source: "import"`) — which is what finally gives
+`source: "import"` a writer, and gives the compliance export a record of where
+an address came from.
+
+---
+
+## Merge tags
+
+The replacer set is **closed**, and is a `strings.NewReplacer` over enumerable
+keys rather than a template engine — there is no expression evaluation in a
+campaign body and there is not going to be:
+
+| Tag | Value |
+|---|---|
+| `{{displayName}}` | the recipient's name, with a sensible fallback |
+| `{{email}}` | the recipient's address |
+| `{{campaignName}}` | the campaign's name |
+| `{{accountName}}` | the tied account's name; **empty when untied**, which is the ordinary case |
+| `{{fields.<key>}}` | one key of the recipient's `fields` map, as imported |
+
+**The HTML and text parts escape differently, on purpose.** Every substituted
+value is HTML-escaped on the HTML path and not on the text path, because the
+text part is not markup and escaping it would show `&amp;` to a reader.
+`displayName` and every `fields.*` value are recipient-supplied — an imported
+CSV is untrusted input — so that split is a security property, not a
+formatting one.
+
+**An unknown tag stays literal in the body.** It is not an error and it is not
+blanked, because blanking it would delete the evidence of the typo. The way to
+catch one before the whole audience does is the test send, which reports every
+tag it could not resolve.
+
+---
+
+## Test send
+
+```
+builtin campaignTestSend(campaignId: "<id>", to: "you@example.com")
+```
+
+Renders the campaign's template against a synthetic recipient — display name
+`Test Recipient`, the address you name, and the `fields` of the audience's
+first real recipient when one exists, so `{{fields.*}}` show the shape they
+will actually have rather than blanks. The subject is prefixed `[Test] `, the
+message goes through the campaign's **resolved sending identity**, and the
+unsubscribe footer carries an obviously-inert token.
+
+It writes **no delivery row** and touches **no counter**, so a test can never
+make a campaign look partly sent. It does consume the ordinary send-rate token
+bucket, because a test is a real message to a real mailbox.
+
+It returns the list of merge tags it could not resolve. That is the check that
+catches a typo'd `{{fields.compnay}}` while it is still cheap.
+
+`to` is **required and never defaults to the caller's own address.** A builtin
+that mails somewhere you did not name is one whose default you have to
+remember.
+
+---
+
+## Reading what a campaign did
+
+```
+builtin campaignStats(campaignId: "<id>")
+```
+
+Every bucket that can be an exact count is one, at any audience size:
+
+| Group | Buckets |
+|---|---|
+| roster | `recipients`, `pending` |
+| transport | `sent`, `failed` |
+| `skipped` | `suppressed`, `unsubscribed`, `other` |
+| `bounces` | `hard` |
+| feedback | `complaints`, `unsubscribed` |
+| `opens` / `clicks` | `total`, `unique` |
+
+They are computed server-side from the delivery ledger (status plus
+`skipReason`), the campaign's own consent events, and its engagement events.
+This replaces counting a page of rows in a browser, which under-reported every
+campaign past the page bound and did so silently.
+
+`skippedCount` also now lands on the campaign row itself, where it always
+should have been: the worker has computed it per job since the sending engine
+shipped and had nowhere on the campaign to put it, so the number an operator
+most needs — the gap between the audience and what actually left — was visible
+only on a row a browser cannot read.
+`recipientCount - sentCount - skippedCount - failedCount` is what is still
+outstanding.
+
+### Two figures are honestly absent rather than rounded
+
+**Unique opens and clicks can come back `unmeasured`.** They are folded from a
+bounded read of the engagement rows, and a read that comes back *at* its bound
+is a truncation. Reporting the folded number anyway would print a unique count
+that is quietly a floor, on the one campaign large enough that the figure
+mattered. So at the bound the answer is `unmeasured`, and the totals — which
+are exact counts — are still there.
+
+**There is no soft-bounce figure per campaign at all.** Not a zero: the field
+is absent. Soft bounces are recorded and deliberately do not suppress, but
+nothing attributes one to a campaign, so a `0` here would be read as "no soft
+bounces" — a claim nothing in the system can make. An absent figure and a zero
+are different answers, and a surface rendering this must not turn one into the
+other.
+
+---
+
+## Open and click tracking
+
+Two booleans on the campaign, both defaulting **true**: `trackOpens` and
+`trackClicks`. An operator sending to a privacy-sensitive list turns them off
+per campaign.
+
+**The HTML part only.** At render time every `http(s)` href is rewritten to a
+signed redirect and a 1x1 pixel is appended. The text part is untouched:
+there is no honest way to count an open in plain text, and rewriting a URL a
+reader can *see* would be visible mangling for a number nobody asked for.
+
+The token is HMAC-signed by the same key ring the unsubscribe link uses, under
+a **different context string**, so an unsubscribe token can never verify as a
+tracking token or the reverse. Its payload carries the delivery, the campaign,
+the kind and — for a click — the destination URL. **The destination is inside
+the signed payload rather than in a query parameter**, which is what makes the
+redirect open-redirect-proof: there is no unsigned input for an attacker to
+aim.
+
+| Endpoint | Behaviour |
+|---|---|
+| `GET /t/o/<token>` | **always** answers the 1x1 GIF; records the open only on a valid signature |
+| `GET /t/c/<token>` | 302 to the signed URL; an invalid or tampered token renders the same "link is not valid" page an expired unsubscribe link gets — never a 500, never a redirect |
+
+Both are served by the bff on the same public origin as `/unsubscribe`
+(`MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL`), and both are HTTP for the reason
+`/unsubscribe` is: the caller is the recipient's mail client, and there is no
+gRPC version of that conversation. The token has to be a single path segment —
+the self-authenticated exemption these routes rely on is bounded to exactly
+one segment under the mount, so a token containing a `/` is not merely
+mis-parsed, it is 401'd before the handler runs.
+
+Hits land on `v1:campaigns:engagementEvent`, one row per hit, written under
+internal origin. Uniqueness is by **delivery**, not by address: one address in
+two audiences is two people as far as a campaign is concerned.
+
+**What tracking does not tell you.** An open is a mail client fetching an
+image — clients that block remote images never report one, and clients that
+prefetch report one nobody read. It is a floor on engagement and a comparison
+between sends, not a readership figure. There is no `delivered` event for the
+same reason there is no `delivered` column on the reputation window: the
+transport says accepted and a bounce arrives later.
 
 ---
 
@@ -491,6 +799,47 @@ a source configured `scheme=none` is refused, because unauthenticated input
 must not write a cluster-wide list. The most anyone can do by calling the
 builtin directly is re-process a webhook you already trusted, which is
 idempotent.
+
+### The Graph mailbox reader
+
+**On Microsoft Graph nobody dials you.** A failed delivery comes back as a
+`multipart/report` DSN mailed to the sending mailbox, so the webhook path
+above — which is the whole ingestion story — had nothing feeding it on the
+transport this deployment actually sends on. Bounces landed in a mailbox and
+were read by no one; the suppression list looked healthy because it was empty.
+
+The reader closes that loop. Active only when the resolved sender is Graph
+**and** campaigns are enabled, it lists the sending mailbox's inbox for unread
+`multipart/report` messages every `MEMQL_EMAIL_NDR_POLL_SECONDS` (default
+300; `0` disables, and a non-integer value falls back to the default rather
+than to off), fetches each as MIME, and stages it as an ordinary
+`v1:platform:inboundRequest` with `source: "graph-mailbox"`. Processed
+messages are marked read and categorized, so a restart does not re-read the
+mailbox from the beginning; the Graph message id is the dedupe key
+underneath, so a redelivery collapses onto the same row.
+
+Two variables and one Entra fact make it work:
+
+```bash
+MEMQL_EMAIL_NDR_POLL_SECONDS=300
+MEMQL_CAMPAIGNS_FEEDBACK_SOURCES=graph-mailbox=rfc3464
+```
+
+**Staging a row is not acting on one.** Until `graph-mailbox=rfc3464` is
+listed, the reader files DSNs the shipped automation then declines to
+process — the same "listing the source here is the authorization" rule as
+every other feed, applied to a feed the engine happens to fill itself. And
+the mailbox must be readable: the Graph application needs `Mail.Read` under
+the **same** `ApplicationAccessPolicy` that scopes `Mail.Send`
+([azure-entry-install.md](azure-entry-install.md)), or the poll fails with a
+403 the log names and the loop stays open.
+
+**`signatureVerified` is stamped true on these rows, and that is honest
+rather than a shortcut.** Provenance IS the verification here: the payload
+was read out of our own mailbox over our own authenticated credential, and
+there is no third-party signature to check. That field is what gates
+`campaignIngestFeedback`, so a row that could not honestly carry it would be
+staged and never acted on.
 
 ### Hard vs soft is the provider's word, not ours
 

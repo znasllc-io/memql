@@ -117,9 +117,15 @@ runs, in order:
    produces one automation and, where the lane needs a loop or a
    conditional, one logic construct beside it. The construct's name is
    derived from the rule id, so regeneration replaces.
-4. **Retire the previous bundle**, when `bundleId` is non-empty (E7).
+4. **Name the bundle it supersedes**, when the rule already carries a
+   `bundleId` (E7). The retirement is not a separate call the operator's
+   button has to survive: it is a step inside the activation below, taken
+   after the new constructs are registered.
 5. **Stage, validate and activate** through the ordinary pipeline, ending
-   in the newly-wired `ActivateApprovedBundle` call.
+   in the newly-wired `ActivateApprovedBundle` call -- which registers the
+   new constructs and only then retires the superseded bundle, so the
+   window in which a rule is armed twice, or armed zero times, does not
+   exist.
 6. **Stamp the outcome on the rule row.** `bundleId`, `constructName`, and
    `status=active`; or `status=failed` with the engine's own sentence on
    `lastError`. The app renders that sentence verbatim, because a
