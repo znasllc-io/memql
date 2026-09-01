@@ -60,6 +60,30 @@ type ActivationEngine interface {
 	RetireActiveBundle(ctx context.Context, owner, bundleId string, deps memql.AuthoredRuntimeDeps) error
 }
 
+// EngineAdapter fits the live *memql.MemQLEngine to ActivationEngine.
+//
+// The two differ in exactly one thing: the engine returns a *ExecuteResult
+// where this package's read helpers take `any` -- and MaterializeRows accepts
+// either. So the adapter is one method wide, and it lives here rather than in
+// app/ for the same reason CampaignsEngineAdapter lives beside its consumer:
+// the shape being adapted is this package's, and a wrapper written at the call
+// site is one that has to be rewritten at the next call site.
+type EngineAdapter struct {
+	Engine *memql.MemQLEngine
+}
+
+func (a EngineAdapter) Execute(ctx context.Context, query string) (any, error) {
+	return a.Engine.Execute(ctx, query)
+}
+
+func (a EngineAdapter) ActivateApprovedBundle(ctx context.Context, owner, bundleId string, deps memql.AuthoredRuntimeDeps) (memql.ActivationResult, error) {
+	return a.Engine.ActivateApprovedBundle(ctx, owner, bundleId, deps)
+}
+
+func (a EngineAdapter) RetireActiveBundle(ctx context.Context, owner, bundleId string, deps memql.AuthoredRuntimeDeps) error {
+	return a.Engine.RetireActiveBundle(ctx, owner, bundleId, deps)
+}
+
 // Activator arms and retires rules.
 type Activator struct {
 	engine ActivationEngine

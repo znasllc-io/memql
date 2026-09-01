@@ -110,7 +110,7 @@ func (a *App) wireAuthoredRuntime() {
 	// catalog promoter and audit sink. It is placed AFTER the registry and
 	// scheduler exist and BEFORE the re-arm, so a rule armed by a re-armed
 	// bundle finds the seam already wired.
-	emailrules.Bind(a.engine, a.AuthoredRuntimeDeps)
+	emailrules.Bind(emailrules.EngineAdapter{Engine: a.engine}, a.AuthoredRuntimeDeps)
 
 	// Boot re-arm (#1039): re-register every already-active bundle across all
 	// owners so their automations fire again after a restart, with no manual
