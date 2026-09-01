@@ -260,10 +260,11 @@ function slotsOf(entry: Record<string, unknown>): IntegrationSlot[] {
     });
   }
   for (const raw of objects(entry, "credentials")) {
+    const source = str(raw, "source");
     out.push({
       name: str(raw, "name"),
       purpose: str(raw, "purpose"),
-      source: str(raw, "source"),
+      source,
       envVar: str(raw, "envVar"),
       secret: true,
       present: bool(raw, "present"),
@@ -271,9 +272,16 @@ function slotsOf(entry: Record<string, unknown>): IntegrationSlot[] {
       // carries no value for a credential slot. Held as "" so one row type
       // serves both kinds without an optional a renderer could forget.
       value: "",
-      // A credential is not editable from here whatever the reply says: the
-      // only write path is the operator command below.
-      editable: false,
+      // THE ENGINE'S OWN FORMULA, APPLIED TO THE SIBLING TYPE. `Setting`
+      // carries `Editable: resolved.Source != SourceEnv`; `Credential` carries
+      // no such field, and the env-first rule is a fact about the RESOLVER
+      // rather than about which of the two structs a slot landed in. So an
+      // env-supplied credential is listed and not offered, exactly like an
+      // env-supplied setting -- writing a row for it would be recorded and
+      // then outranked. This is not a boundary invented here; it is the one
+      // the engine states one struct away, and the day `Credential` grows the
+      // field this should read it instead.
+      editable: source !== "env",
       rotate: str(raw, "rotate"),
       lane: str(raw, "lane"),
       required: bool(raw, "required"),
@@ -357,6 +365,77 @@ export function silentCards(report: IntegrationsReport | null): readonly Integra
   return report.integrations.filter(
     (card) => card.state === "not_reported" && card.slots.length === 0,
   );
+}
+
+/**
+ * What one successful `integrationConfigure` call reports.
+ *
+ * `takesEffect` IS THE SUCCESS LINE and is written by the engine, in two
+ * forms: a node that had resolved a sender discards it and re-resolves on its
+ * next send, and a node whose sender came from the ENVIRONMENT records the row
+ * and keeps using the environment value, because env outranks stored rows.
+ * Only the engine knows which happened -- it is the one holding the resolver
+ * -- so a client-authored "Saved, it will take effect shortly" would be right
+ * half the time and confidently wrong the other half.
+ *
+ * There is no `value` here and never will be: the plaintext crosses the wire
+ * once, on the way in.
+ */
+export interface ConfigureOutcome {
+  slot: string;
+  envVar: string;
+  secret: boolean;
+  /** globalVariable | globalSecret -- the tier the value now lives in. */
+  source: string;
+  /** Whether this node discarded a resolved sender. */
+  reresolves: boolean;
+  /** The engine's own sentence about when this takes effect. Rendered verbatim. */
+  takesEffect: string;
+}
+
+/**
+ * Dig the outcome out of the builtin envelope.
+ *
+ * Keyed on `takesEffect` rather than on the node id or the concept, for the
+ * same reason the report walk is keyed on its `integrations` array: a fixed
+ * path is one a rename turns into `undefined` silently. And keying on the
+ * field the surface MUST render means a reply without one parses as null,
+ * where the surface says the write returned and declines to claim anything
+ * about when it lands -- rather than rendering an empty success line.
+ */
+export function readConfigureOutcome(rows: readonly Row[]): ConfigureOutcome | null {
+  for (const row of rows) {
+    const found = findOutcome(row, 0);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findOutcome(value: unknown, depth: number): ConfigureOutcome | null {
+  if (depth > MAX_ENVELOPE_DEPTH || value === null || typeof value !== "object") return null;
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = findOutcome(entry, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  const bag = value as Record<string, unknown>;
+  if (typeof bag["takesEffect"] === "string" && bag["takesEffect"] !== "") {
+    return {
+      slot: str(bag, "slot"),
+      envVar: str(bag, "envVar"),
+      secret: bool(bag, "secret"),
+      source: str(bag, "source"),
+      reresolves: bool(bag, "reresolves"),
+      takesEffect: str(bag, "takesEffect"),
+    };
+  }
+  for (const nested of Object.values(bag)) {
+    const found = findOutcome(nested, depth + 1);
+    if (found) return found;
+  }
+  return null;
 }
 
 function str(bag: Record<string, unknown>, key: string): string {

@@ -14,6 +14,16 @@ import type { ReactNode } from "react";
 const PLANTED_SECRET = "PLANTED-GRAPH-CLIENT-SECRET-DO-NOT-EMIT";
 const PLANTED_CIPHERTEXT = "PLANTED-SEALED-CIPHERTEXT-DO-NOT-EMIT";
 const PLANTED_FINGERPRINT = "PLANTED-FINGERPRINT-DO-NOT-EMIT";
+// What a person TYPES into the credential field. It crosses the wire once and
+// must never come back into the DOM afterwards.
+const TYPED_SECRET = "TYPED-CLIENT-SECRET-NEVER-SHOW-THIS-AGAIN";
+// The engine's own success sentence. The surface renders it verbatim; a
+// client-authored line would be confidently wrong on a node running from the
+// environment.
+const ENGINE_TAKES_EFFECT =
+  "Saved. The next message this node sends re-resolves its sender, so it takes effect without a restart. Other replicas pick it up on their own next send.";
+const ENGINE_ENV_TAKES_EFFECT =
+  "Saved. This node resolves its sender from the environment, which outranks stored rows, so the row is recorded but this node will keep using the environment value.";
 
 const h = vi.hoisted(() => {
   const reply = (rows: unknown[]) => ({ rows: () => rows });
@@ -22,6 +32,9 @@ const h = vi.hoisted(() => {
     probedReport: null as unknown[] | null,
     error: null as Error | null,
     calls: [] as { probe: boolean }[],
+    writes: [] as { slot: string; value: string }[],
+    writeError: null as Error | null,
+    writeReply: null as unknown[] | null,
   };
   const connection = {
     nodeId: "bff-test",
@@ -34,6 +47,25 @@ const h = vi.hoisted(() => {
         if (state.error) throw state.error;
         if (args.probe && state.probedReport !== null) return reply(state.probedReport);
         return reply(state.report);
+      }),
+      integrationConfigure: vi.fn(async (args: { slot: string; value: string }) => {
+        state.writes.push({ slot: args.slot, value: args.value });
+        if (state.writeError) throw state.writeError;
+        if (state.writeReply !== null) return reply(state.writeReply);
+        return reply([
+          {
+            integrationConfigured: {
+              payload: {
+                slot: args.slot,
+                envVar: "MEMQL_EMAIL_SENDER",
+                secret: false,
+                source: "globalVariable",
+                reresolves: true,
+                takesEffect: ENGINE_TAKES_EFFECT,
+              },
+            },
+          },
+        ]);
       }),
     },
     onStatusChange: (fn: (ev: { status: string; attempt: number; error: string }) => void) => {
@@ -60,7 +92,9 @@ const { INTEGRATIONS_SECTION_ROLE } = await import(
 const { LocalDesktopStore } = await import("../../src/system/store");
 const { UNKNOWN_RUNTIME_CONFIG } = await import("../../src/cluster/config");
 const { roleAdmits, ROLE_LADDER } = await import("../../src/system/roles");
-const { stateOf } = await import("../../src/apps/settings/integrationsReport");
+const { readConfigureOutcome, readIntegrationsReport, stateOf } = await import(
+  "../../src/apps/settings/integrationsReport"
+);
 
 function memStorage(): Pick<Storage, "getItem" | "setItem"> {
   const data = new Map<string, string>();
@@ -269,7 +303,160 @@ beforeEach(() => {
   h.state.probedReport = null;
   h.state.error = null;
   h.state.calls = [];
+  h.state.writes = [];
+  h.state.writeError = null;
+  h.state.writeReply = null;
   h.connection.query.integrationStatus.mockClear();
+  h.connection.query.integrationConfigure.mockClear();
+});
+
+describe("every key is read, and a typo in one cannot be silent", () => {
+  // THE FAILURE THIS EXISTS FOR HAS NO SYMPTOM. A reader keyed on a name the
+  // engine does not send returns the zero value, and a zero value renders as
+  // an empty field, an unset chip or a missing sentence -- all of which are
+  // legitimate answers, so nothing looks wrong. The key names below are
+  // transcribed from the Go json tags in integrations/email/status.go,
+  // integrations/email/configmanifest.go and the map literals in
+  // capabilities.go (the top-level envelope) and configure.go (the write
+  // reply); every one carries a DISTINCTIVE value, so a misread key shows up
+  // as a missing value rather than as a plausible blank.
+  const everyField = {
+    checkedAt: "2026-08-31T12:00:00Z",
+    probed: true,
+    integrations: [
+      {
+        name: "email",
+        registered: true,
+        capabilities: ["sendEmail", "configure"],
+        configured: "yes",
+        health: "unhealthy",
+        state: "unhealthy",
+        reasons: [
+          {
+            code: "probe_failed",
+            lane: "graph",
+            slot: "clientSecret",
+            envVar: "MEMQL_EMAIL_AZURE_CLIENT_SECRET",
+            detail: "REASON-DETAIL",
+          },
+        ],
+        detail: "CARD-DETAIL",
+        mode: "graph",
+        settings: [
+          {
+            name: "senderAddress",
+            value: "SETTING-VALUE",
+            source: "globalVariable",
+            envVar: "SETTING-ENVVAR",
+            purpose: "SETTING-PURPOSE",
+            lane: "graph",
+            required: true,
+            reason: "SETTING-REASON",
+            editable: true,
+          },
+        ],
+        credentials: [
+          {
+            name: "clientSecret",
+            present: true,
+            source: "globalSecret",
+            envVar: "CREDENTIAL-ENVVAR",
+            purpose: "CREDENTIAL-PURPOSE",
+            lane: "graph",
+            required: true,
+            reason: "CREDENTIAL-REASON",
+            rotate: "CREDENTIAL-ROTATE",
+          },
+        ],
+      },
+    ],
+  };
+
+  it("populates every field of the report from the engine's own key names", () => {
+    const report = readIntegrationsReport([{ integrationStatus: { payload: everyField } }]);
+    expect(report).not.toBeNull();
+    expect(report!.checkedAt).toBe("2026-08-31T12:00:00Z");
+    expect(report!.probed).toBe(true);
+    const card = report!.integrations[0]!;
+    expect(card).toMatchObject({
+      name: "email",
+      registered: true,
+      capabilities: ["sendEmail", "configure"],
+      state: "unhealthy",
+      configured: "yes",
+      health: "unhealthy",
+      detail: "CARD-DETAIL",
+      mode: "graph",
+    });
+    expect(card.reasons[0]).toEqual({
+      code: "probe_failed",
+      lane: "graph",
+      slot: "clientSecret",
+      envVar: "MEMQL_EMAIL_AZURE_CLIENT_SECRET",
+      detail: "REASON-DETAIL",
+    });
+    expect(card.slots[0]).toEqual({
+      name: "senderAddress",
+      value: "SETTING-VALUE",
+      source: "globalVariable",
+      envVar: "SETTING-ENVVAR",
+      purpose: "SETTING-PURPOSE",
+      lane: "graph",
+      required: true,
+      reason: "SETTING-REASON",
+      editable: true,
+      secret: false,
+      present: true,
+      rotate: "",
+    });
+    expect(card.slots[1]).toEqual({
+      name: "clientSecret",
+      // A credential carries no value and there is no key to read one from.
+      value: "",
+      source: "globalSecret",
+      envVar: "CREDENTIAL-ENVVAR",
+      purpose: "CREDENTIAL-PURPOSE",
+      lane: "graph",
+      required: true,
+      reason: "CREDENTIAL-REASON",
+      rotate: "CREDENTIAL-ROTATE",
+      editable: true,
+      secret: true,
+      present: true,
+    });
+  });
+
+  it("populates every field of the write reply", () => {
+    const outcome = readConfigureOutcome([
+      {
+        integrationConfigured: {
+          payload: {
+            slot: "senderAddress",
+            envVar: "OUTCOME-ENVVAR",
+            secret: true,
+            source: "globalSecret",
+            reresolves: true,
+            takesEffect: "OUTCOME-SENTENCE",
+          },
+        },
+      },
+    ]);
+    expect(outcome).toEqual({
+      slot: "senderAddress",
+      envVar: "OUTCOME-ENVVAR",
+      secret: true,
+      source: "globalSecret",
+      reresolves: true,
+      takesEffect: "OUTCOME-SENTENCE",
+    });
+  });
+
+  it("returns null rather than a blank outcome when the reply carries no sentence", () => {
+    // The negative control for the walk: it keys on `takesEffect` precisely so
+    // a reply without one is an absence the surface can talk about, rather
+    // than an object full of empty strings it would render as a success.
+    expect(readConfigureOutcome([{ integrationConfigured: { payload: { slot: "x" } } }])).toBeNull();
+  });
 });
 
 describe("the three states come from the engine", () => {
@@ -436,26 +623,33 @@ describe("a secret is write-only", () => {
     expect(dom).toContain("make secret-set");
   });
 
-  it("offers no field for a credential, and says where one is changed", async () => {
+  it("gives a credential a field that POSTS and never one that displays", async () => {
     h.state.report = envelope(CONFIGURED);
     await renderIntegrations();
     const card = screen.getByRole("region", { name: "Email" });
-    // Every field on the card belongs to a non-secret slot, and the two
-    // credentials have none. Asserted by NAME rather than by count: a count
-    // passes for the wrong reason the moment the fixture grows a setting.
+    // Asserted by NAME rather than by count: a count passes for the wrong
+    // reason the moment the fixture grows a slot. tenantId is env-supplied and
+    // therefore has none.
     const boxes = within(card)
       .getAllByRole("textbox")
       .map((box) => box.getAttribute("id"));
     expect(boxes).toEqual([
       "integration-slot-senderAddress",
       "integration-slot-fromName",
+      "integration-slot-clientSecret",
       "integration-slot-smtpHost",
     ]);
-    for (const credential of ["clientSecret", "smtpPassword"]) {
-      expect(boxes.some((id) => id?.includes(credential))).toBe(false);
-    }
-    expect(within(card).getByText(/never from a browser/)).toBeTruthy();
+    // The credential's field starts EMPTY even though the slot is set: there
+    // is nothing to prefill it with, and that is the whole promise.
+    const secretBox = within(card).getByLabelText(
+      "Application secret (new value)",
+    ) as HTMLInputElement;
+    expect(secretBox.value).toBe("");
+    expect(secretBox.getAttribute("placeholder")).toBe("Replace this credential");
     expect(within(card).getByText("Write-only")).toBeTruthy();
+    expect(within(card).getByText(/Sent once and sealed in the cluster/)).toBeTruthy();
+    // And the CLI route survives for operators who prefer it.
+    expect(within(card).getByText(/make secret-set/)).toBeTruthy();
   });
 
   it("says a credential is SET and where it came from, without saying what it is", async () => {
@@ -505,18 +699,163 @@ describe("a boot-envelope variable is listed, not offered", () => {
   });
 });
 
-describe("the write half is inert, and says exactly what is missing", () => {
-  it("disables every field and names what has to exist", async () => {
+describe("the write half (memql#4825)", () => {
+  async function typeAndSave(field: string, value: string) {
+    const card = screen.getByRole("region", { name: "Email" });
+    fireEvent.change(within(card).getByLabelText(field), { target: { value } });
+    await act(async () => {
+      fireEvent.click(within(card).getByRole("button", { name: `Save ${field.replace(/ \(new value\)$/, "")}` }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    return card;
+  }
+
+  it("calls the builtin with the slot NAME, never the environment variable", async () => {
+    // The whole reason a browser may not call setGlobalVariable itself: a
+    // caller that supplied the variable could write MEMQL_EMAIL_SENDR, get a
+    // green save, and never be mailed anything again.
+    h.state.report = envelope(CONFIGURED);
+    await renderIntegrations();
+    await typeAndSave("Sending mailbox", "ops@example.com");
+    expect(h.state.writes).toEqual([{ slot: "senderAddress", value: "ops@example.com" }]);
+    expect(h.state.writes[0]?.slot).not.toContain("MEMQL_");
+  });
+
+  it("re-reads after a save, so the card shows what the cluster now holds", async () => {
+    h.state.report = envelope(CONFIGURED);
+    await renderIntegrations();
+    expect(h.state.calls).toHaveLength(1);
+    await typeAndSave("Sending mailbox", "ops@example.com");
+    expect(h.state.calls).toEqual([{ probe: false }, { probe: false }]);
+  });
+
+  it("renders the ENGINE's success sentence, not one of ours", async () => {
+    // `takesEffect` has two forms and only the engine knows which happened.
+    h.state.report = envelope(CONFIGURED);
+    await renderIntegrations();
+    const card = await typeAndSave("Sending mailbox", "ops@example.com");
+    expect(within(card).getByText(ENGINE_TAKES_EFFECT)).toBeTruthy();
+  });
+
+  it("says the row is recorded and ignored when the engine says so", async () => {
+    // The env branch. A client-authored "it takes effect shortly" would be
+    // confidently wrong exactly here.
+    h.state.report = envelope(CONFIGURED);
+    h.state.writeReply = [
+      {
+        integrationConfigured: {
+          payload: {
+            slot: "senderAddress",
+            envVar: "MEMQL_EMAIL_SENDER",
+            secret: false,
+            source: "globalVariable",
+            reresolves: false,
+            takesEffect: ENGINE_ENV_TAKES_EFFECT,
+          },
+        },
+      },
+    ];
+    await renderIntegrations();
+    const card = await typeAndSave("Sending mailbox", "ops@example.com");
+    expect(within(card).getByText(ENGINE_ENV_TAKES_EFFECT)).toBeTruthy();
+    expect(within(card).queryByText(/without a restart/)).toBeNull();
+  });
+
+  it("claims nothing about timing when the reply carries no sentence", async () => {
+    h.state.report = envelope(CONFIGURED);
+    h.state.writeReply = [{ somethingElse: { payload: { ok: true } } }];
+    await renderIntegrations();
+    const card = await typeAndSave("Sending mailbox", "ops@example.com");
+    expect(within(card).getByText(/did not say when it takes effect/)).toBeTruthy();
+  });
+
+  it("renders a refusal beside the field, in the engine's own words", async () => {
+    h.state.report = envelope(CONFIGURED);
+    h.state.writeError = new Error(
+      'email.configure: "senderAddres" is not a configurable setting of the email integration; the settings it has are tenantId, clientId, senderAddress',
+    );
+    await renderIntegrations();
+    const card = await typeAndSave("Sending mailbox", "ops@example.com");
+    expect(within(card).getByText("Sending mailbox was not saved.")).toBeTruthy();
+    // Verbatim: the engine's sentence NAMES the settings that exist, which no
+    // paraphrase of ours would.
+    expect(within(card).getByText(/the settings it has are tenantId/)).toBeTruthy();
+    expect(within(card).queryByText(ENGINE_TAKES_EFFECT)).toBeNull();
+  });
+
+  it("refuses to send a blank value rather than spending a refusal on it", async () => {
     h.state.report = envelope(CONFIGURED);
     await renderIntegrations();
     const card = screen.getByRole("region", { name: "Email" });
-    for (const box of within(card).getAllByRole("textbox")) {
-      expect((box as HTMLInputElement).disabled).toBe(true);
-    }
-    expect(within(card).getByText(/Saving from here is not wired up yet/)).toBeTruthy();
-    expect(within(card).getByText(/nothing that writes it back/)).toBeTruthy();
-    // No Save. A button that silently does nothing is the thing this avoids.
-    expect(within(card).queryByRole("button", { name: /save/i })).toBeNull();
+    // `fromName` is the OPTIONAL, unset slot: its field starts empty.
+    const save = within(card).getByRole("button", { name: "Save From name" });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(within(card).getByLabelText("From name"), { target: { value: "MemQL" } });
+    expect((within(card).getByRole("button", { name: "Save From name" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("offers no field for an env-supplied slot, whichever half it is in", async () => {
+    // The engine's `editable` flag for a setting; the same env-first rule,
+    // applied to a credential, which carries no such flag.
+    h.state.report = envelope({
+      ...CONFIGURED,
+      credentials: [{ ...CREDENTIALS[0], source: "env" }],
+    });
+    await renderIntegrations();
+    const card = screen.getByRole("region", { name: "Email" });
+    expect(within(card).queryByLabelText("Microsoft tenant")).toBeNull();
+    expect(within(card).queryByLabelText("Application secret (new value)")).toBeNull();
+    expect(within(card).queryByRole("button", { name: "Save Application secret" })).toBeNull();
+  });
+
+  it("says once per card how far a save reaches", async () => {
+    h.state.report = envelope(CONFIGURED);
+    await renderIntegrations();
+    const card = screen.getByRole("region", { name: "Email" });
+    expect(within(card).getByText(/Other replicas pick it up on their own next send/)).toBeTruthy();
+  });
+});
+
+describe("a credential is posted and never read back", () => {
+  it("keeps a typed secret out of the DOM after the save", async () => {
+    h.state.report = envelope(CONFIGURED);
+    h.state.writeReply = [
+      {
+        integrationConfigured: {
+          payload: {
+            slot: "clientSecret",
+            envVar: "MEMQL_EMAIL_AZURE_CLIENT_SECRET",
+            secret: true,
+            source: "globalSecret",
+            reresolves: true,
+            takesEffect: ENGINE_TAKES_EFFECT,
+          },
+        },
+      },
+    ];
+    const { container } = await renderIntegrations();
+    const card = screen.getByRole("region", { name: "Email" });
+    fireEvent.change(within(card).getByLabelText("Application secret (new value)"), {
+      target: { value: TYPED_SECRET },
+    });
+    await act(async () => {
+      fireEvent.click(within(card).getByRole("button", { name: "Save Application secret" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // It reached the cluster ONCE...
+    expect(h.state.writes).toEqual([{ slot: "clientSecret", value: TYPED_SECRET }]);
+    // ...and the field cleared itself rather than holding it.
+    expect(
+      (within(card).getByLabelText("Application secret (new value)") as HTMLInputElement).value,
+    ).toBe("");
+    // ...and nothing anywhere renders it, in any attribute.
+    expect(container.innerHTML).not.toContain(TYPED_SECRET);
+
+    // The reachable positive: the save DID happen and the card says so.
+    expect(within(card).getByText(ENGINE_TAKES_EFFECT)).toBeTruthy();
   });
 });
 

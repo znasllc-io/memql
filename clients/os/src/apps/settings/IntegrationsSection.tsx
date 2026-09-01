@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { Button, Caption, Chip, Chips, Fact, Facts, Field, Input, Notice } from "../../kit";
 import { useSession } from "../../chrome/access";
 import type { RoleRequirement } from "../../system/roles";
@@ -6,6 +8,7 @@ import {
   lanesOf,
   silentCards,
   visibleReasons,
+  type ConfigureOutcome,
   type IntegrationCard,
   type IntegrationReason,
   type IntegrationSlot,
@@ -18,7 +21,7 @@ import {
   sourceLabel,
   stateLabel,
 } from "./integrationCopy";
-import { INTEGRATION_WRITES } from "./integrationWrites";
+import { CONFIG_WRITE_NOTE } from "./integrationWrites";
 import { useIntegrations, type IntegrationsFacts } from "./useIntegrations";
 
 // Integrations (issue #4826 / program decision P6): what this cluster can
@@ -47,11 +50,14 @@ import { useIntegrations, type IntegrationsFacts } from "./useIntegrations";
 //
 // THREE RULES, and they are the design of this surface:
 //
-//  1. A SECRET IS WRITE-ONLY. No value is read back -- not masked, not
-//     truncated, not dots. The card says whether it is SET and where it came
-//     from. `TestStatusNeverLeaksACredential` holds the server half; the
-//     client half is offering no control that would display one, which is why
-//     `IntegrationSlot` has nowhere for a secret's value to land.
+//  1. A SECRET IS WRITE-ONLY, and that is now literal in both directions: the
+//     field POSTS a value and the card never renders one back -- not masked,
+//     not truncated, not dots. The plaintext crosses the wire once, is sealed
+//     server-side under a key that must never exist in a browser, and no reply
+//     carries it again. `TestStatusNeverLeaksACredential` holds the server
+//     half; the client half is `IntegrationSlot` having nowhere for a secret's
+//     value to land and no control that would display one. The rotate command
+//     stays beside the field for operators who would rather use the CLI.
 //  2. A BOOT-ENVELOPE VARIABLE IS LISTED, NOT OFFERED. The resolver reads env
 //     first and stops, so a value the environment supplies cannot be
 //     overridden from the graph. That boundary is DECLARED
@@ -200,7 +206,7 @@ function IntegrationPanel({
                     className="os-field-group"
                     key={`${slot.secret ? "secret" : "setting"}:${slot.name}`}
                   >
-                    <SlotRow slot={slot} />
+                    <SlotRow slot={slot} facts={facts} />
                   </li>
                 ))}
               </ul>
@@ -214,13 +220,7 @@ function IntegrationPanel({
               arrangement that resolves to nothing.
             </Caption>
           ) : null}
-          {INTEGRATION_WRITES.available ? null : (
-            <Notice
-              tone="warn"
-              sentence="Saving from here is not wired up yet."
-              next={INTEGRATION_WRITES.reason}
-            />
-          )}
+          <Caption>{CONFIG_WRITE_NOTE}</Caption>
         </>
       )}
     </section>
@@ -228,24 +228,62 @@ function IntegrationPanel({
 }
 
 /**
- * One configuration key.
+ * One configuration key: what it is, whether it is set, where from, and the
+ * field that changes it.
  *
- * THE FIELD IS DISABLED RATHER THAN ABSENT, and for a secret it is disabled
- * rather than typeable. The shape of what will exist is worth showing -- it
- * is what says a value belongs here at all -- but a box that accepts a client
- * secret and then cannot save it is a box somebody pastes a credential into
- * and loses. "Nothing happens where nothing is offered" is the shell's rule;
- * a disabled control offers nothing while still saying what it is for.
+ * THE DRAFT IS `null` UNTIL SOMEBODY TYPES, and that is what keeps a save from
+ * fighting the read that follows it. `null` means "show the server's value",
+ * so a successful save resets to `null` and the reloaded row is what appears
+ * -- no effect syncing state, and no box holding stale text next to a card
+ * that has moved on. For a credential the server value is the empty string by
+ * construction, so the field clears itself.
+ *
+ * THE SECRET FIELD IS NOT MASKED, deliberately. It is typed or pasted once and
+ * never read back, so masking protects nothing that the card does not already
+ * refuse to show -- while hiding a trailing character in a pasted credential,
+ * which then fails at send time as an opaque vendor error. It is the posture
+ * every write-only secret field in this kind of console takes, and the caption
+ * says the value is sent once.
  */
-function SlotRow({ slot }: { slot: IntegrationSlot }) {
+function SlotRow({ slot, facts }: { slot: IntegrationSlot; facts: IntegrationsFacts }) {
   const label = slotLabel(slot.name);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [outcome, setOutcome] = useState<ConfigureOutcome | null>(null);
+  const [returned, setReturned] = useState(false);
+
   // The engine already drew the sensitivity line, and this honours it rather
   // than drawing a second one: a `Setting` is the non-secret half and its
   // value is meant to be read (which mailbox does this cluster send as), a
   // `Credential` carries no value at all. Withholding an env-sourced setting
   // would hide the sending mailbox on every production cluster, where env is
   // the normal source -- env decides EDITABILITY here, not sensitivity.
-  const offersAField = !slot.secret && slot.editable;
+  const offersAField = slot.editable;
+  const value = draft ?? (slot.secret ? "" : slot.value);
+  const ready = value.trim() !== "";
+
+  const save = () => {
+    if (!ready || saving) return;
+    setSaving(true);
+    setError("");
+    setOutcome(null);
+    setReturned(false);
+    facts
+      .configure(slot.name, value.trim())
+      .then((result) => {
+        setOutcome(result);
+        setReturned(true);
+        // Drop the draft BEFORE the re-read, so the field shows what the
+        // cluster now holds rather than what was typed at it. For a credential
+        // that is the empty string, which is the field clearing itself.
+        setDraft(null);
+        facts.reload();
+      })
+      .catch((err: unknown) => setError(messageOf(err)))
+      .finally(() => setSaving(false));
+  };
+
   return (
     <>
       <Chips label={`${label} state`}>
@@ -264,25 +302,32 @@ function SlotRow({ slot }: { slot: IntegrationSlot }) {
         {slot.required ? null : <Chip tone="muted">Optional</Chip>}
       </Chips>
       <Field label={`${label}${slot.envVar ? ` -- ${slot.envVar}` : ""}`}>
-        {slot.secret ? (
-          // NO INPUT AND NO VALUE. The reply carries neither, and a field here
-          // would be the one place in this shell a credential could be shown.
-          <Caption>
-            Changed with the operator command below, never from a browser.
-          </Caption>
-        ) : offersAField ? (
-          <Input
-            id={`integration-slot-${slot.name}`}
-            label={label}
-            value={slot.value}
-            onChange={() => {}}
-            disabled
-          />
+        {offersAField ? (
+          <>
+            <Input
+              id={`integration-slot-${slot.name}`}
+              label={slot.secret ? `${label} (new value)` : label}
+              value={value}
+              onChange={setDraft}
+              placeholder={slot.secret && slot.present ? "Replace this credential" : undefined}
+              onEnter={save}
+            />
+            <Button
+              tone="primary"
+              onClick={save}
+              busy={saving}
+              busyLabel="Saving"
+              disabled={!ready}
+              ariaLabel={`Save ${label}`}
+            >
+              Save
+            </Button>
+          </>
         ) : (
           // LISTED, NOT OFFERED. The resolver reads env first and stops, so a
           // field here would accept a value and change nothing.
           <>
-            <span className="os-mono">{slot.value || "--"}</span>
+            <span className="os-mono">{slot.secret ? "" : slot.value || "--"}</span>
             <Caption>
               Set in this node&apos;s environment, which the resolver reads
               first. Changing it is a redeploy.
@@ -291,11 +336,39 @@ function SlotRow({ slot }: { slot: IntegrationSlot }) {
         )}
       </Field>
       {slot.purpose ? <p className="os-caption">{slot.purpose}</p> : null}
+      {slot.secret && offersAField ? (
+        <Caption>
+          Sent once and sealed in the cluster. Nothing shows it again -- if you
+          need to change it, type the new value here.
+        </Caption>
+      ) : null}
       {/* The engine writes TWO sentences about a slot that is wrong -- a short
           one for this position and a longer one for the card's summary -- and
           both are rendered where their author put them. `reason` is empty
           whenever nothing is wrong, which is what keeps a healthy list quiet. */}
       {slot.reason ? <Notice tone="warn" detail={slot.reason} /> : null}
+      {/* A refusal beside the control that produced it, in the engine's words:
+          it names the slots that exist when a name is wrong, and says why an
+          empty value is refused. Never a toast, never rewritten. */}
+      {error ? <Notice tone="error" sentence={`${label} was not saved.`} detail={error} /> : null}
+      {/* THE SUCCESS LINE IS THE ENGINE'S. `takesEffect` has two forms -- this
+          node re-resolves on its next send, or this node runs from an
+          environment that outranks stored rows and will keep doing so -- and
+          only the engine knows which happened. A client-authored "Saved, it
+          takes effect shortly" would be confidently wrong half the time. When
+          the reply carries no sentence at all we say the write returned and
+          claim nothing about when it lands. */}
+      {returned ? (
+        <Notice
+          tone="info"
+          detail={outcome?.takesEffect || undefined}
+          sentence={
+            outcome === null
+              ? `${label} was written. The cluster did not say when it takes effect.`
+              : undefined
+          }
+        />
+      ) : null}
       {slot.secret && slot.rotate ? (
         <p className="os-caption os-mono">{slot.rotate}</p>
       ) : null}
@@ -433,4 +506,9 @@ function Refresh({ facts }: { facts: IntegrationsFacts }) {
       </Caption>
     </div>
   );
+}
+
+function messageOf(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
 }

@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useOsConnection } from "../../live/connection";
-import { readIntegrationsReport, type IntegrationsReport } from "./integrationsReport";
+import {
+  readConfigureOutcome,
+  readIntegrationsReport,
+  type ConfigureOutcome,
+  type IntegrationsReport,
+} from "./integrationsReport";
 
 // The Integrations read (issue #4826 / program decision P6).
 //
@@ -10,6 +15,12 @@ import { readIntegrationsReport, type IntegrationsReport } from "./integrationsR
 // projection of ONE NODE's in-memory registry, not of rows anyone writes, so
 // there is no graph event to subscribe to. Which replica answered is not
 // knowable from here and the section says so.
+//
+// THE WRITE IS THE SAME SHAPE AS THE PROBE: an imperative call with no effect
+// behind it, so there is no render path that writes. It names a manifest SLOT
+// and never a row or an environment variable -- `integrationConfigure` derives
+// the name and the row id server-side, which is what makes a mistyped variable
+// impossible rather than merely unlikely (memql#4825).
 //
 // THE PROBE IS AN ACTION, AND THAT IS ENFORCED BY SHAPE RATHER THAN BY CARE.
 // A live check dials a third party -- Entra's token endpoint, or an SMTP
@@ -33,6 +44,19 @@ export interface IntegrationsFacts {
   fetchedAt: number | null;
   reload: () => void;
   check: () => void;
+  /**
+   * Set one slot, by its manifest NAME.
+   *
+   * REJECTS on a refusal rather than returning a flag: the engine's sentence
+   * is the whole message -- it names the slots that exist when a name is
+   * wrong, and says why an empty value is refused -- and it belongs beside
+   * the field that produced it. A boolean here would make the caller invent
+   * one.
+   *
+   * The value is passed straight through and is never held: no draft of a
+   * credential outlives the call, and nothing in this module reads one back.
+   */
+  configure: (slot: string, value: string) => Promise<ConfigureOutcome | null>;
 }
 
 export function useIntegrations(): IntegrationsFacts {
@@ -114,7 +138,18 @@ export function useIntegrations(): IntegrationsFacts {
       });
   }, [connection]);
 
-  return { report, loading, checking, error, fetchedAt, reload, check };
+  const configure = useCallback(
+    async (slot: string, value: string): Promise<ConfigureOutcome | null> => {
+      if (connection === null) {
+        throw new Error("Not connected to the cluster, so nothing was written.");
+      }
+      const result = await connection.query.integrationConfigure({ slot, value });
+      return readConfigureOutcome([...result.rows()]);
+    },
+    [connection],
+  );
+
+  return { report, loading, checking, error, fetchedAt, reload, check, configure };
 }
 
 function messageOf(err: unknown): string {
