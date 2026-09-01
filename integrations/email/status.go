@@ -547,11 +547,29 @@ func sortReportsByName(reports []IntegrationReport) {
 // asking" is then nobody -- which must not be treated as a trusted internal
 // call (component/auth's ActorEnvelopeMap makes the same choice, memql#2801).
 //
-// Owner and admin only. The reply carries no secret, but it does carry the
+// Owner, developer and admin. The reply carries no secret, but it does carry the
 // operational shape of the deployment -- which mailbox it sends as, which
 // relay it talks to, which credentials are seeded -- and the probe reaches
 // out to a third party on the caller's say-so. Neither belongs to every
-// authenticated reader. Builtins cannot express this gate in the DSL (the
+// authenticated reader.
+//
+// DEVELOPER joined them for memql#4826, and its absence was a real defect
+// rather than a tightening. Program decision P6 gates integration
+// configuration owner-or-developer -- wiring up what the cluster talks to is
+// a developer's concern, administering PEOPLE is an admin's -- and the OS
+// Settings section that renders this report declares exactly that role set.
+// So the role the section exists FOR was the one role the engine refused, and
+// the section would have rendered a refusal to its intended audience while
+// serving somebody it does not offer itself to.
+//
+// Admin is KEPT rather than removed to match P6 exactly, and the asymmetry is
+// deliberate: P6 is about who may CONFIGURE, and this is a read that carries
+// no secret. Narrowing an existing read to make a sentence symmetrical would
+// take a capability away from every admin in every deployment to fix a
+// documentation shape, and the OS surface already declines to offer the
+// section to them.
+//
+// Builtins cannot express this gate in the DSL (the
 // annotation set is @description/@enabled/@disabled/@executor/@alias/@args/
 // @sdk, and the coarse gRPC data-plane gate classifies every builtin as a
 // read), so Go is the only place it can live.
@@ -560,8 +578,8 @@ func statusAuthorized(ctx context.Context) error {
 	if !ok || ac == nil {
 		return fmt.Errorf("email.status: no authenticated caller")
 	}
-	if ac.Role == auth.RoleOwner || ac.Role == auth.RoleAdmin {
+	if ac.Role == auth.RoleOwner || ac.Role == auth.RoleAdmin || ac.Role == auth.RoleDeveloper {
 		return nil
 	}
-	return fmt.Errorf("email.status: role %q may not read integration configuration (owner or admin required)", string(ac.Role))
+	return fmt.Errorf("email.status: role %q may not read integration configuration (owner, developer or admin required)", string(ac.Role))
 }
