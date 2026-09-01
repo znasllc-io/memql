@@ -126,7 +126,12 @@ func (w *Worker) handleImportRecipients(ctx context.Context, args map[string]any
 	if artifactID == "" {
 		return nil, errors.New("campaigns.importRecipients: artifactId is required")
 	}
-	if hasHeader, ok := args["hasHeader"].(bool); ok && !hasHeader {
+	// hasHeader is read in BOTH spellings a caller can produce -- the declared
+	// bool, and the string a JSON client sends for the same field. Reading
+	// only the bool would let `"false"` fall through to the permissive branch
+	// and import a headerless file as though the caller had asked for a
+	// header, which is the one direction this refusal must not fail in.
+	if !headerAsserted(args["hasHeader"]) {
 		return nil, errors.New("campaigns.importRecipients: hasHeader=false is refused. The column mapping " +
 			"IS the header, and guessing which column holds addresses is how an import mails the wrong " +
 			"list -- which cannot be recalled. Add a header row naming at least `email`")
@@ -242,6 +247,22 @@ func (w *Worker) handleImportRecipients(ctx context.Context, args map[string]any
 		"total":        result.Total,
 		"invalidLines": invalidLinePayload(result.InvalidLines),
 	})
+}
+
+// headerAsserted reports whether the caller left hasHeader alone or said
+// true. ABSENT means true, which is the documented default and what every
+// caller that has never heard of the flag sends.
+func headerAsserted(raw any) bool {
+	switch v := raw.(type) {
+	case nil:
+		return true
+	case bool:
+		return v
+	case string:
+		return !strings.EqualFold(strings.TrimSpace(v), "false")
+	default:
+		return true
+	}
 }
 
 func invalidLinePayload(lines []invalidLine) []map[string]any {

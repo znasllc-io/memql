@@ -275,12 +275,31 @@ func TestImportRefusesAFileWithNoEmailColumn(t *testing.T) {
 
 func TestImportRefusesHasHeaderFalse(t *testing.T) {
 	engine := &fakeEngine{}
-	w := importWorker(t, engine, "a@example.test")
+	// A file that WOULD import cleanly, so the only thing under test is the
+	// flag: a headerless fixture would refuse for the missing-column reason
+	// and the accepting half would pass for the wrong reason.
+	w := importWorker(t, engine, "email\na@example.test")
 
-	if _, err := w.handleImportRecipients(importCtx(), map[string]any{
-		"audienceId": testAudience, "artifactId": testArtifact, "hasHeader": false,
-	}, 0); err == nil {
-		t.Fatal("hasHeader=false was accepted")
+	// BOTH spellings. Reading only the declared bool would let the string
+	// "false" a JSON client sends fall through to the permissive branch and
+	// import a headerless file as though a header had been asserted -- the
+	// one direction this refusal must not fail in.
+	for _, hasHeader := range []any{false, "false", "FALSE"} {
+		if _, err := w.handleImportRecipients(importCtx(), map[string]any{
+			"audienceId": testAudience, "artifactId": testArtifact, "hasHeader": hasHeader,
+		}, 0); err == nil {
+			t.Errorf("hasHeader=%#v was accepted", hasHeader)
+		}
+	}
+	// Absent and true are the same answer, and it is the documented default.
+	for _, hasHeader := range []any{nil, true, "true"} {
+		args := map[string]any{"audienceId": testAudience, "artifactId": testArtifact}
+		if hasHeader != nil {
+			args["hasHeader"] = hasHeader
+		}
+		if _, err := w.handleImportRecipients(importCtx(), args, 0); err != nil {
+			t.Errorf("hasHeader=%#v was refused: %v", hasHeader, err)
+		}
 	}
 }
 
