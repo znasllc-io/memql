@@ -460,13 +460,34 @@ function numberAt(row: Row, key: string): number {
 export function importReportFrom(row: Row | null): ImportReport {
   if (row === null) return { added: 0, duplicates: 0, invalid: 0, total: 0, samples: [] };
   const flat = flatten(row);
-  const rawSamples = flat["samples"] ?? flat["invalidSamples"] ?? flat["sampleInvalid"];
+  // `invalidLines` FIRST, because that is what the engine actually sends
+  // (component/campaigns/import.go). The three spellings after it were written
+  // against the builtin's prose description before the Go side existed, and
+  // they are kept rather than deleted: this reader's whole job is that an
+  // unrecognised reply degrades to "it said nothing" instead of throwing, and
+  // a reader that only knew one key would have no fallback the day the reply
+  // gains a second shape. What is NOT acceptable is the state this was in --
+  // knowing three keys and not the real one, which renders an empty report
+  // beside a non-zero invalid count and looks like a clean file.
+  const rawSamples =
+    flat["invalidLines"] ?? flat["samples"] ?? flat["invalidSamples"] ?? flat["sampleInvalid"];
   const samples = Array.isArray(rawSamples)
     ? rawSamples
         .filter((s): s is Row => !!s && typeof s === "object" && !Array.isArray(s))
         .map((s) => ({
           line: numberAt(s, "line") || numberAt(s, "lineNumber"),
-          text: typeof s["text"] === "string" ? s["text"] : typeof s["line"] === "string" ? s["line"] : "",
+          // `value` is the engine's name for the offending text. `text` and a
+          // STRING-valued `line` stay as fallbacks for the same reason above --
+          // and note `line` is a NUMBER in the engine's shape, so the string
+          // check is what keeps the two readings from colliding.
+          text:
+            typeof s["value"] === "string"
+              ? s["value"]
+              : typeof s["text"] === "string"
+                ? s["text"]
+                : typeof s["line"] === "string"
+                  ? s["line"]
+                  : "",
           reason: typeof s["reason"] === "string" ? s["reason"] : "",
         }))
     : [];

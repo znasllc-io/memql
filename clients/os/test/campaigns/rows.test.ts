@@ -472,3 +472,63 @@ describe("reading whether this cluster can send mail", () => {
     ).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The engine's reply shapes, pinned against the ENGINE's own key names.
+//
+// These readers were written before the Go handlers existed, from the
+// builtins' prose descriptions, and one of them guessed wrong: it knew
+// `samples`, `invalidSamples` and `sampleInvalid` and did not know
+// `invalidLines`, which is what `component/campaigns/import.go` actually
+// sends. The failure had no symptom -- a non-zero invalid count beside an
+// empty list of bad lines reads exactly like a clean file with a few
+// duplicates, and the operator's next action is to look for a problem that is
+// not there.
+//
+// So the fixtures below are copied from the Go source rather than invented,
+// and that is the point of them: they fail the day the engine renames a key,
+// which is the only moment anybody could still fix it cheaply.
+// ---------------------------------------------------------------------------
+
+describe("the engine's reply shapes", () => {
+  it("reads the import report the engine actually sends", async () => {
+    const { importReportFrom } = await import("../../src/apps/campaigns/actions");
+    // component/campaigns/import.go: resultNode("campaignImport", {...})
+    const report = importReportFrom({
+      audienceId: "v1:campaigns:audience:a1",
+      artifactId: "v1:library:artifact:f1",
+      added: 118,
+      duplicates: 4,
+      invalid: 2,
+      total: 124,
+      invalidLines: [
+        { line: 17, reason: "not an address", value: "dana(at)example.test" },
+        { line: 92, reason: "no email column value", value: ",Dana,Acme" },
+      ],
+    } as never);
+
+    expect(report.added).toBe(118);
+    expect(report.duplicates).toBe(4);
+    expect(report.invalid).toBe(2);
+    expect(report.total).toBe(124);
+    expect(report.samples).toHaveLength(2);
+    expect(report.samples[0]?.line).toBe(17);
+    expect(report.samples[0]?.reason).toBe("not an address");
+    // `value` is the engine's name for the offending text. Reading only
+    // `text` here would render a line number and a reason with nothing to
+    // fix -- which is worse than no sample at all.
+    expect(report.samples[0]?.text).toBe("dana(at)example.test");
+  });
+
+  it("reads the unresolved merge tags the engine actually sends", async () => {
+    const { unresolvedTagsFrom } = await import("../../src/apps/campaigns/actions");
+    // component/campaigns/test_send.go: "unresolvedTags"
+    expect(unresolvedTagsFrom({ unresolvedTags: ["{{fields.compnay}}"] } as never)).toEqual([
+      "{{fields.compnay}}",
+    ]);
+    // A reply that says nothing is a clean test, never an error about a
+    // shape we did not understand.
+    expect(unresolvedTagsFrom({} as never)).toEqual([]);
+    expect(unresolvedTagsFrom(null)).toEqual([]);
+  });
+})
