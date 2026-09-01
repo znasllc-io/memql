@@ -6269,6 +6269,8 @@ type CreateRoleArgs struct {
 	PredefinedSet bool // set true to send predefined; required because zero-value bool is ambiguous
 	Active        bool
 	ActiveSet     bool // set true to send active; required because zero-value bool is ambiguous
+	// Other slugs that resolve to THIS rung. Accepted because the seed materializer writes base roles through this mutation, and a field the mutation does not accept is a field the seed silently drops -- which is exactly what happened to `aliases` on its first attempt: every seeded row landed with it null, the engine kept working through its compiled fallback, and MemQL OS could not rank `writer` or `reader` at all.
+	Aliases []string
 }
 
 // CreateRole calls the engine mutation createRole.
@@ -6319,6 +6321,13 @@ func CreateRoleBuild(args CreateRoleArgs) string {
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
+	}
+	if args.Aliases != nil {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("aliases: ")
+		b.WriteString(renderMemQLValue(args.Aliases))
 	}
 	b.WriteString(")")
 	return b.String()

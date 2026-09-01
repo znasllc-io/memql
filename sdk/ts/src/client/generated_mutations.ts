@@ -3365,6 +3365,8 @@ export interface CreateRoleArgs {
   description?: string;
   predefined?: boolean;
   active?: boolean;
+  /** Other slugs that resolve to THIS rung. Accepted because the seed materializer writes base roles through this mutation, and a field the mutation does not accept is a field the seed silently drops -- which is exactly what happened to `aliases` on its first attempt: every seeded row landed with it null, the engine kept working through its compiled fallback, and MemQL OS could not rank `writer` or `reader` at all. */
+  aliases?: string[];
 }
 
 export function buildCreateRole(args: CreateRoleArgs): string {
@@ -3376,6 +3378,7 @@ export function buildCreateRole(args: CreateRoleArgs): string {
   if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
   if (args.predefined !== undefined) parts.push("predefined: " + renderMemQLValue(args.predefined));
   if (args.active !== undefined) parts.push("active: " + renderMemQLValue(args.active));
+  if (args.aliases !== undefined) parts.push("aliases: " + renderMemQLValue(args.aliases));
   return "mutation createRole(" + parts.join(", ") + ")";
 }
 

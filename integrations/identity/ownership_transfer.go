@@ -172,6 +172,9 @@ func transferableConcepts(only string) []string {
 		if field == "" || field == langparser.RowAuthzSelfOwnedField {
 			continue
 		}
+		if isEvidenceOwnerField(field) {
+			continue
+		}
 		names = append(names, name)
 	}
 	// Sorted so a partial failure reports the same progress every time, and
@@ -385,4 +388,29 @@ func stringArg(args map[string]any, key string) string {
 func auditEventId(from, to string) string {
 	return fmt.Sprintf("v1:identity:auditEvent:transfer-%s-%s-%d",
 		bareTail(from), bareTail(to), time.Now().UTC().UnixNano())
+}
+
+// isEvidenceOwnerField reports whether a concept's declared owner field names
+// WHO ACTED rather than who owns the row.
+//
+// v1:identity:authActivity declares `@rowAuthz(owner="actorUserId",
+// clusterOwner)`, and the tier is right -- a person reads their own activity.
+// But `actorUserId` is a RECORD OF WHO DID SOMETHING, and a transfer that
+// rewrote it would re-attribute another principal's session refreshes, blocked
+// refreshes, grace-window accepts and PAT authentications to the recipient.
+// That log is the evidence refresh-token reuse detection reads (memql#4329);
+// silently rewriting it is worse than leaving a row unwritable, which is the
+// only thing skipping costs.
+//
+// KEYED ON THE FIELD NAME, not on a concept list, and the distinction is the
+// point: any concept that scopes its rows by WHO ACTED has the same property,
+// and a list would have to be remembered by whoever adds the next one. The
+// owner-vs-actor distinction is already in the field's name because the
+// authors of those concepts drew it there.
+//
+// It does mean a concept that names its genuine owner field `actorUserId`
+// would be skipped. That trade is deliberate: the cost is a row an operator
+// has to move by hand, against silently falsifying an audit trail.
+func isEvidenceOwnerField(field string) bool {
+	return strings.TrimSpace(field) == "actorUserId"
 }

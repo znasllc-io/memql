@@ -180,6 +180,27 @@ export function roleAdmits(actorRole: string, requirement?: RoleRequirement): bo
 }
 
 /**
+ * The slug to GRANT for a rung -- the spelling a `v1:identity:user.role` row
+ * actually carries, which is not always the catalog's own slug.
+ *
+ * THE TWO VOCABULARIES ARE NOT THE SAME SET, and a picker that offers the
+ * wrong one is refused server-side. The catalog seeds
+ * owner/developer/admin/user/viewer; a user row carries
+ * owner/admin/developer/writer/reader, and `auth.ValidRoles()` -- what
+ * setUserRole and the invitation path validate against -- is the second list.
+ * Offering `user` or `viewer` is a write the engine rejects, and dropping
+ * `writer` and `reader` means the CURRENT role of every ordinary principal
+ * matches no option at all, so the select mis-renders them.
+ *
+ * The alias is the bridge, and it is the FIRST one deliberately: a rung
+ * carries its legacy user-row spelling there, and a custom role -- which has
+ * no legacy spelling -- carries none and grants under its own slug.
+ */
+export function roleGrantSlug(rung: RoleRung): string {
+  return rung.aliases[0] ?? rung.slug;
+}
+
+/**
  * The floor a requirement states, for a surface that has to NAME it -- the
  * refused-surface panel is the one caller.
  *

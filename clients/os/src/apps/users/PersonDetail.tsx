@@ -13,6 +13,7 @@ import {
   formatFreshness,
   formatMoment,
   roleAdmits,
+  roleGrantSlug,
   roleLadder,
 } from "../../kit";
 import { useOsConnection } from "../../live/connection";
@@ -46,7 +47,11 @@ import { useSessionsCount } from "./useSessions";
  * the options appear in is the order the engine ranks them.
  */
 function grantableRoles(): string[] {
-  return roleLadder().map((rung) => rung.slug);
+  // roleGrantSlug, not rung.slug: the catalog's vocabulary and a user row's
+  // are different sets, and setUserRole validates against the second. Offering
+  // `viewer` is a write the engine refuses, and dropping `reader` means the
+  // current role of every ordinary principal matches no option.
+  return roleLadder().map(roleGrantSlug);
 }
 
 export function PersonDetail({

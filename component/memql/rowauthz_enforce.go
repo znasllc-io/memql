@@ -430,7 +430,22 @@ func rowAuthzAdmitsMode(ctx context.Context, conceptName string, id string, payl
 		// comparison because the admin branch does not read the owner field
 		// at all -- a row that cannot say who owns it is still an
 		// administrable row.
-		if decl.ClusterOwnerBypass && rowAuthzIsClusterOwner(ctx) {
+		// NOT ON A RANK-STRICT WRITE. rowAuthzWriteEscapeFor withdraws the
+		// blanket cluster-owner escape for such a concept (D3), and this
+		// branch would hand it straight back one layer down -- before the
+		// owner comparison, before rankAdmitsRow, and for a declaration the
+		// parser accepts and the formatter renders
+		// (`owner="f", rankVisible, rankStrict, clusterOwner`).
+		//
+		// "Peer rows are read-only, owner-to-owner included" would then be
+		// decorative for every concept declaring both, and latently so: no
+		// concept declares rankStrict today, so the first one to adopt it
+		// would silently not get the guarantee it asked for.
+		//
+		// READS are unaffected. A cluster owner reading across users is what
+		// the composite exists for; only the WRITE defers to the rank rule.
+		if decl.ClusterOwnerBypass && rowAuthzIsClusterOwner(ctx) &&
+			!(write && decl.RankStrict && !rowAuthzActorIsUnranked(ctx)) {
 			return rowAuthzAdmit
 		}
 		if strings.TrimSpace(decl.Owner) == langparser.RowAuthzSelfOwnedField {

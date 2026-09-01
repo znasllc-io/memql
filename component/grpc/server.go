@@ -1324,6 +1324,19 @@ func (s *streamSession) rankScopeContext() context.Context {
 	}
 	s.accessMu.Lock()
 	defer s.accessMu.Unlock()
+	if s.access == nil {
+		// NOT CACHED YET. The scope resolves under a sync.Once against
+		// whatever actor is current at the FIRST graph event, and an event can
+		// reach the fan-out before ensureAccess has run. Caching there would
+		// freeze a no-actor scope -- which admits nothing -- for the life of
+		// the stream: correct on load and frozen after, the failure this
+		// whole seam is written against.
+		//
+		// A fresh holder each time costs one resolution per event during that
+		// window, and the window is the handful of events between connect and
+		// the first message that needs an identity.
+		return s.service.engine.SubscriptionRankContext(context.Background())
+	}
 	if s.rankCtx == nil {
 		s.rankCtx = s.service.engine.SubscriptionRankContext(context.Background())
 	}
@@ -1772,6 +1785,20 @@ func (s *streamSession) handleRotateAuth(envelope *memqlv1.MemqlClientMessage, m
 		s.access = auth.FallbackFromClaims(vc.ClaimsMap)
 		s.accessLoaded = true
 	}
+
+	// THE RANK SCOPE GOES WITH THE CREDENTIAL (epic memql#4832).
+	//
+	// rankScopeContext resolves once and caches, so without this the stream
+	// keeps answering subscription row admission from the SUPERSEDED
+	// credential's owner set and rank -- for the life of the stream. A caller
+	// demoted mid-session, or rotating in a lower-privileged token, would keep
+	// receiving events for rows their new credential cannot read, including
+	// cluster-owned rows under an `unowned` floor they no longer clear.
+	//
+	// Cleared here rather than refreshed: the next event resolves it against
+	// the access this same critical section just installed, which is the only
+	// ordering that cannot serve a mixed answer.
+	s.rankCtx = nil
 
 	prevSubject := s.identity.Subject
 	s.identity = newIdentity

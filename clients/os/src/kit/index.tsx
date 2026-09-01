@@ -6,6 +6,7 @@ import { deriveProvenance, type MachinePresence, type ProvenanceFacts, type Prov
 import type { FileEntry } from "../system/desktop";
 import {
   roleAdmits,
+  roleGrantSlug,
   roleLadder,
   roleLadderLoaded,
   roleRank,
@@ -45,7 +46,7 @@ export { useLiveView, type LiveView } from "../live/liveView";
 export { useNow } from "./useNow";
 export { formatBytes, formatDuration, formatFreshness, formatMoment } from "./format";
 export { boolOr, flatten, stringsOf } from "./rows";
-export { deriveProvenance, roleAdmits, roleLadder, roleLadderLoaded, roleRank, roleRungOf };
+export { deriveProvenance, roleAdmits, roleGrantSlug, roleLadder, roleLadderLoaded, roleRank, roleRungOf };
 export type { ClusterRole, MachinePresence, ProvenanceFacts, ProvenanceTone, RoleRequirement, RoleRung };
 
 /**

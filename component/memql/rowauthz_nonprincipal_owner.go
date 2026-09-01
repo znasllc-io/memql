@@ -57,8 +57,10 @@ package memql
 // why that is the weaker form: "the prefix exists so a log line is legible; it
 // is not a protocol, and inferring an authorization decision from a string
 // shape is how a value somebody can influence becomes a permission". The flag
-// is set by the four constructors that build a non-principal actor and by
-// nothing a request can reach.
+// is set by the three SYNTHETIC constructors and by nothing a request can
+// reach. (`ContextWithUserActor` IS request-reachable -- component/identity's
+// web handlers call it on the request context -- which is exactly why the
+// discriminator is Synthetic and not Unranked.)
 
 import (
 	"context"

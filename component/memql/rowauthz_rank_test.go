@@ -528,6 +528,61 @@ func TestTheRankFloorSurvivesRegistration(t *testing.T) {
 	}
 }
 
+// THE COMPOSITE BYPASS MUST NOT HAND BACK THE WRITE ESCAPE rankStrict just
+// withdrew.
+//
+// `@rowAuthz(owner="f", rankVisible, rankStrict, clusterOwner)` is a
+// declaration the parser accepts and the formatter renders, and the two halves
+// pull in opposite directions: rowAuthzWriteEscapeFor defers for a cluster
+// owner, and the composite arm inside rowAuthzAdmits would then admit them
+// anyway -- before the owner comparison and before rankAdmitsRow. D3's "peer
+// rows are read-only, owner-to-owner included" would be decorative for exactly
+// the concepts that asked for it.
+//
+// Latent, which is why it needs a test rather than a comment: no concept
+// declares rankStrict today, so the first one to adopt it would silently not
+// get the guarantee.
+func TestTheCompositeBypassDoesNotUndoRankStrictOnWrites(t *testing.T) {
+	decl := &langparser.RowAuthzDecl{
+		Tier: langparser.RowAuthzOwned, Owner: "ownerUserId",
+		RankVisible: true, RankStrict: true, ClusterOwnerBypass: true,
+	}
+	before := memorynodes.All()
+	memorynodes.MergeAll(map[string]*memorynodes.Concept{
+		declaredRankConcept: {Name: declaredRankConcept, NodeType: "rank", RowAuthz: decl},
+	})
+	t.Cleanup(func() { memorynodes.ReplaceAll(before) })
+	if got := rowAuthzDeclFor(declaredRankConcept); got == nil || !got.RankStrict || !got.ClusterOwnerBypass {
+		t.Fatal("the fixture did not land; this test would measure an undeclared concept")
+	}
+
+	// An owner, and a row owned by a PEER owner.
+	scope := scopeWith(400, []string{"me", "peer"}, []string{"me"})
+	ctx := rankCtx(t, auth.RoleOwner, "me", false, scope)
+	payload := []byte(`{"ownerUserId":"peer"}`)
+
+	if got := rowAuthzAdmitsWrite(ctx, declaredRankConcept, "row-1", payload); got == rowAuthzAdmit {
+		t.Fatal("a cluster owner was admitted to WRITE a peer owner's row on a rankStrict " +
+			"concept. rowAuthzWriteEscapeFor withdraws the blanket escape for exactly this " +
+			"case, and the composite arm handed it straight back one layer down")
+	}
+	// READS are untouched -- reading across users is what the composite is for.
+	if got := rowAuthzAdmits(ctx, declaredRankConcept, "row-1", payload); got != rowAuthzAdmit {
+		t.Fatalf("the cluster owner's READ was %v; the composite must still admit it", got)
+	}
+	// And a row BELOW them is still writable, so this is a peer rule rather
+	// than a blanket refusal.
+	below := []byte(`{"ownerUserId":"me"}`)
+	if got := rowAuthzAdmitsWrite(ctx, declaredRankConcept, "row-2", below); got != rowAuthzAdmit {
+		t.Fatalf("the caller's OWN row was refused a write (%v)", got)
+	}
+	// An UNRANKED actor keeps the escape (D4), or every sweep stops.
+	sweepCtx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("seedSelfAccount"))
+	if _, escaped := rowAuthzWriteEscapeFor(sweepCtx, decl); !escaped {
+		t.Fatal("an unranked actor lost the escape on a rankStrict+clusterOwner concept")
+	}
+}
+
 // ---------------------------------------------------------------------
 // Subscriptions (D7 -- the tier covers reads, writes AND live events)
 // ---------------------------------------------------------------------

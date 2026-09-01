@@ -297,3 +297,70 @@ func TestNonPrincipalActorsAreNotGovernedByRank(t *testing.T) {
 		})
 	}
 }
+
+// TestCreateRoleAcceptsAliases is the gate that would have caught `aliases`
+// landing null on every seeded role row.
+//
+// THE TEXT GATES COULD NOT. component/auth/role_ladder_client_parity_test.go
+// parses `dsl/rbac/seeds.memql` as TEXT and compares numbers; memqllint loads
+// the tree; TestEngineInitLoadsFullDSL boots the engine. All three were green
+// while `createRole` neither declared nor accepted the field, so the seed
+// materializer -- which writes base roles THROUGH this mutation -- dropped it
+// on every write and every stored row carried null.
+//
+// What made it invisible is worth stating, because it is the reason a DSL
+// field needs a test at the MUTATION and not only at the seed: the ENGINE has
+// a compiled fallback (`auth.RoleRank`) that knows the legacy five, so nothing
+// server-side misbehaved. MemQL OS has no fallback BY DESIGN -- deleting it
+// was the point of D1 -- so `roleRungOf("writer")` answered nil, `roleRank`
+// answered -1, and roleAdmits refused every gated surface to every writer and
+// reader in the cluster. The OS suite passed throughout, because its harness
+// installs a fixture ladder that has the aliases the database does not.
+//
+// Written against createRole rather than against the seeded rows so it is
+// deterministic: the shared test database holds whatever a previous boot
+// seeded, and a test that reads those rows measures that history rather than
+// this contract.
+func TestCreateRoleAcceptsAliases(t *testing.T) {
+	eng, _, _ := sharedReadMergeEngine(t)
+	suffix := uniqueSuffix("alias4832")
+	slug := "lead-" + suffix
+	alias := "legacylead-" + suffix
+
+	// The rank-bound guard (memql#2072) resolves the CREATOR's rank through
+	// auth.UserIdentityFromContext, which reads the token's claims rather than
+	// the AccessContext -- so the claims have to carry the role, or the
+	// creator ranks 0 and may author nothing.
+	seeder := "alias-seeder-" + suffix
+	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{
+		UserId: seeder, Role: auth.RoleOwner,
+	})
+	ctx = auth.ContextWithToken(ctx, &auth.TokenInfo{
+		Subject: seeder,
+		Claims:  map[string]any{"sub": seeder, "role": string(auth.RoleOwner)},
+	})
+	ctx = auth.ContextWithInternalOrigin(ctx)
+	q := fmt.Sprintf(`mutation createRole(roleId: %s, slug: %s, name: %s, rank: 250, aliases: [%s])`,
+		langparser.QuoteString("v1:rbac:role:"+slug),
+		langparser.QuoteString(slug),
+		langparser.QuoteString("Lead"),
+		langparser.QuoteString(alias))
+	if _, err := eng.Execute(ctx, q); err != nil {
+		t.Fatalf("createRole with aliases: %v", err)
+	}
+
+	ladder := eng.rankLadder(context.Background())
+	if got := ladder.rankOf(slug); got != 250 {
+		t.Fatalf("the custom role's own slug ranks %d, want 250 -- the row did not land", got)
+	}
+	if _, stored := ladder.ranks[alias]; !stored {
+		t.Fatalf("createRole DROPPED `aliases`: %q resolves to no rung in the ladder read from rows.\n"+
+			"A field the mutation does not ACCEPT is a field the seed materializer writes as null,\n"+
+			"in silence. The engine survives that through auth.RoleRank; MemQL OS deleted its\n"+
+			"fallback deliberately (epic memql#4832, D1) and would refuse every gated surface to\n"+
+			"every principal holding an alias-only role.", alias)
+	}
+	if got := ladder.rankOf(alias); got != 250 {
+		t.Fatalf("the alias ranks %d, want 250 -- it resolved to the wrong rung", got)
+	}
+}

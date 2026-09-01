@@ -26,6 +26,16 @@ package memql
 // every consumer, which is the property that matters most here: the SQL
 // term, the in-memory post-filter and the per-row gate all read the same
 // resolved answer, so the three cannot disagree about a single row.
+//
+// TO BE EXACT ABOUT WHAT GUARANTEES THAT, because "structural" would be
+// overstating it: the memo is installed on the context by the read entry
+// point (engine.go, beside the row-authz binding stamp) and by executeWrite,
+// and every consumer downstream inherits it. lowerRankScope re-installs it
+// defensively, so a nested evaluation cannot resolve a second one. What is
+// NOT guaranteed by construction is a caller that reaches the row gate on a
+// context no entry point stamped -- and that case is handled by declining to
+// widen (rankScopeFromContext returns nil), which withholds rather than
+// discloses. So: one resolution by convention, fail-closed by construction.
 // A cluster's principal count is small and bounded -- this is an
 // operator's cluster, not a consumer social graph -- so one map per
 // request is affordable where a per-row join is not.
@@ -235,6 +245,12 @@ func rankAdmitsRow(ctx context.Context, decl *langparser.RowAuthzDecl, storedOwn
 		// to be strictly below, so there is no rank-strict answer for it
 		// and the ordinary escapes stay the only way to write one.
 		if write || decl.Unowned == "" {
+			// No rank-strict answer for a row nobody owns: there is no owner
+			// to be strictly below. On a concept declaring rankStrict WITHOUT
+			// clusterOwner such a row is writable by internal origin alone --
+			// ownership transfer skips empty owners too, deliberately, since
+			// a singleton has no meaningful second owner. That is a narrow and
+			// intended corner, not an oversight.
 			return false
 		}
 		return rankFloorAdmits(scope.ladder, decl.Unowned, scope.actorRank)
@@ -374,6 +390,12 @@ func (e *MemQLEngine) rankLadder(ctx context.Context) roleLadder {
 		return ladder
 	}
 	seen := map[string]struct{}{}
+	// Alias claims, applied only after every SLUG is resolved -- see below.
+	type aliasClaim struct {
+		names []string
+		rank  int
+	}
+	var pendingAliases []aliasClaim
 	for i := range nodes {
 		payload := rankRowPayload(nodes[i])
 		if payload == nil {
@@ -403,13 +425,30 @@ func (e *MemQLEngine) rankLadder(ctx context.Context) roleLadder {
 		// owner/developer/admin/user/viewer, and without the aliases as
 		// DATA every consumer needs its own translation table -- which is
 		// how the two ladders diverged in the first place.
-		for _, alias := range rankAliasList(payload["aliases"]) {
+		//
+		// DEFERRED TO A SECOND PASS, and that is the security-relevant part.
+		// Applying them inline made "a slug already taken by a base role wins"
+		// depend on ITERATION ORDER: rows come back newest-first, so a custom
+		// role created today could claim an alias whose base role had not been
+		// read yet. `writer` and `reader` are alias-only rungs -- no row
+		// carries them as a slug -- so nothing would ever reclaim them, and a
+		// developer minting a rank-299 role aliased `reader` would promote
+		// every reader in the cluster to 299. The rank-bound guard bounds only
+		// the `rank` field and never looks at `aliases`.
+		//
+		// With slugs resolved first, a slug ALWAYS wins over any alias, and
+		// the claim the concept makes is true by construction rather than by
+		// the order rows happen to come back in.
+		pendingAliases = append(pendingAliases, aliasClaim{names: rankAliasList(payload["aliases"]), rank: rank})
+	}
+	for _, claim := range pendingAliases {
+		for _, alias := range claim.names {
 			alias = strings.TrimSpace(alias)
 			if alias == "" {
 				continue
 			}
 			if _, taken := ladder.ranks[alias]; !taken {
-				ladder.ranks[alias] = rank
+				ladder.ranks[alias] = claim.rank
 			}
 		}
 	}

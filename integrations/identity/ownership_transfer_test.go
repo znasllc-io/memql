@@ -158,3 +158,31 @@ func TestSelfOwnedConceptsAreNotTransferable(t *testing.T) {
 		}
 	}
 }
+
+// TestTransferSkipsEvidenceBearingConcepts pins the exclusion.
+//
+// `v1:identity:authActivity` declares `@rowAuthz(owner="actorUserId",
+// clusterOwner)`. The tier is correct -- a person reads their own activity --
+// but the field records WHO ACTED, and a transfer that rewrote it would
+// re-attribute another principal's session refreshes and PAT authentications
+// to the recipient. That log is what refresh-token reuse detection reads.
+func TestTransferSkipsEvidenceBearingConcepts(t *testing.T) {
+	if !isEvidenceOwnerField("actorUserId") {
+		t.Fatal("actorUserId is not recognised as an actor record, so authActivity would be " +
+			"rewritten by a transfer -- silently falsifying the audit trail reuse detection reads")
+	}
+	// The reachable positive: an ordinary owner field is still transferable,
+	// or this exclusion would be a way of transferring nothing.
+	for _, ordinary := range []string{"ownerUserId", "userId", "requestedBy"} {
+		if isEvidenceOwnerField(ordinary) {
+			t.Fatalf("%q was excluded from transfer; only fields that record WHO ACTED are", ordinary)
+		}
+	}
+	// And nothing listed as transferable may carry one.
+	for _, name := range transferableConcepts("") {
+		decl := conceptRowAuthz(name)
+		if decl != nil && isEvidenceOwnerField(decl.Owner) {
+			t.Fatalf("%s is listed as transferable but its owner field records who ACTED", name)
+		}
+	}
+}

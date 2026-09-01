@@ -18,6 +18,7 @@ import {
   Select,
   formatMoment,
   roleAdmits,
+  roleGrantSlug,
   roleLadder,
   useLiveView,
   useNow,
@@ -174,7 +175,7 @@ function IssueInvitation({
               A custom role the operator defined appears here with no client
               release, and the order matches the engine's ranking rather than
               a literal this file used to keep. */}
-          {roleLadder().map((rung) => rung.slug).map((r) => (
+          {roleLadder().map(roleGrantSlug).map((r) => (
             <option
               key={r}
               value={r}
