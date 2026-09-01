@@ -5,12 +5,36 @@
 
 /// A MemQL cluster -- the top-level deployment unit consisting of a shared database and seed nodes
 /// (bff, cognition, planner). Partitions exist within a cluster for data isolation.
-@displayCard(primary="name", secondary="provider", tertiary="region", status="status")
+// NO `status=` SLOT, for the reason `database` above has none (memql#4766,
+// memql#4772): the field it named was written once at bootstrap and refreshed
+// by nothing, so a card rendering it showed a health verdict that was a
+// constant. A display card with no status slot says nothing about health,
+// which is the true statement.
+@displayCard(primary="name", secondary="provider", tertiary="region")
 concept cluster {
   name              string! @description("Cluster name (e.g., 'development', 'staging-us-central1').")
   region            string  @description("Cloud region (e.g., 'us-central1') or 'local' for development.")
   seedNodeTypes     []string  @description("Required node types for this cluster (e.g., ['bff', 'cognition', 'planner']).")
-  status            enum("bootstrapping", "healthy", "degraded", "shutting_down")  @default("bootstrapping") @description("Current cluster health status.")
+  // `status` IS GONE (memql#4772), and this note is here so it is not re-added.
+  //
+  // It was enum("bootstrapping","healthy","degraded","shutting_down") with one
+  // writer -- `createCluster`, resolving `args.status ?? "healthy"` -- and
+  // `bootstrapCluster` never passed the argument. There is no `updateCluster`
+  // anywhere. So every cluster wrote the literal "healthy" once and nothing
+  // ever moved it: `degraded` and `shutting_down` had never been written by
+  // anything, and the MemQL OS Settings panel rendered that constant to an
+  // operator as "Status", where it would have said healthy with every node
+  // down.
+  //
+  // Same removal memql#4766 made to `database.status` (structurally
+  // unanswerable -- the row lives in the database it describes) and
+  // `identityProvider.status`. This one differed only in having a live
+  // consumer, which is why it was split out rather than folded in.
+  //
+  // A cluster health verdict is not impossible -- `seedNodeTypes` here plus
+  // `v1:cluster:node` liveness is a real aggregate -- but it must be DERIVED
+  // at read time, never stored, or it acquires exactly the staleness this
+  // field died of. Probe live and say when you looked.
   databaseId        string  @description("Node ID of the v1:cluster:database record for this cluster's database.")
   identityProviderId  string  @description("Node ID of the v1:cluster:identityProvider record.")
   version           string  @description("MemQL version running on this cluster.")

@@ -75,8 +75,13 @@ export function ClusterSection() {
           <dd>{identity.cluster?.name || dash(identity.loading)}</dd>
           <dt>Region</dt>
           <dd>{identity.cluster?.region || dash(identity.loading)}</dd>
-          <dt>Status</dt>
-          <dd>{identity.cluster?.status || dash(identity.loading)}</dd>
+          {/* NO "Status" ROW. `v1:cluster:cluster.status` is gone (memql#4772):
+              its only writer stamped a constant at bootstrap and nothing ever
+              refreshed it, so this line said "healthy" with every node down --
+              and it said it HERE, on the panel, as well as in the diagnostics
+              report. A health verdict for this cluster has to be DERIVED at
+              read time (seedNodeTypes against live v1:cluster:node rows), not
+              read from a stored field. */}
           <dt>Deploy target</dt>
           <dd>{identity.cluster?.provider || dash(identity.loading)}</dd>
         </dl>

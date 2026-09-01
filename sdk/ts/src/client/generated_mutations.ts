@@ -1870,8 +1870,6 @@ export interface CreateClusterArgs {
   clusterId: string;
   name: string;
   region?: string;
-  // Enum: bootstrapping | healthy | degraded | shutting_down
-  status?: string;
   databaseId?: string;
   identityProviderId?: string;
   version?: string;
@@ -1883,7 +1881,6 @@ export function buildCreateCluster(args: CreateClusterArgs): string {
   parts.push("clusterId: " + renderMemQLValue(args.clusterId));
   parts.push("name: " + renderMemQLValue(args.name));
   if (args.region !== undefined) parts.push("region: " + renderMemQLValue(args.region));
-  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
   if (args.databaseId !== undefined) parts.push("databaseId: " + renderMemQLValue(args.databaseId));
   if (args.identityProviderId !== undefined) parts.push("identityProviderId: " + renderMemQLValue(args.identityProviderId));
   if (args.version !== undefined) parts.push("version: " + renderMemQLValue(args.version));

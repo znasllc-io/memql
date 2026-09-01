@@ -77,16 +77,15 @@ func mustReadTreeFile(t *testing.T, path string) string {
 // not what makes dropping it acceptable.
 //
 // So an omission has to be argued for, one entry at a time.
-var bootstrapOmittedArgs = map[string]string{
-	// cluster.status has the same defect as the two fields memql#4766
-	// removed -- one writer, a constant, no refresher -- but it is a
-	// different concept, it is outside that issue's scope, and unlike its
-	// siblings it has a LIVE consumer: the OS Settings cluster panel renders
-	// it as "Status", which means it currently shows an operator a hardcoded
-	// verdict. Removing it is a change to that surface as well, so it is
-	// tracked on its own (memql#4772) rather than folded in here.
-	"createCluster.status": "memql#4772 -- frozen like its siblings, but has a live consumer and is tracked separately",
-}
+// EMPTY, and that is the finished state rather than a gap. Its one entry was
+// `createCluster.status`, which memql#4772 closed by REMOVING the field rather
+// than by forwarding it -- the honest fix for an argument whose only effect was
+// to stamp a constant nobody refreshed.
+//
+// An empty map does not weaken the gate: the test below fails on any declared
+// argument `bootstrapCluster` does not pass, and a new entry here has to be
+// argued for in the same way. Keep it, and keep it empty.
+var bootstrapOmittedArgs = map[string]string{}
 
 func TestBootstrapClusterForwardsEveryDeclaredField(t *testing.T) {
 	// Guard the path itself: a rename that moved these files would otherwise

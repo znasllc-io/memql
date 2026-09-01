@@ -15,10 +15,11 @@ import { SdkDesktopGateway } from "../live/desktopGateway";
 import { MachinesProvider } from "../live/machines";
 import { OsConnectionProvider, useOsConnection } from "../live/connection";
 import type { ProfileAccess } from "../modules/profile/access";
+import { useResolvedAccess } from "../modules/profile/useResolvedAccess";
 import type { PlacementTokens } from "../system/placement";
 import { GraphDesktopStore } from "../system/graphStore";
 import { LocalDesktopStore, type DesktopStore } from "../system/store";
-import { SessionProvider } from "./access";
+import { SessionProvider, useSession } from "./access";
 import { Desktop } from "./Desktop";
 import { suppressBrowserMenu } from "./browserMenu";
 import { Dock } from "./Dock";
@@ -54,7 +55,6 @@ export function Shell({
   authSource?: OsAuthSource;
   ports?: ShellPorts;
 }) {
-  const actorRole = access?.clusterRole ?? "";
   const source = useMemo<OsAuthSource>(
     () => authSource ?? { bearer: async () => null, refresh: async () => null },
     [authSource],
@@ -72,19 +72,30 @@ export function Shell({
 
   const grid = useMemo(() => gridForViewport(viewport.w, viewport.h), [viewport]);
 
+  // ===========================================================================
+  // SESSION RESOLVES *INSIDE* THE CONNECTION, AND THAT ORDER IS THE FIX
+  // ===========================================================================
+  // Who is signed in comes from `query.getMyAccess()` on the shell's own
+  // stream, so the provider that supplies it has to sit BELOW the one that
+  // dials. It used to sit above, which is why the facts were fetched over HTTP
+  // instead -- from a route that does not exist, silently yielding "no role"
+  // to everyone forever (see `useResolvedAccess`).
+  //
+  // `access` stays a prop and still WINS when given: every test harness and
+  // preview passes one, and a caller that already knows is not asking.
   return (
-    <SessionProvider value={{ access, config }}>
+    <AuthSourceProvider source={source}>
       {/* The credential seam, reachable from inside an app. An app that
           uploads somewhere the shell's own provider does not point at -- the
           Training app posts to the space attachment route rather than to the
           Library -- builds its own provider from this, and gets `bearer()`
           rather than the token. */}
-      <AuthSourceProvider source={source}>
       <OsConnectionProvider authSource={source} enabled={!ports.disableConnection}>
+        <SessionScope access={access} config={config}>
         <MachinesProvider>
           <ShellTransports source={source} ports={ports}>
             {(uploads, desktopStore) => (
-              <OsProvider registry={OS_REGISTRY} actorRole={actorRole} grid={grid} store={desktopStore}>
+              <ShellRoster grid={grid} store={desktopStore}>
                 {layout === "phone" ? (
                   <div
       className="os-root"
@@ -103,13 +114,64 @@ export function Shell({
                     onSignOut={onSignOut}
                   />
                 )}
-              </OsProvider>
+              </ShellRoster>
             )}
           </ShellTransports>
         </MachinesProvider>
+        </SessionScope>
       </OsConnectionProvider>
-      </AuthSourceProvider>
-    </SessionProvider>
+    </AuthSourceProvider>
+  );
+}
+
+/**
+ * Resolves the session against the live connection and provides it.
+ *
+ * A component rather than a hook call in `Shell`, because the read needs the
+ * Connection and `Shell` renders the provider that creates it -- a hook there
+ * would run one level too high and always see null.
+ */
+function SessionScope({
+  access,
+  config,
+  children,
+}: {
+  access: ProfileAccess | null;
+  config: OsRuntimeConfig;
+  children: ReactNode;
+}) {
+  const resolved = useResolvedAccess(access);
+  const value = useMemo(() => ({ access: resolved, config }), [resolved, config]);
+  return <SessionProvider value={value}>{children}</SessionProvider>;
+}
+
+/**
+ * The app roster, gated by the RESOLVED role.
+ *
+ * Split out for the same reason `SessionScope` is: `actorRole` used to be read
+ * off `Shell`'s prop, which is exactly the value that was always null in
+ * production. Reading it from context here means the launcher, the dock and
+ * open-by-id all see the role the cluster actually reported.
+ */
+function ShellRoster({
+  grid,
+  store,
+  children,
+}: {
+  grid: ReturnType<typeof gridForViewport>;
+  store: DesktopStore;
+  children: ReactNode;
+}) {
+  const { access } = useSession();
+  return (
+    <OsProvider
+      registry={OS_REGISTRY}
+      actorRole={access?.clusterRole ?? ""}
+      grid={grid}
+      store={store}
+    >
+      {children}
+    </OsProvider>
   );
 }
 

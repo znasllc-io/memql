@@ -10,7 +10,6 @@ mutate cluster createCluster {
     clusterId           string!
     name                string!
     region              string
-    status              enum("bootstrapping", "healthy", "degraded", "shutting_down")
     databaseId          string
     identityProviderId  string
     version             string
@@ -21,7 +20,6 @@ mutate cluster createCluster {
     args.name
     args.region
     seedNodeTypes: ["bff", "cognition", "planner"]
-    status: args.status ?? "healthy"
     args.databaseId
     args.identityProviderId
     args.version
