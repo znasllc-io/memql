@@ -96,6 +96,26 @@ export function DomainsPanel({ site, domain }: { site: SiteRow; domain: string }
         cluster-level resource with real rate limits.
       </Caption>
 
+      {/* WHAT THE DOMAIN'S OWN STATUS DOES NOT SAY. A binding reaches `live`
+          when ITS setup is finished -- both DNS records check out and the
+          certificate is Ready -- and that is a fact about the domain. Whether a
+          visitor gets anything is a fact about the DEPLOYABLE, decided by the
+          status gate in component/edge/handler.go before any file is looked at.
+          The two are independent, and a panel that showed only the first would
+          say "serving" about a hostname the internet 404s.
+          
+          NAMED BY WHAT SERVES, not by listing what does not -- the same
+          inversion the edge's own switch carries. `live` is the one status that
+          serves, so every other value, including any added later, gets this
+          notice without anybody remembering to come back for it. */}
+      {site.status === "live" ? null : (
+        <Notice
+          tone="warn"
+          sentence={`This deployable is ${site.status || "not live"}, so nothing is served at any of its domains.`}
+          next="A domain below marked serving has finished its own setup -- both DNS records check out and its certificate is issued. What a visitor actually gets is decided by the deployable's status, above."
+        />
+      )}
+
       <AddDomain siteId={site.id} />
 
       {/* KEYED ON THE SITE ID so that changing deployable RE-BASELINES rather

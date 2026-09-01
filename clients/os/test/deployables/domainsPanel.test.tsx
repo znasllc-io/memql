@@ -13,6 +13,7 @@ import { CUSTOM_DOMAIN_CONCEPT } from "../../src/apps/deployables/domains";
 import {
   SHOP,
   click,
+  siteRow,
   type,
   domainRow,
   emit,
@@ -135,6 +136,77 @@ describe("the list", () => {
 
     await findCard("gone.acme.com");
     expect(screen.getByText("removed")).toBeTruthy();
+  });
+});
+
+// ===========================================================================
+// The deployable's own status
+// ===========================================================================
+
+describe("what the domain's status does not say", () => {
+  // A BINDING REACHES `live` ON ITS OWN MERITS -- both DNS records check out
+  // and the certificate is issued -- and that says nothing about whether a
+  // visitor gets anything. The edge decides that from the DEPLOYABLE's status,
+  // before any file lookup. Without this notice the panel says "serving" about
+  // a hostname the internet 404s, which was true of the epic as it shipped.
+  it("says nothing is served when the deployable is not live, even with a live domain", async () => {
+    const connection = fakeConnection({
+      sites: [siteRow({ id: "site-shop", hostname: "shop.memql.example.com", status: "draft" })],
+      domains: [domainRow({ id: "cd-1", hostname: "www.acme.com", status: "live" })],
+    });
+    await openShop(connection);
+
+    await findCard("www.acme.com");
+    // The domain's own status is unchanged -- it IS live, and saying otherwise
+    // would be a different lie.
+    expect(within(card("www.acme.com")).getByText("serving")).toBeTruthy();
+    // And the panel says what that does and does not mean.
+    expect(screen.getByText(/This deployable is draft, so nothing is served/i)).toBeTruthy();
+  });
+
+  it("names a paused deployable in its own words", async () => {
+    const connection = fakeConnection({
+      sites: [siteRow({ id: "site-shop", hostname: "shop.memql.example.com", status: "disabled" })],
+      domains: [domainRow({ id: "cd-1", status: "live" })],
+    });
+    await openShop(connection);
+
+    await screen.findByText(/This deployable is disabled, so nothing is served/i);
+  });
+
+  // NAMED BY WHAT SERVES. `live` is the one status that serves, so a value this
+  // build has never seen gets the notice by construction -- the same inversion
+  // the edge's own switch carries, and the reason a future enum addition
+  // cannot silently start claiming to serve.
+  //
+  // IT SAYS "not live" RATHER THAN NAMING THE VALUE, and that is not this
+  // panel's doing: `siteFromRow` (rows.ts) normalises any status outside
+  // draft/live/disabled to the EMPTY STRING, so an unrecognised value never
+  // reaches this component at all. That ternary is inert while the enum has
+  // exactly those three members and becomes a real defect the moment a fourth
+  // arrives -- the whole Deployables surface would render such a site with a
+  // blank status. The notice is still correct and still fires, which is the
+  // property being pinned here; naming the value is the projection's to fix.
+  it("covers a status this build does not recognise", async () => {
+    const connection = fakeConnection({
+      sites: [siteRow({ id: "site-shop", hostname: "shop.memql.example.com", status: "archived" })],
+      domains: [domainRow({ id: "cd-1", status: "live" })],
+    });
+    await openShop(connection);
+
+    await screen.findByText(/This deployable is not live, so nothing is served/i);
+  });
+
+  // THE OTHER DIRECTION, which is what stops this becoming a standing banner.
+  it("says nothing when the deployable is live", async () => {
+    const connection = fakeConnection({
+      sites: [SHOP],
+      domains: [domainRow({ id: "cd-1", status: "live" })],
+    });
+    await openShop(connection);
+
+    await findCard("www.acme.com");
+    expect(screen.queryByText(/nothing is served at any of its domains/i)).toBeNull();
   });
 });
 
