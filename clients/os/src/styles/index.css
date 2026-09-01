@@ -5393,7 +5393,11 @@ a.os-button {
   display: block;
   height: 2px;
   border-radius: 1px;
-  background: var(--os-rail);
+  /* The unlit rungs use the STRONG rail rather than the plain one. They are
+   * the thing being counted -- a ladder whose empty rungs are invisible is a
+   * highlight with no scale behind it -- and at 2px they need the extra
+   * weight to register at all. */
+  background: var(--os-rail-hover);
   /* Ticks are drawn at 60% and grow to full width when they carry meaning,
    * so the two lit rungs read as marks rather than as brighter hairlines --
    * the difference survives a low-contrast screen, which a colour change
@@ -5405,11 +5409,19 @@ a.os-button {
     width var(--os-duration-fast) var(--os-ease);
 }
 
-/* THE OWNER's rung: ink, full width. Read as "them". */
+/* THE OWNER's rung: ink, and NARROWER than the viewer's.
+ *
+ * The width difference is not decoration. The two lit rungs are adjacent
+ * whenever the owner sits one rung from the viewer -- which is the commonest
+ * case and the one the mark exists to explain -- and two full-width bars
+ * touching read as a single thick block, so the fact "they are one rung above
+ * you" collapses into "something is highlighted here". Differing widths keep
+ * them countable, and they do it by SHAPE, so the distinction survives a
+ * reader who cannot separate the two hues. */
 .os-rank-tick[data-owner] {
   background: var(--os-ink);
-  width: 100%;
-  margin-inline-start: 0;
+  width: 70%;
+  margin-inline-start: 15%;
 }
 
 /* THE VIEWER's rung: the accent, full width. Read as "you". Declared after
