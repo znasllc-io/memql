@@ -124,6 +124,20 @@ func (e *MemQLEngine) tryCompileCombinedFilter(ctx context.Context, expr Express
 		}
 		return filter, true
 
+	case *constantBoolExpression:
+		// A term already decided for the whole scan -- a folded caller-flag
+		// comparison (`args.includeArchived==true`, memql#4814). It has to
+		// compile, not merely post-filter: the shape that produces it is a
+		// DISJUNCT beside row predicates, and a tree the combined compiler
+		// refuses falls to the split evaluator, which has no notion of a
+		// node-set for a constant and fails the read with "unsupported
+		// expression node". TRUE / FALSE keeps the whole filter in one query
+		// and lets Postgres fold the term away.
+		if node.value {
+			return compiledExpression{sql: "TRUE"}, true
+		}
+		return compiledExpression{sql: "FALSE"}, true
+
 	case *SpecReferenceExpression:
 		// Expand the spec inline and try to compile its expression.
 		// This allows specs like specIsActiveRecord (payload.active==true) to be

@@ -10,8 +10,31 @@ import { flatten, stringsOf } from "../../kit/rows";
 // that can each fail for unrelated reasons. Everything here is a function of a
 // row and is unit-testable with no browser, no cluster and no React.
 
-/** The literal id of the owner's own company (design D3). */
-export const SELF_ACCOUNT_ID = "v1:accounts:account:self";
+/**
+ * The owner's own company (design D3), as its id appears ON THE WIRE.
+ *
+ * ===========================================================================
+ * BARE, NOT `v1:accounts:account:self`, AND THE DIFFERENCE IS THE WHOLE APP
+ * ===========================================================================
+ * The seed writes the canonical id and the row is stored under it, so the
+ * canonical spelling is the one every server-side file in this feature says --
+ * the automation, the query, the design record. None of that reaches a
+ * browser. The engine STRIPS the `{concept}:` prefix at every egress seam
+ * (docs/public/concepts/identifiers.md, machine-checked by
+ * component/grpc/wire_bare_ids_test.go, which fails the build if a canonical
+ * id leaks), so a client receives `self` and the contract's own sentence is
+ * "clients never compose, parse, or compare a canonical id".
+ *
+ * Holding the canonical string here compared it against a bare one, so
+ * `accountIsSelf` was FALSE for the self row and stayed false forever. Nothing
+ * errored: the first-run card never rendered on a cluster that had never been
+ * configured, the `you` chip never appeared, and the owner's own company read
+ * as an ordinary client -- three surfaces silently wrong, all from one
+ * comparison. The OS suite passed throughout because its harness seeds
+ * `accountRow({ id: SELF_ACCOUNT_ID })`, so both sides of the comparison were
+ * whatever this constant said.
+ */
+export const SELF_ACCOUNT_ID = "self";
 
 export const ACCOUNT_CONCEPT = "v1:accounts:account";
 
