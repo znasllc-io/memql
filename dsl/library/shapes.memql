@@ -26,6 +26,7 @@ shape artifact artifactFull {
   producedByWorkerId
   producedByWorkerName
   validationStatus
+  accountIds
   updatedAt
   row.createdAt
 }

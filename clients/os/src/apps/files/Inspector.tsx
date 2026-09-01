@@ -5,7 +5,10 @@ import { useAuthSource } from "../../auth/context";
 import { useSession } from "../../chrome/access";
 import { useOs } from "../../chrome/state";
 import { openInVsCode, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
-import { Button, Chip, Chips, Fact, Facts, Notice, ProvenanceDot, Select, formatMoment } from "../../kit";
+import { Button, Chip, Chips, Fact, Facts, Notice, ProvenanceDot, Select, Subhead, formatMoment } from "../../kit";
+import { AccountLabelPicker } from "../accounts/AccountPicker";
+import { useAccountOptions } from "../accounts/tie";
+import { useArtifactAccounts } from "./actions/accounts";
 import { useOsConnection } from "../../live/connection";
 import { rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
 import { kindGlyph } from "./BrowseSection";
@@ -68,6 +71,8 @@ export function Inspector({
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [deskNote, setDeskNote] = useState("");
   const [moveError, setMoveError] = useState("");
+  const accounts = useAccountOptions();
+  const accountTie = useArtifactAccounts();
   const [archiveError, setArchiveError] = useState("");
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [confirmingArchive, setConfirmingArchive] = useState(false);
@@ -243,6 +248,35 @@ export function Inspector({
           ))}
         </Chips>
       ) : null}
+
+      {/* WHO THIS IS FOR (epic memql#4800, D5). MULTIPLE, because the index's
+          `accountIds` is a list -- a contract naming two clients is one file,
+          and making it pick would be the schema disagreeing with the filing
+          cabinet. Toggles rather than a multi-select: that control drops every
+          selection on an unmodified click, which is the most destructive
+          interaction available on a picker whose job is "one or two".
+
+          The write is ordinary and ungated. An account is a record with no
+          read effect, so labelling a file changes who it is ABOUT and nothing
+          about who may read it. */}
+      <div className="os-files-accounts">
+        <Subhead>Clients</Subhead>
+        <AccountLabelPicker
+          selected={row.accountIds}
+          accounts={accounts}
+          label="The clients this file is about"
+          disabled={accountTie.busy}
+          onChange={(next) => void accountTie.setAccounts(row.id, next)}
+        />
+        {accountTie.error === "" ? null : (
+          <Notice
+            tone="error"
+            sentence="The client labels were not changed."
+            next="This file still carries whatever labels it had."
+            detail={accountTie.error}
+          />
+        )}
+      </div>
 
       <div className="os-files-actions">
         <Button tone="primary" onClick={openVsCode}>

@@ -309,6 +309,49 @@ func kickGuestInvitation(ctx context.Context, engine *memqlengine.MemQLEngine, i
 // interceptor has run); space-membership enforcement is left to the
 // partition check on envelope.partition, which the caller populates
 // with partition_id.
+// guestInvitationArgs builds the createGuestInvitation argument map.
+//
+// EXTRACTED SO THE WIRE CONTRACT IS TESTABLE (epic memql#4800). The whole of
+// what makes `SendGuestInviteMsg.account_id` a compatible addition is a
+// property of THIS map -- what it contains when the field is absent -- and
+// asserting that through the full stream handler would need a session, an
+// engine and a mail sender to check one key.
+//
+// THE CLIENT TIE IS OMITTED WHEN ABSENT, and that is the compatibility. Adding
+// the key with an empty value would write `accountId: ""` into the payload:
+// createGuestInvitation ACCEPTS the arg, and an accepted arg present in the
+// map is present in the delta. An invitation from a client that never
+// mentioned an account has to be byte-identical to one created before the
+// field existed, which is what makes this wire-compatible rather than merely
+// backward-parsing.
+//
+// NOT VALIDATED against the account registry, deliberately. An account is a
+// record with no read effect (D1), so an id naming no row costs nothing -- a
+// surface resolves what it can and renders the rest as untied -- while a
+// lookup here would put a second failure mode, and a second round trip, in
+// front of the invite path for a label.
+func guestInvitationArgs(
+	msg *memqlv1.SendGuestInviteMsg,
+	invitationId, partitionId, inviterId, emailAddr, tokenHash string,
+	expiresAt time.Time,
+) map[string]any {
+	args := map[string]any{
+		"invitationId": invitationId,
+		"partitionId":  partitionId,
+		"spaceName":    strings.TrimSpace(msg.GetSpaceName()),
+		"inviterId":    inviterId,
+		"inviterName":  strings.TrimSpace(msg.GetInviterName()),
+		"inviteeEmail": emailAddr,
+		"inviteeName":  strings.TrimSpace(msg.GetGuestName()),
+		"tokenHash":    tokenHash,
+		"expiresAt":    expiresAt.Format(time.RFC3339),
+	}
+	if accountId := strings.TrimSpace(msg.GetAccountId()); accountId != "" {
+		args["accountId"] = accountId
+	}
+	return args
+}
+
 func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.SendGuestInviteMsg) error {
 	if msg == nil {
 		return nil
@@ -406,17 +449,7 @@ func (s *streamSession) handleSendGuestInvite(envelope *memqlv1.MemqlClientMessa
 	// Persist the invitation. The plain token is intentionally NOT
 	// in the args -- the row stores only the hash. The plain token
 	// rides in the email below and never lands in the database.
-	args := map[string]any{
-		"invitationId": invitationId,
-		"partitionId":  partitionId,
-		"spaceName":    strings.TrimSpace(msg.GetSpaceName()),
-		"inviterId":    inviterId,
-		"inviterName":  strings.TrimSpace(msg.GetInviterName()),
-		"inviteeEmail": emailAddr,
-		"inviteeName":  strings.TrimSpace(msg.GetGuestName()),
-		"tokenHash":    tokenHash,
-		"expiresAt":    expiresAt.Format(time.RFC3339),
-	}
+	args := guestInvitationArgs(msg, invitationId, partitionId, inviterId, emailAddr, tokenHash, expiresAt)
 	argsJSON, _ := json.Marshal(args)
 	query := fmt.Sprintf("createGuestInvitation(%s)", renderQueryArgs(argsJSON))
 

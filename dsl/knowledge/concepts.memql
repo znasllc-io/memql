@@ -3,6 +3,8 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use accounts.concepts.{ account }
+
 /// A single retrievable text chunk attached to a knowledge domain. Chunks are produced by the
 /// knowledge ingestion integration (which splits source text and embeds each chunk). The embedding
 /// itself lives in the node_vectors table keyed by this chunk's id, via integration.embedding.store
@@ -29,9 +31,56 @@ concept documentChunk {
 }
 
 // The restructure-script section headers that used to sit here
-// (knowledgeDomain, spreadsheetRow, validationEvent, liveSource,
-// liveConnector, liveSnapshot) named no concept declared in this file, or
-// anywhere in dsl/ -- dead stubs left behind by scripts/restructure-by-construct
-// with no body to accompany them. Removed rather than kept as headers to
-// nothing; see documentChunk.documentId above for the related dangling
+// (spreadsheetRow, validationEvent, liveSource, liveConnector, liveSnapshot)
+// named no concept declared in this file, or anywhere in dsl/ -- dead stubs
+// left behind by scripts/restructure-by-construct with no body to accompany
+// them. Removed rather than kept as headers to nothing; see
+// documentChunk.documentId above for the related dangling
 // v1:knowledge:document reference.
+//
+// `knowledgeDomain` was one of those headers, and it is a header no longer:
+// the concept below closes that gap (epic memql#4800).
+
+// ===========================================================================
+// A CONCEPT WHOSE ROWS EXISTED BEFORE ITS DECLARATION DID
+// ===========================================================================
+// `v1:knowledge:knowledgeDomain` rows have been written for a long time --
+// integrations/knowledge/seed.go executes `createKnowledgeDomain(...)` over
+// the standard-domain catalog at boot -- while the concept was declared in NO
+// .memql file anywhere in this tree. That is the same shape as the guest
+// invitation gap (memql#4258): first-party Go naming constructs the engine
+// cannot resolve. The visible consequence was on the client side, and the
+// Training app wrote it down: a domain card is labelled by its raw domainId,
+// because the domain's own payload -- name, category, tier -- had no client
+// read surface at all (clients/os/src/apps/training/DomainsSection.tsx).
+//
+// WHAT THIS DECLARATION DOES AND DOES NOT DO. It gives the concept a schema, a
+// shape and a read path, so `name` and the account tag below can be rendered.
+// It deliberately does NOT declare `createKnowledgeDomain`. Declaring the write
+// would silently switch the catalog seeder on for every engine-only build --
+// hundreds of rows appearing at boot on clusters that have never had them --
+// and that is a decision about the catalog, not about this epic's tag. The
+// asymmetry is recorded rather than tidied: the read is what was asked for.
+//
+// NO ROW-AUTHZ TIER, matching its sibling `documentChunk` in this same file
+// rather than departing from it. A knowledge domain is the cluster's shared
+// corpus index -- the same population for everybody, with no owner field to
+// scope to -- and giving it an owner tier would make every seeded catalog row
+// unreadable by every caller, since the seeder writes them as the system. That
+// is the standing residual the per-row-authz audit already records for this
+// namespace; this declaration inherits it rather than inventing a new answer.
+@displayCard(primary="name", secondary="category", tertiary="description", status="active")
+concept knowledgeDomain {
+  name                 string!  @description("The domain's human name, e.g. 'Residential real estate'. What the Training app renders on a card instead of the raw id, once rows carry it.")
+  description          string   @description("What the domain covers, in a sentence. Written by the catalog seeder from the standard-domain registration.")
+  category             string   @description("Catalog grouping the domain belongs to, e.g. 'personal' / 'business'. Free text rather than an enum: the catalog is product-extensible through RegisterSeedDomain, and a closed set here would refuse a pack's own category at load.")
+  tier                 enum("A", "B", "C")  @description("Safety tier. Absent reads as A by convention -- @default is deliberately NOT declared, because this domain declares no create mutation (see the header) and @default is never applied on insert (memql#3038); an annotation nothing stamps is a silent no-op the conformance gate refuses. The convention lives here instead -- A = general, B = safety-relevant, C = high-stakes regulated. THE tier the disclaimer machinery actually keys on (integrations/knowledge/seed_domain_content.go): a Tier-B domain carries disclaimerChunkText as chunk 0, a Tier-C domain gets curated content or an upload-authoritative-sources placeholder. v1:agents:agentRole.tier and v1:agents:skill.tier mirror this value by convention and neither is what fires the effect -- see their own descriptions, which record that correction.")
+  active               bool     @description("Whether the domain participates. Absent reads as participating, and the convention is stated rather than declared as @default for the reason `tier` records. The seeder's existence probe (domainExists) treats a missing key and true as the same answer, so a row written before this field existed reads as active.")
+  predefined           bool     @description("True for a domain that ships in the standard catalog, false for one created at runtime. Lets a surface tell a catalog domain from a domain somebody made.")
+  source               string   @description("Which registration wrote the row -- the standard catalog, or a pack's RegisterSeedDomain. Provenance for an operator asking where a domain came from.")
+  relevantForRoles     []string  @description("Agent-role slugs this domain is offered for. Read by the role -> domain mapping at seed time; nothing at request time consults it.")
+  requiredByToolSlugs  []string  @description("Tool slugs that need this domain present. A catalog-integrity input, not a runtime gate.")
+  accountId            string   @description("The v1:accounts:account this domain is tagged with -- which client it was trained for (epic memql#4800, D5). A TAG, and the word is exact: it is rendered on the Training domain card and filterable there, and NOTHING ELSE READS IT. Agent routing, domain attachment, retrieval, scoring and the system_knowledge block are all deliberately unaffected -- an agent carrying a tagged domain behaves identically to one carrying an untagged one, and `domainsForAccount` (dsl/accounts/queries.memql) is the only query in the tree that mentions the field. That restraint is the decision, not an omission: routing off account-tagged domains is named in the design as follow-up work, and building half of it here would make the tag mean something nobody agreed to.")
+
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+}

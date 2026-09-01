@@ -2592,6 +2592,18 @@ message SendGuestInviteMsg {
   // rather than seconds because the surface is deliberately coarse --
   // longer-lived "scheduled" invitations are a separate feature.
   int32 expires_in_minutes = 8;
+  // OPTIONAL. The v1:accounts:account this guest is being invited on
+  // behalf of -- which client's person they are (epic memql#4800, D5).
+  // Wire-compatible by construction: a client that omits it sends
+  // exactly what it sent before, and the handler writes no key at all,
+  // so the invitation row is byte-identical to one created yesterday.
+  //
+  // IT GRANTS NOTHING. An account is a record, never an authorization
+  // boundary -- a guest invited "for" a client reaches exactly the one
+  // space this invitation already names and not a byte more. The field
+  // is what lets the Users app say who a guest is for, and what a
+  // future client-access feature would point at.
+  string account_id = 9;
 }
 
 // SendGuestInviteResult is the reply for SendGuestInviteMsg. error_code

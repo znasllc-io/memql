@@ -27,6 +27,9 @@ import { SOURCE_VALUES } from "./concepts";
 import type { FilesFilter, KindFilter } from "./filters";
 import type { FolderTree, TreeNode } from "./fold";
 import { artifactFingerprint, artifactName, fileStory, type ArtifactRow } from "./rows";
+import { accountIsArchived, accountName } from "../accounts/rows";
+import { useAccountOptions } from "../accounts/tie";
+import { ACCOUNT_ANY, ACCOUNT_NONE } from "./filters";
 import { Inspector } from "./Inspector";
 import type { UploadTask, UploadTasksApi } from "./useUploadTasks";
 
@@ -185,6 +188,7 @@ export function BrowseSection({
 
   const selected = content.find((r) => r.id === selectedId) ?? null;
   const searching = filter.search.trim() !== "";
+  const accountOptions = useAccountOptions();
 
   // Direct, non-archived counts by folder -- what a person would count.
   const counts = new Map<string, number>();
@@ -201,7 +205,11 @@ export function BrowseSection({
   // Empty and filtered-to-empty are DIFFERENT answers: one is about the
   // Library, the other about the question just asked of it.
   const narrowed =
-    searching || filter.kind !== "all" || filter.source !== "all" || filter.folderId !== "";
+    searching ||
+    filter.kind !== "all" ||
+    filter.source !== "all" ||
+    filter.accountId !== ACCOUNT_ANY ||
+    filter.folderId !== "";
   const emptyText =
     content.filter((r) => !r.archived).length === 0 && !narrowed
       ? "Nothing in your Library yet. Drop a file onto the desk or upload one here."
@@ -259,6 +267,29 @@ export function BrowseSection({
           {SOURCE_VALUES.map((source) => (
             <option key={source} value={source}>
               {source}
+            </option>
+          ))}
+        </Select>
+        {/* THE CLIENT FILTER (epic memql#4800, D5). Client-side over the
+            seeded snapshot like every other facet here -- a row promoted
+            before `accountIds` existed has no key at all, and only the fold
+            reads absence and the empty list as one answer.
+
+            "No client" is a first-class option rather than an absence,
+            because "what still needs filing" is the question somebody asks
+            while they are filing, and it is the only one the other two
+            cannot express. */}
+        <Select
+          id="files-account"
+          label="Client"
+          value={filter.accountId}
+          onChange={(accountId) => patch({ accountId })}
+        >
+          <option value={ACCOUNT_ANY}>Any client</option>
+          <option value={ACCOUNT_NONE}>No client</option>
+          {accountOptions.map((account) => (
+            <option key={account.id} value={account.id}>
+              {accountIsArchived(account) ? `${accountName(account)} (archived)` : accountName(account)}
             </option>
           ))}
         </Select>
@@ -387,7 +418,7 @@ export function BrowseSection({
             <UploadPlaceholder key={task.id} task={task} />
           ))}
           <LiveList<ArtifactRow>
-            key={`${filter.folderId ?? "~"}|${filter.kind}|${filter.source}|${filter.showArchived}|${filter.search}`}
+            key={`${filter.folderId ?? "~"}|${filter.kind}|${filter.source}|${filter.accountId}|${filter.showArchived}|${filter.search}`}
             source={list}
             rowId={(r) => r.id}
             fingerprint={artifactFingerprint}

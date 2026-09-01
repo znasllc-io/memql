@@ -34,7 +34,28 @@ import (
 //     consumes them, so nothing else asserts that the wire is connected.
 func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 	// (1) The pinned set.
-	want := []string{"auditEventRetentionSweep", "workerInvocationRetentionSweep"}
+	//
+	// seedSelfAccount joined it in epic memql#4800, and it is the first entry
+	// that is not a sweep -- so the second property is worth stating in its
+	// own terms rather than by analogy. Its read does not span MANY owners; it
+	// reads a row that has NO owner. `v1:accounts:account:self` is the
+	// deployment's own company, seeded cluster-owned with `ownerUserId` empty,
+	// and sameRowAuthzOwner refuses an empty owner outright -- so the owned
+	// branch of the composite tier cannot match it for anybody, and the
+	// cluster-owner escape is the only branch that reaches it at all.
+	//
+	// That is what rules out the alternative this gate points at. Borrowing
+	// ONE owner's authority with auth.ContextWithUserActor works when a row
+	// has an owner to borrow; here there is none, and no user's envelope --
+	// not even the cluster's first user's -- can see the row.
+	//
+	// What a narrowed read would cost is the sharp end: the automation gates
+	// its create on the probe being empty, so a probe that cannot see the row
+	// reports "absent" and the seed re-runs on every boot, overwriting the
+	// name a human typed into the first-run card. That is decision D3's
+	// failure, arrived at through authorization rather than through the gate
+	// D3 actually warns about.
+	want := []string{"auditEventRetentionSweep", "seedSelfAccount", "workerInvocationRetentionSweep"}
 	got := auth.MaintenanceAutomationNames()
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("the maintenance list is %v, pinned as %v.\n\n"+

@@ -373,6 +373,28 @@ func defaultRoutingRules() []RoutingRule {
 		// the tree triggers on either concept.
 		{Pattern: "graph.node.created.v1:identity:account", TargetType: ""},
 		{Pattern: "graph.node.created.v1:identity:auditEvent", TargetType: ""},
+		// The client registry (epic memql#4800). An account row is written
+		// by whichever bff replica took the operator's create or edit --
+		// and by the seed materializer on EVERY node at boot, which is the
+		// case that makes this rule load-bearing rather than a nicety: the
+		// `self` singleton is materialized by a node nobody's browser is
+		// attached to. Read by the Accounts app's list and by the account
+		// picker every tie surface in the OS mounts, all served by the bff.
+		// Without these rules the list is correct on load and frozen after,
+		// which is the failure that looks like it is working.
+		//
+		// Low volume by nature: an account is a company somebody typed in,
+		// and the row carries no field that moves on a timer -- which is
+		// also why the app's arrival cue can fingerprint every field it
+		// renders without becoming the strobe the heartbeat rule warns
+		// about.
+		//
+		// SAFE TO BROADCAST, checked rather than assumed: no automation in
+		// the tree triggers on v1:accounts:*. No delete rule -- nothing
+		// hard-deletes an account; archiveClientAccount is an UPDATE (D8) -- so a
+		// delete rule would be surface nothing sends.
+		{Pattern: "graph.node.created.v1:accounts:account", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:accounts:account", TargetType: ""},
 		// Self-healing precondition-miss signal (Epic 4 / memql#2139). A
 		// first-class automation precondition that evaluates false emits
 		// healing.precondition.missed; the LLM repair loop (E4.4) subscribes.

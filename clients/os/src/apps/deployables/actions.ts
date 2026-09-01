@@ -222,3 +222,61 @@ export function usePublish(): PublishState {
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// The client tie (epic memql#4800, D5)
+// ---------------------------------------------------------------------------
+
+export interface SiteAccountState {
+  busy: boolean;
+  /** The server's own sentence, verbatim. "" when the last attempt worked. */
+  error: string;
+  /** Pass "" to clear the tie. */
+  setAccount: (siteId: string, accountId: string) => Promise<boolean>;
+}
+
+/**
+ * Point a deployable at a client, or at nobody.
+ *
+ * ITS OWN BUSY/ERROR PAIR, for the reason the two hooks above have theirs: a
+ * refusal belongs beside the control that produced it, and the picker is on
+ * the site DETAIL while create and publish are elsewhere. A shared pair would
+ * put a tie refusal under a publish button.
+ *
+ * `updateSiteAccount` is a single-purpose write that stamps the field, so ""
+ * clears the tie rather than inheriting the stored value -- see the mutation
+ * for why that is stamped rather than accepted.
+ */
+export function useSiteAccount(): SiteAccountState {
+  const connection = useOsConnection();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const setAccount = useCallback(
+    async (siteId: string, accountId: string): Promise<boolean> => {
+      const query = connection?.query ?? null;
+      if (query === null) {
+        setError("Not connected to the cluster, so nothing was written.");
+        return false;
+      }
+      setBusy(true);
+      setError("");
+      try {
+        await query.updateSiteAccount({ siteId, accountId });
+        // NOTHING IS UPDATED LOCALLY. v1:platform:site broadcasts `updated`,
+        // so the row arrives on the feed the list, the map and this panel all
+        // read -- which is also what makes the tie appear on somebody else's
+        // screen without a reload.
+        return true;
+      } catch (err: unknown) {
+        setError(describe(err));
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [connection],
+  );
+
+  return { busy, error, setAccount };
+}

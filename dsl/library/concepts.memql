@@ -81,6 +81,8 @@ concept artifact {
 
   validationStatus enum("none", "unvalidated", "validated", "rejected", "partiallyValidated", "superseded")  @default("none")  @description("Validation rollup for document-backed artifacts, mirrored from v1:knowledge:document.validationStatus so the Library can facet on it without a join. 'none' for items that have no validation lifecycle (records, generated outputs).")
 
+  accountIds       []string  @description("The v1:accounts:account rows this item is labelled with -- who it is about, or who it was produced for (epic memql#4800, D5). A LIST, because \"one or two accounts\" is the owner's own framing: a contract naming two clients is one file, and forcing it to pick would be the schema disagreeing with the filing cabinet. Optional plain references with NO read effect: row authorization on the index is exactly what it was, `libraryItemsForAccount` reads through the ordinary owner-scoped path and narrows nothing, and a row with no key at all behaves as untied under every filter -- which is every row promoted before this field existed, so the Files browse filter reads absence and the empty list as the same answer, the way the folderId fold already has to. Edited from the Files inspector's account labels; browse filters on it CLIENT-SIDE over the seeded snapshot, for the reason every other Files facet does.")
+
   updatedAt        datetime  @description("RFC3339 watermark of the most recent change to the backing item, stamped on every index write. The default Library sort key (most-recent first).")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")

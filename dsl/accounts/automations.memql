@@ -1,0 +1,62 @@
+// The boot seed: the owner's own company, as account #1.
+//
+// SEEDED, not special-cased, for the reason the portal is site #1: the
+// Accounts app is where clients are managed, and an instance whose registry
+// opens empty gives its owner nothing to recognize -- the first thing they
+// should see is themselves, already in it. It also gives the four tie pickers
+// a target on a cluster where nobody has typed anything yet.
+//
+// ===========================================================================
+// AN AUTOMATION RATHER THAN A `seed` BLOCK, AND THE REASON IS MECHANICAL
+// ===========================================================================
+// The declarative seed path would have been the obvious home for this. It is
+// not available: the SeedMaterializer derives the mutation it calls from the
+// CONCEPT name -- `"create" + ucFirst(conceptName)` (seed_materializer.go) --
+// so a `seed account self { ... }` block resolves to `createAccount`, which
+// `dsl/identity/mutations.memql` has owned since long before this domain
+// existed and which writes an entirely different concept. There is no hook to
+// point it at `createClientAccount`, and renaming the concept to reach one
+// would change `v1:accounts:account:self` -- the id the OS, the design record
+// and the custom-domains epic all key on.
+//
+// So the seed takes the other shape the engine already has for a literal-id
+// singleton, which is the one D3 names anyway: `bootstrapCluster`'s
+// startup-triggered, absence-gated create (dsl/cluster/automations.memql).
+// Same machinery, opposite gate -- see dsl/accounts/logic.memql.
+/// Materialize the owner's own company on first startup
+@trigger(event="system.startup")
+automation seedSelfAccount {
+  args {
+    domain any
+    node any
+  }
+
+  step decide {
+    logic selfAccountAbsent (
+      event
+    )
+  }
+
+  // THE ID IS A LITERAL, and that is the accurate statement rather than a
+  // shortcut: there is exactly one company that is this instance's owner.
+  // It is also what makes the gate above meaningful -- a minted id would be
+  // absent on every boot forever.
+  //
+  // `name` is a STARTER, not a claim. Nothing a boot can read knows what this
+  // company is called, so the row says so plainly and the first-run card asks
+  // (D7). `configuredAt` is left unwritten and that absence IS the card.
+  //
+  // `domain` comes from MEMQL_DOMAIN, forwarded onto the startup payload by
+  // app/cluster.go. Every field binds an explicit key + coalesce, mirroring
+  // bootstrapCluster: a multi-segment path evaluates to nil when absent, and a
+  // nil argument for a required arg trips validation.
+  step selfAccount {
+    if steps.decide.result == true {
+      mutation createClientAccount (
+        accountId: "v1:accounts:account:self",
+        name:      "My company",
+        domain:    domain ?? ""
+      )
+    }
+  }
+}

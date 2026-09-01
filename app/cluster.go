@@ -809,6 +809,21 @@ func (a *App) EmitSystemStartup() {
 		payload["identityProvider"] = idpInfo
 	}
 
+	// The install's own domain, for the accounts seed (epic memql#4800).
+	// MEMQL_DOMAIN is the ONE domain input (#4222 / #3593); the seed uses it to
+	// prepopulate `v1:accounts:account:self.domain`, which is the only field of
+	// the owner's own company a boot can honestly fill.
+	//
+	// Forwarded here rather than read in the automation because a DSL body has
+	// no environment access -- the startup payload is the seam every other boot
+	// fact already travels on, and memql#4766's whole finding was that a fact
+	// the payload could carry and did not is a field that stays empty forever.
+	//
+	// Empty when unset, and the automation coalesces: an install with no
+	// MEMQL_DOMAIN gets a company row with no domain, which is true, rather
+	// than a localhost placeholder somebody has to notice and delete.
+	payload["domain"] = strings.TrimSpace(os.Getenv("MEMQL_DOMAIN"))
+
 	payload["region"] = firstNonEmptyStr(os.Getenv("MEMQL_REGION"), "local")
 
 	// Include the deploy provider / cloud target (#1872) so cluster

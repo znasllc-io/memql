@@ -499,6 +499,36 @@ mutate artifact moveArtifactToFolder {
   }
 }
 
+/// Label a Library item with the clients it is about (epic memql#4800, D5) -- the Files inspector's
+/// account picker, and its only caller.
+///
+/// A READ-MERGE update in the shape moveArtifactToFolder set: folder, labels, archived and every
+/// other index field survive a re-label untouched, which is what makes labelling cheap enough to be
+/// a chip somebody toggles rather than a form they submit.
+///
+/// `accountIds` is STAMPED with `?? []`, not accepted, for moveArtifactToFolder's reason applied to
+/// a list: an accepted arg omitted is dropped and inherited, so REMOVING the last label would
+/// silently re-save the label just removed. An explicit empty list is what "no client" looks like,
+/// and the coalesce is what lets an omitted arg mean it.
+///
+/// `updatedAt` advances because a re-label IS a change a person made to the row, and the Library's
+/// default sort should say so -- the same call moveArtifactToFolder makes.
+///
+/// Ids are not validated against the registry: an account has no read effect, and a list filtered
+/// against the caller's own visible accounts would quietly DROP a label somebody else's account put
+/// there. The Files browse filter reads an unresolvable id as a tie to something not visible.
+mutate artifact setArtifactAccounts {
+  args {
+    artifactId  string!
+    accountIds  []string
+  }
+  update {
+    id: args.artifactId
+    accountIds: args.accountIds ?? []
+    updatedAt: now
+  }
+}
+
 // ---- uploadSession: the chunked-transfer writes (memql#4782) ----
 
 /// Open a chunked upload session (memql#4782, design C2). @serverOnly, and actor-scoping is NOT the

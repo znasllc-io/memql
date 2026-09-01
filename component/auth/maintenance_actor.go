@@ -93,6 +93,15 @@ var maintenanceAutomations = map[string]string{
 		"tier (memql#4366). Worse than the one above, because this sweep is OBSERVATION-ONLY: it publishes a " +
 		"candidate COUNT, so an unauthorized read does not fail, it reports zero -- and a retention window " +
 		"nobody enforces is indistinguishable from one with nothing to do",
+	"seedSelfAccount": "the boot seed for v1:accounts:account:self, whose concept declares the composite " +
+		"owner tier (epic memql#4800). It reads existingSelfAccount to decide whether the owner's own company " +
+		"has been created yet, and the row is CLUSTER-OWNED -- ownerUserId empty -- so the owned branch of the " +
+		"tier can never match it and only the cluster-owner escape can see it at all. The failure this prevents " +
+		"is sharper than either sweep above, and in the opposite direction: a narrowed read here does not skip " +
+		"work, it reports the row ABSENT, and absent means CREATE. The seed would therefore re-run on every " +
+		"boot forever, which is exactly the clobbering of a human's edits that decision D3 exists to forbid. " +
+		"@createOnly on createClientAccount is the second guard, and it would hold -- but a probe that is " +
+		"wrong on every call is not something to leave standing behind a guard",
 }
 
 // IsMaintenanceAutomation reports whether this automation runs under the

@@ -309,6 +309,7 @@ shape invitation invitationFull {
   expiresAt
   status
   respondedAt
+  accountId
   row.createdAt
 }
 
@@ -345,6 +346,7 @@ shape invitation invitationAdminSummary {
   deliveryState
   deliveryError
   deliveryAttemptedAt
+  accountId
   row.createdAt
 }
 

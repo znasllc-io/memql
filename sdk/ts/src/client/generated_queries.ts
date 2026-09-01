@@ -1947,6 +1947,53 @@ QueryClient.prototype.cataloguedConstructsForOwner = function (this: QueryClient
   return this.executeNamed("cataloguedConstructsForOwner", buildCataloguedConstructsForOwner(args), opts);
 };
 
+/** Resolve one account by its own row id. The detail view's read on open, and the read every tie surface uses to put a name on an id it holds. */
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["clientAccountById"] in generated_concepts.ts).
+export interface ClientAccountByIdArgs {
+  accountId: string;
+}
+
+export function buildClientAccountById(args: ClientAccountByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "query clientAccountById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    clientAccountById(args: ClientAccountByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.clientAccountById = function (this: QueryClient, args: ClientAccountByIdArgs = {} as ClientAccountByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("clientAccountById", buildClientAccountById(args), opts);
+};
+
+/** Every account this caller may see -- their own, or every account in the cluster when the caller is a cluster owner. The Accounts app's primary screen, and the source every account picker in the OS reads.
+ARCHIVED ROWS ARE EXCLUDED BY DEFAULT and returned under the filter (D8). The archive term is a DISJUNCTION rather than a `when(args.includeArchived)` guard, and the difference is not stylistic: `when(...)` drops its block on the argument's ABSENCE, not on its falsity, so a caller passing `includeArchived: false` -- which is exactly what a checkbox bound to a boolean sends -- would have widened the read to every archived row. Written as `isNotArchived || args.includeArchived==true` the three cases are the three answers: absent resolves nil and fails the comparison (active only), false fails it (active only), true admits everything.
+"Everything", note, and not "the archived ones": a person looking for a client they filed away wants it in its place in the list, marked, not in a separate list of the forgotten.
+The caller term is the composite tier's own predicate written out, which is what TestRowAuthzEnforcementLandGate requires of an authored query over a tier-declaring concept. */
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["clientAccountsAll"] in generated_concepts.ts).
+export interface ClientAccountsAllArgs {
+  includeArchived?: boolean;
+}
+
+export function buildClientAccountsAll(args: ClientAccountsAllArgs): string {
+  const parts: string[] = [];
+  if (args.includeArchived !== undefined) parts.push("includeArchived: " + renderMemQLValue(args.includeArchived));
+  return "query clientAccountsAll(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    clientAccountsAll(args: ClientAccountsAllArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.clientAccountsAll = function (this: QueryClient, args: ClientAccountsAllArgs = {} as ClientAccountsAllArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("clientAccountsAll", buildClientAccountsAll(args), opts);
+};
+
 /** The database backing this cluster: where it is, what engine and version, and which extensions are installed. CLUSTER OWNER ONLY. */
 // Bound concept: v1:cluster:database (machine-readable: BoundConcepts["clusterDatabase"] in generated_concepts.ts).
 export interface ClusterDatabaseArgs {
@@ -2759,6 +2806,30 @@ QueryClient.prototype.documentVersionsForOwner = function (this: QueryClient, ar
   return this.executeNamed("documentVersionsForOwner", buildDocumentVersionsForOwner(args), opts);
 };
 
+/** The knowledge domains tagged with one account.
+A TAG AND NOTHING MORE (D5). This read is the only consumer of `v1:knowledge:knowledgeDomain.accountId` in the tree, and the field is consulted by nothing in routing, attachment, retrieval or scoring. A domain tagged with an account trains, attaches and answers exactly as an untagged one does.
+No tier conjunct, because the concept declares no tier -- see its declaration in dsl/knowledge/concepts.memql for why that matches its sibling `documentChunk` rather than departing from it. */
+// Bound concept: v1:knowledge:knowledgeDomain (machine-readable: BoundConcepts["domainsForAccount"] in generated_concepts.ts).
+export interface DomainsForAccountArgs {
+  accountId: string;
+}
+
+export function buildDomainsForAccount(args: DomainsForAccountArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "query domainsForAccount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    domainsForAccount(args: DomainsForAccountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.domainsForAccount = function (this: QueryClient, args: DomainsForAccountArgs = {} as DomainsForAccountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("domainsForAccount", buildDomainsForAccount(args), opts);
+};
+
 /** ENGINE: send jobs the drain worker still has work to do on, oldest first so a long-queued campaign is not starved by a newer one. Cluster-owner gated -- this is the one read in the domain that deliberately spans owners, which is exactly why it may only be issued by the engine's own operator identity and why the row it returns carries no recipient data. */
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["drainableSendJobs"] in generated_concepts.ts).
 export interface DrainableSendJobsArgs {
@@ -3382,6 +3453,30 @@ QueryClient.prototype.invitationByTokenHash = function (this: QueryClient, args:
   return this.executeNamed("invitationByTokenHash", buildInvitationByTokenHash(args), opts);
 };
 
+/** The guest invitations sent on behalf of one account.
+`invitationAdminSummary`, NEVER `invitationFull`, and this is the rule the Users app's own review wrote (memql#4735): `invitationFull` projects `tokenHash`, `previousTokenHash` and `bindingHash` -- not the plaintext token, but the key the resolve path looks an invitation up BY -- and a rollup that says how many guests a client has has never needed them.
+`requiresOwnerOrAdmin` is `pendingUserInvitations`' own gate, carried here for the same reason: the invitation concept declares no row tier, so the spec IS the authorization on this read, and a rollup that dropped it would be the shortest path in the product to reading every invitation in the cluster. The Accounts app is not admin-gated, so below that floor this section renders empty -- which is the engine's answer, rendered. */
+// Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["invitationsForAccount"] in generated_concepts.ts).
+export interface InvitationsForAccountArgs {
+  accountId: string;
+}
+
+export function buildInvitationsForAccount(args: InvitationsForAccountArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "query invitationsForAccount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    invitationsForAccount(args: InvitationsForAccountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.invitationsForAccount = function (this: QueryClient, args: InvitationsForAccountArgs = {} as InvitationsForAccountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("invitationsForAccount", buildInvitationsForAccount(args), opts);
+};
+
 /** List the CALLER'S worker invocations belonging to a Plan.
 The `ownerUserId==actor.userId` conjunct is the caller scope v1:worker:invocation's composite tier now injects anyway (memql#4406); stating it is what makes the read's scope checkable (TestRowAuthzEnforcementLandGate) instead of implicit. There is deliberately no operator counterpart: the pair shape exists where an operator surface needs it (invocationsForWorker / invocationsForWorkerAsOperator, for /fleet/machines), and adding an unused second variant here would be surface nothing reads. */
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["invocationsForPlan"] in generated_concepts.ts).
@@ -3467,6 +3562,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.invocationsForWorkerAsOperator = function (this: QueryClient, args: InvocationsForWorkerAsOperatorArgs = {} as InvocationsForWorkerAsOperatorArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("invocationsForWorkerAsOperator", buildInvocationsForWorkerAsOperator(args), opts);
+};
+
+/** Every knowledge domain this cluster holds.
+The read the Training app's domain cards have never had (epic memql#4800). Until this landed, that page was entirely CHUNK-derived: it rolled domains up out of `v1:knowledge:documentChunk.domainId` and labelled each card with the raw id, because the domain row itself had no client read surface and no concept declaration behind it. With this, a card can say the domain's name and render the account it is tagged with.
+NO ACTOR TERM, because the concept declares no row-authz tier -- see the concept for why that matches its sibling `documentChunk` rather than departing from it. A caller reads the cluster's catalog, which is the same catalog for everybody.
+`active` is NOT filtered here. The seeder's own existence probe treats a missing key and true alike, and a surface that wants only live domains can fold on the field; a query that pre-filtered it would hide exactly the rows an operator asking "why is this domain not working" needs to see. */
+// Bound concept: v1:knowledge:knowledgeDomain (machine-readable: BoundConcepts["knowledgeDomainsAll"] in generated_concepts.ts).
+export interface KnowledgeDomainsAllArgs {
+}
+
+export function buildKnowledgeDomainsAll(args: KnowledgeDomainsAllArgs): string {
+  void args;
+  return "query knowledgeDomainsAll()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    knowledgeDomainsAll(args?: KnowledgeDomainsAllArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.knowledgeDomainsAll = function (this: QueryClient, args: KnowledgeDomainsAllArgs = {} as KnowledgeDomainsAllArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("knowledgeDomainsAll", buildKnowledgeDomainsAll(args), opts);
 };
 
 /** Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content. */
@@ -3723,6 +3841,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryFolders = function (this: QueryClient, args: LibraryFoldersArgs = {} as LibraryFoldersArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryFolders", buildLibraryFolders(args), opts);
+};
+
+/** The Library items labelled with one account.
+`accountIds` is a LIST (D5 -- "one or two accounts" is the owner's own framing), so the tie term is membership rather than equality.
+ARCHIVED ROWS ARE EXCLUDED, matching `libraryArtifacts` rather than this file's own `clientAccountsAll`: the account filter above is a view over the registry a person is administering, while this is a count of what is currently filed for a client. `archived!=true` rather than `==false`, because a row promoted before the field existed carries no key at all and `==false` would silently exclude it. */
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryItemsForAccount"] in generated_concepts.ts).
+export interface LibraryItemsForAccountArgs {
+  accountId: string;
+}
+
+export function buildLibraryItemsForAccount(args: LibraryItemsForAccountArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "query libraryItemsForAccount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryItemsForAccount(args: LibraryItemsForAccountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryItemsForAccount = function (this: QueryClient, args: LibraryItemsForAccountArgs = {} as LibraryItemsForAccountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryItemsForAccount", buildLibraryItemsForAccount(args), opts);
 };
 
 /** List workspace-scoped live sources for the Library Records lens. Gated by ownerUserId==actor.userId -- NOT the un-gated partition-shared read it was before memql#4340, because v1:library:artifact now declares an owner tier and an ownerless row is unreachable on every path. See the note above (#723 for the original shape, D8 for the tier). */
@@ -8917,6 +9059,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.sitesAll = function (this: QueryClient, args: SitesAllArgs = {} as SitesAllArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("sitesAll", buildSitesAll(args), opts);
+};
+
+/** The deployables tied to one account.
+`isNotDeleted` and the composite-tier term are `sitesAll`'s own conjuncts, repeated here rather than referenced: this is the same read that query makes, narrowed by the tie field, and a soft-deleted site must stay gone from a rollup for the reason it is gone from the list. */
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesForAccount"] in generated_concepts.ts).
+export interface SitesForAccountArgs {
+  accountId: string;
+}
+
+export function buildSitesForAccount(args: SitesForAccountArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "query sitesForAccount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sitesForAccount(args: SitesForAccountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sitesForAccount = function (this: QueryClient, args: SitesForAccountArgs = {} as SitesForAccountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sitesForAccount", buildSitesForAccount(args), opts);
 };
 
 /** Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it. */

@@ -13747,8 +13747,20 @@ type SendGuestInviteMsg struct {
 	// rather than seconds because the surface is deliberately coarse --
 	// longer-lived "scheduled" invitations are a separate feature.
 	ExpiresInMinutes int32 `protobuf:"varint,8,opt,name=expires_in_minutes,json=expiresInMinutes,proto3" json:"expires_in_minutes,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// OPTIONAL. The v1:accounts:account this guest is being invited on
+	// behalf of -- which client's person they are (epic memql#4800, D5).
+	// Wire-compatible by construction: a client that omits it sends
+	// exactly what it sent before, and the handler writes no key at all,
+	// so the invitation row is byte-identical to one created yesterday.
+	//
+	// IT GRANTS NOTHING. An account is a record, never an authorization
+	// boundary -- a guest invited "for" a client reaches exactly the one
+	// space this invitation already names and not a byte more. The field
+	// is what lets the Users app say who a guest is for, and what a
+	// future client-access feature would point at.
+	AccountId     string `protobuf:"bytes,9,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SendGuestInviteMsg) Reset() {
@@ -13835,6 +13847,13 @@ func (x *SendGuestInviteMsg) GetExpiresInMinutes() int32 {
 		return x.ExpiresInMinutes
 	}
 	return 0
+}
+
+func (x *SendGuestInviteMsg) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
 }
 
 // SendGuestInviteResult is the reply for SendGuestInviteMsg. error_code
@@ -22063,7 +22082,7 @@ const file_memql_proto_rawDesc = "" +
 	"\x0eAgentTurnError\x12\x19\n" +
 	"\berror_id\x18\x01 \x01(\tR\aerrorId\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x12\n" +
-	"\x04code\x18\x03 \x01(\tR\x04code\"\x97\x02\n" +
+	"\x04code\x18\x03 \x01(\tR\x04code\"\xb6\x02\n" +
 	"\x12SendGuestInviteMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x19\n" +
@@ -22075,7 +22094,9 @@ const file_memql_proto_rawDesc = "" +
 	"\n" +
 	"guest_name\x18\x06 \x01(\tR\tguestName\x12\"\n" +
 	"\rjoin_url_base\x18\a \x01(\tR\vjoinUrlBase\x12,\n" +
-	"\x12expires_in_minutes\x18\b \x01(\x05R\x10expiresInMinutes\"\xb9\x01\n" +
+	"\x12expires_in_minutes\x18\b \x01(\x05R\x10expiresInMinutes\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\t \x01(\tR\taccountId\"\xb9\x01\n" +
 	"\x15SendGuestInviteResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +

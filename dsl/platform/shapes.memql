@@ -93,6 +93,7 @@ shape site siteFull {
   notes
   artifactId
   binding
+  accountId
   row.createdAt
 }
 

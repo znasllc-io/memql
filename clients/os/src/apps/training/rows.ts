@@ -1,5 +1,7 @@
 import { rowBool, rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { flatten } from "../../kit/rows";
+
 import {
   ANALYZE_PLAN_KIND,
   CORPUS_GROUP_ID,
@@ -290,4 +292,43 @@ export function rollupDomains(rows: readonly Row[]): DomainRollup[] {
   // that is stable against the data.
   order.sort((a, b) => a.localeCompare(b));
   return order.map((domainId) => byDomain.get(domainId)!);
+}
+
+// ---------------------------------------------------------------------------
+// The domain row itself (epic memql#4800)
+// ---------------------------------------------------------------------------
+
+/**
+ * A knowledge domain's own facts, as opposed to a rollup of its chunks.
+ *
+ * NEW, because the concept is. `v1:knowledge:knowledgeDomain` had rows and no
+ * declaration anywhere in this tree until epic memql#4800 -- the catalog
+ * seeder wrote them through a mutation the engine could not resolve -- so this
+ * page has always labelled a card by its raw `domainId` and said so on screen.
+ * With the concept declared, projected and readable, a card can say the
+ * domain's NAME and render the client it is tagged with.
+ */
+export interface DomainMeta {
+  id: string;
+  name: string;
+  category: string;
+  tier: string;
+  /**
+   * The client this domain was trained for (D5). A TAG AND NOTHING MORE:
+   * agent routing, domain attachment, retrieval and scoring are all
+   * deliberately unaffected, and this page renders and filters by it. A domain
+   * carrying one behaves identically to a domain that does not.
+   */
+  accountId: string;
+}
+
+export function domainMetaFromRow(raw: Row): DomainMeta {
+  const row = flatten(raw);
+  return {
+    id: rowString(row, "id"),
+    name: rowString(row, "name"),
+    category: rowString(row, "category"),
+    tier: rowString(row, "tier"),
+    accountId: rowString(row, "accountId"),
+  };
 }

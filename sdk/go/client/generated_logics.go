@@ -675,6 +675,29 @@ func RevokeExpiredDelegationsBuild(args RevokeExpiredDelegationsArgs) string {
 	return b.String()
 }
 
+// SelfAccountAbsent -- True when the owner's own company has not been materialized yet, on a bff.
+// =========================================================================== THE DELIBERATE INVERSION OF THE CLUSTER SINGLETONS (D3) =========================================================================== `clusterInfraRefresh` (dsl/cluster/logic.memql) answers "what is true about this cluster's infrastructure right now" and is therefore ungated: the SYSTEM is the writer of `v1:cluster:database:primary`, so a boot rewriting it is a boot telling the truth, and memql#4766 exists because those rows were once gated like a create and froze at first boot.
+// This row is the opposite case and takes `bootstrapCluster`'s gate rather than its sibling's: the writer of `v1:accounts:account:self` is a HUMAN. The first-run card asks them what their company is called, and a boot that rewrote the row would undo that answer on a schedule nobody watches. So the question here is the once-per-lifetime one -- "should this row be CREATED" -- and `existing.empty()` is what asks it.
+// The `bff` term is `bootstrapCluster`'s too, and for the same reason: every node type receives system.startup, and without it a cognition, agent, planner and worker node would each race to create the same row on a fresh cluster. They would converge -- the id is literal, so the writes are versions of one logical row -- but converging on identical content is not a reason to write it five times.
+type SelfAccountAbsentArgs struct {
+	Event map[string]any
+}
+
+// SelfAccountAbsent calls the engine logic selfAccountAbsent.
+func (qc *QueryClient) SelfAccountAbsent(ctx context.Context, args SelfAccountAbsentArgs) (*Result, error) {
+	call := SelfAccountAbsentBuild(args)
+	return qc.executeNamed(ctx, "selfAccountAbsent", call)
+}
+
+func SelfAccountAbsentBuild(args SelfAccountAbsentArgs) string {
+	var b strings.Builder
+	b.WriteString("logic selfAccountAbsent(")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString(")")
+	return b.String()
+}
+
 // TransitionEventKind -- PURE audit-vocabulary decision table for a v1:forge:request status transition: new status -> the v1:forge:requestEvent kind (needs_approval -> validated, queued -> approved, changes_requested / rejected pass through). Returns "" -- meaning SKIP, record nothing -- for an unrecognised status AND for an update whose status did not change (oldStatus == status), which the automation's former shape claimed but never checked. No graph reads or writes. P1 #2368.
 type TransitionEventKindArgs struct {
 	Status    any

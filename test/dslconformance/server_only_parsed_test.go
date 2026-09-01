@@ -168,9 +168,22 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
-		{Path: "identity/queries.memql", Name: "activeUsers"}:    true,
-		{Path: "identity/queries.memql", Name: "userByEmail"}:    true,
-		{Path: "identity/queries.memql", Name: "userByIdSystem"}: true,
+		// epic memql#4800. The accounts seed's existence probe. It runs from
+		// the seedSelfAccount automation at system.startup, under the engine's
+		// own system actor, before any person has signed in -- so actor.userId
+		// is empty for the only caller it will ever have, and the composite
+		// tier its five siblings in that file carry would evaluate against
+		// nobody. That is not merely a read returning nothing: the automation
+		// gates the CREATE on this read being empty, so a filter that always
+		// answered empty would re-create v1:accounts:account:self on every
+		// boot, which is exactly the clobbering D3 forbids. Caller-scoping is
+		// impossible because there is no caller; @serverOnly is what keeps an
+		// ungated projection of the contact fields off the wire, and the app
+		// reads the same row through clientAccountById.
+		{Path: "accounts/queries.memql", Name: "existingSelfAccount"}: true,
+		{Path: "identity/queries.memql", Name: "activeUsers"}:         true,
+		{Path: "identity/queries.memql", Name: "userByEmail"}:         true,
+		{Path: "identity/queries.memql", Name: "userByIdSystem"}:      true,
 		// memql#3217. The complete-set sibling of activeUsers, behind the
 		// startup per-user seed sweep. @serverOnly for activeUsers' reason
 		// minus most of the exposure -- its projection is userIdRef (row.id

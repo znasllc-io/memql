@@ -1917,6 +1917,56 @@ func CataloguedConstructsForOwnerBuild(args CataloguedConstructsForOwnerArgs) st
 	return "query cataloguedConstructsForOwner()"
 }
 
+// ClientAccountById -- Resolve one account by its own row id. The detail view's read on open, and the read every tie surface uses to put a name on an id it holds.
+//
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["clientAccountById"] in generated_concepts.go).
+type ClientAccountByIdArgs struct {
+	AccountId string
+}
+
+// ClientAccountById calls the engine query clientAccountById.
+func (qc *QueryClient) ClientAccountById(ctx context.Context, args ClientAccountByIdArgs) (*Result, error) {
+	call := ClientAccountByIdBuild(args)
+	return qc.executeNamed(ctx, "clientAccountById", call)
+}
+
+func ClientAccountByIdBuild(args ClientAccountByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query clientAccountById(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ClientAccountsAll -- Every account this caller may see -- their own, or every account in the cluster when the caller is a cluster owner. The Accounts app's primary screen, and the source every account picker in the OS reads.
+// ARCHIVED ROWS ARE EXCLUDED BY DEFAULT and returned under the filter (D8). The archive term is a DISJUNCTION rather than a `when(args.includeArchived)` guard, and the difference is not stylistic: `when(...)` drops its block on the argument's ABSENCE, not on its falsity, so a caller passing `includeArchived: false` -- which is exactly what a checkbox bound to a boolean sends -- would have widened the read to every archived row. Written as `isNotArchived || args.includeArchived==true` the three cases are the three answers: absent resolves nil and fails the comparison (active only), false fails it (active only), true admits everything.
+// "Everything", note, and not "the archived ones": a person looking for a client they filed away wants it in its place in the list, marked, not in a separate list of the forgotten.
+// The caller term is the composite tier's own predicate written out, which is what TestRowAuthzEnforcementLandGate requires of an authored query over a tier-declaring concept.
+//
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["clientAccountsAll"] in generated_concepts.go).
+type ClientAccountsAllArgs struct {
+	IncludeArchived    bool
+	IncludeArchivedSet bool // set true to send includeArchived; required because zero-value bool is ambiguous
+}
+
+// ClientAccountsAll calls the engine query clientAccountsAll.
+func (qc *QueryClient) ClientAccountsAll(ctx context.Context, args ClientAccountsAllArgs) (*Result, error) {
+	call := ClientAccountsAllBuild(args)
+	return qc.executeNamed(ctx, "clientAccountsAll", call)
+}
+
+func ClientAccountsAllBuild(args ClientAccountsAllArgs) string {
+	var b strings.Builder
+	b.WriteString("query clientAccountsAll(")
+	if args.IncludeArchivedSet {
+		b.WriteString("includeArchived: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeArchived))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ClusterDatabase -- The database backing this cluster: where it is, what engine and version, and which extensions are installed. CLUSTER OWNER ONLY.
 //
 // Bound concept: v1:cluster:database (machine-readable: BoundConcepts["clusterDatabase"] in generated_concepts.go).
@@ -2764,6 +2814,30 @@ func DocumentVersionsForOwnerBuild(args DocumentVersionsForOwnerArgs) string {
 	return b.String()
 }
 
+// DomainsForAccount -- The knowledge domains tagged with one account.
+// A TAG AND NOTHING MORE (D5). This read is the only consumer of `v1:knowledge:knowledgeDomain.accountId` in the tree, and the field is consulted by nothing in routing, attachment, retrieval or scoring. A domain tagged with an account trains, attaches and answers exactly as an untagged one does.
+// No tier conjunct, because the concept declares no tier -- see its declaration in dsl/knowledge/concepts.memql for why that matches its sibling `documentChunk` rather than departing from it.
+//
+// Bound concept: v1:knowledge:knowledgeDomain (machine-readable: BoundConcepts["domainsForAccount"] in generated_concepts.go).
+type DomainsForAccountArgs struct {
+	AccountId string
+}
+
+// DomainsForAccount calls the engine query domainsForAccount.
+func (qc *QueryClient) DomainsForAccount(ctx context.Context, args DomainsForAccountArgs) (*Result, error) {
+	call := DomainsForAccountBuild(args)
+	return qc.executeNamed(ctx, "domainsForAccount", call)
+}
+
+func DomainsForAccountBuild(args DomainsForAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("query domainsForAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // DrainableSendJobs -- ENGINE: send jobs the drain worker still has work to do on, oldest first so a long-queued campaign is not starved by a newer one. Cluster-owner gated -- this is the one read in the domain that deliberately spans owners, which is exactly why it may only be issued by the engine's own operator identity and why the row it returns carries no recipient data.
 //
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["drainableSendJobs"] in generated_concepts.go).
@@ -3400,6 +3474,30 @@ func InvitationByTokenHashBuild(args InvitationByTokenHashArgs) string {
 	return b.String()
 }
 
+// InvitationsForAccount -- The guest invitations sent on behalf of one account.
+// `invitationAdminSummary`, NEVER `invitationFull`, and this is the rule the Users app's own review wrote (memql#4735): `invitationFull` projects `tokenHash`, `previousTokenHash` and `bindingHash` -- not the plaintext token, but the key the resolve path looks an invitation up BY -- and a rollup that says how many guests a client has has never needed them.
+// `requiresOwnerOrAdmin` is `pendingUserInvitations`' own gate, carried here for the same reason: the invitation concept declares no row tier, so the spec IS the authorization on this read, and a rollup that dropped it would be the shortest path in the product to reading every invitation in the cluster. The Accounts app is not admin-gated, so below that floor this section renders empty -- which is the engine's answer, rendered.
+//
+// Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["invitationsForAccount"] in generated_concepts.go).
+type InvitationsForAccountArgs struct {
+	AccountId string
+}
+
+// InvitationsForAccount calls the engine query invitationsForAccount.
+func (qc *QueryClient) InvitationsForAccount(ctx context.Context, args InvitationsForAccountArgs) (*Result, error) {
+	call := InvitationsForAccountBuild(args)
+	return qc.executeNamed(ctx, "invitationsForAccount", call)
+}
+
+func InvitationsForAccountBuild(args InvitationsForAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("query invitationsForAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // InvocationsForPlan -- List the CALLER'S worker invocations belonging to a Plan.
 // The `ownerUserId==actor.userId` conjunct is the caller scope v1:worker:invocation's composite tier now injects anyway (memql#4406); stating it is what makes the read's scope checkable (TestRowAuthzEnforcementLandGate) instead of implicit. There is deliberately no operator counterpart: the pair shape exists where an operator surface needs it (invocationsForWorker / invocationsForWorkerAsOperator, for /fleet/machines), and adding an unused second variant here would be surface nothing reads.
 //
@@ -3482,6 +3580,26 @@ func InvocationsForWorkerAsOperatorBuild(args InvocationsForWorkerAsOperatorArgs
 	b.WriteString(quoteMemQL(args.WorkerId))
 	b.WriteString(")")
 	return b.String()
+}
+
+// KnowledgeDomainsAll -- Every knowledge domain this cluster holds.
+// The read the Training app's domain cards have never had (epic memql#4800). Until this landed, that page was entirely CHUNK-derived: it rolled domains up out of `v1:knowledge:documentChunk.domainId` and labelled each card with the raw id, because the domain row itself had no client read surface and no concept declaration behind it. With this, a card can say the domain's name and render the account it is tagged with.
+// NO ACTOR TERM, because the concept declares no row-authz tier -- see the concept for why that matches its sibling `documentChunk` rather than departing from it. A caller reads the cluster's catalog, which is the same catalog for everybody.
+// `active` is NOT filtered here. The seeder's own existence probe treats a missing key and true alike, and a surface that wants only live domains can fold on the field; a query that pre-filtered it would hide exactly the rows an operator asking "why is this domain not working" needs to see.
+//
+// Bound concept: v1:knowledge:knowledgeDomain (machine-readable: BoundConcepts["knowledgeDomainsAll"] in generated_concepts.go).
+type KnowledgeDomainsAllArgs struct {
+}
+
+// KnowledgeDomainsAll calls the engine query knowledgeDomainsAll.
+func (qc *QueryClient) KnowledgeDomainsAll(ctx context.Context, args KnowledgeDomainsAllArgs) (*Result, error) {
+	call := KnowledgeDomainsAllBuild(args)
+	return qc.executeNamed(ctx, "knowledgeDomainsAll", call)
+}
+
+func KnowledgeDomainsAllBuild(args KnowledgeDomainsAllArgs) string {
+	_ = args
+	return "query knowledgeDomainsAll()"
 }
 
 // LibraryArtifactById -- Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content.
@@ -3726,6 +3844,30 @@ func (qc *QueryClient) LibraryFolders(ctx context.Context, args LibraryFoldersAr
 func LibraryFoldersBuild(args LibraryFoldersArgs) string {
 	_ = args
 	return "query libraryFolders()"
+}
+
+// LibraryItemsForAccount -- The Library items labelled with one account.
+// `accountIds` is a LIST (D5 -- "one or two accounts" is the owner's own framing), so the tie term is membership rather than equality.
+// ARCHIVED ROWS ARE EXCLUDED, matching `libraryArtifacts` rather than this file's own `clientAccountsAll`: the account filter above is a view over the registry a person is administering, while this is a count of what is currently filed for a client. `archived!=true` rather than `==false`, because a row promoted before the field existed carries no key at all and `==false` would silently exclude it.
+//
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryItemsForAccount"] in generated_concepts.go).
+type LibraryItemsForAccountArgs struct {
+	AccountId string
+}
+
+// LibraryItemsForAccount calls the engine query libraryItemsForAccount.
+func (qc *QueryClient) LibraryItemsForAccount(ctx context.Context, args LibraryItemsForAccountArgs) (*Result, error) {
+	call := LibraryItemsForAccountBuild(args)
+	return qc.executeNamed(ctx, "libraryItemsForAccount", call)
+}
+
+func LibraryItemsForAccountBuild(args LibraryItemsForAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryItemsForAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // LibraryWorkspaceLiveSources -- List workspace-scoped live sources for the Library Records lens. Gated by ownerUserId==actor.userId -- NOT the un-gated partition-shared read it was before memql#4340, because v1:library:artifact now declares an owner tier and an ownerless row is unreachable on every path. See the note above (#723 for the original shape, D8 for the tier).
@@ -9504,6 +9646,29 @@ func (qc *QueryClient) SitesAll(ctx context.Context, args SitesAllArgs) (*Result
 func SitesAllBuild(args SitesAllArgs) string {
 	_ = args
 	return "query sitesAll()"
+}
+
+// SitesForAccount -- The deployables tied to one account.
+// `isNotDeleted` and the composite-tier term are `sitesAll`'s own conjuncts, repeated here rather than referenced: this is the same read that query makes, narrowed by the tie field, and a soft-deleted site must stay gone from a rollup for the reason it is gone from the list.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesForAccount"] in generated_concepts.go).
+type SitesForAccountArgs struct {
+	AccountId string
+}
+
+// SitesForAccount calls the engine query sitesForAccount.
+func (qc *QueryClient) SitesForAccount(ctx context.Context, args SitesForAccountArgs) (*Result, error) {
+	call := SitesForAccountBuild(args)
+	return qc.executeNamed(ctx, "sitesForAccount", call)
+}
+
+func SitesForAccountBuild(args SitesForAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("query sitesForAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // SkillBySlug -- Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it.

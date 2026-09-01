@@ -659,6 +659,30 @@ func ArchiveAudienceBuild(args ArchiveAudienceArgs) string {
 	return b.String()
 }
 
+// ArchiveClientAccount -- File a client away.
+// A STATUS FLIP, never a delete, and the ties are the reason. Four concepts carry an optional reference to this row, and every one of them keeps resolving after this write: a site tied to an archived account still serves, a file still carries its label, an invitation still names who it was for. Unfiling a client must not rewrite the record of what was done for them.
+// There is no unarchive mutation and that is not an omission -- `updateClientAccount` cannot reach `status`, so bringing a client back is deliberately a second decision rather than a field on the edit form. Restoring one today means an operator write; a control for it belongs with whatever surface eventually answers the same question for the Bin (memql#4784), and inventing a second half-answer here would be the thing to undo when it lands.
+//
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["archiveClientAccount"] in generated_concepts.go).
+type ArchiveClientAccountArgs struct {
+	AccountId string
+}
+
+// ArchiveClientAccount calls the engine mutation archiveClientAccount.
+func (qc *QueryClient) ArchiveClientAccount(ctx context.Context, args ArchiveClientAccountArgs) (*Result, error) {
+	call := ArchiveClientAccountBuild(args)
+	return qc.executeNamed(ctx, "archiveClientAccount", call)
+}
+
+func ArchiveClientAccountBuild(args ArchiveClientAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation archiveClientAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ArchiveComposedView -- Archive a composed view: flip status to archived and stamp archivedAt. The row is retained in full -- MemQL has no hard delete, and a person who retires a view they spent time on should be able to find it again. Owned: ownerUserId is re-stamped from actor.userId and the write guard refuses a target row the actor does not own.
 //
 // Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["archiveComposedView"] in generated_concepts.go).
@@ -3204,6 +3228,72 @@ func CreateCapabilityBuild(args CreateCapabilityArgs) string {
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreateClientAccount -- Add a client to the registry -- and, once per cluster lifetime, materialize the owner's own company as `v1:accounts:account:self`.
+// =========================================================================== WHY THIS IS NOT NAMED createAccount =========================================================================== `createAccount` is TAKEN. `dsl/identity/mutations.memql` has declared it, with `updateAccount`, `archiveAccount` and the query `accountById`, since long before this domain existed -- they write `v1:identity:account`, the PAYING account of the isolation model, which shares a word with this concept and nothing else. Function names resolve in one flat registry and the first registration wins, so a second `createAccount` does not conflict loudly: it simply never registers, and every call in this domain reaches identity's mutation instead. Measured, not assumed -- memqllint reported all four of this domain's constructs as tools whose handler named no registered function, which is what an unregistered mutation looks like from the outside.
+// So the four names carry `client`, which is the word for what this concept is (see the disambiguation note in concepts.memql). The CONCEPT keeps its name -- `v1:accounts:account`, and the singleton `v1:accounts:account:self` -- because that id is what the OS, the design record and the custom-domains epic all key on, and because a concept id is namespaced where a function name is not.
+// =========================================================================== @createOnly IS THE SECOND HALF OF CREATE-IF-ABSENT (D3) =========================================================================== The `self` row is materialized by the `seedSelfAccount` automation, which gates on the row's absence -- so on an ordinary boot this mutation is not called at all. `@createOnly` closes the narrow race that gate cannot: two bff replicas boot together, both read absent, one creates, an operator edits the name, and the slow replica's create then lands on a row that is no longer empty. Naming every payload field here drops them all from that delta, so the read-merge inherits the operator's values and the late write is a no-op rather than a silent revert.
+// It is a property of the WRITE, so it holds for any future caller, not just the boot path. Every payload field is named, `status` included: an operator who archived their own company row must not find it active again after a restart. `ownerUserId` is absent because it is not accepted -- it is stamped, and executeWrite undoes the stamp for a system actor, which is how the seeded row lands cluster-owned like the portal site does.
+// `configuredAt` IS NOT STAMPED HERE, and that is the first-run card (D7). The card asks the one question a boot cannot answer -- what is this company called -- and `updateClientAccount` stamping the field is what retires it. A create-time stamp would retire the card before it was ever shown.
+// `name` is `string!` on the concept and required here; everything else is optional and sits in accept{} rather than stamp{}, so an omitted argument is OMITTED FROM THE PAYLOAD rather than written as an explicit blank (missing args are dropped -- mutation_templates.go). `args.domain ?? ""` would put an empty string in the delta, which reads back as "we asked and they have no domain" rather than "nobody has said".
+//
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["createClientAccount"] in generated_concepts.go).
+type CreateClientAccountArgs struct {
+	AccountId           string
+	Name                string
+	Domain              string
+	PrimaryContactName  string
+	PrimaryContactEmail string
+	Notes               string
+}
+
+// CreateClientAccount calls the engine mutation createClientAccount.
+func (qc *QueryClient) CreateClientAccount(ctx context.Context, args CreateClientAccountArgs) (*Result, error) {
+	call := CreateClientAccountBuild(args)
+	return qc.executeNamed(ctx, "createClientAccount", call)
+}
+
+func CreateClientAccountBuild(args CreateClientAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createClientAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if args.Domain != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("domain: ")
+		b.WriteString(quoteMemQL(args.Domain))
+	}
+	if args.PrimaryContactName != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("primaryContactName: ")
+		b.WriteString(quoteMemQL(args.PrimaryContactName))
+	}
+	if args.PrimaryContactEmail != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("primaryContactEmail: ")
+		b.WriteString(quoteMemQL(args.PrimaryContactEmail))
+	}
+	if args.Notes != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("notes: ")
+		b.WriteString(quoteMemQL(args.Notes))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -12793,6 +12883,40 @@ func SetAgentVideoOverrideBuild(args SetAgentVideoOverrideArgs) string {
 	return b.String()
 }
 
+// SetArtifactAccounts -- Label a Library item with the clients it is about (epic memql#4800, D5) -- the Files inspector's account picker, and its only caller.
+// A READ-MERGE update in the shape moveArtifactToFolder set: folder, labels, archived and every other index field survive a re-label untouched, which is what makes labelling cheap enough to be a chip somebody toggles rather than a form they submit.
+// `accountIds` is STAMPED with `?? []`, not accepted, for moveArtifactToFolder's reason applied to a list: an accepted arg omitted is dropped and inherited, so REMOVING the last label would silently re-save the label just removed. An explicit empty list is what "no client" looks like, and the coalesce is what lets an omitted arg mean it.
+// `updatedAt` advances because a re-label IS a change a person made to the row, and the Library's default sort should say so -- the same call moveArtifactToFolder makes.
+// Ids are not validated against the registry: an account has no read effect, and a list filtered against the caller's own visible accounts would quietly DROP a label somebody else's account put there. The Files browse filter reads an unresolvable id as a tie to something not visible.
+//
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["setArtifactAccounts"] in generated_concepts.go).
+type SetArtifactAccountsArgs struct {
+	ArtifactId string
+	AccountIds []string
+}
+
+// SetArtifactAccounts calls the engine mutation setArtifactAccounts.
+func (qc *QueryClient) SetArtifactAccounts(ctx context.Context, args SetArtifactAccountsArgs) (*Result, error) {
+	call := SetArtifactAccountsBuild(args)
+	return qc.executeNamed(ctx, "setArtifactAccounts", call)
+}
+
+func SetArtifactAccountsBuild(args SetArtifactAccountsArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setArtifactAccounts(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if args.AccountIds != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountIds: ")
+		b.WriteString(renderMemQLValue(args.AccountIds))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // SetAuthoredAutomationsEnabled -- Flip the cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue #961). Partial-update of the singleton cluster-settings row (id='cluster'): sets authoredAutomationsEnabled true (resume) or false (halt). false halts EVERY authored automation across the whole cluster -- the governance hard stop -- independent of any bundle status or per-user kill switch. Operator-only in practice (the admin settings surface calls it); the authored scheduler reads the flag through clusterSettingsCurrent on its global gate.
 //
 // Bound concept: v1:identity:clusterSettings (machine-readable: BoundConcepts["setAuthoredAutomationsEnabled"] in generated_concepts.go).
@@ -14779,6 +14903,71 @@ func UpdateCampaignProgressBuild(args UpdateCampaignProgressArgs) string {
 	return b.String()
 }
 
+// UpdateClientAccount -- Correct a client's facts, and record that a human said so.
+// THE configuredAt STAMP IS THE POINT, not a side effect (D7). This mutation is what retires the OS first-run card: the seeded `self` row carries facts a boot derived and a name nobody chose, and the card asks for the name. The moment this write lands, the row has been stated by a person and the card yields to the ordinary surface. Nothing else in the tree writes the field.
+// EVERY EDITABLE FIELD IS IN accept{} AND NONE IS REQUIRED, because `update{}` read-merges the persisted row (memql#1628): an omitted field inherits rather than blanking, so the detail view can send only what changed and two people editing different fields do not overwrite each other. `name` is omissible here even though the concept declares it `string!` -- the merge supplies the stored value, and requiring it would invite callers to pass back a row they read a moment ago, which is a lost update waiting for two concurrent writers.
+// `status` is deliberately NOT here. Archiving is its own write below, because it is its own decision and it asks its own confirm.
+//
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["updateClientAccount"] in generated_concepts.go).
+type UpdateClientAccountArgs struct {
+	AccountId           string
+	Name                string
+	Domain              string
+	PrimaryContactName  string
+	PrimaryContactEmail string
+	Notes               string
+}
+
+// UpdateClientAccount calls the engine mutation updateClientAccount.
+func (qc *QueryClient) UpdateClientAccount(ctx context.Context, args UpdateClientAccountArgs) (*Result, error) {
+	call := UpdateClientAccountBuild(args)
+	return qc.executeNamed(ctx, "updateClientAccount", call)
+}
+
+func UpdateClientAccountBuild(args UpdateClientAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateClientAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.Name != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("name: ")
+		b.WriteString(quoteMemQL(args.Name))
+	}
+	if args.Domain != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("domain: ")
+		b.WriteString(quoteMemQL(args.Domain))
+	}
+	if args.PrimaryContactName != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("primaryContactName: ")
+		b.WriteString(quoteMemQL(args.PrimaryContactName))
+	}
+	if args.PrimaryContactEmail != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("primaryContactEmail: ")
+		b.WriteString(quoteMemQL(args.PrimaryContactEmail))
+	}
+	if args.Notes != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("notes: ")
+		b.WriteString(quoteMemQL(args.Notes))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // UpdateClusterSettings -- Update the singleton cluster-settings row from the admin UI. Read-merges the existing row (update()): only the fields the caller actually passes change; every omitted field -- internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay @required because the admin form always submits them. `bootstrappedAt` is additionally @noUnset: the verifier's stamp (empty -> set) still lands, but no admin edit can take a stamped cluster back to un-bootstrapped by passing it explicitly empty -- un-bootstrapping is not an ordinary write (memql#3415).
 //
 // Bound concept: v1:identity:clusterSettings (machine-readable: BoundConcepts["updateClusterSettings"] in generated_concepts.go).
@@ -16382,6 +16571,40 @@ func UpdateSessionStreamsBuild(args UpdateSessionStreamsArgs) string {
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateSiteAccount -- Point a deployable at the client it is FOR -- or at nobody (epic memql#4800, D5).
+// A NARROW, SINGLE-PURPOSE WRITE, like updateSiteBundle and updateSiteStatus beside it. The site detail's account picker is its only caller, and giving the tie its own mutation is what keeps the picker from being able to touch a hostname, a bundle or a status by accident.
+// `accountId` IS STAMPED, NOT ACCEPTED, and the difference is the whole feature. An accepted arg is dropped from the payload when omitted (missing args are dropped, mutation_templates.go) and the read-merge then inherits the stored value -- which would make CLEARING a tie inexpressible: every "no client" would silently re-save the client already there. `args.accountId ?? ""` always writes a value, so an omitted arg means "no client" and says so on the row.
+// NOT VALIDATED against the registry, deliberately. An account is a record with no read effect (D1), so an id naming no row costs nothing: the picker resolves what it can and renders the rest as "not visible to you", which is a truer answer than a refusal would be -- an operator CAN legitimately tie a site to an account whose row another person owns.
+// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, which resolves the target row and admits its owner with the cluster-owner path as the separate escape. Nothing about the account is consulted: tying a site to a client changes who the work is FOR and never who may read or write it.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteAccount"] in generated_concepts.go).
+type UpdateSiteAccountArgs struct {
+	SiteId    string
+	AccountId string
+}
+
+// UpdateSiteAccount calls the engine mutation updateSiteAccount.
+func (qc *QueryClient) UpdateSiteAccount(ctx context.Context, args UpdateSiteAccountArgs) (*Result, error) {
+	call := UpdateSiteAccountBuild(args)
+	return qc.executeNamed(ctx, "updateSiteAccount", call)
+}
+
+func UpdateSiteAccountBuild(args UpdateSiteAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateSiteAccount(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if args.AccountId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
+	}
 	b.WriteString(")")
 	return b.String()
 }

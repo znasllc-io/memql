@@ -473,6 +473,39 @@ mutate site updateSiteStatus {
   }
 }
 
+/// Point a deployable at the client it is FOR -- or at nobody (epic memql#4800, D5).
+///
+/// A NARROW, SINGLE-PURPOSE WRITE, like updateSiteBundle and updateSiteStatus beside it. The site
+/// detail's account picker is its only caller, and giving the tie its own mutation is what keeps
+/// the picker from being able to touch a hostname, a bundle or a status by accident.
+///
+/// `accountId` IS STAMPED, NOT ACCEPTED, and the difference is the whole feature. An accepted arg
+/// is dropped from the payload when omitted (missing args are dropped, mutation_templates.go) and
+/// the read-merge then inherits the stored value -- which would make CLEARING a tie inexpressible:
+/// every "no client" would silently re-save the client already there. `args.accountId ?? ""` always
+/// writes a value, so an omitted arg means "no client" and says so on the row.
+///
+/// NOT VALIDATED against the registry, deliberately. An account is a record with no read effect
+/// (D1), so an id naming no row costs nothing: the picker resolves what it can and renders the rest
+/// as "not visible to you", which is a truer answer than a refusal would be -- an operator CAN
+/// legitimately tie a site to an account whose row another person owns.
+///
+/// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, which resolves the target
+/// row and admits its owner with the cluster-owner path as the separate escape. Nothing about the
+/// account is consulted: tying a site to a client changes who the work is FOR and never who may
+/// read or write it.
+@description("Point a deployable at the client it is for")
+mutate site updateSiteAccount {
+  args {
+    siteId     string!
+    accountId  string
+  }
+  update {
+    id: args.siteId
+    accountId: args.accountId ?? ""
+  }
+}
+
 /// Soft-delete a site by stamping deleted=true (memql#3717). The time-series row survives for
 /// history; isNotDeleted on siteByHostname/sitesAll/siteById is what actually stops the edge
 /// resolving a deleted site's hostname -- this mutation only flips the flag. A systemOwned row
