@@ -37,6 +37,11 @@ Design: `docs/superpowers/specs/2026-08-26-memql-os-desktop-shell-design.md`.
   one-line edits away and deliberately not built.
 - **Persistence**: `system/store.ts` (`DesktopStore`) — versioned
   localStorage; desks, items, pins, theme. Never windows.
+- **The interface language**: [DESIGN.md](DESIGN.md) — the ten owner-set
+  rules every app surface follows (epic memql#4848): Head-first sections,
+  filters behind one Refine affordance, quiet sort, the control line,
+  one container grammar. When a rule and a surface disagree, the surface
+  is wrong.
 - Phone keeps its own chrome (tab bar, one app at a time, Ask sheet);
   layout is keyed off pointer/hover, never width alone.
 

@@ -1239,7 +1239,10 @@ button:not(:disabled):active {
   margin-bottom: 6px;
 }
 .os-choice {
-  padding: 6px 14px;
+  display: inline-flex;
+  align-items: center;
+  height: var(--os-control-h);
+  padding: 0 14px;
   border: 1px solid var(--os-line);
   border-radius: var(--os-radius-sm);
   background: none;
@@ -1753,12 +1756,95 @@ button:not(:disabled):active {
 .os-head .os-subhead {
   margin: 0;
 }
+.os-head-meta {
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+  font-variant-numeric: tabular-nums;
+}
 .os-head-actions {
   margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* Rule 3: sort is not a button -- quiet text on the scope line. */
+.os-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--os-control-h);
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--os-muted);
+  font: inherit;
+  font-size: var(--os-text-sm);
+  cursor: pointer;
+}
+.os-sort:hover {
+  color: var(--os-ink);
+}
+.os-sort:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+  border-radius: var(--os-radius-xs);
+}
+.os-sort svg {
+  opacity: 0.55;
+}
+
+/* Rule 2: the Refine affordance -- search and facets behind one control,
+ * active constraints as removable chips beside it while collapsed. */
+.os-refine {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.os-refine-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--os-control-h);
+  padding: 0 10px;
+  max-width: 220px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-raised);
+  color: var(--os-muted);
+  font: inherit;
+  font-size: var(--os-text-base);
+  cursor: pointer;
+}
+.os-refine-open[data-active] {
+  color: var(--os-ink);
+  border-color: var(--os-accent);
+}
+.os-refine-open:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+}
+.os-refine-open-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-refine-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 264px;
+  padding: 10px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-glass-solid);
+  box-shadow: var(--os-shadow-float);
 }
 
 .os-subhead {
@@ -1791,11 +1877,15 @@ button:not(:disabled):active {
   flex-wrap: wrap;
 }
 
+/* THE CONTROL LINE (DESIGN.md rule 5): one height, one text size, one
+ * field radius for every piece of interactive chrome. Heights come from the
+ * token, never re-stated per control, so nothing can drift a pixel off. */
 .os-input,
 .os-select {
   flex: 1 1 12ch;
   min-width: 12ch;
-  padding: 6px 9px;
+  height: var(--os-control-h);
+  padding: 0 10px;
   font: inherit;
   font-size: var(--os-text-base);
   color: var(--os-ink);
@@ -1812,8 +1902,36 @@ button:not(:disabled):active {
   display: inline-flex;
 }
 
+/* The styled select (rule 5): the UA's own chrome goes, the wrapper draws a
+ * currentColor chevron, and the select sits flush with the input beside it
+ * in both modes and under every theme pack. */
+.os-select-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 1 1 12ch;
+  min-width: 12ch;
+}
+.os-select-wrap .os-select {
+  flex: 1;
+  width: 100%;
+  appearance: none;
+  padding-right: 26px;
+}
+.os-select-chevron {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  translate: 0 -50%;
+  pointer-events: none;
+  color: var(--os-muted);
+}
+
 .os-button {
-  padding: 6px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--os-control-h);
+  padding: 0 12px;
   font: inherit;
   font-size: var(--os-text-base);
   font-weight: 500;
@@ -2843,7 +2961,10 @@ a.os-button {
   gap: 4px;
 }
 .os-files-kind {
-  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  height: var(--os-control-h);
+  padding: 0 12px;
   border: 1px solid var(--os-line);
   border-radius: 999px;
   background: none;
@@ -2936,6 +3057,19 @@ a.os-button {
 .os-files-node:disabled {
   opacity: 0.55;
   cursor: default;
+}
+/* Rule 6: actions are verbs, nodes are nouns. A rail ACTION sits below a
+ * hairline, stays muted, and never wears the node's current highlight. */
+.os-files-node[data-action] {
+  margin-top: 6px;
+  border-top: 1px solid var(--os-line);
+  border-radius: 0;
+  padding-top: 8px;
+  color: var(--os-muted);
+}
+.os-files-node[data-action]:hover {
+  color: var(--os-ink);
+  background: none;
 }
 .os-files-rename {
   flex: 1;

@@ -21,13 +21,16 @@ export {
   Input,
   Notice,
   Panel,
+  Refine,
   Row,
   Select,
+  SortControl,
   Subhead,
   type ButtonTone,
   type ChipTone,
   type ChoiceOption,
   type NoticeTone,
+  type RefineChip,
 } from "./controls";
 export { LiveList, type LiveListSource } from "../live/LiveList";
 export { useLiveView, type LiveView } from "../live/liveView";
