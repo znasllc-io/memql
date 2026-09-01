@@ -566,7 +566,13 @@ func (e *MemQLEngine) rankScopeComparison(ctx context.Context, n *RankScopeExpre
 		owners = scope.writeOwners
 	}
 
-	values := make([]any, 0, len(owners)+1)
+	// No `+1` for the unowned entry, and no arithmetic on len() at all: a
+	// caller-influenced capacity expression is what CodeQL's
+	// go/allocation-size-overflow flags, and this repo's answer to that rule
+	// is to DROP the arithmetic rather than guard it (memql#4822). The hint is
+	// an optimisation; being one short costs a single append growth, and the
+	// slice is bounded by the principal count either way.
+	values := make([]any, 0, len(owners))
 	for id := range owners {
 		values = append(values, id)
 	}
