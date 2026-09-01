@@ -87,6 +87,10 @@ export interface FakeSeed {
   folders?: Row[];
   machines?: Row[];
   files?: Row[];
+  /** The Bin's population -- what libraryArchivedArtifacts answers. */
+  archived?: Row[];
+  /** Archived folders, which libraryFolders deliberately cannot see. */
+  archivedFolders?: Row[];
   /** Superseded version rows, answering libraryFileVersionsForFile. */
   versions?: Row[];
   byId?: Record<string, Row>;
@@ -113,6 +117,9 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call === "query libraryFolders()") return rowsResult(seed.folders ?? []);
       if (call === "query myWorkersWithStatus()") return rowsResult(seed.machines ?? []);
       if (call.startsWith("query libraryFileById(")) return rowsResult(seed.files ?? []);
+      if (call === "query libraryFilesForOwner()") return rowsResult(seed.files ?? []);
+      if (call === "query libraryArchivedArtifacts()") return rowsResult(seed.archived ?? []);
+      if (call === "query libraryArchivedFolders()") return rowsResult(seed.archivedFolders ?? []);
       if (call.startsWith("query libraryFileVersionsForFile(")) return rowsResult(seed.versions ?? []);
       if (call.startsWith("mutation ") || call.startsWith("builtin ")) return rowsResult([]);
 

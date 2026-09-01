@@ -6,6 +6,7 @@ import {
   Rocket,
   Settings as SettingsIcon,
   Sparkles,
+  Trash2,
   Users,
 } from "lucide-react";
 
@@ -14,6 +15,8 @@ import { useAsk } from "../ask/AskProvider";
 import type { OsAppManifest, OsRegistry, OsWidgetManifest } from "../system/registry";
 import { AccountsApp } from "./accounts/AccountsApp";
 import { ACCOUNTS_SECTIONS } from "./accounts/settings";
+import { BinApp } from "./bin/BinApp";
+import { BIN_APP_ID, BIN_SECTIONS } from "./bin/concepts";
 import { DeployablesApp } from "./deployables/DeployablesApp";
 import { DEPLOYABLES_SECTIONS } from "./deployables/settings";
 import { FilesApp } from "./files/FilesApp";
@@ -198,6 +201,31 @@ const accounts: OsAppManifest = {
   component: AccountsApp,
 };
 
+// The Bin, in full (memql#4784). ALWAYS DOCKED, which is the whole distinction
+// its sibling manifests point at: `dockFixture` puts it in the dock in every
+// session and keeps it out of the pin list, so it cannot be unpinned, dragged
+// out of the strip, or lost to a desktop document written before it existed.
+//
+// The reason is the gesture rather than the app. Archiving has a destination
+// now -- you drag a file onto it, exactly as on every desktop anybody has used
+// -- and a destination that a person can remove is one that stops being there
+// on the day they need it. Ordinary apps stay pinnable; this is the one
+// fixture, and the flag exists for it rather than as a capability.
+//
+// NO manifest role. `v1:library:artifact` and `v1:library:folder` declare the
+// composite tier, so every signed-in person has a Bin of their own and the
+// engine decides how far its reads go. Gating here would be presentation
+// pretending to be authorization.
+const bin: OsAppManifest = {
+  id: BIN_APP_ID,
+  name: "Bin",
+  icon: Trash2,
+  sections: BIN_SECTIONS,
+  settingsSection: "settings",
+  dockFixture: true,
+  component: BinApp,
+};
+
 function AskWidgetBody() {
   const { transport, voice, settings } = useAsk();
   return (
@@ -214,6 +242,6 @@ const askWidget: OsWidgetManifest = {
 };
 
 export const OS_REGISTRY: OsRegistry = {
-  apps: [accounts, files, deployables, fleet, users, training, settings],
+  apps: [accounts, files, deployables, fleet, users, training, settings, bin],
   widgets: [askWidget],
 };

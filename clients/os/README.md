@@ -528,6 +528,98 @@ Training's domain tag is likewise render-and-filter only, which is what the
 design asks for: nothing about routing, attachment or agent behaviour
 consults `knowledgeDomain.accountId`, and `domainsForAccount` is the only
 query in the tree that mentions it.
+## The Bin, the seventh app and the only dock FIXTURE (memql#4784)
+
+`src/apps/bin/` is the archive: everything you threw away, what it was, and
+where it came from. Five things about it are new rules rather than repetitions
+of the six apps before it.
+
+- **A TRASH CAN THAT CANNOT DESTROY ANYTHING IS A DIFFERENT OBJECT, and the
+  app says so on the page.** Every trash can anybody has used is a waiting room
+  for deletion; an archive in MemQL is an append-only re-version carrying
+  `archived=true`, so the bytes stay, every earlier version stays, and there is
+  no expiry anywhere in the product. A surface that looked like a trash can and
+  quietly behaved differently would be read as one -- so the difference is
+  stated in the header line, in the empty state, and in the settings section
+  where somebody goes looking for the retention control that does not exist.
+  An absent control with no account of itself reads as something nobody got
+  round to building.
+
+- **ONE DRAG CONTEXT NOW SPANS THE SHELL** (`chrome/dragScope.tsx`). The desk
+  and the dock owned a `DndContext` each and are SIBLINGS in the layout, so a
+  drag begun on a desk icon or in a Files window could never resolve a drop in
+  the dock -- dnd-kit only considers droppables inside the context the drag
+  started in. That was invisible until something needed to cross the line.
+  Handlers claim an id PREFIX and register a REF: a hook that re-registered
+  when its closure changed would re-register on every render of the desktop,
+  and its cleanup would unregister mid-drag. The alternative -- native HTML5
+  dnd for this one target -- is the two-implementations-of-one-behaviour shape
+  the arrival-cue section warns about, with "the desk icon can be dragged to
+  the Bin but the Files row cannot" as the bug nobody notices for a month.
+
+- **A FIXTURE IS NOT A PIN.** `dockFixture` on the manifest puts the Bin in
+  the dock in every session and keeps it OUT of the pin list -- including out
+  of a stored desktop document that names it, because a fixture that is also a
+  pin can be dragged out of the strip and lost. Pins roam with the desktop; a
+  fixture is a property of the shell, so no upgrade path and no corrupt
+  document can leave somebody without one. Its context menu offers no pin
+  control at all rather than a disabled one.
+
+- **THE BIN IS NOT DRAWN AS A DANGEROUS THING.** Amber is `warn` and red is
+  `error` everywhere here, and an archive is neither. The drop target lights in
+  the ACCENT, like every other "yes, here" affordance in the OS. (The CONFIRM
+  keeps the shell's existing confirm language, matching the Files inspector --
+  two different confirms for one action is worse than a colour that leans
+  cautious.) A **folder** dropped on the Bin is REFUSED and told where to go:
+  archiving a folder is a recursive walk whose confirm names the live count
+  inside it, and a dock icon cannot count that. A file from the COMPUTER is
+  refused out loud, and `stopPropagation` runs in both drag phases -- the dock
+  sits over the desk plate, whose own handler would otherwise upload it at the
+  exact moment somebody meant to throw something away.
+
+- **THE STORY LEADS, AND IT IS SAID EXACTLY ONCE.** Where a file came from is
+  the fact that decides whether you still want it -- a client's laptop in March
+  is a different decision from an agent's output yesterday -- so the row's
+  quiet middle is the provenance and the detail panel's header is the machine
+  block: its name, its presence, the absolute path (selectable in one gesture,
+  because the reader is a window away from a file manager on that machine), and
+  the origin link state. Where a machine is named the header SENTENCE stands
+  down, rather than announcing the same machine twice in eighty pixels. The
+  rows carry no presence dot at all: it means "is that machine reachable right
+  now" everywhere in this shell, which beside an archived row is both
+  irrelevant and misleading -- a file whose origin is gone would show green for
+  as long as the machine that no longer holds it stays awake.
+
+Two smaller things. The list merges TWO feeds (`apps/bin/mergedView.ts`), and
+`useLiveView` cannot do that: it caches against ONE upstream snapshot's
+identity, so a folder arriving while the artifacts are unchanged folds into
+nothing -- the list never moves, nothing errors, the folder is simply missing.
+And "was filed in" resolves against the ARCHIVED folders, because
+`libraryFolders` carries `archived != true` and a folder that went to the Bin
+with its contents is invisible to every other surface in the product.
+
+### Origin link states, in Files (epic memql#4783)
+
+A file pushed from a watched folder on a fleet machine carries a state against
+its origin -- `synced`, `stale`, `origin_gone` -- rendered as a chip on the row
+and rolled up as a dot on the folder. Three rules:
+
+- **ABSENT IS NOT A STATE.** A browser upload has no origin to link to and
+  every file stored before the field existed has no member. Reading either as
+  `synced` puts an in-sync badge on every file in the Library.
+- **`synced` DRAWS NOTHING on a folder.** The reason to mark a folder is to
+  make somebody open it, and a green mark on every backed-up folder is noise
+  that makes the few needing attention invisible. The rollup reports the WORST
+  beneath it, through every ancestor, so the top of a deep tree does not look
+  clean.
+- **The states come from a THIRD feed over `v1:library:file`**, not from the
+  index. Promoting `linkState` onto `v1:library:artifact` needs an automation
+  on the file's `node.updated`, and the artifact-to-file archive automation
+  already runs the other way -- the pair closes a loop where each write
+  publishes an event the other subscribes to. Three concepts at one app root is
+  not a violation of the one-feed rule: that rule is per CONCEPT, and two
+  concepts cannot disagree.
+
 ## Packages, inside Deployables (epic memql#4794)
 
 `src/apps/deployables/packages/` is the other half of what a deployable IS: a
