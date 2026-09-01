@@ -187,9 +187,31 @@ const (
 // body is an injection, an escaped one in the text body is visible mojibake
 // -- so both replacers are built from ONE list here rather than assembled
 // separately, and render_escaping_test.go pins each tag in both.
+const (
+	// baseMergeTagCount is the closed set: displayName, email, campaignName,
+	// accountName -- two slice entries each.
+	baseMergeTagCount = 8
+	// mergeFieldsCapHint bounds the capacity hint only. It is not a limit on
+	// how many fields render: a recipient carrying more than this still gets
+	// every one of them, through append.
+	mergeFieldsCapHint = 4096
+)
+
 func mergeReplacers(c Campaign, r Recipient, accountName string) (text, html *strings.Replacer) {
 	pairs := func(escape bool) []string {
-		out := make([]string, 0, 10+2*len(r.Fields))
+		// The capacity is an optimization and is CLAMPED rather than trusted.
+		// `2*len(...)` over a pathological map wraps negative, and make with a
+		// negative capacity panics -- so the one arithmetic expression here
+		// that takes an attacker-influenced length (a recipient's `fields`
+		// comes from whatever columns a CSV carried) is bounded before it is
+		// doubled. append grows the slice correctly past the hint either way,
+		// so clamping costs a reallocation on a map nobody will ever have and
+		// removes an unchecked multiply from a render path.
+		n := len(r.Fields)
+		if n > mergeFieldsCapHint {
+			n = mergeFieldsCapHint
+		}
+		out := make([]string, 0, baseMergeTagCount+2*n)
 		add := func(tag, value string) {
 			if escape {
 				value = htmlEscape(value)

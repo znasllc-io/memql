@@ -531,4 +531,4 @@ describe("the engine's reply shapes", () => {
     expect(unresolvedTagsFrom({} as never)).toEqual([]);
     expect(unresolvedTagsFrom(null)).toEqual([]);
   });
-})
+});
