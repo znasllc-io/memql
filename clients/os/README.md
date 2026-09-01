@@ -21,7 +21,13 @@ Design: `docs/superpowers/specs/2026-08-26-memql-os-desktop-shell-design.md`.
   hold the mic to talk, tap it to keep listening.
 - **Roles**: one predicate (`system/roles.ts`) gates apps and app sections
   from `MyAccess.clusterRole`. Presentation only — row authz stays the
-  engine's.
+  engine's. A requirement is a LADDER MINIMUM (`{ min }`) or an explicit SET
+  (`{ any }`), and the set form exists for exactly one reason: Settings ->
+  Integrations is owner-or-developer and the ladder puts `admin` between the
+  two, so `{ min: "developer" }` cannot leave it out (epic memql#4819).
+  The minimum stays the default and the common case — reach for the set only
+  when a requirement is genuinely non-monotonic, and say why where you
+  declare it.
 - **Theming**: `--os-*` token packs on the root (`data-os-theme`); mode
   (light/dark/system) is orthogonal. The wallpaper (the memory field) paints
   from tokens and from the pack's own field parameters. A pack is DATA, and
