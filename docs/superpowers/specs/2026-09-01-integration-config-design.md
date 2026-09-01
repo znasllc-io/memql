@@ -170,11 +170,14 @@ Two honest gaps this phase closes rather than inherits:
   rotation took -- so T6 adds the field and the doc becomes true, rather
   than the doc being trimmed to match.
 - **The rotation hint names a command that does not exist.**
-  `rotateCommand()` returns `make secret-set NAME=… VALUE=… SCOPE=global`.
-  There is no `secret-set` target in the Makefile, and `scripts/secrets`
-  supports exactly `seed` and `health` -- `set` was retired. An operator
-  following the hint gets "No rule to make target". The hint becomes "set
-  it here", because after T7 that is true.
+  `rotateCommand()` returns an invocation of a `secret-set` make target,
+  passing `NAME`, `VALUE` and `SCOPE=global`. There is no such target in
+  the Makefile, and `scripts/secrets` supports exactly `seed` and `health`
+  -- `set` was retired. An operator following the hint gets "No rule to
+  make target". The hint becomes "set it here", because after T7 that is
+  true. (The repo has a gate for precisely this class of citation, and it
+  reads documentation as well as code -- which is how this spec found the
+  defect.)
 - **The scoping gap stays a gap, and is named.** `registryRollCall` covers
   plug-ins registered through `memql.RegisteredPlugins()`. The
   integrations wired explicitly in `app/integrations_*.go` -- cognition,
