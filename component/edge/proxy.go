@@ -97,11 +97,43 @@ func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
 	proxy.ServeHTTP(w, r)
 }
 
-// libraryBytePrefix is the bff route root the Library's two byte-bearing
-// endpoints mount at (server.ArtifactPaths(): POST /artifacts and
-// GET /artifacts/{id}/content, memql#4341). Named, not spelled inline, so the
-// one place that has to agree with component/server says which.
-const libraryBytePrefix = "/artifacts"
+// bffRootPrefixes are the bff route roots that are NOT under its "/memql"
+// multiplexed root, so the marker is stripped for them rather than swapped.
+//
+//   - "/artifacts"  -- the Library's two byte-bearing endpoints
+//     (server.ArtifactPaths(): POST /artifacts and
+//     GET /artifacts/{id}/content, memql#4341).
+//   - "/spaces"     -- the space attachment endpoints
+//     (server.SpaceAttachmentPaths(): POST /spaces/{id}/attachments and
+//     GET /spaces/{id}/attachments/{attachmentId}, memql#4738). This is
+//     what puts the knowledge pipeline within reach of a hosted surface:
+//     the MemQL OS Training app drops a file into the caller's own daily
+//     space and the analyzer runs from there.
+//
+// Named, not spelled inline, so the one place that has to agree with
+// component/server says which.
+//
+// A LIST RATHER THAN A SECOND CONSTANT because the rule is one rule with two
+// members, and the day a third bff root appears the alternative is a second
+// `strings.HasPrefix` pair somebody has to notice is the same test twice.
+var bffRootPrefixes = []string{"/artifacts", "/spaces"}
+
+// isBffRootPath reports whether a marker-stripped path addresses one of the
+// bff's own roots.
+//
+// The prefix must end the path or be followed by "/" -- never a bare
+// HasPrefix. "/artifactsomething" is a different route from "/artifacts", and
+// treating it as the same one would silently make any future
+// "/memql/artifacts*" or "/memql/spaces*" path unreachable through this proxy
+// while every manifest looked correct.
+func isBffRootPath(rest string) bool {
+	for _, prefix := range bffRootPrefixes {
+		if rest == prefix || strings.HasPrefix(rest, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
 
 // upstreamPath maps the edge's same-origin marker onto the bff's real path
 // space.
@@ -111,7 +143,8 @@ const libraryBytePrefix = "/artifacts"
 // rather than deleted -- deleting it outright would make every proxied path
 // lose its leading segment along with the marker. The Library's byte routes
 // live at the bff's own root instead ("/artifacts", "/artifacts/{id}/content"),
-// so for those the marker is stripped and nothing put back.
+// as do the space attachment routes ("/spaces/{id}/attachments"), so for those
+// the marker is stripped and nothing put back.
 //
 // WHY THE PORTAL CANNOT JUST CALL "/artifacts" DIRECTLY, which is the obvious
 // question. It is served BY this handler, and a path that resolves to no file
@@ -122,13 +155,17 @@ const libraryBytePrefix = "/artifacts"
 // it swallowed by this proxy: the marker is the one prefix a bundle may not
 // claim.
 //
-// Nothing new is EXPOSED by this. serveAPI already requires site.APIProxy,
-// and both routes are authenticated with per-row authorization deciding every
-// read (component/server/artifact_handler.go) -- a strictly narrower surface
-// than the "/memql/ws" bridge this proxy has always carried.
+// Nothing new is EXPOSED by this. serveAPI already requires site.APIProxy, and
+// every one of these routes is authenticated: the Library's two decide each
+// read under the caller's own actor (component/server/artifact_handler.go),
+// and the attachment handler checks space ownership BEFORE it parses a
+// multipart body, answering a generic 404 rather than a 403 so probing cannot
+// tell "not yours" from "not there" (component/server/attachment_handler.go).
+// Strictly narrower, in both cases, than the "/memql/ws" bridge this proxy has
+// always carried -- that one is the whole multiplexed API.
 func upstreamPath(in string) string {
 	rest := strings.TrimPrefix(in, "/_memql")
-	if rest == libraryBytePrefix || strings.HasPrefix(rest, libraryBytePrefix+"/") {
+	if isBffRootPath(rest) {
 		return rest
 	}
 	return "/memql" + rest

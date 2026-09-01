@@ -2484,3 +2484,199 @@ a.os-button {
   font-size: var(--os-text-xs);
   color: var(--os-muted);
 }
+
+/* ---- training: the app's own surfaces (epic #4737) ----
+ *
+ * Four things live here and nothing else: the dropzone, the per-file upload
+ * line, the review card and the domain card. Everything else the app renders
+ * is the shared kit -- which is the measure Deployables set, and this app
+ * needs less vocabulary of its own than that one did.
+ */
+
+/* The dropzone. It is a drop TARGET and a button, because a surface reachable
+ * only by dragging is unreachable to anybody who cannot drag; the dashed edge
+ * is what says "put something here" without a word. */
+.os-train-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 22px 16px;
+  border: 1px dashed var(--os-line);
+  border-radius: var(--os-radius);
+  background: var(--os-raised);
+  color: var(--os-muted);
+  text-align: center;
+  transition: border-color var(--os-duration-fast) var(--os-ease),
+    background var(--os-duration-fast) var(--os-ease);
+}
+.os-train-drop[data-over] {
+  border-color: var(--os-accent);
+  border-style: solid;
+  background: var(--os-accent-soft);
+}
+/* A dropzone with nowhere to put a file is DIM rather than hidden: the reason
+ * it cannot be used is rendered right above it, and hiding the control would
+ * leave that notice explaining the absence of something. */
+.os-train-drop[data-disabled] {
+  opacity: 0.55;
+}
+.os-train-drop-line {
+  margin: 0;
+  font-size: var(--os-text-base);
+  color: var(--os-ink);
+}
+
+/* One file on its way to the cluster. The phase is a data attribute rather
+ * than three classes so a reader of the DOM can see the state machine. */
+.os-train-uploads {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.os-train-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+}
+.os-train-upload[data-phase="failed"] {
+  border-color: var(--os-error);
+}
+.os-train-upload-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A plan's failure reason, on the row. Clipped rather than wrapped: the row is
+ * one line, and the full text is on the element's own title. */
+.os-train-plan-error {
+  font-size: var(--os-text-xs);
+  color: var(--os-warn);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40ch;
+}
+
+/* ---- the review queue ---- */
+
+.os-train-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.os-train-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.os-train-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+}
+.os-train-card:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 2px;
+}
+.os-train-card-text {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  line-height: 1.5;
+  color: var(--os-ink);
+  white-space: pre-wrap;
+}
+.os-train-card-actions {
+  display: flex;
+  gap: 8px;
+}
+/* A DECIDED CARD, collapsed in place. It keeps its slot so nothing moves under
+ * the cursor, and it goes quiet so the queue still reads as work. */
+.os-train-card[data-decided] {
+  padding: 6px 12px;
+  background: var(--os-raised);
+  opacity: 0.75;
+}
+.os-train-card-compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.os-train-card-compact .os-caption {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- the domains browser ---- */
+
+.os-train-domains,
+.os-train-chunk-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.os-train-domain {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.os-train-domain-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-raised);
+}
+.os-train-chunk-rows .os-row-name {
+  font-weight: 400;
+  font-size: var(--os-text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-train-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 16px;
+  color: var(--os-muted);
+  text-align: center;
+}
+
+/* AN INERT AFFORDANCE, and it looks inert. Not a disabled button: a disabled
+ * button invites a click and answers nothing, while this is a label that says
+ * where the feature went. The cursor stays default for the same reason. */
+.os-train-inert {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border: 1px dashed var(--os-line);
+  border-radius: 999px;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}

@@ -7183,6 +7183,33 @@ QueryClient.prototype.setBudget = function (this: QueryClient, args: SetBudgetAr
   return this.executeNamed("setBudget", buildSetBudget(args), opts);
 };
 
+/** Approve or reject a knowledge chunk: writes validationStatus to 'validated' (ingestible into retrieval) or 'rejected' (soft-deleted from it). Backs the MemQL OS Training app's review queue, which lists chunks still at the 'unvalidated' default. Partial update -- the chunk row and every other field on it are preserved. */
+// Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["setChunkValidationStatus"] in generated_concepts.ts).
+export interface SetChunkValidationStatusArgs {
+  /** Bare id of the v1:knowledge:documentChunk being decided. */
+  chunkId: string;
+  /** The decision. There is no 'unvalidated' member: a chunk reaches the queue by default, not by being put back. */
+  // Enum: validated | rejected
+  status: string;
+}
+
+export function buildSetChunkValidationStatus(args: SetChunkValidationStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("chunkId: " + renderMemQLValue(args.chunkId));
+  parts.push("status: " + renderMemQLValue(args.status));
+  return "mutation setChunkValidationStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setChunkValidationStatus(args: SetChunkValidationStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setChunkValidationStatus = function (this: QueryClient, args: SetChunkValidationStatusArgs = {} as SetChunkValidationStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setChunkValidationStatus", buildSetChunkValidationStatus(args), opts);
+};
+
 /** Record TCPA consent / opt-out for an external number (append-only; newest wins). */
 // Bound concept: v1:telephony:consent (machine-readable: BoundConcepts["setConsent"] in generated_concepts.ts).
 export interface SetConsentArgs {

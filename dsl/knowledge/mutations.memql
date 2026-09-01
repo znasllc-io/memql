@@ -107,3 +107,50 @@ mutate documentChunk markChunkSuperseded {
     supersededReason: args.reason ?? args.supersededReason ?? ""
   }
 }
+
+// ---- setChunkValidationStatus ----
+
+// setChunkValidationStatus -- the review decision (memql#4739).
+//
+// `validationStatus` defaults to "unvalidated" on every chunk
+// `createDocumentChunk` writes, and until now NOTHING in the tree moved it:
+// `writeKnowledgeChunk` hard-stamps "validated" at insert time and
+// `markChunkSuperseded` touches only the supersession fields. So the field
+// that decides whether a chunk is ingestible into retrieval had a default, two
+// readers and no writer -- which reads from the outside as "the review gate is
+// not implemented", and is exactly that.
+//
+// MINIMAL ARGUMENTS on purpose. `update {}` has been a read-merge since
+// memql#1628, so re-supplying `domainId` / `source` / `text` to "identify" the
+// row would be dead weight the undeclared-argument discard hides -- and every
+// one of those is a field a caller could then quietly rewrite while claiming
+// to approve a chunk.
+//
+// THE STATUS IS AN ENUM OF TWO, and "unvalidated" is deliberately not one of
+// them: this mutation records a DECISION, and there is no decision that means
+// "I have not decided". A chunk returns to the queue by never having left it.
+//
+// AUTHORIZATION. `v1:knowledge:documentChunk` declares no `@rowAuthz` tier and
+// carries no owner field to declare one against, so this write is admitted for
+// any authenticated caller -- the same standing residual its three sibling
+// mutations sit on, recorded in the per-row-authz audit rather than quietly
+// widened here. The Training app's `writer` role gate is PRESENTATION; it is
+// not what stops anyone, and the app says so.
+
+/// Approve or reject a knowledge chunk: writes validationStatus to 'validated' (ingestible into
+/// retrieval) or 'rejected' (soft-deleted from it). Backs the MemQL OS Training app's review
+/// queue, which lists chunks still at the 'unvalidated' default. Partial update -- the chunk row
+/// and every other field on it are preserved.
+mutate documentChunk setChunkValidationStatus {
+  args {
+    /// Bare id of the v1:knowledge:documentChunk being decided.
+    chunkId  string!
+    /// The decision. There is no 'unvalidated' member: a chunk reaches the queue by default, not
+    /// by being put back.
+    status   enum("validated", "rejected")!
+  }
+  update {
+    id: args.chunkId
+    validationStatus: args.status
+  }
+}

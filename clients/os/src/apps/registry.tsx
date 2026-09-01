@@ -16,14 +16,17 @@ import { DEPLOYABLES_SECTIONS } from "./deployables/settings";
 import { FleetApp } from "./fleet/FleetApp";
 import { FLEET_SECTIONS } from "./fleet/settings";
 import { SettingsApp } from "./settings/SettingsApp";
+import { TrainingApp } from "./training/TrainingApp";
+import { TRAINING_SECTIONS } from "./training/settings";
 import { UsersApp } from "./users/UsersApp";
 import { USERS_SECTIONS } from "./users/settings";
 import { StubApp } from "./StubApp";
 
-// The installed roster (spec D12). Settings, Fleet and Users are real; the
-// remaining product apps are honest stubs replaced by their epics, and the Ask
-// widget is the widget framework's first resident. Static by design --
-// runtime app delivery is deliberately not a foundation question.
+// The installed roster (spec D12). Settings, Fleet, Users, Deployables and
+// Training are real; the remaining product apps are honest stubs replaced by
+// their epics, and the Ask widget is the widget framework's first resident.
+// Static by design -- runtime app delivery is deliberately not a foundation
+// question.
 //
 // The `stub` helper stays for as long as anything uses it, and goes with the
 // last one: keeping a factory nothing calls is how a file grows a shape
@@ -136,22 +139,35 @@ const users: OsAppManifest = {
   component: UsersApp,
 };
 
-const training = stub(
-  {
-    id: "training",
-    name: "Training",
-    icon: GraduationCap,
-    roles: { min: "writer" },
-    sections: [
-      { id: "upload", name: "Upload" },
-      { id: "review", name: "Review" },
-      { id: "settings", name: "Settings" },
-    ],
-    settingsSection: "settings",
-  },
-  4737,
-  "Teach MemQL from files: drop documents in, watch analysis run, review what it identified.",
-);
+// Training, in full (epic #4737). Upload is first and is therefore the section
+// a window opens on: this app is for teaching MemQL from files, and the
+// dropzone is the thing it is for. The app's own settings can point it
+// elsewhere, which it does by navigating itself on open.
+//
+// The section list is TRAINING_SECTIONS rather than a literal, for the reason
+// FLEET_SECTIONS, USERS_SECTIONS and DEPLOYABLES_SECTIONS are: the settings
+// section offers an "open Training on" picker over exactly these ids, and a
+// second copy of the list is one that can disagree -- a preference naming a
+// section the manifest does not declare leaves the window on Upload with the
+// nav highlighting nothing.
+//
+// `roles: { min: "writer" }` is PRESENTATION (spec section E). It is on the
+// APP rather than on any section because every surface here reads or writes
+// the same two populations -- there is no line inside the app where the answer
+// changes. The engine remains the authority: row admission decides every read,
+// the attachment handler checks space ownership before it parses a byte, and
+// `setChunkValidationStatus` is admitted for any authenticated caller because
+// `v1:knowledge:documentChunk` declares no tier (the standing residual its
+// sibling mutations already sit on, recorded in the per-row-authz audit).
+const training: OsAppManifest = {
+  id: "training",
+  name: "Training",
+  icon: GraduationCap,
+  roles: { min: "writer" },
+  sections: TRAINING_SECTIONS,
+  settingsSection: "settings",
+  component: TrainingApp,
+};
 
 function AskWidgetBody() {
   const { transport } = useAsk();

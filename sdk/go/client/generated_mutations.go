@@ -12825,6 +12825,37 @@ func SetBudgetBuild(args SetBudgetArgs) string {
 	return b.String()
 }
 
+// SetChunkValidationStatus -- Approve or reject a knowledge chunk: writes validationStatus to 'validated' (ingestible into retrieval) or 'rejected' (soft-deleted from it). Backs the MemQL OS Training app's review queue, which lists chunks still at the 'unvalidated' default. Partial update -- the chunk row and every other field on it are preserved.
+//
+// Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["setChunkValidationStatus"] in generated_concepts.go).
+type SetChunkValidationStatusArgs struct {
+	// Bare id of the v1:knowledge:documentChunk being decided.
+	ChunkId string
+	// The decision. There is no 'unvalidated' member: a chunk reaches the queue by default, not by being put back.
+	// Enum: validated | rejected
+	Status string
+}
+
+// SetChunkValidationStatus calls the engine mutation setChunkValidationStatus.
+func (qc *QueryClient) SetChunkValidationStatus(ctx context.Context, args SetChunkValidationStatusArgs) (*Result, error) {
+	call := SetChunkValidationStatusBuild(args)
+	return qc.executeNamed(ctx, "setChunkValidationStatus", call)
+}
+
+func SetChunkValidationStatusBuild(args SetChunkValidationStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setChunkValidationStatus(")
+	b.WriteString("chunkId: ")
+	b.WriteString(quoteMemQL(args.ChunkId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(quoteMemQL(args.Status))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SetConsent -- Record TCPA consent / opt-out for an external number (append-only; newest wins).
 //
 // Bound concept: v1:telephony:consent (machine-readable: BoundConcepts["setConsent"] in generated_concepts.go).

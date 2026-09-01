@@ -28,9 +28,9 @@ Design: `docs/superpowers/specs/2026-08-26-memql-os-desktop-shell-design.md`.
 
 Pure state machines live in `src/system/` (tested without React); chrome
 in `src/chrome/`; the app/widget contracts in `src/system/registry.ts`;
-the shared kit in `src/kit/`. Settings, Fleet, Users and Deployables are
-real; the remaining product apps are stubs until their epics land (#4721
-#4737).
+the shared kit in `src/kit/`. Settings, Fleet, Users, Deployables and
+Training are real; the remaining product apps are stubs until their epics
+land (#4721).
 
 ## Right-click belongs to the shell
 
@@ -282,3 +282,79 @@ authority on.
   panel marks a `bundleRef` flip because the VALUE changed, not because a tick
   fired -- an `updated` tick fires for a rename too, and a marker driven by it
   would announce a publish that did not happen.
+
+## Training, the fourth app (memql#4737)
+
+`src/apps/training/` is teaching MemQL from files: a dropzone into the
+attachment analysis pipeline, the analysis plans running live beside it, a
+review queue over what the pipeline extracted, and a browser of the knowledge
+domains it feeds. Four things about it are new rules rather than repetitions of
+the three apps before it.
+
+- **A CONCEPT FIELD IS NOT A READABLE FIELD, and the omission is silent.**
+  `documentChunk` declares `validationStatus`, `source`, `documentId`,
+  `superseded` and the rest; `documentChunkFull` projected none of them. A
+  review queue built against that read would have selected on a key no row
+  carried, found nothing, and rendered "nothing awaiting review" against a
+  cluster full of unvalidated chunks -- an empty list being a completely
+  plausible answer is what would have made it survive review. Before rendering
+  a concept you have not rendered before, read what its SHAPE projects, not
+  what its concept declares. Two shapes grew here, and the growth is the
+  feature: `documentChunkDomainLite` gained `validationStatus` so ONE
+  `allDocumentChunkDomains` pass yields a complete per-domain rollup, instead
+  of a per-domain page walk that counts the first fifty and calls it a total.
+
+- **NOT EVERY FEED IS LIVE, and the honest move is to say which.**
+  `component/node/routing.go` carries broadcast rules for `v1:planner:*`, so
+  the analysis list is live with no engine work: the attachment handler stamps
+  a queued Plan and finishes on a detached goroutine, and the transitions land
+  under the person watching. It carries NONE for `v1:knowledge:*`, so the
+  chunk surfaces are on-demand reads that print when they were read and re-read
+  on window focus. A `LiveList` over the knowledge side would render "Loading
+  from the cluster" and then a list that silently never moved -- worse than a
+  plain one, because the caption would be claiming wiring that is not there.
+  Adding the missing rule is not this app's call: chunk writes are
+  high-volume, which is the same ground `v1:worker:invocation` is excluded on.
+
+- **A hosted surface reaches a bff-root route through the marker, and the
+  marker had to learn this one.** The OS is served by `component/edge`, so a
+  bare same-origin POST to `/spaces/{id}/attachments` resolves to no file in
+  the bundle and takes the SPA fallback: index.html, 200, an upload that
+  stored nothing and said it worked. `upstreamPath` strips `/_memql` for the
+  bff's own roots, and `/spaces` joined `/artifacts` there (memql#4738). The
+  transport names that failure explicitly when it happens anyway -- an HTML
+  body means the site answered, not the cluster.
+
+- **A WINDOW SITS INSIDE THE DESK PLATE, AND THE DESK PLATE TAKES FILE
+  DROPS.** `Desktop.tsx`'s `onHostDrop` turns a dropped file into a Library
+  artifact and a desk icon, and a `WindowFrame` renders inside it -- so an
+  app's own drop target must `stopPropagation`, or ONE file is uploaded TWICE,
+  to two different places, and the second upload is one nobody asked for.
+  Stop it on `dragover` too, and stop it even when the target is DISABLED:
+  otherwise the desk's own dragover allows the drop and dropping a file on a
+  visibly-disabled control produces a desktop icon, which is a stranger answer
+  than nothing happening. "Nothing happens where nothing is offered" is the
+  same rule the right-click section states.
+
+- **An app that uploads somewhere the shell's provider does not point at
+  builds its own, from a CAPABILITY.** `items/upload.ts`'s `UploadHandle` is
+  generic over its result now, because the desk's drops return a Library
+  artifact and this one returns an attachment; the whole progress /
+  in-surface-failure / retry vocabulary is written against that shape, so the
+  alternative to a type parameter was a second copy of it. The bearer comes
+  from `auth/context.tsx` -- a context handing out `bearer()`, never the
+  string, which is the rule `auth/source.ts` already stated and had no way for
+  an app to honour.
+
+### What it deliberately does not do
+
+The owner's scenario for this app is entity-level -- "MemQL identified a new
+customer, should I add it?" -- and the concepts that would carry it
+(`domainEntitySchema`, `entityIndex`, `validationEvent`) are declared in no
+`.memql` file in this tree. So the reviewable unit is the CHUNK, which is what
+`validationStatus` is actually attached to, and the app says so on the page.
+Likewise a domain card is labelled by its `domainId` because
+`v1:knowledge:knowledgeDomain` is product-owned and has no list query at all --
+that is the truth this engine can tell, not a placeholder. Attaching a domain
+to an agent rides `skill.domainIds` and lands with the Agents surface; the
+affordance is present, inert, and says where the feature went.

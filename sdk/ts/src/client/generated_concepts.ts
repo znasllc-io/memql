@@ -698,6 +698,7 @@ export const BoundConcepts = {
   setAuthoringBundleStatus: "v1:authoring:bundle",
   setBookingHours: "v1:calendar:bookingHours",
   setBudget: "v1:router:budget",
+  setChunkValidationStatus: "v1:knowledge:documentChunk",
   setConsent: "v1:telephony:consent",
   setConstructCompiledForm: "v1:authoring:construct",
   setConstructStatus: "v1:authoring:construct",

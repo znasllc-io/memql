@@ -17,15 +17,48 @@ shape attachment attachmentDownload {
   status
 }
 
-/// Minimal document-chunk projection used for per-domain counting on the frontend. Returns only the
-/// parent domainId for each chunk so the Knowledge panel can build a {domainId: count} map without
-/// paying for full-chunk-payload bandwidth.
+// documentChunkDomainLite carries `validationStatus` as well as the domain id
+// (memql#4740), and the second field is what makes the rollup HONEST rather
+// than cheaper.
+//
+// `allDocumentChunkDomains` is `@unbounded` -- "a bounded dedupe enumeration
+// consumed whole" -- so one read already returns a row per chunk in the
+// cluster. With only `domainId` on it, a per-domain validated / unvalidated /
+// rejected breakdown could be built exactly one way: page
+// `documentChunksForDomain` per domain and count the FIRST 50, which is a
+// number that looks like a total and is not one. The projected status turns
+// the same one-pass read into a complete rollup with no extra round trip.
+//
+// Additive: the portal's existing grouping consumer reads `domainId` and is
+// unaffected by a key it does not look at.
+/// Minimal document-chunk projection used for per-domain counting on the frontend. Returns the
+/// parent domainId plus the chunk's validation status, so a caller can build both a
+/// {domainId: count} map and a per-domain validated/unvalidated/rejected rollup from one read.
 @row
 shape documentChunk documentChunkDomainLite {
   domainId
+  validationStatus
 }
 
-/// Document chunk projection including the source reference and ordering.
+// documentChunkFull gained the six provenance + lifecycle fields the MemQL OS
+// Training app's review queue renders (memql#4739).
+//
+// A CONCEPT FIELD IS NOT A READABLE FIELD. Every one of these is declared on
+// `documentChunk` and was projected by nothing, so a client asking this query
+// for a chunk's validation state got a row with no such key -- which renders
+// as "this chunk has no status", not as "this projection does not carry one".
+// The review queue is defined by three of them (`validationStatus` selects the
+// queue, `superseded` keeps history out of it, `documentId` groups an upload
+// batch), so without the projection the section would read an empty queue
+// against a cluster full of unvalidated chunks and look like it was working.
+//
+// Additive for the Trainer Agent's `existingCorpus` read, which names the
+// fields it forwards; the dispatcher truncates `text` per chunk for its token
+// budget and these six are short.
+/// Document chunk projection including the source reference, ordering, provenance discriminator
+/// and validation / supersession state. Backs the Trainer Agent's mode='refresh' existingCorpus
+/// and the Training app's review queue (which selects on validationStatus, groups by documentId
+/// and renders superseded chunks as history rather than as work).
 @row
 shape documentChunk documentChunkFull {
   row.id
@@ -34,6 +67,12 @@ shape documentChunk documentChunkFull {
   sourceRef
   seq
   tokenCount
+  documentId
+  source
+  sourceTopic
+  validationStatus
+  superseded
+  supersededReason
   row.createdAt
 }
 
