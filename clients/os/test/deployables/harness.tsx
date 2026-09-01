@@ -100,6 +100,16 @@ export interface FakeSeed {
   addDomainError?: string;
   /** Fails the next `removeCustomDomain` with this server message. */
   removeDomainError?: string;
+  /** v1:platform:package rows `packagesAll` answers with. */
+  packages?: Row[];
+  /** v1:platform:packageDeployment rows, keyed by packageId. */
+  deployments?: Record<string, Row[]>;
+  /** Fails the next `packageDeploy` with this server message. */
+  deployError?: string;
+  /** Fails the next `packageArchive` with this server message. */
+  archiveError?: string;
+  /** What `packageDeploy` answers with when it succeeds. */
+  deployResult?: Row;
   /** Rows a by-id re-read answers with, keyed by row id. */
   byId?: Record<string, Row>;
   /** Fails the next `createSite` with this server message. */
@@ -161,6 +171,34 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
 
       if (call.startsWith("mutation removeCustomDomain(")) {
         if (seed.removeDomainError !== undefined) throw new Error(seed.removeDomainError);
+        return rowsResult([]);
+      }
+
+      if (call === "query packagesAll()") return rowsResult(seed.packages ?? []);
+
+      if (call.startsWith("query packageDeployments(")) {
+        const id = /packageId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        return rowsResult(seed.deployments?.[id] ?? []);
+      }
+
+      if (call.startsWith("builtin packageDeploy(")) {
+        if (seed.deployError !== undefined) throw new Error(seed.deployError);
+        return rowsResult([
+          seed.deployResult ??
+            ({ deploymentId: "dep-new", status: "awaiting_confirm", awaitingConfirm: "true" } as unknown as Row),
+        ]);
+      }
+
+      if (call.startsWith("builtin packageArchive(")) {
+        if (seed.archiveError !== undefined) throw new Error(seed.archiveError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("builtin packageRollback(") || call.startsWith("builtin packageRestore(")) {
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("mutation createPackage(")) {
         return rowsResult([]);
       }
 

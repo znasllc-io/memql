@@ -5293,6 +5293,75 @@ func CreatePATIdentityBuild(args CreatePATIdentityArgs) string {
 	return b.String()
 }
 
+// CreatePackage -- Register a tracked package. The person's write: they supply the source, the engine supplies the identity and the name.
+// `name` is an ARG here and only here, because at registration time no analysis has run yet and the tree has not been read -- so the manifest cannot have supplied it. The first successful analysis overwrites it through recordPackageAnalysis, which is why the field's doc says the name comes from the manifest: this value is a placeholder with a person's guess in it.
+// `repoTokenRef` NAMES a globalSecret and is a plain string here on purpose (D14). There is no arg on this mutation, or anywhere else in this epic, that carries a token VALUE.
+//
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["createPackage"] in generated_concepts.go).
+type CreatePackageArgs struct {
+	PackageId string
+	Name      string
+	// Enum: repo | artifact
+	SourceKind   string
+	RepoUrl      string
+	RepoRef      string
+	RepoTokenRef string
+	ArtifactId   string
+}
+
+// CreatePackage calls the engine mutation createPackage.
+func (qc *QueryClient) CreatePackage(ctx context.Context, args CreatePackageArgs) (*Result, error) {
+	call := CreatePackageBuild(args)
+	return qc.executeNamed(ctx, "createPackage", call)
+}
+
+func CreatePackageBuild(args CreatePackageArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createPackage(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("sourceKind: ")
+	b.WriteString(quoteMemQL(args.SourceKind))
+	if args.RepoUrl != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("repoUrl: ")
+		b.WriteString(quoteMemQL(args.RepoUrl))
+	}
+	if args.RepoRef != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("repoRef: ")
+		b.WriteString(quoteMemQL(args.RepoRef))
+	}
+	if args.RepoTokenRef != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("repoTokenRef: ")
+		b.WriteString(quoteMemQL(args.RepoTokenRef))
+	}
+	if args.ArtifactId != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("artifactId: ")
+		b.WriteString(quoteMemQL(args.ArtifactId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CreatePasskeyIdentity -- Register a passkey identity (WebAuthn discoverable credential). Stores the credential's PUBLIC COSE key -- there is no secret half to withhold.
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createPasskeyIdentity"] in generated_concepts.go).
@@ -15832,6 +15901,44 @@ func UpdateOutboundRequestStatusBuild(args UpdateOutboundRequestStatusArgs) stri
 		}
 		b.WriteString("sentAt: ")
 		b.WriteString(quoteMemQL(args.SentAt))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdatePackageSource -- Edit the source facts of a tracked package: which ref to deploy, and which named secret to fetch under. Minimal arguments deliberately -- update{} has been a read-merge since memql#1628, so re-supplying every discriminator is dead weight that an undeclared-argument DISCARD hides.
+//
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["updatePackageSource"] in generated_concepts.go).
+type UpdatePackageSourceArgs struct {
+	PackageId    string
+	RepoRef      string
+	RepoTokenRef string
+}
+
+// UpdatePackageSource calls the engine mutation updatePackageSource.
+func (qc *QueryClient) UpdatePackageSource(ctx context.Context, args UpdatePackageSourceArgs) (*Result, error) {
+	call := UpdatePackageSourceBuild(args)
+	return qc.executeNamed(ctx, "updatePackageSource", call)
+}
+
+func UpdatePackageSourceBuild(args UpdatePackageSourceArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updatePackageSource(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	if args.RepoRef != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("repoRef: ")
+		b.WriteString(quoteMemQL(args.RepoRef))
+	}
+	if args.RepoTokenRef != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("repoTokenRef: ")
+		b.WriteString(quoteMemQL(args.RepoTokenRef))
 	}
 	b.WriteString(")")
 	return b.String()

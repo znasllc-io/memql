@@ -39,6 +39,14 @@ type writeMeta struct {
 	// priorStatus is the prior row's `status` field (empty when absent),
 	// surfaced as the event's `oldStatus` so transition-only automations
 	// can gate on a real state change (#1158).
+	//
+	// SECOND CONSUMER since epic memql#4794: the D10 lifecycle guards read it
+	// too. They judge a TRANSITION rather than a destination -- "archived from
+	// what" is the whole rule -- and a guard reading only the merged payload
+	// could not see the prior value at all. It also carries
+	// v1:platform:packageDeployment's append-only property: terminal means the
+	// PRIOR status was terminal, so a delta that also rewrites status cannot
+	// launder that away.
 	priorStatus string
 	// finalPayloadJSON is the merged-and-written payload, marshalled for
 	// the transition event's flattened-field shape.
@@ -1063,6 +1071,24 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 		if err := e.validateSiteHostnamePolicy(ctx, payload, mutation.ID, actor, meta.priorExisted, meta.priorHostname); err != nil {
+			return nil, meta, err
+		}
+		// The D10 lifecycle law (epic memql#4794), beside the two above
+		// because it is the same kind of rule and the same reason: what may
+		// follow what is a comparison against the PRIOR row, which no
+		// mutation body can make. See platform_site_status_guard.go.
+		if err := e.validateSiteStatusTransition(ctx, payload, meta.priorExisted, meta.priorStatus, meta.priorSystemOwned, actor); err != nil {
+			return nil, meta, err
+		}
+	}
+
+	// v1:platform:packageDeployment is APPEND-ONLY past a terminal status
+	// (epic memql#4794, D7). Enforced here rather than left to the pipeline
+	// that happens to respect it: the timeline's value is that it records what
+	// was attempted, and a retry quietly rewriting the row it is retrying
+	// would destroy exactly that.
+	if conceptMeta.Name == conceptPlatformPackageDeployment {
+		if err := validatePackageDeploymentAppendOnly(meta.priorExisted, meta.priorStatus); err != nil {
 			return nil, meta, err
 		}
 	}

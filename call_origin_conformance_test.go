@@ -331,7 +331,31 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// is never returned, so no later frame inherits the mark. That is the
 		// memql#2989 escalation shape, and it is asserted rather than asserted
 		// here: component/worker/appsession_store_test.go.
-		"component/worker":          "app-session row writes -- server-initiated; the ids are engine-minted and the payload arrives on a stream the cockpit opened, with no caller-supplied identifier in scope (memql#4360)",
+		"component/worker": "app-session row writes -- server-initiated; the ids are engine-minted and the payload arrives on a stream the cockpit opened, with no caller-supplied identifier in scope (memql#4360)",
+		// SERVER-INITIATED (epic memql#4794). The packages pipeline advances
+		// a deployment by writing its own row, six times, across stage
+		// handoffs that frequently land on a different node from the one the
+		// person clicked on -- so on the write path there is no caller in
+		// scope at all, and actor.userId is empty. Every one of those
+		// mutations is @serverOnly and OriginClient is the zero value, so
+		// without the stamp each advance is refused with only a WARN: a
+		// deploy that appears to hang with nothing in the timeline.
+		//
+		// What makes it server-initiated rather than request-derived: no
+		// caller-supplied identifier is in scope on any write. The deployment
+		// id is engine-minted, ownerUserId is COPIED off the package row the
+		// starting caller already read under their OWN actor (so it cannot
+		// name a user that caller could not act as), and the report is the
+		// output of the offline analysis rather than anything a caller sent.
+		//
+		// The stamp is scoped to ONE Execute call and cannot escape: it is
+		// applied inline inside store.writeInternal and the marked context is
+		// never returned, so no later frame inherits it -- the memql#2879
+		// shape. Reads are deliberately UNSTAMPED and run under the caller's
+		// own actor, which is what keeps row admission the composite tier's
+		// decision. Both asserted in
+		// component/packages/internal_origin_test.go.
+		"component/packages":        "package deploy pipeline -- server-initiated; stage advances happen after cross-node handoffs with no caller in scope, and every id is engine-minted (memql#4794)",
 		"integrations/agent/worker": "worker store, server-initiated",
 		"integrations/dailyspace":   "scheduled space provisioning, no caller in scope",
 	}

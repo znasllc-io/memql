@@ -997,3 +997,344 @@ mutate syncState setSyncPaused {
     paused:  args.paused
   }
 }
+
+// ---- packages (epic memql#4794) ----
+//
+// TWO GROUPS, and the split is the whole security shape of the epic.
+//
+// The FIRST group is the pipeline's own writers: every stage advance, every
+// report, every version stamp. All @serverOnly, all called from Go under
+// stamped internal origin (component/auth.ContextWithInternalOrigin, whose
+// per-package allowlist grows deliberately and is asserted by a precondition
+// test of its own). They are @serverOnly because their arguments are the
+// pipeline's internal state -- a status the state machine decides, a report
+// only the analysis can produce -- and a client-reachable mutation over them
+// would let a caller declare a deploy succeeded that never ran.
+//
+// The SECOND group is what a PERSON does: create a package, archive one,
+// archive a site. Those are ordinary caller-scoped mutations gated by the
+// composite tier, because they act on the caller's own rows.
+//
+// A @serverOnly writer WITHOUT the stamp is refused on every call with only a
+// WARN to show for it, so the two halves of each pipeline write -- this
+// annotation and that stamp -- are a pair that has to land together.
+
+/// Register a tracked package. The person's write: they supply the source, the engine supplies the
+/// identity and the name.
+///
+/// `name` is an ARG here and only here, because at registration time no analysis has run yet and
+/// the tree has not been read -- so the manifest cannot have supplied it. The first successful
+/// analysis overwrites it through recordPackageAnalysis, which is why the field's doc says the name
+/// comes from the manifest: this value is a placeholder with a person's guess in it.
+///
+/// `repoTokenRef` NAMES a globalSecret and is a plain string here on purpose (D14). There is no arg
+/// on this mutation, or anywhere else in this epic, that carries a token VALUE.
+@actor
+@description("Register a package this cluster tracks and can deploy")
+mutate package createPackage {
+  args {
+    packageId     string!
+    name          string!  @maxLength(120)
+    sourceKind    enum("repo", "artifact")!
+    repoUrl       string   @maxLength(400)
+    repoRef       string   @maxLength(200)
+    repoTokenRef  string   @maxLength(120)
+    artifactId    string
+  }
+  insert {
+    accept { name, repoUrl, repoRef, repoTokenRef, artifactId }
+    stamp {
+      id:              args.packageId
+      ownerUserId:     actor.userId
+      sourceKind:      args.sourceKind
+      status:          "active"
+      updateAvailable: false
+    }
+  }
+}
+
+/// Edit the source facts of a tracked package: which ref to deploy, and which named secret to fetch
+/// under. Minimal arguments deliberately -- update{} has been a read-merge since memql#1628, so
+/// re-supplying every discriminator is dead weight that an undeclared-argument DISCARD hides.
+@description("Update a package's tracked ref or secret name")
+mutate package updatePackageSource {
+  args {
+    packageId     string!
+    repoRef       string   @maxLength(200)
+    repoTokenRef  string   @maxLength(120)
+  }
+  update {
+    accept { repoRef, repoTokenRef }
+    stamp {
+      id: args.packageId
+    }
+  }
+}
+
+/// Set a package's lifecycle status (D10). Pipeline/capability writer.
+///
+/// @serverOnly, and the reason is the whole D10 shape: archiving is a read-then-verify-then-write
+/// dance MemQL cannot express -- the typed name has to be compared against the STORED name, and
+/// "this package still has live deployables" is a question about OTHER rows. Both live in the
+/// packageArchive capability, which runs under the CALLER's actor and reaches this mutation under
+/// stamped internal origin once it has decided.
+///
+/// A client-reachable status write would be that capability with its two checks removed, which is
+/// exactly the thing the design means by "the OS renders the confirm; the server remains the law".
+/// The structural half of the law -- what may follow what -- is enforced a second time beside
+/// executeWrite, so no writer of any kind can reach `archived` from a status that is not `disabled`.
+///
+/// actor.userId scoping is not the fix, and this is the clearest case of why: the caller DOES own
+/// the row. Scoping would admit exactly the call the design refuses -- archiving without typing the
+/// name and without the active-deployables check -- because both of those are conditions on the
+/// package's state, not on who is asking.
+@serverOnly
+@description("Set a package's lifecycle status")
+mutate package setPackageStatus {
+  args {
+    packageId  string!
+    status     enum("active", "archived")!
+  }
+  update {
+    id:     args.packageId
+    status: args.status
+  }
+}
+
+/// Stamp the version a successful deploy put live. Pipeline writer.
+///
+/// actor.userId scoping is not the fix, and the reason generalises to every pipeline writer below.
+/// Caller-scoping bounds WHOSE rows a call may touch; the danger here is not whose row it is but
+/// WHAT is being asserted about it -- "this version is now serving" is a fact only the code that
+/// performed the roll can know, and a caller stamping it about their OWN package would be equally
+/// wrong and equally unscoped-away. Second, this write happens after a stage handoff, on whichever
+/// node the pipeline advanced on, where there is no person in scope at all: actor.userId is empty
+/// there, so the scoped form would refuse the only legitimate caller it has.
+@serverOnly
+@description("Record the source version now serving for a package")
+mutate package recordPackageDeployedVersion {
+  args {
+    packageId        string!
+    deployedVersion  string!
+    updateAvailable  boolean!
+  }
+  update {
+    accept { deployedVersion, updateAvailable }
+    stamp {
+      id:                 args.packageId
+    }
+  }
+}
+
+/// Stamp the manifest's own name onto the package after an analysis has read the tree.
+///
+/// actor.userId scoping is not the fix: the value is READ OUT OF THE TREE, so the only correct
+/// caller is the analysis that read it, and a caller-scoped version would let a person rename their
+/// own package to something the manifest does not say -- which the very next deploy would overwrite.
+/// Scoping bounds whose row is touched; the problem is that the value has one true source.
+@serverOnly
+@description("Record the package name the manifest declares")
+mutate package recordPackageName {
+  args {
+    packageId  string!
+    name       string!
+  }
+  update {
+    id:   args.packageId
+    name: args.name
+  }
+}
+
+/// The D11 feeds' ONLY write. Both feeds -- the webhook and the poll -- converge here, and this
+/// mutation touches exactly the two fields section C marks as feed-owned. That narrowness is the
+/// design: a feed that could write anything else would be deciding to deploy, and deploying an
+/// update is a person's click starting a NEW deployment run through analyze and confirm again.
+///
+/// actor.userId scoping is not the fix: the polling feed runs on a schedule with no person attached,
+/// so actor.userId is empty on the only path that calls it, and the webhook feed runs inside the
+/// inbound receiver where the "caller" is GitHub. Scoping it would refuse both legitimate callers
+/// while still permitting the thing worth preventing -- a person asserting that their own package
+/// has an upstream update it does not have, which is a claim about a row they already own.
+@serverOnly
+@description("Record the newest upstream version a package's source has reached")
+mutate package recordPackageUpstreamVersion {
+  args {
+    packageId           string!
+    latestKnownVersion  string!
+    updateAvailable     boolean!
+  }
+  update {
+    accept { latestKnownVersion, updateAvailable }
+    stamp {
+      id:                  args.packageId
+    }
+  }
+}
+
+/// Open a deployment attempt. Pipeline writer, and the first row of an append-only timeline.
+///
+/// `ownerUserId` is STAMPED from actor.userId and is deliberately NOT an arg, for the reason
+/// TestDeclaredOwnerFieldsAreServerStamped states: a concept declaring an owner tier over a
+/// CALLER-SUPPLIED field records a guarantee nothing provides, and it reads as safe, so an auditor
+/// seeing the tier stops looking. An earlier cut passed it as an argument on the reasoning that the
+/// pipeline copies it off the package row -- true, and invisible at this boundary, which is exactly
+/// what the gate exists to refuse.
+///
+/// What makes the stamp work on a path with no person on it is BORROWED AUTHORITY, the
+/// component/campaigns pattern: the pipeline runs this one write under
+/// auth.ContextWithUserActor(ctx, <the package's owner>), and that owner value was read off a
+/// package row the STARTING caller had already resolved under their own actor -- so it can never
+/// name a user the caller could not act as.
+///
+/// actor.userId scoping is not the fix for the REST of this construct, and that is the separate
+/// question: the later stages of this very row are written where no person is in scope at all, and
+/// the claim worth refusing ("this deploy succeeded") is one a caller could make about their own
+/// package anyway. Hence @serverOnly as well as the stamp.
+@serverOnly
+@actor
+@description("Open a package deployment attempt")
+mutate packageDeployment openPackageDeployment {
+  args {
+    deploymentId   string!
+    packageId      string!
+    sourceVersion  string
+    requestedBy    string
+    startedAt      datetime!
+  }
+  insert {
+    accept { sourceVersion, requestedBy }
+    stamp {
+      id:           args.deploymentId
+      packageId:    args.packageId
+      ownerUserId:  actor.userId
+      status:       "analyzing"
+      startedAt:    args.startedAt
+    }
+  }
+}
+
+/// Advance a deployment to the next stage. Pipeline writer.
+///
+/// One mutation for every non-terminal transition rather than one per stage: the ORDER is the D6
+/// law and the state machine in Go enforces it, so a mutation per stage would be six copies of one
+/// write, each of which could drift from the law it was supposed to express.
+///
+/// actor.userId scoping is not the fix: a stage advance is a HANDOFF, frequently onto another node,
+/// where no person is in scope and actor.userId is empty. And the risk a scoped form would leave
+/// standing is the one that matters -- a caller driving their own deployment through `publishing`
+/// without any of the work having happened.
+@serverOnly
+@description("Advance a package deployment to its next stage")
+mutate packageDeployment advancePackageDeployment {
+  args {
+    deploymentId  string!
+    status        enum("analyzing", "awaiting_confirm", "building", "staging_dsl", "rolling", "publishing")!
+  }
+  update {
+    id:     args.deploymentId
+    status: args.status
+  }
+}
+
+/// Land the analysis report, and the snapshot it was read from. Pipeline writer.
+///
+/// actor.userId scoping is not the fix: the report is the output of the offline analysis gates
+/// (component/packages) and nothing else can produce a truthful one. A caller-scoped version would
+/// let a person write a clean report onto their own deployment and walk it past the confirm gate --
+/// their own row, their own package, and a complete fabrication of the one artifact the gate exists
+/// to show them.
+@serverOnly
+@description("Record a package deployment's analysis report")
+mutate packageDeployment recordPackageDeploymentReport {
+  args {
+    deploymentId        string!
+    report              object!
+    sourceVersion       string
+    snapshotArtifactId  string
+  }
+  update {
+    accept { sourceVersion, snapshotArtifactId }
+    stamp {
+      id:      args.deploymentId
+      report:  args.report
+    }
+  }
+}
+
+/// Finish a deployment attempt: succeeded, refused, or failed. Pipeline writer.
+///
+/// The row is TERMINAL after this and accepts no further writes -- enforced beside executeWrite,
+/// because "append-only" is a property of the concept and not of the callers who happen to respect
+/// it. A retry is a new row.
+///
+/// actor.userId scoping is not the fix: closing runs at the end of the pipeline, on a node with no
+/// person in scope, and the assertion being made -- "this succeeded" -- is exactly the one a caller
+/// scoped to their own rows would still be free to make falsely about their own deploy.
+@serverOnly
+@description("Close a package deployment at a terminal status")
+mutate packageDeployment closePackageDeployment {
+  args {
+    deploymentId  string!
+    status        enum("succeeded", "refused", "failed")!
+    deployables   []object
+    dslVersion    string
+    buildLogTail  string
+    error         object
+    finishedAt    datetime!
+  }
+  update {
+    accept { deployables, dslVersion, buildLogTail, error }
+    stamp {
+      id:          args.deploymentId
+      status:      args.status
+      finishedAt:  args.finishedAt
+    }
+  }
+}
+
+/// Bind a site to the package deployable that produced it. Pipeline writer, run once on the FIRST
+/// deploy of a deployable; later deploys find the site through these two fields and republish it.
+///
+/// actor.userId scoping is not the fix: these two fields are the KEY a later deploy republishes
+/// through, so a caller able to set them on their own site could point somebody else's package
+/// deployable at it and have the next deploy of that package publish into a site the package's
+/// owner never chose. The site is the caller's; the consequence is not.
+@serverOnly
+@description("Bind a site to the package deployable that produced it")
+mutate site recordSitePackageOrigin {
+  args {
+    siteId                 string!
+    packageId              string!
+    packageDeployableName  string!
+  }
+  update {
+    accept { packageId, packageDeployableName }
+    stamp {
+      id:                     args.siteId
+    }
+  }
+}
+
+/// Set a site's lifecycle status, including `archived` (D10). Capability writer.
+///
+/// The existing updateSiteStatus stays exactly as it was and is the client-reachable one -- it
+/// offers draft / live / disabled and cannot name `archived` at all, so the ordinary enable/disable
+/// edge is unchanged and needs no capability. This one exists for the archive edge alone, for the
+/// same reason setPackageStatus does: the typed hostname is compared against the STORED hostname,
+/// which a mutation body cannot do.
+///
+/// actor.userId scoping is not the fix for the same reason it is not there: the caller owns the
+/// site, so scoping admits the very call being refused. What is being withheld is not reach across
+/// users -- it is the ability to skip the confirmation and the disable-first rule.
+@serverOnly
+@description("Set a site's lifecycle status, including archived")
+mutate site setSiteStatus {
+  args {
+    siteId  string!
+    status  enum("draft", "live", "disabled", "archived")!
+  }
+  update {
+    id:     args.siteId
+    status: args.status
+  }
+}

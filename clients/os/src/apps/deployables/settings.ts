@@ -30,6 +30,14 @@ import type { OsAppSection } from "../../system/registry";
 export const DEPLOYABLES_SECTIONS: OsAppSection[] = [
   { id: "map", name: "Map" },
   { id: "sites", name: "Sites" },
+  // Packages sits BEFORE Actions and after the two views of what is already
+  // serving, which is the order somebody works in: look at what is live, then
+  // at the sources it came from, then at the one-off writes. It carries no
+  // role of its own -- v1:platform:package declares the composite tier, so
+  // every signed-in person has packages of their own to read and the engine
+  // decides how far the list reaches. Only the WRITE controls inside it are
+  // gated, exactly as the Sites section gates publishing (epic memql#4794).
+  { id: "packages", name: "Packages" },
   { id: "actions", name: "Actions", roles: { min: "admin" } },
   { id: "settings", name: "Settings" },
 ];

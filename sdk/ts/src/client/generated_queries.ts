@@ -4725,6 +4725,154 @@ QueryClient.prototype.overridesForConstruct = function (this: QueryClient, args:
   return this.executeNamed("overridesForConstruct", buildOverridesForConstruct(args), opts);
 };
 
+/** One package by its row id, whatever its status -- detail opens on an archived package too, which is the point of a visible archive. */
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["packageById"] in generated_concepts.ts).
+export interface PackageByIdArgs {
+  packageId: string;
+}
+
+export function buildPackageById(args: PackageByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  return "query packageById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packageById(args: PackageByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packageById = function (this: QueryClient, args: PackageByIdArgs = {} as PackageByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packageById", buildPackageById(args), opts);
+};
+
+/** One deployment attempt by id -- what the OS polls while a deploy advances and what the confirm gate reads the report from. */
+// Bound concept: v1:platform:packageDeployment (machine-readable: BoundConcepts["packageDeploymentById"] in generated_concepts.ts).
+export interface PackageDeploymentByIdArgs {
+  deploymentId: string;
+}
+
+export function buildPackageDeploymentById(args: PackageDeploymentByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("deploymentId: " + renderMemQLValue(args.deploymentId));
+  return "query packageDeploymentById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packageDeploymentById(args: PackageDeploymentByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packageDeploymentById = function (this: QueryClient, args: PackageDeploymentByIdArgs = {} as PackageDeploymentByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packageDeploymentById", buildPackageDeploymentById(args), opts);
+};
+
+/** One package's deployment timeline, newest first. Append-only, so this IS the history of what was attempted -- not a summary of it. */
+// Bound concept: v1:platform:packageDeployment (machine-readable: BoundConcepts["packageDeployments"] in generated_concepts.ts).
+export interface PackageDeploymentsArgs {
+  packageId: string;
+}
+
+export function buildPackageDeployments(args: PackageDeploymentsArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  return "query packageDeployments(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packageDeployments(args: PackageDeploymentsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packageDeployments = function (this: QueryClient, args: PackageDeploymentsArgs = {} as PackageDeploymentsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packageDeployments", buildPackageDeployments(args), opts);
+};
+
+/** The packages this caller may see, active only. The OS packages list. */
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.ts).
+export interface PackagesAllArgs {
+}
+
+export function buildPackagesAll(args: PackagesAllArgs): string {
+  void args;
+  return "query packagesAll()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packagesAll(args?: PackagesAllArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packagesAll = function (this: QueryClient, args: PackagesAllArgs = {} as PackagesAllArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packagesAll", buildPackagesAll(args), opts);
+};
+
+/** Archived packages -- the Archived filter's read. Deliberately selects archived rows instead of inheriting a filter that would hide them; see the note above. */
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesArchived"] in generated_concepts.ts).
+export interface PackagesArchivedArgs {
+}
+
+export function buildPackagesArchived(args: PackagesArchivedArgs): string {
+  void args;
+  return "query packagesArchived()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packagesArchived(args?: PackagesArchivedArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packagesArchived = function (this: QueryClient, args: PackagesArchivedArgs = {} as PackagesArchivedArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packagesArchived", buildPackagesArchived(args), opts);
+};
+
+/** Packages tracking a given repository URL -- the D11 webhook feed's match, and the OS's duplicate check when somebody adds a repo that is already tracked. */
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesByRepoUrl"] in generated_concepts.ts).
+export interface PackagesByRepoUrlArgs {
+  repoUrl: string;
+}
+
+export function buildPackagesByRepoUrl(args: PackagesByRepoUrlArgs): string {
+  const parts: string[] = [];
+  parts.push("repoUrl: " + renderMemQLValue(args.repoUrl));
+  return "query packagesByRepoUrl(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packagesByRepoUrl(args: PackagesByRepoUrlArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packagesByRepoUrl = function (this: QueryClient, args: PackagesByRepoUrlArgs = {} as PackagesByRepoUrlArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packagesByRepoUrl", buildPackagesByRepoUrl(args), opts);
+};
+
+/** Every repo-sourced package, for the D11 polling feed's sweep. Runs under the engine's own operator identity, which the admin branch admits; a person calling it reads exactly their own, which is harmless and correct. */
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesTrackingRepos"] in generated_concepts.ts).
+export interface PackagesTrackingReposArgs {
+}
+
+export function buildPackagesTrackingRepos(args: PackagesTrackingReposArgs): string {
+  void args;
+  return "query packagesTrackingRepos()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packagesTrackingRepos(args?: PackagesTrackingReposArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packagesTrackingRepos = function (this: QueryClient, args: PackagesTrackingReposArgs = {} as PackagesTrackingReposArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packagesTrackingRepos", buildPackagesTrackingRepos(args), opts);
+};
+
 /** Read the caller's own override of one page (epic memql#4661). Owned: the filter gates on ownerUserId==actor.userId, so a person only ever resolves their OWN regenerations and one person's regeneration can never repaint another's console -- the per-user scope of D4 is this conjunct and nothing else.
 A page nobody has regenerated returns nothing, which is not an empty state: it is the answer, and the caller renders the page's seed.
 THE VERSION STRIP IS THIS QUERY WRAPPED IN `asOf`, the deployables pattern (D10 / memql#2880). A write in MemQL is an append onto one id, so a plain read returns the NEWEST version and re-issuing it under successive `asOf` timestamps -- each set just before the previous result's createdAt -- walks back one version at a time. There is deliberately no `asOf latest` clause here: a query that declares one refuses to be wrapped by a caller's own, which is exactly the capability the walk needs. Original is the seed and needs no row at all. */
@@ -9152,6 +9300,7 @@ QueryClient.prototype.siteById = function (this: QueryClient, args: SiteByIdArgs
 };
 
 /** The deployables this caller may see: their OWN sites, or every site in the cluster when the caller is a cluster owner. The portal's primary screen.
+ARCHIVED ROWS ARE EXCLUDED HERE and listed by sitesArchived instead (epic memql#4794, D10). The exclusion is written out rather than folded into a trait, because it is the one conjunct whose counterpart query deliberately inverts it -- and a reader comparing the two needs to see the same term in both -- here `isNotArchived`, there `statusIsArchived`. The trait is `status != "archived"` rather than an allow-list of the other three: status is required, so every row carries one, and != is null-safe against a non-empty literal (memql#1685) -- while an allow-list would silently drop a row the day a fifth value is added.
 The name predates self-serve deployables and is kept: it is the same read, and the composite tier is what decides how far "all" reaches for a given actor. The caller term is that tier's own predicate written out -- see siteByHostname for why the bare admin gate it replaced would now collapse the read to cluster owners alone. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesAll"] in generated_concepts.ts).
 export interface SitesAllArgs {
@@ -9172,8 +9321,29 @@ QueryClient.prototype.sitesAll = function (this: QueryClient, args: SitesAllArgs
   return this.executeNamed("sitesAll", buildSitesAll(args), opts);
 };
 
+/** Archived sites -- the OS Archived filter for deployables. The default list (sitesAll) shows every non-archived site; this is its counterpart, and the two together are the whole population. */
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesArchived"] in generated_concepts.ts).
+export interface SitesArchivedArgs {
+}
+
+export function buildSitesArchived(args: SitesArchivedArgs): string {
+  void args;
+  return "query sitesArchived()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sitesArchived(args?: SitesArchivedArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sitesArchived = function (this: QueryClient, args: SitesArchivedArgs = {} as SitesArchivedArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sitesArchived", buildSitesArchived(args), opts);
+};
+
 /** The deployables tied to one account.
-`isNotDeleted` and the composite-tier term are `sitesAll`'s own conjuncts, repeated here rather than referenced: this is the same read that query makes, narrowed by the tie field, and a soft-deleted site must stay gone from a rollup for the reason it is gone from the list. */
+`isNotDeleted` and the composite-tier term are `sitesAll`'s own conjuncts, repeated here rather than referenced: this is the same read that query makes, narrowed by the tie field, and a soft-deleted site must stay gone from a rollup for the reason it is gone from the list.
+`isNotArchived` joined them when v1:platform:site gained the archived rung (epic memql#4794, D10), and it is not optional for a ROLLUP: the band this feeds says "and N more, in Deployables", so a count that included archived sites would point the reader at a list that disagrees with it. A band is a count of what is currently filed for a client, not of everything ever -- which is the same reading libraryItemsForAccount already takes. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesForAccount"] in generated_concepts.ts).
 export interface SitesForAccountArgs {
   accountId: string;
@@ -9193,6 +9363,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.sitesForAccount = function (this: QueryClient, args: SitesForAccountArgs = {} as SitesForAccountArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("sitesForAccount", buildSitesForAccount(args), opts);
+};
+
+/** The sites this package deployed -- the detail panel's deployables list, and the D10 archive gate's own read: a package with a non-archived site refuses to archive, and this is what counts them. Carries NO status filter for exactly that reason; the caller decides what a non-archived site is. */
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesForPackage"] in generated_concepts.ts).
+export interface SitesForPackageArgs {
+  packageId: string;
+}
+
+export function buildSitesForPackage(args: SitesForPackageArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  return "query sitesForPackage(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sitesForPackage(args: SitesForPackageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sitesForPackage = function (this: QueryClient, args: SitesForPackageArgs = {} as SitesForPackageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sitesForPackage", buildSitesForPackage(args), opts);
 };
 
 /** Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it. */

@@ -24,7 +24,34 @@ function objectOf(row: Row, key: string): Record<string, unknown> {
   return {};
 }
 
-export type SiteStatus = "draft" | "live" | "disabled" | "";
+/**
+ * The values `v1:platform:site.status` declares.
+ *
+ * ONE LIST, and the type below is derived from it rather than restated. The
+ * two used to be written separately -- a union type and a runtime allowlist in
+ * `siteFromRow` -- and that is a shape that cannot survive the enum growing:
+ * `archived` arrived with the packages epic (memql#4794), went into the type,
+ * and was silently normalised to "" by the projection, so every archived row
+ * reached its component with a BLANK status. The Archived filter would have
+ * listed rows that did not say they were archived.
+ *
+ * It was inert until the fourth value existed, which is why it survived: with
+ * exactly three members the allowlist dropped nothing. Deriving the type from
+ * the list makes the next value one edit instead of two, and makes a missed
+ * one a type error rather than an empty string.
+ */
+export const SITE_STATUSES = ["draft", "live", "disabled", "archived"] as const;
+
+/** A declared status, or "" for a row the fold has not filled. `archived` is
+ *  the end of the D10 lifecycle and the edge answers 404 for it -- to the
+ *  internet an archived site is gone rather than paused. */
+export type SiteStatus = (typeof SITE_STATUSES)[number] | "";
+
+/** Narrows a wire string to a declared status. The ONE runtime gate, reading
+ *  the same list the type is built from. */
+export function isSiteStatus(value: string): value is SiteStatus {
+  return (SITE_STATUSES as readonly string[]).includes(value);
+}
 
 export interface SiteRow {
   id: string;
@@ -61,8 +88,7 @@ export function siteFromRow(raw: Row): SiteRow {
     ownerUserId: rowString(row, "ownerUserId"),
     hostname: rowString(row, "hostname"),
     kind: rowString(row, "kind"),
-    status:
-      status === "draft" || status === "live" || status === "disabled" ? status : "",
+    status: isSiteStatus(status) ? status : "",
     bundleRef: rowString(row, "bundleRef"),
     artifactId: rowString(row, "artifactId"),
     title: rowString(row, "title"),
@@ -117,6 +143,9 @@ export type StatusTone = "ok" | "muted" | "warn";
 export function statusTone(site: SiteRow): StatusTone {
   if (site.status === "live") return "ok";
   if (site.status === "disabled") return "warn";
+  // draft and archived are both "not serving", and they read the same here
+  // deliberately: the difference between them is HISTORY, which the archived
+  // chip and the Archived filter carry, not liveness.
   return "muted";
 }
 
@@ -142,6 +171,9 @@ export function statusTone(site: SiteRow): StatusTone {
 export function statusDotTone(site: SiteRow): "reachable" | "unreachable" | "unknown" {
   if (site.status === "live") return "reachable";
   if (site.status === "disabled") return "unreachable";
+  // draft and archived both get NO dot, which is what `unknown` renders. An
+  // archived site is not "unreachable" in the sense the amber dot means --
+  // nothing is wrong with it, it is filed -- and the chip beside it says which.
   return "unknown";
 }
 

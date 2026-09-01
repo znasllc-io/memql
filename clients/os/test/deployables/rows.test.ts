@@ -9,6 +9,7 @@ import {
   ownerLabel,
   siteFromRow,
   siteIsClusterOwned,
+  SITE_STATUSES,
   siteIsCurrent,
   siteName,
   statusDotTone,
@@ -180,5 +181,38 @@ describe("the domain a hostname groups under", () => {
 
   it("answers empty for an empty hostname", () => {
     expect(domainOf("")).toBe("");
+  });
+});
+
+describe("the status projection admits every declared value", () => {
+  // THE BUG THIS PINS: `siteFromRow` normalised an unrecognised status to "",
+  // against a hand-written allowlist that was a SECOND copy of the union type.
+  // When `archived` arrived with the packages epic it went into the type and
+  // not into the allowlist, so every archived row reached its component with a
+  // blank status -- and the Archived filter, whose whole purpose is showing
+  // them, listed rows that did not say what they were.
+  //
+  // It was inert while the enum had three members, which is exactly why it
+  // survived review: the allowlist dropped nothing until there was something
+  // to drop.
+  it("keeps every value the concept declares, including archived", () => {
+    for (const status of SITE_STATUSES) {
+      const site = siteFromRow(siteRow({ id: "s1", status }));
+      expect(site.status).toBe(status);
+    }
+  });
+
+  it("still drops a value the concept does not declare", () => {
+    // The reachable positive for the check itself: without this, the test
+    // above would pass against a projection that had simply stopped filtering.
+    const site = siteFromRow(siteRow({ id: "s1", status: "nonsense" }));
+    expect(site.status).toBe("");
+  });
+
+  it("renders archived as its own state rather than as a fault", () => {
+    const archived = siteFromRow(siteRow({ id: "s1", status: "archived" }));
+    // No dot: an archived site is filed, not unreachable. The chip says which.
+    expect(statusDotTone(archived)).toBe("unknown");
+    expect(statusTone(archived)).toBe("muted");
   });
 });

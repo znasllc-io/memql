@@ -2924,6 +2924,43 @@ QueryClient.prototype.createPATIdentity = function (this: QueryClient, args: Cre
   return this.executeNamed("createPATIdentity", buildCreatePATIdentity(args), opts);
 };
 
+/** Register a tracked package. The person's write: they supply the source, the engine supplies the identity and the name.
+`name` is an ARG here and only here, because at registration time no analysis has run yet and the tree has not been read -- so the manifest cannot have supplied it. The first successful analysis overwrites it through recordPackageAnalysis, which is why the field's doc says the name comes from the manifest: this value is a placeholder with a person's guess in it.
+`repoTokenRef` NAMES a globalSecret and is a plain string here on purpose (D14). There is no arg on this mutation, or anywhere else in this epic, that carries a token VALUE. */
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["createPackage"] in generated_concepts.ts).
+export interface CreatePackageArgs {
+  packageId: string;
+  name: string;
+  // Enum: repo | artifact
+  sourceKind: string;
+  repoUrl?: string;
+  repoRef?: string;
+  repoTokenRef?: string;
+  artifactId?: string;
+}
+
+export function buildCreatePackage(args: CreatePackageArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("sourceKind: " + renderMemQLValue(args.sourceKind));
+  if (args.repoUrl !== undefined) parts.push("repoUrl: " + renderMemQLValue(args.repoUrl));
+  if (args.repoRef !== undefined) parts.push("repoRef: " + renderMemQLValue(args.repoRef));
+  if (args.repoTokenRef !== undefined) parts.push("repoTokenRef: " + renderMemQLValue(args.repoTokenRef));
+  if (args.artifactId !== undefined) parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  return "mutation createPackage(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createPackage(args: CreatePackageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createPackage = function (this: QueryClient, args: CreatePackageArgs = {} as CreatePackageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createPackage", buildCreatePackage(args), opts);
+};
+
 /** Register a passkey identity (WebAuthn discoverable credential). Stores the credential's PUBLIC COSE key -- there is no secret half to withhold. */
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createPasskeyIdentity"] in generated_concepts.ts).
 export interface CreatePasskeyIdentityArgs {
@@ -9108,6 +9145,32 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateOutboundRequestStatus = function (this: QueryClient, args: UpdateOutboundRequestStatusArgs = {} as UpdateOutboundRequestStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateOutboundRequestStatus", buildUpdateOutboundRequestStatus(args), opts);
+};
+
+/** Edit the source facts of a tracked package: which ref to deploy, and which named secret to fetch under. Minimal arguments deliberately -- update{} has been a read-merge since memql#1628, so re-supplying every discriminator is dead weight that an undeclared-argument DISCARD hides. */
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["updatePackageSource"] in generated_concepts.ts).
+export interface UpdatePackageSourceArgs {
+  packageId: string;
+  repoRef?: string;
+  repoTokenRef?: string;
+}
+
+export function buildUpdatePackageSource(args: UpdatePackageSourceArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  if (args.repoRef !== undefined) parts.push("repoRef: " + renderMemQLValue(args.repoRef));
+  if (args.repoTokenRef !== undefined) parts.push("repoTokenRef: " + renderMemQLValue(args.repoTokenRef));
+  return "mutation updatePackageSource(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updatePackageSource(args: UpdatePackageSourceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updatePackageSource = function (this: QueryClient, args: UpdatePackageSourceArgs = {} as UpdatePackageSourceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updatePackageSource", buildUpdatePackageSource(args), opts);
 };
 
 /** Upsert a participant presence snapshot for multi-client status consistency. */

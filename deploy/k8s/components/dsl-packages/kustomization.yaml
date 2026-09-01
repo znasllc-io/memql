@@ -1,0 +1,86 @@
+# Reusable kustomize Component: PACKAGE DSL delivery, fetched at boot.
+#
+# Epic memql#4794, D5 -- "DSL is data, not an image". The sibling `dsl-bundle`
+# component delivers ONE product's DSL by baking it into an image and copying
+# it out of an init-container; this one delivers N packages' DSL by reading a
+# pointer document out of the cluster's own object storage. Both land the same
+# tree in the same shared volume, and the node reads MEMQL_DSL_PATH exactly as
+# it does today -- no hot-mount, no new boot path, no engine change.
+#
+# WHY A POINTER AND NOT AN IMAGE. A package's DSL changes on the package
+# author's clock, not on the engine's. Baking it would make every deploy an
+# image build plus a registry push plus a digest pin in an overlay -- which is
+# the CI dependency D5 exists to remove. Reading a pointer makes a deploy a
+# blob write plus a rolling restart, and makes a ROLLBACK a pointer rewrite
+# plus the same restart, which is the same shape as a site rollback.
+#
+# THE POINTER IS blob://packages/active.json: a small JSON object mapping a
+# domain name to the content-addressed prefix its tree lives under
+# (packages/<domain>/<contentHash>/). Content addressing is what makes the copy
+# idempotent and the rollback safe: an old prefix's bytes are still there, so
+# pointing back at one never has to restore anything.
+#
+# ORDER MATTERS AND IT IS ENCODED HERE. `dsl-packages-fetch` runs AFTER
+# `dsl-bundle-copy` when both components are applied, because init containers
+# run in list order and this one appends. A product's own bundle therefore
+# lands first and a package can add domains beside it -- never over it, since
+# the engine's own mount skips a domain that collides with a core namespace and
+# the ANALYSIS refuses one outright (dsl_domain_reserved), so a collision is
+# caught long before a pod boots.
+#
+# FAIL-OPEN ON AN ABSENT POINTER, FAIL-CLOSED ON A BROKEN ONE. A cluster that
+# has never deployed a package has no active.json, and that is the ordinary
+# state rather than a fault -- the fetch exits 0 and the node boots with
+# whatever DSL it already had. A pointer that EXISTS and cannot be read is a
+# hard failure: booting a node with silently-missing product DSL is how a
+# cluster comes up looking healthy and answering "function not found" to every
+# call.
+#
+# USAGE (in an instance overlay):
+#   components:
+#     - ../../components/dsl-packages
+#   labels:
+#     - pairs: { memql/product-dsl: "true" }
+#       includeSelectors: false
+#
+# The engine container is index 0 on every mesh node Deployment, so the patch
+# is name-agnostic -- the same assumption dsl-bundle makes.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - target:
+      kind: Deployment
+      labelSelector: memql/product-dsl=true
+    patch: |
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: dsl-bundle
+          emptyDir: {}
+      - op: add
+        path: /spec/template/spec/initContainers/-
+        value:
+          name: dsl-packages-fetch
+          image: memql-engine:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/app/memql", "dsl-fetch"]
+          env:
+            - name: MEMQL_DSL_PATH
+              value: /var/lib/memql/dsl
+          envFrom:
+            - secretRef:
+                name: memql-secrets
+          volumeMounts:
+            - name: dsl-bundle
+              mountPath: /var/lib/memql/dsl
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value:
+          name: dsl-bundle
+          mountPath: /var/lib/memql/dsl
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: MEMQL_DSL_PATH
+          value: /var/lib/memql/dsl

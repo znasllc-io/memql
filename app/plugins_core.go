@@ -55,6 +55,15 @@ import (
 	// (memql#4345). Blank-imported HERE, beside the integration it split from, so
 	// the registration reaches exactly the same binaries it did before the move.
 	_ "github.com/znasllc-io/memql/component/sitepublish"
+	// packages lives in the ROOT module for exactly the reason sitePublish
+	// does, and it is the same constraint one layer up: the deploy pipeline
+	// publishes through component/edge's Publisher, and importing edge from
+	// integrations is the module cycle CI's module-boundaries lane refuses
+	// (epic memql#4794). Registered on every node type, because the builtins
+	// are declared in the core DSL tree that every binary loads -- and an
+	// integration registered NOWHERE only warns, while one registered with a
+	// capability MISSING fails boot.
+	_ "github.com/znasllc-io/memql/component/packages"
 	_ "github.com/znasllc-io/memql/integrations/library"
 	_ "github.com/znasllc-io/memql/integrations/liveknowledge"
 	_ "github.com/znasllc-io/memql/integrations/openairealtime"

@@ -6,6 +6,7 @@ import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
 import { accountNameFrom } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
 import { useSiteAccount } from "./actions";
+import { SiteLifecycle } from "./packages/SiteLifecycle";
 import { formatMoment } from "../../kit/format";
 import { TICK_TTL_MS } from "../../live/arrival";
 import { STOREFRONT_KIND, kindLabel } from "./concepts";
@@ -38,6 +39,7 @@ export function SiteDetail({
   viewerUserId,
   canPublish,
   clusterDomain = "",
+  canManage = false,
   onAsk,
 }: {
   site: SiteRow;
@@ -45,6 +47,11 @@ export function SiteDetail({
   canPublish: boolean;
   /** The domain this cluster serves, for composing the record guidance. */
   clusterDomain?: string;
+  /** Whether to render the lifecycle controls (epic memql#4794). Presentation
+   *  over a server-side law: the D10 guard beside the engine's write path is
+   *  what actually refuses, and a systemOwned row renders no controls at all
+   *  whatever this says. */
+  canManage?: boolean;
   /** Opens Ask with this deployable as its context. */
   onAsk?: (tag: string) => void;
 }) {
@@ -194,6 +201,13 @@ export function SiteDetail({
       )}
 
       {canPublish ? <PublishPicker site={site} /> : null}
+
+      {/* The lifecycle, migrated from the portal (epic memql#4794, D13):
+          version history and rollback, pause and resume, archive. It renders
+          NOTHING at all for a systemOwned row -- not disabled controls -- and
+          the server refuses those writes regardless, which is the split
+          between what is presentation and what is the law. */}
+      <SiteLifecycle site={site} canWrite={canManage} />
     </Panel>
     {/* THE SAME GATE PUBLISHING CARRIES, and for the same reason: binding a
         client's own domain is cluster-owner territory in v1 (design D1),

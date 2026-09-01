@@ -322,3 +322,47 @@ func TestEvaluateRouting_SiteEdgeInvalidationBroadcast(t *testing.T) {
 		t.Error("graph.node.created.v1:platform:globalVariable must NOT be forwarded by the site invalidation rule (no wildcard on the concept segment)")
 	}
 }
+
+// TestPackageRowsReachABrowserOnAnotherNode is the cross-node half of epic
+// memql#4794, and it is a routing assertion rather than a live-cluster lane on
+// purpose.
+//
+// THE PIPELINE ITSELF MAKES NO CROSS-NODE HANDOFF. A deployment advances
+// through the D6 order inside ONE Deploy() call on ONE node -- component/
+// packages/pipeline.go -- so there is no stage-to-stage hop to test. The design
+// anticipated stage handoffs as row events and this implementation does not
+// need them; what it costs is stated there: a node lost mid-deploy strands its
+// row at a non-terminal status, and the recovery is the one the append-only
+// rule already prescribes, a new attempt.
+//
+// What IS cross-node is the READ. Every row the pipeline writes is written on
+// whichever node ran it and read in an OS window some bff is serving, so
+// without these rules default-deny leaves the packages list correct on load and
+// frozen afterwards -- the failure that looks like it is working.
+//
+// `updated` carries most of the weight: a deploy advances by writing its own
+// status six times, and a person watching a deploy is watching exactly those.
+func TestPackageRowsReachABrowserOnAnotherNode(t *testing.T) {
+	rules := defaultRoutingRules()
+	for _, topic := range []string{
+		"graph.node.created.v1:platform:package",
+		"graph.node.updated.v1:platform:package",
+		"graph.node.created.v1:platform:packageDeployment",
+		"graph.node.updated.v1:platform:packageDeployment",
+	} {
+		d := evaluateRouting(rules, topic)
+		if !d.Forward {
+			t.Errorf("%s does not forward: the OS would show a list that is correct on load and never moves again", topic)
+		}
+		if !d.Broadcast {
+			t.Errorf("%s forwards to one node type rather than broadcasting: whichever bff is serving the window has to receive it", topic)
+		}
+	}
+
+	// The reachable positive that makes the assertions above evidence about
+	// the table rather than about evaluateRouting: a concept with no rule
+	// does NOT forward.
+	if d := evaluateRouting(rules, "graph.node.updated.v1:platform:packageNotAThing"); d.Forward {
+		t.Error("control failed: an unlisted concept forwarded, so the checks above prove nothing")
+	}
+}

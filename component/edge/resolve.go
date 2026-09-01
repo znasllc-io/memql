@@ -17,7 +17,7 @@ type Site struct {
 	Hostname    string
 	Kind        string // "spa" | "static" | "shopify_storefront"
 	BundleRef   string
-	Status      string // "draft" | "live" | "disabled"
+	Status      string // "draft" | "live" | "disabled" | "archived" | "archived"
 	Title       string
 	APIProxy    bool
 	SystemOwned bool
