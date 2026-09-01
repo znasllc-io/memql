@@ -240,8 +240,15 @@ func (f *Function) clone() *Function {
 		BuiltinArgs:      f.BuiltinArgs.clone(),
 		ArgsSchema:       argsSchemaCopy,
 		// Attribute values
-		Enabled:           f.Enabled,
-		ServerOnly:        f.ServerOnly,
+		Enabled:    f.Enabled,
+		ServerOnly: f.ServerOnly,
+		// The actor-rank floor (epic memql#4832, D6). It has to be listed
+		// here, and the reason is worth a line: the registry hands out CLONES,
+		// so a field this function does not name is a field every registered
+		// construct loses. The loader resolved @requiresRank correctly and the
+		// enforcement read it correctly, and the floor was still absent
+		// everywhere -- a gate that parsed, validated and gated nothing.
+		RequiresRank:      f.RequiresRank,
 		Deprecated:        f.Deprecated,
 		Version:           f.Version,
 		Timeout:           f.Timeout,

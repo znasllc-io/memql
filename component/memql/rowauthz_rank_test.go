@@ -424,3 +424,44 @@ func TestTheSelfAccountCannotBeArchived(t *testing.T) {
 		t.Fatalf("archiving an ordinary account was refused: %v", err)
 	}
 }
+
+// TestTheRankFloorSurvivesRegistration is a regression test for a bug that
+// shipped a gate which parsed, validated and gated NOTHING.
+//
+// The registry hands out CLONES (baseregistry stores a copy function), and
+// Function.clone() lists its fields by name. `RequiresRank` was resolved
+// correctly by the loader and read correctly by the enforcement, and was empty
+// at every call site, because the one function in between did not name it.
+//
+// The class is worth a test rather than a comment: every future field on
+// Function has the same failure mode, and it is silent in the safe-looking
+// direction -- an authorization floor that admits everyone.
+func TestTheRankFloorSurvivesRegistration(t *testing.T) {
+	registry := newFunctionRegistry()
+	if err := registry.Upsert(&Function{
+		Name:         "probeFlooredConstruct",
+		FunctionKind: "query",
+		Enabled:      true,
+		RequiresRank: "admin",
+		ServerOnly:   true,
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	got, ok := registry.Lookup("probeFlooredConstruct")
+	if !ok || got == nil {
+		t.Fatal("the construct did not register")
+	}
+	if got.RequiresRank != "admin" {
+		t.Fatalf("RequiresRank = %q after a registry round trip, want \"admin\".\n"+
+			"Function.clone() lists its fields by name, so a field it does not mention is a "+
+			"field every registered construct loses -- and for this one that means an "+
+			"authorization floor that admits everybody, with the annotation still in the DSL "+
+			"and the load-time validation still passing.", got.RequiresRank)
+	}
+	// The neighbour, as a control: if BOTH are empty the registry itself is
+	// broken and this test is measuring that instead.
+	if !got.ServerOnly {
+		t.Fatal("ServerOnly was also lost, so this test is measuring a broken registry rather " +
+			"than a missing field in clone()")
+	}
+}
