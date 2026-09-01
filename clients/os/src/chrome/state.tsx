@@ -16,6 +16,7 @@ import {
 import {
   addDesk as addDeskFn,
   closeWindow as closeWindowFn,
+  consumeIntent as consumeIntentFn,
   focusWindow as focusWindowFn,
   gcAutoDesks,
   initialShell,
@@ -98,9 +99,16 @@ export interface OsActions {
    * it on the requested section is what lets the app tell "the shell put me
    * here" apart from "somebody asked for this".
    *
+   * `payload` (epic memql#4842, #4845) rides to the app as a consumable
+   * window intent -- the id is minted here, so callers hand over only what
+   * they want shown. Delivered to a fresh window and an already-open one
+   * alike (replacing any standing intent and adopting the section).
+   *
    * Omitted = the shell default (the first role-admitted section).
    */
-  openApp: (appId: AppId, sectionId?: string) => ShellEffect;
+  openApp: (appId: AppId, sectionId?: string, payload?: Record<string, unknown>) => ShellEffect;
+  /** Clear a window's consumed intent, matched by id (stale consumes no-op). */
+  consumeWindowIntent: (windowId: WindowId, intentId: string) => void;
   closeWindow: (id: WindowId) => void;
   minimizeWindow: (id: WindowId) => void;
   toggleFullscreen: (id: WindowId) => void;
@@ -446,17 +454,22 @@ export function OsProvider({
     let lastEffect: ShellEffect = { kind: "none" };
 
     actionsRef.current = {
-      openApp: (appId, sectionId) => {
+      openApp: (appId, sectionId, payload) => {
         lastEffect = { kind: "none" };
+        // Minted OUTSIDE the updater: React may re-run updaters, and an id
+        // minted inside would advance the counter once per run.
+        const intent = payload ? { id: nextId("intent"), payload } : undefined;
         set((s) => {
           if (!canOpen(registry, actorRoleRef.current, appId)) return s;
           const target = sectionId ?? defaultSection(registry, actorRoleRef.current, appId);
-          const { state: shell, effect } = openAppFn(s.shell, appId, target);
+          const { state: shell, effect } = openAppFn(s.shell, appId, target, intent);
           lastEffect = effect;
           return { ...s, shell };
         });
         return lastEffect;
       },
+      consumeWindowIntent: (windowId, intentId) =>
+        set((s) => ({ ...s, shell: consumeIntentFn(s.shell, windowId, intentId) })),
       closeWindow: (id) => set((s) => ({ ...s, shell: closeWindowFn(s.shell, id).state })),
       minimizeWindow: (id) => set((s) => ({ ...s, shell: setWindowMode(s.shell, id, "minimized") })),
       toggleFullscreen: (id) =>

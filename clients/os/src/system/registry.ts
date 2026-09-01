@@ -21,6 +21,17 @@ export interface OsAppProps {
   navigate: (sectionId: string) => void;
   /** Augment the window's Ask context ("app:<id>" is always present). */
   askContext: (tag: string) => void;
+  /**
+   * A standing open instruction (epic memql#4842, #4845): opaque payload the
+   * opener handed to `openApp`, delivered whether this window is fresh or
+   * was already open. An app that acts on one calls `consumeIntent` with the
+   * SAME id -- consumption is id-matched so acting on a stale render can
+   * never eat a newer instruction. Apps that ignore both props are
+   * unaffected.
+   */
+  intent?: { id: string; payload: Record<string, unknown> };
+  /** Optional so a harness constructing props by hand stays valid. */
+  consumeIntent?: (intentId: string) => void;
 }
 
 export interface OsAppManifest {
