@@ -87,6 +87,11 @@ type Integration struct {
 	domainAuthorizer     DomainWriteAuthorizer
 	artifactPollAttempts int
 	artifactPollInterval time.Duration
+	// blobFetcher streams stored bytes for the chunked-upload case
+	// (memql#4782): hash stamping always, extraction when readable. No
+	// fetcher keeps chunked files hash-absent -- "not measured" -- and
+	// unextracted; see SetBlobFetcher in analysis.go.
+	blobFetcher BlobFetcher
 }
 
 // NewIntegration wires the engine handle. The factory is in plugin.go;

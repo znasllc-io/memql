@@ -180,6 +180,20 @@ func apiIngress(domain, pathBlock string) string {
 		"metadata:\n" +
 		"  name: api-front-door\n" +
 		"  namespace: memql\n" +
+		"  annotations:\n" +
+		"    # THE BODY-SIZE ALLOWANCE (memql#4782, design D9). ingress-nginx's default\n" +
+		"    # proxy-body-size is 1m, which made every documented upload cap on this host\n" +
+		"    # quietly unreachable in the cloud -- the 413 came from the proxy, not the\n" +
+		"    # handler, and named no knob. 48m covers the two largest legitimate bodies\n" +
+		"    # this Ingress carries with slack: a 32 MiB one-shot POST /artifacts plus its\n" +
+		"    # multipart framing, and a 16 MiB session chunk. It is deliberately NOT the\n" +
+		"    # 4 GiB file cap: files above the one-shot threshold arrive as chunked\n" +
+		"    # sessions, so no single REQUEST ever needs more than this. The handlers keep\n" +
+		"    # their own MaxBytesReader bounds; this is the outer fence, not the\n" +
+		"    # enforcement. Local parity note: traefik enforces no default body limit, so\n" +
+		"    # the local overlay needs no counterpart -- recorded here because 'works\n" +
+		"    # locally' is therefore no evidence about this annotation.\n" +
+		"    nginx.ingress.kubernetes.io/proxy-body-size: \"48m\"\n" +
 		"spec:\n" +
 		"  ingressClassName: " + ingressClass + "\n" +
 		tlsBlock(host) +

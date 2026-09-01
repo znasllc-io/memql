@@ -2518,7 +2518,7 @@ export interface CreateLibraryFileArgs {
   name: string;
   mimeType: string;
   size: number;
-  sha256: string;
+  sha256?: string;
   blobUrl: string;
   // Enum: uploaded | exported | agent_generated | derived
   source: string;
@@ -2537,7 +2537,7 @@ export function buildCreateLibraryFile(args: CreateLibraryFileArgs): string {
   parts.push("name: " + renderMemQLValue(args.name));
   parts.push("mimeType: " + renderMemQLValue(args.mimeType));
   parts.push("size: " + renderMemQLValue(args.size));
-  parts.push("sha256: " + renderMemQLValue(args.sha256));
+  if (args.sha256 !== undefined) parts.push("sha256: " + renderMemQLValue(args.sha256));
   parts.push("blobUrl: " + renderMemQLValue(args.blobUrl));
   parts.push("source: " + renderMemQLValue(args.source));
   if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
@@ -7555,6 +7555,7 @@ export interface SetLibraryFileStatusArgs {
   // Enum: none | partial | complete
   embeddingStatus?: string;
   failureReason?: string;
+  sha256?: string;
 }
 
 export function buildSetLibraryFileStatus(args: SetLibraryFileStatusArgs): string {
@@ -7564,6 +7565,7 @@ export function buildSetLibraryFileStatus(args: SetLibraryFileStatusArgs): strin
   if (args.summary !== undefined) parts.push("summary: " + renderMemQLValue(args.summary));
   if (args.embeddingStatus !== undefined) parts.push("embeddingStatus: " + renderMemQLValue(args.embeddingStatus));
   if (args.failureReason !== undefined) parts.push("failureReason: " + renderMemQLValue(args.failureReason));
+  if (args.sha256 !== undefined) parts.push("sha256: " + renderMemQLValue(args.sha256));
   return "mutation setLibraryFileStatus(" + parts.join(", ") + ")";
 }
 

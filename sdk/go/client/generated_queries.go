@@ -3655,6 +3655,23 @@ func LibraryFileChunksForFileBuild(args LibraryFileChunksForFileArgs) string {
 	return b.String()
 }
 
+// LibraryFileSizesForOwner -- The sizes of every file the caller holds, ARCHIVED INCLUDED -- the stored half of the storage quota (memql#4782, design C4). Archived files keep their bytes and keep counting: retention is real, and a quota that forgot archived rows would let 'archive then re-upload' mint unbounded storage. UNBOUNDED for the same fail-open reason as its session sibling; owner-scoped, two fields per row.
+//
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFileSizesForOwner"] in generated_concepts.go).
+type LibraryFileSizesForOwnerArgs struct {
+}
+
+// LibraryFileSizesForOwner calls the engine query libraryFileSizesForOwner.
+func (qc *QueryClient) LibraryFileSizesForOwner(ctx context.Context, args LibraryFileSizesForOwnerArgs) (*Result, error) {
+	call := LibraryFileSizesForOwnerBuild(args)
+	return qc.executeNamed(ctx, "libraryFileSizesForOwner", call)
+}
+
+func LibraryFileSizesForOwnerBuild(args LibraryFileSizesForOwnerArgs) string {
+	_ = args
+	return "query libraryFileSizesForOwner()"
+}
+
 // LibraryFilesForOwner -- List the caller's Library files, newest first, gated by ownerUserId==actor.userId. The file-level read behind the Artifacts page's upload and training surfaces -- the artifact index is what the list renders, and this is what answers questions the index does not carry (analysis status, embedding coverage, which domains a file was trained into).
 //
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFilesForOwner"] in generated_concepts.go).
@@ -4231,6 +4248,23 @@ func OidcIdentityBySubjectBuild(args OidcIdentityBySubjectArgs) string {
 	b.WriteString(quoteMemQL(args.Subject))
 	b.WriteString(")")
 	return b.String()
+}
+
+// OpenUploadSessionsForOwner -- The declared sizes of the caller's OPEN upload sessions -- the in-flight half of the storage quota (memql#4782, design C4): at init and at one-shot upload, the sum of stored file sizes PLUS these declared sizes must stay under MEMQL_LIBRARY_USER_QUOTA_BYTES, or a person could evade the quota by opening sessions they never finish. UNBOUNDED for the quota's reason: a truncated page fails OPEN, admitting bytes the quota should refuse. Owner-scoped, projecting two fields per row.
+//
+// Bound concept: v1:library:uploadSession (machine-readable: BoundConcepts["openUploadSessionsForOwner"] in generated_concepts.go).
+type OpenUploadSessionsForOwnerArgs struct {
+}
+
+// OpenUploadSessionsForOwner calls the engine query openUploadSessionsForOwner.
+func (qc *QueryClient) OpenUploadSessionsForOwner(ctx context.Context, args OpenUploadSessionsForOwnerArgs) (*Result, error) {
+	call := OpenUploadSessionsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "openUploadSessionsForOwner", call)
+}
+
+func OpenUploadSessionsForOwnerBuild(args OpenUploadSessionsForOwnerArgs) string {
+	_ = args
+	return "query openUploadSessionsForOwner()"
 }
 
 // OrdersByCompany -- One company's orders in a window -- the B2B account view.
@@ -10173,6 +10207,28 @@ func UpcomingEventsBuild(args UpcomingEventsArgs) string {
 	}
 	b.WriteString("windowEnd: ")
 	b.WriteString(quoteMemQL(args.WindowEnd))
+	b.WriteString(")")
+	return b.String()
+}
+
+// UploadSessionById -- Fetch one chunked upload session by id, gated to the caller -- THE per-chunk authorization read (design C2): every chunk PUT, the inventory and the complete resolve the session through this under the caller's own actor, so a session that is not theirs is a session that is not there. Owned: ownerUserId==actor.userId is the load-bearing guard.
+//
+// Bound concept: v1:library:uploadSession (machine-readable: BoundConcepts["uploadSessionById"] in generated_concepts.go).
+type UploadSessionByIdArgs struct {
+	UploadId string
+}
+
+// UploadSessionById calls the engine query uploadSessionById.
+func (qc *QueryClient) UploadSessionById(ctx context.Context, args UploadSessionByIdArgs) (*Result, error) {
+	call := UploadSessionByIdBuild(args)
+	return qc.executeNamed(ctx, "uploadSessionById", call)
+}
+
+func UploadSessionByIdBuild(args UploadSessionByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query uploadSessionById(")
+	b.WriteString("uploadId: ")
+	b.WriteString(quoteMemQL(args.UploadId))
 	b.WriteString(")")
 	return b.String()
 }
