@@ -12,6 +12,7 @@ shape role roleFull {
   description
   predefined
   active
+  aliases
   row.createdAt
 }
 

@@ -25,6 +25,7 @@
 // correct. The account is shared; the rows are not.
 
 use common.specs.{ requiresOwnerOrAdmin }
+use deployment.specs.{ requiresDeveloperOrAbove }
 use common.traits.{ isNotArchived, isNotDeleted }
 use identity.concepts.{ invitation }
 use identity.shapes.{ invitationAdminSummary }
@@ -56,12 +57,32 @@ use platform.shapes.{ siteFull }
 /// The caller term is the composite tier's own predicate written out, which is
 /// what TestRowAuthzEnforcementLandGate requires of an authored query over a
 /// tier-declaring concept.
+///
+/// IT CARRIES A THIRD DISJUNCT NOW, and the reason is worth stating because
+/// the term looks wider than it is. The concept declares `rankVisible` plus an
+/// `unowned="admin"` floor (epic memql#4832), so the tier admits more than
+/// owner-or-cluster-owner -- and an authored conjunct narrower than the tier
+/// would silently re-close what the declaration opened, leaving an admin the
+/// zero rows memql#4837 exists to end.
+///
+/// The WIDTH is not where the narrowing was lost: the engine ANDs the tier's
+/// own predicate at the root, and that term carries the rank membership as a
+/// pushed-down `in` list. So for an admin this conjunct folds to a constant
+/// and the injected term does the real work IN SQL -- which is what keeps a
+/// page of peer-owned rows from reading as exhaustion to the cursor.
+///
+/// `requiresDeveloperOrAbove` is `developer || admin || owner`, i.e. rank >=
+/// 200 -- the same set as the concept's `unowned="admin"` floor. Its NAME
+/// predates the ladder flip and reads a rung too high; the set is right, and
+/// dslgate.AdminGateRe recognises it, so every arm of this disjunction is
+/// caller-scoped and ClauseGuarantees still holds.
 @actor
+@requiresRank("admin")
 query account clientAccountsAll {
   args {
     includeArchived  boolean
   }
-  filter  (ownerUserId==actor.userId || actor.isClusterOwner==true) && (isNotArchived || args.includeArchived==true)
+  filter  (ownerUserId==actor.userId || actor.isClusterOwner==true || requiresDeveloperOrAbove) && (isNotArchived || args.includeArchived==true)
   shape   clientAccountFull
   sort    "name", "asc"
 }
@@ -70,11 +91,12 @@ query account clientAccountsAll {
 /// the read every tie surface uses to put a name on an id it holds.
 @unbounded("account by id -- bounded to a single row (id is the row's own primary key)")
 @actor
+@requiresRank("admin")
 query account clientAccountById {
   args {
     accountId  string!
   }
-  filter  row.id==args.accountId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row.id==args.accountId && (ownerUserId==actor.userId || actor.isClusterOwner==true || requiresDeveloperOrAbove)
   shape   clientAccountFull
 }
 

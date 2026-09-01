@@ -169,10 +169,19 @@ func contextWithRankScopeMemo(ctx context.Context, e *MemQLEngine) context.Conte
 // direction a gate may fail in when the alternative is silence.
 func rankScopeFromContext(ctx context.Context) *rankScope {
 	memo, _ := ctx.Value(rankScopeMemoKey{}).(*rankScopeMemo)
-	if memo == nil || memo.engine == nil {
+	if memo == nil {
 		return nil
 	}
-	memo.once.Do(func() { memo.scope = memo.engine.resolveRankScope(ctx) })
+	// The engine check is INSIDE the once, not in front of it. A memo whose
+	// scope is already resolved answers from it regardless -- the resolution
+	// is the thing this returns, and refusing to hand back an answer already
+	// computed because the resolver that computed it is not attached would
+	// make the memo's own contents unreachable.
+	memo.once.Do(func() {
+		if memo.engine != nil {
+			memo.scope = memo.engine.resolveRankScope(ctx)
+		}
+	})
 	return memo.scope
 }
 
@@ -225,7 +234,7 @@ func rankAdmitsRow(ctx context.Context, decl *langparser.RowAuthzDecl, storedOwn
 		if write || decl.Unowned == "" {
 			return false
 		}
-		return scope.actorRank >= scope.ladder.rankOf(decl.Unowned)
+		return rankFloorAdmits(scope.ladder, decl.Unowned, scope.actorRank)
 	}
 	if write {
 		return scope.admitsWrite(storedOwner)
@@ -530,7 +539,7 @@ func (e *MemQLEngine) rankScopeComparison(ctx context.Context, n *RankScopeExpre
 	// field that is PRESENT and empty is a deliberate statement of
 	// cluster ownership.
 	if n.UnownedFloor != "" && !n.Strict {
-		if scope.actorRank >= e.rankLadder(ctx).rankOf(n.UnownedFloor) {
+		if rankFloorAdmits(scope.ladder, n.UnownedFloor, scope.actorRank) {
 			values = append(values, "")
 		}
 	}
@@ -561,4 +570,25 @@ func sortAnyStrings(values []any) {
 		b, _ := values[j].(string)
 		return a < b
 	})
+}
+
+// rankFloorAdmits tests an actor's rank against a declared floor.
+//
+// AN UNRESOLVABLE FLOOR DENIES EVERYONE, and this function exists because the
+// obvious spelling does the opposite. `actorRank >= ladder.rankOf(slug)` reads
+// correctly and fails OPEN: rankOf answers 0 for a slug it does not know, and
+// every rank is >= 0, so a single typo in `unowned="devleoper"` turns a floor
+// into a pass-through that hands every deployment-owned row to every caller --
+// silently, with the declaration still reading like a gate.
+//
+// The load-time check (validateRowAuthzUnownedSlugs) is what stops such a
+// declaration reaching a booted engine at all. This is the runtime backstop,
+// and the two are deliberately not one: a gate whose only enforcement runs at
+// boot is a gate that a code path bypassing boot does not have.
+func rankFloorAdmits(ladder roleLadder, slug string, actorRank int) bool {
+	floor := ladder.rankOf(slug)
+	if floor <= 0 {
+		return false
+	}
+	return actorRank >= floor
 }

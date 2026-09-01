@@ -48,6 +48,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // refuseBelowRequiredRank enforces a construct's `@requiresRank` floor.
@@ -180,4 +181,40 @@ func (e *MemQLEngine) refusePlanBelowRequiredRank(ctx context.Context, plan *Que
 		}
 	}
 	return nil
+}
+
+// validateRowAuthzUnownedSlugs is the load-time check for the OTHER slug a
+// declaration can name: `@rowAuthz(owner="f", rankVisible, unowned="<role>")`.
+//
+// Same failure as a mistyped @requiresRank and worse in one way: that one
+// gates who may CALL, this one gates who may SEE the deployment's own rows,
+// and an unresolvable floor would admit every caller to every one of them.
+// rankFloorAdmits refuses at runtime; this refuses at BOOT, which is where a
+// typo should be discovered.
+func (e *MemQLEngine) validateRowAuthzUnownedSlugs(ctx context.Context) []error {
+	ladder := e.rankLadder(ctx)
+	var problems []error
+	sorted := make([]string, 0)
+	for name := range memorynodes.All() {
+		sorted = append(sorted, name)
+	}
+	// Sorted so a boot failure names the same concept every time.
+	sort.Strings(sorted)
+	for _, name := range sorted {
+		decl := rowAuthzDeclFor(name)
+		if decl == nil || strings.TrimSpace(decl.Unowned) == "" {
+			continue
+		}
+		slug := strings.TrimSpace(decl.Unowned)
+		if ladder.rankOf(slug) > 0 {
+			continue
+		}
+		problems = append(problems, fmt.Errorf(
+			"%s declares @rowAuthz(..., unowned=%q), which names no role in dsl/rbac. "+
+				"An unresolvable floor ranks 0 and every rank clears 0, so this declaration "+
+				"would admit EVERY caller to every cluster-owned row of this concept while "+
+				"still reading like a gate. Known roles: %s",
+			name, slug, strings.Join(ladder.knownSlugs(), ", ")))
+	}
+	return problems
 }

@@ -447,6 +447,25 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		}
 	}
 
+	// The OTHER slug a declaration can name (epic memql#4832): an
+	// `unowned="<role>"` floor. Same failure as a mistyped @requiresRank
+	// and worse in one direction -- an unresolvable floor would admit
+	// every caller to every cluster-owned row of the concept.
+	for _, problem := range e.validateRowAuthzUnownedSlugs(context.Background()) {
+		report.AddSkip(baseloader.Skip{
+			Component: "memql.engine",
+			Keyword:   "rowAuthz",
+			Name:      "unowned",
+			Phase:     "contract-gate:rowAuthzUnowned",
+			Err:       problem.Error(),
+		})
+		if e.Component != nil && e.Logger != nil {
+			e.Logger.Error("@rowAuthz(unowned=...) names an unknown role",
+				"component", "memql.engine",
+				"detail", problem.Error())
+		}
+	}
+
 	dups := DetectDuplicateConstructs(rawTree)
 	report.SetDuplicates(dups)
 	if e.Component != nil && e.Logger != nil && len(dups) > 0 {

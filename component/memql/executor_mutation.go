@@ -1011,6 +1011,16 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 	}
+
+	// The self account is not archivable (memql#4837). Guards the STATUS
+	// FLIP on the merged payload rather than the mutation name, so a
+	// second writer cannot rediscover this in production. See
+	// accounts_self_archive_guard.go.
+	if conceptMeta.Name == conceptAccountsAccount {
+		if err := e.validateSelfAccountNotArchived(ctx, mutation.ID, payload); err != nil {
+			return nil, meta, err
+		}
+	}
 	// Self-healing base-tier immutability guard (memql#2140): a tier=base
 	// v1:healing:healedOverride is the authored/embedded deploy spine and may
 	// only be materialized by a system actor (the SeedMaterializer). Any

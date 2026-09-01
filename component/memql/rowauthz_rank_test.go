@@ -1,0 +1,426 @@
+package memql
+
+import (
+	"context"
+	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
+)
+
+// THE RANK RULES (epic memql#4832, task memql#4834).
+//
+// These run against a FIXTURE concept for the reason the composite tier's
+// tests do, and one more. The reason they share: registering a fixture is how
+// a gate is measured resolving a tier from the REAL registry rather than from
+// a decl handed straight to the function under test. The reason particular to
+// this file: the rank rules are the first tier arguments that change what an
+// existing concept's rows are worth, so pointing them at a live concept would
+// make a failure here indistinguishable from a failure in that concept's own
+// declaration.
+const declaredRankConcept = "v1:rowauthzfixture:rank"
+
+// rankFixture registers a concept declaring the rank modifiers.
+//
+// The `unowned` floor is `admin` -- rank 200 in the base ladder -- so the
+// tests below can distinguish four outcomes with one fixture: below the floor,
+// at it, above it, and unowned-vs-owned.
+func rankFixture(t *testing.T, strict bool, unowned string) *langparser.RowAuthzDecl {
+	t.Helper()
+	if _, err := LoadUnifiedConcepts(nil); err != nil {
+		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	}
+	decl := &langparser.RowAuthzDecl{
+		Tier:        langparser.RowAuthzOwned,
+		Owner:       "ownerUserId",
+		RankVisible: true,
+		RankStrict:  strict,
+		Unowned:     unowned,
+	}
+	before := memorynodes.All()
+	memorynodes.MergeAll(map[string]*memorynodes.Concept{
+		declaredRankConcept: {
+			Name:     declaredRankConcept,
+			NodeType: "rank",
+			RowAuthz: decl,
+		},
+	})
+	t.Cleanup(func() { memorynodes.ReplaceAll(before) })
+
+	// POSITIVE CONTROL, and it earns its place here more than anywhere:
+	// an undeclared concept admits everything, so without this every
+	// assertion below could pass while measuring nothing at all.
+	got := rowAuthzDeclFor(declaredRankConcept)
+	if got == nil {
+		t.Fatal("the rank fixture is not in the registry, so every assertion below would measure " +
+			"an UNDECLARED concept -- which admits everything and passes for the wrong reason")
+	}
+	if !got.RankVisible {
+		t.Fatalf("the fixture resolved to %+v, which carries no rank branch", *got)
+	}
+	return got
+}
+
+// baseLadder is the compiled fallback ladder, which is what rankOf resolves
+// against when no role catalog is readable -- the shape every test in this
+// file runs under, since none of them has a database.
+func baseLadder() roleLadder { return roleLadder{ranks: map[string]int{}} }
+
+// ---------------------------------------------------------------------
+// The floor, and the spelling that fails OPEN
+// ---------------------------------------------------------------------
+
+// TestAnUnresolvableFloorAdmitsNobody is the highest-value test in this file.
+//
+// The natural spelling of a rank floor -- `actorRank >= ladder.rankOf(slug)`
+// -- reads correctly and is a security hole: rankOf answers 0 for a slug it
+// does not know, and EVERY rank clears 0. So one typo in
+// `unowned="devleoper"` silently converts a gate into a pass-through that
+// hands every deployment-owned row to every caller, with the declaration still
+// reading like a gate to anyone reviewing it.
+//
+// This asserts the fail-CLOSED direction, and the case below it asserts the
+// instrument can move at all -- a fail-closed test that would also pass
+// against a function returning false unconditionally is not evidence.
+func TestAnUnresolvableFloorAdmitsNobody(t *testing.T) {
+	ladder := baseLadder()
+	for _, slug := range []string{"devleoper", "", "nosuchrole", "OWNER-ish"} {
+		for _, rank := range []int{0, 50, 100, 200, 300, 400, 9000} {
+			if rankFloorAdmits(ladder, slug, rank) {
+				t.Fatalf("rankFloorAdmits(%q, actorRank=%d) admitted. An unresolvable floor ranks 0 "+
+					"and every rank clears 0, so this would hand every cluster-owned row to every "+
+					"caller while the declaration still read like a gate", slug, rank)
+			}
+		}
+	}
+}
+
+// The reachable positive for the test above: a floor that DOES resolve admits
+// at and above itself, and refuses below.
+func TestAResolvableFloorAdmitsAtAndAboveItself(t *testing.T) {
+	ladder := baseLadder()
+	cases := []struct {
+		slug  string
+		rank  int
+		admit bool
+	}{
+		{"admin", 400, true},  // owner clears the admin floor
+		{"admin", 300, true},  // developer clears it -- the flipped ladder
+		{"admin", 200, true},  // admin is AT the floor
+		{"admin", 100, false}, // writer/user is below
+		{"admin", 50, false},  // reader/viewer is below
+		{"owner", 400, true},
+		{"owner", 300, false}, // developer does NOT clear an owner floor
+	}
+	for _, c := range cases {
+		if got := rankFloorAdmits(ladder, c.slug, c.rank); got != c.admit {
+			t.Fatalf("rankFloorAdmits(%q, actorRank=%d) = %v, want %v", c.slug, c.rank, got, c.admit)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------
+// The predicate the tier injects
+// ---------------------------------------------------------------------
+
+// The rank branch is OR-ED onto the rendered tier predicate, never
+// substituted for it. Both halves are load-bearing: the owner comparison keeps
+// "your own rows" true for a caller the principal table cannot rank, and the
+// rank branch adds everybody below them.
+func TestRankTierOrsTheRankBranchOntoTheOwnerTerm(t *testing.T) {
+	decl := rankFixture(t, false, "admin")
+	expr, err := rowAuthzPredicateExpr(decl)
+	if err != nil {
+		t.Fatalf("rowAuthzPredicateExpr: %v", err)
+	}
+	logical, ok := expr.(*LogicalExpression)
+	if !ok || logical.Op != LogicalOr {
+		t.Fatalf("the rank tier rendered %T, want a disjunction carrying the owner term and the rank branch", expr)
+	}
+	if !treeHasRankScope(logical) {
+		t.Fatal("the injected term carries no rank node, so the rank branch would never be resolved")
+	}
+	// The owner half must survive. Losing it is the silent failure: a
+	// caller the ladder cannot rank would lose access to their OWN rows,
+	// and every test that seeds a rankable owner would still pass.
+	if treeHasRankScope(logical.Left) {
+		t.Fatal("the rank node replaced the owner term rather than joining it; a caller the " +
+			"principal table cannot rank must keep reading their own rows")
+	}
+}
+
+// A concept declaring NO rank modifier must render exactly what it rendered
+// before this epic. This is the migration claim -- "~130 tier declarations
+// exist and none changes meaning" -- as a test rather than an assurance.
+func TestATierWithoutRankModifiersIsUnchanged(t *testing.T) {
+	for _, decl := range []*langparser.RowAuthzDecl{
+		{Tier: langparser.RowAuthzOwned, Owner: "ownerUserId"},
+		{Tier: langparser.RowAuthzOwned, Owner: "ownerUserId", ClusterOwnerBypass: true},
+		{Tier: langparser.RowAuthzClusterOwner},
+		{Tier: langparser.RowAuthzPublic},
+	} {
+		expr, err := rowAuthzPredicateExpr(decl)
+		if err != nil {
+			t.Fatalf("rowAuthzPredicateExpr(%+v): %v", decl, err)
+		}
+		if expr != nil && treeHasRankScope(expr) {
+			t.Fatalf("%+v rendered a rank node; a declaration that does not ask for rank must not get it", decl)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------
+// The row gate
+// ---------------------------------------------------------------------
+
+// rankCtx builds a context carrying an actor and a resolved scope, without a
+// database: resolveRankScope reads the principal table through the engine, and
+// these cases are about the DECISION rather than about the read.
+func rankCtx(t *testing.T, role auth.Role, userId string, unranked bool, scope *rankScope) context.Context {
+	t.Helper()
+	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{
+		UserId:   userId,
+		Role:     role,
+		Unranked: unranked,
+	})
+	memo := &rankScopeMemo{}
+	memo.once.Do(func() { memo.scope = scope })
+	return context.WithValue(ctx, rankScopeMemoKey{}, memo)
+}
+
+func scopeWith(actorRank int, read, write []string) *rankScope {
+	s := &rankScope{
+		actorRank:   actorRank,
+		ladder:      baseLadder(),
+		readOwners:  map[string]struct{}{},
+		writeOwners: map[string]struct{}{},
+	}
+	for _, id := range read {
+		addOwnerSpellings(s.readOwners, id)
+	}
+	for _, id := range write {
+		addOwnerSpellings(s.writeOwners, id)
+	}
+	return s
+}
+
+// D2 vs D3 in one table: the read rule includes peers, the write rule does
+// not. This is the one-word difference between the two decisions, and the
+// place a regression would be invisible -- a write path that kept delegating
+// to the READ admission would hand every peer write authority the moment a
+// concept declared rankVisible.
+func TestRankReadsIncludePeersAndRankWritesDoNot(t *testing.T) {
+	decl := rankFixture(t, true, "admin")
+	// The caller is a developer; `peer` is another developer, `below` is a
+	// reader. Reads admit both, writes admit only `below`.
+	scope := scopeWith(300, []string{"me", "peer", "below"}, []string{"me", "below"})
+	ctx := rankCtx(t, auth.RoleDeveloper, "me", false, scope)
+
+	cases := []struct {
+		owner     string
+		read      bool
+		write     bool
+		rationale string
+	}{
+		{"below", true, true, "a reader's row is readable and writable by a developer"},
+		{"peer", true, false, "a PEER's row is readable and READ-ONLY -- D3's whole point"},
+		{"stranger", false, false, "an owner outside the scope is neither"},
+	}
+	for _, c := range cases {
+		if got := rankAdmitsRow(ctx, decl, c.owner, true, false); got != c.read {
+			t.Fatalf("read of a row owned by %q = %v, want %v (%s)", c.owner, got, c.read, c.rationale)
+		}
+		if got := rankAdmitsRow(ctx, decl, c.owner, true, true); got != c.write {
+			t.Fatalf("write of a row owned by %q = %v, want %v (%s)", c.owner, got, c.write, c.rationale)
+		}
+	}
+}
+
+// rankStrict is what admits a write at all. A concept declaring only
+// rankVisible gets the read widening and keeps the owned tier's write rule.
+func TestRankWritesNeedTheStrictModifier(t *testing.T) {
+	decl := rankFixture(t, false, "")
+	scope := scopeWith(300, []string{"below"}, []string{"below"})
+	ctx := rankCtx(t, auth.RoleDeveloper, "me", false, scope)
+	if !rankAdmitsRow(ctx, decl, "below", true, false) {
+		t.Fatal("rankVisible must still admit the READ")
+	}
+	if rankAdmitsRow(ctx, decl, "below", true, true) {
+		t.Fatal("a concept declaring rankVisible but NOT rankStrict must keep the owned tier's " +
+			"write rule; granting the write here would make the two modifiers one")
+	}
+}
+
+// An UNOWNED row (present and empty) is the deployment's. It is admitted at
+// the declared floor and refused below it -- and refused for WRITES at every
+// rank, because a row nobody owns has no owner to be strictly below.
+func TestUnownedRowsAreAdmittedAtTheDeclaredFloorOnly(t *testing.T) {
+	decl := rankFixture(t, true, "admin")
+	for _, c := range []struct {
+		rank  int
+		admit bool
+	}{{400, true}, {300, true}, {200, true}, {100, false}, {50, false}} {
+		ctx := rankCtx(t, auth.RoleDeveloper, "me", false, scopeWith(c.rank, nil, nil))
+		if got := rankAdmitsRow(ctx, decl, "", true, false); got != c.admit {
+			t.Fatalf("unowned row read at rank %d = %v, want %v", c.rank, got, c.admit)
+		}
+		if rankAdmitsRow(ctx, decl, "", true, true) {
+			t.Fatalf("unowned row WRITE at rank %d was admitted; a row nobody owns has no owner "+
+				"to be strictly below, so rank-strict has no answer for it", c.rank)
+		}
+	}
+}
+
+// An ABSENT owner field is a different thing from a present-and-empty one, and
+// stays denied at every rank -- matching what the owned tier has always done
+// with one: "a row that cannot say who owns it is not a row this caller can be
+// shown to own".
+func TestAnAbsentOwnerFieldIsNeverAdmittedByRank(t *testing.T) {
+	decl := rankFixture(t, true, "admin")
+	ctx := rankCtx(t, auth.RoleOwner, "me", false, scopeWith(400, nil, nil))
+	if rankAdmitsRow(ctx, decl, "", false, false) {
+		t.Fatal("a row with no owner FIELD was admitted by the rank branch. Absent and " +
+			"present-and-empty must stay distinguishable: only the second is a deliberate " +
+			"statement of cluster ownership")
+	}
+}
+
+// With no scope resolved, the rank branch declines to widen. It is a DISJUNCT,
+// so declining leaves exactly the pre-rank behaviour -- a row withheld, never
+// a row disclosed.
+func TestWithNoResolvedScopeTheRankBranchWithholds(t *testing.T) {
+	decl := rankFixture(t, true, "admin")
+	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "me", Role: auth.RoleOwner})
+	if rankAdmitsRow(ctx, decl, "anyone", true, false) || rankAdmitsRow(ctx, decl, "", true, false) {
+		t.Fatal("the rank branch widened with no resolved scope; an unresolvable gate must " +
+			"withhold, and it can do so safely here only because it is a disjunct")
+	}
+}
+
+// ---------------------------------------------------------------------
+// D4 -- the actors the rank rules do not govern
+// ---------------------------------------------------------------------
+
+// Every non-principal constructor sets Unranked. Without it, a rank-strict
+// concept turns every retention sweep and boot seed into a peer-write and
+// stops it -- and a sweep that retires nothing looks exactly like a sweep with
+// nothing to retire.
+func TestEveryNonPrincipalActorIsUnranked(t *testing.T) {
+	if ac := auth.MaintenanceActor("auditEventRetentionSweep"); ac == nil || !ac.Unranked {
+		t.Fatal("auth.MaintenanceActor is not marked Unranked; every retention sweep on a " +
+			"rank-strict concept would be refused as a peer-write")
+	}
+	ctx := auth.ContextWithUserActor(context.Background(), "someone")
+	ac, _ := auth.AccessFromContext(ctx)
+	if ac == nil || !ac.Unranked {
+		t.Fatal("auth.ContextWithUserActor is not marked Unranked; borrowed authority carries a " +
+			"synthetic RoleWriter, and ranking it would refuse a borrowed admin their own rows")
+	}
+	// The seed materializer's actor is built inside this package.
+	seedCtx := systemActorContext(context.Background())
+	seedAc, _ := auth.AccessFromContext(seedCtx)
+	if seedAc == nil || !seedAc.Unranked {
+		t.Fatal("the seed materializer's actor is not marked Unranked; a boot seed refused as a " +
+			"peer-write is a cluster that will not finish starting")
+	}
+}
+
+// D3 withdraws the cluster-owner WRITE escape on a rank-strict concept -- and
+// keeps it for an unranked actor, which is the D4 clause that keeps the
+// cluster booting.
+func TestRankStrictWithdrawsTheClusterOwnerEscapeExceptForUnrankedActors(t *testing.T) {
+	strict := &langparser.RowAuthzDecl{
+		Tier: langparser.RowAuthzOwned, Owner: "ownerUserId", RankVisible: true, RankStrict: true,
+	}
+	plain := &langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: "ownerUserId"}
+
+	human := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "op", Role: auth.RoleOwner})
+	if _, escaped := rowAuthzWriteEscapeFor(human, strict); escaped {
+		t.Fatal("a cluster owner still escaped the write guard on a rank-strict concept. " +
+			"'Peer rows are read-only INCLUDING owner-to-owner' cannot be true while a blanket " +
+			"escape returns before any owner is resolved")
+	}
+	if _, escaped := rowAuthzWriteEscapeFor(human, plain); !escaped {
+		t.Fatal("the cluster-owner escape was withdrawn from a concept that declares no rank " +
+			"rule; the withdrawal must be scoped to rankStrict or ~130 declarations change meaning")
+	}
+	sweep := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("auditEventRetentionSweep"))
+	if _, escaped := rowAuthzWriteEscapeFor(sweep, strict); !escaped {
+		t.Fatal("an unranked actor lost the escape on a rank-strict concept (D4). Every retention " +
+			"sweep and boot seed on that concept would stop, silently")
+	}
+}
+
+// ---------------------------------------------------------------------
+// #4817 -- a non-principal cannot own a row
+// ---------------------------------------------------------------------
+
+// The stamp-undo three files claimed and nothing implemented.
+func TestANonPrincipalActorDoesNotOwnTheRowItCreates(t *testing.T) {
+	rankFixture(t, false, "admin")
+	seed := auth.MaintenanceActor("seedSelfAccount")
+	ctx := auth.ContextWithAccess(context.Background(), seed)
+
+	payload := map[string]any{"ownerUserId": seed.UserId, "name": "My company"}
+	undoNonPrincipalOwnerStamp(ctx, declaredRankConcept, payload)
+	if got := payload["ownerUserId"]; got != "" {
+		t.Fatalf("ownerUserId = %q after a maintenance-actor create, want the empty string. "+
+			"A synthetic id resolves to no principal and therefore to no rank, which makes the "+
+			"row's visibility something nothing can reason about", got)
+	}
+	if _, present := payload["ownerUserId"]; !present {
+		t.Fatal("the field was DELETED rather than emptied. Present-and-empty is a statement " +
+			"of cluster ownership; absent is a row that never said, and the rank branch reads " +
+			"them differently on purpose")
+	}
+}
+
+// It only ever deletes the actor's OWN id -- so a system actor provisioning a
+// row FOR a user leaves that row theirs. Without this the same rule would
+// quietly un-own every row any automation ever created on somebody's behalf.
+func TestTheOwnerUndoNeverTouchesAThirdPartysRow(t *testing.T) {
+	rankFixture(t, false, "admin")
+	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("seedSelfAccount"))
+	payload := map[string]any{"ownerUserId": "a-real-user"}
+	undoNonPrincipalOwnerStamp(ctx, declaredRankConcept, payload)
+	if payload["ownerUserId"] != "a-real-user" {
+		t.Fatalf("ownerUserId = %v; a system actor provisioning a row FOR a user must leave it theirs",
+			payload["ownerUserId"])
+	}
+}
+
+// A real principal's create is untouched -- the reachable positive for the two
+// tests above.
+func TestAPrincipalsOwnStampSurvives(t *testing.T) {
+	rankFixture(t, false, "admin")
+	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "u1", Role: auth.RoleWriter})
+	payload := map[string]any{"ownerUserId": "u1"}
+	undoNonPrincipalOwnerStamp(ctx, declaredRankConcept, payload)
+	if payload["ownerUserId"] != "u1" {
+		t.Fatalf("ownerUserId = %v; an ordinary caller's own stamp must survive", payload["ownerUserId"])
+	}
+}
+
+// ---------------------------------------------------------------------
+// The self account (memql#4837)
+// ---------------------------------------------------------------------
+
+// Archive is the only exit in this model -- no unarchive, no delete -- so
+// archiving the self account is a one-way trip to a cluster with no company.
+func TestTheSelfAccountCannotBeArchived(t *testing.T) {
+	e := &MemQLEngine{}
+	ctx := context.Background()
+	if err := e.validateSelfAccountNotArchived(ctx, selfAccountId, map[string]any{"status": "archived"}); err == nil {
+		t.Fatal("archiving the self account was allowed")
+	}
+	// Every other edit stays legal, including on the self row: a locked
+	// field would make a first-run typo permanent, and there is no delete.
+	if err := e.validateSelfAccountNotArchived(ctx, selfAccountId, map[string]any{"status": "active", "name": "Renamed"}); err != nil {
+		t.Fatalf("a non-archiving edit to the self account was refused: %v", err)
+	}
+	// An ordinary client account archives exactly as before.
+	if err := e.validateSelfAccountNotArchived(ctx, "v1:accounts:account:acme", map[string]any{"status": "archived"}); err != nil {
+		t.Fatalf("archiving an ordinary account was refused: %v", err)
+	}
+}
