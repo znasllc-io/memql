@@ -10,13 +10,22 @@ owner: znas
 # CodeQL alert triage
 
 The default CodeQL suite runs on every push to `main`. This is the standing
-record of how its open alerts were resolved. Twenty-six were triaged: the 23
-open on `main`, plus 3 that arrived with the local-models-fleet epic.
+record of how its open alerts were resolved, a round at a time.
 
-**Six were real and are fixed in code. Twenty were false positives.** All six
-fixes cleared the analysis -- alerts #1003-#1008 are `state=fixed`, not
-dismissed -- and the twenty carry a dismissal reason each. `main` has no open
-code-scanning alert.
+**Round one (2026-08-26) -- twenty-six alerts:** the 23 open on `main`, plus 3
+that arrived with the local-models-fleet epic. **Six were real and are fixed in
+code. Twenty were false positives.** All six fixes cleared the analysis --
+alerts #1003-#1008 are `state=fixed`, not dismissed -- and the twenty carry a
+dismissal reason each.
+
+**Round two (2026-08-31) -- three alerts** (#1032-#1034, memql#4777). All three
+were real and all three are fixed in code; nothing was dismissed, so they
+appear under [Fixed in code](#fixed-in-code) only.
+
+This file deliberately does NOT record a count of what is open now. That is a
+live fact with a one-line query (see [Re-triaging](#re-triaging)), and a
+sentence here saying `main` is clean goes quietly false the next time the suite
+runs -- which is exactly what happened between the two rounds above.
 
 Dismissals live on the alert itself (GitHub keeps them across re-scans of the
 same finding). This file exists because a dismissal reason is one sentence and
@@ -81,11 +90,12 @@ exactly what the guard refuses. `TestTheBulkDownloadGuardIsConsulted` removes
 the seam and checks the refusal returns, so the seam cannot become the way
 `streamBulk` quietly stops consulting the guard.
 
-### `go/incorrect-integer-conversion` x4 (high)
+### `go/incorrect-integer-conversion` x6 (high)
 
-`integrations/shopify/store.go` (`mapInt`) and
-`component/worker/delegation_probe.go` (`intFromRow`). Both narrowed `int64`
-and `float64` to `int` bare.
+Round one, x4: `integrations/shopify/store.go` (`mapInt`) and
+`component/worker/delegation_probe.go` (`intFromRow`). Round two, x2:
+`integrations/agents/factory.go` (`intFromAnyLoose`). All three narrowed
+`int64` and `float64` to `int` bare.
 
 Both wider cases are reachable with a value `int` cannot hold: JSON decodes
 every number to `float64`, a mirrored Shopify field is whatever that vendor's
@@ -98,6 +108,69 @@ nothing to show why.
 Now saturating, which keeps the sign and the ordering -- all a count or a limit
 is read for. `NaN` has no ordering and so no clamp: it becomes the same zero an
 absent field does.
+
+**This rule is the repo's recurring one, and what recurs is not the bug -- it
+is the SWEEP.** Four rounds have now fixed it: `integrations/library`
+(2026-06-19, alerts #301/#302), `integrations/dailyspace` (2026-07-17),
+`integrations/shopify` + `component/worker` (2026-08-26), and
+`integrations/agents` (2026-08-31). Each round fixed exactly the site CodeQL
+named. `intFromAnyLoose` was written on 2026-05-21 and so PREDATES every one of
+them: the oldest instance in the tree survived three rounds of fixing this
+exact defect, because no round asked what else looked like it.
+
+**Why a green scan is not the same as a clean tree here.** The query is
+taint-driven -- it flags a narrowing only where it can trace the value back to
+a `strconv.Parse*`. Every site is the same shape, a small `func …(v any) int`
+decoding a JSON-ish payload field, and the ones with no traceable parser
+upstream are invisible to it. Measured on 2026-08-31, after this round:
+
+```bash
+# every `case float64:` / `case int64:` arm returning a bare int(x)
+git grep -n -A2 -E '^\s+case (float64|int64):$' -- '*.go' ':!*_test.go' \
+  | grep -E 'return int\(|= int\(' | grep -v clamp
+```
+
+**22 files, 47 arms, none of them flagged.** They were deliberately NOT swept
+in round two: the ask was the open alerts, and a 22-file change is a different
+review. The number above is a measurement to re-take, not a fact to trust --
+run the command.
+
+The check when adding another such helper is therefore not "is this value big",
+and not "did the scan stay green" -- it is that a bare `int(x)` in a `float64`
+or `int64` arm is the defect, whatever the field means and whoever can prove
+the value's provenance.
+
+`factory.go`'s value is `maxSkills`, a per-role cap handed to the
+`agentFactoryAnalyze` prompt, and it makes the cost of the wrong saturation
+concrete. Truncation there does not merely lose magnitude, it INVERTS the
+ranking the field exists to express -- a role declaring 2^32+1 presents to the
+model as the most restrictive in the catalog rather than the least -- and
+saturating to zero would have read as "this role may hold no skills at all".
+Saturating to `math.MaxInt` is the only one of the three that preserves the
+order. Measured, not reasoned: against the previous conversion the new tests
+report `-9223372036854775808` on amd64, because Go leaves the out-of-range
+float conversion implementation-defined and the hardware answers with the
+integer indefinite value.
+
+### `js/superfluous-trailing-arguments` x1 (warning)
+
+`clients/os/test/setup.ts`. The jsdom shim installed as the global
+`ResizeObserver` declared no constructor, while the real API takes a
+`ResizeObserverCallback`.
+
+**The alert pointed at the wrong file, and that is the interesting part.**
+CodeQL resolves the global to the shim, so the finding landed on the correct
+production call in `clients/os/src/wallpaper/MemoryField.tsx` --
+`new ResizeObserver(resize)` -- as passing a superfluous argument. A gap in a
+TEST double is not privately incomplete; it becomes a claim about application
+code that is right.
+
+The shim now declares the parameters and `implements ResizeObserver`. Both
+halves of that were checked rather than assumed: renaming a method fails the
+build (`TS2420`), and dropping the constructor parameter does NOT, because
+TypeScript accepts a signature with fewer parameters anywhere one with more is
+wanted. So `implements` gates the instance side only, and the comment in the
+file says so instead of claiming a guard that is not there.
 
 ---
 
