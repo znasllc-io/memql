@@ -343,6 +343,11 @@ func (s *Store) StageOutbound(ctx context.Context, requestID, target, subject, b
 // point of send, the RFC 8058 pair attached, the resolved sending identity
 // applied, the outcome ledgered. Reached as a builtin rather than as a Go call
 // so this package does not depend on component/campaigns' internals.
+//
+// A kind-prefixed `builtin <name>(...)` string IS executable through the
+// engine, and the precedent is shipped: dsl/memql/tools.memql declares
+// `@handler(type="query", query="builtin help(name: \"$args.name\")")`, and
+// tool_execution.go's query arm hands exactly that text to Execute.
 func (s *Store) SendToRecipient(ctx context.Context, templateID, recipientID, senderIdentityID, ruleID string) error {
 	args := []arg{
 		{"templateId", memql.BareShortId(templateID)},
