@@ -129,6 +129,9 @@ func systemActorContext(ctx context.Context) context.Context {
 		// role ladder, so the rank rules skip it. A boot seed refused as a
 		// peer-write is a cluster that will not finish starting.
 		Unranked: true,
+		// And SYNTHETIC -- the boot seed is the cluster acting, and its rows
+		// are the deployment's rather than any principal's.
+		Synthetic: true,
 	})
 }
 

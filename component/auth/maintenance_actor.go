@@ -133,6 +133,9 @@ func MaintenanceActor(automationName string) *AccessContext {
 		// rank-strict concept would read this actor as an owner writing a
 		// PEER owner's row and refuse the sweep.
 		Unranked: true,
+		// And SYNTHETIC: this is the cluster acting, so it can never be a
+		// row's owner. See AccessContext.Synthetic.
+		Synthetic: true,
 	}
 }
 

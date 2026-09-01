@@ -95,6 +95,9 @@ func contextWithSystemActor(ctx context.Context, automationName string) context.
 			// cluster acting, not a principal. accessRole above decides what
 			// it may reach; it is not a rung, and the rank rules skip it.
 			Unranked: true,
+			// And SYNTHETIC: an automation is the cluster acting, so a row it
+			// creates is not owned by the automation.
+			Synthetic: true,
 		})
 	}
 	return ctx

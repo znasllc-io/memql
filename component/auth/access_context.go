@@ -101,6 +101,28 @@ type AccessContext struct {
 	// system identity" would restate per construct a rule the engine makes
 	// once.
 	Unranked bool
+
+	// Synthetic marks an actor that is THE CLUSTER ACTING RATHER THAN A
+	// PERSON, and it is a narrower statement than Unranked above.
+	//
+	// THE TWO ARE NOT THE SAME PROPERTY, and conflating them is a mistake
+	// this field exists because of. Unranked says "the rank rules do not
+	// govern this actor". Synthetic says "this actor can never be a row's
+	// OWNER". All three of MaintenanceActor, the seed materializer and an
+	// automation's system actor are both. BORROWED AUTHORITY
+	// (ContextWithUserActor) is only the first: its synthetic RoleWriter must
+	// not be read as a rung, but its UserId is a real person's, and rows it
+	// creates are genuinely theirs.
+	//
+	// The failure that separated them: undoNonPrincipalOwnerStamp keyed on
+	// Unranked and blanked `ownerUserId` on every row written through
+	// borrowed authority -- the worker's delegation policy, an app session --
+	// leaving them owned by nobody. Three db-gated tests caught it; no unit
+	// test could, because the stamp only happens on a real write.
+	//
+	// Set by the three synthetic constructors and by nothing a request can
+	// reach, exactly like ConnectorName and IsAnonymous above.
+	Synthetic bool
 }
 
 // AccessContextKey is the context key for AccessContext values.
@@ -177,6 +199,11 @@ func ContextWithUserActor(ctx context.Context, userId string) context.Context {
 	// rank 100" -- the campaigns drain worker borrows a campaign owner who
 	// may be an admin, and a rank comparison against the borrowed role
 	// would refuse them their own rows.
+	// Unranked but NOT Synthetic. The synthetic RoleWriter above must not be
+	// read as a rung -- the campaigns worker borrows a campaign owner who may
+	// be an admin -- but the UserId is a real person's, and a row created here
+	// is genuinely theirs. See AccessContext.Synthetic for the failure that
+	// separated the two.
 	return ContextWithAccess(ctx, &AccessContext{UserId: userId, Role: RoleWriter, Unranked: true})
 }
 

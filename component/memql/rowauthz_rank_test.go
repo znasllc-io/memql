@@ -376,6 +376,68 @@ func TestANonPrincipalActorDoesNotOwnTheRowItCreates(t *testing.T) {
 	}
 }
 
+// BORROWED AUTHORITY IS NOT SYNTHETIC, and this is the regression test for the
+// mistake that separated the two flags.
+//
+// ContextWithUserActor is Unranked -- its RoleWriter is a stand-in and must
+// not be read as a rung -- and it is NOT Synthetic: its UserId is a real
+// person's, and a row it creates is genuinely theirs. Keying the owner undo on
+// Unranked blanked `ownerUserId` on every row written through it (the worker's
+// delegation policy, an app session), leaving them owned by nobody.
+//
+// It was caught by three db-gated tests and could not have been caught by a
+// unit test here, because the stamp only happens on a real write -- which is
+// why this asserts the FLAGS, the thing a unit test can see, rather than
+// re-staging the write.
+func TestBorrowedAuthorityStillOwnsTheRowsItCreates(t *testing.T) {
+	rankFixture(t, false, "admin")
+	ctx := auth.ContextWithUserActor(context.Background(), "a-real-person")
+	ac, _ := auth.AccessFromContext(ctx)
+	if ac == nil {
+		t.Fatal("ContextWithUserActor installed no access context")
+	}
+	if !ac.Unranked {
+		t.Fatal("borrowed authority must stay Unranked: its RoleWriter is a stand-in, and " +
+			"ranking it would refuse a borrowed admin their own rows")
+	}
+	if ac.Synthetic {
+		t.Fatal("borrowed authority must NOT be Synthetic. It acts as a real person, so the " +
+			"rows it creates are that person's -- marking it synthetic blanks their owner and " +
+			"leaves the row owned by nobody")
+	}
+	payload := map[string]any{"ownerUserId": "a-real-person"}
+	undoNonPrincipalOwnerStamp(ctx, declaredRankConcept, payload)
+	if payload["ownerUserId"] != "a-real-person" {
+		t.Fatalf("ownerUserId = %v after a borrowed-authority create, want the person's own id",
+			payload["ownerUserId"])
+	}
+}
+
+// The three SYNTHETIC constructors carry both flags. Unranked alone would
+// leave them subject to the owner undo's counterpart problem -- a boot seed
+// owned by `system:seedMaterializer` is a row whose visibility nothing can
+// reason about (memql#4817).
+func TestTheSyntheticActorsCarryBothFlags(t *testing.T) {
+	for name, ac := range map[string]*auth.AccessContext{
+		"MaintenanceActor":      auth.MaintenanceActor("seedSelfAccount"),
+		"the seed materializer": mustAccess(t, systemActorContext(context.Background())),
+	} {
+		if ac == nil {
+			t.Fatalf("%s built no access context", name)
+		}
+		if !ac.Unranked || !ac.Synthetic {
+			t.Fatalf("%s: Unranked=%v Synthetic=%v -- a synthetic actor is both, and the two "+
+				"say different things (see AccessContext.Synthetic)", name, ac.Unranked, ac.Synthetic)
+		}
+	}
+}
+
+func mustAccess(t *testing.T, ctx context.Context) *auth.AccessContext {
+	t.Helper()
+	ac, _ := auth.AccessFromContext(ctx)
+	return ac
+}
+
 // It only ever deletes the actor's OWN id -- so a system actor provisioning a
 // row FOR a user leaves that row theirs. Without this the same rule would
 // quietly un-own every row any automation ever created on somebody's behalf.

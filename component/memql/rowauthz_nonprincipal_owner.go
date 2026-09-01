@@ -41,7 +41,18 @@ package memql
 // actually about; an operator writing a user's row arrives with that user's id
 // in the payload, it is not the caller's own, and nothing is touched.
 //
-// THE DISCRIMINATOR IS AccessContext.Unranked, NOT AN ID PREFIX. The site
+// THE DISCRIMINATOR IS AccessContext.Synthetic, AND NOT Unranked -- the two
+// are different properties and this rule needs the narrower one.
+//
+// Unranked says "the rank rules do not govern this actor"; Synthetic says
+// "this actor can never be a row's owner". Borrowed authority
+// (ContextWithUserActor) is the first and not the second: its RoleWriter is a
+// stand-in, but its UserId is a real person's and rows it creates are theirs.
+// Keying this on Unranked blanked `ownerUserId` on every row written through
+// borrowed authority -- the worker's delegation policy, an app session --
+// leaving them owned by nobody, and three db-gated tests are what caught it.
+//
+// AND IT IS NOT AN ID PREFIX EITHER. The site
 // version tests for a `system:` prefix, and this tree says in as many words
 // why that is the weaker form: "the prefix exists so a log line is legible; it
 // is not a protocol, and inferring an authorization decision from a string
@@ -70,7 +81,7 @@ func undoNonPrincipalOwnerStamp(ctx context.Context, conceptName string, payload
 		return
 	}
 	ac, _ := auth.AccessFromContext(ctx)
-	if ac == nil || !ac.Unranked {
+	if ac == nil || !ac.Synthetic {
 		return
 	}
 	decl := rowAuthzDeclFor(conceptName)
