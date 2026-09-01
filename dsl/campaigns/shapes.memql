@@ -20,6 +20,7 @@ shape audience audienceFull {
   name
   description
   status
+  accountId
   row.createdAt
 }
 
@@ -35,6 +36,7 @@ shape recipient recipientFull {
   subscriptionStatus
   unsubscribedAt
   source
+  fields
   row.createdAt
 }
 
@@ -49,6 +51,7 @@ shape template templateFull {
   textBody
   htmlBody
   status
+  accountId
   row.createdAt
 }
 
@@ -71,7 +74,12 @@ shape campaign campaignFull {
   recipientCount
   sentCount
   failedCount
+  skippedCount
   lastError
+  accountId
+  senderIdentityId
+  trackOpens
+  trackClicks
   row.createdAt
 }
 
@@ -186,5 +194,71 @@ shape consentEvent consentEventFull {
   reason
   recipientId
   campaignId
+  row.createdAt
+}
+
+/// Full sending-identity projection (memql#4821). Every field, because none of them is a secret --
+/// an identity row is a declaration that a mailbox exists and may be used, and the whole point is
+/// that an operator can read it back and see what their campaigns will send as.
+@row
+shape senderIdentity senderIdentityFull {
+  row.id
+  ownerUserId
+  address
+  fromName
+  replyTo
+  accountId
+  status
+  notes
+  row.createdAt
+}
+
+/// Full engagement-event projection (memql#4823) -- one recorded open or click.
+@row
+shape engagementEvent engagementEventFull {
+  row.id
+  ownerUserId
+  campaignId
+  deliveryId
+  kind
+  url
+  occurredAt
+  row.createdAt
+}
+
+/// The delivery reference alone, for folding a UNIQUE open/click figure in Go. Deliberately lean:
+/// this is the only bounded read in the stats path, and every field it does not project is more
+/// rows that fit under the same bound. It is the `deliveryLedgerEntry` argument applied again.
+@row
+shape engagementEvent engagementDeliveryRef {
+  row.id
+  deliveryId
+}
+
+/// Full event-email-rule projection (memql#4829). Carries the generated bundle and construct refs
+/// alongside the form fields, because "which automation is this rule" is the first question anybody
+/// debugging one asks, and the answer living only in a log line is how it stays unanswered.
+@row
+shape emailRule emailRuleFull {
+  row.id
+  ownerUserId
+  name
+  description
+  accountId
+  triggerConcept
+  eventKind
+  condition
+  templateId
+  recipientMode
+  recipientRoles
+  audienceId
+  recipientField
+  senderIdentityId
+  status
+  bundleId
+  constructName
+  lastError
+  lastFiredAt
+  firedCount
   row.createdAt
 }

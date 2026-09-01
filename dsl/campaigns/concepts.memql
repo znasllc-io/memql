@@ -9,27 +9,52 @@
 // per-row machinery as the rest of the graph. A campaign editor is then a
 // layout over queries and mutations, not a new subsystem.
 //
-// EIGHT CONCEPTS. Five answer the four questions a send has to answer --
-// who, what, when, and what happened -- and two are the sending engine's
-// own state (memql#3348):
+// THIRTEEN CONCEPTS. Six answer the five questions a send has to answer --
+// who, what, from whom, when, and what happened -- four are the sending
+// engine's own state (memql#3348), and three are the compliance, engagement
+// and automation surfaces layered on top:
 //
-//   audience     WHO        a named set of addresses
-//   recipient    WHO        one address in an audience, with its subscription state
-//   template     WHAT       the subject + bodies, authored once and reused
-//   campaign     WHEN       audience x template x schedule, plus the send state
-//   delivery     OUTCOME    one row per recipient per campaign
-//   sendJob      ENGINE     the per-campaign send run the worker drains
-//   suppression  ENGINE     the cluster-wide do-not-mail list, digest-keyed
-//   consentEvent EXPORT    append-only grant/withdraw/bounce/complaint/suppress
+//   audience         WHO        a named set of addresses
+//   recipient        WHO        one address in an audience, with its subscription state
+//   template         WHAT       the subject + bodies, authored once and reused
+//   senderIdentity   FROM       a mailbox this deployment may send as (memql#4821)
+//   campaign         WHEN       audience x template x schedule, plus the send state
+//   delivery         OUTCOME    one row per recipient per campaign
+//   sendJob          ENGINE     the per-campaign send run the worker drains
+//   suppression      ENGINE     the cluster-wide do-not-mail list, digest-keyed
+//   reputationWindow ENGINE     per (identity, domain, day) deliverability counters
+//   warmupState      ENGINE     the evidence-driven ramp's own decision record
+//   consentEvent     EXPORT     append-only grant/withdraw/bounce/complaint/suppress
+//   engagementEvent  EXPORT     append-only open/click, one row per tracked hit (memql#4823)
+//   emailRule        AUTOMATION "when X happens on concept Y, send template Z" (memql#4829)
 //
-// PER-ROW AUTHZ TIER: owned, on the five operator-facing concepts. Every row
-// carries ownerUserId, every concept declares @rowAuthz(owner="ownerUserId"),
-// every mutation stamps that field from actor.userId rather than from a caller
-// argument, and every query names it as a top-level conjunct. A caller
-// therefore cannot read, create, retarget or delete another operator's
-// campaign even with its id. Shared / team-owned campaigns are a deliberate
-// non-goal for now: "owned" is the tier that is enforced end to end today, and
-// widening it later is a tier change plus a grant concept, not a re-model.
+// The census used to say EIGHT and list nine, having been written before the
+// reputation and warmup rows landed. A count in a header is a claim the file
+// makes about itself; keep it true when you add to this file.
+//
+// PER-ROW AUTHZ TIER: COMPOSITE, on the nine operator-facing concepts --
+// @rowAuthz(owner="ownerUserId", clusterOwner) (memql#4820, program P2). Every
+// row carries ownerUserId, every mutation stamps that field from actor.userId
+// rather than from a caller argument, and every query names the composite
+// predicate `(ownerUserId==actor.userId || actor.isClusterOwner==true)` as a
+// top-level conjunct.
+//
+// WHY THE SECOND TERM, AND WHAT IT DOES NOT BUY. These rows became a
+// multi-client product surface: one deployment runs campaigns for several
+// accounts, and the person who has to answer "why did this client's send
+// stop" is the cluster owner. A plain owner tier has no cluster-owner escape
+// on the READ path -- enforceRowAuthzOnPlan ANDs the owned predicate
+// unconditionally -- so operator oversight would not merely be unimplemented,
+// it would not be EXPRESSIBLE, and every fleet-wide campaigns view would
+// silently render one person's subset.
+//
+// The second argument is READ-ONLY by construction: the WRITE guard ignores it
+// (memql#4312), so direct row writes stay owner-scoped exactly as before. A
+// cluster owner can therefore SEE another operator's campaign and drive its
+// builtins -- whose gate is "can the caller read the campaign row" -- and
+// cannot rewrite its content behind the owner's back. Full team sharing (a
+// granted tier over a membership concept) stays a deliberate non-goal; this is
+// oversight, not sharing.
 //
 // THE TWO ENGINE CONCEPTS ARE clusterOwner, NOT owned, and the split is the
 // load-bearing part of the sending design (memql#3348).
@@ -65,6 +90,8 @@
 // which is a change from what this header said before memql#3348 -- see the
 // `delivery.outboundRequestId` field doc for the three reasons.
 
+use accounts.concepts.{ account }
+use authoring.concepts.{ bundle }
 use identity.concepts.{ user }
 use platform.concepts.{ outboundRequest }
 
@@ -74,14 +101,16 @@ use platform.concepts.{ outboundRequest }
 /// rows rather than one enormous payload. Per-row authz: owned -- ownerUserId is stamped from
 /// actor.userId on every write and every read gates on ownerUserId==actor.userId.
 @displayCard(primary="name", secondary="description", tertiary="ownerUserId", status="status")
-@rowAuthz(owner="ownerUserId")
+@rowAuthz(owner="ownerUserId", clusterOwner)
 concept audience {
   ownerUserId  string!  @description("v1:identity:user.id that owns this audience. Stamped from actor.userId at create time and re-stamped on every update, so ownership can never be reassigned by a caller. The load-bearing per-row authz key.")
   name         string!  @description("Short operator-facing name for the audience, e.g. 'Beta waitlist'. The primary display field; not required to be unique.")
   description  string   @description("What this audience is and how someone lands in it. Free text, shown under the name in the portal's audience list.")
   status       enum("active", "archived")  @default("active")  @description("Lifecycle. 'active' audiences are offered when authoring a campaign; 'archived' ones are kept for the history their past campaigns reference but are hidden from the picker. Audiences are never deleted -- a deleted audience would orphan every delivery record that names it.")
+  accountId    string   @description("Optional v1:accounts:account.id this audience is FOR -- the client whose work it is. A RECORD, NEVER A VISIBILITY SCOPE (accounts D1): no query in this tree narrows a read because of it, and two people opening the same account see different rollups because the account is shared and the rows are not. Empty is the ordinary case and means the operator's own work; the OS app requires picking one at create, which is app behaviour rather than schema.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
 }
 
 /// One email address in an audience, with the subscription state that decides whether it may be
@@ -90,7 +119,7 @@ concept audience {
 /// future send, including sends of campaigns authored before the unsubscribe. Per-row authz: owned
 /// via ownerUserId, mirrored from the parent audience at create time.
 @displayCard(primary="email", secondary="displayName", tertiary="audienceId", status="subscriptionStatus")
-@rowAuthz(owner="ownerUserId")
+@rowAuthz(owner="ownerUserId", clusterOwner)
 concept recipient {
   ownerUserId         string!  @description("v1:identity:user.id that owns this recipient row -- the owner of the parent audience, stamped from actor.userId. The per-row authz key.")
   audienceId          string!  @description("v1:campaigns:audience.id this address belongs to. A person in two audiences is two rows, so a per-audience unsubscribe is expressible and a global one is a sweep.")
@@ -99,6 +128,7 @@ concept recipient {
   subscriptionStatus  enum("subscribed", "unsubscribed", "bounced", "complained")  @default("subscribed")  @description("Whether this address may be mailed. 'subscribed' is the only sendable state. 'unsubscribed' is the recipient's own choice and is permanent until they opt back in; 'bounced' and 'complained' are the provider's verdict and exist as distinct states because they mean different things to a deliverability review -- a bounce is a bad address, a complaint is a reputational event.")
   unsubscribedAt      datetime  @description("When the address left the subscribed state. Empty while subscribed. Recorded rather than inferred from row history so a suppression check is one field read.")
   source              enum("manual", "import", "signup")  @default("manual")  @description("How the address got here. 'manual' = typed into the portal, 'import' = bulk upload, 'signup' = a product flow added it. Provenance a deliverability review asks for first when complaint rates rise.")
+  fields              object  @pii  @description("Per-recipient merge data -- every column a CSV import carried that was not `email` or `displayName`, verbatim, as a flat string map (memql#4822). Reachable from a template as {{fields.<key>}} against the CLOSED merge-tag set; the renderer builds a strings.NewReplacer over the enumerable keys rather than evaluating a template language, so a value here is substituted and never executed. Marked @pii: an import's spare columns routinely carry names, companies and account numbers, and the deletion path must reach them.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="audienceId", target=audience, direction="outgoing")
@@ -109,7 +139,7 @@ concept recipient {
 /// retyped, and so editing copy is a different action (and a different authorization decision, later)
 /// from scheduling a send. Per-row authz: owned.
 @displayCard(primary="name", secondary="subject", tertiary="ownerUserId", status="status")
-@rowAuthz(owner="ownerUserId")
+@rowAuthz(owner="ownerUserId", clusterOwner)
 concept template {
   ownerUserId  string!  @description("v1:identity:user.id that owns this template. Stamped from actor.userId. The per-row authz key.")
   name         string!  @description("Operator-facing name for the template, e.g. 'August product update'. Distinct from the subject line, which is what the recipient sees.")
@@ -117,8 +147,51 @@ concept template {
   textBody     string!  @description("The plain-text body. Required, not optional: a text alternative is what keeps a message out of the spam bucket and readable in a client that refuses HTML.")
   htmlBody     string   @description("Optional HTML alternative. When present the message goes out as multipart/alternative with text first.")
   status       enum("draft", "ready", "archived")  @default("draft")  @description("Authoring lifecycle. 'draft' is being written; 'ready' means an operator has decided it may be attached to a campaign; 'archived' keeps it readable for the campaigns that referenced it without offering it in the picker.")
+  accountId    string   @description("Optional v1:accounts:account.id this template is FOR -- the client whose work it is. A RECORD, NEVER A VISIBILITY SCOPE (accounts D1): no query in this tree narrows a read because of it, and two people opening the same account see different rollups because the account is shared and the rows are not. Empty is the ordinary case and means the operator's own work; the OS app requires picking one at create, which is app behaviour rather than schema.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+}
+
+/// A mailbox this deployment may send campaign mail AS -- the "from whom" of a send (memql#4821,
+/// program P1).
+///
+/// IT CARRIES NO SECRET MATERIAL, and that is the whole shape of the design. Authentication stays
+/// the cluster's ONE Graph credential; an identity row is the operator's DECLARATION that a mailbox
+/// exists inside their tenant and that campaigns may leave from it. Nothing here grants access to
+/// anything. Whether the send actually succeeds is decided by the tenant's Exchange
+/// ApplicationAccessPolicy -- the mail-enabled security group that scopes Mail.Send -- which no
+/// engine preflight can read. So a mailbox declared here but not added to that group surfaces as
+/// Graph's own 403 on the campaign's lastError, and that refusal is the honest check. The runbook
+/// section "adding a sending identity" is the other half of creating one of these.
+///
+/// WHY A ROW RATHER THAN MORE ENV VARS. The deployment runs campaigns for several accounts, and
+/// which mailbox a client's mail leaves from is a per-account fact an operator changes without a
+/// restart. The env-configured sender remains the DEFAULT -- a campaign naming no identity behaves
+/// exactly as every campaign did before this concept existed -- so plurality is purely additive and
+/// the single-mailbox deployment never has to know this concept is here.
+///
+/// SUPPRESSION DOES NOT FOLLOW THE IDENTITY (program P8). Several mailboxes inside one operator
+/// tenant are still one legal sender org and one domain reputation, so the do-not-mail list stays
+/// cluster-wide: an unsubscribe is a statement to the operator of this deployment, not to one of
+/// their mailboxes. Reputation and warmup DO key per identity -- they always did, on
+/// v1:campaigns:reputationWindow.sendingIdentity and v1:campaigns:warmupState.sendingIdentity, which
+/// were built for a plurality that did not yet exist. This concept is what finally supplies it.
+///
+/// Per-row authz: composite. The operator owns their identities; the cluster owner reads them all.
+@displayCard(primary="address", secondary="fromName", tertiary="accountId", status="status")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept senderIdentity {
+  ownerUserId  string!  @description("v1:identity:user.id that owns this identity. Stamped from actor.userId on every write. The per-row authz key.")
+  address      string!  @description("The mailbox UPN the Graph application may send as, e.g. news@acme-client.com. Becomes the From ADDRESS and the /users/{address}/sendMail path segment, so it is validated for RFC 5322 shape AND header safety on the write path -- a CR or LF here would be header injection into every message this identity sends. Normalized lowercase; it is also the reputation and warmup key, so two spellings of one mailbox would split its ramp in half.")
+  fromName     string!  @description("The display name on the From header for campaigns sent as this identity, e.g. 'Acme News'. Overridden per campaign by campaign.fromName when that is set. Required, because a From with no phrase shows the raw mailbox to every recipient, which is the deliverability equivalent of not having thought about it.")
+  replyTo      string   @description("Default Reply-To for campaigns using this identity that set none of their own. Empty means replies go to the sending address itself. A campaign's own replyTo always wins.")
+  accountId    string   @description("Optional v1:accounts:account.id this identity belongs to -- the client whose mailbox it is. A RECORD, NEVER A VISIBILITY SCOPE (accounts D1); it is what lets the app PREFILL a campaign's identity picker from the selected account. The ENGINE never infers an identity from a campaign's accountId: prefill is UX, resolution is explicit (D4).")
+  status       enum("active", "disabled")  @default("active")  @description("Whether this identity may be used. 'disabled' is how an operator retires a mailbox WITHOUT deleting the row -- past campaigns name it, and the reputation history is keyed on its address. Preflight refuses a campaign naming a disabled identity rather than falling back to the default, because a silent fallback mails a client's list from the wrong mailbox and nothing says so.")
+  notes        string   @description("Free-text operator provenance -- which tenant group the mailbox is in, who asked for it, when it was warmed. Never a credential.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
 }
 
 /// A campaign: one template addressed to one audience, optionally at a scheduled time, plus the state
@@ -130,7 +203,7 @@ concept template {
 /// is on the operator-facing writes, and the counters land on a row the worker was authorized to
 /// touch rather than on one it reached past the owner tier.
 @displayCard(primary="name", secondary="scheduledAt", tertiary="audienceId", status="status")
-@rowAuthz(owner="ownerUserId")
+@rowAuthz(owner="ownerUserId", clusterOwner)
 concept campaign {
   ownerUserId     string!  @description("v1:identity:user.id that owns this campaign. Stamped from actor.userId. The per-row authz key.")
   name            string!  @description("Operator-facing campaign name. The primary display field.")
@@ -146,10 +219,17 @@ concept campaign {
   sentCount       int  @default("0")  @description("Deliveries the transport accepted. Denormalized from v1:campaigns:delivery so a campaign list does not have to aggregate per row.")
   failedCount     int  @default("0")  @description("Deliveries that reached a terminal failure.")
   lastError       string   @description("The most recent send-level error -- a refused configuration, an exhausted allowlist -- as opposed to a per-recipient failure, which lives on the delivery row. Empty on a clean send.")
+  skippedCount    int  @default("0")  @description("Recipients suppressed rather than mailed (memql#4823). The worker has computed this per job since memql#3348 and had nowhere on the CAMPAIGN to put it, so the number an operator most needs -- the gap between the audience and what actually left -- was visible only on a clusterOwner-tier row a browser cannot read. recipientCount minus sentCount minus this minus failedCount is what is still outstanding.")
+  accountId       string   @description("Optional v1:accounts:account.id this campaign is FOR -- the client whose work it is. A RECORD, NEVER A VISIBILITY SCOPE (accounts D1): no query in this tree narrows a read because of it. Empty is the ordinary case and means the operator's own work; the OS app requires picking one at create, which is app behaviour rather than schema.")
+  senderIdentityId string  @description("Optional v1:campaigns:senderIdentity.id this campaign sends AS. Empty resolves to the env-configured default sender, which is exactly what every campaign did before identities existed -- so absence is the ordinary case and plurality is additive. THE ENGINE NEVER INFERS THIS FROM accountId: the app prefills the picker from the account's identities, and prefill is UX while resolution is explicit (memql#4821 D4). Preflight refuses a campaign naming a missing or disabled identity rather than silently falling back, because a silent fallback mails a client's list from the wrong mailbox.")
+  trackOpens      bool  @default("true")  @description("Whether the HTML part carries a tracking pixel (memql#4823). HTML only -- there is no honest way to count an open in a plain-text part, and a text-part beacon would be a claim the format cannot support. Default true; an operator sending to a privacy-sensitive list turns it off per campaign.")
+  trackClicks     bool  @default("true")  @description("Whether http(s) links in the HTML part are rewritten to signed redirect URLs (memql#4823). The signature is what makes the redirect open-redirect-proof: an unsigned or tampered target never redirects. Text-part link tracking is deliberately not built -- rewriting a URL a reader can see would be visible mangling for a number nobody asked for.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="audienceId", target=audience, direction="outgoing")
   @relationship(type="references", field="templateId", target=template, direction="outgoing")
+  @relationship(type="references", as="sendsAs", field="senderIdentityId", target=senderIdentity, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
 }
 
 /// One recipient's outcome for one campaign -- the per-recipient audit trail a deliverability review
@@ -181,7 +261,7 @@ concept campaign {
 /// weaken the transactional egress control it exists to provide. The field stays on the schema
 /// because a future queued transport would populate it.
 @displayCard(primary="email", secondary="campaignId", tertiary="sentAt", status="status")
-@rowAuthz(owner="ownerUserId")
+@rowAuthz(owner="ownerUserId", clusterOwner)
 concept delivery {
   ownerUserId        string!  @description("v1:identity:user.id that owns this delivery record -- the owner of the campaign, mirrored so the row is gated without a join. The per-row authz key.")
   campaignId         string!  @description("v1:campaigns:campaign.id this delivery belongs to.")
@@ -199,6 +279,43 @@ concept delivery {
   @relationship(type="parent", field="campaignId", target=campaign, direction="outgoing")
   @relationship(type="references", field="recipientId", target=recipient, direction="outgoing")
   @relationship(type="references", field="outboundRequestId", target=outboundRequest, direction="outgoing")
+}
+
+/// One tracked interaction with one delivered message -- an open or a click (memql#4823). Append-only:
+/// a person who opens a message four times produces four rows, and `campaignStats` computes the
+/// unique figure by (delivery, kind). Raw events are stored rather than counters incremented because
+/// a counter cannot answer "when", and "the whole audience opened it within ninety seconds of a
+/// tweet" is the shape of question an operator actually has.
+///
+/// HOW A ROW GETS HERE, AND WHY THAT IS SAFE. The tracking endpoints are unauthenticated by
+/// necessity -- the caller is a mail client fetching an image, or a browser following a link -- so
+/// the only thing standing between them and a forged row is the token. The token is HMAC-signed by
+/// the same rotating key ring the unsubscribe links use, under its OWN context label, and it carries
+/// the delivery, the campaign, the kind and (for a click) the destination URL. An unsigned or edited
+/// token records NOTHING and, for a click, redirects nowhere: the signature over the URL is exactly
+/// what makes the redirect open-redirect-proof. The write itself is a @serverOnly mutation under
+/// internal origin, so no client can reach it directly whatever it holds.
+///
+/// WHAT AN OPEN IS NOT. It is a pixel fetch, and mail clients cache, prefetch and block images. An
+/// open is therefore evidence of interest and never proof of reading, and the surfaces that render
+/// it say so rather than implying a precision the mechanism does not have. Text-only readers count
+/// as zero opens, which is the same statement.
+///
+/// Per-row authz: composite -- the operator owns their own engagement history, the cluster owner
+/// reads every operator's.
+@displayCard(primary="kind", secondary="campaignId", tertiary="occurredAt", status="kind")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept engagementEvent {
+  ownerUserId  string!  @description("v1:identity:user.id that owns the campaign this event is about, mirrored so the row is gated without a join. The per-row authz key. Taken from the signed token's own campaign, never from the request.")
+  campaignId   string!  @description("v1:campaigns:campaign.id the tracked message belonged to. Denormalized from the delivery so per-campaign stats need no join.")
+  deliveryId   string!  @description("v1:campaigns:delivery.id -- the one recipient's message that was opened or clicked. It is the uniqueness key: unique opens are distinct deliveryIds, not distinct addresses, because one address in two audiences is two people as far as a campaign is concerned.")
+  kind         enum("open", "click")!  @description("Which interaction. 'open' is a tracking-pixel fetch on the HTML part; 'click' is a signed redirect being followed. There is deliberately no third value -- 'delivered' is not observable here (the transport says accepted and a bounce arrives later) and inventing it would be a number nothing can honestly produce.")
+  url          string   @description("For a click, the destination the reader was sent to, verbatim from the signed token. Empty on an open. Stored so 'which link worked' is answerable without re-parsing the body a template may since have been edited out from under.")
+  occurredAt   datetime!  @description("When the hit arrived, stamped from the engine clock. Not caller-supplied: the caller here is an unauthenticated mail client, and a timestamp it chose would be the one field of this row an attacker could set.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="campaignId", target=campaign, direction="outgoing")
+  @relationship(type="references", field="deliveryId", target=delivery, direction="outgoing")
 }
 
 /// The engine's own record of one send RUN -- the queue the drain worker scans, and the only row in
@@ -367,7 +484,7 @@ concept warmupState {
 /// required on suppress (enforced by recordConsentSuppress). Config and
 /// templates stay data, not this schema.
 @displayCard(primary="kind", secondary="emailDigest", tertiary="occurredAt", status="kind")
-@rowAuthz(owner="ownerUserId")
+@rowAuthz(owner="ownerUserId", clusterOwner)
 concept consentEvent {
   ownerUserId  string!  @description("v1:identity:user.id of the operator whose send this consent belongs to. Stamped from actor.userId. The per-row authz key for export.")
   emailDigest  string!  @description("SHA-256 hex digest of the normalized (lowercased, trimmed) address. The subscriber key. The mailbox is never stored here -- a caller can ask about an address only when it already holds it.")
@@ -381,4 +498,69 @@ concept consentEvent {
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="recipientId", target=recipient, direction="outgoing")
   @relationship(type="references", field="campaignId", target=campaign, direction="outgoing")
+}
+
+/// An event-triggered email: "when X happens on concept Y, send template Z" (memql#4829, program P4
+/// and P5). THIS ROW IS THE FORM, NOT THE MECHANISM. What actually runs is a real authored
+/// automation construct, generated deterministically from these fields and activated through the
+/// runtime authoring pipeline; this row is what the app lists, edits, pauses and explains.
+///
+/// WHY A GENERATED CONSTRUCT RATHER THAN ONE SHIPPED AUTOMATION WITH A LOOKUP TABLE. An automation's
+/// @trigger names ONE concept at load time. A user picking an arbitrary trigger concept therefore
+/// cannot be served by anything pre-shipped -- there is no wildcard trigger, and there should not be
+/// one. Generating a construct also inherits the whole governance apparatus for free: per-rule pause,
+/// the circuit breaker, the cluster kill switch, boot re-arm, and an author-scoped actor. The
+/// generator is a deterministic template. The LLM authoring path stays off: a rule that mails
+/// strangers is not a place for a model to improvise, and a deterministic generator is one a person
+/// can read the output of.
+///
+/// TWO DELIVERY LANES, CHOSEN BY WHO RECEIVES (P5), never by a toggle the operator has to understand.
+///
+///   recipientMode=cluster_roles  OPERATIONAL. The recipients are this cluster's own people, so the
+///                                mail rides the transactional outbox: the egress allowlist applies,
+///                                there is no unsubscribe footer, and the marketing suppression list
+///                                is neither consulted nor written. Telling an owner a new admin was
+///                                added is not marketing, and running it through the campaign
+///                                machinery would let an unsubscribe from a newsletter silence an
+///                                operational alert.
+///
+///   recipientMode=audience       MARKETING. A campaign audience is being mailed one row at a time,
+///   recipientMode=row_address    so it rides the campaign machinery: suppression checked at the
+///                                point of send, unsubscribe attached, sender identity applied,
+///                                outcome ledgered. row_address is the same lane with the address
+///                                read off the triggering row instead of a roster.
+///
+/// Per-row authz: composite -- the operator owns their rules, the cluster owner reads them all. The
+/// GENERATED construct runs under the author's own envelope, which is why the rule records who
+/// authored it: an automation's actor is not the row owner's, and a caller-scoped read from inside
+/// one returns nothing while looking entirely correct.
+@displayCard(primary="name", secondary="triggerConcept", tertiary="templateId", status="status")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept emailRule {
+  ownerUserId       string!  @description("v1:identity:user.id that authored this rule. Stamped from actor.userId. The per-row authz key, AND the envelope the generated construct runs under -- see the concept doc's note on the actor trap.")
+  name              string!  @description("Operator-facing rule name, e.g. 'Tell the owner about new admins'. The primary display field, and the basis of the generated construct's name, so it is what an operator sees in both places.")
+  description       string   @description("What this rule is for, in the operator's own words. Rendered under the name; also carried onto the generated construct so somebody reading the DSL knows why it exists.")
+  triggerConcept    string!  @description("The canonical concept id whose rows fire this rule, e.g. 'v1:identity:user'. Offered from the LIVE concepts registry rather than a hardcoded list, so a rule can name a concept a product bundle added after this release. It becomes the generated @trigger's concept argument verbatim.")
+  eventKind         enum("created", "updated")!  @description("Which row event fires the rule. 'created' maps to node.created, 'updated' to node.updated. Deliberately only two: a delete has no row to read recipients or merge data from, so a rule triggered by one could describe nothing about what was deleted.")
+  condition         string   @description("Optional boolean expression over the triggering event, evaluated by the automation's own condition step -- e.g. role==\"admin\". Empty fires on every event of the kind. It is the runtime STRING evaluator's grammar, which is the one surface where ! is legal; the generator validates it before the bundle is written rather than letting a typo become a construct that fails to load.")
+  templateId        string!  @description("v1:campaigns:template.id supplying the subject and bodies. The same templates campaigns use, so copy is authored once -- and merge tags resolve against whichever lane runs, with {{fields.*}} empty on the operational lane, which has no recipient row.")
+  recipientMode     enum("cluster_roles", "audience", "row_address")!  @description("WHO receives, which is also what picks the delivery lane (P5). 'cluster_roles' = this cluster's own people, operational lane. 'audience' = a campaign audience, marketing lane. 'row_address' = an address read off the triggering row, marketing lane. The app presents this as a question about recipients and never as a lane toggle: the lane is a consequence.")
+  recipientRoles    []string  @description("For recipientMode=cluster_roles, which roles receive -- owner / admin / developer / writer / reader. Empty means the cluster owner alone, which is the common 'tell me when this happens' case.")
+  audienceId        string   @description("For recipientMode=audience, the v1:campaigns:audience.id to mail. Ignored in the other modes.")
+  recipientField    string   @description("For recipientMode=row_address, the dotted path into the triggering row's payload that holds the address, e.g. 'primaryContactEmail'. Validated to resolve on the trigger concept at generate time, because a path that resolves to nothing is a rule that fires forever and mails nobody.")
+  accountId         string   @description("Optional v1:accounts:account.id this rule is FOR. A record, never a visibility scope (accounts D1).")
+  senderIdentityId  string   @description("Optional v1:campaigns:senderIdentity.id the marketing lane sends as. Empty resolves to the env-configured default, exactly as a campaign's does. Ignored on the operational lane, which leaves through the transactional outbox and its own configured sender.")
+  status            enum("draft", "active", "paused", "failed")  @default("draft")  @description("Rule lifecycle. 'draft' has never been generated. 'active' has a live construct. 'paused' keeps the construct but disarms it -- the operator's own stop button. 'failed' means generation or validation refused, and lastError says what the engine said; the app renders that sentence rather than inventing one.")
+  bundleId          string   @description("v1:authoring:bundle.id of the generated bundle. Empty until the rule is first activated. Editing a rule generates a NEW bundle and retires the old one, so this always names the bundle currently armed.")
+  constructName     string   @description("The generated automation construct's name, derived deterministically from the rule id so a regeneration replaces rather than accumulates. What to grep for when somebody asks which automation sent an email.")
+  lastError         string   @description("Why generation, validation or activation last refused -- the engine's own sentence, so the app can render it verbatim instead of paraphrasing a failure it does not understand. Empty on a healthy rule.")
+  lastFiredAt       datetime  @description("When the generated construct last ran. A LIVENESS field: it moves on its own, so a surface that fingerprints it for arrival cues turns the rules list into a strobe. Display it; do not ring on it.")
+  firedCount        int  @default("0")  @description("How many times the rule has fired since it was first activated. Liveness like lastFiredAt -- shown, never fingerprinted.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", field="templateId", target=template, direction="outgoing")
+  @relationship(type="references", field="audienceId", target=audience, direction="outgoing")
+  @relationship(type="references", as="sendsAs", field="senderIdentityId", target=senderIdentity, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+  @relationship(type="references", as="generatedInto", field="bundleId", target=bundle, direction="outgoing")
 }

@@ -1776,7 +1776,7 @@ func CallsByPartitionBuild(args CallsByPartitionArgs) string {
 	return b.String()
 }
 
-// CampaignById -- One campaign by id, gated to its owner. Backs the campaign editor. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller cannot read another operator's campaign even with its id.
+// CampaignById -- One campaign by id, gated to its owner. Backs the campaign editor. Owned: (ownerUserId==actor.userId || actor.isClusterOwner==true) is the load-bearing guard, so a caller cannot read another operator's campaign even with its id.
 //
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaignById"] in generated_concepts.go).
 type CampaignByIdArgs struct {
@@ -1798,7 +1798,147 @@ func CampaignByIdBuild(args CampaignByIdArgs) string {
 	return b.String()
 }
 
-// Campaigns -- The caller's campaigns, newest first. The portal's campaign list. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-operator reads are impossible. Optional status filter narrows to one lifecycle bucket; omit it to see everything.
+// CampaignConsentCountByKind -- How many consent events of one kind this campaign produced -- the bounce, complaint and one-click-withdraw figures. Read from the consent stream rather than from delivery rows because a bounce arrives AFTER the transport accepted the message: the delivery says "sent" and stays that way, which is correct and is why it cannot answer this.
+//
+// Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["campaignConsentCountByKind"] in generated_concepts.go).
+type CampaignConsentCountByKindArgs struct {
+	CampaignId string
+	Kind       string
+}
+
+// CampaignConsentCountByKind calls the engine query campaignConsentCountByKind.
+func (qc *QueryClient) CampaignConsentCountByKind(ctx context.Context, args CampaignConsentCountByKindArgs) (*Result, error) {
+	call := CampaignConsentCountByKindBuild(args)
+	return qc.executeNamed(ctx, "campaignConsentCountByKind", call)
+}
+
+func CampaignConsentCountByKindBuild(args CampaignConsentCountByKindArgs) string {
+	var b strings.Builder
+	b.WriteString("query campaignConsentCountByKind(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kind: ")
+	b.WriteString(quoteMemQL(args.Kind))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignDeliveryCountByStatus -- How many deliveries this campaign has in one status. The exact figure at any audience size -- the portal's page-capped client-side counting is what this replaces.
+//
+// Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["campaignDeliveryCountByStatus"] in generated_concepts.go).
+type CampaignDeliveryCountByStatusArgs struct {
+	CampaignId string
+	Status     string
+}
+
+// CampaignDeliveryCountByStatus calls the engine query campaignDeliveryCountByStatus.
+func (qc *QueryClient) CampaignDeliveryCountByStatus(ctx context.Context, args CampaignDeliveryCountByStatusArgs) (*Result, error) {
+	call := CampaignDeliveryCountByStatusBuild(args)
+	return qc.executeNamed(ctx, "campaignDeliveryCountByStatus", call)
+}
+
+func CampaignDeliveryCountByStatusBuild(args CampaignDeliveryCountByStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("query campaignDeliveryCountByStatus(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(quoteMemQL(args.Status))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignEngagementCountByKind -- TOTAL opens or clicks for a campaign -- every recorded hit, exact. The UNIQUE figure cannot be a count (the engine has no DISTINCT), which is why `campaignEngagementRefs` exists beside this one.
+//
+// Bound concept: v1:campaigns:engagementEvent (machine-readable: BoundConcepts["campaignEngagementCountByKind"] in generated_concepts.go).
+type CampaignEngagementCountByKindArgs struct {
+	CampaignId string
+	Kind       string
+}
+
+// CampaignEngagementCountByKind calls the engine query campaignEngagementCountByKind.
+func (qc *QueryClient) CampaignEngagementCountByKind(ctx context.Context, args CampaignEngagementCountByKindArgs) (*Result, error) {
+	call := CampaignEngagementCountByKindBuild(args)
+	return qc.executeNamed(ctx, "campaignEngagementCountByKind", call)
+}
+
+func CampaignEngagementCountByKindBuild(args CampaignEngagementCountByKindArgs) string {
+	var b strings.Builder
+	b.WriteString("query campaignEngagementCountByKind(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kind: ")
+	b.WriteString(quoteMemQL(args.Kind))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignEngagementRefs -- The delivery references behind a campaign's engagement events, for computing the UNIQUE figure by folding in Go. Deliberately projects the reference and nothing else: this is the one read in the stats path that is bounded, and a lean shape is what keeps the bound generous. A read that comes back AT the bound is reported as unmeasured rather than as a number -- the ledger-page rule.
+//
+// Bound concept: v1:campaigns:engagementEvent (machine-readable: BoundConcepts["campaignEngagementRefs"] in generated_concepts.go).
+type CampaignEngagementRefsArgs struct {
+	CampaignId string
+	Kind       string
+}
+
+// CampaignEngagementRefs calls the engine query campaignEngagementRefs.
+func (qc *QueryClient) CampaignEngagementRefs(ctx context.Context, args CampaignEngagementRefsArgs) (*Result, error) {
+	call := CampaignEngagementRefsBuild(args)
+	return qc.executeNamed(ctx, "campaignEngagementRefs", call)
+}
+
+func CampaignEngagementRefsBuild(args CampaignEngagementRefsArgs) string {
+	var b strings.Builder
+	b.WriteString("query campaignEngagementRefs(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kind: ")
+	b.WriteString(quoteMemQL(args.Kind))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignSkipCountByReason -- How many of this campaign's skipped deliveries carry one of the named skip reasons. A list rather than one reason per call because the skipped bucket is reported in three groups and three counts beat seven round trips.
+//
+// Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["campaignSkipCountByReason"] in generated_concepts.go).
+type CampaignSkipCountByReasonArgs struct {
+	CampaignId  string
+	SkipReasons []any
+}
+
+// CampaignSkipCountByReason calls the engine query campaignSkipCountByReason.
+func (qc *QueryClient) CampaignSkipCountByReason(ctx context.Context, args CampaignSkipCountByReasonArgs) (*Result, error) {
+	call := CampaignSkipCountByReasonBuild(args)
+	return qc.executeNamed(ctx, "campaignSkipCountByReason", call)
+}
+
+func CampaignSkipCountByReasonBuild(args CampaignSkipCountByReasonArgs) string {
+	var b strings.Builder
+	b.WriteString("query campaignSkipCountByReason(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("skipReasons: ")
+	b.WriteString(renderMemQLValue(args.SkipReasons))
+	b.WriteString(")")
+	return b.String()
+}
+
+// Campaigns -- The caller's campaigns, newest first. The portal's campaign list. Owned: the row set is gated by (ownerUserId==actor.userId || actor.isClusterOwner==true) server-side, so cross-operator reads are impossible. Optional status filter narrows to one lifecycle bucket; omit it to see everything.
 //
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaigns"] in generated_concepts.go).
 type CampaignsArgs struct {
@@ -1818,6 +1958,30 @@ func CampaignsBuild(args CampaignsArgs) string {
 		b.WriteString("status: ")
 		b.WriteString(quoteMemQL(args.Status))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignsForAccount -- The email campaigns run for one account.
+// The composite-tier term is `campaigns`' own conjunct, repeated here rather than referenced, for the reason `sitesForAccount` repeats `sitesAll`'s: this is the same read that query makes, narrowed by the tie field, and a rollup that dropped the tier predicate would be the shortest path in the product to reading every operator's campaigns.
+// It counts CAMPAIGNS and not sends. A band that said "4,182" would be counting delivery rows, which is a number about one busy week rather than about the client -- and the delivery ledger is deliberately not readable in bulk from here at all (memql#4823). Cancelled and failed campaigns are included: a rollup is what is filed for this client, and a send that failed is still work that happened.
+//
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaignsForAccount"] in generated_concepts.go).
+type CampaignsForAccountArgs struct {
+	AccountId string
+}
+
+// CampaignsForAccount calls the engine query campaignsForAccount.
+func (qc *QueryClient) CampaignsForAccount(ctx context.Context, args CampaignsForAccountArgs) (*Result, error) {
+	call := CampaignsForAccountBuild(args)
+	return qc.executeNamed(ctx, "campaignsForAccount", call)
+}
+
+func CampaignsForAccountBuild(args CampaignsForAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("query campaignsForAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2250,7 +2414,7 @@ func ComposedViewsBuild(args ComposedViewsArgs) string {
 	return b.String()
 }
 
-// ConsentEventsBySubscriber -- Consent event stream for one subscriber, newest first. Export answers status/date/source from these rows: current status is the latest kind. Owned: ownerUserId==actor.userId is a top-level conjunct.
+// ConsentEventsBySubscriber -- Consent event stream for one subscriber, newest first. Export answers status/date/source from these rows: current status is the latest kind. Owned: (ownerUserId==actor.userId || actor.isClusterOwner==true) is a top-level conjunct.
 //
 // Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["consentEventsBySubscriber"] in generated_concepts.go).
 type ConsentEventsBySubscriberArgs struct {
@@ -2956,6 +3120,52 @@ func DueResponsibilitiesBuild(args DueResponsibilitiesArgs) string {
 	b.WriteString("query dueResponsibilities(")
 	b.WriteString("trigger: ")
 	b.WriteString(quoteMemQL(args.Trigger))
+	b.WriteString(")")
+	return b.String()
+}
+
+// EmailRuleById -- One event-email rule by id.
+//
+// Bound concept: v1:campaigns:emailRule (machine-readable: BoundConcepts["emailRuleById"] in generated_concepts.go).
+type EmailRuleByIdArgs struct {
+	EmailRuleId string
+}
+
+// EmailRuleById calls the engine query emailRuleById.
+func (qc *QueryClient) EmailRuleById(ctx context.Context, args EmailRuleByIdArgs) (*Result, error) {
+	call := EmailRuleByIdBuild(args)
+	return qc.executeNamed(ctx, "emailRuleById", call)
+}
+
+func EmailRuleByIdBuild(args EmailRuleByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query emailRuleById(")
+	b.WriteString("emailRuleId: ")
+	b.WriteString(quoteMemQL(args.EmailRuleId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// EmailRules -- Every event-email rule the caller may see, newest first. The row is the FORM; what runs is the generated authored construct it names.
+//
+// Bound concept: v1:campaigns:emailRule (machine-readable: BoundConcepts["emailRules"] in generated_concepts.go).
+type EmailRulesArgs struct {
+	Status string
+}
+
+// EmailRules calls the engine query emailRules.
+func (qc *QueryClient) EmailRules(ctx context.Context, args EmailRulesArgs) (*Result, error) {
+	call := EmailRulesBuild(args)
+	return qc.executeNamed(ctx, "emailRules", call)
+}
+
+func EmailRulesBuild(args EmailRulesArgs) string {
+	var b strings.Builder
+	b.WriteString("query emailRules(")
+	if args.Status != "" {
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -6108,7 +6318,7 @@ func SalesRepsForStoreBuild(args SalesRepsForStoreArgs) string {
 	return b.String()
 }
 
-// ScheduledSendJobs -- ENGINE: send jobs committed to a time and not yet fired, oldest first (memql#3459). Cluster-owner gated, and it spans owners for the same reason drainableSendJobs does -- "which campaigns are due" is a question about the cluster, and it is not one an OWNED row can answer at all, since the owned tier injects ownerUserId==actor.userId into every read with no cluster-owner bypass. That is why the schedule lives on the engine's job row rather than being scanned off v1:campaigns:campaign.
+// ScheduledSendJobs -- ENGINE: send jobs committed to a time and not yet fired, oldest first (memql#3459). Cluster-owner gated, and it spans owners for the same reason drainableSendJobs does -- "which campaigns are due" is a question about the cluster, and it is not one an OWNED row can answer at all, since the owned tier injects (ownerUserId==actor.userId || actor.isClusterOwner==true) into every read with no cluster-owner bypass. That is why the schedule lives on the engine's job row rather than being scanned off v1:campaigns:campaign.
 // It deliberately does NOT filter on the due time. The authority on when a send fires is the CAMPAIGN's scheduledAt, which an operator can move with updateCampaign without the job row hearing about it -- so the worker reads every scheduled job and asks the campaign. The set is small by nature (one row per pending scheduled campaign), which is what makes that affordable.
 //
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["scheduledSendJobs"] in generated_concepts.go).
@@ -6193,6 +6403,74 @@ func SendableRecipientsForAudienceBuild(args SendableRecipientsForAudienceArgs) 
 	b.WriteString("query sendableRecipientsForAudience(")
 	b.WriteString("audienceId: ")
 	b.WriteString(quoteMemQL(args.AudienceId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SenderIdentities -- Every sending identity the caller may use, newest first. Backs the identity picker on the campaign editor and the Senders section of the OS app. Composite tier, so a cluster owner sees every operator's -- which is what makes "who is this cluster mailing as" answerable at all.
+//
+// Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["senderIdentities"] in generated_concepts.go).
+type SenderIdentitiesArgs struct {
+	Status string
+}
+
+// SenderIdentities calls the engine query senderIdentities.
+func (qc *QueryClient) SenderIdentities(ctx context.Context, args SenderIdentitiesArgs) (*Result, error) {
+	call := SenderIdentitiesBuild(args)
+	return qc.executeNamed(ctx, "senderIdentities", call)
+}
+
+func SenderIdentitiesBuild(args SenderIdentitiesArgs) string {
+	var b strings.Builder
+	b.WriteString("query senderIdentities(")
+	if args.Status != "" {
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// SenderIdentitiesForAccount -- The sending identities filed under one account. The tie is a RECORD, not a scope: this is the same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct is carried verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1).
+//
+// Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["senderIdentitiesForAccount"] in generated_concepts.go).
+type SenderIdentitiesForAccountArgs struct {
+	AccountId string
+}
+
+// SenderIdentitiesForAccount calls the engine query senderIdentitiesForAccount.
+func (qc *QueryClient) SenderIdentitiesForAccount(ctx context.Context, args SenderIdentitiesForAccountArgs) (*Result, error) {
+	call := SenderIdentitiesForAccountBuild(args)
+	return qc.executeNamed(ctx, "senderIdentitiesForAccount", call)
+}
+
+func SenderIdentitiesForAccountBuild(args SenderIdentitiesForAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("query senderIdentitiesForAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SenderIdentityById -- One sending identity by id. The read the send path uses to resolve a campaign's senderIdentityId, under the CAMPAIGN OWNER's borrowed actor -- so an identity the owner cannot read is an identity the send refuses to use, which is the same answer as it not existing.
+//
+// Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["senderIdentityById"] in generated_concepts.go).
+type SenderIdentityByIdArgs struct {
+	SenderIdentityId string
+}
+
+// SenderIdentityById calls the engine query senderIdentityById.
+func (qc *QueryClient) SenderIdentityById(ctx context.Context, args SenderIdentityByIdArgs) (*Result, error) {
+	call := SenderIdentityByIdBuild(args)
+	return qc.executeNamed(ctx, "senderIdentityById", call)
+}
+
+func SenderIdentityByIdBuild(args SenderIdentityByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query senderIdentityById(")
+	b.WriteString("senderIdentityId: ")
+	b.WriteString(quoteMemQL(args.SenderIdentityId))
 	b.WriteString(")")
 	return b.String()
 }

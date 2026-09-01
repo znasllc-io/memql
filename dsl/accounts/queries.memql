@@ -24,6 +24,8 @@
 // people can open the same account and see different rollups. That is
 // correct. The account is shared; the rows are not.
 
+use campaigns.concepts.{ campaign }
+use campaigns.shapes.{ campaignFull }
 use common.specs.{ requiresOwnerOrAdmin }
 use common.traits.{ isNotArchived, isNotDeleted }
 use identity.concepts.{ invitation }
@@ -212,5 +214,27 @@ query invitation invitationsForAccount {
   }
   filter  accountId==args.accountId && requiresOwnerOrAdmin
   shape   invitationAdminSummary
+  sort    "row.createdAt", "desc"
+}
+
+/// The email campaigns run for one account.
+///
+/// The composite-tier term is `campaigns`' own conjunct, repeated here rather than referenced, for
+/// the reason `sitesForAccount` repeats `sitesAll`'s: this is the same read that query makes,
+/// narrowed by the tie field, and a rollup that dropped the tier predicate would be the shortest
+/// path in the product to reading every operator's campaigns.
+///
+/// It counts CAMPAIGNS and not sends. A band that said "4,182" would be counting delivery rows,
+/// which is a number about one busy week rather than about the client -- and the delivery ledger is
+/// deliberately not readable in bulk from here at all (memql#4823). Cancelled and failed campaigns
+/// are included: a rollup is what is filed for this client, and a send that failed is still work
+/// that happened.
+@actor
+query campaign campaignsForAccount {
+  args {
+    accountId  string!
+  }
+  filter  accountId==args.accountId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  shape   campaignFull
   sort    "row.createdAt", "desc"
 }

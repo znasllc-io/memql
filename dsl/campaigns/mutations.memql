@@ -45,9 +45,10 @@ mutate audience createAudience {
     audienceId   string!
     name         string!
     description  string
+    accountId    string
   }
   insert {
-    accept { name, description }
+    accept { name, description, accountId }
     stamp {
       id: args.audienceId
       ownerUserId: actor.userId
@@ -81,10 +82,11 @@ mutate recipient addRecipient {
     audienceId   string!
     email        string!
     displayName  string
+    fields       object
     source       string
   }
   insert {
-    accept { audienceId, email, displayName }
+    accept { audienceId, email, displayName, fields }
     stamp {
       id: args.recipientId
       ownerUserId: actor.userId
@@ -127,9 +129,10 @@ mutate template createTemplate {
     subject     string!
     textBody    string!
     htmlBody    string
+    accountId   string
   }
   insert {
-    accept { name, subject, textBody, htmlBody }
+    accept { name, subject, textBody, htmlBody, accountId }
     stamp {
       id: args.templateId
       ownerUserId: actor.userId
@@ -148,9 +151,10 @@ mutate template updateTemplate {
     textBody    string!
     htmlBody    string
     status      string
+    accountId   string
   }
   update {
-    accept { name, subject, textBody, htmlBody, status }
+    accept { name, subject, textBody, htmlBody, status, accountId }
     stamp {
       id: args.templateId
       ownerUserId: actor.userId
@@ -167,12 +171,16 @@ mutate campaign createCampaign {
     name         string!
     audienceId   string!
     templateId   string!
-    fromName     string
-    replyTo      string
-    scheduledAt  datetime
+    fromName          string
+    replyTo           string
+    scheduledAt       datetime
+    accountId         string
+    senderIdentityId  string
+    trackOpens        bool
+    trackClicks       bool
   }
   insert {
-    accept { name, audienceId, templateId, fromName, replyTo, scheduledAt }
+    accept { name, audienceId, templateId, fromName, replyTo, scheduledAt, accountId, senderIdentityId }
     stamp {
       id: args.campaignId
       ownerUserId: actor.userId
@@ -180,6 +188,9 @@ mutate campaign createCampaign {
       recipientCount: 0
       sentCount: 0
       failedCount: 0
+      skippedCount: 0
+      trackOpens: args.trackOpens ?? true
+      trackClicks: args.trackClicks ?? true
     }
   }
 }
@@ -194,12 +205,16 @@ mutate campaign updateCampaign {
     name         string!
     audienceId   string!
     templateId   string!
-    fromName     string
-    replyTo      string
-    scheduledAt  datetime
+    fromName          string
+    replyTo           string
+    scheduledAt       datetime
+    accountId         string
+    senderIdentityId  string
+    trackOpens        bool
+    trackClicks       bool
   }
   update {
-    accept { name, audienceId, templateId, fromName, replyTo, scheduledAt }
+    accept { name, audienceId, templateId, fromName, replyTo, scheduledAt, accountId, senderIdentityId, trackOpens, trackClicks }
     stamp {
       id: args.campaignId
       ownerUserId: actor.userId
@@ -213,7 +228,16 @@ mutate campaign updateCampaign {
 /// re-reads this row rather than trusting the copy it stamped on the send job, so moving the date
 /// moves the send. What this mutation does not do by itself is create the job the worker scans;
 /// `campaignScheduleSend` does both, and is the path the portal takes.
+/// SCOPING TO actor.userId IS NOT THE FIX HERE, and that is why the annotation is @serverOnly
+/// rather than a tighter filter. These rows are ALREADY owner-scoped -- ownerUserId is stamped
+/// from actor.userId on every write, so a caller can only ever reach their own campaign. The
+/// problem is not WHOSE row is being written, it is that a caller may not perform this transition
+/// at all: a browser flipping status to "sending" with no send job behind it, or stamping counters
+/// for deliveries that never happened, desyncs the row from the engine while owning it perfectly.
+/// The builtins do the authorization (an owned-tier read under the caller's own actor) and then the
+/// preflight; this write is the last step of that, not an operation of its own.
 @actor
+@serverOnly
 mutate campaign scheduleCampaign {
   args {
     campaignId   string!
@@ -250,7 +274,16 @@ mutate campaign cancelCampaign {
 /// `campaignStartSend` builtin AFTER it has read the campaign under the caller's own actor, which is
 /// where the ownership check actually happens; this mutation re-stamps ownerUserId anyway, because a
 /// write whose ownership depends on a read-merge is a write whose ownership can drift. Owned.
+/// SCOPING TO actor.userId IS NOT THE FIX HERE, and that is why the annotation is @serverOnly
+/// rather than a tighter filter. These rows are ALREADY owner-scoped -- ownerUserId is stamped
+/// from actor.userId on every write, so a caller can only ever reach their own campaign. The
+/// problem is not WHOSE row is being written, it is that a caller may not perform this transition
+/// at all: a browser flipping status to "sending" with no send job behind it, or stamping counters
+/// for deliveries that never happened, desyncs the row from the engine while owning it perfectly.
+/// The builtins do the authorization (an owned-tier read under the caller's own actor) and then the
+/// preflight; this write is the last step of that, not an operation of its own.
 @actor
+@serverOnly
 mutate campaign startCampaign {
   args {
     campaignId  string!
@@ -267,7 +300,16 @@ mutate campaign startCampaign {
 /// Pause a running send. The delivery ledger is untouched, which is the whole point: a paused
 /// campaign resumes exactly where it stopped because "where it stopped" is the set of recipients
 /// with no delivery row, not a cursor that could go stale. Owned.
+/// SCOPING TO actor.userId IS NOT THE FIX HERE, and that is why the annotation is @serverOnly
+/// rather than a tighter filter. These rows are ALREADY owner-scoped -- ownerUserId is stamped
+/// from actor.userId on every write, so a caller can only ever reach their own campaign. The
+/// problem is not WHOSE row is being written, it is that a caller may not perform this transition
+/// at all: a browser flipping status to "sending" with no send job behind it, or stamping counters
+/// for deliveries that never happened, desyncs the row from the engine while owning it perfectly.
+/// The builtins do the authorization (an owned-tier read under the caller's own actor) and then the
+/// preflight; this write is the last step of that, not an operation of its own.
 @actor
+@serverOnly
 mutate campaign pauseCampaign {
   args {
     campaignId  string!
@@ -282,7 +324,16 @@ mutate campaign pauseCampaign {
 /// Resume a paused send. Deliberately does NOT re-stamp startedAt -- the gap between startedAt and
 /// completedAt is the number a deliverability review reads as "how long did this run take", and
 /// resetting it on every resume would erase the pause it is meant to reveal. Owned.
+/// SCOPING TO actor.userId IS NOT THE FIX HERE, and that is why the annotation is @serverOnly
+/// rather than a tighter filter. These rows are ALREADY owner-scoped -- ownerUserId is stamped
+/// from actor.userId on every write, so a caller can only ever reach their own campaign. The
+/// problem is not WHOSE row is being written, it is that a caller may not perform this transition
+/// at all: a browser flipping status to "sending" with no send job behind it, or stamping counters
+/// for deliveries that never happened, desyncs the row from the engine while owning it perfectly.
+/// The builtins do the authorization (an owned-tier read under the caller's own actor) and then the
+/// preflight; this write is the last step of that, not an operation of its own.
 @actor
+@serverOnly
 mutate campaign resumeCampaign {
   args {
     campaignId  string!
@@ -301,19 +352,29 @@ mutate campaign resumeCampaign {
 ///
 /// Distinct from `updateCampaign`, which is the operator's authoring write and deliberately refuses
 /// to accept status or any counter. The two never overlap in what they accept.
+/// SCOPING TO actor.userId IS NOT THE FIX HERE, and that is why the annotation is @serverOnly
+/// rather than a tighter filter. These rows are ALREADY owner-scoped -- ownerUserId is stamped
+/// from actor.userId on every write, so a caller can only ever reach their own campaign. The
+/// problem is not WHOSE row is being written, it is that a caller may not perform this transition
+/// at all: a browser flipping status to "sending" with no send job behind it, or stamping counters
+/// for deliveries that never happened, desyncs the row from the engine while owning it perfectly.
+/// The builtins do the authorization (an owned-tier read under the caller's own actor) and then the
+/// preflight; this write is the last step of that, not an operation of its own.
 @actor
+@serverOnly
 mutate campaign updateCampaignProgress {
   args {
     campaignId      string!
     status          string
     recipientCount  int
     sentCount       int
+    skippedCount    int
     failedCount     int
     lastError       string
     completedAt     datetime
   }
   update {
-    accept { status, recipientCount, sentCount, failedCount, lastError, completedAt }
+    accept { status, recipientCount, sentCount, skippedCount, failedCount, lastError, completedAt }
     stamp {
       id: args.campaignId
       ownerUserId: actor.userId
@@ -334,7 +395,16 @@ mutate campaign updateCampaignProgress {
 ///
 /// Owned: ownerUserId is stamped from actor.userId. The worker runs this under the CAMPAIGN OWNER'S
 /// actor, so the value is the campaign's owner and no caller can name a different one.
+/// SCOPING TO actor.userId IS NOT THE FIX HERE, and that is why the annotation is @serverOnly
+/// rather than a tighter filter. These rows are ALREADY owner-scoped -- ownerUserId is stamped
+/// from actor.userId on every write, so a caller can only ever reach their own campaign. The
+/// problem is not WHOSE row is being written, it is that a caller may not perform this transition
+/// at all: a browser flipping status to "sending" with no send job behind it, or stamping counters
+/// for deliveries that never happened, desyncs the row from the engine while owning it perfectly.
+/// The builtins do the authorization (an owned-tier read under the caller's own actor) and then the
+/// preflight; this write is the last step of that, not an operation of its own.
 @actor
+@serverOnly
 mutate delivery recordCampaignDelivery {
   args {
     campaignId         string!
@@ -631,6 +701,263 @@ mutate consentEvent recordConsentSuppress {
       ownerUserId: actor.userId
       kind: "suppress"
       occurredAt: args.occurredAt ?? now
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sending identities (memql#4821)
+// ---------------------------------------------------------------------------
+
+/// Declare a mailbox this deployment may send campaign mail as. Owned: ownerUserId is stamped from
+/// actor.userId, so a caller can only ever declare their own.
+///
+/// NO CREDENTIAL CROSSES THIS BOUNDARY, which is why it is an ordinary client-reachable mutation
+/// rather than a @serverOnly one. Authentication stays the cluster's single Graph credential; this
+/// row says a mailbox exists and may be used. What it CANNOT do is make a mailbox sendable -- that
+/// is the tenant's ApplicationAccessPolicy, and an address declared here but missing from that group
+/// surfaces as Graph's own 403 on the campaign's lastError. The engine validates the address for RFC
+/// shape and header safety before it is stored: it becomes a From header and a URL path segment, and
+/// a CR or LF in it would be header injection into every message the identity ever sends.
+@actor
+mutate senderIdentity createSenderIdentity {
+  args {
+    senderIdentityId  string!
+    address           string!
+    fromName          string!
+    replyTo           string
+    accountId         string
+    notes             string
+  }
+  insert {
+    accept { address, fromName, replyTo, accountId, notes }
+    stamp {
+      id: args.senderIdentityId
+      ownerUserId: actor.userId
+      status: "active"
+    }
+  }
+}
+
+/// Edit a sending identity's presentation and tie. Deliberately does not accept `status`:
+/// enabling and disabling an identity is a deliverability decision with a send-time consequence, and
+/// `setSenderIdentityStatus` is the call that makes it, so the two never overlap in what they accept.
+@actor
+mutate senderIdentity updateSenderIdentity {
+  args {
+    senderIdentityId  string!
+    address           string!
+    fromName          string!
+    replyTo           string
+    accountId         string
+    notes             string
+  }
+  update {
+    accept { address, fromName, replyTo, accountId, notes }
+    stamp {
+      id: args.senderIdentityId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Enable or retire a sending identity. Retiring is a status flip and never a delete: past campaigns
+/// name the row, and the reputation and warmup history are keyed on its address, so deleting it
+/// would orphan the evidence a deliverability review is made of.
+@actor
+mutate senderIdentity setSenderIdentityStatus {
+  args {
+    senderIdentityId  string!
+    status            string!
+  }
+  update {
+    accept { status }
+    stamp {
+      id: args.senderIdentityId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Engagement (memql#4823)
+// ---------------------------------------------------------------------------
+
+/// Record one open or click. @serverOnly, and that is the whole security posture of the tracking
+/// endpoints: the HTTP callers are an unauthenticated mail client and an unauthenticated browser, so
+/// the ONLY thing between them and this row is the signed token the handler verifies first, plus the
+/// fact that nothing client-reachable can call this at all. The write runs under internal origin
+/// from the handler's Go, having derived every argument from the token's signed payload rather than
+/// from the request.
+///
+/// The id is derived from (deliveryId, kind, occurredAt) so a retried image fetch inside the same
+/// second collapses onto one row instead of inflating the total. Per-part hashed, because a
+/// separator that can appear inside a part is a separator two distinct events can forge a collision
+/// across (authoring rule 20).
+/// SCOPING TO actor.userId IS NOT THE FIX: there is no actor to scope by. The HTTP callers are an
+/// unauthenticated mail client fetching an image and an unauthenticated browser following a
+/// redirect, so actor.userId is empty for every legitimate call, and a self-scoped filter would
+/// match nothing while looking correct. The owner comes out of the signed token, not the request.
+@actor
+@serverOnly
+mutate engagementEvent recordEngagementEvent {
+  args {
+    campaignId  string!
+    deliveryId  string!
+    kind        string!
+    url         string
+    occurredAt  datetime
+  }
+  insert {
+    accept { campaignId, deliveryId, kind, url }
+    stamp {
+      id: hash(concat(
+        hash(canonicalId(args.deliveryId, delivery)),
+        hash(args.kind),
+        hash(args.occurredAt ?? now)
+      ))
+      ownerUserId: actor.userId
+      occurredAt: args.occurredAt ?? now
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Event-email rules (memql#4829)
+// ---------------------------------------------------------------------------
+
+/// Author an event-email rule. Lands as a draft: nothing runs until it is generated and activated,
+/// so writing this row can never by itself mail anybody -- the same "the row existing is not
+/// permission to send" stance v1:campaigns:sendJob's `scheduled` status takes.
+@actor
+mutate emailRule createEmailRule {
+  args {
+    emailRuleId       string!
+    name              string!
+    description       string
+    triggerConcept    string!
+    eventKind         string!
+    condition         string
+    templateId        string!
+    recipientMode     string!
+    recipientRoles    array
+    audienceId        string
+    recipientField    string
+    accountId         string
+    senderIdentityId  string
+  }
+  insert {
+    accept { name, description, triggerConcept, eventKind, condition, templateId,
+             recipientMode, recipientRoles, audienceId, recipientField, accountId, senderIdentityId }
+    stamp {
+      id: args.emailRuleId
+      ownerUserId: actor.userId
+      status: "draft"
+      firedCount: 0
+    }
+  }
+}
+
+/// Edit a rule's form. Does NOT accept status, the generated refs or the error: those are the
+/// engine's account of what it made of the form, and a caller who could write them could claim a
+/// rule was active with nothing behind it.
+@actor
+mutate emailRule updateEmailRule {
+  args {
+    emailRuleId       string!
+    name              string!
+    description       string
+    triggerConcept    string!
+    eventKind         string!
+    condition         string
+    templateId        string!
+    recipientMode     string!
+    recipientRoles    array
+    audienceId        string
+    recipientField    string
+    accountId         string
+    senderIdentityId  string
+  }
+  update {
+    accept { name, description, triggerConcept, eventKind, condition, templateId,
+             recipientMode, recipientRoles, audienceId, recipientField, accountId, senderIdentityId }
+    stamp {
+      id: args.emailRuleId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Record what the generator and the activation pipeline made of a rule -- the bundle and construct
+/// it produced, the resulting status, and the engine's own sentence when it refused. @serverOnly:
+/// the whole value of these fields is that they are the ENGINE's account rather than a claim, and a
+/// caller who could set status:"active" would be asserting a live automation that does not exist.
+/// SCOPING TO actor.userId IS NOT THE FIX: the row is already owner-scoped and the caller IS the
+/// owner. What must not be caller-writable is the CLAIM these fields make -- that a construct was
+/// generated, that activation succeeded, that the rule has fired N times. An owner who could set
+/// status:"active" would be asserting a live automation that does not exist, and one who could set
+/// firedCount would be editing the evidence. The rule's FORM stays client-writable next door.
+@actor
+@serverOnly
+mutate emailRule recordEmailRuleGeneration {
+  args {
+    emailRuleId    string!
+    status         string!
+    bundleId       string
+    constructName  string
+    lastError      string
+  }
+  update {
+    accept { status, bundleId, constructName, lastError }
+    stamp {
+      id: args.emailRuleId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Stamp that a rule fired. @serverOnly for the same reason the campaign counters are: it is the
+/// engine's observation, and these two fields are the rule's LIVENESS -- they move on their own, so
+/// a surface that fingerprints them for arrival cues turns the rules list into a strobe.
+/// SCOPING TO actor.userId IS NOT THE FIX: the row is already owner-scoped and the caller IS the
+/// owner. What must not be caller-writable is the CLAIM these fields make -- that a construct was
+/// generated, that activation succeeded, that the rule has fired N times. An owner who could set
+/// status:"active" would be asserting a live automation that does not exist, and one who could set
+/// firedCount would be editing the evidence. The rule's FORM stays client-writable next door.
+@actor
+@serverOnly
+mutate emailRule recordEmailRuleFiring {
+  args {
+    emailRuleId  string!
+    firedCount   int!
+    lastFiredAt  datetime
+    lastError    string
+  }
+  update {
+    accept { firedCount, lastError }
+    stamp {
+      id: args.emailRuleId
+      ownerUserId: actor.userId
+      lastFiredAt: args.lastFiredAt ?? now
+    }
+  }
+}
+
+/// Pause or resume a rule. The operator's own stop button: pausing keeps the generated construct but
+/// disarms it, which is a different thing from deleting the rule and a different thing again from
+/// the circuit breaker tripping -- and all three are visible as distinct statuses so nobody has to
+/// guess which one happened.
+@actor
+mutate emailRule setEmailRuleStatus {
+  args {
+    emailRuleId  string!
+    status       string!
+  }
+  update {
+    accept { status }
+    stamp {
+      id: args.emailRuleId
+      ownerUserId: actor.userId
     }
   }
 }

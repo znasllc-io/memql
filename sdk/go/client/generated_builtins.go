@@ -14,6 +14,65 @@ var (
 	_ = strings.Builder{}
 )
 
+// CampaignActivateEmailRule -- Generate an event-email rule's automation construct and arm it (memql#4829). The generator is a DETERMINISTIC template over the rule's form -- the LLM authoring path stays off, because a rule that mails strangers is not a place for a model to improvise and a deterministic generator is one a person can read the output of. The generated .memql goes through the ordinary authoring pipeline: bundle, validate, activate. Activation takes effect IMMEDIATELY rather than at next boot. The rule row records the bundle and construct it produced; on refusal it records the engine's own sentence on lastError and the rule goes to 'failed' rather than silently staying draft.
+type CampaignActivateEmailRuleArgs struct {
+	// The rule to generate and arm. The caller must own it: the generated construct runs under the AUTHOR's envelope, so who armed it decides what it can read.
+	EmailRuleId string
+}
+
+// CampaignActivateEmailRule calls the engine builtin campaignActivateEmailRule.
+func (qc *QueryClient) CampaignActivateEmailRule(ctx context.Context, args CampaignActivateEmailRuleArgs) (*Result, error) {
+	call := CampaignActivateEmailRuleBuild(args)
+	return qc.executeNamed(ctx, "campaignActivateEmailRule", call)
+}
+
+func CampaignActivateEmailRuleBuild(args CampaignActivateEmailRuleArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignActivateEmailRule(")
+	b.WriteString("emailRuleId: ")
+	b.WriteString(quoteMemQL(args.EmailRuleId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignImportRecipients -- Import recipients into an audience from a CSV file already uploaded to the Library (memql#4822). The file is read SERVER-SIDE under the caller's own actor, so a file the caller cannot read is a file this cannot import -- the artifact id is not a capability. The header row must carry an `email` column (case-insensitive; `displayName` and `name` are also recognized) and EVERY OTHER COLUMN lands verbatim in the recipient's `fields` map, reachable from a template as {{fields.<key>}}. Per row: the address is normalized and shape-validated, deduplicated against the audience's existing recipients AND against earlier rows of the same file (first occurrence wins). The import refuses WHOLE when the resulting roster would exceed MEMQL_CAMPAIGNS_MAX_AUDIENCE -- it never silently truncates, because a partially-imported list is one nobody knows is partial. Returns {added, duplicates, invalid, total} plus up to 20 sample invalid lines with their line numbers, so the operator's next action is fixing the file rather than guessing at it. Each added recipient also gets a consent grant event with source 'import'.
+type CampaignImportRecipientsArgs struct {
+	// The audience to import into. The caller must be able to read it.
+	AudienceId string
+	// v1:library:artifact.id of the uploaded CSV. Read under the caller's actor -- an artifact the caller cannot read is not found.
+	ArtifactId string
+	// Whether the first row is a header. Defaults true. A file with no header cannot be imported: the column mapping IS the header, and guessing which column holds addresses is how an import mails the wrong list.
+	HasHeader    bool
+	HasHeaderSet bool // set true to send hasHeader; required because zero-value bool is ambiguous
+}
+
+// CampaignImportRecipients calls the engine builtin campaignImportRecipients.
+func (qc *QueryClient) CampaignImportRecipients(ctx context.Context, args CampaignImportRecipientsArgs) (*Result, error) {
+	call := CampaignImportRecipientsBuild(args)
+	return qc.executeNamed(ctx, "campaignImportRecipients", call)
+}
+
+func CampaignImportRecipientsBuild(args CampaignImportRecipientsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignImportRecipients(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if args.HasHeaderSet {
+		if b.Len() > 33 {
+			b.WriteString(", ")
+		}
+		b.WriteString("hasHeader: ")
+		b.WriteString(fmt.Sprintf("%v", args.HasHeader))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignPauseSend -- Pause a running campaign send. The delivery ledger is untouched, so resuming continues exactly where it stopped -- 'where it stopped' is the set of recipients with no delivery row, not a cursor that could go stale.
 type CampaignPauseSendArgs struct {
 	// The campaign to pause. The caller must own it.
@@ -52,6 +111,27 @@ func CampaignResumeSendBuild(args CampaignResumeSendArgs) string {
 	b.WriteString("builtin campaignResumeSend(")
 	b.WriteString("campaignId: ")
 	b.WriteString(quoteMemQL(args.CampaignId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignRetireEmailRule -- Retire an event-email rule's generated construct (memql#4829). The automation stops firing and the bundle is retired; the RULE row survives with its history, because a rule somebody turned off is a different thing from one that never existed. Used by delete and by edit-and-regenerate, which retires the old bundle before arming the new one -- so a rule is never armed twice.
+type CampaignRetireEmailRuleArgs struct {
+	// The rule whose construct should be retired.
+	EmailRuleId string
+}
+
+// CampaignRetireEmailRule calls the engine builtin campaignRetireEmailRule.
+func (qc *QueryClient) CampaignRetireEmailRule(ctx context.Context, args CampaignRetireEmailRuleArgs) (*Result, error) {
+	call := CampaignRetireEmailRuleBuild(args)
+	return qc.executeNamed(ctx, "campaignRetireEmailRule", call)
+}
+
+func CampaignRetireEmailRuleBuild(args CampaignRetireEmailRuleArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignRetireEmailRule(")
+	b.WriteString("emailRuleId: ")
+	b.WriteString(quoteMemQL(args.EmailRuleId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -101,6 +181,55 @@ func CampaignStartSendBuild(args CampaignStartSendArgs) string {
 	b.WriteString("builtin campaignStartSend(")
 	b.WriteString("campaignId: ")
 	b.WriteString(quoteMemQL(args.CampaignId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignStats -- The outcome breakdown for one campaign (memql#4823): recipients, pending, sent, failed, the skipped bucket split into suppressed / unsubscribed / other, hard bounces, complaints, one-click unsubscribes, and opens and clicks as both total and unique. Computed SERVER-SIDE from the delivery ledger, the campaign's consent events and its engagement events -- every bucket that can be an exact COUNT is one, at any audience size. This replaces counting a capped page of rows in the browser, which under-reported every campaign past the page bound and did so silently. Two figures are honest about their limits rather than rounded into a number: a unique open/click count is folded from a bounded read and is reported as UNMEASURED rather than as a wrong number when that bound is reached, and soft bounces are absent entirely because nothing measures them per campaign -- an absent figure and a zero are different answers.
+type CampaignStatsArgs struct {
+	// The campaign to report on. The caller must be able to read it.
+	CampaignId string
+}
+
+// CampaignStats calls the engine builtin campaignStats.
+func (qc *QueryClient) CampaignStats(ctx context.Context, args CampaignStatsArgs) (*Result, error) {
+	call := CampaignStatsBuild(args)
+	return qc.executeNamed(ctx, "campaignStats", call)
+}
+
+func CampaignStatsBuild(args CampaignStatsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignStats(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignTestSend -- Send one test copy of a campaign to a named address (memql#4822). Renders the campaign's template against a synthetic recipient -- display name 'Test Recipient', the address you name, and the `fields` of the audience's first real recipient when one exists, so {{fields.*}} show the shape they will actually have. The subject is prefixed '[Test] ', the message goes through the campaign's resolved sending identity, and the unsubscribe footer carries an obviously-inert token. It writes NO delivery row and touches NO counter, so a test send can never make a campaign look partly sent; it does consume the ordinary send-rate token bucket, because a test is a real message to a real mailbox. Returns the list of merge tags it could not resolve -- the check that catches a typo'd {{fields.compnay}} before the whole audience gets it. `to` is REQUIRED and never defaults to the caller's own address: a builtin that mails somewhere you did not name is one you have to remember the default of.
+type CampaignTestSendArgs struct {
+	// The campaign to render. The caller must be able to read it.
+	CampaignId string
+	// Where to send the test. Required and validated -- there is deliberately no default.
+	To string
+}
+
+// CampaignTestSend calls the engine builtin campaignTestSend.
+func (qc *QueryClient) CampaignTestSend(ctx context.Context, args CampaignTestSendArgs) (*Result, error) {
+	call := CampaignTestSendBuild(args)
+	return qc.executeNamed(ctx, "campaignTestSend", call)
+}
+
+func CampaignTestSendBuild(args CampaignTestSendArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignTestSend(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("to: ")
+	b.WriteString(quoteMemQL(args.To))
 	b.WriteString(")")
 	return b.String()
 }

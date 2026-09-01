@@ -1,38 +1,47 @@
 // campaigns domain -- caller-scoped reads.
 //
-// Authz tier: owned. Every filter in this file names
-// ownerUserId==actor.userId as a TOP-LEVEL conjunct, never inside a when()
-// guard and never as one arm of an ||. That placement is the whole gate: a
-// guarded conjunct vanishes when its argument is absent, which is how a
-// query that looks scoped comes to return the whole table (memql#2883). No
-// argument here can widen the row set past the caller's own rows.
+// Authz tier: COMPOSITE (memql#4820). Every filter over an operator-facing
+// concept names the owner-or-cluster-owner disjunction as a TOP-LEVEL
+// conjunct, never inside a when() guard and never as one arm of a wider ||.
+// That placement is the whole gate: a guarded conjunct vanishes when its
+// argument is absent, which is how a query that looks scoped comes to return
+// the whole table (memql#2883). No argument here can widen the row set past
+// the caller's own rows -- the only thing that widens it is BEING the cluster
+// owner, which is a fact about the actor and not about the call.
+//
+// THE PARENTHESES ARE NOT STYLE. && binds tighter than ||, so an unparenthesized
+// `a && b || c` reads as `(a && b) || c` and the cluster-owner arm would satisfy
+// the WHOLE filter -- turning campaignById into "any campaign in the cluster,
+// and also ignore the id". The parens are the difference between oversight and
+// an open door, which is why every one of them is written out rather than left
+// to the reader.
 //
 // The by-id reads are exempt from the pagination rule by shape rather than by
 // annotation: an unguarded row.id equality reads at most one row, so it is not
 // a list. The list reads all declare sort + paginate.
 
 /// The caller's campaigns, newest first. The portal's campaign list. Owned: the row set is gated by
-/// ownerUserId==actor.userId server-side, so cross-operator reads are impossible. Optional status
+/// (ownerUserId==actor.userId || actor.isClusterOwner==true) server-side, so cross-operator reads are impossible. Optional status
 /// filter narrows to one lifecycle bucket; omit it to see everything.
 @actor
 query campaign campaigns {
   args {
     status  string
   }
-  filter    ownerUserId==actor.userId && when(args.status) { status==args.status }
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && when(args.status) { status==args.status }
   sort      "row.createdAt", "desc"
   paginate  50
   shape     campaignFull
 }
 
-/// One campaign by id, gated to its owner. Backs the campaign editor. Owned: ownerUserId==actor.userId
+/// One campaign by id, gated to its owner. Backs the campaign editor. Owned: (ownerUserId==actor.userId || actor.isClusterOwner==true)
 /// is the load-bearing guard, so a caller cannot read another operator's campaign even with its id.
 @actor
 query campaign campaignById {
   args {
     campaignId  string!
   }
-  filter  row.id==args.campaignId && ownerUserId==actor.userId
+  filter  row.id==args.campaignId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
   shape   campaignFull
 }
 
@@ -43,7 +52,7 @@ query audience audiences {
   args {
     status  string
   }
-  filter    ownerUserId==actor.userId && when(args.status) { status==args.status }
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && when(args.status) { status==args.status }
   sort      "row.createdAt", "desc"
   paginate  50
   shape     audienceFull
@@ -55,7 +64,7 @@ query audience audienceById {
   args {
     audienceId  string!
   }
-  filter  row.id==args.audienceId && ownerUserId==actor.userId
+  filter  row.id==args.audienceId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
   shape   audienceFull
 }
 
@@ -66,7 +75,7 @@ query template templates {
   args {
     status  string
   }
-  filter    ownerUserId==actor.userId && when(args.status) { status==args.status }
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && when(args.status) { status==args.status }
   sort      "row.createdAt", "desc"
   paginate  50
   shape     templateFull
@@ -79,7 +88,7 @@ query template templateById {
   args {
     templateId  string!
   }
-  filter  row.id==args.templateId && ownerUserId==actor.userId
+  filter  row.id==args.templateId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
   shape   templateFull
 }
 
@@ -92,7 +101,7 @@ query recipient recipientsForAudience {
   args {
     audienceId  string!
   }
-  filter    ownerUserId==actor.userId && audienceId==args.audienceId
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && audienceId==args.audienceId
   sort      "row.createdAt", "desc"
   paginate  100
   shape     recipientFull
@@ -106,7 +115,7 @@ query recipient sendableRecipientsForAudience {
   args {
     audienceId  string!
   }
-  filter    ownerUserId==actor.userId && audienceId==args.audienceId && isSendableRecipient
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && audienceId==args.audienceId && isSendableRecipient
   sort      "row.createdAt", "desc"
   paginate  100
   shape     recipientFull
@@ -120,7 +129,7 @@ query delivery deliveriesForCampaign {
   args {
     campaignId  string!
   }
-  filter    ownerUserId==actor.userId && campaignId==args.campaignId
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && campaignId==args.campaignId
   sort      "row.createdAt", "desc"
   paginate  100
   shape     deliveryFull
@@ -141,7 +150,7 @@ query delivery deliveriesForCampaign {
 //
 // The two OWNED reads (audienceRosterForSend / deliveryLedgerForCampaign) are
 // issued by that same worker under the CAMPAIGN OWNER'S actor -- so they gate
-// on ownerUserId==actor.userId like every other read in this domain, and the
+// on (ownerUserId==actor.userId || actor.isClusterOwner==true) like every other read in this domain, and the
 // worker gets exactly the owner's authority and no more. That is why the
 // engine needs no bypass anywhere: it borrows an identity rather than
 // out-ranking one.
@@ -174,7 +183,7 @@ query sendJob recentSendJobs {
 /// ENGINE: send jobs committed to a time and not yet fired, oldest first (memql#3459). Cluster-owner
 /// gated, and it spans owners for the same reason drainableSendJobs does -- "which campaigns are due"
 /// is a question about the cluster, and it is not one an OWNED row can answer at all, since the owned
-/// tier injects ownerUserId==actor.userId into every read with no cluster-owner bypass. That is why
+/// tier injects (ownerUserId==actor.userId || actor.isClusterOwner==true) into every read with no cluster-owner bypass. That is why
 /// the schedule lives on the engine's job row rather than being scanned off v1:campaigns:campaign.
 ///
 /// It deliberately does NOT filter on the due time. The authority on when a send fires is the
@@ -236,7 +245,7 @@ query recipient audienceRosterForSend {
   args {
     audienceId  string!
   }
-  filter    ownerUserId==actor.userId && audienceId==args.audienceId
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && audienceId==args.audienceId
   sort      "row.createdAt", "asc"
   paginate  500
   shape     recipientFull
@@ -252,7 +261,7 @@ query recipient audienceRosterSize {
   args {
     audienceId  string!
   }
-  filter  ownerUserId==actor.userId && audienceId==args.audienceId
+  filter  (ownerUserId==actor.userId || actor.isClusterOwner==true) && audienceId==args.audienceId
   count
 }
 
@@ -278,7 +287,7 @@ query delivery deliveriesForRecipients {
     campaignId    string!
     recipientIds  array!
   }
-  filter    ownerUserId==actor.userId && campaignId==args.campaignId && recipientId in args.recipientIds
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && campaignId==args.campaignId && recipientId in args.recipientIds
   sort      "row.createdAt", "asc"
   paginate  1000
   shape     deliveryLedgerEntry
@@ -293,7 +302,7 @@ query delivery deliveryLedgerForCampaign {
   args {
     campaignId  string!
   }
-  filter    ownerUserId==actor.userId && campaignId==args.campaignId
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && campaignId==args.campaignId
   sort      "row.createdAt", "asc"
   paginate  5000
   shape     deliveryLedgerEntry
@@ -333,13 +342,13 @@ query warmupState warmupStateForIdentity {
 
 /// Consent event stream for one subscriber, newest first. Export answers
 /// status/date/source from these rows: current status is the latest kind.
-/// Owned: ownerUserId==actor.userId is a top-level conjunct.
+/// Owned: (ownerUserId==actor.userId || actor.isClusterOwner==true) is a top-level conjunct.
 @actor
 query consentEvent consentEventsBySubscriber {
   args {
     emailDigest  string!
   }
-  filter    ownerUserId==actor.userId && emailDigest==args.emailDigest
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && emailDigest==args.emailDigest
   sort      "row.createdAt", "desc"
   paginate  50
   shape     consentEventFull
@@ -352,8 +361,152 @@ query consentEvent consentStatus {
   args {
     emailDigest  string!
   }
-  filter    ownerUserId==actor.userId && emailDigest==args.emailDigest
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && emailDigest==args.emailDigest
   sort      "row.createdAt", "desc"
   paginate  1
   shape     consentEventFull
+}
+
+// ---------------------------------------------------------------------------
+// Sender identities (memql#4821)
+// ---------------------------------------------------------------------------
+
+/// Every sending identity the caller may use, newest first. Backs the identity picker on the
+/// campaign editor and the Senders section of the OS app. Composite tier, so a cluster owner sees
+/// every operator's -- which is what makes "who is this cluster mailing as" answerable at all.
+@actor
+query senderIdentity senderIdentities {
+  args {
+    status  string
+  }
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && when(args.status) { status==args.status }
+  sort      "address", "asc"
+  paginate  200
+  shape     senderIdentityFull
+}
+
+/// One sending identity by id. The read the send path uses to resolve a campaign's senderIdentityId,
+/// under the CAMPAIGN OWNER's borrowed actor -- so an identity the owner cannot read is an identity
+/// the send refuses to use, which is the same answer as it not existing.
+@actor
+query senderIdentity senderIdentityById {
+  args {
+    senderIdentityId  string!
+  }
+  filter  row.id==args.senderIdentityId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  shape   senderIdentityFull
+}
+
+/// The sending identities filed under one account. The tie is a RECORD, not a scope: this is the
+/// same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct is carried
+/// verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1).
+@actor
+query senderIdentity senderIdentitiesForAccount {
+  args {
+    accountId  string!
+  }
+  filter  accountId==args.accountId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  shape   senderIdentityFull
+  sort    "address", "asc"
+}
+
+// ---------------------------------------------------------------------------
+// Stats (memql#4823). The engine has no group-by, so an aggregate is either a
+// `count` query per bucket or a Go fold over rows. Every bucket that CAN be a
+// count is one: a count is exact at any audience size, while a bounded read of
+// an unbounded set is a truncation wearing a number's clothes.
+// ---------------------------------------------------------------------------
+
+/// How many deliveries this campaign has in one status. The exact figure at any audience size --
+/// the portal's page-capped client-side counting is what this replaces.
+@actor
+query delivery campaignDeliveryCountByStatus {
+  args {
+    campaignId  string!
+    status      string!
+  }
+  filter  (ownerUserId==actor.userId || actor.isClusterOwner==true) && campaignId==args.campaignId && status==args.status
+  count
+}
+
+/// How many of this campaign's skipped deliveries carry one of the named skip reasons. A list rather
+/// than one reason per call because the skipped bucket is reported in three groups and three counts
+/// beat seven round trips.
+@actor
+query delivery campaignSkipCountByReason {
+  args {
+    campaignId   string!
+    skipReasons  array!
+  }
+  filter  (ownerUserId==actor.userId || actor.isClusterOwner==true) && campaignId==args.campaignId && status=="skipped" && skipReason in args.skipReasons
+  count
+}
+
+/// TOTAL opens or clicks for a campaign -- every recorded hit, exact. The UNIQUE figure cannot be a
+/// count (the engine has no DISTINCT), which is why `campaignEngagementRefs` exists beside this one.
+@actor
+query engagementEvent campaignEngagementCountByKind {
+  args {
+    campaignId  string!
+    kind        string!
+  }
+  filter  (ownerUserId==actor.userId || actor.isClusterOwner==true) && campaignId==args.campaignId && kind==args.kind
+  count
+}
+
+/// The delivery references behind a campaign's engagement events, for computing the UNIQUE figure by
+/// folding in Go. Deliberately projects the reference and nothing else: this is the one read in the
+/// stats path that is bounded, and a lean shape is what keeps the bound generous. A read that comes
+/// back AT the bound is reported as unmeasured rather than as a number -- the ledger-page rule.
+@actor
+query engagementEvent campaignEngagementRefs {
+  args {
+    campaignId  string!
+    kind        string!
+  }
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && campaignId==args.campaignId && kind==args.kind
+  sort      "row.createdAt", "desc"
+  paginate  5000
+  shape     engagementDeliveryRef
+}
+
+/// How many consent events of one kind this campaign produced -- the bounce, complaint and
+/// one-click-withdraw figures. Read from the consent stream rather than from delivery rows because a
+/// bounce arrives AFTER the transport accepted the message: the delivery says "sent" and stays that
+/// way, which is correct and is why it cannot answer this.
+@actor
+query consentEvent campaignConsentCountByKind {
+  args {
+    campaignId  string!
+    kind        string!
+  }
+  filter  (ownerUserId==actor.userId || actor.isClusterOwner==true) && campaignId==args.campaignId && kind==args.kind
+  count
+}
+
+// ---------------------------------------------------------------------------
+// Event-email rules (memql#4829)
+// ---------------------------------------------------------------------------
+
+/// Every event-email rule the caller may see, newest first. The row is the FORM; what runs is the
+/// generated authored construct it names.
+@actor
+query emailRule emailRules {
+  args {
+    status  string
+  }
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && when(args.status) { status==args.status }
+  sort      "row.createdAt", "desc"
+  paginate  200
+  shape     emailRuleFull
+}
+
+/// One event-email rule by id.
+@actor
+query emailRule emailRuleById {
+  args {
+    emailRuleId  string!
+  }
+  filter  row.id==args.emailRuleId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  shape   emailRuleFull
 }
