@@ -1,0 +1,43 @@
+// A CONCEPT FIELD IS NOT A READABLE FIELD, and the omission is silent (spec
+// section D). A query with no shape projects every field of its concept; a
+// query WITH one projects exactly what the shape names, and a field left out
+// is invisible to every client with nothing on any path saying so. The
+// Training app's review queue is the standing example of what that costs --
+// it would have selected on a key no row carried and rendered "nothing
+// awaiting review" against a cluster full of unvalidated chunks.
+//
+// So this file names every field of v1:accounts:account. There is nothing
+// credential-adjacent on the concept to withhold: the contact fields are
+// facts the operator typed about a client, which is the whole point of
+// recording them.
+
+/// Full projection of v1:accounts:account -- what the Accounts app's list, its
+/// detail view and every account picker in the OS read.
+///
+/// NAMED clientAccountFull, NOT accountFull, and the collision is real rather
+/// than stylistic: `dsl/identity/shapes.memql` already declares
+/// `shape account accountFull` over `v1:identity:account`, the paying account
+/// of the isolation model. Shape names resolve across namespaces -- the
+/// cross-namespace-import gate (memql#3803) reads a bare `accountFull` as
+/// whichever namespace declared it -- so a second one would make every
+/// existing identity query's projection ambiguous. `client` is the
+/// disambiguator because it is the word for what this concept is.
+///
+/// ONE shape rather than a list/detail pair, deliberately. The row is eight
+/// small fields; a "lite" projection would save nothing measurable and would
+/// buy a second thing to keep in step with the concept. The moment a field
+/// arrives that a list should not carry -- a long note, an attachment -- that
+/// is the day to split it, and not before.
+@row
+shape account clientAccountFull {
+  row.id
+  ownerUserId
+  name
+  domain
+  primaryContactName
+  primaryContactEmail
+  notes
+  status
+  configuredAt
+  row.createdAt
+}

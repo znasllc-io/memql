@@ -1,0 +1,209 @@
+// The registry's own reads, and the four rollups the app's detail view folds
+// into one answer (D6).
+//
+// ===========================================================================
+// FOUR OF THESE SIX QUERIES READ A CONCEPT THIS DOMAIN DOES NOT OWN
+// ===========================================================================
+// `dsl/worker/queries.memql` is the precedent -- it declares
+// `query plan runningPlansForUser` over `planner.concepts.plan` under a `use`
+// -- and the reasoning is the same here. What makes a rollup a rollup is the
+// ACCOUNT it is asked about; the four populations belong to four different
+// domains, and putting each rollup beside its own concept would scatter one
+// feature across four files whose only shared fact is a field name.
+//
+// EVERY ONE OF THEM READS THROUGH THE NORMAL AUTHORIZED PATH, and that is
+// D1 restated as code: each filter is the tie-field equality ANDed with the
+// concept's OWN tier predicate, exactly as the concept's own queries write
+// it. Not one of them narrows a read BECAUSE of an account -- a caller sees
+// precisely the sites, files, domains and invitations they could already see,
+// arranged by who the work was for. An account is a record, so a rollup can
+// only ever be a presentation of rows the engine had already decided to hand
+// over.
+//
+// The consequence is worth stating plainly because a reader will wonder: two
+// people can open the same account and see different rollups. That is
+// correct. The account is shared; the rows are not.
+
+use common.specs.{ requiresOwnerOrAdmin }
+use common.traits.{ isNotArchived, isNotDeleted }
+use identity.concepts.{ invitation }
+use identity.shapes.{ invitationAdminSummary }
+use knowledge.concepts.{ knowledgeDomain }
+use knowledge.shapes.{ knowledgeDomainFull }
+use library.concepts.{ artifact }
+use library.shapes.{ artifactFull }
+use platform.concepts.{ site }
+use platform.shapes.{ siteFull }
+
+/// Every account this caller may see -- their own, or every account in the
+/// cluster when the caller is a cluster owner. The Accounts app's primary
+/// screen, and the source every account picker in the OS reads.
+///
+/// ARCHIVED ROWS ARE EXCLUDED BY DEFAULT and returned under the filter (D8).
+/// The archive term is a DISJUNCTION rather than a `when(args.includeArchived)`
+/// guard, and the difference is not stylistic: `when(...)` drops its block on
+/// the argument's ABSENCE, not on its falsity, so a caller passing
+/// `includeArchived: false` -- which is exactly what a checkbox bound to a
+/// boolean sends -- would have widened the read to every archived row. Written
+/// as `isNotArchived || args.includeArchived==true` the three cases are the three answers:
+/// absent resolves nil and fails the comparison (active only), false fails it
+/// (active only), true admits everything.
+///
+/// "Everything", note, and not "the archived ones": a person looking for a
+/// client they filed away wants it in its place in the list, marked, not in a
+/// separate list of the forgotten.
+///
+/// The caller term is the composite tier's own predicate written out, which is
+/// what TestRowAuthzEnforcementLandGate requires of an authored query over a
+/// tier-declaring concept.
+@actor
+query account clientAccountsAll {
+  args {
+    includeArchived  boolean
+  }
+  filter  (ownerUserId==actor.userId || actor.isClusterOwner==true) && (isNotArchived || args.includeArchived==true)
+  shape   clientAccountFull
+  sort    "name", "asc"
+}
+
+/// Resolve one account by its own row id. The detail view's read on open, and
+/// the read every tie surface uses to put a name on an id it holds.
+@unbounded("account by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query account clientAccountById {
+  args {
+    accountId  string!
+  }
+  filter  row.id==args.accountId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  shape   clientAccountFull
+}
+
+/// The `self` singleton, if it has been materialized. The boot seed's existence
+/// probe, and nothing else calls it.
+///
+/// IT CARRIES THE COMPOSITE TIER, AND THE AUTOMATION IS ELEVATED TO MATCH.
+/// The first cut of this query omitted the tier conjunct, on the reasoning that
+/// the caller is a boot automation with no signed-in person behind it. The
+/// row-authz land gate refused it, and the gate was right: enforcement ANDs the
+/// tier into every read of this concept whatever the filter says, so omitting
+/// it does not make the read unscoped -- it makes the read SILENTLY narrowed,
+/// and the `self` row is cluster-owned (ownerUserId empty), which the owned
+/// branch can never match.
+///
+/// What that would have cost is worse than the two maintenance sweeps whose
+/// entries sit beside this automation's in component/auth/maintenance_actor.go,
+/// and worse in the opposite direction. A narrowed sweep skips work and looks
+/// idle. A narrowed probe here reports the row ABSENT -- and absent means
+/// CREATE, so the seed would re-run on every boot forever, which is precisely
+/// the clobbering D3 forbids. `seedSelfAccount` is therefore on the maintenance
+/// allowlist, which runs it as RoleOwner: the cluster-owner escape is the only
+/// branch that can see this row, and the automation now has it.
+///
+/// @serverOnly is the other half. An ungated read projecting contact fields is
+/// the `searchUsers` shape the PII gate exists to refuse (memql#2883), and the
+/// app has no business calling this one -- it reads the same row through
+/// `clientAccountById`, which carries the same tier and is on the wire.
+///
+/// WHY actor.userId SCOPING IS NOT THE FIX. There is no actor and there is no
+/// owner. The caller is a boot automation, so no person is signed in for
+/// `actor.userId` to name; and the row it looks for is CLUSTER-OWNED --
+/// `ownerUserId` is empty by design, because the owner's own company is the
+/// deployment's row rather than whichever principal happened to boot it, and
+/// sameRowAuthzOwner refuses an empty owner outright. So a self-scoped filter
+/// would match zero rows for the only caller this query will ever have, and
+/// borrowing one user's authority (auth.ContextWithUserActor) would not help
+/// either: there is no owner to borrow. The cluster-owner escape is the only
+/// branch that can see this row, which is why the automation is on the
+/// maintenance list rather than this query being scoped.
+@actor
+@serverOnly
+@unbounded("the self account singleton -- bounded to a single row (literal id)")
+query account existingSelfAccount {
+  filter  row.id=="v1:accounts:account:self" && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  shape   clientAccountFull
+}
+
+// ---------------------------------------------------------------------------
+// The four rollups
+// ---------------------------------------------------------------------------
+
+/// The deployables tied to one account.
+///
+/// `isNotDeleted` and the composite-tier term are `sitesAll`'s own conjuncts,
+/// repeated here rather than referenced: this is the same read that query
+/// makes, narrowed by the tie field, and a soft-deleted site must stay gone
+/// from a rollup for the reason it is gone from the list.
+@actor
+query site sitesForAccount {
+  args {
+    accountId  string!
+  }
+  filter  accountId==args.accountId && isNotDeleted && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  shape   siteFull
+  sort    "hostname", "asc"
+}
+
+/// The Library items labelled with one account.
+///
+/// `accountIds` is a LIST (D5 -- "one or two accounts" is the owner's own
+/// framing), so the tie term is membership rather than equality.
+///
+/// ARCHIVED ROWS ARE EXCLUDED, matching `libraryArtifacts` rather than this
+/// file's own `clientAccountsAll`: the account filter above is a view over the
+/// registry a person is administering, while this is a count of what is
+/// currently filed for a client. `archived!=true` rather than `==false`,
+/// because a row promoted before the field existed carries no key at all and
+/// `==false` would silently exclude it.
+@actor
+query artifact libraryItemsForAccount {
+  args {
+    accountId  string!
+  }
+  filter  args.accountId in accountIds && archived!=true && ownerUserId==actor.userId
+  shape   artifactFull
+  sort    "updatedAt", "desc"
+}
+
+/// The knowledge domains tagged with one account.
+///
+/// A TAG AND NOTHING MORE (D5). This read is the only consumer of
+/// `v1:knowledge:knowledgeDomain.accountId` in the tree, and the field is
+/// consulted by nothing in routing, attachment, retrieval or scoring. A domain
+/// tagged with an account trains, attaches and answers exactly as an untagged
+/// one does.
+///
+/// No tier conjunct, because the concept declares no tier -- see its
+/// declaration in dsl/knowledge/concepts.memql for why that matches its
+/// sibling `documentChunk` rather than departing from it.
+query knowledgeDomain domainsForAccount {
+  args {
+    accountId  string!
+  }
+  filter  accountId==args.accountId
+  shape   knowledgeDomainFull
+  sort    "name", "asc"
+}
+
+/// The guest invitations sent on behalf of one account.
+///
+/// `invitationAdminSummary`, NEVER `invitationFull`, and this is the rule the
+/// Users app's own review wrote (memql#4735): `invitationFull` projects
+/// `tokenHash`, `previousTokenHash` and `bindingHash` -- not the plaintext
+/// token, but the key the resolve path looks an invitation up BY -- and a
+/// rollup that says how many guests a client has has never needed them.
+///
+/// `requiresOwnerOrAdmin` is `pendingUserInvitations`' own gate, carried here
+/// for the same reason: the invitation concept declares no row tier, so the
+/// spec IS the authorization on this read, and a rollup that dropped it would
+/// be the shortest path in the product to reading every invitation in the
+/// cluster. The Accounts app is not admin-gated, so below that floor this
+/// section renders empty -- which is the engine's answer, rendered.
+@actor
+query invitation invitationsForAccount {
+  args {
+    accountId  string!
+  }
+  filter  accountId==args.accountId && requiresOwnerOrAdmin
+  shape   invitationAdminSummary
+  sort    "row.createdAt", "desc"
+}

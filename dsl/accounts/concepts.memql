@@ -1,0 +1,66 @@
+// The client registry (epic memql#4800, design
+// docs/superpowers/specs/2026-09-01-accounts-app-design.md).
+//
+// An ACCOUNT IS A RECORD, NEVER AN AUTHORIZATION BOUNDARY (D1). This is the
+// one sentence the whole domain is built on, and every other file here
+// depends on it staying true. An account says who work is FOR -- the company
+// whose storefront this cluster hosts, whose files it stores, whose people it
+// invited as guests. It is not a login wall, not a visibility scope, and not
+// a partition. Row authorization is untouched everywhere the four tie fields
+// land, and no query in this tree or any other narrows a read on an account
+// field.
+//
+// The pressure to make it one will arrive, because a registry of clients
+// LOOKS like a tenancy model. When client ACCESS is eventually wanted it
+// rides the guest-invitation machinery already in dsl/identity -- pointed at
+// an account, which is exactly what `v1:identity:invitation.accountId` is
+// for. That is an invitation gaining a label, not an account gaining a wall.
+
+// ===========================================================================
+// TWO THINGS IN THIS ENGINE ARE CALLED AN ACCOUNT, AND THEY ARE UNRELATED
+// ===========================================================================
+// `v1:identity:account` already exists and is the PAYING account of the
+// account-isolation model (docs/internal/design/account-isolation-model.md) --
+// a billing and attribution subject that nothing authenticates as.
+// `v1:accounts:account`, declared here, is a CLIENT: a company this instance's
+// owner does work for. They share a word and nothing else -- no field, no
+// reference, no lifecycle. Neither is the other's namespace, and a reader
+// tracing `accountId` should check which concept the field's own description
+// names before assuming.
+//
+// The name is kept rather than made unique because it is the owner's own word
+// for the thing, and the domain qualifies it: everything in `v1:accounts:` is
+// about clients, and nothing else is.
+
+use identity.concepts.{ user }
+
+/// A client -- a company this instance's owner does work for.
+///
+/// THE COMPOSITE TIER, for the reason v1:platform:site carries one. A plain
+/// `owner="ownerUserId"` tier has no cluster-owner escape on the READ path --
+/// enforceRowAuthzOnPlan ANDs the owned predicate unconditionally -- so "list
+/// every account in this cluster" would not merely be unimplemented, it would
+/// not be EXPRESSIBLE, and the app's primary screen would silently render a
+/// subset. Going the other way (a bare clusterOwner tier) would make every
+/// account a non-operator created invisible to the person who created it. The
+/// composite keeps both statements true: a user reads exactly their own
+/// accounts, an operator reads every row.
+///
+/// `ownerUserId` EMPTY means cluster-owned, and the `self` singleton is the
+/// case: it is the DEPLOYMENT's row, not whichever principal happened to boot
+/// the cluster. sameRowAuthzOwner refuses an empty owner outright, so a
+/// cluster-owned row is reachable through the admin branch alone.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="name", secondary="domain", tertiary="primaryContactEmail", status="status")
+concept account {
+  ownerUserId  string   @description("v1:identity:user.id that created this account, or EMPTY for a cluster-owned one. Stamped from the actor by createAccount, which is what makes the tier above true rather than aspirational; a write made as the DEPLOYMENT -- a cluster owner, a system actor, or trusted server-side Go -- has that stamp undone and produces a cluster-owned row instead, which is how the seeded `self` row gets its empty owner. NOT `string!`: an empty value is the meaningful cluster-owned state, and `string!` would refuse the seed.")
+  name         string!  @description("The client's name, as a person would say it. REQUIRED, and it is the one thing the first-run card insists on (D7) -- an account whose name is a placeholder is a row nobody can pick out of a list. The seeded `self` row gets a starter value rather than a real one precisely so the card has something to ask for; see dsl/accounts/seeds.memql for why that starter is not a lie the app has to detect.")
+  domain       string   @description("The client's OWN domain (acme.com), not a hostname this cluster serves. Free text, unvalidated, and deliberately so: it is a fact about the client, recorded because somebody knows it, and refusing a typo would cost more than it saves. Epic C (custom domains) consumes exactly this field plus v1:platform:site.accountId as its SUGGESTION source when an operator adds a custom domain to a site (D9) -- a suggestion, never a claim: nothing here verifies ownership of anything, and Epic C's DNS check is what does.")
+  primaryContactName   string  @description("Who to talk to at the client. A FIELD ON THE ROW rather than a contact concept (D4): a contact concept is future work that nothing in this epic needs, and a v1 that ships two fields is one a later concept can migrate from, while a v1 that ships a half-designed concept is one it has to live with.")
+  primaryContactEmail  string  @description("How to reach primaryContactName. Recorded, never sent to -- no path in this tree mails an account contact. When guest access for a client is eventually wanted it rides an invitation carrying this account's id, and the invitation carries its own inviteeEmail; the two are deliberately not the same field.")
+  notes        string   @description("Free text about the client, in the operator's own words. The place the things this schema deliberately does not model go -- the billing contact, the renewal date, the name of the person who actually answers.")
+  status       enum("active", "archived")!  @description("Two rungs, and the missing third is the decision (D8). The deployables ladder is draft / live / disabled because a site is a SERVABLE thing and `disabled` is the state that answers 503 rather than 404. An account serves nothing, so there is no request for a middle rung to change the answer to -- it is a record that is either current or filed away. `archived` removes the row from the default list and marks it under the Archived filter; nothing else in the cluster consults it, and in particular a tie pointing at an archived account keeps resolving, because unfiling a client must never break the provenance of what was done for them. NOTE: @default is never applied on insert (memql#2960) -- createAccount fills this with ??.")
+  configuredAt datetime @description("When a human last stated this row's facts -- stamped by updateClientAccount, and by NOTHING else (D7). Its absence on the seeded `self` row is what renders the OS first-run card, and the card's Save is an updateAccount, so answering the question is what retires it; createClientAccount deliberately does not stamp, or the card would be retired before it was ever shown. On an ordinary account -- one somebody typed into the create form -- absence means created and never since edited, which is a smaller claim than the one the card acts on. Read the field as 'a person last confirmed these facts at', and read the card's gate as what it is: a question about ONE row, asked because a boot filled that row in and a boot cannot know what a company is called.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
