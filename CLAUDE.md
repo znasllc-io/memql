@@ -2152,9 +2152,10 @@ weight that an undeclared-argument DISCARD hides.
 ### Email campaigns + the sending engine
 
 Campaigns are ordinary graph state (memql#3323) plus a Go sending engine
-(memql#3348). Seven concepts under `dsl/campaigns/`: five operator-facing and
-owned-tier (`audience`, `recipient`, `template`, `campaign`, `delivery`), two
-engine-owned and clusterOwner-tier (`sendJob`, `suppression`). Runbook:
+(memql#3348). Ten concepts under `dsl/campaigns/`: six operator-facing and
+owned-tier (`audience`, `recipient`, `template`, `campaign`, `delivery`,
+`consentEvent`), four engine-owned and clusterOwner-tier (`sendJob`,
+`suppression`, `reputationWindow`, `warmupState`). Runbook:
 [campaign-sending.md](docs/public/operate/campaign-sending.md).
 
 **The two identities is the design.** A send touches rows belonging to somebody
@@ -2193,7 +2194,11 @@ NOT a migration window: unsubscribe links never expire, so **the window is
 counted in rotations, not days** -- rotate at most once for any reason short of
 key compromise.
 
-Not built: an automated warming ramp, and a scheduler for `scheduledAt`.
+The scheduler (`campaignScheduleSend`), the evidence-driven warming ramp, and
+bounce/complaint feedback ingestion are all built -- the runbook is current.
+The multi-account campaigns program (account ties, per-account sender
+identities, import, stats, tracking, the OS app, event emails) is specced in
+[2026-09-01-email-campaigns-program-design.md](docs/superpowers/specs/2026-09-01-email-campaigns-program-design.md).
 
 ### Planner / Knowledge / Validation
 
