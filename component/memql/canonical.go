@@ -41,6 +41,22 @@ func canonicalExpression(expr ExpressionNode) string {
 		return fmt.Sprintf("select(%s|%s)", target, strings.Join(fields, ","))
 	case *CountExpression:
 		return fmt.Sprintf("count(%s)", canonicalExpression(node.Target))
+	case *constantBoolExpression:
+		// A folded caller-flag comparison (memql#4814), and it is part of the
+		// query's IDENTITY for the same reason the `as` label above is.
+		//
+		// `clientAccountsAll(includeArchived: true)` and the same call with
+		// false differ ONLY in this node once the flag is bound, so a node the
+		// default arm renders as "" gives the two reads one signature -- and
+		// result caching is default-on, so each returns whichever ran first.
+		// Measured, not feared: the archived client appeared in the narrowed
+		// list and vanished from the widened one, decided by call order.
+		//
+		// It cannot change any existing signature: the only other producer of
+		// this node is resolveActorComparisonsToConstants, which runs inside
+		// evaluateExpressionSet -- long after planCacheSignature has read
+		// plan.Root.
+		return fmt.Sprintf("const(%t)", node.value)
 	case *SpecReferenceExpression:
 		return fmt.Sprintf("spec(%s)", strings.ToLower(strings.TrimSpace(node.Name)))
 	case *AIExpression:

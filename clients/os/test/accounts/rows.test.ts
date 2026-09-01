@@ -39,9 +39,35 @@ describe("accountFromRow", () => {
     // A partial CDC event carries only what the write touched. Defaulting to
     // "active" here would put an archived client back in the default list on
     // the strength of a guess.
-    const row = accountFromRow({ id: "v1:accounts:account:a1", payload: { name: "Acme" } });
+    const row = accountFromRow({ id: "a1", payload: { name: "Acme" } });
     expect(row.status).toBe("");
     expect(accountIsArchived(row)).toBe(false);
+  });
+});
+
+describe("SELF_ACCOUNT_ID", () => {
+  // THE ID THIS APP COMPARES IS THE ID THE WIRE SENDS, which is the bare
+  // shortId -- the engine strips `{concept}:` at every egress seam
+  // (docs/public/concepts/identifiers.md).
+  //
+  // Pinned as its own case because every other test in this file supplies the
+  // constant on BOTH sides of the comparison: seed the fixture with whatever
+  // this constant says and `accountIsSelf` agrees with itself no matter what
+  // it says. That is how the canonical spelling shipped -- the suite was
+  // green, and in the browser the first-run card, the `you` chip and the
+  // detail view's self branch were all silently dead.
+  it("is the BARE row id, never the canonical one", () => {
+    expect(SELF_ACCOUNT_ID).toBe("self");
+    expect(SELF_ACCOUNT_ID).not.toContain(":");
+  });
+
+  it("matches the row shape the engine actually delivers", () => {
+    // Literal, not the constant: this is the assertion that fails if the
+    // constant drifts back to `v1:accounts:account:self`.
+    expect(accountIsSelf(accountFromRow({ id: "self", name: "My company" }))).toBe(true);
+    expect(
+      accountIsSelf(accountFromRow({ id: "v1:accounts:account:self", name: "My company" })),
+    ).toBe(false);
   });
 });
 
@@ -64,7 +90,7 @@ describe("needsFirstRun", () => {
     // No other account can raise the card, because no other account was
     // filled in by a boot. An ordinary row's empty stamp means "created and
     // never edited", which is a smaller claim.
-    const other = accountFromRow({ id: "v1:accounts:account:a1", name: "Acme" });
+    const other = accountFromRow({ id: "a1", name: "Acme" });
     expect(needsFirstRun(other)).toBe(false);
     expect(accountIsSelf(other)).toBe(false);
   });
