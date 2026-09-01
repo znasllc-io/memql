@@ -339,6 +339,14 @@ func (l roleLadder) rankOf(slug string) int {
 // whose catalog has not seeded yet, or whose database is unreachable,
 // still ranks the five base slugs correctly rather than ranking every
 // principal at 0 and refusing the whole cluster its own rows.
+// staged-data: MUST-NOT-GATE -- gating this produces a FALSE DENIAL, and the
+// argument is the one lookupRoleRankBySlug already records for the same read.
+// A staged v1:rbac:role row excluded here does not resolve, rankOf answers 0,
+// and every principal holding that role is ranked BELOW everyone -- so their
+// own colleagues stop seeing their rows and every rank floor refuses them.
+// Withholding a staged role from the LADDER hides nothing (the catalog is
+// public reference data); it only breaks the ordering that decides who may see
+// what. MUST-NOT-GATE on functionality, not on security.
 func (e *MemQLEngine) rankLadder(ctx context.Context) roleLadder {
 	ladder := roleLadder{ranks: map[string]int{}}
 	db := e.database()
@@ -398,6 +406,13 @@ func (e *MemQLEngine) rankLadder(ctx context.Context) roleLadder {
 
 // principalRoles reads every principal's current role slug, keyed by user
 // id. The map is small and bounded by design (B.2 of the design record).
+// staged-data: MUST-NOT-GATE -- a principal dropped from this map is a
+// principal with NO RESOLVABLE RANK, and every row they own then falls out of
+// the rank branch for everybody. The owner still reads their own rows (that
+// branch never consults this map), so the failure is invisible from the one
+// account most likely to check: an operator sees their colleague's rows vanish
+// from a list and the colleague sees nothing wrong. Staging governs whether a
+// ROW is published; it must not decide whether a PERSON can be ranked.
 func (e *MemQLEngine) principalRoles(ctx context.Context) map[string]string {
 	out := map[string]string{}
 	db := e.database()

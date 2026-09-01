@@ -41,6 +41,11 @@ const settings: OsAppManifest = {
     { id: "appearance", name: "Appearance" },
     { id: "ask", name: "Ask" },
     { id: "apps", name: "Apps" },
+    // Widened by the ladder flip (epic memql#4832, D1): under the shell's
+    // old ordering this admitted {admin, owner}, and it now admits
+    // {admin, developer, owner}. Correct in the new direction -- cluster
+    // diagnostics is engineering surface, and developer is the engineering
+    // tier -- so this is a line the flip fixes rather than one it endangers.
     { id: "cluster", name: "Cluster", roles: { min: "admin" } },
     { id: "diagnostics", name: "Diagnostics" },
   ],
@@ -130,6 +135,26 @@ const fleet: OsAppManifest = {
 // `roles: { min: "admin" }` is PRESENTATION (spec section E). The engine's
 // `requiresOwnerOrAdmin` specs, `adminops.authorize` and row admission remain
 // the authority on every read and write this app makes.
+//
+// RE-READ UNDER THE FLIPPED LADDER (epic memql#4832, D1), because this line
+// changed meaning without changing.
+//
+// It was written when the shell ranked admin ABOVE developer, so `min:
+// "admin"` meant {admin, owner}. The engine ranks developer (300) above admin
+// (200) and that ordering is now the only one, so the same line means {admin,
+// developer, owner} -- a developer sees this app where they did not before.
+//
+// KEPT, deliberately, and the alternative is worth naming: `min: "developer"`
+// would exclude admins from the user-management app, which is precisely
+// backwards, since admin is the tier holding the full `principal` verbs.
+//
+// What a rank floor CANNOT say here is the thing one might want -- "admin but
+// not developer" is a CAPABILITY distinction, not a rank one, and the two
+// tiers are orthogonal by construction (admin holds principal management and
+// no authoring; developer holds authoring and no principal management). A
+// developer opening Users therefore READS it and is refused the writes by the
+// engine's own principal-verb checks, which is the honest division: this line
+// decides what is offered, the engine decides what happens.
 const users: OsAppManifest = {
   id: "users",
   name: "Users",
@@ -179,13 +204,30 @@ const training: OsAppManifest = {
 // its five siblings are: the gear and the manifest must offer the same set,
 // and a second copy of the list is one that can disagree.
 //
-// NO manifest role. `v1:accounts:account` declares the composite tier
-// (`@rowAuthz(owner="ownerUserId", clusterOwner)`), so every signed-in person
-// has accounts of their own to read and the engine decides how far the list
-// reaches. Gating here would be presentation pretending to be authorization --
-// and the one surface inside that IS gated, the guest-invitation rollup, is
-// gated by the engine's own `requiresOwnerOrAdmin` and renders the refusal
-// rather than hiding the band.
+// `roles: { min: "admin" }` -- AND IT IS A MIRROR, NOT THE GATE (epic
+// memql#4832 D6, memql#4837).
+//
+// This manifest carried NO role until now, and the reasoning was sound at the
+// time: gating here would have been "presentation pretending to be
+// authorization", because a launcher filter is the only thing this file can
+// do and its own predicate says so.
+//
+// What changed is that there is now something real to mirror. The accounts
+// constructs declare `@requiresRank("admin")`, which the ENGINE enforces, so
+// a person below that rank is refused server-side whether or not this line
+// exists. Both halves are permanent and neither stands in for the other:
+// hiding an app somebody cannot reach beats letting them open it and read a
+// refusal, and that is a different job from refusing it.
+//
+// `admin` is rank >= 200 = {admin, developer, owner}, which is the set
+// memql#4837 spells out. The issue's title says "developer-and-above" and
+// means the same set -- that was the OS ladder's way of saying it, back when
+// developer sat BELOW admin. `min: "developer"` would read like the issue and
+// lock out every admin.
+//
+// `TestAppManifestMirrorsTheEngineFloor` (component/auth) fails the build if
+// this value and the DSL floor ever disagree, which is the whole point of
+// calling it a mirror.
 //
 // NOT always-docked. That is the Bin's distinction (#4784); this is an
 // ordinary app that opens from the launcher like every other one.
@@ -193,6 +235,7 @@ const accounts: OsAppManifest = {
   id: "accounts",
   name: "Accounts",
   icon: Building2,
+  roles: { min: "admin" },
   sections: ACCOUNTS_SECTIONS,
   settingsSection: "settings",
   component: AccountsApp,

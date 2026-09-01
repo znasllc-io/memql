@@ -20,7 +20,7 @@ import { browserHandoffPorts, openInVsCode, VSCODE_NO_ANSWER_MESSAGE, type Hando
 import { FileIcon } from "../items/FileIcon";
 import { FolderIcon } from "../items/FolderIcon";
 import type { UploadProvider } from "../items/upload";
-import { widgetById } from "../system/registry";
+import { widgetById, widgetsForRole } from "../system/registry";
 import { placeWindows, type PlacementTokens } from "../system/placement";
 import type { DeskSurface, DesktopItem, GridPos } from "../system/desktop";
 import type { Desk } from "../system/desks";
@@ -387,7 +387,12 @@ export function Desktop({
 
   // ---- context menus ----
   function deskMenuEntries(cell: GridPos): MenuEntry[] {
-    const widgets = registry.widgets;
+    // ROLE-FILTERED, like the launcher's Widgets tab (epic memql#4832, D1).
+    // This read the unfiltered `registry.widgets`, so a gated widget would
+    // have been offered here to everyone. The action refuses it too -- an
+    // offer nobody can take is a worse bug than a missing offer, but a menu
+    // that offers it at all is the one the person actually sees.
+    const widgets = widgetsForRole(registry, actorRole);
     return [
       {
         id: "new-folder",

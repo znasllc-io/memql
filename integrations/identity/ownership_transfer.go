@@ -53,6 +53,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	componentAuth "github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -201,6 +202,13 @@ func bareTail(id string) string {
 // append-only, so an id can have a version owned by the subject and a newer
 // one owned by somebody else. Transferring on the strength of a superseded
 // version would hand away a row that had already moved on.
+// staged-data: MUST-NOT-GATE -- a staged row skipped here is left owned by the
+// departing principal, which is precisely the permanently-unwritable row this
+// whole capability exists to prevent (memql#4838). It would be skipped
+// silently, the transfer would report success, and the row would surface as
+// unwritable later with an audit trail saying it had been handed over.
+// Ownership is orthogonal to publication: who may write a row is not a
+// question about whether it is visible yet.
 func (i *IdentityIntegration) rowsOwnedBy(ctx context.Context, conceptName, field, owner, onlyRow string) ([]string, error) {
 	var nodes []memorynodes.MemoryNode
 	if err := i.db().NewSelect().
@@ -274,6 +282,11 @@ func (i *IdentityIntegration) reassignRow(ctx context.Context, conceptName, rowI
 
 // assertPrincipalExists refuses a transfer into a principal the cluster does
 // not have.
+// staged-data: MUST-NOT-GATE -- gating this reports a staged principal as
+// NONEXISTENT and refuses the transfer outright, with a message saying the
+// destination user does not exist in a cluster where they plainly do. A false
+// denial on the safety check of a recovery path, and the operator's only
+// remaining move would be to guess that staging is the cause.
 func (i *IdentityIntegration) assertPrincipalExists(ctx context.Context, userId string) error {
 	var nodes []memorynodes.MemoryNode
 	if err := i.db().NewSelect().
@@ -322,7 +335,9 @@ func (i *IdentityIntegration) auditTransfer(ctx context.Context, access *compone
 		return err
 	}
 	query := fmt.Sprintf(
-		`mutation createAuditEvent(category:%s, action:%s, actorUserId:%s, actorEmail:%s, actorRole:%s, targetType:%s, targetId:%s, outcome:%s, detail:%s)`,
+		`mutation createAuditEvent(eventId:%s, occurredAt:%s, category:%s, action:%s, actorUserId:%s, actorEmail:%s, actorRole:%s, targetType:%s, targetId:%s, outcome:%s, detail:%s)`,
+		langparser.QuoteString(auditEventId(from, to)),
+		langparser.QuoteString(time.Now().UTC().Format(time.RFC3339Nano)),
 		langparser.QuoteString("authorization"),
 		langparser.QuoteString("row_ownership_transferred"),
 		langparser.QuoteString(access.UserId),
@@ -332,7 +347,13 @@ func (i *IdentityIntegration) auditTransfer(ctx context.Context, access *compone
 		langparser.QuoteString(to),
 		langparser.QuoteString("success"),
 		string(detail))
-	_, err = i.engine.Execute(componentAuth.ContextWithInternalOrigin(ctx), query)
+	// NO INTERNAL-ORIGIN STAMP HERE, deliberately. createAuditEvent is not
+	// @serverOnly, and v1:identity:auditEvent declares
+	// `@rowAuthz(owner="actorUserId", clusterOwner)` -- the actor recorded IS
+	// this caller, who is a cluster owner by the check above, so the ordinary
+	// write path admits it. Stamping anyway would widen a call that does not
+	// need widening, which is how an escape becomes ambient.
+	_, err = i.engine.Execute(ctx, query)
 	return err
 }
 
@@ -356,4 +377,12 @@ func stringArg(args map[string]any, key string) string {
 	}
 	s, _ := args[key].(string)
 	return s
+}
+
+// auditEventId derives the audit row's id from the pair and the instant, so a
+// second transfer between the same two principals appends rather than
+// colliding with the first.
+func auditEventId(from, to string) string {
+	return fmt.Sprintf("v1:identity:auditEvent:transfer-%s-%s-%d",
+		bareTail(from), bareTail(to), time.Now().UTC().UnixNano())
 }

@@ -2,8 +2,10 @@ import { useDraggable } from "@dnd-kit/core";
 import { Maximize2, Minimize2, Minus, Settings2, Sparkles, X } from "lucide-react";
 
 import { useAsk } from "../ask/AskProvider";
+import { SurfaceRefused } from "../kit/RankStates";
 import type { Rect } from "../system/placement";
 import { sectionsForRole, type OsAppManifest } from "../system/registry";
+import { roleAdmits } from "../system/roles";
 import type { OsWindow } from "../system/windows";
 import { useOs } from "./state";
 
@@ -139,11 +141,27 @@ export function WindowFrame({
           </nav>
         ) : null}
         <div className="os-window-content" data-os-window-content>
-          <Body
-            sectionId={current?.id ?? ""}
-            navigate={(sectionId) => actions.navigateSection(win.id, sectionId)}
-            askContext={(tag) => openAsk(tag)}
-          />
+          {/* THE REFUSED SURFACE (epic memql#4832, D6).
+              A window can be open on an app this actor's rank does not clear,
+              two ways that both happen: a desk restored from storage naming an
+              app whose requirement the person no longer meets, and a role
+              changed while they were signed in. openApp refuses the first
+              OPEN, but neither path re-checks a window already on the desk.
+              Rendering the app body anyway would run its reads and show the
+              refusals one at a time, which says nothing about why. */}
+          {roleAdmits(actorRole, manifest.roles) ? (
+            <Body
+              sectionId={current?.id ?? ""}
+              navigate={(sectionId) => actions.navigateSection(win.id, sectionId)}
+              askContext={(tag) => openAsk(tag)}
+            />
+          ) : (
+            <SurfaceRefused
+              surface={manifest.name}
+              required={manifest.roles?.min ?? ""}
+              actorRole={actorRole}
+            />
+          )}
         </div>
       </div>
     </section>

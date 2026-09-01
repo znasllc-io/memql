@@ -10,6 +10,19 @@ import type { ProfileAccess } from "../modules/profile/access";
 export interface SessionFacts {
   access: ProfileAccess | null;
   config: OsRuntimeConfig;
+  /**
+   * Whether the cluster's role ladder has landed (epic memql#4832, D1).
+   *
+   * It rides here so a gated surface can tell TWO STATES APART that both
+   * hide an app: "you may not reach this" and "the shell does not know the
+   * ordering yet". They must not read the same to the person in front of it
+   * -- one is an answer and the other is a wait, and rendering the answer
+   * during the wait is how a shell tells somebody they lack access they have.
+   *
+   * Optional so every existing harness that builds SessionFacts by hand keeps
+   * compiling; absent reads as "not loaded", which is the fail-closed value.
+   */
+  ladderLoaded?: boolean;
 }
 
 const Ctx = createContext<SessionFacts | null>(null);

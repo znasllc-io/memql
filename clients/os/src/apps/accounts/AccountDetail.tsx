@@ -2,11 +2,14 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { FileText, GraduationCap, Rocket, UserPlus } from "lucide-react";
 
-import { Button, Caption, Check, Fact, Facts, Input, Notice, Panel, Subhead } from "../../kit";
+import { Button, Caption, Check, Fact, Facts, Input, Notice, Panel, Subhead,
+  PeerRowReadOnly,
+} from "../../kit";
 import { rowString } from "@znasllc-io/memql-sdk-core/client";
 import { flatten } from "../../kit/rows";
 import type { ArchiveAccountState, UpdateAccountState } from "./actions";
 import { accountIsArchived, accountIsSelf, accountName, type AccountRow } from "./rows";
+import { useSession } from "../../chrome/access";
 import { useAccountRollups, type Rollup } from "./useAccounts";
 
 // One client: their facts, and everything of this cluster's that is theirs.
@@ -44,14 +47,28 @@ export function AccountDetail({
 }) {
   const rollups = useAccountRollups(account.id);
   const archived = accountIsArchived(account);
+  const self = accountIsSelf(account);
 
   return (
     <div className="os-account-detail">
       <ProfilePanel account={account} update={update} />
       <Ledger account={account} rollups={rollups} />
-      {archived ? null : (
+      {/* THE SELF ACCOUNT IS NOT ARCHIVABLE (memql#4837).
+          The panel rendered for it like any other client, so the owner could
+          file away their own company -- and archive is the ONLY exit in this
+          model, so it was a one-way trip. The engine refuses it now
+          (accounts_self_archive_guard.go, no escape, not even for a cluster
+          owner); this is the courtesy half, and the two are not
+          interchangeable: archiveClientAccount takes the id as a caller
+          argument, so hiding the button stops the button and nothing else.
+
+          The REASON replaces the control rather than disabling it. A greyed
+          Archive button on your own company is a question the surface refuses
+          to answer, and the answer is short. */}
+      {archived || self ? null : (
         <ArchivePanel account={account} archive={archive} onArchived={onArchived} />
       )}
+      {self && !archived ? <SelfAccountPanel /> : null}
     </div>
   );
 }
@@ -69,6 +86,19 @@ function ProfilePanel({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(() => toDraft(account));
+  const { access } = useSession();
+  const actorRole = access?.clusterRole ?? "";
+
+  // WHOSE ROW IS THIS. `ownerUserId` empty means CLUSTER-OWNED -- the self
+  // account -- which is everyone's to edit who got this far, so it is not a
+  // peer row. Anything else that is not the viewer's own is.
+  //
+  // Presentation only, as ever: the engine's write guard is the authority, and
+  // it refuses the same write whatever this renders. What this decides is
+  // whether somebody is offered a form that cannot save.
+  const ownerUserId = account.ownerUserId.trim();
+  const readOnly = ownerUserId !== "" && ownerUserId !== (access?.userId ?? "\u0000");
+
 
   // RESET THE DRAFT WHEN THE ROW CHANGES UNDER THE FORM. The feed is live, so
   // somebody else's edit can land while this panel is open. Keyed on the row's
@@ -91,8 +121,18 @@ function ProfilePanel({
       <Panel label="Profile">
         <div className="os-account-profile-head">
           <Subhead>Profile</Subhead>
-          <Button onClick={() => setEditing(true)}>Edit</Button>
+          {/* NO EDIT BUTTON ON SOMEBODY ELSE'S ACCOUNT (epic memql#4832, D2).
+              This is a state the app could not previously be in: before
+              rank-visible reads, an account you could not edit was one you
+              could not SEE, so an Edit button that opened a form the engine
+              then refused to save had never been reachable. It is now -- a
+              developer reads an admin's clients -- and the honest surface is
+              to say why rather than to offer a save that cannot land. */}
+          {readOnly ? null : <Button onClick={() => setEditing(true)}>Edit</Button>}
         </div>
+        {readOnly ? (
+          <PeerRowReadOnly actorRole={actorRole} />
+        ) : null}
         <Facts>
           <Fact label="Name" value={account.name} />
           <Fact label="Domain" value={account.domain} mono />
@@ -441,6 +481,34 @@ function ArchivePanel({
           </div>
         </div>
       )}
+    </Panel>
+  );
+}
+
+
+/**
+ * What stands where the Archive panel would be, on the cluster's own account.
+ *
+ * It says the rule and the reason in two lines and offers nothing, because
+ * there is nothing to offer -- this is not a permission a different person
+ * could exercise, it is a row that has no exit. A disabled button would imply
+ * the opposite.
+ *
+ * Everything ELSE about this account stays editable, including its name and
+ * domain, and the panel says so: there is no delete in this model, so a
+ * first-run typo would otherwise be permanent. Nothing in the cluster derives
+ * authority from these fields -- `name` is read by no gate, and `domain` feeds
+ * custom-domain SUGGESTIONS only.
+ */
+function SelfAccountPanel() {
+  return (
+    <Panel label="This cluster">
+      <Subhead>This cluster</Subhead>
+      <p className="os-caption">
+        This is your own company, not a client. It cannot be archived -- archive is
+        the only exit here, and the cluster would be left without one. Its name,
+        domain and contact stay editable above.
+      </p>
     </Panel>
   );
 }
