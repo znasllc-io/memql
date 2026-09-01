@@ -50,7 +50,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
 	"slices"
 	"strings"
 	"time"
@@ -61,6 +60,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // resultConcept is the synthetic MemoryNode concept the capabilities
@@ -1139,56 +1139,34 @@ func intField(m map[string]any, key string) int {
 
 // intArg coerces an arbitrary arg value to int, reporting whether a
 // numeric value was present.
+//
+// The two answers differ on purpose. An int64 SATURATES because its callers
+// are version ordinals (expectedVersion, versionNumber) and an ordering that
+// inverts is worse than one that stops; a float ZEROES because there is no
+// fractional version and a caller sending one is already outside the
+// contract.
 func intArg(v any) (int, bool) {
 	switch t := v.(type) {
 	case int:
 		return t, true
 	case int64:
-		return safeIntFromInt64(t), true
+		return num.ClampInt64(t), true
 	case float64:
-		return safeIntFromFloat(t), true
+		return num.Float64OrZero(t), true
 	case float32:
-		return safeIntFromFloat(float64(t)), true
+		return num.Float64OrZero(float64(t)), true
 	case json.Number:
 		// Prefer the integer parse so a large whole number keeps full
 		// precision; the int64 result is bound-checked below. Fall back
 		// to the float parse for fractional values.
 		if i, err := t.Int64(); err == nil {
-			return safeIntFromInt64(i), true
+			return num.ClampInt64(i), true
 		}
 		if f, err := t.Float64(); err == nil {
-			return safeIntFromFloat(f), true
+			return num.Float64OrZero(f), true
 		}
 	}
 	return 0, false
-}
-
-// safeIntFromInt64 narrows an int64 to int, clamping to the 32-bit range
-// (the worst-case int width) so the conversion is overflow-safe on every
-// platform. Bound-checked on the int64 source directly so the narrowing
-// is provably bounded (go/incorrect-integer-conversion).
-func safeIntFromInt64(v int64) int {
-	if v > math.MaxInt32 {
-		return math.MaxInt32
-	}
-	if v < math.MinInt32 {
-		return math.MinInt32
-	}
-	return int(v)
-}
-
-// safeIntFromFloat narrows a float64 to int. It bounds the float to the
-// 32-bit range (exactly representable in float64) and then funnels through
-// safeIntFromInt64 -- the single int->int narrowing sink -- rather than
-// converting the float to int directly. A direct int(float64) is flagged
-// by go/incorrect-integer-conversion because the float carries no provable
-// integer bound; routing through the int64 sink keeps the narrowing safe
-// and recognizable. These args are small counts / limits.
-func safeIntFromFloat(v float64) int {
-	if math.IsNaN(v) || v > math.MaxInt32 || v < math.MinInt32 {
-		return 0
-	}
-	return safeIntFromInt64(int64(v))
 }
 
 // extractRows normalizes the engine's Execute return into a uniform

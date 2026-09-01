@@ -46,6 +46,7 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 const (
@@ -190,6 +191,12 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 	// limit tolerance: the DSL parser produces int64 for integer
 	// literals, JSON-unmarshal produces float64 when the caller marshaled
 	// a Go map. Accept both so the handler is source-agnostic.
+	//
+	// ZERO out of range (memql#4779), because the `limit <= 0` normalization
+	// directly below is already this site's answer to a nonsense limit and
+	// zero is how a value reaches it. Saturating instead would produce
+	// `LIMIT 9223372036854775807` on a vector scan -- accepted by Postgres,
+	// and exactly the unbounded query the limit exists to prevent.
 	limit := 0
 	limitPresent := false
 	if v, ok := args["limit"]; ok {
@@ -198,13 +205,13 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 		case int:
 			limit = n
 		case int64:
-			limit = int(n)
+			limit = num.Int64OrZero(n)
 		case int32:
 			limit = int(n)
 		case float64:
-			limit = int(n)
+			limit = num.Float64OrZero(n)
 		case float32:
-			limit = int(n)
+			limit = num.Float64OrZero(float64(n))
 		}
 	}
 	if limit <= 0 {

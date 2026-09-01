@@ -19,6 +19,7 @@ import (
 	componentAuth "github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // Integration is the DSL-callable governance surface.
@@ -131,18 +132,25 @@ func boolArg(args map[string]any, key string) bool {
 	}
 }
 
+// intArg reads a numeric capability arg.
+//
+// SATURATES out of range (memql#4779). Every value read here is a privilege
+// RANK feeding `CanCreatePrincipal`, which is `targetRank < actor.Rank` -- so
+// a narrowing that flips the sign flips an authorization decision. This is the
+// twin of component/memql's intWithOkFromAny; two packages decode the same
+// rank, and they must not disagree about what an absurd one means.
 func intArg(args map[string]any, key string) int {
 	switch v := args[key].(type) {
 	case int:
 		return v
 	case int64:
-		return int(v)
+		return num.ClampInt64(v)
 	case int32:
 		return int(v)
 	case float64:
-		return int(v)
+		return num.ClampFloat64(v)
 	case float32:
-		return int(v)
+		return num.ClampFloat64(float64(v))
 	default:
 		return 0
 	}

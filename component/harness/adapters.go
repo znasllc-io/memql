@@ -25,6 +25,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // Executor is the narrow engine surface the writer/claimer use to run
@@ -520,20 +521,24 @@ func stringField(m map[string]any, key string) string {
 	return ""
 }
 
+// intField reads a harness step payload's numeric field.
+//
+// SATURATES out of range (memql#4779). Its one caller is `attempt`, a retry
+// ordinal, and an ordinal that wraps negative sorts before every real attempt.
 func intField(m map[string]any, key string) int {
 	if m == nil {
 		return 0
 	}
 	switch v := m[key].(type) {
 	case float64:
-		return int(v)
+		return num.ClampFloat64(v)
 	case int:
 		return v
 	case int64:
-		return int(v)
+		return num.ClampInt64(v)
 	case json.Number:
 		n, _ := v.Int64()
-		return int(n)
+		return num.ClampInt64(n)
 	}
 	return 0
 }

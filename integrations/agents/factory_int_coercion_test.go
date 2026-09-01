@@ -87,20 +87,28 @@ func TestIntFromAnyLoose_PassesInRangeValuesThrough(t *testing.T) {
 	}
 }
 
-// TestClampInt64ToInt_Saturates asserts the int64 arm at both extremes. The
-// wanted value is math.MaxInt rather than math.MaxInt64 deliberately: on a
-// 64-bit build the two are equal and the assertion is exact, and on a 32-bit
-// one it is the saturation. The guard itself is unreachable on amd64/arm64 --
-// this test proves the contract, not that the branch ran here.
-func TestClampInt64ToInt_Saturates(t *testing.T) {
-	if got := clampInt64ToInt(math.MaxInt64); got != math.MaxInt {
-		t.Errorf("clampInt64ToInt(MaxInt64) = %d, want %d", got, math.MaxInt)
+// TestIntFromAnyLooseSaturates asserts the site's own answer at both extremes.
+//
+// The narrowing itself is core/num's, and core/num tests it. What this file
+// still owes an assertion about is that THIS decoder saturates rather than
+// zeroing or defaulting -- maxSkills is an ordering, and the two other answers
+// would each read as a different lie about a role (memql#4778). Asserted
+// through the decoder rather than the helper so a later "simplification" of the
+// arm back to a bare conversion fails here.
+func TestIntFromAnyLooseSaturates(t *testing.T) {
+	if got := intFromAnyLoose(int64(math.MaxInt64)); got != math.MaxInt {
+		t.Errorf("intFromAnyLoose(MaxInt64) = %d, want %d", got, math.MaxInt)
 	}
-	if got := clampInt64ToInt(math.MinInt64); got != math.MinInt {
-		t.Errorf("clampInt64ToInt(MinInt64) = %d, want %d", got, math.MinInt)
+	if got := intFromAnyLoose(int64(math.MinInt64)); got != math.MinInt {
+		t.Errorf("intFromAnyLoose(MinInt64) = %d, want %d", got, math.MinInt)
 	}
-	if got := clampInt64ToInt(42); got != 42 {
-		t.Errorf("clampInt64ToInt(42) = %d, want 42", got)
+	if got := intFromAnyLoose(1e30); got != math.MaxInt {
+		t.Errorf("intFromAnyLoose(1e30) = %d, want %d -- the bare conversion "+
+			"answered %d here, which presents the least restrictive role in the "+
+			"catalog as the most", got, math.MaxInt, math.MinInt64)
+	}
+	if got := intFromAnyLoose(int64(42)); got != 42 {
+		t.Errorf("intFromAnyLoose(42) = %d, want 42", got)
 	}
 }
 

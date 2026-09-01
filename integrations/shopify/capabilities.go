@@ -9,6 +9,7 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 	"github.com/znasllc-io/memql/integrations/shopify/generated"
 )
 
@@ -519,6 +520,11 @@ func argString(args map[string]any, key string) string {
 	}
 }
 
+// argInt reads a numeric capability arg.
+//
+// THE CALLER'S DEFAULT, out of range (memql#4779). Its caller is a low-stock
+// threshold with `5` already named at the call site, and a threshold of 2^63
+// reports every location in the store as low.
 func argInt(args map[string]any, key string, fallback int) int {
 	if args == nil {
 		return fallback
@@ -527,9 +533,9 @@ func argInt(args map[string]any, key string, fallback int) int {
 	case int:
 		return v
 	case int64:
-		return int(v)
+		return num.Int64Or(v, fallback)
 	case float64:
-		return int(v)
+		return num.Float64Or(v, fallback)
 	}
 	return fallback
 }

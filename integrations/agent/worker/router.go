@@ -547,8 +547,10 @@ func LabelsFromArgs(v any) map[string]string {
 			out[k] = fmt.Sprintf("%t", t)
 		case float64:
 			// JSON numbers land as float64. Render 1 as "1", not "1.000000".
-			if t == float64(int64(t)) {
-				out[k] = fmt.Sprintf("%d", int64(t))
+			//
+			// narrowing: GUARDED -- num.WholeInt64 IS the guard (memql#4779).
+			if whole, ok := num.WholeInt64(t); ok {
+				out[k] = fmt.Sprintf("%d", whole)
 			} else {
 				out[k] = fmt.Sprintf("%g", t)
 			}

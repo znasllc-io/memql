@@ -53,6 +53,7 @@ import (
 	"github.com/znasllc-io/memql/component/deploycontrol"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
@@ -238,14 +239,19 @@ func (p *Provider) recordBack(ctx context.Context, args map[string]any, _ int) (
 	if nodeType := argString(args, "nodeType"); nodeType != "" {
 		version := argString(args, "version")
 		imageDigest := argString(args, "imageDigest")
+		// THE CALLER'S DEFAULT, out of range (memql#4779). The value is
+		// %d-formatted straight into a generated MemQL mutation, so an absurd
+		// one produces a syntactically valid statement asking for 2^63
+		// replicas; `1` is already declared on the line above and is the
+		// answer an absent field gets.
 		replicas := 1
 		switch r := args["replicas"].(type) {
 		case int:
 			replicas = r
 		case int64:
-			replicas = int(r)
+			replicas = num.Int64Or(r, replicas)
 		case float64:
-			replicas = int(r)
+			replicas = num.Float64Or(r, replicas)
 		}
 		call := fmt.Sprintf(
 			"mutation createDeploymentNodeSpec(deploymentId: %s, nodeType: %s, version: %s, replicas: %d, imageDigest: %s)",

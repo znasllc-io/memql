@@ -33,13 +33,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
 	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // EmbedDomainItemsDispatcher claims embedDomainItems Plans and runs the
@@ -340,20 +340,14 @@ func planEmbedDomainIds(input map[string]any) []string {
 func intFromAny(v any) int {
 	switch n := v.(type) {
 	case float64:
-		if n > math.MaxInt32 || n < math.MinInt32 {
-			return 0
-		}
-		return clampInt64ToInt(int64(n), 0)
+		return num.Float64OrZero(n)
 	case int:
 		return n
 	case int64:
-		return clampInt64ToInt(n, 0)
+		return num.Int64OrZero(n)
 	case json.Number:
 		if f, err := n.Float64(); err == nil {
-			if f > math.MaxInt32 || f < math.MinInt32 {
-				return 0
-			}
-			return clampInt64ToInt(int64(f), 0)
+			return num.Float64OrZero(f)
 		}
 	}
 	return 0

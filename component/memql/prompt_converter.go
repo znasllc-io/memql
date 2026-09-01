@@ -37,6 +37,7 @@ import (
 	"strings"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // promptDeclToPromptDecl converts a langparser PromptDecl into the
@@ -177,8 +178,10 @@ func stringifyAttrValue(v any) string {
 	case float64:
 		// Trim trailing zeros on whole numbers so 10 doesn't render
 		// as "10.000000"; otherwise float-format.
-		if x == float64(int64(x)) {
-			return fmt.Sprintf("%d", int64(x))
+		//
+		// narrowing: GUARDED -- num.WholeInt64 IS the guard (memql#4779).
+		if whole, ok := num.WholeInt64(x); ok {
+			return fmt.Sprintf("%d", whole)
 		}
 		return fmt.Sprintf("%g", x)
 	case nil:

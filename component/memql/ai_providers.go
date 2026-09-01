@@ -22,6 +22,7 @@ import (
 
 	"github.com/znasllc-io/memql/core/audio"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 const envDefaultProvider = "MEMQL_DEFAULT_PROVIDER"
@@ -76,11 +77,15 @@ type ProviderConfig struct {
 // ContextWindow returns the context window size from provider params,
 // falling back to 0 if not explicitly set. Callers should use
 // polyphon.LookupContextWindow(model) as a fallback for unknown values.
+//
+// SATURATES out of range (memql#4779). The value is a capacity, reported into
+// the router's decision payload, and a negative capacity would make every
+// prompt look too long for the provider that declared it.
 func (c ProviderConfig) ContextWindow() int {
 	if cw, ok := c.Params["contextWindow"]; ok {
 		switch v := cw.(type) {
 		case float64:
-			return int(v)
+			return num.ClampFloat64(v)
 		case int:
 			return v
 		}
@@ -1311,11 +1316,16 @@ func newOpenAIEmbeddingProvider(cfg ProviderConfig) (AIProvider, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("provider %q missing auth.apiKey", cfg.Name)
 	}
+	// THE CALLER'S DEFAULT, out of range (memql#4779), and this is the one
+	// site in the sweep where saturation would be actively worse: `dims` is
+	// sent to OpenAI as the embedding vector width, so MaxInt and 0 are both
+	// just a different 400 from the API. The default is already declared on
+	// the line above and is the only answer that produces a working provider.
 	dims := 1536
 	if d, ok := cfg.Params["dimensions"]; ok {
 		switch v := d.(type) {
 		case float64:
-			dims = int(v)
+			dims = num.Float64Or(v, dims)
 		case int:
 			dims = v
 		}
@@ -3306,19 +3316,31 @@ func numberParam(value any, fallback float64) float64 {
 	return fallback
 }
 
+// intParam reads a numeric provider param.
+//
+// SATURATES out of range (memql#4779). This is the widest-fanout site in the
+// sweep -- some thirty call sites, nearly all of them `maxTokens` /
+// `maxCompletionTokens` / `thinkingBudgetTokens` on their way to a paid API.
+//
+// Reporting ok=false instead was the tempting alternative and is the wrong
+// one: the callers are `else if` chains that fall through to the provider's
+// own default, so an absurd budget would be silently ignored and the request
+// would succeed having spent whatever the vendor felt like. A saturated value
+// is refused by every provider with a 400 naming the field, which is a loud
+// failure about the number that was actually configured.
 func intParam(value any) (int, bool) {
 	switch v := value.(type) {
 	case float64:
-		return int(v), true
+		return num.ClampFloat64(v), true
 	case float32:
-		return int(v), true
+		return num.ClampFloat64(float64(v)), true
 	case int:
 		return v, true
 	case int64:
-		return int(v), true
+		return num.ClampInt64(v), true
 	case json.Number:
 		if parsed, err := v.Int64(); err == nil {
-			return int(parsed), true
+			return num.ClampInt64(parsed), true
 		}
 	}
 	return 0, false

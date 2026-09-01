@@ -1213,10 +1213,16 @@ func versionNumbers(eng *stubEngine) []int {
 	return nums
 }
 
-// TestIntArgClampsToInt32Range verifies the numeric coercion narrows
-// JSON-decoded values to the 32-bit int range so the int conversion is
-// overflow-safe on every platform (CodeQL go/incorrect-integer-conversion).
-func TestIntArgClampsToInt32Range(t *testing.T) {
+// TestIntArgNarrowsSafely verifies the numeric coercion narrows JSON-decoded
+// values through core/num rather than a bare conversion.
+//
+// THE BOUND IS THE PLATFORM'S, not int32 (memql#4779). The helper this
+// replaced clamped at math.MaxInt32 and called that "the worst-case int
+// width" -- a portability proxy rather than a domain rule, and on a 64-bit
+// build it truncated a legitimate 5 GB size to 2147483647 while protecting
+// nothing. The out-of-range ANSWERS are unchanged: an int64 saturates because
+// its callers are version ordinals, a float zeroes.
+func TestIntArgNarrowsSafely(t *testing.T) {
 	cases := []struct {
 		name string
 		in   any
@@ -1228,8 +1234,17 @@ func TestIntArgClampsToInt32Range(t *testing.T) {
 		{"float64", float64(10), 10, true},
 		{"float32", float32(3), 3, true},
 		{"json.Number", json.Number("99"), 99, true},
-		{"overflow-high", float64(1) + math.MaxInt32, 0, true},
-		{"overflow-low", float64(-1) + math.MinInt32, 0, true},
+		// Past int32 and well inside int: carried, not truncated. This is the
+		// case the old int32 bound got wrong.
+		{"past-int32-high", float64(1) + math.MaxInt32, math.MaxInt32 + 1, true},
+		{"past-int32-low", float64(-1) + math.MinInt32, math.MinInt32 - 1, true},
+		// Past int: the float arm's answer is zero.
+		{"overflow-high", 1e30, 0, true},
+		{"overflow-low", -1e30, 0, true},
+		{"nan", math.NaN(), 0, true},
+		// The int64 arm's answer is saturation, because a version ordinal that
+		// inverts is worse than one that stops.
+		{"int64-saturates", int64(math.MaxInt64), math.MaxInt, true},
 		{"non-numeric", "nope", 0, false},
 	}
 	for _, tc := range cases {
