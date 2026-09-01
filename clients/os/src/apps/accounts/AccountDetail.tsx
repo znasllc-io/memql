@@ -90,15 +90,36 @@ function ProfilePanel({
   const { access } = useSession();
   const actorRole = access?.clusterRole ?? "";
 
-  // WHOSE ROW IS THIS. `ownerUserId` empty means CLUSTER-OWNED -- the self
-  // account -- which is everyone's to edit who got this far, so it is not a
-  // peer row. Anything else that is not the viewer's own is.
+  // WHOSE ROW IS THIS, and can this viewer write it.
   //
-  // Presentation only, as ever: the engine's write guard is the authority, and
-  // it refuses the same write whatever this renders. What this decides is
-  // whether somebody is offered a form that cannot save.
+  // Presentation only, as ever: the engine's write guard is the authority and
+  // refuses the same write whatever this renders. What this decides is whether
+  // somebody is offered a form that CANNOT SAVE -- which under rank-visible
+  // reads is a new possibility, because a row you may not write is now a row
+  // you can see (epic memql#4832, D2).
+  //
+  // Three cases, and the middle one is the one that is easy to get wrong:
+  //
+  //  - the viewer's OWN row            writable
+  //  - CLUSTER-OWNED (empty owner)     writable by a cluster OWNER only
+  //  - anyone else's                   read-only
+  //
+  // The cluster-owned case is the `self` account. It is tempting to read an
+  // empty owner as "nobody's, so everybody's" -- and the engine says the
+  // opposite: `sameRowAuthzOwner` refuses an empty owner outright, so the
+  // clusterOwner branch is the only one that admits the write, and that branch
+  // is `Role == RoleOwner` exactly. Offering an admin the Edit button here
+  // would hand them a form the engine refuses on save, which is precisely the
+  // shape this panel now exists to avoid.
+  //
+  // `clusterRole === "owner"` rather than roleAdmits, because this is not a
+  // rank floor: it mirrors auth.IsClusterOwner, which is one role and not a
+  // rung. Settings' ClusterSection reads it the same way and for the same
+  // reason.
   const ownerUserId = account.ownerUserId.trim();
-  const readOnly = ownerUserId !== "" && ownerUserId !== (access?.userId ?? "\u0000");
+  const viewerOwnsIt = ownerUserId !== "" && ownerUserId === (access?.userId ?? "\u0000");
+  const clusterOwned = ownerUserId === "";
+  const readOnly = clusterOwned ? actorRole !== "owner" : !viewerOwnsIt;
 
 
   // RESET THE DRAFT WHEN THE ROW CHANGES UNDER THE FORM. The feed is live, so
@@ -132,7 +153,11 @@ function ProfilePanel({
           {readOnly ? null : <Button onClick={() => setEditing(true)}>Edit</Button>}
         </div>
         {readOnly ? (
-          <PeerRowReadOnly actorRole={actorRole} />
+          clusterOwned ? (
+            <PeerRowReadOnly actorRole={actorRole} ownerName="This cluster" ownerRole="owner" />
+          ) : (
+            <PeerRowReadOnly actorRole={actorRole} />
+          )
         ) : null}
         <Facts>
           <Fact label="Name" value={account.name} />
