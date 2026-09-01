@@ -1256,6 +1256,12 @@ func (h *ArtifactHandler) serveFileBytes(w http.ResponseWriter, r *http.Request,
 		// giving the streamer a second shape keeps Range, Content-Length and
 		// the buffered fallback on exactly one code path -- the alternative
 		// is two download implementations that drift.
+		//
+		// Status is the one field with no counterpart: a superseded version
+		// has no lifecycle, because nothing will ever analyse it again. It is
+		// set to `ready` for the ONE thing the download path does with it --
+		// a log field on an unavailable blob -- and is not a fact read off
+		// the row. Nothing here gates on it.
 		row = &LibraryFileRow{
 			ID:       version.ID,
 			Name:     version.Name,

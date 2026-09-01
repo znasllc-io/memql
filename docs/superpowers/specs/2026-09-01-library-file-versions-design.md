@@ -135,16 +135,34 @@ path, where the handler never held the file. The concept's own reading of
 absence -- "not measured yet, never no hash exists" -- stays true, and the
 analysis pass stamps the real value when it streams the committed blob.
 
-## D6 -- the versioned blob path
+## D6 -- the versioned blob path, keyed per ATTEMPT rather than per version
 
-`library/{userId}/{fileId}/v{n}/{name}` for every version after the first.
-Version 1 keeps the unversioned `library/{userId}/{fileId}/{name}` path it
-already has, so nothing is migrated.
+`library/{userId}/{fileId}/{key}/{name}` for every version after the first,
+where `key` is a **fresh short id minted per upload attempt**. Version 1 keeps
+the unversioned `library/{userId}/{fileId}/{name}` path it already has, so
+nothing is migrated.
 
-The D12 durability invariant (`docs/public/operate/library.md`) holds by
+**It was `v{n}` in the first draft of this design, and that is wrong.** Two
+supersedes of one file racing each other both read the same head, so both
+compute the same version number -- and the second `Upload` would overwrite the
+first's bytes at a shared path, leaving a head row whose name, size and hash
+describe a different file's content. A per-attempt key makes every upload's
+bytes untouchable by every other, which is what the durability invariant
+actually needs; the version NUMBER is a fact about a row, and it lives on the
+row.
+
+The D12 durability invariant (`docs/public/operate/library.md`) then holds by
 construction rather than by care: a supersede only ever writes to a path no
-version has used, so there is no code path in this epic that can overwrite
+upload has used, so there is no code path in this epic that can overwrite
 stored bytes.
+
+**What the race still costs, stated rather than hidden:** one of the two
+uploads loses its place as the head -- the later head write wins, and the
+loser's bytes are left unreferenced in storage. That is a LOST upload, which a
+person can see (their version is not there), rather than a CORRUPTED one,
+which they cannot. The snapshot write is unaffected either way: both attempts
+freeze the same outgoing head at the same derived id, so history stays
+correct.
 
 ## D7 -- the target is verified before a byte moves
 

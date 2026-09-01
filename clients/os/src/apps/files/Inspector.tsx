@@ -111,6 +111,7 @@ export function Inspector({
     [row.kind, row.sourceConceptRef],
   );
   const versions = useFileVersions(fileId);
+  const refreshVersions = versions.refresh;
   const picker = useRef<HTMLInputElement | null>(null);
   const [newVersionError, setNewVersionError] = useState("");
   const [newVersionNote, setNewVersionNote] = useState("");
@@ -231,7 +232,7 @@ export function Inspector({
         // is what makes the stack below show what just happened. The LIST
         // updates on its own -- the artifact index is re-stamped server-side
         // and arrives on the feed the browse already reads.
-        versions.refresh();
+        refreshVersions();
       } catch (err: unknown) {
         setNewVersionError(describe(err));
       } finally {
@@ -239,7 +240,11 @@ export function Inspector({
         setNewVersionBusy(false);
       }
     },
-    [uploads, row.id, versions],
+    // `refreshVersions`, not the whole `versions` object: the hook returns a
+    // fresh object every render, so depending on it would make this
+    // useCallback a no-op that re-allocates on every keystroke elsewhere in
+    // the panel. The refresh function itself is stable.
+    [uploads, row.id, refreshVersions],
   );
 
   const downloadVersion = useCallback(

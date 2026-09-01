@@ -11,7 +11,8 @@ vi.mock("../../src/live/connection", () => ({
   useOsConnection: () => h.connection,
 }));
 
-import { artifactRow, click, fakeConnection, fileRow, renderFiles, versionRow } from "./harness";
+import { ARTIFACT_CONCEPT } from "../../src/apps/files/concepts";
+import { artifactRow, click, emit, fakeConnection, fileRow, renderFiles, versionRow } from "./harness";
 import type { UploadHandle, UploadOptions, UploadProvider, UploadResult } from "../../src/items/upload";
 
 // The version history panel and the upload-new-version action (epic
@@ -50,6 +51,11 @@ function recordingProvider(): UploadProvider & {
 async function openInspector(title: string) {
   await click(screen.getByRole("button", { name: new RegExp(title) }));
   return screen.getByRole("complementary", { name: "File details" });
+}
+
+function arrivalOf(name: string): string | null {
+  const row = screen.getByRole("button", { name: new RegExp(name) });
+  return row.closest("li")?.getAttribute("data-arrival") ?? null;
 }
 
 describe("the version history panel", () => {
@@ -261,5 +267,68 @@ describe("the upload-new-version action", () => {
     // The HISTORY is still there: an archived file keeps its bytes and its
     // provenance, and the panel is where a person goes to get an earlier copy.
     expect(within(inspector).getByRole("region", { name: "Version history" })).toBeTruthy();
+  });
+});
+
+describe("the list when a version lands", () => {
+  // #4808's acceptance criterion, stated directly: ONE row, pulsed ONCE.
+  //
+  // What the cluster emits after a supersede is not a create -- it is the SAME
+  // artifact row re-stamped from the new head, which is the whole point of the
+  // head-on-the-file-row design. A second row here would mean the artifact
+  // index had re-pointed, which is the failure the mechanism exists to avoid.
+  it("shows one row, pulsed, and no second row", async () => {
+    const connection = fakeConnection({
+      artifacts: [artifactRow({ id: "a-1", title: "q3.pdf", sourceConceptRef: "v1:library:file:f-1" })],
+      files: [fileRow({ id: "f-1", versionNumber: 1 })],
+    });
+    h.connection = connection;
+    await renderFiles();
+    expect(screen.getAllByRole("button", { name: /q3/ })).toHaveLength(1);
+    expect(arrivalOf("q3\\.pdf")).toBeNull();
+
+    await emit(
+      connection,
+      ARTIFACT_CONCEPT,
+      artifactRow({ id: "a-1", title: "q3-final.pdf", sourceConceptRef: "v1:library:file:f-1" }),
+    );
+
+    expect(screen.getAllByRole("button", { name: /q3/ })).toHaveLength(1);
+    expect(arrivalOf("q3-final\\.pdf")).toBe("updated");
+  });
+
+  // THE STROBE RULE STILL HOLDS, and this is where the fingerprint's one blind
+  // spot is written down rather than left to be discovered.
+  //
+  // `artifactFingerprint` names what a PERSON would call a change -- title,
+  // filing, archive, labels, validation, summary, format -- and deliberately
+  // not `updatedAt`, which the analysis pass re-stamps on every touch. A new
+  // version normally moves at least one of those (a new filename, or the
+  // summary the analysis pass writes for the new bytes), so it pulses.
+  //
+  // It does NOT pulse for a version that changes none of them: the same
+  // filename, an opaque type with no summary to rewrite. That is a real gap
+  // and it is left open on purpose -- closing it means carrying a version
+  // number on the INDEX, duplicating a fact the file row owns, to drive a cue
+  // whose only uncovered case already has its confirmation in surface (the
+  // panel that took the upload says which version landed and re-reads at
+  // once). Naming `updatedAt` instead would strobe the whole list on analysis
+  // churn no person can see, which is the failure the fingerprint exists to
+  // prevent.
+  it("stays silent when a re-stamp changes nothing a person would call a change", async () => {
+    const row = { id: "a-1", title: "backup.zip", sourceConceptRef: "v1:library:file:f-1" };
+    const connection = fakeConnection({
+      artifacts: [artifactRow({ ...row, updatedAt: "t1" })],
+      files: [fileRow({ id: "f-1", versionNumber: 1 })],
+    });
+    h.connection = connection;
+    await renderFiles();
+
+    await emit(connection, ARTIFACT_CONCEPT, artifactRow({ ...row, updatedAt: "t2" }));
+    expect(arrivalOf("backup\\.zip")).toBeNull();
+
+    // ...and pulses the moment one of them does move.
+    await emit(connection, ARTIFACT_CONCEPT, artifactRow({ ...row, title: "backup-2.zip" }));
+    expect(arrivalOf("backup-2\\.zip")).toBe("updated");
   });
 });
