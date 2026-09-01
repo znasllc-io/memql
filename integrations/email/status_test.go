@@ -46,11 +46,11 @@ const (
 func clearEmailEnv(t *testing.T) {
 	t.Helper()
 	for _, spec := range append(graphSlotSpecs(), smtpSlotSpecs()...) {
-		if spec.envVar != "" {
-			t.Setenv(spec.envVar, "")
+		if spec.EnvVar != "" {
+			t.Setenv(spec.EnvVar, "")
 		}
-		if spec.legacy != "" {
-			t.Setenv(spec.legacy, "")
+		if spec.Legacy != "" {
+			t.Setenv(spec.Legacy, "")
 		}
 	}
 	// The domain decides whether log-only is a choice or a defect

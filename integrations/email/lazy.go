@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 )
 
@@ -115,11 +116,43 @@ func (l *LazySender) resolve(ctx context.Context) Sender {
 		return l.envResolved // LogSender from caller
 	}
 
-	if sender := l.tryGraphFromMemql(ctx); sender != nil {
+	// ONE walk over the declared manifest, rather than a hand-written
+	// attempt per lane (memql#4825). The lane list, which slots each needs
+	// and which of them are secret are all declared in emailconfig.go, and
+	// the status reporter walks the same declaration -- so the console
+	// cannot show a complete lane beside a sender that did not resolve.
+	//
+	// Env is passed as nil deliberately: this tier runs only after the env
+	// tier already lost, and letting it re-read the environment would let a
+	// half-migrated configuration resolve here by borrowing the very values
+	// NewSenderFromEnv had already declined to use.
+	res := resolveEmailConfig(ctx, ConfigResolver{Vars: l.resolveVar, Secrets: l.resolveSecret})
+	if sender := senderFor(res, l.logger); sender != nil {
 		return sender
 	}
-	if sender := l.trySMTPFromMemql(ctx); sender != nil {
-		return sender
+
+	// A configuration that is PRESENT but split across tiers is a distinct
+	// state from an absent one, and it used to be silent: the operator saw
+	// every value seeded and a log-only sender. The manifest can tell them
+	// apart, so this says which it is.
+	for _, lane := range res.Lanes {
+		if l.logger == nil {
+			continue
+		}
+		switch {
+		case lane.Split:
+			l.logger.Warn("email: a lane's settings are present but split across tiers, so none of them is used",
+				"lane", lane.Lane.Name,
+				"hint", "a lane is taken WHOLE from the environment or WHOLE from stored rows, never mixed")
+		case lane.Partial:
+			// The generalization of the old "SMTP_HOST seeded but
+			// SMTP_FROM_ADDR missing" line. It now fires for whichever lane
+			// somebody started, and names every value it is short of --
+			// rather than for one hand-picked pair on one hand-picked lane.
+			l.logger.Warn("email: a lane is partly configured and cannot be used",
+				"lane", lane.Lane.Name,
+				"missing", strings.Join(lane.Missing, ", "))
+		}
 	}
 
 	// The baseline is whatever the caller passed, which on an install that
@@ -136,99 +169,4 @@ func (l *LazySender) resolve(ctx context.Context) Sender {
 		}
 	}
 	return l.envResolved // LogSender baseline
-}
-
-func (l *LazySender) tryGraphFromMemql(ctx context.Context) Sender {
-	keys := DefaultGraphEnvKeys()
-	legacy := LegacyGraphEnvKeys()
-
-	tenantId := l.firstNonEmptyVar(ctx, keys.TenantId, legacy.TenantId)
-	clientId := l.firstNonEmptyVar(ctx, keys.ClientId, legacy.ClientId)
-	sender := l.firstNonEmptyVar(ctx, keys.SenderAddr, legacy.SenderAddr)
-	fromName := l.firstNonEmptyVar(ctx, keys.FromName, legacy.FromName)
-	clientSecret := l.firstNonEmptySecret(ctx, keys.ClientSecret, legacy.ClientSecret)
-
-	if tenantId == "" || clientId == "" || clientSecret == "" || sender == "" {
-		return nil
-	}
-	if l.logger != nil {
-		l.logger.Info("email: using Microsoft Graph sender (resolved from memql global rows)",
-			"sender", sender,
-			"tenantId", tenantId)
-	}
-	return NewGraphSender(GraphConfig{
-		TenantId:     tenantId,
-		ClientId:     clientId,
-		ClientSecret: clientSecret,
-		SenderAddr:   sender,
-		FromName:     fromName,
-	}, nil, l.logger)
-}
-
-func (l *LazySender) trySMTPFromMemql(ctx context.Context) Sender {
-	keys := DefaultEnvKeys()
-
-	host := l.firstNonEmptyVar(ctx, keys.Host)
-	if host == "" {
-		return nil
-	}
-	fromAddr := l.firstNonEmptyVar(ctx, keys.FromAddr)
-	if fromAddr == "" {
-		if l.logger != nil {
-			l.logger.Warn("email: SMTP_HOST seeded but SMTP_FROM_ADDR missing; cannot construct SMTPSender")
-		}
-		return nil
-	}
-	port := l.firstNonEmptyVar(ctx, keys.Port)
-	if port == "" {
-		port = "587"
-	}
-	username := l.firstNonEmptyVar(ctx, keys.Username)
-	password := l.firstNonEmptySecret(ctx, keys.Password)
-	fromName := l.firstNonEmptyVar(ctx, keys.FromName)
-
-	if l.logger != nil {
-		l.logger.Info("email: using SMTP sender (resolved from memql global rows)",
-			"host", host, "fromAddr", fromAddr)
-	}
-	return NewSMTPSender(SMTPConfig{
-		Host:     host,
-		Port:     port,
-		Username: username,
-		Password: password,
-		FromAddr: fromAddr,
-		FromName: fromName,
-	}, l.logger)
-}
-
-func (l *LazySender) firstNonEmptyVar(ctx context.Context, names ...string) string {
-	if l.resolveVar == nil {
-		return ""
-	}
-	for _, name := range names {
-		if name == "" {
-			continue
-		}
-		v, err := l.resolveVar(ctx, name)
-		if err == nil && v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func (l *LazySender) firstNonEmptySecret(ctx context.Context, names ...string) string {
-	if l.resolveSecret == nil {
-		return ""
-	}
-	for _, name := range names {
-		if name == "" {
-			continue
-		}
-		v, err := l.resolveSecret(ctx, name)
-		if err == nil && v != "" {
-			return v
-		}
-	}
-	return ""
 }

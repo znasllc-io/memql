@@ -421,90 +421,74 @@ func DefaultEnvKeys() EnvKeys {
 func NewSenderFromEnv(prefix string, logger *slog.Logger) (Sender, error) {
 	reader := env.NewEnvReader(strings.TrimRight(prefix, "_"))
 
-	// --- Graph path -----------------------------------------------------
-	// Try the new EMAIL_*-prefixed names first; fall back per-field to
-	// the pre-rename AZURE_* / MAIL_* names so installs that haven't
-	// re-seeded (`go run ./scripts/secrets seed`) since the rename keep working.
-	graphKeys := DefaultGraphEnvKeys()
-	legacyKeys := LegacyGraphEnvKeys()
-	readGraph := func(primary, legacy string) string {
-		if v, ok := reader.String(primary); ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-		if v, ok := reader.String(legacy); ok {
-			return strings.TrimSpace(v)
-		}
-		return ""
-	}
-	graphCfg := GraphConfig{
-		TenantId:     readGraph(graphKeys.TenantId, legacyKeys.TenantId),
-		ClientId:     readGraph(graphKeys.ClientId, legacyKeys.ClientId),
-		ClientSecret: readGraph(graphKeys.ClientSecret, legacyKeys.ClientSecret),
-		SenderAddr:   readGraph(graphKeys.SenderAddr, legacyKeys.SenderAddr),
-		FromName:     readGraph(graphKeys.FromName, legacyKeys.FromName),
-	}
-	graphReady := graphCfg.TenantId != "" &&
-		graphCfg.ClientId != "" &&
-		graphCfg.ClientSecret != "" &&
-		graphCfg.SenderAddr != ""
-	if graphReady {
-		if logger != nil {
-			logger.Info("email: using Microsoft Graph sender",
-				"sender", graphCfg.SenderAddr,
-				"tenantId", graphCfg.TenantId)
-		}
-		return NewGraphSender(graphCfg, nil, logger), nil
+	// ONE walk over the declared manifest (memql#4825). Which lanes exist,
+	// which slots each needs, which are secret and which legacy names are
+	// still honoured are all declared in emailconfig.go, and the lazy row
+	// resolver and the status reporter read the same declaration -- so the
+	// three cannot disagree about what "configured" means.
+	res := resolveEmailConfig(context.Background(), ConfigResolver{
+		Env: func(name string) (string, bool) { return reader.String(name) },
+	})
+	if sender := senderFor(res, logger); sender != nil {
+		return sender, nil
 	}
 
-	// --- SMTP fallback --------------------------------------------------
-	smtpKeys := DefaultEnvKeys()
-	host, _ := reader.String(smtpKeys.Host)
-	host = strings.TrimSpace(host)
-	if host == "" {
-		if err := refuseLogOnlySelection(logger, "no sender configured"); err != nil {
-			return nil, err
+	// Nothing resolved whole. The remaining job is to say WHY in the terms
+	// the operator will recognise, and the three cases read very
+	// differently.
+	//
+	// A SPLIT lane first, because it is the one that looks configured: every
+	// value is set and the sender is still log-only. It used to produce the
+	// same silent fall-through as an empty environment.
+	because := "no sender configured"
+	for _, lane := range res.Lanes {
+		switch {
+		case lane.Split:
+			because = "the " + lane.Lane.Name + " lane's settings are present but split across the environment and stored rows"
+		case lane.Partial:
+			// The case that reads like a typo rather than an omission:
+			// somebody started this lane, so they plainly intended to send.
+			// Refusing it is if anything more clearly right than the
+			// no-configuration case. Generalized from the hardcoded
+			// "SMTP_HOST set but SMTP_FROM_ADDR missing" (memql#4825), which
+			// only ever noticed one of the eleven ways to stop half way.
+			because = "the " + lane.Lane.Name + " lane is partly configured; missing " + strings.Join(lane.Missing, ", ")
+		default:
+			continue
 		}
-		if logger != nil {
+		break
+	}
+	if err := refuseLogOnlySelection(logger, because); err != nil {
+		return nil, err
+	}
+	if logger != nil {
+		if because == "no sender configured" {
 			logger.Info("email: no sender configured, using LogSender",
-				"hint", "set MEMQL_EMAIL_AZURE_TENANT_ID / MEMQL_EMAIL_AZURE_CLIENT_ID / MEMQL_EMAIL_AZURE_CLIENT_SECRET / MEMQL_EMAIL_SENDER for Microsoft Graph, or SMTP_HOST / SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD / SMTP_FROM_ADDR for SMTP")
+				"hint", "set "+strings.Join(laneEnvVars(res, LaneGraph), " / ")+" for Microsoft Graph, or "+
+					strings.Join(laneEnvVars(res, LaneSMTP), " / ")+" for SMTP")
+		} else {
+			logger.Warn("email: falling back to LogSender", "because", because)
 		}
-		return NewLogSender(logger), nil
 	}
+	return NewLogSender(logger), nil
+}
 
-	cfg := SMTPConfig{Host: host}
-	if v, ok := reader.String(smtpKeys.Port); ok {
-		cfg.Port = strings.TrimSpace(v)
-	}
-	if cfg.Port == "" {
-		cfg.Port = "587"
-	}
-	if v, ok := reader.String(smtpKeys.Username); ok {
-		cfg.Username = strings.TrimSpace(v)
-	}
-	if v, ok := reader.String(smtpKeys.Password); ok {
-		cfg.Password = v
-	}
-	if v, ok := reader.String(smtpKeys.FromAddr); ok {
-		cfg.FromAddr = strings.TrimSpace(v)
-	}
-	if v, ok := reader.String(smtpKeys.FromName); ok {
-		cfg.FromName = strings.TrimSpace(v)
-	}
-	if cfg.FromAddr == "" {
-		// The second fall-through, and the one that reads like a typo rather
-		// than an omission: a host is set, so the operator plainly intended
-		// to send. Refusing it is if anything more clearly right than the
-		// no-configuration case above.
-		if err := refuseLogOnlySelection(logger, "SMTP_HOST set but SMTP_FROM_ADDR missing"); err != nil {
-			return nil, err
+// laneEnvVars lists a lane's REQUIRED variables, for the hint an operator
+// reads when nothing is configured. Required only: naming the optional ones
+// makes a five-item list look like five obligations.
+func laneEnvVars(res ConfigResolution, name string) []string {
+	out := []string{}
+	for _, lane := range res.Lanes {
+		if lane.Lane.Name != name {
+			continue
 		}
-		if logger != nil {
-			logger.Warn("email: SMTP_HOST set but SMTP_FROM_ADDR missing; falling back to LogSender")
+		for _, slot := range lane.Slots {
+			if slot.Slot.Required {
+				out = append(out, slot.Slot.EnvVar)
+			}
 		}
-		return NewLogSender(logger), nil
 	}
-
-	return NewSMTPSender(cfg, logger), nil
+	return out
 }
 
 // refuseLogOnlySelection returns the boot refusal when this install must
