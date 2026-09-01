@@ -92,6 +92,12 @@ var LegacyAliases = map[string]string{
 	"MEMQL_ANTHROPIC_API_KEY":                               "ANTHROPIC_API_KEY",
 	"MEMQL_DATABASE_DSN":                                    "MEMORY_NODES_DATABASE_DSN",
 	"MEMQL_DEFAULT_AGENT_PROVIDER":                          "DEFAULT_AGENT_PROVIDER",
+	// The blob-storage string every deployed secret actually carries
+	// (memql#4843): seed-secrets.sh seeds it locally and the cloud's ESO
+	// sync writes it into memql-secrets, but no Go reader was left after the
+	// MEMQL_ rename -- so storage silently degraded everywhere the secret
+	// was the only source. The alias is the fix that heals both at once.
+	"MEMQL_AZURE_STORAGE_CONNECTION_STRING":                 "AZURE_BLOB_CONNECTION_STRING",
 	"MEMQL_EMAIL_AZURE_CLIENT_ID":                           "EMAIL_AZURE_CLIENT_ID",
 	"MEMQL_EMAIL_AZURE_CLIENT_SECRET":                       "EMAIL_AZURE_CLIENT_SECRET",
 	"MEMQL_EMAIL_AZURE_TENANT_ID":                           "EMAIL_AZURE_TENANT_ID",

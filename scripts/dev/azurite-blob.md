@@ -10,7 +10,7 @@ The local overlay adds an `azurite` Deployment + Service running the `mcr.micros
 
 ### Connection string wiring (`scripts/k3d/seed-secrets.sh`)
 
-`make up` (via `seed-secrets.sh`) seeds `AZURE_BLOB_CONNECTION_STRING` into the `memql-secrets` k8s Secret using the well-known Azurite dev constants:
+`make up` (via `seed-secrets.sh`) seeds `AZURE_BLOB_CONNECTION_STRING` into the `memql-secrets` k8s Secret using the well-known Azurite dev constants. Three pieces make it reach the uploader (memql#4843 restored the first): the boot-time legacy-alias shim maps that seeded key onto `MEMQL_AZURE_STORAGE_CONNECTION_STRING` (the only name the Go reader knows), and the local overlay's `patches/blob-storage-local.yaml` sets `MEMQL_AZURE_BLOB_CONTAINER=memql` plus `MEMQL_AZURE_BLOB_AUTOCREATE=true` on the bff and agent — the two values the secret cannot carry. The constants:
 
 ```
 DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;
