@@ -1,0 +1,232 @@
+import type { ReactNode } from "react";
+import { act, fireEvent, render } from "@testing-library/react";
+import { vi } from "vitest";
+import { QueryClient, Result, type Row } from "@znasllc-io/memql-sdk-core/client";
+
+import { SessionProvider } from "../../src/chrome/access";
+import { OsProvider } from "../../src/chrome/state";
+import { MachinesProvider } from "../../src/live/machines";
+import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/config";
+import { OS_REGISTRY } from "../../src/apps/registry";
+import { FilesApp } from "../../src/apps/files/FilesApp";
+import type { FilesSettings } from "../../src/apps/files/settings";
+import { DEFAULT_FILES_SETTINGS } from "../../src/apps/files/settings";
+import type { UploadProvider } from "../../src/items/upload";
+
+// The Files app's test harness.
+//
+// THE FAKE SITS UNDER `executeNamed`, NOT OVER THE GENERATED METHODS -- the
+// deployables harness's rule, kept for the reason its header states: a double
+// that stubs `query.createLibraryFolder` records arguments and never renders
+// the call, so the generated builder (the thing that turns arguments into
+// MemQL text the engine has to parse) would run in production and nowhere
+// else. The stub answers at the funnel, so every test exercises the real
+// builders, the real LiveCollection retain/seed path and the real
+// projections.
+
+export function rowsResult(rows: Row[]): Result {
+  return new Result({ data: rows } as never);
+}
+
+export function bundleResult(rows: Row[]): Result {
+  const nodes = rows.map((row) => {
+    const { id, createdAt, ...fields } = row as Record<string, unknown>;
+    return { id, createdAt, payload: fields };
+  });
+  return new Result({ bundle: { nodes } } as never);
+}
+
+export interface FakeEvent {
+  subscriptionId: string;
+  kind: string;
+  timestamp: Date | null;
+  payload: Row | null;
+  payloadOmitted: boolean;
+  seq: number;
+  gapBefore: boolean;
+}
+
+export interface FakeSubscriptions {
+  subscribeGraph: (handler: (event: FakeEvent) => void, opts: { concept?: string }) => () => void;
+  emit: (concept: string, payload: Row, kind?: string) => void;
+  /** Live handler count per concept -- what the popover lifecycle asserts. */
+  activeCount: (concept: string) => number;
+}
+
+function fakeSubscriptions(): FakeSubscriptions {
+  const handlers = new Map<string, Set<(event: FakeEvent) => void>>();
+  return {
+    subscribeGraph(handler, opts) {
+      const concept = opts.concept ?? "*";
+      const set = handlers.get(concept) ?? new Set();
+      set.add(handler);
+      handlers.set(concept, set);
+      return () => set.delete(handler);
+    },
+    emit(concept, payload, kind = "NODE_UPDATED") {
+      for (const handler of handlers.get(concept) ?? []) {
+        handler({
+          subscriptionId: "sub-1",
+          kind,
+          timestamp: new Date(),
+          payload,
+          payloadOmitted: false,
+          seq: 0,
+          gapBefore: false,
+        });
+      }
+    },
+    activeCount(concept) {
+      return handlers.get(concept)?.size ?? 0;
+    },
+  };
+}
+
+export interface FakeSeed {
+  artifacts?: Row[];
+  folders?: Row[];
+  machines?: Row[];
+  files?: Row[];
+  byId?: Record<string, Row>;
+  /** Refusal sentences, keyed by construct name (e.g. archiveArtifact). */
+  refuse?: Record<string, string>;
+}
+
+export interface FakeConnection {
+  query: QueryClient;
+  calls: string[];
+  callsNamed: (construct: string) => string[];
+  subscriptions: FakeSubscriptions;
+}
+
+export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
+  const calls: string[] = [];
+  const stub = {
+    executeNamed: vi.fn(async (name: string, call: string) => {
+      calls.push(call);
+      const refusal = seed.refuse?.[name];
+      if (refusal !== undefined) throw new Error(refusal);
+
+      if (call.startsWith("query libraryArtifactsByLens(")) return rowsResult(seed.artifacts ?? []);
+      if (call === "query libraryFolders()") return rowsResult(seed.folders ?? []);
+      if (call === "query myWorkersWithStatus()") return rowsResult(seed.machines ?? []);
+      if (call.startsWith("query libraryFileById(")) return rowsResult(seed.files ?? []);
+      if (call.startsWith("mutation ") || call.startsWith("builtin ")) return rowsResult([]);
+
+      const match = /id==(\S+)/.exec(call);
+      const wanted = match?.[1] ?? "";
+      const row = wanted === "" ? undefined : seed.byId?.[wanted];
+      return bundleResult(row ? [row] : []);
+    }),
+  };
+  return {
+    query: Object.setPrototypeOf(stub, QueryClient.prototype) as QueryClient,
+    calls,
+    callsNamed: (construct: string) => calls.filter((c) => c.includes(`${construct}(`)),
+    subscriptions: fakeSubscriptions(),
+  };
+}
+
+export function withSession(children: ReactNode, overrides: { userId?: string; role?: string } = {}) {
+  const config: OsRuntimeConfig = { ...UNKNOWN_RUNTIME_CONFIG, domain: "memql.example.com" };
+  return (
+    <SessionProvider
+      value={{
+        access: {
+          userId: overrides.userId ?? "u-me",
+          primaryEmail: "owner@example.com",
+          clusterRole: overrides.role ?? "owner",
+        },
+        config,
+      }}
+    >
+      {children}
+    </SessionProvider>
+  );
+}
+
+export function memSettingsStore(over: Partial<FilesSettings> = {}) {
+  let value: FilesSettings = { ...DEFAULT_FILES_SETTINGS, ...over };
+  return {
+    load: () => value,
+    save: (next: FilesSettings) => void (value = next),
+  };
+}
+
+export const NO_UPLOADS: UploadProvider = {
+  upload: () => ({ done: new Promise(() => {}), abort: () => {} }),
+};
+
+/** Render the Files app inside the providers it really mounts under. */
+export async function renderFiles(opts: {
+  section?: string;
+  settings?: Partial<FilesSettings>;
+  uploads?: UploadProvider;
+} = {}) {
+  const view = render(
+    withSession(
+      <OsProvider registry={OS_REGISTRY} actorRole="owner" grid={{ cols: 8, rows: 5 }}>
+        <MachinesProvider>
+          <FilesApp
+            sectionId={opts.section ?? "browse"}
+            navigate={() => {}}
+            askContext={() => {}}
+            store={memSettingsStore(opts.settings ?? {})}
+            uploads={opts.uploads ?? NO_UPLOADS}
+          />
+        </MachinesProvider>
+      </OsProvider>,
+    ),
+  );
+  // Let the collections run their seeds.
+  await act(async () => {});
+  return view;
+}
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+export function artifactRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    lens: "artifact",
+    kind: "file",
+    source: "uploaded",
+    sourceConceptRef: `v1:library:file:${over.id}`,
+    title: `${over.id}.bin`,
+    summary: "",
+    labels: [],
+    archived: false,
+    folderId: "",
+    createdAt: "2026-08-20T10:00:00Z",
+    ...over,
+  };
+}
+
+export function folderRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    name: over.id,
+    parentFolderId: "",
+    archived: false,
+    createdAt: "2026-08-19T10:00:00Z",
+    ...over,
+  };
+}
+
+export async function emit(
+  connection: FakeConnection,
+  concept: string,
+  payload: Row,
+  kind = "NODE_UPDATED",
+): Promise<void> {
+  await act(async () => {
+    connection.subscriptions.emit(concept, payload, kind);
+  });
+}
+
+export async function click(el: Element | null | undefined): Promise<void> {
+  if (!el) throw new Error("click() was handed nothing to click");
+  await act(async () => {
+    fireEvent.click(el);
+  });
+}

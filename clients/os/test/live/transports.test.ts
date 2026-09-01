@@ -94,10 +94,22 @@ describe("EdgeUploadProvider", () => {
     expect(calls[0]!.init.body).toBeInstanceOf(FormData);
   });
 
-  it("rejects with the status when the route refuses", async () => {
-    const fetchImpl = (async () => new Response("no", { status: 413 })) as unknown as typeof fetch;
-    const provider = new EdgeUploadProvider(async () => null, "/_memql/artifacts", fetchImpl);
-    await expect(provider.upload(new File(["x"], "big.bin")).done).rejects.toThrow(/413/);
+  it("rejects with the server's sentence verbatim, or the status when there is none", async () => {
+    // The v2 rule (epic #4721): over-cap and over-quota refusals reach the
+    // surface as the engine's own words, which name the numbers -- a
+    // paraphrase would drop the one fact that helps. The status is the
+    // fallback for an empty body.
+    const worded = (async () => new Response("file too large: max 32 MiB", { status: 413 })) as unknown as typeof fetch;
+    await expect(
+      new EdgeUploadProvider(async () => null, "/_memql/artifacts", worded)
+        .upload(new File(["x"], "big.bin")).done,
+    ).rejects.toThrow("file too large: max 32 MiB");
+
+    const bare = (async () => new Response("", { status: 413 })) as unknown as typeof fetch;
+    await expect(
+      new EdgeUploadProvider(async () => null, "/_memql/artifacts", bare)
+        .upload(new File(["x"], "big.bin")).done,
+    ).rejects.toThrow(/413/);
   });
 
   it("derives the marker path from the base url", () => {

@@ -14,6 +14,8 @@ import {
 import { newShortId } from "@znasllc-io/memql-sdk-core/client";
 
 import { DeskFolderPopover } from "../apps/files/DeskFolderPopover";
+import { TREE_PATH_SEP, uploadDroppedTree } from "../apps/files/uploadTree";
+import { entriesOf, hasDirectory, walkEntries } from "../items/folderDrop";
 import { browserHandoffPorts, openInVsCode, VSCODE_NO_ANSWER_MESSAGE, type HandoffPorts } from "../items/vscode";
 import { FileIcon } from "../items/FileIcon";
 import { FolderIcon } from "../items/FolderIcon";
@@ -235,14 +237,78 @@ export function Desktop({
     [actions, uploads],
   );
 
+  // A dropped DIRECTORY becomes a Library folder tree with a desk shortcut
+  // to each top-level folder (design D3, desk half): the tree is created
+  // first, the files stream into it, and the shortcut's popover shows them
+  // landing live. Failures summarize on the desk's own error line.
+  const dropTree = useCallback(
+    async (event: React.DragEvent, cell: GridPos) => {
+      const query = connection?.query ?? null;
+      if (query === null) {
+        setDeskError("Not connected to the cluster, so nothing was uploaded.");
+        return;
+      }
+      const walked = await walkEntries(entriesOf(event.dataTransfer));
+      if (walked.refusal !== "") {
+        setDeskError(walked.refusal);
+        return;
+      }
+      // Only the FILED half: loose files beside the directory already took
+      // the ordinary icon path in onHostDrop, and uploading them here too
+      // would land every one of them twice.
+      const filed = walked.files.filter((f) => f.dirPath.length > 0);
+      if (filed.length === 0) return;
+      const result = await uploadDroppedTree(filed, "", {
+        createFolder: async (name, parentFolderId) => {
+          const folderId = newShortId();
+          await query.createLibraryFolder({
+            folderId,
+            name,
+            ...(parentFolderId !== "" ? { parentFolderId } : {}),
+          });
+          return folderId;
+        },
+        uploadFile: async (file, folderId) => {
+          await uploads.upload(file, folderId !== "" ? { folderId } : undefined).done;
+        },
+        concurrency: 3,
+        onFileSettled: () => {},
+      });
+      // A desk shortcut for each TOP-LEVEL folder (depth-1 path key), at the
+      // drop cell outward. Its popover shows the files landing, live.
+      for (const [key, folderId] of result.folderIdByPath) {
+        if (key === "" || key.includes(TREE_PATH_SEP)) continue;
+        actions.placeFolderShortcut({ folderId, name: key }, cell);
+      }
+      if (result.failures.length > 0) {
+        const first = result.failures[0];
+        setDeskError(
+          `${result.failures.length} of ${filed.length} files did not land -- ${first?.error ?? ""} The landed files stay landed; the Files app lists the rest.`,
+        );
+      }
+    },
+    [connection, uploads, actions],
+  );
+
   const onHostDrop = useCallback(
     (event: React.DragEvent) => {
-      if (!event.dataTransfer.files.length) return;
+      if (!event.dataTransfer.files.length && !event.dataTransfer.items.length) return;
       event.preventDefault();
       const cell = pxToCell(event, grid);
+      const entries = entriesOf(event.dataTransfer);
+      if (hasDirectory(entries)) {
+        // Loose files beside the directory take the ordinary icon path; the
+        // directory takes the tree path.
+        for (const entry of entries) {
+          if (!entry.isFile || !entry.file) continue;
+          entry.file((file) => startUpload(file, cell));
+        }
+        void dropTree(event, cell);
+        return;
+      }
       for (const file of Array.from(event.dataTransfer.files)) startUpload(file, cell);
     },
-    [grid, startUpload],
+    [grid, startUpload, dropTree],
   );
 
   const onFolderHostDrop = useCallback(

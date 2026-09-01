@@ -393,6 +393,15 @@ export function OsProvider({
   const gridRef = useRef(grid);
   gridRef.current = grid;
 
+  // The CURRENT state, readable synchronously from an action. The older
+  // "let outcome; set(updater); return outcome" shape only works when React
+  // evaluates the queued updater eagerly, which it does exactly when the
+  // fiber's queue is empty -- the second call in a session reads a stale
+  // "full". An action that must ANSWER (placed / focused / full) computes
+  // from here and then applies.
+  const stateRef = useRef<OsState | null>(null);
+  stateRef.current = state;
+
   const actionsRef = useRef<OsActions | null>(null);
   if (!actionsRef.current) {
     const set = (updater: (s: OsState) => OsState) => setState((s) => pruneSurfaces(updater(s)));
@@ -464,67 +473,62 @@ export function OsProvider({
         }),
       selectSurfaceItem: (itemId) => set((s) => ({ ...s, selectedItemId: itemId })),
       sendFileToDesk: (entry) => {
-        let outcome: "placed" | "focused" | "full" = "full";
-        set((s) => {
-          const deskId = s.shell.activeDeskId;
-          const surface = surfaceOf(s, deskId);
-          // The dedupe rule: an item already on the ACTIVE desk is focused,
-          // never duplicated. Matched by artifact -- the desk id is minted
-          // per shortcut and means nothing to the Library.
-          const existing = Object.values(surface.items).find(
-            (i) => i.kind === "file" && entry.artifactId !== "" && i.artifactId === entry.artifactId,
-          );
-          if (existing) {
-            outcome = "focused";
-            return { ...s, selectedItemId: existing.id };
-          }
-          const id = mintItemId(s);
-          const placed = addItem(surface, { kind: "file", id, ...entry }, { col: 0, row: 0 }, gridRef.current);
-          if (!placed) return s;
-          outcome = "placed";
-          return { ...withSurface(s, deskId, placed), selectedItemId: id };
-        });
-        return outcome;
+        const s = stateRef.current;
+        if (!s) return "full";
+        const deskId = s.shell.activeDeskId;
+        const surface = surfaceOf(s, deskId);
+        // The dedupe rule: an item already on the ACTIVE desk is focused,
+        // never duplicated. Matched by artifact -- the desk id is minted
+        // per shortcut and means nothing to the Library.
+        const existing = Object.values(surface.items).find(
+          (i) => i.kind === "file" && entry.artifactId !== "" && i.artifactId === entry.artifactId,
+        );
+        if (existing) {
+          set((cur) => ({ ...cur, selectedItemId: existing.id }));
+          return "focused";
+        }
+        const id = mintItemId(s);
+        const placed = addItem(surface, { kind: "file", id, ...entry }, { col: 0, row: 0 }, gridRef.current);
+        if (!placed) return "full";
+        set((cur) => ({ ...withSurface(cur, deskId, placed), selectedItemId: id }));
+        return "placed";
       },
       sendFolderToDesk: (folderId, name) => {
-        let outcome: "placed" | "focused" | "full" = "full";
-        set((s) => {
-          const deskId = s.shell.activeDeskId;
-          const surface = surfaceOf(s, deskId);
-          const existing = Object.values(surface.items).find(
-            (i) => i.kind === "folder" && i.folderId === folderId,
-          );
-          if (existing) {
-            outcome = "focused";
-            return { ...s, selectedItemId: existing.id };
-          }
-          const id = mintItemId(s);
-          const placed = addItem(
-            surface,
-            { kind: "folder", id, folderId, name },
-            { col: 0, row: 0 },
-            gridRef.current,
-          );
-          if (!placed) return s;
-          outcome = "placed";
-          return { ...withSurface(s, deskId, placed), selectedItemId: id };
-        });
-        return outcome;
+        const s = stateRef.current;
+        if (!s) return "full";
+        const deskId = s.shell.activeDeskId;
+        const surface = surfaceOf(s, deskId);
+        const existing = Object.values(surface.items).find(
+          (i) => i.kind === "folder" && i.folderId === folderId,
+        );
+        if (existing) {
+          set((cur) => ({ ...cur, selectedItemId: existing.id }));
+          return "focused";
+        }
+        const id = mintItemId(s);
+        const placed = addItem(
+          surface,
+          { kind: "folder", id, folderId, name },
+          { col: 0, row: 0 },
+          gridRef.current,
+        );
+        if (!placed) return "full";
+        set((cur) => ({ ...withSurface(cur, deskId, placed), selectedItemId: id }));
+        return "placed";
       },
       placeFolderShortcut: (shortcut, preferred) => {
-        let ok = false;
-        set((s) => {
-          const deskId = s.shell.activeDeskId;
-          const placed = addItem(
-            surfaceOf(s, deskId),
-            { kind: "folder", id: mintItemId(s), ...shortcut },
-            preferred,
-            gridRef.current,
-          );
-          ok = !!placed;
-          return withSurface(s, deskId, placed);
-        });
-        return ok;
+        const s = stateRef.current;
+        if (!s) return false;
+        const deskId = s.shell.activeDeskId;
+        const placed = addItem(
+          surfaceOf(s, deskId),
+          { kind: "folder", id: mintItemId(s), ...shortcut },
+          preferred,
+          gridRef.current,
+        );
+        if (!placed) return false;
+        set((cur) => withSurface(cur, deskId, placed));
+        return true;
       },
       renameFolderShortcut: (itemId, name) =>
         set((s) => {

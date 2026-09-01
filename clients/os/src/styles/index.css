@@ -2680,3 +2680,314 @@ a.os-button {
   font-size: var(--os-text-xs);
   color: var(--os-muted);
 }
+
+/* ---- files: the app's own surfaces (epic #4721) ----
+ *
+ * Rail, list, inspector: three readings of two feeds, in one window. The
+ * generic controls come from the kit; what is local here is the LAYOUT (the
+ * three-zone browse that wraps rather than crushes at half-window widths)
+ * and the app's one owned moment, the PROVENANCE STORY line -- the sentence
+ * this platform can say about a file that a folder of bytes cannot.
+ */
+.os-files {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.os-files-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.os-files-search {
+  flex: 1 1 180px;
+  min-width: 140px;
+}
+.os-files-search .os-input {
+  width: 100%;
+}
+
+/* The kind tabs: the shell's one selection language (the accent-bordered
+ * pill), at toolbar size. */
+.os-files-kinds {
+  display: inline-flex;
+  gap: 4px;
+}
+.os-files-kind {
+  padding: 4px 10px;
+  border: 1px solid var(--os-line);
+  border-radius: 999px;
+  background: none;
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+  cursor: pointer;
+}
+.os-files-kind[aria-checked="true"] {
+  background: var(--os-accent-soft);
+  border-color: var(--os-accent);
+  color: var(--os-ink);
+}
+.os-files-kind:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+}
+
+/* The three-zone body. WRAP, never crush: at half-window widths the
+ * inspector takes the full width below the list, and the rail keeps its
+ * readable minimum. min-height 0 / min-width 0 are load-bearing -- without
+ * them the flex children refuse to shrink and the WINDOW grows a horizontal
+ * rail. */
+.os-files-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.os-files-rail {
+  flex: 0 1 184px;
+  min-width: 148px;
+  overflow-y: auto;
+  padding-right: 8px;
+  border-right: 1px solid var(--os-line);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-content: start;
+}
+.os-files-node {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: var(--os-radius-xs);
+  background: none;
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.os-files-node:hover {
+  background: var(--os-raised);
+}
+.os-files-node[data-current] {
+  background: var(--os-accent-soft);
+  color: var(--os-ink);
+}
+.os-files-node:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+}
+.os-files-node-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-files-node-count {
+  font-size: var(--os-text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--os-muted);
+}
+.os-files-node:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.os-files-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  font-size: var(--os-text-sm);
+}
+
+.os-files-list {
+  flex: 1 1 300px;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.os-files-scope {
+  margin: 0;
+}
+
+/* The inspector: a quiet panel whose header is the file and whose first line
+ * is its story. */
+.os-files-inspector {
+  flex: 1 1 264px;
+  max-width: 340px;
+  min-width: 220px;
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-self: flex-start;
+  max-height: 100%;
+}
+.os-files-inspector-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.os-files-inspector-glyph {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: var(--os-radius-xs);
+  background: var(--os-raised);
+  color: var(--os-muted);
+}
+.os-files-inspector-name {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--os-text-md);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* THE STORY LINE. One sentence, full ink, the dot saying whether the place
+ * it names is reachable right now. Deliberately larger than the facts below
+ * it: this is the header fact, not a row in the table. */
+.os-files-story {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--os-text-md);
+  color: var(--os-ink);
+}
+.os-files-story .os-dot {
+  flex-shrink: 0;
+}
+
+.os-files-summary {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+  line-height: 1.5;
+}
+
+.os-files-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.os-files-confirm {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.os-files-move .os-select {
+  width: 100%;
+}
+
+/* Upload placeholders (design D3): a landing file is a real row in the list
+ * with an honest byte counter -- monospace, tabular, no percentage theater
+ * -- and a hairline progress track under it. */
+.os-files-up {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 12px;
+  border: 1px dashed var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+}
+.os-files-up-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--os-ink);
+  font-size: var(--os-text-base);
+}
+.os-files-up-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.os-files-up-bytes {
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--os-muted);
+}
+.os-files-up-track {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--os-line);
+  overflow: hidden;
+}
+.os-files-up-bar {
+  height: 100%;
+  background: var(--os-accent);
+  transition: width var(--os-duration-fast) var(--os-ease);
+}
+.os-files-up-note {
+  margin: 0;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+.os-files-up-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* The desk's own error line (folder create/rename/move refusals): the
+ * server's sentence, on the desk, self-clearing. The hint's position
+ * language, the error's tone. */
+.os-desk-error {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--os-dock-h) + 26px);
+  transform: translateX(-50%);
+  margin: 0;
+  max-width: min(520px, 80vw);
+  padding: 7px 12px;
+  border-radius: var(--os-radius-sm);
+  background: var(--os-glass-solid);
+  border: 1px solid var(--os-error);
+  color: var(--os-ink);
+  font-size: var(--os-text-sm);
+  box-shadow: var(--os-shadow-float);
+  z-index: 40;
+}
+
+/* The desk folder popover carries a LiveList now (a live view of the
+ * Library folder); its rows keep the popover's compact voice. */
+.os-folder-popover .os-livelist-rows {
+  display: grid;
+  gap: 2px;
+}
+.os-folder-popover .os-folder-entry-open {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  font-size: var(--os-text-sm);
+  color: var(--os-ink);
+}
+.os-folder-popover .os-caption {
+  margin: 2px 4px;
+}

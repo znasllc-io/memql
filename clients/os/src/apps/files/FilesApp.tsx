@@ -1,7 +1,11 @@
-import { useMemo, useState } from "react";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { useCallback, useMemo, useState } from "react";
+import { newShortId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { useAuthSource } from "../../auth/context";
+import { EdgeUploadProvider } from "../../items/edgeUpload";
+import type { UploadProvider } from "../../items/upload";
 import { Check, Head, Panel } from "../../kit";
+import { useOsConnection } from "../../live/connection";
 import { useLiveView } from "../../live/liveView";
 import type { OsAppProps } from "../../system/registry";
 import { BrowseSection } from "./BrowseSection";
@@ -15,6 +19,7 @@ import {
   type FilesSettingsStore,
 } from "./settings";
 import { useLibraryFeeds } from "./useLibrary";
+import { useUploadTasks } from "./useUploadTasks";
 
 // Files: the Library on the desktop (epic #4721). A live folder tree over the
 // caller's content-bearing rows, a list that announces changes once and
@@ -35,12 +40,37 @@ export function FilesApp({
   sectionId,
   askContext,
   store,
-}: OsAppProps & { store?: FilesSettingsStore }) {
-  // Injectable for tests; nothing in the shell passes one.
+  uploads,
+}: OsAppProps & { store?: FilesSettingsStore; uploads?: UploadProvider }) {
+  // Injectable for tests; nothing in the shell passes either.
   const settingsStore = useMemo(() => store ?? new LocalFilesSettingsStore(), [store]);
   const [settings, setSettings] = useState<FilesSettings>(() => settingsStore.load());
+  const authSource = useAuthSource();
+  const connection = useOsConnection();
+  const provider = useMemo(
+    () => uploads ?? new EdgeUploadProvider(() => authSource.bearer()),
+    [uploads, authSource],
+  );
 
   const { artifacts, folders } = useLibraryFeeds();
+
+  // The tree flow's folder port: one Library mutation, the id minted here
+  // (the mutationCreateSpace pattern). The live feed delivers the row.
+  const createFolder = useCallback(
+    async (name: string, parentFolderId: string): Promise<string> => {
+      const query = connection?.query ?? null;
+      if (query === null) throw new Error("Not connected to the cluster, so no folder was created.");
+      const folderId = newShortId();
+      await query.createLibraryFolder({
+        folderId,
+        name,
+        ...(parentFolderId !== "" ? { parentFolderId } : {}),
+      });
+      return folderId;
+    },
+    [connection],
+  );
+  const { tasks, uploadFiles, uploadTree } = useUploadTasks(provider, createFolder);
 
   const [filter, setFilter] = useState<FilesFilter>(() => ({
     ...DEFAULT_FILTER,
@@ -120,6 +150,9 @@ export function FilesApp({
       onSelect={setSelectedId}
       confirmBeforeArchive={settings.confirmBeforeArchive}
       askContext={askContext}
+      tasks={tasks}
+      uploadFiles={uploadFiles}
+      uploadTree={uploadTree}
     />
   );
 }
