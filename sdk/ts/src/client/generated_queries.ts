@@ -3643,6 +3643,26 @@ QueryClient.prototype.libraryFileChunksForFile = function (this: QueryClient, ar
   return this.executeNamed("libraryFileChunksForFile", buildLibraryFileChunksForFile(args), opts);
 };
 
+/** The sizes of every file the caller holds, ARCHIVED INCLUDED -- the stored half of the storage quota (memql#4782, design C4). Archived files keep their bytes and keep counting: retention is real, and a quota that forgot archived rows would let 'archive then re-upload' mint unbounded storage. UNBOUNDED for the same fail-open reason as its session sibling; owner-scoped, two fields per row. */
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFileSizesForOwner"] in generated_concepts.ts).
+export interface LibraryFileSizesForOwnerArgs {
+}
+
+export function buildLibraryFileSizesForOwner(args: LibraryFileSizesForOwnerArgs): string {
+  void args;
+  return "query libraryFileSizesForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryFileSizesForOwner(args?: LibraryFileSizesForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryFileSizesForOwner = function (this: QueryClient, args: LibraryFileSizesForOwnerArgs = {} as LibraryFileSizesForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryFileSizesForOwner", buildLibraryFileSizesForOwner(args), opts);
+};
+
 /** List the caller's Library files, newest first, gated by ownerUserId==actor.userId. The file-level read behind the Artifacts page's upload and training surfaces -- the artifact index is what the list renders, and this is what answers questions the index does not carry (analysis status, embedding coverage, which domains a file was trained into). */
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFilesForOwner"] in generated_concepts.ts).
 export interface LibraryFilesForOwnerArgs {
@@ -3661,6 +3681,48 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryFilesForOwner = function (this: QueryClient, args: LibraryFilesForOwnerArgs = {} as LibraryFilesForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryFilesForOwner", buildLibraryFilesForOwner(args), opts);
+};
+
+/** Fetch one folder by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. Backs the desk-folder popover's name refresh and the Files app's breadcrumb resolve; archived rows ARE returned here -- a caller asking about a specific id deserves the honest answer, and the archived field says which kind it got. */
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryFolderById"] in generated_concepts.ts).
+export interface LibraryFolderByIdArgs {
+  folderId: string;
+}
+
+export function buildLibraryFolderById(args: LibraryFolderByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("folderId: " + renderMemQLValue(args.folderId));
+  return "query libraryFolderById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryFolderById(args: LibraryFolderByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryFolderById = function (this: QueryClient, args: LibraryFolderByIdArgs = {} as LibraryFolderByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryFolderById", buildLibraryFolderById(args), opts);
+};
+
+/** The caller's whole folder tree, live (memql#4781, design B1). Owned: ownerUserId==actor.userId gates the row set; `archived != true` is the null-safe soft-delete filter, for the reason libraryArtifacts spells out at length. UNBOUNDED ON PURPOSE: the OS folds (folders, artifacts) snapshots into a tree client-side, and a truncated page would silently re-parent every folder whose ancestor fell off the edge -- the fold is orphan-tolerant, so nothing would LOOK broken, which is exactly why the truncation must not happen. The set is small by construction: folders are hand-made organizational rows, bounded by one person's patience, not by data volume. */
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryFolders"] in generated_concepts.ts).
+export interface LibraryFoldersArgs {
+}
+
+export function buildLibraryFolders(args: LibraryFoldersArgs): string {
+  void args;
+  return "query libraryFolders()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryFolders(args?: LibraryFoldersArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryFolders = function (this: QueryClient, args: LibraryFoldersArgs = {} as LibraryFoldersArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryFolders", buildLibraryFolders(args), opts);
 };
 
 /** List workspace-scoped live sources for the Library Records lens. Gated by ownerUserId==actor.userId -- NOT the un-gated partition-shared read it was before memql#4340, because v1:library:artifact now declares an owner tier and an ownerless row is unreachable on every path. See the note above (#723 for the original shape, D8 for the tier). */
@@ -4201,6 +4263,26 @@ declare module "./query.js" {
 
 QueryClient.prototype.oidcIdentityBySubject = function (this: QueryClient, args: OidcIdentityBySubjectArgs = {} as OidcIdentityBySubjectArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("oidcIdentityBySubject", buildOidcIdentityBySubject(args), opts);
+};
+
+/** The declared sizes of the caller's OPEN upload sessions -- the in-flight half of the storage quota (memql#4782, design C4): at init and at one-shot upload, the sum of stored file sizes PLUS these declared sizes must stay under MEMQL_LIBRARY_USER_QUOTA_BYTES, or a person could evade the quota by opening sessions they never finish. UNBOUNDED for the quota's reason: a truncated page fails OPEN, admitting bytes the quota should refuse. Owner-scoped, projecting two fields per row. */
+// Bound concept: v1:library:uploadSession (machine-readable: BoundConcepts["openUploadSessionsForOwner"] in generated_concepts.ts).
+export interface OpenUploadSessionsForOwnerArgs {
+}
+
+export function buildOpenUploadSessionsForOwner(args: OpenUploadSessionsForOwnerArgs): string {
+  void args;
+  return "query openUploadSessionsForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    openUploadSessionsForOwner(args?: OpenUploadSessionsForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.openUploadSessionsForOwner = function (this: QueryClient, args: OpenUploadSessionsForOwnerArgs = {} as OpenUploadSessionsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("openUploadSessionsForOwner", buildOpenUploadSessionsForOwner(args), opts);
 };
 
 /** One company's orders in a window -- the B2B account view. */
@@ -9487,6 +9569,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.upcomingEvents = function (this: QueryClient, args: UpcomingEventsArgs = {} as UpcomingEventsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("upcomingEvents", buildUpcomingEvents(args), opts);
+};
+
+/** Fetch one chunked upload session by id, gated to the caller -- THE per-chunk authorization read (design C2): every chunk PUT, the inventory and the complete resolve the session through this under the caller's own actor, so a session that is not theirs is a session that is not there. Owned: ownerUserId==actor.userId is the load-bearing guard. */
+// Bound concept: v1:library:uploadSession (machine-readable: BoundConcepts["uploadSessionById"] in generated_concepts.ts).
+export interface UploadSessionByIdArgs {
+  uploadId: string;
+}
+
+export function buildUploadSessionById(args: UploadSessionByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("uploadId: " + renderMemQLValue(args.uploadId));
+  return "query uploadSessionById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    uploadSessionById(args: UploadSessionByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.uploadSessionById = function (this: QueryClient, args: UploadSessionByIdArgs = {} as UploadSessionByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("uploadSessionById", buildUploadSessionById(args), opts);
 };
 
 /** Returns usable data records (confirmed, or checked if policy allows) */

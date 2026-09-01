@@ -31,7 +31,7 @@ function entryFor(list: HTMLElement, name: string): HTMLElement {
 describe("the apps index", () => {
   it("lists exactly the apps this session may open", () => {
     const list = openIndex({ access: ADMIN });
-    expect(within(list).getByText("Artifacts")).toBeTruthy();
+    expect(within(list).getByText("Files")).toBeTruthy();
     expect(within(list).getByText("Users")).toBeTruthy();
     // Scoped to the entry: "Settings" is also the label on every app's own
     // settings button in this list.
@@ -42,7 +42,7 @@ describe("the apps index", () => {
     const list = openIndex({ access: READER });
     expect(within(list).queryByText("Users")).toBeNull();
     expect(within(list).queryByText("Training")).toBeNull();
-    expect(within(list).getByText("Artifacts")).toBeTruthy();
+    expect(within(list).getByText("Files")).toBeTruthy();
   });
 
   it("opens the target app's own window on its settings section", () => {

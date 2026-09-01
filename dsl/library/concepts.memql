@@ -67,15 +67,17 @@ concept artifact {
 
   archived         bool  @default("false")  @description("Soft delete: true once the owner archives the item, which removes it from the default Library list without destroying the row or its provenance (memql#4340). The engine is append-only by (id, createdAt), so an archive is a re-version carrying archived=true rather than a DELETE -- the history, the labels and the sourceConceptRef all survive. archiveArtifact sets it, and archives the backing v1:library:file when the artifact is one. createArtifact writes `archived: args.archived ?? false` so every promoted row carries an explicit value -- not because the list filter requires it (measured: `archived != true` DOES return a row whose payload has no archived key at all, so rows written before this field existed keep listing), but because a row that states its own answer is what makes the filter readable and what stops the next author reaching for `archived == false`, which is the spelling a missing key would silently exclude.")
 
+  folderId         string  @description("v1:library:folder.id this item is filed under -- the ORGANIZATIONAL TRUTH of the Files app's Drive-model tree (memql#4781, design D3). An id, never a path string; empty or absent means the root. Any kind can be filed, not only files. moveArtifactToFolder is the re-filing write (a read-merge update, so labels and archived survive a move); at promotion time createArtifact carries the backing row's initial filing forward, after which THIS copy is authoritative and the backing row's is not tracked further. Every folder filter runs CLIENT-SIDE over the owner's snapshot, because rows promoted before this field existed have no key at all and `folderId == \"\"` cannot match them -- the `archived != true` lesson, applied to a field where the honest reader is the fold, not the filter.")
+
   partitionId          string  @description("v1:cognition:space.id this item belongs to, when space-scoped (documents, generated outputs). Empty for user-global records (notes / to-dos / memories). Backs the per-space facet filter.")
 
   agentId          string  @description("v1:agents:agent.id associated with this item, when one applies (e.g. the agent that produced a generated output or owns a memory). Backs the per-agent facet filter.")
 
   producedByPlanId string  @description("v1:planner:plan.id that produced this item, when it came from a plan (documents carry document.planId; generated outputs carry the producing plan). Provenance back-pointer surfaced in the detail view.")
 
-  producedByWorkerId string  @description("v1:worker:registration.id of the worker MACHINE that produced this item, when source=computer_use. Lets the Library say WHICH of the user's registered computers a computer-use file came from, and detect when it is the machine the user is currently on. Empty for workbench / agent / uploaded items.")
+  producedByWorkerId string  @description("v1:worker:registration.id of the worker MACHINE this item is associated with, WHEN A MACHINE IS KNOWN (memql#4781 generalized this from its original computer-use-only meaning): the machine a computer-use output was produced on, or the machine a file was uploaded from (indexFileOnCreate forwards the file row's verified uploadedFromWorkerId here). Lets the Files app say WHICH of the user's registered computers an item came from, and detect when it is the machine the user is currently on. Empty when no machine is honestly known -- a browser upload names none.")
 
-  producedByWorkerName string  @description("Human-readable name of the producing worker machine (e.g. 'MacBook-Pro'), copied from the worker registration at index time so the Library can label 'Computer use - <machine>' without a join. Empty unless producedByWorkerId is set.")
+  producedByWorkerName string  @description("Human-readable name of the machine producedByWorkerId names (e.g. 'MacBook-Pro'), copied from the worker registration at write time so the Files app can label the row without a join. Empty unless producedByWorkerId is set. Generalized alongside producedByWorkerId: 'produced on' for computer-use outputs, 'uploaded from' for files -- the kind and source decide the verb, the field carries the machine.")
 
   validationStatus enum("none", "unvalidated", "validated", "rejected", "partiallyValidated", "superseded")  @default("none")  @description("Validation rollup for document-backed artifacts, mirrored from v1:knowledge:document.validationStatus so the Library can facet on it without a join. 'none' for items that have no validation lifecycle (records, generated outputs).")
 
@@ -85,6 +87,7 @@ concept artifact {
   @relationship(type="references", field="agentId", target=agent, direction="outgoing")
   @relationship(type="references", field="producedByPlanId", target=plan, direction="outgoing")
   @relationship(type="references", field="producedByWorkerId", target=registration, direction="outgoing")
+  @relationship(type="references", field="folderId", target=folder, direction="outgoing")
 }
 
 // ---- generatedOutput: the home concept for app-produced deliverables ----
@@ -291,7 +294,7 @@ concept file {
 
   size         int!  @description("Size of the stored bytes. Bounded at upload by MEMQL_LIBRARY_MAX_UPLOAD_BYTES (default 256 MB, sized so a site bundle fits). Recorded from what was actually written to blob storage, not from the client's Content-Length.")
 
-  sha256       string!  @description("Lowercase hex SHA-256 of the stored bytes. A DEDUP HINT and an integrity check -- NEVER an access key: knowing it grants nothing, because the download route resolves the artifact under the caller's own actor and there are no signed URLs anywhere in this design.")
+  sha256       string  @description("Lowercase hex SHA-256 of the stored bytes. A DEDUP HINT and an integrity check -- NEVER an access key: knowing it grants nothing, because the download route resolves the artifact under the caller's own actor and there are no signed URLs anywhere in this design. OPTIONAL since memql#4782: a one-shot upload computes it inline, but a chunked upload's handler never holds the whole file, so the row lands in 'stored' with this ABSENT and the analysis pass stamps it by streaming the committed blob once. Absent means 'not measured yet', never 'no hash exists' -- readers render a dash, not an error.")
 
   blobUrl      string!  @description("Where the bytes live: 'library/{userId}/{fileId}/{name}' through integration.storage.upload. A STORAGE PATH, not a URL a browser can fetch -- the bytes only ever reach a viewer through GET /artifacts/{id}/content, which re-checks row admission and streams them; it never redirects.")
 
@@ -311,7 +314,17 @@ concept file {
 
   archived     bool  @default("false")  @description("Soft delete, set by archiveLibraryFile -- and set for you by archiveArtifact when the artifact being archived is backed by this file, so the two never disagree. The bytes are NOT deleted: the row keeps its blobUrl and its provenance, and the append-only history keeps every earlier version.")
 
+  folderId     string  @description("v1:library:folder.id the upload was filed under -- the INITIAL FILING ONLY (memql#4781, design B2). The upload route knows the target folder, and the promotion automation can only forward what the backing row carries: the same 'the writer knew it' reasoning format already uses. After promotion the artifact index's own folderId is authoritative -- a later move updates the index and deliberately never comes back here, so this copy is a record of where the file LANDED, not where it is.")
+
+  uploadedFromWorkerId  string  @description("v1:worker:registration.id of the fleet machine this file was uploaded FROM, when the uploader honestly knows it (memql#4781, design D5): a cockpit push names its own worker registration; a browser physically cannot name a machine and sends nothing -- no identity is ever invented, and nothing here is guessed from a user agent. VERIFIED at write time: the named registration must belong to the uploading user, read under the caller's own actor, and a claim that fails verification REFUSES the upload with a typed error rather than silently blanking -- a silently-dropped field would render as 'uploaded here', which is a lie. This axis is called PROVENANCE; 'origin' stays reserved for the data-origins system (memql#4378). Doubles as the future sync epic's machine half of the (machine, path) key.")
+
+  uploadedFromWorkerName  string  @description("Human-readable name of the machine uploadedFromWorkerId names, resolved from the caller's own verified worker registration at upload time (displayName when the owner set one, else the reported hostname) -- never taken on faith from the request, so the label the Files app renders is the label the fleet already shows for that machine. Empty whenever uploadedFromWorkerId is.")
+
+  uploadedFromPath  string  @description("Absolute path the file occupied on the uploading machine, as the cockpit reported it (e.g. '/Users/a/Reports/q3.pdf'). Stamped only where honestly known -- a browser upload carries none. Stays on THIS row and is deliberately not promoted to the index: the Files app's inspector reads the file row, and the future watched-folder sync epic keys re-pushes on (uploadedFromWorkerId, uploadedFromPath) read from here (design E).")
+
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", field="uploadedFromWorkerId", target=registration, direction="outgoing")
+  @relationship(type="references", field="folderId", target=folder, direction="outgoing")
 }
 
 // ---- fileChunk: the similarity substrate ----
@@ -358,4 +371,119 @@ concept fileChunk {
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="fileId", target=file, direction="outgoing")
   @relationship(type="references", field="artifactId", target=artifact, direction="outgoing")
+}
+
+// ---- folder: the Files app's Drive-model tree ----
+//
+// The Library's file system (memql#4781, design D3): folder rows plus a
+// folderId pointer on the index. THE DRIVE MODEL, NOT POSIX -- ids, never
+// path strings; sibling name duplicates allowed (a folder is a collection,
+// not a namespace, so there is no uniqueness machinery and no rename
+// conflict); no permission tree, because row authz is unchanged and a
+// folder confers nothing. A move is one row update; a rename touches
+// nothing else.
+//
+// Depth is capped at 12 and cycles are refused CLIENT-SIDE in v1 (design
+// D11): the client holds the owner's whole small tree and the engine has
+// no loop construct, so the server-side cascade + integrity guard is a
+// recorded hardening follow-up rather than built here. The client's tree
+// fold is cycle- and orphan-TOLERANT on top of that (a violating folder
+// renders at root with a marker), so a hostile or buggy writer can degrade
+// the picture but never break it.
+
+/// One folder in the owner's Library tree (memql#4781, design B1/D3): a named collection artifacts
+/// and other folders point INTO via ids -- never a path segment, never a namespace. parentFolderId
+/// nests it (empty or absent = root); sibling name duplicates are allowed by design, so there is no
+/// uniqueness machinery to fight and a rename touches exactly one row. Archiving is the same soft
+/// delete every Library row gets -- the client-driven walk archives contents first (design B5), and
+/// a folder that vanishes under its children only degrades the picture: the tree fold renders
+/// orphans at root with a marker. Per-row authz: the composite tier (memql#4312) -- the owner, or a
+/// cluster owner -- matching artifact and file, whose rows it organizes.
+@displayCard(primary="name", tertiary="createdAt")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept folder {
+  ownerUserId     string!  @serverSet  @description("v1:identity:user.id that owns this folder. Stamped from actor.userId on every write and never accepted as a mutation arg (@serverSet makes that a load-time rejection, memql#3175); the engine also server-stamps it from the @rowAuthz declaration on the raw insert() surface. The load-bearing per-row authz key -- a folder is the owner's the way their files are, and confers no permissions of its own.")
+
+  name            string!  @description("Display name of the folder, as the owner typed it. NOT a namespace: sibling duplicates are allowed (design D3), so nothing anywhere compares two folders by name -- the id is the identity, and a rename is one field on one row.")
+
+  parentFolderId  string  @description("v1:library:folder.id of the containing folder; empty or absent = a root folder. Declared as a self-referential `references` relationship below -- an edge, not a hierarchy the engine enforces: depth cap (12) and cycle refusal are the CLIENT's in v1 (design D11), and the tree fold tolerates violations defensively, rendering the offender at root with a marker, so a bad write degrades the picture rather than breaking it.")
+
+  archived        bool  @default("false")  @description("Soft delete, set by archiveLibraryFolder. libraryFolders filters it with the null-safe `archived != true` spelling, so rows written before any future field change keep listing. The client-driven archive walk (design B5) archives a folder's CONTENTS first, children-first, then the folder -- idempotent under interruption, and re-running archives the remainder. Removing a desk shortcut is NEVER this write.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", field="parentFolderId", target=folder, direction="outgoing")
+}
+
+// ---- uploadSession: chunked resumable transfer (memql#4782) ----
+//
+// Files over the one-shot threshold arrive as CHUNKED SESSIONS over Azure
+// block-blob staging (design D8): open a session, PUT 16 MiB chunks to
+// staged blocks, commit. The session row is two things at once:
+//
+//   - THE PER-CHUNK AUTHORIZATION. Every chunk PUT and the complete resolve
+//     the session under the caller's own actor, and row admission IS the
+//     owner check -- a session that is not yours is a session that is not
+//     there. No side table, no bearer re-parse.
+//   - THE RECORD OF INIT-TIME FACTS complete needs: the declared size the
+//     commit is verified against, the blob path the blocks staged into, the
+//     fileId the file row will take, the filing and the verified provenance.
+//
+// REPLICA-AGNOSTIC BY CONSTRUCTION: staged blocks live with the blob in
+// storage and this row lives in the graph, so ANY bff serves any chunk and
+// completes any session -- no replica holds session state in memory, which
+// is the multi-node rule holding by construction rather than by care.
+//
+// NO SWEEPER, deliberately. An abandoned session row is inert (its owner
+// can read it; nothing else ever will), its staged blocks garbage-collect
+// on Azure's ~7-day uncommitted-block clock, and clients purge their local
+// resume records on the same clock. The `abandoned` status value exists so
+// the lifecycle can be stated in full; nothing writes it in v1 -- abandoning
+// IS stopping, and a stopped session needs no write to be abandoned.
+//
+// @no-displayCard: transfer machinery, never a row a person is shown. Its
+// fields are a filename, byte counts, a storage path and a lifecycle enum;
+// the row a person sees is the v1:library:file the session completes into,
+// which carries the real card. The documented fallback is the better
+// rendering for the operator spelunking case.
+
+/// One chunked upload in flight (memql#4782, design C2): the per-chunk authorization row (row
+/// admission is the owner check) and the record of init-time facts the complete step needs. Staged
+/// blocks live with the blob in Azure, never in any replica's memory, so any bff serves any chunk.
+/// Written ONLY by the upload routes through @serverOnly mutations: blobPath and fileId are
+/// storage-layer facts a caller must never author -- a forged blobPath would point complete at
+/// somebody else's bytes. Abandoned sessions are inert rows; their staging garbage-collects on
+/// Azure's ~7-day clock and no sweeper exists. Per-row authz: the composite tier (memql#4312),
+/// matching every other Library concept.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept uploadSession {
+  ownerUserId  string!  @serverSet  @description("v1:identity:user.id that opened this session. Stamped from actor.userId on every write and never accepted as a mutation arg (@serverSet, memql#3175). The per-row authz key, and therefore the WHOLE per-chunk authorization: chunk PUTs resolve the session under the caller's actor, and a session that is not theirs does not resolve.")
+
+  name         string!  @description("Original filename as the owner will see it, sanitised at session init exactly as the one-shot route sanitises it -- it becomes the last segment of blobPath and, at complete, the file row's name.")
+
+  size         int!  @description("Declared total size in bytes, bounded by MEMQL_LIBRARY_MAX_UPLOAD_BYTES at init. A CLAIM the commit verifies: complete sums the staged blocks and refuses a mismatch, so a client that lied about size gets a refusal, not a truncated file. Also what the chunk route bounds n against (n <= ceil(size / chunkSize)), so staging is bounded by the declaration.")
+
+  mimeType     string  @description("Content type as declared at init; complete passes it to createLibraryFile verbatim, where the one-shot route's own rules (any type accepted, opaque when unknown) apply unchanged.")
+
+  folderId     string  @description("v1:library:folder.id the finished file will be filed under -- the same initial-filing semantics file.folderId documents (memql#4781, design B2), recorded at init because complete must not re-ask the client anything.")
+
+  labels       []string  @description("Labels to apply to the promoted artifact at complete, through the same builtin the one-shot route uses -- so a label applied through a chunked upload is indistinguishable from any other.")
+
+  uploadedFromWorkerId  string  @description("Verified machine provenance, exactly as file.uploadedFromWorkerId documents (design D5): verified against the caller's own fleet at INIT -- fail-fast, before anyone streams gigabytes -- and forwarded to the file row at complete.")
+
+  uploadedFromWorkerName  string  @description("The fleet's own label for the machine, resolved from the caller's verified registration at init (displayName, else hostname). Empty whenever uploadedFromWorkerId is.")
+
+  uploadedFromPath  string  @description("Absolute path the file occupies on the uploading machine, as reported at init. Carried to file.uploadedFromPath at complete; the future sync epic keys on it.")
+
+  blobPath     string!  @description("Where the staged blocks live and the committed blob will land: library/{userId}/{fileId}/{name}, composed SERVER-SIDE at init from the verified actor and the engine-minted fileId. The reason the session mutations are @serverOnly: a caller-authored blobPath could name another user's object, and complete would then mint a file row whose bytes are somebody else's.")
+
+  fileId       string!  @description("The v1:library:file id complete will create -- minted by the engine at init so the blob path, the resume records and the eventual row all agree on one identity before a single byte moves.")
+
+  chunkSize    int!  @description("Chunk size in bytes -- 16 MiB, a constant of the design (D8), not a knob. Recorded on the row so complete and resume compute ceil(size / chunkSize) from what THIS session was opened with, even if the constant ever changes between releases.")
+
+  status       enum("open", "completed", "abandoned")!  @description("Lifecycle. open = accepting chunks; completed = the block list committed and the file row exists (terminal); abandoned = declared but unwritten in v1 -- a stopped session needs no write to be abandoned, its staging garbage-collects server-side on Azure's ~7-day clock, and the row itself is inert either way. Stamped 'open' at init and never accepted from args: a caller who could re-open a completed session could drive complete twice.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", field="folderId", target=folder, direction="outgoing")
+  @relationship(type="references", field="fileId", target=file, direction="outgoing")
+  @relationship(type="references", field="uploadedFromWorkerId", target=registration, direction="outgoing")
 }

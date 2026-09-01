@@ -109,6 +109,20 @@ kind: Ingress
 metadata:
   name: api-front-door
   namespace: memql
+  annotations:
+    # THE BODY-SIZE ALLOWANCE (memql#4782, design D9). ingress-nginx's default
+    # proxy-body-size is 1m, which made every documented upload cap on this host
+    # quietly unreachable in the cloud -- the 413 came from the proxy, not the
+    # handler, and named no knob. 48m covers the two largest legitimate bodies
+    # this Ingress carries with slack: a 32 MiB one-shot POST /artifacts plus its
+    # multipart framing, and a 16 MiB session chunk. It is deliberately NOT the
+    # 4 GiB file cap: files above the one-shot threshold arrive as chunked
+    # sessions, so no single REQUEST ever needs more than this. The handlers keep
+    # their own MaxBytesReader bounds; this is the outer fence, not the
+    # enforcement. Local parity note: traefik enforces no default body limit, so
+    # the local overlay needs no counterpart -- recorded here because 'works
+    # locally' is therefore no evidence about this annotation.
+    nginx.ingress.kubernetes.io/proxy-body-size: "48m"
 spec:
   ingressClassName: nginx
   tls:

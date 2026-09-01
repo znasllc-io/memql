@@ -30,13 +30,22 @@ owner. There is no third answer.
 
 `v1:library:file` is the sixth backing row and the only one with bytes behind
 it. It carries `name`, `mimeType`, `size`, `sha256`, `blobUrl`, `source`,
-`status`, `summary`, `embeddingStatus`, `trainedIntoDomainIds` and `archived`.
+`status`, `summary`, `embeddingStatus`, `trainedIntoDomainIds`, `archived`,
+the initial filing (`folderId`) and the upload provenance trio
+(`uploadedFromWorkerId` / `uploadedFromWorkerName` / `uploadedFromPath`).
 
 The bytes go to blob storage under `library/{userId}/{fileId}/{name}` through
 `integration.storage.upload` -- Azure Blob in the cloud, Azurite locally.
 
 **`sha256` is a dedup hint and never an access key.** Knowing a file's hash
 grants nothing; every read re-resolves ownership.
+
+**The MemQL copy is independent and durable** (memql#4781, design D12). A file
+uploaded from a machine survives that machine's deletion of the original and
+survives the machine disconnecting; archiving in MemQL never touches the
+origin. This is the invariant the future watched-folder backup builds on, and
+it is why the copy here is deliberately NOT a data-origins mirror: a mirror
+reconciles deletions, a backup retains and flags.
 
 ### Uploading -- `POST /artifacts`
 
@@ -48,26 +57,73 @@ Bearer-authenticated, and the actor owns the result. Answers
 unknown type is stored opaquely, never executed, and goes straight to
 `status: ready` with no chunks.
 
-The cap is `MEMQL_LIBRARY_MAX_UPLOAD_BYTES`, default 268435456 (256 MB) --
-sized so a site bundle fits, since the deployables path publishes from one.
-Over the cap is `413`, enforced in two layers so that a client's
-`Content-Length` is treated as a claim rather than as the limit. A value that
-is set but unparseable or non-positive falls back to the default: an
-unbounded upload route is the one outcome a misconfigured cap must never
-produce. The in-memory multipart threshold is a separate fixed 32 MB and
-deliberately does not scale with the cap.
+The one-shot route also accepts `folderId` and the provenance trio
+(`uploadedFromWorkerId` / `uploadedFromWorkerName` / `uploadedFromPath`) as
+form fields -- see Upload provenance below.
+
+**Two caps apply, and their refusals name their numbers.**
+
+- `MEMQL_LIBRARY_MAX_UPLOAD_BYTES` (default 4294967296, 4 GiB) caps one
+  FILE -- a one-shot body, or a chunked session's declared size. Over it is
+  `413`. On the one-shot route enforcement is two-layer so a client's
+  `Content-Length` stays a claim rather than the limit; on the chunked path
+  the declared size is checked at init and the staged bytes must EQUAL it at
+  complete. A value that is set but unparseable or non-positive falls back
+  to the default: an unbounded upload route is the one outcome a
+  misconfigured cap must never produce.
+- `MEMQL_LIBRARY_USER_QUOTA_BYTES` (default 107374182400, 100 GiB) caps one
+  USER's whole Library: stored file bytes -- **archived files keep counting;
+  retention is real** -- plus the declared sizes of their open upload
+  sessions, plus the new upload. Over it is `507`, naming the would-be total
+  and the quota. It exists because a per-file cap alone cannot stop one
+  person filling the account.
 
 This is one of the documented HTTP exceptions to the gRPC-first policy. It is
 an **authenticated** route, so it appears in none of `PublicPaths()`,
 `HandlerAuthorizedPaths()` or `SelfAuthenticatedPaths()` -- exactly the class
 `cmd/frontdoorpaths` exists to route.
 
+### Chunked resumable uploads -- `POST /artifacts/uploads`
+
+Files past the one-shot threshold arrive as sessions over Azure block-blob
+staging (memql#4782, design D8): open a session, PUT 16 MiB chunks,
+commit.
+
+| Route | Purpose |
+|---|---|
+| `POST /artifacts/uploads` | Open a session: `{name, size, mimeType, folderId, labels, uploadedFrom*}` answers `201 {uploadId, chunkSize}`. The quota check and provenance verification happen HERE, before anyone streams gigabytes |
+| `GET /artifacts/uploads/{id}` | The staged-chunk inventory -- what resume reads: `{uploadId, status, size, chunkSize, staged: [{n, size}]}` |
+| `PUT /artifacts/uploads/{id}/chunks/{n}` | One raw chunk (16 MiB constant), streamed to a staged block. `n` runs 1..ceil(size/chunkSize); out-of-range is refused, so staging is bounded by the declaration. Re-staging the same `n` replaces it, which is what makes retries coordination-free |
+| `POST /artifacts/uploads/{id}/complete` | Verify staged bytes == declared size (a mismatch is `409` and the session STAYS OPEN), commit the block list in order, create the rows, answer the one-shot's own `201 {artifactId, fileId}`. Completing a completed session answers the same ids with `200` -- the kill-after-commit resume case |
+
+Three properties are load-bearing:
+
+- **Replica-agnostic by construction.** The session row lives in the graph
+  and staged blocks live with the blob, so ANY bff serves any chunk and
+  completes any session. No replica holds session state in memory; a test
+  completes one upload through two independent handler instances.
+- **The session row IS the per-chunk authorization.** Every route resolves
+  it under the caller's own actor, and row admission is the owner check --
+  "not yours" and "not there" are one `404`.
+- **No sweeper.** An abandoned session's staged blocks garbage-collect on
+  Azure's ~7-day uncommitted-block clock; the row is inert. Clients purge
+  their local resume records on the same clock.
+
+`sha256` on a chunked file is stamped by the ANALYSIS pass, which streams
+the committed blob once -- the handler never held the whole file. Until the
+pass runs, the field is absent: "not measured", never "no hash".
+
 ### Exporting -- `GET /artifacts/{id}/content`
 
 One route exports the whole Library.
 
-- A **file** streams its bytes with `Content-Type`, `Content-Length` and
-  `Content-Disposition: attachment`.
+- A **file** streams its bytes with `Content-Type`, `Content-Length` (from
+  the ROW, not from buffering), `Accept-Ranges: bytes` and
+  `Content-Disposition: attachment` -- constant memory through the bff, and
+  a single-range `Range` header answers `206` with `Content-Range`
+  (memql#4782, design C5). An unsatisfiable range is `416`; a malformed or
+  multi-range header is ignored and the full body served, which RFC 9110
+  permits.
 - A **note**, **generated output** or **memory** renders its body as
   `text/markdown` or `text/plain` with a filename derived from the title.
 - A **todo**, **calendar event**, **document** or **live source** has no body
@@ -79,6 +135,65 @@ to export", so the response cannot be used to probe for rows.
 
 There are **no redirects and no signed storage URLs.** Bytes come through the
 bff. This design adds none.
+
+### Upload provenance
+
+Where a file came FROM is recorded only where it is honestly known
+(memql#4781, design D5). The axis is called **provenance**; "origin" stays
+reserved for the data-origins system (memql#4378).
+
+- A **cockpit push** names the machine: `uploadedFromWorkerId` (the worker
+  registration), `uploadedFromWorkerName` and `uploadedFromPath` ride the
+  upload as form fields.
+- A **browser upload** carries none of the three. A browser physically cannot
+  name a machine or the dropped file's path, and nothing here guesses one
+  from a user agent.
+
+**Claims are verified, and a failed claim refuses the whole upload.** The
+named registration must be one of the CALLER's own machines -- checked under
+the caller's own actor, before any byte reaches storage -- and the stored
+`uploadedFromWorkerName` is resolved from the registration row itself
+(`displayName`, else the reported hostname), so the label the Files app
+renders can never disagree with the fleet page. A silently-dropped claim
+would render as "uploaded here", which is a lie; hence `403`, naming the
+refused registration id.
+
+Promotion forwards the machine id and name into the index's
+`producedByWorkerId` / `producedByWorkerName`, whose meaning generalizes from
+"computer_use only" to "when a machine is known". The **path stays on the
+file row**: the index does not need it, and the sync epic reads the file row.
+
+---
+
+## Folders
+
+The Files app's tree is the **Drive model, not POSIX** (memql#4781, design
+D3): `v1:library:folder` rows plus a `folderId` pointer on the index. Ids,
+never path strings. Sibling name duplicates are allowed -- a folder is a
+collection, not a namespace -- so there is no uniqueness machinery and no
+rename conflict. A move is one row update; a rename touches nothing else. No
+permission tree exists: row authz is unchanged, and a folder confers nothing.
+
+- **Writes:** `createLibraryFolder`, `renameLibraryFolder`,
+  `moveLibraryFolder`, `archiveLibraryFolder`, and `moveArtifactToFolder`
+  (a read-merge, so labels and archived survive a re-filing untouched). All
+  client-reachable; ownership is stamped from the actor.
+- **Reads:** `libraryFolders` (the whole owner tree, unbounded on purpose --
+  the client-side fold needs every row at once) and `libraryFolderById`.
+- **Live:** `graph.node.created/updated.v1:library:folder` carry broadcast
+  routing rules, so the tree moves under a watching browser with no engine
+  work per surface.
+- **The index is the organizational truth.** `file.folderId` is the initial
+  filing only; after promotion, moves update the index and never chase the
+  backing row.
+- **Depth (12) and cycle refusal are the client's in v1** (design D11); the
+  client's tree fold is cycle- and orphan-TOLERANT anyway, rendering a
+  violating folder at root with a marker, so a bad write degrades the
+  picture without breaking it. Server-side cascade + integrity guard is a
+  recorded hardening follow-up.
+- **Archive is client-driven and children-first** (design B5): contents via
+  `archiveArtifact` (whose automation archives backing files), then folders.
+  Idempotent under interruption -- re-running archives the remainder.
 
 ---
 

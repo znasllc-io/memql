@@ -53,6 +53,28 @@ export function formatFreshness(value: string, now: Date): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+/**
+ * Bytes, in the unit a person would pick. IEC units -- the storage caps this
+ * shell renders (32 MiB one-shot line, 512 MiB buffer limit, 4 GiB upload
+ * cap) are IEC, and mixing 512 MiB in one sentence with "537 MB" in the next
+ * would read as two different numbers. Whole numbers under a KiB, one
+ * decimal above. Zero renders "0 B": a transfer that has moved nothing yet
+ * has moved nothing, which is not the absent answer "--" is for.
+ */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "--";
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let value = bytes;
+  let unit = "B";
+  for (const next of units) {
+    if (value < 1024) break;
+    value /= 1024;
+    unit = next;
+  }
+  return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${unit}`;
+}
+
 /** A call's duration. Zero and negative render as "--": a row whose
  *  `completedAt` never landed has no duration, and "0ms" would claim one. */
 export function formatDuration(ms: number): string {

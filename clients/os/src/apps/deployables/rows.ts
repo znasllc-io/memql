@@ -1,5 +1,7 @@
 import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { boolOr, flatten } from "../../kit/rows";
+
 // The wire rows this app renders, projected into the shapes its surfaces read.
 //
 // PURE, and separate from every component, for the reason apps/users/rows.ts
@@ -9,40 +11,12 @@ import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 // lets the LIST, the DETAIL and the MAP be checked against the same fixtures
 // and therefore be checked against each other.
 
-/**
- * Unwrap a `payload`-nested row to the flat form the field helpers read.
- *
- * A site row reaches these functions from two places -- the SEED (`sitesAll`,
- * already shape-flattened through `siteFull`) and the SUBSCRIPTION fold (a CDC
- * envelope, whose concept fields sit inside `payload`) -- and the two have to
- * produce the same object, or a site renders one way on load and another way
- * the moment anything about it changes.
- *
- * The envelope wins on a collision so `id` stays the ROW's id rather than any
- * `id` the payload happens to carry.
- */
-export function flatten(row: Row): Row {
-  const nested = row["payload"];
-  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
-    return { ...(nested as Row), ...row };
-  }
-  return row;
-}
-
-/**
- * A boolean field that can be ABSENT, with the default the concept declares.
- *
- * The SDK's `rowBool` returns `false` for a missing key, which collapses
- * "absent" and "explicitly false" into one answer. `deleted` and `systemOwned`
- * both default to false so the collapse is harmless for them -- but a folded
- * CDC event carries only what the write touched, so reading them through one
- * helper that states the default keeps the next field (whose default may be
- * true) from silently inheriting the wrong one.
- */
-function boolOr(row: Row, key: string, fallback: boolean): boolean {
-  const v = row[key];
-  return typeof v === "boolean" ? v : fallback;
-}
+// `flatten` and `boolOr` moved to kit/rows.ts when the third app copied them
+// (memql#4721); the reasoning they carried -- seed rows and CDC envelopes must
+// project identically, and an absent boolean takes the concept's own default
+// -- moved with them. `flatten` is re-exported because it was already part of
+// this module's surface (PublishPicker reads it).
+export { flatten };
 
 function objectOf(row: Row, key: string): Record<string, unknown> {
   const v = row[key];

@@ -1,18 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  addFileToFolder,
   addItem,
-  createFolder,
-  deleteFolder,
   emptySurface,
   moveItem,
   nearestFreeCell,
-  removeFileFromFolder,
   removeItem,
   sortSurface,
   surfaceHasContent,
   updateFile,
+  updateFolder,
   type DeskSurface,
   type DesktopItem,
 } from "../../src/system/desktop";
@@ -84,45 +81,28 @@ describe("desk surface grid", () => {
   });
 });
 
-describe("folders", () => {
-  it("moves a file into a folder and off the grid", () => {
-    let s = place(emptySurface(), file("a"), 0, 0);
-    s = createFolder(s, "dir", "Reports", { col: 1, row: 0 }, GRID)!;
-    s = addFileToFolder(s, "dir", "a");
-    expect(s.items.a).toBeUndefined();
-    expect(s.positions.a).toBeUndefined();
-    const dir = s.items.dir!;
-    expect(dir.kind === "folder" && dir.children.map((c) => c.id)).toEqual(["a"]);
-  });
+describe("folders are shortcuts (design D4)", () => {
+  const shortcut: DesktopItem = { kind: "folder", id: "dir", folderId: "f-lib-1", name: "Reports" };
 
-  it("takes a file back out near the folder", () => {
+  it("places like any one-cell item and removes without touching anything else", () => {
     let s = place(emptySurface(), file("a"), 0, 0);
-    s = createFolder(s, "dir", "Reports", { col: 4, row: 2 }, GRID)!;
-    s = addFileToFolder(s, "dir", "a");
-    s = removeFileFromFolder(s, "dir", "a", GRID);
-    expect(s.items.a!.kind).toBe("file");
-    const d = Math.max(Math.abs(s.positions.a!.col - 4), Math.abs(s.positions.a!.row - 2));
-    expect(d).toBeLessThanOrEqual(1);
-  });
-
-  it("deleting a folder returns its children to the grid", () => {
-    let s = place(emptySurface(), file("a"), 0, 0);
-    s = place(s, file("b"), 1, 0);
-    s = createFolder(s, "dir", "Reports", { col: 2, row: 0 }, GRID)!;
-    s = addFileToFolder(s, "dir", "a");
-    s = addFileToFolder(s, "dir", "b");
-    s = deleteFolder(s, "dir", GRID);
+    s = place(s, shortcut, 1, 0);
+    expect(s.positions.dir).toEqual({ col: 1, row: 0 });
+    // Remove-from-desk removes the SHORTCUT only -- there are no children to
+    // return, because the contents live in the Library, not on the desk.
+    s = removeItem(s, "dir");
     expect(s.items.dir).toBeUndefined();
     expect(s.items.a!.kind).toBe("file");
-    expect(s.items.b!.kind).toBe("file");
   });
 
-  it("refuses folder-into-folder by construction (only files move in)", () => {
-    let s = createFolder(emptySurface(), "d1", "One", { col: 0, row: 0 }, GRID)!;
-    s = createFolder(s, "d2", "Two", { col: 1, row: 0 }, GRID)!;
-    const before = s;
-    s = addFileToFolder(s, "d1", "d2");
-    expect(s).toBe(before);
+  it("updateFolder refreshes the denormalized name opportunistically", () => {
+    let s = place(emptySurface(), shortcut, 0, 0);
+    s = updateFolder(s, "dir", { name: "Client reports" });
+    const item = s.items.dir!;
+    expect(item.kind === "folder" && item.name).toBe("Client reports");
+    // A patch aimed at a non-folder is a no-op, not a corruption.
+    s = place(s, file("a"), 1, 0);
+    expect(updateFolder(s, "a", { name: "x" })).toBe(s);
   });
 });
 

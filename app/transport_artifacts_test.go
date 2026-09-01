@@ -49,6 +49,13 @@ func TestLibraryAnalyzerAdapterCarriesEveryParam(t *testing.T) {
 		Name:        "notes.txt",
 		MimeType:    "text/plain",
 		Data:        []byte("hello"),
+		// The chunked pair (memql#4782): the committed blob's address, and
+		// the hash when a one-shot upload already computed it. The fixture
+		// fills every source field the adapter maps from, so the
+		// destination-driven assertion below measures the COPY, not the
+		// fixture.
+		BlobUrl: "library/user-a/file-1/notes.txt",
+		Sha256:  "sha-1",
 	}
 	adapter.AnalyzeFile(context.Background(), req)
 

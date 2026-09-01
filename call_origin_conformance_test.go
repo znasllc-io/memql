@@ -271,6 +271,21 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		//     the analogue of the route_gate_test.go memql#2934 made
 		//     component/identity/admin carry for exactly this reason.
 		"component/identity/workertoken": "worker-token store -- REQUEST-DERIVED; precondition (userId is always the authenticated caller's subject) asserted by component/grpc/worker_token_caller_scope_test.go, memql#3063",
+		// REQUEST-DERIVED, the recoverykey/workertoken shape: a package that
+		// exists to hold ONE stamp, with nothing else in it. The @serverOnly
+		// pair it satisfies (createUploadSession / completeUploadSession)
+		// guards blobPath -- a storage path a caller must never author,
+		// because a forged one points the complete step at another user's
+		// bytes -- and the 'open' status stamp that stops a completed
+		// session being re-driven. Three asserted facts earn the entry, all
+		// in component/server/uploadsession/store_internal_origin_test.go:
+		// the constructs really are @serverOnly in the loaded registry (the
+		// stamp is required, not decorative); no Store method returns a
+		// context (the memql#2989 escalation cannot happen); and the
+		// rendered writes never name ownerUserId or status, while the READ
+		// is deliberately unstamped so row admission stays the per-chunk
+		// owner check.
+		"component/server/uploadsession": "chunked-upload session store -- REQUEST-DERIVED; preconditions (stamp is required by @serverOnly, dies inside one call, and the writes never name an owner) asserted by component/server/uploadsession/store_internal_origin_test.go, memql#4782",
 		"component/memql":                "seed materialiser and authoring capability store, both boot-time",
 		// SERVER-INITIATED, not request-derived -- the same class as
 		// integrations/agent/worker below rather than the three exceptions

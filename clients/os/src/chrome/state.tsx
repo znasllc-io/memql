@@ -32,18 +32,14 @@ import {
   type ShellState,
 } from "../system/desks";
 import {
-  addFileToFolder as addFileToFolderFn,
   addItem,
-  createFolder as createFolderFn,
-  deleteFolder as deleteFolderFn,
   emptySurface,
   moveItem as moveItemFn,
-  removeFileFromFolder as removeFileFromFolderFn,
   removeItem as removeItemFn,
-  renameFolder as renameFolderFn,
   sortSurface,
   surfaceHasContent,
   updateFile as updateFileFn,
+  updateFolder as updateFolderFn,
   type DeskSurface,
   type DesktopItem,
   type FileEntry,
@@ -66,6 +62,14 @@ export interface OsState {
   surfaces: Record<DeskId, DeskSurface>;
   dock: DockState;
   themePack: string;
+  /**
+   * The selected desk item. SESSION state, exactly like windows: it lives
+   * here rather than inside the Desktop component so an app surface can
+   * FOCUS an item ("send to desktop" of something already present), and it
+   * is deliberately absent from `documentFromState` -- a roamed desktop must
+   * not move another machine's selection.
+   */
+  selectedItemId: string | null;
 }
 
 export interface OsActions {
@@ -99,11 +103,21 @@ export interface OsActions {
   updateFileItem: (itemId: string, patch: Partial<Omit<FileEntry, "id">>) => void;
   removeSurfaceItem: (itemId: string) => void;
   moveSurfaceItem: (itemId: string, to: GridPos) => void;
-  createFolder: (name: string, preferred: GridPos) => void;
-  renameFolder: (folderId: string, name: string) => void;
-  deleteFolder: (folderId: string) => void;
-  dropFileIntoFolder: (folderId: string, fileItemId: string) => void;
-  takeFileOutOfFolder: (folderId: string, fileId: string) => void;
+  /** Select a desk item (null clears). Session state, never persisted. */
+  selectSurfaceItem: (itemId: string | null) => void;
+  /**
+   * Put a Library FILE on the active desk, or focus it if a shortcut to the
+   * same artifact is already there -- the dedupe rule, in the one place it
+   * can live now that apps can send too.
+   */
+  sendFileToDesk: (entry: Omit<FileEntry, "id">) => "placed" | "focused" | "full";
+  /** The folder-shortcut sibling of sendFileToDesk, deduped by folderId. */
+  sendFolderToDesk: (folderId: string, name: string) => "placed" | "focused" | "full";
+  /** Place a folder shortcut at a cell (desk create-folder, after the
+   *  Library mutation landed). */
+  placeFolderShortcut: (shortcut: { folderId: string; name: string }, preferred: GridPos) => boolean;
+  /** Refresh a folder shortcut's denormalized name from live rows. */
+  renameFolderShortcut: (itemId: string, name: string) => void;
   addWidget: (widgetId: string) => boolean;
   removeWidget: (itemId: string) => void;
   sortActiveDesk: () => void;
@@ -176,6 +190,7 @@ export function seedDocument(registry: OsRegistry, grid: GridSize): OsState {
     surfaces: { [shell.activeDeskId]: surface },
     dock: { pinned: ["settings"] },
     themePack: "graphite",
+    selectedItemId: null,
   };
 }
 
@@ -186,7 +201,7 @@ function stateFromDocument(doc: DesktopDocument): OsState {
     windows: {},
     focusedWindowId: null,
   };
-  return { shell, surfaces: doc.surfaces, dock: doc.dock, themePack: doc.themePack };
+  return { shell, surfaces: doc.surfaces, dock: doc.dock, themePack: doc.themePack, selectedItemId: null };
 }
 
 /**
@@ -238,6 +253,14 @@ export function adoptDocument(s: OsState, doc: DesktopDocument): OsState {
     surfaces: doc.surfaces,
     dock: doc.dock,
     themePack: doc.themePack,
+    // Selection survives adoption only while its item does: the arriving
+    // desktop is a statement about ITEMS, and a selection of one it no
+    // longer carries would highlight nothing.
+    selectedItemId:
+      s.selectedItemId !== null &&
+      Object.values(doc.surfaces).some((surface) => !!surface.items[s.selectedItemId!])
+        ? s.selectedItemId
+        : null,
   };
 }
 
@@ -370,6 +393,15 @@ export function OsProvider({
   const gridRef = useRef(grid);
   gridRef.current = grid;
 
+  // The CURRENT state, readable synchronously from an action. The older
+  // "let outcome; set(updater); return outcome" shape only works when React
+  // evaluates the queued updater eagerly, which it does exactly when the
+  // fiber's queue is empty -- the second call in a session reads a stale
+  // "full". An action that must ANSWER (placed / focused / full) computes
+  // from here and then applies.
+  const stateRef = useRef<OsState | null>(null);
+  stateRef.current = state;
+
   const actionsRef = useRef<OsActions | null>(null);
   if (!actionsRef.current) {
     const set = (updater: (s: OsState) => OsState) => setState((s) => pruneSurfaces(updater(s)));
@@ -439,30 +471,69 @@ export function OsProvider({
           const deskId = s.shell.activeDeskId;
           return withSurface(s, deskId, moveItemFn(surfaceOf(s, deskId), itemId, to, gridRef.current));
         }),
-      createFolder: (name, preferred) =>
+      selectSurfaceItem: (itemId) => set((s) => ({ ...s, selectedItemId: itemId })),
+      sendFileToDesk: (entry) => {
+        const s = stateRef.current;
+        if (!s) return "full";
+        const deskId = s.shell.activeDeskId;
+        const surface = surfaceOf(s, deskId);
+        // The dedupe rule: an item already on the ACTIVE desk is focused,
+        // never duplicated. Matched by artifact -- the desk id is minted
+        // per shortcut and means nothing to the Library.
+        const existing = Object.values(surface.items).find(
+          (i) => i.kind === "file" && entry.artifactId !== "" && i.artifactId === entry.artifactId,
+        );
+        if (existing) {
+          set((cur) => ({ ...cur, selectedItemId: existing.id }));
+          return "focused";
+        }
+        const id = mintItemId(s);
+        const placed = addItem(surface, { kind: "file", id, ...entry }, { col: 0, row: 0 }, gridRef.current);
+        if (!placed) return "full";
+        set((cur) => ({ ...withSurface(cur, deskId, placed), selectedItemId: id }));
+        return "placed";
+      },
+      sendFolderToDesk: (folderId, name) => {
+        const s = stateRef.current;
+        if (!s) return "full";
+        const deskId = s.shell.activeDeskId;
+        const surface = surfaceOf(s, deskId);
+        const existing = Object.values(surface.items).find(
+          (i) => i.kind === "folder" && i.folderId === folderId,
+        );
+        if (existing) {
+          set((cur) => ({ ...cur, selectedItemId: existing.id }));
+          return "focused";
+        }
+        const id = mintItemId(s);
+        const placed = addItem(
+          surface,
+          { kind: "folder", id, folderId, name },
+          { col: 0, row: 0 },
+          gridRef.current,
+        );
+        if (!placed) return "full";
+        set((cur) => ({ ...withSurface(cur, deskId, placed), selectedItemId: id }));
+        return "placed";
+      },
+      placeFolderShortcut: (shortcut, preferred) => {
+        const s = stateRef.current;
+        if (!s) return false;
+        const deskId = s.shell.activeDeskId;
+        const placed = addItem(
+          surfaceOf(s, deskId),
+          { kind: "folder", id: mintItemId(s), ...shortcut },
+          preferred,
+          gridRef.current,
+        );
+        if (!placed) return false;
+        set((cur) => withSurface(cur, deskId, placed));
+        return true;
+      },
+      renameFolderShortcut: (itemId, name) =>
         set((s) => {
-          const deskId = s.shell.activeDeskId;
-          return withSurface(s, deskId, createFolderFn(surfaceOf(s, deskId), mintItemId(s), name, preferred, gridRef.current));
-        }),
-      renameFolder: (folderId, name) =>
-        set((s) => {
-          const deskId = deskOfItem(s, folderId);
-          return deskId ? withSurface(s, deskId, renameFolderFn(surfaceOf(s, deskId), folderId, name)) : s;
-        }),
-      deleteFolder: (folderId) =>
-        set((s) => {
-          const deskId = deskOfItem(s, folderId);
-          return deskId ? withSurface(s, deskId, deleteFolderFn(surfaceOf(s, deskId), folderId, gridRef.current)) : s;
-        }),
-      dropFileIntoFolder: (folderId, fileItemId) =>
-        set((s) => {
-          const deskId = deskOfItem(s, folderId);
-          return deskId ? withSurface(s, deskId, addFileToFolderFn(surfaceOf(s, deskId), folderId, fileItemId)) : s;
-        }),
-      takeFileOutOfFolder: (folderId, fileId) =>
-        set((s) => {
-          const deskId = deskOfItem(s, folderId);
-          return deskId ? withSurface(s, deskId, removeFileFromFolderFn(surfaceOf(s, deskId), folderId, fileId, gridRef.current)) : s;
+          const deskId = deskOfItem(s, itemId);
+          return deskId ? withSurface(s, deskId, updateFolderFn(surfaceOf(s, deskId), itemId, { name })) : s;
         }),
       addWidget: (widgetId) => {
         let ok = false;

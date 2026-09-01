@@ -1,5 +1,6 @@
 import { rowArray, rowNumber, rowObject, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { flatten } from "../../kit/rows";
 import { labelMapFrom, mergeLabels, type LabelMap, type MergedLabel } from "./labels";
 
 // The wire rows the Fleet renders, projected into the shapes its surfaces
@@ -19,19 +20,9 @@ import { labelMapFrom, mergeLabels, type LabelMap, type MergedLabel } from "./la
 // The envelope flattens the concept fields alongside the intrinsics, but a
 // `payload`-wrapped form is what a raw graph event carries, and the two paths
 // have to produce the same object or a machine would render one way on load
-// and another way the moment its heartbeat lands. `flatten` is that one
-// reconciliation, applied before any field is read.
-
-/** Unwrap a `payload`-nested row to the flat form the field helpers read. */
-export function flatten(row: Row): Row {
-  const nested = row["payload"];
-  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
-    // The intrinsics live on the envelope, the concept fields inside it;
-    // the envelope wins on a collision so `id` stays the row's own id.
-    return { ...(nested as Row), ...row };
-  }
-  return row;
-}
+// and another way the moment its heartbeat lands. `flatten` (kit/rows.ts,
+// promoted once the third app copied it) is that one reconciliation, applied
+// before any field is read.
 
 function stringList(row: Row, key: string): string[] {
   const raw = rowArray(row, key) ?? [];

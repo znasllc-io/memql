@@ -27,13 +27,35 @@ export interface UploadResult {
  * The parameter DEFAULTS to `UploadResult` so every existing spelling of
  * `UploadHandle` still means what it did.
  */
+/** Byte progress, honest to what actually landed. */
+export interface UploadProgress {
+  sentBytes: number;
+  totalBytes: number;
+  /** Chunks the cluster already held when a resume started -- what the
+   *  surface says "12 of 40 chunks already in the cluster" with. Absent on a
+   *  fresh upload. */
+  resumedChunks?: number;
+  totalChunks?: number;
+}
+
 export interface UploadHandle<T = UploadResult> {
   done: Promise<T>;
   abort: () => void;
+  /**
+   * Subscribe to byte progress. OPTIONAL: the in-memory provider and the
+   * attachment route report nothing, and every existing consumer reads only
+   * `done`/`abort`. Returns an unsubscribe.
+   */
+  onProgress?: (listener: (progress: UploadProgress) => void) => () => void;
+}
+
+export interface UploadOptions {
+  /** Library folder the file lands in. Omitted = the root (design D4/B2). */
+  folderId?: string;
 }
 
 export interface UploadProvider {
-  upload(file: File): UploadHandle;
+  upload(file: File, opts?: UploadOptions): UploadHandle;
 }
 
 /**
@@ -43,7 +65,7 @@ export interface UploadProvider {
 export class InMemoryUploadProvider implements UploadProvider {
   constructor(private readonly delayMs = 30) {}
 
-  upload(file: File): UploadHandle {
+  upload(file: File, _opts?: UploadOptions): UploadHandle {
     let cancelled = false;
     const done = new Promise<UploadResult>((resolve, reject) => {
       setTimeout(() => {

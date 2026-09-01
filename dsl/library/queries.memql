@@ -1,3 +1,5 @@
+use common.traits.{ isOpen }
+
 // library domain -- Library reads.
 //
 // Authz tier: owned. Every filter gates on
@@ -388,4 +390,75 @@ query fileChunk libraryFileChunksForFile {
   sort     "row.createdAt", "desc"
   paginate 50
   shape   libraryFileChunkFull
+}
+
+// ---- folder: the Files app's tree reads (memql#4781) ----
+
+/// The caller's whole folder tree, live (memql#4781, design B1). Owned: ownerUserId==actor.userId
+/// gates the row set; `archived != true` is the null-safe soft-delete filter, for the reason
+/// libraryArtifacts spells out at length. UNBOUNDED ON PURPOSE: the OS folds (folders, artifacts)
+/// snapshots into a tree client-side, and a truncated page would silently re-parent every folder
+/// whose ancestor fell off the edge -- the fold is orphan-tolerant, so nothing would LOOK broken,
+/// which is exactly why the truncation must not happen. The set is small by construction: folders
+/// are hand-made organizational rows, bounded by one person's patience, not by data volume.
+@unbounded("the caller's whole folder tree -- the client-side tree fold needs every row at once, and a truncated page silently renders missing ancestors' children at root as orphans; owner-scoped and hand-created, so the set is small by construction. No sort either: the fold orders by (name, id) itself, because a picture that depended on wire order would reshuffle while somebody watches")
+@actor
+query folder libraryFolders {
+  filter  ownerUserId==actor.userId && archived!=true
+  shape   libraryFolderFull
+}
+
+/// Fetch one folder by id, gated to the caller. Owned: ownerUserId==actor.userId is the
+/// load-bearing guard. Backs the desk-folder popover's name refresh and the Files app's
+/// breadcrumb resolve; archived rows ARE returned here -- a caller asking about a specific id
+/// deserves the honest answer, and the archived field says which kind it got.
+@unbounded("library folder by id (guarded), gated to the owner -- bounded to a single row")
+@actor
+query folder libraryFolderById {
+  args {
+    folderId  string!
+  }
+  filter  when(args.folderId) { row.id==args.folderId } && ownerUserId==actor.userId
+  shape   libraryFolderFull
+}
+
+// ---- uploadSession + quota reads (memql#4782) ----
+
+/// Fetch one chunked upload session by id, gated to the caller -- THE per-chunk authorization read
+/// (design C2): every chunk PUT, the inventory and the complete resolve the session through this
+/// under the caller's own actor, so a session that is not theirs is a session that is not there.
+/// Owned: ownerUserId==actor.userId is the load-bearing guard.
+@unbounded("upload session by id (guarded), gated to the owner -- bounded to a single row")
+@actor
+query uploadSession uploadSessionById {
+  args {
+    uploadId  string!
+  }
+  filter  when(args.uploadId) { row.id==args.uploadId } && ownerUserId==actor.userId
+  shape   uploadSessionFull
+}
+
+/// The declared sizes of the caller's OPEN upload sessions -- the in-flight half of the storage
+/// quota (memql#4782, design C4): at init and at one-shot upload, the sum of stored file sizes
+/// PLUS these declared sizes must stay under MEMQL_LIBRARY_USER_QUOTA_BYTES, or a person could
+/// evade the quota by opening sessions they never finish. UNBOUNDED for the quota's reason: a
+/// truncated page fails OPEN, admitting bytes the quota should refuse. Owner-scoped, projecting
+/// two fields per row.
+@unbounded("quota enforcement must see EVERY open session's declared size -- a truncated page fails open, admitting an upload the quota should refuse; owner-scoped and two fields per row")
+@actor
+query uploadSession openUploadSessionsForOwner {
+  filter  ownerUserId==actor.userId && isOpen
+  shape   uploadSessionSize
+}
+
+/// The sizes of every file the caller holds, ARCHIVED INCLUDED -- the stored half of the storage
+/// quota (memql#4782, design C4). Archived files keep their bytes and keep counting: retention is
+/// real, and a quota that forgot archived rows would let 'archive then re-upload' mint unbounded
+/// storage. UNBOUNDED for the same fail-open reason as its session sibling; owner-scoped, two
+/// fields per row.
+@unbounded("quota enforcement must sum EVERY file the owner holds, archived included -- a truncated page fails open, admitting an upload the quota should refuse; owner-scoped and two fields per row")
+@actor
+query file libraryFileSizesForOwner {
+  filter  ownerUserId==actor.userId
+  shape   libraryFileSize
 }

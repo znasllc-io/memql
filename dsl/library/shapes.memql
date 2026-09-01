@@ -19,6 +19,7 @@ shape artifact artifactFull {
   scope
   labels
   archived
+  folderId
   partitionId
   agentId
   producedByPlanId
@@ -124,7 +125,63 @@ shape file libraryFileFull {
   embeddingStatus
   trainedIntoDomainIds
   archived
+  folderId
+  uploadedFromWorkerId
+  uploadedFromWorkerName
+  uploadedFromPath
   row.createdAt
+}
+
+/// Full projection of a Library folder row (memql#4781): every payload field plus the row id and
+/// creation stamp. Backs libraryFolders (the tree read) and libraryFolderById. A concept field is
+/// not a readable field until a shape projects it -- this is the projection, and it carries
+/// parentFolderId and archived precisely because the client-side tree fold and the archive walk
+/// read them.
+@row
+shape folder libraryFolderFull {
+  row.id
+  ownerUserId
+  name
+  parentFolderId
+  archived
+  row.createdAt
+}
+
+/// Full projection of a chunked upload session (memql#4782). Backs uploadSessionById -- the
+/// per-chunk authorization read -- so it carries everything the chunk, inventory and complete
+/// handlers decide on: the declared size the commit verifies, the blob path the blocks staged
+/// into, the fileId and filing and provenance the file row will take, and the status.
+@row
+shape uploadSession uploadSessionFull {
+  row.id
+  ownerUserId
+  name
+  size
+  mimeType
+  folderId
+  labels
+  uploadedFromWorkerId
+  uploadedFromWorkerName
+  uploadedFromPath
+  blobPath
+  fileId
+  chunkSize
+  status
+  row.createdAt
+}
+
+/// The quota projection of an upload session: the declared size, and nothing a sum does not need.
+@row
+shape uploadSession uploadSessionSize {
+  row.id
+  size
+}
+
+/// The quota projection of a file: the stored size, and nothing a sum does not need.
+@row
+shape file libraryFileSize {
+  row.id
+  size
 }
 
 /// Full projection of one file chunk, including the body text the embedding was computed from.

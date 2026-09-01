@@ -49,7 +49,10 @@ package library
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"time"
@@ -121,9 +124,37 @@ type AnalyzeFileParams struct {
 	// MimeType is the type as uploaded / sniffed. Decides whether this
 	// file has a known reader at all.
 	MimeType string
-	// Data is the uploaded bytes.
+	// Data is the uploaded bytes -- present on the one-shot path, NIL on
+	// the chunked path (memql#4782), where no handler ever held the file
+	// and the pass streams the committed blob instead.
 	Data []byte
+	// BlobUrl is where the committed bytes live, for the chunked case
+	// above. Ignored when Data is present and the hash is known.
+	BlobUrl string
+	// Sha256 is the hash as the upload route computed it, or "" when
+	// nobody has measured it yet -- the chunked case, which is the pass's
+	// cue to stream the blob once and stamp what it measures (design D10).
+	Sha256 string
 }
+
+// BlobFetcher opens the stored blob as a stream -- the one capability the
+// pass needs for chunked files (hashing always; extraction when the type
+// is readable). *azureblob.AzureBlobUploader implements it.
+type BlobFetcher interface {
+	DownloadStreamURL(ctx context.Context, blobURL string) (io.ReadCloser, error)
+}
+
+// SetBlobFetcher wires the blob stream. Optional, like the extractor: with
+// none configured a chunked file keeps an absent sha256 -- "not measured"
+// -- rather than failing, because a missing fetcher is an operator
+// condition and not a property of the file.
+func (i *Integration) SetBlobFetcher(f BlobFetcher) { i.blobFetcher = f }
+
+// analysisMaxFetchBytes bounds how much of a fetched blob is held for
+// EXTRACTION. The hash has no bound -- it streams -- but extraction needs
+// the bytes in memory, and a blob past this size is treated as opaque
+// (ready, no chunks) rather than silently truncated into a wrong summary.
+const analysisMaxFetchBytes int64 = 100 << 20
 
 // SetExtractor wires the text extractor. A node with none configured
 // treats every type as unreadable (status ready, no chunks) rather than
@@ -195,13 +226,45 @@ func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams)
 	}
 	ctx = withUserActor(ctx, owner)
 
+	// --- the chunked case: fetch what the handler never held (memql#4782) ---
+	//
+	// One stream serves both needs: the hash is fed by a TeeReader while
+	// extraction's bytes accumulate under a bound, so the blob is read ONCE
+	// whether or not the type is readable. A hash the upload route already
+	// computed is never re-measured, and an opaque type with a known hash
+	// never opens the stream at all.
+	// blobBacked marks the CHUNKED shape (memql#4782): the caller held no
+	// bytes and says where the committed blob lives. Legacy callers that
+	// pass neither Data nor BlobUrl keep the original behaviour -- the
+	// extractor decides, and its failure carries the reason.
+	blobBacked := len(params.Data) == 0 && strings.TrimSpace(params.BlobUrl) != ""
+	data := params.Data
+	measuredHash := ""
+	if blobBacked && (params.Sha256 == "" || i.canExtract(params.MimeType)) {
+		if i.blobFetcher != nil {
+			fetched, hash := i.fetchAndHash(ctx, params.BlobUrl, i.canExtract(params.MimeType))
+			data = fetched
+			if params.Sha256 == "" {
+				measuredHash = hash
+			}
+		} else if params.Sha256 == "" {
+			i.log().Warn("library: no blob fetcher wired; a chunked file keeps an absent sha256",
+				"fileId", fileId)
+		}
+	}
+
 	// An unreadable type is a terminal SUCCESS with no chunks (design
 	// 3.4). Checked before the `analyzing` transition so an opaque upload
 	// never flickers through a status that promises work nobody is doing.
-	if !i.canExtract(params.MimeType) {
+	// The same path serves a blob-backed READABLE type whose bytes could
+	// not be fetched or were too large to hold: the file is stored and
+	// downloadable either way, and `ready` with no chunks is the honest
+	// summary of that.
+	if !i.canExtract(params.MimeType) || (blobBacked && len(data) == 0) {
 		if err := i.setFileStatus(ctx, fileId, fileStatusUpdate{
 			status:          "ready",
 			embeddingStatus: "complete",
+			sha256:          measuredHash,
 		}); err != nil {
 			return fmt.Errorf("library.analyzeFile: mark opaque file ready: %w", err)
 		}
@@ -209,11 +272,11 @@ func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams)
 		return nil
 	}
 
-	if err := i.setFileStatus(ctx, fileId, fileStatusUpdate{status: "analyzing"}); err != nil {
+	if err := i.setFileStatus(ctx, fileId, fileStatusUpdate{status: "analyzing", sha256: measuredHash}); err != nil {
 		return fmt.Errorf("library.analyzeFile: mark analyzing: %w", err)
 	}
 
-	text, err := i.extractor.Extract(ctx, params.MimeType, params.Data)
+	text, err := i.extractor.Extract(ctx, params.MimeType, data)
 	if err != nil {
 		return i.failFile(ctx, fileId, fmt.Sprintf(
 			"could not read the contents of this %s file: %v", params.MimeType, err))
@@ -288,6 +351,46 @@ func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams)
 		"fileId", fileId, "artifactId", artifactId,
 		"chunks", len(chunks), "embedded", embedded, "summarized", summary != "")
 	return nil
+}
+
+// fetchAndHash streams the stored blob ONCE: the whole stream feeds the
+// sha256, and -- when wantBytes -- up to analysisMaxFetchBytes accumulate
+// for extraction. A blob past the bound keeps hashing to the end but
+// returns nil bytes, so the caller treats it as opaque rather than
+// summarising a truncation. Any failure returns ("", nil): the hash is a
+// fact or it is absent, never a partial.
+func (i *Integration) fetchAndHash(ctx context.Context, blobURL string, wantBytes bool) ([]byte, string) {
+	rc, err := i.blobFetcher.DownloadStreamURL(ctx, blobURL)
+	if err != nil {
+		i.log().Warn("library: blob fetch for analysis failed", "blobUrl", blobURL, "error", err)
+		return nil, ""
+	}
+	defer func() { _ = rc.Close() }()
+
+	h := sha256.New()
+	if !wantBytes {
+		if _, err := io.Copy(h, rc); err != nil {
+			i.log().Warn("library: blob hash stream failed", "blobUrl", blobURL, "error", err)
+			return nil, ""
+		}
+		return nil, hex.EncodeToString(h.Sum(nil))
+	}
+
+	buf, err := io.ReadAll(io.TeeReader(io.LimitReader(rc, analysisMaxFetchBytes+1), h))
+	if err != nil {
+		i.log().Warn("library: blob fetch stream failed", "blobUrl", blobURL, "error", err)
+		return nil, ""
+	}
+	if int64(len(buf)) > analysisMaxFetchBytes {
+		// Too large to extract; finish the hash over the remainder and
+		// hand back no bytes.
+		if _, err := io.Copy(h, rc); err != nil {
+			i.log().Warn("library: blob hash tail failed", "blobUrl", blobURL, "error", err)
+			return nil, ""
+		}
+		return nil, hex.EncodeToString(h.Sum(nil))
+	}
+	return buf, hex.EncodeToString(h.Sum(nil))
 }
 
 // canExtract reports whether this node can read this MIME type at all.
@@ -400,6 +503,11 @@ type fileStatusUpdate struct {
 	summary         string
 	embeddingStatus string
 	failureReason   string
+	// sha256 is written only when THIS pass measured it (memql#4782, D10):
+	// a chunked upload lands hash-absent, and the pass streams the
+	// committed blob once to stamp it. Never re-stated for a hash the
+	// upload route already computed.
+	sha256 string
 }
 
 func (i *Integration) setFileStatus(ctx context.Context, fileId string, u fileStatusUpdate) error {
@@ -415,6 +523,9 @@ func (i *Integration) setFileStatus(ctx context.Context, fileId string, u fileSt
 	}
 	if u.failureReason != "" {
 		parts = append(parts, fmt.Sprintf("failureReason: %s", langparser.QuoteString(u.failureReason)))
+	}
+	if u.sha256 != "" {
+		parts = append(parts, fmt.Sprintf("sha256: %s", langparser.QuoteString(u.sha256)))
 	}
 	_, err := i.engine.Execute(ctx, fmt.Sprintf("mutation setLibraryFileStatus(%s)", strings.Join(parts, ", ")))
 	return err

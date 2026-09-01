@@ -36,8 +36,9 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		t.Fatalf("getwd: %v", err)
 	}
 
-	// Allow-list: filename -> reason. Empty for now; every existing
-	// sha256 site was migrated to core/id helpers per memql#102.
+	// Allow-list: filename -> reason. Every entry is a WIRE-FORMAT hash --
+	// the carve-out this test's own header names -- never a shortId or
+	// cache key, which stay on core/id.
 	//
 	// (The artifacts-labels feature briefly needed an entry here for a
 	// Go-side re-derivation of createArtifact's hash-based id. Review
@@ -45,7 +46,18 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 	// DSL query filtering on the declared sourceConceptRef payload field
 	// -- specifically to remove the unguarded coupling a duplicated hash
 	// expression created, so the entry is gone rather than kept.)
-	allow := map[string]string{}
+	allow := map[string]string{
+		// v1:library:file.sha256 is a REAL SHA-256 hex digest of the stored
+		// bytes -- the concept documents it as a dedup hint and integrity
+		// check a person can compare against `sha256sum` -- and the one-shot
+		// upload route computes it with crypto/sha256 in component/server.
+		// The analysis pass stamps the SAME field for chunked uploads
+		// (memql#4782, D10), so it must be the same algorithm at the same
+		// byte width: a core/id fingerprint would write a value that
+		// disagrees with every other producer and consumer of the field.
+		"library/analysis.go":             "v1:library:file.sha256 is a wire-format SHA-256 the one-shot route also computes; the chunked stamp must match it byte for byte (memql#4782)",
+		"library/analysis_sha256_test.go": "asserts the stamped digest equals crypto/sha256 over the streamed bytes -- the test for the entry above",
+	}
 
 	type violation struct {
 		path string

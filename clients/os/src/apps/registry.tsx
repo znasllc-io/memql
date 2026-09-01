@@ -1,6 +1,6 @@
 import {
+  Files as FilesIcon,
   GraduationCap,
-  Library,
   MonitorSmartphone,
   Rocket,
   Settings as SettingsIcon,
@@ -13,6 +13,8 @@ import { useAsk } from "../ask/AskProvider";
 import type { OsAppManifest, OsRegistry, OsWidgetManifest } from "../system/registry";
 import { DeployablesApp } from "./deployables/DeployablesApp";
 import { DEPLOYABLES_SECTIONS } from "./deployables/settings";
+import { FilesApp } from "./files/FilesApp";
+import { FILES_SECTIONS } from "./files/settings";
 import { FleetApp } from "./fleet/FleetApp";
 import { FLEET_SECTIONS } from "./fleet/settings";
 import { SettingsApp } from "./settings/SettingsApp";
@@ -20,25 +22,12 @@ import { TrainingApp } from "./training/TrainingApp";
 import { TRAINING_SECTIONS } from "./training/settings";
 import { UsersApp } from "./users/UsersApp";
 import { USERS_SECTIONS } from "./users/settings";
-import { StubApp } from "./StubApp";
 
-// The installed roster (spec D12). Settings, Fleet, Users, Deployables and
-// Training are real; the remaining product apps are honest stubs replaced by
-// their epics, and the Ask widget is the widget framework's first resident.
-// Static by design -- runtime app delivery is deliberately not a foundation
-// question.
-//
-// The `stub` helper stays for as long as anything uses it, and goes with the
-// last one: keeping a factory nothing calls is how a file grows a shape
-// nobody can explain.
-
-function stub(manifest: Omit<OsAppManifest, "component">, epicIssue: number, summary: string): OsAppManifest {
-  const full: OsAppManifest = {
-    ...manifest,
-    component: () => <StubApp manifest={full} epicIssue={epicIssue} summary={summary} />,
-  };
-  return full;
-}
+// The installed roster (spec D12). Every app is real now -- Files (epic
+// #4721) replaced the last stub, and the `stub` helper and StubApp went with
+// it, as the note that used to sit here promised they would. The Ask widget
+// is the widget framework's first resident. Static by design -- runtime app
+// delivery is deliberately not a foundation question.
 
 const settings: OsAppManifest = {
   id: "settings",
@@ -55,20 +44,28 @@ const settings: OsAppManifest = {
   component: SettingsApp,
 };
 
-const artifacts = stub(
-  {
-    id: "artifacts",
-    name: "Artifacts",
-    icon: Library,
-    sections: [
-      { id: "browse", name: "Browse" },
-      { id: "settings", name: "Settings" },
-    ],
-    settingsSection: "settings",
-  },
-  4721,
-  "The Library on the desktop: browse and search everything MemQL holds for you, send files to the desk, open them in VS Code.",
-);
+// Files, in full (epic #4721). Browse is first and is therefore the section
+// a window opens on: the Library as a folder tree, live, with the inspector
+// telling each file's provenance story. The app's own settings hold the
+// list defaults and the archive confirm.
+//
+// The section list is FILES_SECTIONS rather than a literal, for the reason
+// its four siblings are: the gear and the manifest must offer the same set,
+// and a second copy of the list is one that can disagree.
+//
+// NO manifest role: `v1:library:artifact` and `v1:library:folder` declare
+// the composite tier (`@rowAuthz(owner="ownerUserId", clusterOwner)`), so
+// every signed-in person has a Library of their own to read and the engine
+// decides how far every read reaches. Gating here would be presentation
+// pretending to be authorization.
+const files: OsAppManifest = {
+  id: "files",
+  name: "Files",
+  icon: FilesIcon,
+  sections: FILES_SECTIONS,
+  settingsSection: "settings",
+  component: FilesApp,
+};
 
 // Deployables, in full (epic #4725). MAP is first and is therefore the section
 // a window opens on: what serves where is a shape rather than a table, and the
@@ -183,6 +180,6 @@ const askWidget: OsWidgetManifest = {
 };
 
 export const OS_REGISTRY: OsRegistry = {
-  apps: [artifacts, deployables, fleet, users, training, settings],
+  apps: [files, deployables, fleet, users, training, settings],
   widgets: [askWidget],
 };

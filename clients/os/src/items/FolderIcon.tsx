@@ -13,7 +13,6 @@ export interface FolderEntryView {
 export function FolderIcon({
   id,
   name,
-  count,
   open,
   isDropTarget,
   onToggle,
@@ -21,7 +20,6 @@ export function FolderIcon({
 }: {
   id: string;
   name: string;
-  count: number;
   open: boolean;
   isDropTarget: boolean;
   onToggle: () => void;
@@ -43,7 +41,10 @@ export function FolderIcon({
       <button
         type="button"
         className="os-file-button"
-        aria-label={`${name}, folder, ${count} ${count === 1 ? "file" : "files"}`}
+        // No count in the name: a desk folder is a shortcut to a Library
+        // folder (design D4), and the desk stays subscription-free until the
+        // popover opens -- a closed icon honestly does not know.
+        aria-label={`${name}, folder`}
         aria-expanded={open}
         onClick={onToggle}
       >

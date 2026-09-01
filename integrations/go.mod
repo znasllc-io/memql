@@ -7,6 +7,7 @@ go 1.26.1
 toolchain go1.26.6
 
 require (
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.0
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.0
 	github.com/google/uuid v1.6.0
 	github.com/livekit/media-sdk v0.0.0-20260605212526-4c11a51d3c97
@@ -51,7 +52,6 @@ require (
 	buf.build/go/protovalidate v1.2.0 // indirect
 	buf.build/go/protoyaml v0.7.0 // indirect
 	cel.dev/expr v0.25.2 // indirect
-	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.12.0 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.66.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect

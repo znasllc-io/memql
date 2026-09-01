@@ -703,6 +703,28 @@ func ArchiveLibraryFileBuild(args ArchiveLibraryFileArgs) string {
 	return b.String()
 }
 
+// ArchiveLibraryFolder -- Archive a folder -- the soft delete, same shape as archiveArtifact. The row survives with its name and its place in the tree; libraryFolders' `archived != true` filter drops it from the default read. The CLIENT drives the recursive walk (design B5/D11): contents first via archiveArtifact (whose automation archives backing files), then folders children-first, so this write is always the LAST touch on an emptied branch -- and re-running an interrupted walk archives the remainder idempotently. Artifacts still pointing here render at root with an orphan marker rather than vanishing: the fold is tolerant, and a row is never lost to a dangling pointer.
+//
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["archiveLibraryFolder"] in generated_concepts.go).
+type ArchiveLibraryFolderArgs struct {
+	FolderId string
+}
+
+// ArchiveLibraryFolder calls the engine mutation archiveLibraryFolder.
+func (qc *QueryClient) ArchiveLibraryFolder(ctx context.Context, args ArchiveLibraryFolderArgs) (*Result, error) {
+	call := ArchiveLibraryFolderBuild(args)
+	return qc.executeNamed(ctx, "archiveLibraryFolder", call)
+}
+
+func ArchiveLibraryFolderBuild(args ArchiveLibraryFolderArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation archiveLibraryFolder(")
+	b.WriteString("folderId: ")
+	b.WriteString(quoteMemQL(args.FolderId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // AssignResponsibility -- Persist a routing decision onto a v1:planner:responsibility (epic #632, C2): bind the resolved agent (assignedAgentId), optional role slug (assignedRoleSlug), and flip targetKind off 'unassigned' onto the concrete kind (assistant / specialist). Called by the reactive-loop router after agentFactoryAnalyze + createSpecialist/extendSpecialist mint or match an agent. Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier) so the router can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in the AccessContext before calling, so this lands as an owned write.
 //
 // Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["assignResponsibility"] in generated_concepts.go).
@@ -2147,6 +2169,7 @@ type CreateArtifactArgs struct {
 	Labels               []string
 	Archived             bool
 	ArchivedSet          bool // set true to send archived; required because zero-value bool is ambiguous
+	FolderId             string
 	PartitionId          string
 	AgentId              string
 	ProducedByPlanId     string
@@ -2240,6 +2263,13 @@ func CreateArtifactBuild(args CreateArtifactArgs) string {
 		}
 		b.WriteString("archived: ")
 		b.WriteString(fmt.Sprintf("%v", args.Archived))
+	}
+	if args.FolderId != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderId: ")
+		b.WriteString(quoteMemQL(args.FolderId))
 	}
 	if args.PartitionId != "" {
 		if b.Len() > 24 {
@@ -4502,8 +4532,12 @@ type CreateLibraryFileArgs struct {
 	// Enum: uploaded | exported | agent_generated | derived
 	Source string
 	// Enum: markdown | document | pdf | spreadsheet | image | text | conversation | other
-	Format  string
-	Summary string
+	Format                 string
+	Summary                string
+	FolderId               string
+	UploadedFromWorkerId   string
+	UploadedFromWorkerName string
+	UploadedFromPath       string
 }
 
 // CreateLibraryFile calls the engine mutation createLibraryFile.
@@ -4532,11 +4566,13 @@ func CreateLibraryFileBuild(args CreateLibraryFileArgs) string {
 	}
 	b.WriteString("size: ")
 	b.WriteString(fmt.Sprintf("%v", args.Size))
-	if b.Len() > 27 {
-		b.WriteString(", ")
+	if args.Sha256 != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sha256: ")
+		b.WriteString(quoteMemQL(args.Sha256))
 	}
-	b.WriteString("sha256: ")
-	b.WriteString(quoteMemQL(args.Sha256))
 	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
@@ -4560,6 +4596,34 @@ func CreateLibraryFileBuild(args CreateLibraryFileArgs) string {
 		}
 		b.WriteString("summary: ")
 		b.WriteString(quoteMemQL(args.Summary))
+	}
+	if args.FolderId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderId: ")
+		b.WriteString(quoteMemQL(args.FolderId))
+	}
+	if args.UploadedFromWorkerId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("uploadedFromWorkerId: ")
+		b.WriteString(quoteMemQL(args.UploadedFromWorkerId))
+	}
+	if args.UploadedFromWorkerName != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("uploadedFromWorkerName: ")
+		b.WriteString(quoteMemQL(args.UploadedFromWorkerName))
+	}
+	if args.UploadedFromPath != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("uploadedFromPath: ")
+		b.WriteString(quoteMemQL(args.UploadedFromPath))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -4614,6 +4678,42 @@ func CreateLibraryFileChunkBuild(args CreateLibraryFileChunkArgs) string {
 		}
 		b.WriteString("tokenCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenCount))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreateLibraryFolder -- Create a folder in the caller's Library tree (memql#4781, design B1). Owner-acted: ownerUserId is stamped from actor.userId, so a folder can only ever be created for the person the call runs as. parentFolderId nests it under an existing folder; absent means root. Sibling name duplicates are allowed by design (a folder is a collection, not a namespace), so there is no uniqueness check to refuse a name. The client enforces the depth cap (12) and cycle refusal (design D11); the tree fold tolerates violations defensively either way. archived is stamped false explicitly so every row states its own answer -- the same reasoning createArtifact records.
+//
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["createLibraryFolder"] in generated_concepts.go).
+type CreateLibraryFolderArgs struct {
+	FolderId       string
+	Name           string
+	ParentFolderId string
+}
+
+// CreateLibraryFolder calls the engine mutation createLibraryFolder.
+func (qc *QueryClient) CreateLibraryFolder(ctx context.Context, args CreateLibraryFolderArgs) (*Result, error) {
+	call := CreateLibraryFolderBuild(args)
+	return qc.executeNamed(ctx, "createLibraryFolder", call)
+}
+
+func CreateLibraryFolderBuild(args CreateLibraryFolderArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createLibraryFolder(")
+	b.WriteString("folderId: ")
+	b.WriteString(quoteMemQL(args.FolderId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if args.ParentFolderId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("parentFolderId: ")
+		b.WriteString(quoteMemQL(args.ParentFolderId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -9057,6 +9157,66 @@ func MintSkillBuild(args MintSkillArgs) string {
 	return b.String()
 }
 
+// MoveArtifactToFolder -- Re-file a Library artifact into a folder (memql#4781, design B2) -- the organizational write of the Files app, and deliberately a READ-MERGE update: labels, archived, provenance and every other index field survive a move untouched, which is what makes moving cheap enough to be the only filing operation the tree needs. An absent folderId (or an explicit "") files it at the root -- ?? is blank-coalescing, and no folder's id is "". updatedAt advances because a move IS a change a person made to the row, and the Library's default sort should say so. Works on every content kind (file, document, generated_output); the backing row's own folderId copy is the initial filing only and is deliberately not chased (the index is authoritative after promotion).
+//
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["moveArtifactToFolder"] in generated_concepts.go).
+type MoveArtifactToFolderArgs struct {
+	ArtifactId string
+	FolderId   string
+}
+
+// MoveArtifactToFolder calls the engine mutation moveArtifactToFolder.
+func (qc *QueryClient) MoveArtifactToFolder(ctx context.Context, args MoveArtifactToFolderArgs) (*Result, error) {
+	call := MoveArtifactToFolderBuild(args)
+	return qc.executeNamed(ctx, "moveArtifactToFolder", call)
+}
+
+func MoveArtifactToFolderBuild(args MoveArtifactToFolderArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation moveArtifactToFolder(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if args.FolderId != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderId: ")
+		b.WriteString(quoteMemQL(args.FolderId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// MoveLibraryFolder -- Move a folder to a new parent -- one row update, the Drive model's whole cost for a move (design D3). An absent parentFolderId (or an explicit "") moves it to the root: ?? is blank-coalescing, and for a move-target that collapse is exactly the wanted semantics, because no folder's id is "". Cycle prevention is the CLIENT's check in v1 (design D11) -- the engine has no ancestor walk to refuse one with -- and the tree fold renders a folder whose ancestor chain revisits itself at root with a marker, so a race between two movers degrades the picture rather than losing anybody's rows.
+//
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["moveLibraryFolder"] in generated_concepts.go).
+type MoveLibraryFolderArgs struct {
+	FolderId       string
+	ParentFolderId string
+}
+
+// MoveLibraryFolder calls the engine mutation moveLibraryFolder.
+func (qc *QueryClient) MoveLibraryFolder(ctx context.Context, args MoveLibraryFolderArgs) (*Result, error) {
+	call := MoveLibraryFolderBuild(args)
+	return qc.executeNamed(ctx, "moveLibraryFolder", call)
+}
+
+func MoveLibraryFolderBuild(args MoveLibraryFolderArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation moveLibraryFolder(")
+	b.WriteString("folderId: ")
+	b.WriteString(quoteMemQL(args.FolderId))
+	if args.ParentFolderId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("parentFolderId: ")
+		b.WriteString(quoteMemQL(args.ParentFolderId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // PauseCampaign -- Pause a running send. The delivery ledger is untouched, which is the whole point: a paused campaign resumes exactly where it stopped because "where it stopped" is the set of recipients with no delivery row, not a cursor that could go stale. Owned.
 //
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["pauseCampaign"] in generated_concepts.go).
@@ -11391,6 +11551,34 @@ func RemoveAgentFromSpaceBuild(args RemoveAgentFromSpaceArgs) string {
 	return b.String()
 }
 
+// RenameLibraryFolder -- Rename a folder. One field on one row: names are display labels, not namespaces (design D3), so nothing else is touched, no uniqueness is checked, and every artifact filed under the folder is oblivious -- they point at the id, and the id does not change.
+//
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["renameLibraryFolder"] in generated_concepts.go).
+type RenameLibraryFolderArgs struct {
+	FolderId string
+	Name     string
+}
+
+// RenameLibraryFolder calls the engine mutation renameLibraryFolder.
+func (qc *QueryClient) RenameLibraryFolder(ctx context.Context, args RenameLibraryFolderArgs) (*Result, error) {
+	call := RenameLibraryFolderBuild(args)
+	return qc.executeNamed(ctx, "renameLibraryFolder", call)
+}
+
+func RenameLibraryFolderBuild(args RenameLibraryFolderArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation renameLibraryFolder(")
+	b.WriteString("folderId: ")
+	b.WriteString(quoteMemQL(args.FolderId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RenamePasskeyIdentity -- Rename an enrolled passkey. Changes only the display label -- the credential itself is untouched.
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["renamePasskeyIdentity"] in generated_concepts.go).
@@ -13203,6 +13391,7 @@ type SetLibraryFileStatusArgs struct {
 	// Enum: none | partial | complete
 	EmbeddingStatus string
 	FailureReason   string
+	Sha256          string
 }
 
 // SetLibraryFileStatus calls the engine mutation setLibraryFileStatus.
@@ -13241,6 +13430,13 @@ func SetLibraryFileStatusBuild(args SetLibraryFileStatusArgs) string {
 		}
 		b.WriteString("failureReason: ")
 		b.WriteString(quoteMemQL(args.FailureReason))
+	}
+	if args.Sha256 != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sha256: ")
+		b.WriteString(quoteMemQL(args.Sha256))
 	}
 	b.WriteString(")")
 	return b.String()

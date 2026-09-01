@@ -35,6 +35,7 @@ mutate artifact createArtifact {
     scope             enum("workspace", "private")
     labels            []string
     archived          bool
+    folderId          string
     partitionId           string
     agentId           string
     producedByPlanId  string
@@ -56,6 +57,7 @@ mutate artifact createArtifact {
     live: args.live ?? false
     args.scope
     args.labels
+    args.folderId
     // Written explicitly rather than left to the concept's @default, which
     // never fires on insert. NOT because the default list needs it: a row with
     // no `archived` member is still returned by `archived != true` (measured,
@@ -259,14 +261,22 @@ mutate file createLibraryFile {
     name      string!
     mimeType  string!
     size      int!
-    sha256    string!
+    // Optional since memql#4782: a chunked upload's complete step never held
+    // the whole file, so it creates the row with sha256 ABSENT and the
+    // analysis pass stamps it by streaming the committed blob once. One-shot
+    // callers keep passing the inline hash.
+    sha256    string
     blobUrl   string!
     source    enum("uploaded", "exported", "agent_generated", "derived")!
     format    enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")
     summary   string
+    folderId  string
+    uploadedFromWorkerId    string
+    uploadedFromWorkerName  string
+    uploadedFromPath        string
   }
   insert {
-    accept { name, mimeType, size, sha256, blobUrl, source, summary }
+    accept { name, mimeType, size, sha256, blobUrl, source, summary, folderId, uploadedFromWorkerId, uploadedFromWorkerName, uploadedFromPath }
     stamp {
       id: args.fileId
       ownerUserId: actor.userId
@@ -290,9 +300,14 @@ mutate file setLibraryFileStatus {
     summary          string
     embeddingStatus  enum("none", "partial", "complete")
     failureReason    string
+    // The analysis pass stamps a chunked upload's hash here (memql#4782,
+    // design D10): the pass streams the committed blob once and writes what
+    // it measured. Absent on every other transition, and the read-merge
+    // keeps whatever an earlier write recorded.
+    sha256           string
   }
   update {
-    accept { status, summary, embeddingStatus, failureReason }
+    accept { status, summary, embeddingStatus, failureReason, sha256 }
     stamp {
       id: args.fileId
     }
@@ -369,5 +384,173 @@ mutate fileChunk createLibraryFileChunk {
       id: args.chunkId
       ownerUserId: actor.userId
     }
+  }
+}
+
+// ---- folder: the Files app's Drive-model writes (memql#4781) ----
+//
+// All five are CLIENT-REACHABLE, unlike the promotion writes above: the OS
+// Files app calls them through the generated SDK, and every one is owned by
+// construction -- createLibraryFolder stamps ownerUserId from actor.userId
+// (@serverSet makes a caller-supplied owner a load-time rejection), and the
+// three update-shaped writes are read-merges on a row the composite tier's
+// write guard already scopes to its owner.
+//
+// The update-shaped ones take MINIMAL arguments (the memql#4258 rule):
+// update{} has been a read-merge since memql#1628, so re-supplying
+// discriminators is dead weight an undeclared-argument DISCARD would hide.
+// moveLibraryFolder and moveArtifactToFolder write their target through
+// `args.X ?? ""` so an ABSENT argument and an explicit "" both mean "the
+// root" -- ?? is blank-coalescing, and for a move-target that collapse is
+// the wanted semantics, not a hazard: there is no folder whose id is "".
+
+/// Create a folder in the caller's Library tree (memql#4781, design B1). Owner-acted: ownerUserId
+/// is stamped from actor.userId, so a folder can only ever be created for the person the call runs
+/// as. parentFolderId nests it under an existing folder; absent means root. Sibling name duplicates
+/// are allowed by design (a folder is a collection, not a namespace), so there is no uniqueness
+/// check to refuse a name. The client enforces the depth cap (12) and cycle refusal (design D11);
+/// the tree fold tolerates violations defensively either way. archived is stamped false explicitly
+/// so every row states its own answer -- the same reasoning createArtifact records.
+@actor
+mutate folder createLibraryFolder {
+  args {
+    folderId        string!
+    name            string!
+    parentFolderId  string
+  }
+  insert {
+    accept { name, parentFolderId }
+    stamp {
+      id: args.folderId
+      ownerUserId: actor.userId
+      archived: false
+    }
+  }
+}
+
+/// Rename a folder. One field on one row: names are display labels, not namespaces (design D3), so
+/// nothing else is touched, no uniqueness is checked, and every artifact filed under the folder is
+/// oblivious -- they point at the id, and the id does not change.
+mutate folder renameLibraryFolder {
+  args {
+    folderId  string!
+    name      string!
+  }
+  update {
+    id: args.folderId
+    args.name
+  }
+}
+
+/// Move a folder to a new parent -- one row update, the Drive model's whole cost for a move
+/// (design D3). An absent parentFolderId (or an explicit "") moves it to the root: ?? is
+/// blank-coalescing, and for a move-target that collapse is exactly the wanted semantics, because
+/// no folder's id is "". Cycle prevention is the CLIENT's check in v1 (design D11) -- the engine
+/// has no ancestor walk to refuse one with -- and the tree fold renders a folder whose ancestor
+/// chain revisits itself at root with a marker, so a race between two movers degrades the picture
+/// rather than losing anybody's rows.
+mutate folder moveLibraryFolder {
+  args {
+    folderId        string!
+    parentFolderId  string
+  }
+  update {
+    id: args.folderId
+    parentFolderId: args.parentFolderId ?? ""
+  }
+}
+
+/// Archive a folder -- the soft delete, same shape as archiveArtifact. The row survives with its
+/// name and its place in the tree; libraryFolders' `archived != true` filter drops it from the
+/// default read. The CLIENT drives the recursive walk (design B5/D11): contents first via
+/// archiveArtifact (whose automation archives backing files), then folders children-first, so this
+/// write is always the LAST touch on an emptied branch -- and re-running an interrupted walk
+/// archives the remainder idempotently. Artifacts still pointing here render at root with an
+/// orphan marker rather than vanishing: the fold is tolerant, and a row is never lost to a
+/// dangling pointer.
+mutate folder archiveLibraryFolder {
+  args {
+    folderId  string!
+  }
+  update {
+    id: args.folderId
+    archived: true
+  }
+}
+
+/// Re-file a Library artifact into a folder (memql#4781, design B2) -- the organizational write of
+/// the Files app, and deliberately a READ-MERGE update: labels, archived, provenance and every
+/// other index field survive a move untouched, which is what makes moving cheap enough to be the
+/// only filing operation the tree needs. An absent folderId (or an explicit "") files it at the
+/// root -- ?? is blank-coalescing, and no folder's id is "". updatedAt advances because a move IS
+/// a change a person made to the row, and the Library's default sort should say so. Works on every
+/// content kind (file, document, generated_output); the backing row's own folderId copy is the
+/// initial filing only and is deliberately not chased (the index is authoritative after
+/// promotion).
+mutate artifact moveArtifactToFolder {
+  args {
+    artifactId  string!
+    folderId    string
+  }
+  update {
+    id: args.artifactId
+    folderId: args.folderId ?? ""
+    updatedAt: now
+  }
+}
+
+// ---- uploadSession: the chunked-transfer writes (memql#4782) ----
+
+/// Open a chunked upload session (memql#4782, design C2). @serverOnly, and actor-scoping is NOT the
+/// reason it cannot be client-reachable -- ownerUserId IS stamped from actor.userId. The reason is
+/// blobPath and fileId: storage-layer facts only the upload route may author, because a
+/// caller-supplied blobPath could name ANOTHER user's object and the complete step would then mint
+/// a file row whose bytes are somebody else's -- authorization moved from the graph to whoever can
+/// type a path. status is stamped 'open' for the sibling reason: a caller who could write status
+/// could re-open a completed session and drive complete twice. The handler also runs the quota and
+/// provenance checks BEFORE calling this, so a session row's existence implies both passed.
+@actor
+@serverOnly
+mutate uploadSession createUploadSession {
+  args {
+    uploadId  string!
+    name      string!
+    size      int!
+    mimeType  string
+    folderId  string
+    labels    []string
+    uploadedFromWorkerId    string
+    uploadedFromWorkerName  string
+    uploadedFromPath        string
+    blobPath  string!
+    fileId    string!
+    chunkSize int!
+  }
+  insert {
+    accept { name, size, mimeType, folderId, labels, uploadedFromWorkerId, uploadedFromWorkerName, uploadedFromPath, blobPath, fileId, chunkSize }
+    stamp {
+      id: args.uploadId
+      ownerUserId: actor.userId
+      status: "open"
+    }
+  }
+}
+
+/// Mark a chunked upload session completed (memql#4782): the block list committed, the file row
+/// exists, the session is terminal. @serverOnly, and scoping to actor.userId is not the fix here
+/// because it is ALREADY in place -- the write-guard scopes this update to the session's owner,
+/// and that owner is exactly who must not call it directly: completion is the STATE the complete
+/// handler's idempotency rests on (a completed session answers its ids instead of re-running the
+/// commit), so an owner who could flip it from a client could desynchronise their own row from
+/// the storage truth it summarises. A read-merge: every init-time fact survives for the audit
+/// trail.
+@serverOnly
+mutate uploadSession completeUploadSession {
+  args {
+    uploadId  string!
+  }
+  update {
+    id: args.uploadId
+    status: "completed"
   }
 }

@@ -77,7 +77,7 @@ describe("the desktop lands (spec K bullet 1)", () => {
 describe("windows and desks (spec K bullets 2-3)", () => {
   it("opens two apps on one desk, spills the third onto a new desk", () => {
     renderShell();
-    openFromLauncher("Artifacts");
+    openFromLauncher("Files");
     openFromLauncher("Fleet");
     expect(document.querySelectorAll(".os-window")).toHaveLength(2);
     expect(screen.getByText("Desk 1 of 1")).toBeTruthy();
@@ -90,34 +90,34 @@ describe("windows and desks (spec K bullets 2-3)", () => {
 
   it("relaunching an open app focuses it instead of duplicating it", () => {
     renderShell();
-    openFromLauncher("Artifacts");
-    openFromLauncher("Artifacts");
-    expect(document.querySelectorAll("[data-os-window='artifacts']")).toHaveLength(1);
+    openFromLauncher("Files");
+    openFromLauncher("Files");
+    expect(document.querySelectorAll("[data-os-window='files']")).toHaveLength(1);
   });
 
   it("minimizes to the dock and restores from it", () => {
     renderShell();
-    openFromLauncher("Artifacts");
-    fireEvent.click(screen.getByRole("button", { name: "Minimize Artifacts" }));
-    expect(document.querySelector("[data-os-window='artifacts']")).toBeNull();
+    openFromLauncher("Files");
+    fireEvent.click(screen.getByRole("button", { name: "Minimize Files" }));
+    expect(document.querySelector("[data-os-window='files']")).toBeNull();
 
     const dock = document.querySelector("[data-os-dock]") as HTMLElement;
-    fireEvent.click(within(dock).getByRole("button", { name: "Artifacts (running)" }));
-    expect(document.querySelector("[data-os-window='artifacts']")).not.toBeNull();
+    fireEvent.click(within(dock).getByRole("button", { name: "Files (running)" }));
+    expect(document.querySelector("[data-os-window='files']")).not.toBeNull();
   });
 
   it("full-screens and closes", () => {
     renderShell();
-    openFromLauncher("Artifacts");
-    fireEvent.click(screen.getByRole("button", { name: "Full screen Artifacts" }));
-    expect(document.querySelector("[data-os-window='artifacts']")?.hasAttribute("data-fullscreen")).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Close Artifacts" }));
-    expect(document.querySelector("[data-os-window='artifacts']")).toBeNull();
+    openFromLauncher("Files");
+    fireEvent.click(screen.getByRole("button", { name: "Full screen Files" }));
+    expect(document.querySelector("[data-os-window='files']")?.hasAttribute("data-fullscreen")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Close Files" }));
+    expect(document.querySelector("[data-os-window='files']")).toBeNull();
   });
 
   it("switches desks from the keyboard", () => {
     renderShell();
-    openFromLauncher("Artifacts");
+    openFromLauncher("Files");
     openFromLauncher("Fleet");
     openFromLauncher("Deployables"); // desk 2
     fireEvent.keyDown(window, { key: "ArrowLeft", ctrlKey: true, shiftKey: true });
@@ -131,16 +131,16 @@ describe("dock pins (spec K bullet 3)", () => {
   it("pins from the context menu and persists across a remount", () => {
     const storage = memStorage();
     const { view } = renderShell({ storage });
-    openFromLauncher("Artifacts");
+    openFromLauncher("Files");
     const dock = document.querySelector("[data-os-dock]") as HTMLElement;
-    fireEvent.contextMenu(within(dock).getByRole("button", { name: "Artifacts (running)" }));
+    fireEvent.contextMenu(within(dock).getByRole("button", { name: "Files (running)" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Pin to dock" }));
 
     view.unmount();
     resetIdsForTest();
     renderShell({ storage });
     const dock2 = document.querySelector("[data-os-dock]") as HTMLElement;
-    expect(within(dock2).getByRole("button", { name: "Artifacts" })).toBeTruthy();
+    expect(within(dock2).getByRole("button", { name: "Files" })).toBeTruthy();
   });
 });
 
@@ -151,7 +151,7 @@ describe("roles (spec K bullet 7)", () => {
     const launcher = screen.getByRole("dialog", { name: "Launcher" });
     expect(within(launcher).queryByRole("button", { name: "Users" })).toBeNull();
     expect(within(launcher).queryByRole("button", { name: "Training" })).toBeNull();
-    expect(within(launcher).getByRole("button", { name: "Artifacts" })).toBeTruthy();
+    expect(within(launcher).getByRole("button", { name: "Files" })).toBeTruthy();
   });
 
   it("gates app sections: reader sees no Cluster section in Settings", () => {
@@ -181,10 +181,10 @@ describe("Ask (spec K bullet 5)", () => {
     fireEvent.keyDown(sheet, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Ask" })).toBeNull();
 
-    openFromLauncher("Artifacts");
-    fireEvent.click(screen.getByRole("button", { name: "Ask about Artifacts" }));
+    openFromLauncher("Files");
+    fireEvent.click(screen.getByRole("button", { name: "Ask about Files" }));
     const sheet2 = screen.getByRole("dialog", { name: "Ask" });
-    expect(within(sheet2).getByText(/app:artifacts/)).toBeTruthy();
+    expect(within(sheet2).getByText(/app:files/)).toBeTruthy();
 
     const widget = document.querySelector("[data-os-widget='ask']") as HTMLElement;
     expect(within(widget).getByRole("textbox", { name: "Ask" })).toBeTruthy();
@@ -216,12 +216,17 @@ describe("desktop items (spec K bullet 4)", () => {
     ).toBeTruthy();
   });
 
-  it("creates a folder from the desk context menu", () => {
+  it("refuses desk folder creation while no cluster connection exists", () => {
+    // A desk folder IS a Library folder now (design D4), so creating one is
+    // a write the cluster must confirm. This shell renders with the
+    // connection disabled, and the menu says so by refusing -- a shortcut to
+    // a folder that was never created would be a control pointing at
+    // nothing. The connected path is covered in test/files/desk.test.tsx.
     renderShell();
     const plate = document.querySelector(".os-plate") as HTMLElement;
     fireEvent.contextMenu(plate);
-    fireEvent.click(screen.getByRole("menuitem", { name: "New folder" }));
-    expect(screen.getByRole("button", { name: /New folder, folder, 0 files/ })).toBeTruthy();
+    const entry = screen.getByRole("menuitem", { name: "New folder" });
+    expect((entry as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("removes the seeded widget through its menu, leaving the empty-desk hint", () => {

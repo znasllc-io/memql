@@ -1,5 +1,18 @@
 import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+import { QueryClient, Result } from "@znasllc-io/memql-sdk-core/client";
+
+// The connection seam, mocked at the MODULE so the desk's folder mutations
+// can be driven in a shell test. The default is null -- identical to the
+// disableConnection shells every other test here renders -- and the fake
+// answers at `executeNamed`, so the real generated builder runs (a stub over
+// the generated method would never render the call that has to parse).
+const h = vi.hoisted(() => ({ connection: null as unknown }));
+vi.mock("../../src/live/connection", () => ({
+  OsConnectionProvider: ({ children }: { children: ReactNode }) => children,
+  useOsConnection: () => h.connection,
+}));
 
 import { StubAskTransport } from "../../src/ask/askController";
 import { Shell } from "../../src/chrome/Shell";
@@ -51,7 +64,7 @@ function remoteDocument(overrides: Partial<DesktopDocument> = {}): DesktopDocume
     surfaces: {
       "desk-70": {
         items: {
-          "item-1": { kind: "folder", id: "item-1", name: "Taxes", children: [] },
+          "item-1": { kind: "folder", id: "item-1", folderId: "f-taxes", name: "Taxes" },
         },
         positions: { "item-1": { col: 2, row: 2 } },
       },
@@ -67,6 +80,7 @@ beforeEach(() => {
   resetIdsForTest();
   localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
+  h.connection = null;
 });
 
 describe("adoptDocument", () => {
@@ -143,7 +157,22 @@ describe("ids minted against the document", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("folders created after a reload do not replace the seeded widget", () => {
+  it("folders created after a reload do not replace the seeded widget", async () => {
+    // Desk folder creation is a Library write now (design D4), so this test
+    // hands the shell a connection whose engine half records the calls and
+    // answers success -- the id-collision property under test is the desk's
+    // own (mintItemId), unchanged by where the folder row lives.
+    const calls: string[] = [];
+    const stub = {
+      executeNamed: vi.fn(async (_name: string, call: string) => {
+        calls.push(call);
+        return new Result({ data: [] } as never);
+      }),
+    };
+    h.connection = {
+      query: Object.setPrototypeOf(stub, QueryClient.prototype),
+      subscriptions: { subscribeGraph: () => () => {} },
+    };
     // THE BUG, exactly as a person meets it. `nextId` is ONE counter shared
     // by every prefix, so a fresh session seeds `desk-1` then `item-2`; the
     // counter restarts at 0 on reload and hands out `item-1`, then `item-2`
@@ -185,16 +214,21 @@ describe("ids minted against the document", () => {
     );
     // Through the real surface: right-click the active desk plate, take
     // "New folder". No conditionals -- if this path stops being reachable
-    // the test must fail rather than quietly assert nothing.
-    const newFolder = () => {
+    // the test must fail rather than quietly assert nothing. Async now: the
+    // shortcut lands only after the Library mutation resolves.
+    const newFolder = async () => {
       const plate = document.querySelector(".os-plate");
       expect(plate).not.toBeNull();
       fireEvent.contextMenu(plate as Element, { clientX: 400, clientY: 300 });
       const menu = screen.getByRole("menu");
-      fireEvent.click(within(menu).getByRole("menuitem", { name: "New folder" }));
+      await act(async () => {
+        fireEvent.click(within(menu).getByRole("menuitem", { name: "New folder" }));
+      });
     };
-    newFolder();
-    newFolder();
+    await newFolder();
+    await newFolder();
+    // Both creations really reached the engine as the real rendered call.
+    expect(calls.filter((c) => c.startsWith("mutation createLibraryFolder(")).length).toBe(2);
 
     const after = store.load();
     const items = after?.surfaces[after.activeDeskId]?.items ?? {};

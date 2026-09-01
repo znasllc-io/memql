@@ -87,6 +87,11 @@ type Integration struct {
 	domainAuthorizer     DomainWriteAuthorizer
 	artifactPollAttempts int
 	artifactPollInterval time.Duration
+	// blobFetcher streams stored bytes for the chunked-upload case
+	// (memql#4782): hash stamping always, extraction when readable. No
+	// fetcher keeps chunked files hash-absent -- "not measured" -- and
+	// unextracted; see SetBlobFetcher in analysis.go.
+	blobFetcher BlobFetcher
 }
 
 // NewIntegration wires the engine handle. The factory is in plugin.go;
@@ -596,6 +601,9 @@ func (i *Integration) writeArtifactLabels(ctx context.Context, row map[string]an
 		fmt.Sprintf("producedByPlanId: %s", langparser.QuoteString(stringField(row, "producedByPlanId"))),
 		fmt.Sprintf("producedByWorkerId: %s", langparser.QuoteString(stringField(row, "producedByWorkerId"))),
 		fmt.Sprintf("producedByWorkerName: %s", langparser.QuoteString(stringField(row, "producedByWorkerName"))),
+		// folderId is index-only, like labels: a label write that omitted it
+		// would re-file the artifact at root (memql#4781, the #4288 class).
+		fmt.Sprintf("folderId: %s", langparser.QuoteString(stringField(row, "folderId"))),
 	}
 	for _, field := range artifactEnumFields {
 		if v := stringField(row, field); v != "" {
@@ -639,7 +647,7 @@ func (i *Integration) writeArtifactIndex(ctx context.Context, q string) error {
 // index, and where does ownerUserId come from?" answerable by reading one file.
 func (i *Integration) writeFileArtifact(ctx context.Context, sourceRef string, file map[string]any, carry artifactCarryForward) error {
 	q := fmt.Sprintf(
-		`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s, lens: "artifact", kind: "file", source: %s, title: %s, summary: %s, format: %s, mimeType: %s, live: false, labels: %s, archived: %t)`,
+		`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s, lens: "artifact", kind: "file", source: %s, title: %s, summary: %s, format: %s, mimeType: %s, live: false, labels: %s, archived: %t, folderId: %s, producedByWorkerId: %s, producedByWorkerName: %s)`,
 		langparser.QuoteString(sourceRef),
 		langparser.QuoteString(stringField(file, "ownerUserId")),
 		langparser.QuoteString(fileArtifactSource(stringField(file, "source"))),
@@ -649,6 +657,14 @@ func (i *Integration) writeFileArtifact(ctx context.Context, sourceRef string, f
 		langparser.QuoteString(stringField(file, "mimeType")),
 		quoteStringArray(carry.labels),
 		carry.archived,
+		langparser.QuoteString(carry.folderId),
+		// The verified machine provenance travels on the FILE row
+		// (memql#4781, design D5); re-sending it here keeps the analysis
+		// re-stamp from erasing what the promotion wrote. Read from the
+		// file rather than carried from the index because the file row is
+		// the verified source of the fact.
+		langparser.QuoteString(stringField(file, "uploadedFromWorkerId")),
+		langparser.QuoteString(stringField(file, "uploadedFromWorkerName")),
 	)
 	return i.writeArtifactIndex(ctx, q)
 }
@@ -821,7 +837,7 @@ func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 		return
 	}
 	q := fmt.Sprintf(
-		`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s, lens: "artifact", kind: "generated_output", source: %s, title: %s, summary: %s, format: %s, mimeType: %s, partitionId: %s, producedByPlanId: %s, labels: %s, archived: %t)`,
+		`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s, lens: "artifact", kind: "generated_output", source: %s, title: %s, summary: %s, format: %s, mimeType: %s, partitionId: %s, producedByPlanId: %s, labels: %s, archived: %t, folderId: %s)`,
 		langparser.QuoteString(sourceRef),
 		langparser.QuoteString(stringField(doc, "ownerUserId")),
 		langparser.QuoteString(source),
@@ -833,6 +849,7 @@ func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 		langparser.QuoteString(stringField(doc, "producedByPlanId")),
 		quoteStringArray(carry.labels),
 		carry.archived,
+		langparser.QuoteString(carry.folderId),
 	)
 	_ = i.writeArtifactIndex(ctx, q)
 }
@@ -849,6 +866,12 @@ func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 type artifactCarryForward struct {
 	labels   []string
 	archived bool
+	// folderId is the third member (memql#4781), exactly as this struct's
+	// comment predicted a third would land: the Files app's filing lives on
+	// the INDEX row only, so a re-version that omits it silently re-files
+	// the artifact at root as a side effect of an edit or an analysis
+	// re-stamp.
+	folderId string
 }
 
 // currentArtifactCarryForward reads the CURRENT artifact index row's
@@ -876,6 +899,7 @@ func (i *Integration) currentArtifactCarryForward(ctx context.Context, sourceRef
 	return artifactCarryForward{
 		labels:   stringSliceField(rows[0], "labels"),
 		archived: boolField(rows[0], "archived"),
+		folderId: stringField(rows[0], "folderId"),
 	}, true
 }
 

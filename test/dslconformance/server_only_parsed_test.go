@@ -495,6 +495,19 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "identity/mutations.memql", Name: "markGuestInvitationAccepted"}: true,
 		{Path: "identity/mutations.memql", Name: "markGuestInvitationKicked"}:   true,
 		{Path: "identity/mutations.memql", Name: "rotateGuestInvitationToken"}:  true,
+		// The chunked-upload session writes (memql#4782). NOT the
+		// caller-has-no-user-row shape above: ownerUserId IS stamped from
+		// actor.userId, and actor-scoping is fully in place. What a caller
+		// must never author is blobPath -- a storage path composed
+		// server-side from the verified actor and the engine-minted fileId,
+		// where a forged value would point the complete step at ANOTHER
+		// user's bytes -- and status, whose 'open' stamp is what stops a
+		// completed session being re-opened and completed twice. The quota
+		// and provenance checks also run in the handler BEFORE the create,
+		// so a session row's existence implies both passed; client-reachable
+		// versions would make every one of those gates optional.
+		{Path: "library/mutations.memql", Name: "createUploadSession"}:   true,
+		{Path: "library/mutations.memql", Name: "completeUploadSession"}: true,
 		// The membership half, in cognition because the SPACE is cognition's.
 		// Same gate, different asset: `isGuest` is authorization-relevant, not
 		// decoration, so a client-reachable version would let any authenticated

@@ -87,6 +87,26 @@ func TestEvaluateRouting_ForwardRules(t *testing.T) {
 	}
 }
 
+// TestEvaluateRouting_LibraryFolderBroadcast (memql#4781): folder rows are
+// written by the bff (the OS Files app's create/rename/move/archive all land
+// there) and read live by every browser watching the tree -- the desk-folder
+// popover included, which may be dialed to a different replica. Without the
+// broadcast the tree is correct on load and frozen after, which looks like
+// it is working. Deletes are NOT crossed: nothing hard-deletes a folder
+// (archive is an update), so a delete rule would be surface nothing sends.
+func TestEvaluateRouting_LibraryFolderBroadcast(t *testing.T) {
+	for _, topic := range []string{
+		"graph.node.created.v1:library:folder",
+		"graph.node.updated.v1:library:folder",
+	} {
+		d := evaluateRouting(defaultRoutingRules(), topic)
+		if !d.Forward || !d.Broadcast || d.TargetType != "" {
+			t.Fatalf("topic %q must broadcast to all node types (memql#4781), got forward=%v broadcast=%v target=%q",
+				topic, d.Forward, d.Broadcast, d.TargetType)
+		}
+	}
+}
+
 func TestRegisterRoutingRule_PluginAdds(t *testing.T) {
 	// Verify a product plug-in can add forward rules through
 	// RegisterRoutingRule and have them picked up by defaultRoutingRules.

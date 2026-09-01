@@ -5,7 +5,7 @@
 // placements), dock pins and the theme pack -- never windows.
 
 import type { Desk, ShellState } from "./desks";
-import type { DeskSurface } from "./desktop";
+import type { DeskSurface, FileEntry, GridPos } from "./desktop";
 import type { DockState } from "./dock";
 import type { DeskId } from "./windows";
 
@@ -97,11 +97,55 @@ export function sanitizeDocument(raw: unknown): DesktopDocument | null {
   for (const [deskId, surface] of Object.entries(doc.surfaces ?? {})) {
     if (!deskIds.has(deskId) || !surface || typeof surface !== "object") continue;
     const items: DeskSurface["items"] = {};
+    // Children of LEGACY icon-group folders, waiting for a cell near their
+    // group's old position (the design D4 migration -- see below).
+    const lifts: Array<{ entry: FileEntry; near: GridPos }> = [];
+    const rawPositions = (surface.positions ?? {}) as Record<string, { col?: unknown; row?: unknown }>;
+    const posOf = (id: string): GridPos => {
+      const pos = rawPositions[id];
+      return pos && typeof pos.col === "number" && typeof pos.row === "number"
+        ? { col: pos.col, row: pos.row }
+        : { col: 0, row: 0 };
+    };
     for (const [id, item] of Object.entries(surface.items ?? {})) {
       if (!item || typeof item !== "object" || (item as { id?: unknown }).id !== id) continue;
       if (item.kind === "file" && item.uploadState === "uploading") {
         items[id] = { ...item, uploadState: "failed" };
-      } else if (item.kind === "file" || item.kind === "folder" || item.kind === "widget") {
+      } else if (item.kind === "folder") {
+        // TWO SHAPES UNDER ONE KIND (design D4). The unified shortcut carries
+        // `folderId` and holds nothing; the foundation's icon-group carried
+        // its files INSIDE `children`. The migration lifts those children
+        // back onto the grid as plain shortcuts -- the `deleteFolder` shape
+        // -- so nobody loses a shortcut to the rename. A folder that is
+        // neither shape is dropped: keeping it would render a control whose
+        // popover can show nothing.
+        const legacy = item as unknown as { children?: unknown; folderId?: unknown; name?: unknown };
+        if (typeof legacy.folderId === "string" && legacy.folderId !== "" && typeof legacy.name === "string") {
+          items[id] = { kind: "folder", id, folderId: legacy.folderId, name: legacy.name };
+        } else if (Array.isArray(legacy.children)) {
+          const near = posOf(id);
+          for (const child of legacy.children) {
+            if (!child || typeof child !== "object") continue;
+            const c = child as Partial<FileEntry> & { id?: unknown };
+            if (typeof c.id !== "string" || c.id === "") continue;
+            lifts.push({
+              near,
+              entry: {
+                id: c.id,
+                artifactId: typeof c.artifactId === "string" ? c.artifactId : "",
+                title: typeof c.title === "string" && c.title !== "" ? c.title : c.id,
+                fileKind: typeof c.fileKind === "string" ? c.fileKind : "file",
+                source: typeof c.source === "string" ? c.source : "",
+                ...(typeof c.producedByWorkerId === "string" && c.producedByWorkerId !== ""
+                  ? { producedByWorkerId: c.producedByWorkerId }
+                  : {}),
+                // An upload cannot survive a reload in either shape.
+                ...(c.uploadState ? { uploadState: "failed" as const } : {}),
+              },
+            });
+          }
+        }
+      } else if (item.kind === "file" || item.kind === "widget") {
         items[id] = item;
       }
     }
@@ -109,6 +153,31 @@ export function sanitizeDocument(raw: unknown): DesktopDocument | null {
     for (const [id, pos] of Object.entries(surface.positions ?? {})) {
       if (!items[id] || !pos || typeof pos.col !== "number" || typeof pos.row !== "number") continue;
       positions[id] = { col: pos.col, row: pos.row };
+    }
+    // Place every lifted child: an item with no position renders nowhere,
+    // which would be exactly the lost shortcut this pass exists to prevent.
+    // Ring scan from the group's old cell; the grid's true size is unknown
+    // here (viewport-dependent), so only non-negativity bounds the scan.
+    const occupied = new Set(Object.values(positions).map((p) => `${p.col}:${p.row}`));
+    for (const lift of lifts) {
+      if (items[lift.entry.id]) continue;
+      let placed: GridPos | null = null;
+      for (let radius = 0; placed === null && radius <= 64; radius += 1) {
+        for (let dc = -radius; dc <= radius && placed === null; dc += 1) {
+          for (let dr = -radius; dr <= radius; dr += 1) {
+            if (Math.max(Math.abs(dc), Math.abs(dr)) !== radius) continue;
+            const col = lift.near.col + dc;
+            const row = lift.near.row + dr;
+            if (col < 0 || row < 0 || occupied.has(`${col}:${row}`)) continue;
+            placed = { col, row };
+            break;
+          }
+        }
+      }
+      if (placed === null) continue;
+      occupied.add(`${placed.col}:${placed.row}`);
+      items[lift.entry.id] = { kind: "file", ...lift.entry };
+      positions[lift.entry.id] = placed;
     }
     surfaces[deskId] = { items, positions };
   }
