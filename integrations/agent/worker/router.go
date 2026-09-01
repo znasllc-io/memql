@@ -43,6 +43,7 @@ import (
 	"time"
 
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // Strategy values for v1:worker:routingPolicy.strategy.
