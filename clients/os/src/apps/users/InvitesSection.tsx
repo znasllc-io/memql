@@ -2,6 +2,10 @@ import { useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { MailPlus } from "lucide-react";
 
+import { AccountChip } from "../accounts/AccountPicker";
+import { accountNameFrom, type AccountRow } from "../accounts/rows";
+import { useAccountOptions } from "../accounts/tie";
+
 import {
   Button,
   Chip,
@@ -44,6 +48,7 @@ export function InvitesSection({
 }) {
   const { source: collection, snapshot, reseed } = useInvites();
   const now = useNow(60_000);
+  const accounts = useAccountOptions();
 
   const source = useLiveView<Row, InvitationRow>(collection, "invites", (rows) =>
     rows.map(invitationFromRow).filter((i) => i.id !== ""),
@@ -73,11 +78,16 @@ export function InvitesSection({
         // is set once at issue and never moves, so it is not news; nothing
         // here churns on a timer, which is why this list has no heartbeat
         // problem to avoid.
-        fingerprint={(i) => `${i.status}|${i.active}|${i.deliveryState}|${i.deliveryError}`}
+        // `accountId` joins the fingerprint because a re-tie is a change a
+        // person made and would want to see land. It cannot strobe: the field
+        // is written once, at send time, by a human action.
+        fingerprint={(i) =>
+          `${i.status}|${i.active}|${i.deliveryState}|${i.deliveryError}|${i.accountId}`
+        }
         label="Outstanding invitations"
         emptyText="Nobody is waiting on an invitation."
         renderRow={(invite, tick) => (
-          <InviteLine invite={invite} tick={tick} now={now} actions={actions} />
+          <InviteLine invite={invite} tick={tick} now={now} actions={actions} accounts={accounts} />
         )}
       />
     </div>
@@ -228,7 +238,9 @@ function InviteLine({
   tick,
   now,
   actions,
+  accounts,
 }: {
+  accounts: AccountRow[];
   invite: InvitationRow;
   tick: "added" | "updated" | null;
   now: Date;
@@ -269,6 +281,11 @@ function InviteLine({
       }
     >
       {invite.inviteeRole === "" ? null : <Chip tone="muted">{invite.inviteeRole}</Chip>}
+      {/* The client this invitation is on behalf of (epic memql#4800, D5).
+          Draws NOTHING for an untied invitation -- AccountChip returns null on
+          an empty name -- so a list of ordinary user invitations reads exactly
+          as it did before this epic. */}
+      <AccountChip name={accountNameFrom(accounts, invite.accountId)} />
       <DeliveryChip invite={invite} />
       <span className="os-caption" title={invite.expiresAt || undefined}>
         {invite.expiresAt === ""

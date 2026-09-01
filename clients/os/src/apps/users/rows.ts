@@ -121,6 +121,19 @@ export interface InvitationRow {
    */
   deliveryState: DeliveryState;
   deliveryError: string;
+  /**
+   * The client this invitation is on behalf of (epic memql#4800, D5), or ""
+   * for an invitation nobody tied.
+   *
+   * Written by the GUEST path -- `SendGuestInviteMsg` threads it to
+   * `createGuestInvitation` -- so a `kind=="user"` row, which is what this
+   * app's list holds, does not carry one today. It is projected and rendered
+   * anyway rather than left out: `invitationAdminSummary` is the shape BOTH
+   * kinds are read through, the field is on the concept for both, and a
+   * surface that displayed it only after somebody remembered to add it is a
+   * surface that would have quietly shown nothing.
+   */
+  accountId: string;
   createdAt: string;
 }
 
@@ -147,6 +160,7 @@ export function invitationFromRow(raw: Row): InvitationRow {
     deliveryState:
       delivery === "sent" || delivery === "failed" ? delivery : "not_attempted",
     deliveryError: rowString(row, "deliveryError"),
+    accountId: rowString(row, "accountId"),
     createdAt: rowString(row, "createdAt"),
   };
 }

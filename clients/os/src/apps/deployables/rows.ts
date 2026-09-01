@@ -44,6 +44,12 @@ export interface SiteRow {
   systemOwned: boolean;
   deleted: boolean;
   binding: Record<string, unknown>;
+  /**
+   * The client this deployable is FOR (epic memql#4800, D5). Optional, and a
+   * plain reference with no read effect -- a site with no tie lists, resolves
+   * and serves exactly as it always has.
+   */
+  accountId: string;
   createdAt: string;
 }
 
@@ -68,6 +74,7 @@ export function siteFromRow(raw: Row): SiteRow {
     // that did not touch the field.
     deleted: boolOr(row, "deleted", false),
     binding: objectOf(row, "binding"),
+    accountId: rowString(row, "accountId"),
     createdAt: rowString(row, "createdAt"),
   };
 }

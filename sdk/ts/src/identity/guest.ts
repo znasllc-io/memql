@@ -24,6 +24,21 @@ export interface SendGuestInviteArgs {
   joinUrlBase: string;
   guestName?: string;
   expiresInMinutes?: number;
+  /**
+   * OPTIONAL. The v1:accounts:account this guest is being invited on behalf
+   * of -- which client's person they are (epic memql#4800, D5).
+   *
+   * OMITTED WHEN ABSENT, not sent as "": the handler only forwards a non-blank
+   * value to createGuestInvitation, so a caller that leaves this out writes an
+   * invitation row byte-identical to one created before the field existed.
+   * That is what makes the addition wire-compatible rather than merely
+   * backward-parsing.
+   *
+   * It GRANTS NOTHING. An account is a record, never an authorization
+   * boundary, so a guest invited "for" a client reaches exactly the one space
+   * this invitation already names.
+   */
+  accountId?: string;
   signal?: AbortSignal;
 }
 
@@ -57,6 +72,7 @@ export async function sendGuestInvite(
         joinUrlBase: args.joinUrlBase,
         ...(args.guestName ? { guestName: args.guestName } : {}),
         ...(args.expiresInMinutes != null ? { expiresInMinutes: args.expiresInMinutes } : {}),
+        ...(args.accountId ? { accountId: args.accountId } : {}),
       },
     },
     args.signal,

@@ -409,3 +409,70 @@ repetitions of the four apps before it.
   six-character escape for U+001F, never pasted as the byte itself: a
   literal control byte turned the file binary to grep and to every
   repo-walking gate while its tests stayed green.
+
+## Accounts, the sixth app (memql#4800)
+
+`src/apps/accounts/` is the client registry: the companies this instance does
+work for, and what of the cluster's is theirs. It is the first app whose
+subject is not something the cluster owns, and four things about it are new
+rules rather than repetitions of the five before it.
+
+- **A TIE SURFACE BELONGS TO THE DOMAIN THAT OWNS THE CONCEPT, NOT TO THE
+  KIT.** Four other apps render and edit an account tie -- Deployables,
+  Files, Users, Training -- and every one of them imports `AccountPicker` and
+  `useAccountOptions` from `apps/accounts/`. That is deliberately not a
+  promotion into `kit/`: the kit is the OS's shared VOCABULARY (rows, chips,
+  notices, the live list), and a picker over one domain's concept is not
+  vocabulary. Putting it there would make every app depend on a concept most
+  of them otherwise know nothing about. `useAccountOptions` keys its
+  collection on one string, so four surfaces mounting it at once share one
+  subscription rather than opening four.
+
+- **THE LEDGER IS AN ON-DEMAND READ, AND ALL FOUR BANDS ARE, DELIBERATELY.**
+  Three of the four rolled-up concepts DO broadcast (`v1:platform:site`,
+  `v1:library:artifact`, `v1:identity:invitation`), so a live ledger is
+  buildable. `v1:knowledge:knowledgeDomain` carries no rule and nothing
+  broadcasts it, so the fourth band could never be live -- and a ledger where
+  three bands move and the fourth silently does not is worse than one where
+  none do, because the reader has no way to tell which kind of band they are
+  looking at. So all four are read together, print when they were read, and
+  re-read on demand. Consistency across a composite surface beat liveness on
+  part of it.
+
+- **A REFUSAL IS NOT A ZERO.** `invitationsForAccount` carries
+  `requiresOwnerOrAdmin`, so below that floor the engine refuses the read.
+  The band renders "Not yours to read" plus the server's own sentence, and
+  never a count -- a `0` there would be this window inventing a fact about a
+  client. Each band settles on its own for the same reason: one
+  `Promise.all` would let the one refusal that WILL happen decide the state
+  of three reads that succeeded.
+
+- **THE FIRST-RUN CARD IS GATED ON A ROW, NOT ON A FLAG.** It renders when
+  `v1:accounts:account:self` carries no `configuredAt`, read off the feed the
+  list already holds rather than through a second by-id read -- one source of
+  truth for the row that decides whether a form or a list renders. Saving is
+  an ordinary `updateClientAccount`, which stamps the field, so the answer
+  lives in the cluster and the card is gone for everybody at once. Nothing is
+  remembered in this browser, and no other OS surface gains a prompt: a
+  first-run question that ambushes somebody mid-task is one they dismiss, and
+  a dismissed question needs somewhere to be remembered.
+
+  While the feed is still seeding, NEITHER renders. An unconfigured self row
+  and a feed that has not arrived look identical from the gate, and guessing
+  wrong shows a setup form to somebody whose company was named months ago.
+
+### What it deliberately does not do
+
+The Users bullet of the tie task asks for an optional account picker on the
+**guest-invite send flow**. There is no guest-invite send flow in this shell,
+or in the portal -- a guest invitation is space-scoped, and the OS has no
+space surface to send one from. So the field is threaded end to end (proto,
+handler, `createGuestInvitation`, and the TS SDK's `sendGuestInvite`) and the
+invitation list RENDERS the tie wherever a row carries one; the picker is a
+few lines the day a send flow exists to put it on. Building the flow itself
+to hang a picker from it would have been a different feature.
+
+Training's domain tag is likewise render-and-filter only, which is what the
+design asks for: nothing about routing, attachment or agent behaviour
+consults `knowledgeDomain.accountId`, and `domainsForAccount` is the only
+query in the tree that mentions it.

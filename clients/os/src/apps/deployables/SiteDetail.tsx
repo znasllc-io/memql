@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink, Sparkles } from "lucide-react";
 
-import { Button, Chip, Chips, Fact, Facts, Panel, ProvenanceDot, Subhead } from "../../kit";
+import { Button, Chip, Chips, Fact, Facts, Field, Notice, Panel, ProvenanceDot, Subhead } from "../../kit";
+import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
+import { accountNameFrom } from "../accounts/rows";
+import { useAccountOptions } from "../accounts/tie";
+import { useSiteAccount } from "./actions";
 import { formatMoment } from "../../kit/format";
 import { TICK_TTL_MS } from "../../live/arrival";
 import { STOREFRONT_KIND, kindLabel } from "./concepts";
@@ -44,6 +48,8 @@ export function SiteDetail({
   const url = liveUrlFor(site.hostname);
   const storefront = site.kind === STOREFRONT_KIND ? storefrontBinding(site) : null;
   const flipped = useBundleFlip(site);
+  const accounts = useAccountOptions();
+  const tie = useSiteAccount();
 
   return (
     <Panel label={`Deployable ${siteName(site)}`}>
@@ -75,6 +81,11 @@ export function SiteDetail({
           {site.status || "status unknown"}
         </span>
         <Chip>{kindLabel(site.kind) || "kind unknown"}</Chip>
+        {/* The client this deployable is for, BESIDE kind and status (D5) --
+            because "who is this for" is the same class of fact as "what is it"
+            and "is it up", and a site with no client renders exactly as it did
+            before this epic: AccountChip draws nothing for an empty name. */}
+        <AccountChip name={accountNameFrom(accounts, site.accountId)} />
         <Chip tone={ownerLabel(site, viewerUserId) === "yours" ? "accent" : "muted"}>
           {ownerLabel(site, viewerUserId)}
         </Chip>
@@ -149,6 +160,32 @@ export function SiteDetail({
             />
           </Facts>
         </>
+      )}
+
+      {/* The client picker (epic memql#4800, D5). Presentation over engine
+          truth: an account is a record with no read effect, so setting one
+          changes who the work is FOR and nothing about who may read or write
+          this deployable. It is NOT behind `canPublish` for that reason --
+          labelling a site with the client it belongs to is not a privileged
+          act, and the engine's own write guard is what decides whether the
+          write lands. */}
+      <Field label="Client">
+        <AccountPicker
+          id={`os-deploy-account-${site.id}`}
+          label="The client this deployable is for"
+          value={site.accountId}
+          accounts={accounts}
+          disabled={tie.busy}
+          onChange={(next) => void tie.setAccount(site.id, next)}
+        />
+      </Field>
+      {tie.error === "" ? null : (
+        <Notice
+          tone="error"
+          sentence="The client was not changed."
+          next="This deployable is still tied to whatever it was."
+          detail={tie.error}
+        />
       )}
 
       {canPublish ? <PublishPicker site={site} /> : null}

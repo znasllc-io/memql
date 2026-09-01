@@ -2,12 +2,18 @@ import { useCallback, useEffect, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Boxes, Link2Off } from "lucide-react";
 
-import { Button, Caption, Chip, Chips, Head, Notice, Subhead } from "../../kit";
+import { Button, Caption, Chip, Chips, Head, Notice, Select, Subhead } from "../../kit";
+import { AccountChip } from "../accounts/AccountPicker";
+import { accountIsArchived, accountName, accountNameFrom } from "../accounts/rows";
+import { useAccountOptions } from "../accounts/tie";
 import { formatFreshness } from "../../kit/format";
 import { useNow } from "../../kit/useNow";
 import { useOsConnection } from "../../live/connection";
 import { CORPUS_GROUP_LABEL, REJECTED, UNVALIDATED, VALIDATED } from "./concepts";
-import { chunkFromRow, groupChunksByDocument, type Chunk, type DomainRollup } from "./rows";
+import { chunkFromRow, groupChunksByDocument, type Chunk, type DomainMeta, type DomainRollup } from "./rows";
+
+/** The "no client" option's value. Not "" -- that is "any client". */
+const ACCOUNT_UNTAGGED = "\u0000untagged";
 import type { DomainsFeed } from "./useDomains";
 
 // What MemQL knows, by domain.
@@ -21,10 +27,23 @@ import type { DomainsFeed } from "./useDomains";
 // `integrations/knowledge/seed.go`) has no client read surface at all, and
 // everything on this page is CHUNK-DERIVED.
 //
-// The card therefore says the id, because the id is what this engine can
-// truthfully tell somebody. Adding a read for the domain row is a different
-// piece of work -- it needs a query, and a query needs an authorization
-// judgment about a concept nobody has declared a tier on.
+// THAT CHANGED IN EPIC memql#4800, and the note is kept rather than deleted
+// because the shape of the fix is the point. The concept is now declared
+// (dsl/knowledge/concepts.memql), projected by `knowledgeDomainFull` and read
+// by `knowledgeDomainsAll`, so a card can say the domain's NAME and render the
+// client it is tagged with. A card whose id matches no catalog row STILL says
+// the id -- that is not a fallback, it is the truthful answer on a cluster
+// whose domain rows were never written, which an engine-only build genuinely
+// is: `createKnowledgeDomain` is declared in no .memql file in this tree, so
+// the seeder's write resolves to nothing.
+//
+// The authorization judgment the old note asked for was made and filed rather
+// than guessed: the concept declares NO tier, because none the engine offers
+// fits an ownerless system-seeded catalog, and memql#4809 is that question.
+//
+// THE ACCOUNT TAG CHANGES NOTHING ELSE (D5). Routing, attachment, retrieval
+// and scoring do not consult it. It is rendered here and filterable here, and
+// that is the whole of its effect.
 
 export function DomainsSection({
   feed,
@@ -37,10 +56,44 @@ export function DomainsSection({
 }) {
   const now = useNow(30_000);
   const [openDomainId, setOpenDomainId] = useState("");
+  const accounts = useAccountOptions();
+  // "" = no client constraint. An id narrows to domains tagged with it;
+  // ACCOUNT_UNTAGGED narrows to domains carrying no tag at all, which is the
+  // question somebody asks while they are tagging.
+  const [accountFilter, setAccountFilter] = useState("");
+
+  // THE FILTER IS A FOLD, not a second read. `knowledgeDomainsAll` returns the
+  // whole catalog and the chunk rollups are already here; narrowing on the
+  // client is a view over both, and re-reading per selection would put a round
+  // trip behind a dropdown.
+  //
+  // A ROLLUP WITH NO CATALOG ROW COUNTS AS UNTAGGED, which is the only honest
+  // reading: a domain the seeder never wrote a row for has no tag, and hiding
+  // it under "no client" would make the untagged view lie about what is
+  // untagged.
+  const shown = feed.rollups.filter((rollup) => {
+    if (accountFilter === "") return true;
+    const tag = feed.domains.get(rollup.domainId)?.accountId ?? "";
+    return accountFilter === ACCOUNT_UNTAGGED ? tag === "" : tag === accountFilter;
+  });
 
   return (
     <div className="os-app-stack">
       <Head title="Domains">
+        <Select
+          id="training-domain-account"
+          label="Client"
+          value={accountFilter}
+          onChange={setAccountFilter}
+        >
+          <option value="">Any client</option>
+          <option value={ACCOUNT_UNTAGGED}>No client</option>
+          {accounts.map((account) => (
+            <option key={account.id} value={account.id}>
+              {accountIsArchived(account) ? `${accountName(account)} (archived)` : accountName(account)}
+            </option>
+          ))}
+        </Select>
         <Button onClick={feed.reload}>Re-read</Button>
       </Head>
 
@@ -59,6 +112,10 @@ export function DomainsSection({
         <Caption>Reading from the cluster...</Caption>
       ) : null}
 
+      {feed.state === "ready" && feed.rollups.length > 0 && shown.length === 0 ? (
+        <Caption>No domains are tagged with that client.</Caption>
+      ) : null}
+
       {feed.state === "ready" && feed.rollups.length === 0 ? (
         <div className="os-train-empty">
           <p className="os-train-drop-line">No domains yet -- upload a file to start.</p>
@@ -69,10 +126,15 @@ export function DomainsSection({
       ) : null}
 
       <ul className="os-train-domains" aria-label="Knowledge domains in this cluster">
-        {feed.rollups.map((rollup) => (
+        {shown.map((rollup) => (
           <li key={rollup.domainId}>
             <DomainCard
               rollup={rollup}
+              meta={feed.domains.get(rollup.domainId)}
+              accountLabel={accountNameFrom(
+                accounts,
+                feed.domains.get(rollup.domainId)?.accountId ?? "",
+              )}
               open={openDomainId === rollup.domainId}
               onToggle={() =>
                 setOpenDomainId((held) => (held === rollup.domainId ? "" : rollup.domainId))
@@ -96,10 +158,14 @@ export function DomainsSection({
 
 function DomainCard({
   rollup,
+  meta,
+  accountLabel,
   open,
   onToggle,
 }: {
   rollup: DomainRollup;
+  meta: DomainMeta | undefined;
+  accountLabel: string;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -114,7 +180,15 @@ function DomainCard({
         onClick={onToggle}
       >
         <Boxes size={16} aria-hidden />
-        <span className="os-row-name os-mono">{rollup.domainId}</span>
+        {/* THE NAME WHERE THERE IS ONE, the id where there is not -- and the
+            id keeps the mono face so a reader can tell which they are looking
+            at without being told. */}
+        {meta && meta.name.trim() !== "" ? (
+          <span className="os-row-name">{meta.name}</span>
+        ) : (
+          <span className="os-row-name os-mono">{rollup.domainId}</span>
+        )}
+        <AccountChip name={accountLabel} />
         <span className="os-row-state">
           {/* THE THREE PARTS SUM TO THE COUNT, by construction (see
               `rollupDomains`): an unrecognised or absent status counts as

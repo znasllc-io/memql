@@ -7251,6 +7251,34 @@ QueryClient.prototype.setAgentVideoOverride = function (this: QueryClient, args:
   return this.executeNamed("setAgentVideoOverride", buildSetAgentVideoOverride(args), opts);
 };
 
+/** Label a Library item with the clients it is about (epic memql#4800, D5) -- the Files inspector's account picker, and its only caller.
+A READ-MERGE update in the shape moveArtifactToFolder set: folder, labels, archived and every other index field survive a re-label untouched, which is what makes labelling cheap enough to be a chip somebody toggles rather than a form they submit.
+`accountIds` is STAMPED with `?? []`, not accepted, for moveArtifactToFolder's reason applied to a list: an accepted arg omitted is dropped and inherited, so REMOVING the last label would silently re-save the label just removed. An explicit empty list is what "no client" looks like, and the coalesce is what lets an omitted arg mean it.
+`updatedAt` advances because a re-label IS a change a person made to the row, and the Library's default sort should say so -- the same call moveArtifactToFolder makes.
+Ids are not validated against the registry: an account has no read effect, and a list filtered against the caller's own visible accounts would quietly DROP a label somebody else's account put there. The Files browse filter reads an unresolvable id as a tie to something not visible. */
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["setArtifactAccounts"] in generated_concepts.ts).
+export interface SetArtifactAccountsArgs {
+  artifactId: string;
+  accountIds?: string[];
+}
+
+export function buildSetArtifactAccounts(args: SetArtifactAccountsArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
+  return "mutation setArtifactAccounts(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setArtifactAccounts(args: SetArtifactAccountsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setArtifactAccounts = function (this: QueryClient, args: SetArtifactAccountsArgs = {} as SetArtifactAccountsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setArtifactAccounts", buildSetArtifactAccounts(args), opts);
+};
+
 /** Flip the cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue #961). Partial-update of the singleton cluster-settings row (id='cluster'): sets authoredAutomationsEnabled true (resume) or false (halt). false halts EVERY authored automation across the whole cluster -- the governance hard stop -- independent of any bundle status or per-user kill switch. Operator-only in practice (the admin settings surface calls it); the authored scheduler reads the flag through clusterSettingsCurrent on its global gate. */
 // Bound concept: v1:identity:clusterSettings (machine-readable: BoundConcepts["setAuthoredAutomationsEnabled"] in generated_concepts.ts).
 export interface SetAuthoredAutomationsEnabledArgs {
@@ -9422,6 +9450,34 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateSessionStreams = function (this: QueryClient, args: UpdateSessionStreamsArgs = {} as UpdateSessionStreamsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateSessionStreams", buildUpdateSessionStreams(args), opts);
+};
+
+/** Point a deployable at the client it is FOR -- or at nobody (epic memql#4800, D5).
+A NARROW, SINGLE-PURPOSE WRITE, like updateSiteBundle and updateSiteStatus beside it. The site detail's account picker is its only caller, and giving the tie its own mutation is what keeps the picker from being able to touch a hostname, a bundle or a status by accident.
+`accountId` IS STAMPED, NOT ACCEPTED, and the difference is the whole feature. An accepted arg is dropped from the payload when omitted (missing args are dropped, mutation_templates.go) and the read-merge then inherits the stored value -- which would make CLEARING a tie inexpressible: every "no client" would silently re-save the client already there. `args.accountId ?? ""` always writes a value, so an omitted arg means "no client" and says so on the row.
+NOT VALIDATED against the registry, deliberately. An account is a record with no read effect (D1), so an id naming no row costs nothing: the picker resolves what it can and renders the rest as "not visible to you", which is a truer answer than a refusal would be -- an operator CAN legitimately tie a site to an account whose row another person owns.
+AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, which resolves the target row and admits its owner with the cluster-owner path as the separate escape. Nothing about the account is consulted: tying a site to a client changes who the work is FOR and never who may read or write it. */
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteAccount"] in generated_concepts.ts).
+export interface UpdateSiteAccountArgs {
+  siteId: string;
+  accountId?: string;
+}
+
+export function buildUpdateSiteAccount(args: UpdateSiteAccountArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "mutation updateSiteAccount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateSiteAccount(args: UpdateSiteAccountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateSiteAccount = function (this: QueryClient, args: UpdateSiteAccountArgs = {} as UpdateSiteAccountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateSiteAccount", buildUpdateSiteAccount(args), opts);
 };
 
 /** Point a site at a different bundle version. THE deploy operation, and THE rollback operation -- they are the same write in opposite directions, which is the whole reason bundles are stored under versioned prefixes rather than overwritten.

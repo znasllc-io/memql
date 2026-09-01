@@ -10,6 +10,11 @@ import { artifactName, isContentKind, type ArtifactRow } from "./rows";
 // the empty string as the same answer: the root. (The `archived != true`
 // lesson, applied to the next field.)
 
+/** No client constraint. */
+export const ACCOUNT_ANY = "all";
+/** Only rows tied to no client at all. */
+export const ACCOUNT_NONE = "none";
+
 export type KindFilter = "all" | (typeof CONTENT_KINDS)[number];
 export type SourceFilter = "all" | (typeof SOURCE_VALUES)[number];
 
@@ -24,6 +29,15 @@ export interface FilesFilter {
   source: SourceFilter;
   /** Archived rows are EXCLUDED by default and visibly marked when shown. */
   showArchived: boolean;
+  /**
+   * The client scope (epic memql#4800): "all" = no account constraint,
+   * "none" = only rows with NO client, an id = rows labelled with it.
+   *
+   * "none" is a real value rather than an absence because "show me what is
+   * not filed to anybody" is the question somebody asks when they are trying
+   * to file things -- and it is the only one the other two cannot express.
+   */
+  accountId: string;
   search: string;
   /** false = newest first, the default. */
   sortAscending: boolean;
@@ -34,6 +48,7 @@ export const DEFAULT_FILTER: FilesFilter = {
   kind: "all",
   source: "all",
   showArchived: false,
+  accountId: ACCOUNT_ANY,
   search: "",
   sortAscending: false,
 };
@@ -56,6 +71,19 @@ export function applyFilters(rows: readonly ArtifactRow[], filter: FilesFilter):
     if (filter.source !== "all" && row.source !== filter.source) return false;
     if (!matchesSearch(row, filter.search)) return false;
     if (!searching && filter.folderId !== null && row.folderId !== filter.folderId) return false;
+    // THE CLIENT SCOPE READS ABSENCE AND THE EMPTY LIST AS ONE ANSWER, and it
+    // has to: every row promoted before `accountIds` existed carries no key at
+    // all, so a filter that distinguished them would hide the entire
+    // pre-existing Library from the "no client" view -- which is exactly the
+    // view somebody uses to find what still needs filing.
+    if (filter.accountId === ACCOUNT_NONE && row.accountIds.length > 0) return false;
+    if (
+      filter.accountId !== ACCOUNT_ANY &&
+      filter.accountId !== ACCOUNT_NONE &&
+      !row.accountIds.includes(filter.accountId)
+    ) {
+      return false;
+    }
     return true;
   });
   const direction = filter.sortAscending ? 1 : -1;
