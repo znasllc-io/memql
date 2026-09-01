@@ -6,7 +6,7 @@
 // goes green through the ordinary derivation ("uploaded" = bytes in the
 // cluster).
 
-import type { UploadHandle, UploadProvider, UploadResult } from "./upload";
+import type { UploadHandle, UploadOptions, UploadProvider, UploadResult } from "./upload";
 
 export function artifactsUploadPath(baseUrl: string): string {
   const mount = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
@@ -20,13 +20,16 @@ export class EdgeUploadProvider implements UploadProvider {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  upload(file: File): UploadHandle {
+  upload(file: File, opts?: UploadOptions): UploadHandle {
     const abort = new AbortController();
     const done = (async (): Promise<UploadResult> => {
       const token = await this.bearer();
       const body = new FormData();
       body.append("file", file);
       body.append("name", file.name);
+      // The destination folder rides the same form (design B2): the upload
+      // route is the writer that knows it, and promotion forwards it.
+      if (opts?.folderId) body.append("folderId", opts.folderId);
       const response = await this.fetchImpl(this.path, {
         method: "POST",
         body,

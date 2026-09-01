@@ -31,7 +31,11 @@ export interface FileEntry {
 
 export type DesktopItem =
   | ({ kind: "file" } & FileEntry)
-  | { kind: "folder"; id: ItemId; name: string; children: FileEntry[] }
+  // A desk folder is a SHORTCUT to a Library folder (design D4): the popover
+  // is a live view of the Library's rows, so the item itself holds nothing --
+  // only the pointer and a denormalized name that refreshes opportunistically
+  // from live rows. Removing it removes the shortcut and never archives.
+  | { kind: "folder"; id: ItemId; folderId: string; name: string }
   | { kind: "widget"; id: ItemId; widgetId: string; w: number; h: number };
 
 export interface DeskSurface {
@@ -162,73 +166,20 @@ export function updateFile(
   return { ...surface, items: { ...surface.items, [id]: { ...item, ...patch, kind: "file", id } } };
 }
 
-// ---- folders (flat: folders hold files only, spec D4) ----
+// ---- folders (shortcuts to Library folders, spec D4) ----
 
-export function createFolder(
+/** Refresh a folder shortcut's denormalized fields (the name, from live
+ *  rows). Removal is plain `removeItem`: a shortcut holds nothing to return
+ *  to the grid, and removing it never touches the Library. */
+export function updateFolder(
   surface: DeskSurface,
   id: ItemId,
-  name: string,
-  preferred: GridPos,
-  grid: GridSize,
-): DeskSurface | null {
-  return addItem(surface, { kind: "folder", id, name, children: [] }, preferred, grid);
-}
-
-export function renameFolder(surface: DeskSurface, id: ItemId, name: string): DeskSurface {
+  patch: Partial<Pick<Extract<DesktopItem, { kind: "folder" }>, "name">>,
+): DeskSurface {
   const item = surface.items[id];
   if (!item || item.kind !== "folder") return surface;
-  return { ...surface, items: { ...surface.items, [id]: { ...item, name } } };
-}
-
-/** Move a desk file into a folder (the file leaves the grid). */
-export function addFileToFolder(surface: DeskSurface, folderId: ItemId, fileId: ItemId): DeskSurface {
-  const folder = surface.items[folderId];
-  const file = surface.items[fileId];
-  if (!folder || folder.kind !== "folder" || !file || file.kind !== "file") return surface;
-  const { kind: _kind, ...entry } = file;
-  const next = removeItem(surface, fileId);
-  return {
-    ...next,
-    items: { ...next.items, [folderId]: { ...folder, children: [...folder.children, entry] } },
-  };
-}
-
-/** Take a file back out of a folder onto the grid near the folder. */
-export function removeFileFromFolder(
-  surface: DeskSurface,
-  folderId: ItemId,
-  fileId: ItemId,
-  grid: GridSize,
-): DeskSurface {
-  const folder = surface.items[folderId];
-  if (!folder || folder.kind !== "folder") return surface;
-  const entry = folder.children.find((c) => c.id === fileId);
-  if (!entry) return surface;
-  const folderPos = surface.positions[folderId] ?? { col: 0, row: 0 };
-  const trimmed: DeskSurface = {
-    ...surface,
-    items: {
-      ...surface.items,
-      [folderId]: { ...folder, children: folder.children.filter((c) => c.id !== fileId) },
-    },
-  };
-  return addItem(trimmed, { kind: "file", ...entry }, folderPos, grid) ?? surface;
-}
-
-/** Delete a folder; its files return to the grid near its position. */
-export function deleteFolder(surface: DeskSurface, folderId: ItemId, grid: GridSize): DeskSurface {
-  const folder = surface.items[folderId];
-  if (!folder || folder.kind !== "folder") return surface;
-  const at = surface.positions[folderId] ?? { col: 0, row: 0 };
-  let next = removeItem(surface, folderId);
-  for (const entry of folder.children) {
-    const placed = addItem(next, { kind: "file", ...entry }, at, grid);
-    if (placed) next = placed;
-    // A full grid drops nothing: the folder stays deleted only if every
-    // child found a cell; otherwise keep the original surface intact.
-    else return surface;
-  }
-  return next;
+  if (patch.name === undefined || patch.name === item.name) return surface;
+  return { ...surface, items: { ...surface.items, [id]: { ...item, name: patch.name } } };
 }
 
 /** Repack every item top-left, files and folders sorted by title/name. */

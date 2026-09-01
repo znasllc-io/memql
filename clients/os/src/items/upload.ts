@@ -32,8 +32,13 @@ export interface UploadHandle<T = UploadResult> {
   abort: () => void;
 }
 
+export interface UploadOptions {
+  /** Library folder the file lands in. Omitted = the root (design D4/B2). */
+  folderId?: string;
+}
+
 export interface UploadProvider {
-  upload(file: File): UploadHandle;
+  upload(file: File, opts?: UploadOptions): UploadHandle;
 }
 
 /**
@@ -43,7 +48,7 @@ export interface UploadProvider {
 export class InMemoryUploadProvider implements UploadProvider {
   constructor(private readonly delayMs = 30) {}
 
-  upload(file: File): UploadHandle {
+  upload(file: File, _opts?: UploadOptions): UploadHandle {
     let cancelled = false;
     const done = new Promise<UploadResult>((resolve, reject) => {
       setTimeout(() => {

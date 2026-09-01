@@ -51,7 +51,7 @@ function remoteDocument(overrides: Partial<DesktopDocument> = {}): DesktopDocume
     surfaces: {
       "desk-70": {
         items: {
-          "item-1": { kind: "folder", id: "item-1", name: "Taxes", children: [] },
+          "item-1": { kind: "folder", id: "item-1", folderId: "f-taxes", name: "Taxes" },
         },
         positions: { "item-1": { col: 2, row: 2 } },
       },
