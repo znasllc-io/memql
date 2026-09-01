@@ -191,27 +191,29 @@ const (
 	// baseMergeTagCount is the closed set: displayName, email, campaignName,
 	// accountName -- two slice entries each.
 	baseMergeTagCount = 8
-	// mergeFieldsCapHint bounds the capacity hint only. It is not a limit on
-	// how many fields render: a recipient carrying more than this still gets
-	// every one of them, through append.
-	mergeFieldsCapHint = 4096
 )
 
 func mergeReplacers(c Campaign, r Recipient, accountName string) (text, html *strings.Replacer) {
 	pairs := func(escape bool) []string {
-		// The capacity is an optimization and is CLAMPED rather than trusted.
-		// `2*len(...)` over a pathological map wraps negative, and make with a
-		// negative capacity panics -- so the one arithmetic expression here
-		// that takes an attacker-influenced length (a recipient's `fields`
-		// comes from whatever columns a CSV carried) is bounded before it is
-		// doubled. append grows the slice correctly past the hint either way,
-		// so clamping costs a reallocation on a map nobody will ever have and
-		// removes an unchecked multiply from a render path.
-		n := len(r.Fields)
-		if n > mergeFieldsCapHint {
-			n = mergeFieldsCapHint
-		}
-		out := make([]string, 0, baseMergeTagCount+2*n)
+		// CONSTANT capacity, covering the closed base set only. The fields
+		// grow the slice through append.
+		//
+		// It used to be `baseMergeTagCount + 2*len(r.Fields)`, and a
+		// recipient's `fields` map is whatever columns a CSV carried -- the
+		// one caller-influenced length on the render path. Doubled without a
+		// bound it wraps negative, and make with a negative capacity panics.
+		// Clamping it first was the obvious repair and is NOT what is here,
+		// because CodeQL's range analysis does not follow a clamp on a len()
+		// and kept flagging it -- and an unproven bound that a reader believes
+		// is worse than no bound at all.
+		//
+		// So the arithmetic is gone rather than guarded. A capacity hint is
+		// only ever an optimization: append reallocates a handful of times for
+		// a recipient with many fields, on a path that is already doing string
+		// substitution over a whole message body. That is a real cost of
+		// approximately nothing, paid for an allocation size that is now a
+		// constant anybody can check by reading it.
+		out := make([]string, 0, baseMergeTagCount)
 		add := func(tag, value string) {
 			if escape {
 				value = htmlEscape(value)
