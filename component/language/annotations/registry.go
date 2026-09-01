@@ -29,14 +29,14 @@ package annotations
 // the editor projection of each decl parser's accepted set.
 var ByReceiver = map[string][]string{
 	"Query": {
-		"description", "enabled", "disabled", "public", "serverOnly", "mcp", "unbounded", "cache", "nocache", "latestMode", "actor",
+		"description", "enabled", "disabled", "public", "serverOnly", "mcp", "unbounded", "cache", "nocache", "latestMode", "actor", "requiresRank",
 	},
 	"Mutation": {
 		"description", "enabled", "disabled", "actor", "public", "serverOnly",
-		"mergeFields", "appendFields", "createOnly", "noUnset", "scrubPii", "mcp",
+		"mergeFields", "appendFields", "createOnly", "noUnset", "scrubPii", "mcp", "requiresRank",
 	},
 	"Logic": {
-		"description", "enabled", "disabled", "eventField", "actor",
+		"description", "enabled", "disabled", "eventField", "actor", "requiresRank",
 	},
 	"Automation": {
 		"description", "enabled", "disabled", "trigger", "filter", "mcp", "actor", "schedule",
@@ -90,6 +90,7 @@ var Docs = map[string]string{
 	"description":  "Human-readable description of this definition. PREFER the /// doc-comment form (#2601): a /// block immediately above the declaration IS the description and wins over this annotation; @description remains the valid compatibility fallback -- the tree gate rejects the redundant long form (including a bare @description shadowed by a /// block). Aim for ~500 characters (editorial target).",
 	"eventField":   "On an event-triggered logic: declare the allowed top-level event payload fields (e.g. @eventField(\"partitionId\", \"siParticipantId\")). Opt-in field-level validation -- every event.payload.<field> reference in the body is checked against this set at load time, rejecting typos / fields the (possibly synthetic, handler-assembled) triggering event cannot carry (memql#1743). Bare names or payload.-prefixed paths both normalize to the head segment.",
 	"public":       "Per-row-authz marker: this query/mutation is intentionally callable without a caller-scope filter (concept catalogs, pre-auth login paths). See docs/public/operate/auth/per-row-authz-audit.md.",
+	"requiresRank": "The actor-rank FLOOR: only a caller holding this role, or one ranked above it, may invoke the construct -- @requiresRank(\"developer\") (epic memql#4832, D6). ENFORCED at execution and VALIDATED AT LOAD against the role ladder in dsl/rbac, so a typo refuses boot rather than gating on rank 0 and admitting everyone. This is the server-side counterpart to MemQL OS's per-surface role requirement: the shell keeps hiding what a caller cannot reach (hiding an action beats letting them click it and reading a refusal) and this makes the hidden surface a REFUSED one. Declared on the CONSTRUCT because a surface is a set of constructs and an app id from a browser is a claim, not a fact. It gates WHO MAY CALL; @rowAuthz still decides WHICH ROWS come back.",
 	"serverOnly":   "Bars the construct from client-originated calls while leaving server-side Go free to call it (memql#2800). ENFORCED at execution against auth.CallOrigin -- unlike the retired @internal, which only hid a construct from discovery. Use only when caller-scoping is impossible: the auth path resolving `sub` -> user before an actor exists, or an automation acting on a user other than the actor. Callers must stamp auth.ContextWithInternalOrigin.",
 	"actor":        "On a mutation: resolves auth-context (`actor.X`) fields. On a shape: kind marker -- projects the auth-context envelope (actor.userId / role / ...).",
 	"mergeFields":  "On an update mutation: deep-merge the named object-typed payload fields into the stored object instead of replacing them wholesale, so sibling keys survive a single-key write. Format: @mergeFields(\"preferences\").",

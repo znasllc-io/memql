@@ -417,6 +417,36 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		}
 	}
 
+	// @requiresRank slug validation (epic memql#4832, D6/O2). A floor
+	// naming a role the ladder does not know ranks 0, and a floor of 0
+	// admits every caller -- so a typo would read as a gate and be none.
+	// This is what makes the annotation form checkable at LOAD, which is
+	// the whole reason O2 chose it over a spec conjunct.
+	//
+	// Landed on the report as strict-boot problems, exactly like the
+	// contract gates above, so a MEMQL_DSL_PATH product bundle is covered
+	// by the same check this repo's own tree is.
+	// context.Background(): Init carries none, and this read belongs to
+	// the boot rather than to any request. On a FIRST boot the catalog is
+	// being seeded by this very startup, so the ladder reads empty and
+	// rankOf falls back to the engine's compiled base slugs -- which is
+	// why the five base roles validate on a fresh cluster and a
+	// custom-role floor is the case that needs a seeded catalog.
+	for _, problem := range e.validateRequiresRankSlugs(context.Background(), functionRegistry) {
+		report.AddSkip(baseloader.Skip{
+			Component: "memql.engine",
+			Keyword:   "requiresRank",
+			Name:      "requiresRank",
+			Phase:     "contract-gate:requiresRank",
+			Err:       problem.Error(),
+		})
+		if e.Component != nil && e.Logger != nil {
+			e.Logger.Error("@requiresRank names an unknown role",
+				"component", "memql.engine",
+				"detail", problem.Error())
+		}
+	}
+
 	dups := DetectDuplicateConstructs(rawTree)
 	report.SetDuplicates(dups)
 	if e.Component != nil && e.Logger != nil && len(dups) > 0 {

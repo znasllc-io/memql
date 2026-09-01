@@ -91,6 +91,10 @@ func contextWithSystemActor(ctx context.Context, automationName string) context.
 		ctx = auth.ContextWithAccess(ctx, &auth.AccessContext{
 			UserId: actorId,
 			Role:   accessRole,
+			// D4 (epic memql#4832): an automation's system actor is the
+			// cluster acting, not a principal. accessRole above decides what
+			// it may reach; it is not a rung, and the rank rules skip it.
+			Unranked: true,
 		})
 	}
 	return ctx

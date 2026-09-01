@@ -507,6 +507,15 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		// free to call it; see auth.CallOrigin for why that distinction needed
 		// a new signal rather than the retired @internal.
 		ServerOnly: hasFlagAttribute(funcDef.Attributes, "serverOnly"),
+		// @requiresRank("<role>") (epic memql#4832, D6) -- the actor-rank
+		// floor. A valued attribute rather than a flag, and validated at
+		// LOAD against the role ladder: that is what settles O2 in favour
+		// of an annotation over a spec conjunct. A spec is recognised BY
+		// NAME by dslgate.AdminGateRe, so every new gate is a new regex
+		// entry and a chance to ship a silent one -- which has already
+		// happened twice (forgeDeveloper, forgeApprover were live filter
+		// conjuncts the composition rule had never run on).
+		RequiresRank: stringAttributeValue(funcDef.Attributes, "requiresRank"),
 	}
 
 	// Handle rate limit
@@ -1122,6 +1131,28 @@ func hasFlagAttribute(attrs []*languageParser.Attribute, name string) bool {
 		}
 	}
 	return false
+}
+
+// stringAttributeValue reads a single-value attribute -- `@name("value")`
+// -- off a parsed construct, returning "" when it is absent. Accepts the
+// bare-value spelling and the single positional argument the parser may
+// surface, because both reach here depending on how the annotation was
+// written.
+func stringAttributeValue(attrs []*languageParser.Attribute, name string) string {
+	for _, a := range attrs {
+		if a == nil || a.Name != name {
+			continue
+		}
+		if s, ok := a.Value.(string); ok {
+			return strings.TrimSpace(s)
+		}
+		for _, v := range a.Args {
+			if s, ok := v.(string); ok {
+				return strings.TrimSpace(s)
+			}
+		}
+	}
+	return ""
 }
 
 func collectFunctionDefsFromFile(file *languageParser.File) []*languageParser.FunctionDef {
