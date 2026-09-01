@@ -141,10 +141,12 @@ func SendGuestInvite(ctx context.Context, sender Sender, p GuestInviteParams) er
 		html.EscapeString(expiresHuman),
 	)
 
+	// The zero SendAs: a guest invite leaves from the deployment's configured
+	// mailbox, exactly as it did before identities existed (design D5).
 	return sender.Send(ctx, Message{
 		To:       p.To,
 		Subject:  subject,
 		TextBody: text,
 		HTMLBody: htmlBody,
-	})
+	}, SendAs{})
 }

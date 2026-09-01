@@ -83,12 +83,17 @@ func (s *EngineEmailSender) SendMagicLink(ctx context.Context, in magiclink.Send
 		return s.noSender("magic link", in.Email, subject, slog.String("link", in.LinkURL))
 	}
 
+	// The zero SendAs: a magic link leaves from the deployment's one
+	// configured mailbox (email design D5). Identity mail is the case the
+	// zero value exists for -- it is the cluster speaking as itself, and a
+	// sign-in link arriving from an unfamiliar sender is worse than one
+	// arriving from a boring one.
 	return sender.Send(ctx, email.Message{
 		To:       in.Email,
 		Subject:  subject,
 		TextBody: textBody,
 		HTMLBody: htmlBody,
-	})
+	}, email.SendAs{})
 }
 
 // isDevBaseURL returns true when the configured public origin is plain

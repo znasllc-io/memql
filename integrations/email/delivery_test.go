@@ -212,7 +212,7 @@ func TestLogSenderRefusesSendWhenDeliveryRequired(t *testing.T) {
 		To:       "owner@acme.com",
 		Subject:  "Claim ownership of MemQL",
 		TextBody: "link",
-	})
+	}, SendAs{})
 	if !errors.Is(err, ErrLogOnlyRefused) {
 		t.Fatalf("LogSender.Send = %v, want ErrLogOnlyRefused", err)
 	}
@@ -233,7 +233,7 @@ func TestLogSenderStillLogsLocally(t *testing.T) {
 		To:       "dev@memql.localhost",
 		Subject:  "Sign in to MemQL",
 		TextBody: "link",
-	})
+	}, SendAs{})
 	if err != nil {
 		t.Fatalf("local log-only send must succeed: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestLogSenderDecidesAtConstruction(t *testing.T) {
 	t.Setenv(DomainEnv, "memql.localhost")
 	if err := refusing.Send(context.Background(), Message{
 		To: "owner@acme.com", Subject: "s", TextBody: "b",
-	}); !errors.Is(err, ErrLogOnlyRefused) {
+	}, SendAs{}); !errors.Is(err, ErrLogOnlyRefused) {
 		t.Fatalf("a Sender built on a cloud domain must keep refusing; got %v", err)
 	}
 }
@@ -269,7 +269,7 @@ func TestLazySenderBaselineRefuses(t *testing.T) {
 
 	err := lazy.Send(context.Background(), Message{
 		To: "owner@acme.com", Subject: "s", TextBody: "b",
-	})
+	}, SendAs{})
 	if !errors.Is(err, ErrLogOnlyRefused) {
 		t.Fatalf("LazySender.Send = %v, want ErrLogOnlyRefused", err)
 	}

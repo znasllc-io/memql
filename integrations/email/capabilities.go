@@ -18,11 +18,27 @@ import (
 type Integration struct {
 	sender Sender
 	logger *slog.Logger
+	// engine is the write side, and it is optional. A node that resolves no
+	// engine can still REPORT its configuration -- the report is a read of
+	// env and of rows the resolvers already reach -- but cannot change it,
+	// and `configure` says so rather than nil-panicking (memql#4825).
+	engine ConfigWriter
 }
 
 // NewIntegration builds an email integration over the given Sender.
 func NewIntegration(sender Sender, logger *slog.Logger) *Integration {
 	return &Integration{sender: sender, logger: logger}
+}
+
+// WithConfigWriter attaches the engine the `configure` capability writes
+// through. Separate from the constructor because the sender half of this
+// integration has never needed one, and a required parameter would make every
+// existing caller carry a dependency for a capability it does not use.
+func (i *Integration) WithConfigWriter(engine ConfigWriter) *Integration {
+	if i != nil {
+		i.engine = engine
+	}
+	return i
 }
 
 // IntegrationName returns the stable identifier.
@@ -40,6 +56,18 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"subject":  "string (required) - email subject",
 				"textBody": "string (required) - plain-text body",
 				"htmlBody": "string (optional) - HTML alternative",
+			},
+		},
+		{
+			Name: "configure",
+			Description: "Set one of the email integration's configuration values, sealing it first when it is a credential. " +
+				"Owner or developer only. The caller names a SLOT from the declared manifest, never a row name -- so a " +
+				"mistyped variable cannot become a row the resolver never reads and a green save that changes nothing. " +
+				"The node re-resolves its sender on its next send, so it takes effect without a restart.",
+			Handler: i.handleConfigure,
+			ArgsSchema: map[string]string{
+				"slot":  "string (required) - the manifest slot to set, e.g. senderAddress or clientSecret",
+				"value": "string (required) - the plaintext value; a credential is sealed server-side and never read back",
 			},
 		},
 		{
@@ -120,7 +148,13 @@ func (i *Integration) handleSendEmail(ctx context.Context, args map[string]any, 
 		return nil, err
 	}
 
-	if err := i.sender.Send(ctx, msg); err != nil {
+	// The DEFAULT identity, always. `sendEmail` is the transactional
+	// capability -- a DSL author renders a body and asks for it to go out --
+	// and the mailbox it leaves from is a deployment fact, not an argument.
+	// Sending as an arbitrary mailbox is a campaigns decision made against a
+	// stored, operator-declared identity row (design D4), never free text
+	// arriving through a builtin's args map.
+	if err := i.sender.Send(ctx, msg, SendAs{}); err != nil {
 		return nil, fmt.Errorf("email.sendEmail: %w", err)
 	}
 

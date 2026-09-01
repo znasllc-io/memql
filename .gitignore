@@ -152,6 +152,15 @@ node_modules/
 clients/portal/dist/
 clients/os/dist/
 
+# Vite's dependency pre-bundle cache. It normally lives under a package's own
+# node_modules and is covered by the rule above; it lands HERE when a vite
+# config is run with a `root` above the package -- which is what a scratch QA
+# harness does, and those are how the two client trees get looked at in a real
+# browser (memql#4826). Untracked and uncommittable rather than a thing every
+# such session has to remember to sweep: a build cache in a large PR is
+# exactly what nobody reviews.
+clients/.vite/
+
 # macOS
 .DS_Store
 

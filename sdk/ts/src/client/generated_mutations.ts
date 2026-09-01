@@ -94,6 +94,7 @@ export interface AddRecipientArgs {
   audienceId: string;
   email: string;
   displayName?: string;
+  fields?: Record<string, unknown>;
   source?: string;
 }
 
@@ -103,6 +104,7 @@ export function buildAddRecipient(args: AddRecipientArgs): string {
   parts.push("audienceId: " + renderMemQLValue(args.audienceId));
   parts.push("email: " + renderMemQLValue(args.email));
   if (args.displayName !== undefined) parts.push("displayName: " + renderMemQLValue(args.displayName));
+  if (args.fields !== undefined) parts.push("fields: " + renderMemQLValue(args.fields));
   if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
   return "mutation addRecipient(" + parts.join(", ") + ")";
 }
@@ -1472,6 +1474,7 @@ export interface CreateAudienceArgs {
   audienceId: string;
   name: string;
   description?: string;
+  accountId?: string;
 }
 
 export function buildCreateAudience(args: CreateAudienceArgs): string {
@@ -1479,6 +1482,7 @@ export function buildCreateAudience(args: CreateAudienceArgs): string {
   parts.push("audienceId: " + renderMemQLValue(args.audienceId));
   parts.push("name: " + renderMemQLValue(args.name));
   if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
   return "mutation createAudience(" + parts.join(", ") + ")";
 }
 
@@ -1849,6 +1853,10 @@ export interface CreateCampaignArgs {
   fromName?: string;
   replyTo?: string;
   scheduledAt?: string;
+  accountId?: string;
+  senderIdentityId?: string;
+  trackOpens?: boolean;
+  trackClicks?: boolean;
 }
 
 export function buildCreateCampaign(args: CreateCampaignArgs): string {
@@ -1860,6 +1868,10 @@ export function buildCreateCampaign(args: CreateCampaignArgs): string {
   if (args.fromName !== undefined) parts.push("fromName: " + renderMemQLValue(args.fromName));
   if (args.replyTo !== undefined) parts.push("replyTo: " + renderMemQLValue(args.replyTo));
   if (args.scheduledAt !== undefined) parts.push("scheduledAt: " + renderMemQLValue(args.scheduledAt));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.senderIdentityId !== undefined) parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
+  if (args.trackOpens !== undefined) parts.push("trackOpens: " + renderMemQLValue(args.trackOpens));
+  if (args.trackClicks !== undefined) parts.push("trackClicks: " + renderMemQLValue(args.trackClicks));
   return "mutation createCampaign(" + parts.join(", ") + ")";
 }
 
@@ -2331,6 +2343,52 @@ declare module "./query.js" {
 
 QueryClient.prototype.createDocumentChunk = function (this: QueryClient, args: CreateDocumentChunkArgs = {} as CreateDocumentChunkArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createDocumentChunk", buildCreateDocumentChunk(args), opts);
+};
+
+/** Author an event-email rule. Lands as a draft: nothing runs until it is generated and activated, so writing this row can never by itself mail anybody -- the same "the row existing is not permission to send" stance v1:campaigns:sendJob's `scheduled` status takes. */
+// Bound concept: v1:campaigns:emailRule (machine-readable: BoundConcepts["createEmailRule"] in generated_concepts.ts).
+export interface CreateEmailRuleArgs {
+  emailRuleId: string;
+  name: string;
+  description?: string;
+  triggerConcept: string;
+  eventKind: string;
+  condition?: string;
+  templateId: string;
+  recipientMode: string;
+  recipientRoles?: unknown[];
+  audienceId?: string;
+  recipientField?: string;
+  accountId?: string;
+  senderIdentityId?: string;
+}
+
+export function buildCreateEmailRule(args: CreateEmailRuleArgs): string {
+  const parts: string[] = [];
+  parts.push("emailRuleId: " + renderMemQLValue(args.emailRuleId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  parts.push("triggerConcept: " + renderMemQLValue(args.triggerConcept));
+  parts.push("eventKind: " + renderMemQLValue(args.eventKind));
+  if (args.condition !== undefined) parts.push("condition: " + renderMemQLValue(args.condition));
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  parts.push("recipientMode: " + renderMemQLValue(args.recipientMode));
+  if (args.recipientRoles !== undefined) parts.push("recipientRoles: " + renderMemQLValue(args.recipientRoles));
+  if (args.audienceId !== undefined) parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  if (args.recipientField !== undefined) parts.push("recipientField: " + renderMemQLValue(args.recipientField));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.senderIdentityId !== undefined) parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
+  return "mutation createEmailRule(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createEmailRule(args: CreateEmailRuleArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createEmailRule = function (this: QueryClient, args: CreateEmailRuleArgs = {} as CreateEmailRuleArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createEmailRule", buildCreateEmailRule(args), opts);
 };
 
 /** Persist an enrolment-token row at issue time. */
@@ -3443,6 +3501,39 @@ QueryClient.prototype.createSemanticTask = function (this: QueryClient, args: Cr
   return this.executeNamed("createSemanticTask", buildCreateSemanticTask(args), opts);
 };
 
+/** Declare a mailbox this deployment may send campaign mail as. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever declare their own.
+NO CREDENTIAL CROSSES THIS BOUNDARY, which is why it is an ordinary client-reachable mutation rather than a @serverOnly one. Authentication stays the cluster's single Graph credential; this row says a mailbox exists and may be used. What it CANNOT do is make a mailbox sendable -- that is the tenant's ApplicationAccessPolicy, and an address declared here but missing from that group surfaces as Graph's own 403 on the campaign's lastError. The engine validates the address for RFC shape and header safety before it is stored: it becomes a From header and a URL path segment, and a CR or LF in it would be header injection into every message the identity ever sends. */
+// Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["createSenderIdentity"] in generated_concepts.ts).
+export interface CreateSenderIdentityArgs {
+  senderIdentityId: string;
+  address: string;
+  fromName: string;
+  replyTo?: string;
+  accountId?: string;
+  notes?: string;
+}
+
+export function buildCreateSenderIdentity(args: CreateSenderIdentityArgs): string {
+  const parts: string[] = [];
+  parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
+  parts.push("address: " + renderMemQLValue(args.address));
+  parts.push("fromName: " + renderMemQLValue(args.fromName));
+  if (args.replyTo !== undefined) parts.push("replyTo: " + renderMemQLValue(args.replyTo));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.notes !== undefined) parts.push("notes: " + renderMemQLValue(args.notes));
+  return "mutation createSenderIdentity(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createSenderIdentity(args: CreateSenderIdentityArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createSenderIdentity = function (this: QueryClient, args: CreateSenderIdentityArgs = {} as CreateSenderIdentityArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createSenderIdentity", buildCreateSenderIdentity(args), opts);
+};
+
 /** Create a session record for a participant in a space. */
 // Bound concept: v1:cognition:session (machine-readable: BoundConcepts["createSessionForParticipant"] in generated_concepts.ts).
 export interface CreateSessionForParticipantArgs {
@@ -3729,6 +3820,7 @@ export interface CreateTemplateArgs {
   subject: string;
   textBody: string;
   htmlBody?: string;
+  accountId?: string;
 }
 
 export function buildCreateTemplate(args: CreateTemplateArgs): string {
@@ -3738,6 +3830,7 @@ export function buildCreateTemplate(args: CreateTemplateArgs): string {
   parts.push("subject: " + renderMemQLValue(args.subject));
   parts.push("textBody: " + renderMemQLValue(args.textBody));
   if (args.htmlBody !== undefined) parts.push("htmlBody: " + renderMemQLValue(args.htmlBody));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
   return "mutation createTemplate(" + parts.join(", ") + ")";
 }
 
@@ -5061,28 +5154,6 @@ QueryClient.prototype.moveLibraryFolder = function (this: QueryClient, args: Mov
   return this.executeNamed("moveLibraryFolder", buildMoveLibraryFolder(args), opts);
 };
 
-/** Pause a running send. The delivery ledger is untouched, which is the whole point: a paused campaign resumes exactly where it stopped because "where it stopped" is the set of recipients with no delivery row, not a cursor that could go stale. Owned. */
-// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["pauseCampaign"] in generated_concepts.ts).
-export interface PauseCampaignArgs {
-  campaignId: string;
-}
-
-export function buildPauseCampaign(args: PauseCampaignArgs): string {
-  const parts: string[] = [];
-  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
-  return "mutation pauseCampaign(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    pauseCampaign(args: PauseCampaignArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.pauseCampaign = function (this: QueryClient, args: PauseCampaignArgs = {} as PauseCampaignArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("pauseCampaign", buildPauseCampaign(args), opts);
-};
-
 /** Persist a Task's working state for async parking + planner re-invocation. Called when a Task transitions to paused / awaitingFeedback. */
 // Bound concept: v1:planner:taskState (machine-readable: BoundConcepts["persistTaskState"] in generated_concepts.ts).
 export interface PersistTaskStateArgs {
@@ -5382,49 +5453,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.recordCall = function (this: QueryClient, args: RecordCallArgs = {} as RecordCallArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("recordCall", buildRecordCall(args), opts);
-};
-
-/** Record one recipient's outcome for one campaign. THE writer memql#3348 exists to supply: it is what stamps v1:campaigns:delivery's declared owner field from the actor, and its absence is why that concept sat on the owner-stamping gate's exemption list.
-THE ID IS DERIVED, NOT PASSED, and that is the idempotency mechanism rather than a convenience. (campaignId, recipientId) hashes to exactly one row id, so a resumed, restarted or double-claimed send writes a new VERSION of the same row instead of a second delivery -- the ledger cannot double-count and the worker cannot double-mail, because the row's existence is what removes the recipient from the next batch. Each part is hashed before concatenation (authoring rule 20), so no separator in a caller-supplied id can make two different pairs collide onto one timeline.
-Owned: ownerUserId is stamped from actor.userId. The worker runs this under the CAMPAIGN OWNER'S actor, so the value is the campaign's owner and no caller can name a different one. */
-// Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["recordCampaignDelivery"] in generated_concepts.ts).
-export interface RecordCampaignDeliveryArgs {
-  campaignId: string;
-  recipientId: string;
-  email: string;
-  // Enum: pending | sent | failed | skipped
-  status: string;
-  skipReason?: string;
-  lastError?: string;
-  sentAt?: string;
-  attempts?: number;
-  nextAttemptAt?: string;
-  outboundRequestId?: string;
-}
-
-export function buildRecordCampaignDelivery(args: RecordCampaignDeliveryArgs): string {
-  const parts: string[] = [];
-  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
-  parts.push("recipientId: " + renderMemQLValue(args.recipientId));
-  parts.push("email: " + renderMemQLValue(args.email));
-  parts.push("status: " + renderMemQLValue(args.status));
-  if (args.skipReason !== undefined) parts.push("skipReason: " + renderMemQLValue(args.skipReason));
-  if (args.lastError !== undefined) parts.push("lastError: " + renderMemQLValue(args.lastError));
-  if (args.sentAt !== undefined) parts.push("sentAt: " + renderMemQLValue(args.sentAt));
-  if (args.attempts !== undefined) parts.push("attempts: " + renderMemQLValue(args.attempts));
-  if (args.nextAttemptAt !== undefined) parts.push("nextAttemptAt: " + renderMemQLValue(args.nextAttemptAt));
-  if (args.outboundRequestId !== undefined) parts.push("outboundRequestId: " + renderMemQLValue(args.outboundRequestId));
-  return "mutation recordCampaignDelivery(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    recordCampaignDelivery(args: RecordCampaignDeliveryArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.recordCampaignDelivery = function (this: QueryClient, args: RecordCampaignDeliveryArgs = {} as RecordCampaignDeliveryArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("recordCampaignDelivery", buildRecordCampaignDelivery(args), opts);
 };
 
 /** Append a provider bounce event. Append-only. */
@@ -6670,28 +6698,6 @@ QueryClient.prototype.restoreLibraryFolder = function (this: QueryClient, args: 
   return this.executeNamed("restoreLibraryFolder", buildRestoreLibraryFolder(args), opts);
 };
 
-/** Resume a paused send. Deliberately does NOT re-stamp startedAt -- the gap between startedAt and completedAt is the number a deliverability review reads as "how long did this run take", and resetting it on every resume would erase the pause it is meant to reveal. Owned. */
-// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["resumeCampaign"] in generated_concepts.ts).
-export interface ResumeCampaignArgs {
-  campaignId: string;
-}
-
-export function buildResumeCampaign(args: ResumeCampaignArgs): string {
-  const parts: string[] = [];
-  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
-  return "mutation resumeCampaign(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    resumeCampaign(args: ResumeCampaignArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.resumeCampaign = function (this: QueryClient, args: ResumeCampaignArgs = {} as ResumeCampaignArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("resumeCampaign", buildResumeCampaign(args), opts);
-};
-
 /** Retire a bundle: status -> retired and retiredAt stamped. Used when a new version supersedes it or the user removes the capability. The authored runtime (#959) unregisters its constructs on this transition. */
 // Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["retireAuthoringBundle"] in generated_concepts.ts).
 export interface RetireAuthoringBundleArgs {
@@ -7102,31 +7108,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.scheduleAccountDeletion = function (this: QueryClient, args: ScheduleAccountDeletionArgs = {} as ScheduleAccountDeletionArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("scheduleAccountDeletion", buildScheduleAccountDeletion(args), opts);
-};
-
-/** Commit a campaign to a time. Owned.
-scheduledAt written here is THE AUTHORITY on when the send fires (memql#3459) -- the drain worker re-reads this row rather than trusting the copy it stamped on the send job, so moving the date moves the send. What this mutation does not do by itself is create the job the worker scans; `campaignScheduleSend` does both, and is the path the portal takes. */
-// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["scheduleCampaign"] in generated_concepts.ts).
-export interface ScheduleCampaignArgs {
-  campaignId: string;
-  scheduledAt: string;
-}
-
-export function buildScheduleCampaign(args: ScheduleCampaignArgs): string {
-  const parts: string[] = [];
-  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
-  parts.push("scheduledAt: " + renderMemQLValue(args.scheduledAt));
-  return "mutation scheduleCampaign(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    scheduleCampaign(args: ScheduleCampaignArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.scheduleCampaign = function (this: QueryClient, args: ScheduleCampaignArgs = {} as ScheduleCampaignArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("scheduleCampaign", buildScheduleCampaign(args), opts);
 };
 
 /** Create an action utterance in a space. */
@@ -7696,6 +7677,30 @@ QueryClient.prototype.setDelegationPolicy = function (this: QueryClient, args: S
   return this.executeNamed("setDelegationPolicy", buildSetDelegationPolicy(args), opts);
 };
 
+/** Pause or resume a rule. The operator's own stop button: pausing keeps the generated construct but disarms it, which is a different thing from deleting the rule and a different thing again from the circuit breaker tripping -- and all three are visible as distinct statuses so nobody has to guess which one happened. */
+// Bound concept: v1:campaigns:emailRule (machine-readable: BoundConcepts["setEmailRuleStatus"] in generated_concepts.ts).
+export interface SetEmailRuleStatusArgs {
+  emailRuleId: string;
+  status: string;
+}
+
+export function buildSetEmailRuleStatus(args: SetEmailRuleStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("emailRuleId: " + renderMemQLValue(args.emailRuleId));
+  parts.push("status: " + renderMemQLValue(args.status));
+  return "mutation setEmailRuleStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setEmailRuleStatus(args: SetEmailRuleStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setEmailRuleStatus = function (this: QueryClient, args: SetEmailRuleStatusArgs = {} as SetEmailRuleStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setEmailRuleStatus", buildSetEmailRuleStatus(args), opts);
+};
+
 /** Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. */
 // Bound concept: v1:platform:globalSecret (machine-readable: BoundConcepts["setGlobalSecret"] in generated_concepts.ts).
 export interface SetGlobalSecretArgs {
@@ -8056,6 +8061,30 @@ QueryClient.prototype.setResponsibilityStatus = function (this: QueryClient, arg
   return this.executeNamed("setResponsibilityStatus", buildSetResponsibilityStatus(args), opts);
 };
 
+/** Enable or retire a sending identity. Retiring is a status flip and never a delete: past campaigns name the row, and the reputation and warmup history are keyed on its address, so deleting it would orphan the evidence a deliverability review is made of. */
+// Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["setSenderIdentityStatus"] in generated_concepts.ts).
+export interface SetSenderIdentityStatusArgs {
+  senderIdentityId: string;
+  status: string;
+}
+
+export function buildSetSenderIdentityStatus(args: SetSenderIdentityStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
+  parts.push("status: " + renderMemQLValue(args.status));
+  return "mutation setSenderIdentityStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setSenderIdentityStatus(args: SetSenderIdentityStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setSenderIdentityStatus = function (this: QueryClient, args: SetSenderIdentityStatusArgs = {} as SetSenderIdentityStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setSenderIdentityStatus", buildSetSenderIdentityStatus(args), opts);
+};
+
 /** Move a store through its lifecycle. Separate from updateStore because status is the switch ingestion reads: pausing a store is an operational act, not a configuration edit, and it wants its own audit line. */
 // Bound concept: v1:shopify:store (machine-readable: BoundConcepts["setStoreStatus"] in generated_concepts.ts).
 export interface SetStoreStatusArgs {
@@ -8294,28 +8323,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.stampNodeTokenBootstrap = function (this: QueryClient, args: StampNodeTokenBootstrapArgs = {} as StampNodeTokenBootstrapArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("stampNodeTokenBootstrap", buildStampNodeTokenBootstrap(args), opts);
-};
-
-/** Move a campaign into the sending state and stamp when the run began. Called by the `campaignStartSend` builtin AFTER it has read the campaign under the caller's own actor, which is where the ownership check actually happens; this mutation re-stamps ownerUserId anyway, because a write whose ownership depends on a read-merge is a write whose ownership can drift. Owned. */
-// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["startCampaign"] in generated_concepts.ts).
-export interface StartCampaignArgs {
-  campaignId: string;
-}
-
-export function buildStartCampaign(args: StartCampaignArgs): string {
-  const parts: string[] = [];
-  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
-  return "mutation startCampaign(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    startCampaign(args: StartCampaignArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.startCampaign = function (this: QueryClient, args: StartCampaignArgs = {} as StartCampaignArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("startCampaign", buildStartCampaign(args), opts);
 };
 
 /** Claim a ready step (ready -> running). Stamps assignedAgent + startedAt. The engine step guard rejects the transition when the prior status is not 'ready'. */
@@ -8698,6 +8705,10 @@ export interface UpdateCampaignArgs {
   fromName?: string;
   replyTo?: string;
   scheduledAt?: string;
+  accountId?: string;
+  senderIdentityId?: string;
+  trackOpens?: boolean;
+  trackClicks?: boolean;
 }
 
 export function buildUpdateCampaign(args: UpdateCampaignArgs): string {
@@ -8709,6 +8720,10 @@ export function buildUpdateCampaign(args: UpdateCampaignArgs): string {
   if (args.fromName !== undefined) parts.push("fromName: " + renderMemQLValue(args.fromName));
   if (args.replyTo !== undefined) parts.push("replyTo: " + renderMemQLValue(args.replyTo));
   if (args.scheduledAt !== undefined) parts.push("scheduledAt: " + renderMemQLValue(args.scheduledAt));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.senderIdentityId !== undefined) parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
+  if (args.trackOpens !== undefined) parts.push("trackOpens: " + renderMemQLValue(args.trackOpens));
+  if (args.trackClicks !== undefined) parts.push("trackClicks: " + renderMemQLValue(args.trackClicks));
   return "mutation updateCampaign(" + parts.join(", ") + ")";
 }
 
@@ -8720,41 +8735,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateCampaign = function (this: QueryClient, args: UpdateCampaignArgs = {} as UpdateCampaignArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateCampaign", buildUpdateCampaign(args), opts);
-};
-
-/** Stamp send progress onto the campaign row. Written by the drain worker under the campaign owner's actor, once per batch and once at completion, so the portal's campaign list shows live counters without aggregating the ledger per row. Owned -- ownerUserId is re-stamped from actor.userId, so the worker can only ever write this onto a campaign it was authorized to read.
-Distinct from `updateCampaign`, which is the operator's authoring write and deliberately refuses to accept status or any counter. The two never overlap in what they accept. */
-// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["updateCampaignProgress"] in generated_concepts.ts).
-export interface UpdateCampaignProgressArgs {
-  campaignId: string;
-  status?: string;
-  recipientCount?: number;
-  sentCount?: number;
-  failedCount?: number;
-  lastError?: string;
-  completedAt?: string;
-}
-
-export function buildUpdateCampaignProgress(args: UpdateCampaignProgressArgs): string {
-  const parts: string[] = [];
-  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
-  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
-  if (args.recipientCount !== undefined) parts.push("recipientCount: " + renderMemQLValue(args.recipientCount));
-  if (args.sentCount !== undefined) parts.push("sentCount: " + renderMemQLValue(args.sentCount));
-  if (args.failedCount !== undefined) parts.push("failedCount: " + renderMemQLValue(args.failedCount));
-  if (args.lastError !== undefined) parts.push("lastError: " + renderMemQLValue(args.lastError));
-  if (args.completedAt !== undefined) parts.push("completedAt: " + renderMemQLValue(args.completedAt));
-  return "mutation updateCampaignProgress(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    updateCampaignProgress(args: UpdateCampaignProgressArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.updateCampaignProgress = function (this: QueryClient, args: UpdateCampaignProgressArgs = {} as UpdateCampaignProgressArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("updateCampaignProgress", buildUpdateCampaignProgress(args), opts);
 };
 
 /** Correct a client's facts, and record that a human said so.
@@ -8952,6 +8932,52 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateDeploymentStatus = function (this: QueryClient, args: UpdateDeploymentStatusArgs = {} as UpdateDeploymentStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateDeploymentStatus", buildUpdateDeploymentStatus(args), opts);
+};
+
+/** Edit a rule's form. Does NOT accept status, the generated refs or the error: those are the engine's account of what it made of the form, and a caller who could write them could claim a rule was active with nothing behind it. */
+// Bound concept: v1:campaigns:emailRule (machine-readable: BoundConcepts["updateEmailRule"] in generated_concepts.ts).
+export interface UpdateEmailRuleArgs {
+  emailRuleId: string;
+  name: string;
+  description?: string;
+  triggerConcept: string;
+  eventKind: string;
+  condition?: string;
+  templateId: string;
+  recipientMode: string;
+  recipientRoles?: unknown[];
+  audienceId?: string;
+  recipientField?: string;
+  accountId?: string;
+  senderIdentityId?: string;
+}
+
+export function buildUpdateEmailRule(args: UpdateEmailRuleArgs): string {
+  const parts: string[] = [];
+  parts.push("emailRuleId: " + renderMemQLValue(args.emailRuleId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  parts.push("triggerConcept: " + renderMemQLValue(args.triggerConcept));
+  parts.push("eventKind: " + renderMemQLValue(args.eventKind));
+  if (args.condition !== undefined) parts.push("condition: " + renderMemQLValue(args.condition));
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  parts.push("recipientMode: " + renderMemQLValue(args.recipientMode));
+  if (args.recipientRoles !== undefined) parts.push("recipientRoles: " + renderMemQLValue(args.recipientRoles));
+  if (args.audienceId !== undefined) parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  if (args.recipientField !== undefined) parts.push("recipientField: " + renderMemQLValue(args.recipientField));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.senderIdentityId !== undefined) parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
+  return "mutation updateEmailRule(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateEmailRule(args: UpdateEmailRuleArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateEmailRule = function (this: QueryClient, args: UpdateEmailRuleArgs = {} as UpdateEmailRuleArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateEmailRule", buildUpdateEmailRule(args), opts);
 };
 
 /** Re-insert a generatedOutput row (same id, new version) carrying the latest edited content so the Library viewer + artifact index reflect the most recent document version. Append-only by (id, createdAt): a new node version, reads return the latest. Handler-invoked by integration.library.editDocument / restoreDocumentVersion; ownerUserId is stamped from actor.userId, and both handlers run the write under the existing row's owner. */
@@ -9584,6 +9610,38 @@ QueryClient.prototype.updateSendJob = function (this: QueryClient, args: UpdateS
   return this.executeNamed("updateSendJob", buildUpdateSendJob(args), opts);
 };
 
+/** Edit a sending identity's presentation and tie. Deliberately does not accept `status`: enabling and disabling an identity is a deliverability decision with a send-time consequence, and `setSenderIdentityStatus` is the call that makes it, so the two never overlap in what they accept. */
+// Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["updateSenderIdentity"] in generated_concepts.ts).
+export interface UpdateSenderIdentityArgs {
+  senderIdentityId: string;
+  address: string;
+  fromName: string;
+  replyTo?: string;
+  accountId?: string;
+  notes?: string;
+}
+
+export function buildUpdateSenderIdentity(args: UpdateSenderIdentityArgs): string {
+  const parts: string[] = [];
+  parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
+  parts.push("address: " + renderMemQLValue(args.address));
+  parts.push("fromName: " + renderMemQLValue(args.fromName));
+  if (args.replyTo !== undefined) parts.push("replyTo: " + renderMemQLValue(args.replyTo));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.notes !== undefined) parts.push("notes: " + renderMemQLValue(args.notes));
+  return "mutation updateSenderIdentity(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateSenderIdentity(args: UpdateSenderIdentityArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateSenderIdentity = function (this: QueryClient, args: UpdateSenderIdentityArgs = {} as UpdateSenderIdentityArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateSenderIdentity", buildUpdateSenderIdentity(args), opts);
+};
+
 /** Update a session record's device state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist. */
 // Bound concept: v1:cognition:session (machine-readable: BoundConcepts["updateSessionDevices"] in generated_concepts.ts).
 export interface UpdateSessionDevicesArgs {
@@ -9803,6 +9861,7 @@ export interface UpdateTemplateArgs {
   textBody: string;
   htmlBody?: string;
   status?: string;
+  accountId?: string;
 }
 
 export function buildUpdateTemplate(args: UpdateTemplateArgs): string {
@@ -9813,6 +9872,7 @@ export function buildUpdateTemplate(args: UpdateTemplateArgs): string {
   parts.push("textBody: " + renderMemQLValue(args.textBody));
   if (args.htmlBody !== undefined) parts.push("htmlBody: " + renderMemQLValue(args.htmlBody));
   if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
   return "mutation updateTemplate(" + parts.join(", ") + ")";
 }
 

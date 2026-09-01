@@ -17,6 +17,7 @@ import (
 	"github.com/znasllc-io/memql/component/observe"
 	"github.com/znasllc-io/memql/component/outbound"
 	"github.com/znasllc-io/memql/component/router"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // engineAndBus creates the MemQL engine, sets up the component bus wiring,
@@ -220,6 +221,38 @@ func (a *App) engineAndBus() {
 	if err := a.engine.RegisterIntegration(campaignWorker); err != nil {
 		a.fatal("failed to register campaigns integration", "error", err)
 	}
+
+	// memql#4824: the Graph mailbox reader -- the other end of the loop the
+	// worker above opens. On the Graph transport a failed delivery comes
+	// back as a `multipart/report` DSN mailed to the sending mailbox, not as
+	// a webhook, so without something reading that mailbox the suppression
+	// list starves on the one transport this deployment actually sends on.
+	// It stages what it finds as v1:platform:inboundRequest rows and the
+	// existing feedback automation takes over.
+	//
+	// Wired HERE rather than as a self-registering plug-in, for BOTH of the
+	// reasons the campaigns worker is:
+	//
+	//  1. The cluster execution guard is not on PluginContext, and it is not
+	//     optional here -- two replicas polling one mailbox both list it and
+	//     both race to mark the same message read, so the loser's PATCH
+	//     404s on a message that has already moved. The claim is per PASS
+	//     because the listing is the racy part.
+	//  2. Whether campaigns are enabled is component/campaigns' answer, and
+	//     integrations/email must not grow an edge to that package to ask
+	//     it. The config is already loaded here; passing it in is one
+	//     definition of the switch instead of two.
+	//
+	// The sender resolves at POLL time off the integration registry, the
+	// same seam and for the same reason as the worker's.
+	ndrPoller := email.NewNDRPoller(
+		&CampaignsEngineAdapter{Engine: a.engine},
+		clusterGuard,
+		a.campaignEmailSender,
+		campaigns.LoadConfig().Enabled,
+		a.Logger,
+	)
+	a.Dependencies = append(a.Dependencies, ndrPoller)
 
 	// epic memql#4378: the outbox drain worker. Delivers every change to
 	// an ORIGIN concept out to the systems that mirror it, with an

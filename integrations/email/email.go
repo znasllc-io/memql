@@ -25,7 +25,98 @@ const ComponentName = "email"
 // Sender delivers a single email message. Implementations are expected
 // to be safe for concurrent use.
 type Sender interface {
-	Send(ctx context.Context, msg Message) error
+	Send(ctx context.Context, msg Message, as SendAs) error
+}
+
+// SendAs names the mailbox a message leaves from (design D5, memql#4821).
+//
+// The ZERO VALUE means "the configured default sender", which is what every
+// caller outside the campaigns worker passes -- so plurality is ADDITIVE and
+// no transactional caller had to learn about it. A magic link, a guest invite
+// and an outbound row all keep sending from the one mailbox the deployment
+// authenticated as, and say so by passing nothing.
+//
+// It is a PARAMETER rather than a field on Message, and that placement is the
+// whole design. Message stays From-less: a caller-supplied `From:` header is
+// still refused by the renderer (mime.go's reservedHeaders), because an
+// arbitrary From is a sender the mailbox did not authenticate as and that is
+// exactly the SPF/DKIM alignment the campaign path depends on being
+// structural. An identity is not free text the message carries -- it is a
+// mailbox the transport must actually be able to send as, which is a fact
+// about the TRANSPORT, so it travels beside the message and each Sender
+// decides whether it can honour it. Graph can (a different `/users/{addr}`
+// path); SMTP cannot (AUTH is bound to one mailbox) and refuses.
+//
+// Nothing here validates that the address is a mailbox the credential may
+// send as. It cannot: that is Exchange ApplicationAccessPolicy state in
+// somebody else's tenant, and the honest check is the provider's 403 landing
+// on the campaign's lastError (design D7).
+type SendAs struct {
+	// Address is the mailbox UPN to send as -- the value that becomes both
+	// the Graph `/users/{address}/sendMail` path segment and the address
+	// half of the From header.
+	Address string
+	// FromName is the display name half of the From header. May be set on
+	// its own: a SendAs carrying only a FromName means "the default mailbox,
+	// under this display name", which is what a campaign overriding
+	// `fromName` and nothing else asks for.
+	FromName string
+}
+
+// IsZero reports whether this is the "use the configured default" sentinel.
+//
+// Whitespace counts as empty. A stored identity row whose address is a stray
+// space is not an identity, and treating it as one would build
+// `/users/%20/sendMail` and fail with a message about a mailbox nobody named.
+func (s SendAs) IsZero() bool {
+	return strings.TrimSpace(s.Address) == "" && strings.TrimSpace(s.FromName) == ""
+}
+
+// Validate rejects an identity that cannot be put on a header line.
+//
+// Called by every Sender before the wire, for the same reason Message.Validate
+// is: FromName became CALLER-INFLUENCED with D6 (a campaign's `fromName`
+// reaches it), and the structured Graph payload does not pass through
+// RenderRFC5322's header-injection barrier -- it JSON-encodes the name into a
+// body. So the barrier has to exist here too, or one of the two Graph request
+// forms is checked and the other is not.
+func (s SendAs) Validate() error {
+	if headerUnsafe(s.Address) {
+		return errors.New("email: SendAs.Address contains illegal control characters (header injection)")
+	}
+	if headerUnsafe(s.FromName) {
+		return errors.New("email: SendAs.FromName contains illegal control characters (header injection)")
+	}
+	addr := strings.TrimSpace(s.Address)
+	if addr != "" && !strings.Contains(addr, "@") {
+		return fmt.Errorf("email: SendAs.Address %q is not a valid mailbox address", s.Address)
+	}
+	return nil
+}
+
+// resolveIdentity folds a SendAs over a configured default pair and returns
+// the (address, displayName) actually to be used.
+//
+// ONE function, called once per send, because the alternative is what D6
+// found: an address resolved in three places drifts, and the drift is a
+// message whose envelope says one mailbox and whose From header says another
+// -- which is a DMARC alignment failure that looks like a deliverability
+// mystery rather than a bug.
+//
+// The two halves fall back INDEPENDENTLY. A SendAs carrying only a FromName
+// keeps the default address, which is what "send from the usual mailbox under
+// this campaign's display name" means; an identity carrying only an address
+// takes the deployment's default display name rather than going nameless.
+func resolveIdentity(as SendAs, defaultAddr, defaultName string) (string, string) {
+	addr := strings.TrimSpace(as.Address)
+	if addr == "" {
+		addr = defaultAddr
+	}
+	name := strings.TrimSpace(as.FromName)
+	if name == "" {
+		name = defaultName
+	}
+	return addr, name
 }
 
 // Message is a rendered email ready to go on the wire.
@@ -123,13 +214,41 @@ func NewSMTPSender(cfg SMTPConfig, logger *slog.Logger) *SMTPSender {
 }
 
 // Send delivers msg via SMTP. Blocks until the remote acks or fails.
-func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
+//
+// A non-default `as` is REFUSED here rather than honoured (design D5).
+// SMTP AUTH binds this connection to exactly one mailbox: the relay
+// authenticated s.cfg.Username and will either reject a mismatched envelope
+// sender outright or, worse, accept it and let the receiving domain fail
+// SPF/DMARC -- a message that leaves successfully and lands in a spam folder,
+// which is the failure mode nobody sees. So the refusal is PERMANENT and
+// typed: no amount of waiting turns an SMTP relay into a multi-mailbox one,
+// and a retryable classification would park a campaign forever on an install
+// that can never send it.
+//
+// A SendAs that carries only a display name is fine and is honoured: the
+// address is unchanged, so the authentication story is unchanged, and only
+// the From phrase differs.
+func (s *SMTPSender) Send(ctx context.Context, msg Message, as SendAs) error {
 	if err := msg.Validate(); err != nil {
+		return err
+	}
+	if err := as.Validate(); err != nil {
 		return err
 	}
 
 	from := s.cfg.FromAddr
-	fromHeader := FromHeader(from, s.cfg.FromName)
+	if requested := strings.TrimSpace(as.Address); requested != "" && !strings.EqualFold(requested, strings.TrimSpace(from)) {
+		err := fmt.Errorf(
+			"email: this node sends over SMTP, whose AUTH is bound to the single mailbox %q, so it cannot send as %q. "+
+				"Configure Microsoft Graph (%s, %s, %s, %s -- all four) to send from more than one identity, "+
+				"or point this campaign at the default sending identity",
+			from, requested,
+			DefaultGraphEnvKeys().TenantId, DefaultGraphEnvKeys().ClientId,
+			DefaultGraphEnvKeys().ClientSecret, DefaultGraphEnvKeys().SenderAddr)
+		return &SendError{Permanent: true, Detail: err.Error(), Cause: err}
+	}
+	_, fromName := resolveIdentity(as, from, s.cfg.FromName)
+	fromHeader := FromHeader(from, fromName)
 
 	// Header injection barrier at the wire-format boundary: no header value
 	// reaches the SMTP payload without passing headerUnsafe. msg.Validate()
@@ -219,8 +338,16 @@ func NewLogSender(logger *slog.Logger) *LogSender {
 }
 
 // Send logs the message without attempting delivery, or refuses.
-func (l *LogSender) Send(_ context.Context, msg Message) error {
+//
+// The identity is logged as well as the recipient. On a local install the log
+// line IS the delivered message -- it is the only record that a send happened
+// -- so omitting which mailbox it would have left from would make the one
+// surface an operator can inspect blind to the exact thing D5 added.
+func (l *LogSender) Send(_ context.Context, msg Message, as SendAs) error {
 	if err := msg.Validate(); err != nil {
+		return err
+	}
+	if err := as.Validate(); err != nil {
 		return err
 	}
 	if l.refusal != nil {
@@ -238,9 +365,12 @@ func (l *LogSender) Send(_ context.Context, msg Message) error {
 	if l.logger == nil {
 		return nil
 	}
+	sendAsAddr, sendAsName := resolveIdentity(as, "(configured default)", "")
 	l.logger.Info("email (log-only mode, not delivered)",
 		"to", msg.To,
 		"subject", msg.Subject,
+		"sendAs", sendAsAddr,
+		"fromName", sendAsName,
 		"text", msg.TextBody)
 	return nil
 }
@@ -291,90 +421,74 @@ func DefaultEnvKeys() EnvKeys {
 func NewSenderFromEnv(prefix string, logger *slog.Logger) (Sender, error) {
 	reader := env.NewEnvReader(strings.TrimRight(prefix, "_"))
 
-	// --- Graph path -----------------------------------------------------
-	// Try the new EMAIL_*-prefixed names first; fall back per-field to
-	// the pre-rename AZURE_* / MAIL_* names so installs that haven't
-	// re-seeded (`go run ./scripts/secrets seed`) since the rename keep working.
-	graphKeys := DefaultGraphEnvKeys()
-	legacyKeys := LegacyGraphEnvKeys()
-	readGraph := func(primary, legacy string) string {
-		if v, ok := reader.String(primary); ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-		if v, ok := reader.String(legacy); ok {
-			return strings.TrimSpace(v)
-		}
-		return ""
-	}
-	graphCfg := GraphConfig{
-		TenantId:     readGraph(graphKeys.TenantId, legacyKeys.TenantId),
-		ClientId:     readGraph(graphKeys.ClientId, legacyKeys.ClientId),
-		ClientSecret: readGraph(graphKeys.ClientSecret, legacyKeys.ClientSecret),
-		SenderAddr:   readGraph(graphKeys.SenderAddr, legacyKeys.SenderAddr),
-		FromName:     readGraph(graphKeys.FromName, legacyKeys.FromName),
-	}
-	graphReady := graphCfg.TenantId != "" &&
-		graphCfg.ClientId != "" &&
-		graphCfg.ClientSecret != "" &&
-		graphCfg.SenderAddr != ""
-	if graphReady {
-		if logger != nil {
-			logger.Info("email: using Microsoft Graph sender",
-				"sender", graphCfg.SenderAddr,
-				"tenantId", graphCfg.TenantId)
-		}
-		return NewGraphSender(graphCfg, nil, logger), nil
+	// ONE walk over the declared manifest (memql#4825). Which lanes exist,
+	// which slots each needs, which are secret and which legacy names are
+	// still honoured are all declared in emailconfig.go, and the lazy row
+	// resolver and the status reporter read the same declaration -- so the
+	// three cannot disagree about what "configured" means.
+	res := resolveEmailConfig(context.Background(), ConfigResolver{
+		Env: func(name string) (string, bool) { return reader.String(name) },
+	})
+	if sender := senderFor(res, logger); sender != nil {
+		return sender, nil
 	}
 
-	// --- SMTP fallback --------------------------------------------------
-	smtpKeys := DefaultEnvKeys()
-	host, _ := reader.String(smtpKeys.Host)
-	host = strings.TrimSpace(host)
-	if host == "" {
-		if err := refuseLogOnlySelection(logger, "no sender configured"); err != nil {
-			return nil, err
+	// Nothing resolved whole. The remaining job is to say WHY in the terms
+	// the operator will recognise, and the three cases read very
+	// differently.
+	//
+	// A SPLIT lane first, because it is the one that looks configured: every
+	// value is set and the sender is still log-only. It used to produce the
+	// same silent fall-through as an empty environment.
+	because := "no sender configured"
+	for _, lane := range res.Lanes {
+		switch {
+		case lane.Split:
+			because = "the " + lane.Lane.Name + " lane's settings are present but split across the environment and stored rows"
+		case lane.Partial:
+			// The case that reads like a typo rather than an omission:
+			// somebody started this lane, so they plainly intended to send.
+			// Refusing it is if anything more clearly right than the
+			// no-configuration case. Generalized from the hardcoded
+			// "SMTP_HOST set but SMTP_FROM_ADDR missing" (memql#4825), which
+			// only ever noticed one of the eleven ways to stop half way.
+			because = "the " + lane.Lane.Name + " lane is partly configured; missing " + strings.Join(lane.Missing, ", ")
+		default:
+			continue
 		}
-		if logger != nil {
+		break
+	}
+	if err := refuseLogOnlySelection(logger, because); err != nil {
+		return nil, err
+	}
+	if logger != nil {
+		if because == "no sender configured" {
 			logger.Info("email: no sender configured, using LogSender",
-				"hint", "set MEMQL_EMAIL_AZURE_TENANT_ID / MEMQL_EMAIL_AZURE_CLIENT_ID / MEMQL_EMAIL_AZURE_CLIENT_SECRET / MEMQL_EMAIL_SENDER for Microsoft Graph, or SMTP_HOST / SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD / SMTP_FROM_ADDR for SMTP")
+				"hint", "set "+strings.Join(laneEnvVars(res, LaneGraph), " / ")+" for Microsoft Graph, or "+
+					strings.Join(laneEnvVars(res, LaneSMTP), " / ")+" for SMTP")
+		} else {
+			logger.Warn("email: falling back to LogSender", "because", because)
 		}
-		return NewLogSender(logger), nil
 	}
+	return NewLogSender(logger), nil
+}
 
-	cfg := SMTPConfig{Host: host}
-	if v, ok := reader.String(smtpKeys.Port); ok {
-		cfg.Port = strings.TrimSpace(v)
-	}
-	if cfg.Port == "" {
-		cfg.Port = "587"
-	}
-	if v, ok := reader.String(smtpKeys.Username); ok {
-		cfg.Username = strings.TrimSpace(v)
-	}
-	if v, ok := reader.String(smtpKeys.Password); ok {
-		cfg.Password = v
-	}
-	if v, ok := reader.String(smtpKeys.FromAddr); ok {
-		cfg.FromAddr = strings.TrimSpace(v)
-	}
-	if v, ok := reader.String(smtpKeys.FromName); ok {
-		cfg.FromName = strings.TrimSpace(v)
-	}
-	if cfg.FromAddr == "" {
-		// The second fall-through, and the one that reads like a typo rather
-		// than an omission: a host is set, so the operator plainly intended
-		// to send. Refusing it is if anything more clearly right than the
-		// no-configuration case above.
-		if err := refuseLogOnlySelection(logger, "SMTP_HOST set but SMTP_FROM_ADDR missing"); err != nil {
-			return nil, err
+// laneEnvVars lists a lane's REQUIRED variables, for the hint an operator
+// reads when nothing is configured. Required only: naming the optional ones
+// makes a five-item list look like five obligations.
+func laneEnvVars(res ConfigResolution, name string) []string {
+	out := []string{}
+	for _, lane := range res.Lanes {
+		if lane.Lane.Name != name {
+			continue
 		}
-		if logger != nil {
-			logger.Warn("email: SMTP_HOST set but SMTP_FROM_ADDR missing; falling back to LogSender")
+		for _, slot := range lane.Slots {
+			if slot.Slot.Required {
+				out = append(out, slot.Slot.EnvVar)
+			}
 		}
-		return NewLogSender(logger), nil
 	}
-
-	return NewSMTPSender(cfg, logger), nil
+	return out
 }
 
 // refuseLogOnlySelection returns the boot refusal when this install must

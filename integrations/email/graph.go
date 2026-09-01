@@ -76,8 +76,24 @@ func NewGraphSender(cfg GraphConfig, httpClient *http.Client, logger *slog.Logge
 // implementation stuck in a 401 loop until the cached expiresAt
 // finally passed naturally. One retry is enough; if the refreshed
 // token also 401s the underlying credential is the problem.
-func (g *GraphSender) Send(ctx context.Context, msg Message) error {
+//
+// # Sending as a non-default identity (design D5)
+//
+// A non-zero `as` moves THREE things together -- the `/users/{address}`
+// path segment, the From address and the From display name -- and they are
+// resolved ONCE, in sendOnce, precisely so they cannot move apart. Graph
+// resolves the path segment against the token's tenant and stamps the
+// envelope sender from it, so a path segment that disagreed with the From
+// header would produce a message whose envelope and header name different
+// mailboxes: a DMARC alignment failure that arrives as a deliverability
+// mystery rather than an error. Whether the credential may in fact send as
+// that mailbox is Exchange ApplicationAccessPolicy state we cannot see from
+// here; the honest report is Graph's own 403 on the campaign's lastError.
+func (g *GraphSender) Send(ctx context.Context, msg Message, as SendAs) error {
 	if err := msg.Validate(); err != nil {
+		return err
+	}
+	if err := as.Validate(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(g.cfg.TenantId) == "" ||
@@ -87,8 +103,15 @@ func (g *GraphSender) Send(ctx context.Context, msg Message) error {
 		return errors.New("graph: missing required config (TenantId, ClientId, ClientSecret, SenderAddr)")
 	}
 
+	// Resolved here as well as inside sendOnce, for the log lines only. The
+	// wire value is the one sendOnce computes; this is the same fold over the
+	// same inputs, so the two cannot disagree, and reporting the DEFAULT
+	// mailbox on a send that left from an identity mailbox would make the
+	// node log actively misleading about which reputation took the hit.
+	sendAsAddr, _ := resolveIdentity(as, g.cfg.SenderAddr, g.cfg.FromName)
+
 	// First attempt with whatever's cached.
-	status, body, retryAfter, err := g.sendOnce(ctx, msg, false)
+	status, body, retryAfter, err := g.sendOnce(ctx, msg, as, false)
 	if err != nil {
 		return err
 	}
@@ -97,7 +120,7 @@ func (g *GraphSender) Send(ctx context.Context, msg Message) error {
 			g.logger.Info("email sent via graph",
 				"to", msg.To,
 				"subject", msg.Subject,
-				"sender", g.cfg.SenderAddr)
+				"sender", sendAsAddr)
 		}
 		return nil
 	}
@@ -107,10 +130,10 @@ func (g *GraphSender) Send(ctx context.Context, msg Message) error {
 		if g.logger != nil {
 			g.logger.Warn("graph: sendMail 401 with cached token; forcing token refresh + retry",
 				"to", msg.To,
-				"sender", g.cfg.SenderAddr,
+				"sender", sendAsAddr,
 			)
 		}
-		status, body, retryAfter, err = g.sendOnce(ctx, msg, true)
+		status, body, retryAfter, err = g.sendOnce(ctx, msg, as, true)
 		if err != nil {
 			return err
 		}
@@ -119,7 +142,7 @@ func (g *GraphSender) Send(ctx context.Context, msg Message) error {
 				g.logger.Info("email sent via graph (after token refresh)",
 					"to", msg.To,
 					"subject", msg.Subject,
-					"sender", g.cfg.SenderAddr)
+					"sender", sendAsAddr)
 			}
 			return nil
 		}
@@ -136,7 +159,7 @@ func (g *GraphSender) Send(ctx context.Context, msg Message) error {
 // is true it invalidates the cached access token before fetching a
 // fresh one. Returns the response status, body, and any transport
 // error so the caller can decide whether to retry.
-func (g *GraphSender) sendOnce(ctx context.Context, msg Message, forceRefresh bool) (int, []byte, string, error) {
+func (g *GraphSender) sendOnce(ctx context.Context, msg Message, as SendAs, forceRefresh bool) (int, []byte, string, error) {
 	if forceRefresh {
 		g.invalidateToken()
 	}
@@ -145,8 +168,14 @@ func (g *GraphSender) sendOnce(ctx context.Context, msg Message, forceRefresh bo
 		return 0, nil, "", err
 	}
 
+	// THE resolution, once, at the top -- the three places the identity is
+	// spent below all read these two variables and never g.cfg again. See
+	// Send's comment for why a drift between them is a silent deliverability
+	// failure rather than an error.
+	sendAsAddr, fromName := resolveIdentity(as, g.cfg.SenderAddr, g.cfg.FromName)
+
 	endpoint := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/sendMail",
-		url.PathEscape(g.cfg.SenderAddr))
+		url.PathEscape(sendAsAddr))
 
 	// TWO REQUEST FORMS, chosen by whether the message carries extra
 	// headers (memql#3348).
@@ -164,7 +193,7 @@ func (g *GraphSender) sendOnce(ctx context.Context, msg Message, forceRefresh bo
 	// swapping it wholesale would put the guest-invite lane behind an
 	// untested encoder for no gain.
 	if len(msg.Headers) > 0 {
-		return g.sendMIME(ctx, endpoint, token, msg)
+		return g.sendMIME(ctx, endpoint, token, msg, sendAsAddr, fromName)
 	}
 
 	// Graph takes exactly one body contentType. Prefer HTML when the
@@ -188,8 +217,8 @@ func (g *GraphSender) sendOnce(ctx context.Context, msg Message, forceRefresh bo
 			},
 			"from": map[string]any{
 				"emailAddress": map[string]string{
-					"address": g.cfg.SenderAddr,
-					"name":    g.cfg.FromName,
+					"address": sendAsAddr,
+					"name":    fromName,
 				},
 			},
 		},
@@ -208,8 +237,14 @@ func (g *GraphSender) sendOnce(ctx context.Context, msg Message, forceRefresh bo
 // sendMIME POSTs the message as a base64-encoded RFC 5322 document --
 // Graph's MIME sendMail form. The only path that can carry
 // `List-Unsubscribe`; see sendOnce for why.
-func (g *GraphSender) sendMIME(ctx context.Context, endpoint, token string, msg Message) (int, []byte, string, error) {
-	raw, err := RenderRFC5322(FromHeader(g.cfg.SenderAddr, g.cfg.FromName), msg)
+//
+// The identity arrives ALREADY RESOLVED rather than being re-derived here.
+// This is the third of the three places one send spends it, and the one
+// where a re-derivation would be least visible: the endpoint was built from
+// the resolved address several lines up, so a locally-recomputed From here
+// could disagree with the path segment and nothing would say so.
+func (g *GraphSender) sendMIME(ctx context.Context, endpoint, token string, msg Message, sendAsAddr, fromName string) (int, []byte, string, error) {
+	raw, err := RenderRFC5322(FromHeader(sendAsAddr, fromName), msg)
 	if err != nil {
 		return 0, nil, "", err
 	}
@@ -222,20 +257,75 @@ func (g *GraphSender) sendMIME(ctx context.Context, endpoint, token string, msg 
 // outcome -- status, body, and the Retry-After header, which the caller
 // needs to classify a throttle.
 func (g *GraphSender) post(ctx context.Context, endpoint, token, contentType string, body []byte) (int, []byte, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return 0, nil, "", fmt.Errorf("graph: build request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", contentType)
-
-	resp, err := g.http.Do(req)
+	status, respBody, retryAfter, err := g.do(ctx, http.MethodPost, endpoint, token, contentType, body)
 	if err != nil {
 		// A transport error never reached a status, so it cannot be
 		// classified as permanent. Returned as an error rather than a
 		// SendError because the caller's classifier only sees responses;
 		// the campaign worker treats any unclassified error as retryable.
 		return 0, nil, "", fmt.Errorf("graph: sendMail network: %w", err)
+	}
+	return status, respBody, retryAfter, nil
+}
+
+// get issues one authenticated Graph READ (memql#4824). The NDR poller's
+// half of the credential: the same app registration, the same token cache,
+// the same client, pointed at the mailbox instead of at sendMail.
+//
+// It returns the status rather than judging it, for the same reason post
+// does: the status and the Retry-After header are the only place a throttle
+// is visible, and Graph throttles a mailbox READ exactly as it throttles a
+// send. classifyHTTPSend is what the caller runs on the pair, so a 429 while
+// listing the inbox backs off instead of hammering.
+func (g *GraphSender) get(ctx context.Context, endpoint, token string) (int, []byte, error) {
+	status, body, retryAfter, err := g.do(ctx, http.MethodGet, endpoint, token, "", nil)
+	if err != nil {
+		return 0, nil, fmt.Errorf("graph: read network: %w", err)
+	}
+	if status/100 != 2 {
+		return status, body, classifyHTTPSend(status, retryAfter,
+			fmt.Sprintf("graph: GET %d: %s", status, string(body)))
+	}
+	return status, body, nil
+}
+
+// patch issues one authenticated Graph WRITE against a mailbox resource --
+// used only to stamp a processed message read and categorized. Same
+// classification story as get.
+func (g *GraphSender) patch(ctx context.Context, endpoint, token string, body []byte) (int, []byte, error) {
+	status, respBody, retryAfter, err := g.do(ctx, http.MethodPatch, endpoint, token, "application/json", body)
+	if err != nil {
+		return 0, nil, fmt.Errorf("graph: patch network: %w", err)
+	}
+	if status/100 != 2 {
+		return status, respBody, classifyHTTPSend(status, retryAfter,
+			fmt.Sprintf("graph: PATCH %d: %s", status, string(respBody)))
+	}
+	return status, respBody, nil
+}
+
+// do is the one authenticated Graph round trip every verb above goes
+// through. Extracted rather than copied when the reader arrived
+// (memql#4824): the bearer header, the client and the Retry-After read are
+// the three things every Graph call needs identically, and three copies of
+// them is three places to forget one.
+func (g *GraphSender) do(ctx context.Context, method, endpoint, token, contentType string, body []byte) (int, []byte, string, error) {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
+	if err != nil {
+		return 0, nil, "", fmt.Errorf("graph: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+
+	resp, err := g.http.Do(req)
+	if err != nil {
+		return 0, nil, "", err
 	}
 	defer resp.Body.Close()
 

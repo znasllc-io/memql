@@ -1813,7 +1813,7 @@ QueryClient.prototype.callsByPartition = function (this: QueryClient, args: Call
   return this.executeNamed("callsByPartition", buildCallsByPartition(args), opts);
 };
 
-/** One campaign by id, gated to its owner. Backs the campaign editor. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller cannot read another operator's campaign even with its id. */
+/** One campaign by id, gated to its owner. Backs the campaign editor. Owned: (ownerUserId==actor.userId || actor.isClusterOwner==true) is the load-bearing guard, so a caller cannot read another operator's campaign even with its id. */
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaignById"] in generated_concepts.ts).
 export interface CampaignByIdArgs {
   campaignId: string;
@@ -1835,7 +1835,127 @@ QueryClient.prototype.campaignById = function (this: QueryClient, args: Campaign
   return this.executeNamed("campaignById", buildCampaignById(args), opts);
 };
 
-/** The caller's campaigns, newest first. The portal's campaign list. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-operator reads are impossible. Optional status filter narrows to one lifecycle bucket; omit it to see everything. */
+/** How many consent events of one kind this campaign produced -- the bounce, complaint and one-click-withdraw figures. Read from the consent stream rather than from delivery rows because a bounce arrives AFTER the transport accepted the message: the delivery says "sent" and stays that way, which is correct and is why it cannot answer this. */
+// Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["campaignConsentCountByKind"] in generated_concepts.ts).
+export interface CampaignConsentCountByKindArgs {
+  campaignId: string;
+  kind: string;
+}
+
+export function buildCampaignConsentCountByKind(args: CampaignConsentCountByKindArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  parts.push("kind: " + renderMemQLValue(args.kind));
+  return "query campaignConsentCountByKind(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignConsentCountByKind(args: CampaignConsentCountByKindArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignConsentCountByKind = function (this: QueryClient, args: CampaignConsentCountByKindArgs = {} as CampaignConsentCountByKindArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignConsentCountByKind", buildCampaignConsentCountByKind(args), opts);
+};
+
+/** How many deliveries this campaign has in one status. The exact figure at any audience size -- the portal's page-capped client-side counting is what this replaces. */
+// Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["campaignDeliveryCountByStatus"] in generated_concepts.ts).
+export interface CampaignDeliveryCountByStatusArgs {
+  campaignId: string;
+  status: string;
+}
+
+export function buildCampaignDeliveryCountByStatus(args: CampaignDeliveryCountByStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  parts.push("status: " + renderMemQLValue(args.status));
+  return "query campaignDeliveryCountByStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignDeliveryCountByStatus(args: CampaignDeliveryCountByStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignDeliveryCountByStatus = function (this: QueryClient, args: CampaignDeliveryCountByStatusArgs = {} as CampaignDeliveryCountByStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignDeliveryCountByStatus", buildCampaignDeliveryCountByStatus(args), opts);
+};
+
+/** TOTAL opens or clicks for a campaign -- every recorded hit, exact. The UNIQUE figure cannot be a count (the engine has no DISTINCT), which is why `campaignEngagementRefs` exists beside this one. */
+// Bound concept: v1:campaigns:engagementEvent (machine-readable: BoundConcepts["campaignEngagementCountByKind"] in generated_concepts.ts).
+export interface CampaignEngagementCountByKindArgs {
+  campaignId: string;
+  kind: string;
+}
+
+export function buildCampaignEngagementCountByKind(args: CampaignEngagementCountByKindArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  parts.push("kind: " + renderMemQLValue(args.kind));
+  return "query campaignEngagementCountByKind(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignEngagementCountByKind(args: CampaignEngagementCountByKindArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignEngagementCountByKind = function (this: QueryClient, args: CampaignEngagementCountByKindArgs = {} as CampaignEngagementCountByKindArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignEngagementCountByKind", buildCampaignEngagementCountByKind(args), opts);
+};
+
+/** The delivery references behind a campaign's engagement events, for computing the UNIQUE figure by folding in Go. Deliberately projects the reference and nothing else: this is the one read in the stats path that is bounded, and a lean shape is what keeps the bound generous. A read that comes back AT the bound is reported as unmeasured rather than as a number -- the ledger-page rule. */
+// Bound concept: v1:campaigns:engagementEvent (machine-readable: BoundConcepts["campaignEngagementRefs"] in generated_concepts.ts).
+export interface CampaignEngagementRefsArgs {
+  campaignId: string;
+  kind: string;
+}
+
+export function buildCampaignEngagementRefs(args: CampaignEngagementRefsArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  parts.push("kind: " + renderMemQLValue(args.kind));
+  return "query campaignEngagementRefs(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignEngagementRefs(args: CampaignEngagementRefsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignEngagementRefs = function (this: QueryClient, args: CampaignEngagementRefsArgs = {} as CampaignEngagementRefsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignEngagementRefs", buildCampaignEngagementRefs(args), opts);
+};
+
+/** How many of this campaign's skipped deliveries carry one of the named skip reasons. A list rather than one reason per call because the skipped bucket is reported in three groups and three counts beat seven round trips. */
+// Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["campaignSkipCountByReason"] in generated_concepts.ts).
+export interface CampaignSkipCountByReasonArgs {
+  campaignId: string;
+  skipReasons: unknown[];
+}
+
+export function buildCampaignSkipCountByReason(args: CampaignSkipCountByReasonArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  parts.push("skipReasons: " + renderMemQLValue(args.skipReasons));
+  return "query campaignSkipCountByReason(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSkipCountByReason(args: CampaignSkipCountByReasonArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSkipCountByReason = function (this: QueryClient, args: CampaignSkipCountByReasonArgs = {} as CampaignSkipCountByReasonArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSkipCountByReason", buildCampaignSkipCountByReason(args), opts);
+};
+
+/** The caller's campaigns, newest first. The portal's campaign list. Owned: the row set is gated by (ownerUserId==actor.userId || actor.isClusterOwner==true) server-side, so cross-operator reads are impossible. Optional status filter narrows to one lifecycle bucket; omit it to see everything. */
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaigns"] in generated_concepts.ts).
 export interface CampaignsArgs {
   status?: string;
@@ -1855,6 +1975,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaigns = function (this: QueryClient, args: CampaignsArgs = {} as CampaignsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaigns", buildCampaigns(args), opts);
+};
+
+/** The email campaigns run for one account.
+The composite-tier term is `campaigns`' own conjunct, repeated here rather than referenced, for the reason `sitesForAccount` repeats `sitesAll`'s: this is the same read that query makes, narrowed by the tie field, and a rollup that dropped the tier predicate would be the shortest path in the product to reading every operator's campaigns.
+It counts CAMPAIGNS and not sends. A band that said "4,182" would be counting delivery rows, which is a number about one busy week rather than about the client -- and the delivery ledger is deliberately not readable in bulk from here at all (memql#4823). Cancelled and failed campaigns are included: a rollup is what is filed for this client, and a send that failed is still work that happened. */
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaignsForAccount"] in generated_concepts.ts).
+export interface CampaignsForAccountArgs {
+  accountId: string;
+}
+
+export function buildCampaignsForAccount(args: CampaignsForAccountArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "query campaignsForAccount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignsForAccount(args: CampaignsForAccountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignsForAccount = function (this: QueryClient, args: CampaignsForAccountArgs = {} as CampaignsForAccountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignsForAccount", buildCampaignsForAccount(args), opts);
 };
 
 /** List every active capability across all roles for a single resource type -- e.g. 'who can do anything to a principal?'. Backs the cockpit's per-resource RBAC audit view and lets E1.3 governance reason about all principal-targeting grants in one read. Bounded to the (small) set of grants naming that resource type. */
@@ -2265,7 +2409,7 @@ QueryClient.prototype.composedViews = function (this: QueryClient, args: Compose
   return this.executeNamed("composedViews", buildComposedViews(args), opts);
 };
 
-/** Consent event stream for one subscriber, newest first. Export answers status/date/source from these rows: current status is the latest kind. Owned: ownerUserId==actor.userId is a top-level conjunct. */
+/** Consent event stream for one subscriber, newest first. Export answers status/date/source from these rows: current status is the latest kind. Owned: (ownerUserId==actor.userId || actor.isClusterOwner==true) is a top-level conjunct. */
 // Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["consentEventsBySubscriber"] in generated_concepts.ts).
 export interface ConsentEventsBySubscriberArgs {
   emailDigest: string;
@@ -2959,6 +3103,50 @@ declare module "./query.js" {
 
 QueryClient.prototype.dueResponsibilities = function (this: QueryClient, args: DueResponsibilitiesArgs = {} as DueResponsibilitiesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("dueResponsibilities", buildDueResponsibilities(args), opts);
+};
+
+/** One event-email rule by id. */
+// Bound concept: v1:campaigns:emailRule (machine-readable: BoundConcepts["emailRuleById"] in generated_concepts.ts).
+export interface EmailRuleByIdArgs {
+  emailRuleId: string;
+}
+
+export function buildEmailRuleById(args: EmailRuleByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("emailRuleId: " + renderMemQLValue(args.emailRuleId));
+  return "query emailRuleById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailRuleById(args: EmailRuleByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailRuleById = function (this: QueryClient, args: EmailRuleByIdArgs = {} as EmailRuleByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailRuleById", buildEmailRuleById(args), opts);
+};
+
+/** Every event-email rule the caller may see, newest first. The row is the FORM; what runs is the generated authored construct it names. */
+// Bound concept: v1:campaigns:emailRule (machine-readable: BoundConcepts["emailRules"] in generated_concepts.ts).
+export interface EmailRulesArgs {
+  status?: string;
+}
+
+export function buildEmailRules(args: EmailRulesArgs): string {
+  const parts: string[] = [];
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  return "query emailRules(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailRules(args: EmailRulesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailRules = function (this: QueryClient, args: EmailRulesArgs = {} as EmailRulesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailRules", buildEmailRules(args), opts);
 };
 
 /** Enrolment-token lookup by tokenHash for the /enroll redeem path. */
@@ -5727,6 +5915,30 @@ QueryClient.prototype.recentSendJobs = function (this: QueryClient, args: Recent
   return this.executeNamed("recentSendJobs", buildRecentSendJobs(args), opts);
 };
 
+/** One recipient by id.
+IT EXISTS TO REMOVE A SCAN FROM A SEND PATH (memql#4829). Every other read of this concept is audience-scoped, which is right for a roster and wrong for the single-recipient send the marketing lane makes: that path holds a recipient id and needs the row, and without this query it had to find the audience first -- from the rule when one named it, and otherwise by walking the caller's audiences and refusing past a bound rather than answering "not found". A bounded scan standing in for a by-id read is a correct answer that gets slower as an operator succeeds, and it refuses at exactly the point somebody has enough audiences to care.
+The tier conjunct is what keeps it safe to expose an unscoped by-id read: an id is not a capability here, and a recipient the caller does not own is simply not found -- the same answer campaignById gives. */
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientById"] in generated_concepts.ts).
+export interface RecipientByIdArgs {
+  recipientId: string;
+}
+
+export function buildRecipientById(args: RecipientByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("recipientId: " + renderMemQLValue(args.recipientId));
+  return "query recipientById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    recipientById(args: RecipientByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.recipientById = function (this: QueryClient, args: RecipientByIdArgs = {} as RecipientByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("recipientById", buildRecipientById(args), opts);
+};
+
 /** Every recipient in one of the caller's audiences, newest first -- including suppressed ones, which is the point: an operator reviewing an audience needs to see the unsubscribes and bounces, not a filtered view that makes them invisible. Owned, and the projection carries @pii fields, so the caller conjunct is doubly load-bearing here. */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientsForAudience"] in generated_concepts.ts).
 export interface RecipientsForAudienceArgs {
@@ -6119,7 +6331,7 @@ QueryClient.prototype.salesRepsForStore = function (this: QueryClient, args: Sal
   return this.executeNamed("salesRepsForStore", buildSalesRepsForStore(args), opts);
 };
 
-/** ENGINE: send jobs committed to a time and not yet fired, oldest first (memql#3459). Cluster-owner gated, and it spans owners for the same reason drainableSendJobs does -- "which campaigns are due" is a question about the cluster, and it is not one an OWNED row can answer at all, since the owned tier injects ownerUserId==actor.userId into every read with no cluster-owner bypass. That is why the schedule lives on the engine's job row rather than being scanned off v1:campaigns:campaign.
+/** ENGINE: send jobs committed to a time and not yet fired, oldest first (memql#3459). Cluster-owner gated, and it spans owners for the same reason drainableSendJobs does -- "which campaigns are due" is a question about the cluster, and it is not one an OWNED row can answer at all, since the owned tier injects (ownerUserId==actor.userId || actor.isClusterOwner==true) into every read with no cluster-owner bypass. That is why the schedule lives on the engine's job row rather than being scanned off v1:campaigns:campaign.
 It deliberately does NOT filter on the due time. The authority on when a send fires is the CAMPAIGN's scheduledAt, which an operator can move with updateCampaign without the job row hearing about it -- so the worker reads every scheduled job and asks the campaign. The set is small by nature (one row per pending scheduled campaign), which is what makes that affordable. */
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["scheduledSendJobs"] in generated_concepts.ts).
 export interface ScheduledSendJobsArgs {
@@ -6206,6 +6418,72 @@ declare module "./query.js" {
 
 QueryClient.prototype.sendableRecipientsForAudience = function (this: QueryClient, args: SendableRecipientsForAudienceArgs = {} as SendableRecipientsForAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("sendableRecipientsForAudience", buildSendableRecipientsForAudience(args), opts);
+};
+
+/** Every sending identity the caller may use, newest first. Backs the identity picker on the campaign editor and the Senders section of the OS app. Composite tier, so a cluster owner sees every operator's -- which is what makes "who is this cluster mailing as" answerable at all. */
+// Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["senderIdentities"] in generated_concepts.ts).
+export interface SenderIdentitiesArgs {
+  status?: string;
+}
+
+export function buildSenderIdentities(args: SenderIdentitiesArgs): string {
+  const parts: string[] = [];
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  return "query senderIdentities(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    senderIdentities(args: SenderIdentitiesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.senderIdentities = function (this: QueryClient, args: SenderIdentitiesArgs = {} as SenderIdentitiesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("senderIdentities", buildSenderIdentities(args), opts);
+};
+
+/** The sending identities filed under one account. The tie is a RECORD, not a scope: this is the same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct is carried verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1). */
+// Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["senderIdentitiesForAccount"] in generated_concepts.ts).
+export interface SenderIdentitiesForAccountArgs {
+  accountId: string;
+}
+
+export function buildSenderIdentitiesForAccount(args: SenderIdentitiesForAccountArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "query senderIdentitiesForAccount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    senderIdentitiesForAccount(args: SenderIdentitiesForAccountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.senderIdentitiesForAccount = function (this: QueryClient, args: SenderIdentitiesForAccountArgs = {} as SenderIdentitiesForAccountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("senderIdentitiesForAccount", buildSenderIdentitiesForAccount(args), opts);
+};
+
+/** One sending identity by id. The read the send path uses to resolve a campaign's senderIdentityId, under the CAMPAIGN OWNER's borrowed actor -- so an identity the owner cannot read is an identity the send refuses to use, which is the same answer as it not existing. */
+// Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["senderIdentityById"] in generated_concepts.ts).
+export interface SenderIdentityByIdArgs {
+  senderIdentityId: string;
+}
+
+export function buildSenderIdentityById(args: SenderIdentityByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
+  return "query senderIdentityById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    senderIdentityById(args: SenderIdentityByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.senderIdentityById = function (this: QueryClient, args: SenderIdentityByIdArgs = {} as SenderIdentityByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("senderIdentityById", buildSenderIdentityById(args), opts);
 };
 
 /** Another person's auth-session rows, newest first, for an owner/admin operator surface. Includes revoked rows so a reader can tell a live session from a retired one. No token hashes. */

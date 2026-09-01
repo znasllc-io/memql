@@ -187,3 +187,8 @@ regexTarget = "match"
 regexes = [
   '''0123456789abcdef0123''',
 ]
+
+[[allowlists]]
+description = "MemQL OS per-app settings-store keys (epic memql#4819). NOT credentials: `memql-os-<app>-v1` is the localStorage KEY NAME a per-app settings store writes under -- the string a browser looks a document up by, not anything in the document. Every OS app declares one under the same house pattern (`ACCOUNTS_SETTINGS_KEY`, `FILES_SETTINGS_KEY`, `DEPLOYABLES_SETTINGS_KEY`, ...), and `generic-api-key` matched exactly one of them, the campaigns app's, purely on the entropy of a longer hyphenated label -- so the finding is about the app's NAME LENGTH rather than about anything the value contains. Value-keyed with no `paths` (memql#3484): the literal identifies itself, the pattern is closed and app-scoped, and a path constraint would resurface the finding the moment a settings module moves or the seventh app is named something a syllable longer. Renaming the value to dodge the entropy check was the alternative and is worse: it would leave one app spelling its key differently from six siblings for a reason nothing in the code records, and `gitleaks git .` scans COMMITS, so the historical finding would survive the rename anyway."
+regexTarget = "match"
+regexes = ['''memql-os-[a-z]+-v[0-9]+''']

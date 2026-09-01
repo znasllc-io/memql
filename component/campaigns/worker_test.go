@@ -78,6 +78,29 @@ type fakeEngine struct {
 	// catalog is in play at all.
 	shopifyStores []map[string]any
 
+	// senderIdentities backs senderIdentityById (memql#4821), keyed by BARE
+	// id -- the form the campaign row's senderIdentityId is bare-ified to
+	// before it becomes a query argument.
+	senderIdentities map[string]map[string]any
+	// identityReadErr makes senderIdentityById FAIL rather than answer
+	// empty. The two are different outcomes and the difference is the whole
+	// environment-versus-authoring split: an empty answer is an authoring
+	// mistake and terminal, a failure is the cluster's and waits.
+	identityReadErr error
+	// accounts backs clientAccountById, keyed by bare id.
+	accounts map[string]map[string]any
+
+	// emailRules backs emailRuleById (memql#4829), keyed by bare id. Its one
+	// consumer is sendToRecipient resolving which audience a rule mails.
+	emailRules map[string]map[string]any
+
+	// libraryArtifacts / libraryFiles back the CSV import's two owner-gated
+	// reads (memql#4822), keyed by bare id. Absent means "not visible to
+	// this caller", which is the same answer the real queries give and is
+	// what makes the "an artifact id is not a capability" assertion possible.
+	libraryArtifacts map[string]map[string]any
+	libraryFiles     map[string]map[string]any
+
 	calls []recordedCall
 }
 
@@ -127,6 +150,57 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 		return rowsEnvelope(e.shopifyProducts), nil
 	case strings.HasPrefix(q, "query stores"):
 		return rowsEnvelope(e.shopifyStores), nil
+	case strings.HasPrefix(q, "query senderIdentityById"):
+		if e.identityReadErr != nil {
+			return nil, e.identityReadErr
+		}
+		if row, ok := e.senderIdentities[argOf(q, "senderIdentityId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query clientAccountById"):
+		if row, ok := e.accounts[argOf(q, "accountId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query recipientById"):
+		// MODELS THE TIER, which is the whole point of the query: the row
+		// comes back only to its owner or a cluster owner. A fake that
+		// answered regardless would make "a recipient the caller does not
+		// own is not found" untestable while looking covered -- and that
+		// sentence is the entire safety argument for exposing an unscoped
+		// by-id read.
+		if ac == nil || (ac.UserId != testOwner && !ac.IsClusterOwner()) {
+			return rowsEnvelope(nil), nil
+		}
+		wanted := argOf(q, "recipientId")
+		for _, row := range e.roster {
+			if memql.BareShortId(str(row, "id")) == wanted {
+				return rowsEnvelope([]map[string]any{row}), nil
+			}
+		}
+		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query emailRuleById"):
+		if row, ok := e.emailRules[argOf(q, "emailRuleId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query audiences("):
+		rows := make([]map[string]any, 0, 1)
+		if len(e.roster) > 0 {
+			rows = append(rows, map[string]any{"id": "v1:campaigns:audience:" + testAudience})
+		}
+		return rowsEnvelope(rows), nil
+	case strings.HasPrefix(q, "query libraryArtifactById"):
+		if row, ok := e.libraryArtifacts[argOf(q, "artifactId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query libraryFileById"):
+		if row, ok := e.libraryFiles[argOf(q, "fileId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
 	default:
 		return nil, nil
 	}
@@ -246,13 +320,20 @@ func argOf(q, name string) string {
 
 // recordingSender captures every message instead of delivering it, and
 // can be told to fail.
+//
+// It records the SendAs beside the message (memql#4821). The identity is a
+// PARAMETER rather than a header on the message, so a fake that dropped it
+// would leave every identity-resolution assertion reaching for a value it
+// cannot see -- which is how "the campaign sends as the right mailbox"
+// becomes untestable while looking covered.
 type recordingSender struct {
-	mu   sync.Mutex
-	sent []email.Message
-	fail func(n int) error
+	mu     sync.Mutex
+	sent   []email.Message
+	sentAs []email.SendAs
+	fail   func(n int) error
 }
 
-func (s *recordingSender) Send(_ context.Context, msg email.Message) error {
+func (s *recordingSender) Send(_ context.Context, msg email.Message, as email.SendAs) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n := len(s.sent)
@@ -262,7 +343,18 @@ func (s *recordingSender) Send(_ context.Context, msg email.Message) error {
 		}
 	}
 	s.sent = append(s.sent, msg)
+	s.sentAs = append(s.sentAs, as)
 	return nil
+}
+
+// identities returns the SendAs each captured message went out under, in
+// order.
+func (s *recordingSender) identities() []email.SendAs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]email.SendAs, len(s.sentAs))
+	copy(out, s.sentAs)
+	return out
 }
 
 func (s *recordingSender) count() int {
@@ -319,6 +411,18 @@ func recipientRow(id, addr, status string) map[string]any {
 		"id":                 "v1:campaigns:recipient:" + id,
 		"email":              addr,
 		"subscriptionStatus": status,
+	}
+}
+
+// senderIdentityRow is one v1:campaigns:senderIdentity as the engine hands it
+// back (memql#4821).
+func senderIdentityRow(id, address, fromName, status string) map[string]any {
+	return map[string]any{
+		"id":          "v1:campaigns:senderIdentity:" + id,
+		"ownerUserId": "v1:identity:user:" + testOwner,
+		"address":     address,
+		"fromName":    fromName,
+		"status":      status,
 	}
 }
 

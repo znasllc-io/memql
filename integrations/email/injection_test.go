@@ -77,7 +77,7 @@ func TestSMTPSend_ValidateRejectsInjection(t *testing.T) {
 		To:       "guest@example.com\r\nBcc: victim@example.com",
 		Subject:  "Welcome",
 		TextBody: "hello",
-	})
+	}, SendAs{})
 	if err == nil {
 		t.Fatal("SMTPSender.Send delivered a header-injection message")
 	}
@@ -103,7 +103,7 @@ func TestSMTPSend_ClosureGuardsConfigFrom(t *testing.T) {
 		To:       "guest@example.com",
 		Subject:  "Welcome",
 		TextBody: "hello",
-	})
+	}, SendAs{})
 	if err == nil {
 		t.Fatal("SMTPSender.Send delivered a message with an injected From header")
 	}

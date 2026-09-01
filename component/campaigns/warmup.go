@@ -91,6 +91,29 @@ type warmupDecision struct {
 
 // applyWarmup re-evaluates the ramp if it is enabled and due, and sets the
 // limiter accordingly. Called once per drain pass.
+//
+// # One ladder per identity, one rate per process (memql#4821)
+//
+// `warmupStateForIdentity` was built for plurality and, until sending
+// identities existed, received exactly one member: every counter row carried
+// the deployment's single label, so a per-identity read read a singular
+// world. It now evaluates ONE LADDER PER IDENTITY this process has actually
+// mailed as, plus the configured default -- so a deployment sending three
+// clients' campaigns from three mailboxes warms three ladders and each one
+// advances on its own evidence.
+//
+// The LIMITER, though, is one bucket for the whole process, and there is no
+// honest way to make it three: the token bucket paces this replica's outbound
+// calls, not a mailbox's. So the strictest step wins. That direction is
+// forced rather than chosen -- taking the highest would send a cold mailbox's
+// mail at a warm one's rate, which is the exact failure warming exists to
+// prevent, and the ramp's standing invariant is that it may only ever hold
+// the rate DOWN.
+//
+// The cost is stated rather than hidden: a warm identity sharing a process
+// with a cold one sends slower than its own ladder allows. That is a
+// throughput cost on a marketing message, against a reputation cost on a new
+// domain, and only one of those is recoverable.
 func (w *Worker) applyWarmup(systemCtx context.Context, now time.Time) {
 	if !w.cfg.WarmupEnabled || len(w.cfg.WarmupSteps) == 0 || w.store == nil {
 		return
@@ -105,27 +128,77 @@ func (w *Worker) applyWarmup(systemCtx context.Context, now time.Time) {
 		return
 	}
 
-	state, _, err := w.store.WarmupState(systemCtx, w.cfg.SendingIdentity)
-	if err != nil {
-		w.logger.Debug("campaigns: could not read the warming ramp state (engine likely not ready)", "error", err)
-		return
-	}
+	// ONE reputation read for every identity. The rows are keyed by
+	// (identity, domain, day, node) and AggregateReputation folds by domain,
+	// so the aggregate is sliced per identity here rather than re-queried --
+	// a query per identity would multiply the ramp's cost by the number of
+	// mailboxes for evidence already in hand.
 	rows, err := w.store.ReputationSince(systemCtx, now.AddDate(0, 0, -warmupWindowDays).UTC().Format(time.DateOnly))
 	if err != nil {
 		w.logger.Debug("campaigns: could not read reputation counters", "error", err)
 		return
 	}
 
-	next := w.evaluateWarmup(state, AggregateReputation(rows), now)
-	if err := w.store.RecordWarmupState(systemCtx, w.cfg.SendingIdentity, next); err != nil {
-		w.logger.Warn("campaigns: could not record the warming ramp decision", "error", err)
+	slowest := 0
+	for _, identity := range w.warmupIdentities() {
+		state, _, err := w.store.WarmupState(systemCtx, identity)
+		if err != nil {
+			w.logger.Debug("campaigns: could not read the warming ramp state (engine likely not ready)",
+				"identity", identity, "error", err)
+			continue
+		}
+		next := w.evaluateWarmup(state, AggregateReputation(rowsForIdentity(rows, identity)), now)
+		if err := w.store.RecordWarmupState(systemCtx, identity, next); err != nil {
+			w.logger.Warn("campaigns: could not record the warming ramp decision", "identity", identity, "error", err)
+		}
+		if rate := next.RatePerMinute; rate > 0 && (slowest == 0 || rate < slowest) {
+			slowest = rate
+		}
+		if next.Decision != "held" {
+			w.logger.Info("campaigns: warming ramp "+next.Decision,
+				"identity", identity, "step", next.Step,
+				"ratePerMinute", next.RatePerMinute, "reason", next.Reason)
+		}
 	}
-	w.setWarmupRate(next)
-	if next.Decision != "held" {
-		w.logger.Info("campaigns: warming ramp "+next.Decision,
-			"identity", w.cfg.SendingIdentity, "step", next.Step,
-			"ratePerMinute", next.RatePerMinute, "reason", next.Reason)
+	w.setWarmupRate(warmupDecision{RatePerMinute: slowest})
+}
+
+// warmupIdentities is every ladder this replica evaluates: the configured
+// default, plus each identity it has actually mailed as.
+//
+// The default is ALWAYS included, even on a process that has only ever sent
+// as named identities. Dropping it would mean a deployment's own mailbox
+// silently stops being warmed the moment the first client identity is added
+// -- and warming state that stops advancing looks identical to warming state
+// that is holding on evidence.
+func (w *Worker) warmupIdentities() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := []string{w.cfg.SendingIdentityFor("")}
+	for identity := range w.activeIdentities {
+		if identity != out[0] {
+			out = append(out, identity)
+		}
 	}
+	sortStrings(out)
+	return out
+}
+
+// rowsForIdentity narrows the reputation window rows to one sending identity.
+//
+// A row whose sendingIdentity is EMPTY belongs to the default ladder, because
+// that is what an unlabelled counter meant before identities existed and
+// re-attributing that history to nothing would erase every deployment's
+// warming evidence at the moment it first declares an identity.
+func rowsForIdentity(rows []ReputationWindow, identity string) []ReputationWindow {
+	out := make([]ReputationWindow, 0, len(rows))
+	for _, r := range rows {
+		rowIdentity := strings.TrimSpace(r.SendingIdentity)
+		if rowIdentity == identity || (rowIdentity == "" && identity == "default") {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // setWarmupRate applies the step to the send limiter. min(), never max():

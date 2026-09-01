@@ -8,6 +8,7 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // feedback_ingest.go -- the wire from a provider's webhook to the
@@ -161,17 +162,92 @@ func (w *Worker) applyFeedbackReport(ctx context.Context, report FeedbackReport)
 	default:
 		return false, fmt.Errorf("report kind %q is not hard_bounce / soft_bounce / complaint", report.Kind)
 	}
+	campaignID := memql.BareShortId(report.CampaignID)
 	if err := w.store.RecordSuppression(
 		w.systemActorContext(ctx),
 		digest,
 		report.Kind,
 		EmailDomain(report.Email),
-		memql.BareShortId(report.CampaignID),
+		campaignID,
 		report.Note,
 	); err != nil {
 		return false, err
 	}
+	w.recordFeedbackConsent(ctx, report, digest, campaignID)
 	return true, nil
+}
+
+// recordFeedbackConsent appends the consent event behind a provider verdict
+// (memql#4820).
+//
+// # Why the suppression row is not enough
+//
+// The suppression row says the address is on a cluster-wide do-not-mail list.
+// It does NOT say which stream of consent this belongs to, when it changed,
+// or on whose authority -- and those are the questions a client audit and a
+// re-import ask. v1:campaigns:consentEvent is the only place with an answer,
+// and until now it had no production writer at all: the concept shipped in
+// memql#4141, every deployment's stream was empty, and the export answered
+// "no record" for addresses the cluster was actively refusing to mail.
+//
+// # Source is "provider", and that is the honest label
+//
+// The verdict came out of a payload a third party signed with a secret the
+// operator configured, at a source the operator allowlisted. It is not the
+// operator's assertion (that is source "operator", from campaignSuppress) and
+// it is not the recipient's action (that is "one_click"). Collapsing the
+// three would make the stream unable to answer the one thing it exists for.
+//
+// # A report with NO campaign records nothing, deliberately
+//
+// consentEvent is owner-tier and there is no actor in scope on this path: the
+// caller is an automation. The only way to establish an owner is the
+// campaign's own send job, so a provider that does not echo X-Campaign-Id
+// leaves this with nobody to file the event under. Writing it under the
+// automation's actor would produce a row the operator cannot read and the
+// export cannot find -- worse than the gap, because it looks like data. The
+// suppression still happens either way; it is the audit line that is missing,
+// and it is missing loudly here rather than silently misfiled.
+func (w *Worker) recordFeedbackConsent(ctx context.Context, report FeedbackReport, digest, campaignID string) {
+	kind, ok := feedbackConsentKinds[report.Kind]
+	if !ok {
+		return
+	}
+	if campaignID == "" {
+		w.logger.Debug("campaigns: a provider report named no campaign, so its consent event has no owner to be filed under",
+			"kind", report.Kind)
+		return
+	}
+	owner, found, err := w.store.CampaignOwnerForSend(w.systemActorContext(ctx), campaignID)
+	if err != nil || !found || owner == "" {
+		w.logger.Debug("campaigns: could not resolve the owner behind a reported campaign, so no consent event was appended",
+			"campaign", campaignID, "error", err)
+		return
+	}
+	if err := w.store.RecordConsent(ownerActorContext(ctx, owner), kind, ConsentRecord{
+		EventID:     id.NewShortId(),
+		EmailDigest: digest,
+		Source:      "provider",
+		CampaignID:  campaignID,
+		OccurredAt:  time.Now().UTC(),
+	}); err != nil {
+		// The address IS suppressed. A missing consent row is a gap in the
+		// audit trail, not a reason to fail an ingest that has already done
+		// the thing that protects the sending domain.
+		w.logger.Warn("campaigns: suppressed a reported address but could not append its consent event",
+			"campaign", campaignID, "kind", report.Kind, "error", err)
+	}
+}
+
+// feedbackConsentKinds maps a provider verdict onto a consent kind.
+//
+// A SOFT BOUNCE is deliberately absent. It does not suppress, it does not
+// change anybody's consent, and appending a `bounce` event for one would make
+// the stream say a subscriber's permission changed because their mailbox was
+// full for an afternoon.
+var feedbackConsentKinds = map[string]string{
+	"hard_bounce": ConsentBounce,
+	"complaint":   ConsentComplaint,
 }
 
 // failFeedback stamps the inbound row and returns the error to the caller,
