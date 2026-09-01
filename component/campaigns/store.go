@@ -210,6 +210,17 @@ type Recipient struct {
 	Email              string
 	DisplayName        string
 	SubscriptionStatus string
+
+	// Fields is the per-recipient merge data an import carried in
+	// (memql#4822): every CSV column that was not `email` or a display name,
+	// verbatim, reachable from a template as {{fields.<key>}}.
+	//
+	// Enumerable and nothing more. The renderer walks these keys to build a
+	// replacer; it never evaluates a path, so a key that is not present
+	// leaves its tag in the body as literal text rather than resolving to
+	// something. That is the whole reason this is a map rather than an
+	// expression context.
+	Fields map[string]any
 }
 
 // LedgerEntry is the slim delivery projection the resume diff runs over.
@@ -416,6 +427,7 @@ func (s *Store) RosterPage(ctx context.Context, audienceID, cursor string) ([]Re
 			Email:              str(r, "email"),
 			DisplayName:        str(r, "displayName"),
 			SubscriptionStatus: str(r, "subscriptionStatus"),
+			Fields:             objectField(r, "fields"),
 		})
 	}
 	return out, next, nil
@@ -1007,6 +1019,21 @@ func booleanOr(m map[string]any, key string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+// objectField reads a nested object off a row.
+//
+// Returns nil for anything that is not a map, INCLUDING a JSON-ish shape the
+// engine handed back some other way -- there is deliberately no re-parsing
+// here. The one consumer is the merge-tag replacer, and a field it cannot
+// enumerate simply contributes no tags, which leaves them literal in the body
+// and reported by the test send. Guessing at a decode would be the one way to
+// resolve a tag to the wrong value silently.
+func objectField(m map[string]any, key string) map[string]any {
+	if v, ok := m[key].(map[string]any); ok {
+		return v
+	}
+	return nil
 }
 
 // strOr is the string twin of booleanOr, for a field whose absence means a

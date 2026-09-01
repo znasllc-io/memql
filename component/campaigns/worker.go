@@ -612,7 +612,7 @@ func (w *Worker) processRecipient(
 		w.failJob(systemCtx, *job, "cannot mint an unsubscribe token: "+err.Error())
 		return true, err
 	}
-	msg, err := renderMessage(campaign, tmpl, r, unsubscribeURL(w.cfg.UnsubscribeBaseURL, token), w.renderOptions(ownerCtx, campaign, identity))
+	msg, err := renderMessage(campaign, tmpl, r, unsubscribeURL(w.cfg.UnsubscribeBaseURL, token), w.renderOptions(ownerCtx, campaign, identity, r.ID))
 	if err != nil {
 		// Mirrors the mint failure above: a message we cannot render is a job
 		// that cannot proceed, not a recipient to skip silently.
@@ -715,8 +715,17 @@ func (w *Worker) deliver(ctx context.Context, msg email.Message, as email.SendAs
 // account that does not resolve renders the tag empty, which is the tag's
 // documented behaviour for an untied campaign, and an archived client must
 // not be able to stop a send.
-func (w *Worker) renderOptions(ownerCtx context.Context, campaign Campaign, identity resolvedIdentity) RenderOptions {
-	return RenderOptions{ReplyTo: replyToFor(campaign, identity)}
+func (w *Worker) renderOptions(ownerCtx context.Context, campaign Campaign, identity resolvedIdentity, recipientID string) RenderOptions {
+	accountName, err := w.store.AccountName(ownerCtx, campaign.AccountID)
+	if err != nil {
+		w.logger.Debug("campaigns worker: could not resolve the campaign's account name for {{accountName}}",
+			"campaign", campaign.ID, "error", err)
+	}
+	return RenderOptions{
+		ReplyTo:     replyToFor(campaign, identity),
+		AccountName: accountName,
+		Tracking:    w.cfg.trackingRenderFor(campaign, deliveryRowID(campaign.ID, recipientID)),
+	}
 }
 
 // nowUTC is the worker's clock, tolerating a zero-valued Worker. Tests
