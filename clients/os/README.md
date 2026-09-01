@@ -508,3 +508,71 @@ Training's domain tag is likewise render-and-filter only, which is what the
 design asks for: nothing about routing, attachment or agent behaviour
 consults `knowledgeDomain.accountId`, and `domainsForAccount` is the only
 query in the tree that mentions it.
+## Packages, inside Deployables (epic memql#4794)
+
+`src/apps/deployables/packages/` is the other half of what a deployable IS: a
+site is what serves, and a package is where it came from. It ships a live
+packages list, a package detail with the analysis report and the deployment
+timeline, an always-present confirm gate, and the per-site lifecycle the portal
+used to own. Five things about it are new rules rather than repetitions of the
+five apps before it.
+
+- **THE ONE-FEED RULE IS PER CONCEPT, NOT PER APP.** Deployables now retains
+  TWO collections at its root -- sites and packages -- and that is not a
+  violation of the rule the app was built on. What must never happen is two
+  subscriptions over the SAME concept, free to disagree about what the cluster
+  holds; two concepts cannot disagree, because they are describing different
+  things. A package's deployment TIMELINE is a third, and it is retained by the
+  detail panel rather than the root, because keeping every package's timeline
+  live would subscribe the window to every deploy in the cluster to render one.
+
+- **A FILTER RE-BASELINES THROUGH `useLiveView`'s KEY, not through a `key` prop
+  on the list.** Revealing rows the browser already had is not the cluster
+  sending them, so the Archived toggle must not fire the arrival cue for every
+  newly-visible row. `viewKey` is where a re-baseline is expressed
+  (`live/liveView.ts` rebuilds on it), and it is one line rather than an
+  unmount.
+
+- **A CUE AND A STANDING MARK ARE DIFFERENT STATEMENTS, and the update needs
+  both.** The arrival ring says "this just changed" and decays on the clock;
+  the `update` chip says "there is a newer version than the one you are
+  running" and stays until somebody deploys. A cue alone would make the news
+  visible only to whoever happened to be looking. A chip alone would make it
+  arrive in silence. `updateAvailable` is named in the fingerprint DESPITE
+  being written by a ten-minute poll, because the engine's feed only writes it
+  when the upstream actually moved -- so a flip is news by construction rather
+  than a heartbeat.
+
+- **THE STAGE RAIL DRAWS WHAT DID NOT HAPPEN.** `StageRail.tsx` is the one new
+  visual idea here, and the reason it earns a sequenced device -- normally the
+  most over-used structure in software design -- is that a deploy has a LAW
+  about its order (`stage -> roll -> publish`, reversed on rollback). The part
+  that matters is the SKIPPED stages: an app-only package draws them, dimmed,
+  with the reason beside them, because "nothing had to restart" is what
+  explains a deploy that took seconds and a person counting missing steps
+  cannot find it. `railFor` is pure and exported for exactly that reason --
+  what the rail SAYS is the assertion, not what it renders.
+
+  Two smaller rules came out of looking at it in a browser rather than in
+  jsdom, which has no CSS engine and would have passed either version: the
+  unreached stages dim their CONTENT rather than the whole row, or the
+  connector goes with them and the rail stops dead where the run is; and they
+  carry no glyph, because a crossed circle reads as "forbidden" and put five
+  refusal symbols on a healthy deploy.
+
+- **THE CONFIRM GATE IS A PANEL, NOT A DIALOG.** The report is the size of a
+  page, and a scrolling modal is a worse page. More importantly a refusal
+  inside a modal that then closes is a refusal nobody can re-read, which is the
+  same reason this shell has no toasts. The gate lives on the ROW
+  (`status: "awaiting_confirm"`) rather than in component state, so somebody
+  who closed the window finds their deploy exactly where they left it.
+
+Two things it deliberately does not do. There is no raw `bundleRef` editor
+anywhere (D13: parity covers the four features somebody uses, not the operator
+escape hatch -- a field that accepts any URI is a way to point a live site at
+nothing). And a `systemOwned` row renders NO lifecycle controls at all, not
+disabled ones: the seeded portal and OS sites are exempt from the lifecycle
+entirely, and six greyed-out buttons are six controls somebody has to read past
+to learn they are not for them. The server refuses those writes regardless --
+the presentation is the courtesy, `component/memql/platform_site_status_guard.go`
+is the gate.

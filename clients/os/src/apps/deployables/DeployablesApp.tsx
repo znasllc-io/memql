@@ -9,6 +9,9 @@ import type { OsAppProps } from "../../system/registry";
 import { ActionsSection } from "./actions/ActionsSection";
 import { MapSection, NO_SELECTION, type MapSelection } from "./map/MapSection";
 import type { MapNode } from "./map/layout";
+import { PackagesSection } from "./packages/PackagesSection";
+import { packageFromRow, type PackageRow } from "./packages/rows";
+import { usePackages } from "./packages/usePackages";
 import { siteFingerprint, siteFromRow, type SiteRow } from "./rows";
 import { SitesSection } from "./SitesSection";
 import {
@@ -40,12 +43,15 @@ import { useSites } from "./useSites";
 //
 // Sections are the app's own navigation. It never opens a window.
 
-const EMPTY_SNAPSHOT: LiveSnapshot<SiteRow> = {
+// The disconnected snapshot, generic over the row type so the two feeds share
+// one rather than casting. A cast here would be the kind of thing that reads
+// as harmless and hides a real type change later.
+const EMPTY_SNAPSHOT = <T,>(): LiveSnapshot<T> => ({
   rows: [],
   state: "disconnected",
   error: "",
   version: 0,
-};
+});
 
 export function DeployablesApp({
   sectionId,
@@ -66,6 +72,14 @@ export function DeployablesApp({
   const canWrite = roleAdmits(actorRole, { min: "admin" });
 
   const { source: collection, reseed } = useSites();
+  // A SECOND FEED, over a second concept, and deliberately not folded into the
+  // one above. `useSites` and `usePackages` read different concepts with
+  // different shapes -- one feed cannot carry both -- and each is retained
+  // once here for the life of the window so switching sections costs nothing.
+  // The rule the app root exists for is one feed PER CONCEPT, not one feed
+  // total: what must never happen is two subscriptions over the SAME concept
+  // free to disagree about what the cluster holds.
+  const { source: packageCollection, reseed: reseedPackages } = usePackages();
 
   // PROJECT, then narrow, in one pass. The collection holds RAW wire rows --
   // the fold upserts an event payload as the row type with no projection hook
@@ -78,12 +92,18 @@ export function DeployablesApp({
   const sites = useLiveView<Row, SiteRow>(collection, "sites", (rows) =>
     rows.map(siteFromRow).filter((s) => s.id !== "" && !s.deleted),
   );
-  const snapshot = sites?.snapshot ?? EMPTY_SNAPSHOT;
+  const snapshot = sites?.snapshot ?? EMPTY_SNAPSHOT<SiteRow>();
 
   // The arrival cue, ONCE, for the whole app. The list renders it through
   // LiveList and the map draws it on its nodes; both read the same reducer over
   // the same snapshot, so a publish announces itself identically in both.
   const ticks = useArrivals(snapshot, (s) => s.id, siteFingerprint);
+
+  const packages = useLiveView<Row, PackageRow>(packageCollection, "packages", (rows) =>
+    rows.map(packageFromRow).filter((p) => p.id !== ""),
+  );
+  const packageSnapshot = packages?.snapshot ?? EMPTY_SNAPSHOT<PackageRow>();
+  const [selectedPackageId, setSelectedPackageId] = useState("");
 
   const [selection, setSelection] = useState<MapSelection>(NO_SELECTION);
   const selectedSiteId = selection.siteIds.length === 1 ? (selection.siteIds[0] ?? "") : "";
@@ -132,6 +152,21 @@ export function DeployablesApp({
   if (sectionId === "actions") {
     return <ActionsSection domain={config.domain} />;
   }
+  if (sectionId === "packages") {
+    return (
+      <PackagesSection
+        source={packages}
+        snapshot={packageSnapshot}
+        selectedPackageId={selectedPackageId}
+        onSelect={setSelectedPackageId}
+        viewerUserId={viewerUserId}
+        domain={config.domain}
+        canWrite={canWrite}
+        onReseed={reseedPackages}
+        onAsk={askContext}
+      />
+    );
+  }
   if (sectionId === "sites") {
     return (
       <SitesSection
@@ -143,6 +178,7 @@ export function DeployablesApp({
         viewerUserId={viewerUserId}
         canPublish={canWrite}
         clusterDomain={config.domain}
+        canManage={canWrite}
         onAsk={askContext}
         onReseed={reseed}
       />

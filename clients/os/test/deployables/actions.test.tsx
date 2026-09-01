@@ -61,11 +61,18 @@ describe("who is offered the write half", () => {
   const app = appById(OS_REGISTRY, "deployables")!;
 
   it("hides Actions from a reader and a writer, and shows it to an admin", () => {
-    expect(sectionsForRole(app, "reader").map((s) => s.id)).toEqual(["map", "sites", "settings"]);
-    expect(sectionsForRole(app, "writer").map((s) => s.id)).toEqual(["map", "sites", "settings"]);
+    // PACKAGES IS UNGATED, and that is deliberate rather than an omission
+    // (epic memql#4794): v1:platform:package declares the composite owner
+    // tier, so every signed-in person has packages of their own to read and
+    // the ENGINE decides how far the list reaches. Gating the section would
+    // hide somebody's own packages from them. Only the write controls inside
+    // it are admin+, exactly as Sites gates publishing rather than the list.
+    expect(sectionsForRole(app, "reader").map((s) => s.id)).toEqual(["map", "sites", "packages", "settings"]);
+    expect(sectionsForRole(app, "writer").map((s) => s.id)).toEqual(["map", "sites", "packages", "settings"]);
     expect(sectionsForRole(app, "admin").map((s) => s.id)).toEqual([
       "map",
       "sites",
+      "packages",
       "actions",
       "settings",
     ]);

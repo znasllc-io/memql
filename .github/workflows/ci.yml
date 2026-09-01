@@ -981,12 +981,32 @@ jobs:
       # an assignment, the substitution's exit status IS the statement's, so
       # `bash -e` aborts and the lane goes red. The empty check covers the
       # other half: a script that exits 0 with no output.
+      # THE PER-PACKAGE TIMEOUT IS 600s, RAISED FROM 300s (epic memql#4794),
+      # and the reason is a measurement rather than a preference.
+      #
+      # `-timeout` is per PACKAGE, and cmd/memql-lsp was already running at
+      # 209s and 245s of the 300s budget on green main runs -- 70% and 82%.
+      # That is not a margin: it makes every lane red a coin flip on runner
+      # speed, and it makes the NEXT change to the DSL tree the one that gets
+      # blamed. The packages epic added ~30 constructs, which grows every tree
+      # load that package makes, and tipped it -- twice, with a pass in
+      # between, which is the signature of a budget sitting at its limit rather
+      # than of a hang.
+      #
+      # 600s is 2.4x the worst observed rather than a round number pulled from
+      # nowhere. It does not hide a genuinely hung test: the JOB carries
+      # `timeout-minutes: 20` above, so a deadlock still fails the lane -- this
+      # only stops a SLOW package being reported as a hung one.
+      #
+      # If a package ever approaches 600s, the answer is to make it cheaper
+      # rather than to raise this again. cmd/memql-lsp is slow because most of
+      # its cases build a full engine from the embedded DSL tree.
       - name: go test (excluding the db-gated trees db-tests owns)
         if: ${{ env.RUN_GO == 'true' }}
         run: |
           pkgs="$(scripts/ci/db-gated-packages.sh --complement-cacheable)"
           test -n "$pkgs" || { echo "::error::db-gated-packages.sh produced an empty package list"; exit 1; }
-          go test -timeout=300s $pkgs
+          go test -timeout=600s $pkgs
       # Build-tagged test lanes (#1338, #2903). The untagged `go test ./...`
       # above never RUNS a //go:build-tagged test file, so a tagged suite is
       # CI-invisible without an explicit -tags run.

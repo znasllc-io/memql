@@ -92,11 +92,41 @@ func LoadUnifiedConcepts(logger *slog.Logger) (int, error) {
 // stop a node starting); memqllint turns each entry into a diagnostic,
 // which is the only pre-boot gate a product bundle has.
 func LoadUnifiedConceptsWithSkips(logger *slog.Logger) (int, []ConceptSkip, error) {
+	concepts, skips, err := BuildUnifiedConcepts(logger, memqldsl.Tree())
+	if err != nil {
+		return 0, skips, err
+	}
+
+	// Merge into the global registry. Use the additive MergeAll
+	// path so legacy registrations stay present during the
+	// transitional state.
+	memoryNodes.MergeAll(concepts)
+
+	if logger != nil {
+		logger.Info("unified loader: registered concepts",
+			"component", "memql.unifiedLoader",
+			"count", len(concepts))
+		warnUndeclaredRowAuthz(logger, concepts)
+	}
+
+	return len(concepts), skips, nil
+}
+
+// BuildUnifiedConcepts is LoadUnifiedConceptsWithSkips without the
+// registration: it builds every concept declared in the given tree and RETURNS
+// them, touching no global state.
+//
+// The split exists because "validate a tree" and "install a tree" are
+// different operations that had been one function (memql#4794). The offline
+// package analysis has to do the first over a tree that must never become the
+// process's live schema, even for an instant -- so it builds into a registry
+// of its own (memoryNodes.NewRegistry) and hands that to Init. Boot still does
+// both, in that order, through the wrapper above.
+func BuildUnifiedConcepts(logger *slog.Logger, tree fs.FS) (map[string]*memoryNodes.Concept, []ConceptSkip, error) {
 	var skips []ConceptSkip
-	tree := memqldsl.Tree()
 	paths, err := dslfs.WalkMemqlFiles(tree)
 	if err != nil {
-		return 0, nil, fmt.Errorf("walk unified DSL tree: %w", err)
+		return nil, nil, fmt.Errorf("walk unified DSL tree: %w", err)
 	}
 
 	// Pass 1: read + parse every concept file, cache its decls + `use`
@@ -173,7 +203,7 @@ func LoadUnifiedConceptsWithSkips(logger *slog.Logger) (int, []ConceptSkip, erro
 				// mis-namespaced concept changes canonical ids, so boot,
 				// the memqllint parity tier, and the sense build must all
 				// fail loudly here.
-				return 0, skips, fmt.Errorf("%s: %w", cf.path, idErr)
+				return nil, skips, fmt.Errorf("%s: %w", cf.path, idErr)
 			}
 
 			resolveRelationshipTargets(decl, cf.dir, cf.uses, index, id, logger)
@@ -198,19 +228,7 @@ func LoadUnifiedConceptsWithSkips(logger *slog.Logger) (int, []ConceptSkip, erro
 		}
 	}
 
-	// Merge into the global registry. Use the additive MergeAll
-	// path so legacy registrations stay present during the
-	// transitional state.
-	memoryNodes.MergeAll(concepts)
-
-	if logger != nil {
-		logger.Info("unified loader: registered concepts",
-			"component", "memql.unifiedLoader",
-			"count", len(concepts))
-		warnUndeclaredRowAuthz(logger, concepts)
-	}
-
-	return len(concepts), skips, nil
+	return concepts, skips, nil
 }
 
 // warnUndeclaredRowAuthz reports every concept that entered the tree

@@ -63,3 +63,35 @@ automation reconcileCustomDomains {
     builtin customDomainReconcile ()
   }
 }
+
+// ---- update detection (epic memql#4794, D11) ----
+
+/// Notice a push or release for a repository this cluster tracks as a package. Rides the existing
+/// inbound seam -- the receiver has already checked the source allowlist and the per-source HMAC by
+/// the time a row exists -- so this adds no HTTP surface at all. A delivery matching no package is
+/// a no-op: most of a cluster's webhooks are about something else.
+@trigger(event="node.created", concept="v1:platform:inboundRequest", partition="*")
+automation notePackageUpstreamFromWebhook {
+  args {
+    id     any
+    source any
+    body   any
+  }
+  step note {
+    builtin packageNoteUpstreamFromWebhook (
+      inboundRequestId: id,
+      source: source,
+      body: body
+    )
+  }
+}
+
+/// The polling fallback for clusters no webhook can reach. Every 10 minutes, which is the cadence
+/// of a cue rather than of a deploy -- nothing here deploys anything, and the person who sees the
+/// cue decides whether a ten-minute-old answer was worth acting on.
+@trigger(schedule="0 */10 * * * *")
+automation pollPackageUpstreams {
+  step poll {
+    builtin packagePollUpstream ()
+  }
+}

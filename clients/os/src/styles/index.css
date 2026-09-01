@@ -1896,6 +1896,18 @@ button:not(:disabled):active {
   color: var(--os-ink);
   font-size: var(--os-text-base);
 }
+/* A CONTROL INSIDE A NOTICE IS A CONTROL, not a banner. `.os-notice` is a
+ * column flex, so a child stretches to its full width by default -- which
+ * turned "Try again" and "Deploy the update" into full-bleed bars that read as
+ * the notice itself rather than as something to press. Narrow selector: the
+ * text children keep stretching, which costs nothing since they are
+ * left-aligned anyway. */
+.os-notice > .os-button,
+.os-notice > .os-chips,
+.os-notice > a.os-button {
+  align-self: flex-start;
+}
+
 .os-notice[data-tone="info"] {
   border-left-color: var(--os-accent);
   background: var(--os-accent-soft);
@@ -3648,4 +3660,462 @@ a.os-button {
   .os-record-value {
     transition: none;
   }
+}
+
+/* ==========================================================================
+ * Packages (epic memql#4794)
+ * ==========================================================================
+ *
+ * The one new visual idea here is THE STAGE RAIL, and everything else is the
+ * app's existing voice. That restraint is deliberate: a section that arrived
+ * with its own palette would read as a different product bolted on, and the
+ * shell's tokens are the design.
+ *
+ * The rail is worth the one idea because a deploy is the only object in this
+ * product with a LAW about its order -- stage, then roll, then publish,
+ * reversed on the way back -- and because the most useful thing it can say is
+ * what a run did NOT do. A skipped stage is drawn, dimmed, with its reason
+ * beside it, rather than left out: "nothing had to restart" is the sentence
+ * that explains why an app-only deploy lands in seconds, and a person counting
+ * missing steps cannot find it.
+ */
+
+.os-rail {
+  display: grid;
+  gap: 0;
+  margin: 10px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.os-rail-stage {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: start;
+  gap: 10px;
+  padding: 5px 0;
+  position: relative;
+}
+
+/* THE LINE IS A PSEUDO-ELEMENT ON EACH STAGE, not a border on the list, so it
+ * can stop at the last one. A border on the container would run past the final
+ * mark and read as a step that has not been named yet. */
+.os-rail-stage::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 22px;
+  bottom: -5px;
+  width: 1px;
+  /* Brighter than --os-line, which is tuned for a box edge against a plate and
+   * disappears as a 1px thread over the panel's ground. */
+  background: color-mix(in oklab, var(--os-line) 65%, var(--os-ink));
+  opacity: 0.5;
+}
+.os-rail-stage:last-child::before {
+  display: none;
+}
+
+.os-rail-mark {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  border: 1px solid var(--os-line);
+  background: var(--os-plate);
+  color: var(--os-muted);
+  z-index: 1;
+}
+
+.os-rail-body {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.os-rail-label {
+  font-size: var(--os-text-sm);
+  color: var(--os-ink);
+}
+
+.os-rail-note {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  text-wrap: pretty;
+}
+
+.os-rail-stage[data-state="done"] .os-rail-mark {
+  border-color: var(--os-accent);
+  background: var(--os-accent-soft);
+  color: var(--os-accent);
+}
+
+/* THE RUNNING STAGE IS THE ONE THING MOVING, so it is the only thing that
+ * animates. A ring rather than a fill: the mark stays the same size, so the
+ * rail does not shift as a deploy advances. */
+.os-rail-stage[data-state="current"] .os-rail-mark {
+  border-color: var(--os-accent);
+  background: var(--os-accent);
+  box-shadow: 0 0 0 0 var(--os-accent-soft);
+  animation: os-rail-pulse 1.8s var(--os-ease) infinite;
+}
+.os-rail-stage[data-state="current"] .os-rail-label {
+  color: var(--os-accent);
+}
+
+@keyframes os-rail-pulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--os-accent-soft);
+  }
+  70% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+/* Reduced motion still gets a mark -- held rather than pulsing. "No animation"
+ * would leave those readers unable to tell which stage is running, which is a
+ * different failure from the one the setting asks about. */
+@media (prefers-reduced-motion: reduce) {
+  .os-rail-stage[data-state="current"] .os-rail-mark {
+    animation: none;
+    box-shadow: 0 0 0 3px var(--os-accent-soft);
+  }
+}
+
+.os-rail-stage[data-state="skipped"] .os-rail-mark {
+  border-style: dashed;
+  color: var(--os-muted);
+}
+.os-rail-stage[data-state="skipped"] .os-rail-label {
+  color: var(--os-muted);
+}
+
+.os-rail-stage[data-state="stopped"] .os-rail-mark {
+  border-color: var(--os-warn);
+  color: var(--os-warn);
+}
+.os-rail-stage[data-state="stopped"] .os-rail-label {
+  color: var(--os-warn);
+}
+
+/* AN UNREACHED STAGE DIMS ITS CONTENT, NOT ITSELF. Dimming the whole <li>
+ * took the connector with it, and the rail then stopped dead after the running
+ * stage -- which reads as a picture that failed to draw rather than as steps
+ * that have not happened yet. The line is the one part that has to stay whole:
+ * it is what says these are one sequence. */
+.os-rail-stage[data-state="ahead"] .os-rail-mark,
+.os-rail-stage[data-state="ahead"] .os-rail-body {
+  opacity: 0.45;
+}
+
+/* The reversed rail (a rollback) reads bottom-up, so the connector is drawn
+ * upward instead. Same component, same order in the DOM -- only the reading
+ * direction changes, which is what keeps a screen reader's order honest. */
+.os-rail[data-reversed="true"] .os-rail-stage::before {
+  top: -5px;
+  bottom: 22px;
+}
+
+/* ---- the report -------------------------------------------------------- */
+
+.os-report {
+  display: grid;
+  gap: 14px;
+}
+
+.os-report-part {
+  display: grid;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--os-line);
+}
+
+.os-report-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--os-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--os-muted);
+}
+
+.os-report-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.os-report-item {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+  border: 1px solid var(--os-line);
+}
+.os-report-item[data-problem="true"] {
+  border-color: var(--os-warn);
+}
+
+.os-report-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.os-report-name {
+  font-size: var(--os-text-sm);
+  color: var(--os-ink);
+}
+
+.os-report-path,
+.os-report-plan {
+  margin: 0;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  font-family: var(--os-font-mono);
+  overflow-wrap: anywhere;
+}
+.os-report-plan {
+  font-family: var(--os-font);
+}
+
+.os-report-problems {
+  display: grid;
+  gap: 8px;
+}
+
+.os-report-fast {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--os-text-xs);
+  color: var(--os-accent);
+}
+
+/* The build log is a DISCLOSURE, closed by default. It is the answer to "why
+ * did my build fail" and it is also a wall of npm output -- open by default it
+ * would bury the refusal that sits above it. */
+.os-report-log {
+  border-radius: var(--os-radius-sm);
+  border: 1px solid var(--os-line);
+  background: var(--os-ground);
+}
+.os-report-log > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  cursor: pointer;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+.os-report-log pre {
+  margin: 0;
+  padding: 0 9px 9px;
+  max-height: 240px;
+  overflow: auto;
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+  color: var(--os-ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---- the package list -------------------------------------------------- */
+
+.os-pkg-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.os-pkg-version {
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+.os-archive-toggle {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding-top: 8px;
+  border-top: 1px solid var(--os-line);
+}
+
+/* ---- one attempt in the timeline --------------------------------------- */
+
+.os-attempt {
+  display: grid;
+  gap: 6px;
+  padding: 9px 11px;
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+  border: 1px solid var(--os-line);
+}
+.os-attempt[data-status="failed"],
+.os-attempt[data-status="refused"] {
+  border-color: color-mix(in oklab, var(--os-warn) 40%, var(--os-line));
+}
+
+.os-attempt-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.os-attempt-version {
+  font-size: var(--os-text-sm);
+  color: var(--os-ink);
+}
+
+.os-attempt-status {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  margin-left: auto;
+}
+.os-attempt-status[data-status="succeeded"] {
+  color: var(--os-accent);
+}
+.os-attempt-status[data-status="failed"],
+.os-attempt-status[data-status="refused"] {
+  color: var(--os-warn);
+}
+
+.os-attempt-sites {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.os-attempt-sites li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+/* ---- the hostname picker ----------------------------------------------- */
+
+.os-host-pick {
+  display: grid;
+  gap: 3px;
+  padding: 8px 0;
+}
+
+.os-host-name {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+/* The preview is the WHOLE answer to "what will this be called", so it is a
+ * line of its own rather than a hint inside the field: somebody typing a slug
+ * is choosing a hostname, and the hostname is the thing they should be
+ * reading. */
+.os-host-preview {
+  margin: 0;
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+.os-host-preview[data-ok="true"] {
+  color: var(--os-accent);
+}
+
+/* ---- destructive corners ----------------------------------------------- */
+
+.os-danger-part {
+  border-top-color: color-mix(in oklab, var(--os-warn) 35%, var(--os-line));
+}
+
+.os-confirm-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.os-confirm-row .os-input {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+/* ---- the version list -------------------------------------------------- */
+
+.os-versions {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.os-version {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 9px;
+  border-radius: var(--os-radius-xs);
+  background: var(--os-plate);
+  border: 1px solid var(--os-line);
+  font-size: var(--os-text-xs);
+}
+.os-version[data-current="true"] {
+  border-color: var(--os-accent);
+}
+
+.os-version-when {
+  color: var(--os-muted);
+}
+
+.os-version-ref {
+  color: var(--os-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.os-version .os-button,
+.os-version .os-chip {
+  margin-left: auto;
+}
+
+.os-form-label {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+.os-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }

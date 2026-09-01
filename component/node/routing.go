@@ -253,6 +253,31 @@ func defaultRoutingRules() []RoutingRule {
 		// on. The sweep's no-change passes write no row at all.
 		{Pattern: "graph.node.created.v1:platform:customDomain", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:platform:customDomain", TargetType: ""},
+		// Packages (epic memql#4794, D7). Both concepts broadcast, both
+		// verbs, and the reason is the epic's headline rather than a cache:
+		// the rows are written on whichever node is RUNNING THE PIPELINE and
+		// read in the OS window the bff is serving. Without these rules
+		// default-deny leaves the packages list correct on load and frozen
+		// after -- which is the failure mode that looks like it is working,
+		// and the one clients/os/README.md names as the mistake a new app
+		// makes by default.
+		//
+		// `updated` carries most of the weight here. A deployment ADVANCES by
+		// writing its own status, six times, through the D6 stage order, and
+		// a person watching a deploy is watching exactly those updates. On
+		// the package row it is the D11 feeds' updateAvailable flip, which is
+		// the entire mechanism behind the update cue.
+		//
+		// SAFE TO BROADCAST, checked rather than assumed: no automation in
+		// the tree triggers on either concept, so there is no consumer to
+		// double-fire. Volume is bounded by human action -- a package is
+		// added by a click and a deployment writes single-digit rows per
+		// attempt -- which is the same ground v1:worker:invocation was
+		// EXCLUDED on, in the other direction.
+		{Pattern: "graph.node.created.v1:platform:package", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:platform:package", TargetType: ""},
+		{Pattern: "graph.node.created.v1:platform:packageDeployment", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:platform:packageDeployment", TargetType: ""},
 		// ---- The browser-facing completion (memql#4542) -------------------
 		//
 		// Everything from here to the end of this block was added by ONE

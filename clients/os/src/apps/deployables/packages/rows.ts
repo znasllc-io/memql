@@ -1,0 +1,240 @@
+import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+
+import { boolOr, flatten } from "../../../kit";
+
+// What the Packages surface reads, projected once.
+//
+// Both concepts are declared in dsl/platform/concepts.memql and both are
+// BROADCAST (component/node/routing.go carries created + updated for each), so
+// everything here is live with no polling: a deploy advances by writing its own
+// status six times, and those writes are what a person watching a deploy is
+// watching.
+
+/** The tracked source (`dsl/platform/concepts.memql`). */
+export const PACKAGE_CONCEPT = "v1:platform:package";
+
+/** One deployment attempt -- the append-only timeline. */
+export const DEPLOYMENT_CONCEPT = "v1:platform:packageDeployment";
+
+export interface PackageRow {
+  id: string;
+  ownerUserId: string;
+  name: string;
+  sourceKind: string;
+  repoUrl: string;
+  repoRef: string;
+  repoTokenRef: string;
+  artifactId: string;
+  deployedVersion: string;
+  latestKnownVersion: string;
+  updateAvailable: boolean;
+  status: string;
+  createdAt: string;
+}
+
+export function packageFromRow(row: Row): PackageRow {
+  const flat = flatten(row);
+  return {
+    id: rowString(flat, "id"),
+    ownerUserId: rowString(flat, "ownerUserId"),
+    name: rowString(flat, "name"),
+    sourceKind: rowString(flat, "sourceKind"),
+    repoUrl: rowString(flat, "repoUrl"),
+    repoRef: rowString(flat, "repoRef"),
+    repoTokenRef: rowString(flat, "repoTokenRef"),
+    artifactId: rowString(flat, "artifactId"),
+    deployedVersion: rowString(flat, "deployedVersion"),
+    latestKnownVersion: rowString(flat, "latestKnownVersion"),
+    updateAvailable: boolOr(flat, "updateAvailable", false),
+    status: rowString(flat, "status"),
+    createdAt: rowString(flat, "createdAt"),
+  };
+}
+
+/**
+ * WHAT A PERSON WOULD CALL A CHANGE, and nothing that moves on a timer.
+ *
+ * This is the arrival cue's whole contract (`clients/os/README.md`): anything
+ * named here announces itself, so a liveness field would turn the list into a
+ * strobe. There is no `lastSeenAt` on this concept to get wrong -- but
+ * `latestKnownVersion` and `updateAvailable` ARE written by a poll on a ten
+ * minute cadence, and they are named here deliberately anyway. The engine's
+ * feed only writes them when the upstream actually moved
+ * (component/packages/feeds.go), so a flip is news by construction: it means
+ * somebody pushed to the repository this package tracks, which is exactly the
+ * thing a person wants to be told about.
+ */
+export function packageFingerprint(p: PackageRow): string {
+  return [
+    p.name,
+    p.sourceKind,
+    p.repoUrl,
+    p.repoRef,
+    p.repoTokenRef,
+    p.deployedVersion,
+    p.latestKnownVersion,
+    p.updateAvailable ? "update" : "current",
+    p.status,
+  ].join(" ");
+}
+
+export interface DeployableOutcome {
+  name: string;
+  siteId: string;
+  hostname: string;
+  bundleRef: string;
+  version: string;
+  created: boolean;
+  refusal?: { code: string; message: string; scope?: string };
+}
+
+export interface DeploymentRow {
+  id: string;
+  packageId: string;
+  sourceVersion: string;
+  status: string;
+  report: AnalysisReport | null;
+  dslVersion: string;
+  deployables: DeployableOutcome[];
+  snapshotArtifactId: string;
+  buildLogTail: string;
+  error: { code: string; message: string; scope?: string } | null;
+  requestedBy: string;
+  startedAt: string;
+  finishedAt: string;
+  createdAt: string;
+}
+
+export interface AnalysisReport {
+  name?: string;
+  formatVersion?: number;
+  sourceVersion?: string;
+  deployables?: ReportDeployable[];
+  dslDomains?: ReportDomain[];
+  goPacks?: ReportGoPack[];
+  problems?: ReportProblem[];
+  ok?: boolean;
+}
+
+export interface ReportDeployable {
+  name: string;
+  kind: string;
+  path: string;
+  buildPlan: string;
+  command?: string;
+  output: string;
+  prebuilt: boolean;
+  binding?: { storeDomain?: string; storefrontTokenRef?: string };
+  problem?: ReportProblem;
+}
+
+export interface ReportDomain {
+  domain: string;
+  constructs: Record<string, number>;
+  files: number;
+  reserved?: boolean;
+}
+
+export interface ReportGoPack {
+  path: string;
+  module?: string;
+  note: string;
+}
+
+export interface ReportProblem {
+  code: string;
+  message: string;
+  scope?: string;
+  fatal: boolean;
+}
+
+export function deploymentFromRow(row: Row): DeploymentRow {
+  const flat = flatten(row);
+  return {
+    id: rowString(flat, "id"),
+    packageId: rowString(flat, "packageId"),
+    sourceVersion: rowString(flat, "sourceVersion"),
+    status: rowString(flat, "status"),
+    report: objectOf<AnalysisReport>(flat, "report"),
+    dslVersion: rowString(flat, "dslVersion"),
+    deployables: listOf<DeployableOutcome>(flat, "deployables"),
+    snapshotArtifactId: rowString(flat, "snapshotArtifactId"),
+    buildLogTail: rowString(flat, "buildLogTail"),
+    error: objectOf<{ code: string; message: string; scope?: string }>(flat, "error"),
+    requestedBy: rowString(flat, "requestedBy"),
+    startedAt: rowString(flat, "startedAt"),
+    finishedAt: rowString(flat, "finishedAt"),
+    createdAt: rowString(flat, "createdAt"),
+  };
+}
+
+/**
+ * A deployment row is APPEND-ONLY past a terminal status, so the only thing
+ * that ever changes about one is which stage it has reached. That IS the
+ * change a person is watching, so `status` is the fingerprint and there is
+ * nothing else worth naming.
+ */
+export function deploymentFingerprint(d: DeploymentRow): string {
+  return d.status;
+}
+
+function objectOf<T>(row: Record<string, unknown>, key: string): T | null {
+  const raw = row[key];
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === "object" && !Array.isArray(raw)) return raw as T;
+  if (typeof raw === "string" && raw !== "") {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed !== null && typeof parsed === "object") return parsed as T;
+    } catch {
+      // A field that is not JSON is a field this surface cannot render, and
+      // rendering nothing is the honest answer. Never a thrown parse error:
+      // one unreadable report must not blank a whole timeline.
+    }
+  }
+  return null;
+}
+
+function listOf<T>(row: Record<string, unknown>, key: string): T[] {
+  const raw = row[key];
+  if (Array.isArray(raw)) return raw as T[];
+  if (typeof raw === "string" && raw !== "") {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed as T[];
+    } catch {
+      // Same reasoning as objectOf.
+    }
+  }
+  return [];
+}
+
+// ---------------------------------------------------------------------------
+// Presentation
+// ---------------------------------------------------------------------------
+
+/** What this package's source IS, in the words a person used to add it. */
+export function sourceLabel(p: PackageRow): string {
+  if (p.sourceKind === "repo") {
+    const ref = p.repoRef === "" ? "default branch" : p.repoRef;
+    return `${shortRepo(p.repoUrl)} at ${ref}`;
+  }
+  if (p.sourceKind === "artifact") return "uploaded zip";
+  return "source unknown";
+}
+
+export function shortRepo(url: string): string {
+  const trimmed = url
+    .replace(/^https?:\/\//, "")
+    .replace(/\.git$/, "")
+    .replace(/\/$/, "");
+  return trimmed.replace(/^github\.com\//, "");
+}
+
+/** A commit sha reads as its first seven characters; a tag reads as itself. */
+export function shortVersion(v: string): string {
+  const t = v.trim();
+  if (t === "") return "";
+  if (/^[0-9a-f]{16,}$/i.test(t)) return t.slice(0, 7);
+  return t;
+}

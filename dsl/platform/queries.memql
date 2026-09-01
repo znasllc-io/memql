@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use common.traits.{ isActiveRecord, isNotDeleted }
+use common.traits.{ isActiveRecord, isNotArchived, isNotDeleted, statusIsActive, statusIsArchived }
 
 // ---- queries/v1/platform/globalVariable.memql ----
 
@@ -243,13 +243,21 @@ query site siteByHostname {
 /// The deployables this caller may see: their OWN sites, or every site in the cluster when the
 /// caller is a cluster owner. The portal's primary screen.
 ///
+/// ARCHIVED ROWS ARE EXCLUDED HERE and listed by sitesArchived instead (epic memql#4794, D10). The
+/// exclusion is written out rather than folded into a trait, because it is the one conjunct whose
+/// counterpart query deliberately inverts it -- and a reader comparing the two needs to see the same
+/// term in both -- here `isNotArchived`, there `statusIsArchived`. The trait is `status != "archived"`
+/// rather than an allow-list of the other three: status is required, so every row carries one, and
+/// != is null-safe against a non-empty literal (memql#1685) -- while an allow-list would silently
+/// drop a row the day a fifth value is added.
+///
 /// The name predates self-serve deployables and is kept: it is the same read, and the composite tier
 /// is what decides how far "all" reaches for a given actor. The caller term is that tier's own
 /// predicate written out -- see siteByHostname for why the bare admin gate it replaced would now
 /// collapse the read to cluster owners alone.
 @actor
 query site sitesAll {
-  filter  isNotDeleted && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  isNotDeleted && isNotArchived && (ownerUserId==actor.userId || actor.isClusterOwner==true)
   shape   siteFull
   sort    "hostname", "asc"
 }
@@ -446,4 +454,121 @@ query syncState syncStatesAll {
   sort      "row.createdAt", "desc"
   paginate  100
   shape     syncStateFull
+}
+
+// ---- packages (epic memql#4794) ----
+//
+// THE ARCHIVE IS A PLACE, NOT A VOID (D10), and these queries are where that
+// is either true or a slogan. Every list in this tree inherits the isNotDeleted
+// tradition, which filters a retired row out of every surface -- and section A
+// of the design names that as exactly why D10 exists: an operator who deleted a
+// deployable could not find it again to see what it had been. So the default
+// lists here filter on status DELIBERATELY rather than by inheritance, and the
+// archive listings deliberately do NOT: they select archived rows and return
+// them, marked.
+//
+// The caller term is the composite tier's own predicate written out, exactly as
+// v1:platform:site's queries write it (memql#4344): the engine ANDs the same
+// term in from the concept's declaration, and restating it is what lets a
+// reader see the scope without resolving the concept. It is an OWNERSHIP floor
+// rather than a fail-open selection -- a false admin gate leaves precisely the
+// caller's own rows.
+
+/// The packages this caller may see, active only. The OS packages list.
+@actor
+query package packagesAll {
+  filter  statusIsActive && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  sort    "name", "asc"
+  shape   packageFull
+}
+
+/// Archived packages -- the Archived filter's read. Deliberately selects archived
+/// rows instead of inheriting a filter that would hide them; see the note above.
+@actor
+query package packagesArchived {
+  filter  statusIsArchived && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  sort    "name", "asc"
+  shape   packageFull
+}
+
+/// One package by its row id, whatever its status -- detail opens on an archived
+/// package too, which is the point of a visible archive.
+@actor
+query package packageById {
+  args {
+    packageId  string!
+  }
+  filter  row.id==args.packageId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  shape   packageFull
+}
+
+/// Packages tracking a given repository URL -- the D11 webhook feed's match, and
+/// the OS's duplicate check when somebody adds a repo that is already tracked.
+@actor
+query package packagesByRepoUrl {
+  args {
+    repoUrl  string!
+  }
+  filter  repoUrl==args.repoUrl && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  sort    "name", "asc"
+  shape   packageFull
+}
+
+/// Every repo-sourced package, for the D11 polling feed's sweep. Runs under the
+/// engine's own operator identity, which the admin branch admits; a person
+/// calling it reads exactly their own, which is harmless and correct.
+@actor
+query package packagesTrackingRepos {
+  filter    sourceKind=="repo" && statusIsActive && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  sort      "name", "asc"
+  paginate  200
+  shape     packageFull
+}
+
+/// One package's deployment timeline, newest first. Append-only, so this IS the
+/// history of what was attempted -- not a summary of it.
+@actor
+query packageDeployment packageDeployments {
+  args {
+    packageId  string!
+  }
+  filter    packageId==args.packageId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  sort      "row.createdAt", "desc"
+  paginate  50
+  shape     packageDeploymentFull
+}
+
+/// One deployment attempt by id -- what the OS polls while a deploy advances and
+/// what the confirm gate reads the report from.
+@actor
+query packageDeployment packageDeploymentById {
+  args {
+    deploymentId  string!
+  }
+  filter  row.id==args.deploymentId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  shape   packageDeploymentFull
+}
+
+/// The sites this package deployed -- the detail panel's deployables list, and
+/// the D10 archive gate's own read: a package with a non-archived site refuses to
+/// archive, and this is what counts them. Carries NO status filter for exactly
+/// that reason; the caller decides what a non-archived site is.
+@actor
+query site sitesForPackage {
+  args {
+    packageId  string!
+  }
+  filter  packageId==args.packageId && isNotDeleted && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  sort    "hostname", "asc"
+  shape   siteFull
+}
+
+/// Archived sites -- the OS Archived filter for deployables. The default list
+/// (sitesAll) shows every non-archived site; this is its counterpart, and the two
+/// together are the whole population.
+@actor
+query site sitesArchived {
+  filter  statusIsArchived && isNotDeleted && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  sort    "hostname", "asc"
+  shape   siteFull
 }

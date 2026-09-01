@@ -4721,6 +4721,145 @@ func OverridesForConstructBuild(args OverridesForConstructArgs) string {
 	return b.String()
 }
 
+// PackageById -- One package by its row id, whatever its status -- detail opens on an archived package too, which is the point of a visible archive.
+//
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["packageById"] in generated_concepts.go).
+type PackageByIdArgs struct {
+	PackageId string
+}
+
+// PackageById calls the engine query packageById.
+func (qc *QueryClient) PackageById(ctx context.Context, args PackageByIdArgs) (*Result, error) {
+	call := PackageByIdBuild(args)
+	return qc.executeNamed(ctx, "packageById", call)
+}
+
+func PackageByIdBuild(args PackageByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query packageById(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PackageDeploymentById -- One deployment attempt by id -- what the OS polls while a deploy advances and what the confirm gate reads the report from.
+//
+// Bound concept: v1:platform:packageDeployment (machine-readable: BoundConcepts["packageDeploymentById"] in generated_concepts.go).
+type PackageDeploymentByIdArgs struct {
+	DeploymentId string
+}
+
+// PackageDeploymentById calls the engine query packageDeploymentById.
+func (qc *QueryClient) PackageDeploymentById(ctx context.Context, args PackageDeploymentByIdArgs) (*Result, error) {
+	call := PackageDeploymentByIdBuild(args)
+	return qc.executeNamed(ctx, "packageDeploymentById", call)
+}
+
+func PackageDeploymentByIdBuild(args PackageDeploymentByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query packageDeploymentById(")
+	b.WriteString("deploymentId: ")
+	b.WriteString(quoteMemQL(args.DeploymentId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PackageDeployments -- One package's deployment timeline, newest first. Append-only, so this IS the history of what was attempted -- not a summary of it.
+//
+// Bound concept: v1:platform:packageDeployment (machine-readable: BoundConcepts["packageDeployments"] in generated_concepts.go).
+type PackageDeploymentsArgs struct {
+	PackageId string
+}
+
+// PackageDeployments calls the engine query packageDeployments.
+func (qc *QueryClient) PackageDeployments(ctx context.Context, args PackageDeploymentsArgs) (*Result, error) {
+	call := PackageDeploymentsBuild(args)
+	return qc.executeNamed(ctx, "packageDeployments", call)
+}
+
+func PackageDeploymentsBuild(args PackageDeploymentsArgs) string {
+	var b strings.Builder
+	b.WriteString("query packageDeployments(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PackagesAll -- The packages this caller may see, active only. The OS packages list.
+//
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.go).
+type PackagesAllArgs struct {
+}
+
+// PackagesAll calls the engine query packagesAll.
+func (qc *QueryClient) PackagesAll(ctx context.Context, args PackagesAllArgs) (*Result, error) {
+	call := PackagesAllBuild(args)
+	return qc.executeNamed(ctx, "packagesAll", call)
+}
+
+func PackagesAllBuild(args PackagesAllArgs) string {
+	_ = args
+	return "query packagesAll()"
+}
+
+// PackagesArchived -- Archived packages -- the Archived filter's read. Deliberately selects archived rows instead of inheriting a filter that would hide them; see the note above.
+//
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesArchived"] in generated_concepts.go).
+type PackagesArchivedArgs struct {
+}
+
+// PackagesArchived calls the engine query packagesArchived.
+func (qc *QueryClient) PackagesArchived(ctx context.Context, args PackagesArchivedArgs) (*Result, error) {
+	call := PackagesArchivedBuild(args)
+	return qc.executeNamed(ctx, "packagesArchived", call)
+}
+
+func PackagesArchivedBuild(args PackagesArchivedArgs) string {
+	_ = args
+	return "query packagesArchived()"
+}
+
+// PackagesByRepoUrl -- Packages tracking a given repository URL -- the D11 webhook feed's match, and the OS's duplicate check when somebody adds a repo that is already tracked.
+//
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesByRepoUrl"] in generated_concepts.go).
+type PackagesByRepoUrlArgs struct {
+	RepoUrl string
+}
+
+// PackagesByRepoUrl calls the engine query packagesByRepoUrl.
+func (qc *QueryClient) PackagesByRepoUrl(ctx context.Context, args PackagesByRepoUrlArgs) (*Result, error) {
+	call := PackagesByRepoUrlBuild(args)
+	return qc.executeNamed(ctx, "packagesByRepoUrl", call)
+}
+
+func PackagesByRepoUrlBuild(args PackagesByRepoUrlArgs) string {
+	var b strings.Builder
+	b.WriteString("query packagesByRepoUrl(")
+	b.WriteString("repoUrl: ")
+	b.WriteString(quoteMemQL(args.RepoUrl))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PackagesTrackingRepos -- Every repo-sourced package, for the D11 polling feed's sweep. Runs under the engine's own operator identity, which the admin branch admits; a person calling it reads exactly their own, which is harmless and correct.
+//
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesTrackingRepos"] in generated_concepts.go).
+type PackagesTrackingReposArgs struct {
+}
+
+// PackagesTrackingRepos calls the engine query packagesTrackingRepos.
+func (qc *QueryClient) PackagesTrackingRepos(ctx context.Context, args PackagesTrackingReposArgs) (*Result, error) {
+	call := PackagesTrackingReposBuild(args)
+	return qc.executeNamed(ctx, "packagesTrackingRepos", call)
+}
+
+func PackagesTrackingReposBuild(args PackagesTrackingReposArgs) string {
+	_ = args
+	return "query packagesTrackingRepos()"
+}
+
 // PageOverride -- Read the caller's own override of one page (epic memql#4661). Owned: the filter gates on ownerUserId==actor.userId, so a person only ever resolves their OWN regenerations and one person's regeneration can never repaint another's console -- the per-user scope of D4 is this conjunct and nothing else.
 // A page nobody has regenerated returns nothing, which is not an empty state: it is the answer, and the caller renders the page's seed.
 // THE VERSION STRIP IS THIS QUERY WRAPPED IN `asOf`, the deployables pattern (D10 / memql#2880). A write in MemQL is an append onto one id, so a plain read returns the NEWEST version and re-issuing it under successive `asOf` timestamps -- each set just before the previous result's createdAt -- walks back one version at a time. There is deliberately no `asOf latest` clause here: a query that declares one refuses to be wrapped by a caller's own, which is exactly the capability the walk needs. Original is the seed and needs no row at all.
@@ -9736,6 +9875,7 @@ func SiteByIdBuild(args SiteByIdArgs) string {
 }
 
 // SitesAll -- The deployables this caller may see: their OWN sites, or every site in the cluster when the caller is a cluster owner. The portal's primary screen.
+// ARCHIVED ROWS ARE EXCLUDED HERE and listed by sitesArchived instead (epic memql#4794, D10). The exclusion is written out rather than folded into a trait, because it is the one conjunct whose counterpart query deliberately inverts it -- and a reader comparing the two needs to see the same term in both -- here `isNotArchived`, there `statusIsArchived`. The trait is `status != "archived"` rather than an allow-list of the other three: status is required, so every row carries one, and != is null-safe against a non-empty literal (memql#1685) -- while an allow-list would silently drop a row the day a fifth value is added.
 // The name predates self-serve deployables and is kept: it is the same read, and the composite tier is what decides how far "all" reaches for a given actor. The caller term is that tier's own predicate written out -- see siteByHostname for why the bare admin gate it replaced would now collapse the read to cluster owners alone.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesAll"] in generated_concepts.go).
@@ -9753,8 +9893,26 @@ func SitesAllBuild(args SitesAllArgs) string {
 	return "query sitesAll()"
 }
 
+// SitesArchived -- Archived sites -- the OS Archived filter for deployables. The default list (sitesAll) shows every non-archived site; this is its counterpart, and the two together are the whole population.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesArchived"] in generated_concepts.go).
+type SitesArchivedArgs struct {
+}
+
+// SitesArchived calls the engine query sitesArchived.
+func (qc *QueryClient) SitesArchived(ctx context.Context, args SitesArchivedArgs) (*Result, error) {
+	call := SitesArchivedBuild(args)
+	return qc.executeNamed(ctx, "sitesArchived", call)
+}
+
+func SitesArchivedBuild(args SitesArchivedArgs) string {
+	_ = args
+	return "query sitesArchived()"
+}
+
 // SitesForAccount -- The deployables tied to one account.
 // `isNotDeleted` and the composite-tier term are `sitesAll`'s own conjuncts, repeated here rather than referenced: this is the same read that query makes, narrowed by the tie field, and a soft-deleted site must stay gone from a rollup for the reason it is gone from the list.
+// `isNotArchived` joined them when v1:platform:site gained the archived rung (epic memql#4794, D10), and it is not optional for a ROLLUP: the band this feeds says "and N more, in Deployables", so a count that included archived sites would point the reader at a list that disagrees with it. A band is a count of what is currently filed for a client, not of everything ever -- which is the same reading libraryItemsForAccount already takes.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesForAccount"] in generated_concepts.go).
 type SitesForAccountArgs struct {
@@ -9772,6 +9930,28 @@ func SitesForAccountBuild(args SitesForAccountArgs) string {
 	b.WriteString("query sitesForAccount(")
 	b.WriteString("accountId: ")
 	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SitesForPackage -- The sites this package deployed -- the detail panel's deployables list, and the D10 archive gate's own read: a package with a non-archived site refuses to archive, and this is what counts them. Carries NO status filter for exactly that reason; the caller decides what a non-archived site is.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesForPackage"] in generated_concepts.go).
+type SitesForPackageArgs struct {
+	PackageId string
+}
+
+// SitesForPackage calls the engine query sitesForPackage.
+func (qc *QueryClient) SitesForPackage(ctx context.Context, args SitesForPackageArgs) (*Result, error) {
+	call := SitesForPackageBuild(args)
+	return qc.executeNamed(ctx, "sitesForPackage", call)
+}
+
+func SitesForPackageBuild(args SitesForPackageArgs) string {
+	var b strings.Builder
+	b.WriteString("query sitesForPackage(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
 	b.WriteString(")")
 	return b.String()
 }

@@ -162,6 +162,49 @@ func (u *AzureBlobUploader) Download(ctx context.Context, container, objectName 
 	return data, nil
 }
 
+// ListPrefix returns every blob name under prefix, in the order the service
+// returns them.
+//
+// Added for package DSL delivery (epic memql#4794): the boot-time fetcher has
+// a content-addressed PREFIX and needs the tree under it, which is the one
+// shape none of the by-name reads above can express. Bounded by
+// maxListedBlobs, because the caller is an init container writing into a
+// node's boot path and an unbounded listing there is an unbounded copy.
+func (u *AzureBlobUploader) ListPrefix(ctx context.Context, container, prefix string) ([]string, error) {
+	if u == nil || u.client == nil {
+		return nil, fmt.Errorf("azure blob uploader not initialized")
+	}
+	container = strings.TrimSpace(container)
+	prefix = strings.TrimSpace(prefix)
+	if container == "" || prefix == "" {
+		return nil, fmt.Errorf("azure blob container and prefix are required")
+	}
+
+	var names []string
+	pager := u.client.NewListBlobsFlatPager(container, &azblob.ListBlobsFlatOptions{Prefix: &prefix})
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list azure blobs under %q: %w", prefix, err)
+		}
+		for _, item := range page.Segment.BlobItems {
+			if item == nil || item.Name == nil {
+				continue
+			}
+			names = append(names, *item.Name)
+			if len(names) >= maxListedBlobs {
+				return nil, fmt.Errorf("more than %d blobs under %q; refusing to list further", maxListedBlobs, prefix)
+			}
+		}
+	}
+	return names, nil
+}
+
+// maxListedBlobs bounds ListPrefix. Sized to the package file-count cap
+// (MEMQL_PACKAGES_MAX_FILE_COUNT, default 20000) with headroom, so a tree that
+// passed analysis can always be fetched back.
+const maxListedBlobs = 50000
+
 // ParseBlobObject extracts the (container, objectName) pair from a stored blob
 // URL of the form https://<account>.blob.core.windows.net/<container>/<object...>.
 // Returns ok=false for non-https URLs -- e.g. the `local://` dev placeholder or

@@ -34,6 +34,7 @@ export function SitesSection({
   viewerUserId,
   canPublish,
   clusterDomain,
+  canManage = false,
   onAsk,
   onReseed,
 }: {
@@ -46,6 +47,9 @@ export function SitesSection({
   canPublish: boolean;
   /** The domain this cluster serves, threaded to the detail's Domains panel. */
   clusterDomain: string;
+  /** Whether to render the lifecycle controls -- presentation over a
+   *  server-side law, so hiding them is UX and the guard is the gate. */
+  canManage?: boolean;
   onAsk?: (tag: string) => void;
   onReseed: () => void;
 }) {
@@ -95,6 +99,7 @@ export function SitesSection({
           viewerUserId={viewerUserId}
           canPublish={canPublish}
           clusterDomain={clusterDomain}
+          canManage={canManage}
           onAsk={onAsk}
         />
       )}

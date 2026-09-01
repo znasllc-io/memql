@@ -93,6 +93,8 @@ shape site siteFull {
   notes
   artifactId
   binding
+  packageId
+  packageDeployableName
   accountId
   row.createdAt
 }
@@ -159,5 +161,53 @@ shape syncState syncStateFull {
   deadLetterCount
   paused
   lastError
+  row.createdAt
+}
+
+// ---- packages (epic memql#4794) ----
+
+/// Full projection of v1:platform:package -- the OS packages list and detail.
+///
+/// `repoTokenRef` is projected deliberately: it is a NAME, never a value (D14), and the person
+/// editing a package has to be able to see which secret it points at. Nothing here can leak a
+/// credential, because no credential is ever on the row.
+@row
+shape package packageFull {
+  row.id
+  ownerUserId
+  name
+  sourceKind
+  repoUrl
+  repoRef
+  repoTokenRef
+  artifactId
+  deployedVersion
+  latestKnownVersion
+  updateAvailable
+  status
+  row.createdAt
+}
+
+/// Full projection of v1:platform:packageDeployment -- the timeline and the confirm gate.
+///
+/// `report` and `error` are projected whole because they ARE the surface: the confirm gate renders
+/// the report, and the OS renders the error's own sentence verbatim. Summarising either here would
+/// mean the browser showing a paraphrase of a refusal whose exact words are the useful part.
+@row
+shape packageDeployment packageDeploymentFull {
+  row.id
+  ownerUserId
+  packageId
+  sourceVersion
+  status
+  report
+  dslVersion
+  deployables
+  snapshotArtifactId
+  buildLogTail
+  error
+  requestedBy
+  startedAt
+  finishedAt
   row.createdAt
 }

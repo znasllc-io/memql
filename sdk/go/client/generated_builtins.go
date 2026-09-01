@@ -795,6 +795,144 @@ func LibraryTrainFileBuild(args LibraryTrainFileArgs) string {
 	return b.String()
 }
 
+// PackageAnalyze -- Analyze a package source offline and return the report, deploying nothing (epic memql#4794, D12). Fetches the tracked source, walks the manifest, discovers the DSL domains and runs the SAME Init-grade gates strict boot runs -- so 'this DSL would refuse boot' is an answer produced here, before a pod is ever asked to run it. Returns {report, ok}: the report names every deployable with its build plan (or 'prebuilt output found -- build skipped'), every DSL domain with construct counts, any Go pack as reported-not-deployable, and every problem found. A refusal carries one of the stable codes in component/packages/refusal.go.
+type PackageAnalyzeArgs struct {
+	// The v1:platform:package row to analyze.
+	PackageId string
+}
+
+// PackageAnalyze calls the engine builtin packageAnalyze.
+func (qc *QueryClient) PackageAnalyze(ctx context.Context, args PackageAnalyzeArgs) (*Result, error) {
+	call := PackageAnalyzeBuild(args)
+	return qc.executeNamed(ctx, "packageAnalyze", call)
+}
+
+func PackageAnalyzeBuild(args PackageAnalyzeArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin packageAnalyze(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PackageArchive -- Archive one of the caller's packages (epic memql#4794, D10). Refuses with package_has_active_deployables when any site this package deployed is not itself archived -- a package is the source its deployables came from, and filing it away while it is still serving the internet would put the record and the reality in different states. Also refuses unless confirmName matches the package's stored name exactly. Archived packages stay listed behind the Archived filter. Returns {packageId, name, status}.
+type PackageArchiveArgs struct {
+	// The v1:platform:package row to archive.
+	PackageId string
+	// The package's own name, typed by the person as confirmation. Compared against the stored value; a mismatch refuses and writes nothing.
+	ConfirmName string
+}
+
+// PackageArchive calls the engine builtin packageArchive.
+func (qc *QueryClient) PackageArchive(ctx context.Context, args PackageArchiveArgs) (*Result, error) {
+	call := PackageArchiveBuild(args)
+	return qc.executeNamed(ctx, "packageArchive", call)
+}
+
+func PackageArchiveBuild(args PackageArchiveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin packageArchive(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("confirmName: ")
+	b.WriteString(quoteMemQL(args.ConfirmName))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PackageDeploy -- Run one deployment attempt for a package (epic memql#4794). WITHOUT confirm the run parks at awaiting_confirm with the analysis report on a new deployment row and nothing else happens -- that gate is always present (D12), and a redeploy passes it in one click. WITH confirm the run builds, stages, rolls and publishes in the D6 order: a failure anywhere before publish leaves every site serving exactly what it was serving, and a package with no DSL (or unchanged DSL) skips stage and roll entirely so nothing restarts. A package carrying DSL requires the cluster-owner actor and is refused with dsl_requires_cluster_owner at the START, before any build. hostnames is required only for a deployable's FIRST deploy; later deploys find the site through (packageId, packageDeployableName). Returns {deploymentId, status, awaitingConfirm, deployables, report}.
+type PackageDeployArgs struct {
+	// The v1:platform:package row to deploy.
+	PackageId string
+	// Pass true to proceed past the confirm gate. Absent or false parks the run with its report and returns.
+	Confirm    bool
+	ConfirmSet bool // set true to send confirm; required because zero-value bool is ambiguous
+	// Deployable name -> hostname, for deployables being deployed for the FIRST time. A hostname is chosen once and remembered on the site row.
+	Hostnames map[string]any
+}
+
+// PackageDeploy calls the engine builtin packageDeploy.
+func (qc *QueryClient) PackageDeploy(ctx context.Context, args PackageDeployArgs) (*Result, error) {
+	call := PackageDeployBuild(args)
+	return qc.executeNamed(ctx, "packageDeploy", call)
+}
+
+func PackageDeployBuild(args PackageDeployArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin packageDeploy(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	if args.ConfirmSet {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("confirm: ")
+		b.WriteString(fmt.Sprintf("%v", args.Confirm))
+	}
+	if args.Hostnames != nil {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("hostnames: ")
+		b.WriteString(renderMemQLValue(args.Hostnames))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// PackageRestore -- Bring one of the caller's archived packages back to active (epic memql#4794, D10). No typed confirmation and no cascade: the package's sites keep whatever status they have, because restoring a source is not a decision to redeploy it. Returns {packageId, name, status}.
+type PackageRestoreArgs struct {
+	// The archived v1:platform:package row to restore.
+	PackageId string
+}
+
+// PackageRestore calls the engine builtin packageRestore.
+func (qc *QueryClient) PackageRestore(ctx context.Context, args PackageRestoreArgs) (*Result, error) {
+	call := PackageRestoreBuild(args)
+	return qc.executeNamed(ctx, "packageRestore", call)
+}
+
+func PackageRestoreBuild(args PackageRestoreArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin packageRestore(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PackageRollback -- Restore a package to what an earlier successful deployment left live (epic memql#4794, D7). Executes the D6 order REVERSED -- every site is pointed back at its recorded bundle version FIRST, then the active-set pointer goes back and the cluster rolls -- so the app stops using the old schema before the schema changes, which is the window the forward order closes in the other direction. Restores a tuple recorded on the prior row rather than replaying events, which is why the timeline is append-only. Rolling back to a deployment that carried DSL requires the cluster-owner actor. Returns {restored}.
+type PackageRollbackArgs struct {
+	// The v1:platform:package to roll back.
+	PackageId string
+	// The earlier v1:platform:packageDeployment whose state to restore. Must have finished as succeeded.
+	DeploymentId string
+}
+
+// PackageRollback calls the engine builtin packageRollback.
+func (qc *QueryClient) PackageRollback(ctx context.Context, args PackageRollbackArgs) (*Result, error) {
+	call := PackageRollbackBuild(args)
+	return qc.executeNamed(ctx, "packageRollback", call)
+}
+
+func PackageRollbackBuild(args PackageRollbackArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin packageRollback(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("deploymentId: ")
+	b.WriteString(quoteMemQL(args.DeploymentId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ProviderAuthStatus -- List every AI provider this NODE has registered: its vendor and model, whether this node can call it, which tier of the resolution chain supplied its credential (federation | globalSecret | globalVariable | env | unresolved), and -- when it cannot be called -- why not. Produced from the live provider registry, never persisted, and carrying no credential or fingerprint of one. Per-node on purpose: two replicas genuinely can disagree, and that disagreement is the most useful thing this read surfaces. Owner-only.
 type ProviderAuthStatusArgs struct {
 }
@@ -1247,6 +1385,34 @@ func ShopifyqlBuild(args ShopifyqlArgs) string {
 	return b.String()
 }
 
+// SiteArchive -- Archive one of the caller's sites (epic memql#4794, D10). Refuses unless the site is already DISABLED -- archiving is the end of a lifecycle, not a shortcut past pausing -- and unless confirmHostname matches the site's stored hostname exactly, which is the typed confirmation the OS renders and this server verifies. A systemOwned site (the cluster's own portal and OS) is refused outright: those rows are exempt from the lifecycle entirely. An archived site stops serving (404) but stays listed behind the Archived filter, because an archive is a place and not a void. Returns {siteId, hostname, status}. Refusals carry stable codes.
+type SiteArchiveArgs struct {
+	// The v1:platform:site row to archive.
+	SiteId string
+	// The site's own hostname, typed by the person as confirmation. Compared against the stored value; a mismatch refuses and writes nothing.
+	ConfirmHostname string
+}
+
+// SiteArchive calls the engine builtin siteArchive.
+func (qc *QueryClient) SiteArchive(ctx context.Context, args SiteArchiveArgs) (*Result, error) {
+	call := SiteArchiveBuild(args)
+	return qc.executeNamed(ctx, "siteArchive", call)
+}
+
+func SiteArchiveBuild(args SiteArchiveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin siteArchive(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("confirmHostname: ")
+	b.WriteString(quoteMemQL(args.ConfirmHostname))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SitePublishFromArtifact -- Deploy a Library zip artifact to one of the caller's hosted sites (memql#4345). The caller must own the site (or be a cluster owner) AND own the artifact, which must be a Library file whose MIME type is a zip. The bundle is read from object storage and validated -- index.html at the ROOT for spa and shopify_storefront, plus the same per-file (25 MB), whole-bundle (500 MB) and file-count (20000) limits POST /sites/{id}/bundles enforces -- then written under a new content-addressed version prefix before bundleRef is flipped, so a failed publish leaves the site serving exactly what it was serving. artifactId is stamped on the site row as provenance and the attempt is recorded on the security audit log. Returns {siteId, artifactId, fileId, version, bundleRef, fileCount, totalBytes}. Rollback is unchanged: updateSiteBundle pointed back at an earlier version's bundleRef.
 type SitePublishFromArtifactArgs struct {
 	// The v1:platform:site row to publish to.
@@ -1271,6 +1437,27 @@ func SitePublishFromArtifactBuild(args SitePublishFromArtifactArgs) string {
 	}
 	b.WriteString("artifactId: ")
 	b.WriteString(quoteMemQL(args.ArtifactId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SiteRestore -- Bring one of the caller's archived sites back to DISABLED (epic memql#4794, D10). Deliberately not back to live: restoring returns a site to the state it was archived from, and publishing it again is a separate, visible decision. No typed confirmation, because leaving the archive destroys nothing. Returns {siteId, hostname, status}.
+type SiteRestoreArgs struct {
+	// The archived v1:platform:site row to restore.
+	SiteId string
+}
+
+// SiteRestore calls the engine builtin siteRestore.
+func (qc *QueryClient) SiteRestore(ctx context.Context, args SiteRestoreArgs) (*Result, error) {
+	call := SiteRestoreBuild(args)
+	return qc.executeNamed(ctx, "siteRestore", call)
+}
+
+func SiteRestoreBuild(args SiteRestoreArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin siteRestore(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
 	b.WriteString(")")
 	return b.String()
 }

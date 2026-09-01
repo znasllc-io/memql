@@ -30,12 +30,12 @@ export function ActionsSection({ domain }: { domain: string }) {
           about the zip -- belongs beside the deployable it happened to.
         </Caption>
         <Caption>
-          Status changes, rollback and deletion stay in the portal for now.
+          Pausing, rollback and archiving live on each deployable, under Sites.
         </Caption>
         <Caption>
-          A client's own domain is not one of them any more. Open a deployable and use its Domains
-          panel: this cluster shows you the two DNS records to create, tells you which one is still
-          wrong until both check out, and then provisions the route and the certificate itself.
+          A client's own domain lives there too. Open a deployable and use its Domains panel: this
+          cluster shows you the two DNS records to create, tells you which one is still wrong until
+          both check out, and then provisions the route and the certificate itself.
         </Caption>
       </Panel>
     </div>

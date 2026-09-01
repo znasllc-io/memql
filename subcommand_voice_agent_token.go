@@ -30,6 +30,12 @@ func dispatchSubcommand(args []string) (bool, int) {
 	switch args[0] {
 	case "migrate":
 		return true, runMigrateSubcommand(args[1:])
+	// Available on EVERY node binary (epic memql#4794): it is the init
+	// container that runs before a node boots, and every DSL-consuming node
+	// type needs it. It reads object storage and the filesystem, never the
+	// database, so it has no build-tag dependencies of its own.
+	case "dsl-fetch":
+		return true, runDslFetchSubcommand(args[1:])
 	case "pat":
 		return true, runPATSubcommand(args[1:])
 	case "enrolment-token":

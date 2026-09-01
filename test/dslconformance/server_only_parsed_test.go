@@ -276,6 +276,50 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "recordCustomDomainIssuingProgress"}: true,
 		{Path: "platform/mutations.memql", Name: "markCustomDomainLive"}:              true,
 		{Path: "platform/mutations.memql", Name: "markCustomDomainRemoved"}:           true,
+		// epic memql#4794. The packages pipeline's writers, the D11 feeds'
+		// single write, and the two status setters behind the D10 archive
+		// capabilities. They divide into two arguments and neither is
+		// "caller-scoping was inconvenient".
+		//
+		// THE PIPELINE WRITERS -- openPackageDeployment, advance..., record...
+		// Report, close..., recordPackageDeployedVersion, recordPackageName,
+		// recordSitePackageOrigin -- run where THERE IS NO CALLER. A deploy
+		// advances by stage handoffs across nodes, so actor.userId is empty on
+		// the very path that has to write, and a caller-scoped form would open
+		// a timeline nothing could advance. What keeps those rows visible to
+		// the right people is not scoping but ownerUserId, copied off a
+		// package row the STARTING caller had already read under their own
+		// actor -- so it can never name a user that caller could not act as.
+		// Separately, the thing worth preventing here is not cross-user reach
+		// at all: it is a caller asserting "this deploy succeeded", or writing
+		// a clean analysis report, about a package they genuinely own.
+		// Caller-scoping bounds whose rows are touched, not what may be
+		// claimed about them.
+		//
+		// THE TWO STATUS SETTERS -- setPackageStatus, setSiteStatus -- are the
+		// clearest case, because the caller DOES own the row. Scoping them
+		// would admit precisely the call D10 refuses: archiving without the
+		// typed-name confirmation, and without the check that no deployable is
+		// still serving. Both are conditions on the row's state rather than on
+		// who is asking, so the capability that can evaluate them
+		// (integration.packages) is the only caller, and this annotation is
+		// what makes it the only one.
+		//
+		// recordPackageUpstreamVersion is the D11 feeds' whole write surface.
+		// Its two legitimate callers are a scheduled automation with nobody
+		// attached and the inbound webhook receiver, where the "caller" is
+		// GitHub -- scoping refuses both and still permits the claim worth
+		// refusing.
+		{Path: "platform/mutations.memql", Name: "setPackageStatus"}:              true,
+		{Path: "platform/mutations.memql", Name: "setSiteStatus"}:                 true,
+		{Path: "platform/mutations.memql", Name: "recordPackageDeployedVersion"}:  true,
+		{Path: "platform/mutations.memql", Name: "recordPackageName"}:             true,
+		{Path: "platform/mutations.memql", Name: "recordPackageUpstreamVersion"}:  true,
+		{Path: "platform/mutations.memql", Name: "openPackageDeployment"}:         true,
+		{Path: "platform/mutations.memql", Name: "advancePackageDeployment"}:      true,
+		{Path: "platform/mutations.memql", Name: "recordPackageDeploymentReport"}: true,
+		{Path: "platform/mutations.memql", Name: "closePackageDeployment"}:        true,
+		{Path: "platform/mutations.memql", Name: "recordSitePackageOrigin"}:       true,
 		// memql#4270 / memql#4606 / memql#4601. The four writes of the
 		// user-invitation lifecycle, and none is caller-scopable for the same
 		// underlying reason: the row is not the caller's.

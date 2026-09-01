@@ -74,6 +74,7 @@ var pluginKinds = map[string]moduleKind{
 	"timeutil":      kindComponent,
 	"embedding":     kindComponent, // see the note below
 	"deployversion": kindComponent,
+	"packages":      kindComponent, // see the note below
 	"sitePublish":   kindComponent, // see the note below
 	// Custom domains (epic memql#4805). A COMPONENT by this table's own test:
 	// does turning it off remove a feature, or break the engine?
@@ -157,6 +158,19 @@ var pluginKinds = map[string]moduleKind{
 //     integrations/library made the module graph a cycle. CI's
 //     module-boundaries lane is what says so; the go.work workspace resolves
 //     the import and hides it.
+//
+//   - packages -> COMPONENT (epic memql#4794), and for the same reason
+//     sitePublish is, one layer up. The deploy pipeline publishes through
+//     component/edge's Publisher and stages DSL into the cluster's own object
+//     storage; it makes no outbound call to anybody's system except GitHub's
+//     tarball API, which is a fetch of the operator's OWN source rather than a
+//     vendor integration. It lives in component/packages, in the ROOT module,
+//     because component/edge is in the root module too and integrations is a
+//     separate module the root already requires -- so importing edge from
+//     integrations would make the module graph a cycle. The design record
+//     names integrations/packages/ as the location; this is the same package
+//     under the one constraint that location cannot satisfy, and CI's
+//     module-boundaries lane is what says so.
 //
 //   - knowledge -> PACK, with a real integration inside it. This is the one
 //     genuinely mixed case: integrations/knowledge/seed_wikipedia.go DOES call

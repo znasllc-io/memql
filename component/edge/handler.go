@@ -73,12 +73,28 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// site is 503, deliberately: a deliberately paused site and a typo'd
 	// hostname are different situations, and the operator debugging one needs
 	// to tell them apart from the status code alone.
+	//
+	// THE SWITCH NAMES WHAT SERVES, not what does not, and that inversion is
+	// load-bearing (epic memql#4794). It used to 404 draft, 503 disabled and
+	// serve everything else -- which meant the D10 lifecycle adding `archived`
+	// to the enum would have made every archived site keep answering 200,
+	// silently, with the row correctly marked archived on the operator's own
+	// page. A serve-by-default tail cannot be audited: it grants serving to
+	// values that do not exist yet. Now a status this build does not recognise
+	// resolves for nobody, so the next value added to the enum is inert here
+	// until somebody decides what it should do.
 	switch {
-	case site == nil, site.Status == "draft":
+	case site == nil:
 		http.NotFound(w, r)
 		return
+	case site.Status == "live":
+		// serves; fall through
 	case site.Status == "disabled":
 		http.Error(w, "this site is unavailable", http.StatusServiceUnavailable)
+		return
+	default:
+		// draft, archived, and any status a future release adds.
+		http.NotFound(w, r)
 		return
 	}
 

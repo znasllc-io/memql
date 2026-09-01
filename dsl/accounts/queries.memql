@@ -133,12 +133,19 @@ query account existingSelfAccount {
 /// repeated here rather than referenced: this is the same read that query
 /// makes, narrowed by the tie field, and a soft-deleted site must stay gone
 /// from a rollup for the reason it is gone from the list.
+///
+/// `isNotArchived` joined them when v1:platform:site gained the archived rung
+/// (epic memql#4794, D10), and it is not optional for a ROLLUP: the band this
+/// feeds says "and N more, in Deployables", so a count that included archived
+/// sites would point the reader at a list that disagrees with it. A band is a
+/// count of what is currently filed for a client, not of everything ever --
+/// which is the same reading libraryItemsForAccount already takes.
 @actor
 query site sitesForAccount {
   args {
     accountId  string!
   }
-  filter  accountId==args.accountId && isNotDeleted && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  accountId==args.accountId && isNotDeleted && isNotArchived && (ownerUserId==actor.userId || actor.isClusterOwner==true)
   shape   siteFull
   sort    "hostname", "asc"
 }

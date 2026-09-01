@@ -51,6 +51,31 @@ func DefaultRegistry() Registry {
 	return defaultRegistry
 }
 
+// NewRegistry returns an ISOLATED *MemoryRegistry holding exactly concepts.
+//
+// Unlike CloneDefaultRegistry it is seeded from nothing, which is the point:
+// it backs a validation pass that must build a WHOLE tree's concepts from
+// scratch and hand them to MemQLEngine.Init without the global default
+// registry -- the one every live read consults for schemas and row-authz
+// tiers -- being touched at any moment of the pass.
+//
+// That distinction is load-bearing for component/packages. The pre-existing
+// offline pass (LintUnifiedTree) reaches the same answer by emptying the
+// default registry and reloading it, which is correct in a CLI that owns its
+// process and is a security hole in a serving one: for the width of the pass
+// every concept's declared tier is absent, and an absent tier admits
+// everybody. A pass built on this constructor never has that window.
+//
+// The map is copied, so a later mutation of the caller's map does not reach
+// the registry.
+func NewRegistry(concepts map[string]*Concept) *MemoryRegistry {
+	next := make(map[string]*Concept, len(concepts))
+	for name, c := range concepts {
+		next[name] = c
+	}
+	return &MemoryRegistry{concepts: next}
+}
+
 // CloneDefaultRegistry returns an ISOLATED *MemoryRegistry seeded from a
 // snapshot of the global default registry. Mutating the clone (via
 // MergeAll / ReplaceAll) never touches the global default, and later
