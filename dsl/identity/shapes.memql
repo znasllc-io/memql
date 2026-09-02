@@ -571,6 +571,7 @@ shape enrolmentToken enrolmentTokenFull {
   userId
   tokenHash
   issuedBy
+  invitationId
   expiresAt
   consumedAt
   consumedFromIP

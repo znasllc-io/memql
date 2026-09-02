@@ -62,6 +62,7 @@ type Row struct {
 	UserId         string
 	TokenHash      string
 	IssuedBy       string
+	InvitationId   string
 	ExpiresAt      time.Time
 	ConsumedAt     time.Time
 	ConsumedFromIP string
@@ -122,6 +123,26 @@ func BareSlug(id string) string {
 // caller cannot hand this function a plain token even by mistake, because
 // there is no parameter for one.
 func (s *Store) Create(ctx context.Context, enrolmentId, userId, tokenHash, issuedBy string, expiresAt time.Time, sourceIP string) error {
+	return s.create(ctx, enrolmentId, userId, tokenHash, issuedBy, "", expiresAt, sourceIP)
+}
+
+// CreateForInvitation persists a row minted in exchange for a user invitation
+// (memql#4880).
+//
+// issuedBy is STILL a user -- the inviter, whose authority is what the
+// invitation carried -- because the concept declares that field a parent edge
+// onto v1:identity:user and the engine refuses any other concept's id there at
+// write time. The invitation itself lands on its own field, invitationId, so
+// an operator reading the row can see where the credential came from without
+// the attribution having to lie about what kind of thing it names.
+func (s *Store) CreateForInvitation(ctx context.Context, enrolmentId, userId, tokenHash, issuedBy, invitationId string, expiresAt time.Time, sourceIP string) error {
+	if strings.TrimSpace(invitationId) == "" {
+		return errors.New("enrolment.Store.CreateForInvitation: invitationId required -- use Create for a token no invitation produced")
+	}
+	return s.create(ctx, enrolmentId, userId, tokenHash, issuedBy, invitationId, expiresAt, sourceIP)
+}
+
+func (s *Store) create(ctx context.Context, enrolmentId, userId, tokenHash, issuedBy, invitationId string, expiresAt time.Time, sourceIP string) error {
 	if s == nil || s.Engine == nil {
 		return errors.New("enrolment.Store: engine not wired")
 	}
@@ -131,12 +152,20 @@ func (s *Store) Create(ctx context.Context, enrolmentId, userId, tokenHash, issu
 	if expiresAt.IsZero() {
 		return errors.New("enrolment.Store.Create: expiresAt required -- a token with no expiry is not a short-lived credential")
 	}
-	q := fmt.Sprintf(
-		`mutation createEnrolmentToken(enrolmentId:%s,userId:%s,tokenHash:%s,issuedBy:%s,expiresAt:%s,sourceIP:%s)`,
+	var b strings.Builder
+	fmt.Fprintf(&b,
+		`mutation createEnrolmentToken(enrolmentId:%s,userId:%s,tokenHash:%s,issuedBy:%s,expiresAt:%s,sourceIP:%s`,
 		langparser.QuoteString(BareSlug(enrolmentId)), langparser.QuoteString(userId), langparser.QuoteString(tokenHash), langparser.QuoteString(issuedBy),
 		langparser.QuoteString(expiresAt.UTC().Format(time.RFC3339Nano)), langparser.QuoteString(sourceIP),
 	)
-	if _, err := s.Engine.Execute(ctx, q); err != nil {
+	// Omitted rather than sent empty: the mutation carries invitationId in
+	// accept{}, so a missing argument writes no key and every existing issuer
+	// stays byte-identical.
+	if invitationId != "" {
+		fmt.Fprintf(&b, `,invitationId:%s`, langparser.QuoteString(invitationId))
+	}
+	b.WriteString(`)`)
+	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
 		return fmt.Errorf("enrolment.Store.Create: %w", err)
 	}
 	return nil
@@ -280,6 +309,7 @@ func rowFromNode(n *memqlv1.MemoryNode) *Row {
 		UserId:         str("userId"),
 		TokenHash:      str("tokenHash"),
 		IssuedBy:       str("issuedBy"),
+		InvitationId:   str("invitationId"),
 		ExpiresAt:      parsedTime("expiresAt"),
 		ConsumedAt:     parsedTime("consumedAt"),
 		ConsumedFromIP: str("consumedFromIP"),

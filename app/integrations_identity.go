@@ -29,7 +29,6 @@ import (
 	"github.com/znasllc-io/memql/component/identity/pat"
 	"github.com/znasllc-io/memql/component/identity/recoverykey"
 	"github.com/znasllc-io/memql/component/identity/refresh"
-	"github.com/znasllc-io/memql/component/identity/registration"
 	identityweb "github.com/znasllc-io/memql/component/identity/web"
 	"github.com/znasllc-io/memql/component/identity/webauthn"
 )
@@ -605,82 +604,20 @@ func (a *App) integrationsIdentity() {
 		},
 
 		func(ctx context.Context, plainToken, sourceIP string) (identityweb.InvitationAcceptResult, error) {
-			internalCtx := auth.ContextWithInternalOrigin(ctx)
-
-			// RE-RESOLVED HERE, NOT TRUSTED FROM THE PAGE. This closure spends
-			// a credential; it does its own lookup so the decision to spend is
-			// made against the row as it is now, not as some earlier request
-			// reported it.
-			row, err := store.LookupInvitationByTokenHash(internalCtx, invitation.Hash(plainToken))
+			// The three writes and their ordering live in invitation.Accept,
+			// next to the stores, where a real-engine test can drive them
+			// (memql#4880). This closure only supplies what the node knows:
+			// the stores and the internal-domain policy.
+			out, err := invitation.Accept(auth.ContextWithInternalOrigin(ctx), invitation.AcceptDeps{
+				Store:               store,
+				Enrolments:          enrolStore,
+				InternalEmail:       cfg.IsInternalEmail,
+				InternalDefaultRole: cfg.InternalDefaultRole,
+			}, plainToken, sourceIP)
 			if err != nil {
 				return identityweb.InvitationAcceptResult{}, err
 			}
-			if row == nil || !strings.EqualFold(strings.TrimSpace(row.Kind), "user") ||
-				!row.Active || !strings.EqualFold(strings.TrimSpace(row.Status), "pending") ||
-				(!row.ExpiresAt.IsZero() && !row.ExpiresAt.After(time.Now().UTC())) {
-				return identityweb.InvitationAcceptResult{}, fmt.Errorf("identity: invitation is not redeemable")
-			}
-
-			// THE ORDER OF THE NEXT THREE WRITES IS THE WHOLE FAILURE STORY,
-			// and it is chosen the way IssueUserInvitation chooses its own.
-			//
-			// User first. It is the durable thing the invitee actually needs,
-			// and creating it twice is what we must avoid -- so it happens
-			// once, before anything that could make us retry.
-			//
-			// Mark accepted second. This is what makes the invitation
-			// single-use, and it must land BEFORE a usable credential exists:
-			// if the process died between minting the enrolment token and
-			// stamping the row, the invitation would still read as pending and
-			// a forwarded copy could be redeemed again for a second account.
-			// Marking first can only fail the other way -- a spent invitation
-			// and no enrolment link -- which strands the invitee with a clear
-			// message and a row an admin can see, instead of quietly leaving a
-			// live credential behind.
-			//
-			// Enrolment token last, because it is the only one of the three the
-			// caller can be handed again by simply issuing a fresh invitation.
-			userId, err := identity.NewRandomId("")
-			if err != nil {
-				return identityweb.InvitationAcceptResult{}, err
-			}
-			internal := cfg.IsInternalEmail(row.Email)
-			role := strings.TrimSpace(row.Role)
-			if role == "" && internal {
-				role = cfg.InternalDefaultRole
-			}
-			seed := identity.UserProfileSeed{
-				// Stamped at creation for the reason memql#4304 gives: the flag
-				// should be right from the first sign-in rather than appearing
-				// later, and the heuristic never runs again.
-				SharedMailbox: registration.LooksLikeSharedMailbox(row.Email),
-			}
-			if err := store.CreateUserOnFirstLogin(internalCtx, userId, row.Email, row.Email, role, internal, seed); err != nil {
-				return identityweb.InvitationAcceptResult{}, err
-			}
-			if err := store.MarkUserInvitationAccepted(internalCtx, row.ID, userId); err != nil {
-				return identityweb.InvitationAcceptResult{}, err
-			}
-
-			plain, hash, err := enrolment.Mint()
-			if err != nil {
-				return identityweb.InvitationAcceptResult{}, err
-			}
-			enrolmentId, err := enrolment.NewId()
-			if err != nil {
-				return identityweb.InvitationAcceptResult{}, err
-			}
-			// issuedBy names the INVITATION rather than a person, because no
-			// person issued this one -- the invitee's own click did, and the
-			// authority for it was the invitation. An operator reading the
-			// enrolment row should be able to see that without guessing.
-			issuedBy := "invitation:" + row.ID
-			expiresAt := time.Now().UTC().Add(enrolment.DefaultTTL)
-			if err := enrolStore.Create(internalCtx, enrolmentId, userId, hash, issuedBy, expiresAt, sourceIP); err != nil {
-				return identityweb.InvitationAcceptResult{}, err
-			}
-
-			return identityweb.InvitationAcceptResult{EnrolmentCode: plain, Email: row.Email}, nil
+			return identityweb.InvitationAcceptResult{EnrolmentCode: out.EnrolmentCode, Email: out.Email}, nil
 		},
 		auditLogger,
 	)

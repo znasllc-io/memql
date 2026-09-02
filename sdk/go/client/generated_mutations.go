@@ -4349,15 +4349,17 @@ func CreateEmailRuleBuild(args CreateEmailRuleArgs) string {
 }
 
 // CreateEnrolmentToken -- Persist an enrolment-token row at issue time.
+// `invitationId` is the invitation-accept path's attribution (memql#4880). OPTIONAL, and in accept{} rather than stamp{}, so an omitted arg is dropped from the payload entirely and the portal and install-wizard issuers write no key at all. `issuedBy` stays a USER on every path -- the concept declares it a parent edge onto v1:identity:user and the engine refuses anything else -- which is why the invitation gets a field of its own instead of riding there.
 //
 // Bound concept: v1:identity:enrolmentToken (machine-readable: BoundConcepts["createEnrolmentToken"] in generated_concepts.go).
 type CreateEnrolmentTokenArgs struct {
-	EnrolmentId string
-	UserId      string
-	TokenHash   string
-	IssuedBy    string
-	ExpiresAt   string
-	SourceIP    string
+	EnrolmentId  string
+	UserId       string
+	TokenHash    string
+	IssuedBy     string
+	ExpiresAt    string
+	SourceIP     string
+	InvitationId string
 }
 
 // CreateEnrolmentToken calls the engine mutation createEnrolmentToken.
@@ -4397,6 +4399,13 @@ func CreateEnrolmentTokenBuild(args CreateEnrolmentTokenArgs) string {
 		}
 		b.WriteString("sourceIP: ")
 		b.WriteString(quoteMemQL(args.SourceIP))
+	}
+	if args.InvitationId != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("invitationId: ")
+		b.WriteString(quoteMemQL(args.InvitationId))
 	}
 	b.WriteString(")")
 	return b.String()
