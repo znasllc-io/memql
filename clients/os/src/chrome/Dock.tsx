@@ -287,12 +287,19 @@ export function Dock({
   onOpenLauncher: () => void;
   onSignOut: () => void;
 }) {
-  const { state, actions, registry, actorRole, notice } = useOs();
+  const { state, actions, registry, actorRole, ladderLoaded, notice } = useOs();
   const { openAsk } = useAsk();
   const connection = useConnectionStatus();
   const [menu, setMenu] = useState<{ x: number; y: number; appId: AppId } | null>(null);
 
-  const fixtures = useMemo(() => fixturesForRole(registry, actorRole), [registry, actorRole]);
+  // `ladderLoaded` in the deps for the launcher's reason (memql#4857):
+  // fixturesForRole reads the role ladder out of band, so a fixture gated
+  // above the pre-load answer would otherwise stay hidden after the ladder
+  // lands. The unmemoized filters below recompute on the same re-render.
+  const fixtures = useMemo(
+    () => fixturesForRole(registry, actorRole),
+    [registry, actorRole, ladderLoaded],
+  );
   const fixtureIds = useMemo(() => fixtures.map((a) => a.id), [fixtures]);
 
   const runningIds = Object.values(state.shell.windows).map((w) => w.appId);

@@ -23,7 +23,7 @@ export function LauncherOverlay({
   onClose: () => void;
   onOpenThemes: () => void;
 }) {
-  const { registry, actorRole, actions } = useOs();
+  const { registry, actorRole, ladderLoaded, actions } = useOs();
   const [tab, setTab] = useState<"apps" | "widgets">("apps");
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -37,13 +37,21 @@ export function LauncherOverlay({
     }
   }, [open]);
 
+  // `ladderLoaded` is a dep even though it is not read in the body: appsForRole
+  // calls roleAdmits, which reads the role LADDER out of band (module state),
+  // so the ladder landing after the role is a change this memo must see or it
+  // keeps the empty-ladder answer -- every gated app hidden -- for the session
+  // (memql#4857). The same reason it rides the widgets filter below.
   const apps = useMemo(() => {
     const admitted = appsForRole(registry, actorRole);
     const q = query.trim().toLowerCase();
     return q ? admitted.filter((a) => a.name.toLowerCase().includes(q)) : admitted;
-  }, [registry, actorRole, query]);
+  }, [registry, actorRole, ladderLoaded, query]);
 
-  const widgets = widgetsForRole(registry, actorRole);
+  const widgets = useMemo(
+    () => widgetsForRole(registry, actorRole),
+    [registry, actorRole, ladderLoaded],
+  );
 
   if (!open) return null;
 

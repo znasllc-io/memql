@@ -170,6 +170,19 @@ export interface OsContextValue {
   actions: OsActions;
   registry: OsRegistry;
   actorRole: string;
+  /**
+   * Whether the cluster's role LADDER has loaded (epic memql#4832, memql#4857).
+   *
+   * THE REACTIVITY SIGNAL FOR EVERY roleAdmits-CONSUMING SURFACE. The ladder
+   * is async module state that lands AFTER the role (a slow `activeRoles`
+   * read), and roleAdmits reads it out of band -- so a launcher/dock memo
+   * keyed only on `actorRole` computes its app list against an EMPTY ladder,
+   * refuses every gated app fail-closed, and never recomputes when the ladder
+   * arrives (actorRole did not change). Carrying the flag here, and naming it
+   * in those memos' deps, is what makes them recompute the moment it flips.
+   * A surface that filters by role MUST depend on this.
+   */
+  ladderLoaded: boolean;
   grid: GridSize;
   /** Null when there is nothing to report. Rendered by the dock. */
   notice: OsNotice | null;
@@ -333,12 +346,20 @@ export function OsProvider({
   children,
   registry,
   actorRole,
+  ladderLoaded = true,
   store,
   grid,
 }: {
   children: ReactNode;
   registry: OsRegistry;
   actorRole: string;
+  /**
+   * Defaults TRUE so every existing harness -- which seeds the ladder in
+   * test/setup.ts and never renders the pre-load window -- behaves exactly as
+   * before. The shell passes the real flag; the pre-load state is false only
+   * while the cluster read is in flight.
+   */
+  ladderLoaded?: boolean;
   store?: DesktopStore;
   grid: GridSize;
 }) {
@@ -660,8 +681,8 @@ export function OsProvider({
   actorRoleRef.current = actorRole;
 
   const value = useMemo<OsContextValue>(
-    () => ({ state, actions: actionsRef.current!, registry, actorRole, grid, notice }),
-    [state, registry, actorRole, grid, notice],
+    () => ({ state, actions: actionsRef.current!, registry, actorRole, ladderLoaded, grid, notice }),
+    [state, registry, actorRole, ladderLoaded, grid, notice],
   );
 
   // Every installed pack's CSS, in one style element, kept in step with the
