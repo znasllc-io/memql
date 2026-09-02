@@ -660,6 +660,12 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		//     `ownerUserId: actor.userId`. A guard reading the merged
 		//     payload would compare the attacker against the attacker.
 		//  2. Before any write, so a refusal cannot be partial.
+		//  3. With the rank memo installed, so the guard's rank-strict
+		//     branch resolves the ladder once for this write rather than
+		//     per candidate -- and resolves it from the SAME function the
+		//     read path uses, which is what keeps "may read" and "may
+		//     write" two rules over one resolution.
+		ctx = contextWithRankScopeMemo(ctx, e)
 		if err := guardRowAuthzWrite(ctx, conceptMeta.Name, id, priorPayload, existed, requirePrior); err != nil {
 			return nil, meta, err
 		}
@@ -775,6 +781,16 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 	}
+
+	// A NON-PRINCIPAL CANNOT OWN A ROW (memql#4817). The site stamp above
+	// is this rule for one concept; this is the same rule for every
+	// concept that declares an owner field, keyed on D4's explicit
+	// Unranked flag rather than on the shape of an id string.
+	//
+	// Placed HERE for the reason the site stamp states: before
+	// canonicalizeRelationshipFields, while the stamped value is still the
+	// bare actor id the comparison expects.
+	undoNonPrincipalOwnerStamp(ctx, conceptMeta.Name, payload)
 
 	// Annotation-driven PII scrub (memql#1711). A mutation tagged
 	// @scrubPii (the hard-delete / data-deletion path) clears EVERY field
@@ -992,6 +1008,16 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// last_owner_deletion_validation.go.
 	if conceptMeta.Name == conceptIdentityUser {
 		if err := e.validateLastOwnerNotDeleted(ctx, payload, mutation.ID, meta.priorUserRole); err != nil {
+			return nil, meta, err
+		}
+	}
+
+	// The self account is not archivable (memql#4837). Guards the STATUS
+	// FLIP on the merged payload rather than the mutation name, so a
+	// second writer cannot rediscover this in production. See
+	// accounts_self_archive_guard.go.
+	if conceptMeta.Name == conceptAccountsAccount {
+		if err := e.validateSelfAccountNotArchived(ctx, mutation.ID, payload); err != nil {
 			return nil, meta, err
 		}
 	}

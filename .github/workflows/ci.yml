@@ -780,6 +780,20 @@ jobs:
         # Still bounded by `any .go change sets RUN_GO, which makes RUN_GATES
         # false`, which is the part that actually caps the cost.
         #
+        # `./component/auth/...` IS HERE FOR THE SAME REASON `./deploy/...` IS
+        # (epic memql#4832). role_ladder_client_parity_test.go reads THREE
+        # files this bucket routes and this lane otherwise never ran a test
+        # over: clients/os/src/system/roles.ts, clients/os/test/seededLadder.ts
+        # and dsl/rbac/seeds.memql. It refuses a hardcoded role ordering in the
+        # shell and pins the ladder's three readings to one set of numbers.
+        #
+        # Without this entry the gate's own inputs reach NO lane that runs it:
+        # `clients/**` and `**/*.memql` are `gates` entries, and a PR touching
+        # only those sets RUN_GO false -- so re-introducing the divergence this
+        # epic closed would have merged green, in exactly the shape the two
+        # ladders arrived in the first time. Cheap: the package is small and
+        # DB-free.
+        #
         # `./deploy/...` CLOSES A HOLE THIS BUCKET ALREADY MEANT TO COVER
         # (memql#4487). `**/*.yaml` is a `gates` entry, and two deploy trees
         # are routed here BY NAME with comments saying which Go test reads
@@ -804,7 +818,7 @@ jobs:
         # the render halves self-skip without kustomize or kubectl on the
         # runner, and the text-level halves, which are the ones that must not
         # skip, do not.
-        run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./deploy/...
+        run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
       #

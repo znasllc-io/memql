@@ -1508,7 +1508,7 @@ export interface CreateAuditEventArgs {
   actorEmail?: string;
   actorRole?: string;
   actorIdentityId?: string;
-  // Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity
+  // Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity | rowOwnership
   targetType?: string;
   targetId?: string;
   targetEmail?: string;
@@ -1929,7 +1929,9 @@ So the four names carry `client`, which is the word for what this concept is (se
 =========================================================================== @createOnly IS THE SECOND HALF OF CREATE-IF-ABSENT (D3) =========================================================================== The `self` row is materialized by the `seedSelfAccount` automation, which gates on the row's absence -- so on an ordinary boot this mutation is not called at all. `@createOnly` closes the narrow race that gate cannot: two bff replicas boot together, both read absent, one creates, an operator edits the name, and the slow replica's create then lands on a row that is no longer empty. Naming every payload field here drops them all from that delta, so the read-merge inherits the operator's values and the late write is a no-op rather than a silent revert.
 It is a property of the WRITE, so it holds for any future caller, not just the boot path. Every payload field is named, `status` included: an operator who archived their own company row must not find it active again after a restart. `ownerUserId` is absent because it is not accepted -- it is stamped, and executeWrite undoes the stamp for a system actor, which is how the seeded row lands cluster-owned like the portal site does.
 `configuredAt` IS NOT STAMPED HERE, and that is the first-run card (D7). The card asks the one question a boot cannot answer -- what is this company called -- and `updateClientAccount` stamping the field is what retires it. A create-time stamp would retire the card before it was ever shown.
-`name` is `string!` on the concept and required here; everything else is optional and sits in accept{} rather than stamp{}, so an omitted argument is OMITTED FROM THE PAYLOAD rather than written as an explicit blank (missing args are dropped -- mutation_templates.go). `args.domain ?? ""` would put an empty string in the delta, which reads back as "we asked and they have no domain" rather than "nobody has said". */
+`name` is `string!` on the concept and required here; everything else is optional and sits in accept{} rather than stamp{}, so an omitted argument is OMITTED FROM THE PAYLOAD rather than written as an explicit blank (missing args are dropped -- mutation_templates.go). `args.domain ?? ""` would put an empty string in the delta, which reads back as "we asked and they have no domain" rather than "nobody has said".
+THE WRITE FLOOR (epic memql#4832 D6, memql#4837). `@requiresRank("admin")` is rank >= 200 -- {admin, developer, owner} -- the same floor the two reads carry, and it is stated on each of the three writes rather than inherited from anywhere. A caller who could CREATE an account they cannot READ is a worse state than either gate refusing on its own: the row would exist, owned by them, and invisible to them.
+The boot seed clears it without an exemption. seedSelfAccount runs under a MaintenanceActor carrying RoleOwner, and an unranked actor is not exempt from a rank floor -- it simply outranks this one. */
 // Bound concept: v1:accounts:account (machine-readable: BoundConcepts["createClientAccount"] in generated_concepts.ts).
 export interface CreateClientAccountArgs {
   accountId: string;
@@ -3363,6 +3365,8 @@ export interface CreateRoleArgs {
   description?: string;
   predefined?: boolean;
   active?: boolean;
+  /** Other slugs that resolve to THIS rung. Accepted because the seed materializer writes base roles through this mutation, and a field the mutation does not accept is a field the seed silently drops -- which is exactly what happened to `aliases` on its first attempt: every seeded row landed with it null, the engine kept working through its compiled fallback, and MemQL OS could not rank `writer` or `reader` at all. */
+  aliases?: string[];
 }
 
 export function buildCreateRole(args: CreateRoleArgs): string {
@@ -3374,6 +3378,7 @@ export function buildCreateRole(args: CreateRoleArgs): string {
   if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
   if (args.predefined !== undefined) parts.push("predefined: " + renderMemQLValue(args.predefined));
   if (args.active !== undefined) parts.push("active: " + renderMemQLValue(args.active));
+  if (args.aliases !== undefined) parts.push("aliases: " + renderMemQLValue(args.aliases));
   return "mutation createRole(" + parts.join(", ") + ")";
 }
 

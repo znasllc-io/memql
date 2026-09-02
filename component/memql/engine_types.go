@@ -85,6 +85,15 @@ type QueryPlan struct {
 	// rows to another (memql#3172 finding 2).
 	RowAuthzInjected bool
 
+	// RequiredRanks maps construct name -> the role slug its
+	// `@requiresRank` declares (epic memql#4832, D6). Empty for nearly
+	// every plan.
+	//
+	// It records WHICH floors apply, never whether they were cleared:
+	// the plan is cached and shared across callers, and "this caller
+	// cleared it" is not a property of a plan.
+	RequiredRanks map[string]string
+
 	// RowAuthzConcept names the concept whose declaration was injected,
 	// so the ctx-bearing side of the engine can re-read the tier instead
 	// of re-deriving it from the expression.

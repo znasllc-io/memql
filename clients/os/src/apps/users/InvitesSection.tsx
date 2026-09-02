@@ -18,7 +18,8 @@ import {
   Select,
   formatMoment,
   roleAdmits,
-  ROLE_LADDER,
+  roleGrantSlug,
+  roleLadder,
   useLiveView,
   useNow,
 } from "../../kit";
@@ -170,7 +171,11 @@ function IssueInvitation({
           onChange={setRole}
         >
           <option value="">cluster default</option>
-          {ROLE_LADDER.map((r) => (
+          {/* The CLUSTER's ladder, weakest rung first (epic memql#4832, D1).
+              A custom role the operator defined appears here with no client
+              release, and the order matches the engine's ranking rather than
+              a literal this file used to keep. */}
+          {roleLadder().map(roleGrantSlug).map((r) => (
             <option
               key={r}
               value={r}

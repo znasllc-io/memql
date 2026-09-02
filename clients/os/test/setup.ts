@@ -1,3 +1,17 @@
+import { setRoleLadder } from "../src/system/roles";
+import { SEEDED_LADDER } from "./seededLadder";
+
+// THE ROLE LADDER IS CLUSTER STATE NOW (epic memql#4832, D1), and in
+// production the shell reads it before it renders anything gated. jsdom has
+// no cluster, so every suite would otherwise run against an EMPTY ladder --
+// under which roleAdmits refuses everything gated and a launcher test would
+// pass while measuring nothing.
+//
+// Installed here rather than per file so the default matches production. A
+// test that wants the pre-load state clears it explicitly, which reads as the
+// deliberate act it is.
+setRoleLadder(SEEDED_LADDER);
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 class MemoryStorage implements Storage {

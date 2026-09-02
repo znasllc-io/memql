@@ -83,6 +83,7 @@ seed role user {
   rank:        100
   description: "Member tier: read/write the data plane, read the catalogs. No user management, authoring, or deploy."
   predefined:  true
+  aliases:     ["writer"]
 }
 
 @description("viewer: the read-only tier. The E1.5 (memql#2073) reconciliation target for the legacy reader slug -- reads the data plane + catalogs, writes nothing. Ranked below user (member) so a member out-ranks a viewer. Mirrors component/auth/rbac_model.go's reader/viewer capability profile.")
@@ -92,6 +93,7 @@ seed role viewer {
   rank:        50
   description: "Read-only tier: reads the data plane and the catalogs; no writes, no management. The reader slug maps here."
   predefined:  true
+  aliases:     ["reader"]
 }
 
 // =============================================================================

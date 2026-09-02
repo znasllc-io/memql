@@ -91,7 +91,7 @@ const { INTEGRATIONS_SECTION_ROLE } = await import(
 );
 const { LocalDesktopStore } = await import("../../src/system/store");
 const { UNKNOWN_RUNTIME_CONFIG } = await import("../../src/cluster/config");
-const { roleAdmits, ROLE_LADDER } = await import("../../src/system/roles");
+const { roleAdmits, roleLadder } = await import("../../src/system/roles");
 const { readConfigureOutcome, readIntegrationsReport, stateOf } = await import(
   "../../src/apps/settings/integrationsReport"
 );
@@ -944,7 +944,12 @@ describe("the role gate", () => {
     // The reachable positive: every one of those roles is admitted somewhere,
     // so the five falses above are about this requirement rather than about a
     // predicate that refuses everything.
-    for (const role of ROLE_LADDER) {
+    // The ladder is cluster state now (epic memql#4832), installed for every
+    // suite by test/setup.ts. Reading it here rather than a literal keeps the
+    // control measuring the same rungs the assertions above name.
+    const rungs = roleLadder().map((rung) => rung.slug);
+    expect(rungs.length).toBeGreaterThan(0);
+    for (const role of rungs) {
       expect(roleAdmits(role, undefined)).toBe(true);
     }
   });

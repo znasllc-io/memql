@@ -150,6 +150,20 @@ type Function struct {
 	// discovery while leaving it callable, this one is checked at execution.
 	ServerOnly bool
 
+	// RequiresRank is the role slug a caller must hold, at that rank or
+	// above, to invoke this construct -- `@requiresRank("developer")`.
+	// Empty on every construct that declares none, which is nearly all of
+	// them.
+	//
+	// This is the SERVER-SIDE COUNTERPART to the OS shell's per-surface
+	// role requirement (epic memql#4832, D6). It is declared on the
+	// CONSTRUCT and not on a surface, and that is the crux of the
+	// decision: a surface is a set of constructs, and an app id arriving
+	// from a browser is a claim rather than a fact -- gating on one would
+	// trust the client to report the very thing being gated. The app
+	// manifest's `roles` field becomes the presentation MIRROR of this.
+	RequiresRank string
+
 	// Deprecated contains deprecation message if set (empty = not deprecated)
 	Deprecated string
 
@@ -226,8 +240,15 @@ func (f *Function) clone() *Function {
 		BuiltinArgs:      f.BuiltinArgs.clone(),
 		ArgsSchema:       argsSchemaCopy,
 		// Attribute values
-		Enabled:           f.Enabled,
-		ServerOnly:        f.ServerOnly,
+		Enabled:    f.Enabled,
+		ServerOnly: f.ServerOnly,
+		// The actor-rank floor (epic memql#4832, D6). It has to be listed
+		// here, and the reason is worth a line: the registry hands out CLONES,
+		// so a field this function does not name is a field every registered
+		// construct loses. The loader resolved @requiresRank correctly and the
+		// enforcement read it correctly, and the floor was still absent
+		// everywhere -- a gate that parsed, validated and gated nothing.
+		RequiresRank:      f.RequiresRank,
 		Deprecated:        f.Deprecated,
 		Version:           f.Version,
 		Timeout:           f.Timeout,

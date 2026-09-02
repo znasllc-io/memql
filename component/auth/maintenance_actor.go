@@ -127,6 +127,15 @@ func MaintenanceActor(automationName string) *AccessContext {
 	return &AccessContext{
 		UserId: maintenanceUserIdPrefix + name,
 		Role:   RoleOwner,
+		// Not a principal, so the rank rules do not govern it (D4, epic
+		// memql#4832). RoleOwner above is what buys the cluster-owner
+		// escape; it is NOT a claim to rank 400, and without this flag a
+		// rank-strict concept would read this actor as an owner writing a
+		// PEER owner's row and refuse the sweep.
+		Unranked: true,
+		// And SYNTHETIC: this is the cluster acting, so it can never be a
+		// row's owner. See AccessContext.Synthetic.
+		Synthetic: true,
 	}
 }
 

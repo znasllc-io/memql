@@ -61,8 +61,20 @@
 /// (missing args are dropped -- mutation_templates.go). `args.domain ?? ""`
 /// would put an empty string in the delta, which reads back as "we asked and
 /// they have no domain" rather than "nobody has said".
+///
+/// THE WRITE FLOOR (epic memql#4832 D6, memql#4837). `@requiresRank("admin")`
+/// is rank >= 200 -- {admin, developer, owner} -- the same floor the two reads
+/// carry, and it is stated on each of the three writes rather than inherited
+/// from anywhere. A caller who could CREATE an account they cannot READ is a
+/// worse state than either gate refusing on its own: the row would exist,
+/// owned by them, and invisible to them.
+///
+/// The boot seed clears it without an exemption. seedSelfAccount runs under a
+/// MaintenanceActor carrying RoleOwner, and an unranked actor is not exempt
+/// from a rank floor -- it simply outranks this one.
 @actor
 @createOnly("name", "domain", "primaryContactName", "primaryContactEmail", "notes", "status")
+@requiresRank("admin")
 mutate account createClientAccount {
   args {
     accountId            string!
@@ -101,6 +113,7 @@ mutate account createClientAccount {
 ///
 /// `status` is deliberately NOT here. Archiving is its own write below,
 /// because it is its own decision and it asks its own confirm.
+@requiresRank("admin")
 mutate account updateClientAccount {
   args {
     accountId            string!
@@ -133,6 +146,7 @@ mutate account updateClientAccount {
 /// operator write; a control for it belongs with whatever surface eventually
 /// answers the same question for the Bin (memql#4784), and inventing a second
 /// half-answer here would be the thing to undo when it lands.
+@requiresRank("admin")
 mutate account archiveClientAccount {
   args {
     accountId  string!

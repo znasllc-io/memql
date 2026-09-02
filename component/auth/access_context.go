@@ -68,6 +68,61 @@ type AccessContext struct {
 	// restating, per construct, the rule the concept's own @rowAuthz(public)
 	// declaration already makes once.
 	IsAnonymous bool
+
+	// Unranked marks an actor the RANK RULES DO NOT GOVERN (epic
+	// memql#4832, D4). Rank-visible reads and rank-strict writes are
+	// statements about PRINCIPALS -- people holding a rung on the role
+	// ladder -- and the cluster's own characterised identities hold no
+	// rung: MaintenanceActor, the seed materializer, an automation's
+	// system actor, and borrowed authority via ContextWithUserActor.
+	//
+	// WITHOUT THIS, EVERY RETENTION SWEEP AND BOOT SEED BECOMES A
+	// PEER-WRITE AND STOPS -- and a sweep that retires nothing looks
+	// exactly like a sweep with nothing to retire, which is why D4 is
+	// stated in the design rather than left to be discovered.
+	//
+	// IT IS AN EXPLICIT FLAG BECAUSE THERE IS NOTHING ELSE HONEST TO READ.
+	// The maintenance actor and the seed materializer both carry
+	// RoleOwner, so a role check cannot tell them from a real operator;
+	// their synthetic `system:` UserId prefix CAN, and this tree forbids
+	// that in as many words -- "the prefix exists so a log line is
+	// legible; it is not a protocol, and inferring an authorization
+	// decision from a string shape is how a value somebody can influence
+	// becomes a permission" (anonymous_actor.go). So the constructors say
+	// it, once, where the actor is built.
+	//
+	// It does NOT grant anything. It is read only where the rank rules
+	// would otherwise apply, and every other gate -- the owned tier, the
+	// cluster-owner escape, internal origin -- answers exactly as before.
+	//
+	// Like ConnectorName and IsAnonymous it is a Go field and NOT part of
+	// the DSL actor envelope, for the same reason: the envelope is a
+	// closed authoring surface, and a filter branching on "is the caller a
+	// system identity" would restate per construct a rule the engine makes
+	// once.
+	Unranked bool
+
+	// Synthetic marks an actor that is THE CLUSTER ACTING RATHER THAN A
+	// PERSON, and it is a narrower statement than Unranked above.
+	//
+	// THE TWO ARE NOT THE SAME PROPERTY, and conflating them is a mistake
+	// this field exists because of. Unranked says "the rank rules do not
+	// govern this actor". Synthetic says "this actor can never be a row's
+	// OWNER". All three of MaintenanceActor, the seed materializer and an
+	// automation's system actor are both. BORROWED AUTHORITY
+	// (ContextWithUserActor) is only the first: its synthetic RoleWriter must
+	// not be read as a rung, but its UserId is a real person's, and rows it
+	// creates are genuinely theirs.
+	//
+	// The failure that separated them: undoNonPrincipalOwnerStamp keyed on
+	// Unranked and blanked `ownerUserId` on every row written through
+	// borrowed authority -- the worker's delegation policy, an app session --
+	// leaving them owned by nobody. Three db-gated tests caught it; no unit
+	// test could, because the stamp only happens on a real write.
+	//
+	// Set by the three synthetic constructors and by nothing a request can
+	// reach, exactly like ConnectorName and IsAnonymous above.
+	Synthetic bool
 }
 
 // AccessContextKey is the context key for AccessContext values.
@@ -138,7 +193,18 @@ func ContextWithUserActor(ctx context.Context, userId string) context.Context {
 	}
 	ctx = ContextWithClaims(ctx, claims)
 	ctx = ContextWithToken(ctx, BuildTokenInfo(claims))
-	return ContextWithAccess(ctx, &AccessContext{UserId: userId, Role: RoleWriter})
+	// Unranked: this is BORROWED authority (D4). The context exists so
+	// server-side Go can act on one user's behalf, and the rank rules must
+	// not read the synthetic RoleWriter above as "this principal sits at
+	// rank 100" -- the campaigns drain worker borrows a campaign owner who
+	// may be an admin, and a rank comparison against the borrowed role
+	// would refuse them their own rows.
+	// Unranked but NOT Synthetic. The synthetic RoleWriter above must not be
+	// read as a rung -- the campaigns worker borrows a campaign owner who may
+	// be an admin -- but the UserId is a real person's, and a row created here
+	// is genuinely theirs. See AccessContext.Synthetic for the failure that
+	// separated the two.
+	return ContextWithAccess(ctx, &AccessContext{UserId: userId, Role: RoleWriter, Unranked: true})
 }
 
 // IsClusterOwner returns true when the caller is a cluster-wide owner.

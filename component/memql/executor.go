@@ -291,6 +291,24 @@ func (e *MemQLEngine) evaluateExpressionSet(ctx context.Context, expr Expression
 }
 
 func (e *MemQLEngine) evaluateExpressionSetWithContext(ctx context.Context, expr ExpressionNode, timestamp *time.Time, target int, sorter *compiledSort, conceptContext string) (map[string]memorynodes.MemoryNode, error) {
+	// RANK LOWERING (epic memql#4832, D2), and the POSITION is the design.
+	//
+	// A rank term is symbolic in the plan -- it names the rule, not the
+	// ids -- because the plan is cached and shared. It is resolved HERE,
+	// at the one point where the SQL half (tryCompileCombinedFilter, just
+	// below) and the post-filter half (resolveExpressionForExecution and
+	// everything it feeds) still read the SAME tree. Lowering once, above
+	// that fork, is what makes "the two halves cannot disagree about a
+	// row" a structural property rather than a convention two functions
+	// are each asked to remember.
+	//
+	// The memo is installed first so a nested evaluation -- a logical
+	// branch recursing back into this function -- reuses one resolution
+	// instead of re-reading the principal table per subtree.
+	if treeHasRankScope(expr) {
+		ctx = contextWithRankScopeMemo(ctx, e)
+		expr = e.lowerRankScope(ctx, expr)
+	}
 	// Optimization: Try to compile the entire expression tree into a single SQL query.
 	// This is much more efficient than running separate queries and intersecting/unioning results.
 	if combined, ok := e.tryCompileCombinedFilter(ctx, expr, conceptContext); ok {

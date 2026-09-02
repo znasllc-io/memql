@@ -926,6 +926,16 @@ func (w *Worker) systemActorContext(ctx context.Context) context.Context {
 	return auth.ContextWithAccess(ctx, &auth.AccessContext{
 		UserId: systemCampaignsActor,
 		Role:   auth.RoleOwner,
+		// Unranked + Synthetic (epic memql#4832, D4): the drain worker acting
+		// as the cluster. RoleOwner is what buys the cluster-owner escape for
+		// its clusterOwner-tier reads; it is not a rung, and a rank-strict
+		// concept must not read it as an owner writing a PEER owner's row --
+		// a send job that silently drains nothing looks exactly like a queue
+		// with nothing in it. The OWNED-tier work rides ownerActorContext
+		// below, which borrows a real person and is deliberately not
+		// Synthetic.
+		Unranked:  true,
+		Synthetic: true,
 	})
 }
 

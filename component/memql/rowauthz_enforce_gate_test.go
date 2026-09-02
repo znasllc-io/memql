@@ -8,6 +8,7 @@ import (
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/dslgate"
 )
 
 // THE LAND-TIME GATE for row-authz enforcement (memql#3172).
@@ -36,6 +37,13 @@ type gateRow struct {
 	predicate string
 	verdict   ShadowVerdict
 	reason    string
+	// rankTier records that the concept declares a rank branch whose
+	// injected term has no author spelling (epic memql#4832).
+	rankTier bool
+	// callerScoped records that the filter carries a top-level conjunct
+	// that scopes the read to the caller -- the property this gate keeps
+	// checking when implication stops being decidable.
+	callerScoped bool
 }
 
 // measureDeclaredReads runs the analyzer over every query construct in
@@ -65,12 +73,14 @@ func measureDeclaredReads(registry *FunctionRegistry) (measured []gateRow, undec
 		}
 		verdict, reason := AnalyzeShadow(fn.Expr, concept.RowAuthz)
 		measured = append(measured, gateRow{
-			construct: fn.Name,
-			concept:   bound,
-			tier:      string(concept.RowAuthz.Tier),
-			predicate: InjectedPredicate(concept.RowAuthz),
-			verdict:   verdict,
-			reason:    reason,
+			construct:    fn.Name,
+			concept:      bound,
+			tier:         string(concept.RowAuthz.Tier),
+			predicate:    InjectedPredicate(concept.RowAuthz),
+			verdict:      verdict,
+			reason:       reason,
+			rankTier:     concept.RowAuthz.RankVisible,
+			callerScoped: filterIsCallerScoped(fn.Expr, concept.RowAuthz),
 		})
 	}
 	sort.Slice(measured, func(i, j int) bool {
@@ -121,6 +131,38 @@ func TestRowAuthzEnforcementLandGate(t *testing.T) {
 
 	for _, r := range measured {
 		if r.verdict == ShadowAlreadyImplied {
+			continue
+		}
+		// A RANK-DECLARING TIER IS NOT DECIDABLE BY INSPECTION, and this is
+		// the same shape the composite arm in AnalyzeShadow records one level
+		// down (memql#4312): without an arm for it, the tier could be
+		// DECLARED and then no construct over it could be AUTHORED.
+		//
+		// The injected predicate for `rankVisible` is
+		// `owner || clusterOwner || <rank membership>`, and the rank arm has
+		// NO AUTHOR SPELLING -- it is a symbolic node resolved per request
+		// against the principal table, deliberately, because a resolved list
+		// of user ids in a cached plan would be one caller's answer served to
+		// the next. So "does this filter imply the injected term" is a
+		// question with no static answer, and this file's doctrine is to
+		// report undecidable rather than a confident wrong one.
+		//
+		// THE EXEMPTION IS NOT A HOLE, because it is replaced by a stricter
+		// positive requirement: the construct must still carry a top-level
+		// CALLER-SCOPE conjunct. What the gate stops being able to check is
+		// whether injection changes the result set -- which for these tiers
+		// it certainly does, that being the entire feature. What it keeps
+		// checking is that the read is scoped to the caller at all, which is
+		// the property that actually protects rows.
+		if r.rankTier && r.verdict == ShadowUndecidable {
+			if !r.callerScoped {
+				t.Errorf("%s over %s declares a rank tier and its filter carries no top-level "+
+					"caller-scope conjunct.\n"+
+					"A rank tier's injected term cannot be decided by "+
+					"inspection, so this gate checks the property it still can: the read must be "+
+					"scoped to the caller. Add the tier's own composite term as a conjunct.",
+					r.construct, r.concept)
+			}
 			continue
 		}
 		t.Errorf("%s over %s (tier %s) is %s under enforcement: %s\n"+
@@ -347,5 +389,53 @@ func TestLandGateReportsOnlyDeclaredTiers(t *testing.T) {
 		if c.RowAuthz.Tier == langparser.RowAuthzPublic && r.predicate != "" {
 			t.Fatalf("%s declares public but the gate reports the predicate %q", r.concept, r.predicate)
 		}
+	}
+}
+
+
+// filterIsCallerScoped reports whether a filter carries a TOP-LEVEL conjunct
+// that scopes the read to the caller.
+//
+// It is deliberately weaker than AnalyzeShadow's implication check and answers
+// a different question: not "does injecting change the result set" but "is
+// this read scoped to whoever is asking at all". That is the property a rank
+// tier still lets this gate verify, and it is the one that protects rows.
+//
+// A conjunct qualifies when it is an owner-scope leaf, a cluster-owner leaf, a
+// recognised actor gate, or a DISJUNCTION whose every arm is one of those --
+// which is the shape the composite tier's own predicate takes, and therefore
+// the shape every construct over such a concept is already written in.
+func filterIsCallerScoped(expr ExpressionNode, decl *langparser.RowAuthzDecl) bool {
+	conjuncts, ok := topLevelConjunctsOf(unwrapToFilter(expr))
+	if !ok {
+		return false
+	}
+	for _, c := range conjuncts {
+		if callerScopeNode(c, decl) {
+			return true
+		}
+	}
+	return false
+}
+
+func callerScopeNode(node ExpressionNode, decl *langparser.RowAuthzDecl) bool {
+	switch n := node.(type) {
+	case *LogicalExpression:
+		if n.Op != LogicalOr {
+			// A conjunction inside a conjunct: either half scoping the read
+			// scopes it, the same way a top-level conjunct does.
+			return callerScopeNode(n.Left, decl) || callerScopeNode(n.Right, decl)
+		}
+		// A DISJUNCTION scopes the read only when EVERY arm does -- one
+		// unscoped arm returns rows the others would have excluded, which is
+		// the fail-open memql#2839 closed.
+		return callerScopeNode(n.Left, decl) && callerScopeNode(n.Right, decl)
+	case *SpecReferenceExpression:
+		// An actor gate, recognised by the SAME regex dslgate uses, so this
+		// gate and the composition rule cannot disagree about what counts as
+		// one. A gate neither knows is not a gate to either.
+		return dslgate.AdminGateRe.MatchString(" " + n.Name + " ")
+	default:
+		return isOwnerScopeLeaf(node, decl.Owner) || isClusterOwnerLeaf(node)
 	}
 }

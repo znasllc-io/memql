@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { initialShell, openApp, resetIdsForTest } from "../../src/system/desks";
 import { emptySurface, addItem } from "../../src/system/desktop";
 import { dockOrder, emptyDock, isPinned, movePin, pin, unpin } from "../../src/system/dock";
-import { roleAdmits, ROLE_LADDER } from "../../src/system/roles";
+import { roleAdmits, roleLadder, setRoleLadder } from "../../src/system/roles";
+import { SEEDED_LADDER } from "../seededLadder";
 import {
   documentFromState,
   LocalDesktopStore,
@@ -42,19 +43,66 @@ describe("dock pins", () => {
 });
 
 describe("role predicate", () => {
+  // The ladder is CLUSTER STATE now (epic memql#4832, D1), so every case here
+  // installs it first. Vitest isolates per FILE rather than per test, so the
+  // install has to be per-test: a case that ran after one clearing the ladder
+  // would otherwise measure an empty one and pass by admitting nothing.
+  beforeEach(() => setRoleLadder(SEEDED_LADDER));
+
   it("admits along the ladder, inclusive at the minimum", () => {
-    for (const [i, role] of ROLE_LADDER.entries()) {
-      for (const [j, min] of ROLE_LADDER.entries()) {
-        expect(roleAdmits(role, { min })).toBe(i >= j);
+    const rungs = roleLadder();
+    expect(rungs.length).toBeGreaterThan(0);
+    for (const [i, actor] of rungs.entries()) {
+      for (const [j, floor] of rungs.entries()) {
+        expect(roleAdmits(actor.slug, { min: floor.slug })).toBe(i >= j);
       }
     }
+  });
+
+  // THE DEFECT THIS EPIC EXISTS TO CLOSE, pinned as a case rather than left
+  // to the matrix above -- which would pass against EITHER ordering, since it
+  // only checks the ladder is consistent with itself.
+  //
+  // The shell used to rank admin above developer; the engine ranks developer
+  // (300) above admin (200). While the only consumer was a launcher that
+  // mis-sorted an app. Under rank-based row visibility the same request gets
+  // opposite answers depending on which side answers it.
+  it("ranks developer ABOVE admin, as the engine does", () => {
+    expect(roleAdmits("developer", { min: "admin" })).toBe(true);
+    expect(roleAdmits("admin", { min: "developer" })).toBe(false);
+  });
+
+  // The legacy slugs on a user row are not the slugs the catalog seeds, and
+  // the mapping is DATA on the rung rather than a table in the client.
+  it("resolves the legacy slugs through their rung's aliases", () => {
+    expect(roleAdmits("writer", { min: "user" })).toBe(true);
+    expect(roleAdmits("reader", { min: "viewer" })).toBe(true);
+    expect(roleAdmits("reader", { min: "user" })).toBe(false);
   });
 
   it("no requirement admits everyone; unknown roles unlock nothing gated", () => {
     expect(roleAdmits("", undefined)).toBe(true);
     expect(roleAdmits("mystery", undefined)).toBe(true);
-    expect(roleAdmits("mystery", { min: "reader" })).toBe(false);
-    expect(roleAdmits("", { min: "reader" })).toBe(false);
+    expect(roleAdmits("mystery", { min: "viewer" })).toBe(false);
+    expect(roleAdmits("", { min: "viewer" })).toBe(false);
+  });
+
+  // A floor naming a role the cluster does not have admits NOBODY. The
+  // obvious alternative -- treat an unresolvable floor as 0 -- reads
+  // correctly and fails OPEN, which is the same trap the engine's own
+  // rankFloorAdmits is written against.
+  it("a requirement naming an unknown role admits nobody", () => {
+    expect(roleAdmits("owner", { min: "nosuchrole" })).toBe(false);
+    expect(roleAdmits("reader", { min: "nosuchrole" })).toBe(false);
+  });
+
+  // Before the cluster read lands there is no ordering, and every gated
+  // surface stays hidden. That is the same answer an unreported actor role
+  // already gets, and it must not be confused with a decision about access.
+  it("admits nothing gated before the ladder loads", () => {
+    setRoleLadder([]);
+    expect(roleAdmits("owner", { min: "viewer" })).toBe(false);
+    expect(roleAdmits("owner", undefined)).toBe(true);
   });
 });
 

@@ -107,6 +107,67 @@ use identity.concepts.{ user }
 //                                -- reading a row as an administrator is not
 //                                authoring it.
 //
+//   THE RANK MODIFIERS (epic memql#4832). Three more ARGUMENTS of the owned
+//   tier -- flags, like clusterOwner, for the same reason: four sites switch
+//   on the owned tier, and a new tier value falls silently out of all four.
+//
+//   @rowAuthz(owner="<field>", rankVisible)
+//                                READS widen to "the owner, OR anyone whose
+//                                rank is at or above the OWNER'S rank" (D2).
+//                                Peers included at every rung -- the
+//                                comparison is <=, not <. The owner's rank is
+//                                resolved per REQUEST from the principal
+//                                table and never stamped on the row:
+//                                promoting somebody retroactively changes who
+//                                may see the rows they already own, so a
+//                                stamped rank is stale from the moment any
+//                                role changes, and stale in the direction of
+//                                showing too much.
+//
+//                                A row whose owner resolves to no live
+//                                principal -- empty, or a synthetic system id
+//                                -- is NOT admitted by this branch. It has no
+//                                rank to compare.
+//
+//   @rowAuthz(owner="<field>", rankVisible, rankStrict)
+//                                WRITES widen to "your own row, OR a row
+//                                owned by someone STRICTLY below your rank"
+//                                (D3) -- and NARROW, which is the half to
+//                                read twice: rankStrict WITHDRAWS the
+//                                cluster-owner write escape, so peer rows are
+//                                read-only owner-to-owner included. That is
+//                                the decision, not an oversight, and
+//                                ownership transfer (memql#4838) is what
+//                                makes an offboarded principal's rows
+//                                writable again. Internal origin and unranked
+//                                actors keep the escape (D4) or every
+//                                retention sweep and boot seed stops.
+//
+//                                Requires rankVisible. A write rule with no
+//                                matching read rule grants the authority to
+//                                change a row the same caller cannot see.
+//
+//   @rowAuthz(owner="<field>", rankVisible, unowned="<role>")
+//                                A row with a PRESENT but EMPTY owner field
+//                                is CLUSTER-OWNED -- the deployment's, not a
+//                                principal's -- so it has no owner's rank and
+//                                the rank branch refuses it by default. This
+//                                names the ACTOR rank from which such a row
+//                                becomes readable. `v1:accounts:account` is
+//                                the case: before it, an admin opening the
+//                                registry got zero rows and could not tell an
+//                                unconfigured cluster from an empty one.
+//
+//                                An ABSENT owner key stays denied at every
+//                                rank, which is what the owned tier has
+//                                always done with one. Only present-and-empty
+//                                is a deliberate statement of cluster
+//                                ownership.
+//
+//                                The slug is resolved at LOAD; an
+//                                unresolvable floor refuses boot, because it
+//                                would rank 0 and every rank clears 0.
+//
 // THE TIER IS ENFORCED (memql#3172), so declaring one CHANGES WHAT READS
 // RETURN: its predicate is ANDed into the plan of every read with a bound
 // concept, every emitted row is separately admitted against the tier its own

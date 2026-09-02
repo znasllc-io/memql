@@ -20,6 +20,7 @@ import { MachinesProvider } from "../live/machines";
 import { OsConnectionProvider, useOsConnection } from "../live/connection";
 import type { ProfileAccess } from "../modules/profile/access";
 import { useResolvedAccess } from "../modules/profile/useResolvedAccess";
+import { useRoleLadder } from "../modules/profile/useRoleLadder";
 import type { PlacementTokens } from "../system/placement";
 import { GraphDesktopStore } from "../system/graphStore";
 import { LocalDesktopStore, type DesktopStore } from "../system/store";
@@ -153,7 +154,22 @@ function SessionScope({
   children: ReactNode;
 }) {
   const resolved = useResolvedAccess(access);
-  const value = useMemo(() => ({ access: resolved, config }), [resolved, config]);
+  // The role LADDER, read here for the same reason the identity is: both need
+  // the Connection, and both are facts about the cluster this session is
+  // talking to (epic memql#4832, D1). It installs a module-level ordering
+  // rather than joining `value`, because roleAdmits keeps its signature --
+  // threading a ladder through every one of its ~20 call sites would be a
+  // second spelling of "can this actor see this", which this shell has
+  // exactly one of on purpose.
+  //
+  // `ladderLoaded` rides on the session facts so a surface can tell "you may
+  // not reach this" from "the shell does not know yet" -- two states that
+  // both hide an app and must not read the same to the person in front of it.
+  const ladderLoaded = useRoleLadder();
+  const value = useMemo(
+    () => ({ access: resolved, config, ladderLoaded }),
+    [resolved, config, ladderLoaded],
+  );
   return <SessionProvider value={value}>{children}</SessionProvider>;
 }
 

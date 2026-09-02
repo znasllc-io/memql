@@ -5368,3 +5368,155 @@ a.os-button {
 .os-files-node-link[data-link="origin_gone"] {
   background: var(--os-warn);
 }
+
+/* ---- rank (epic memql#4832) -----------------------------------------
+ *
+ * The rung mark and the two states it explains. Everything here reads
+ * tokens; nothing introduces a hue. Rank is an ORDERING, not a status, so
+ * the amber/red families are deliberately absent and the accent marks
+ * exactly one thing -- where the viewer stands.
+ */
+
+.os-rank-mark {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  width: 10px;
+  vertical-align: -2px;
+  flex: none;
+}
+
+/* One tick per rung. The default is a hairline: a rung that exists and is
+ * not one of the two being pointed at. */
+.os-rank-tick {
+  display: block;
+  height: 2px;
+  border-radius: 1px;
+  /* The unlit rungs use the STRONG rail rather than the plain one. They are
+   * the thing being counted -- a ladder whose empty rungs are invisible is a
+   * highlight with no scale behind it -- and at 2px they need the extra
+   * weight to register at all. */
+  background: var(--os-rail-hover);
+  /* Ticks are drawn at 60% and grow to full width when they carry meaning,
+   * so the two lit rungs read as marks rather than as brighter hairlines --
+   * the difference survives a low-contrast screen, which a colour change
+   * alone does not. */
+  width: 60%;
+  margin-inline-start: 20%;
+  transition:
+    background var(--os-duration-fast) var(--os-ease),
+    width var(--os-duration-fast) var(--os-ease);
+}
+
+/* THE OWNER's rung: ink, and NARROWER than the viewer's.
+ *
+ * The width difference is not decoration. The two lit rungs are adjacent
+ * whenever the owner sits one rung from the viewer -- which is the commonest
+ * case and the one the mark exists to explain -- and two full-width bars
+ * touching read as a single thick block, so the fact "they are one rung above
+ * you" collapses into "something is highlighted here". Differing widths keep
+ * them countable, and they do it by SHAPE, so the distinction survives a
+ * reader who cannot separate the two hues. */
+.os-rank-tick[data-owner] {
+  background: var(--os-ink);
+  width: 70%;
+  margin-inline-start: 15%;
+}
+
+/* THE VIEWER's rung: the accent, full width. Read as "you". Declared after
+ * the owner rule so a single rung carrying BOTH reads as yours -- when the
+ * two coincide the fact worth showing is that they are level with you, and
+ * the accent is what the eye finds. */
+.os-rank-tick[data-actor] {
+  background: var(--os-accent);
+  width: 100%;
+  margin-inline-start: 0;
+}
+
+.os-rank-mark-lg {
+  width: 16px;
+  gap: 3px;
+}
+.os-rank-mark-lg .os-rank-tick {
+  height: 3px;
+  border-radius: 1.5px;
+}
+
+/* A role slug is cluster state, so it is set in the data voice. */
+.os-role-slug {
+  font-family: var(--os-font-mono);
+  font-size: 0.9em;
+  color: var(--os-muted);
+}
+
+.os-role-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---- the refused surface ---- */
+
+.os-rank-refused {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 100%;
+  padding: 48px 32px;
+  text-align: center;
+}
+
+.os-rank-refused-head {
+  margin: 0;
+  font-size: var(--os-text-md);
+  font-weight: 600;
+  color: var(--os-ink);
+}
+
+.os-rank-refused-body {
+  margin: 0;
+  max-width: 42ch;
+  font-size: var(--os-text-base);
+  color: var(--os-muted);
+}
+
+.os-rank-refused-next {
+  margin: 6px 0 0;
+}
+
+/* ---- the read-only peer row ---- */
+
+.os-rank-readonly {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  /* The plate, not a tinted panel: this is a statement about the row, not a
+   * warning about it, and a coloured ground would say otherwise. */
+  background: var(--os-plate);
+}
+
+.os-rank-readonly .os-rank-mark {
+  margin-top: 2px;
+}
+
+.os-rank-readonly-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.os-rank-readonly-head {
+  margin: 0;
+  font-size: var(--os-text-base);
+  color: var(--os-ink);
+}
+
+.os-rank-readonly-copy .os-caption {
+  max-width: 56ch;
+}

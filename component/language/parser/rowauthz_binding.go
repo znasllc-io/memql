@@ -129,6 +129,58 @@ type RowAuthzDecl struct {
 	// Set only for RowAuthzOwned. On any other tier it is meaningless and
 	// FormatRowAuthz refuses it rather than dropping it silently.
 	ClusterOwnerBypass bool `json:"clusterOwnerBypass,omitempty"`
+
+	// RankVisible widens the owned tier's READ half to "the owner, OR
+	// anyone whose rank is at or above the OWNER'S rank" -- epic
+	// memql#4832 D2, `@rowAuthz(owner="<field>", rankVisible)`.
+	//
+	// Peers are included at every rung: the comparison is `<=`, not `<`.
+	// An owner field that resolves to no live principal -- empty, or a
+	// synthetic `system:` id -- is NOT admitted by this branch. It has no
+	// rank to compare, and admitting it would make every unowned row
+	// visible to the whole cluster the moment a concept opted in. Use the
+	// Unowned floor below to say what an unowned row is worth.
+	//
+	// A flag on the owned tier for the same reason ClusterOwnerBypass is
+	// one: four sites switch on Tier == RowAuthzOwned, and a new tier
+	// value falls silently out of all four.
+	RankVisible bool `json:"rankVisible,omitempty"`
+
+	// RankStrict widens the owned tier's WRITE half to "your own row, OR
+	// a row owned by someone STRICTLY below your rank" -- D3.
+	//
+	// It both WIDENS and NARROWS, and the narrowing is the point. It
+	// widens because the owned tier admits only the owner today, so a
+	// developer cannot touch a reader's row at all. It narrows because a
+	// CLUSTER OWNER writing a PEER owner's row stops being admitted by
+	// rowAuthzWriteEscape -- "owner-to-owner is read-only" is D3's sharp
+	// edge and the reason ownership transfer exists (memql#4838).
+	//
+	// Requires RankVisible. The reverse combination -- write a row you
+	// cannot read -- is the one incoherent pairing, and ParseRowAuthz
+	// refuses it rather than resolving it.
+	RankStrict bool `json:"rankStrict,omitempty"`
+
+	// Unowned is the role slug from which a row with an EMPTY owner field
+	// becomes readable -- `@rowAuthz(owner="<field>", unowned="developer")`.
+	//
+	// An unowned row is the DEPLOYMENT's, not a principal's: the `self`
+	// account and the portal site are the cases. Today such a row is
+	// reachable through the cluster-owner branch alone, which is why an
+	// admin or a developer opening the Accounts registry gets zero rows
+	// and cannot tell an unconfigured cluster from an empty one
+	// (memql#4837).
+	//
+	// NAMED `unowned` AND NOT `clusterOwned`, deliberately. It sits beside
+	// `clusterOwner` in the same argument list and the two say opposite
+	// halves of a sentence -- `clusterOwner` is about the ACTOR, this is
+	// about the ROW -- so a one-letter difference between them would be a
+	// reading trap in the one place in the tree that must be read exactly.
+	//
+	// Set only for RowAuthzOwned. The slug is resolved against the role
+	// ladder at LOAD, so a typo refuses boot rather than silently gating
+	// on rank 0 (which admits everyone).
+	Unowned string `json:"unowned,omitempty"`
 }
 
 // The declaration forms. The two parameterised tiers use the house
@@ -187,7 +239,24 @@ var rowAuthzKeywordTiers = map[string]RowAuthzTier{
 // rowAuthzSpellings renders the accepted forms for a diagnostic, in a
 // stable order.
 func rowAuthzSpellings() string {
-	return `@rowAuthz(public), @rowAuthz(clusterOwner), @rowAuthz(owner="<field>"), @rowAuthz(via="<spec>"), @rowAuthz(owner="<field>", clusterOwner)`
+	return `@rowAuthz(public), @rowAuthz(clusterOwner), @rowAuthz(owner="<field>"), @rowAuthz(via="<spec>"), @rowAuthz(owner="<field>", clusterOwner), @rowAuthz(owner="<field>", rankVisible[, rankStrict][, unowned="<role>"][, clusterOwner])`
+}
+
+// rowAuthzOwnedModifiers is THE set of arguments that may accompany an
+// `owner=` argument. Every one of them widens the owned tier; none of
+// them replaces it, which is why they are flags on one tier rather than
+// tiers of their own (see RowAuthzDecl.ClusterOwnerBypass).
+//
+// The map's VALUE says whether the argument is a bare flag. A keyword
+// modifier (`unowned="developer"`) carries a quoted value; a flag
+// modifier (`clusterOwner`) must be bare, because the parser stores a
+// bare identifier as `true` and `clusterOwner="yes"` is a different
+// shape that is not a spelling of anything.
+var rowAuthzOwnedModifiers = map[string]bool{
+	rowAuthzArgClusterOwner: true,
+	rowAuthzArgRankVisible:  true,
+	rowAuthzArgRankStrict:   true,
+	rowAuthzArgUnowned:      false,
 }
 
 // rowAuthzArgClusterOwner is the flag spelling that, BESIDE an `owner=`
@@ -196,41 +265,109 @@ func rowAuthzSpellings() string {
 // flag-tier map where the same word means the standalone tier.
 const rowAuthzArgClusterOwner = "clusterOwner"
 
-// parseRowAuthzComposite reads the two-argument form
-// `@rowAuthz(owner="<field>", clusterOwner)`.
+// The rank modifiers (epic memql#4832). Constants for the same reason
+// rowAuthzArgClusterOwner is one: the parser, the formatter and the
+// modifier table all have to agree on the spelling.
+const (
+	rowAuthzArgRankVisible = "rankVisible"
+	rowAuthzArgRankStrict  = "rankStrict"
+	rowAuthzArgUnowned     = "unowned"
+)
+
+// parseRowAuthzOwnedModifiers reads the owned tier carrying one or more
+// widening modifiers:
 //
-// It is the ONLY accepted argument list with more than one entry. Every
-// other pair names two tiers, which is not a wider tier but an ambiguous
-// declaration -- and an ambiguous authorization statement is the one
-// thing this parser must never resolve by picking a side.
+//	@rowAuthz(owner="<field>", clusterOwner)                  memql#4312
+//	@rowAuthz(owner="<field>", rankVisible)                   memql#4834 (D2)
+//	@rowAuthz(owner="<field>", rankVisible, rankStrict)       memql#4834 (D3)
+//	@rowAuthz(owner="<field>", rankVisible, unowned="developer")
 //
-// Returns (nil, false) when the args are not that shape, so the caller
-// emits the shared "takes exactly one tier" diagnostic with the composite
-// named among the accepted forms.
-func parseRowAuthzComposite(args map[string]any) (*RowAuthzDecl, bool) {
-	if len(args) != 2 {
-		return nil, false
-	}
+// It is the ONLY accepted argument list with more than one entry, and
+// every accepted shape names ONE tier -- the owned tier -- plus
+// arguments that widen it. Two TIERS in one list remains what it always
+// was: not a wider tier but an ambiguous declaration, and an ambiguous
+// authorization statement is the one thing this parser must never
+// resolve by picking a side.
+//
+// Returns (nil, "", false) when the args are not that shape, so the
+// caller emits the shared "takes exactly one tier" diagnostic. Returns
+// (nil, reason, false) when the shape IS owned-with-modifiers but the
+// combination is refused, so the caller can say WHICH argument is wrong
+// rather than listing every accepted form at someone who is one word
+// away from a legal declaration.
+func parseRowAuthzOwnedModifiers(args map[string]any) (*RowAuthzDecl, string, bool) {
 	rawOwner, hasOwner := args[rowAuthzArgOwner]
-	rawBypass, hasBypass := args[rowAuthzArgClusterOwner]
-	if !hasOwner || !hasBypass {
-		return nil, false
-	}
-	// `clusterOwner` must be the BARE flag: the parser stores a bare
-	// identifier as `true`. `clusterOwner="yes"` is a different shape and
-	// is not a spelling of this tier -- the same rule the single-argument
-	// flag branch applies.
-	if b, isBool := rawBypass.(bool); !isBool || !b {
-		return nil, false
+	if !hasOwner {
+		return nil, "", false
 	}
 	owner, isString := rawOwner.(string)
 	if !isString {
-		return nil, false
+		return nil, "", false
 	}
 	if owner = strings.TrimSpace(owner); owner == "" {
-		return nil, false
+		return nil, "", false
 	}
-	return &RowAuthzDecl{Tier: RowAuthzOwned, Owner: owner, ClusterOwnerBypass: true}, true
+
+	decl := &RowAuthzDecl{Tier: RowAuthzOwned, Owner: owner}
+	for name, raw := range args {
+		if name == rowAuthzArgOwner {
+			continue
+		}
+		isFlag, known := rowAuthzOwnedModifiers[name]
+		if !known {
+			// Not a modifier at all -- fall back to the shared "takes
+			// exactly one tier" diagnostic, which is the right message
+			// for `@rowAuthz(owner="x", via="y")`.
+			return nil, "", false
+		}
+		if isFlag {
+			// A flag modifier must be BARE: the parser stores a bare
+			// identifier as `true`, so `rankVisible="yes"` is a different
+			// shape and is not a spelling of this modifier.
+			if b, isBool := raw.(bool); !isBool || !b {
+				return nil, fmt.Sprintf("@%s(%s) takes no value -- write it bare, as @%s(%s=%q, %s). Accepted: %s",
+					RowAuthzAnnotation, name, RowAuthzAnnotation, rowAuthzArgOwner, owner, name, rowAuthzSpellings()), false
+			}
+			switch name {
+			case rowAuthzArgClusterOwner:
+				decl.ClusterOwnerBypass = true
+			case rowAuthzArgRankVisible:
+				decl.RankVisible = true
+			case rowAuthzArgRankStrict:
+				decl.RankStrict = true
+			}
+			continue
+		}
+		// A keyword modifier carries a quoted value.
+		v, ok := raw.(string)
+		if !ok || strings.TrimSpace(v) == "" {
+			return nil, fmt.Sprintf("@%s(%s=...) requires a quoted role slug -- write @%s(%s=%q, %s=\"developer\"). Accepted: %s",
+				RowAuthzAnnotation, name, RowAuthzAnnotation, rowAuthzArgOwner, owner, name, rowAuthzSpellings()), false
+		}
+		if name == rowAuthzArgUnowned {
+			decl.Unowned = strings.TrimSpace(v)
+		}
+	}
+
+	// The one incoherent pairing, refused rather than resolved: a write
+	// rule with no matching read rule grants the authority to change a row
+	// the same caller cannot see. Whichever way an engine resolved that it
+	// would be surprising, so it is not resolved.
+	if decl.RankStrict && !decl.RankVisible {
+		return nil, fmt.Sprintf("@%s(%s) needs %s beside it -- rank-strict writes let a caller change rows that rank-visible reads are what let them SEE. Write @%s(%s=%q, %s, %s). Accepted: %s",
+			RowAuthzAnnotation, rowAuthzArgRankStrict, rowAuthzArgRankVisible,
+			RowAuthzAnnotation, rowAuthzArgOwner, owner, rowAuthzArgRankVisible, rowAuthzArgRankStrict, rowAuthzSpellings()), false
+	}
+	// `unowned` is a rank floor and rank floors are meaningless without
+	// the rank branch: the unowned row would still be reachable through
+	// the cluster-owner escape alone, so the declaration would read as a
+	// widening that does nothing.
+	if decl.Unowned != "" && !decl.RankVisible {
+		return nil, fmt.Sprintf("@%s(%s=%q) needs %s beside it -- without the rank branch an unowned row is still reachable through %s alone, so the floor would gate nothing. Write @%s(%s=%q, %s, %s=%q). Accepted: %s",
+			RowAuthzAnnotation, rowAuthzArgUnowned, decl.Unowned, rowAuthzArgRankVisible, rowAuthzArgClusterOwner,
+			RowAuthzAnnotation, rowAuthzArgOwner, owner, rowAuthzArgRankVisible, rowAuthzArgUnowned, decl.Unowned, rowAuthzSpellings()), false
+	}
+	return decl, "", true
 }
 
 // ParseRowAuthz is THE detector: it turns an `@rowAuthz(...)`
@@ -261,13 +398,22 @@ func ParseRowAuthz(attr *Attribute) (*RowAuthzDecl, error) {
 			RowAuthzAnnotation, rowAuthzSpellings())
 	}
 	if len(attr.Args) > 1 {
-		// The one legal multi-argument list: the COMPOSITE tier
-		// (memql#4312). "The owner, or a cluster owner" is a single floor
-		// -- it is the owned tier with the admin gate ORed in, not two
-		// tiers -- so it does not violate the rule the message below
-		// states.
-		if decl, ok := parseRowAuthzComposite(attr.Args); ok {
+		// The one legal multi-argument list: the OWNED tier carrying
+		// widening modifiers -- the composite (memql#4312) and the rank
+		// modifiers (memql#4834). "The owner, or a cluster owner" and
+		// "the owner, or anyone above the owner's rank" are each a single
+		// floor -- the owned tier with a gate ORed in, not two tiers --
+		// so neither violates the rule the message below states.
+		decl, refusal, ok := parseRowAuthzOwnedModifiers(attr.Args)
+		if ok {
 			return decl, nil
+		}
+		// A refusal means the shape WAS owned-with-modifiers and one
+		// argument is wrong. Saying which beats listing every accepted
+		// form at an author who is one word away from a legal
+		// declaration.
+		if refusal != "" {
+			return nil, fmt.Errorf("%s", refusal)
 		}
 		return nil, fmt.Errorf("@%s takes exactly one tier, got %d (%s) -- a concept declares a single floor. Write one of: %s",
 			RowAuthzAnnotation, len(attr.Args), strings.Join(sortedArgNames(attr.Args), ", "), rowAuthzSpellings())
@@ -355,6 +501,30 @@ func FormatRowAuthz(d RowAuthzDecl) (string, error) {
 		return "", fmt.Errorf("@%s: the clusterOwner bypass is an argument of the owned tier -- it has no meaning on tier %q; write @%s(%s=\"<field>\", %s)",
 			RowAuthzAnnotation, d.Tier, RowAuthzAnnotation, rowAuthzArgOwner, rowAuthzArgClusterOwner)
 	}
+	// Same rule for the rank modifiers, and for the same reason: a
+	// renderer that silently discards half a declaration emits something
+	// ParseRowAuthz reads back as a DIFFERENT decl.
+	for _, m := range []struct {
+		set  bool
+		name string
+	}{
+		{d.RankVisible, rowAuthzArgRankVisible},
+		{d.RankStrict, rowAuthzArgRankStrict},
+		{d.Unowned != "", rowAuthzArgUnowned},
+	} {
+		if m.set && d.Tier != RowAuthzOwned {
+			return "", fmt.Errorf("@%s: %s is an argument of the owned tier -- it has no meaning on tier %q",
+				RowAuthzAnnotation, m.name, d.Tier)
+		}
+	}
+	if d.RankStrict && !d.RankVisible {
+		return "", fmt.Errorf("@%s: %s without %s is not a declaration this parser reads back -- see ParseRowAuthz",
+			RowAuthzAnnotation, rowAuthzArgRankStrict, rowAuthzArgRankVisible)
+	}
+	if d.Unowned != "" && !d.RankVisible {
+		return "", fmt.Errorf("@%s: %s without %s is not a declaration this parser reads back -- see ParseRowAuthz",
+			RowAuthzAnnotation, rowAuthzArgUnowned, rowAuthzArgRankVisible)
+	}
 	switch d.Tier {
 	case RowAuthzPublic, RowAuthzClusterOwner:
 		return fmt.Sprintf("@%s(%s)", RowAuthzAnnotation, d.Tier), nil
@@ -362,10 +532,25 @@ func FormatRowAuthz(d RowAuthzDecl) (string, error) {
 		if strings.TrimSpace(d.Owner) == "" {
 			return "", fmt.Errorf("@%s: tier %q needs an owner field", RowAuthzAnnotation, d.Tier)
 		}
-		if d.ClusterOwnerBypass {
-			return fmt.Sprintf("@%s(%s=%q, %s)", RowAuthzAnnotation, rowAuthzArgOwner, d.Owner, rowAuthzArgClusterOwner), nil
+		// Canonical modifier ORDER, so the round-trip is byte-stable:
+		// the read widenings first (rankVisible, then the write rule it
+		// gates, then the unowned floor it makes meaningful), and the
+		// cluster-owner escape last because it is the oldest and every
+		// existing declaration in the tree already spells it there.
+		out := fmt.Sprintf("@%s(%s=%q", RowAuthzAnnotation, rowAuthzArgOwner, d.Owner)
+		if d.RankVisible {
+			out += ", " + rowAuthzArgRankVisible
 		}
-		return fmt.Sprintf("@%s(%s=%q)", RowAuthzAnnotation, rowAuthzArgOwner, d.Owner), nil
+		if d.RankStrict {
+			out += ", " + rowAuthzArgRankStrict
+		}
+		if d.Unowned != "" {
+			out += fmt.Sprintf(", %s=%q", rowAuthzArgUnowned, d.Unowned)
+		}
+		if d.ClusterOwnerBypass {
+			out += ", " + rowAuthzArgClusterOwner
+		}
+		return out + ")", nil
 	case RowAuthzGranted:
 		if strings.TrimSpace(d.Spec) == "" {
 			return "", fmt.Errorf("@%s: tier %q needs a spec name", RowAuthzAnnotation, d.Tier)

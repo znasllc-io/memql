@@ -9,6 +9,8 @@
 package identity
 
 import (
+	"github.com/uptrace/bun"
+
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -17,11 +19,25 @@ import (
 // lives in component/identity/verifier/ and component/auth/.
 // Per-row authorization is enforced inside DSL queries + mutations;
 // see docs/public/operate/auth/per-row-authz-audit.md.
-type IdentityIntegration struct{}
+type IdentityIntegration struct {
+	// engine and db are nil on a node whose plug-in factory had neither.
+	// Only ownership transfer (memql#4838) needs them; every delegation
+	// capability above is pure and keeps working without them, which is why
+	// the factory does not refuse when they are absent.
+	engine memql.IntegrationEngineAccess
+	db     func() *bun.DB
+}
 
 // NewIdentityIntegration creates an identity integration.
 func NewIdentityIntegration() *IdentityIntegration {
 	return &IdentityIntegration{}
+}
+
+// NewIdentityIntegrationWithEngine creates one that can also transfer row
+// ownership -- the capability that needs to read every declared concept and
+// write back through the engine.
+func NewIdentityIntegrationWithEngine(engine memql.IntegrationEngineAccess, db func() *bun.DB) *IdentityIntegration {
+	return &IdentityIntegration{engine: engine, db: db}
 }
 
 // IntegrationName returns the stable identifier.
@@ -45,6 +61,20 @@ func (i *IdentityIntegration) Capabilities() []memql.IntegrationCapability {
 				"scopes":          "array?",
 				"expiresAt":       "string?",
 				"note":            "string?",
+			},
+		},
+		{
+			Name: "transferRowOwnership",
+			Description: "Reassign every row one principal owns to another, optionally narrowed to " +
+				"one concept or one row. Cluster-owner only; audited on v1:identity:auditEvent. " +
+				"This is what makes rank-strict writes survivable: with peer rows read-only at " +
+				"every rung, an offboarded principal's rows are otherwise unwritable forever.",
+			Handler: i.handleTransferRowOwnership,
+			ArgsSchema: map[string]string{
+				"fromUserId": "string",
+				"toUserId":   "string",
+				"concept":    "string?",
+				"rowId":      "string?",
 			},
 		},
 		{
