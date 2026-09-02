@@ -95,6 +95,8 @@ export interface FakeSeed {
   archivedFolders?: Row[];
   /** Superseded version rows, answering libraryFileVersionsForFile. */
   versions?: Row[];
+  /** The watched-folder arrangements (epic memql#4783). */
+  backups?: Row[];
   byId?: Record<string, Row>;
   /** Refusal sentences, keyed by construct name (e.g. archiveArtifact). */
   refuse?: Record<string, string>;
@@ -123,6 +125,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call === "query libraryArchivedArtifacts()") return rowsResult(seed.archived ?? []);
       if (call === "query libraryArchivedFolders()") return rowsResult(seed.archivedFolders ?? []);
       if (call.startsWith("query libraryFileVersionsForFile(")) return rowsResult(seed.versions ?? []);
+      if (call.startsWith("query libraryWatchedFolders(")) return rowsResult(seed.backups ?? []);
       if (call.startsWith("mutation ") || call.startsWith("builtin ")) return rowsResult([]);
 
       const match = /id==(\S+)/.exec(call);
@@ -311,6 +314,25 @@ export function versionRow(over: Partial<Row> & { id: string; fileId: string; ve
     createdAt: "2026-08-20T10:00:00Z",
     ...over,
   };
+}
+
+/** A watched folder. The three fields a cockpit reports are ABSENT by default,
+ *  which is the state every backup starts in and the one most easily got
+ *  wrong -- "no machine has checked in yet" must not read as "everything is
+ *  fine". Pass them explicitly to model a machine that has reported. */
+export function watchedFolderRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    ownerUserId: "user-1",
+    workerId: "wkr-1",
+    localPath: "/Users/ana/Clients",
+    folderId: "",
+    status: "active",
+    excludeGlobs: [],
+    includeHidden: false,
+    archived: false,
+    createdAt: "2026-08-30T12:00:00Z",
+    ...over,
+  } as Row;
 }
 
 export function folderRow(over: Partial<Row> & { id: string }): Row {
