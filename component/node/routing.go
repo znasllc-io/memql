@@ -376,6 +376,27 @@ func defaultRoutingRules() []RoutingRule {
 		// would be surface nothing sends.
 		{Pattern: "graph.node.created.v1:library:folder", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:library:folder", TargetType: ""},
+		// The watched-folder arrangement (epic memql#4783, the cockpit half
+		// memql#4841). These rows have TWO writers on DIFFERENT nodes and that
+		// is the whole reason the rules are here: a person creates, pauses and
+		// re-points a watch from the browser (the bff takes that write), and a
+		// cockpit reports every sweep through reportLibraryWatchedFolderSweep
+		// (which lands on whichever replica its own request dialed). Neither
+		// side is guaranteed to be the replica the Files app is watching from,
+		// so without these the arrangement is correct on load and frozen
+		// after -- and "frozen" here means a backup that has stopped reporting
+		// looks exactly like one that is fine, which is the single worst
+		// failure this surface can have.
+		//
+		// BROADCAST WITH A CONSUMER TO CHECK, and it was checked: no
+		// automation in the tree triggers on v1:library:watchedFolder (swept
+		// over dsl/ when the concept landed, the same check the folder rule
+		// above records), so the multi-fire question does not arise. No delete
+		// rule for the folder rule's reason: nothing hard-deletes a watch --
+		// archiveLibraryWatchedFolder is an UPDATE -- so a delete rule would
+		// be surface nothing sends.
+		{Pattern: "graph.node.created.v1:library:watchedFolder", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:library:watchedFolder", TargetType: ""},
 		// Authoring rows behind Nexus's Constructs page (memql#4542). A
 		// bundle, its constructs and the dependency edges between them are
 		// written by whichever node ran the authoring promote -- an agent

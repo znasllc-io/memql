@@ -20,10 +20,14 @@ import (
 // test of itself.
 //
 // The fixture concept is registered here rather than declared in dsl/,
-// because the tier ships EMPTY: no concept in the engine tree declares
-// @rowAuthz(public), and the conformance suite proves it. A product bundle
-// declares the tier on its own content concepts when it means to publish
-// them; this is what one of those looks like.
+// because the tier ships EMPTY OF ANONYMOUSLY-REACHABLE CONCEPTS: nothing in
+// the engine tree is servable to a stranger, and the conformance suite proves
+// it. (One engine concept does now declare the tier --
+// v1:knowledge:knowledgeDomain, with the requiresIdentity narrowing of
+// memql#4809 -- which is exactly why that gate takes the narrow population and
+// this fixture is still needed to test the wide one.) A product bundle declares
+// plain `public` on its own content concepts when it means to publish them;
+// this is what one of those looks like.
 
 const anonPublicConcept = "v1:rowauthzprobe:publicPage"
 
@@ -277,5 +281,51 @@ func TestAnonymousWriteIsRefusedAtTheChokepoint(t *testing.T) {
 		if !strings.Contains(err.Error(), "no anonymous write") {
 			t.Errorf("the write to %s was refused for the wrong reason (%v) -- a refusal that fires for an unrelated reason is not the gate firing", conceptName, err)
 		}
+	}
+}
+
+// The requiresIdentity narrowing (memql#4809), tested through the same real
+// admission function everything else in this file goes through.
+//
+// The rule has TWO halves and both have to hold, because getting either one
+// backwards is silent. Withhold too much and every existing public concept
+// stops being readable by the anonymous callers it was published for; withhold
+// too little and a catalog somebody declared "shared inside this cluster" is
+// on the internet the day the flag is turned on.
+func TestRequiresIdentityKeepsAConceptOffTheAnonymousDoor(t *testing.T) {
+	const narrowed = "v1:rowauthzprobe:sharedCatalog"
+	registerProbeConcept(t, narrowed, &langparser.RowAuthzDecl{
+		Tier: langparser.RowAuthzPublic, RequiresIdentity: true,
+	})
+	row := rowOf(t, narrowed, narrowed+":domain-1", map[string]any{"name": "Residential real estate"})
+
+	// Half one: an anonymous caller is refused, exactly as they are refused
+	// an undeclared concept. This is the half the flag exists for.
+	if got := rowAuthzAdmits(anonCtx(), row.Concept, row.ID, row.Payload); got != rowAuthzDeny {
+		t.Errorf("an anonymous caller was admitted to @rowAuthz(public, requiresIdentity) (admission=%v).\n"+
+			"The narrowing is the entire difference between 'this catalog has no row-level distinction to "+
+			"draw' and 'serve this catalog to the internet', and it lands at exactly one site "+
+			"(conceptDeclaresPublicTier). If it stops holding, every concept that took this form is "+
+			"published the moment MEMQL_PUBLIC_READS_ENABLED is turned on.", got)
+	}
+
+	// Half two: every AUTHENTICATED caller still sees a plain public tier --
+	// no predicate, no owner comparison, no narrowing of any kind. A flag
+	// that leaked past the anonymous door would make a catalog with no owner
+	// field unreadable by everyone, which presents as "this cluster has no
+	// knowledge domains".
+	if got := rowAuthzAdmits(callerCtx("user-a"), row.Concept, row.ID, row.Payload); got != rowAuthzAdmit {
+		t.Errorf("an authenticated caller was refused a requiresIdentity row (admission=%v) -- "+
+			"the narrowing leaked past the anonymous door", got)
+	}
+
+	// The reachable positive: with the SAME actor and the SAME shape of row,
+	// plain `public` admits. So the refusal above is about the flag rather
+	// than about anonymous callers being refused everything anyway.
+	withPublicFixtureConcept(t)
+	open := rowOf(t, anonPublicConcept, anonPublicConcept+":home", map[string]any{"title": "Home"})
+	if got := rowAuthzAdmits(anonCtx(), open.Concept, open.ID, open.Payload); got != rowAuthzAdmit {
+		t.Fatalf("plain @rowAuthz(public) refused an anonymous caller (admission=%v) -- "+
+			"this control did not move, so the assertion above measures nothing", got)
 	}
 }

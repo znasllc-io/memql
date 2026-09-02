@@ -11,6 +11,11 @@ import type { OsAppSection } from "../../system/registry";
  *  manifest and the gear must offer the same set. */
 export const FILES_SECTIONS: OsAppSection[] = [
   { id: "browse", name: "Browse" },
+  // Backups lives in Files rather than in Fleet, and the split is about what
+  // the thing IS. Fleet is machines and how work is routed to them; a backup
+  // is a folder, its destination is a Library folder two panes away, and the
+  // per-file states it rolls up are the ones the browse already renders.
+  { id: "backups", name: "Backups" },
   { id: "settings", name: "Settings" },
 ];
 

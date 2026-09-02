@@ -239,3 +239,29 @@ shape fileChunk libraryFileChunkFull {
   tokenCount
   row.createdAt
 }
+
+/// Full projection of one watched folder (epic memql#4783, the cockpit half memql#4841). Backs both
+/// readers, and deliberately one shape for the two: the cockpit needs the arrangement and the Files
+/// app needs the arrangement PLUS what was last reported about it, and two shapes over one row would
+/// be two things to keep in step for no gain. A concept field is not a readable field until a shape
+/// projects it, so every field the app renders and every field the sweeper acts on is here --
+/// including the three that are frequently ABSENT (originState, filesSeen, bytesSeen), because a
+/// projection that omitted them would make "nothing has reported yet" unreadable rather than empty.
+@row
+shape watchedFolder watchedFolderFull {
+  row.id
+  ownerUserId
+  workerId
+  localPath
+  folderId
+  status
+  excludeGlobs
+  includeHidden
+  archived
+  originState
+  lastSweepAt
+  lastSweepError
+  filesSeen
+  bytesSeen
+  row.createdAt
+}

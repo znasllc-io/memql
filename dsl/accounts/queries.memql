@@ -203,9 +203,18 @@ query artifact libraryItemsForAccount {
 /// tagged with an account trains, attaches and answers exactly as an untagged
 /// one does.
 ///
-/// No tier conjunct, because the concept declares no tier -- see its
-/// declaration in dsl/knowledge/concepts.memql for why that matches its
-/// sibling `documentChunk` rather than departing from it.
+/// No tier conjunct, and that is now declared rather than absent (memql#4809):
+/// `v1:knowledge:knowledgeDomain` carries `@rowAuthz(public, requiresIdentity)`,
+/// meaning its rows have no row-level distinction to draw and its authorization
+/// lives at the surface instead.
+///
+/// @requiresRank("admin") is that surface half here, and the floor is a rung
+/// ABOVE its sibling `knowledgeDomainsAll` on the same concept deliberately:
+/// this read is reached from the Accounts app (`roles: { min: "admin" }`) and
+/// answers a question about one CLIENT, while the catalog list answers a
+/// question about the cluster. Same rows, two questions, two floors -- which is
+/// exactly the asymmetry a per-row tier could not have expressed.
+@requiresRank("admin")
 query knowledgeDomain domainsForAccount {
   args {
     accountId  string!

@@ -45,6 +45,34 @@ func publicTierConcepts(t *testing.T) (names []string, examined int) {
 	return names, len(all)
 }
 
+// anonymouslyReachablePublicConcepts is the subset of the above that an
+// UNAUTHENTICATED caller could actually reach: public, without the
+// requiresIdentity narrowing (memql#4809).
+//
+// The distinction is the whole point of that flag, and it is why the two
+// gates in this file take different populations. TestPublicTierConceptsCarryNoPII
+// asks "could a reader who should not see this field see it", and every
+// signed-in stranger on the cluster is such a reader -- so it takes the WIDE
+// set. TestTheEngineTreeDeclaresNoPublicConcepts asks "does enabling
+// MEMQL_PUBLIC_READS_ENABLED publish something nobody chose to publish", and a
+// requiresIdentity concept is refused to anonymous callers by
+// conceptDeclaresPublicTier no matter what that flag says -- so it takes the
+// NARROW one.
+func anonymouslyReachablePublicConcepts(t *testing.T) (names []string, examined int) {
+	t.Helper()
+	if _, err := memqlengine.LoadUnifiedConcepts(nil); err != nil {
+		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	}
+	all := memorynodes.All()
+	for name, c := range all {
+		if c != nil && c.RowAuthz != nil && c.RowAuthz.Tier == langparser.RowAuthzPublic && !c.RowAuthz.RequiresIdentity {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names, len(all)
+}
+
 // TestPublicTierConceptsCarryNoPII.
 //
 // The @pii annotation drives the hard-delete scrub and the unbound-read
@@ -106,10 +134,26 @@ func TestTheEngineTreeDeclaresNoPublicConcepts(t *testing.T) {
 	// every cluster that enables public reads.
 	allowed := map[string]string{}
 
-	names, examined := publicTierConcepts(t)
+	// The ANONYMOUSLY REACHABLE set, not every public-tier concept
+	// (memql#4809). `@rowAuthz(public, requiresIdentity)` declares "no
+	// row-level distinction exists over these rows" WITHOUT declaring "serve
+	// them to the internet", and this gate is about the second half only.
+	// v1:knowledge:knowledgeDomain is the first concept in the tree to take
+	// that form, and an entry here for it would record a decision nobody made.
+	names, examined := anonymouslyReachablePublicConcepts(t)
 	if examined == 0 {
 		t.Fatal("the concept registry is empty -- this gate examined nothing")
 	}
+	// An empty offender list has to be about the TREE, not about a filter
+	// that stopped matching. The wide set is non-empty -- knowledgeDomain is
+	// in it -- so the narrowing is what emptied this one, and that is the
+	// only reading of an empty result this gate accepts.
+	wide, _ := publicTierConcepts(t)
+	if len(wide) == 0 {
+		t.Fatal("no concept declares @rowAuthz(public) at all -- this gate's narrowing is untested, " +
+			"so its empty result says nothing about whether requiresIdentity is being honoured")
+	}
+	t.Logf("%d concept(s) declare the public tier; %d of them are anonymously reachable", len(wide), len(names))
 
 	for _, name := range names {
 		if reason, ok := allowed[name]; ok {

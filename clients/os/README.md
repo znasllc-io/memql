@@ -644,6 +644,54 @@ and rolled up as a dot on the folder. Three rules:
   concepts cannot disagree.
 
 
+### Backups, the Files section that sets those states up (memql#4841)
+
+The arrangement half of the same epic: a folder on one of the caller's
+machines, kept arriving in a Library folder. It reads
+`v1:library:watchedFolder` as a FOURTH feed at the Files app root, and lives in
+Files rather than in Fleet because the thing is a folder -- Fleet is machines
+and how work is routed to them.
+
+- **THE LINK IS THE ROW.** A backup is a relationship between two named ends,
+  so the surface draws one: machine and path on the left, Library folder on the
+  right, a wire between them whose SHAPE and colour are the state. The
+  direction is drawn because the direction is a rule (one-way forever), and the
+  two file counts either side are the point -- the origin's own count is
+  something only the machine can answer, and when a backup is behind the
+  difference between them is the story.
+- **Colour is never the only carrier.** Every tone is also a word on the state
+  line and a sentence in the link's accessible name, and the wire changes shape
+  as well as hue (solid / dashed / severed / stopped-at-a-bar), so it survives
+  greyscale. Motion appears on exactly one tone -- the one where bytes really
+  are moving -- and `prefers-reduced-motion` removes it without removing
+  information.
+- **`paused` beats every fault, and `waiting` beats the rest.** The cockpit
+  stops sweeping a paused backup, so its `originState` is the last thing seen
+  BEFORE the pause; painting that as a live alarm on something somebody turned
+  off is how a person learns to stop reading the colours. And a backup nothing
+  has reported on is neither working nor broken -- claiming either invents
+  evidence.
+- **A backup's badge reads ITS OWN files, matched on `(machine, path)`, never
+  the destination folder's rollup.** Anything else in that Library folder -- a
+  browser upload, a file dragged in -- has no origin to be stale against, and a
+  folder rollup would put "changed on the machine" on a backup because of a
+  file that came from no machine at all.
+- **`lastSweepAt` is rendered continuously and is ABSENT from the
+  fingerprint.** A sweep touches it, and the two counts, on a schedule for
+  every backup forever; naming any of them as news strobes the list on the
+  sweep's own cycle. The counts still re-render when they move -- only the CUE
+  is fingerprint-driven, which is the pair the campaigns app pins.
+- **A refusal belongs to the write that produced it.** The writes hook carries
+  an `errorId` beside the sentence, because one shared error string over a list
+  of rows has no home: on every row it is four copies of one refusal, on none
+  it is a write that failed silently.
+- **The machine can veto.** `refused_by_policy` is its own `originState`, not a
+  flavour of `unreadable`: nothing about the folder is wrong and the repair is
+  in that machine's `policy.yaml`. The row is written from a browser and read
+  by a cockpit, so its path is one the cluster is naming on somebody else's
+  machine -- the situation appsession's `CheckWorkspace` exists for, and the
+  same answer.
+
 ## Campaigns, the eighth app (epic memql#4827 / #4828 / #4830)
 
 `src/apps/campaigns/` is mail: the audiences it goes to, the copy it is made

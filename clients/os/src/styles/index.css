@@ -5613,3 +5613,308 @@ a.os-button {
 .os-rank-readonly-copy .os-caption {
   max-width: 56ch;
 }
+
+/* ---- backups (epic memql#4783, the cockpit half memql#4841) -----------
+ *
+ * THE LINK IS THE ROW. A backup is a relationship between two named ends --
+ * a folder on a machine, and a folder here -- so the surface draws one:
+ * origin on the left, destination on the right, and a wire between them
+ * whose appearance is the state of the bytes.
+ *
+ * The direction is drawn because the direction is a RULE. This is one-way
+ * forever, machine to MemQL; a picture that could be read either way would
+ * be the wrong picture of the feature.
+ *
+ * COLOUR IS NEVER THE ONLY CARRIER. Every tone here is also a word on the
+ * state line and a sentence in the link's accessible name, so the wire adds
+ * emphasis to something already said. It changes SHAPE as well as hue --
+ * solid, dashed, severed -- which is what keeps it legible in greyscale and
+ * to anyone who does not separate the amber from the accent.
+ *
+ * Every value is a token. Nothing here introduces a hue, so a theme pack
+ * restyles the whole surface with no code change.
+ */
+
+.os-backup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+}
+
+/* The link and the row's actions share one line: the link takes a bounded
+ * measure on the left and the buttons take the space that is left. An
+ * unbounded link stretched the two ends to the window's edges, which put
+ * hundreds of pixels of nothing between two things whose whole point is that
+ * they are connected -- the picture then read as distance rather than as a
+ * relationship. */
+.os-backup-top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.os-backup-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 420px;
+  min-width: 0;
+  max-width: 660px;
+}
+
+/* The origin end is a FIXED column, so every wire in the list starts at the
+ * same x. Letting it size to its content put each row's wire at a different
+ * place and the list stopped reading as one system -- six unrelated diagrams
+ * rather than six instances of one. A long path truncates with its full value
+ * on the title, which is the trade worth making for the alignment. */
+.os-backup-end {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 0 1 300px;
+}
+
+/* The destination end starts WHERE THE ARROW LANDS, and takes only the width
+ * it needs. Right-aligning it inside a fixed column left it floating in the
+ * middle of the row with the arrow pointing at nothing -- the label has to
+ * begin at the arrowhead or the link does not read as one. */
+.os-backup-end-here {
+  flex: 0 1 auto;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.os-backup-machine,
+.os-backup-folder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--os-text-base);
+  color: var(--os-ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.os-backup-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--os-line);
+}
+
+.os-backup-dot[data-online="true"] {
+  background: var(--os-accent);
+}
+
+/* The path is the one piece of foreign text on this surface -- it belongs to
+ * another machine's filesystem -- so it is set in the mono face, which is
+ * how the rest of the shell marks data it did not author. */
+.os-backup-path {
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.os-backup-count {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- the wire -------------------------------------------------------
+ *
+ * Drawn with a repeating gradient rather than a border, because the DASH
+ * has to be able to move: a linear-gradient background can be animated by
+ * position where a border-style cannot.
+ */
+.os-backup-wire {
+  flex: 0 1 140px;
+  position: relative;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--os-line);
+  min-width: 56px;
+  max-width: 160px;
+}
+
+/* The arrowhead. It is on the DESTINATION end and points at it, which is the
+ * whole claim the element makes. */
+.os-backup-wire::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  transform: translateY(-50%) rotate(45deg);
+  color: var(--os-line);
+}
+
+.os-backup-wire[data-tone="settled"] {
+  background: var(--os-accent);
+}
+.os-backup-wire[data-tone="settled"]::after {
+  color: var(--os-accent);
+}
+
+/* Catching up: bytes are on their way, so the wire moves toward the
+ * destination. The ONE animation on this surface, and it is animating the
+ * one thing that is genuinely in motion. */
+.os-backup-wire[data-tone="behind"] {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--os-accent) 0 8px,
+    transparent 8px 16px
+  );
+  background-size: 16px 100%;
+  animation: os-backup-flow 900ms linear infinite;
+}
+.os-backup-wire[data-tone="behind"]::after {
+  color: var(--os-accent);
+}
+
+@keyframes os-backup-flow {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 16px 0;
+  }
+}
+
+/* Waiting: nothing has been claimed yet, so the wire is drawn but faint, and
+ * carries no arrowhead -- there is no flow to point at. */
+.os-backup-wire[data-tone="waiting"] {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--os-line) 0 3px,
+    transparent 3px 8px
+  );
+}
+.os-backup-wire[data-tone="waiting"]::after {
+  display: none;
+}
+
+/* Paused: a dotted, muted line. Deliberately NOT a fault colour -- somebody
+ * turned this off on purpose, and alarming about it is how a person learns
+ * to stop reading the colours. */
+.os-backup-wire[data-tone="paused"] {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--os-muted) 0 2px,
+    transparent 2px 6px
+  );
+  opacity: 0.6;
+}
+.os-backup-wire[data-tone="paused"]::after {
+  color: var(--os-muted);
+  opacity: 0.6;
+}
+
+/* Refused: the wire stops at a bar just past the origin. The machine did not
+ * fail to send -- it declined to, and the shape says the difference. */
+.os-backup-wire[data-tone="refused"] {
+  background: linear-gradient(90deg, var(--os-warn) 0 30%, transparent 30% 100%);
+}
+.os-backup-wire[data-tone="refused"]::before {
+  content: "";
+  position: absolute;
+  left: 30%;
+  top: -5px;
+  width: 2px;
+  height: 12px;
+  background: var(--os-warn);
+}
+.os-backup-wire[data-tone="refused"]::after {
+  display: none;
+}
+
+/* Broken: the wire is SEVERED. A visible gap in the middle, both stubs in the
+ * warn tone, and no arrowhead -- nothing is arriving. This is the one bold
+ * move on the surface, and it is spent on the state a person most needs to
+ * notice from across a room. */
+.os-backup-wire[data-tone="broken"] {
+  background: linear-gradient(
+    90deg,
+    var(--os-warn) 0 40%,
+    transparent 40% 60%,
+    var(--os-warn) 60% 100%
+  );
+}
+.os-backup-wire[data-tone="broken"]::after {
+  display: none;
+}
+
+.os-backup-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: var(--os-text-sm);
+}
+
+.os-backup-tone {
+  color: var(--os-ink);
+}
+
+.os-backup[data-tone="broken"] .os-backup-tone,
+.os-backup[data-tone="refused"] .os-backup-tone {
+  color: var(--os-warn);
+}
+
+.os-backup-when {
+  color: var(--os-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.os-backup-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.os-backup-confirm,
+.os-backup-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.os-backups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The form takes a READABLE MEASURE while the list takes the window
+ * (DESIGN.md rule 9). A path field stretched to 1500px is a text input a
+ * person's eye has to travel the whole screen to read back, and it made the
+ * three short fields beside it look like an error. The list is the opposite
+ * case and keeps the full width, because its rows are a picture. */
+.os-backups > .os-panel {
+  max-width: 560px;
+}
+
+/* Motion is emphasis, never information: the dashes carry the same tone and
+ * the same words standing still, so removing the animation removes nothing a
+ * person needs. */
+@media (prefers-reduced-motion: reduce) {
+  .os-backup-wire[data-tone="behind"] {
+    animation: none;
+  }
+}

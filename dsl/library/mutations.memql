@@ -805,3 +805,154 @@ mutate file supersedeLibraryFileHead {
     versionUploadedAt: now
   }
 }
+
+// ---- watchedFolder: setting a backup up, and reporting on it ----
+//
+// Five writes, split by WHO makes them. Four are the person's -- create,
+// re-point, pause, archive -- and one is the cockpit's: reportWatchedFolderSweep,
+// the only way anything ever learns what is actually at the origin.
+//
+// NONE OF THEM IS @serverOnly, and that is the difference between this family
+// and the guest-invitation one. Nothing here is a credential: the arrangement
+// names a machine the caller already owns and a folder they already own, and
+// the authorization that matters -- may this caller push bytes claiming this
+// machine -- lives at the upload route, where verifyProvenance resolves the
+// claim in the caller's own fleet. A client-reachable create is therefore
+// exactly right; it is what lets the Files app and the cockpit use one API.
+
+/// Start watching a folder on one of the caller's machines (epic memql#4783). Owner-acted:
+/// ownerUserId is stamped from actor.userId, so a watch can only ever be created for the person the
+/// call runs as. `status` and `archived` are stamped explicitly rather than left to the concept's
+/// @default, for createArtifact's reason -- @default is never applied on insert (memql#3038), so a
+/// row that states its own answer is the only row whose answer can be read.
+///
+/// The machine is NOT verified here. That is the header's decision, not an omission: the row is a
+/// preference, a watch naming a machine the caller does not own is read by no cockpit, and the push
+/// it would attempt is refused at the upload by a check that CAN see the caller's fleet.
+@actor
+mutate watchedFolder createLibraryWatchedFolder {
+  args {
+    watchId        string!
+    workerId       string!
+    localPath      string!
+    folderId       string
+    excludeGlobs   []string
+    includeHidden  boolean
+  }
+  insert {
+    accept { workerId, localPath, folderId, excludeGlobs }
+    stamp {
+      id: args.watchId
+      ownerUserId: actor.userId
+      includeHidden: args.includeHidden ?? false
+      status: "active"
+      archived: false
+    }
+  }
+}
+
+/// Re-point or re-tune a watch: where it files, what it skips, whether it sweeps hidden entries.
+/// A read-merge update (memql#1628), so the arguments are MINIMAL -- the machine and the path are
+/// deliberately absent, because they are the backup's IDENTITY (the (machine, path) key every
+/// re-push is matched on) and re-supplying them would be dead weight that an undeclared-argument
+/// DISCARD then hides.
+///
+/// THE THREE IT DOES TAKE ARE A FULL REPLACE, and each writes its explicit empty rather than a bare
+/// `args.X` -- the `?? []` / `?? ""` idiom setArtifactAccounts and renameWorker already use. Omitting
+/// one therefore CLEARS it (back to the Library root, back to skipping nothing, back to hiding
+/// hidden files), which is the one semantic the caller can rely on: a bare `args.excludeGlobs` would
+/// leave "the caller sent nothing" meaning whatever the writer happened to do with an absent value,
+/// and that is exactly the ambiguity the idiom exists to remove. The Files form always sends all
+/// three, because it shows all three.
+///
+/// Re-pointing folderId moves NOTHING that already arrived. Files carry their own folderId and the
+/// engine has no cascade; this decides where the next push lands. The app says exactly that at the
+/// moment of the change, because a person re-pointing a backup reasonably expects otherwise.
+mutate watchedFolder updateLibraryWatchedFolder {
+  args {
+    watchId        string!
+    folderId       string
+    excludeGlobs   []string
+    includeHidden  boolean
+  }
+  update {
+    id: args.watchId
+    folderId: args.folderId ?? ""
+    excludeGlobs: args.excludeGlobs ?? []
+    includeHidden: args.includeHidden ?? false
+  }
+}
+
+/// Pause or resume a watch. One field on one row, and deliberately not the archive: pausing keeps
+/// the arrangement in the list and in the cockpit's local record, so resuming picks up where it
+/// left off instead of re-pushing a folder from scratch.
+mutate watchedFolder setLibraryWatchedFolderStatus {
+  args {
+    watchId  string!
+    status   enum("active", "paused")!
+  }
+  update {
+    id: args.watchId
+    status: args.status
+  }
+}
+
+/// Stop watching a folder, keeping the record of what was arranged. THE FILES THAT ALREADY ARRIVED
+/// ARE UNTOUCHED -- they are ordinary Library files owned by the same person, and the one-way
+/// invariant (design E, D12) does not stop applying because the arrangement ended. Nothing here
+/// reaches the origin either: archiving a watch does not delete anything on the machine.
+mutate watchedFolder archiveLibraryWatchedFolder {
+  args {
+    watchId  string!
+  }
+  update {
+    id: args.watchId
+    archived: true
+  }
+}
+
+/// Put an archived watch back. The plain inverse of the archive, one field on one row -- which is
+/// what lets somebody undo a stop without re-typing a path (memql#4784's restore reasoning, applied
+/// to the arrangement rather than to a file).
+mutate watchedFolder restoreLibraryWatchedFolder {
+  args {
+    watchId  string!
+  }
+  update {
+    id: args.watchId
+    archived: false
+  }
+}
+
+/// Record what the cockpit found at the origin on its last pass (epic memql#4783, the cockpit half
+/// memql#4841). The counterpart of setLibraryFileLinkState one level up: that one reports on a file,
+/// this one on the folder, and both exist because the cockpit is the only party that can see the
+/// origin at all -- the engine knows what it received and when, and nothing more.
+///
+/// `lastSweepAt` IS SERVER-STAMPED, not accepted. A caller that could name its own check time could
+/// claim to have looked when it did not, and the entire value of the field is that it makes a stale
+/// `ok` honest: "backed up, last checked 3 weeks ago" is a different claim from "backed up", and
+/// only one of them is one this row can make. Same reasoning, same shape as linkCheckedAt.
+///
+/// EVERY REPORT REPLACES THE WHOLE REPORTED STATE. A clean pass sends no error and clears the
+/// previous one -- `?? ""` is blank-coalescing, so an absent argument writes the empty string
+/// rather than leaving a fixed problem on screen forever. The counts are stamped through the same
+/// coalesce, where `0` survives it (?? keeps 0 and false; it falls through on blanks), so "the
+/// folder is there and empty" and "nothing has reported" stay different answers.
+mutate watchedFolder reportLibraryWatchedFolderSweep {
+  args {
+    watchId         string!
+    originState     enum("ok", "missing", "unreadable", "refused_by_policy")!
+    filesSeen       int
+    bytesSeen       int
+    lastSweepError  string
+  }
+  update {
+    id: args.watchId
+    originState: args.originState
+    filesSeen: args.filesSeen ?? 0
+    bytesSeen: args.bytesSeen ?? 0
+    lastSweepError: args.lastSweepError ?? ""
+    lastSweepAt: now
+  }
+}

@@ -9,6 +9,9 @@ import { useOsConnection } from "../../live/connection";
 import { useLiveView } from "../../live/liveView";
 import { useOs } from "../../chrome/state";
 import type { OsAppProps } from "../../system/registry";
+import { BackupsSection } from "./backups/BackupsSection";
+import { backupFromRow, type BackupRow } from "./backups/rows";
+import { useBackupsFeed } from "./backups/useBackups";
 import { BrowseSection, type DeskFolderShortcut } from "./BrowseSection";
 import {
   applyFilters,
@@ -67,6 +70,16 @@ export function FilesApp({
   );
 
   const { artifacts, folders, files } = useLibraryFeeds();
+
+  // The backups feed is RETAINED AT THE APP ROOT like its three siblings, not
+  // inside the section, so switching away and back does not tear the
+  // subscription down and re-seed. `useLiveCollection` retains inside an
+  // effect, and a hook cannot be called conditionally anyway -- the section
+  // switch below returns early.
+  const backupsFeed = useBackupsFeed();
+  const backups = useLiveView<Row, BackupRow>(backupsFeed.source, "backups", (rows) =>
+    rows.map(backupFromRow).filter((backup) => backup.id !== "" && !backup.archived),
+  );
 
   // The tree flow's folder port: one Library mutation, the id minted here
   // (the mutationCreateSpace pattern). The live feed delivers the row.
@@ -259,6 +272,15 @@ export function FilesApp({
 
   if (sectionId === "settings") {
     return <FilesSettingsSection settings={settings} update={update} />;
+  }
+  if (sectionId === "backups") {
+    return (
+      <BackupsSection
+        folders={folders.snapshot.rows}
+        files={files.snapshot.rows}
+        source={backups}
+      />
+    );
   }
   return (
     <BrowseSection

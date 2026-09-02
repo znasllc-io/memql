@@ -587,3 +587,34 @@ query file libraryFileSizesForOwner {
   filter  ownerUserId==actor.userId
   shape   libraryFileSize
 }
+
+// ---- watchedFolder: the backup arrangement's one read (epic memql#4783) ----
+
+/// The caller's watched folders, live (epic memql#4783, the cockpit half memql#4841).
+///
+/// ONE READ SERVES BOTH CONSUMERS, and that is deliberate. The Files app wants every watch the
+/// person has; a cockpit wants the watches for the one machine it is. Those are the same question
+/// with a guard on it, and a second query would be a second place for the owner filter and the
+/// soft-delete spelling to drift -- the `archived != true` / `== true` asymmetry two constructs up
+/// is exactly the kind of drift a duplicate read acquires.
+///
+/// `workerId` is GUARDED, so an absent argument is the whole list rather than a match on the empty
+/// string. There is no half-supplied-key hazard here the way there is on libraryFileByUploadedFrom,
+/// because there is only one part to supply.
+///
+/// UNBOUNDED for libraryFolders' reason, one step stronger: a watch is a thing a person sets up by
+/// hand, one per folder they care about, so the set is bounded by their patience rather than by
+/// data volume -- and a truncated page would silently stop a machine sweeping the folders that fell
+/// off the edge, which looks exactly like a backup that is working.
+@unbounded("the caller's whole set of watched folders -- hand-created, one per folder a person chose, so bounded by their patience rather than by data; a truncated page would silently stop a cockpit sweeping the watches that fell off the edge, which is indistinguishable from a backup that is working")
+@actor
+query watchedFolder libraryWatchedFolders {
+  args {
+    /// Restrict to the watches for one machine -- what a cockpit asks for, naming its own
+    /// registration id. Absent returns every watch the caller has, which is what the Files app
+    /// renders.
+    workerId  string
+  }
+  filter  ownerUserId==actor.userId && when(args.workerId) { workerId==args.workerId } && archived!=true
+  shape   watchedFolderFull
+}
