@@ -15,18 +15,31 @@
 //
 // `filepath.Walk` does not consult `.gitignore`, so being untracked protects
 // nothing. The only fix is for the walker to know.
+//
+// `.superpowers` joined the list for exactly that reason, and it had exactly
+// that symptom (memql#4878). It is where the skills write their working prose
+// -- design records, audit lanes, brainstorm notes -- and one of them cited a
+// `deploy`, a `bootstrap` and a `secrets-seed` make target, none of which
+// exist. TestMakeTargetCitationsNameRealTargets read them and failed, with
+// twenty findings naming a directory that is gitignored, untracked, and
+// absent from every checkout CI has ever made. So `make test` was RED on the
+// developer's machine and green on the server, over prose about the
+// repository rather than the repository.
 package repowalk
 
 // skipped is the set of directory names no repository walk should descend into.
 //
-// Deliberately small. These four are wrong for EVERY walker: three are not our
-// source at all, and `.claude` is our source duplicated. Anything narrower --
-// `bin`, `gen`, `dist`, `testdata`, `sdk` -- is a judgement particular to one
-// test's question, and belongs at that call site rather than here, where it
-// would silently narrow every other walker's coverage.
+// Deliberately small. These five are wrong for EVERY walker: three are not our
+// source at all, `.claude` is our source duplicated, and `.superpowers` is
+// working prose ABOUT the source that no gate is asking a question of.
+// Anything narrower -- `bin`, `gen`, `dist`, `testdata`, `sdk` -- is a
+// judgement particular to one test's question, and belongs at that call site
+// rather than here, where it would silently narrow every other walker's
+// coverage.
 var skipped = map[string]bool{
 	".git":         true,
 	".claude":      true,
+	".superpowers": true,
 	"vendor":       true,
 	"node_modules": true,
 }
