@@ -68,7 +68,11 @@ func requestWithResolvedAccess(r *http.Request) *http.Request {
 	if !ok {
 		return r
 	}
-	if class, isString := claims["class"].(string); isString && class != "" && class != "user" {
+	// badge (memql#2513) stays admitted: a badge session is a HUMAN at a
+	// shared terminal whose actor FallbackFromClaims resolves with its role
+	// ceiling applied -- refusing it here would 401 a badged operator's every
+	// Library and attachment call while their gRPC surface works.
+	if class, isString := claims["class"].(string); isString && class != "" && class != "user" && class != "badge" {
 		return r
 	}
 	return r.WithContext(auth.ContextWithAccess(ctx, auth.FallbackFromClaims(claims)))

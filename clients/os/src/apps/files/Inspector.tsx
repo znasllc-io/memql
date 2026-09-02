@@ -53,6 +53,7 @@ export function Inspector({
   row,
   folderNameOf,
   tree,
+  archivedFolderIds,
   presence,
   confirmBeforeArchive,
   uploads,
@@ -62,6 +63,8 @@ export function Inspector({
   row: ArtifactRow;
   folderNameOf: (folderId: string) => string;
   tree: FolderTree;
+  /** Ids of KNOWN-archived folders -- the restore re-file predicate. */
+  archivedFolderIds: ReadonlySet<string>;
   presence: (workerId: string) => { name?: string; online: boolean } | null;
   confirmBeforeArchive: boolean;
   /**
@@ -334,9 +337,11 @@ export function Inspector({
   // "putting back" means. The automation mirror deliberately does not exist
   // (apps/bin/restore.ts says why), which is why this is two writes.
   //
-  // ONE addition over the Bin's flow (#4846 AC): a file whose folder is not
-  // live -- archived, or gone -- re-files to the Library root, because a row
-  // restored into an invisible folder is invisible everywhere except search.
+  // ONE addition over the Bin's flow (#4846 AC): a file whose folder is
+  // KNOWN-ARCHIVED re-files to the Library root, because a row restored into
+  // an invisible folder is invisible everywhere except search. Fail-closed on
+  // archived-list membership -- an absence test against the live tree would
+  // re-file out of live folders while the feed is still seeding.
   const restore = useCallback(async () => {
     const query = connection?.query ?? null;
     if (query === null) {
@@ -357,7 +362,7 @@ export function Inspector({
           await query.restoreLibraryFolder({ folderId });
         },
       });
-      if (row.folderId !== "" && !tree.byId.has(row.folderId)) {
+      if (row.folderId !== "" && archivedFolderIds.has(row.folderId)) {
         await query.moveArtifactToFolder({ artifactId: row.id, folderId: "" });
         setDeskNote("Restored to the Library root -- its folder is still archived.");
       }
@@ -366,7 +371,7 @@ export function Inspector({
     } finally {
       setArchiveBusy(false);
     }
-  }, [connection, row, tree]);
+  }, [connection, row, archivedFolderIds]);
 
   // Download is offered only where bytes or a body exist: a file always, the
   // rendered kinds by construction of the content route.

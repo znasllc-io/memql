@@ -112,7 +112,10 @@ button:not(:disabled):active {
 .os-launcher-panel,
 .os-ask-sheet,
 .os-themes,
-.os-widget,
+.os-widget {
+  background: var(--os-glass-solid);
+  border: 1px solid var(--os-line);
+}
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
   .os-window,
   .os-dock,
@@ -3442,7 +3445,13 @@ a.os-button {
   margin: 8px 0;
 }
 
-.os-account-form-actions,
+.os-account-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 /* ---- the ledger ---- */
 
 .os-account-ledger {

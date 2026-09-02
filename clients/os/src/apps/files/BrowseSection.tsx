@@ -192,9 +192,11 @@ export function BrowseSection({
   // Restore, from the Archive place's row menu (epic memql#4842, #4846): the
   // Bin's client-driven pair, verbatim, so the two archive surfaces cannot
   // drift apart on what "putting back" means -- plus the #4846 addition: a
-  // file whose folder is not live re-files to the Library root, because a
-  // row restored into an invisible folder is invisible everywhere except
-  // search.
+  // file whose folder is KNOWN-ARCHIVED re-files to the Library root, because
+  // a row restored into an invisible folder is invisible everywhere except
+  // search. Membership in the archived list is the predicate, NOT absence
+  // from the live tree: while the folders feed is still seeding the tree is
+  // empty, and an absence test would re-file rows out of live folders.
   const restoreOneRow = async (row: ArtifactRow) => {
     const query = connection?.query ?? null;
     if (query === null) {
@@ -214,7 +216,7 @@ export function BrowseSection({
           await query.restoreLibraryFolder({ folderId });
         },
       });
-      if (row.folderId !== "" && !tree.byId.has(row.folderId)) {
+      if (row.folderId !== "" && archivedFolders.some((f) => f.id === row.folderId)) {
         await query.moveArtifactToFolder({ artifactId: row.id, folderId: "" });
       }
     } catch (err: unknown) {
@@ -334,6 +336,7 @@ export function BrowseSection({
   };
 
   const selected = content.find((r) => r.id === selectedId) ?? null;
+  const archivedFolderIdSet = new Set(archivedFolders.map((f) => f.id));
   const searching = filter.search.trim() !== "";
   const accountOptions = useAccountOptions();
 
@@ -723,6 +726,7 @@ export function BrowseSection({
             row={selected}
             folderNameOf={folderNameOf}
             tree={tree}
+            archivedFolderIds={archivedFolderIdSet}
             presence={presence}
             confirmBeforeArchive={confirmBeforeArchive}
             uploads={uploads}
