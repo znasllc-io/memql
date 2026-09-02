@@ -516,6 +516,28 @@ QueryClient.prototype.archiveLibraryFolder = function (this: QueryClient, args: 
   return this.executeNamed("archiveLibraryFolder", buildArchiveLibraryFolder(args), opts);
 };
 
+/** Stop watching a folder, keeping the record of what was arranged. THE FILES THAT ALREADY ARRIVED ARE UNTOUCHED -- they are ordinary Library files owned by the same person, and the one-way invariant (design E, D12) does not stop applying because the arrangement ended. Nothing here reaches the origin either: archiving a watch does not delete anything on the machine. */
+// Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["archiveLibraryWatchedFolder"] in generated_concepts.ts).
+export interface ArchiveLibraryWatchedFolderArgs {
+  watchId: string;
+}
+
+export function buildArchiveLibraryWatchedFolder(args: ArchiveLibraryWatchedFolderArgs): string {
+  const parts: string[] = [];
+  parts.push("watchId: " + renderMemQLValue(args.watchId));
+  return "mutation archiveLibraryWatchedFolder(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    archiveLibraryWatchedFolder(args: ArchiveLibraryWatchedFolderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.archiveLibraryWatchedFolder = function (this: QueryClient, args: ArchiveLibraryWatchedFolderArgs = {} as ArchiveLibraryWatchedFolderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("archiveLibraryWatchedFolder", buildArchiveLibraryWatchedFolder(args), opts);
+};
+
 /** Persist a routing decision onto a v1:planner:responsibility (epic #632, C2): bind the resolved agent (assignedAgentId), optional role slug (assignedRoleSlug), and flip targetKind off 'unassigned' onto the concrete kind (assistant / specialist). Called by the reactive-loop router after agentFactoryAnalyze + createSpecialist/extendSpecialist mint or match an agent. Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier) so the router can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in the AccessContext before calling, so this lands as an owned write. */
 // Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["assignResponsibility"] in generated_concepts.ts).
 export interface AssignResponsibilityArgs {
@@ -2737,6 +2759,39 @@ declare module "./query.js" {
 
 QueryClient.prototype.createLibraryFolder = function (this: QueryClient, args: CreateLibraryFolderArgs = {} as CreateLibraryFolderArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createLibraryFolder", buildCreateLibraryFolder(args), opts);
+};
+
+/** Start watching a folder on one of the caller's machines (epic memql#4783). Owner-acted: ownerUserId is stamped from actor.userId, so a watch can only ever be created for the person the call runs as. `status` and `archived` are stamped explicitly rather than left to the concept's @default, for createArtifact's reason -- @default is never applied on insert (memql#3038), so a row that states its own answer is the only row whose answer can be read.
+The machine is NOT verified here. That is the header's decision, not an omission: the row is a preference, a watch naming a machine the caller does not own is read by no cockpit, and the push it would attempt is refused at the upload by a check that CAN see the caller's fleet. */
+// Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["createLibraryWatchedFolder"] in generated_concepts.ts).
+export interface CreateLibraryWatchedFolderArgs {
+  watchId: string;
+  workerId: string;
+  localPath: string;
+  folderId?: string;
+  excludeGlobs?: string[];
+  includeHidden?: boolean;
+}
+
+export function buildCreateLibraryWatchedFolder(args: CreateLibraryWatchedFolderArgs): string {
+  const parts: string[] = [];
+  parts.push("watchId: " + renderMemQLValue(args.watchId));
+  parts.push("workerId: " + renderMemQLValue(args.workerId));
+  parts.push("localPath: " + renderMemQLValue(args.localPath));
+  if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
+  if (args.excludeGlobs !== undefined) parts.push("excludeGlobs: " + renderMemQLValue(args.excludeGlobs));
+  if (args.includeHidden !== undefined) parts.push("includeHidden: " + renderMemQLValue(args.includeHidden));
+  return "mutation createLibraryWatchedFolder(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createLibraryWatchedFolder(args: CreateLibraryWatchedFolderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createLibraryWatchedFolder = function (this: QueryClient, args: CreateLibraryWatchedFolderArgs = {} as CreateLibraryWatchedFolderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createLibraryWatchedFolder", buildCreateLibraryWatchedFolder(args), opts);
 };
 
 /** Create a magic-link request row at issuance time. */
@@ -6536,6 +6591,39 @@ QueryClient.prototype.renameWorker = function (this: QueryClient, args: RenameWo
   return this.executeNamed("renameWorker", buildRenameWorker(args), opts);
 };
 
+/** Record what the cockpit found at the origin on its last pass (epic memql#4783, the cockpit half memql#4841). The counterpart of setLibraryFileLinkState one level up: that one reports on a file, this one on the folder, and both exist because the cockpit is the only party that can see the origin at all -- the engine knows what it received and when, and nothing more.
+`lastSweepAt` IS SERVER-STAMPED, not accepted. A caller that could name its own check time could claim to have looked when it did not, and the entire value of the field is that it makes a stale `ok` honest: "backed up, last checked 3 weeks ago" is a different claim from "backed up", and only one of them is one this row can make. Same reasoning, same shape as linkCheckedAt.
+EVERY REPORT REPLACES THE WHOLE REPORTED STATE. A clean pass sends no error and clears the previous one -- `?? ""` is blank-coalescing, so an absent argument writes the empty string rather than leaving a fixed problem on screen forever. The counts are stamped through the same coalesce, where `0` survives it (?? keeps 0 and false; it falls through on blanks), so "the folder is there and empty" and "nothing has reported" stay different answers. */
+// Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["reportLibraryWatchedFolderSweep"] in generated_concepts.ts).
+export interface ReportLibraryWatchedFolderSweepArgs {
+  watchId: string;
+  // Enum: ok | missing | unreadable | refused_by_policy
+  originState: string;
+  filesSeen?: number;
+  bytesSeen?: number;
+  lastSweepError?: string;
+}
+
+export function buildReportLibraryWatchedFolderSweep(args: ReportLibraryWatchedFolderSweepArgs): string {
+  const parts: string[] = [];
+  parts.push("watchId: " + renderMemQLValue(args.watchId));
+  parts.push("originState: " + renderMemQLValue(args.originState));
+  if (args.filesSeen !== undefined) parts.push("filesSeen: " + renderMemQLValue(args.filesSeen));
+  if (args.bytesSeen !== undefined) parts.push("bytesSeen: " + renderMemQLValue(args.bytesSeen));
+  if (args.lastSweepError !== undefined) parts.push("lastSweepError: " + renderMemQLValue(args.lastSweepError));
+  return "mutation reportLibraryWatchedFolderSweep(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    reportLibraryWatchedFolderSweep(args: ReportLibraryWatchedFolderSweepArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.reportLibraryWatchedFolderSweep = function (this: QueryClient, args: ReportLibraryWatchedFolderSweepArgs = {} as ReportLibraryWatchedFolderSweepArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("reportLibraryWatchedFolderSweep", buildReportLibraryWatchedFolderSweep(args), opts);
+};
+
 /** Send a v1:forge:request back for changes: set status 'changes_requested' with a reason. */
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["requestChanges"] in generated_concepts.ts).
 export interface RequestChangesArgs {
@@ -6701,6 +6789,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.restoreLibraryFolder = function (this: QueryClient, args: RestoreLibraryFolderArgs = {} as RestoreLibraryFolderArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("restoreLibraryFolder", buildRestoreLibraryFolder(args), opts);
+};
+
+/** Put an archived watch back. The plain inverse of the archive, one field on one row -- which is what lets somebody undo a stop without re-typing a path (memql#4784's restore reasoning, applied to the arrangement rather than to a file). */
+// Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["restoreLibraryWatchedFolder"] in generated_concepts.ts).
+export interface RestoreLibraryWatchedFolderArgs {
+  watchId: string;
+}
+
+export function buildRestoreLibraryWatchedFolder(args: RestoreLibraryWatchedFolderArgs): string {
+  const parts: string[] = [];
+  parts.push("watchId: " + renderMemQLValue(args.watchId));
+  return "mutation restoreLibraryWatchedFolder(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    restoreLibraryWatchedFolder(args: RestoreLibraryWatchedFolderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.restoreLibraryWatchedFolder = function (this: QueryClient, args: RestoreLibraryWatchedFolderArgs = {} as RestoreLibraryWatchedFolderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("restoreLibraryWatchedFolder", buildRestoreLibraryWatchedFolder(args), opts);
 };
 
 /** Retire a bundle: status -> retired and retiredAt stamped. Used when a new version supersedes it or the user removes the capability. The authored runtime (#959) unregisters its constructs on this transition. */
@@ -7831,6 +7941,31 @@ declare module "./query.js" {
 
 QueryClient.prototype.setLibraryFileStatus = function (this: QueryClient, args: SetLibraryFileStatusArgs = {} as SetLibraryFileStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("setLibraryFileStatus", buildSetLibraryFileStatus(args), opts);
+};
+
+/** Pause or resume a watch. One field on one row, and deliberately not the archive: pausing keeps the arrangement in the list and in the cockpit's local record, so resuming picks up where it left off instead of re-pushing a folder from scratch. */
+// Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["setLibraryWatchedFolderStatus"] in generated_concepts.ts).
+export interface SetLibraryWatchedFolderStatusArgs {
+  watchId: string;
+  // Enum: active | paused
+  status: string;
+}
+
+export function buildSetLibraryWatchedFolderStatus(args: SetLibraryWatchedFolderStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("watchId: " + renderMemQLValue(args.watchId));
+  parts.push("status: " + renderMemQLValue(args.status));
+  return "mutation setLibraryWatchedFolderStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setLibraryWatchedFolderStatus(args: SetLibraryWatchedFolderStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setLibraryWatchedFolderStatus = function (this: QueryClient, args: SetLibraryWatchedFolderStatusArgs = {} as SetLibraryWatchedFolderStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setLibraryWatchedFolderStatus", buildSetLibraryWatchedFolderStatus(args), opts);
 };
 
 /** Set E911 / caller-ID verification state on an owned DID (by row id). */
@@ -9079,6 +9214,35 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateInboundRequestStatus = function (this: QueryClient, args: UpdateInboundRequestStatusArgs = {} as UpdateInboundRequestStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateInboundRequestStatus", buildUpdateInboundRequestStatus(args), opts);
+};
+
+/** Re-point or re-tune a watch: where it files, what it skips, whether it sweeps hidden entries. A read-merge update (memql#1628), so the arguments are MINIMAL -- re-supplying the machine and the path would be dead weight, and an undeclared argument is discarded silently, which is how dead weight turns into a field nobody notices stopped being written.
+Re-pointing folderId moves NOTHING that already arrived. Files carry their own folderId and the engine has no cascade; this decides where the next push lands. The app says exactly that at the moment of the change, because a person re-pointing a backup reasonably expects otherwise. */
+// Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["updateLibraryWatchedFolder"] in generated_concepts.ts).
+export interface UpdateLibraryWatchedFolderArgs {
+  watchId: string;
+  folderId?: string;
+  excludeGlobs?: string[];
+  includeHidden?: boolean;
+}
+
+export function buildUpdateLibraryWatchedFolder(args: UpdateLibraryWatchedFolderArgs): string {
+  const parts: string[] = [];
+  parts.push("watchId: " + renderMemQLValue(args.watchId));
+  if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
+  if (args.excludeGlobs !== undefined) parts.push("excludeGlobs: " + renderMemQLValue(args.excludeGlobs));
+  if (args.includeHidden !== undefined) parts.push("includeHidden: " + renderMemQLValue(args.includeHidden));
+  return "mutation updateLibraryWatchedFolder(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateLibraryWatchedFolder(args: UpdateLibraryWatchedFolderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateLibraryWatchedFolder = function (this: QueryClient, args: UpdateLibraryWatchedFolderArgs = {} as UpdateLibraryWatchedFolderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateLibraryWatchedFolder", buildUpdateLibraryWatchedFolder(args), opts);
 };
 
 /** Operator-driven status transition on a missingCapability row. Used by the platform team's backlog tooling to mark a gap as in_progress, resolved (with a note on what shipped), or wontfix. */

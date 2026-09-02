@@ -570,3 +570,82 @@ concept uploadSession {
   @relationship(type="references", field="targetArtifactId", target=artifact, direction="outgoing")
   @relationship(type="references", field="uploadedFromWorkerId", target=registration, direction="outgoing")
 }
+
+// ---- watchedFolder: a standing promise, not a file (epic memql#4783) ----
+//
+// One folder on one of the owner's machines, kept arriving in the Library.
+// The engine half of the watched-folder backup (memql#4841): the ENGINE holds
+// the arrangement, the COCKPIT does the watching, and the split is not
+// negotiable in either direction -- only the cockpit can see the origin, and
+// only the graph can survive the machine being off.
+//
+// WHY THE CONFIGURATION LIVES HERE AND NOT IN THE COCKPIT'S policy.yaml. A
+// watch is something a person sets up once and then expects to be able to
+// see, pause and re-point from wherever they happen to be -- including from a
+// browser, on a different machine, while the watching machine is asleep. A
+// file on the machine's own disk can answer none of those. It also makes the
+// arrangement survive a re-install: the cockpit asks what it is watching
+// rather than remembering.
+//
+// THE COCKPIT READS THIS AS THE OWNING USER, NOT AS THE WORKER. A worker
+// token is surface-pinned to WorkerService and cannot read the graph or reach
+// the upload routes at all; the cockpit is separately signed in, and every
+// read and every push therefore runs under the person's own actor. That is
+// what makes the authorization story here exactly the browser's, with no
+// second one to keep in step -- and it is why `workerId` below carries no
+// engine-side ownership check: the enforcement that matters lives at the
+// upload, where verifyProvenance resolves the claimed machine in the CALLER's
+// own fleet and refuses anything else.
+//
+// A WATCH NAMING A MACHINE THE OWNER DOES NOT HAVE IS INERT, NOT DANGEROUS.
+// watchedFoldersForWorker filters on ownerUserId, so another person's cockpit
+// never sees this row; the worst case is a dangling reference in the owner's
+// own list, which the Files app renders as the raw id the way view-kit
+// renders every unresolvable lookup.
+//
+// ONE-WAY FOREVER, and this concept cannot express anything else: there is no
+// field for what MemQL would send back, because nothing is ever sent back. A
+// deletion at the origin flags (v1:library:file.linkState = origin_gone) and
+// never removes the copy -- design E's load-bearing invariant, stated on the
+// file row and restated here because this is the row that starts the whole
+// arrangement.
+/// One folder on one of the owner's fleet machines, continuously backed up into a Library folder
+/// (epic memql#4783, the cockpit half memql#4841). The engine holds the arrangement and the state
+/// last reported about it; the cockpit does the sweeping, the pushing and the looking-at-the-origin,
+/// because it is the only party that can see the origin at all. Per-row authz: the composite tier
+/// (memql#4312) -- the owner, or a cluster owner -- matching every other Library concept, so an
+/// operator answering "why has this machine stopped backing up" can read the arrangement without
+/// being able to rewrite it.
+@displayCard(primary="localPath", secondary="workerId", tertiary="lastSweepAt", status="status")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept watchedFolder {
+  ownerUserId   string!  @serverSet  @description("v1:identity:user.id that set this watch up. Stamped from actor.userId on every write and never accepted as a mutation arg (@serverSet makes that a load-time rejection, memql#3175). The load-bearing per-row authz key, and also the routing key: a cockpit signed in as this user is the only one that will ever read this row.")
+
+  workerId      string!  @description("v1:worker:registration.id of the machine that does the watching. Deliberately NOT verified against the caller's fleet at write time -- the row is a preference and the gate that matters is at the upload, where verifyProvenance resolves the claimed machine in the caller's own fleet and refuses anything else (see the header). A watch naming a machine the owner does not have is read by no cockpit and pushes nothing.")
+
+  localPath     string!  @description("Absolute path of the folder ON THAT MACHINE, as the person typed it -- '/Users/ana/Clients/2026' or 'C:\\Work\\Renders'. A string the engine never interprets: it has no filesystem to resolve it against, cannot tell a typo from a folder that is merely offline, and must not pretend otherwise. The cockpit is what finds out, and it says so through originState below. Also the PREFIX half of the (machine, path) key every re-push versions on -- each file's own uploadedFromPath is this path plus its position beneath it.")
+
+  folderId      string  @description("v1:library:folder.id everything from this watch is filed under; empty or absent means the Library root. The DESTINATION, and the only part of the arrangement the person can see the contents of without leaving the browser -- which is why the Files app draws the watch as a link between two named ends rather than as a row of settings. Re-pointing it moves nothing that already arrived: files carry their own folderId, so a change here decides where the NEXT push lands, and the app says so at the moment of the change.")
+
+  status        enum("active", "paused")!  @default("active")  @description("Whether the cockpit should be sweeping this folder right now. `paused` is a real state a person wants -- 'stop for today, keep the arrangement' -- and is deliberately not modelled as archived: pausing is reversible in one click and keeps the watch in the list, archiving takes it out of it. The cockpit reads both and skips paused ones; it does NOT delete its local record of a paused watch, so resuming does not re-push everything.")
+
+  excludeGlobs  []string  @description("Path patterns beneath localPath that are skipped, matched by the cockpit against each entry's path RELATIVE to localPath ('node_modules/**', '*.tmp'). Client-side and cockpit-side only: the engine stores the list and never evaluates it, having nothing to evaluate it against. Empty or absent excludes nothing.")
+
+  includeHidden bool  @default("false")  @description("Whether dot-prefixed entries are swept. Off by default because the common case -- a Documents or a client-work folder -- is full of '.DS_Store' and editor state nobody wants versioned, and a backup that silently fills with them is one people turn off.")
+
+  archived      bool  @default("false")  @description("Soft delete: the watch is taken out of the list without destroying the record of what was arranged. Spelled and filtered exactly as its siblings are -- `archived != true`, the null-safe form, so rows written before any future field change keep listing (memql#1685). ARCHIVING A WATCH REMOVES NOTHING THAT ARRIVED THROUGH IT: the files are ordinary Library files owned by the same person, and the one-way invariant does not stop applying because the arrangement ended.")
+
+  originState   enum("ok", "missing", "unreadable", "refused_by_policy")  @description("What the cockpit last SAW at localPath -- the folder-level counterpart of file.linkState, and it has the same absent-is-not-a-state discipline: ABSENT means no cockpit has reported yet, which is a genuine further answer ('waiting for that machine to check in') and must not read as ok. `missing` = nothing is at that path, which is the honest answer to a typo AND to a folder somebody moved, and the engine deliberately cannot tell those apart. `unreadable` = it is there and the process cannot read it (permissions, a TCC prompt nobody answered, an unmounted volume). `refused_by_policy` = THE MACHINE'S OWN OWNER HAS NOT ALLOWED THAT PATH, and it is a separate value rather than a flavour of unreadable because the repair is completely different and lives somewhere else: nothing about the folder is wrong, and no amount of looking at the Library will fix it -- somebody has to add the path to that machine's policy.yaml. Collapsing it into `unreadable` would send a person hunting for a permissions problem that does not exist. THE VETO IS THE POINT: this row is written from a browser and read by a cockpit, so the path in it is a path the CLUSTER is naming on somebody else's machine -- the same situation appsession's CheckWorkspace exists for, and the same answer. A watch is a request; the machine decides. No @default on the field, for the reason knowledgeDomain.tier records: nothing stamps a value at create, and an annotation nothing applies is a silent no-op.")
+
+  lastSweepAt   datetime  @description("RFC3339 moment the cockpit last finished a pass over this folder. SERVER-STAMPED by reportWatchedFolderSweep rather than accepted from the report, for exactly the reason file.linkCheckedAt is: a caller that could name its own check time could claim to have looked when it did not, and the whole value of this field is that it is what makes a stale `ok` honest -- 'backed up, last checked 3 weeks ago' is a different claim from 'backed up'. Rendered CONTINUOUSLY beside the state and never fingerprinted into an arrival cue: a sweep touches this on a schedule forever, so naming it as news would strobe the list on the sweep's own cycle (the heartbeat rule, clients/os/README.md).")
+
+  lastSweepError string  @description("What went wrong on the last pass, in the cockpit's own words, when something did. Empty on a clean pass. Shown verbatim rather than re-worded: the sentence names a path, a permission or an HTTP status the person can act on, and a friendlier paraphrase would lose the only part that helps.")
+
+  filesSeen     int  @description("How many files the last sweep found beneath localPath, after exclusions. The origin's own count, which nothing else in the graph can answer -- the Library knows what ARRIVED, and the difference between the two is exactly what a person wants to see when a backup is behind. Absent on a watch nothing has reported yet.")
+
+  bytesSeen     int  @description("Total size in bytes of those files at the origin. Same reason and same absence as filesSeen; rendered alongside it so 'watching 1,284 files, 42.1 GB' is one sentence about the origin rather than a claim about the copy.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", field="workerId", target=registration, direction="outgoing")
+  @relationship(type="references", field="folderId", target=folder, direction="outgoing")
+}

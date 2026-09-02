@@ -3043,7 +3043,8 @@ QueryClient.prototype.documentVersionsForOwner = function (this: QueryClient, ar
 
 /** The knowledge domains tagged with one account.
 A TAG AND NOTHING MORE (D5). This read is the only consumer of `v1:knowledge:knowledgeDomain.accountId` in the tree, and the field is consulted by nothing in routing, attachment, retrieval or scoring. A domain tagged with an account trains, attaches and answers exactly as an untagged one does.
-No tier conjunct, because the concept declares no tier -- see its declaration in dsl/knowledge/concepts.memql for why that matches its sibling `documentChunk` rather than departing from it. */
+No tier conjunct, and that is now declared rather than absent (memql#4809): `v1:knowledge:knowledgeDomain` carries `@rowAuthz(public, requiresIdentity)`, meaning its rows have no row-level distinction to draw and its authorization lives at the surface instead.
+@requiresRank("admin") is that surface half here, and the floor is a rung ABOVE its sibling `knowledgeDomainsAll` on the same concept deliberately: this read is reached from the Accounts app (`roles: { min: "admin" }`) and answers a question about one CLIENT, while the catalog list answers a question about the cluster. Same rows, two questions, two floors -- which is exactly the asymmetry a per-row tier could not have expressed. */
 // Bound concept: v1:knowledge:knowledgeDomain (machine-readable: BoundConcepts["domainsForAccount"] in generated_concepts.ts).
 export interface DomainsForAccountArgs {
   accountId: string;
@@ -3845,7 +3846,8 @@ QueryClient.prototype.invocationsForWorkerAsOperator = function (this: QueryClie
 
 /** Every knowledge domain this cluster holds.
 The read the Training app's domain cards have never had (epic memql#4800). Until this landed, that page was entirely CHUNK-derived: it rolled domains up out of `v1:knowledge:documentChunk.domainId` and labelled each card with the raw id, because the domain row itself had no client read surface and no concept declaration behind it. With this, a card can say the domain's name and render the account it is tagged with.
-NO ACTOR TERM, because the concept declares no row-authz tier -- see the concept for why that matches its sibling `documentChunk` rather than departing from it. A caller reads the cluster's catalog, which is the same catalog for everybody.
+NO ACTOR TERM, and now that is a declaration rather than an omission (memql#4809). The concept declares `@rowAuthz(public, requiresIdentity)`: its rows carry no row-level distinction to draw -- the catalog is the same population for every caller -- so there is no tier conjunct to AND in here and nothing for one to narrow.
+@requiresRank("writer") IS THE AUTHORIZATION, and it is the surface half of the same ruling (D6). It mirrors the Training app's own manifest floor (`roles: { min: "writer" }`, clients/os/src/apps/registry.tsx), which until this landed was presentation pretending to be a gate -- the read itself admitted any authenticated caller. The mirror is deliberate and permanent: the manifest decides what a person is offered, this decides what the engine will answer, and neither stands in for the other.
 `active` is NOT filtered here. The seeder's own existence probe treats a missing key and true alike, and a surface that wants only live domains can fold on the field; a query that pre-filtered it would hide exactly the rows an operator asking "why is this domain not working" needs to see. */
 // Bound concept: v1:knowledge:knowledgeDomain (machine-readable: BoundConcepts["knowledgeDomainsAll"] in generated_concepts.ts).
 export interface KnowledgeDomainsAllArgs {
@@ -4282,6 +4284,32 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryItemsForAccount = function (this: QueryClient, args: LibraryItemsForAccountArgs = {} as LibraryItemsForAccountArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryItemsForAccount", buildLibraryItemsForAccount(args), opts);
+};
+
+/** The caller's watched folders, live (epic memql#4783, the cockpit half memql#4841).
+ONE READ SERVES BOTH CONSUMERS, and that is deliberate. The Files app wants every watch the person has; a cockpit wants the watches for the one machine it is. Those are the same question with a guard on it, and a second query would be a second place for the owner filter and the soft-delete spelling to drift -- the `archived != true` / `== true` asymmetry two constructs up is exactly the kind of drift a duplicate read acquires.
+`workerId` is GUARDED, so an absent argument is the whole list rather than a match on the empty string. There is no half-supplied-key hazard here the way there is on libraryFileByUploadedFrom, because there is only one part to supply.
+UNBOUNDED for libraryFolders' reason, one step stronger: a watch is a thing a person sets up by hand, one per folder they care about, so the set is bounded by their patience rather than by data volume -- and a truncated page would silently stop a machine sweeping the folders that fell off the edge, which looks exactly like a backup that is working. */
+// Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["libraryWatchedFolders"] in generated_concepts.ts).
+export interface LibraryWatchedFoldersArgs {
+  /** Restrict to the watches for one machine -- what a cockpit asks for, naming its own registration id. Absent returns every watch the caller has, which is what the Files app renders. */
+  workerId?: string;
+}
+
+export function buildLibraryWatchedFolders(args: LibraryWatchedFoldersArgs): string {
+  const parts: string[] = [];
+  if (args.workerId !== undefined) parts.push("workerId: " + renderMemQLValue(args.workerId));
+  return "query libraryWatchedFolders(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryWatchedFolders(args: LibraryWatchedFoldersArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryWatchedFolders = function (this: QueryClient, args: LibraryWatchedFoldersArgs = {} as LibraryWatchedFoldersArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryWatchedFolders", buildLibraryWatchedFolders(args), opts);
 };
 
 /** List workspace-scoped live sources for the Library Records lens. Gated by ownerUserId==actor.userId -- NOT the un-gated partition-shared read it was before memql#4340, because v1:library:artifact now declares an owner tier and an ownerless row is unreachable on every path. See the note above (#723 for the original shape, D8 for the tier). */

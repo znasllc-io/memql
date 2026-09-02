@@ -757,6 +757,28 @@ func ArchiveLibraryFolderBuild(args ArchiveLibraryFolderArgs) string {
 	return b.String()
 }
 
+// ArchiveLibraryWatchedFolder -- Stop watching a folder, keeping the record of what was arranged. THE FILES THAT ALREADY ARRIVED ARE UNTOUCHED -- they are ordinary Library files owned by the same person, and the one-way invariant (design E, D12) does not stop applying because the arrangement ended. Nothing here reaches the origin either: archiving a watch does not delete anything on the machine.
+//
+// Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["archiveLibraryWatchedFolder"] in generated_concepts.go).
+type ArchiveLibraryWatchedFolderArgs struct {
+	WatchId string
+}
+
+// ArchiveLibraryWatchedFolder calls the engine mutation archiveLibraryWatchedFolder.
+func (qc *QueryClient) ArchiveLibraryWatchedFolder(ctx context.Context, args ArchiveLibraryWatchedFolderArgs) (*Result, error) {
+	call := ArchiveLibraryWatchedFolderBuild(args)
+	return qc.executeNamed(ctx, "archiveLibraryWatchedFolder", call)
+}
+
+func ArchiveLibraryWatchedFolderBuild(args ArchiveLibraryWatchedFolderArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation archiveLibraryWatchedFolder(")
+	b.WriteString("watchId: ")
+	b.WriteString(quoteMemQL(args.WatchId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // AssignResponsibility -- Persist a routing decision onto a v1:planner:responsibility (epic #632, C2): bind the resolved agent (assignedAgentId), optional role slug (assignedRoleSlug), and flip targetKind off 'unassigned' onto the concrete kind (assistant / specialist). Called by the reactive-loop router after agentFactoryAnalyze + createSpecialist/extendSpecialist mint or match an agent. Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier) so the router can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in the AccessContext before calling, so this lands as an owned write.
 //
 // Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["assignResponsibility"] in generated_concepts.go).
@@ -4964,6 +4986,66 @@ func CreateLibraryFolderBuild(args CreateLibraryFolderArgs) string {
 		}
 		b.WriteString("parentFolderId: ")
 		b.WriteString(quoteMemQL(args.ParentFolderId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreateLibraryWatchedFolder -- Start watching a folder on one of the caller's machines (epic memql#4783). Owner-acted: ownerUserId is stamped from actor.userId, so a watch can only ever be created for the person the call runs as. `status` and `archived` are stamped explicitly rather than left to the concept's @default, for createArtifact's reason -- @default is never applied on insert (memql#3038), so a row that states its own answer is the only row whose answer can be read.
+// The machine is NOT verified here. That is the header's decision, not an omission: the row is a preference, a watch naming a machine the caller does not own is read by no cockpit, and the push it would attempt is refused at the upload by a check that CAN see the caller's fleet.
+//
+// Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["createLibraryWatchedFolder"] in generated_concepts.go).
+type CreateLibraryWatchedFolderArgs struct {
+	WatchId          string
+	WorkerId         string
+	LocalPath        string
+	FolderId         string
+	ExcludeGlobs     []string
+	IncludeHidden    bool
+	IncludeHiddenSet bool // set true to send includeHidden; required because zero-value bool is ambiguous
+}
+
+// CreateLibraryWatchedFolder calls the engine mutation createLibraryWatchedFolder.
+func (qc *QueryClient) CreateLibraryWatchedFolder(ctx context.Context, args CreateLibraryWatchedFolderArgs) (*Result, error) {
+	call := CreateLibraryWatchedFolderBuild(args)
+	return qc.executeNamed(ctx, "createLibraryWatchedFolder", call)
+}
+
+func CreateLibraryWatchedFolderBuild(args CreateLibraryWatchedFolderArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createLibraryWatchedFolder(")
+	b.WriteString("watchId: ")
+	b.WriteString(quoteMemQL(args.WatchId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("workerId: ")
+	b.WriteString(quoteMemQL(args.WorkerId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("localPath: ")
+	b.WriteString(quoteMemQL(args.LocalPath))
+	if args.FolderId != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderId: ")
+		b.WriteString(quoteMemQL(args.FolderId))
+	}
+	if args.ExcludeGlobs != nil {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("excludeGlobs: ")
+		b.WriteString(renderMemQLValue(args.ExcludeGlobs))
+	}
+	if args.IncludeHiddenSet {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includeHidden: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeHidden))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -11944,6 +12026,61 @@ func RenameWorkerBuild(args RenameWorkerArgs) string {
 	return b.String()
 }
 
+// ReportLibraryWatchedFolderSweep -- Record what the cockpit found at the origin on its last pass (epic memql#4783, the cockpit half memql#4841). The counterpart of setLibraryFileLinkState one level up: that one reports on a file, this one on the folder, and both exist because the cockpit is the only party that can see the origin at all -- the engine knows what it received and when, and nothing more.
+// `lastSweepAt` IS SERVER-STAMPED, not accepted. A caller that could name its own check time could claim to have looked when it did not, and the entire value of the field is that it makes a stale `ok` honest: "backed up, last checked 3 weeks ago" is a different claim from "backed up", and only one of them is one this row can make. Same reasoning, same shape as linkCheckedAt.
+// EVERY REPORT REPLACES THE WHOLE REPORTED STATE. A clean pass sends no error and clears the previous one -- `?? ""` is blank-coalescing, so an absent argument writes the empty string rather than leaving a fixed problem on screen forever. The counts are stamped through the same coalesce, where `0` survives it (?? keeps 0 and false; it falls through on blanks), so "the folder is there and empty" and "nothing has reported" stay different answers.
+//
+// Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["reportLibraryWatchedFolderSweep"] in generated_concepts.go).
+type ReportLibraryWatchedFolderSweepArgs struct {
+	WatchId string
+	// Enum: ok | missing | unreadable | refused_by_policy
+	OriginState    string
+	FilesSeen      int
+	BytesSeen      int
+	LastSweepError string
+}
+
+// ReportLibraryWatchedFolderSweep calls the engine mutation reportLibraryWatchedFolderSweep.
+func (qc *QueryClient) ReportLibraryWatchedFolderSweep(ctx context.Context, args ReportLibraryWatchedFolderSweepArgs) (*Result, error) {
+	call := ReportLibraryWatchedFolderSweepBuild(args)
+	return qc.executeNamed(ctx, "reportLibraryWatchedFolderSweep", call)
+}
+
+func ReportLibraryWatchedFolderSweepBuild(args ReportLibraryWatchedFolderSweepArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation reportLibraryWatchedFolderSweep(")
+	b.WriteString("watchId: ")
+	b.WriteString(quoteMemQL(args.WatchId))
+	if b.Len() > 41 {
+		b.WriteString(", ")
+	}
+	b.WriteString("originState: ")
+	b.WriteString(quoteMemQL(args.OriginState))
+	if args.FilesSeen != 0 {
+		if b.Len() > 41 {
+			b.WriteString(", ")
+		}
+		b.WriteString("filesSeen: ")
+		b.WriteString(fmt.Sprintf("%v", args.FilesSeen))
+	}
+	if args.BytesSeen != 0 {
+		if b.Len() > 41 {
+			b.WriteString(", ")
+		}
+		b.WriteString("bytesSeen: ")
+		b.WriteString(fmt.Sprintf("%v", args.BytesSeen))
+	}
+	if args.LastSweepError != "" {
+		if b.Len() > 41 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lastSweepError: ")
+		b.WriteString(quoteMemQL(args.LastSweepError))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // RequestChanges -- Send a v1:forge:request back for changes: set status 'changes_requested' with a reason.
 //
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["requestChanges"] in generated_concepts.go).
@@ -12133,6 +12270,28 @@ func RestoreLibraryFolderBuild(args RestoreLibraryFolderArgs) string {
 	b.WriteString("mutation restoreLibraryFolder(")
 	b.WriteString("folderId: ")
 	b.WriteString(quoteMemQL(args.FolderId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RestoreLibraryWatchedFolder -- Put an archived watch back. The plain inverse of the archive, one field on one row -- which is what lets somebody undo a stop without re-typing a path (memql#4784's restore reasoning, applied to the arrangement rather than to a file).
+//
+// Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["restoreLibraryWatchedFolder"] in generated_concepts.go).
+type RestoreLibraryWatchedFolderArgs struct {
+	WatchId string
+}
+
+// RestoreLibraryWatchedFolder calls the engine mutation restoreLibraryWatchedFolder.
+func (qc *QueryClient) RestoreLibraryWatchedFolder(ctx context.Context, args RestoreLibraryWatchedFolderArgs) (*Result, error) {
+	call := RestoreLibraryWatchedFolderBuild(args)
+	return qc.executeNamed(ctx, "restoreLibraryWatchedFolder", call)
+}
+
+func RestoreLibraryWatchedFolderBuild(args RestoreLibraryWatchedFolderArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation restoreLibraryWatchedFolder(")
+	b.WriteString("watchId: ")
+	b.WriteString(quoteMemQL(args.WatchId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -13856,6 +14015,35 @@ func SetLibraryFileStatusBuild(args SetLibraryFileStatusArgs) string {
 		b.WriteString("sha256: ")
 		b.WriteString(quoteMemQL(args.Sha256))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// SetLibraryWatchedFolderStatus -- Pause or resume a watch. One field on one row, and deliberately not the archive: pausing keeps the arrangement in the list and in the cockpit's local record, so resuming picks up where it left off instead of re-pushing a folder from scratch.
+//
+// Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["setLibraryWatchedFolderStatus"] in generated_concepts.go).
+type SetLibraryWatchedFolderStatusArgs struct {
+	WatchId string
+	// Enum: active | paused
+	Status string
+}
+
+// SetLibraryWatchedFolderStatus calls the engine mutation setLibraryWatchedFolderStatus.
+func (qc *QueryClient) SetLibraryWatchedFolderStatus(ctx context.Context, args SetLibraryWatchedFolderStatusArgs) (*Result, error) {
+	call := SetLibraryWatchedFolderStatusBuild(args)
+	return qc.executeNamed(ctx, "setLibraryWatchedFolderStatus", call)
+}
+
+func SetLibraryWatchedFolderStatusBuild(args SetLibraryWatchedFolderStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setLibraryWatchedFolderStatus(")
+	b.WriteString("watchId: ")
+	b.WriteString(quoteMemQL(args.WatchId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(quoteMemQL(args.Status))
 	b.WriteString(")")
 	return b.String()
 }
@@ -15873,6 +16061,54 @@ func UpdateInboundRequestStatusBuild(args UpdateInboundRequestStatusArgs) string
 		}
 		b.WriteString("processedAt: ")
 		b.WriteString(quoteMemQL(args.ProcessedAt))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateLibraryWatchedFolder -- Re-point or re-tune a watch: where it files, what it skips, whether it sweeps hidden entries. A read-merge update (memql#1628), so the arguments are MINIMAL -- re-supplying the machine and the path would be dead weight, and an undeclared argument is discarded silently, which is how dead weight turns into a field nobody notices stopped being written.
+// Re-pointing folderId moves NOTHING that already arrived. Files carry their own folderId and the engine has no cascade; this decides where the next push lands. The app says exactly that at the moment of the change, because a person re-pointing a backup reasonably expects otherwise.
+//
+// Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["updateLibraryWatchedFolder"] in generated_concepts.go).
+type UpdateLibraryWatchedFolderArgs struct {
+	WatchId          string
+	FolderId         string
+	ExcludeGlobs     []string
+	IncludeHidden    bool
+	IncludeHiddenSet bool // set true to send includeHidden; required because zero-value bool is ambiguous
+}
+
+// UpdateLibraryWatchedFolder calls the engine mutation updateLibraryWatchedFolder.
+func (qc *QueryClient) UpdateLibraryWatchedFolder(ctx context.Context, args UpdateLibraryWatchedFolderArgs) (*Result, error) {
+	call := UpdateLibraryWatchedFolderBuild(args)
+	return qc.executeNamed(ctx, "updateLibraryWatchedFolder", call)
+}
+
+func UpdateLibraryWatchedFolderBuild(args UpdateLibraryWatchedFolderArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateLibraryWatchedFolder(")
+	b.WriteString("watchId: ")
+	b.WriteString(quoteMemQL(args.WatchId))
+	if args.FolderId != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderId: ")
+		b.WriteString(quoteMemQL(args.FolderId))
+	}
+	if args.ExcludeGlobs != nil {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("excludeGlobs: ")
+		b.WriteString(renderMemQLValue(args.ExcludeGlobs))
+	}
+	if args.IncludeHiddenSet {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includeHidden: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeHidden))
 	}
 	b.WriteString(")")
 	return b.String()
