@@ -159,12 +159,70 @@ func repairDefinedForProvider(provider string) bool {
 // console and stamped with the repair record's id. It is what the README's
 // `-p '{"operation":{"sync":{}}}'` becomes with provenance attached; the
 // shape is ArgoCD's own Operation type.
+//
+// ===========================================================================
+// WHY IT ALSO CLEARS THE PREVIOUS OPERATION'S STATUS (memql#4871)
+// ===========================================================================
+// A repair issued after ANY selective sync on the Application was silently
+// PARTIAL: it reported success, recorded its marker, and reconciled only the
+// resources the last selective sync had named. Observed live on 2026-09-02 --
+// a repair that should have applied a new Role, RoleBinding and Ingress
+// annotation ran as a ten-Deployment sync instead, twice, and the manifest
+// delta was never applied until the inherited fields were cleared by hand.
+//
+// The cause is on ArgoCD's side and cannot be fixed by writing `.operation`
+// more carefully. The application controller persists the new operation by
+// JSON-merge-patching `status.operationState`, marshaled with `omitempty`.
+// Our operation sets `prune: true` -- non-empty, so it overwrites -- but it
+// names no `resources` and no `syncOptions`, and an empty slice is OMITTED by
+// omitempty rather than serialized. A merge patch that omits a key LEAVES THE
+// EXISTING VALUE, so the previous operation's `resources` list and
+// `syncOptions` survive into ours and scope the sync to whatever somebody
+// last selected.
+//
+// SENDING `"resources": []` DOES NOT WORK, which is the part worth writing
+// down because it is the first thing anyone will try: the round trip is
+// through ArgoCD's own types, and the empty slice is dropped by the same
+// omitempty on the way through. The reliable form is to clear the fields on
+// the STATUS side, where nothing re-marshals them.
+//
+// Both are in ONE merge patch rather than two calls. It is atomic, so there
+// is no window in which `.operation` is set while the stale status still
+// stands -- and the controller reads `.operation` and writes
+// `status.operationState` over a status we have already emptied.
+//
+// `prune` is reset too, though our operation always sets it true and would
+// overwrite it anyway. It costs nothing, it matches the reset that was
+// verified live, and it means a future change that stops sending prune does
+// not quietly reintroduce this same inheritance for that field.
+//
+// THIS RESTS ON ArgoCD's Application HAVING NO STATUS SUBRESOURCE. It does
+// not (a plain `kubectl patch application ... -p '{"status":...}'` is what
+// cleared it live, with no `--subresource=status`), which is why one patch to
+// the main resource reaches both. If that ever changes the status half would
+// be silently dropped and the partial repair would return, so
+// TestRepairSyncPatchClearsThePreviousOperation pins the shape here and the
+// operator README documents the same reset.
 func repairSyncPatch(marker string) (string, error) {
 	marker = strings.TrimSpace(marker)
 	if marker == "" {
 		return "", fmt.Errorf("repair sync patch: marker (the repair record id) is required")
 	}
 	patch := map[string]any{
+		// Cleared FIRST in reading order and atomically in effect: see above.
+		// nil marshals to JSON null, which a merge patch treats as "delete
+		// this key" -- the only spelling that removes an inherited value.
+		"status": map[string]any{
+			"operationState": map[string]any{
+				"operation": map[string]any{
+					"sync": map[string]any{
+						"prune":       false,
+						"resources":   nil,
+						"syncOptions": nil,
+					},
+				},
+			},
+		},
 		"operation": map[string]any{
 			"initiatedBy": map[string]any{"username": repairInitiator, "automated": false},
 			"info":        []map[string]string{{"name": repairOperationInfoName, "value": marker}},

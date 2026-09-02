@@ -7,7 +7,7 @@ import (
 )
 
 func TestSkipDirCoversTheDirectoriesThatBreakWalkers(t *testing.T) {
-	for _, name := range []string{".git", ".claude", "vendor", "node_modules"} {
+	for _, name := range []string{".git", ".claude", ".superpowers", "vendor", "node_modules"} {
 		if !SkipDir(name) {
 			t.Errorf("SkipDir(%q) = false, want true", name)
 		}
@@ -70,7 +70,7 @@ func TestSkipDirStopsAWalkEnteringAWorktree(t *testing.T) {
 
 func TestSkippedNamesIsSortedAndComplete(t *testing.T) {
 	got := SkippedNames()
-	want := []string{".claude", ".git", "node_modules", "vendor"}
+	want := []string{".claude", ".git", ".superpowers", "node_modules", "vendor"}
 	if len(got) != len(want) {
 		t.Fatalf("SkippedNames() = %v, want %v", got, want)
 	}

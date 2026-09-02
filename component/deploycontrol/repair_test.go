@@ -550,6 +550,69 @@ func TestRepairSyncPatchCarriesProvenanceAndPrune(t *testing.T) {
 	}
 }
 
+// A repair after a SELECTIVE sync must reconcile the whole render, not the
+// previous selection (memql#4871).
+//
+// The controller persists a new operation by merge-patching
+// `status.operationState` with `omitempty`, so an operation that names no
+// `resources` and no `syncOptions` inherits the previous one's -- and a
+// repair silently became "re-sync exactly what somebody last selected", while
+// reporting success. The patch therefore has to clear those fields on the
+// status side, where nothing re-marshals them and an explicit `[]` is not
+// dropped.
+//
+// Asserted on the RAW JSON rather than through a struct: the whole defect is
+// about keys being ABSENT versus present-and-null, and unmarshaling into a
+// typed value erases exactly that distinction.
+func TestRepairSyncPatchClearsThePreviousOperation(t *testing.T) {
+	raw, err := repairSyncPatch("rec-9")
+	if err != nil {
+		t.Fatalf("repairSyncPatch: %v", err)
+	}
+	var patch map[string]any
+	if err := json.Unmarshal([]byte(raw), &patch); err != nil {
+		t.Fatalf("patch is not JSON: %v (%s)", err, raw)
+	}
+
+	status, ok := patch["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("no status in the patch; the inherited fields are only clearable there: %s", raw)
+	}
+	opState, _ := status["operationState"].(map[string]any)
+	prev, _ := opState["operation"].(map[string]any)
+	sync, ok := prev["sync"].(map[string]any)
+	if !ok {
+		t.Fatalf("no status.operationState.operation.sync: %s", raw)
+	}
+
+	// PRESENT AND NULL, not absent. A merge patch deletes a key only when the
+	// key is there with a null value; an omitted key leaves what was there,
+	// which is the bug.
+	for _, field := range []string{"resources", "syncOptions"} {
+		v, present := sync[field]
+		if !present {
+			t.Errorf("status...sync.%s is absent; a merge patch only clears a field that is "+
+				"present and null, so an absent one leaves the previous operation's value", field)
+			continue
+		}
+		if v != nil {
+			t.Errorf("status...sync.%s = %v, want null -- an empty slice is dropped by ArgoCD's "+
+				"own omitempty on the round trip, which is why null is the only spelling", field, v)
+		}
+	}
+	if prune, present := sync["prune"].(bool); !present || prune {
+		t.Errorf("status...sync.prune = %v (present=%v), want false", prune, present)
+	}
+
+	// ...and the operation itself still asks for a pruning sync. The reset
+	// must not have disarmed the thing being reset for.
+	op, _ := patch["operation"].(map[string]any)
+	opSync, _ := op["sync"].(map[string]any)
+	if prune, _ := opSync["prune"].(bool); !prune {
+		t.Errorf("operation.sync.prune = false; the status reset must not disarm the repair itself: %s", raw)
+	}
+}
+
 func TestParseRepairObservation(t *testing.T) {
 	obs, err := parseRepairObservation(argoApp("Succeeded", "Synced", "Healthy", "rec-7"))
 	if err != nil {
