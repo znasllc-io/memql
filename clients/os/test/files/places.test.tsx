@@ -41,8 +41,16 @@ describe("the Desktop place", () => {
 
     // The desk folder is a rail child of Desktop; scoping into it shows its
     // live contents -- the same rows the Library shows for that folder.
+    //
+    // SCOPED TO THE DESKTOP GROUP rather than indexed out of the whole rail.
+    // The same folder is a real Library folder too, so "the second Reports
+    // button" only meant the desk one while every place rendered its children
+    // at once; it silently becomes the wrong element -- or none -- the moment
+    // a place is shut.
     const rail = screen.getByRole("navigation", { name: "Places and folders" });
-    await click(within(rail).getAllByRole("button", { name: /Reports/ })[1]!);
+    const desktop = rail.querySelector("#os-files-place-desktop") as HTMLElement;
+    expect(desktop).toBeTruthy();
+    await click(within(desktop).getByRole("button", { name: /Reports/ }));
     expect(screen.getByRole("button", { name: /filed\.pdf/ })).toBeTruthy();
     expect(screen.queryByText(/loose\.bin/)).toBeNull();
   });

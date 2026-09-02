@@ -101,9 +101,16 @@ export function BinApp({ sectionId, askContext, store }: OsAppProps & { store?: 
         .map(artifactFromRow)
         .filter((r) => r.id !== "" && isContentKind(r.kind))
         .map(binItemFromArtifact);
+      // `!f.deleted` is the live-path guard, not a second copy of the read's.
+      // libraryArchivedFolders carries isNotDeleted, so a seed never brings a
+      // deleted folder here -- but a live re-read is the raw by-id fetch, with
+      // row authz and no query filter, so a folder that was ALREADY in the Bin
+      // when the archive walk deleted it comes back on that very update.
+      // Without this it would sit in the Bin offering a Restore that the reads
+      // will never honour, which is the exact noise the disposition removes.
       const folderItems = folderRows
         .map(folderFromRow)
-        .filter((f) => f.id !== "")
+        .filter((f) => f.id !== "" && !f.deleted)
         .map(binItemFromFolder);
       return filterBinItems(orderBinItems([...items, ...folderItems]), search);
     },

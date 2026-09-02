@@ -1,22 +1,23 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, File, FileText, FolderPlus, Plus, Sparkles, Upload } from "lucide-react";
 import {
-  Archive as ArchiveGlyph,
-  File,
-  FileText,
-  Folder,
-  FolderPlus,
-  HardDrive,
-  Monitor,
-  Sparkles,
-  Upload,
-} from "lucide-react";
-import { newShortId, type LiveState, type Row } from "@znasllc-io/memql-sdk-core/client";
+  newShortId,
+  rowNumber,
+  rowString,
+  type LiveState,
+  type Row,
+} from "@znasllc-io/memql-sdk-core/client";
 
+import { useAuthSource } from "../../auth/context";
+import { useSession } from "../../chrome/access";
 import { ContextMenu } from "../../chrome/ContextMenu";
 import { useOs } from "../../chrome/state";
+import { openInVsCode, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
+import { downloadArtifact } from "./actions/download";
 import { useOsConnection } from "../../live/connection";
 import { entriesOf, hasDirectory, walkEntries } from "../../items/folderDrop";
-import { planArchive, runArchiveWalk } from "./actions/archive";
+import { planArchive, runArchiveWalk, subtreeHoldsArtifact } from "./actions/archive";
+import { Rail, type ExpandedPlaces } from "./Rail";
 import {
   Button,
   Caption,
@@ -97,6 +98,8 @@ export function BrowseSection({
   desksWithItems,
   filter,
   setFilter,
+  expanded,
+  setExpanded,
   selectedId,
   onSelect,
   linkByFileId,
@@ -125,6 +128,10 @@ export function BrowseSection({
   desksWithItems: number;
   filter: FilesFilter;
   setFilter: (next: FilesFilter) => void;
+  /** Which rail places are open. Held by the app root so switching to
+   *  Settings and back does not shut everything the person just opened. */
+  expanded: ExpandedPlaces;
+  setExpanded: (next: ExpandedPlaces) => void;
   selectedId: string;
   onSelect: (id: string) => void;
   /** Origin link state by backing file id (epic memql#4783). */
@@ -144,10 +151,11 @@ export function BrowseSection({
 }) {
   const { presence } = useMachines();
   const { actions } = useOs();
+  const { config } = useSession();
+  const authSource = useAuthSource();
   const connection = useOsConnection();
   const patch = (p: Partial<FilesFilter>) => setFilter({ ...filter, ...p });
   const pickRef = useRef<HTMLInputElement | null>(null);
-  const rootRef = useRef<HTMLDivElement | null>(null);
   // A refused DROP (over the file or depth bound) renders here, in surface,
   // with the walker's own sentence.
   const [dropRefusal, setDropRefusal] = useState("");
@@ -170,22 +178,105 @@ export function BrowseSection({
   // row, and it had no menu at all.
   const [rowMenu, setRowMenu] = useState<{ x: number; y: number; row: ArtifactRow } | null>(null);
   const [rowArchive, setRowArchive] = useState<ArtifactRow | null>(null);
-  const [rowNote, setRowNote] = useState("");
+  // The row actions' one refusal slot, carrying the SENTENCE with it. Four
+  // verbs report here (archive, move, download, new version) and a single
+  // shared wording would tell the reader neither which one failed nor what
+  // state their file is now in.
+  const [rowNote, setRowNote] = useState<{ sentence: string; next: string; detail: string } | null>(
+    null,
+  );
+  const refuse = (sentence: string, next: string, err: unknown) =>
+    setRowNote({ sentence, next, detail: err instanceof Error ? err.message : String(err) });
+  // The row menu's own flows. Each renders beside the list, in surface, the
+  // way every other refusal in this app does.
+  const [rowMove, setRowMove] = useState<ArtifactRow | null>(null);
+  const [rowVersionFor, setRowVersionFor] = useState<ArtifactRow | null>(null);
+  const [vsNoAnswer, setVsNoAnswer] = useState(false);
+  const versionPick = useRef<HTMLInputElement | null>(null);
+
+  // Every heavy verb the row menu offers is the inspector's verb, reached by
+  // the SAME function -- the download decision is shared in actions/download,
+  // the desk hand-off is one shell action, the new version is the one upload
+  // provider. A right-click is a third entry point onto one set of actions,
+  // never a second implementation of them.
+  const downloadRow = async (row: ArtifactRow) => {
+    setRowNote(null);
+    try {
+      await downloadArtifact({
+        artifactId: row.id,
+        name: artifactName(row),
+        fileId: row.kind === "file" ? (row.sourceConceptRef.split(":").pop() ?? "") : "",
+        readFile: connection
+          ? async (id) => {
+              const result = await connection.query.libraryFileById({ fileId: id });
+              const fileRow = result.rows()[0] ?? null;
+              if (!fileRow) return null;
+              return { sizeBytes: rowNumber(fileRow, "size"), name: rowString(fileRow, "name") };
+            }
+          : null,
+        bearer: () => authSource.bearer(),
+      });
+    } catch (err: unknown) {
+      refuse("The download did not land.", "Nothing was saved.", err);
+    }
+  };
+
+  const sendRowToDesk = (row: ArtifactRow) => {
+    const outcome = actions.sendFileToDesk({
+      artifactId: row.id,
+      title: artifactName(row),
+      fileKind: row.kind,
+      source: row.source,
+      ...(row.producedByWorkerId ? { producedByWorkerId: row.producedByWorkerId } : {}),
+    });
+    setRailNote(
+      outcome === "full"
+        ? "The desk is full -- remove something from it first."
+        : outcome === "focused"
+          ? "Already on the desk; it is selected there now."
+          : "On the desk.",
+    );
+    setTimeout(() => setRailNote(""), 5000);
+  };
+
+  const moveRowTo = async (row: ArtifactRow, folderId: string) => {
+    const query = connection?.query ?? null;
+    setRowMove(null);
+    if (query === null) {
+      refuse("The move was refused.", "The file is where it was.", "Not connected to the cluster.");
+      return;
+    }
+    setRowNote(null);
+    try {
+      await query.moveArtifactToFolder({ artifactId: row.id, folderId });
+    } catch (err: unknown) {
+      refuse("The move was refused.", "The file is where it was.", err);
+    }
+  };
+
+  const sendNewVersion = async (row: ArtifactRow, file: File) => {
+    setRowNote(null);
+    try {
+      await uploads.upload(file, { targetArtifactId: row.id }).done;
+    } catch (err: unknown) {
+      refuse("The new version was not accepted.", "This file still holds the version it had.", err);
+    }
+  };
 
   const archiveOneRow = async (row: ArtifactRow) => {
     const query = connection?.query ?? null;
     if (query === null) {
-      setRowNote("Not connected to the cluster, so nothing was archived.");
+      refuse("The archive was refused.", "The file is where it was.", "Not connected to the cluster.");
       return;
     }
     setRowArchive(null);
-    setRowNote("");
+    setRowNote(null);
     try {
       // Nothing is patched locally: the archive broadcasts, the row leaves
       // this list on the same feed, and it arrives in the Bin.
       await query.archiveArtifact({ artifactId: row.id });
     } catch (err: unknown) {
-      setRowNote(err instanceof Error ? err.message : String(err));
+      refuse("The archive was refused.", "The file is where it was.", err);
     }
   };
 
@@ -200,10 +291,10 @@ export function BrowseSection({
   const restoreOneRow = async (row: ArtifactRow) => {
     const query = connection?.query ?? null;
     if (query === null) {
-      setRowNote("Not connected to the cluster, so nothing was restored.");
+      refuse("The restore was refused.", "The file is still archived.", "Not connected to the cluster.");
       return;
     }
-    setRowNote("");
+    setRowNote(null);
     try {
       await runRestore(planRestore(binItemFromArtifact(row)), {
         restoreArtifact: async (artifactId) => {
@@ -220,7 +311,7 @@ export function BrowseSection({
         await query.moveArtifactToFolder({ artifactId: row.id, folderId: "" });
       }
     } catch (err: unknown) {
-      setRowNote(err instanceof Error ? err.message : String(err));
+      refuse("The restore was refused.", "The file is still archived.", err);
     }
   };
 
@@ -267,6 +358,13 @@ export function BrowseSection({
         },
         archiveFolder: async (id) => {
           await query.archiveLibraryFolder({ folderId: id });
+        },
+        // A folder with no file anywhere beneath it is DELETED rather than
+        // archived: there is nothing in it to put back, so a row in the Bin
+        // beside the things that ARE waiting there would be noise. Still a
+        // soft delete -- the row survives, every folder read excludes it.
+        deleteFolder: async (id) => {
+          await query.deleteLibraryFolder({ folderId: id });
         },
         onProgress: (done, total) => setArchiveProgress({ done, total }),
       });
@@ -335,6 +433,73 @@ export function BrowseSection({
     uploadFiles(Array.from(event.dataTransfer.files), destinationFolderId);
   };
 
+  const rowMenuEntries = (row: ArtifactRow) => {
+    const ask = {
+      id: "ask",
+      label: "Ask about this file",
+      onSelect: () => askContext(`app:files/browse file:${artifactName(row)}`),
+    };
+    const download = {
+      id: "download",
+      label: "Download",
+      onSelect: () => void downloadRow(row),
+    };
+    if (row.archived) {
+      return [
+        {
+          id: "restore",
+          // The Bin's verb, kept verbatim (cohesion): one name for one action
+          // wherever it appears.
+          label: "Restore",
+          disabled: connection === null,
+          onSelect: () => void restoreOneRow(row),
+        },
+        download,
+        ask,
+      ];
+    }
+    return [
+      { id: "open", label: "Open in VS Code", onSelect: () => openVsCodeFor(row) },
+      { id: "desk", label: "Send to desktop", onSelect: () => sendRowToDesk(row) },
+      download,
+      ...(row.kind === "file"
+        ? [
+            {
+              id: "version",
+              label: "Upload new version",
+              onSelect: () => {
+                setRowVersionFor(row);
+                versionPick.current?.click();
+              },
+            },
+          ]
+        : []),
+      {
+        id: "move",
+        label: "Move to folder",
+        disabled: connection === null,
+        onSelect: () => setRowMove(row),
+      },
+      ask,
+      {
+        id: "archive",
+        // "Move to Bin" rather than "Delete": the action's name has to be what
+        // it DOES, and nothing here deletes. It keeps that name through the
+        // whole flow, which is why the confirm below says the same and the Bin
+        // says the item is in it.
+        label: "Move to Bin",
+        disabled: connection === null,
+        onSelect: () =>
+          confirmBeforeArchive ? setRowArchive(row) : void archiveOneRow(row),
+      },
+    ];
+  };
+
+  const openVsCodeFor = (row: ArtifactRow) => {
+    setVsNoAnswer(false);
+    openInVsCode(config.domain, row.id, () => setVsNoAnswer(true));
+  };
+
   const selected = content.find((r) => r.id === selectedId) ?? null;
   const archivedFolderIdSet = new Set(archivedFolders.map((f) => f.id));
   const searching = filter.search.trim() !== "";
@@ -356,6 +521,11 @@ export function BrowseSection({
   const deskFileCount = content.filter(
     (r) => !r.archived && deskFileArtifactIds.has(r.id),
   ).length;
+  // The COLLAPSED Library's number is the whole place, not its root folder.
+  // A shut summary reading "3" over two hundred files is a smaller number
+  // standing in front of a bigger one it does not mention; the per-folder
+  // counts above stay direct, which is the recorded answer for a location.
+  const libraryTotal = content.length - archivedTotal;
 
   const folderNameOf = (folderId: string): string => {
     if (folderId === "") return "Library";
@@ -419,7 +589,6 @@ export function BrowseSection({
 
   return (
     <div
-      ref={rootRef}
       className="os-files"
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes("Files")) return;
@@ -491,9 +660,19 @@ export function BrowseSection({
             ))}
           </Select>
         </Refine>
-        <Button tone="primary" onClick={() => pickRef.current?.click()}>
-          <Upload size={13} aria-hidden /> Upload
-        </Button>
+        {/* ONE WAY TO ADD SOMETHING (DESIGN.md rule 1: at most one primary
+            action). Uploading a file and making a folder are the same
+            question -- "put something here" -- and they were answered in two
+            places: a primary button up here and a rail ACTION wedged between
+            the Library tree and the Desktop place, where it read as a folder
+            you could open. The rail action is gone; both answers live on this
+            button, and both land in the folder currently being looked at. */}
+        <AddMenu
+          disabled={connection === null}
+          destinationName={destinationFolderId === "" ? "Library" : folderNameOf(destinationFolderId)}
+          onUpload={() => pickRef.current?.click()}
+          onNewFolder={() => void newFolderIn(destinationFolderId)}
+        />
       </Head>
       <input
         ref={pickRef}
@@ -509,139 +688,36 @@ export function BrowseSection({
       />
 
       <div className="os-files-body">
-        {/* THE RAIL'S THREE PLACES (epic memql#4842, #4846): Library is what
-            you have, Desktop is what sits on your desks, Archive is what you
-            archived. Only items PLACED on a desk appear under Desktop; only
-            archived rows under Archive -- the old show-archived checkbox is
-            what this replaces. */}
-        <nav className="os-files-rail" aria-label="Places and folders">
-          <button
-            type="button"
-            className="os-files-node"
-            data-current={!searching && filter.place === "library" && filter.folderId === "" ? true : undefined}
-            onClick={() => patch({ place: "library", folderId: "", search: "" })}
-          >
-            <HardDrive size={14} aria-hidden />
-            <span className="os-files-node-name">Library</span>
-            <span className="os-files-node-count">{counts.get("") ?? 0}</span>
-          </button>
-          {tree.roots.map((node) => (
-            <RailNode
-              key={node.folder.id}
-              node={node}
-              counts={counts}
-              folderLinks={folderLinks}
-              currentId={searching || filter.place !== "library" ? null : filter.folderId}
-              renamingFolderId={renamingFolderId}
-              onScope={(folderId) => patch({ place: "library", folderId, search: "" })}
-              onMenu={(x, y, menuNode) => {
-                // The menu positions inside THIS box, so viewport coords
-                // become box coords -- against the window frame they would
-                // open a window-offset away from the click.
-                const rect = rootRef.current?.getBoundingClientRect();
-                setFolderMenu({
-                  x: x - (rect?.left ?? 0),
-                  y: y - (rect?.top ?? 0),
-                  node: menuNode,
-                });
-              }}
-              onRename={(folderId, name) => void renameFolder(folderId, name)}
-              onCancelRename={() => setRenamingFolderId("")}
-            />
-          ))}
-          {/* The one rail ACTION (rule 6), beside the block it acts on: it
-              creates a folder in the Library scope being looked at. Below the
-              archived flood it would be furniture nobody finds. */}
-          <button
-            type="button"
-            className="os-files-node"
-            data-action
-            disabled={connection === null}
-            onClick={() =>
-              void newFolderIn(searching || filter.place !== "library" ? "" : (filter.folderId ?? ""))
-            }
-          >
-            <FolderPlus size={14} aria-hidden />
-            <span className="os-files-node-name">New folder</span>
-          </button>
-
-          <button
-            type="button"
-            className="os-files-node os-files-place"
-            data-current={!searching && filter.place === "desktop" && filter.folderId === "" ? true : undefined}
-            onClick={() => patch({ place: "desktop", folderId: "", search: "" })}
-          >
-            <Monitor size={14} aria-hidden />
-            <span className="os-files-node-name">Desktop</span>
-            <span className="os-files-node-count">{deskFileCount > 0 ? deskFileCount : ""}</span>
-          </button>
-          {deskFolders.map((shortcut) => (
-            <button
-              key={shortcut.folderId}
-              type="button"
-              className="os-files-node"
-              style={{ paddingInlineStart: "24px" }}
-              data-current={
-                !searching && filter.place === "desktop" && filter.folderId === shortcut.folderId
-                  ? true
-                  : undefined
-              }
-              onClick={() => patch({ place: "desktop", folderId: shortcut.folderId, search: "" })}
-            >
-              <Folder size={14} aria-hidden />
-              <span className="os-files-node-name">{folderNameOf(shortcut.folderId)}</span>
-              <span className="os-files-node-count">
-                {(counts.get(shortcut.folderId) ?? 0) > 0 ? counts.get(shortcut.folderId) : ""}
-              </span>
-            </button>
-          ))}
-
-          <button
-            type="button"
-            className="os-files-node os-files-place"
-            data-current={!searching && filter.place === "archive" && filter.folderId === "" ? true : undefined}
-            onClick={() => patch({ place: "archive", folderId: "", search: "" })}
-          >
-            <ArchiveGlyph size={14} aria-hidden />
-            <span className="os-files-node-name">Archive</span>
-            <span className="os-files-node-count">{archivedTotal > 0 ? archivedTotal : ""}</span>
-          </button>
-          {archivedFolders.map((folder) => (
-            <button
-              key={folder.id}
-              type="button"
-              className="os-files-node"
-              style={{ paddingInlineStart: "24px" }}
-              data-current={
-                !searching && filter.place === "archive" && filter.folderId === folder.id
-                  ? true
-                  : undefined
-              }
-              onClick={() => patch({ place: "archive", folderId: folder.id, search: "" })}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                const rect = rootRef.current?.getBoundingClientRect();
-                setArchivedFolderMenu({
-                  x: event.clientX - (rect?.left ?? 0),
-                  y: event.clientY - (rect?.top ?? 0),
-                  folder,
-                });
-              }}
-            >
-              <Folder size={14} aria-hidden />
-              <span className="os-files-node-name">{folder.name}</span>
-              <span className="os-files-node-count">
-                {(archivedCounts.get(folder.id) ?? 0) > 0 ? archivedCounts.get(folder.id) : ""}
-              </span>
-            </button>
-          ))}
-
-          {railNote !== "" ? <Caption>{railNote}</Caption> : null}
-          {foldersState === "degraded" || foldersState === "disconnected" ? (
-            <Caption>Folder updates are behind -- showing the last known tree.</Caption>
-          ) : null}
-        </nav>
+        {/* THE RAIL (epic memql#4842, #4846; collapsed by default here).
+            Library is what you have, Desktop is what sits on your desks,
+            Archive is what you archived. Each place is a disclosure over its
+            own folders -- see Rail.tsx for why they start shut and why
+            selecting one also opens it. */}
+        <Rail
+          filter={filter}
+          patch={patch}
+          tree={tree}
+          counts={counts}
+          archivedCounts={archivedCounts}
+          folderLinks={folderLinks}
+          archivedFolders={archivedFolders}
+          deskFolders={deskFolders}
+          folderNameOf={folderNameOf}
+          libraryTotal={libraryTotal}
+          deskFileCount={deskFileCount}
+          archivedTotal={archivedTotal}
+          expanded={expanded}
+          setExpanded={setExpanded}
+          renamingFolderId={renamingFolderId}
+          onRename={(folderId, name) => void renameFolder(folderId, name)}
+          onCancelRename={() => setRenamingFolderId("")}
+          onFolderMenu={(x, y, node) => setFolderMenu({ x, y, node })}
+          onArchivedFolderMenu={(x, y, folder) =>
+            setArchivedFolderMenu({ x, y, folder })
+          }
+          railNote={railNote}
+          foldersState={foldersState}
+        />
 
         <div className="os-files-list">
           {artifacts.snapshot.error ? (
@@ -658,21 +734,48 @@ export function BrowseSection({
               <Button onClick={() => setDropRefusal("")}>Dismiss</Button>
             </Notice>
           ) : null}
+          {/* THE CONFIRM NAMES THE DISPOSITION IT IS ABOUT TO PERFORM, and
+              the button keeps that name through the flow. A folder holding no
+              file at any depth is deleted rather than archived, so offering
+              to "archive" it and then removing it from every surface would be
+              the interface saying one thing and doing another -- on the one
+              action in this app that a person cannot undo by clicking
+              Restore. */}
           {pendingArchive !== "" ? (
-            <Notice
-              tone="warn"
-              sentence={`Archive "${folderNameOf(pendingArchive)}" and its ${
-                planArchive(tree, content, pendingArchive).itemCount
-              } items?`}
-              next="Everything inside archives too, children first. Nothing is deleted -- it all lives under Archive, where Restore puts it back."
-            >
-              <div className="os-files-confirm">
-                <Button tone="danger" onClick={() => void runFolderArchive(pendingArchive)}>
-                  Archive
-                </Button>
-                <Button onClick={() => setPendingArchive("")}>Cancel</Button>
-              </div>
-            </Notice>
+            (() => {
+              const plan = planArchive(tree, content, pendingArchive);
+              const name = folderNameOf(pendingArchive);
+              const keeping = subtreeHoldsArtifact(tree, content, pendingArchive);
+              const emptied = plan.deleteFolderIds.length;
+              return (
+                <Notice
+                  tone="warn"
+                  sentence={
+                    keeping
+                      ? `Archive "${name}" and its ${plan.itemCount} items?`
+                      : `Delete "${name}"?`
+                  }
+                  next={
+                    keeping
+                      ? `Everything inside archives too, children first, and lives under Archive where Restore puts it back.${
+                          emptied > 0
+                            ? ` The ${emptied} empty ${emptied === 1 ? "folder" : "folders"} inside are deleted instead -- there is nothing in them to put back.`
+                            : ""
+                        }`
+                      : `It holds no files at any depth${
+                          emptied > 1 ? `, and nor do the ${emptied - 1} folders inside it` : ""
+                        }. There is nothing to put back, so it is removed from every surface rather than kept in the Bin.`
+                  }
+                >
+                  <div className="os-files-confirm">
+                    <Button tone="danger" onClick={() => void runFolderArchive(pendingArchive)}>
+                      {keeping ? "Archive" : "Delete"}
+                    </Button>
+                    <Button onClick={() => setPendingArchive("")}>Cancel</Button>
+                  </div>
+                </Notice>
+              );
+            })()
           ) : null}
           {archiveProgress !== null ? (
             <Caption>
@@ -725,7 +828,6 @@ export function BrowseSection({
             key={selected.id}
             row={selected}
             folderNameOf={folderNameOf}
-            tree={tree}
             archivedFolderIds={archivedFolderIdSet}
             presence={presence}
             confirmBeforeArchive={confirmBeforeArchive}
@@ -736,40 +838,18 @@ export function BrowseSection({
         )}
       </div>
 
+      {/* THE ROW'S MENU IS THE INSPECTOR'S ACTION SET (memql#4860 wave).
+          It used to hold one entry -- Move to Bin -- which made a right-click
+          look like it had failed to load rather than like the surface it is.
+          Every verb here reaches the same function the inspector's button
+          does; the two heavy ones (download, new version) run the shared
+          implementations rather than second copies. */}
       {rowMenu !== null ? (
         <ContextMenu
           x={rowMenu.x}
           y={rowMenu.y}
           label="File"
-          entries={
-            rowMenu.row.archived
-              ? [
-                  {
-                    id: "restore",
-                    // The Bin's verb, kept verbatim (cohesion): one name for
-                    // one action wherever it appears.
-                    label: "Restore",
-                    disabled: connection === null,
-                    onSelect: () => void restoreOneRow(rowMenu.row),
-                  },
-                ]
-              : [
-                  {
-                    id: "archive",
-                    // "Move to Bin" rather than "Delete": the action's name has
-                    // to be what it DOES, and nothing here deletes. It keeps
-                    // that name through the whole flow, which is why the
-                    // confirm below says the same and the Bin says the item is
-                    // in it.
-                    label: "Move to Bin",
-                    disabled: connection === null,
-                    onSelect: () =>
-                      confirmBeforeArchive
-                        ? setRowArchive(rowMenu.row)
-                        : void archiveOneRow(rowMenu.row),
-                  },
-                ]
-          }
+          entries={rowMenuEntries(rowMenu.row)}
           onClose={() => setRowMenu(null)}
         />
       ) : null}
@@ -803,14 +883,60 @@ export function BrowseSection({
           </div>
         </Notice>
       ) : null}
-      {rowNote !== "" ? (
+      {rowNote !== null ? (
         <Notice
           tone="error"
-          sentence="The archive was refused."
-          next="The file is where it was."
-          detail={rowNote}
-        />
+          sentence={rowNote.sentence}
+          next={rowNote.next}
+          detail={rowNote.detail}
+        >
+          <Button onClick={() => setRowNote(null)}>Dismiss</Button>
+        </Notice>
       ) : null}
+      {vsNoAnswer ? <Notice tone="warn" sentence={VSCODE_NO_ANSWER_MESSAGE} /> : null}
+      {/* MOVE, re-homed from the inspector (the owner asked for it off that
+          panel). A picker rather than a submenu: the folder list is a tree of
+          arbitrary size and a context menu is not where an arbitrary list
+          belongs. */}
+      {rowMove !== null ? (
+        <Notice tone="warn" sentence={`Move "${artifactName(rowMove)}" to another folder`}>
+          <div className="os-files-confirm">
+            <span className="os-files-move-pick">
+            <Select
+              id={`files-move-${rowMove.id}`}
+              label="Move to folder"
+              value={rowMove.folderId}
+              onChange={(folderId) => void moveRowTo(rowMove, folderId)}
+            >
+              <option value="">Library (top level)</option>
+              {flatFolderOptions(tree).map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+            </span>
+            <Button onClick={() => setRowMove(null)}>Cancel</Button>
+          </div>
+        </Notice>
+      ) : null}
+      {/* The picker is never seen: a bare file input cannot be styled into
+          this shell's button language, and every surface here uses the same
+          one. Cleared on change so picking the SAME file twice fires again --
+          a change event that never comes reads as a dead menu item. */}
+      <input
+        ref={versionPick}
+        type="file"
+        className="os-visually-hidden"
+        aria-label="Choose a file to upload as the new version"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          const row = rowVersionFor;
+          setRowVersionFor(null);
+          if (file && row) void sendNewVersion(row, file);
+        }}
+      />
       {folderMenu !== null ? (
         <ContextMenu
           x={folderMenu.x}
@@ -848,12 +974,27 @@ export function BrowseSection({
             },
             {
               id: "archive",
-              label: "Archive",
+              // The verb the menu offers is the one that will happen. An
+              // empty folder is deleted, and calling that "Archive" here and
+              // "Delete" in the confirm one click later would teach somebody
+              // that the two words mean the same thing in this app.
+              label: subtreeHoldsArtifact(tree, content, folderMenu.node.folder.id)
+                ? "Archive"
+                : "Delete",
               disabled: connection === null,
               onSelect: () =>
                 confirmBeforeArchive
                   ? setPendingArchive(folderMenu.node.folder.id)
                   : void runFolderArchive(folderMenu.node.folder.id),
+            },
+            {
+              id: "new-folder",
+              // Creating a folder INSIDE a named one is the placement the
+              // Head's Add control cannot express -- it puts things in the
+              // folder being looked at, which is not always this one.
+              label: "New folder inside",
+              disabled: connection === null,
+              onSelect: () => void newFolderIn(folderMenu.node.folder.id),
             },
           ]}
           onClose={() => setFolderMenu(null)}
@@ -861,6 +1002,98 @@ export function BrowseSection({
       ) : null}
     </div>
   );
+}
+
+/**
+ * The Add menu: one primary control, two ways to put something in the place
+ * being looked at.
+ *
+ * IT NAMES THE DESTINATION. Both actions land in the folder currently
+ * scoped, which is invisible from the button -- so the menu says where,
+ * rather than leaving somebody to find out by doing it. Searching or
+ * standing in Archive resolves to the Library root upstream, and the label
+ * follows that same value rather than guessing at it separately.
+ */
+function AddMenu({
+  disabled,
+  destinationName,
+  onUpload,
+  onNewFolder,
+}: {
+  disabled: boolean;
+  destinationName: string;
+  onUpload: () => void;
+  onNewFolder: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: PointerEvent) => {
+      if (!wrap.current?.contains(event.target as Node)) setOpen(false);
+    };
+    // Capture phase, like the shell's context menu: a click that lands on a
+    // control which stops propagation must still shut this.
+    window.addEventListener("pointerdown", onPointer, true);
+    return () => window.removeEventListener("pointerdown", onPointer, true);
+  }, [open]);
+
+  const choose = (run: () => void) => {
+    setOpen(false);
+    run();
+  };
+
+  return (
+    <div className="os-files-add" ref={wrap}>
+      <Button tone="primary" ariaExpanded={open} onClick={() => setOpen(!open)}>
+        <Plus size={13} aria-hidden /> Add <ChevronDown size={12} aria-hidden />
+      </Button>
+      {open ? (
+        <div
+          className="os-menu os-files-add-menu"
+          role="menu"
+          aria-label="Add to this folder"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.stopPropagation();
+              setOpen(false);
+            }
+          }}
+        >
+          <p className="os-menu-head">Into {destinationName}</p>
+          <button
+            type="button"
+            role="menuitem"
+            className="os-menu-item"
+            onClick={() => choose(onUpload)}
+          >
+            <Upload size={13} aria-hidden /> Upload files
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="os-menu-item"
+            disabled={disabled}
+            onClick={() => choose(onNewFolder)}
+          >
+            <FolderPlus size={13} aria-hidden /> New folder
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** The tree flattened for the move picker, depth as indentation. */
+function flatFolderOptions(tree: FolderTree): Array<{ id: string; label: string }> {
+  const out: Array<{ id: string; label: string }> = [];
+  const walk = (node: TreeNode, depth: number) => {
+    out.push({ id: node.folder.id, label: `${"  ".repeat(depth)}${node.folder.name}` });
+    for (const child of node.children) walk(child, depth + 1);
+  };
+  for (const root of tree.roots) walk(root, 0);
+  return out;
 }
 
 function UploadPlaceholder({ task }: { task: UploadTask }) {
@@ -917,118 +1150,6 @@ function UploadPlaceholder({ task }: { task: UploadTask }) {
         </>
       ) : null}
     </div>
-  );
-}
-
-function RailNode({
-  node,
-  counts,
-  folderLinks,
-  currentId,
-  renamingFolderId,
-  onScope,
-  onMenu,
-  onRename,
-  onCancelRename,
-}: {
-  node: TreeNode;
-  counts: Map<string, number>;
-  /** The WORST origin link state anywhere beneath this folder (epic
-   *  memql#4783), or absent -- which is most folders, and draws nothing. */
-  folderLinks: Map<string, LinkState>;
-  currentId: string | null;
-  renamingFolderId: string;
-  onScope: (folderId: string) => void;
-  onMenu: (x: number, y: number, node: TreeNode) => void;
-  onRename: (folderId: string, name: string) => void;
-  onCancelRename: () => void;
-}) {
-  const marker =
-    node.placement === "orphan"
-      ? { label: "parent gone", title: "This folder's parent is archived or missing, so it shows at the top." }
-      : node.placement === "cycle"
-        ? { label: "loop", title: "This folder's ancestry loops back on itself, so it shows at the top." }
-        : node.placement === "deep"
-          ? { label: "too deep", title: "Nested past 12 levels, so it shows at the top." }
-          : null;
-  const count = counts.get(node.folder.id) ?? 0;
-  const renaming = renamingFolderId === node.folder.id;
-  return (
-    <>
-      {renaming ? (
-        <div className="os-files-node" style={{ paddingInlineStart: `${10 + node.depth * 14}px` }}>
-          <Folder size={14} aria-hidden />
-          <input
-            className="os-input os-files-rename"
-            defaultValue={node.folder.name}
-            aria-label={`Rename ${node.folder.name}`}
-            autoFocus
-            onKeyDown={(event) => {
-              if (event.key === "Enter") onRename(node.folder.id, event.currentTarget.value);
-              if (event.key === "Escape") onCancelRename();
-            }}
-            onBlur={(event) => onRename(node.folder.id, event.currentTarget.value)}
-          />
-        </div>
-      ) : (
-        <button
-          type="button"
-          className="os-files-node"
-          style={{ paddingInlineStart: `${10 + node.depth * 14}px` }}
-          data-current={currentId === node.folder.id ? true : undefined}
-          onClick={() => onScope(node.folder.id)}
-          onContextMenu={(event) => {
-            // The rail offers its own menu, so the browser's stays out (the
-            // shell's right-click rule: a surface with a menu says so).
-            event.preventDefault();
-            event.stopPropagation();
-            onMenu(event.clientX, event.clientY, node);
-          }}
-        >
-          <Folder size={14} aria-hidden />
-          <span className="os-files-node-name">{node.folder.name}</span>
-          {marker ? (
-            <Chip tone="muted" title={marker.title}>
-              {marker.label}
-            </Chip>
-          ) : null}
-          {/* THE ROLLUP DOT, and it is a dot rather than a count on purpose:
-              the reason to mark a folder is to make somebody open it, and a
-              folder holding one missing file needs opening exactly as much as
-              one holding forty. `synced` draws nothing at all -- a green mark
-              on every backed-up folder is noise that makes the few that need
-              attention invisible. */}
-          {(() => {
-            const rollup = folderLinks.get(node.folder.id);
-            if (rollup === undefined || rollup === "synced") return null;
-            return (
-              <span
-                className="os-files-node-link"
-                data-link={rollup}
-                title={`Something in here: ${LINK_SENTENCE[rollup]}`}
-                role="img"
-                aria-label={`Something in this folder is ${LINK_LABEL[rollup]}`}
-              />
-            );
-          })()}
-          <span className="os-files-node-count">{count > 0 ? count : ""}</span>
-        </button>
-      )}
-      {node.children.map((child) => (
-        <RailNode
-          key={child.folder.id}
-          node={child}
-          folderLinks={folderLinks}
-          counts={counts}
-          currentId={currentId}
-          renamingFolderId={renamingFolderId}
-          onScope={onScope}
-          onMenu={onMenu}
-          onRename={onRename}
-          onCancelRename={onCancelRename}
-        />
-      ))}
-    </>
   );
 }
 

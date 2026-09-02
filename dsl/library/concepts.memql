@@ -477,8 +477,10 @@ concept fileChunk {
 /// uniqueness machinery to fight and a rename touches exactly one row. Archiving is the same soft
 /// delete every Library row gets -- the client-driven walk archives contents first (design B5), and
 /// a folder that vanishes under its children only degrades the picture: the tree fold renders
-/// orphans at root with a marker. Per-row authz: the composite tier (memql#4312) -- the owner, or a
-/// cluster owner -- matching artifact and file, whose rows it organizes.
+/// orphans at root with a marker. A folder whose subtree holds no file at all takes the OTHER
+/// disposition instead: `deleted`, which no surface shows and no restore undoes, because there is
+/// nothing inside it for anybody to want back. Per-row authz: the composite tier (memql#4312) --
+/// the owner, or a cluster owner -- matching artifact and file, whose rows it organizes.
 @displayCard(primary="name", tertiary="createdAt")
 @rowAuthz(owner="ownerUserId", clusterOwner)
 concept folder {
@@ -489,6 +491,8 @@ concept folder {
   parentFolderId  string  @description("v1:library:folder.id of the containing folder; empty or absent = a root folder. Declared as a self-referential `references` relationship below -- an edge, not a hierarchy the engine enforces: depth cap (12) and cycle refusal are the CLIENT's in v1 (design D11), and the tree fold tolerates violations defensively, rendering the offender at root with a marker, so a bad write degrades the picture rather than breaking it.")
 
   archived        bool  @default("false")  @description("Soft delete, set by archiveLibraryFolder. libraryFolders filters it with the null-safe `archived != true` spelling, so rows written before any future field change keep listing. The client-driven archive walk (design B5) archives a folder's CONTENTS first, children-first, then the folder -- idempotent under interruption, and re-running archives the remainder. Removing a desk shortcut is NEVER this write.")
+
+  deleted         bool  @default("false")  @description("The disposition of a folder whose subtree held NO FILE AT ALL, at any depth, when somebody archived it -- set by deleteLibraryFolder, which the archive walk calls instead of archiveLibraryFolder for exactly those folders. Every folder read carries the isNotDeleted trait (the null-safe `deleted != true` spelling, for the reason archived above records), so a deleted folder leaves the tree, the Bin and a by-id resolve together: there is no surface it still appears on. NOT A FLAVOUR OF archived, and the difference is not cosmetic -- nothing archived this row. Archiving exists so a person can get something back, and an empty folder tree has nothing in it to get back, so an archived one would be a line in the Bin that answers no question anybody asked. NO RESTORE PATH RESURRECTS IT: restoreLibraryFolder clears archived and deliberately never touches this field, because a row every surface excludes is a row nothing can ask to have back.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="parentFolderId", target=folder, direction="outgoing")

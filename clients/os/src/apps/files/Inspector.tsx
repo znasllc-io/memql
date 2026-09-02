@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, CornerUpRight, Download, FilePlus2, RotateCcw, X } from "lucide-react";
+import { Archive, CornerUpRight, Download, FilePlus2, RotateCcw, Sparkles, X } from "lucide-react";
 
 import { useAuthSource } from "../../auth/context";
 import { useSession } from "../../chrome/access";
@@ -7,7 +7,7 @@ import { useOs } from "../../chrome/state";
 import { openInVsCode, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
 import { binItemFromArtifact } from "../bin/rows";
 import { planRestore, runRestore } from "../bin/restore";
-import { Button, Chip, Chips, Fact, Facts, Notice, ProvenanceDot, Select, Subhead, formatBytes, formatMoment } from "../../kit";
+import { Button, Chip, Chips, CopyValue, Fact, Facts, Notice, ProvenanceDot, Subhead, formatBytes, formatMoment } from "../../kit";
 import { AccountLabelPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
 import { useArtifactAccounts } from "./actions/accounts";
@@ -18,41 +18,73 @@ import { useOsConnection } from "../../live/connection";
 import type { UploadProvider } from "../../items/upload";
 import { rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
 import { kindGlyph } from "./BrowseSection";
-import { OVER_LIMIT_SENTENCE, planDownload, runBufferedDownload } from "./actions/download";
+import {
+  downloadArtifact,
+  OVER_LIMIT_SENTENCE,
+  planDownload,
+  runBufferedDownload,
+} from "./actions/download";
 import { downloadWorkerRegistration, runWorkerDownload } from "./actions/downloadWorker";
-import type { FolderTree, TreeNode } from "./fold";
 import { artifactName, fileStory, type ArtifactRow } from "./rows";
 
 // The inspector (design D1): the file's story, its facts, and the five
 // actions -- open in VS Code, send to desktop, download, upload a new version,
-// archive -- plus the re-filing move and the version history. THE STORY LEADS:
-// where a file came from is the fact this platform can tell that a generic
-// file manager cannot, so it is the header, not a row in a table.
+// archive -- plus the version history. THE STORY LEADS: where a file came from
+// is the fact this platform can tell that a generic file manager cannot, so it
+// is the header, not a row in a table.
 //
 // THE HISTORY SITS UNDER THE ACTION THAT GROWS IT (epic memql#4806). "Upload
 // new version" is beside Download, and the stack it appends to is directly
 // below -- so the refusal renders next to the control that produced it and the
 // result appears where the person is already looking.
+//
+// ===========================================================================
+// THE PANEL IS FOUR GROUPS, AND THE TWO OPAQUE VALUES ARE COPYABLE
+// ===========================================================================
+// It was a flat stack of ten things and it scrolled SIDEWAYS. An artifact id
+// is one unbreakable word, and the facts grid's `1fr` column refused to shrink
+// below it, so the panel grew past its own container. The fix is at the cause
+// (`minmax(0, 1fr)` in the stylesheet); an id nobody can select out of a
+// truncated line is only half an answer, so `Id` and `Plan` render as
+// `CopyValue` -- ellipsized, with the whole value on `title` and in the
+// clipboard. The short human facts get no button: one beside "Created" is
+// furniture.
+//
+// After the lead, the rest groups under Subheads (DESIGN.md rule 8): the
+// file's own details, the clients it is about, the actions, the versions. Two
+// rules the grouping had to respect.
+//
+//   - SAY IT ONCE (rule 7). The kind was a glyph in the header AND a `Kind`
+//     row in the facts. The glyph stays -- it is the same mark the list row
+//     carries, so the panel that opens is visibly the thing that was clicked
+//     -- and it is NAMED now (`role="img"`), which is what keeps the kind in
+//     the reading for somebody who never sees a glyph. The fact row goes.
+//   - EVERY NOTICE STAYS WITH ITS ACTION. One error slot per action was a
+//     recorded decision before this pass, so the whole block moved into the
+//     Actions group in its existing order and nothing was consolidated. A
+//     download refusal must never sit under the archive button.
+//
+// ONE PRIMARY, AND `Archive` KEEPS ITS TONE. "Open in VS Code" is the one
+// thing this surface is for; "Restore" was a second primary and is quiet now.
+// "Archive" stays `danger` because tone here is about CONSEQUENCE rather than
+// emphasis (the Button contract says so) -- dropping it to quiet would make
+// archiving look exactly like downloading.
+//
+// ASK IS THE SHELL'S ASK AFFORDANCE, IN THE HEADER (the SiteDetail pattern),
+// not a full-width button at the foot of the panel. The tag string is
+// unchanged: it is a contract with the Ask surface.
+//
+// MOVING A FILE IS NOT HERE ANY MORE. Re-filing is something you do TO a row,
+// so it lives on the row's own context menu rather than as a standing picker
+// at the bottom of a reading surface.
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** The tree flattened for the move picker, depth as indentation. */
-function folderOptions(tree: FolderTree): Array<{ id: string; label: string }> {
-  const out: Array<{ id: string; label: string }> = [];
-  const walk = (node: TreeNode, depth: number) => {
-    out.push({ id: node.folder.id, label: `${"  ".repeat(depth)}${node.folder.name}` });
-    for (const child of node.children) walk(child, depth + 1);
-  };
-  for (const root of tree.roots) walk(root, 0);
-  return out;
-}
-
 export function Inspector({
   row,
   folderNameOf,
-  tree,
   archivedFolderIds,
   presence,
   confirmBeforeArchive,
@@ -62,7 +94,6 @@ export function Inspector({
 }: {
   row: ArtifactRow;
   folderNameOf: (folderId: string) => string;
-  tree: FolderTree;
   /** Ids of KNOWN-archived folders -- the restore re-file predicate. */
   archivedFolderIds: ReadonlySet<string>;
   presence: (workerId: string) => { name?: string; online: boolean } | null;
@@ -97,7 +128,6 @@ export function Inspector({
   const [downloadError, setDownloadError] = useState("");
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [deskNote, setDeskNote] = useState("");
-  const [moveError, setMoveError] = useState("");
   const accounts = useAccountOptions();
   const accountTie = useArtifactAccounts();
   const [archiveError, setArchiveError] = useState("");
@@ -164,43 +194,20 @@ export function Inspector({
     setDownloadBusy(true);
     setDownloadError("");
     try {
-      // The 512 MiB decision needs the SIZE, which lives on the backing file
-      // row -- the index deliberately does not carry it. Non-file kinds are
-      // small rendered bodies (design D13) and skip the read.
-      let sizeBytes = 0;
-      let fileName = name;
-      if (row.kind === "file" && connection) {
-        const fileId = row.sourceConceptRef.split(":").pop() ?? "";
-        if (fileId !== "") {
-          const result = await connection.query.libraryFileById({ fileId });
-          const fileRow = result.rows()[0] ?? null;
-          if (fileRow) {
-            sizeBytes = rowNumber(fileRow, "size");
-            fileName = rowString(fileRow, "name") || name;
-          }
-        }
-      }
-      const registration = await downloadWorkerRegistration();
-      const plan = planDownload({ workerAvailable: registration !== null, sizeBytes });
-      if (plan.path === "refused") {
-        setDownloadError(OVER_LIMIT_SENTENCE);
-        return;
-      }
-      if (plan.path === "worker" && registration !== null) {
-        await runWorkerDownload({
-          artifactId: row.id,
-          fileName,
-          sizeBytes,
-          bearer: () => authSource.bearer(),
-          registration,
-        });
-      } else {
-        await runBufferedDownload({
-          artifactId: row.id,
-          fileName,
-          bearer: () => authSource.bearer(),
-        });
-      }
+      await downloadArtifact({
+        artifactId: row.id,
+        name,
+        fileId: row.kind === "file" ? (row.sourceConceptRef.split(":").pop() ?? "") : "",
+        readFile: connection
+          ? async (id) => {
+              const result = await connection.query.libraryFileById({ fileId: id });
+              const fileRow = result.rows()[0] ?? null;
+              if (!fileRow) return null;
+              return { sizeBytes: rowNumber(fileRow, "size"), name: rowString(fileRow, "name") };
+            }
+          : null,
+        bearer: () => authSource.bearer(),
+      });
     } catch (err: unknown) {
       setDownloadError(describe(err));
     } finally {
@@ -294,25 +301,6 @@ export function Inspector({
     [row.id, name, authSource],
   );
 
-  const moveTo = useCallback(
-    async (folderId: string) => {
-      const query = connection?.query ?? null;
-      if (query === null) {
-        setMoveError("Not connected to the cluster, so nothing moved.");
-        return;
-      }
-      setMoveError("");
-      try {
-        await query.moveArtifactToFolder({ artifactId: row.id, folderId });
-        // Nothing is patched locally: the update broadcasts and the list,
-        // the rail counts and this panel all move together on the same feed.
-      } catch (err: unknown) {
-        setMoveError(describe(err));
-      }
-    },
-    [connection, row.id],
-  );
-
   const archive = useCallback(async () => {
     const query = connection?.query ?? null;
     if (query === null) {
@@ -376,15 +364,29 @@ export function Inspector({
   // Download is offered only where bytes or a body exist: a file always, the
   // rendered kinds by construction of the content route.
   const filedIn = folderNameOf(row.folderId);
-  const options = folderOptions(tree);
 
   return (
     <aside className="os-files-inspector" aria-label="File details">
       <header className="os-files-inspector-head">
-        <span className="os-files-inspector-glyph">{kindGlyph(row.kind, 18)}</span>
+        {/* THE KIND IS SAID HERE AND NOWHERE ELSE (DESIGN.md rule 7). The
+            glyph is the mark the list row already carries, so the panel that
+            opens is visibly the thing that was clicked -- and it is NAMED,
+            because a purely decorative glyph would drop the kind out of the
+            reading of anybody who never sees one. */}
+        <span className="os-files-inspector-glyph" role="img" aria-label={`Kind: ${row.kind}`}>
+          {kindGlyph(row.kind, 18)}
+        </span>
         <h3 className="os-files-inspector-name" title={name}>
           {name}
         </h3>
+        {/* Ask, the shell's own affordance, where every other detail surface
+            puts it. The tag is unchanged: the Ask surface reads it. */}
+        <Button
+          onClick={() => onAsk(`app:files/browse file:${name}`)}
+          ariaLabel={`Ask about ${name}`}
+        >
+          <Sparkles size={13} aria-hidden /> Ask
+        </Button>
         <Button onClick={onClose} ariaLabel="Close details">
           <X size={14} aria-hidden />
         </Button>
@@ -398,30 +400,42 @@ export function Inspector({
         <span>{story.sentence}</span>
       </p>
       {row.archived ? <Chip tone="muted">archived</Chip> : null}
-
-      <Facts>
-        <Fact label="Kind" value={row.kind} mono />
-        <Fact label="Filed in" value={filedIn} />
-        <Fact label="Format" value={row.format || row.mimeType} mono />
-        {row.kind === "document" ? (
-          <Fact label="Validation" value={row.validationStatus} />
-        ) : null}
-        {row.producedByPlanId !== "" ? (
-          <Fact label="Plan" value={row.producedByPlanId} mono />
-        ) : null}
-        <Fact label="Created" value={formatMoment(row.createdAt)} />
-        <Fact label="Id" value={row.id} mono />
-      </Facts>
-
+      {/* The file's own words sit with the story rather than under the table:
+          both are prose about this file, and what follows is the table. */}
       {row.summary.trim() !== "" ? <p className="os-files-summary">{row.summary}</p> : null}
 
-      {row.labels.length > 0 ? (
-        <Chips label="Labels">
-          {row.labels.map((label) => (
-            <Chip key={label}>{label}</Chip>
-          ))}
-        </Chips>
-      ) : null}
+      <div className="os-files-group">
+        <Subhead>Details</Subhead>
+        <Facts>
+          <Fact label="Filed in" value={filedIn} />
+          <Fact label="Format" value={row.format || row.mimeType} mono />
+          {row.kind === "document" ? (
+            <Fact label="Validation" value={row.validationStatus} />
+          ) : null}
+          <Fact label="Created" value={formatMoment(row.createdAt)} />
+          {/* THE TWO OPAQUE VALUES COME LAST, AND THEY ARE COPYABLE. Neither
+              is readable at a glance and neither is retypeable, so each stays
+              on one line and hands the whole string over on a click. Putting
+              them below the human facts also keeps the two longest values out
+              of the way of the four somebody actually reads. */}
+          {row.producedByPlanId !== "" ? (
+            <Fact
+              label="Plan"
+              value={<CopyValue value={row.producedByPlanId} label="Plan" />}
+              mono
+            />
+          ) : null}
+          <Fact label="Id" value={<CopyValue value={row.id} label="Id" />} mono />
+        </Facts>
+
+        {row.labels.length > 0 ? (
+          <Chips label="Labels">
+            {row.labels.map((label) => (
+              <Chip key={label}>{label}</Chip>
+            ))}
+          </Chips>
+        ) : null}
+      </div>
 
       {/* WHO THIS IS FOR (epic memql#4800, D5). MULTIPLE, because the index's
           `accountIds` is a list -- a contract naming two clients is one file,
@@ -432,8 +446,11 @@ export function Inspector({
 
           The write is ordinary and ungated. An account is a record with no
           read effect, so labelling a file changes who it is ABOUT and nothing
-          about who may read it. */}
-      <div className="os-files-accounts">
+          about who may read it.
+
+          It is the one EDITABLE thing on a surface that is otherwise a
+          reading, which is why it is its own group rather than a fact row. */}
+      <div className="os-files-group">
         <Subhead>Clients</Subhead>
         <AccountLabelPicker
           selected={row.accountIds}
@@ -452,113 +469,122 @@ export function Inspector({
         )}
       </div>
 
-      <div className="os-files-actions">
-        <Button tone="primary" onClick={openVsCode}>
-          Open in VS Code
-        </Button>
-        <Button onClick={sendToDesk}>
-          <CornerUpRight size={13} aria-hidden /> Send to desktop
-        </Button>
-        <Button onClick={() => void download()} busy={downloadBusy} busyLabel="Downloading">
-          <Download size={13} aria-hidden /> Download
-        </Button>
-        {/* NEW VERSION, beside Download and only for files. The person NAMES
-            the file this replaces by acting from its own inspector, which is
-            the whole identity story: a browser upload carries no honest
-            machine or path identity, and matching by filename would silently
-            merge two different files. */}
-        {row.kind === "file" && !row.archived ? (
-          <Button
-            onClick={() => picker.current?.click()}
-            busy={newVersionBusy}
-            busyLabel="Uploading"
-          >
-            <FilePlus2 size={13} aria-hidden /> Upload new version
+      <div className="os-files-group">
+        <Subhead>Actions</Subhead>
+        {/* ONE PRIMARY LEADS, FULL WIDTH; THE REST PAIR UP UNDER IT. The row
+            was six equal buttons wrapping raggedly at a width the panel picks
+            for itself, so which action sat beside which changed with the
+            label lengths. The grid below is either one column or two, and
+            every cell is the same size -- predictable at any panel width. */}
+        <div className="os-files-actions">
+          <Button tone="primary" onClick={openVsCode}>
+            Open in VS Code
           </Button>
-        ) : null}
-        {!row.archived ? (
-          <Button
-            tone="danger"
-            busy={archiveBusy}
-            busyLabel="Archiving"
-            onClick={() => (confirmBeforeArchive ? setConfirmingArchive(true) : void archive())}
-          >
-            <Archive size={13} aria-hidden /> Archive
-          </Button>
-        ) : (
-          <Button
-            tone="primary"
-            busy={archiveBusy}
-            busyLabel="Restoring"
-            onClick={() => void restore()}
-          >
-            <RotateCcw size={13} aria-hidden /> Restore
-          </Button>
-        )}
-      </div>
-      {/* The picker itself is never seen: a bare file input cannot be styled
-          into this shell's button language, and every surface here uses the
-          same one. */}
-      <input
-        ref={picker}
-        type="file"
-        className="os-visually-hidden"
-        aria-label="Choose a file to upload as the new version"
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          // The input is cleared so picking the SAME file twice fires again --
-          // a change event that never comes reads as a dead button.
-          event.target.value = "";
-          if (file) void sendNewVersion(file);
-        }}
-      />
-      {newVersionBusy && newVersionSent > 0 ? (
-        <p className="os-caption os-files-version-progress">{formatBytes(newVersionSent)} sent</p>
-      ) : null}
-      {newVersionNote !== "" ? <p className="os-caption">{newVersionNote}</p> : null}
-      {newVersionError !== "" ? (
-        <Notice
-          tone="error"
-          sentence="The new version was not accepted."
-          next="This file still holds the version it had."
-          detail={newVersionError}
-        >
-          {pending.current === null ? null : (
-            <Button
-              onClick={() => {
-                const file = pending.current;
-                if (file) void sendNewVersion(file);
-              }}
-            >
-              Try again
+          <div className="os-files-actions-more">
+            <Button onClick={sendToDesk}>
+              <CornerUpRight size={13} aria-hidden /> Send to desktop
             </Button>
-          )}
-        </Notice>
-      ) : null}
-      {vsNoAnswer ? <Notice tone="warn" sentence={VSCODE_NO_ANSWER_MESSAGE} /> : null}
-      {deskNote !== "" ? <p className="os-caption">{deskNote}</p> : null}
-      {downloadError !== "" ? (
-        <Notice tone="error" sentence="The download did not land." detail={downloadError}>
-          <Button onClick={() => void download()}>Try again</Button>
-        </Notice>
-      ) : null}
-      {confirmingArchive ? (
-        <Notice
-          tone="warn"
-          sentence={`Archive "${name}"?`}
-          next="Archiving hides it from the default list; the bytes stay, and the archived filter brings it back."
-        >
-          <div className="os-files-confirm">
-            <Button tone="danger" onClick={() => void archive()}>
-              Archive
+            <Button onClick={() => void download()} busy={downloadBusy} busyLabel="Downloading">
+              <Download size={13} aria-hidden /> Download
             </Button>
-            <Button onClick={() => setConfirmingArchive(false)}>Cancel</Button>
+            {/* NEW VERSION, beside Download and only for files. The person
+                NAMES the file this replaces by acting from its own inspector,
+                which is the whole identity story: a browser upload carries no
+                honest machine or path identity, and matching by filename would
+                silently merge two different files. */}
+            {row.kind === "file" && !row.archived ? (
+              <Button
+                onClick={() => picker.current?.click()}
+                busy={newVersionBusy}
+                busyLabel="Uploading"
+              >
+                <FilePlus2 size={13} aria-hidden /> Upload new version
+              </Button>
+            ) : null}
+            {!row.archived ? (
+              <Button
+                tone="danger"
+                busy={archiveBusy}
+                busyLabel="Archiving"
+                onClick={() => (confirmBeforeArchive ? setConfirmingArchive(true) : void archive())}
+              >
+                <Archive size={13} aria-hidden /> Archive
+              </Button>
+            ) : (
+              <Button busy={archiveBusy} busyLabel="Restoring" onClick={() => void restore()}>
+                <RotateCcw size={13} aria-hidden /> Restore
+              </Button>
+            )}
           </div>
-        </Notice>
-      ) : null}
-      {archiveError !== "" ? (
-        <Notice tone="error" sentence="The archive was refused." detail={archiveError} />
-      ) : null}
+        </div>
+        {/* The picker itself is never seen: a bare file input cannot be styled
+            into this shell's button language, and every surface here uses the
+            same one. */}
+        <input
+          ref={picker}
+          type="file"
+          className="os-visually-hidden"
+          aria-label="Choose a file to upload as the new version"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            // The input is cleared so picking the SAME file twice fires again
+            // -- a change event that never comes reads as a dead button.
+            event.target.value = "";
+            if (file) void sendNewVersion(file);
+          }}
+        />
+        {/* EVERY SLOT BELOW BELONGS TO THE ACTION ABOVE IT, in the order it
+            has always been in. One error slot per action is a recorded
+            decision: consolidating them would put a download refusal under
+            the archive button. */}
+        {newVersionBusy && newVersionSent > 0 ? (
+          <p className="os-caption os-files-version-progress">{formatBytes(newVersionSent)} sent</p>
+        ) : null}
+        {newVersionNote !== "" ? <p className="os-caption">{newVersionNote}</p> : null}
+        {newVersionError !== "" ? (
+          <Notice
+            tone="error"
+            sentence="The new version was not accepted."
+            next="This file still holds the version it had."
+            detail={newVersionError}
+          >
+            {pending.current === null ? null : (
+              <Button
+                onClick={() => {
+                  const file = pending.current;
+                  if (file) void sendNewVersion(file);
+                }}
+              >
+                Try again
+              </Button>
+            )}
+          </Notice>
+        ) : null}
+        {vsNoAnswer ? <Notice tone="warn" sentence={VSCODE_NO_ANSWER_MESSAGE} /> : null}
+        {deskNote !== "" ? <p className="os-caption">{deskNote}</p> : null}
+        {downloadError !== "" ? (
+          <Notice tone="error" sentence="The download did not land." detail={downloadError}>
+            <Button onClick={() => void download()}>Try again</Button>
+          </Notice>
+        ) : null}
+        {confirmingArchive ? (
+          <Notice
+            tone="warn"
+            sentence={`Archive "${name}"?`}
+            next="Archiving hides it from the default list; the bytes stay, and the archived filter brings it back."
+          >
+            <div className="os-files-confirm">
+              <Button tone="danger" onClick={() => void archive()}>
+                Archive
+              </Button>
+              <Button onClick={() => setConfirmingArchive(false)}>Cancel</Button>
+            </div>
+          </Notice>
+        ) : null}
+        {archiveError !== "" ? (
+          <Notice tone="error" sentence="The archive was refused." detail={archiveError} />
+        ) : null}
+      </div>
 
       {row.kind === "file" ? (
         <VersionHistory
@@ -573,28 +599,6 @@ export function Inspector({
           downloadingVersion={downloadingVersion}
         />
       ) : null}
-
-      <div className="os-files-move">
-        <p className="os-caption">Move to folder</p>
-        <Select
-          id={`files-move-${row.id}`}
-          label="Move to folder"
-          value={row.folderId}
-          onChange={(folderId) => void moveTo(folderId)}
-        >
-          <option value="">Library (top level)</option>
-          {options.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
-      </div>
-      {moveError !== "" ? (
-        <Notice tone="error" sentence="The move was refused." detail={moveError} />
-      ) : null}
-
-      <Button onClick={() => onAsk(`app:files/browse file:${name}`)}>Ask about this file</Button>
     </aside>
   );
 }

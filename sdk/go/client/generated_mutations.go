@@ -8244,6 +8244,31 @@ func DeleteCalendarEventBuild(args DeleteCalendarEventArgs) string {
 	return b.String()
 }
 
+// DeleteLibraryFolder -- Delete a folder whose subtree held no file at all -- the disposition the archive walk takes for an empty branch, instead of archiveLibraryFolder. Same soft delete in the storage sense (the row survives, the engine is append-only), and the opposite of it in the product sense: every folder read carries isNotDeleted, so this row leaves the tree, the Bin and a by-id resolve at once.
+// The distinction it draws is the point. Archiving is how somebody gets a thing back later, and a folder holding no file anywhere beneath it has nothing to get back -- archiving one puts a line in the Bin that answers no question anybody asked, next to the files that DO deserve to be there. An already-archived file beneath the folder still counts as a file, because Restore can still reach it, so a folder above one archives like any other.
+// NOT @serverOnly, exactly as archiveLibraryFolder is not: the OS Files app drives the walk, the composite tier's write guard already scopes the row to its owner, and no field here is a credential.
+// There is deliberately NO inverse. restoreLibraryFolder clears `archived` and never touches `deleted`, because a row every read excludes is a row nothing can ask to have back -- and resurrecting an empty folder would restore the noise this write exists to avoid.
+//
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["deleteLibraryFolder"] in generated_concepts.go).
+type DeleteLibraryFolderArgs struct {
+	FolderId string
+}
+
+// DeleteLibraryFolder calls the engine mutation deleteLibraryFolder.
+func (qc *QueryClient) DeleteLibraryFolder(ctx context.Context, args DeleteLibraryFolderArgs) (*Result, error) {
+	call := DeleteLibraryFolderBuild(args)
+	return qc.executeNamed(ctx, "deleteLibraryFolder", call)
+}
+
+func DeleteLibraryFolderBuild(args DeleteLibraryFolderArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation deleteLibraryFolder(")
+	b.WriteString("folderId: ")
+	b.WriteString(quoteMemQL(args.FolderId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // DeleteRecord -- Soft-delete a data record (sets active=false)
 //
 // Bound concept: v1:data:record (machine-readable: BoundConcepts["deleteRecord"] in generated_concepts.go).
@@ -12253,6 +12278,7 @@ func RestoreLibraryFileBuild(args RestoreLibraryFileArgs) string {
 }
 
 // RestoreLibraryFolder -- Bring a folder back out of the Bin (memql#4784) -- the inverse of archiveLibraryFolder. The CLIENT drives the recursive walk here too, and in the opposite ORDER from the archive: parents OUTWARD-first, so a restored item never appears under a parent that is still archived. A folder restored on its own comes back empty and that is the honest result -- its contents are their own rows and each one is its own decision, which is what lets somebody take one file back out of the Bin without undoing everything they filed there.
+// It clears `archived` ONLY, and the absent second line is deliberate. deleteLibraryFolder's disposition is unreachable from every surface -- the Bin's own read carries isNotDeleted -- so nothing can name a deleted folder to restore it, and a write that cleared the field anyway would resurrect exactly the empty-folder noise that write exists to avoid.
 //
 // Bound concept: v1:library:folder (machine-readable: BoundConcepts["restoreLibraryFolder"] in generated_concepts.go).
 type RestoreLibraryFolderArgs struct {

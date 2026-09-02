@@ -60,12 +60,15 @@ export function pathPlaceholderFor(machine: MachineRow | undefined): string {
  * tree without being one.
  *
  * Archived folders are left out: filing new work into the Bin is not something
- * to offer. The indent is spaces rather than a rendered hierarchy because a
- * `<select>`'s options are text -- this is the one place in the app where the
- * tree has to flatten, and saying so beats a component that pretends otherwise.
+ * to offer. Deleted ones are left out for a blunter reason -- one held no file
+ * anywhere, no folder read returns it, and a backup pointed at one would push
+ * into a destination the person can never open. The indent is spaces rather
+ * than a rendered hierarchy because a `<select>`'s options are text -- this is
+ * the one place in the app where the tree has to flatten, and saying so beats a
+ * component that pretends otherwise.
  */
 export function folderChoices(folders: readonly FolderRow[]): { id: string; label: string }[] {
-  const tree = foldFolderTree(folders.filter((folder) => !folder.archived));
+  const tree = foldFolderTree(folders.filter((folder) => !folder.archived && !folder.deleted));
   const out: { id: string; label: string }[] = [];
   const walk = (nodes: readonly TreeNode[], depth: number) => {
     for (const node of nodes) {

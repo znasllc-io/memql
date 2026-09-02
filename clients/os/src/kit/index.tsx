@@ -25,6 +25,7 @@ export {
   Chip,
   Chips,
   ChoiceStack,
+  CopyValue,
   Fact,
   Facts,
   Field,

@@ -222,6 +222,8 @@ export async function renderFiles(opts: {
   /** A standing open intent, delivered as the window would deliver it. */
   intent?: { id: string; payload: Record<string, unknown> };
   consumeIntent?: (intentId: string) => void;
+  /** The Ask tag the surface hands the shell, for the tests that pin it. */
+  askContext?: (tag: string) => void;
 } = {}) {
   const view = render(
     withSession(
@@ -235,7 +237,7 @@ export async function renderFiles(opts: {
           <FilesApp
             sectionId={opts.section ?? "browse"}
             navigate={() => {}}
-            askContext={() => {}}
+            askContext={opts.askContext ?? (() => {})}
             intent={opts.intent}
             consumeIntent={opts.consumeIntent ?? (() => {})}
             store={memSettingsStore(opts.settings ?? {})}

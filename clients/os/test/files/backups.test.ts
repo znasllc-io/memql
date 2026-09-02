@@ -200,12 +200,17 @@ describe("backupFingerprint", () => {
 
 describe("the form's pure helpers", () => {
   const folders: FolderRow[] = [
-    { id: "f1", name: "Clients", parentFolderId: "", archived: false },
-    { id: "f2", name: "2026", parentFolderId: "f1", archived: false },
-    { id: "f3", name: "Old", parentFolderId: "", archived: true },
+    { id: "f1", name: "Clients", parentFolderId: "", archived: false, deleted: false },
+    { id: "f2", name: "2026", parentFolderId: "f1", archived: false, deleted: false },
+    { id: "f3", name: "Old", parentFolderId: "", archived: true, deleted: false },
+    // A folder the archive walk deleted for holding no file anywhere. It is
+    // not archived, so only the deleted half of the filter keeps it out of a
+    // destination picker -- and a backup pointed at it would push into a
+    // folder no read returns.
+    { id: "f4", name: "Empty", parentFolderId: "", archived: false, deleted: true },
   ];
 
-  it("offers every live folder, indented, and never the Bin", () => {
+  it("offers every live folder, indented, and never the Bin or a deleted one", () => {
     const choices = folderChoices(folders);
     expect(choices.map((c) => c.id)).toEqual(["f1", "f2"]);
     // The child is indented under its parent, so a flat select still reads

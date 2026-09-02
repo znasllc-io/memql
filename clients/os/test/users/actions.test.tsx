@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { chooseOption, openSelect } from "../selectControl";
+
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
 vi.mock("../../src/live/connection", () => ({
@@ -175,9 +177,7 @@ describe("admin actions", () => {
     connection.dispatcher.sendAndWait = vi.fn(async () => adminOk());
     const view = await openAda(connection);
 
-    fireEvent.change(await screen.findByLabelText(/Cluster role for/), {
-      target: { value: "developer" },
-    });
+    chooseOption(await screen.findByLabelText(/Cluster role for/), "developer");
 
     await waitFor(() => {
       expect(adminRequest(connection.dispatcher.sendAndWait).setUserRole).toEqual({
@@ -199,9 +199,7 @@ describe("admin actions", () => {
     );
     const view = await openAda(connection);
 
-    fireEvent.change(await screen.findByLabelText(/Cluster role for/), {
-      target: { value: "owner" },
-    });
+    chooseOption(await screen.findByLabelText(/Cluster role for/), "owner");
 
     // Setting the value optimistically would leave a refused change on screen
     // as though it had happened.
@@ -271,16 +269,15 @@ describe("admin actions", () => {
     });
     const view = await openAda(connection, "admin");
 
-    const select = (await screen.findByLabelText(/Cluster role for/)) as HTMLSelectElement;
-    const byValue = (v: string) =>
-      Array.from(select.options).find((o) => o.value === v) as HTMLOptionElement;
+    const list = openSelect(await screen.findByLabelText(/Cluster role for/));
+    const option = (name: string) => within(list).getByRole("option", { name });
 
     // PRESENTATION GATING ONLY (spec section E). `adminops.authorize` is the
     // authority, and a forced call still fails server-side -- which is
     // documented rather than tested here, because it is not this window's
     // behaviour.
-    expect(byValue("admin").disabled).toBe(false);
-    expect(byValue("owner").disabled).toBe(true);
+    expect(option("admin").getAttribute("aria-disabled")).toBeNull();
+    expect(option("owner").getAttribute("aria-disabled")).toBe("true");
     view.unmount();
   });
 
@@ -292,8 +289,11 @@ describe("admin actions", () => {
       byId: { "v1:identity:user:ada": ada({ role: "owner" }) },
     });
     const view = await openAda(connection, "admin");
-    const select = (await screen.findByLabelText(/Cluster role for/)) as HTMLSelectElement;
-    expect(select.value).toBe("owner");
+    // The CLOSED control shows it, which is the half a person sees: the option
+    // is unchoosable and still has to be what the field reads.
+    const trigger = await screen.findByLabelText(/Cluster role for/);
+    expect(trigger.textContent).toBe("owner");
+    expect(within(openSelect(trigger)).getByRole("option", { name: "owner" }).getAttribute("aria-selected")).toBe("true");
     view.unmount();
   });
 });

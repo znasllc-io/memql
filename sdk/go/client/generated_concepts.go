@@ -487,6 +487,7 @@ var BoundConcepts = map[string]string{
 	"delegationsByIdentity":                            "v1:identity:delegation",
 	"deleteAgent":                                      "v1:agents:agent",
 	"deleteCalendarEvent":                              "v1:calendar:calendarEvent",
+	"deleteLibraryFolder":                              "v1:library:folder",
 	"deleteRecord":                                     "v1:data:record",
 	"deleteSite":                                       "v1:platform:site",
 	"deleteUserHard":                                   "v1:identity:user",

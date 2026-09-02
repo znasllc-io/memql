@@ -77,6 +77,20 @@ export interface FolderRow {
   /** "" = a root folder. */
   parentFolderId: string;
   archived: boolean;
+  /**
+   * The other disposition: a folder whose subtree held no file at all, which
+   * the archive walk deletes rather than archives (there is nothing inside it
+   * for anybody to get back). Distinct from `archived` -- nothing archived it,
+   * and no restore brings it back.
+   *
+   * PROJECTED HERE BECAUSE THE LIVE PATH NEEDS IT. Every folder read carries
+   * `isNotDeleted`, so a seed never delivers one -- but a live re-read is the
+   * raw `concept == … && id == …` fetch, which honours row authz and no query
+   * filter at all. Without this field the delete would land, the row would
+   * come back on its own update, and the folder would sit in the tree until
+   * somebody reloaded: the deletion looking exactly like a no-op.
+   */
+  deleted: boolean;
 }
 
 export function folderFromRow(raw: Row): FolderRow {
@@ -86,6 +100,11 @@ export function folderFromRow(raw: Row): FolderRow {
     name: rowString(row, "name"),
     parentFolderId: rowString(row, "parentFolderId"),
     archived: boolOr(row, "archived", false),
+    // ABSENT IS NOT DELETED, for the reason the artifact fold records one
+    // field up: every folder written before this field existed has no member
+    // at all, and reading absence as true would empty the tree on the first
+    // event that did not touch it.
+    deleted: boolOr(row, "deleted", false),
   };
 }
 
@@ -175,7 +194,16 @@ export function fileStory(row: ArtifactRow, machine: MachinePresence | null): Fi
     return { sentence: "Made by computer use", tone: "unknown", machineNamed: false };
   }
   if (row.producedByPlanId !== "") {
-    return { sentence: `Produced by plan ${row.producedByPlanId}`, tone: "reachable", machineNamed: false };
+    // THE ID IS NOT IN THE SENTENCE, and that is the whole of the fix.
+    //
+    // This read `Produced by plan ${id}`, which put a 32-character opaque
+    // token in the one line the inspector leads with -- three wrapped lines of
+    // hex above the file's own summary, saying nothing a person can act on,
+    // and repeating the `Plan` fact four rows below it (DESIGN.md rule 7).
+    // The fact is where an id belongs: it is monospaced, truncated, and has a
+    // button that copies the whole thing. The story is for the sentence only
+    // this platform can say.
+    return { sentence: "Produced by a plan", tone: "reachable", machineNamed: false };
   }
   const sentence = SOURCE_SENTENCES[row.source];
   if (sentence !== undefined) return { sentence, tone: "reachable", machineNamed: false };
