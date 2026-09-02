@@ -699,7 +699,8 @@ concept workerPairingCode {
 concept enrolmentToken {
   userId          string!    @description("v1:identity:user.id this token enrols. The redeem path resolves the passkey owner from THIS field and never from a caller-supplied argument, so a leaked token can only ever add a credential to the account it was minted for.")
   tokenHash       string!    @description("SHA-256 hex digest of the plain mql_enr_<...> token. The plaintext is returned to the issuer ONCE, embedded in the enrolment link, and is never persisted or logged.")
-  issuedBy        string!    @description("v1:identity:user.id of the principal that minted the token -- the owner/admin on the portal path, the cluster owner on the install-wizard path. Equal to userId when someone mints their own link; carried separately so an admin-assisted enrolment has attribution without re-deriving it from the audit trail.")
+  issuedBy        string!    @description("v1:identity:user.id of the principal whose authority minted the token -- the owner/admin on the portal path, the cluster owner on the install-wizard path, the INVITER on the invitation-accept path (memql#4880). Equal to userId when someone mints their own link; carried separately so an admin-assisted enrolment has attribution without re-deriving it from the audit trail. ALWAYS a user id: this field is a parent edge onto v1:identity:user, and the engine refuses any other concept's id here at write time, which is what an accept that named the invitation instead ran into.")
+  invitationId    string     @description("v1:identity:invitation.id of the invitation this token was minted in exchange for, when there was one (memql#4880). Empty on the portal and install-wizard paths. This is how an operator reading the row sees that a credential came from an invitation rather than from a person's click in the console; issuedBy cannot carry that, because it has to name a user.")
   expiresAt       datetime!  @description("Absolute expiration timestamp. Redeem rejects rows past this even when consumedAt is empty. Default 15 minutes from issue, overridable per-issue up to a capped maximum (component/identity/enrolment.MaxTTL).")
   consumedAt      datetime   @description("Stamped when the authorized passkey registration completes. Single-use semantics: a row with non-empty consumedAt is dead and any replay is refused with the already-used rejection state.")
   consumedFromIP  string     @description("Source IP the redeem came from. Audit signal -- helps detect 'someone else used my enrolment link'.")
@@ -708,6 +709,7 @@ concept enrolmentToken {
 
   @relationship(type="parent", field="userId", target=user, direction="outgoing")
   @relationship(type="parent", field="issuedBy", target=user, direction="outgoing")
+  @relationship(type="references", as="redeems", field="invitationId", target=invitation, direction="outgoing")
 }
 
 /// Organization group. Users belong to groups; agents are assigned to groups for scoped access

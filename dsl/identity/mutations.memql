@@ -2807,17 +2807,25 @@ mutate identity revokePasskeyIdentity {
 }
 
 /// Persist an enrolment-token row at issue time.
+///
+/// `invitationId` is the invitation-accept path's attribution (memql#4880).
+/// OPTIONAL, and in accept{} rather than stamp{}, so an omitted arg is dropped
+/// from the payload entirely and the portal and install-wizard issuers write no
+/// key at all. `issuedBy` stays a USER on every path -- the concept declares it
+/// a parent edge onto v1:identity:user and the engine refuses anything else --
+/// which is why the invitation gets a field of its own instead of riding there.
 mutate enrolmentToken createEnrolmentToken {
   args {
-    enrolmentId  string!
-    userId       string!
-    tokenHash    string!
-    issuedBy     string!
-    expiresAt    string!
-    sourceIP     string
+    enrolmentId   string!
+    userId        string!
+    tokenHash     string!
+    issuedBy      string!
+    expiresAt     string!
+    sourceIP      string
+    invitationId  string
   }
   insert {
-    accept { userId, tokenHash, issuedBy, expiresAt }
+    accept { userId, tokenHash, issuedBy, expiresAt, invitationId }
     stamp {
       id: args.enrolmentId
       sourceIP: args.sourceIP ?? ""

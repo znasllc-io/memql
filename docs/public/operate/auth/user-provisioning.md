@@ -129,9 +129,15 @@ flows:
   `IdentityAdminMsg.issue_user_invitation`, and the reply carries the link
   ONCE -- only the token's SHA-256 digest is persisted, the same convention
   every other credential row in this domain follows. The recipient opens
-  `/login?invitation=<token>`, the field is pre-filled, and on completion the
-  identity service stamps the role the issuer chose. There is no separate
-  partition grant to stamp -- the role is the whole of it.
+  `/invitation?code=<token>` (memql#4601): the page resolves the token
+  server-side and shows what it says, and the accept spends it once --
+  provisioning the user row with the role the issuer chose, marking the
+  invitation accepted, and minting a 15-minute enrolment token that lands on
+  `/enroll` in the same window. The enrolment token's `issuedBy` names the
+  INVITER, because the field is a parent edge onto `v1:identity:user` and
+  the inviter's authority is what the invitation carried; the invitation
+  itself is recorded on the token's `invitationId` (memql#4880). There is no
+  separate partition grant to stamp -- the role is the whole of it.
 
   **What the registration mode does to it.** The policy is applied in the
   gate (`component/identity/adminops`), never by the console:
