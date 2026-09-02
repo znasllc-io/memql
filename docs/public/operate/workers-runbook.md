@@ -38,14 +38,16 @@ command that repo builds), not from this engine repo's `scripts/install/`
 `hosts-entries.sh`, `install-binary.sh`, ...) and has no `install-mac.sh` /
 `install-linux.sh` of its own.
 
+Each command below is ONE physical line, deliberately: terminal paste handling
+splits the multi-line backslash form, so `bash -s --` runs alone and every flag
+after it then runs as a command of its own (`--token ...: command not found`).
+The pairing panel on `/fleet/machines` (section 5.5) emits exactly this shape,
+with the token and cluster URL filled in.
+
 ### macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-mac.sh | \
-  bash -s -- \
-    --token mql_wkr_xxxxxxxxxxxx \
-    --cluster https://app.example.com \
-    --computeruse
+curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-mac.sh | bash -s -- --token mql_wkr_xxxxxxxxxxxx --cluster https://app.example.com --computeruse
 ```
 
 The install script:
@@ -88,11 +90,7 @@ install rather than as a missing grant.
 ### Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-linux.sh | \
-  bash -s -- \
-    --token mql_wkr_xxxxxxxxxxxx \
-    --cluster https://app.example.com \
-    --computeruse
+curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-linux.sh | bash -s -- --token mql_wkr_xxxxxxxxxxxx --cluster https://app.example.com --computeruse
 ```
 
 The install script writes a user-systemd unit at
