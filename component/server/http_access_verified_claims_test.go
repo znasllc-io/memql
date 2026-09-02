@@ -44,17 +44,58 @@ const verifiedSub = "v1:identity:user:test-owner"
 // only -- deliberately NOT auth.ContextWithUserActor, which is the shape that
 // hid memql#4843 from this suite.
 func withVerifiedClaims(r *http.Request, sub, role string) *http.Request {
+	return withVerifiedClaimsClass(r, sub, role, "")
+}
+
+// withVerifiedClaimsClass is the machine-credential variant: a verified JWT
+// whose `class` claim names a surface-pinned credential.
+func withVerifiedClaimsClass(r *http.Request, sub, role, class string) *http.Request {
+	claims := map[string]any{
+		"sub":   sub,
+		"email": sub + "@example.test",
+		"role":  role,
+	}
+	if class != "" {
+		claims["class"] = class
+	}
 	vc := &verifier.VerifiedClaims{
-		UserId: sub,
-		Role:   role,
-		Source: verifier.SourceJWT,
-		ClaimsMap: map[string]any{
-			"sub":   sub,
-			"email": sub + "@example.test",
-			"role":  role,
-		},
+		UserId:    sub,
+		Role:      role,
+		Source:    verifier.SourceJWT,
+		Class:     class,
+		ClaimsMap: claims,
 	}
 	return r.WithContext(verifier.AttachToContext(r.Context(), vc))
+}
+
+// A surface-pinned machine credential must NOT gain the Library's write
+// surface just because its JWT verifies: the pins (service_account is
+// read/query-pinned, voice_agent is pinned to its gRPC message set,
+// app_session likewise) are enforced by the gRPC interceptors, which HTTP
+// never runs -- so the HTTP access resolution refuses to mint an actor for
+// any non-user class and the handler's own gate answers 401, exactly as it
+// did before memql#4843's fix existed.
+func TestNonUserCredentialClassesStayOffTheLibraryWriteSurface(t *testing.T) {
+	store := newFakeLibraryStore()
+	blob := newFakeBlob()
+	h := NewArtifactHandler(ArtifactHandlerOptions{
+		Logger: quietLogger(), Bucket: "lib", Uploader: blob, Downloader: blob,
+		Store: store, Analyzer: newFakeAnalyzer(), PromotionWait: 50 * time.Millisecond,
+	})
+	for _, class := range []string{"service_account", "voice_agent", "app_session"} {
+		body, ct := uploadBody(t, "notes.md", "text/markdown", []byte("# hello\n"), nil)
+		req := httptest.NewRequest(http.MethodPost, "/artifacts", body)
+		req.Header.Set("Content-Type", ct)
+		req = withVerifiedClaimsClass(req, "v1:identity:user:machine-owner", "owner", class)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("class %q: status = %d, want 401 -- a surface-pinned machine credential must not store bytes over HTTP", class, rec.Code)
+		}
+	}
+	if got := len(store.snapshotCreated()); got != 0 {
+		t.Fatalf("createLibraryFile called %d times for machine credentials, want 0", got)
+	}
 }
 
 // ---------------------------------------------------------------------------

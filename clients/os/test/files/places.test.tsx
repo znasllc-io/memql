@@ -77,6 +77,26 @@ describe("the open intent", () => {
   });
 });
 
+describe("restore out of the Archive place", () => {
+  it("re-files a row to the root when its folder is not live (the #4846 rule)", async () => {
+    h.connection = fakeConnection({
+      archivedFolders: [folderRow({ id: "f-gone", name: "Old drafts", archived: true })],
+      artifacts: [
+        artifactRow({ id: "a-1", title: "stranded.txt", archived: true, folderId: "f-gone" }),
+      ],
+    });
+    await renderFiles();
+    await click(screen.getByRole("button", { name: /^Archive/ }));
+    fireEvent.contextMenu(screen.getByRole("button", { name: /stranded\.txt/ }));
+    await click(screen.getByRole("menuitem", { name: "Restore" }));
+    const conn = h.connection as ReturnType<typeof fakeConnection>;
+    expect(conn.callsNamed("restoreArtifact")).toHaveLength(1);
+    // The folder is archived, so the row re-files to the Library root --
+    // restored into an invisible folder is invisible everywhere but search.
+    expect(conn.callsNamed("moveArtifactToFolder")[0]).toContain('folderId: ""');
+  });
+});
+
 describe("the Head line (DESIGN.md rules 1-3)", () => {
   it("carries the place name, the count, the quiet sort and the Refine affordance -- no standing filter strip", async () => {
     h.connection = fakeConnection({

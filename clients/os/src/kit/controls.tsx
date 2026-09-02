@@ -287,7 +287,7 @@ export function Refine({
       {open ? (
         <div className="os-refine-panel">
           <Input
-            id="refine-search"
+            id={`refine-search-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
             label={placeholder}
             placeholder={placeholder}
             value={search}

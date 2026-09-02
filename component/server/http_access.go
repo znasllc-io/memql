@@ -50,6 +50,15 @@ import (
 //     handlers' own gates exactly as before. FallbackFromClaims(nil) would
 //     fabricate a blank-UserId reader envelope; the absence of claims is the
 //     absence of a caller, and it stays one.
+//   - A NON-USER credential class attaches nothing either, and this is a
+//     surface pin, not bookkeeping. service_account is read/query-pinned,
+//     voice_agent is pinned to its gRPC message set, app_session is
+//     surface-pinned by design -- their pins live in the gRPC interceptors,
+//     which HTTP never runs. Resolving an actor for them here would hand a
+//     machine credential a byte-storing write surface its pin denies
+//     everywhere else (it 401'd before this file existed, by accident;
+//     it keeps 401ing now, on purpose). Absent class means user, the
+//     verifier's own backward-compat rule.
 func requestWithResolvedAccess(r *http.Request) *http.Request {
 	ctx := r.Context()
 	if _, ok := auth.AccessFromContext(ctx); ok {
@@ -57,6 +66,9 @@ func requestWithResolvedAccess(r *http.Request) *http.Request {
 	}
 	claims, ok := auth.ClaimsFromContext(ctx)
 	if !ok {
+		return r
+	}
+	if class, isString := claims["class"].(string); isString && class != "" && class != "user" {
 		return r
 	}
 	return r.WithContext(auth.ContextWithAccess(ctx, auth.FallbackFromClaims(claims)))

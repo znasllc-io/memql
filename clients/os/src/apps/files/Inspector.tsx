@@ -333,6 +333,10 @@ export function Inspector({
   // the backing file -- so the two surfaces cannot drift apart on what
   // "putting back" means. The automation mirror deliberately does not exist
   // (apps/bin/restore.ts says why), which is why this is two writes.
+  //
+  // ONE addition over the Bin's flow (#4846 AC): a file whose folder is not
+  // live -- archived, or gone -- re-files to the Library root, because a row
+  // restored into an invisible folder is invisible everywhere except search.
   const restore = useCallback(async () => {
     const query = connection?.query ?? null;
     if (query === null) {
@@ -353,12 +357,16 @@ export function Inspector({
           await query.restoreLibraryFolder({ folderId });
         },
       });
+      if (row.folderId !== "" && !tree.byId.has(row.folderId)) {
+        await query.moveArtifactToFolder({ artifactId: row.id, folderId: "" });
+        setDeskNote("Restored to the Library root -- its folder is still archived.");
+      }
     } catch (err: unknown) {
       setArchiveError(describe(err));
     } finally {
       setArchiveBusy(false);
     }
-  }, [connection, row]);
+  }, [connection, row, tree]);
 
   // Download is offered only where bytes or a body exist: a file always, the
   // rendered kinds by construction of the content route.

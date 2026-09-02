@@ -191,7 +191,10 @@ export function BrowseSection({
 
   // Restore, from the Archive place's row menu (epic memql#4842, #4846): the
   // Bin's client-driven pair, verbatim, so the two archive surfaces cannot
-  // drift apart on what "putting back" means.
+  // drift apart on what "putting back" means -- plus the #4846 addition: a
+  // file whose folder is not live re-files to the Library root, because a
+  // row restored into an invisible folder is invisible everywhere except
+  // search.
   const restoreOneRow = async (row: ArtifactRow) => {
     const query = connection?.query ?? null;
     if (query === null) {
@@ -211,6 +214,9 @@ export function BrowseSection({
           await query.restoreLibraryFolder({ folderId });
         },
       });
+      if (row.folderId !== "" && !tree.byId.has(row.folderId)) {
+        await query.moveArtifactToFolder({ artifactId: row.id, folderId: "" });
+      }
     } catch (err: unknown) {
       setRowNote(err instanceof Error ? err.message : String(err));
     }
@@ -368,8 +374,10 @@ export function BrowseSection({
     filter.source !== "all" ||
     filter.accountId !== ACCOUNT_ANY ||
     filter.folderId !== "";
-  const placeCount =
-    filter.place === "archive" ? archivedTotal : filter.place === "desktop" ? deskFileCount : (counts.get("") ?? 0);
+  // The Head's meta is what the LIST is showing right now -- scoped folder,
+  // facets and search included -- never a different population's number
+  // beside the scope's name.
+  const listedCount = list?.snapshot.rows.length ?? 0;
   const emptyText = narrowed
     ? "Nothing matches. Clear the search or filters to see your files."
     : filter.place === "desktop"
@@ -421,7 +429,7 @@ export function BrowseSection({
           and count, the quiet sort, one Refine affordance, the Upload
           primary. The nine-control strip this replaces is the reason rule 2
           exists. */}
-      <Head title={headTitle} meta={placeCount}>
+      <Head title={headTitle} meta={listedCount}>
         <SortControl
           ascending={filter.sortAscending}
           onToggle={() => patch({ sortAscending: !filter.sortAscending })}
@@ -688,7 +696,6 @@ export function BrowseSection({
               <FileLine
                 row={row}
                 tick={tick}
-                place={filter.place}
                 searching={searching}
                 folderNameOf={folderNameOf}
                 presence={presence}
@@ -1024,7 +1031,6 @@ function RailNode({
 function FileLine({
   row,
   tick,
-  place,
   searching,
   folderNameOf,
   presence,
@@ -1036,7 +1042,6 @@ function FileLine({
 }: {
   row: ArtifactRow;
   tick: "added" | "updated" | null;
-  place: FilesPlace;
   searching: boolean;
   folderNameOf: (folderId: string) => string;
   presence: (workerId: string) => { name?: string; online: boolean } | null;
@@ -1122,10 +1127,6 @@ function FileLine({
           {LINK_LABEL[linkState]}
         </Chip>
       )}
-      {/* In the Archive place every row is archived -- the chip would be
-          furniture (DESIGN.md rule 7). It renders only where it is news:
-          an archived row surfacing in a search. */}
-      {row.archived && place !== "archive" ? <Chip tone="muted">archived</Chip> : null}
     </ListRow>
     </div>
   );
