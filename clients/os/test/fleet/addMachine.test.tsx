@@ -19,7 +19,9 @@ vi.mock("@znasllc-io/memql-sdk-core/identity", () => ({
 }));
 
 const { AddMachine } = await import("../../src/apps/fleet/addMachine/AddMachine");
-const { installCommand, workerClusterUrl } = await import("../../src/apps/fleet/addMachine/install");
+const { installCommand, workerClusterUrl, INSTALL_PLATFORMS } = await import(
+  "../../src/apps/fleet/addMachine/install"
+);
 const { fakeConnection, withSession } = await import("./harness");
 
 // ASSEMBLED FROM PARTS, deliberately. The repo's secret scanner matches
@@ -208,5 +210,42 @@ describe("the install command", () => {
 
   it("strips a scheme and trailing slashes off the configured domain", () => {
     expect(workerClusterUrl("https://memql.example.com/")).toBe("https://api.memql.example.com");
+  });
+
+  it("is ONE physical line, whatever the inputs", () => {
+    // The multi-line-with-trailing-backslashes form was split by terminal
+    // paste handling, on this very panel: `bash -s --` ran with no arguments
+    // and `--token mql_wkr_...` executed as its own failing command, with the
+    // worker token in shell history either way (memql#4875). What is pinned
+    // is the ABSENCE of the two characters a terminal can mis-handle -- any
+    // newline or backslash reintroduces the split. Every combination is swept
+    // because the computer-use branch was exactly where the old shape changed
+    // its line structure.
+    for (const platform of INSTALL_PLATFORMS) {
+      for (const computerUse of [false, true]) {
+        for (const clusterUrl of ["https://api.example.com", ""]) {
+          const command = installCommand({ platform, clusterUrl, token: TOKEN, computerUse });
+          expect(command).not.toContain("\n");
+          expect(command).not.toContain("\\");
+        }
+      }
+    }
+  });
+
+  it("pins the exact composed shape", () => {
+    // Word for word, so a re-ordering of flags or a doubled space fails HERE
+    // rather than on an operator's machine. The runbook (memql#4874) and the
+    // portal composer (memql#4873) print this same single line; if this
+    // assertion has to change, they change with it.
+    const command = installCommand({
+      platform: "mac",
+      clusterUrl: "https://api.example.com",
+      token: TOKEN,
+      computerUse: true,
+    });
+    expect(command).toBe(
+      "curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-mac.sh" +
+        ` | bash -s -- --token ${TOKEN} --cluster https://api.example.com --computeruse`,
+    );
   });
 });

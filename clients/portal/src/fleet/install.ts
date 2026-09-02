@@ -9,6 +9,9 @@
 // this page just minted, so an operator copies one line instead of reading a
 // runbook and substituting two values by hand -- which is where the mistakes
 // are (a token pasted with a trailing newline, a cluster URL with no scheme).
+// "One line" is literal since memql#4873: one PHYSICAL line, and the runbook
+// prints the same single line (memql#4874, the same epic) -- if the shape
+// changes on either side, it changes on both.
 //
 // THE INSTALLER SHIPS FROM memql-cockpit, not from this repo. The worker is a
 // run mode of the `memql` command that repo builds, and scripts/install/ here
@@ -68,18 +71,28 @@ export interface InstallCommandInput {
   computerUse: boolean;
 }
 
-// installCommand composes the runbook's one-liner. Multi-line with trailing
-// backslashes, exactly as the runbook prints it -- a single 200-character line
-// is unreadable in a page and no easier to paste.
+// installCommand composes the runbook's one-liner.
+//
+// ===========================================================================
+// ONE PHYSICAL LINE, BECAUSE PASTE HANDLING SPLITS ANYTHING ELSE
+// ===========================================================================
+// The first shape here was multi-line with trailing backslashes, defended as
+// more readable than a 200-character line and no easier to paste. Field
+// evidence reversed that: terminal paste handling (bracketed paste,
+// continuation-prompt mangling) split the copied block, so `bash -s --` ran
+// with NO arguments and `--token mql_wkr_...` executed as its own shell
+// command -- observed live as `--token ...: command not found`, with the
+// worker token landing in shell history either way. A flag line running as a
+// command is strictly worse than a long line: the install half-runs, the
+// failure names nothing an operator can act on, and the credential leaks.
+//
+// So: no newline and no backslash anywhere in the output, whatever the
+// inputs. Readability in the page is the rendering surface's job (the
+// AddMachine <pre> scrolls horizontally); correctness under paste is this
+// module's, and only a single physical line survives every terminal.
 export function installCommand(input: InstallCommandInput): string {
   const cluster = input.clusterUrl === "" ? CLUSTER_URL_PLACEHOLDER : input.clusterUrl;
   const script = `https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-${input.platform}.sh`;
-  const lines = [
-    `curl -fsSL ${script} | \\`,
-    `  bash -s -- \\`,
-    `    --token ${input.token} \\`,
-    `    --cluster ${cluster}${input.computerUse ? " \\" : ""}`,
-  ];
-  if (input.computerUse) lines.push("    --computeruse");
-  return lines.join("\n");
+  const computeruse = input.computerUse ? " --computeruse" : "";
+  return `curl -fsSL ${script} | bash -s -- --token ${input.token} --cluster ${cluster}${computeruse}`;
 }
