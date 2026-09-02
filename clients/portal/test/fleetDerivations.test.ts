@@ -17,6 +17,7 @@ import {
   installCommand,
   workerClusterUrl,
   CLUSTER_URL_PLACEHOLDER,
+  INSTALL_PLATFORMS,
 } from "../src/fleet/install";
 import {
   chipsFromMap,
@@ -184,6 +185,48 @@ describe("the install command", () => {
     expect(command).toContain("--token mql_wkr_abc");
     expect(command).toContain("--cluster https://api.example.com");
     expect(command).toContain("--computeruse");
+  });
+
+  it("is ONE physical line, whatever the inputs", () => {
+    // The multi-line-with-trailing-backslashes form was split by terminal
+    // paste handling: `bash -s --` ran with no arguments and `--token
+    // mql_wkr_...` executed as its own failing command, with the worker token
+    // in shell history either way (memql#4873). What is pinned is the ABSENCE
+    // of the two characters a terminal can mis-handle -- any newline or
+    // backslash reintroduces the split. Every combination is swept because
+    // the computer-use branch was exactly where the old shape changed its
+    // line structure.
+    for (const platform of INSTALL_PLATFORMS) {
+      for (const computerUse of [false, true]) {
+        for (const clusterUrl of ["https://api.example.com", ""]) {
+          const command = installCommand({
+            platform,
+            clusterUrl,
+            token: "mql_wkr_abc",
+            computerUse,
+          });
+          expect(command).not.toContain("\n");
+          expect(command).not.toContain("\\");
+        }
+      }
+    }
+  });
+
+  it("pins the exact composed shape", () => {
+    // Word for word, so a re-ordering of flags or a doubled space fails HERE
+    // rather than on an operator's machine. The runbook prints this same
+    // single line (memql#4874); if this assertion has to change, the runbook
+    // changes with it.
+    const command = installCommand({
+      platform: "mac",
+      clusterUrl: "https://api.example.com",
+      token: "mql_wkr_abc",
+      computerUse: true,
+    });
+    expect(command).toBe(
+      "curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-mac.sh" +
+        " | bash -s -- --token mql_wkr_abc --cluster https://api.example.com --computeruse",
+    );
   });
 
   it("omits --computeruse for the headless build", () => {
