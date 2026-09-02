@@ -190,11 +190,16 @@ function ShellRoster({
   store: DesktopStore;
   children: ReactNode;
 }) {
-  const { access } = useSession();
+  const { access, ladderLoaded } = useSession();
   return (
     <OsProvider
       registry={OS_REGISTRY}
       actorRole={access?.clusterRole ?? ""}
+      // The role LADDER's load state (memql#4857): the roster gates on the
+      // role, and roleAdmits cannot answer until the ladder lands. Threading
+      // it through here is what makes the launcher and dock recompute the
+      // moment it does, rather than staying with the empty-ladder answer.
+      ladderLoaded={ladderLoaded ?? false}
       grid={grid}
       store={store}
     >
