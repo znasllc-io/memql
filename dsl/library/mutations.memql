@@ -419,6 +419,11 @@ mutate file restoreLibraryFile {
 /// restored on its own comes back empty and that is the honest result -- its contents are their own
 /// rows and each one is its own decision, which is what lets somebody take one file back out of the
 /// Bin without undoing everything they filed there.
+///
+/// It clears `archived` ONLY, and the absent second line is deliberate. deleteLibraryFolder's
+/// disposition is unreachable from every surface -- the Bin's own read carries isNotDeleted -- so
+/// nothing can name a deleted folder to restore it, and a write that cleared the field anyway
+/// would resurrect exactly the empty-folder noise that write exists to avoid.
 mutate folder restoreLibraryFolder {
   args {
     folderId  string!
@@ -478,11 +483,11 @@ mutate fileChunk createLibraryFileChunk {
 
 // ---- folder: the Files app's Drive-model writes (memql#4781) ----
 //
-// All five are CLIENT-REACHABLE, unlike the promotion writes above: the OS
+// All six are CLIENT-REACHABLE, unlike the promotion writes above: the OS
 // Files app calls them through the generated SDK, and every one is owned by
 // construction -- createLibraryFolder stamps ownerUserId from actor.userId
 // (@serverSet makes a caller-supplied owner a load-time rejection), and the
-// three update-shaped writes are read-merges on a row the composite tier's
+// update-shaped writes are read-merges on a row the composite tier's
 // write guard already scopes to its owner.
 //
 // The update-shaped ones take MINIMAL arguments (the memql#4258 rule):
@@ -564,6 +569,34 @@ mutate folder archiveLibraryFolder {
   update {
     id: args.folderId
     archived: true
+  }
+}
+
+/// Delete a folder whose subtree held no file at all -- the disposition the archive walk takes for
+/// an empty branch, instead of archiveLibraryFolder. Same soft delete in the storage sense (the row
+/// survives, the engine is append-only), and the opposite of it in the product sense: every folder
+/// read carries isNotDeleted, so this row leaves the tree, the Bin and a by-id resolve at once.
+///
+/// The distinction it draws is the point. Archiving is how somebody gets a thing back later, and a
+/// folder holding no file anywhere beneath it has nothing to get back -- archiving one puts a line
+/// in the Bin that answers no question anybody asked, next to the files that DO deserve to be
+/// there. An already-archived file beneath the folder still counts as a file, because Restore can
+/// still reach it, so a folder above one archives like any other.
+///
+/// NOT @serverOnly, exactly as archiveLibraryFolder is not: the OS Files app drives the walk, the
+/// composite tier's write guard already scopes the row to its owner, and no field here is a
+/// credential.
+///
+/// There is deliberately NO inverse. restoreLibraryFolder clears `archived` and never touches
+/// `deleted`, because a row every read excludes is a row nothing can ask to have back -- and
+/// resurrecting an empty folder would restore the noise this write exists to avoid.
+mutate folder deleteLibraryFolder {
+  args {
+    folderId  string!
+  }
+  update {
+    id: args.folderId
+    deleted: true
   }
 }
 

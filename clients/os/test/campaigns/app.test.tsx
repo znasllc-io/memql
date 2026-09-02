@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { chooseOption, openSelect } from "../selectControl";
+
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
 vi.mock("../../src/live/connection", () => ({
@@ -479,9 +481,7 @@ describe("the template editor", () => {
     // Nothing sampled: no fields.* tag anywhere.
     expect(screen.queryByText("{{fields.company}}")).toBeNull();
 
-    fireEvent.change(screen.getByLabelText("Audience to sample a recipient from"), {
-      target: { value: "v1:campaigns:audience:a1" },
-    });
+    chooseOption(screen.getByLabelText("Audience to sample a recipient from"), "Newsletter");
     expect(await screen.findByText("{{fields.company}}")).toBeTruthy();
     // ...and it says what it renders to, which is what makes it documentation.
     expect(screen.getByText("Acme Corp")).toBeTruthy();
@@ -563,9 +563,12 @@ describe("the rules builder", () => {
 
     expect(await screen.findByText("When a")).toBeTruthy();
     // A hardcoded list would make the newest half of a cluster's schema
-    // untriggerable with no way to tell.
-    expect(await screen.findByText("user (identity)")).toBeTruthy();
-    expect(screen.getByText("account (accounts)")).toBeTruthy();
+    // untriggerable with no way to tell. The kit's Select draws its own list,
+    // so the choices exist once it is opened -- which is also the only moment
+    // a person can see them.
+    const list = openSelect(screen.getByLabelText("The kind of thing that fires this rule"));
+    expect(within(list).getByRole("option", { name: "user (identity)" })).toBeTruthy();
+    expect(within(list).getByRole("option", { name: "account (accounts)" })).toBeTruthy();
   });
 
   it("names the recipient choice as WHO, and the lane only as an effect", async () => {

@@ -916,12 +916,21 @@ tunnel. Each run gets a per-run credential and the `mcp.<domain>` endpoint.
   (`v1:worker:delegationPolicy`): no allowed, signed-in, online machine means
   the task runs in-process. A plan never waits for a laptop to wake up.
 - **The back-channel credential's `sub` is the OWNING USER's id**, so row authz
-  applies to the app exactly as to their browser, and the service-account
+  applies to the app exactly as to their browser, and the machine-credential
   surface pin plus `role=system` keep it off every credential mutation and
   cluster-owner gate. Minted via `POST /node/bootstrap` with
   `tokenClass="app_session"`, which WIDENS what the bootstrap secret buys; four
   things narrow it -- the named user must exist, the TTL is hard-capped at 8h,
   the surface stays read/query-pinned, and the session id is the token label.
+  **It carries `class="app_session"`, NOT `service_account`** (memql#4857).
+  That is the one machine class whose subject is a person, which is exactly
+  what lets `http_access.go` resolve an HTTP actor for it and admit it to the
+  Library's byte routes -- as that user, gated on the actor resolving to a USER
+  and never on a role. Minted as `service_account` it was indistinguishable
+  from a credential whose subject is a binary, so the cockpit's Library pull
+  and push 401'd. The gRPC read/query pin covers both classes identically, and
+  `POST /sites/{id}/bundles` still names `service_account` exactly, so an app
+  session cannot publish a site.
   **It is NOT revocable** (the DB-free JWKS verify path is what lets it work on
   every node); standing in for revocation are the short lifetime, the cockpit
   deleting the MCP config at end, and renewal-in-place.

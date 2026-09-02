@@ -1,6 +1,8 @@
 package memql
 
 import (
+	"time"
+
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -14,7 +16,15 @@ func cloneExecuteResult(result *ExecuteResult) *ExecuteResult {
 	clone := &ExecuteResult{
 		output:        result.output,
 		includeBundle: result.includeBundle,
-		startTime:     result.startTime,
+		// A CLONE STARTS ITS OWN CLOCK (memql#4860). Copying startTime is
+		// what made a cached read report the age of the entry it came from:
+		// resultCache.set and .get both round-trip through here, so a hit
+		// carried the clock of the miss that filled it, and FinalizeMeta --
+		// run by the gRPC layer afterwards -- subtracted that from now. On a
+		// @cache(300) query the answer ranged over five minutes of pure
+		// fiction. A clone is a new DELIVERY of an answer, not a replay of
+		// the call that computed it, so its clock begins here.
+		startTime: time.Now(),
 	}
 	if result.Bundle != nil {
 		clone.Bundle = cloneGraphBundle(result.Bundle)

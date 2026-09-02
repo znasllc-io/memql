@@ -13,6 +13,7 @@ import { BackupsSection } from "./backups/BackupsSection";
 import { backupFromRow, type BackupRow } from "./backups/rows";
 import { useBackupsFeed } from "./backups/useBackups";
 import { BrowseSection, type DeskFolderShortcut } from "./BrowseSection";
+import { ALL_COLLAPSED, type ExpandedPlaces } from "./Rail";
 import {
   applyFilters,
   DEFAULT_FILTER,
@@ -104,6 +105,11 @@ export function FilesApp({
     sortAscending: settings.defaultSort === "oldest",
   }));
   const [selectedId, setSelectedId] = useState("");
+  // Which rail places are open. HELD HERE rather than in the browse, for the
+  // same reason the filter is: the section switch below returns early, so a
+  // trip to Settings and back would otherwise shut everything the person had
+  // just opened. Starts all-shut -- Rail.tsx says why.
+  const [expanded, setExpanded] = useState<ExpandedPlaces>(ALL_COLLAPSED);
 
   // ===========================================================================
   // THE DESK, FOLDED FOR THE DESKTOP PLACE (epic memql#4842, #4846)
@@ -159,6 +165,10 @@ export function FilesApp({
         folderId: typeof folderId === "string" ? folderId : "",
         search: "",
       }));
+      // Arriving by intent OPENS the place. Being sent here from a desk icon
+      // is the same request as clicking the place in the rail, and answering
+      // it with a shut disclosure would hide the folder the sender named.
+      setExpanded((e) => ({ ...e, [place]: true }));
       setSelectedId("");
     }
     consumeIntent?.(intent.id);
@@ -216,10 +226,19 @@ export function FilesApp({
   // The tree, from the folders feed. Archived folders are dropped HERE, not
   // by the read: the seed now includes them for the Archive place, and an
   // archive flip arrives as an UPDATE the fold has to keep answering for.
+  //
+  // DELETED folders are dropped here too, and for a sharper reason. No folder
+  // read returns one, so a seed never carries one -- but a live re-read is the
+  // raw by-id fetch, which applies row authz and no query filter, so the row
+  // comes back on the very update that deleted it. Without this conjunct the
+  // folder would stay in the tree until somebody reloaded, which reads as the
+  // delete having done nothing at all.
   const tree = useMemo(
     () =>
       foldFolderTree(
-        folders.snapshot.rows.map(folderFromRow).filter((f) => f.id !== "" && !f.archived),
+        folders.snapshot.rows
+          .map(folderFromRow)
+          .filter((f) => f.id !== "" && !f.archived && !f.deleted),
       ),
     [folders.snapshot],
   );
@@ -228,11 +247,16 @@ export function FilesApp({
   // #4846). Deliberately not a tree -- archived folders' ancestry mixes live
   // and archived parents, and a tree over that would lie one way or the
   // other. Flat, named, counted is the honest reading.
+  //
+  // `!f.deleted` for the live-path reason above, and it is not redundant with
+  // `f.archived`: the two are independent fields, so a folder somebody
+  // archived before the empty-folder rule existed carries BOTH the day the
+  // walk deletes it, and this place is one of the two it must leave.
   const archivedFolders = useMemo(
     () =>
       folders.snapshot.rows
         .map(folderFromRow)
-        .filter((f) => f.id !== "" && f.archived)
+        .filter((f) => f.id !== "" && f.archived && !f.deleted)
         .sort((a, b) => a.name.localeCompare(b.name)),
     [folders.snapshot],
   );
@@ -296,6 +320,8 @@ export function FilesApp({
       desksWithItems={desk.desksWithItems}
       filter={filter}
       setFilter={setFilter}
+      expanded={expanded}
+      setExpanded={setExpanded}
       selectedId={selectedId}
       onSelect={setSelectedId}
       linkByFileId={linkByFileId}

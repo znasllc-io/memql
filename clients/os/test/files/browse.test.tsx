@@ -126,6 +126,10 @@ describe("the folder rail", () => {
     });
     await renderFiles();
     expect(screen.queryByText(/filed\.mp4/)).toBeNull();
+    // The places start shut, so a folder is something you go and open. The
+    // disclosure is a separate control from the destination on purpose --
+    // see Rail.tsx.
+    await click(screen.getByRole("button", { name: "Expand Library" }));
     await click(screen.getByRole("button", { name: /Client videos/ }));
     expect(screen.getByRole("button", { name: /filed\.mp4/ })).toBeTruthy();
     expect(screen.queryByText(/root\.txt/)).toBeNull();
@@ -141,6 +145,7 @@ describe("the folder rail", () => {
     });
     h.connection = connection;
     await renderFiles();
+    await click(screen.getByRole("button", { name: "Expand Library" }));
     fireEvent.contextMenu(screen.getByRole("button", { name: /Client videos/ }));
     await click(screen.getByRole("menuitem", { name: "Archive" }));
     expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
@@ -163,7 +168,10 @@ describe("the folder rail", () => {
 });
 
 describe("the inspector", () => {
-  it("tells the provenance story and moves a file with a real rendered call", async () => {
+  // The panel's own re-filing picker is gone -- re-filing is something you do
+  // TO a row, so it lives on the row's context menu. test/files/inspector.test.tsx
+  // pins its absence; what stays here is the lead the panel is built around.
+  it("tells the provenance story", async () => {
     const connection = fakeConnection({
       folders: [folderRow({ id: "f-vid", name: "Client videos" })],
       artifacts: [artifactRow({ id: "a-1", title: "brief.pdf" })],
@@ -173,14 +181,6 @@ describe("the inspector", () => {
     await click(screen.getByRole("button", { name: /brief\.pdf/ }));
     const inspector = screen.getByRole("complementary", { name: "File details" });
     expect(within(inspector).getByText("Uploaded here")).toBeTruthy();
-
-    fireEvent.change(within(inspector).getByLabelText("Move to folder"), {
-      target: { value: "f-vid" },
-    });
-    await Promise.resolve();
-    expect(connection.callsNamed("moveArtifactToFolder")).toEqual([
-      'mutation moveArtifactToFolder(artifactId: "a-1", folderId: "f-vid")',
-    ]);
   });
 
   it("renders an archive refusal verbatim, in surface", async () => {

@@ -604,8 +604,26 @@ func (e *MemQLEngine) Execute(ctx context.Context, query string) (*ExecuteResult
 // and a nil specOverlay, so the default path is byte-for-byte the prior
 // behaviour. allowInline (MCP Tier-3 #1535) relaxes the inline-shape
 // pre-rejection; default false everywhere else.
-func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *FunctionRegistry, specOverlay map[string]*Spec, allowInline bool) (*ExecuteResult, error) {
+func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *FunctionRegistry, specOverlay map[string]*Spec, allowInline bool) (out *ExecuteResult, err error) {
 	startTime := time.Now()
+
+	// `took` MEANS THIS CALL, ON EVERY RETURN PATH (memql#4860).
+	//
+	// ExecuteResult stamps its clock in newExecuteResult -- wherever the
+	// object is built -- and the gRPC layer turns that into ResultMeta.TookMs
+	// after this function has returned. On the query path below the object is
+	// built with the bundle already in hand, so the number excluded the
+	// parse, the plan and the database round trip; the cache-hit return a
+	// little further down handed back a stored answer whose clock was older
+	// still. Re-basing here, once, is what makes the field answer one
+	// question from all nine returns instead of a different one from each.
+	//
+	// A DEFER RATHER THAN NINE ASSIGNMENTS, and a named result to reach: the
+	// returns are spread across the mutation, logic, builtin, literal, cache
+	// and query branches, and a stamp added to eight of them is a stamp
+	// somebody forgets on the ninth -- which is how the cache branch came to
+	// report an age in the first place.
+	defer func() { out.startedAt(startTime) }()
 
 	if !e.canResolve() {
 		return nil, ErrEngineNotInitialized

@@ -3919,6 +3919,7 @@ func LibraryArchivedArtifactsBuild(args LibraryArchivedArtifactsArgs) string {
 }
 
 // LibraryArchivedFolders -- The folders in the Bin (memql#4784). libraryFolders carries `archived != true`, so the default tree read cannot see these at all -- an archived folder is invisible to every other surface in the product, which is exactly why the Bin needs its own read rather than a filter over one.
+// isNotDeleted rides alongside `archived == true`, and the pairing is not belt-and-braces. The two dispositions are independent fields on one row, so a folder that took the empty-branch disposition must not surface here just because something later stamped it archived as well -- the Bin is where a person goes to get things back, and a folder that held no file has nothing there to offer them.
 // Unbounded for the same reason libraryFolders is, and it matters more here: the Bin renders each archived item under the folder it was filed in, so a truncated page would file rows under a parent that did not arrive and show them at the root as orphans -- indistinguishable from items that really were at the root.
 //
 // Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryArchivedFolders"] in generated_concepts.go).
@@ -4242,6 +4243,7 @@ func LibraryFilesForOwnerBuild(args LibraryFilesForOwnerArgs) string {
 }
 
 // LibraryFolderById -- Fetch one folder by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. Backs the desk-folder popover's name refresh and the Files app's breadcrumb resolve; archived rows ARE returned here -- a caller asking about a specific id deserves the honest answer, and the archived field says which kind it got.
+// DELETED rows are not, and the asymmetry with archived is the whole point of the second disposition. An archived folder is somewhere a person can still go and look, so naming its id deserves a row back; a folder deleted for holding no file is meant to be absent from every surface, and a by-id read that answered would be the one place it reappeared -- a stale desk shortcut or breadcrumb resolving to a folder nothing else can show.
 //
 // Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryFolderById"] in generated_concepts.go).
 type LibraryFolderByIdArgs struct {
@@ -4263,7 +4265,7 @@ func LibraryFolderByIdBuild(args LibraryFolderByIdArgs) string {
 	return b.String()
 }
 
-// LibraryFolders -- The caller's whole folder tree, live (memql#4781, design B1). Owned: ownerUserId==actor.userId gates the row set; `archived != true` is the null-safe soft-delete filter, for the reason libraryArtifacts spells out at length. UNBOUNDED ON PURPOSE: the OS folds (folders, artifacts) snapshots into a tree client-side, and a truncated page would silently re-parent every folder whose ancestor fell off the edge -- the fold is orphan-tolerant, so nothing would LOOK broken, which is exactly why the truncation must not happen. The set is small by construction: folders are hand-made organizational rows, bounded by one person's patience, not by data volume.
+// LibraryFolders -- The caller's whole folder tree, live (memql#4781, design B1). Owned: ownerUserId==actor.userId gates the row set; `archived != true` is the null-safe soft-delete filter, for the reason libraryArtifacts spells out at length, and isNotDeleted is the same null-safe spelling of the second disposition (the trait is mandatory where one covers the predicate, rule 22). The two are not redundant: an archived folder is one somebody can still find in the Bin, a deleted one held no file at all and is meant to be gone from every surface at once. UNBOUNDED ON PURPOSE: the OS folds (folders, artifacts) snapshots into a tree client-side, and a truncated page would silently re-parent every folder whose ancestor fell off the edge -- the fold is orphan-tolerant, so nothing would LOOK broken, which is exactly why the truncation must not happen. The set is small by construction: folders are hand-made organizational rows, bounded by one person's patience, not by data volume.
 //
 // Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryFolders"] in generated_concepts.go).
 type LibraryFoldersArgs struct {

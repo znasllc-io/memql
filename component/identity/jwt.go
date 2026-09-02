@@ -112,6 +112,29 @@ const (
 	// gate (AnalysisTemplate) uses for its authenticated query; PATs stay the
 	// human-CLI credential.
 	ClassServiceAccount = "service_account"
+	// ClassAppSession marks a delegated app run's MCP back-channel
+	// credential (memql#4857). It is NOT ClassServiceAccount, and the
+	// distinction is the whole point of the class existing.
+	//
+	// Every other machine class names a MACHINE: a node token's subject is a
+	// binary, a voice-agent token's is a process, an ordinary
+	// service-account's is whatever automation holds it. This one's `sub` is
+	// a HUMAN USER's id, because that is what makes row authz apply to a
+	// delegated app exactly as it applies to that person's browser -- the
+	// entire security story of the local-apps back-channel.
+	//
+	// It used to be minted AS ClassServiceAccount, and the collapse cost the
+	// cluster a real capability: component/server/http_access.go pins every
+	// non-user class off the Library's byte routes, correctly, because
+	// resolving an actor for a machine subject would invent a person to own
+	// the bytes. With one name for two things that rule could not be stated
+	// for one and not the other, so the cockpit's Library pull and push 401'd
+	// against a credential the design says is the user's own.
+	//
+	// The gRPC read/query surface pin applies to this class exactly as it
+	// does to ClassServiceAccount -- narrower reach, not wider. What it buys
+	// is the ability to SAY which of the two a route means.
+	ClassAppSession = "app_session"
 	// ClassBadge marks a short-lived shared-terminal operator grant
 	// (memql#2513): a registered badge/device id presented at an
 	// already-authenticated terminal exchanges (POST /auth/badge/grant)
@@ -482,11 +505,29 @@ type ServiceAccountIssueInput struct {
 	TTLOverride time.Duration
 }
 
+// IssueAppSessionAccessToken mints a class="app_session" JWT for a delegated
+// app run's back-channel (memql#4857). Same shape as the service-account
+// mint below and deliberately sharing its body -- the ONLY difference is the
+// class claim, and two copies of this would drift on the next field added.
+//
+// The caller is responsible for the four narrowings the class does not carry
+// on its own (the named user must exist, the TTL is capped, the surface stays
+// pinned, the session id is the label); see mintAppSessionCredential.
+func (j *JWTIssuer) IssueAppSessionAccessToken(in ServiceAccountIssueInput, now time.Time) (string, time.Time, error) {
+	return j.issueLabelledAccessToken(ClassAppSession, in, now)
+}
+
 // IssueServiceAccountAccessToken mints a class="service_account" JWT for a
 // machine principal (#691). The per-node JWKS verifier on the BFF/mesh admits
 // it with no DB lookup; the service-account interceptor pins it to the
 // read/query surface. Short-lived + rotatable; there is no refresh path.
 func (j *JWTIssuer) IssueServiceAccountAccessToken(in ServiceAccountIssueInput, now time.Time) (string, time.Time, error) {
+	return j.issueLabelledAccessToken(ClassServiceAccount, in, now)
+}
+
+// issueLabelledAccessToken is the body both labelled machine mints share.
+// `class` is the only thing that varies between them.
+func (j *JWTIssuer) issueLabelledAccessToken(class string, in ServiceAccountIssueInput, now time.Time) (string, time.Time, error) {
 	if strings.TrimSpace(in.Subject) == "" {
 		return "", time.Time{}, errors.New("identity: ServiceAccountIssueInput.Subject required")
 	}
@@ -510,7 +551,7 @@ func (j *JWTIssuer) IssueServiceAccountAccessToken(in ServiceAccountIssueInput, 
 	// voice-agent path uses); the verifier reads it without interpretation and
 	// the interceptor uses it for audit logging.
 	claims := AccessTokenClaims{
-		Class:  ClassServiceAccount,
+		Class:  class,
 		NodeId: in.Label,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    j.issuer,

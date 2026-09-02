@@ -19,6 +19,7 @@ function folder(over: Partial<FolderRow> & { id: string }): FolderRow {
     name: over.name ?? over.id,
     parentFolderId: over.parentFolderId ?? "",
     archived: over.archived ?? false,
+    deleted: over.deleted ?? false,
   };
 }
 

@@ -35,10 +35,13 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    (`Select` draws its own currentColor chevron). Forms use `Field` --
    label above, control on the line; nothing invents a third field size.
 
-6. **Actions are verbs, nouns are nouns.** A rail action ("New folder")
-   reads as an action -- muted, icon-led, hairline-separated
-   (`.os-files-node[data-action]`) -- never styled identically to a data
-   node it might sit beside.
+6. **Actions are verbs, nouns are nouns.** An action is never styled as a
+   data node it might sit beside -- and the strongest form of that is not to
+   seat it among them at all. The Files rail is nouns (places and folders),
+   so "New folder" lives on the Head's one Add control beside Upload, where
+   "put something here" is asked once; as a muted, hairline-separated row
+   between the Library tree and the Desktop place it still read as a folder
+   you could open.
 
 7. **Say it once.** A scope is named in one place. The rail highlights it,
    the Head names it, the list does not re-caption it, placeholders stay

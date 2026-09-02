@@ -11,6 +11,8 @@
 //             naming the limit and the alternatives -- an in-surface answer,
 //             never a hung download that dies at 90%.
 
+import { downloadWorkerRegistration, runWorkerDownload } from "./downloadWorker";
+
 export const BUFFER_LIMIT_BYTES = 512 * 1024 * 1024;
 
 export const OVER_LIMIT_SENTENCE =
@@ -60,6 +62,67 @@ async function refusalFrom(response: Response): Promise<string> {
   }
   if (body === "") return `The cluster refused the download (${response.status}).`;
   return body;
+}
+
+/**
+ * The whole download decision for one artifact, from the row to the bytes.
+ *
+ * SHARED BECAUSE IT IS ONE ACTION WITH TWO ENTRY POINTS -- the inspector's
+ * Download button and the row's right-click menu. The size lookup, the
+ * worker-versus-buffered plan and the over-limit refusal are the parts that
+ * would drift if each surface kept its own copy, and the way they would drift
+ * is silent: a second copy that forgets the size read simply plans as though
+ * every file were small, and the refusal that protects a browser from a
+ * 512 MiB buffer never fires.
+ *
+ * THE OVER-LIMIT CASE THROWS rather than returning a status. Both callers
+ * already render a caught error verbatim beside the control that produced it,
+ * so throwing gives the refusal the same route and the same sentence as every
+ * other failure -- one path, and no caller that can forget to check a flag.
+ */
+export async function downloadArtifact(input: {
+  artifactId: string;
+  /** The artifact's display name -- the fallback when the backing file row
+   *  carries none, and the whole answer for the kinds that have no such row. */
+  name: string;
+  /** The backing file id, or "" for a kind with no file row behind it. Those
+   *  are small rendered bodies (design D13) and skip the read entirely. */
+  fileId: string;
+  /** Reads the backing file row. Null when there is no connection, which is
+   *  not an error here: the download itself is a bearer fetch, so it can still
+   *  run -- it just plans against an unknown size. */
+  readFile: ((fileId: string) => Promise<{ sizeBytes: number; name: string } | null>) | null;
+  bearer: () => Promise<string | null>;
+}): Promise<void> {
+  // The 512 MiB decision needs the SIZE, which lives on the backing file row
+  // -- the index deliberately does not carry it.
+  let sizeBytes = 0;
+  let fileName = input.name;
+  if (input.fileId !== "" && input.readFile) {
+    const meta = await input.readFile(input.fileId);
+    if (meta) {
+      sizeBytes = meta.sizeBytes;
+      fileName = meta.name || input.name;
+    }
+  }
+  const registration = await downloadWorkerRegistration();
+  const plan = planDownload({ workerAvailable: registration !== null, sizeBytes });
+  if (plan.path === "refused") throw new Error(OVER_LIMIT_SENTENCE);
+  if (plan.path === "worker" && registration !== null) {
+    await runWorkerDownload({
+      artifactId: input.artifactId,
+      fileName,
+      sizeBytes,
+      bearer: input.bearer,
+      registration,
+    });
+    return;
+  }
+  await runBufferedDownload({
+    artifactId: input.artifactId,
+    fileName,
+    bearer: input.bearer,
+  });
 }
 
 export interface BufferedDownloadPorts {

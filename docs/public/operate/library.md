@@ -238,11 +238,14 @@ rename conflict. A move is one row update; a rename touches nothing else. No
 permission tree exists: row authz is unchanged, and a folder confers nothing.
 
 - **Writes:** `createLibraryFolder`, `renameLibraryFolder`,
-  `moveLibraryFolder`, `archiveLibraryFolder`, and `moveArtifactToFolder`
-  (a read-merge, so labels and archived survive a re-filing untouched). All
-  client-reachable; ownership is stamped from the actor.
+  `moveLibraryFolder`, `archiveLibraryFolder`, `deleteLibraryFolder`, and
+  `moveArtifactToFolder` (a read-merge, so labels and archived survive a
+  re-filing untouched). All client-reachable; ownership is stamped from the
+  actor.
 - **Reads:** `libraryFolders` (the whole owner tree, unbounded on purpose --
   the client-side fold needs every row at once) and `libraryFolderById`.
+  Every one of them, the Bin's `libraryArchivedFolders` included, carries the
+  `isNotDeleted` trait, so a deleted folder leaves all three at once.
 - **Live:** `graph.node.created/updated.v1:library:folder` carry broadcast
   routing rules, so the tree moves under a watching browser with no engine
   work per surface.
@@ -257,6 +260,31 @@ permission tree exists: row authz is unchanged, and a folder confers nothing.
 - **Archive is client-driven and children-first** (design B5): contents via
   `archiveArtifact` (whose automation archives backing files), then folders.
   Idempotent under interruption -- re-running archives the remainder.
+- **An empty folder is DELETED, not archived.** A folder with no file
+  anywhere beneath it -- itself empty, or holding only more empty folders, at
+  any depth -- takes `deleteLibraryFolder` instead of
+  `archiveLibraryFolder`, and the walk decides that per folder, the one being
+  acted on included. Archiving an entirely empty tree therefore deletes all
+  of it and archives nothing.
+
+  The rule follows from what archiving is FOR: getting something back later.
+  An empty folder tree has nothing in it to get back, so archiving one leaves
+  a row in the Archive place and in the Bin that answers no question anybody
+  asked, sitting among the files that genuinely are waiting there. Deleting
+  it is still a soft delete -- the row survives, because the engine is
+  append-only -- but every folder read excludes it, so it is gone from the
+  tree, from Archive and from the Bin together.
+
+  **The predicate is over ALL artifacts, archived ones included.** An
+  archived file beneath a folder is still a file somebody can restore, so the
+  folder above it archives like any other. That is also what keeps a resumed
+  walk consistent: the contents phase runs first, and leaves exactly that
+  shape behind.
+
+  **Nothing restores a deleted folder.** `restoreLibraryFolder` clears
+  `archived` and deliberately never touches `deleted` -- a row every read
+  excludes is a row nothing can name, and bringing an empty folder back would
+  restore the noise the rule exists to remove.
 
 ---
 
@@ -356,6 +384,11 @@ absent from the next plan.
 **A folder comes back EMPTY.** Everything that was inside it is its own row and
 its own decision, which is what lets somebody take one file back without
 undoing everything they filed away.
+
+**A folder that was DELETED rather than archived does not come back at all**,
+and cannot be asked to: it held no file anywhere beneath it, no folder read
+returns it, and `restoreLibraryFolder` clears `archived` alone. See
+[An empty folder is DELETED, not archived](#folders).
 
 **Nothing expires.** There is no retention sweep, no quota-driven cleanup and
 no expiry anywhere in the product: archived items accumulate and are kept until

@@ -13,6 +13,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 import { click, fakeConnection, fileRow, folderRow, renderFiles, watchedFolderRow } from "./harness";
+import { selectedLabel } from "../selectControl";
 
 // The Backups surface (epic memql#4783, the cockpit half memql#4841).
 //
@@ -261,6 +262,10 @@ describe("editing", () => {
 
     await click(screen.getByRole("button", { name: "Edit the backup of /a" }));
     expect((screen.getByLabelText("Also skip") as HTMLInputElement).value).toBe("*.tmp");
-    expect((screen.getByLabelText("Where it lands") as HTMLSelectElement).value).toBe("f-1");
+    // The LABEL, not a `.value`: the picker is the kit's listbox now (#4862)
+    // and its trigger is a button, whose `.value` is "" for every folder --
+    // an assertion that would pass for a form seeded with nothing at all.
+    // What this test is about is what the person sees when Edit opens.
+    expect(selectedLabel(screen.getByLabelText("Where it lands"))).toContain("Clients");
   });
 });

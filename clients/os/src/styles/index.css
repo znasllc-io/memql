@@ -1173,9 +1173,25 @@ button:not(:disabled):active {
   font-size: var(--os-text-lg);
 }
 
+/* THE VALUE COLUMN IS `minmax(0, 1fr)`, NOT `1fr`, AND THAT IS THE WHOLE
+ * REASON A FACTS LIST DOES NOT PUSH ITS PANEL SIDEWAYS.
+ *
+ * A `1fr` track carries an implicit `min-width: auto`, which is min-CONTENT --
+ * so the track refuses to shrink below the longest unbreakable word in it. An
+ * artifact id is one such word, roughly 40 characters with no break
+ * opportunity, and the Files inspector is 340px wide: the grid grew to fit the
+ * id, the panel grew with it, and the inspector scrolled left and right. Every
+ * fix applied to the VALUE (ellipsis, `word-break`, a narrower font) is
+ * defeated by the track, because the track is sized before the value is asked
+ * anything. `minmax(0, 1fr)` removes the floor, and `min-width: 0` on the `dd`
+ * removes the same floor one level down so the value's own overflow rules can
+ * finally apply.
+ *
+ * Do not "simplify" this back to `1fr`. It reads like a redundant longhand of
+ * exactly the same thing, and it is not. */
 .os-facts {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 8px 18px;
   margin: 0 0 14px;
 }
@@ -1185,6 +1201,12 @@ button:not(:disabled):active {
 }
 .os-facts dd {
   margin: 0;
+  min-width: 0;
+  /* Removing the track's floor only PERMITS the value to be narrow; this is
+   * what makes it be. A value that truncates on one line says so for itself
+   * (see `.os-copyvalue-text`, whose `nowrap` wins over this); everything else
+   * breaks rather than reaching past the panel. */
+  overflow-wrap: anywhere;
   font-size: var(--os-text-base);
 }
 
@@ -1904,6 +1926,161 @@ button:not(:disabled):active {
   translate: 0 -50%;
   pointer-events: none;
   color: var(--os-muted);
+}
+
+/* =========================================================================
+ * THE DRAWN SELECT -- the open half of the kit's `Select`
+ * =========================================================================
+ *
+ * Everything above this banner is the CLOSED control and is unchanged: the
+ * trigger wears the same `.os-select` field rule the native `<select>` wore,
+ * so it and an `Input` on the same line are still one object (rule 5). What is
+ * new is the OPEN half. That used to be the browser's `<option>` popup, which
+ * no rule in this file could reach -- its background, radius, font, padding
+ * and hover were the platform's -- so a themed field opened a stranger's box.
+ * It is a listbox the shell draws now, in `.os-menu`'s vocabulary, and the
+ * reasoning is written out at the top of `src/kit/controls.tsx`.
+ *
+ * The list is portalled to `document.body` and placed from script, so every
+ * geometry value on it arrives inline and only its LOOK lives here.
+ */
+
+/* The trigger is a button wearing a field's clothes, so it needs the three
+ * things a `<select>` had for free: a left-aligned single line, a pointer, and
+ * a value that ellipsizes rather than pushing the chevron out of the box. */
+.os-select {
+  display: inline-flex;
+  align-items: center;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+.os-select-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A value matching no option -- usually an id whose row has not arrived. */
+.os-select-value[data-placeholder] {
+  color: var(--os-muted);
+}
+
+.os-select-wrap[data-open] .os-select {
+  border-color: var(--os-accent);
+}
+/* The one open/closed affordance that is not colour, so it survives a
+ * greyscale reading and a theme pack that tunes the accent down. */
+.os-select-chevron {
+  transition: rotate var(--os-duration-fast) var(--os-ease);
+}
+.os-select-wrap[data-open] .os-select-chevron {
+  rotate: 180deg;
+}
+
+.os-select-list {
+  position: fixed;
+  /* Above `.os-menu` (90), the highest surface in this shell. A select can be
+   * opened inside a window, a Refine panel, a sheet or the themes drawer, and
+   * it has to sit over whichever one raised it. */
+  z-index: 95;
+  margin: 0;
+  padding: 4px;
+  max-height: min(320px, 60vh);
+  overflow-y: auto;
+  /* A long list scrolled to its end must not hand the wheel to the surface
+   * behind it, which on this desktop is somebody's window. */
+  overscroll-behavior: contain;
+  border-radius: var(--os-radius-sm);
+  border: 1px solid var(--os-line);
+  /* SOLID, not the glass the windows use, for two reasons. `backdrop-filter`
+   * on this node would make it a containing block for its own fixed
+   * descendants -- the exact trap the portal exists to escape -- and a
+   * translucent list of words over arbitrary content is a list nobody can
+   * read. `.os-menu` is solid for the same reason. */
+  background: var(--os-glass-solid);
+  box-shadow: var(--os-shadow-float);
+  animation: os-select-open var(--os-duration-fast) var(--os-ease);
+}
+/* Opened upwards, so it arrives from the direction it opened towards. */
+.os-select-list[data-above] {
+  animation-name: os-select-open-above;
+}
+
+@keyframes os-select-open {
+  from {
+    opacity: 0;
+    translate: 0 -3px;
+  }
+}
+@keyframes os-select-open-above {
+  from {
+    opacity: 0;
+    translate: 0 3px;
+  }
+}
+/* The duration tokens are already zeroed under reduced motion, which makes
+ * this instant; it is stated as well because a list arriving is chrome
+ * responding to a click, and a reader who asked for no motion should not have
+ * to trust a token to get none. */
+@media (prefers-reduced-motion: reduce) {
+  .os-select-list {
+    animation: none;
+  }
+  .os-select-chevron {
+    transition: none;
+  }
+}
+
+.os-select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* `.os-menu-item`'s own padding and radius: one popup vocabulary, not two. */
+  padding: 7px 10px;
+  border-radius: var(--os-radius-xs);
+  color: var(--os-ink);
+  font-size: var(--os-text-base);
+  cursor: pointer;
+  user-select: none;
+}
+.os-select-option:hover:not([aria-disabled]) {
+  background: var(--os-raised);
+}
+/* WHERE THE KEYBOARD IS. Focus stays on the trigger while the list is open,
+ * so this is the only mark a keyboard reader has -- and it is an inset
+ * `box-shadow` rather than an `outline` so it sits inside the padded row, the
+ * way every other cue in this shell is drawn. It reads on top of the hover
+ * plate, so pointing at one row while arrowing through another says both. */
+.os-select-option[data-active] {
+  background: var(--os-raised);
+  box-shadow: inset 0 0 0 1px var(--os-accent);
+}
+.os-select-option[aria-disabled] {
+  color: var(--os-muted);
+  cursor: default;
+}
+/* The check holds its column whether or not it is drawn, so the labels line
+ * up and the list does not shift by 20px when the selection moves. Selection
+ * is a GLYPH and not only a tint: a background alone is indistinguishable
+ * from the hover under a finger, and invisible in greyscale. */
+.os-select-check {
+  display: inline-flex;
+  flex: none;
+  width: 12px;
+  color: var(--os-accent);
+}
+.os-select-option-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-select-empty {
+  margin: 0;
+  padding: 7px 10px;
+  color: var(--os-muted);
+  font-size: var(--os-text-base);
 }
 
 .os-button {
@@ -3024,31 +3201,138 @@ a.os-button {
   opacity: 0.55;
   cursor: default;
 }
-/* A PLACE node (Library / Desktop / Archive) opens its own block in the
- * rail: a breath of space above, nothing louder -- the places read as
- * sections of one rail, not as three rails. */
-.os-files-place {
-  margin-top: 8px;
-}
 
-/* Rule 6: actions are verbs, nodes are nouns. A rail ACTION sits below a
- * hairline, stays muted, and never wears the node's current highlight. */
-.os-files-node[data-action] {
-  margin-top: 6px;
-  border-top: 1px solid var(--os-line);
-  border-radius: 0;
-  padding-top: 8px;
-  color: var(--os-muted);
-}
-.os-files-node[data-action]:hover {
-  color: var(--os-ink);
-  background: none;
-}
 .os-files-rename {
   flex: 1;
   min-width: 0;
   padding: 2px 6px;
   font-size: var(--os-text-sm);
+}
+
+/* ---- the rail's disclosures, and the one Add control (memql#4860 wave) ----
+ *
+ * The rail used to render every place's folders at once. Three destinations
+ * were being pushed off the bottom by the contents of whichever place
+ * happened to be biggest, so the places collapse and start shut; Rail.tsx
+ * carries the behavioural reasoning.
+ *
+ * THE DISCLOSURE AND THE DESTINATION ARE TWO BUTTONS ON ONE LINE, because a
+ * button inside a button is invalid and because the chevron needs its own
+ * accessible name and its own aria-expanded. The row is the flex container
+ * they share; the place node keeps every one of its own rules by still being
+ * an .os-files-node. */
+.os-files-place-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+/* The place node is inside a flex row now, so it has to be told to take the
+ * rest of it -- width: 100% on a flex item resolves against the row, not the
+ * rail, and the counts would drift right of the folders below. */
+.os-files-place-row .os-files-node {
+  flex: 1;
+  min-width: 0;
+}
+/* A PLACE node opens its own block in the rail: a breath of space above,
+ * nothing louder. The margin moves to the ROW, or the chevron sits on the
+ * old line while the name sits on the new one. */
+.os-files-place-row:not(:first-child) {
+  margin-top: 8px;
+}
+
+.os-files-disclose {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--os-radius-xs);
+  background: none;
+  color: var(--os-muted);
+  cursor: pointer;
+  transition: transform var(--os-duration-fast) var(--os-ease);
+}
+.os-files-disclose:hover {
+  color: var(--os-ink);
+  background: var(--os-raised);
+}
+.os-files-disclose:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+}
+/* The chevron IS the state -- it points right when shut and down when open,
+ * which is the one convention every file explorer has taught. Rotating the
+ * button rather than swapping the glyph keeps a single element to animate
+ * and a single element to hit. */
+.os-files-disclose[aria-expanded="true"] {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .os-files-disclose {
+    transition: none;
+  }
+}
+
+/* `hidden` on the group does the hiding, and the `:not([hidden])` is what
+ * lets it. An AUTHOR `display: flex` beats the UA sheet's `[hidden] {
+ * display: none }` at equal specificity, so the bare selector would have
+ * made the attribute inert and the rail would never collapse -- while
+ * looking, in the diff, exactly like collapsing code. Guard the layout
+ * instead of adding an `!important` to the UA's rule. */
+/* NAMED FOR THE PLACE, not just "group". `.os-files-group` is already the
+ * INSPECTOR's rule-8 grouping (a hairline, a Subhead, display:flex), and an
+ * author `display` beats the UA's `[hidden] { display: none }` at equal
+ * specificity -- so sharing the name left every shut place rendering its
+ * contents with a stray hairline over them, while the markup said `hidden`
+ * and the tests, which query the accessibility tree, passed. Found by
+ * looking at it. */
+.os-files-place-group:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.os-files-place-empty {
+  margin: 2px 0 2px 28px;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+/* ---- Add: one control, two ways to put something in this folder ----
+ *
+ * Replaces the Upload primary AND the rail's "New folder" action. The menu
+ * is anchored to the button (the .os-widget-menu-anchor pattern), not
+ * portalled: it belongs to a control that is already on screen, so it has no
+ * containing-block problem to solve and closing it on scroll would be wrong.
+ */
+/* The row menu's move picker takes a READABLE MEASURE (DESIGN.md rule 9:
+ * lists take the window, forms do not). Inside `.os-files-confirm` the
+ * select is a flex item and would otherwise stretch the full width of the
+ * window -- a folder name is a few words, and a control eighteen hundred
+ * pixels wide to hold one is the dead space that rule is about. */
+.os-files-move-pick {
+  flex: 0 1 320px;
+  min-width: 0;
+}
+
+.os-files-add {
+  position: relative;
+  display: inline-flex;
+}
+.os-files-add-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+}
+/* The menu items carry glyphs, which the shell's plain .os-menu-item does
+ * not expect -- it is a text row. Lay them out rather than letting the icon
+ * sit on the text baseline. */
+.os-files-add-menu .os-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .os-files-list {
@@ -3124,19 +3408,206 @@ a.os-button {
   line-height: 1.5;
 }
 
-.os-files-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
 .os-files-confirm {
   display: flex;
   gap: 6px;
   margin-top: 6px;
 }
-.os-files-move .os-select {
-  width: 100%;
+
+/* ===========================================================================
+ * REGION: THE INSPECTOR RE-PRESENTED -- COPYABLE VALUES, GROUPS, ACTION GRID
+ * ===========================================================================
+ *
+ * Everything this round added lives between these banners, and one of it is
+ * not app-local:
+ *
+ *   - `.os-copyvalue*` is KIT vocabulary (the `CopyValue` control in
+ *     kit/controls.tsx), and it sits here rather than beside `.os-facts`
+ *     purely so this change reads in one place. It has one consumer today --
+ *     the inspector's Id and Plan -- and the moment a second app reaches for
+ *     it these rules move up into the shared section, exactly as `.os-machine`
+ *     moved when Users became the second app to want a row.
+ *   - `.os-files-group` is the panel's grouping (DESIGN.md rule 8): a hairline
+ *     and a Subhead, which is the shape `.os-files-versions` already had. The
+ *     version spine keeps its own copy of those two declarations because it is
+ *     a component of its own; this is the same look, not a second one.
+ *   - `.os-files-actions` is a grid now, for the reason written on it.
+ *   - The story and the summary wrap, which is the SECOND source of the
+ *     sideways scroll and the one a guard hides best.
+ *   - `.os-files-inspector` carries the guard itself, last, because it is the
+ *     backstop and not the fix.
+ *
+ * The FIRST source is not here: it is `.os-facts`, up in the shared section
+ * where that control lives, fixed in place with its own account of why.
+ *
+ * =========================================================================== */
+
+/* A COPYABLE VALUE ON ONE LINE.
+ *
+ * The text truncates and the button holds its place. `min-width: 0` appears
+ * twice on purpose -- once on the flex container and once on the text -- and
+ * both are load-bearing: a flex item's default `min-width: auto` is the same
+ * min-content floor that made the facts grid grow, so without them the line
+ * would simply widen and the ellipsis would never be reached. */
+.os-copyvalue {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
+.os-copyvalue-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.os-copyvalue-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* THE BUTTON'S SPACE IS RESERVED AT ALL TIMES AND ONLY ITS INK ARRIVES.
+ * Revealing it by putting it into the flow would shift the line out from under
+ * the pointer that is reaching for it -- the value would move at the exact
+ * moment somebody aims at it. So it is always laid out, and `opacity` is the
+ * only thing that changes. */
+.os-copyvalue-copy {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--os-radius-xs);
+  background: transparent;
+  color: var(--os-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--os-duration-fast) var(--os-ease);
+}
+.os-copyvalue:hover .os-copyvalue-copy,
+.os-copyvalue-copy:focus-visible {
+  opacity: 1;
+}
+.os-copyvalue-copy:hover {
+  color: var(--os-ink);
+}
+/* The confirmation outlives the pointer. It fires on a click, and a hand that
+ * has already moved on would otherwise fade the only answer there was. */
+.os-copyvalue-copy[data-copied] {
+  opacity: 1;
+  color: var(--os-accent);
+}
+/* No hover to reveal it with means it simply stands. A touch reader must never
+ * be left looking at a truncated value with no way to take it. */
+@media (hover: none) {
+  .os-copyvalue-copy {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .os-copyvalue-copy {
+    transition: none;
+  }
+}
+/* The note is the SURFACE speaking, not data, so it takes the UI face back
+ * from the mono `dd` it is nested in. A refusal set in a monospace face reads
+ * as part of the value it is about. */
+.os-copyvalue-note {
+  font-family: var(--os-font);
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+/* THE PANEL'S GROUPS (DESIGN.md rule 8). A hairline and a Subhead, and no
+ * nested Panel: a bordered box inside a bordered panel is the second container
+ * language rule 8 exists to remove. */
+.os-files-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--os-line);
+}
+
+/* THE ACTION ROW IS A GRID, BECAUSE FLEX-WRAP WAS NOT PREDICTABLE.
+ *
+ * Six buttons of six different widths wrapping into a 220-340px panel put a
+ * different pair on each line at every panel width, and re-arranged itself
+ * whenever a label changed. The grid is either one column or two -- the min
+ * track is sized so two only form when the longest label ("Upload new
+ * version") still fits one -- and every cell is identical, so the arrangement
+ * is a property of the panel rather than of the labels.
+ *
+ * The one primary leads at full width: it is what this surface is for, and it
+ * is outside the grid so its span is not a claim about how many columns the
+ * grid happened to generate.
+ *
+ * `overflow: hidden` on the buttons is the backstop, not the mechanism: if a
+ * font renders a label wider than the track, the label clips and the PANEL
+ * stays where it is. A clipped word costs a glance; a panel that scrolls
+ * sideways costs the whole reading. */
+.os-files-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.os-files-actions-more {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+}
+.os-files-actions .os-button {
+  min-width: 0;
+  padding: 0 8px;
+  justify-content: center;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* THE STORY AND THE SUMMARY ARE SENTENCES, SO THEY WRAP -- and the one token
+ * in a story that cannot wrap breaks rather than widening the panel.
+ *
+ * This is the SECOND source of the same overflow, and the one a guard would
+ * have hidden most convincingly: `fileStory` composes "Produced by plan
+ * <id>", so a plan id -- forty characters with no break opportunity anywhere
+ * in it -- sits inside an ordinary sentence. The facts grid was the first
+ * source and this would have been the next, clipped mid-sentence with no
+ * ellipsis to say anything had been cut.
+ *
+ * A sentence WRAPS where a table value TRUNCATES, and the difference is
+ * deliberate: a cell has one line to give and a paragraph has as many as it
+ * needs, so nothing here is hidden behind a copy button. */
+.os-files-story {
+  min-width: 0;
+}
+.os-files-story > span:not(.os-dot) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.os-files-summary {
+  overflow-wrap: anywhere;
+}
+
+/* THE GUARD. The causes are fixed above -- the facts grid's track, a
+ * truncating CopyValue, a wrapping story -- and this is what keeps a value
+ * nobody has thought of yet from reintroducing the same bug. Vertical
+ * scrolling is the panel's own; horizontal never was, and there is nothing
+ * here a reader could only reach by scrolling right. */
+.os-files-inspector {
+  overflow-x: hidden;
+}
+/* The glyph stands on the control line beside the two header buttons, rather
+ * than four pixels taller than both. */
+.os-files-inspector-glyph {
+  width: var(--os-control-h);
+  height: var(--os-control-h);
+}
+
+/* === END REGION ========================================================== */
 
 /* THE VERSION SPINE (epic memql#4806).
  *
@@ -3393,15 +3864,6 @@ a.os-button {
   font-size: var(--os-text-sm);
   box-shadow: var(--os-shadow-float);
   z-index: 40;
-}
-
-/* The rail's context menu, INSIDE the app box. `.os-context-menu` is
- * position: fixed, and fixed inside the desk's transformed plate resolves
- * against the plate rather than the viewport -- the menu opened a
- * window-offset away from the click. Absolute against this box (the
- * positioned ancestor) is the geometry the click handler already computes. */
-.os-files .os-context-menu {
-  position: absolute;
 }
 
 /* The desk folder popover carries a LiveList now (a live view of the
@@ -3677,15 +4139,12 @@ a.os-button {
   color: var(--os-ink);
 }
 
-/* The Files inspector's client labels (epic memql#4800). A block of its own
- * rather than a row in the facts list: it is the one EDITABLE thing on a
- * surface that is otherwise a reading, and the toggles need room to wrap. */
-.os-files-accounts {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 10px;
-}
+/* The Files inspector's client labels (epic memql#4800) were `.os-files-accounts`
+ * here: a block of its own rather than a row in the facts list, because it is
+ * the one EDITABLE thing on a surface that is otherwise a reading. That is
+ * still true and it is now one of the panel's four `.os-files-group` groups,
+ * which says the same thing in the shell's own grouping grammar -- so the
+ * one-off class is gone rather than kept as an alias with nothing left in it. */
 /* ---- custom domains: the Domains panel (epic memql#4805) ----
  *
  * The surface is about TWO DNS RECORDS and what this cluster last saw at them.

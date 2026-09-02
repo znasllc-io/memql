@@ -145,7 +145,10 @@ describe("fileStory -- the provenance sentence and its dot", () => {
       }),
     );
     const story = fileStory(row, null);
-    expect(story.sentence).toBe("Produced by plan pl-9");
+    // The id is deliberately absent: it is the `Plan` fact's job, with a
+    // copy button, and in the story it was 32 characters of hex leading a
+    // panel (memql#4860 wave).
+    expect(story.sentence).toBe("Produced by a plan");
     expect(story.tone).toBe("reachable");
   });
 
@@ -156,17 +159,35 @@ describe("fileStory -- the provenance sentence and its dot", () => {
 });
 
 describe("folderFromRow", () => {
-  it("projects id, name, parent and archived with honest defaults", () => {
+  it("projects id, name, parent and both dispositions with honest defaults", () => {
     const row = folderFromRow({
       id: "f-1",
       createdAt: "2026-08-20T10:00:00Z",
       payload: { name: "Client videos", parentFolderId: "f-0" },
     } as Row);
+    // ABSENT IS NEITHER. Every folder written before either field existed
+    // carries no member at all, and reading absence as true would empty the
+    // whole tree on the first event that did not touch it.
     expect(row).toEqual({
       id: "f-1",
       name: "Client videos",
       parentFolderId: "f-0",
       archived: false,
+      deleted: false,
     });
+  });
+
+  it("reads `deleted` so the live path can drop a folder the reads already exclude", () => {
+    // No seed ever delivers one -- every folder read carries isNotDeleted. A
+    // live re-read is the raw by-id fetch, with row authz and no query filter,
+    // so the row comes back on the very update that deleted it: this
+    // projection is what lets the tree and the Bin drop it without a reload.
+    const row = folderFromRow({
+      id: "f-1",
+      createdAt: "2026-08-20T10:00:00Z",
+      payload: { name: "Nothing here", deleted: true },
+    } as Row);
+    expect(row.deleted).toBe(true);
+    expect(row.archived).toBe(false);
   });
 });
