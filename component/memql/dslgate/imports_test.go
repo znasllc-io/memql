@@ -23,6 +23,12 @@ import (
 // namespace depend on Go's map iteration order and flake this suite.
 func gateOn(t *testing.T, files map[string]string) []Violation {
 	t.Helper()
+	return gateOnWith(t, files, Options{})
+}
+
+// gateOnWith is gateOn with a verdict on which domains are core (memql#4882).
+func gateOnWith(t *testing.T, files map[string]string, opts Options) []Violation {
+	t.Helper()
 	paths := make([]string, 0, len(files))
 	for p := range files {
 		paths = append(paths, p)
@@ -32,7 +38,7 @@ func gateOn(t *testing.T, files map[string]string) []Violation {
 	for _, p := range paths {
 		corpus = append(corpus, SourceFile{Path: p, Content: files[p]})
 	}
-	return scanCrossNamespaceImports(corpus)
+	return scanCrossNamespaceImports(corpus, opts)
 }
 
 // TestCrossNamespaceReferenceNeedsAnImport is the rule.
@@ -217,5 +223,121 @@ func TestConceptsAreNotReportedHere(t *testing.T) {
 	})
 	if len(got) != 0 {
 		t.Errorf("a CONCEPT reference was reported by the flat-kind gate: %v", got)
+	}
+}
+
+// -- memql#4882: the core tree's late-bound calls -------------------------------
+//
+// dsl/cognition/logic.memql calls `mutationCreateCanvasState`, which the engine
+// documents as "supplied by a product bundle at runtime". On the merged tree a
+// bundle that declares it made pass 1 find the declaration in the product
+// namespace, and the gate asked the CORE file to import it -- an import the
+// engine cannot write. These four cases pin the exemption to exactly that
+// direction.
+
+// coreIs marks the given top-level directories as the engine's own.
+func coreIs(domains ...string) Options {
+	set := map[string]bool{}
+	for _, d := range domains {
+		set[d] = true
+	}
+	return Options{CoreDomain: func(d string) bool { return set[d] }}
+}
+
+const lateBoundCaller = `logic onSecondActiveHuman {
+  body {
+    return mutation mutationCreateCanvasState(stateId: "voice-migrated", space: "s1")
+  }
+}
+`
+
+const lateBoundDeclaration = `mutate canvasState mutationCreateCanvasState {
+  args {
+    stateId  string
+    space    string
+  }
+  insert {
+    id: args.stateId
+    args.space
+  }
+}
+`
+
+// TestCoreReferenceToARuntimeDeclaredNameIsTheLateBindingSeam is the fix: a
+// core file calling a name that only a runtime domain declares is not a
+// missing import, because the import it would need cannot be written.
+func TestCoreReferenceToARuntimeDeclaredNameIsTheLateBindingSeam(t *testing.T) {
+	files := map[string]string{
+		"cognition/logic.memql": lateBoundCaller,
+		"znas/mutations.memql":  lateBoundDeclaration,
+	}
+	if got := gateOnWith(t, files, coreIs("cognition")); len(got) != 0 {
+		t.Fatalf("violations = %v, want none: the core tree cannot import a product "+
+			"namespace, so this is the documented late-binding seam, not a missing `use`", got)
+	}
+	// Without the verdict the rule is what it was: reported. nil is the
+	// fail-closed direction, so a caller that has the verdict must pass it.
+	if got := gateOn(t, files); len(got) != 1 {
+		t.Fatalf("violations without a core-domain verdict = %v, want 1: nil CoreDomain "+
+			"must keep the pre-#4882 rule rather than exempt silently", got)
+	}
+}
+
+// TestRuntimeReferenceToACoreNameStillNeedsAnImport is the direction that must
+// stay refused: a product file CAN write `use cognition.mutations.{ ... }`, so
+// it must.
+func TestRuntimeReferenceToACoreNameStillNeedsAnImport(t *testing.T) {
+	got := gateOnWith(t, map[string]string{
+		"cognition/mutations.memql": lateBoundDeclaration,
+		"znas/logic.memql":          lateBoundCaller,
+	}, coreIs("cognition"))
+	if len(got) != 1 {
+		t.Fatalf("violations = %v, want 1: a runtime file referencing a core name with no "+
+			"import is the ordinary rule, and the exemption must not reach it", got)
+	}
+	if !strings.Contains(got[0].Detail, "use cognition.mutations.{ mutationCreateCanvasState }") {
+		t.Errorf("the violation must still spell the remedy:\n%s", got[0].Detail)
+	}
+}
+
+// TestRuntimeReferenceToAnotherRuntimeNamespaceStillNeedsAnImport: two product
+// domains are two namespaces like any other.
+func TestRuntimeReferenceToAnotherRuntimeNamespaceStillNeedsAnImport(t *testing.T) {
+	got := gateOnWith(t, map[string]string{
+		"acme/mutations.memql": lateBoundDeclaration,
+		"znas/logic.memql":     lateBoundCaller,
+	}, coreIs("cognition"))
+	if len(got) != 1 {
+		t.Fatalf("violations = %v, want 1: runtime -> runtime is not the seam", got)
+	}
+}
+
+// TestCoreReferenceToAnotherCoreNamespaceStillNeedsAnImport: the engine's own
+// tree keeps the whole rule -- this is the case the gate was written for.
+func TestCoreReferenceToAnotherCoreNamespaceStillNeedsAnImport(t *testing.T) {
+	got := gateOnWith(t, map[string]string{
+		"common/builtins.memql": "builtin trackPresence {\n  x string\n}\n",
+		"cognition/automations.memql": `automation a {
+  step s {
+    builtin trackPresence(x: "1")
+  }
+}
+`,
+	}, coreIs("common", "cognition"))
+	if len(got) != 1 {
+		t.Fatalf("violations = %v, want 1: core -> core with no import is exactly what "+
+			"enforcing `use` means, and #4882 must not widen the exemption to it", got)
+	}
+}
+
+// TestNestedCoreNamespaceIsCore: agents/roles is `agents/roles` to namespaceOf
+// (a nested directory is its own namespace) and is still the core tree.
+func TestNestedCoreNamespaceIsCore(t *testing.T) {
+	got := gateOnWith(t, map[string]string{
+		"agents/roles/professional.memql": lateBoundCaller,
+		"znas/mutations.memql":            lateBoundDeclaration,
+	}, coreIs("agents"))
+	if len(got) != 0 {
+		t.Fatalf("violations = %v, want none: a nested directory of a core domain is core", got)
 	}
 }

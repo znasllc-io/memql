@@ -77,6 +77,16 @@ func ValidatePackDomain(domain string, coreDomains, existing []string) error {
 	return nil
 }
 
+// CoreDomains returns the namespaces the embedded tree ships -- the sealed,
+// engine-owned half of the merged tree, as opposed to a RegisterTree overlay
+// (a product bundle mounted at MEMQL_DSL_PATH). It is what lets the
+// cross-namespace-import gate tell the core's documented late-binding calls
+// apart from a missing `use` (memql#4882): a core file cannot import a product
+// namespace it does not know exists.
+func CoreDomains() []string {
+	return coreDomains()
+}
+
 // coreDomains returns the sorted set of top-level directory names in the
 // embedded DSL tree -- the namespaces MemQL owns canonically. These are
 // the domains a pack may not collide with. Built by reading the embedded

@@ -154,13 +154,19 @@ type declaredAt struct {
 // boot may not want to pay for the merged tree" argument for leaving this gate
 // test-only. Reading the tree itself is ScanTree's job, one layer up.
 //
+// A CORE file's reference to a name declared ONLY by a runtime domain is not
+// reported (memql#4882): it is the late-binding seam the engine documents, and
+// the core file cannot carry the import the remedy would spell. opts.CoreDomain
+// is the verdict on which directories are core; nil reports everything, as
+// before.
+//
 // PASS 1 IS WHY THE WHOLE SET IS REQUIRED. A reference is a violation only when
 // some file DECLARES the name in another namespace; a name declared in a file
 // the caller did not supply reads as declared nowhere, and report() returns on
 // `!known`. So a partial set fails OPEN, silently. ScanFiles' doc says this to
 // its callers; it is repeated here because this is the function whose logic
 // depends on it.
-func scanCrossNamespaceImports(files []SourceFile) []Violation {
+func scanCrossNamespaceImports(files []SourceFile, opts Options) []Violation {
 	paths := make([]string, 0, len(files))
 	code := make(map[string]string, len(files))
 	for _, f := range files {
@@ -227,6 +233,19 @@ func scanCrossNamespaceImports(files []SourceFile) []Violation {
 			d, known := declared[name]
 			switch {
 			case !known, !flatKinds[d.kind], d.namespace == ns, declaredHere[name], imported[name], reported[name]:
+				return
+			case opts.coreNamespace(ns) && !opts.coreNamespace(d.namespace):
+				// THE LATE-BINDING SEAM (memql#4882). A sealed core file is
+				// calling a name that only a runtime domain declares -- the
+				// shape the engine documents for mutationCreateCanvasState
+				// ("supplied by a product bundle at runtime"). The `use` the
+				// gate would ask for has to be written into the core file,
+				// which cannot name a product namespace it does not know
+				// exists; so on the merged tree every conforming bundle
+				// tripped this gate, and strict boot refused the node.
+				// Exempting exactly this direction is what lets the boot gate
+				// and test/dslconformance's "declared nowhere in this tree is
+				// skipped" agree.
 				return
 			}
 			reported[name] = true

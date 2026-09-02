@@ -84,6 +84,7 @@ import (
 	"io"
 	"io/fs"
 	"sort"
+	"strings"
 
 	"github.com/znasllc-io/memql/core/dslfs"
 )
@@ -151,6 +152,27 @@ type Options struct {
 	// direction: a genuinely server-only construct is reported rather than
 	// silently exempted. Callers that have the verdict should supply it.
 	ServerOnly func(file, name string) bool
+
+	// CoreDomain reports whether a top-level tree directory is one the engine
+	// ships embedded -- a namespace whose files are sealed at build time.
+	//
+	// The cross-namespace-import gate needs it to tell two references apart
+	// that read identically off the source: an author who forgot a `use`, and
+	// the core tree calling a construct it documents as "supplied by a product
+	// bundle at runtime" (dsl/cognition/logic.memql ->
+	// mutationCreateCanvasState). The second cannot carry an import -- the
+	// engine does not know the product namespace exists -- so the gate exempts
+	// a CORE file's reference to a name declared ONLY by a non-core domain,
+	// and nothing else (memql#4882). Every other direction still needs its
+	// `use`: runtime -> core, runtime -> runtime, core -> core.
+	//
+	// nil means "no domain is core", the fail-CLOSED direction: with no verdict
+	// supplied every cross-namespace reference is reported, which is exactly
+	// the rule before memql#4882. The engine passes the embedded tree's own
+	// domain list (contract_gates.go); a scan over a single tree with no
+	// runtime overlay has no late-bound reference to exempt and may leave it
+	// nil.
+	CoreDomain func(domain string) bool
 }
 
 func (o Options) serverOnly(file, name string) bool {
@@ -158,6 +180,21 @@ func (o Options) serverOnly(file, name string) bool {
 		return false
 	}
 	return o.ServerOnly(file, name)
+}
+
+// coreNamespace reports whether a namespace (a directory path within the tree,
+// as namespaceOf returns it) belongs to a core domain. A nested namespace --
+// `agents/roles` -- is core when its top-level directory is, because that is
+// the directory the embedded tree ships and the unit RegisterTree mounts.
+func (o Options) coreNamespace(namespace string) bool {
+	if o.CoreDomain == nil || namespace == "" {
+		return false
+	}
+	domain := namespace
+	if i := strings.IndexByte(domain, '/'); i >= 0 {
+		domain = domain[:i]
+	}
+	return o.CoreDomain(domain)
 }
 
 // UserScopeSelectionExemptions records constructs that select rows by a
@@ -212,7 +249,7 @@ func ScanFiles(files []SourceFile, opts Options) []Violation {
 	// The cross-namespace import gate is CORPUS-level, not per-file: whether a
 	// reference crosses a boundary depends on where the referenced name is
 	// declared, which one file cannot answer (memql#3803).
-	out = append(out, scanCrossNamespaceImports(files)...)
+	out = append(out, scanCrossNamespaceImports(files, opts)...)
 	// The sub-automation gate is corpus-level for the same reason and one more:
 	// whether a callee resolves depends on what is declared ANYWHERE, and
 	// resolving per file would make A-calls-B succeed or fail on directory
