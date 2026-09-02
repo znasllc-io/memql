@@ -501,6 +501,33 @@ operator-triggered sync (`kubectl -n argocd patch app memql --type merge
 `Executor` on the identity node and stamped with the repair's record id,
 never a direct `kubectl apply`.
 
+**It also clears the previous operation's selection first, and a repair is
+silently partial without that** (memql#4871). ArgoCD's application controller
+persists a new operation by merge-patching `status.operationState` with
+`omitempty`: a sync that names no `resources` and no `syncOptions` omits both
+keys, and a merge patch that omits a key leaves the existing value. So after
+ANY selective sync on the Application -- one naming particular resources --
+every later repair inherited that selection, reconciled only those resources,
+and **reported success**. Observed live on 2026-09-02: a repair that should
+have applied a new Role, RoleBinding and Ingress annotation ran as a
+ten-Deployment sync instead, twice, and no `status.history` entry was recorded
+because ArgoCD writes none for a selective sync -- so the timeline looked
+untouched while several bumps had in fact been applied.
+
+Sending `"resources": []` does not help; the empty slice is dropped by the
+same `omitempty` on the round trip. The fields have to be cleared on the
+status side, which the repair now does in the same atomic merge patch:
+
+```
+"status": {"operationState": {"operation": {"sync": {
+    "prune": false, "resources": null, "syncOptions": null }}}}
+```
+
+An operator running the patch by hand needs the same reset. If you are
+diagnosing a sync that touched fewer resources than the render, read
+`status.operationState.operation.sync` before believing the sync was
+complete.
+
 ### Per provider
 
 The provider is read off the graph -- the `v1:cluster:cluster` row, then
