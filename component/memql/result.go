@@ -98,6 +98,28 @@ func (r *ExecuteResult) SetCursor(cursor string) {
 	r.Meta.Cursor = cursor
 }
 
+// startedAt re-bases the result's clock on the moment the REQUEST began.
+//
+// WHY THE CLOCK IS NOT SET WHERE THE RESULT IS BUILT (memql#4860).
+// newExecuteResult stamps startTime wherever the object happens to be
+// constructed, and FinalizeMeta -- which the gRPC layer calls after the
+// engine has returned -- reports time.Since of it. That made `took` wrong in
+// both directions: on the query path the object is built with the bundle
+// already in hand, so the number excluded the parse and the database round
+// trip; and a result served from the result cache carried the clock of the
+// MISS THAT FILLED IT, so a @cache(300) read reported an age of up to five
+// minutes as though it were a duration. executeWith calls this on every
+// return so the number means one thing everywhere: how long this call took.
+//
+// Nil-tolerant, because the caller is a deferred re-base that also runs on
+// the error returns, where there is no result.
+func (r *ExecuteResult) startedAt(t time.Time) {
+	if r == nil {
+		return
+	}
+	r.startTime = t
+}
+
 // FinalizeMeta calculates final metadata values like execution time.
 func (r *ExecuteResult) FinalizeMeta() {
 	if r == nil || r.Meta == nil {
