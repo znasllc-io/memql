@@ -7,7 +7,7 @@ go 1.26.1
 toolchain go1.26.6
 
 require (
-	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.0
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.1
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.0
 	github.com/google/uuid v1.6.0
 	github.com/livekit/media-sdk v0.0.0-20260605212526-4c11a51d3c97
