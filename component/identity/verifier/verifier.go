@@ -43,6 +43,11 @@ const (
 	ClassNode           = "node"
 	ClassVoiceAgent     = "voice_agent"
 	ClassServiceAccount = "service_account"
+	// ClassAppSession is a delegated app run's back-channel credential
+	// (memql#4857). Its `sub` is a real user's id, which is what separates it
+	// from every other machine class and what lets the Library's byte routes
+	// admit it. See component/identity.ClassAppSession for the full reason.
+	ClassAppSession = "app_session"
 )
 
 // VerifiedClaims is the unified shape both the JWT and PAT paths

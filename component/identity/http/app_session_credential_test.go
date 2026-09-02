@@ -86,8 +86,13 @@ func TestAppSessionCredential_SubjectIsTheUser(t *testing.T) {
 
 	claims, err := s.Issuer.VerifyAccessToken(resp.PlainToken, time.Now().UTC())
 	require.NoError(t, err)
-	assert.Equal(t, identity.ClassServiceAccount, claims.Class,
-		"the credential must verify on every node's DB-free JWKS path")
+	assert.Equal(t, identity.ClassAppSession, claims.Class,
+		"the credential must verify on every node's DB-free JWKS path, AS ITSELF")
+	assert.NotEqual(t, identity.ClassServiceAccount, claims.Class,
+		"it was minted as service_account until memql#4857, and the collapse is what "+
+			"stopped the Library's byte routes admitting it: one class name for a "+
+			"machine subject and a user subject cannot express a rule that admits "+
+			"only the second")
 	assert.Equal(t, userId, claims.Subject,
 		"sub must be the owning user so row authz applies to the delegated app")
 	assert.Equal(t, "app-session:v1:worker:appSession:s1", claims.NodeId,

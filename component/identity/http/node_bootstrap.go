@@ -567,8 +567,9 @@ func (s *Server) requireSecureBootstrapRequest(w http.ResponseWriter, r *http.Re
 	return false
 }
 
-// mintAppSessionCredential is the class="service_account" mint path
-// for a delegated app run's MCP back-channel (memql#4360).
+// mintAppSessionCredential is the class="app_session" mint path for a
+// delegated app run's MCP back-channel (memql#4360; the class is its own
+// since memql#4857).
 //
 // WHAT IS DIFFERENT ABOUT THIS ONE, and why it is gated the way it
 // is. The `node` and `voice_agent` paths mint MACHINE principals:
@@ -589,10 +590,14 @@ func (s *Server) requireSecureBootstrapRequest(w http.ResponseWriter, r *http.Re
 //     the caller asks for. The bearer ends up in a file on somebody's
 //     laptop; shortening the window it is worth anything is the only
 //     mitigation that does not depend on that file being deleted.
-//  3. The surface is pinned by the service-account interceptor to the
-//     read/query path -- every credential and admin mutation is
+//  3. The surface is pinned by the machine-credential interceptor to
+//     the read/query path -- every credential and admin mutation is
 //     refused -- and the role is `system`, not `owner`, so the
-//     credential cannot reach a cluster-owner gate.
+//     credential cannot reach a cluster-owner gate. Over HTTP the token
+//     carries no role claim at all and resolves to `reader` plus the
+//     real user id, which is "act on your own rows, reach no admin
+//     gate" -- the Library's byte routes gate on the actor resolving to
+//     a USER, never on a role.
 //  4. Every mint is audited with the session id as the label, so a
 //     leaked bearer traces back to the run that was handed it.
 //
@@ -655,7 +660,7 @@ func (s *Server) mintAppSessionCredential(w http.ResponseWriter, r *http.Request
 	}
 
 	now := time.Now().UTC()
-	token, expiresAt, err := s.Issuer.IssueServiceAccountAccessToken(identity.ServiceAccountIssueInput{
+	token, expiresAt, err := s.Issuer.IssueAppSessionAccessToken(identity.ServiceAccountIssueInput{
 		// The subject IS the user: row authz then applies to the
 		// delegated app exactly as it does to that user's browser.
 		Subject: ownerUserId,

@@ -156,15 +156,42 @@ leaving callers parked until their own deadlines expire.
 
 ## The back-channel credential
 
-At session start the engine mints a `class="service_account"` JWT and sends it
+At session start the engine mints a `class="app_session"` JWT and sends it
 with `mcpEndpoint = https://mcp.<domain>/mcp`. The cockpit writes the app's MCP
 configuration naming both, runs the app, and **deletes that file at end**.
 
 **Its `sub` is the owning user's id.** That single choice is the security
 story: the app reads over MCP *as that user*, so row authz applies to it
-exactly as it does to their browser. The service-account interceptor pins the
-surface to read/query and stamps `role=system` rather than `owner`, so the
+exactly as it does to their browser. The machine-credential interceptor pins
+the surface to read/query and stamps `role=system` rather than `owner`, so the
 credential reaches no credential mutation and no cluster-owner gate.
+
+### Why it has a class of its own (memql#4857)
+
+It was minted as `class="service_account"` until then, and the collapse cost a
+capability the design had already granted on paper.
+
+Every other machine class names a **machine**: a node token's subject is a
+binary, a voice-agent token's is a process. This one's subject is a **person**.
+`component/server/http_access.go` refuses to resolve an HTTP actor for a
+machine class, and it is right to — the Library's byte routes stamp ownership
+from `actor.userId`, so resolving one for a binary would invent somebody to own
+the bytes. With one class name covering both kinds of subject, that rule could
+not be stated for one and not the other, and the cockpit's `Library.Pull` and
+`Library.Push` **401'd against the user's own rows**.
+
+With the class separated, the rule is sayable and narrow:
+
+| Surface | `service_account` | `app_session` |
+|---|---|---|
+| gRPC `MemqlService.Stream` | read/query pin | the same pin |
+| `POST /artifacts`, `GET /artifacts/{id}/content`, the chunked session family | refused | **admitted, as the user it names** |
+| `POST /sites/{id}/bundles` | admitted | refused |
+
+Over HTTP the token carries **no role claim**, so the actor resolves to
+`reader` plus the real user id. That is enough for the byte routes — they gate
+on the actor resolving to a USER and never on a role — and short of every admin
+gate. Nothing else about the credential widened.
 
 ### It is not revocable, and this doc will not pretend otherwise
 
@@ -189,9 +216,11 @@ path buys.
 
 ### The mint widens the bootstrap secret
 
-`POST /node/bootstrap` with `tokenClass="app_session"` is the mint surface.
-Before this, that secret bought only **machine** principals (`node`,
-`voice_agent`); it now also buys a **user-scoped** one. Narrowing it:
+`POST /node/bootstrap` with `tokenClass="app_session"` is the mint surface —
+the request field and the resulting class claim now agree, which they did not
+before memql#4857. Before this path existed, that secret bought only
+**machine** principals (`node`, `voice_agent`); it now also buys a
+**user-scoped** one. Narrowing it:
 
 - the named user must exist (a forged subject would verify and then act as a
   user nobody can point at in an audit);

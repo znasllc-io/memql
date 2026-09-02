@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/identity/verifier"
 )
 
 // http_access.go -- resolving the HTTP caller's AccessContext from verified
@@ -50,15 +51,49 @@ import (
 //     handlers' own gates exactly as before. FallbackFromClaims(nil) would
 //     fabricate a blank-UserId reader envelope; the absence of claims is the
 //     absence of a caller, and it stays one.
-//   - A NON-USER credential class attaches nothing either, and this is a
-//     surface pin, not bookkeeping. service_account is read/query-pinned,
-//     voice_agent is pinned to its gRPC message set, app_session is
-//     surface-pinned by design -- their pins live in the gRPC interceptors,
-//     which HTTP never runs. Resolving an actor for them here would hand a
-//     machine credential a byte-storing write surface its pin denies
-//     everywhere else (it 401'd before this file existed, by accident;
-//     it keeps 401ing now, on purpose). Absent class means user, the
-//     verifier's own backward-compat rule.
+//   - A MACHINE-SUBJECT credential class attaches nothing either, and this
+//     is a surface pin, not bookkeeping. service_account is read/query-pinned
+//     and voice_agent is pinned to its gRPC message set -- their pins live in
+//     the gRPC interceptors, which HTTP never runs. Resolving an actor for
+//     them here would hand a machine credential a byte-storing write surface
+//     its pin denies everywhere else (it 401'd before this file existed, by
+//     accident; it keeps 401ing now, on purpose). Absent class means user,
+//     the verifier's own backward-compat rule.
+//
+//   - app_session IS ADMITTED, and it is the one machine class that is
+//     (memql#4857). The rule above is really about SUBJECTS rather than
+//     classes: what makes resolving an actor for a service account wrong is
+//     that its `sub` names a binary, so the resolution would invent a person
+//     to own the bytes. An app-session credential's `sub` is a real user's
+//     id -- that is the entire security story of the delegated-app
+//     back-channel, which says row authz applies to the app exactly as it
+//     applies to that person's browser. Refusing it made the cockpit's
+//     Library pull and push 401 against the user's own rows.
+//
+//     It reaches no further than that person does. FallbackFromClaims reads
+//     no role claim off this token (the mint stamps none), so the actor is
+//     `reader` plus their real user id: enough for the byte routes, which
+//     gate on the actor resolving to a USER and never on a role, and short
+//     of every admin gate. The class stays read/query-pinned on gRPC, and
+//     the site-bundle publish route still names service_account exactly, so
+//     an app session cannot publish a site.
+//
+//     This was only expressible once app_session stopped being minted AS
+//     service_account. One name for two subjects is why the rule could not
+//     be stated for one and not the other.
+// httpResolvableClass reports whether a verified credential class names a
+// SUBJECT an HTTP actor may be resolved from. Closed on purpose: a class
+// nobody has adjudicated resolves to nothing and the handler's own gate
+// refuses it, which is the direction this file fails in.
+func httpResolvableClass(class string) bool {
+	switch class {
+	case "", "user", "badge", verifier.ClassAppSession:
+		return true
+	default:
+		return false
+	}
+}
+
 func requestWithResolvedAccess(r *http.Request) *http.Request {
 	ctx := r.Context()
 	if _, ok := auth.AccessFromContext(ctx); ok {
@@ -72,7 +107,7 @@ func requestWithResolvedAccess(r *http.Request) *http.Request {
 	// shared terminal whose actor FallbackFromClaims resolves with its role
 	// ceiling applied -- refusing it here would 401 a badged operator's every
 	// Library and attachment call while their gRPC surface works.
-	if class, isString := claims["class"].(string); isString && class != "" && class != "user" && class != "badge" {
+	if class, isString := claims["class"].(string); isString && !httpResolvableClass(class) {
 		return r
 	}
 	return r.WithContext(auth.ContextWithAccess(ctx, auth.FallbackFromClaims(claims)))

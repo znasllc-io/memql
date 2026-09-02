@@ -15,8 +15,18 @@ import (
 )
 
 // NewServiceAccountStreamInterceptor wraps `base` and admits a machine
-// principal via a class="service_account" identity-issued JWT (#691,
-// deployment-v2 Phase 3). The JWT is verified through the SAME per-node JWKS
+// principal via a class="service_account" OR class="app_session"
+// identity-issued JWT (#691, deployment-v2 Phase 3; the second class since
+// memql#4857).
+//
+// TWO CLASSES, ONE SURFACE PIN, and that is the point. An app-session
+// credential is a delegated app run's back-channel whose `sub` is a real
+// user; a service-account's names a machine. They differ in WHO they are,
+// never in what they may send, so the allowlist below governs both and
+// splitting this interceptor would be two copies of one rule. What the
+// separate class buys is elsewhere: component/server/http_access.go can admit
+// the one whose subject is a person onto the Library's byte routes without
+// admitting the one whose subject is a binary. The JWT is verified through the SAME per-node JWKS
 // verifier every authenticated surface uses -- crucially WITHOUT a DB lookup,
 // which is why this works on the BFF/mesh where a PAT does not (the per-node
 // verifier is constructed with a nil PATVerifier; PATs only verify on the
@@ -50,10 +60,11 @@ func NewServiceAccountStreamInterceptor(
 		}
 
 		vc, err := v.VerifyBearer(ctx, token)
-		if err != nil || vc == nil || vc.Source != verifier.SourceJWT || vc.Class != verifier.ClassServiceAccount {
-			// Not a service-account JWT (could be a user/voice-agent JWT for a
-			// different surface). Hand off to the base chain, which re-runs
-			// VerifyBearer (cheap; JWKS was cached on the first call).
+		if err != nil || vc == nil || vc.Source != verifier.SourceJWT || !isMachineCredentialClass(vc.Class) {
+			// Not one of the two labelled machine JWTs (could be a
+			// user/voice-agent JWT for a different surface). Hand off to the
+			// base chain, which re-runs VerifyBearer (cheap; JWKS was cached
+			// on the first call).
 			if base == nil {
 				return status.Error(codes.Internal, "auth not configured")
 			}
@@ -61,12 +72,20 @@ func NewServiceAccountStreamInterceptor(
 		}
 
 		if logger != nil {
-			logger.Debug("service-account admitted",
-				"label", vc.NodeId, "sub", vc.UserId, "method", info.FullMethod)
+			logger.Debug("machine credential admitted",
+				"class", vc.Class, "label", vc.NodeId, "sub", vc.UserId, "method", info.FullMethod)
 		}
 		ctx = withServiceAccountClaims(ctx, vc)
 		return handler(srv, &serviceAccountStream{ServerStream: ss, ctx: ctx, logger: logger})
 	}
+}
+
+// isMachineCredentialClass reports whether a verified class is one of the two
+// labelled machine credentials this interceptor admits. CLOSED, deliberately:
+// an unrecognised class falls through to the base chain and is judged there,
+// so a new credential family never lands in this pin by accident.
+func isMachineCredentialClass(class string) bool {
+	return class == verifier.ClassServiceAccount || class == verifier.ClassAppSession
 }
 
 // serviceAccountStream pins the surface: it injects the service-account system
@@ -138,16 +157,24 @@ func isServiceAccountPayload(payload any) bool {
 // carrying the verified token's subject + label for audit attribution. The
 // surface allowlist (not the role) is what contains the credential.
 func withServiceAccountClaims(ctx context.Context, vc *verifier.VerifiedClaims) context.Context {
-	label, sub := "", ""
+	label, sub, class := "", "", verifier.ClassServiceAccount
 	if vc != nil {
 		label = vc.NodeId
 		sub = vc.UserId // JWT `sub` claim
+		// THE VERIFIED CLASS, NOT A CONSTANT (memql#4857). Both labelled
+		// machine classes reach here, and stamping one name over the other
+		// would make an app session indistinguishable from a service account
+		// to everything downstream -- including the audit line that is
+		// supposed to say which credential acted.
+		if vc.Class != "" {
+			class = vc.Class
+		}
 	}
 	claims := map[string]any{
 		"sub":   sub,
 		"email": "service-account@memql.internal",
 		"role":  "system",
-		"class": verifier.ClassServiceAccount,
+		"class": class,
 		"label": label,
 	}
 	token := auth.BuildTokenInfo(claims)

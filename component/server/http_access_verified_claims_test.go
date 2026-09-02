@@ -68,21 +68,25 @@ func withVerifiedClaimsClass(r *http.Request, sub, role, class string) *http.Req
 	return r.WithContext(verifier.AttachToContext(r.Context(), vc))
 }
 
-// A surface-pinned machine credential must NOT gain the Library's write
-// surface just because its JWT verifies: the pins (service_account is
-// read/query-pinned, voice_agent is pinned to its gRPC message set,
-// app_session likewise) are enforced by the gRPC interceptors, which HTTP
-// never runs -- so the HTTP access resolution refuses to mint an actor for
-// any non-user class and the handler's own gate answers 401, exactly as it
-// did before memql#4843's fix existed.
-func TestNonUserCredentialClassesStayOffTheLibraryWriteSurface(t *testing.T) {
+// A MACHINE-SUBJECT credential must NOT gain the Library's write surface just
+// because its JWT verifies. Their pins (service_account is read/query-pinned,
+// voice_agent is pinned to its gRPC message set) are enforced by the gRPC
+// interceptors, which HTTP never runs -- and the deeper reason is the SUBJECT:
+// a service-account `sub` names a binary, so resolving an actor for it would
+// invent a person to own the bytes. The HTTP access resolution refuses to mint
+// an actor for either, and the handler's own gate answers 401.
+//
+// app_session is deliberately absent from this list since memql#4857 -- see
+// TestAppSessionCredentialReachesItsOwnersLibrary directly below, which is the
+// other half of one rule and must be read with it.
+func TestMachineSubjectCredentialClassesStayOffTheLibraryWriteSurface(t *testing.T) {
 	store := newFakeLibraryStore()
 	blob := newFakeBlob()
 	h := NewArtifactHandler(ArtifactHandlerOptions{
 		Logger: quietLogger(), Bucket: "lib", Uploader: blob, Downloader: blob,
 		Store: store, Analyzer: newFakeAnalyzer(), PromotionWait: 50 * time.Millisecond,
 	})
-	for _, class := range []string{"service_account", "voice_agent", "app_session"} {
+	for _, class := range []string{"service_account", "voice_agent"} {
 		body, ct := uploadBody(t, "notes.md", "text/markdown", []byte("# hello\n"), nil)
 		req := httptest.NewRequest(http.MethodPost, "/artifacts", body)
 		req.Header.Set("Content-Type", ct)
@@ -95,6 +99,80 @@ func TestNonUserCredentialClassesStayOffTheLibraryWriteSurface(t *testing.T) {
 	}
 	if got := len(store.snapshotCreated()); got != 0 {
 		t.Fatalf("createLibraryFile called %d times for machine credentials, want 0", got)
+	}
+}
+
+// The delegated app run's back-channel DOES reach the Library, as its owner
+// (memql#4857).
+//
+// WHY THIS IS NOT A HOLE IN THE TEST ABOVE. Every other machine class names a
+// machine; this one's `sub` is a real user's id, because that is what makes
+// row authz apply to a delegated app exactly as it applies to that person's
+// browser. So the bytes have an owner without anything being invented, and
+// the row lands under the token's subject -- which is what this asserts,
+// rather than merely asserting a 201.
+//
+// It was minted AS service_account until memql#4857, which is why the cockpit
+// app-session runner's Library pull and push 401'd against the user's own
+// rows: one class name for two kinds of subject cannot express a rule that
+// admits one and refuses the other.
+func TestAppSessionCredentialReachesItsOwnersLibrary(t *testing.T) {
+	store := newFakeLibraryStore()
+	blob := newFakeBlob()
+	h := NewArtifactHandler(ArtifactHandlerOptions{
+		Logger: quietLogger(), Bucket: "lib", Uploader: blob, Downloader: blob,
+		Store: store, Analyzer: newFakeAnalyzer(), PromotionWait: 50 * time.Millisecond,
+	})
+
+	body, ct := uploadBody(t, "notes.md", "text/markdown", []byte("# hello\n"), nil)
+	req := httptest.NewRequest(http.MethodPost, "/artifacts", body)
+	req.Header.Set("Content-Type", ct)
+	// No role claim, exactly as the mint leaves it: the actor resolves to
+	// `reader` plus the real user id. The byte routes gate on the actor
+	// resolving to a USER and never on a role, which is why that is enough
+	// here and still short of every admin gate.
+	req = withVerifiedClaimsClass(req, verifiedSub, "", verifier.ClassAppSession)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 -- an app-session credential acts as the user it names. body: %s",
+			rec.Code, rec.Body.String())
+	}
+	created := store.snapshotCreated()
+	if len(created) != 1 {
+		t.Fatalf("createLibraryFile called %d times, want 1", len(created))
+	}
+	if want := "library/" + verifiedSub + "/"; !strings.Contains(created[0].BlobUrl, want) {
+		t.Errorf("blobUrl = %q, want the storage path keyed on the OWNING USER (%q) -- "+
+			"the credential must not own the bytes, the person must",
+			created[0].BlobUrl, want)
+	}
+}
+
+// The class is admitted on the Library's byte routes and NOWHERE ELSE it was
+// not already. The site-bundle publish route names service_account exactly, so
+// widening the Library must not have widened that -- a CI publish credential
+// and a delegated app run are different things and this is the assertion that
+// keeps them so.
+func TestAppSessionCredentialCannotPublishASiteBundle(t *testing.T) {
+	if verifier.ClassAppSession == verifier.ClassServiceAccount {
+		t.Fatal("the two machine classes must not collapse back into one name")
+	}
+	if httpResolvableClass(verifier.ClassServiceAccount) {
+		t.Error("service_account must not resolve an HTTP actor: its subject names a machine")
+	}
+	if httpResolvableClass(verifier.ClassVoiceAgent) {
+		t.Error("voice_agent must not resolve an HTTP actor: its subject names a process")
+	}
+	if !httpResolvableClass(verifier.ClassAppSession) {
+		t.Error("app_session must resolve an HTTP actor: its subject is a real user")
+	}
+	if !httpResolvableClass("") || !httpResolvableClass("user") || !httpResolvableClass("badge") {
+		t.Error("the human classes must keep resolving")
+	}
+	if httpResolvableClass("something_nobody_adjudicated") {
+		t.Error("an unknown class must resolve nothing -- this gate fails closed")
 	}
 }
 
