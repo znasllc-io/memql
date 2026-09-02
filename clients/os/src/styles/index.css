@@ -1853,6 +1853,13 @@ button:not(:disabled):active {
   background: var(--os-glass-solid);
   box-shadow: var(--os-shadow-float);
 }
+/* Inside the panel the column is the MAIN axis, so the controls' row-flex
+ * basis would stretch them tall; pin them to the control line instead. */
+.os-refine-panel .os-input,
+.os-refine-panel .os-select-wrap {
+  flex: none;
+  width: 100%;
+}
 
 .os-subhead {
   margin: 0 0 4px;

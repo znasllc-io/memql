@@ -538,6 +538,21 @@ export function BrowseSection({
               onCancelRename={() => setRenamingFolderId("")}
             />
           ))}
+          {/* The one rail ACTION (rule 6), beside the block it acts on: it
+              creates a folder in the Library scope being looked at. Below the
+              archived flood it would be furniture nobody finds. */}
+          <button
+            type="button"
+            className="os-files-node"
+            data-action
+            disabled={connection === null}
+            onClick={() =>
+              void newFolderIn(searching || filter.place !== "library" ? "" : (filter.folderId ?? ""))
+            }
+          >
+            <FolderPlus size={14} aria-hidden />
+            <span className="os-files-node-name">New folder</span>
+          </button>
 
           <button
             type="button"
@@ -611,18 +626,6 @@ export function BrowseSection({
             </button>
           ))}
 
-          <button
-            type="button"
-            className="os-files-node"
-            data-action
-            disabled={connection === null}
-            onClick={() =>
-              void newFolderIn(searching || filter.place !== "library" ? "" : (filter.folderId ?? ""))
-            }
-          >
-            <FolderPlus size={14} aria-hidden />
-            <span className="os-files-node-name">New folder</span>
-          </button>
           {railNote !== "" ? <Caption>{railNote}</Caption> : null}
           {foldersState === "degraded" || foldersState === "disconnected" ? (
             <Caption>Folder updates are behind -- showing the last known tree.</Caption>
