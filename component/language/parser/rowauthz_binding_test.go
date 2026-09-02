@@ -741,3 +741,81 @@ func TestFormatRowAuthzRejectsABypassWithNoOwner(t *testing.T) {
 		}
 	}
 }
+
+// The public tier's narrowing modifier (memql#4809).
+//
+// requiresIdentity is the first modifier in this grammar that NARROWS. Its
+// whole job is to let a concept say "no row-level distinction exists over
+// these rows" without also saying "serve them to the internet", so the two
+// halves are tested apart: that the flag parses and round-trips, and that
+// declining it leaves plain `public` exactly what it was.
+func TestParseRowAuthzPublicRequiresIdentity(t *testing.T) {
+	decl, err := ParseRowAuthz(rowAuthzAttr(t, `@rowAuthz(public, requiresIdentity)`))
+	if err != nil {
+		t.Fatalf("ParseRowAuthz(@rowAuthz(public, requiresIdentity)): %v", err)
+	}
+	if decl.Tier != RowAuthzPublic {
+		t.Errorf("tier = %q, want %q -- the modifier qualifies the public tier, it does not replace it", decl.Tier, RowAuthzPublic)
+	}
+	if !decl.RequiresIdentity {
+		t.Error("RequiresIdentity = false, so the narrowing was dropped and the concept would be served to anonymous callers")
+	}
+
+	// Plain public must be UNCHANGED by the modifier existing. If this
+	// flipped, every existing public declaration would silently stop being
+	// anonymously readable -- the opposite failure, and a silent one.
+	plain, err := ParseRowAuthz(rowAuthzAttr(t, `@rowAuthz(public)`))
+	if err != nil {
+		t.Fatalf("ParseRowAuthz(@rowAuthz(public)): %v", err)
+	}
+	if plain.RequiresIdentity {
+		t.Error("plain @rowAuthz(public) parsed as requiresIdentity -- the narrowing must be opt-in")
+	}
+}
+
+// The round trip, which is what the codemod's correctness rests on: anything
+// FormatRowAuthz can write, ParseRowAuthz must read back to the same decl.
+func TestRowAuthzRequiresIdentityRoundTrips(t *testing.T) {
+	rendered, err := FormatRowAuthz(RowAuthzDecl{Tier: RowAuthzPublic, RequiresIdentity: true})
+	if err != nil {
+		t.Fatalf("FormatRowAuthz: %v", err)
+	}
+	if rendered != `@rowAuthz(public, requiresIdentity)` {
+		t.Fatalf("FormatRowAuthz = %q, want @rowAuthz(public, requiresIdentity)", rendered)
+	}
+	back, err := ParseRowAuthz(rowAuthzAttr(t, rendered))
+	if err != nil {
+		t.Fatalf("ParseRowAuthz(%s): %v", rendered, err)
+	}
+	if back.Tier != RowAuthzPublic || !back.RequiresIdentity {
+		t.Errorf("round trip lost the declaration: got tier=%q requiresIdentity=%v", back.Tier, back.RequiresIdentity)
+	}
+}
+
+// Refusals. Each one is a shape that would otherwise be read back as a
+// DIFFERENT declaration than it was written as.
+func TestRowAuthzRequiresIdentityRefusals(t *testing.T) {
+	// Off-tier: the modifier means nothing beside an owner, and a renderer
+	// that dropped it silently would emit a decl that parses back wrong.
+	if _, err := FormatRowAuthz(RowAuthzDecl{Tier: RowAuthzOwned, Owner: "ownerUserId", RequiresIdentity: true}); err == nil {
+		t.Error("FormatRowAuthz accepted requiresIdentity on the owned tier -- it has no meaning there and must be refused, not dropped")
+	} else if !strings.Contains(err.Error(), "requiresIdentity") {
+		t.Errorf("refusal does not name the offending argument: %v", err)
+	}
+
+	// Valued rather than bare: a different shape, and not a spelling of
+	// anything -- the same rule every other flag modifier follows.
+	if _, err := ParseRowAuthz(rowAuthzAttr(t, `@rowAuthz(public, requiresIdentity="yes")`)); err == nil {
+		t.Error("ParseRowAuthz accepted a valued requiresIdentity")
+	}
+
+	// An unknown modifier is named, rather than answered with the full list
+	// of spellings at somebody one word away from a legal declaration.
+	_, err := ParseRowAuthz(rowAuthzAttr(t, `@rowAuthz(public, requiresIdenity)`))
+	if err == nil {
+		t.Fatal("ParseRowAuthz accepted a misspelled modifier on the public tier")
+	}
+	if !strings.Contains(err.Error(), "requiresIdentity") {
+		t.Errorf("the refusal does not offer the correct spelling: %v", err)
+	}
+}

@@ -51,15 +51,25 @@ query documentChunk documentChunksForDomain {
 /// concept declaration behind it. With this, a card can say the domain's name
 /// and render the account it is tagged with.
 ///
-/// NO ACTOR TERM, because the concept declares no row-authz tier -- see the
-/// concept for why that matches its sibling `documentChunk` rather than
-/// departing from it. A caller reads the cluster's catalog, which is the same
-/// catalog for everybody.
+/// NO ACTOR TERM, and now that is a declaration rather than an omission
+/// (memql#4809). The concept declares `@rowAuthz(public, requiresIdentity)`:
+/// its rows carry no row-level distinction to draw -- the catalog is the same
+/// population for every caller -- so there is no tier conjunct to AND in here
+/// and nothing for one to narrow.
+///
+/// @requiresRank("writer") IS THE AUTHORIZATION, and it is the surface half of
+/// the same ruling (D6). It mirrors the Training app's own manifest floor
+/// (`roles: { min: "writer" }`, clients/os/src/apps/registry.tsx), which until
+/// this landed was presentation pretending to be a gate -- the read itself
+/// admitted any authenticated caller. The mirror is deliberate and permanent:
+/// the manifest decides what a person is offered, this decides what the engine
+/// will answer, and neither stands in for the other.
 ///
 /// `active` is NOT filtered here. The seeder's own existence probe treats a
 /// missing key and true alike, and a surface that wants only live domains can
 /// fold on the field; a query that pre-filtered it would hide exactly the rows
 /// an operator asking "why is this domain not working" needs to see.
+@requiresRank("writer")
 query knowledgeDomain knowledgeDomainsAll {
   shape  knowledgeDomainFull
   sort   "name", "asc"

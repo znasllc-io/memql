@@ -62,14 +62,45 @@ concept documentChunk {
 // and that is a decision about the catalog, not about this epic's tag. The
 // asymmetry is recorded rather than tidied: the read is what was asked for.
 //
-// NO ROW-AUTHZ TIER, matching its sibling `documentChunk` in this same file
-// rather than departing from it. A knowledge domain is the cluster's shared
-// corpus index -- the same population for everybody, with no owner field to
-// scope to -- and giving it an owner tier would make every seeded catalog row
-// unreadable by every caller, since the seeder writes them as the system. That
-// is the standing residual the per-row-authz audit already records for this
-// namespace; this declaration inherits it rather than inventing a new answer.
+// THE TIER, AND THE QUESTION memql#4809 FILED RATHER THAN GUESSED AT.
+//
+// This concept has no row-level authorization axis, and that is a fact about
+// the catalog rather than a gap in the declaration. A knowledge domain is the
+// cluster's shared corpus index -- the same population for every caller, with
+// no owner field and nowhere to get one, since the seeder writes these rows as
+// the system. All three tiers the engine offered when this concept landed were
+// wrong in the same way: `owner=` has no field to name and no writer to stamp
+// one, `clusterOwner` hides the catalog from the writers the Training app is
+// for, and the composite needs the owner the first one does not have.
+//
+// So the answer is the fourth tier plus the narrowing memql#4809 asked the
+// gate to learn: `public` is the only tier that injects NO predicate, which is
+// the honest shape for rows that carry no distinction -- but plain `public`
+// also means "an anonymous stranger may read this", which is a much larger
+// claim than this catalog's author is making. `accountId` below ties a domain
+// to a CLIENT ACCOUNT, and the accounts epic gates every account read at
+// admin; publishing "this deployment trained a domain for account X" to the
+// internet is not a decision anybody made.
+//
+// `requiresIdentity` says the part `public` alone cannot: no row-level
+// distinction exists here, AND this is not an invitation to the internet. It
+// lands at exactly one site -- conceptDeclaresPublicTier, the single function
+// deciding anonymous reach -- and changes nothing else about the tier.
+//
+// WHERE THE AUTHORIZATION ACTUALLY LIVES: at the SURFACE. `knowledgeDomainsAll`
+// carries @requiresRank("writer") and `domainsForAccount` @requiresRank("admin"),
+// each mirroring the OS app manifest floor that until now was presentation
+// pretending to be a gate (D6: @requiresRank gates WHO MAY CALL; @rowAuthz
+// still decides WHICH ROWS come back -- and here the answer to the second
+// question is "all of them, to everyone who may ask").
+//
+// THIS RULING IS FOR THIS CONCEPT ONLY. The sibling `v1:knowledge:documentChunk`
+// stays undeclared: it holds corpus TEXT rather than a catalog entry, it is
+// per-domain scoped through documentChunk.domainId, and it has four
+// client-reachable mutations where this concept has none -- so its residual is
+// a WRITE question this read-side ruling does not touch.
 @displayCard(primary="name", secondary="category", tertiary="description", status="active")
+@rowAuthz(public, requiresIdentity)
 concept knowledgeDomain {
   name                 string!  @description("The domain's human name, e.g. 'Residential real estate'. What the Training app renders on a card instead of the raw id, once rows carry it.")
   description          string   @description("What the domain covers, in a sentence. Written by the catalog seeder from the standard-domain registration.")

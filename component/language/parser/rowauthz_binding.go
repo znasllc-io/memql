@@ -181,6 +181,43 @@ type RowAuthzDecl struct {
 	// ladder at LOAD, so a typo refuses boot rather than silently gating
 	// on rank 0 (which admits everyone).
 	Unowned string `json:"unowned,omitempty"`
+
+	// RequiresIdentity narrows the PUBLIC tier from "anybody at all,
+	// including a stranger who has not signed in" to "any authenticated
+	// caller of this cluster" -- `@rowAuthz(public, requiresIdentity)`
+	// (memql#4809).
+	//
+	// IT IS THE FIRST MODIFIER THAT NARROWS RATHER THAN WIDENS, and that
+	// is what it is for. Every other tier answers a question ABOUT THE ROW
+	// -- who owns it, which relationship reaches it, is the caller the
+	// cluster owner. Some concepts have no such question to answer: a
+	// seeded catalog is the same population for every caller, with no owner
+	// field and nowhere to get one. `public` is the only existing tier that
+	// injects no predicate, and so the only one that fits -- but `public`
+	// also means "an anonymous reader may have this", which is a different
+	// and much larger claim than the author of such a catalog is making.
+	//
+	// So the flag says the part `public` alone cannot: there is no row-level
+	// distinction to draw here, AND that is not an invitation to the
+	// internet. Authorization for such a concept lives at the SURFACE
+	// instead, where `@requiresRank` puts it (D6) -- which is the honest
+	// place for it, because "who may ask this question" is the only
+	// question a catalog row leaves open.
+	//
+	// A FLAG ON THE PUBLIC TIER rather than a fifth RowAuthzTier value, for
+	// exactly the reason ClusterOwnerBypass and RankVisible are flags: sites
+	// switch on `Tier == RowAuthzPublic` (rowauthz_write_guard.go,
+	// rowauthz_enforce.go, rowauthz_shadow.go, rowauthz_anonymous.go) and a
+	// new tier value would fall silently out of every one of them while
+	// looking like a tidy addition. The narrowing is purely SUBTRACTIVE and
+	// lands at ONE site -- conceptDeclaresPublicTier, the single function
+	// that decides anonymous reach -- and changes nothing else: the tier
+	// still injects no predicate, still stamps no owner, still guards no
+	// write.
+	//
+	// Set only for RowAuthzPublic. On any other tier it is meaningless and
+	// FormatRowAuthz refuses it rather than dropping it silently.
+	RequiresIdentity bool `json:"requiresIdentity,omitempty"`
 }
 
 // The declaration forms. The two parameterised tiers use the house
@@ -239,7 +276,7 @@ var rowAuthzKeywordTiers = map[string]RowAuthzTier{
 // rowAuthzSpellings renders the accepted forms for a diagnostic, in a
 // stable order.
 func rowAuthzSpellings() string {
-	return `@rowAuthz(public), @rowAuthz(clusterOwner), @rowAuthz(owner="<field>"), @rowAuthz(via="<spec>"), @rowAuthz(owner="<field>", clusterOwner), @rowAuthz(owner="<field>", rankVisible[, rankStrict][, unowned="<role>"][, clusterOwner])`
+	return `@rowAuthz(public), @rowAuthz(public, requiresIdentity), @rowAuthz(clusterOwner), @rowAuthz(owner="<field>"), @rowAuthz(via="<spec>"), @rowAuthz(owner="<field>", clusterOwner), @rowAuthz(owner="<field>", rankVisible[, rankStrict][, unowned="<role>"][, clusterOwner])`
 }
 
 // rowAuthzOwnedModifiers is THE set of arguments that may accompany an
@@ -273,6 +310,84 @@ const (
 	rowAuthzArgRankStrict  = "rankStrict"
 	rowAuthzArgUnowned     = "unowned"
 )
+
+// rowAuthzArgRequiresIdentity is the flag spelling that, BESIDE the bare
+// `public` flag, narrows the public tier to authenticated callers
+// (memql#4809). A constant for the reason its siblings are: the parser,
+// the formatter and the modifier table all have to agree on the spelling.
+const rowAuthzArgRequiresIdentity = "requiresIdentity"
+
+// rowAuthzPublicModifiers is THE set of arguments that may accompany the
+// bare `public` flag. One entry today, and the map exists rather than an
+// `if` for the same reason its owned sibling does: the next modifier is a
+// line here plus a branch in the formatter, not a new parse shape.
+//
+// The VALUE says whether the argument is a bare flag, exactly as in
+// rowAuthzOwnedModifiers -- `requiresIdentity="yes"` is a different shape
+// and is not a spelling of anything.
+var rowAuthzPublicModifiers = map[string]bool{
+	rowAuthzArgRequiresIdentity: true,
+}
+
+// parseRowAuthzPublicModifiers reads the public tier carrying its one
+// narrowing modifier:
+//
+//	@rowAuthz(public, requiresIdentity)                       memql#4809
+//
+// The SECOND accepted multi-argument list, and the rule its owned sibling
+// states is unchanged by it: every accepted shape names ONE tier plus
+// arguments that qualify it. Two TIERS in one list is still an ambiguous
+// declaration this parser must never resolve by picking a side -- which is
+// why `public` is required to be present and bare here, rather than the
+// modifier being accepted on its own.
+//
+// Returns (nil, "", false) when the args are not that shape, so the caller
+// falls through to its shared diagnostic; (nil, reason, false) when the
+// shape IS public-with-modifiers and one argument is wrong.
+func parseRowAuthzPublicModifiers(args map[string]any) (*RowAuthzDecl, string, bool) {
+	raw, hasPublic := args["public"]
+	if !hasPublic {
+		return nil, "", false
+	}
+	if b, isBool := raw.(bool); !isBool || !b {
+		return nil, fmt.Sprintf("@%s(public) takes no value -- write @%s(public, %s)",
+			RowAuthzAnnotation, RowAuthzAnnotation, rowAuthzArgRequiresIdentity), false
+	}
+	decl := &RowAuthzDecl{Tier: RowAuthzPublic}
+	for name, value := range args {
+		if name == "public" {
+			continue
+		}
+		// A SECOND TIER is not an unknown modifier, and must not be
+		// reported as one. `@rowAuthz(public, clusterOwner)` and
+		// `@rowAuthz(owner="x", public)` are ambiguous DECLARATIONS -- two
+		// floors in one list -- and the parser's standing rule is that it
+		// never resolves that by picking a side. Declining the shape here
+		// (rather than refusing it) is what routes them to the shared
+		// "takes exactly one tier" diagnostic, which is the sentence that
+		// actually describes what is wrong with them.
+		if _, isFlagTier := rowAuthzFlagTiers[name]; isFlagTier {
+			return nil, "", false
+		}
+		if _, isKeywordTier := rowAuthzKeywordTiers[name]; isKeywordTier {
+			return nil, "", false
+		}
+		bare, known := rowAuthzPublicModifiers[name]
+		if !known {
+			return nil, fmt.Sprintf("@%s(public, %s) is not a declaration this parser reads -- the public tier takes %s and nothing else",
+				RowAuthzAnnotation, name, rowAuthzArgRequiresIdentity), false
+		}
+		b, isBool := value.(bool)
+		if bare && (!isBool || !b) {
+			return nil, fmt.Sprintf("@%s(public, %s) takes no value -- write it bare",
+				RowAuthzAnnotation, name), false
+		}
+		if name == rowAuthzArgRequiresIdentity {
+			decl.RequiresIdentity = true
+		}
+	}
+	return decl, "", true
+}
 
 // parseRowAuthzOwnedModifiers reads the owned tier carrying one or more
 // widening modifiers:
@@ -408,6 +523,17 @@ func ParseRowAuthz(attr *Attribute) (*RowAuthzDecl, error) {
 		if ok {
 			return decl, nil
 		}
+		// The second legal multi-argument list: the PUBLIC tier carrying
+		// its narrowing modifier (memql#4809). Tried after the owned one
+		// because the owned shapes are the overwhelming majority and this
+		// keeps their diagnostics first; the two are disjoint (one needs
+		// `owner=`, the other needs `public`), so the order is a matter of
+		// which refusal an author sees, never of which decl they get.
+		if publicDecl, publicRefusal, publicOk := parseRowAuthzPublicModifiers(attr.Args); publicOk {
+			return publicDecl, nil
+		} else if publicRefusal != "" {
+			return nil, fmt.Errorf("%s", publicRefusal)
+		}
 		// A refusal means the shape WAS owned-with-modifiers and one
 		// argument is wrong. Saying which beats listing every accepted
 		// form at an author who is one word away from a legal
@@ -517,6 +643,13 @@ func FormatRowAuthz(d RowAuthzDecl) (string, error) {
 				RowAuthzAnnotation, m.name, d.Tier)
 		}
 	}
+	// RequiresIdentity narrows the PUBLIC tier and means nothing on any
+	// other, and is refused rather than dropped for the same round-trip
+	// reason its widening siblings are.
+	if d.RequiresIdentity && d.Tier != RowAuthzPublic {
+		return "", fmt.Errorf("@%s: %s is an argument of the public tier -- it has no meaning on tier %q",
+			RowAuthzAnnotation, rowAuthzArgRequiresIdentity, d.Tier)
+	}
 	if d.RankStrict && !d.RankVisible {
 		return "", fmt.Errorf("@%s: %s without %s is not a declaration this parser reads back -- see ParseRowAuthz",
 			RowAuthzAnnotation, rowAuthzArgRankStrict, rowAuthzArgRankVisible)
@@ -526,7 +659,12 @@ func FormatRowAuthz(d RowAuthzDecl) (string, error) {
 			RowAuthzAnnotation, rowAuthzArgUnowned, rowAuthzArgRankVisible)
 	}
 	switch d.Tier {
-	case RowAuthzPublic, RowAuthzClusterOwner:
+	case RowAuthzPublic:
+		if d.RequiresIdentity {
+			return fmt.Sprintf("@%s(%s, %s)", RowAuthzAnnotation, d.Tier, rowAuthzArgRequiresIdentity), nil
+		}
+		return fmt.Sprintf("@%s(%s)", RowAuthzAnnotation, d.Tier), nil
+	case RowAuthzClusterOwner:
 		return fmt.Sprintf("@%s(%s)", RowAuthzAnnotation, d.Tier), nil
 	case RowAuthzOwned:
 		if strings.TrimSpace(d.Owner) == "" {

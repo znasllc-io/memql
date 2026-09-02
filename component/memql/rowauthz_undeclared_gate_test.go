@@ -376,20 +376,13 @@ const undeclared4270InvitationReason = "memql#4270 -- owner/admin console read; 
 // NEW. This population only shrinks, and an entry added after the seed has to
 // say why it is here rather than inheriting a reason that means "nobody has
 // looked at this one yet".
-// memql#4809. The knowledge-domain catalog gained a declaration in epic
-// memql#4800 -- the concept had rows and no .memql anywhere in the tree, which
-// is why the Training app labels a domain card by its raw id -- and the
-// declaration deliberately carries no tier. None of the three the engine offers
-// fits: there is no owner field and nowhere to get one (the catalog seeder
-// writes these rows as the system), clusterOwner would hide the catalog from
-// the writers Training is for, and the composite needs the owner the first
-// bullet does not have. The declaration therefore inherits the residual its
-// sibling v1:knowledge:documentChunk already sits on, and memql#4809 is that
-// question filed rather than guessed at.
-//
-// These two carry their OWN issue rather than the grandfather marker, because
-// they are not grandfathered -- they were added with the declaration.
-const undeclared4809KnowledgeDomainReason = "memql#4809 -- the knowledge-domain catalog declared in epic memql#4800; no tier the engine offers fits an ownerless, system-seeded shared catalog, and the concept inherits documentChunk's standing residual until that question is answered"
+// memql#4809 IS PAID, and the two entries that stood here are gone with it.
+// v1:knowledge:knowledgeDomain now declares `@rowAuthz(public, requiresIdentity)`
+// -- the catalog has no row-level distinction to draw, and its authorization
+// moved to the surface as @requiresRank on both reads. This paragraph survives
+// its entries deliberately: the ratchet's whole point is that the list only
+// shrinks, and a shrink with no record of what was decided reads, a year later,
+// exactly like an entry somebody quietly deleted.
 
 // epic memql#4800. The guest-invitation rollup on the Accounts detail view.
 // Same concept and same posture as pendingUserInvitations directly below: the
@@ -819,10 +812,6 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"invitationsForAccount":         {"v1:identity:invitation", undeclared4800InvitationRollupReason},
 	"pendingUserInvitations":        {"v1:identity:invitation", undeclared4270InvitationReason},
 	"userInvitationByTokenHash":     {"v1:identity:invitation", undeclared4612UserInvitationReason},
-
-	// v1:knowledge:knowledgeDomain
-	"domainsForAccount":   {"v1:knowledge:knowledgeDomain", undeclared4809KnowledgeDomainReason},
-	"knowledgeDomainsAll": {"v1:knowledge:knowledgeDomain", undeclared4809KnowledgeDomainReason},
 
 	// v1:identity:magicLinkRequest
 	"expiredMagicLinkRequests":    {"v1:identity:magicLinkRequest", undeclaredGrandfatherReason},

@@ -94,15 +94,32 @@ func anonymousAdmission(ctx context.Context, conceptName string) (admitted bool,
 }
 
 // conceptDeclaresPublicTier reports whether the concept declares
-// @rowAuthz(public).
+// @rowAuthz(public) WITHOUT the requiresIdentity narrowing.
 //
 // A concept the registry cannot produce answers FALSE. That is the opposite
 // of the undeclared default and it is deliberate: reach comes from a
 // declaration, and a concept nothing can resolve has made none. For every
 // other caller an unresolvable concept still takes the ordinary path.
+//
+// THIS IS THE ONE SITE requiresIdentity CHANGES (memql#4809), and the whole
+// reason it is a flag on the tier rather than a fifth tier. A concept
+// declaring `@rowAuthz(public, requiresIdentity)` is saying two things at
+// once: there is no row-level distinction to draw over these rows -- so the
+// tier injects no predicate, stamps no owner and guards no write, exactly as
+// plain public does everywhere else in this package -- AND that is not an
+// invitation to the internet. A seeded catalog is the shape: the same
+// population for every caller, with no owner field and nowhere to get one,
+// but its contents are still the deployment's business rather than the
+// world's. Authorization for such a concept lives at the SURFACE, where
+// @requiresRank puts it.
+//
+// So the narrowing lands HERE, at the single function that decides anonymous
+// reach, and nowhere else. An anonymous caller is refused a requiresIdentity
+// concept exactly as they are refused an undeclared one; every authenticated
+// caller sees no difference from plain public at all.
 func conceptDeclaresPublicTier(conceptName string) bool {
 	decl := rowAuthzDeclFor(strings.TrimSpace(conceptName))
-	return decl != nil && decl.Tier == langparser.RowAuthzPublic
+	return decl != nil && decl.Tier == langparser.RowAuthzPublic && !decl.RequiresIdentity
 }
 
 // refuseNonPublicReadForAnonymous refuses a read an anonymous caller is not
