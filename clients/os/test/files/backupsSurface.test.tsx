@@ -216,3 +216,51 @@ describe("a refusal", () => {
     expect(screen.getByText(/is not one of your machines/)).toBeTruthy();
   });
 });
+
+describe("editing", () => {
+  it("does not carry one backup's settings into another when Edit moves between rows", async () => {
+    // The bug this pins: with no `key` on the form, React reconciles the same
+    // instance at the same position when `editing` flips, its useState
+    // initialisers do not re-run, and Save writes the FIRST backup's
+    // destination and exclusions onto the second -- silently, because the
+    // update is a full replace of exactly those fields.
+    const connection = fakeConnection({
+      backups: [
+        watchedFolderRow({ id: "w-1", localPath: "/a", folderId: "f-1", excludeGlobs: ["*.tmp"] }),
+        watchedFolderRow({ id: "w-2", localPath: "/b", folderId: "", excludeGlobs: [] }),
+      ],
+      folders: [folderRow({ id: "f-1", name: "Clients" })],
+      machines: [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"] } as never],
+    });
+    h.connection = connection;
+    await renderFiles({ section: "backups" });
+
+    await click(screen.getByRole("button", { name: "Edit the backup of /a" }));
+    await click(screen.getByRole("button", { name: "Edit the backup of /b" }));
+
+    // The form is now the SECOND backup's, so it shows that row's empty
+    // exclusions rather than the first row's "*.tmp".
+    const skip = screen.getByLabelText("Also skip") as HTMLInputElement;
+    expect(skip.value).toBe("");
+    // ...and its destination is the root, not Clients.
+    const dest = screen.getByLabelText("Where it lands") as HTMLSelectElement;
+    expect(dest.value).toBe("");
+  });
+
+  it("seeds the form from the row being edited", async () => {
+    // The reachable positive for the test above: when Edit opens on a row that
+    // DOES carry settings, they are there. Without this half, a form that
+    // rendered blank always would pass the first test and be broken.
+    const connection = fakeConnection({
+      backups: [watchedFolderRow({ id: "w-1", localPath: "/a", folderId: "f-1", excludeGlobs: ["*.tmp"] })],
+      folders: [folderRow({ id: "f-1", name: "Clients" })],
+      machines: [{ id: "wkr-1", name: "laptop", capabilities: ["HEADLESS"] } as never],
+    });
+    h.connection = connection;
+    await renderFiles({ section: "backups" });
+
+    await click(screen.getByRole("button", { name: "Edit the backup of /a" }));
+    expect((screen.getByLabelText("Also skip") as HTMLInputElement).value).toBe("*.tmp");
+    expect((screen.getByLabelText("Where it lands") as HTMLSelectElement).value).toBe("f-1");
+  });
+});

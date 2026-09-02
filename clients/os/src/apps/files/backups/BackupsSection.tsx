@@ -144,7 +144,15 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
       ) : null}
 
       {editing !== null ? (
+        // KEYED ON THE ROW, so switching Edit from one backup to another
+        // REMOUNTS the form. Without it React reconciles the same instance at
+        // the same position, its useState initialisers do not re-run, and the
+        // fields still hold the previous backup's values -- while the caption
+        // above them names the new one. Saving then wrote A's destination and
+        // A's exclusions onto B, silently, because this mutation is a full
+        // replace of exactly those fields.
         <BackupForm
+          key={editing.id}
           machines={machineList}
           folders={folderRows}
           now={now}
