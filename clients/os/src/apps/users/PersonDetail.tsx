@@ -13,7 +13,8 @@ import {
   formatFreshness,
   formatMoment,
   roleAdmits,
-  ROLE_LADDER,
+  roleGrantSlug,
+  roleLadder,
 } from "../../kit";
 import { useOsConnection } from "../../live/connection";
 import type { UsersActions } from "./actions";
@@ -36,8 +37,22 @@ import { useSessionsCount } from "./useSessions";
 // Every write below then hands its own result back into `local`, because the
 // same missing broadcast means an accepted write produces no event either.
 
-/** Roles an operator may grant, weakest first. */
-const GRANTABLE_ROLES = ROLE_LADDER;
+/**
+ * Roles an operator may grant, weakest first -- read from the CLUSTER's
+ * ladder rather than a literal (epic memql#4832, D1).
+ *
+ * The list used to be a five-item array in the shell whose ORDER disagreed
+ * with the engine's. Reading it here means a cluster that defines a custom
+ * role offers it in this picker with no client release, and that the order
+ * the options appear in is the order the engine ranks them.
+ */
+function grantableRoles(): string[] {
+  // roleGrantSlug, not rung.slug: the catalog's vocabulary and a user row's
+  // are different sets, and setUserRole validates against the second. Offering
+  // `viewer` is a write the engine refuses, and dropping `reader` means the
+  // current role of every ordinary principal matches no option.
+  return roleLadder().map(roleGrantSlug);
+}
 
 export function PersonDetail({
   person,
@@ -152,7 +167,7 @@ export function PersonDetail({
           value={local.role || "reader"}
           onChange={(next) => void applyRole(next)}
         >
-          {GRANTABLE_ROLES.map((role) => (
+          {grantableRoles().map((role) => (
             <option
               key={role}
               value={role}

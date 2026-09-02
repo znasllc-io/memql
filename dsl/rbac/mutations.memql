@@ -34,9 +34,16 @@ mutate role createRole {
     description  string
     predefined   bool
     active       bool
+    /// Other slugs that resolve to THIS rung. Accepted because the seed
+    /// materializer writes base roles through this mutation, and a field the
+    /// mutation does not accept is a field the seed silently drops -- which is
+    /// exactly what happened to `aliases` on its first attempt: every seeded
+    /// row landed with it null, the engine kept working through its compiled
+    /// fallback, and MemQL OS could not rank `writer` or `reader` at all.
+    aliases      []string
   }
   insert {
-    accept { slug, name, rank, description }
+    accept { slug, name, rank, description, aliases }
     stamp {
       id: args.roleId ?? args.slug
       predefined: args.predefined ?? false

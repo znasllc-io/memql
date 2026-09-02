@@ -119,6 +119,20 @@ func TestAgentRoleTierIsPromptAdvisoryOnly(t *testing.T) {
 		// read agentRole.tier, so dsl/agents/concepts.memql's "advisory,
 		// nothing branches on it" description stays true.
 		"rowauthz_anonymous.go": true,
+		// rowauthz_nonprincipal_owner.go joined in memql#4817 / epic
+		// memql#4832, which made "a non-principal cannot own a row" real
+		// rather than a claim three files reasoned from. Its one read is
+		// `decl.Tier != langparser.RowAuthzOwned` -- the tier a CONCEPT
+		// declares about who may see its rows, checked at the point of
+		// adding it, exactly like the five above. It does not read
+		// agentRole.tier.
+		"rowauthz_nonprincipal_owner.go": true,
+		// rowauthz_rank.go and requires_rank.go joined in the same epic and
+		// read the same surface for the same reason: the rank modifiers are
+		// ARGUMENTS of the rowAuthz owned tier, so every branch on them is a
+		// branch on RowAuthzDecl, never on agentRole.tier.
+		"rowauthz_rank.go": true,
+		"requires_rank.go": true,
 	}
 
 	var unknown []string

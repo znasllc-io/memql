@@ -38,6 +38,13 @@ export const DEPLOYABLES_SECTIONS: OsAppSection[] = [
   // decides how far the list reaches. Only the WRITE controls inside it are
   // gated, exactly as the Sites section gates publishing (epic memql#4794).
   { id: "packages", name: "Packages" },
+  // THE FLIP FIXES THIS ONE (epic memql#4832, D1). Under the shell's old
+  // ordering `min: "admin"` meant {admin, owner} and excluded DEVELOPER --
+  // the tier the engine's own deploy gate is built around
+  // (`requiresDeveloperOrAbove`, and auth.AtLeastDeveloper, both of which are
+  // {owner, developer, admin}). The launcher was hiding deploy actions from
+  // the deploy tier. Under the one ladder the same line means rank >= 200,
+  // which is exactly that set.
   { id: "actions", name: "Actions", roles: { min: "admin" } },
   { id: "settings", name: "Settings" },
 ];

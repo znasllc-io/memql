@@ -103,13 +103,61 @@ import (
 // conflating the two makes the gate spoofable by anyone who can obtain
 // that role.
 func rowAuthzWriteEscape(ctx context.Context) (string, bool) {
+	return rowAuthzWriteEscapeFor(ctx, nil)
+}
+
+// rowAuthzWriteEscapeFor is the escape set as it applies to ONE
+// declaration. It is the same two escapes, with one documented
+// subtraction (epic memql#4832, D3).
+//
+// RANK-STRICT WITHDRAWS THE CLUSTER-OWNER ESCAPE, AND THAT IS THE WHOLE
+// OF D3'S SHARP EDGE. "Peer rows are read-only INCLUDING owner-to-owner"
+// cannot be true while a blanket cluster-owner escape is the first thing
+// this guard consults: the escape returns before any owner is resolved,
+// so an owner would keep writing every other owner's rows and the
+// declaration would be decorative. So on a concept declaring rankStrict
+// the escape defers, and rowAuthzAdmitsWrite decides -- which still
+// admits a cluster owner over every rung BELOW them (a reader's row, an
+// admin's row) and refuses only the peer case the decision names.
+//
+// TWO THINGS ARE DELIBERATELY NOT WITHDRAWN.
+//
+//   - INTERNAL ORIGIN. It is trusted server-side Go, stamped per write,
+//     and it is not a principal acting -- the rank rules govern
+//     principals (D4). Withdrawing it would stop the engine's own
+//     maintenance writes on any concept that opted in.
+//   - AN UNRANKED ACTOR (D4). MaintenanceActor and the seed materializer
+//     carry RoleOwner precisely so this escape admits them; they hold no
+//     rung, so "a peer owner" is not a thing either of them can be.
+//     WITHOUT THIS CLAUSE EVERY RETENTION SWEEP AND BOOT SEED ON A
+//     RANK-STRICT CONCEPT BECOMES A PEER-WRITE AND STOPS -- and a sweep
+//     that retires nothing looks exactly like a sweep with nothing to
+//     retire.
+func rowAuthzWriteEscapeFor(ctx context.Context, decl *langparser.RowAuthzDecl) (string, bool) {
 	if auth.OriginFromContext(ctx).IsInternal() {
 		return "internal origin (trusted server-side Go, stamped for this write)", true
 	}
-	if rowAuthzIsClusterOwner(ctx) {
-		return "cluster owner", true
+	if !rowAuthzIsClusterOwner(ctx) {
+		return "", false
 	}
-	return "", false
+	if decl != nil && decl.RankStrict && !rowAuthzActorIsUnranked(ctx) {
+		// Defer to the rank rule rather than escaping. A cluster owner
+		// keeps every write over a LOWER rung; only the peer case is
+		// refused, and ownership transfer (memql#4838) is how a peer's
+		// rows become writable.
+		return "", false
+	}
+	return "cluster owner", true
+}
+
+// rowAuthzActorIsUnranked reads D4's explicit flag. It is a FLAG and not
+// a role or id-prefix check for the reason call_origin.go states: a role
+// is a database fact about a user row, and inferring an authorization
+// decision from the shape of an id string is how a value somebody can
+// influence becomes a permission.
+func rowAuthzActorIsUnranked(ctx context.Context) bool {
+	ac, _ := auth.AccessFromContext(ctx)
+	return ac != nil && ac.Unranked
 }
 
 // guardRowAuthzWrite refuses a write onto an existing row the caller
@@ -144,7 +192,7 @@ func guardRowAuthzWrite(ctx context.Context, conceptName, id string, prior map[s
 		return nil
 	}
 
-	if _, escaped := rowAuthzWriteEscape(ctx); escaped {
+	if _, escaped := rowAuthzWriteEscapeFor(ctx, decl); escaped {
 		return nil
 	}
 
@@ -184,7 +232,7 @@ func guardRowAuthzWrite(ctx context.Context, conceptName, id string, prior map[s
 
 	// ONE rule for "who owns this row", shared with the read path's row
 	// gate. See the anti-drift note at the top of this file.
-	switch rowAuthzAdmits(ctx, conceptName, id, payload) {
+	switch rowAuthzAdmitsWrite(ctx, conceptName, id, payload) {
 	case rowAuthzAdmit:
 		return nil
 

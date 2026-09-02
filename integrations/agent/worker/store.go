@@ -690,5 +690,12 @@ func systemFleetContext(ctx context.Context) context.Context {
 	claims := map[string]any{"sub": systemFleetActor, "role": "owner"}
 	ctx = auth.ContextWithClaims(ctx, claims)
 	ctx = auth.ContextWithToken(ctx, auth.BuildTokenInfo(claims))
-	return auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: systemFleetActor, Role: auth.RoleOwner})
+	// Unranked + Synthetic (epic memql#4832, D4): the fleet store acting as
+	// the cluster, not as a person. RoleOwner is what buys it the
+	// cluster-owner escape; it is not a claim to rank 400, and without the
+	// flags a rank-strict concept would read this as an owner writing a PEER
+	// owner's row and refuse the sweep.
+	return auth.ContextWithAccess(ctx, &auth.AccessContext{
+		UserId: systemFleetActor, Role: auth.RoleOwner, Unranked: true, Synthetic: true,
+	})
 }

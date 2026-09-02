@@ -591,6 +591,21 @@ export function OsProvider({
         set((s) => {
           const manifest = widgetById(registry, widgetId);
           if (!manifest) return s;
+          // THE ROLE GATE, which this action did not have (found while
+          // re-reading every requirement for epic memql#4832, D1).
+          //
+          // `openApp` above checks `canOpen`; this did not, so a widget
+          // carrying `roles` was addable from the DESK CONTEXT MENU by any
+          // role -- the launcher's Widgets tab filters through
+          // widgetsForRole, and the desk menu offered the unfiltered list.
+          // Inert today because the one shipped widget (Ask) declares no
+          // role, which is exactly why it went unnoticed: the first gated
+          // widget would have shipped the hole with it.
+          //
+          // Checked HERE rather than only in the menu for the reason openApp
+          // is: the menu is one caller, and an action that trusts its callers
+          // is an action whose next caller does not know it had to.
+          if (!roleAdmits(actorRoleRef.current, manifest.roles)) return s;
           const deskId = s.shell.activeDeskId;
           const surface = surfaceOf(s, deskId);
           const already = Object.values(surface.items).some(

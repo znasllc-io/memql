@@ -2,7 +2,10 @@
 
 - **Date:** 2026-09-01
 - **Status:** approved (in-session Q&A with the owner; every fork below records
-  the choice that was made and why)
+  the choice that was made and why). **DELIVERED** -- memql#4833, #4834, #4836,
+  #4837, #4838 and the ordering dependency #4817, in one PR. Both open items in
+  section F were settled in implementation and the settlements are recorded
+  there.
 - **Scope:** the cluster's authorization FOUNDATION, not one app. One
   engine-authoritative role ladder consumed by both the engine and MemQL OS;
   two new `@rowAuthz` visibility rules (rank-visible reads, rank-strict
@@ -188,12 +191,59 @@ themselves declare.
 - D4 gets a case per non-principal actor class, because its failure mode is a
   retention sweep that silently retires nothing.
 
-## F. Open decisions
+## F. Open decisions -- BOTH SETTLED IN IMPLEMENTATION
 
-| # | Question | Why it is open |
+| # | Question | Settled as |
 |---|---|---|
-| O1 | Ownership transfer | D3 makes an offboarded owner's rows permanently unwritable. Transfer is the right answer; its surface (who may invoke it, what it audits, whether it is per-row or per-user) is undesigned |
-| O2 | Where a capability requirement is declared on a construct | An annotation on the query/mutation, or a spec conjunct like the existing `requiresOwnerOrAdmin`. The spec form works today and needs no engine change; the annotation form is checkable at load |
+| O1 | Ownership transfer | **A cluster-owner action, per-user AND per-row, audited on `v1:identity:auditEvent` under a new `rowOwnership` targetType.** Cluster owner because "a rank above both parties" has no answer when both are owners -- the case that motivates the feature. Both scopes because the issue names them as different jobs: offboarding is per-user, a single stuck row is not. Refused when the destination does not exist or is deactivated, because transferring into a void recreates the problem silently -- the rows stay unwritable with an audit trail saying they were handed over. Cluster-owned rows are SKIPPED (the `self` account has no meaningful second owner) and self-owned tiers are excluded entirely (their "owner field" is the row's own id, so a transfer would rename the row). `integrations/identity/ownership_transfer.go` |
+| O2 | Where a capability requirement is declared on a construct | **An annotation: `@requiresRank("<role>")`.** The spec form works today and was rejected for one reason -- `dslgate.AdminGateRe` recognises gates BY NAME, so every new spec is a new regex entry and a chance to ship a silent gate. That has already happened twice: `forgeDeveloper` and `forgeApprover` were live authorization conjuncts in production filters the composition rule had never once run on, and they were correctly written by luck rather than as a checked property. The annotation is validated at LOAD, so a typo refuses boot instead of ranking 0 and admitting everyone. `component/memql/requires_rank.go` |
+
+### What implementation changed about the design
+
+Three things were decided at the keyboard and are recorded here because the
+text above does not imply them.
+
+- **The rank rules are FLAGS on the owned tier, not new tiers**
+  (`rankVisible`, `rankStrict`, `unowned="<role>"`). Same reasoning
+  `ClusterOwnerBypass` carries: four sites switch on `Tier == RowAuthzOwned`,
+  and a new tier value falls silently out of all four. `rankStrict` requires
+  `rankVisible`, because a write rule with no matching read rule grants the
+  authority to change a row the same caller cannot see.
+- **`unowned="<role>"` was needed and is not in the design above.** D2 alone
+  does not deliver memql#4837: an unowned row belongs to the DEPLOYMENT and has
+  no owner's rank to compare, so the rank branch refuses it and the self
+  account stays cluster-owner-only. The floor says what such a row is worth.
+  An unresolvable floor DENIES -- the natural spelling
+  (`actorRank >= rankOf(slug)`) reads correctly and fails OPEN, because every
+  rank clears 0.
+- **`rankStrict` withdraws the cluster-owner WRITE escape**, which section B.3
+  implies without saying. "Peer rows are read-only including owner-to-owner"
+  cannot be true while a blanket escape returns before any owner is resolved.
+  Internal origin and unranked actors keep it (D4).
+
+## F.1 Residuals, recorded rather than closed
+
+Two things an adversarial review surfaced that are LATENT today and become
+actionable the moment a concept declares `rankStrict`. **No concept does**, so
+neither is reachable; both are written down because "nobody declared it yet" is
+a fact about the tree, not a property of the code.
+
+- **D4's flag set is not complete.** `Unranked` / `Synthetic` are set by the
+  four documented constructors plus the campaigns drain worker and the fleet
+  store (the two other synthetic actors carrying `RoleOwner`). Roughly ten more
+  synthetic-actor constructors exist across `component/edge`, `component/mcp`,
+  `component/harness`, `component/datasync`, `integrations/customdomain`,
+  `integrations/planner` and `app/`, and they set neither flag. Under a
+  `rankStrict` concept the `RoleOwner` ones would become peer-writes and their
+  sweeps would stop silently -- the exact failure D4 exists to prevent. The
+  first concept to declare `rankStrict` has to sweep that set; a gate that
+  enumerates synthetic constructors would be the durable answer.
+- **Two readers of `v1:rbac:role` disagree about case.**
+  `lookupRoleRankBySlug` matches with `strings.EqualFold`; `roleLadder.rankOf`
+  is deliberately case-sensitive, matching the shell (whose own test pins
+  `"Owner"` as unrankable). Every slug in play is lowercase cluster data, so
+  the two never diverge in practice -- but they are two answers to one
+  question, which is the shape this epic exists to remove.
 
 ## G. Out of scope, and neighbors
 

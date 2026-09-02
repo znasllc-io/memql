@@ -900,6 +900,21 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		return nil, err
 	}
 
+	// SURFACE AUTHORIZATION (epic memql#4832, D6). Every construct this
+	// read expanded that declares an actor-rank floor is checked against
+	// the live caller, HERE rather than at expansion, because the plan is
+	// cached and shared and "this caller cleared the floor" is not a
+	// property of a plan.
+	//
+	// It refuses the READ outright rather than narrowing it. A floor is a
+	// statement about who may call, not about which rows come back -- and
+	// an empty result would be indistinguishable from "there is nothing
+	// here", which is exactly the answer a caller who may not reach the
+	// surface should not be handed.
+	if err := e.refusePlanBelowRequiredRank(ctx, plan); err != nil {
+		return nil, err
+	}
+
 	// ANONYMOUS READS (epic memql#4541, D4). The row gate is what makes the
 	// public tier correct -- it denies every row a non-public read could
 	// return, including the undeclared concepts that admit everyone else.
@@ -922,6 +937,16 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// means by it: one field, read at one seam, rather than two places
 	// re-deriving boundness and drifting.
 	ctx = contextWithRowAuthzBinding(ctx, plan.BoundConcept)
+
+	// One rank resolution for this whole read (epic memql#4832, D2).
+	//
+	// Stamped at the same seam and for the same reason as the binding
+	// above: the rank rules have a pushed-down half and a per-row half,
+	// and they must answer from ONE resolution or a paginated read drops
+	// rows its own WHERE clause selected -- which the cursor logic reads
+	// as exhaustion. Installing the memo here, above both, is what makes
+	// that structural instead of conventional.
+	ctx = contextWithRankScopeMemo(ctx, e)
 
 	effectiveTimestamp := plan.Timestamp
 
@@ -1128,6 +1153,21 @@ func (e *MemQLEngine) planCacheSignature(ctx context.Context, plan *QueryPlan) s
 	if scope := e.stagedScopeFor(ctx); !scope.IsEmpty() {
 		signature = "stagedScope:" + scope.signature() + "\x1f" + signature
 	}
+	// A RANK TERM NEEDS MORE THAN THE ACTOR IN THE KEY (epic memql#4832).
+	//
+	// Every other caller-dependent term above is a fact about WHO is
+	// asking, so keying on the actor identifies the answer. A rank term is
+	// not: it is a fact about everybody ELSE's roles. Promoting a
+	// colleague changes what this actor may see WITHOUT changing who this
+	// actor is, so an actor-only key would serve the pre-promotion answer
+	// for the rest of the TTL -- stale in the direction of showing too
+	// much, which is the one direction this must never be stale in.
+	//
+	// Appended only when the plan actually carries a rank term, so every
+	// other read's key is byte-identical to what it was before.
+	if treeHasRankScope(plan.Root) {
+		signature = "rank:" + e.rankScopeFor(ctx).fingerprint + "\x1f" + signature
+	}
 	return signature
 }
 
@@ -1227,6 +1267,13 @@ func (e *MemQLEngine) executeLogicFunctionCall(ctx context.Context, call *Functi
 	if fn.ServerOnly && !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, fmt.Errorf("function %q is server-only and cannot be called by a client", call.Name)
 	}
+	// The actor-rank floor (epic memql#4832, D6). Repeated at each entry
+	// point for the reason @serverOnly is: mutations and logic dispatch
+	// here rather than through the query expansion path, so a single check
+	// in one of the three would leave the other two open.
+	if err := e.refuseBelowRequiredRank(ctx, fn, call.Name); err != nil {
+		return nil, err
+	}
 	if fn.LogicSteps == nil {
 		return nil, fmt.Errorf("function %q has no multi-step body (LogicSteps unset)", call.Name)
 	}
@@ -1282,6 +1329,13 @@ func (e *MemQLEngine) executeMutationFunctionCall(ctx context.Context, call *Fun
 	// check in one of the three would leave the other two open.
 	if fn.ServerOnly && !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, fmt.Errorf("function %q is server-only and cannot be called by a client", call.Name)
+	}
+	// The actor-rank floor (epic memql#4832, D6). Repeated at each entry
+	// point for the reason @serverOnly is: mutations and logic dispatch
+	// here rather than through the query expansion path, so a single check
+	// in one of the three would leave the other two open.
+	if err := e.refuseBelowRequiredRank(ctx, fn, call.Name); err != nil {
+		return nil, err
 	}
 	if fn.MutationTemplate == nil {
 		return nil, fmt.Errorf("function %q has no mutation template", call.Name)

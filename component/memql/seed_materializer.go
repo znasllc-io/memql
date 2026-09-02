@@ -125,6 +125,13 @@ func systemActorContext(ctx context.Context) context.Context {
 	return auth.ContextWithAccess(ctx, &auth.AccessContext{
 		UserId: seedMaterializerActor,
 		Role:   auth.RoleOwner,
+		// D4 (epic memql#4832): the seed materializer holds no rung on the
+		// role ladder, so the rank rules skip it. A boot seed refused as a
+		// peer-write is a cluster that will not finish starting.
+		Unranked: true,
+		// And SYNTHETIC -- the boot seed is the cluster acting, and its rows
+		// are the deployment's rather than any principal's.
+		Synthetic: true,
 	})
 }
 

@@ -2,7 +2,9 @@ import { useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { UserRound } from "lucide-react";
 
-import { Button, Chip, Head, LiveList, Notice, ProvenanceDot, Row as ListRow } from "../../kit";
+import { Button, Chip, Head, LiveList, Notice, ProvenanceDot, Row as ListRow,
+  RoleTag,
+} from "../../kit";
 import { useLiveView } from "../../live/liveView";
 import { useNow } from "../../kit/useNow";
 import { formatFreshness } from "../../kit/format";
@@ -107,6 +109,7 @@ export function PeopleSection({
             now={now}
             open={openId === person.id}
             onToggle={() => setOpenId((held) => (held === person.id ? "" : person.id))}
+          ownerRole={ownerRole}
           />
         )}
       />
@@ -130,12 +133,15 @@ function PersonLine({
   now,
   open,
   onToggle,
+  ownerRole,
 }: {
   person: PersonRow;
   tick: "added" | "updated" | null;
   now: Date;
   open: boolean;
   onToggle: () => void;
+  /** The VIEWER's role, so each line can show where this person sits against them. */
+  ownerRole: string;
 }) {
   const dim = personIsDim(person);
   return (
@@ -156,7 +162,14 @@ function PersonLine({
       {person.primaryEmail === "" ? null : (
         <span className="os-caption os-mono">{person.primaryEmail}</span>
       )}
-      <Chip tone={person.role === "owner" ? "accent" : "muted"}>{person.role || "reader"}</Chip>
+      {/* THE RUNG MARK, not a coloured chip (epic memql#4832).
+          The chip tinted `owner` with the accent and everything else muted,
+          which is two facts short of what a reader needs: it cannot show
+          ORDER, and it has nothing to say about a role the operator defined
+          themselves -- and roles are cluster state now (D5). The mark is drawn
+          from the cluster's own ladder, so a seven-rung cluster draws seven
+          ticks and a custom rung sits in its real place. */}
+      <RoleTag role={person.role || ""} actorRole={ownerRole} />
       <SignInPolicyChip person={person} />
       {dim ? <span className="os-users-inactive-tag">inactive</span> : null}
     </ListRow>

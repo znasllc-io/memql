@@ -38,6 +38,18 @@ type functionValidator struct {
 	// ambient-rooted predicate is left untouched rather than resolved against
 	// an envelope that was never built.
 	ambient map[string]any
+
+	// requiredRanks accumulates the `@requiresRank` floor of every
+	// construct this expansion pulled in, keyed by construct name (epic
+	// memql#4832, D6).
+	//
+	// COLLECTED HERE, ENFORCED AT EXECUTION, and the split is the point.
+	// Expansion runs at PARSE time and the resulting plan is CACHED and
+	// shared across callers, so a floor decided here would bake one
+	// caller's answer into every later caller's plan. WHICH floors apply
+	// is a static fact about the constructs and belongs on the plan; who
+	// clears them is a fact about the caller and belongs at the call.
+	requiredRanks map[string]string
 }
 
 func newFunctionValidator(functions map[string]*Function, specs *SpecRegistry) *functionValidator {
@@ -57,8 +69,9 @@ func newFunctionValidatorWithAmbient(functions map[string]*Function, specs *Spec
 		specs:     specs,
 		resolved:  make(map[string]ExpressionNode),
 		resolving: make(map[string]struct{}),
-		origin:    origin,
-		ambient:   ambient,
+		origin:        origin,
+		ambient:       ambient,
+		requiredRanks: map[string]string{},
 	}
 }
 
@@ -472,6 +485,11 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 	if fn.ServerOnly && !v.origin.IsInternal() {
 		return nil, fmt.Errorf("function %q is server-only and cannot be called by a client", key)
 	}
+	// Record the construct's actor-rank floor for the executing caller to
+	// clear. Recorded rather than checked -- see requiredRanks.
+	if v.requiredRanks != nil && strings.TrimSpace(fn.RequiresRank) != "" {
+		v.requiredRanks[key] = strings.TrimSpace(fn.RequiresRank)
+	}
 
 	// Validate arguments against schema. Normalise positional
 	// object-literal wrapping first: the language parser produces
@@ -576,6 +594,11 @@ func (v *functionValidator) expandFunctionCallAllowMutationLeaf(call *FunctionCa
 	}
 	if fn.ServerOnly && !v.origin.IsInternal() {
 		return nil, fmt.Errorf("function %q is server-only and cannot be called by a client", key)
+	}
+	// Record the construct's actor-rank floor for the executing caller to
+	// clear. Recorded rather than checked -- see requiredRanks.
+	if v.requiredRanks != nil && strings.TrimSpace(fn.RequiresRank) != "" {
+		v.requiredRanks[key] = strings.TrimSpace(fn.RequiresRank)
 	}
 	if fn.Expr == nil {
 		return nil, nil
@@ -1459,6 +1482,20 @@ func resolvePlanFunctionsWithAmbient(plan *QueryPlan, functions *FunctionRegistr
 		snapshot = functions.LookupIndex()
 	}
 	validator := newFunctionValidatorWithAmbient(snapshot, specs, origin, ambient)
+	defer func() {
+		// Carry the collected floors onto the plan. Done in a defer so an
+		// expansion that fails part-way still reports what it had already
+		// resolved -- and so the single assignment cannot be missed by one
+		// of this function's several return paths.
+		if len(validator.requiredRanks) > 0 {
+			if plan.RequiredRanks == nil {
+				plan.RequiredRanks = map[string]string{}
+			}
+			for name, slug := range validator.requiredRanks {
+				plan.RequiredRanks[name] = slug
+			}
+		}
+	}()
 
 	// Special case: top-level mutation function call.
 	// We don't expand it to an expression; Execute will evaluate it into an insert.

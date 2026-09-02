@@ -2406,7 +2406,7 @@ type CreateAuditEventArgs struct {
 	ActorEmail      string
 	ActorRole       string
 	ActorIdentityId string
-	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity
+	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity | rowOwnership
 	TargetType    string
 	TargetId      string
 	TargetEmail   string
@@ -3290,6 +3290,8 @@ func CreateCapabilityBuild(args CreateCapabilityArgs) string {
 // It is a property of the WRITE, so it holds for any future caller, not just the boot path. Every payload field is named, `status` included: an operator who archived their own company row must not find it active again after a restart. `ownerUserId` is absent because it is not accepted -- it is stamped, and executeWrite undoes the stamp for a system actor, which is how the seeded row lands cluster-owned like the portal site does.
 // `configuredAt` IS NOT STAMPED HERE, and that is the first-run card (D7). The card asks the one question a boot cannot answer -- what is this company called -- and `updateClientAccount` stamping the field is what retires it. A create-time stamp would retire the card before it was ever shown.
 // `name` is `string!` on the concept and required here; everything else is optional and sits in accept{} rather than stamp{}, so an omitted argument is OMITTED FROM THE PAYLOAD rather than written as an explicit blank (missing args are dropped -- mutation_templates.go). `args.domain ?? ""` would put an empty string in the delta, which reads back as "we asked and they have no domain" rather than "nobody has said".
+// THE WRITE FLOOR (epic memql#4832 D6, memql#4837). `@requiresRank("admin")` is rank >= 200 -- {admin, developer, owner} -- the same floor the two reads carry, and it is stated on each of the three writes rather than inherited from anywhere. A caller who could CREATE an account they cannot READ is a worse state than either gate refusing on its own: the row would exist, owned by them, and invisible to them.
+// The boot seed clears it without an exemption. seedSelfAccount runs under a MaintenanceActor carrying RoleOwner, and an unranked actor is not exempt from a rank floor -- it simply outranks this one.
 //
 // Bound concept: v1:accounts:account (machine-readable: BoundConcepts["createClientAccount"] in generated_concepts.go).
 type CreateClientAccountArgs struct {
@@ -6267,6 +6269,8 @@ type CreateRoleArgs struct {
 	PredefinedSet bool // set true to send predefined; required because zero-value bool is ambiguous
 	Active        bool
 	ActiveSet     bool // set true to send active; required because zero-value bool is ambiguous
+	// Other slugs that resolve to THIS rung. Accepted because the seed materializer writes base roles through this mutation, and a field the mutation does not accept is a field the seed silently drops -- which is exactly what happened to `aliases` on its first attempt: every seeded row landed with it null, the engine kept working through its compiled fallback, and MemQL OS could not rank `writer` or `reader` at all.
+	Aliases []string
 }
 
 // CreateRole calls the engine mutation createRole.
@@ -6317,6 +6321,13 @@ func CreateRoleBuild(args CreateRoleArgs) string {
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
+	}
+	if args.Aliases != nil {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("aliases: ")
+		b.WriteString(renderMemQLValue(args.Aliases))
 	}
 	b.WriteString(")")
 	return b.String()

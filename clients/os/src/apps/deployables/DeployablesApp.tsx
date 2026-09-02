@@ -69,6 +69,10 @@ export function DeployablesApp({
   // is still resolving, and the safe one if it never resolves.
   const actorRole = access?.clusterRole ?? "";
   const viewerUserId = access?.userId ?? "";
+  // Rank >= 200 under the one ladder (epic memql#4832, D1) -- {admin,
+  // developer, owner}, which is the set the engine's deploy gate already
+  // uses. Before the flip this excluded developer, so the deploy tier saw a
+  // read-only Deployables app.
   const canWrite = roleAdmits(actorRole, { min: "admin" });
 
   const { source: collection, reseed } = useSites();

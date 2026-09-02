@@ -4,9 +4,21 @@
 
 import { deriveProvenance, type MachinePresence, type ProvenanceFacts, type ProvenanceTone } from "../items/provenance";
 import type { FileEntry } from "../system/desktop";
-import { roleAdmits, ROLE_LADDER, type ClusterRole, type RoleRequirement } from "../system/roles";
+import {
+  roleAdmits,
+  roleGrantSlug,
+  roleLadder,
+  roleLadderLoaded,
+  roleRank,
+  roleRungOf,
+  type ClusterRole,
+  type RoleRequirement,
+  type RoleRung,
+} from "../system/roles";
 
 export { Caption } from "./Caption";
+export { RankMark, RoleTag } from "./RankMark";
+export { PeerRowReadOnly, SurfaceRefused } from "./RankStates";
 export {
   Button,
   Check,
@@ -37,8 +49,8 @@ export { useLiveView, type LiveView } from "../live/liveView";
 export { useNow } from "./useNow";
 export { formatBytes, formatDuration, formatFreshness, formatMoment } from "./format";
 export { boolOr, flatten, stringsOf } from "./rows";
-export { deriveProvenance, roleAdmits, ROLE_LADDER };
-export type { ClusterRole, MachinePresence, ProvenanceFacts, ProvenanceTone, RoleRequirement };
+export { deriveProvenance, roleAdmits, roleGrantSlug, roleLadder, roleLadderLoaded, roleRank, roleRungOf };
+export type { ClusterRole, MachinePresence, ProvenanceFacts, ProvenanceTone, RoleRequirement, RoleRung };
 
 /**
  * The dot language (spec D3): green = reachable now, amber = not reachable,

@@ -50,10 +50,42 @@ use identity.concepts.{ user }
 /// case: it is the DEPLOYMENT's row, not whichever principal happened to boot
 /// the cluster. sameRowAuthzOwner refuses an empty owner outright, so a
 /// cluster-owned row is reachable through the admin branch alone.
-@rowAuthz(owner="ownerUserId", clusterOwner)
+///
+/// THAT LAST SENTENCE WAS ALSO A CLAIM NOTHING IMPLEMENTED (memql#4817). The
+/// seeded row landed owned by `system:maintenance:seedSelfAccount` -- not
+/// empty, just meaningless -- and the tier happened to behave as designed
+/// because a bogus owner matches no real user either. It is genuinely empty
+/// now: a non-principal actor cannot own a row
+/// (component/memql/rowauthz_nonprincipal_owner.go).
+///
+/// THE RANK MODIFIERS (epic memql#4832). `rankVisible` adds "rows owned by
+/// anyone at or below my rank" (D2), and `unowned="admin"` is what finally
+/// makes the self row readable by somebody other than a cluster owner.
+///
+/// Before it, an admin or a developer opening the registry got ZERO ROWS and
+/// could not distinguish an unconfigured cluster from an empty one -- which is
+/// why the "not set up yet" state had no signal to read.
+///
+/// THE FLOOR READS `admin` AND THE ISSUE SAYS "developer-and-above", AND BOTH
+/// NAME THE SAME SET. memql#4837 spells the set out -- "admits developer,
+/// admin and owner, and excludes writer and reader" -- and under the ladder
+/// this epic makes authoritative that set is rank >= 200, whose slug is
+/// `admin`. "Developer-and-above" was the OS ladder's way of saying it, where
+/// developer sat BELOW admin. Writing `unowned="developer"` here would read
+/// like the issue and lock out every admin, which is the exact class of
+/// mistake memql#4833 warns about: every requirement written under the old
+/// ordering changes meaning the moment it flips, and has to be re-read against
+/// what it was TRYING to say rather than transcribed.
+///
+/// NOT rankStrict. Rank-visible reads are wanted here; rank-strict writes are
+/// not, because an account is a RECORD -- who work is for -- and letting a
+/// developer edit an admin's client list is authority this concept never
+/// claimed. The owned tier keeps the write rule it always had: your own rows,
+/// plus the cluster-owner escape.
+@rowAuthz(owner="ownerUserId", rankVisible, unowned="admin", clusterOwner)
 @displayCard(primary="name", secondary="domain", tertiary="primaryContactEmail", status="status")
 concept account {
-  ownerUserId  string   @description("v1:identity:user.id that created this account, or EMPTY for a cluster-owned one. Stamped from the actor by createAccount, which is what makes the tier above true rather than aspirational; a write made as the DEPLOYMENT -- a cluster owner, a system actor, or trusted server-side Go -- has that stamp undone and produces a cluster-owned row instead, which is how the seeded `self` row gets its empty owner. NOT `string!`: an empty value is the meaningful cluster-owned state, and `string!` would refuse the seed.")
+  ownerUserId  string   @description("v1:identity:user.id that created this account, or EMPTY for a cluster-owned one. Stamped from the actor by createAccount, which is what makes the tier above true rather than aspirational; a write made by a SYNTHETIC actor -- the seed materializer, a maintenance actor, an automation's system actor -- has that stamp undone and produces a cluster-owned row instead, which is how the seeded `self` row gets its empty owner (memql#4817). NARROWER THAN THE SENTENCE THIS REPLACED, which said `a cluster owner, a system actor, or trusted server-side Go` and was wrong on two of the three: a real cluster owner keeps their stamp, and so does an internal-origin write. Only an actor carrying AccessContext.Synthetic is undone -- and borrowed authority (ContextWithUserActor) is deliberately NOT one, because it acts as a real person and the rows it creates are theirs. NOT `string!`: an empty value is the meaningful cluster-owned state, and `string!` would refuse the seed.")
   name         string!  @description("The client's name, as a person would say it. REQUIRED, and it is the one thing the first-run card insists on (D7) -- an account whose name is a placeholder is a row nobody can pick out of a list. The seeded `self` row gets a starter value rather than a real one precisely so the card has something to ask for; see dsl/accounts/seeds.memql for why that starter is not a lie the app has to detect.")
   domain       string   @description("The client's OWN domain (acme.com), not a hostname this cluster serves. Free text, unvalidated, and deliberately so: it is a fact about the client, recorded because somebody knows it, and refusing a typo would cost more than it saves. Epic C (custom domains) consumes exactly this field plus v1:platform:site.accountId as its SUGGESTION source when an operator adds a custom domain to a site (D9) -- a suggestion, never a claim: nothing here verifies ownership of anything, and Epic C's DNS check is what does.")
   primaryContactName   string  @description("Who to talk to at the client. A FIELD ON THE ROW rather than a contact concept (D4): a contact concept is future work that nothing in this epic needs, and a v1 that ships two fields is one a later concept can migrate from, while a v1 that ships a half-designed concept is one it has to live with.")

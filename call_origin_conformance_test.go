@@ -138,6 +138,31 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// different question from "which exist", and stamping there would hand
 		// a caller-scoped read the engine's escape.
 		"integrations/customdomain": "the custom-domain reconciliation sweep, server-initiated; its six @serverOnly writers are refused without it",
+		// REQUEST-DERIVED, and the FOURTH exception. Ownership transfer
+		// (memql#4838): one stamp, in reassignRow, on the single Execute that
+		// writes the new owner onto one row.
+		//
+		// WHY IT CANNOT USE THE CLUSTER-OWNER ESCAPE INSTEAD, which is the
+		// obvious alternative and would need no entry here. It would work
+		// today and stop working exactly when this feature is needed: the
+		// rank-strict tier WITHDRAWS that escape for a peer-owned row (epic
+		// memql#4832, D3), and a peer-owned row an owner cannot write is the
+		// only reason transfer exists. The failure would be a transfer that
+		// silently moves nothing on the one concept that required it.
+		//
+		// WHY THE REQUEST-DERIVED SHAPE IS THE SAFE ONE HERE, on the same
+		// terms as component/identity/adminops above: every path that reaches
+		// the stamp is downstream of the cluster-owner gate in the SAME
+		// function (handleTransferRowOwnership refuses a non-owner before any
+		// row is read), and the stamp is applied INLINE as the argument to one
+		// Execute, so the marked context dies at that call. That precondition
+		// is asserted rather than asserted-in-prose:
+		// integrations/identity/internal_origin_precondition_test.go.
+		//
+		// The audit write beside it is deliberately NOT stamped:
+		// createAuditEvent is not @serverOnly and the actor it records is this
+		// caller, so the ordinary path admits it.
+		"integrations/identity": "ownership transfer (memql#4838) -- one inline stamp, downstream of a cluster-owner gate; rank-strict withdraws the cluster-owner escape it would otherwise use",
 		// REQUEST-DERIVED, and the THIRD exception. The redeem path
 		// (component/identity/http/webauthn_recovery.go) calls Store.Resolve on
 		// an UNAUTHENTICATED request context -- the shape call_origin.go warns

@@ -62,3 +62,39 @@ builtin identityValidateScope {
   delegationId  string!
   operation     string!
 }
+
+/// Reassign every row one principal owns to another.
+///
+/// THE COUNTERPART TO RANK-STRICT WRITES (memql#4838, epic memql#4832 O1).
+/// D3 makes peer rows read-only at every rung -- owner-to-owner included -- so
+/// an owner who leaves the company leaves rows no living principal can edit.
+/// This closes that, and a break-glass WRITE ESCAPE deliberately does not: an
+/// escape is available to everyone who can reach it, which is the whole
+/// cluster-owner tier, and it would hollow out D3 on the day it shipped. A
+/// transfer names a new owner and leaves the rank rules untouched -- the row
+/// simply has a different owner afterward, and every predicate keeps its
+/// meaning.
+///
+/// Cluster-owner only. Refused when the destination principal does not exist
+/// or is deactivated, because transferring into a void recreates the problem
+/// silently: the rows are still there, still unwritable, now with an audit
+/// trail saying they were handed over. Cluster-owned rows (empty owner) are
+/// SKIPPED rather than transferred -- `v1:accounts:account:self` has no
+/// meaningful second owner, and handing the deployment's own company to a
+/// person is a downgrade, not a transfer.
+///
+/// Audited once for the whole transfer on v1:identity:auditEvent -- the
+/// DECISIONS log -- not once per row moved: the decision was taken once, by
+/// one person, about one pair of principals.
+@description("Reassign every row one principal owns to another. Cluster-owner only; audited.")
+@executor("integration.identity.transferRowOwnership")
+builtin transferRowOwnership {
+  /// The principal whose rows are being handed over.
+  fromUserId  string!
+  /// The principal receiving them. Must exist and be active.
+  toUserId    string!
+  /// Narrow the transfer to a single concept. Absent transfers every concept declaring an owned tier.
+  concept     string
+  /// Narrow the transfer to a single row. Offboarding is per-user; a single stuck row is not.
+  rowId       string
+}

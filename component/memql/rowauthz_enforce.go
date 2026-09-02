@@ -105,18 +105,51 @@ func rowAuthzPredicateExpr(decl *langparser.RowAuthzDecl) (ExpressionNode, error
 	if strings.TrimSpace(rendered) == "" {
 		return nil, fmt.Errorf("row-authz: tier %q rendered no predicate", decl.Tier)
 	}
+	var base ExpressionNode
 	if cached, ok := rowAuthzPredicateCache.Load(rendered); ok {
-		return cloneRowAuthzPredicate(cached.(ExpressionNode)), nil
+		base = cloneRowAuthzPredicate(cached.(ExpressionNode))
+	} else {
+		parsed, err := parseViaLangparser(rendered, false)
+		if err != nil {
+			return nil, fmt.Errorf("row-authz: predicate %q does not parse: %w", rendered, err)
+		}
+		if parsed.Root == nil {
+			return nil, fmt.Errorf("row-authz: predicate %q parsed to nothing", rendered)
+		}
+		rowAuthzPredicateCache.Store(rendered, parsed.Root)
+		base = cloneRowAuthzPredicate(parsed.Root)
 	}
-	parsed, err := parseViaLangparser(rendered, false)
-	if err != nil {
-		return nil, fmt.Errorf("row-authz: predicate %q does not parse: %w", rendered, err)
+	return orRankScope(base, decl), nil
+}
+
+// orRankScope ORs the rank branch onto a rendered tier predicate
+// (epic memql#4832, D2).
+//
+// IT IS OR-ED, NOT SUBSTITUTED, and both halves stay load-bearing: the
+// owner comparison is what keeps "your own rows" true for a caller the
+// user table cannot rank -- a principal whose row is missing, or a role
+// slug the ladder does not know -- and the rank branch is what adds
+// everybody below them. Replacing the owner term with the rank term would
+// make a user's access to their OWN data depend on a second lookup
+// succeeding.
+//
+// The node is SYMBOLIC and is resolved per request at execution. It is
+// NOT rendered through InjectedPredicate: that function returns a string
+// an author could have typed, and there is no author spelling for "every
+// principal at or below my rank" -- inventing one would put a resolved
+// list of user ids into a cached plan, and into shadow mode's reports.
+func orRankScope(base ExpressionNode, decl *langparser.RowAuthzDecl) ExpressionNode {
+	if decl == nil || !decl.RankVisible {
+		return base
 	}
-	if parsed.Root == nil {
-		return nil, fmt.Errorf("row-authz: predicate %q parsed to nothing", rendered)
+	rank := &RankScopeExpression{
+		OwnerField:   strings.TrimSpace(decl.Owner),
+		UnownedFloor: strings.TrimSpace(decl.Unowned),
 	}
-	rowAuthzPredicateCache.Store(rendered, parsed.Root)
-	return cloneRowAuthzPredicate(parsed.Root), nil
+	if base == nil {
+		return rank
+	}
+	return &LogicalExpression{Op: LogicalOr, Left: base, Right: rank}
 }
 
 // cloneRowAuthzPredicate copies the cached node so a caller that mutates
@@ -295,6 +328,27 @@ const (
 // covers a raw query string (which has no declared binding to resolve a
 // tier from) and graph expansion (which has no filter at all).
 func rowAuthzAdmits(ctx context.Context, conceptName string, id string, payload []byte) rowAuthzAdmission {
+	return rowAuthzAdmitsMode(ctx, conceptName, id, payload, false)
+}
+
+// rowAuthzAdmitsWrite is the WRITE-side admission. It differs from the
+// read side in exactly one place -- the rank comparison is STRICT (D3)
+// where the read is inclusive (D2) -- and shares everything else,
+// including the owner comparison, so "who owns this row" keeps one answer
+// in both directions.
+//
+// THE SPLIT IS THE POINT. Before the rank rules the write guard could
+// delegate to rowAuthzAdmits outright, because "may read" and "may write"
+// had the same answer: the owner, and nobody else. D2 breaks that -- it
+// admits PEERS to reads and D3 refuses them writes -- so a write path
+// that kept delegating to the read admission would hand every peer write
+// authority the moment a concept declared rankVisible. It is a one-word
+// difference and it is the difference between the two decisions.
+func rowAuthzAdmitsWrite(ctx context.Context, conceptName string, id string, payload []byte) rowAuthzAdmission {
+	return rowAuthzAdmitsMode(ctx, conceptName, id, payload, true)
+}
+
+func rowAuthzAdmitsMode(ctx context.Context, conceptName string, id string, payload []byte, write bool) rowAuthzAdmission {
 	// CONNECTOR ACTOR (epic memql#4378, D4). Answered FIRST and never
 	// falls through, in both directions.
 	//
@@ -376,7 +430,22 @@ func rowAuthzAdmits(ctx context.Context, conceptName string, id string, payload 
 		// comparison because the admin branch does not read the owner field
 		// at all -- a row that cannot say who owns it is still an
 		// administrable row.
-		if decl.ClusterOwnerBypass && rowAuthzIsClusterOwner(ctx) {
+		// NOT ON A RANK-STRICT WRITE. rowAuthzWriteEscapeFor withdraws the
+		// blanket cluster-owner escape for such a concept (D3), and this
+		// branch would hand it straight back one layer down -- before the
+		// owner comparison, before rankAdmitsRow, and for a declaration the
+		// parser accepts and the formatter renders
+		// (`owner="f", rankVisible, rankStrict, clusterOwner`).
+		//
+		// "Peer rows are read-only, owner-to-owner included" would then be
+		// decorative for every concept declaring both, and latently so: no
+		// concept declares rankStrict today, so the first one to adopt it
+		// would silently not get the guarantee it asked for.
+		//
+		// READS are unaffected. A cluster owner reading across users is what
+		// the composite exists for; only the WRITE defers to the rank rule.
+		if decl.ClusterOwnerBypass && rowAuthzIsClusterOwner(ctx) &&
+			!(write && decl.RankStrict && !rowAuthzActorIsUnranked(ctx)) {
 			return rowAuthzAdmit
 		}
 		if strings.TrimSpace(decl.Owner) == langparser.RowAuthzSelfOwnedField {
@@ -388,14 +457,26 @@ func rowAuthzAdmits(ctx context.Context, conceptName string, id string, payload 
 			return rowAuthzDeny
 		}
 		owner, ok := rowAuthzOwnerValue(payload, decl.Owner)
+		if sameRowAuthzOwner(owner, caller) {
+			return rowAuthzAdmit
+		}
+		// THE RANK BRANCH (epic memql#4832, D2), checked after the owner
+		// comparison and never before it: "your own row" must not depend
+		// on this caller being resolvable in the principal table.
+		//
+		// It is the row-gate twin of the term lowerRankScope pushes into
+		// SQL, reading the same per-request resolution, so a row the
+		// filter admitted is not then dropped here (or the reverse) --
+		// which for a paginated read would be indistinguishable from
+		// exhaustion.
+		if rankAdmitsRow(ctx, decl, owner, ok, write) {
+			return rowAuthzAdmit
+		}
 		if !ok {
 			// The declared owner field is absent from the row. Deny: a row
 			// that cannot say who owns it is not a row this caller can be
 			// shown to own.
 			return rowAuthzDeny
-		}
-		if sameRowAuthzOwner(owner, caller) {
-			return rowAuthzAdmit
 		}
 		return rowAuthzDeny
 
