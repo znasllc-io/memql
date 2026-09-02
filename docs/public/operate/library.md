@@ -403,6 +403,55 @@ show the person nothing arriving while the backup reported success.
 
 ---
 
+## Watched folders (memql#4841)
+
+The arrangement those states come from: one folder on one of the owner's fleet
+machines, kept arriving in a Library folder. `v1:library:watchedFolder`, set up
+in MemQL OS at **Files -> Backups**, swept by the cockpit on that machine.
+
+**The arrangement lives in the graph; the path is the machine's to refuse.**
+A person sets a backup up from a browser -- possibly on a different computer,
+while the watching machine is asleep -- so the row has to survive that machine
+being off and a re-install. But its path is then one the CLUSTER is naming on
+somebody else's disk, which is the situation the cockpit's `CheckWorkspace`
+already exists for. The cockpit checks every path against its own
+`policy.yaml` `backup.roots` (default-deny) before reading anything, and
+answers `originState=refused_by_policy` when it will not.
+
+That refusal is a state of its own rather than a flavour of `unreadable`, and
+the distinction is the repair: nothing about the folder is wrong, and no amount
+of looking at the Library fixes it -- somebody has to add the path on that
+machine. Collapsing the two would send a person hunting a permissions problem
+that does not exist.
+
+**`lastSweepAt` is server-stamped.** `reportLibraryWatchedFolderSweep` writes
+`now` and does not accept a time from the caller, for the reason
+`linkCheckedAt` does not: a machine that could name its own check time could
+claim to have looked when it did not, and the field's entire value is that it
+makes a stale `ok` honest.
+
+**Absent is not `ok`.** A watch no cockpit has reported on yet has no
+`originState` member at all, and that is a third answer -- "waiting for that
+machine to check in" -- which must not read as "the folder is fine". Same
+discipline as `linkState` one level up.
+
+**Nothing here is `@serverOnly`, and nothing needs to be.** No field is a
+credential; the arrangement names a machine and a folder the caller already
+owns, and the gate that matters runs at the upload, where `verifyProvenance`
+resolves the claimed machine in the caller's own fleet and refuses anything
+else. A watch naming a machine somebody does not own is read by no cockpit and
+pushes nothing.
+
+**Archiving a watch removes nothing.** The files that arrived through it are
+ordinary Library files owned by the same person, and the one-way invariant does
+not stop applying because the arrangement ended. Nothing reaches the origin
+either: stopping a backup does not delete anything on the machine.
+
+Operator side, in the cockpit repo:
+[docs/watched-folders.md](https://github.com/znasllc-io/memql-cockpit/blob/main/docs/watched-folders.md).
+
+---
+
 ## Agent tools
 
 Both run as the person the agent is acting for, never with wider reach.

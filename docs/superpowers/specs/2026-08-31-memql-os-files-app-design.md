@@ -401,6 +401,41 @@ liveness answers -- stays in `memql-cockpit` and is unchanged by this.
   supersedes a copy. `origin_gone` is a LABEL on a file that is still whole and
   still downloadable.
 
+### E2. The cockpit half, as built (memql#4841)
+
+The remaining half, across two repos. This one gained the ARRANGEMENT --
+`v1:library:watchedFolder` plus the OS surface that sets it up -- because the
+cockpit had nothing to ask: nothing in the graph said which folder on which
+machine, so the watcher could not start.
+
+- **The arrangement is graph state, the path is the machine's to refuse.** A
+  backup is set up from a browser, possibly on another computer, so the row has
+  to outlive the machine being asleep. Its path is then one the cluster names on
+  somebody else's disk -- appsession's `CheckWorkspace` situation, and the same
+  answer: the cockpit's `policy.yaml` `backup.roots` is default-deny, and a
+  refusal is REPORTED (`refused_by_policy`), never silent. A machine that
+  quietly ignored a watch would be indistinguishable from one that was offline.
+- **`refused_by_policy` is a value, not a flavour of `unreadable`.** The repair
+  lives somewhere else entirely, and collapsing the two sends a person hunting
+  a permissions problem that does not exist.
+- **A scheduled walk, not fsnotify.** A backup must reconcile -- everything that
+  changed while the process was down produced no event -- and the verify lane is
+  a scheduled look anyway. Recursive watches are also not portable: inotify is
+  one watch per directory against a per-user cap, and exhausting it presents as
+  a backup that silently stops noticing.
+- **The credential is the SIGNED-IN USER'S.** `http_access.go` pins every
+  machine class off the Library write surface deliberately, so the worker token
+  cannot reach `/artifacts` and neither can a PAT. The cockpit is separately
+  signed in, non-interactively (a LaunchAgent has no browser), which makes row
+  authorization here exactly the browser's with no second story to keep.
+- **The OS surface draws the link, not a status field.** A backup is a
+  relationship between two named ends, and the wire between them carries the
+  state in shape as well as colour. `paused` outranks every fault (the cockpit
+  stops sweeping, so the fault is old news), `waiting` outranks the rest
+  (nothing reported is not "broken"), and a backup's badge reads its own files
+  matched on `(machine, path)` rather than the destination folder's rollup --
+  a browser upload filed beside it has no origin to be stale against.
+
 ## F. Testing
 
 - Engine: dslconformance dimensions for the new promotion args; a

@@ -2005,7 +2005,16 @@ schema does not say.
   stands against the machine it was pushed from: the engine stamps `synced` on
   any upload naming a `(uploadedFromWorkerId, uploadedFromPath)` -- which is
   also the key a re-push versions on, on BOTH upload routes -- and only ever
-  FLAGS, so a deletion at the origin never touches the copy.
+  FLAGS, so a deletion at the origin never touches the copy. `watchedFolder`
+  (memql#4841) is the ARRANGEMENT those states come from -- one folder on one
+  of the owner's machines, kept arriving in a Library folder, set up at Files
+  -> Backups and swept by that machine's cockpit. The arrangement lives in the
+  graph so it survives the machine being asleep; the PATH is still the
+  machine's to refuse (`policy.yaml` `backup.roots`, default-deny), and it says
+  so through `originState=refused_by_policy` -- a value of its own rather than
+  a flavour of `unreadable`, because the repair lives on that machine and
+  nowhere else. `lastSweepAt` is server-stamped for `linkCheckedAt`'s reason,
+  and an ABSENT `originState` is "no cockpit has reported yet", never `ok`.
 - **Cluster** (`dsl/cluster/concepts.memql`) -- `node`, `nodeType`,
   `spawnEvent`, `cluster` / `database` / `identityProvider`, plus the deploy
   pair: `deployment` (append-only, one timeline per deploymentId; the
