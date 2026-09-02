@@ -57,13 +57,11 @@ export function AudiencesSection({
   writes,
   uploads,
   showFiled,
-  onToggleFiled,
 }: {
   feeds: CampaignFeeds;
   writes: CampaignWrites;
   uploads: UploadProvider;
   showFiled: boolean;
-  onToggleFiled: (next: boolean) => void;
 }) {
   const [openId, setOpenId] = useState("");
   const [adding, setAdding] = useState(false);
@@ -110,11 +108,6 @@ export function AudiencesSection({
         />
       ) : null}
 
-      <div className="os-campaign-filters">
-        <Check checked={showFiled} onChange={onToggleFiled}>
-          Show archived audiences
-        </Check>
-      </div>
 
       <LiveList<AudienceRow>
         key={`audiences:${showFiled}`}

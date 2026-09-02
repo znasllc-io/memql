@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { newShortId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useAuthSource } from "../../auth/context";
@@ -7,9 +7,16 @@ import type { UploadProvider } from "../../items/upload";
 import { Check, Head, Panel } from "../../kit";
 import { useOsConnection } from "../../live/connection";
 import { useLiveView } from "../../live/liveView";
+import { useOs } from "../../chrome/state";
 import type { OsAppProps } from "../../system/registry";
-import { BrowseSection } from "./BrowseSection";
-import { applyFilters, DEFAULT_FILTER, type FilesFilter } from "./filters";
+import { BrowseSection, type DeskFolderShortcut } from "./BrowseSection";
+import {
+  applyFilters,
+  DEFAULT_FILTER,
+  isFilesPlace,
+  type DeskMembership,
+  type FilesFilter,
+} from "./filters";
 import { foldFolderTree } from "./fold";
 import { rowString } from "@znasllc-io/memql-sdk-core/client";
 
@@ -43,6 +50,8 @@ import { useUploadTasks } from "./useUploadTasks";
 export function FilesApp({
   sectionId,
   askContext,
+  intent,
+  consumeIntent,
   store,
   uploads,
 }: OsAppProps & { store?: FilesSettingsStore; uploads?: UploadProvider }) {
@@ -51,6 +60,7 @@ export function FilesApp({
   const [settings, setSettings] = useState<FilesSettings>(() => settingsStore.load());
   const authSource = useAuthSource();
   const connection = useOsConnection();
+  const { state: osState } = useOs();
   const provider = useMemo(
     () => uploads ?? new EdgeUploadProvider(() => authSource.bearer()),
     [uploads, authSource],
@@ -79,26 +89,90 @@ export function FilesApp({
   const [filter, setFilter] = useState<FilesFilter>(() => ({
     ...DEFAULT_FILTER,
     sortAscending: settings.defaultSort === "oldest",
-    showArchived: settings.showArchived,
   }));
   const [selectedId, setSelectedId] = useState("");
+
+  // ===========================================================================
+  // THE DESK, FOLDED FOR THE DESKTOP PLACE (epic memql#4842, #4846)
+  // ===========================================================================
+  // What sits on the desks is SHELL state (the roamed desktop document), read
+  // here and folded into the pure shapes the filter and the rail consume:
+  // loose file icons by artifact id (uploads in flight excluded -- an icon
+  // with no artifact yet is desk-only), folder shortcuts deduped by folderId,
+  // and which desk holds each artifact so a row can say "Desk 2" when more
+  // than one desk holds items.
+  const desk = useMemo(() => {
+    const fileArtifactIds = new Set<string>();
+    const folderIds = new Set<string>();
+    const folderShortcuts = new Map<string, string>();
+    const deskIndexByArtifactId = new Map<string, number>();
+    const desksWithItems = new Set<string>();
+    osState.shell.desks.forEach((d, index) => {
+      const surface = osState.surfaces[d.id];
+      if (!surface) return;
+      for (const item of Object.values(surface.items)) {
+        if (item.kind === "file" && item.artifactId !== "") {
+          fileArtifactIds.add(item.artifactId);
+          if (!deskIndexByArtifactId.has(item.artifactId)) {
+            deskIndexByArtifactId.set(item.artifactId, index);
+          }
+          desksWithItems.add(d.id);
+        } else if (item.kind === "folder") {
+          folderIds.add(item.folderId);
+          if (!folderShortcuts.has(item.folderId)) folderShortcuts.set(item.folderId, item.name);
+          desksWithItems.add(d.id);
+        }
+      }
+    });
+    const shortcuts: DeskFolderShortcut[] = [...folderShortcuts.entries()]
+      .map(([folderId, name]) => ({ folderId, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const membership: DeskMembership = { fileArtifactIds, folderIds };
+    return { membership, shortcuts, deskIndexByArtifactId, desksWithItems: desksWithItems.size };
+  }, [osState.shell.desks, osState.surfaces]);
+
+  // The open intent (epic memql#4842, #4845): "show this place, this folder".
+  // Consumed by id, so acting on a stale render can never eat a newer
+  // instruction; an unrecognized payload is consumed and ignored rather than
+  // left standing to re-fire on every render.
+  useEffect(() => {
+    if (!intent) return;
+    const place = intent.payload.place;
+    const folderId = intent.payload.folderId;
+    if (isFilesPlace(place)) {
+      setFilter((f) => ({
+        ...f,
+        place,
+        folderId: typeof folderId === "string" ? folderId : "",
+        search: "",
+      }));
+      setSelectedId("");
+    }
+    consumeIntent?.(intent.id);
+  }, [intent, consumeIntent]);
 
   // The list's own reading of the artifacts feed: project, then narrow, then
   // order, in one pass -- the collection holds RAW wire rows, so every
   // predicate runs on an `artifactFromRow` result. The viewKey is the filter
-  // written down: a changed filter MEANS a different reading.
+  // written down: a changed filter MEANS a different reading -- and the desk
+  // membership joins it, because a shortcut appearing reveals rows the
+  // browser already had, which must re-baseline rather than ring.
+  const deskKey = `${[...desk.membership.fileArtifactIds].sort().join(",")}~${[...desk.membership.folderIds].sort().join(",")}`;
   const filterKey = [
+    filter.place,
     filter.folderId ?? "~",
     filter.kind,
     filter.source,
-    filter.showArchived ? "arch" : "",
+    filter.accountId,
     filter.search,
     filter.sortAscending ? "asc" : "desc",
+    filter.place === "desktop" ? deskKey : "",
   ].join("|");
   const list = useLiveView<Row, ArtifactRow>(artifacts.source, `files:list:${filterKey}`, (rows) =>
     applyFilters(
       rows.map(artifactFromRow).filter((r) => r.id !== ""),
       filter,
+      desk.membership,
     ),
   );
 
@@ -126,14 +200,27 @@ export function FilesApp({
     return byId;
   }, [files.snapshot]);
 
-  // The tree, from the folders feed. Archived folders are dropped HERE as
-  // well as by the read's own conjunct, because an archive flip arrives as an
-  // UPDATE: the read excludes it and the subscription does not.
+  // The tree, from the folders feed. Archived folders are dropped HERE, not
+  // by the read: the seed now includes them for the Archive place, and an
+  // archive flip arrives as an UPDATE the fold has to keep answering for.
   const tree = useMemo(
     () =>
       foldFolderTree(
         folders.snapshot.rows.map(folderFromRow).filter((f) => f.id !== "" && !f.archived),
       ),
+    [folders.snapshot],
+  );
+
+  // The Archive place's folders: flat and alphabetical (epic memql#4842,
+  // #4846). Deliberately not a tree -- archived folders' ancestry mixes live
+  // and archived parents, and a tree over that would lie one way or the
+  // other. Flat, named, counted is the honest reading.
+  const archivedFolders = useMemo(
+    () =>
+      folders.snapshot.rows
+        .map(folderFromRow)
+        .filter((f) => f.id !== "" && f.archived)
+        .sort((a, b) => a.name.localeCompare(b.name)),
     [folders.snapshot],
   );
 
@@ -161,13 +248,12 @@ export function FilesApp({
     setSettings(next);
     settingsStore.save(next);
     // Settings take effect without reopening the window: the browse follows
-    // the new defaults now. The toolbar's own toggles keep steering the
-    // session afterwards -- a default is where a session starts, and this is
-    // the one moment "starts" is re-read.
+    // the new defaults now. The session's own controls keep steering
+    // afterwards -- a default is where a session starts, and this is the one
+    // moment "starts" is re-read.
     setFilter((f) => ({
       ...f,
       sortAscending: next.defaultSort === "oldest",
-      showArchived: next.showArchived,
     }));
   }
 
@@ -181,6 +267,11 @@ export function FilesApp({
       foldersState={folders.snapshot.state}
       tree={tree}
       content={content}
+      archivedFolders={archivedFolders}
+      deskFolders={desk.shortcuts}
+      deskFileArtifactIds={desk.membership.fileArtifactIds}
+      deskIndexByArtifactId={desk.deskIndexByArtifactId}
+      desksWithItems={desk.desksWithItems}
       filter={filter}
       setFilter={setFilter}
       selectedId={selectedId}
@@ -240,19 +331,8 @@ function FilesSettingsSection({
           </Check>
           <p className="os-caption">
             The confirm names what is about to move -- for a folder, the live count of everything
-            inside it. Archiving never deletes: archived files keep their bytes and come back under
-            the archived filter.
-          </p>
-        </fieldset>
-
-        <fieldset className="os-field-group">
-          <legend>Archived files</legend>
-          <Check checked={settings.showArchived} onChange={(showArchived) => update({ showArchived })}>
-            Show archived by default
-          </Check>
-          <p className="os-caption">
-            Archived rows are marked wherever they show. The browse toolbar can flip this per
-            window.
+            inside it. Archiving never deletes: everything archived lives under Archive in the
+            browse rail, and in the Bin, where it can be put back.
           </p>
         </fieldset>
 

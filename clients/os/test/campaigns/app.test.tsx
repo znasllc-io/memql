@@ -31,12 +31,14 @@ type Conn = ReturnType<typeof fakeConnection>;
 
 const CAMPAIGN_CONCEPT = "v1:campaigns:campaign";
 
-function memoryStore() {
+function memoryStore(over: Record<string, unknown> = {}) {
   const bag = new Map<string, string>();
-  return new LocalCampaignsSettingsStore({
+  const store = new LocalCampaignsSettingsStore({
     getItem: (k: string) => bag.get(k) ?? null,
     setItem: (k: string, v: string) => void bag.set(k, v),
   });
+  if (Object.keys(over).length > 0) store.save({ ...store.load(), ...over });
+  return store;
 }
 
 /** An upload provider that never touches the network. Nothing in the shell
@@ -55,7 +57,12 @@ function fakeUploads(artifactId = "v1:library:artifact:csv") {
   };
 }
 
-function mount(connection: Conn, sectionId = "campaigns", uploads = fakeUploads()) {
+function mount(
+  connection: Conn,
+  sectionId = "campaigns",
+  uploads = fakeUploads(),
+  settings: Record<string, unknown> = {},
+) {
   h.connection = connection;
   const navigate = vi.fn();
   const view = render(
@@ -64,7 +71,7 @@ function mount(connection: Conn, sectionId = "campaigns", uploads = fakeUploads(
         sectionId={sectionId}
         navigate={navigate}
         askContext={() => {}}
-        store={memoryStore()}
+        store={memoryStore(settings)}
         uploads={uploads}
       />,
     ),
@@ -101,18 +108,22 @@ describe("the campaigns list", () => {
     expect(conn.query.campaigns).toHaveBeenCalledWith({}, expect.anything());
   });
 
-  it("hides finished campaigns by default and shows them under the filter", async () => {
-    const conn = fakeConnection({
+  it("hides finished campaigns by default and shows them under the settings preference", async () => {
+    // The in-surface checkbox is gone (DESIGN.md rules 4/10): visibility of
+    // filed rows is the app-settings preference, exactly like Fleet's
+    // revoked machines and Users' deactivated people.
+    const seed = {
       campaigns: [
         campaignRow({ id: "v1:campaigns:campaign:c1", name: "In flight", status: "sending" }),
         campaignRow({ id: "v1:campaigns:campaign:c2", name: "All done", status: "sent" }),
       ],
-    });
-    mount(conn);
+    };
+    const first = mount(fakeConnection(seed));
     await screen.findByText("In flight");
     expect(screen.queryByText("All done")).toBeNull();
+    first.view.unmount();
 
-    fireEvent.click(screen.getByLabelText("Show finished campaigns", { selector: "input" }));
+    mount(fakeConnection(seed), "campaigns", fakeUploads(), { showFiled: true });
     expect(await screen.findByText("All done")).toBeTruthy();
   });
 });
@@ -223,8 +234,7 @@ describe("one campaign", () => {
         }),
       ],
     });
-    mount(conn);
-    fireEvent.click(screen.getByLabelText("Show finished campaigns", { selector: "input" }));
+    mount(conn, "campaigns", fakeUploads(), { showFiled: true });
     fireEvent.click(await screen.findByText("August update"));
     // VERBATIM. The preflight's sentence names the thing to go and fix.
     expect(
@@ -239,8 +249,7 @@ describe("one campaign", () => {
       ],
       campaignStats: [{ sent: 10, opens: { total: 90 }, clicks: { total: 5, unique: 3 } }],
     });
-    mount(conn);
-    fireEvent.click(screen.getByLabelText("Show finished campaigns", { selector: "input" }));
+    mount(conn, "campaigns", fakeUploads(), { showFiled: true });
     fireEvent.click(await screen.findByText("August update"));
     // A zero there would be this window inventing a fact -- and a zero open
     // rate is a thing operators act on.
@@ -252,8 +261,7 @@ describe("one campaign", () => {
       campaigns: [campaignRow({ id: "v1:campaigns:campaign:c1", status: "sent" })],
       campaignStats: [{ sent: 10 }],
     });
-    mount(conn);
-    fireEvent.click(screen.getByLabelText("Show finished campaigns", { selector: "input" }));
+    mount(conn, "campaigns", fakeUploads(), { showFiled: true });
     fireEvent.click(await screen.findByText("August update"));
     expect(await screen.findByText(/Soft bounces are not counted per campaign/)).toBeTruthy();
   });
@@ -754,8 +762,7 @@ describe("a rule that stopped itself", () => {
       templates: [],
       concepts: [],
     });
-    mount(conn, "rules");
-    fireEvent.click(screen.getByLabelText("Show paused rules", { selector: "input" }));
+    mount(conn, "rules", fakeUploads(), { showFiled: true });
     fireEvent.click(await screen.findByText("Tell the owner about new admins"));
     expect(await screen.findByText(/Paused, and its last run failed/)).toBeTruthy();
     // The engine's own sentence is what somebody acts on.
@@ -777,8 +784,7 @@ describe("a rule that stopped itself", () => {
       templates: [],
       concepts: [],
     });
-    mount(conn, "rules");
-    fireEvent.click(screen.getByLabelText("Show paused rules", { selector: "input" }));
+    mount(conn, "rules", fakeUploads(), { showFiled: true });
     fireEvent.click(await screen.findByText("Tell the owner about new admins"));
     expect(
       await screen.findByText(/what it generated is still there waiting/),

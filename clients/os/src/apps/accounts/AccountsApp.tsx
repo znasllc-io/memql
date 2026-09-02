@@ -88,7 +88,6 @@ export function AccountsApp({
       update={update}
       create={create}
       archive={archive}
-      onToggleArchived={(showArchived) => updateSettings({ showArchived })}
     />
   );
 }
@@ -114,14 +113,12 @@ function AccountsSurface({
   update,
   create,
   archive,
-  onToggleArchived,
 }: {
   feed: ReturnType<typeof useAccounts>;
   settings: AccountsSettings;
   update: ReturnType<typeof useUpdateAccount>;
   create: ReturnType<typeof useCreateAccount>;
   archive: ReturnType<typeof useArchiveAccount>;
-  onToggleArchived: (next: boolean) => void;
 }) {
   const { snapshot } = feed;
 
@@ -151,7 +148,6 @@ function AccountsSurface({
     <AccountsSection
       feed={feed}
       showArchived={settings.showArchived}
-      onToggleArchived={onToggleArchived}
       create={create}
       update={update}
       archive={archive}

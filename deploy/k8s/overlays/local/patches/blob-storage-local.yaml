@@ -1,0 +1,26 @@
+# JSON 6902 patch: point the blob uploader at the in-cluster Azurite emulator
+# (memql#4843).
+#
+# The CONNECTION STRING already rides `memql-secrets` (seed-secrets.sh writes
+# AZURE_BLOB_CONNECTION_STRING; the boot-time legacy-alias shim maps it onto
+# MEMQL_AZURE_STORAGE_CONNECTION_STRING). What was missing -- and what left
+# every Library upload answering 503 and every attachment degrading to a
+# `local://` placeholder -- is the pair only an overlay can know: WHICH
+# container, and that Azurite ships with none pre-created. Both are VALUES over
+# the base, which is exactly what environment parity allows an overlay to
+# carry; the cloud overlay sets its own container name against a provisioned
+# account.
+#
+# `add` at `env/-` appends: env has a merge key, but the append keeps this
+# patch shape identical to its envFrom sibling and cannot collide with a name
+# the base sets (the base sets neither).
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: MEMQL_AZURE_BLOB_CONTAINER
+    value: memql
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: MEMQL_AZURE_BLOB_AUTOCREATE
+    value: "true"

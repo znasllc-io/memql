@@ -154,6 +154,8 @@ export function WindowFrame({
               sectionId={current?.id ?? ""}
               navigate={(sectionId) => actions.navigateSection(win.id, sectionId)}
               askContext={(tag) => openAsk(tag)}
+              intent={win.intent}
+              consumeIntent={(intentId) => actions.consumeWindowIntent(win.id, intentId)}
             />
           ) : (
             <SurfaceRefused

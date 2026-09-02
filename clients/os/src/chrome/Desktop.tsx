@@ -3,7 +3,6 @@ import { useDraggable, useDroppable, type DragEndEvent, type DragStartEvent } fr
 
 import { newShortId } from "@znasllc-io/memql-sdk-core/client";
 
-import { DeskFolderPopover } from "../apps/files/DeskFolderPopover";
 import { TREE_PATH_SEP, uploadDroppedTree } from "../apps/files/uploadTree";
 import { entriesOf, hasDirectory, walkEntries } from "../items/folderDrop";
 import { browserHandoffPorts, openInVsCode, VSCODE_NO_ANSWER_MESSAGE, type HandoffPorts } from "../items/vscode";
@@ -33,10 +32,11 @@ import { WindowFrame } from "./WindowFrame";
 // desk + item context menus, host-file drop -> upload, and the VS Code
 // handoff with its no-answer fallback.
 //
-// DESK FOLDERS ARE LIBRARY SHORTCUTS (design D4): create and rename here are
-// Library mutations, the popover is a live view the popover itself retains,
-// and remove-from-desk removes the shortcut only. The desk stays
-// subscription-free until a popover opens.
+// DESK FOLDERS ARE LIBRARY SHORTCUTS (design D4, reshaped by epic
+// memql#4842): create and rename here are Library mutations, and
+// remove-from-desk removes the shortcut only. Opening one -- double-click,
+// Enter, or the menu's Open -- hands off to the Files app scoped to that
+// folder under the Desktop place; the desk itself stays subscription-free.
 
 // Stable by construction -- it is a dependency of the desk's registration
 // effect, and an array rebuilt each render would re-register on every one.
@@ -83,7 +83,10 @@ export function Desktop({
   const { config } = useSession();
   const connection = useOsConnection();
   const [menu, setMenu] = useState<DeskMenu | null>(null);
-  const [openFolderId, setOpenFolderId] = useState<string | null>(null);
+  // The item whose name is being edited, driven from the context menu (epic
+  // memql#4842, #4847) -- the old rename-on-title-double-click collided with
+  // double-click-to-open and went with the popover.
+  const [renamingItemId, setRenamingItemId] = useState<string | null>(null);
   const selectedId = state.selectedItemId;
   const [draggingWindow, setDraggingWindow] = useState(false);
   const [noAnswerFor, setNoAnswerFor] = useState<string | null>(null);
@@ -162,6 +165,7 @@ export function Desktop({
 
   const renameDeskFolder = useCallback(
     async (itemId: string, folderId: string, name: string) => {
+      setRenamingItemId(null);
       const query = connection?.query ?? null;
       if (query === null) {
         setDeskError("Not connected to the cluster, so the folder keeps its name.");
@@ -175,6 +179,16 @@ export function Desktop({
       }
     },
     [connection, actions],
+  );
+
+  // Opening a desk folder IS opening the Files app (epic memql#4842, #4847):
+  // the window lands on the Desktop place scoped to this folder, whether it
+  // was open already or not -- the shell's open intent carries it.
+  const openFolderInFiles = useCallback(
+    (folderId: string) => {
+      actions.openApp("files", "browse", { place: "desktop", folderId });
+    },
+    [actions],
   );
 
   // Dropping a desk FILE onto a desk FOLDER files the artifact there (the
@@ -239,6 +253,10 @@ export function Desktop({
             return;
           }
           actions.updateFileItem(itemId, { uploadState: "failed" });
+          // The server's own sentence, beside the icon's retry chip -- the
+          // desk used to swallow the reason, which is what made a broken
+          // upload path read as a mystery (epic memql#4842).
+          setDeskError(describe(err));
         });
     },
     [actions, uploads],
@@ -444,7 +462,13 @@ export function Desktop({
     }
     if (item.kind === "folder") {
       return [
-        { id: "open", label: "Open", onSelect: () => setOpenFolderId(item.id) },
+        { id: "open", label: "Open in Files", onSelect: () => openFolderInFiles(item.folderId) },
+        {
+          id: "rename",
+          label: "Rename",
+          disabled: connection === null,
+          onSelect: () => setRenamingItemId(item.id),
+        },
         {
           id: "remove",
           // The shortcut goes; the Library folder and everything in it stay.
@@ -477,19 +501,19 @@ export function Desktop({
               placement={placement}
               surface={state.surfaces[desk.id]}
               selectedId={selectedId}
-              openFolderId={openFolderId}
+              renamingItemId={renamingItemId}
               noAnswerFor={noAnswerFor}
               actorRole={actorRole}
               onSelect={actions.selectSurfaceItem}
               onOpenFile={openFile}
-              onOpenArtifact={openArtifact}
+              onOpenFolder={openFolderInFiles}
               onRetryUpload={(itemId) => {
                 const file = pendingFiles.current.get(itemId);
                 if (file) startUpload(file, { col: 0, row: 0 }, { existingItemId: itemId });
                 else actions.removeSurfaceItem(itemId);
               }}
-              onToggleFolder={(id) => setOpenFolderId((v) => (v === id ? null : id))}
               onRenameFolder={renameDeskFolder}
+              onRenameCancel={() => setRenamingItemId(null)}
               onFolderHostDrop={onFolderHostDrop}
               onMenu={(m) => setMenu(m)}
               onHostDrop={onHostDrop}
@@ -547,15 +571,15 @@ function DeskPlate({
   placement,
   surface,
   selectedId,
-  openFolderId,
+  renamingItemId,
   noAnswerFor,
   actorRole,
   onSelect,
   onOpenFile,
-  onOpenArtifact,
+  onOpenFolder,
   onRetryUpload,
-  onToggleFolder,
   onRenameFolder,
+  onRenameCancel,
   onFolderHostDrop,
   onMenu,
   onHostDrop,
@@ -568,15 +592,15 @@ function DeskPlate({
   placement: PlacementTokens;
   surface: DeskSurface | undefined;
   selectedId: string | null;
-  openFolderId: string | null;
+  renamingItemId: string | null;
   noAnswerFor: string | null;
   actorRole: string;
   onSelect: (id: string | null) => void;
   onOpenFile: (item: Extract<DesktopItem, { kind: "file" }>) => void;
-  onOpenArtifact: (artifactId: string, anchorId: string) => void;
+  onOpenFolder: (folderId: string) => void;
   onRetryUpload: (itemId: string) => void;
-  onToggleFolder: (id: string) => void;
   onRenameFolder: (itemId: string, folderId: string, name: string) => void;
+  onRenameCancel: () => void;
   onFolderHostDrop: (folderId: string, files: readonly File[]) => void;
   onMenu: (menu: DeskMenu) => void;
   onHostDrop: (event: React.DragEvent) => void;
@@ -630,14 +654,14 @@ function DeskPlate({
           item={item}
           pos={surface?.positions[id]}
           selected={selectedId === id}
-          folderOpen={openFolderId === id}
+          renaming={renamingItemId === id}
           noAnswerFor={noAnswerFor}
           onSelect={() => onSelect(id)}
           onOpenFile={onOpenFile}
-          onOpenArtifact={onOpenArtifact}
+          onOpenFolder={onOpenFolder}
           onRetryUpload={() => onRetryUpload(id)}
-          onToggleFolder={() => onToggleFolder(id)}
           onRenameFolder={onRenameFolder}
+          onRenameCancel={onRenameCancel}
           onFolderHostDrop={onFolderHostDrop}
           onMenu={(x, y) => onMenu({ x, y, kind: "item", cell: { col: 0, row: 0 }, itemId: id })}
         />
@@ -668,28 +692,28 @@ function SurfaceItem({
   item,
   pos,
   selected,
-  folderOpen,
+  renaming,
   noAnswerFor,
   onSelect,
   onOpenFile,
-  onOpenArtifact,
+  onOpenFolder,
   onRetryUpload,
-  onToggleFolder,
   onRenameFolder,
+  onRenameCancel,
   onFolderHostDrop,
   onMenu,
 }: {
   item: DesktopItem;
   pos: GridPos | undefined;
   selected: boolean;
-  folderOpen: boolean;
+  renaming: boolean;
   noAnswerFor: string | null;
   onSelect: () => void;
   onOpenFile: (item: Extract<DesktopItem, { kind: "file" }>) => void;
-  onOpenArtifact: (artifactId: string, anchorId: string) => void;
+  onOpenFolder: (folderId: string) => void;
   onRetryUpload: () => void;
-  onToggleFolder: () => void;
   onRenameFolder: (itemId: string, folderId: string, name: string) => void;
+  onRenameCancel: () => void;
   onFolderHostDrop: (folderId: string, files: readonly File[]) => void;
   onMenu: (x: number, y: number) => void;
 }) {
@@ -772,23 +796,17 @@ function SurfaceItem({
           onRetryUpload={onRetryUpload}
         />
       ) : item.kind === "folder" ? (
-        <>
-          <FolderIcon
-            id={item.id}
-            name={item.name}
-            open={folderOpen}
-            isDropTarget={folderDrop.isOver}
-            onToggle={onToggleFolder}
-            onRename={(name) => onRenameFolder(item.id, item.folderId, name)}
-          />
-          {folderOpen ? (
-            <DeskFolderPopover
-              folderId={item.folderId}
-              noAnswerFor={noAnswerFor}
-              onOpen={onOpenArtifact}
-            />
-          ) : null}
-        </>
+        <FolderIcon
+          id={item.id}
+          name={item.name}
+          selected={selected}
+          isDropTarget={folderDrop.isOver}
+          renaming={renaming}
+          onSelect={onSelect}
+          onOpen={() => onOpenFolder(item.folderId)}
+          onRenameCommit={(name) => onRenameFolder(item.id, item.folderId, name)}
+          onRenameCancel={onRenameCancel}
+        />
       ) : (
         (() => {
           const manifest = widgetById(registry, item.widgetId);

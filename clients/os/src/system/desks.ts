@@ -5,7 +5,15 @@
 // typed effect so the chrome can play the right cue without re-deriving
 // what happened.
 
-import { isVisible, newWindow, type AppId, type DeskId, type OsWindow, type WindowId } from "./windows";
+import {
+  isVisible,
+  newWindow,
+  type AppId,
+  type DeskId,
+  type OsWindow,
+  type WindowId,
+  type WindowIntent,
+} from "./windows";
 
 export const DESK_CAP = 2;
 
@@ -120,15 +128,30 @@ function deskHasVacancy(desk: Desk): boolean {
 /**
  * Open an app: focus its existing window (switching desks if needed),
  * place it on the active desk when there is room, or spill onto a fresh
- * auto desk created right after the active one.
+ * auto desk created right after the current one.
+ *
+ * `intent` (epic memql#4842, #4845) is a consumable instruction the window
+ * carries to the app. On a fresh window it rides along; on an existing one
+ * it REPLACES any standing intent and adopts the requested section --
+ * "open Files at this folder" must land there whether the window exists or
+ * not. Without an intent, re-opening neither clears a standing one nor
+ * yanks the window off the section the person navigated to.
  */
-export function openApp(state: ShellState, appId: AppId, sectionId = ""): ShellResult {
+export function openApp(
+  state: ShellState,
+  appId: AppId,
+  sectionId = "",
+  intent?: WindowIntent,
+): ShellResult {
   const existing = windowForApp(state, appId);
   if (existing) {
     const desk = deskOfWindow(state, existing.id);
     if (!desk) throw new Error("shell invariant: window without a desk");
-    const restored: OsWindow =
-      existing.mode === "minimized" ? { ...existing, mode: "normal" } : existing;
+    const restored: OsWindow = {
+      ...existing,
+      ...(existing.mode === "minimized" ? { mode: "normal" as const } : {}),
+      ...(intent ? { intent, ...(sectionId !== "" ? { sectionId } : {}) } : {}),
+    };
     const next: ShellState = {
       ...state,
       windows: { ...state.windows, [existing.id]: restored },
@@ -138,7 +161,7 @@ export function openApp(state: ShellState, appId: AppId, sectionId = ""): ShellR
     return { state: gcAutoDesks(next), effect: { kind: "focused-existing", deskId: desk.id, windowId: existing.id } };
   }
 
-  const win = newWindow(nextId("win"), appId, sectionId);
+  const win = newWindow(nextId("win"), appId, sectionId, intent);
   const current = activeDesk(state);
   if (deskHasVacancy(current)) {
     const next = replaceDesk(
@@ -210,6 +233,18 @@ export function focusWindow(state: ShellState, windowId: WindowId): ShellState {
     activeDeskId: desk.id,
     focusedWindowId: windowId,
   };
+}
+
+/**
+ * Clear a window's intent, matched by id. The match is the point: the app
+ * consumes what it ACTED ON, so a consume racing a newer send leaves the
+ * newer instruction standing.
+ */
+export function consumeIntent(state: ShellState, windowId: WindowId, intentId: string): ShellState {
+  const win = state.windows[windowId];
+  if (!win || win.intent?.id !== intentId) return state;
+  const { intent: _consumed, ...rest } = win;
+  return { ...state, windows: { ...state.windows, [windowId]: rest } };
 }
 
 export function setWindowSection(state: ShellState, windowId: WindowId, sectionId: string): ShellState {

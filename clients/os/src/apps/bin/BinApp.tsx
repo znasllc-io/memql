@@ -3,7 +3,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Folder as FolderIcon } from "lucide-react";
 
-import { Caption, Check, Chip, Head, Input, LiveList, Panel, Row as KitRow, formatFreshness, formatMoment, useNow } from "../../kit";
+import { Caption, Check, Chip, Head, LiveList, Panel, Refine, Row as KitRow, formatFreshness, formatMoment, useNow } from "../../kit";
 import { useOsConnection } from "../../live/connection";
 import { useMachines } from "../../live/machines";
 import type { OsAppProps } from "../../system/registry";
@@ -171,12 +171,13 @@ export function BinApp({ sectionId, askContext, store }: OsAppProps & { store?: 
   return (
     <div className="os-bin">
       <Head title="Bin">
-        <Input
-          id="bin-search"
-          label="Search the Bin"
-          value={search}
-          onChange={setSearch}
+        {/* The search rides the Refine affordance (DESIGN.md rule 2) --
+            collapsed until asked, never standing chrome over the list. */}
+        <Refine
+          search={search}
+          onSearch={setSearch}
           placeholder="Name, label or machine"
+          label="Search the Bin"
         />
       </Head>
 

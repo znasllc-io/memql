@@ -627,6 +627,11 @@ func NewArtifactHandler(opts ArtifactHandlerOptions) *ArtifactHandler {
 // Ingress rules and the same mux registrations carry them; PUT joined the
 // registration for the chunk route (memql#4782).
 func (h *ArtifactHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Resolve the caller's AccessContext from the verified claims the HTTP
+	// middleware attached (memql#4843) -- see http_access.go for why this is
+	// per handler family rather than a global middleware. Every ownership
+	// gate and store read below binds the actor from it.
+	r = requestWithResolvedAccess(r)
 	path := r.URL.Path
 	switch {
 	case r.Method == http.MethodPost && isUploadInitPath(path):

@@ -39,6 +39,12 @@
   --os-radius-sm: 10px;
   --os-radius-xs: 6px;
 
+  /* THE CONTROL LINE (DESIGN.md rule 5): every piece of interactive chrome --
+   * input, select, button, choice pill -- sits at this one height, at
+   * --os-text-base. Not a theme value: packs carry colour and wallpaper only,
+   * so the discipline holds under every theme. */
+  --os-control-h: 30px;
+
   --os-duration-fast: 140ms;
   --os-duration-med: 260ms;
   /* The arrival cue. Longer than an interaction on purpose: it is not

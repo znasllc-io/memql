@@ -449,6 +449,13 @@ patches:
     target:
       kind: ConfigMap
       name: memql-db-pool
+  # Blob storage against the in-cluster Azurite (memql#4843): the container
+  # name and the autocreate flag -- the two values the secret cannot carry.
+  # bff serves the Library artifact routes; agent shares the attachment route.
+  - path: patches/blob-storage-local.yaml
+    target:
+      kind: Deployment
+      name: "^(bff|agent)$"
 
   # -------------------------------------------------------------------------
   # DATABASE -- local VALUES over the cnpg-db component (memql#3846 / #3851)

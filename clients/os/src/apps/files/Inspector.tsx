@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, CornerUpRight, Download, FilePlus2, X } from "lucide-react";
+import { Archive, CornerUpRight, Download, FilePlus2, RotateCcw, X } from "lucide-react";
 
 import { useAuthSource } from "../../auth/context";
 import { useSession } from "../../chrome/access";
 import { useOs } from "../../chrome/state";
 import { openInVsCode, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
+import { binItemFromArtifact } from "../bin/rows";
+import { planRestore, runRestore } from "../bin/restore";
 import { Button, Chip, Chips, Fact, Facts, Notice, ProvenanceDot, Select, Subhead, formatBytes, formatMoment } from "../../kit";
 import { AccountLabelPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
@@ -51,6 +53,7 @@ export function Inspector({
   row,
   folderNameOf,
   tree,
+  archivedFolderIds,
   presence,
   confirmBeforeArchive,
   uploads,
@@ -60,6 +63,8 @@ export function Inspector({
   row: ArtifactRow;
   folderNameOf: (folderId: string) => string;
   tree: FolderTree;
+  /** Ids of KNOWN-archived folders -- the restore re-file predicate. */
+  archivedFolderIds: ReadonlySet<string>;
   presence: (workerId: string) => { name?: string; online: boolean } | null;
   confirmBeforeArchive: boolean;
   /**
@@ -326,6 +331,48 @@ export function Inspector({
     }
   }, [connection, row.id]);
 
+  // Restore, for a row being read in the Archive place (epic memql#4842,
+  // #4846): the Bin's client-driven pair, verbatim -- the index first, then
+  // the backing file -- so the two surfaces cannot drift apart on what
+  // "putting back" means. The automation mirror deliberately does not exist
+  // (apps/bin/restore.ts says why), which is why this is two writes.
+  //
+  // ONE addition over the Bin's flow (#4846 AC): a file whose folder is
+  // KNOWN-ARCHIVED re-files to the Library root, because a row restored into
+  // an invisible folder is invisible everywhere except search. Fail-closed on
+  // archived-list membership -- an absence test against the live tree would
+  // re-file out of live folders while the feed is still seeding.
+  const restore = useCallback(async () => {
+    const query = connection?.query ?? null;
+    if (query === null) {
+      setArchiveError("Not connected to the cluster, so nothing was restored.");
+      return;
+    }
+    setArchiveBusy(true);
+    setArchiveError("");
+    try {
+      await runRestore(planRestore(binItemFromArtifact(row)), {
+        restoreArtifact: async (artifactId) => {
+          await query.restoreArtifact({ artifactId });
+        },
+        restoreFile: async (fileId) => {
+          await query.restoreLibraryFile({ fileId });
+        },
+        restoreFolder: async (folderId) => {
+          await query.restoreLibraryFolder({ folderId });
+        },
+      });
+      if (row.folderId !== "" && archivedFolderIds.has(row.folderId)) {
+        await query.moveArtifactToFolder({ artifactId: row.id, folderId: "" });
+        setDeskNote("Restored to the Library root -- its folder is still archived.");
+      }
+    } catch (err: unknown) {
+      setArchiveError(describe(err));
+    } finally {
+      setArchiveBusy(false);
+    }
+  }, [connection, row, archivedFolderIds]);
+
   // Download is offered only where bytes or a body exist: a file always, the
   // rendered kinds by construction of the content route.
   const filedIn = folderNameOf(row.folderId);
@@ -438,7 +485,16 @@ export function Inspector({
           >
             <Archive size={13} aria-hidden /> Archive
           </Button>
-        ) : null}
+        ) : (
+          <Button
+            tone="primary"
+            busy={archiveBusy}
+            busyLabel="Restoring"
+            onClick={() => void restore()}
+          >
+            <RotateCcw size={13} aria-hidden /> Restore
+          </Button>
+        )}
       </div>
       {/* The picker itself is never seen: a bare file input cannot be styled
           into this shell's button language, and every surface here uses the

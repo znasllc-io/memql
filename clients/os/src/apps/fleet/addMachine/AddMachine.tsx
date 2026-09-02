@@ -3,7 +3,7 @@ import { createWorkerToken } from "@znasllc-io/memql-sdk-core/identity";
 
 import { useSession } from "../../../chrome/access";
 import { useOsConnection } from "../../../live/connection";
-import { Button, Notice, Panel } from "../../../kit";
+import { Button, Notice, Panel, Select } from "../../../kit";
 import {
   CLUSTER_URL_PLACEHOLDER,
   INSTALL_PLATFORMS,
@@ -161,21 +161,18 @@ export function AddMachine({
             placeholder="studio-mac-mini"
             onChange={(e) => setName(e.target.value)}
           />
-          <label className="os-select-label" htmlFor="fleet-add-platform">
-            <span className="os-sr-only">Operating system</span>
-            <select
-              id="fleet-add-platform"
-              className="os-select"
-              value={platform}
-              onChange={(e) => setPlatform(e.target.value as InstallPlatform)}
-            >
-              {INSTALL_PLATFORMS.map((one) => (
-                <option key={one} value={one}>
-                  {INSTALL_PLATFORM_LABEL[one]}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Select
+            id="fleet-add-platform"
+            label="Operating system"
+            value={platform}
+            onChange={(next) => setPlatform(next as InstallPlatform)}
+          >
+            {INSTALL_PLATFORMS.map((one) => (
+              <option key={one} value={one}>
+                {INSTALL_PLATFORM_LABEL[one]}
+              </option>
+            ))}
+          </Select>
           <Button
             type="submit"
             tone="primary"

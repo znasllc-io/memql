@@ -57,13 +57,11 @@ export function CampaignsSection({
   writes,
   showFiled,
   trackByDefault,
-  onToggleFiled,
 }: {
   feeds: CampaignFeeds;
   writes: CampaignWrites;
   showFiled: boolean;
   trackByDefault: boolean;
-  onToggleFiled: (next: boolean) => void;
 }) {
   const [openId, setOpenId] = useState("");
   const [adding, setAdding] = useState(false);
@@ -121,11 +119,6 @@ export function CampaignsSection({
         />
       ) : null}
 
-      <div className="os-campaign-filters">
-        <Check checked={showFiled} onChange={onToggleFiled}>
-          Show finished campaigns
-        </Check>
-      </div>
 
       {/* Keyed on the filter so flipping it RE-BASELINES the arrival cues.
           Revealing rows the browser already had is not the cluster sending
@@ -143,7 +136,7 @@ export function CampaignsSection({
         emptyText={
           showFiled
             ? "No campaigns yet. Write one above -- you will need an audience and a template first."
-            : "Nothing in flight. Start a campaign above, or show finished ones to see what has already gone out."
+            : "Nothing in flight. Start a campaign above -- or turn on finished campaigns in this app's settings to see what has already gone out."
         }
         renderRow={(campaign, tick) => (
           <CampaignLine

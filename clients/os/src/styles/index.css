@@ -112,8 +112,7 @@ button:not(:disabled):active {
 .os-launcher-panel,
 .os-ask-sheet,
 .os-themes,
-.os-widget,
-.os-folder-popover {
+.os-widget {
   background: var(--os-glass-solid);
   border: 1px solid var(--os-line);
 }
@@ -255,6 +254,7 @@ button:not(:disabled):active {
   cursor: default;
 }
 .os-file[data-selected] .os-file-button,
+.os-folder[data-selected] .os-file-button,
 .os-file-button:hover {
   background: var(--os-accent-soft);
 }
@@ -332,39 +332,6 @@ button:not(:disabled):active {
   background: var(--os-plate);
   border: 1px solid var(--os-accent);
   border-radius: var(--os-radius-xs);
-}
-
-.os-folder-popover {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 6px;
-  min-width: 220px;
-  padding: 10px;
-  border-radius: var(--os-radius-sm);
-  box-shadow: var(--os-shadow-float);
-  display: grid;
-  gap: 4px;
-  z-index: 35;
-}
-
-.os-folder-entry {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.os-folder-entry-open {
-  flex: 1;
-  text-align: left;
-  padding: 5px 8px;
-  border: 0;
-  border-radius: var(--os-radius-xs);
-  background: none;
-  cursor: default;
-}
-.os-folder-entry-open:hover {
-  background: var(--os-raised);
 }
 
 /* ---- windows ---- */
@@ -1221,16 +1188,22 @@ button:not(:disabled):active {
   font-size: var(--os-text-base);
 }
 
+/* Settings groups (DESIGN.md rule 8). The fieldset SEMANTICS stay -- a
+ * legend names its group to assistive tech better than any div -- but the
+ * legend-breaking-the-border look was a second container language beside
+ * Panel, so the box goes and the legend dresses as a Subhead. One grouping
+ * grammar, everywhere. */
 .os-field-group {
-  margin: 0 0 16px;
-  padding: 12px 14px;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-sm);
+  margin: 0 0 18px;
+  padding: 0;
+  border: 0;
 }
 .os-field-group legend {
-  padding: 0 6px;
-  font-size: var(--os-text-sm);
-  color: var(--os-muted);
+  padding: 0;
+  margin-bottom: 6px;
+  font-size: var(--os-text-base);
+  font-weight: 600;
+  color: var(--os-ink);
 }
 
 .os-choice-row {
@@ -1239,7 +1212,10 @@ button:not(:disabled):active {
   margin-bottom: 6px;
 }
 .os-choice {
-  padding: 6px 14px;
+  display: inline-flex;
+  align-items: center;
+  height: var(--os-control-h);
+  padding: 0 14px;
   border: 1px solid var(--os-line);
   border-radius: var(--os-radius-sm);
   background: none;
@@ -1753,12 +1729,102 @@ button:not(:disabled):active {
 .os-head .os-subhead {
   margin: 0;
 }
+.os-head-meta {
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+  font-variant-numeric: tabular-nums;
+}
 .os-head-actions {
   margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* Rule 3: sort is not a button -- quiet text on the scope line. */
+.os-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--os-control-h);
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--os-muted);
+  font: inherit;
+  font-size: var(--os-text-sm);
+  cursor: pointer;
+}
+.os-sort:hover {
+  color: var(--os-ink);
+}
+.os-sort:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+  border-radius: var(--os-radius-xs);
+}
+.os-sort svg {
+  opacity: 0.55;
+}
+
+/* Rule 2: the Refine affordance -- search and facets behind one control,
+ * active constraints as removable chips beside it while collapsed. */
+.os-refine {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.os-refine-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--os-control-h);
+  padding: 0 10px;
+  max-width: 220px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-raised);
+  color: var(--os-muted);
+  font: inherit;
+  font-size: var(--os-text-base);
+  cursor: pointer;
+}
+.os-refine-open[data-active] {
+  color: var(--os-ink);
+  border-color: var(--os-accent);
+}
+.os-refine-open:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+}
+.os-refine-open-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-refine-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 264px;
+  padding: 10px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-glass-solid);
+  box-shadow: var(--os-shadow-float);
+}
+/* Inside the panel the column is the MAIN axis, so the controls' row-flex
+ * basis would stretch them tall; pin them to the control line instead. */
+.os-refine-panel .os-input,
+.os-refine-panel .os-select-wrap {
+  flex: none;
+  width: 100%;
 }
 
 .os-subhead {
@@ -1791,11 +1857,15 @@ button:not(:disabled):active {
   flex-wrap: wrap;
 }
 
+/* THE CONTROL LINE (DESIGN.md rule 5): one height, one text size, one
+ * field radius for every piece of interactive chrome. Heights come from the
+ * token, never re-stated per control, so nothing can drift a pixel off. */
 .os-input,
 .os-select {
   flex: 1 1 12ch;
   min-width: 12ch;
-  padding: 6px 9px;
+  height: var(--os-control-h);
+  padding: 0 10px;
   font: inherit;
   font-size: var(--os-text-base);
   color: var(--os-ink);
@@ -1812,8 +1882,36 @@ button:not(:disabled):active {
   display: inline-flex;
 }
 
+/* The styled select (rule 5): the UA's own chrome goes, the wrapper draws a
+ * currentColor chevron, and the select sits flush with the input beside it
+ * in both modes and under every theme pack. */
+.os-select-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 1 1 12ch;
+  min-width: 12ch;
+}
+.os-select-wrap .os-select {
+  flex: 1;
+  width: 100%;
+  appearance: none;
+  padding-right: 26px;
+}
+.os-select-chevron {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  translate: 0 -50%;
+  pointer-events: none;
+  color: var(--os-muted);
+}
+
 .os-button {
-  padding: 6px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--os-control-h);
+  padding: 0 12px;
   font: inherit;
   font-size: var(--os-text-base);
   font-weight: 500;
@@ -2822,20 +2920,6 @@ a.os-button {
   min-height: 0;
 }
 
-.os-files-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.os-files-search {
-  flex: 1 1 180px;
-  min-width: 140px;
-}
-.os-files-search .os-input {
-  width: 100%;
-}
-
 /* The kind tabs: the shell's one selection language (the accent-bordered
  * pill), at toolbar size. */
 .os-files-kinds {
@@ -2843,12 +2927,15 @@ a.os-button {
   gap: 4px;
 }
 .os-files-kind {
-  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  height: var(--os-control-h);
+  padding: 0 12px;
   border: 1px solid var(--os-line);
   border-radius: 999px;
   background: none;
   color: var(--os-muted);
-  font-size: var(--os-text-sm);
+  font-size: var(--os-text-base);
   cursor: pointer;
 }
 .os-files-kind[aria-checked="true"] {
@@ -2937,6 +3024,26 @@ a.os-button {
   opacity: 0.55;
   cursor: default;
 }
+/* A PLACE node (Library / Desktop / Archive) opens its own block in the
+ * rail: a breath of space above, nothing louder -- the places read as
+ * sections of one rail, not as three rails. */
+.os-files-place {
+  margin-top: 8px;
+}
+
+/* Rule 6: actions are verbs, nodes are nouns. A rail ACTION sits below a
+ * hairline, stays muted, and never wears the node's current highlight. */
+.os-files-node[data-action] {
+  margin-top: 6px;
+  border-top: 1px solid var(--os-line);
+  border-radius: 0;
+  padding-top: 8px;
+  color: var(--os-muted);
+}
+.os-files-node[data-action]:hover {
+  color: var(--os-ink);
+  background: none;
+}
 .os-files-rename {
   flex: 1;
   min-width: 0;
@@ -2952,10 +3059,6 @@ a.os-button {
   flex-direction: column;
   gap: 8px;
 }
-.os-files-scope {
-  margin: 0;
-}
-
 /* The inspector: a quiet panel whose header is the file and whose first line
  * is its story. */
 .os-files-inspector {
@@ -3303,22 +3406,6 @@ a.os-button {
 
 /* The desk folder popover carries a LiveList now (a live view of the
  * Library folder); its rows keep the popover's compact voice. */
-.os-folder-popover .os-livelist-rows {
-  display: grid;
-  gap: 2px;
-}
-.os-folder-popover .os-folder-entry-open {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  font-size: var(--os-text-sm);
-  color: var(--os-ink);
-}
-.os-folder-popover .os-caption {
-  margin: 2px 4px;
-}
-
 /* ---- accounts: the app's own surfaces (epic memql#4800) ----
  *
  * Three things live here and nothing else: the LEDGER, the first-run card and
@@ -3358,15 +3445,11 @@ a.os-button {
   margin: 8px 0;
 }
 
-.os-account-form-actions,
-.os-account-filters {
+.os-account-form-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}
-.os-account-filters {
-  margin: 2px 0 6px;
 }
 
 /* ---- the ledger ---- */
@@ -4682,10 +4765,6 @@ a.os-button {
   gap: 4px;
   margin: 8px 0;
 }
-.os-campaign-filters {
-  margin: 2px 0 6px;
-}
-
 .os-campaign-schedule {
   margin-top: 10px;
   padding-top: 10px;
@@ -4906,6 +4985,13 @@ a.os-button {
  * the width and made "can be mailed" look like the row's headline instead of
  * the address. Found by looking at it in a browser; jsdom has no CSS engine
  * and every test passed either way. */
+.os-campaign-roster-row .os-select-wrap {
+  /* The kit Select gained a wrapper (rule 5's drawn chevron); the wrapper is
+   * the flex item now, so the constraint moves onto it or the row regresses
+   * to the stretched shape this rule was written against. */
+  flex: 0 0 auto;
+  min-width: 15ch;
+}
 .os-campaign-roster-row .os-select {
   flex: 0 0 auto;
   min-width: 15ch;
@@ -5092,6 +5178,13 @@ a.os-button {
   color: var(--os-muted);
 }
 
+.os-campaign-sentence .os-select-wrap {
+  /* Constrained at the WRAPPER (the kit Select's flex item since rule 5);
+   * constraining only the inner select would leave the wrapper stretching
+   * and the drawn chevron floating past the control. */
+  flex: 0 1 auto;
+  max-width: 22ch;
+}
 .os-campaign-sentence .os-select {
   /* Wide enough to read, never so wide it breaks the line into a form. */
   max-width: 22ch;

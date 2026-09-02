@@ -8,7 +8,6 @@ import { useAccountOptions } from "../accounts/tie";
 import {
   Button,
   Caption,
-  Check,
   Chip,
   ChoiceStack,
   Fact,
@@ -78,12 +77,10 @@ export function RulesSection({
   feeds,
   writes,
   showFiled,
-  onToggleFiled,
 }: {
   feeds: CampaignFeeds;
   writes: CampaignWrites;
   showFiled: boolean;
-  onToggleFiled: (next: boolean) => void;
 }) {
   const [openId, setOpenId] = useState("");
   const [adding, setAdding] = useState(false);
@@ -142,11 +139,6 @@ export function RulesSection({
         />
       ) : null}
 
-      <div className="os-campaign-filters">
-        <Check checked={showFiled} onChange={onToggleFiled}>
-          Show paused rules
-        </Check>
-      </div>
 
       <LiveList<EmailRuleRow>
         key={`rules:${showFiled}`}

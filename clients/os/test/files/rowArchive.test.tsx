@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { act } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -82,17 +82,24 @@ describe("archiving from a file row", () => {
     expect(screen.getByRole("button", { name: /cut-03\.mov/ })).toBeTruthy();
   });
 
-  it("offers nothing to press on a row already in the Bin", async () => {
-    // Not a hidden entry: the menu says why it is inert, because an item that
-    // silently offers no action reads as a menu that failed to load.
+  it("offers Restore on an archived row, in the Archive place", async () => {
+    // The row's one verb flips with its state (epic memql#4842, #4846): a
+    // live row moves to the Bin, an archived one restores -- the Bin's own
+    // vocabulary, kept verbatim so one action has one name everywhere.
     const connection = fakeConnection({
       artifacts: [artifactRow({ id: "a-1", title: "cut-03.mov", archived: true })],
     });
     h.connection = connection;
-    await renderFiles({ settings: { showArchived: true } });
+    await renderFiles();
+    fireEvent.click(screen.getByRole("button", { name: /^Archive/ }));
 
     await rightClickRow(/cut-03\.mov/);
-    const entry = screen.getByRole("menuitem", { name: "Already in the Bin" });
-    expect(entry.hasAttribute("disabled")).toBe(true);
+    const entry = screen.getByRole("menuitem", { name: "Restore" });
+    expect(entry.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(entry);
+    await waitFor(() => {
+      expect(connection.callsNamed("restoreArtifact")).toHaveLength(1);
+      expect(connection.callsNamed("restoreLibraryFile")).toHaveLength(1);
+    });
   });
 });

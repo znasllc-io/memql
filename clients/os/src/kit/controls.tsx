@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowUpDown, ChevronDown, Search, X } from "lucide-react";
 
 // The OS's shared controls.
 //
@@ -140,20 +141,163 @@ export function Select({
   label: string;
   children: ReactNode;
 }) {
+  // The wrapper draws the chevron (DESIGN.md rule 5): `appearance: none`
+  // drops the UA's own chrome so a select sits flush with the inputs beside
+  // it, and a glyph in currentColor keeps it right in both modes and under
+  // every theme pack -- a background-image chevron would be one fixed colour.
   return (
     <>
       <label className="os-sr-only" htmlFor={id}>
         {label}
       </label>
-      <select
-        id={id}
-        className="os-select"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        {children}
-      </select>
+      <span className="os-select-wrap">
+        <select
+          id={id}
+          className="os-select"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          {children}
+        </select>
+        <ChevronDown size={12} className="os-select-chevron" aria-hidden />
+      </span>
     </>
+  );
+}
+
+/**
+ * Rule 3: sort is not a button. A quiet text control on the list's own scope
+ * line -- click swaps the order, the accessible name says what it is and what
+ * a click does. The default order stays an app-settings preference; this
+ * steers the session.
+ */
+export function SortControl({
+  ascending,
+  onToggle,
+  descLabel = "Newest first",
+  ascLabel = "Oldest first",
+}: {
+  ascending: boolean;
+  onToggle: () => void;
+  descLabel?: string;
+  ascLabel?: string;
+}) {
+  const current = ascending ? ascLabel : descLabel;
+  const other = ascending ? descLabel : ascLabel;
+  return (
+    <button
+      type="button"
+      className="os-sort"
+      aria-label={`Sorted ${current.toLowerCase()} -- switch to ${other.toLowerCase()}`}
+      onClick={onToggle}
+    >
+      <ArrowUpDown size={11} aria-hidden />
+      {current}
+    </button>
+  );
+}
+
+/** One active constraint shown while Refine is collapsed; removable in place. */
+export interface RefineChip {
+  id: string;
+  label: string;
+  onRemove: () => void;
+}
+
+/**
+ * Rule 2: filters are questions, not furniture. The section's search and
+ * facet controls live behind this one affordance on the Head line: collapsed,
+ * it is a single quiet control (carrying the live search text once one is
+ * typed); open, it is an anchored panel with the search first and the app's
+ * facet controls after; active facets render as removable chips beside it
+ * while collapsed, so the state of the question never hides.
+ *
+ * A disclosure, not a modal: Escape and clicking elsewhere collapse it, and
+ * nothing underneath is blocked while it is open.
+ */
+export function Refine({
+  search,
+  onSearch,
+  placeholder = "Search",
+  chips = [],
+  label,
+  children,
+}: {
+  search: string;
+  onSearch: (next: string) => void;
+  placeholder?: string;
+  chips?: readonly RefineChip[];
+  /** Names the whole affordance for assistive tech ("Refine files"). */
+  label: string;
+  children?: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (rootRef.current && event.target instanceof Node && !rootRef.current.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  // The search field takes focus when the panel opens -- the affordance is
+  // search-shaped, so the first keystroke must land in the search.
+  useEffect(() => {
+    if (open) rootRef.current?.querySelector("input")?.focus();
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="os-refine" role="group" aria-label={label}>
+      {chips.map((chip) => (
+        <span key={chip.id} className="os-chip os-chip-editable" data-tone="accent">
+          {chip.label}
+          <button
+            type="button"
+            className="os-chip-remove"
+            aria-label={`Remove ${chip.label}`}
+            onClick={chip.onRemove}
+          >
+            <X size={10} aria-hidden />
+          </button>
+        </span>
+      ))}
+      <button
+        type="button"
+        className="os-refine-open"
+        aria-expanded={open}
+        aria-label={label}
+        data-active={search !== "" || undefined}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Search size={13} aria-hidden />
+        <span className="os-refine-open-text">{search !== "" ? search : placeholder}</span>
+      </button>
+      {open ? (
+        <div className="os-refine-panel">
+          <Input
+            id={`refine-search-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+            label={placeholder}
+            placeholder={placeholder}
+            value={search}
+            onChange={onSearch}
+            onEnter={() => setOpen(false)}
+          />
+          {children}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -250,10 +394,20 @@ export function Panel({ children, label }: { children: ReactNode; label?: string
   );
 }
 
-export function Head({ title, children }: { title: string; children?: ReactNode }) {
+export function Head({
+  title,
+  meta,
+  children,
+}: {
+  title: string;
+  /** A quiet fact beside the title -- a count, a scope note. Muted, tabular. */
+  meta?: ReactNode;
+  children?: ReactNode;
+}) {
   return (
     <div className="os-head">
       <h3 className="os-settings-title">{title}</h3>
+      {meta !== undefined && meta !== null ? <span className="os-head-meta">{meta}</span> : null}
       {children ? <div className="os-head-actions">{children}</div> : null}
     </div>
   );

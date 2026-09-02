@@ -4,12 +4,14 @@ import {
   activeDesk,
   addDesk,
   closeWindow,
+  consumeIntent,
   DESK_CAP,
   deskById,
   initialShell,
   openApp,
   resetIdsForTest,
   setWindowMode,
+  setWindowSection,
   swapSides,
   switchDesk,
   switchDeskBy,
@@ -163,5 +165,60 @@ describe("desk lifecycle", () => {
     expect(s.activeDeskId).toBe(s.desks[0]!.id);
     s = switchDeskBy(s, -1);
     expect(s.activeDeskId).toBe(s.desks[0]!.id);
+  });
+});
+
+describe("open intents (epic memql#4842, #4845)", () => {
+  const intent = (id: string) => ({ id, payload: { scope: "desktop", folderId: "f-1" } });
+
+  it("a fresh window carries the intent it was opened with", () => {
+    const { state } = openApp(initialShell(), "files", "browse", intent("i-1"));
+    const win = windowForApp(state, "files");
+    expect(win?.intent?.id).toBe("i-1");
+    expect(win?.sectionId).toBe("browse");
+  });
+
+  it("opening an already-open app with an intent replaces the standing intent and adopts the section", () => {
+    let s = openApp(initialShell(), "files", "settings").state;
+    s = openApp(s, "files", "browse", intent("i-1")).state;
+    const first = windowForApp(s, "files");
+    expect(first?.intent?.id).toBe("i-1");
+    expect(first?.sectionId).toBe("browse");
+    const { state, effect } = openApp(s, "files", "browse", intent("i-2"));
+    expect(effect.kind).toBe("focused-existing");
+    expect(windowForApp(state, "files")?.intent?.id).toBe("i-2");
+  });
+
+  it("re-opening without an intent neither clears the standing intent nor yanks the section", () => {
+    let s = openApp(initialShell(), "files", "browse", intent("i-1")).state;
+    s = setWindowSection(s, windowForApp(s, "files")!.id, "settings");
+    s = openApp(s, "files").state;
+    const win = windowForApp(s, "files");
+    expect(win?.intent?.id).toBe("i-1");
+    expect(win?.sectionId).toBe("settings");
+  });
+
+  it("consumeIntent clears by id, and a stale consume leaves a newer intent standing", () => {
+    let s = openApp(initialShell(), "files", "browse", intent("i-1")).state;
+    const winId = windowForApp(s, "files")!.id;
+    s = openApp(s, "files", "browse", intent("i-2")).state;
+    s = consumeIntent(s, winId, "i-1");
+    expect(windowForApp(s, "files")?.intent?.id).toBe("i-2");
+    s = consumeIntent(s, winId, "i-2");
+    expect(windowForApp(s, "files")?.intent).toBeUndefined();
+  });
+
+  it("an intent survives a throw to another desk", () => {
+    let s = openApp(initialShell(), "files", "browse", intent("i-1")).state;
+    const winId = windowForApp(s, "files")!.id;
+    s = throwToDesk(s, winId, "new").state;
+    expect(windowForApp(s, "files")?.intent?.id).toBe("i-1");
+  });
+
+  it("a spilled window carries its intent onto the fresh desk", () => {
+    const base = openMany(initialShell(), "a", "b");
+    const { state, effect } = openApp(base, "files", "browse", intent("i-1"));
+    expect(effect.kind).toBe("spilled");
+    expect(windowForApp(state, "files")?.intent?.id).toBe("i-1");
   });
 });

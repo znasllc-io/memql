@@ -26,9 +26,6 @@ export interface FilesSettings {
    * a single file's confirm and the folder walk's count-naming confirm alike.
    */
   confirmBeforeArchive: boolean;
-  /** Whether the browse opens with archived rows shown. OFF by default:
-   *  the standing question this app answers is what you HAVE. */
-  showArchived: boolean;
 }
 
 export const FILES_SETTINGS_KEY = "memql-os-files-v1";
@@ -37,7 +34,6 @@ export const DEFAULT_FILES_SETTINGS: FilesSettings = {
   version: 1,
   defaultSort: "newest",
   confirmBeforeArchive: true,
-  showArchived: false,
 };
 
 /**
@@ -62,10 +58,6 @@ export function sanitizeFilesSettings(raw: unknown): FilesSettings {
       typeof doc.confirmBeforeArchive === "boolean"
         ? doc.confirmBeforeArchive
         : DEFAULT_FILES_SETTINGS.confirmBeforeArchive,
-    showArchived:
-      typeof doc.showArchived === "boolean"
-        ? doc.showArchived
-        : DEFAULT_FILES_SETTINGS.showArchived,
   };
 }
 

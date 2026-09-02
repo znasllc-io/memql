@@ -107,28 +107,24 @@ export function CampaignsApp({
           writes={writes}
           uploads={uploadProvider}
           showFiled={settings.showFiled}
-          onToggleFiled={(showFiled) => updateSettings({ showFiled })}
         />
       ) : sectionId === "templates" ? (
         <TemplatesSection
           feeds={feeds}
           writes={writes}
           showFiled={settings.showFiled}
-          onToggleFiled={(showFiled) => updateSettings({ showFiled })}
         />
       ) : sectionId === "senders" ? (
         <SendersSection
           feeds={feeds}
           writes={writes}
           showFiled={settings.showFiled}
-          onToggleFiled={(showFiled) => updateSettings({ showFiled })}
         />
       ) : sectionId === "rules" ? (
         <RulesSection
           feeds={feeds}
           writes={writes}
           showFiled={settings.showFiled}
-          onToggleFiled={(showFiled) => updateSettings({ showFiled })}
         />
       ) : (
         <CampaignsSection
@@ -136,7 +132,6 @@ export function CampaignsApp({
           writes={writes}
           showFiled={settings.showFiled}
           trackByDefault={settings.trackByDefault}
-          onToggleFiled={(showFiled) => updateSettings({ showFiled })}
         />
       )}
     </>

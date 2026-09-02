@@ -73,7 +73,14 @@ export class EdgeUploadProvider implements UploadProvider {
   constructor(
     private readonly bearer: () => Promise<string | null>,
     private readonly path: string = artifactsUploadPath(import.meta.env.BASE_URL),
-    private readonly fetchImpl: typeof fetch = fetch,
+    // WRAPPED, NOT `fetch` BARE (memql#4842 QA find): a bare reference is
+    // UNBOUND, and calling it as `this.fetchImpl(...)` hands the provider as
+    // the receiver -- Chromium throws "Illegal invocation" before a single
+    // byte moves. Every browser upload died on this line with nothing in any
+    // log, which is half of how "uploads never work" stayed a mystery (the
+    // other half was the 401 the engine answered once a request DID move).
+    // jsdom's fetch tolerates any receiver, so the suite could never see it.
+    private readonly fetchImpl: typeof fetch = (input, init) => fetch(input, init),
     opts: { resume?: ResumeStore; backoffMs?: number } = {},
   ) {
     this.resume = opts.resume ?? new LocalResumeStore();
