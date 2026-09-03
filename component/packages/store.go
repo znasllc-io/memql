@@ -11,6 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/packages/githubapp"
 )
 
 // Engine is the ONLY engine surface the pipeline needs -- one method, the same
@@ -51,6 +52,13 @@ type store struct {
 	// logger is for the one thing the store does on its own account -- the
 	// best-effort heartbeat behind resolveCredential. Nil means slog.Default.
 	logger *slog.Logger
+	// github is the cluster's GitHub App client (epic memql#4912). NIL MEANS
+	// THIS NODE HAS NO APP WIRED, and a github_app grant is then refused by
+	// name (github_app_not_configured) rather than falling through to a token
+	// this store cannot renew -- the same shape as a nil credential resolver
+	// refusing rather than fetching anonymously. A token credential never
+	// touches it.
+	github *githubapp.Client
 }
 
 func (s *store) log() *slog.Logger {
@@ -351,6 +359,78 @@ func (s *store) sourceCredentialSealedById(ctx context.Context, credentialId str
 	return rows[0], nil
 }
 
+// githubAppGrantForCaller reads the caller's own active grant, or nil.
+//
+// The SECOND stamped read, and for the same reason as the first: the query is
+// @serverOnly because it carries the sealed shape, so the stamp is what lets
+// the engine reach the construct at all -- and it widens nothing, because the
+// read path has no internal-origin bypass and the query's own
+// `ownerUserId==actor.userId` term decides the rows.
+//
+// It takes no argument, and the absence is the authorization: there is no
+// value a caller could supply that would make this answer with somebody else's
+// grant. Nil for zero rows -- a person who has not connected GitHub, or who
+// disconnected -- which is what makes the surface offer Connect rather than a
+// picker that would refuse every repository in it.
+func (s *store) githubAppGrantForCaller(ctx context.Context) (map[string]any, error) {
+	rows, err := s.executeInternal(ctx, "query githubAppGrantForCaller()")
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rows[0], nil
+}
+
+// recordRefreshedGrantToken writes a user token the engine renewed on its own.
+//
+// Stamped internal because the mutation is @serverOnly -- and internal origin
+// is also the write guard's escape, so what stops this reaching somebody
+// else's row is NOT the guard but where the id came from: unsealCredential
+// resolved it through the owner-scoped sealed read moments earlier, under the
+// GRANT OWNER's borrowed actor, so an id that arrives here is one that read
+// admitted. That is the same borrowed-authority argument openDeployment makes,
+// and it is the whole of the protection.
+func (s *store) recordRefreshedGrantToken(ctx context.Context, g grantTokenSeed) error {
+	return s.writeInternal(ctx, fmt.Sprintf(
+		"mutation refreshGithubAppGrantToken(credentialId: %s, encryptedValue: %s, fingerprint: %s, refreshToken: %s, expiresAt: %s)",
+		langparser.QuoteString(g.CredentialId),
+		langparser.QuoteString(g.EncryptedValue),
+		langparser.QuoteString(g.Fingerprint),
+		langparser.QuoteString(g.RefreshToken),
+		langparser.QuoteString(rfc3339OrEmpty(g.ExpiresAt)),
+	))
+}
+
+// recordGrantInstallations replaces a grant's installation ids from what the
+// caller has just read live from GitHub.
+//
+// REPLACED rather than merged, because the listing carries the whole set and a
+// merge could never remove one -- and an installation that stays on the row
+// after it was uninstalled is exactly the state that turns a clear
+// repository_not_installed into an unexplained 404.
+//
+// Stamped internal, and as above the stamp opens the write guard rather than
+// satisfying it: the credentialId reached here from a read the CALLER was
+// admitted to (their own grant, through githubAppGrantForCaller or the
+// owner-scoped sealed read), so it can only ever name a row they own.
+//
+// There is deliberately no webhook path writing this. A delivery names a
+// GitHub identity rather than a MemQL user, so finding the grant it belongs to
+// would be a cross-owner read past the concept's own tier -- and nothing reads
+// installationIds on a hot path anyway, because the fetcher asks GitHub which
+// installation covers a repository, live. The stored list is a display cache,
+// which is exactly what an owner-actor refresh is good enough for.
+func (s *store) recordGrantInstallations(ctx context.Context, credentialId string, installationIds []string) error {
+	if installationIds == nil {
+		installationIds = []string{}
+	}
+	return s.writeInternal(ctx, fmt.Sprintf(
+		"mutation recordGithubAppInstallations(credentialId: %s, installationIds: %s)",
+		langparser.QuoteString(credentialId), jsonLiteral(installationIds)))
+}
+
 // createSourceCredential lands a sealed credential under the CALLER's own
 // actor: ownerUserId is stamped from actor.userId inside the mutation, so the
 // ctx handed here must be the person's and never a borrowed one. Stamped
@@ -446,6 +526,23 @@ type credentialSeed struct {
 	Fingerprint    string
 }
 
+// grantTokenSeed is what recordRefreshedGrantToken writes: FOUR TOKEN FIELDS
+// AND NOTHING ELSE.
+//
+// Not the login, not the installations, not the status. A refresh is evidence
+// about a token, and a writer that also touched the installations would be
+// reporting a fact it did not observe -- the same argument credentialSeed
+// makes for not carrying an owner.
+type grantTokenSeed struct {
+	CredentialId   string
+	EncryptedValue string
+	Fingerprint    string
+	// RefreshToken is the SEALED rotated refresh token, or the sealed value
+	// already on the row when GitHub did not rotate one. Never plaintext.
+	RefreshToken string
+	ExpiresAt    time.Time
+}
+
 type deploymentSeed struct {
 	DeploymentId  string
 	PackageId     string
@@ -537,6 +634,48 @@ func rowString(row map[string]any, key string) string {
 		return strings.TrimSpace(v)
 	}
 	return ""
+}
+
+// rowStrings reads a []string field off a row.
+//
+// It handles both spellings the engine can hand back -- a real []string, and
+// the []any a structpb-backed bundle decodes to -- because a caller that
+// handled only one would read an empty list on the other path and report a
+// grant that reaches no installations.
+func rowStrings(row map[string]any, key string) []string {
+	if row == nil {
+		return nil
+	}
+	switch v := row[key].(type) {
+	case []string:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s := strings.TrimSpace(item); s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				out = append(out, strings.TrimSpace(s))
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// rfc3339OrEmpty renders a timestamp, answering the EMPTY STRING for a zero
+// time rather than year one. A datetime field left empty is "not known", and
+// "0001-01-01T00:00:00Z" is a date -- one the expiry comparison would read as
+// long past and refresh against on every call.
+func rfc3339OrEmpty(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 func rowBool(row map[string]any, key string) bool {

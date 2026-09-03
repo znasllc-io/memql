@@ -83,8 +83,10 @@ the engine, and its hostname is where a redirect URI is registered.
    (`GET /repos/{owner}/{repo}/installation` with the app JWT, cached), mint
    an installation token and use it as the bearer. The app's single webhook
    posts to the existing `POST /inbound/github` seam under the app's webhook
-   secret; the feed matches by repository URL as it does today and also
-   reads `installation` events to keep a grant's installation ids current.
+   secret; the feed matches by repository URL as it does today. A grant's
+   installation ids are refreshed on the three paths where the owner's own
+   actor is present, not from `installation` events -- see the amendment in
+   section G.
 6. **Disconnect.** Settings shows "Connected to GitHub as @login" with the
    installations it can reach. Disconnect revokes the grant at GitHub
    (`DELETE /applications/{client_id}/grant`) and flips the row to revoked;
@@ -157,8 +159,8 @@ and the OS copy table.
 - The engine resolves a grant under the package owner's actor through the
   owned tier, exactly as the pasted credential; the Compose guarantee that
   no cluster-wide source credential exists is preserved.
-- The webhook is HMAC-verified by the existing inbound seam; an
-  `installation` event updates installation ids and nothing else.
+- The webhook is HMAC-verified by the existing inbound seam. It carries
+  pushes only; `installation` events are not acted on (section G).
 - The audit log records connect, reconnect, disconnect and a refused
   callback, with the login as the target.
 
@@ -178,7 +180,50 @@ and the OS copy table.
   size, both modes.
 - Boot: five of six values refuses the identity node with the missing names.
 
-## G. Out of scope
+## G. Amendment -- installation ids are refreshed by their owner, not by a webhook
+
+**Recorded 2026-09-03, during implementation. It narrows section A.5 and E, and
+changes no decision.**
+
+As designed, `installation` and `installation_repositories` webhooks kept a
+grant's `installationIds` current. Building it showed the cost, and the cost is
+not proportionate.
+
+A delivery names a GITHUB identity -- an installation id, an account login --
+and never a MemQL user. Finding the grant it belongs to is therefore a read
+ACROSS OWNERS, past `v1:platform:sourceCredential`'s
+`@rowAuthz(owner="ownerUserId", clusterOwner)` tier, and the engine has exactly
+one mechanism for that: listing the automation in
+`component/auth/maintenance_actor.go`, which runs it as a synthetic CLUSTER
+OWNER. That list's own gate says an entry must span owners "BY NATURE ... not
+merely finding an owner-scoped read inconvenient", and the shape here is worse
+than the sweeps already on it: a cluster-owner-privileged handler parsing a body
+that arrives from outside the cluster.
+
+What it would buy is small, because **no hot path reads `installationIds`**:
+
+| Path | What it actually asks GitHub |
+|---|---|
+| fetch, poll | `GET /repos/{owner}/{repo}/installation`, live, with the app JWT |
+| the picker | `GET /user/installations`, live, with the user token |
+| the card | the stored list |
+
+Only the card reads the stored value, and the three paths where the owner's own
+actor IS present cover it: the connect callback (which is also where "Install on
+another organisation" returns, so a new installation is recorded the moment it
+is made), `sourceRepositories` (which lists installations live and writes back
+what it read), and a probe under the grant. What is lost is noticing an
+UNINSTALL performed elsewhere, between one visit and the next -- and the
+consequence of that staleness is one stale chip on a card, never a refused
+fetch.
+
+So: the webhook stays, verified by the same secret, carrying pushes exactly as
+before. `installation` deliveries fall through the push parser as they already
+do -- they name no repository, so they are a named skip and not an error. The
+ids are the owner's to refresh, and nothing in this epic runs as a cluster
+owner.
+
+## H. Out of scope
 
 Sign-in with GitHub as an identity route; permissions beyond contents and
 metadata read; GitHub Enterprise Server hosts (the token path covers a

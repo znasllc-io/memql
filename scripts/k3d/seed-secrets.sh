@@ -929,6 +929,74 @@ function seed_db_creds() {
 # MAIN MEMQL SECRET
 #=============================================================================
 
+RESOLVED_GITHUB_APP_ID=""
+RESOLVED_GITHUB_APP_SLUG=""
+RESOLVED_GITHUB_APP_CLIENT_ID=""
+RESOLVED_GITHUB_APP_CLIENT_SECRET=""
+RESOLVED_GITHUB_APP_PRIVATE_KEY_B64=""
+RESOLVED_GITHUB_APP_WEBHOOK_SECRET=""
+
+# resolve_github_app reads the cluster's GitHub App out of the environment, on
+# the tolerated-absence template seed_livekit_secrets uses (memql#4912).
+#
+# THE ALL-OR-NONE RULE IS ENFORCED HERE, NOT ONLY AT BOOT. The identity node
+# refuses to start on a HALF-configured app -- one to five values set -- which
+# is the right answer in the cloud, where an operator who set four of six wants
+# to hear about it. Locally it would be a crash-loop that reads as "the cluster
+# is broken", so a partial environment is blanked and reported: every key is
+# still seeded (the Secret's shape does not vary with configuration), Connect is
+# simply absent, and the warning names the exact exports that would turn it on.
+#
+# NOTHING BELOW LOGS A VALUE. Two of these are secrets and one is a private
+# key; a key that reaches an operator terminal or a CI log is a key that must be
+# rotated. TestSeedSecretsNeverLogsAGitHubAppSecret pins that.
+function resolve_github_app() {
+    RESOLVED_GITHUB_APP_ID="${MEMQL_GITHUB_APP_ID:-}"
+    RESOLVED_GITHUB_APP_SLUG="${MEMQL_GITHUB_APP_SLUG:-}"
+    RESOLVED_GITHUB_APP_CLIENT_ID="${MEMQL_GITHUB_APP_CLIENT_ID:-}"
+    RESOLVED_GITHUB_APP_CLIENT_SECRET="${MEMQL_GITHUB_APP_CLIENT_SECRET:-}"
+    RESOLVED_GITHUB_APP_PRIVATE_KEY_B64="${MEMQL_GITHUB_APP_PRIVATE_KEY_B64:-}"
+    RESOLVED_GITHUB_APP_WEBHOOK_SECRET="${MEMQL_GITHUB_APP_WEBHOOK_SECRET:-}"
+
+    local present=0
+    local v
+    for v in "$RESOLVED_GITHUB_APP_ID" "$RESOLVED_GITHUB_APP_SLUG" \
+             "$RESOLVED_GITHUB_APP_CLIENT_ID" "$RESOLVED_GITHUB_APP_CLIENT_SECRET" \
+             "$RESOLVED_GITHUB_APP_PRIVATE_KEY_B64" "$RESOLVED_GITHUB_APP_WEBHOOK_SECRET"; do
+        if [ -n "$v" ]; then
+            present=$((present + 1))
+        fi
+    done
+
+    if [ "$present" -eq 6 ]; then
+        info "GitHub Connect enabled (all six MEMQL_GITHUB_APP_* values present)."
+        return 0
+    fi
+
+    if [ "$present" -gt 0 ]; then
+        warn "GitHub App only partly configured ($present of 6 values set); seeding NONE of them."
+        warn "  A half-configured app REFUSES BOOT on the identity node by design, so a partial"
+        warn "  local set would crash-loop identity rather than disable a feature."
+    fi
+    if [ "$present" -eq 0 ]; then
+        info "GitHub Connect disabled (no MEMQL_GITHUB_APP_* values in the environment)."
+    fi
+    warn "  To enable, export all six before 'make secrets':"
+    warn "    export MEMQL_GITHUB_APP_ID=<numeric app id>"
+    warn "    export MEMQL_GITHUB_APP_SLUG=<app-url-slug>"
+    warn "    export MEMQL_GITHUB_APP_CLIENT_ID=<oauth client id>"
+    warn "    export MEMQL_GITHUB_APP_CLIENT_SECRET=<oauth client secret>"
+    warn "    export MEMQL_GITHUB_APP_PRIVATE_KEY_B64=\"\$(base64 -w0 < app.private-key.pem)\""
+    warn "    export MEMQL_GITHUB_APP_WEBHOOK_SECRET=<webhook secret>"
+
+    RESOLVED_GITHUB_APP_ID=""
+    RESOLVED_GITHUB_APP_SLUG=""
+    RESOLVED_GITHUB_APP_CLIENT_ID=""
+    RESOLVED_GITHUB_APP_CLIENT_SECRET=""
+    RESOLVED_GITHUB_APP_PRIVATE_KEY_B64=""
+    RESOLVED_GITHUB_APP_WEBHOOK_SECRET=""
+}
+
 function seed_memql_secrets() {
     # Both values were resolved in main BEFORE any mutation -- see the note
     # there. This function only writes.
@@ -956,6 +1024,7 @@ function seed_memql_secrets() {
     # noisy: it reads this same variable from its own environment.
     local master_key signing_key signing_key_created_at db_dsn db_direct_dsn
     local node_bootstrap_token
+    local gh_app_id gh_app_slug gh_client_id gh_client_secret gh_private_key gh_webhook_secret
     master_key="$RESOLVED_MASTER_KEY"
     signing_key="$RESOLVED_SIGNING_KEY_B64"
     signing_key_created_at="$RESOLVED_SIGNING_KEY_CREATED_AT"
@@ -974,6 +1043,19 @@ function seed_memql_secrets() {
     # For local, the direct DSN is the same as the pooler DSN (no PgBouncer).
     db_direct_dsn="$db_dsn"
 
+    # Resolved in main BEFORE any mutation, with every other value this
+    # function writes -- see the note there. All six or none (epic memql#4912):
+    # resolve_github_app blanks every one when any is missing, so a half-set
+    # environment seeds six empty keys rather than a partial configuration,
+    # which the identity node refuses to boot on by design. A local cluster
+    # must not crash-loop identity because somebody exported four of six.
+    gh_app_id="$RESOLVED_GITHUB_APP_ID"
+    gh_app_slug="$RESOLVED_GITHUB_APP_SLUG"
+    gh_client_id="$RESOLVED_GITHUB_APP_CLIENT_ID"
+    gh_client_secret="$RESOLVED_GITHUB_APP_CLIENT_SECRET"
+    gh_private_key="$RESOLVED_GITHUB_APP_PRIVATE_KEY_B64"
+    gh_webhook_secret="$RESOLVED_GITHUB_APP_WEBHOOK_SECRET"
+
     info "seeding memql-secrets (the config delivery path)..."
     kubectl create secret generic memql-secrets \
         --namespace="$NAMESPACE" \
@@ -985,6 +1067,12 @@ function seed_memql_secrets() {
         --from-literal="MEMQL_DATABASE_DSN=$db_dsn" \
         --from-literal="MEMORY_NODES_DATABASE_DIRECT_DSN=$db_direct_dsn" \
         --from-literal="AZURE_BLOB_CONNECTION_STRING=$AZURITE_CONN" \
+        --from-literal="MEMQL_GITHUB_APP_ID=$gh_app_id" \
+        --from-literal="MEMQL_GITHUB_APP_SLUG=$gh_app_slug" \
+        --from-literal="MEMQL_GITHUB_APP_CLIENT_ID=$gh_client_id" \
+        --from-literal="MEMQL_GITHUB_APP_CLIENT_SECRET=$gh_client_secret" \
+        --from-literal="MEMQL_GITHUB_APP_PRIVATE_KEY_B64=$gh_private_key" \
+        --from-literal="MEMQL_GITHUB_APP_WEBHOOK_SECRET=$gh_webhook_secret" \
         --dry-run=client -o yaml \
         | kubectl apply -f - >&2
     SEEDED_COUNT=$((SEEDED_COUNT + 1))
@@ -1195,6 +1283,7 @@ function main() {
     resolve_signing_key
     resolve_signing_key_created_at
     resolve_node_bootstrap_token
+    resolve_github_app
 
     seed_internal_ca
     seed_domain_configmap

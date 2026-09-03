@@ -117,6 +117,57 @@ const (
 	// reached.
 	CodeSourceHostUnsupported = "source_host_unsupported"
 
+	// -- GitHub App grants (epic memql#4912, C1/C6/D) --
+	//
+	// Five codes for a credential that is not a pasted token but an
+	// authorization GRANT, and each exists because the token vocabulary
+	// above answers the wrong question under one. The rule they share:
+	// a grant's failure names a repair the PERSON can carry out, and
+	// never a fact about the repository, because under a grant this
+	// cluster genuinely does know the difference.
+
+	// CodeReconnectRequired: GitHub refused the grant itself -- the user
+	// token expired and the refresh token is spent or revoked, or the
+	// person revoked the authorization at GitHub. It must NEVER be read
+	// as credential_cannot_see_it or as "private, or not there": under a
+	// token those three are one 404 and the cluster cannot tell them
+	// apart, but under a grant a 401 on the authorization endpoint is a
+	// different fact with a different repair -- reconnect, which is one
+	// click and no typing.
+	CodeReconnectRequired = "reconnect_required"
+	// CodeRepositoryNotInstalled: the grant is good, the person can see
+	// the repository, and the App is not installed ON it. The repair is
+	// an installation link rather than another credential, and answering
+	// it as a 404 would send somebody hunting for a permission problem
+	// that does not exist.
+	CodeRepositoryNotInstalled = "repository_not_installed"
+	// CodeInstallationPending: an installation is waiting for an
+	// organisation owner's approval. Named BY ORGANISATION, because the
+	// repair belongs to somebody else and the person's only useful next
+	// step is knowing whom to ask. Distinct from
+	// repository_not_installed: there the person can act, here they
+	// cannot.
+	CodeInstallationPending = "installation_pending"
+	// CodeGithubAppNotConfigured: this cluster has no GitHub App -- the
+	// six MEMQL_GITHUB_APP_* values are absent -- so Connect is not
+	// offered at all and the pasted token is the whole Source stop. An
+	// operator's condition, not a person's, and the sentence says so
+	// rather than implying somebody typed something wrong.
+	CodeGithubAppNotConfigured = "github_app_not_configured"
+
+	// -- raised on the identity node, catalogued here --
+	//
+	// The connect callback runs in component/identity and its refusal
+	// reaches a person through the same OS copy table every code above
+	// does, so it is catalogued here for the same reason
+	// dsl_requires_cluster_owner is: a catalogue split across packages
+	// grows a fourth ad-hoc string.
+
+	// CodeConnectStateInvalid: the connect state was expired, replayed,
+	// or never issued. Consumed exactly once under a compare-and-swap,
+	// so the SECOND click on a link is this code and not a second grant.
+	CodeConnectStateInvalid = "connect_state_invalid"
+
 	// -- reported, not fatal (D3, and the target model's D9) --
 
 	// CodeGoPackNotDeployable: a bff/ with a go.mod. Reported per-half and

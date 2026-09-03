@@ -129,4 +129,25 @@ describe("refusal copy coverage", () => {
       expect(copy?.next, `${code} does not name the stop that repairs it`).toContain("Where it lives");
     }
   });
+
+  it("carries the GitHub Connect epic's five new codes", () => {
+    // Pinned by name for the same reason the compose block above is: these
+    // five are what a person sees when a GRANT fails, and every one of them
+    // names a repair that differs from the pasted-token vocabulary's. A
+    // reconnect_required rendered as "This cluster refused" would read as a
+    // fault rather than as one click in Settings.
+    expect(copyFor("reconnect_required")?.title).toBe("Your GitHub connection needs renewing");
+    expect(copyFor("reconnect_required")?.next).toContain("Settings > Sources");
+    expect(copyFor("repository_not_installed")?.title).toBe("The app is not installed on that repository");
+    expect(copyFor("repository_not_installed")?.next).toContain("Install it");
+    expect(copyFor("installation_pending")?.title).toBe("Waiting for an organisation owner to approve");
+    // The server's sentence names the ORGANISATION, which is the only fact
+    // that helps; anything composed here would be a worse copy of it.
+    expect(copyFor("installation_pending")?.next).toBe("");
+    expect(copyFor("github_app_not_configured")?.title).toBe("This cluster has no GitHub connection set up");
+    expect(copyFor("github_app_not_configured")?.next).toContain("token instead");
+    expect(copyFor("github_app_not_configured")?.next).toContain("operator");
+    expect(copyFor("connect_state_invalid")?.title).toBe("That sign-in link is no longer valid");
+    expect(copyFor("connect_state_invalid")?.next).toContain("Connect GitHub");
+  });
 });

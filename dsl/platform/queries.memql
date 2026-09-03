@@ -672,3 +672,69 @@ query sourceCredential sourceCredentialSealedById {
   filter  row.id==args.credentialId && ownerUserId==actor.userId
   shape   sourceCredentialSealed
 }
+
+// ---- GitHub App grants (epic memql#4912, C5/C6) ----
+//
+// Two server-only reads, and both run under the GRANT OWNER's actor: the
+// connect callback borrows the state row's user before it reads, and
+// sourceRepositories runs under the person who clicked. So both are
+// owner-scoped exactly as sourceCredentialSealedById is, and that term IS the
+// whole authorization.
+//
+// There is deliberately no cross-owner read here. An earlier draft carried two,
+// for a webhook that would have kept installation ids current -- a delivery
+// names a GitHub identity and never a MemQL user, so finding the grant it
+// belongs to reaches past this concept's tier. The only mechanism for that runs
+// the automation as a synthetic CLUSTER OWNER over a body from outside the
+// cluster, in exchange for one stale chip on a card, so the ids are refreshed
+// on the three paths carrying the owner's own actor instead. Section G of
+// docs/superpowers/specs/2026-09-03-github-connect-design.md is the argument.
+//
+// @serverOnly on both, and caller-scoping is NOT what either withholds: the
+// filters ARE caller-scoped. What the annotation withholds is the WIRE. Both
+// carry sourceCredentialSealed, which projects `encryptedValue` and
+// `refreshToken`, and a client-callable projection of either is a ciphertext
+// oracle even for the row's own owner -- exactly the argument
+// sourceCredentialSealedById already records. Nothing a person does needs
+// them: a grant is unsealed only inside a fetch, a poll, a probe or the
+// callback, into a local that dies with the call.
+
+/// The caller's grant for one GitHub account. The connect callback's read, and the compare half of
+/// its decision: a grant already here is UPDATED in place, and its absence is what mints a new row.
+///
+/// Keyed on `externalId`, GitHub's numeric user id, rather than on the login: a person who renames
+/// their GitHub account must not acquire a second grant, and a login is a display string that moves.
+///
+/// actor.userId scoping is not the fix, and it is already here -- the filter IS owner-scoped. What
+/// @serverOnly withholds is the WIRE: the sealed shape projects `encryptedValue` and `refreshToken`,
+/// and a client-callable projection of either is a ciphertext oracle even for the row's own owner.
+@serverOnly
+@unbounded("one grant per (owner, GitHub account) -- bounded by construction, not by a page")
+@actor
+query sourceCredential githubAppGrantByExternalId {
+  args {
+    externalId  string!
+  }
+  filter  kind=="github_app" && externalId==args.externalId && ownerUserId==actor.userId
+  shape   sourceCredentialSealed
+}
+
+/// The caller's active grant. What sourceRepositories and the prefill probe resolve when no
+/// credential was named -- a person who has connected GitHub should not have to say which grant,
+/// because there is one.
+///
+/// Revoked grants are excluded by the trait rather than by a bare `status=="active"`, and the
+/// exclusion is the point: a disconnected grant must read as ABSENT here, so the surface offers
+/// Connect rather than a picker that would refuse every repository in it.
+///
+/// actor.userId scoping is not the fix, and it is already here -- the filter IS owner-scoped, and it
+/// carries no cluster-owner branch for the reason sourceCredentialSealedById records. What
+/// @serverOnly withholds is the WIRE: this projects the two sealed fields, and no surface a person
+/// touches has any use for them.
+@serverOnly
+@actor
+query sourceCredential githubAppGrantForCaller {
+  filter  kind=="github_app" && statusIsActive && ownerUserId==actor.userId
+  sort    "row.createdAt", "desc"
+  shape   sourceCredentialSealed
+}

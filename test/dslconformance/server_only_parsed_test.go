@@ -252,7 +252,28 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "identity/queries.memql", Name: "usersForSeedSweep"}:         true,
 		{Path: "identity/queries.memql", Name: "usersInDeletionCooldown"}:   true,
 		{Path: "identity/queries.memql", Name: "usersScheduledForDeletion"}: true,
-		{Path: "worker/queries.memql", Name: "runningPlansForUser"}:         true,
+		// epic memql#4912 / memql#4913. GitHub Connect's server-held state:
+		// one read and two writes over v1:identity:githubConnectState.
+		//
+		// Caller scoping has nobody to scope to at the moment that matters.
+		// The read runs inside the callback GitHub redirects a BROWSER to,
+		// carrying an OAuth code, a state value and no MemQL bearer of any
+		// kind -- the person is mid-way through granting this cluster
+		// authority at a different service, so actor.userId is empty and a
+		// self-scoped filter would match zero rows and turn every completed
+		// connect into connect_state_invalid.
+		//
+		// The two writes carry a `stateHash`, which IS the credential the
+		// callback matches on: a client-reachable create would be a primitive
+		// for minting a connect that lands a GitHub grant on an account of the
+		// caller's choosing, and a client-reachable consume would let anyone
+		// burn somebody else's in-flight connect. What bounds them instead is
+		// a SHA-256 digest of 32 CSPRNG bytes, a ten-minute TTL, and a
+		// Postgres advisory lock that spends the row exactly once.
+		{Path: "identity/queries.memql", Name: "githubConnectStateByHash"}:    true,
+		{Path: "identity/mutations.memql", Name: "createGithubConnectState"}:  true,
+		{Path: "identity/mutations.memql", Name: "consumeGithubConnectState"}: true,
+		{Path: "worker/queries.memql", Name: "runningPlansForUser"}:           true,
 		// epic memql#4378, the SYNC RUNTIME's own bookkeeping. Eight
 		// writers over two engine-owned concepts -- an outbox queue and a
 		// health timeline -- and the argument is one argument, not eight.
@@ -400,6 +421,35 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "createSourceCredential"}:   true,
 		{Path: "platform/mutations.memql", Name: "touchSourceCredential"}:    true,
 		{Path: "platform/queries.memql", Name: "sourceCredentialSealedById"}: true,
+		// epic memql#4912. The GitHub App grant's six writes and reads, and
+		// NOT ONE of them is caller-scoping avoided -- every filter here is
+		// already owner-scoped, and createGithubAppGrant stamps the owner from
+		// actor.userId. What @serverOnly withholds is the WIRE, for two
+		// distinct reasons.
+		//
+		// The four writes all land SEALED CIPHERTEXT. Only the Go frame that
+		// ran secret.Encrypt under MEMQL_MASTER_KEY can vouch for an
+		// `encryptedValue` or a `refreshToken`, and that key exists on nodes
+		// and must never exist on a laptop; a client-supplied one would be a
+		// row that reads as connected and unseals to whatever the client
+		// chose. refreshGithubAppGrantToken and recordGithubAppInstallations
+		// add the touchSourceCredential argument on top: both are claims about
+		// what the ENGINE observed, and the poll that makes them runs on a
+		// schedule with nobody attached, so a self-scoped filter would refuse
+		// the one path that legitimately calls them.
+		//
+		// The two reads carry sourceCredentialSealed, which projects both
+		// sealed fields -- so they are the ciphertext oracle
+		// sourceCredentialSealedById already argues against, and nothing a
+		// person does needs them: a grant is unsealed only inside a fetch, a
+		// poll, a probe or the connect callback, into a local that dies with
+		// the call.
+		{Path: "platform/mutations.memql", Name: "createGithubAppGrant"}:         true,
+		{Path: "platform/mutations.memql", Name: "updateGithubAppGrant"}:         true,
+		{Path: "platform/mutations.memql", Name: "refreshGithubAppGrantToken"}:   true,
+		{Path: "platform/mutations.memql", Name: "recordGithubAppInstallations"}: true,
+		{Path: "platform/queries.memql", Name: "githubAppGrantByExternalId"}:     true,
+		{Path: "platform/queries.memql", Name: "githubAppGrantForCaller"}:        true,
 		// memql#4270 / memql#4606 / memql#4601. The four writes of the
 		// user-invitation lifecycle, and none is caller-scopable for the same
 		// underlying reason: the row is not the caller's.

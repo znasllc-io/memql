@@ -37,6 +37,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/identity/githubconnect"
 	"github.com/znasllc-io/memql/component/identity/oidc"
 )
 
@@ -495,6 +496,16 @@ type Config struct {
 	// recoverable through the owner recovery key (memql#3958).
 	OIDC oidc.Config
 
+	// GitHubApp is the cluster's GitHub App, when it has one (epic
+	// memql#4912). The zero value means Connect is absent: the Source stop
+	// offers the pasted-token path alone and githubConnectBegin answers
+	// github_app_not_configured. All six values or none -- Validate refuses a
+	// partial configuration at boot, because the half that is missing fails
+	// where nobody is watching. See component/identity/githubconnect.
+	// Env: MEMQL_GITHUB_APP_ID / _SLUG / _CLIENT_ID / _CLIENT_SECRET /
+	// _PRIVATE_KEY_B64 / _WEBHOOK_SECRET
+	GitHubApp githubconnect.Config
+
 	// InternalDomains is the cluster's "internal users" allowlist.
 	// Email-domain match flags v1:identity:user.internal=true.
 	// Env: MEMQL_IDENTITY_INTERNAL_DOMAINS
@@ -794,6 +805,7 @@ func LoadConfigFromEnv() (Config, error) {
 
 	cfg.RegistrationMode = RegistrationMode(envString("MEMQL_IDENTITY_REGISTRATION_MODE", string(RegistrationModeOpen)))
 	cfg.OIDC = loadOIDCConfig()
+	cfg.GitHubApp = githubconnect.LoadFromEnv()
 	cfg.RegistrationDomains = envStringList("MEMQL_IDENTITY_REGISTRATION_DOMAINS")
 	cfg.InternalDomains = envStringList("MEMQL_IDENTITY_INTERNAL_DOMAINS")
 	cfg.CORSAllowedOrigins = envStringList("MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS")
@@ -950,6 +962,19 @@ func (c Config) Validate() error {
 				return fmt.Errorf("MEMQL_IDENTITY_REGISTERED_CLIENTS: client %q has malformed redirect URI %q: %w", client.ClientId, uri, err)
 			}
 		}
+	}
+
+	// THE GITHUB APP IS ALL SIX OR NONE (epic memql#4912, design section B).
+	//
+	// Checked LAST because it is the only value in this function whose absence
+	// is an ordinary, supported install rather than a defect -- a cluster with
+	// no GitHub App offers the pasted-token path and nothing here fires. What
+	// is refused is the HALF-configured state, on the Anthropic
+	// workload-identity precedent: a Connect button that appears and then fails
+	// per person reports the operator's mistake to everybody except the
+	// operator. The refusal names both halves; see githubconnect.Config.Validate.
+	if err := c.GitHubApp.Validate(); err != nil {
+		return err
 	}
 
 	return nil

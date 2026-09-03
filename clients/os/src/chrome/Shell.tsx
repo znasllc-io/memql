@@ -10,6 +10,7 @@ import { AskSheet } from "../ask/AskSheet";
 import { SdkAskTransport } from "../ask/sdkTransport";
 import { type AskTransport } from "../ask/askController";
 import { OS_REGISTRY } from "../apps/registry";
+import { ConnectReturnDispatcher } from "../apps/deployables/sources/ConnectReturnDispatcher";
 import { AuthSourceProvider } from "../auth/context";
 import type { OsAuthSource } from "../auth/source";
 import type { OsRuntimeConfig } from "../cluster/config";
@@ -215,6 +216,12 @@ function ShellRoster({
       grid={grid}
       store={store}
     >
+      {/* A GitHub connect that has come back lands here: it opens the app
+          that asked and hands the answer over as a window intent (epic
+          memql#4915). Renders nothing, and does nothing at all on a browser
+          that did not arrive from a callback -- which is every other one. It
+          sits INSIDE OsProvider because opening an app is a shell act. */}
+      <ConnectReturnDispatcher />
       {/* Where a captured line comes from: the focused window's app and
           section, read from this provider's state at capture time. */}
       <CaptureContextInstaller />

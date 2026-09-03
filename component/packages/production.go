@@ -15,6 +15,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/deploycontrol"
 	"github.com/znasllc-io/memql/component/edge"
+	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
 
@@ -37,7 +38,7 @@ const (
 // fetch
 // ---------------------------------------------------------------------------
 
-func newProductionFetcher(s *store, logger *slog.Logger) Fetcher {
+func newProductionFetcher(s *store, logger *slog.Logger, gh *githubapp.Client) Fetcher {
 	blobs := &blobReader{}
 	return &githubFetcher{
 		http: &http.Client{Timeout: 5 * time.Minute},
@@ -46,6 +47,12 @@ func newProductionFetcher(s *store, logger *slog.Logger) Fetcher {
 		// credential under the package owner's actor, never through a
 		// cluster-wide secret (epic memql#4885).
 		credentials: s.resolveCredential,
+		// The SAME client the store refreshes user tokens through, so a node
+		// mints installation tokens and renews grants against one app and one
+		// token cache (epic memql#4912). Two clients would be two caches, and
+		// two caches means twice the mints against the same rate limit for no
+		// reason a reader could find.
+		github: gh,
 		artifactBytes: func(ctx context.Context, artifactId string) ([]byte, string, error) {
 			return s.artifactBytes(ctx, artifactId, blobs.read)
 		},

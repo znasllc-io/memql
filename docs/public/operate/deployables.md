@@ -705,3 +705,5 @@ link in a runbook still lands. No new portal work is done here.
   the per-site CSP.
 - [Front door](front-door.md) -- hosts, certificates, custom domains and the
   two TLS regimes.
+- [GitHub Connect](github-connect.md) -- connect GitHub once and pick a
+  repository from a list; the pasted token stays behind "Use a token instead".

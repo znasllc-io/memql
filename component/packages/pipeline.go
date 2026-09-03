@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/core/logger"
 )
 
@@ -119,6 +120,16 @@ type Deps struct {
 	// behind it and read which requests carried a bearer -- and which were
 	// never made.
 	HTTP *http.Client
+	// GitHubApp is the cluster's GitHub App (epic memql#4912). It is what
+	// turns a grant into the installation token background work runs under,
+	// what asks whether the app is installed on a repository at all, and what
+	// reads the branch list and manifest summary the probe answers with.
+	//
+	// NIL MEANS THIS NODE HAS NO APP, and every path that needs one refuses by
+	// name (github_app_not_configured) rather than falling through: a cluster
+	// with no app offers the pasted-token path alone, and saying so is the
+	// operator's answer rather than a person's error.
+	GitHubApp *githubapp.Client
 }
 
 func (d *Deps) httpClient() *http.Client {

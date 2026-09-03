@@ -15,6 +15,7 @@ import { useAwaitingConfirm } from "./packages/useAwaitingConfirm";
 import { usePackages } from "./packages/usePackages";
 import { siteFingerprint, siteFromRow, type SiteRow } from "./rows";
 import { SourcesGroup } from "./settings/SourcesGroup";
+import type { ConnectReturn } from "./sources/connectReturn";
 import { credentialFromRow, type CredentialRow } from "./sources/rows";
 import { useSourceCredentials } from "./sources/useSourceCredentials";
 import {
@@ -182,6 +183,27 @@ export function DeployablesApp({
     settingsStore.save(next);
   }
 
+  // THE ANSWER FROM A GITHUB CONNECT, delivered as a window intent (epic
+  // memql#4915). It is held here and RENDERED BY THE SOURCES GROUP rather
+  // than by this component, because the result belongs on the surface that
+  // asked for the connection -- a page of its own would be a toast with more
+  // pixels. Consumed by id, so acting on a stale render can never eat a
+  // newer instruction, and an unrecognised payload is consumed and ignored
+  // rather than left standing to re-fire on every render.
+  const [connectResult, setConnectResult] = useState<ConnectReturn | null>(null);
+  useEffect(() => {
+    if (!intent) return;
+    const carried = intent.payload["connect"];
+    if (carried !== null && typeof carried === "object") {
+      const answer = carried as Partial<ConnectReturn>;
+      setConnectResult({
+        reason: typeof answer.reason === "string" ? answer.reason : "",
+        section: typeof answer.section === "string" ? answer.section : sectionId,
+      });
+    }
+    consumeIntent?.(intent.id);
+  }, [intent, consumeIntent, sectionId]);
+
   // THE DEFAULT-SECTION PREFERENCE, APPLIED ONCE PER WINDOW -- Fleet's pattern,
   // and its reasoning holds unchanged. The shell opens an app on its manifest's
   // FIRST section, so an app-level "open me here" can only be the app
@@ -212,6 +234,7 @@ export function DeployablesApp({
         actorRole={actorRole}
         credentials={credentials}
         packages={packageSnapshot.rows}
+        connectResult={connectResult}
       />
     );
   }
@@ -276,6 +299,7 @@ function DeployablesSettingsSection({
   actorRole,
   credentials,
   packages,
+  connectResult,
 }: {
   settings: DeployablesSettings;
   update: (patch: Partial<DeployablesSettings>) => void;
@@ -284,6 +308,8 @@ function DeployablesSettingsSection({
   credentials: LiveView<CredentialRow> | null;
   /** The app root's package rows, joined onto each credential by `credentialId`. */
   packages: readonly PackageRow[];
+  /** The answer from a GitHub connect, rendered by the group that asked. */
+  connectResult: ConnectReturn | null;
 }) {
   // OFFER ONLY WHAT THIS SESSION CAN OPEN. A preference naming a section the
   // reader is not admitted to would silently do nothing -- WindowFrame falls
@@ -347,7 +373,7 @@ function DeployablesSettingsSection({
             else to live, and Settings is where an app keeps what is about
             the app rather than about one row (DESIGN.md rule 4's home, one
             step out). The two above ARE preferences and stay above it. */}
-        <SourcesGroup credentials={credentials} packages={packages} />
+        <SourcesGroup credentials={credentials} packages={packages} connectResult={connectResult} />
 
         <p className="os-caption">
           These are kept in this browser, separately from your desktop, so an app learning a
