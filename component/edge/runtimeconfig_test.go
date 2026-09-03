@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeEnv is a tiny map-backed env func for exercising the pure derivation
@@ -578,5 +579,58 @@ func TestSiteFromRow_ProjectsOnlyStringSettings(t *testing.T) {
 		if got := siteFromRow(r).Settings; got == nil || len(got) != 0 {
 			t.Errorf("%s: Settings = %v, want an empty, non-nil map", name, got)
 		}
+	}
+}
+
+// THE ACCEPTANCE CRITERION, end to end through the two pieces that carry it:
+// a settings write reaches the SERVED document within one invalidation.
+//
+// The chain has three links and only the middle one is this epic's. The write
+// broadcasts `graph.node.updated.v1:platform:site` (a routing rule that
+// already existed); SiteInvalidationSubscriber evicts the resolver's cached
+// row by hostname (already existed, and needs no change because the payload's
+// merged row still carries the hostname); and the NEXT request re-queries and
+// serves the new settings, which is what this pins.
+//
+// Without it the epic's claim rests on inspection: the resolver caches a Site
+// for MEMQL_EDGE_SITE_CACHE_TTL_SECONDS, so a settings write with no eviction
+// would be invisible for up to thirty seconds and a test that never
+// invalidated could not tell the two apart.
+func TestSettingsReachTheServedDocumentAfterOneInvalidation(t *testing.T) {
+	const host = "app.example.com"
+	exec := &stubExec{rows: map[string]*Site{
+		host: {ID: "s1", Hostname: host, Status: "live", Kind: "spa", Settings: map[string]string{"apiBase": "https://api.old.example"}},
+	}}
+	resolver := NewResolver(exec, time.Hour) // a TTL long enough that only an eviction can explain a change
+	h := NewHandler(Options{Resolver: resolver, Opener: mapOpener{"index.html": "ROOT"}})
+
+	read := func() string {
+		req := httptest.NewRequest(http.MethodGet, runtimeConfigPath, nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		var doc struct {
+			Settings map[string]string `json:"settings"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return doc.Settings["apiBase"]
+	}
+
+	if got := read(); got != "https://api.old.example" {
+		t.Fatalf("first read = %q, want the stored value", got)
+	}
+
+	// The write lands: the row changes, and nothing tells the resolver.
+	exec.rows[host] = &Site{ID: "s1", Hostname: host, Status: "live", Kind: "spa", Settings: map[string]string{"apiBase": "https://api.new.example"}}
+	if got := read(); got != "https://api.old.example" {
+		t.Fatalf("read = %q before any invalidation; the cache is what the eviction exists to beat, so this must still be the OLD value", got)
+	}
+
+	// One invalidation -- what the subscriber does on the broadcast.
+	resolver.Invalidate(host)
+	if got := read(); got != "https://api.new.example" {
+		t.Errorf("read = %q after invalidation, want the new value -- a bundle would keep reading the old endpoint", got)
 	}
 }
