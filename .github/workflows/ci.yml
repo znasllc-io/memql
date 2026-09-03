@@ -1747,8 +1747,31 @@ jobs:
       - name: db-gated -- the fast packages (tight budget)
         run: |
           start=$SECONDS
-          go test -count=1 -timeout=180s ./component/automations/... ./component/backup/... ./component/grpc/... ./component/identity/... ./component/logstore/... ./component/packages/... ./examples/referencepack/... ./integrations/cognition/... ./integrations/embedding/... ./integrations/planner/... ./integrations/shopify/...
+          go test -count=1 -timeout=180s ./component/automations/... ./component/backup/... ./component/grpc/... ./component/identity/... ./component/logstore/... ./examples/referencepack/... ./integrations/cognition/... ./integrations/embedding/... ./integrations/planner/... ./integrations/shopify/...
           echo "headroom: the fast packages used $((SECONDS - start))s of their 180s budget"
+
+      # SPLIT OUT RATHER THAN ADMITTED (epic memql#4885). component/packages
+      # joined the fast lane when this epic gave it its first db-gated
+      # coverage, and the first CI run said what a local run had not: the
+      # package takes 152s on its own and the eleven-package step took 258s of
+      # a 180s budget. Two things were wrong with leaving it there, and only
+      # the second one is loud. The step's whole claim -- the one its name and
+      # its own echo assert -- had quietly become false. And 152s against the
+      # 180s per-BINARY timeout it shared is 84% of it, so a slower runner does
+      # not print a warning, it fails the lane, and it fails it for a package
+      # that was merely sharing a room.
+      #
+      # The fix the step above prescribes for its sibling is the one taken
+      # here: split by concern, never raise the number. The fast lane keeps its
+      # 180s and gets its claim back; this one gets a budget with real headroom
+      # over what was measured. If THIS warns, split it -- the credential
+      # story's db cases and the pipeline's are separable -- rather than
+      # raising 300.
+      - name: db-gated -- packages (the deploy pipeline)
+        run: |
+          start=$SECONDS
+          go test -count=1 -timeout=300s ./component/packages/...
+          echo "headroom: component/packages used $((SECONDS - start))s of its 300s budget (152s when this step was split out)"
 
   # VS Code extension lane: run every cmd/memql-lsp drift guard over the
   # checked-in editors/vscode assets, then build the offline LSP binary
