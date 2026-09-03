@@ -861,6 +861,69 @@ make a mailbox sendable; that is the tenant's own policy, and an address
 declared here but missing from it comes back as the provider's own 403 on the
 campaign's `lastError`.
 
+## Logs, the ninth app -- and a section on every other one (epic memql#4895)
+
+`src/logs/` is the reading surface over the cluster's log store, `src/apps/logs/`
+is the app (Stream, Search, Settings), and every app's `*_SECTIONS` now carries
+`{ id: "logs", name: "Logs", roles: { min: "admin" } }` right before its
+settings section. Five things about it are rules the next live surface gets
+wrong by default.
+
+- **THIS CONCEPT DOES NOT BROADCAST, AND THE TAIL POLLS.** `v1:observability:logLine`
+  rows never enter the graph -- the store answers from its own hypertable --
+  so no `graph.node.*` event exists for a subscription to receive, and a
+  `useLiveCollection` over it would render "Loading from the cluster" and then
+  a list that never moved. `useLogTail` runs one baseline (`logsTail` with no
+  cursor: the newest lines, oldest first), then polls with the newest row's
+  `occurredAt` and `id` as the keyset cursor every two seconds while the
+  document is visible; an empty answer is "nothing new". A facet change is a
+  different reading and re-baselines: the rendered call string is the key.
+  There is deliberately NO arrival cue on a log line -- a log is nothing but
+  arrivals, and a cue that fired on every one would never stop.
+
+- **`logsSection` IS REQUIRED ON EVERY MANIFEST, like `settingsSection`, and
+  it must be admin-floored.** Every read on the log store is admin-and-above
+  in the ENGINE (spec L3, enforced in the Go handler), so a section offered
+  below that floor opens on a refusal for everyone in it and reads as "this
+  app is broken". `logsSectionProblem` checks both existence and the floor --
+  on the section, or on the app when the app's own floor is at or above admin
+  (the Logs app names its Stream). `AppLogsSection` reads the app's SLICE:
+  lines tagged with the app id OR about a concept the app owns, which the
+  engine ORs into one scope predicate; the concept list is generated
+  constants, never composed ids.
+
+- **THE FRONT END'S OWN LINES ARE CAPTURED, AND THE CAPTURE CANNOT RE-ENTER
+  ITSELF.** `src/logs/capture.ts` wraps `console.error` and `console.warn`
+  (calling through -- nothing is silenced), listens for window errors,
+  unhandled rejections and `pagehide`, and batches to `logsRecordClient`
+  through the connection the shell already holds: flush every two seconds or
+  at twenty lines, at most fifty per call, a queue cap of two hundred with
+  the oldest dropped and counted, identical lines collapsed with
+  `attributes.repeat`, `rate_limited` dropped and never retried. The queue is
+  module state and never React state, the send is unawaited with its
+  rejection swallowed, and a `busy` flag routes anything the capture path
+  itself throws or logs to the ORIGINAL console only. Credential-looking
+  attribute keys and bearer material in a message are stripped where the
+  line is made. `resetCaptureForTest` exists because the installer is
+  once-per-page by design.
+
+- **A RENDER ERROR STAYS IN ITS WINDOW.** `chrome/WindowErrorBoundary` wraps
+  every app body, keyed by window: React would otherwise unmount the whole
+  tree above an uncaught render error -- every window, the dock, the desk --
+  in response to a fault in one app. The boundary shows a Notice with the
+  error's own sentence and a "Reload app" that remounts the body, and it
+  REPORTS the line with the app id and section exactly, from props, where the
+  capture's focused-window context can only guess.
+
+- **THE WINDOWED LIST IS A FIRST USE.** Nothing else in the OS is virtualized
+  and nothing else needs to be; `src/logs/WindowedList.tsx` renders the rows in
+  view plus an overscan at a fixed row height per density, and is promoted to
+  `kit/` on the second use rather than invented as an abstraction from one.
+  Its `follow` is the PARENT's state: the list reports scrolling away from the
+  bottom (and back), and the parent decides what that means. The jump pill
+  is absolute against the list's relative root, never fixed -- the desk plate
+  is CSS-transformed and becomes a fixed element's containing block.
+
 ## Packages, inside Deployables (epic memql#4794)
 
 `src/apps/deployables/packages/` is the other half of what a deployable IS: a

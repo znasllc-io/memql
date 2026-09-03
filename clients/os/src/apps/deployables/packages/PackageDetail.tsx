@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 import { Archive, ArrowUpCircle, ExternalLink, RotateCcw, Rocket, Sparkles, Undo2, Zap } from "lucide-react";
 
 import {
@@ -18,6 +19,7 @@ import {
   useLiveView,
 } from "../../../kit";
 import { formatMoment } from "../../../kit/format";
+import { OpenLogsButton } from "../../../logs/OpenLogs";
 import { usePackageActions } from "./actions";
 import { ConfirmGate } from "./ConfirmGate";
 import { BuildLog, ProblemNotice, ReportView } from "./ReportView";
@@ -232,11 +234,24 @@ export function PackageDetail({
                 {d.automatic ? (
                   /* WHO STARTED IT. A run nobody clicked is the one fact
                      about an attempt that the rail cannot show, and the one
-                     somebody looking at an unexpected deploy needs first. */
+                     somebody looking at an unexpected deploy needs first. It
+                     sits BEFORE the two controls because it is a fact about
+                     the row rather than something to press. */
                   <Chip tone="muted" title="This source's auto-deploy switch started this run: the push planned exactly what the last deploy planned.">
                     automatic
                   </Chip>
                 ) : null}
+                {/* Every line of this attempt (epic memql#4895): the pipeline
+                    stamps each one with the deployment as its subject, so the
+                    Logs app on Search, narrowed to this row, IS the run's
+                    full log rather than the tail kept on the row. Since epic
+                    memql#4900 that is the WHOLE build output, and the tail on
+                    the row is its end. */}
+                <OpenLogsButton
+                  subject={d.id}
+                  subjectConcept={Concepts.PLATFORM_PACKAGE_DEPLOYMENT}
+                  ariaLabel={`Logs of the ${d.sourceVersion === "" ? "unversioned" : shortVersion(d.sourceVersion)} deploy`}
+                />
                 {canWrite && d.status === "succeeded" && d.id !== latest?.id ? (
                   <Button
                     onClick={() => void actions.rollback(pkg.id, d.id).then(reseed)}

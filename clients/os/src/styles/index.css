@@ -6377,3 +6377,350 @@ a.os-button {
     animation: none;
   }
 }
+
+/* ===========================================================================
+ * LOGS (epic memql#4895 / #4897)
+ * ===========================================================================
+ *
+ * The per-app Logs section and the Logs app share one row renderer and one
+ * windowed list, so this is one section rather than one per surface. Level
+ * colours are --os-warn and --os-error only, never the accent: amber is warn
+ * and red is error everywhere in this shell, and a stream of lines is the
+ * loudest place to keep that promise. Nothing here animates -- a log is
+ * nothing but arrivals, and an arrival cue on every one would never stop --
+ * so reduced motion has nothing to remove.
+ */
+
+/* ---- the windowed list ----
+ *
+ * First use, promoted to kit/ on the second (src/logs/WindowedList.tsx). The
+ * root is the scroll container; the spacer holds the full height so the
+ * scrollbar is honest about ten thousand rows; the slice is translated to
+ * where its rows belong. The height is viewport-relative rather than "the
+ * rest of the window" because a detail panel sits BELOW the list and the
+ * window scrolls to it; a list that took every pixel would push the panel
+ * off the surface it explains. */
+.os-vlist {
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  min-height: 240px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+  outline: none;
+}
+.os-vlist:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+}
+.os-vlist-space {
+  position: relative;
+  width: 100%;
+}
+.os-vlist-slice {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  will-change: transform;
+}
+.os-vlist-row {
+  display: flex;
+  align-items: stretch;
+  cursor: default;
+}
+/* The selected row sits on the raised plate; the KEYBOARD cursor is an
+ * inset ring in the accent, so focus is visible while the grid itself holds
+ * the focus (the row is reached by aria-activedescendant, not by tabbing). */
+.os-vlist-row[aria-selected="true"] {
+  background: var(--os-raised);
+}
+.os-vlist:focus-visible .os-vlist-row[data-active] {
+  box-shadow: inset 0 0 0 1px var(--os-accent);
+}
+
+/* ---- the list's root in a section ----
+ *
+ * The jump pill sits INSIDE the list's relative root, absolute against it --
+ * never fixed. The desk plate is CSS-transformed for paging and would become
+ * a fixed element's containing block, which is the trap the Select's file
+ * header records at length. */
+/* The stack FILLS the window and the list takes what the Head, the scope
+ * line and any open detail panel leave -- rule 9, real estate belongs to
+ * content. A viewport fraction was the first spelling and it painted 112px
+ * of dead space below the list in a 1000px window, which is the shape of
+ * the rule's own counter-example. The 240px floor on .os-vlist is what
+ * keeps a selected row's detail panel from squeezing the list to nothing;
+ * past that the window scrolls, which is the honest outcome.
+ *
+ * THE HEIGHT MUST BE DEFINITE. `min-height: 100%` reads as "at least the
+ * window" and lets the box grow to its content instead: the list measured
+ * itself at 6002px and rendered two hundred rows, which is the windowing
+ * gone -- silently, and only visible at real size. */
+.os-logs {
+  height: 100%;
+}
+.os-logs-list {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.os-logs-jump {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+.os-logs-jump .os-button {
+  background: var(--os-glass-solid);
+  box-shadow: var(--os-shadow-float);
+}
+
+/* ---- one line ----
+ *
+ * Fixed height per density (30px comfortable, 22px compact; LogLine.tsx's
+ * ROW_HEIGHT carries the same numbers for the geometry), a two-pixel left
+ * rule for warn and error only, and no per-row border: the rows are the
+ * texture of the list, not cards in it. */
+.os-logs-line {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+  padding: 0 10px 0 8px;
+  border-left: 2px solid transparent;
+  font-size: var(--os-text-sm);
+  color: var(--os-ink);
+}
+.os-logs-line[data-level="warn"] {
+  border-left-color: var(--os-warn);
+}
+.os-logs-line[data-level="error"] {
+  border-left-color: var(--os-error);
+}
+.os-logs-time {
+  flex: none;
+  width: 6.5ch;
+  color: var(--os-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* The level is a WORD on every row and a colour only on the two that
+ * matter; a person reading in greyscale loses nothing. */
+.os-logs-level {
+  flex: none;
+  width: 7ch;
+  color: var(--os-muted);
+}
+.os-logs-level[data-level="warn"] {
+  color: var(--os-warn);
+}
+.os-logs-level[data-level="error"] {
+  color: var(--os-error);
+}
+/* FIXED, never shrink-to-fit. A log list is read by scanning one column
+ * down, and a component cell that shrank to its content started the
+ * message at five different x positions in a single screenful. */
+.os-logs-component {
+  flex: none;
+  width: 16ch;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--os-muted);
+}
+.os-logs-message {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Inline attributes take at most forty percent of the row: they are the
+ * quiet half, and a line whose attributes crowded out its message would
+ * read backwards. */
+.os-logs-attrs {
+  flex: 0 1 40%;
+  min-width: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+.os-logs-attrs:empty {
+  display: none;
+}
+.os-logs-subject-cell {
+  flex: none;
+  display: inline-flex;
+}
+/* The subject mark: a small quiet control at the row end that narrows the
+ * surface to what the line is about. Chip-shaped, because it names a thing
+ * rather than doing one to it. */
+.os-logs-subject {
+  border: 1px solid var(--os-line);
+  border-radius: 999px;
+  background: none;
+  color: var(--os-muted);
+  font: inherit;
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+  line-height: 16px;
+  padding: 0 7px;
+  cursor: pointer;
+}
+.os-logs-subject:hover {
+  color: var(--os-accent);
+  border-color: var(--os-accent);
+}
+.os-logs-subject:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+}
+.os-app-stack[data-density="compact"] .os-logs-line {
+  gap: 8px;
+  font-size: var(--os-text-xs);
+}
+
+/* ---- the scope line ----
+ *
+ * Rule 3's shape: quiet text, not buttons. "Following" carries the live dot
+ * and swaps to "Paused" on click; the freshness beside it is the poll's own
+ * stamp, rendered continuously and never news. */
+.os-logs-scope {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--os-control-h);
+  flex-wrap: wrap;
+}
+.os-logs-follow[data-following] {
+  color: var(--os-ink);
+}
+
+/* ---- the facets inside Refine ----
+ *
+ * The logs panel is wider than the kit's 264px floor because the level row
+ * is four choices, and at the floor the fourth wrapped alone onto a line of
+ * its own -- a set that reads as three plus an afterthought. */
+.os-logs .os-refine-panel {
+  min-width: 296px;
+}
+.os-logs-facet {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.os-logs-choice-row {
+  flex-wrap: wrap;
+  margin-bottom: 0;
+}
+.os-logs-range {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.os-logs-range .os-input {
+  flex: 1 1 14ch;
+}
+
+/* ---- the empty answers ---- */
+.os-logs-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 0;
+}
+.os-logs-empty-line {
+  margin: 0;
+  color: var(--os-muted);
+}
+
+/* ---- the subject line (Search, narrowed by an intent or a mark) ---- */
+.os-logs-subject-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.os-logs-older {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---- the detail panel ---- */
+.os-logs-detail-message {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--os-text-sm);
+}
+.os-logs-attr-list {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 14px;
+  margin: 0;
+  font-size: var(--os-text-xs);
+}
+.os-logs-attr {
+  display: contents;
+}
+.os-logs-attr dt {
+  color: var(--os-muted);
+}
+.os-logs-attr dd {
+  margin: 0;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---- the archived days (the Logs app's Settings) ---- */
+.os-logs-days {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.os-logs-day {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+}
+.os-logs-day-name {
+  font-family: var(--os-font-mono);
+}
+.os-logs-day-note {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+.os-logs-day > .os-button {
+  margin-left: auto;
+}
+.os-logs-day > .os-notice {
+  flex-basis: 100%;
+}
+
+/* ---- a window's fault (chrome/WindowErrorBoundary.tsx) ----
+ *
+ * Contained to the window, sized like a settings surface: one Notice with the
+ * error's own sentence and the way back. Nothing on the desk moves. */
+.os-window-fault {
+  max-width: 560px;
+}

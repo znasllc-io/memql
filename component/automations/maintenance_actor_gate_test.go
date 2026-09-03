@@ -66,8 +66,17 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 	// stranded until it has read them. Under the default reader actor the read
 	// answers zero rows and no error, so a sweep that closes nothing would be
 	// indistinguishable from a cluster with nothing stranded.
+	//
+	// logsRetentionSweep joined in epic memql#4893. It is a sweep in the plain
+	// sense -- every node's log lines, past their retention -- but the rows
+	// it sweeps carry NO row tier: log_line is a dedicated hypertable outside
+	// graph admission. What needs the principal is the executor's own floor:
+	// builtin logsSweep is reserved to a cluster owner in its Go handler
+	// (design L3), and the automation's default RoleReader actor would be
+	// refused by the sweep it exists to run.
 	want := []string{
 		"auditEventRetentionSweep",
+		"logsRetentionSweep",
 		"seedSelfAccount",
 		"sweepAbandonedPackageDeployments",
 		"workerInvocationRetentionSweep",

@@ -6,6 +6,7 @@ import { Folder as FolderIcon } from "lucide-react";
 import { Caption, Check, Chip, Head, LiveList, Panel, Refine, Row as KitRow, formatFreshness, formatMoment, useNow } from "../../kit";
 import { useOsConnection } from "../../live/connection";
 import { useMachines } from "../../live/machines";
+import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { kindGlyph } from "../files/BrowseSection";
 import { artifactFromRow, folderFromRow, isContentKind, fileStory } from "../files/rows";
@@ -47,7 +48,13 @@ function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export function BinApp({ sectionId, askContext, store }: OsAppProps & { store?: FilesSettingsStore }) {
+export function BinApp({
+  sectionId,
+  askContext,
+  intent,
+  consumeIntent,
+  store,
+}: OsAppProps & { store?: FilesSettingsStore }) {
   // The Files store, not one of this app's own: "ask before archiving" is ONE
   // setting with two doors, and a second copy of it is a second answer.
   const settingsStore = useMemo(() => store ?? new LocalFilesSettingsStore(), [store]);
@@ -173,6 +180,11 @@ export function BinApp({ sectionId, askContext, store }: OsAppProps & { store?: 
 
   if (sectionId === "settings") {
     return <BinSettingsSection settings={settings} update={update} />;
+  }
+  // No owned concepts: the Bin is a PLACE over the Library's rows, and those
+  // rows are the Files app's to be about.
+  if (sectionId === "logs") {
+    return <AppLogsSection app="bin" intent={intent} consumeIntent={consumeIntent} />;
   }
 
   return (

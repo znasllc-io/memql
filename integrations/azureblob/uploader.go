@@ -205,6 +205,52 @@ func (u *AzureBlobUploader) ListPrefix(ctx context.Context, container, prefix st
 // passed analysis can always be fetched back.
 const maxListedBlobs = 50000
 
+// BlobInfo is one listed blob with its size in bytes.
+type BlobInfo struct {
+	Name string
+	Size int64
+}
+
+// ListPrefixWithSizes is ListPrefix carrying each blob's content length.
+//
+// Added for the log store's archive listing (epic memql#4893): logsArchiveList
+// shows the archived days WITH SIZES, which is the one fact a person deciding
+// whether to restore a day wants first, and the flat pager already carries it
+// -- ListPrefix drops it. Same bound, same order, same errors as ListPrefix.
+func (u *AzureBlobUploader) ListPrefixWithSizes(ctx context.Context, container, prefix string) ([]BlobInfo, error) {
+	if u == nil || u.client == nil {
+		return nil, fmt.Errorf("azure blob uploader not initialized")
+	}
+	container = strings.TrimSpace(container)
+	prefix = strings.TrimSpace(prefix)
+	if container == "" || prefix == "" {
+		return nil, fmt.Errorf("azure blob container and prefix are required")
+	}
+
+	var out []BlobInfo
+	pager := u.client.NewListBlobsFlatPager(container, &azblob.ListBlobsFlatOptions{Prefix: &prefix})
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list azure blobs under %q: %w", prefix, err)
+		}
+		for _, item := range page.Segment.BlobItems {
+			if item == nil || item.Name == nil {
+				continue
+			}
+			info := BlobInfo{Name: *item.Name}
+			if item.Properties != nil && item.Properties.ContentLength != nil {
+				info.Size = *item.Properties.ContentLength
+			}
+			out = append(out, info)
+			if len(out) >= maxListedBlobs {
+				return nil, fmt.Errorf("more than %d blobs under %q; refusing to list further", maxListedBlobs, prefix)
+			}
+		}
+	}
+	return out, nil
+}
+
 // ParseBlobObject extracts the (container, objectName) pair from a stored blob
 // URL of the form https://<account>.blob.core.windows.net/<container>/<object...>.
 // Returns ok=false for non-https URLs -- e.g. the `local://` dev placeholder or

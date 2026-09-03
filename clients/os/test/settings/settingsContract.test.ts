@@ -12,8 +12,9 @@ function fakeApp(over: Partial<OsAppManifest>): OsAppManifest {
     id: "test",
     name: "Test",
     icon: () => null,
-    sections: [{ id: "main", name: "Main" }],
+    sections: [{ id: "main", name: "Main" }, { id: "logs", name: "Logs", roles: { min: "admin" } }],
     settingsSection: "main",
+    logsSection: "logs",
     component: () => null,
     ...over,
   };
@@ -70,6 +71,8 @@ describe("the settings-section contract", () => {
   // under how the desktop looks. Seven since Integrations (memql#4826) --
   // per-integration configuration lives in Settings rather than in the app
   // windows that consume it, because a credential is not a campaigns record.
+  // Eight since Logs (epic memql#4895): every app carries a Logs section,
+  // and this app has no settings section to put it before, so it is last.
   it("Settings itself declares its sections", () => {
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
     expect(settings?.sections?.map((s) => s.id)).toEqual([
@@ -80,6 +83,7 @@ describe("the settings-section contract", () => {
       "cluster",
       "diagnostics",
       "integrations",
+      "logs",
     ]);
     expect(settings?.sections?.find((s) => s.id === "cluster")?.roles).toEqual({ min: "admin" });
     // THE TWO GATE FORMS ARE PINNED SEPARATELY, because they are different

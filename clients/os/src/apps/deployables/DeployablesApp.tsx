@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { LiveSnapshot, Row } from "@znasllc-io/memql-sdk-core/client";
+import { Concepts, type LiveSnapshot, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Head, Panel, roleAdmits } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { useLiveView } from "../../live/liveView";
 import { useArrivals } from "../../live/useArrivals";
+import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { ActionsSection } from "./actions/ActionsSection";
 import { MapSection, NO_SELECTION, type MapSelection } from "./map/MapSection";
@@ -53,10 +54,21 @@ const EMPTY_SNAPSHOT = <T,>(): LiveSnapshot<T> => ({
   version: 0,
 });
 
+/** The concepts this app owns, for its Logs section: what serves, where it
+ *  came from, each attempt to deploy it, and a client's own domain on it. */
+const DEPLOYABLES_LOG_CONCEPTS = [
+  Concepts.PLATFORM_SITE,
+  Concepts.PLATFORM_PACKAGE,
+  Concepts.PLATFORM_PACKAGE_DEPLOYMENT,
+  Concepts.PLATFORM_CUSTOM_DOMAIN,
+] as const;
+
 export function DeployablesApp({
   sectionId,
   navigate,
   askContext,
+  intent,
+  consumeIntent,
   store,
 }: OsAppProps & { store?: DeployablesSettingsStore }) {
   // Injectable for tests, which is the whole reason the parameter exists --
@@ -152,6 +164,16 @@ export function DeployablesApp({
 
   if (sectionId === "settings") {
     return <DeployablesSettingsSection settings={settings} update={update} actorRole={actorRole} />;
+  }
+  if (sectionId === "logs") {
+    return (
+      <AppLogsSection
+        app="deployables"
+        subjectConcepts={DEPLOYABLES_LOG_CONCEPTS}
+        intent={intent}
+        consumeIntent={consumeIntent}
+      />
+    );
   }
   if (sectionId === "actions") {
     return <ActionsSection domain={config.domain} />;

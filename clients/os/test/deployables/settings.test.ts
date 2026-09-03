@@ -31,17 +31,21 @@ describe("the manifest", () => {
     expect(deployables?.sections?.[0]?.id).toBe("map");
   });
 
-  it("gates Actions at admin and nothing else", () => {
+  it("gates Actions and Logs at admin and nothing else", () => {
     // The app itself admits every signed-in user, because the concept's
     // composite tier means everyone has deployables of their own to read.
+    // Logs joined Actions with epic memql#4895: every read on the log store
+    // is admin-and-above, so the section's floor is the store's.
     expect(deployables?.roles).toBeUndefined();
     const gated = (deployables?.sections ?? []).filter((s) => s.roles !== undefined);
-    expect(gated.map((s) => s.id)).toEqual(["actions"]);
+    expect(gated.map((s) => s.id)).toEqual(["actions", "logs"]);
     // Whole-requirement equality rather than `?.min`: RoleRequirement is a
     // union since issue #4826 gave it a set form, and reading `.min` off it
     // no longer typechecks. The assertion is the same one and is stricter --
     // it would also catch this becoming a set that happens to contain admin.
-    expect(gated[0]?.roles).toEqual({ min: "admin" });
+    for (const section of gated) {
+      expect(section.roles).toEqual({ min: "admin" });
+    }
   });
 
   it("declares the settings section its gear points at", () => {

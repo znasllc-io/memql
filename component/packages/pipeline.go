@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 // The D6 stage order. It is written down once, here, and every traversal reads
@@ -230,7 +232,7 @@ func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, er
 
 	deploymentId := strings.TrimSpace(req.DeploymentId)
 	if deploymentId == "" {
-		deploymentId = d.newId("v1:platform:packageDeployment")
+		deploymentId = d.newId(packageDeploymentConcept)
 	}
 	ownerUserId := rowString(pkg, "ownerUserId")
 
@@ -288,6 +290,12 @@ func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, er
 	return out, nil
 }
 
+// packageDeploymentConcept is the concept every line of a run is ABOUT.
+// Stamped through logger.Subject on each log call of a run (epic memql#4893),
+// which is what lets the Deployables app's Logs section select a run's lines
+// and a person follow one deployment through the store by its id.
+const packageDeploymentConcept = "v1:platform:packageDeployment"
+
 func (d *Deps) closeRun(ctx context.Context, deploymentId string, out *DeployOutcome, problem *Problem) {
 	buildLog := ""
 	for _, o := range out.Deployables {
@@ -308,7 +316,8 @@ func (d *Deps) closeRun(ctx context.Context, deploymentId string, out *DeployOut
 		// The run's own outcome is already decided; failing to record it is a
 		// separate fault and must not overwrite what happened.
 		d.log().Error("packages: could not close the deployment row",
-			"component", "packages.pipeline", "deployment", deploymentId, "err", err)
+			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, deploymentId),
+			"deployment", deploymentId, "err", err)
 	}
 }
 
@@ -331,10 +340,11 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	})
 	out.Report = rep
 
-	snapshotArtifactId := d.storeSnapshot(ctx, req, snapshot)
+	snapshotArtifactId := d.storeSnapshot(ctx, req, out.DeploymentId, snapshot)
 	if rerr := d.Store.recordReport(ctx, out.DeploymentId, rep, snapshotArtifactId); rerr != nil {
 		d.log().Warn("packages: could not record the analysis report",
-			"component", "packages.pipeline", "deployment", out.DeploymentId, "err", rerr)
+			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
+			"deployment", out.DeploymentId, "err", rerr)
 	}
 	if aerr != nil {
 		return aerr
@@ -342,7 +352,8 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	if rep.Name != "" && rep.Name != rowString(pkg, "name") {
 		if nerr := d.Store.recordPackageName(ctx, req.PackageId, rep.Name); nerr != nil {
 			d.log().Warn("packages: could not record the manifest name",
-				"component", "packages.pipeline", "err", nerr)
+				"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
+				"deployment", out.DeploymentId, "err", nerr)
 		}
 	}
 
@@ -410,7 +421,8 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 		out.DslVersion = dslVersion
 		if !staged {
 			d.log().Info("packages: DSL unchanged; stage and roll skipped",
-				"component", "packages.pipeline", "deployment", out.DeploymentId)
+				"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
+				"deployment", out.DeploymentId)
 		}
 	}
 
@@ -426,7 +438,8 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 
 	if verr := d.Store.recordDeployedVersion(ctx, req.PackageId, snapshot.Version, false); verr != nil {
 		d.log().Warn("packages: could not record the deployed version",
-			"component", "packages.pipeline", "err", verr)
+			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
+			"deployment", out.DeploymentId, "err", verr)
 	}
 	return nil
 }
@@ -512,14 +525,15 @@ func (d *Deps) fetch(ctx context.Context, pkg map[string]any) (*SourceSnapshot, 
 // A failure here is logged and swallowed: provenance is valuable and a deploy
 // that works is more valuable, so the absence of a snapshot artifact costs the
 // "re-analyse without refetching" shortcut and nothing else.
-func (d *Deps) storeSnapshot(ctx context.Context, req DeployRequest, s *SourceSnapshot) string {
+func (d *Deps) storeSnapshot(ctx context.Context, req DeployRequest, deploymentId string, s *SourceSnapshot) string {
 	if s == nil || len(s.Bytes) == 0 || d.Publisher == nil {
 		return ""
 	}
 	id, err := d.Publisher.StoreSnapshot(ctx, req.PackageId, s.Version, s.Bytes)
 	if err != nil {
 		d.log().Warn("packages: could not store the source snapshot",
-			"component", "packages.pipeline", "package", req.PackageId, "err", err)
+			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, deploymentId),
+			"deployment", deploymentId, "package", req.PackageId, "err", err)
 		return ""
 	}
 	return id

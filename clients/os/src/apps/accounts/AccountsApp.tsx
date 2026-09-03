@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
 import { Check, Head, Panel } from "../../kit";
+import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { AccountsSection } from "./AccountsSection";
 import { FirstRunCard } from "./FirstRunCard";
@@ -27,9 +29,14 @@ import {
 // decides how far the list reaches. Gating the app would be presentation
 // pretending to be authorization.
 
+/** The concept this app owns, for its Logs section. */
+const ACCOUNTS_LOG_CONCEPTS = [Concepts.ACCOUNTS_ACCOUNT] as const;
+
 export function AccountsApp({
   sectionId,
   navigate,
+  intent,
+  consumeIntent,
   store,
 }: OsAppProps & { store?: AccountsSettingsStore }) {
   // Injectable for tests, which is the whole reason the parameter exists --
@@ -79,6 +86,16 @@ export function AccountsApp({
 
   if (sectionId === "settings") {
     return <AccountsSettingsSection settings={settings} update={updateSettings} />;
+  }
+  if (sectionId === "logs") {
+    return (
+      <AppLogsSection
+        app="accounts"
+        subjectConcepts={ACCOUNTS_LOG_CONCEPTS}
+        intent={intent}
+        consumeIntent={consumeIntent}
+      />
+    );
   }
 
   return (

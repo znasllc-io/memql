@@ -4,7 +4,9 @@ import { vi } from "vitest";
 import { QueryClient, Result, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { SessionProvider } from "../../src/chrome/access";
+import { OsProvider } from "../../src/chrome/state";
 import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/config";
+import { OS_REGISTRY } from "../../src/apps/registry";
 
 // The Deployables app's test harness.
 //
@@ -237,18 +239,26 @@ export function withSession(
     ...UNKNOWN_RUNTIME_CONFIG,
     domain: overrides.domain ?? "memql.example.com",
   };
+  const role = overrides.role ?? "owner";
+  // THE SHELL PROVIDER TOO, since epic memql#4895: the site and package
+  // details carry a "Logs" action that opens another app, and opening an
+  // app is the shell's -- `useOs` throws outside its provider, exactly as
+  // the Files harness found first. The same role on both, so the session's
+  // reading and the shell's cannot disagree.
   return (
     <SessionProvider
       value={{
         access: {
           userId: overrides.userId ?? "u-me",
           primaryEmail: "owner@example.com",
-          clusterRole: overrides.role ?? "owner",
+          clusterRole: role,
         },
         config,
       }}
     >
-      {children}
+      <OsProvider registry={OS_REGISTRY} actorRole={role} grid={{ cols: 8, rows: 5 }}>
+        {children}
+      </OsProvider>
     </SessionProvider>
   );
 }
