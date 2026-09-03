@@ -10575,6 +10575,7 @@ func SourceCredentialByIdBuild(args SourceCredentialByIdArgs) string {
 }
 
 // SourceCredentialsMine -- Every credential this caller holds, revoked ones included and marked -- the Settings Sources group. A cluster owner reads every row's metadata, which is the oversight the composite tier exists for; nothing here can return the ciphertext, because the card shape does not carry it.
+// The composite term is PARENTHESIZED even though it stands alone, and the parens are load-bearing: the struct form splices this filter after the concept predicate (buildStructQueryExpr), and a bare top-level `a || b` reaches the row-authz shadow analyzer in a shape isCompositeScopeConjunct does not recognise, so TestRowAuthzEnforcementLandGate reports the read undecidable. Written the way every composite-tier sibling writes the term, it is recognised as the tier's own.
 //
 // Bound concept: v1:platform:sourceCredential (machine-readable: BoundConcepts["sourceCredentialsMine"] in generated_concepts.go).
 type SourceCredentialsMineArgs struct {
