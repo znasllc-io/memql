@@ -562,6 +562,20 @@ delivery).
 | `MEMQL_DSL_PATH`                                | unset   | Optional on-disk root for the .memql tree. When set and `<root>/<typeName>` exists, that DSL type reads from disk instead of the embedded copy. Per-type partial overrides supported. |
 | `MEMQL_MESH_OUTBOX_RETENTION`                  | `24h`   | Max-age watermark (Go duration string) for the mesh delivery substrate's `mesh_outbox` rows and stale `mesh_cursor` rows; an hourly per-node sweep deletes rows older than this. `0` or negative disables the sweep; an unparsable value falls back to the default. `mesh_key_seq` is never swept (seq-restart hazard). |
 
+#### Hosted deployables: runtime settings and the request log
+
+Registered `component: platform` and `component: edge`; all four optional
+with working defaults, so a cluster that sets none of them still serves every
+site, still carries runtime settings and still records traffic. Full context:
+[deployables.md](deployables.md#runtime-settings).
+
+| Variable                                | Default | Purpose                                                                                  |
+|-----------------------------------------|---------|------------------------------------------------------------------------------------------|
+| `MEMQL_SITE_SETTINGS_MAX_KEYS`          | `64`    | How many runtime settings one deployable may carry. The cap is on the ROW because the edge serves the settings object on every page load and the document grows with it. Unparseable or non-positive falls back to the default rather than to zero -- a zero cap refuses every write and says nothing about the typo that caused it. |
+| `MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH`  | `2048`  | The longest a single setting's value may be, in characters. Same fallback rule.           |
+| `MEMQL_EDGE_REQUEST_LOG_ENABLED`        | `true`  | Whether this edge replica records one row per served request -- the source of a deployable's traffic figure. `false` switches it off HERE: the aggregate is then short by exactly this replica's share, and a window nothing recorded reads as unmeasured rather than as zero. System-owned sites are never recorded whatever this says. |
+| `MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS` | `30`    | How long the raw request rows and both traffic aggregates are kept, applied to the TimescaleDB retention policies at boot. Clamped to 1..365. All three move together, so "unmeasured" means the same thing at every horizon. |
+
 #### STT / voice (only if Polyphon or streaming STT is enabled)
 
 | Variable                       | Default          | Purpose                                                                          |
