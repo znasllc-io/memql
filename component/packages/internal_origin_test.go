@@ -58,6 +58,7 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	_, _ = s.siteById(ctx, "s")
 	_, _ = s.packagesByRepoUrl(ctx, "u")
 	_, _ = s.packagesTrackingRepos(ctx)
+	_, _, _ = s.artifactBytes(ctx, "a", nil)
 
 	_ = s.advance(ctx, "d", StatusBuilding)
 	_ = s.recordDeployedVersion(ctx, "p", "v", false)
@@ -79,7 +80,7 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	_ = s.setSiteAccount(ctx, "s", "a")
 	_ = s.addCustomDomain(ctx, "s", "www.example.com")
 
-	reads := []string{"packageById", "packageDeploymentById", "sitesForPackage", "siteById", "packagesByRepoUrl", "packagesTrackingRepos"}
+	reads := []string{"packageById", "packageDeploymentById", "sitesForPackage", "siteById", "packagesByRepoUrl", "packagesTrackingRepos", "libraryArtifactById"}
 	writes := []string{"advancePackageDeployment", "recordPackageDeployedVersion", "recordPackageName",
 		"recordPackageUpstreamVersion", "recordSitePackageOrigin", "setPackageStatus", "setSiteStatus",
 		"recordPackageDeploymentReport", "createSourceCredential", "touchSourceCredential"}

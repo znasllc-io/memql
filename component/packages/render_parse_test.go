@@ -66,7 +66,13 @@ const awkwardText = "npm ERR! code ELIFECYCLE \"build\" \\ failed\nat line 2\x00
 // the statements they produced.
 func captureStore(t *testing.T) []string {
 	t.Helper()
-	rec := &recordingEngine{}
+	// The two Library rows the zip-source read resolves through, canned so
+	// the read reaches its SECOND statement: with no rows it would stop
+	// after the first and the file read would go unparsed.
+	rec := &recordingEngine{rows: map[string][]map[string]any{
+		"query libraryArtifactById": {{"id": "v1:library:artifact:mno", "kind": "file", "sourceConceptRef": "v1:library:file:mno"}},
+		"query libraryFileById":     {{"id": "v1:library:file:mno", "mimeType": "application/zip", "blobUrl": "library/u/mno/tree.zip"}},
+	}}
 	s := &store{engine: rec}
 	ctx := context.Background()
 	at := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
@@ -78,6 +84,7 @@ func captureStore(t *testing.T) []string {
 	_, _ = s.siteById(ctx, "v1:platform:site:ghi")
 	_, _ = s.packagesByRepoUrl(ctx, "https://github.com/acme/widget")
 	_, _ = s.packagesTrackingRepos(ctx)
+	_, _, _ = s.artifactBytes(ctx, "v1:library:artifact:mno", func(context.Context, string) ([]byte, error) { return nil, nil })
 
 	// Writes.
 	_ = s.openDeployment(ctx, deploymentSeed{
