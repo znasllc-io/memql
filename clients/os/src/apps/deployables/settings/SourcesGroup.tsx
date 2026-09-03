@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { Button, Caption, Chip, Chips, Fact, Facts, Subhead } from "../../../kit";
 import { formatMoment } from "../../../kit/format";
 import type { PackageRow } from "../packages/rows";
+import { toneFor } from "../packages/refusals";
 import { ProblemNotice } from "../packages/ReportView";
 import { ConnectGitHub } from "../sources/ConnectGitHub";
 import { ConnectedAccountCard } from "../sources/ConnectedAccountCard";
@@ -129,7 +130,7 @@ export function SourcesGroup({
             code: connectResult.reason,
             message: "GitHub sent you back without completing the connection.",
           }}
-          tone="error"
+          tone={toneFor(connectResult.reason)}
         />
       ) : null}
 
@@ -234,7 +235,7 @@ function PastedCredential({ card, packages }: { card: CredentialRow; packages: r
           </Caption>
         </div>
       )}
-      {revoke.refusal ? <ProblemNotice problem={revoke.refusal} tone="error" /> : null}
+      {revoke.refusal ? <ProblemNotice problem={revoke.refusal} tone={toneFor(revoke.refusal.code)} /> : null}
     </>
   );
 }

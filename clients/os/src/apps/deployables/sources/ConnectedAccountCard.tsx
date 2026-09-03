@@ -1,8 +1,9 @@
 import { useState } from "react";
 
-import { Button, Caption, Chip, Chips, Fact, Facts } from "../../../kit";
+import { Button, Caption, Chip, Chips, Fact, Facts, Subhead } from "../../../kit";
 import { formatMoment } from "../../../kit/format";
 import type { Refusal } from "../packages/actions";
+import { toneFor } from "../packages/refusals";
 import { ProblemNotice } from "../packages/ReportView";
 import { InstallLink } from "./RepositoryPicker";
 import type { InstallationRow, PendingInstallation } from "./repositories";
@@ -100,8 +101,12 @@ export function ConnectedAccountCard({
       </Chips>
 
       {(pending ?? []).length > 0 ? (
+        /* NAMED, not "that organisation". The whole content of this state is
+           whom to ask, and with two pending chips above it "that" points at
+           neither. */
         <Caption>
-          An owner of that organisation has to approve the app before its repositories appear.
+          An owner of {(pending ?? []).map((p) => p.login).join(", ")} has to approve the app before
+          its repositories appear.
         </Caption>
       ) : null}
 
@@ -125,7 +130,7 @@ export function ConnectedAccountCard({
       )}
       {/* A revoked grant still shows what went with it, so the refusal from
           the act that revoked it has somewhere to land. */}
-      {revoked && refusal ? <ProblemNotice problem={refusal} tone="error" /> : null}
+      {revoked && refusal ? <ProblemNotice problem={refusal} tone={toneFor(refusal.code)} /> : null}
     </section>
   );
 }
@@ -146,6 +151,20 @@ export function ConnectedAccountCard({
  *
  * `tone="danger"` on the confirming button only. The one that arms it is an
  * ordinary control -- it changes nothing.
+ *
+ * IT WEARS THE SETTINGS GROUP'S GRAMMAR, NOT THE REPORT'S. This block used
+ * `.os-report-part` + `.os-report-heading`, which is the deployable PAGE's
+ * vocabulary: an 11px all-caps muted eyebrow, rendered here between two 13px
+ * ink Subheads ("GitHub" above it, "Tokens you pasted" below) -- two heading
+ * languages inside one settings group, and an all-caps label in an epic whose
+ * own type rule is "no all-caps labels, no eyebrows". `.os-settings-danger`
+ * keeps what the report part actually contributed -- the hairline, warm-tinted
+ * -- and drops the heading.
+ *
+ * It also stops the control stretching. `.os-report-part` is a grid, so its
+ * only child filled the column: the un-armed Disconnect measured 534px beside
+ * a 71px Revoke on the same card, and the widest control on the surface was
+ * the destructive one.
  */
 function Disconnect({
   sourceNames,
@@ -161,8 +180,8 @@ function Disconnect({
   const [armed, setArmed] = useState(false);
   const named = sourceNames.join(", ");
   return (
-    <section className="os-report-part os-danger-part">
-      <h4 className="os-report-heading">Disconnect</h4>
+    <section className="os-settings-danger">
+      <Subhead>Disconnect</Subhead>
       {armed ? (
         <>
           <Caption>
@@ -191,7 +210,7 @@ function Disconnect({
           <Button onClick={() => setArmed(true)}>Disconnect</Button>
         </>
       )}
-      {refusal ? <ProblemNotice problem={refusal} tone="error" /> : null}
+      {refusal ? <ProblemNotice problem={refusal} tone={toneFor(refusal.code)} /> : null}
     </section>
   );
 }

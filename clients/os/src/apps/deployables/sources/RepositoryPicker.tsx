@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Button, Caption, Chip, Input, Row as ListRow, Subhead, useNow } from "../../../kit";
 import { formatFreshness } from "../../../kit/format";
 import type { Refusal } from "../packages/actions";
+import { toneFor } from "../packages/refusals";
 import { ProblemNotice } from "../packages/ReportView";
 import { groupRepositories, repositoryCount, type RepositoryPage, type RepositoryRow } from "./repositories";
 
@@ -71,7 +72,7 @@ export function RepositoryPicker({
           refusal is not a zero (clients/os/README.md), so a read that failed
           leaves whatever was already read on screen and says what happened
           over it. */}
-      {refusal ? <ProblemNotice problem={refusal} tone="error" /> : null}
+      {refusal ? <ProblemNotice problem={refusal} tone={toneFor(refusal.code)} /> : null}
 
       {/* SEARCH IS THE CONTROL THIS PICKER EXISTS TO OFFER, not a section
           filter, so it is a plain Input above the list rather than behind
@@ -110,7 +111,7 @@ export function RepositoryPicker({
                 <Caption>Waiting for an owner of {group.owner} to approve the app.</Caption>
               </>
             ) : (
-              <div className="os-livelist-rows">
+              <div className="os-livelist-rows os-repo-rows">
                 {group.repositories.map((repo) => (
                   <RepositoryChoice
                     key={repo.fullName}
@@ -162,7 +163,22 @@ export function RepositoryPicker({
  * be the same fact twice. `visibility` is printed only when GitHub says
  * something other than the two it already told us through `private`, which
  * is how `internal` reaches the eye without every other row carrying a word
- * it did not need.
+ * it did not need -- and it REPLACES the private chip when it is present,
+ * because "private internal" is that same fact twice with an extra word.
+ *
+ * ===========================================================================
+ * THE FACTS ARE COLUMNS, AND EVERY ROW RENDERS ALL THREE
+ * ===========================================================================
+ * `.os-row` is a plain flex line, so a fact placed after the name starts
+ * wherever that name happens to end: measured over seven rows, the branch
+ * began at seven different offsets (101.75 / 142.94 / 164.19 / 188.05 /
+ * 192.2 / 228.09 / 283.08) and so did "pushed", which is a list somebody has
+ * to re-find the same column in on every line.
+ *
+ * So each fact sits in a cell of its own with a DEFINITE width, and the cell
+ * is rendered EVEN WHEN IT IS EMPTY -- an absent cell is exactly what let
+ * the next one move. The names are the visible content and the cells are
+ * geometry, so the empty ones say nothing.
  */
 function RepositoryChoice({
   repo,
@@ -184,14 +200,19 @@ function RepositoryChoice({
       onOpen={() => onChoose(repo)}
       state={chosen ? <span className="os-livelist-tick">chosen</span> : null}
     >
-      {repo.private ? <Chip tone="muted">private</Chip> : null}
-      {unusual ? <Chip tone="muted">{repo.visibility}</Chip> : null}
-      {repo.defaultBranch === "" ? null : (
-        <span className="os-caption os-mono">{repo.defaultBranch}</span>
-      )}
-      {repo.pushedAt === "" ? null : (
-        <span className="os-caption">pushed {formatFreshness(repo.pushedAt, now)}</span>
-      )}
+      <span className="os-repo-cell" data-cell="visibility">
+        {unusual ? (
+          <Chip tone="muted">{repo.visibility}</Chip>
+        ) : repo.private ? (
+          <Chip tone="muted">private</Chip>
+        ) : null}
+      </span>
+      <span className="os-repo-cell os-caption os-mono" data-cell="branch">
+        {repo.defaultBranch}
+      </span>
+      <span className="os-repo-cell os-caption" data-cell="pushed">
+        {repo.pushedAt === "" ? "" : `pushed ${formatFreshness(repo.pushedAt, now)}`}
+      </span>
     </ListRow>
   );
 }
@@ -219,7 +240,14 @@ function EmptyPicker({
   return (
     <>
       <Caption>This connection reaches no repositories yet.</Caption>
-      <InstallLink installUrl={installUrl} />
+      {/* ON THE CONTROL LINE, exactly as the connected-account card mounts
+          the same link. `.os-deploy-publish` is a stretching flex column, so
+          a bare anchor there became a 698px full-bleed slab of the same
+          control the card renders at 214px -- one link, two shapes,
+          depending only on which surface you reached it from. */}
+      <div className="os-form-row">
+        <InstallLink installUrl={installUrl} />
+      </div>
     </>
   );
 }
