@@ -226,11 +226,22 @@ func (i *Integration) upstreamHead(ctx context.Context, d *Deps, pkg map[string]
 			return "", refuse(CodeSourceUnreadable,
 				"this package fetches under credential %q, and this node cannot resolve credentials", id)
 		}
-		token, cerr := d.Credentials(ctx, id, rowString(pkg, "ownerUserId"))
+		resolved, cerr := d.Credentials(ctx, id, rowString(pkg, "ownerUserId"))
 		if cerr != nil {
 			return "", cerr
 		}
-		req.Header.Set("Authorization", "Bearer "+token)
+		// The same two bearers the fetcher chooses between, for the same
+		// reason (epic memql#4912, C6): a poll runs every ten minutes with
+		// nobody watching, so under a grant it must carry an INSTALLATION
+		// token rather than the person's own. A grant that needs reconnecting
+		// refuses here, and handlePollUpstream skips this package with a
+		// warning -- exactly as it skips one whose credential was revoked, and
+		// never by polling anonymously.
+		bearer, berr := installationBearer(ctx, d.GitHubApp, resolved, owner, repo)
+		if berr != nil {
+			return "", berr
+		}
+		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
 
 	resp, derr := d.httpClient().Do(req)

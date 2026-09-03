@@ -146,6 +146,22 @@ func captureStore(t *testing.T) []string {
 	_ = s.revokeSourceCredential(ctx, "v1:platform:sourceCredential:jkl")
 	_ = s.touchSourceCredential(ctx, "v1:platform:sourceCredential:jkl", at)
 
+	// GitHub App grants (epic memql#4912). The two the ENGINE writes -- the
+	// callback's create and update live on the identity node -- plus the
+	// no-argument read behind the picker and the prefill probe. The sealed
+	// values are base64 and exercise nothing, but installationIds is a LIST
+	// literal, which is the argument shape most likely to be rendered wrong
+	// and the one nothing else in this package produces.
+	_, _ = s.githubAppGrantForCaller(ctx)
+	_ = s.recordRefreshedGrantToken(ctx, grantTokenSeed{
+		CredentialId:   "v1:platform:sourceCredential:jkl",
+		EncryptedValue: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		Fingerprint:    "...1234",
+		RefreshToken:   "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+		ExpiresAt:      at,
+	})
+	_ = s.recordGrantInstallations(ctx, "v1:platform:sourceCredential:jkl", []string{"12345678", "87654321"})
+
 	// Placements (epic memql#4885, D8): the two caller-actor calls the
 	// publish stage makes after the site exists. The hostname is remote text
 	// -- a person types it -- so it carries the four control bytes; the
@@ -176,6 +192,12 @@ func captureStore(t *testing.T) []string {
 // accepts them whatever their annotation.
 var serverOnlyQueryTwins = map[string]string{
 	"sourceCredentialSealedById": "sourceCredentialById",
+	// githubAppGrantForCaller declares NO args, and its twin declares none
+	// either -- so argNames matches on the empty string and the substitution
+	// is exact. That is not a weaker check than the pair above: a no-argument
+	// call has nothing to quote, so what the twin exercises is the whole of
+	// what there is to exercise.
+	"githubAppGrantForCaller": "sourceCredentialsMine",
 }
 
 func TestEveryRenderedStatementParsesAndResolves(t *testing.T) {

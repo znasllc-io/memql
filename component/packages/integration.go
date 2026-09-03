@@ -9,6 +9,7 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/packages/githubapp"
 )
 
 // integrationName is the plug-in name. Spelled as a STRING LITERAL in
@@ -157,6 +158,15 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{
 				"repoUrl":      "string (required) -- the repository URL as typed",
 				"credentialId": "string -- one of the caller's v1:platform:sourceCredential rows to probe under; empty probes anonymously",
+			},
+		},
+		{
+			Name:        "sourceRepositories",
+			Description: "List the repositories the caller's GitHub App grant can reach (epic memql#4912, C7). Resolves the caller's active grant -- or the one named by credentialId -- reads its installations LIVE from GitHub and walks each one's repositories, and answers {repositories, installations, pending, nextPage, reason}. Every refusal is a typed reason rather than an error, so the picker renders in place: github_app_not_configured (this cluster has no app, so only the token path is offered), credential_not_found (no grant, or not the caller's), credential_revoked, reconnect_required, rate_limited. Writes nothing except the grant's own installation ids, refreshed from what it just read.",
+			Handler:     i.handleSourceRepositories,
+			ArgsSchema: map[string]string{
+				"credentialId": "string -- a github_app grant of the caller's; empty resolves their active grant",
+				"page":         "int -- 1-based page through each installation's repositories, 100 per page; 0 means the first",
 			},
 		},
 		{
@@ -383,16 +393,26 @@ func (i *Integration) resolve() (*Deps, error) {
 			i.depsErr = fmt.Errorf("packages: no engine")
 			return
 		}
-		s := &store{engine: i.engine, logger: i.logger}
+		// ONE GitHub App client per node, shared by the store (which renews
+		// user tokens), the fetcher and the poll (which mint installation
+		// tokens) and the probe (which reads branches and the manifest). One
+		// client is one installation-token cache; a second would double the
+		// mints against the same rate limit and make "was this cached" a
+		// question with two answers. Built even when the cluster has no app
+		// configured -- every call then answers github_app_not_configured,
+		// which is the operator's fact rather than a nil to remember.
+		gh := githubapp.FromEnv()
+		s := &store{engine: i.engine, logger: i.logger, github: gh}
 		i.deps = &Deps{
 			Store:           s,
-			Fetcher:         newProductionFetcher(s, i.logger),
+			Fetcher:         newProductionFetcher(s, i.logger, gh),
 			Stager:          newBlobStager(),
 			Roller:          newDeployControlRoller(i.logger),
 			Publisher:       newEnginePublisher(i.engine, s, i.logger),
 			Auditor:         &engineAuditor{engine: i.engine, logger: i.logger},
 			Credentials:     s.resolveCredential,
 			PeekCredentials: s.peekCredential,
+			GitHubApp:       gh,
 			Logger:          i.logger,
 			Limits:          DefaultLimits(),
 			// Builder is deliberately nil. See builder.go.

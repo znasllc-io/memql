@@ -2,12 +2,14 @@ package packages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/component/secret"
 )
 
@@ -38,6 +40,53 @@ import (
 //     answers a typed reason, never the value -- and, unlike a fetch, stamps
 //     no heartbeat (peekCredential).
 
+// ResolvedCredential is one credential, unsealed, in the shape every caller
+// that presents a bearer to GitHub needs.
+//
+// It carries the KIND as well as the bearer, and that is the whole reason it
+// is a struct rather than the string it used to be (epic memql#4912). Under a
+// pasted token a 401, a 403 and a 404 are one fact -- "this token does not
+// reach that repository" -- because the cluster genuinely cannot tell them
+// apart. Under a GitHub App grant it can: a 401 is the AUTHORIZATION being
+// refused, whose repair is one click of Connect, and a 404 may be the app not
+// being installed on that repository, whose repair is an installation link. A
+// caller holding only a string cannot make either distinction, so it makes
+// neither, and both facts arrive as "private, or not there".
+//
+// Nothing here is stored by any caller. Bearer is a function-local for the
+// length of one request, exactly as the plain token was.
+type ResolvedCredential struct {
+	// Id is the row this came from, for a refusal that can name it.
+	Id string
+	// Kind is "token" or "github_app". An ABSENT kind on the row reads as
+	// "token" -- every credential written before Connect existed carries no
+	// value, and the pre-Connect behaviour is the reading that asserts least.
+	Kind string
+	// OwnerUserId is whose row it is, as stored. Read back rather than echoed
+	// from the argument, because the argument is who the caller BELIEVED owns
+	// it and this is what the read gate actually admitted.
+	OwnerUserId string
+	// Bearer is what goes in Authorization: Bearer. For a token credential it
+	// is the pasted value; for a grant it is the person's USER token, already
+	// refreshed if it had expired. Background work swaps it for an
+	// installation token (C6) -- see installationBearer.
+	Bearer string
+	// Login and ExternalId identify the GitHub account behind a grant. Empty
+	// for a token credential.
+	Login      string
+	ExternalId string
+	// Installations is the grant's stored installation ids -- a DISPLAY CACHE
+	// refreshed on owner-actor paths, never the thing a fetch decides by. The
+	// fetcher asks GitHub which installation covers a repository, live,
+	// because a stored list cannot answer for a repository added since.
+	Installations []string
+}
+
+// IsGrant reports whether this is a GitHub App grant rather than a pasted
+// token. One predicate rather than a `== "github_app"` at six call sites, so
+// the absent-kind rule is written once.
+func (r ResolvedCredential) IsGrant() bool { return r.Kind == credentialKindGithubApp }
+
 // CredentialResolver unseals a package's credential at the moment of a fetch.
 //
 // The whole D10 shape is in the signature: the caller holds a credential NAME
@@ -47,15 +96,29 @@ import (
 // package's own credential (correct: they are deploying that package), and a
 // package naming another person's credential resolves zero rows and is
 // refused by name.
-type CredentialResolver func(ctx context.Context, credentialId, ownerUserId string) (string, error)
+type CredentialResolver func(ctx context.Context, credentialId, ownerUserId string) (ResolvedCredential, error)
 
-// The credential's declared host and statuses, mirroring the enum on
+// The credential's declared host, kinds and statuses, mirroring the enums on
 // v1:platform:sourceCredential.
 const (
 	credentialHostGitHub    = "github.com"
 	credentialStatusActive  = "active"
 	credentialStatusRevoked = "revoked"
+
+	// credentialKindToken is the pasted value, and it is also what an ABSENT
+	// kind means. The field is deliberately not required on the concept: every
+	// row written before Connect carries no value, and nothing rewrites a row
+	// to add one.
+	credentialKindToken = "token"
+	// credentialKindGithubApp is an authorization grant from the GitHub App.
+	credentialKindGithubApp = "github_app"
 )
+
+// refreshMargin is how long before its stated expiry a user token is refreshed
+// rather than used. A token that expires mid-fetch is a deploy that fails
+// halfway with a 401, and a refresh costs one round trip on the node that
+// already holds the sealed row.
+const refreshMargin = time.Minute
 
 // sourceCredentialConcept is the row kind the create handler mints ids for.
 const sourceCredentialConcept = "v1:platform:sourceCredential"
@@ -63,7 +126,7 @@ const sourceCredentialConcept = "v1:platform:sourceCredential"
 // resolveCredential is the production CredentialResolver for a FETCH: the
 // unseal, plus the lastUsedAt heartbeat, because a fetch is what the heartbeat
 // records.
-func (s *store) resolveCredential(ctx context.Context, credentialId, ownerUserId string) (string, error) {
+func (s *store) resolveCredential(ctx context.Context, credentialId, ownerUserId string) (ResolvedCredential, error) {
 	return s.unsealCredential(ctx, credentialId, ownerUserId, true)
 }
 
@@ -72,7 +135,7 @@ func (s *store) resolveCredential(ctx context.Context, credentialId, ownerUserId
 // is a question, and a question is not a use -- a lastUsedAt that moved on
 // every keystroke in the Source stop would make "last used" mean "last
 // looked at", which is the fact the Sources group is there to show.
-func (s *store) peekCredential(ctx context.Context, credentialId, ownerUserId string) (string, error) {
+func (s *store) peekCredential(ctx context.Context, credentialId, ownerUserId string) (ResolvedCredential, error) {
 	return s.unsealCredential(ctx, credentialId, ownerUserId, false)
 }
 
@@ -83,10 +146,10 @@ func (s *store) peekCredential(ctx context.Context, credentialId, ownerUserId st
 // caller binds the return value to. It is never wrapped into an error -- an
 // error string reaches a log -- and secret.Decrypt's own errors name the key
 // or the ciphertext, never the value, which is what makes THEM safe to wrap.
-func (s *store) unsealCredential(ctx context.Context, credentialId, ownerUserId string, touch bool) (string, error) {
+func (s *store) unsealCredential(ctx context.Context, credentialId, ownerUserId string, touch bool) (ResolvedCredential, error) {
 	credentialId = strings.TrimSpace(credentialId)
 	if credentialId == "" {
-		return "", refuse(CodeCredentialNotFound, "this package names no credential to fetch under")
+		return ResolvedCredential{}, refuse(CodeCredentialNotFound, "this package names no credential to fetch under")
 	}
 
 	// THE PACKAGE OWNER'S AUTHORITY, BORROWED -- component/campaigns' pattern
@@ -105,7 +168,7 @@ func (s *store) unsealCredential(ctx context.Context, credentialId, ownerUserId 
 
 	row, err := s.sourceCredentialSealedById(readCtx, credentialId)
 	if err != nil {
-		return "", err
+		return ResolvedCredential{}, err
 	}
 	if row == nil {
 		// Zero rows, and the sentence must not claim to know which of the
@@ -113,12 +176,12 @@ func (s *store) unsealCredential(ctx context.Context, credentialId, ownerUserId 
 		// credential that does not exist from one that belongs to somebody
 		// else, and that is the design -- a package naming another person's
 		// credential is refused by name, exactly like one naming nothing.
-		return "", refuse(CodeCredentialNotFound,
+		return ResolvedCredential{}, refuse(CodeCredentialNotFound,
 			"this package fetches under credential %q, and the package's owner cannot read it: either it does not exist, or it belongs to somebody else -- a package naming another person's credential is refused by name. Add a credential of your own under Settings and switch this source to it, or clear the field if the repository is public.",
 			credentialId)
 	}
 	if rowString(row, "status") == credentialStatusRevoked {
-		return "", refuse(CodeCredentialRevoked,
+		return ResolvedCredential{}, refuse(CodeCredentialRevoked,
 			"the credential this package fetches under (%q on %s) was revoked. Sources fetching under it refuse at their next fetch until you switch them to another credential on the Source stop.",
 			credentialId, rowString(row, "host"))
 	}
@@ -129,13 +192,36 @@ func (s *store) unsealCredential(ctx context.Context, credentialId, ownerUserId 
 	// discarded with the request.
 	token, derr := secret.Decrypt(rowString(row, "encryptedValue"))
 	if derr != nil {
-		return "", refuse(CodeSourceUnreadable,
+		return ResolvedCredential{}, refuse(CodeSourceUnreadable,
 			"credential %q could not be unsealed on this node: %v. Every node needs the same %s the credential was sealed under.",
 			credentialId, derr, secret.EnvMasterKey)
 	}
 	if strings.TrimSpace(token) == "" {
-		return "", refuse(CodeCredentialNotFound,
+		return ResolvedCredential{}, refuse(CodeCredentialNotFound,
 			"credential %q unsealed to an empty value, so this package cannot fetch under it", credentialId)
+	}
+
+	resolved := ResolvedCredential{
+		Id:            credentialId,
+		Kind:          credentialKind(row),
+		OwnerUserId:   rowString(row, "ownerUserId"),
+		Bearer:        token,
+		Login:         rowString(row, "login"),
+		ExternalId:    rowString(row, "externalId"),
+		Installations: rowStrings(row, "installationIds"),
+	}
+
+	// A GRANT's user token expires in eight hours, so the ordinary path
+	// through here is a refresh nobody watches (C6). It runs under readCtx --
+	// the OWNER's actor, the same authority the sealed read ran under -- so
+	// the write lands on a row that actor may write, and a refresh can never
+	// reach a row the read would not have returned.
+	if resolved.IsGrant() {
+		refreshed, rerr := s.refreshGrantIfExpired(readCtx, row, resolved.Bearer)
+		if rerr != nil {
+			return ResolvedCredential{}, rerr
+		}
+		resolved.Bearer = refreshed
 	}
 
 	// The heartbeat, BEST EFFORT, and only for a fetch. A fetch that cannot
@@ -150,7 +236,114 @@ func (s *store) unsealCredential(ctx context.Context, credentialId, ownerUserId 
 				"component", "packages.credentials", "credential", credentialId, "err", terr)
 		}
 	}
-	return token, nil
+	return resolved, nil
+}
+
+// credentialKind reads the row's kind, answering "token" for an ABSENT value.
+//
+// The default is the whole reason `kind` is not a required field: every
+// credential stored before Connect existed carries no value, nothing rewrites
+// a row to add one, and reading an absent kind as anything other than the
+// pre-Connect behaviour would change what every one of those rows means on the
+// day this shipped.
+func credentialKind(row map[string]any) string {
+	if k := rowString(row, "kind"); k != "" {
+		return k
+	}
+	return credentialKindToken
+}
+
+// refreshGrantIfExpired renews a grant's user token when its stated expiry has
+// passed, and answers the token to present.
+//
+// An ABSENT expiresAt is left alone rather than treated as expired. A GitHub
+// App whose user tokens do not expire writes no value, and refreshing on every
+// call would spend a refresh token -- which rotates on use -- for nothing. If
+// such a token really is dead, GitHub answers 401 and the caller reads that as
+// reconnect_required, which is the same repair by a slower route.
+func (s *store) refreshGrantIfExpired(ctx context.Context, row map[string]any, current string) (string, error) {
+	expiresAt := strings.TrimSpace(rowString(row, "expiresAt"))
+	if expiresAt == "" {
+		return current, nil
+	}
+	expiry, perr := time.Parse(time.RFC3339, expiresAt)
+	if perr != nil {
+		// An expiry this node cannot read is not a reason to refuse a fetch
+		// and not a reason to spend a refresh token: the stored token is
+		// presented, and GitHub is the authority on whether it still works.
+		return current, nil
+	}
+	if time.Now().UTC().Add(refreshMargin).Before(expiry.UTC()) {
+		return current, nil
+	}
+
+	credentialId := rowString(row, "id")
+	if s.github == nil || !s.github.Configured() {
+		// The grant is real and this node cannot renew it. Refusing by name
+		// rather than presenting the expired token: an operator's missing
+		// configuration must not reach a person as "reconnect your GitHub",
+		// which is a repair that would not work.
+		return "", refuse(CodeGithubAppNotConfigured,
+			"credential %q is a GitHub App grant and this cluster has no GitHub App configured, so its token cannot be renewed. An operator sets %s.",
+			credentialId, strings.Join(s.github.Missing(), ", "))
+	}
+	sealedRefresh := rowString(row, "refreshToken")
+	refreshToken := ""
+	if sealedRefresh != "" {
+		plain, derr := secret.Decrypt(sealedRefresh)
+		if derr != nil {
+			return "", refuse(CodeSourceUnreadable,
+				"credential %q's refresh token could not be unsealed on this node: %v. Every node needs the same %s the grant was sealed under.",
+				credentialId, derr, secret.EnvMasterKey)
+		}
+		refreshToken = plain
+	}
+
+	set, rerr := s.github.RefreshUserToken(ctx, refreshToken)
+	if rerr != nil {
+		if errors.Is(rerr, githubapp.ErrNotConfigured) {
+			return "", refuse(CodeGithubAppNotConfigured,
+				"credential %q is a GitHub App grant and this cluster has no GitHub App configured. An operator sets %s.",
+				credentialId, strings.Join(s.github.Missing(), ", "))
+		}
+		if errors.Is(rerr, githubapp.ErrReauthorize) {
+			return "", refuse(CodeReconnectRequired,
+				"GitHub no longer accepts this cluster's authorization for credential %q. Reconnect GitHub in Settings -- it is one click and nothing to type; sources fetching under it refuse until then.",
+				credentialId)
+		}
+		// Anything else is GitHub being unreachable or unwell, which is not
+		// the person's problem and must not be filed as one.
+		return "", refuse(CodeSourceUnreadable,
+			"this cluster could not renew credential %q's GitHub token: %v", credentialId, rerr)
+	}
+
+	// The rotation is written BEFORE the token is used, and both halves go in
+	// one write: a refresh that stored the access token and dropped the
+	// rotated refresh token would work for eight hours and then be
+	// unrenewable, which reaches a person as a connection that breaks
+	// overnight for no reason they can see.
+	sealedValue, fingerprint, serr := secret.Encrypt(set.AccessToken)
+	if serr != nil {
+		return "", fmt.Errorf("packages: seal the renewed GitHub token: %w", serr)
+	}
+	nextRefresh := sealedRefresh
+	if strings.TrimSpace(set.RefreshToken) != "" {
+		sealedNext, _, nerr := secret.Encrypt(set.RefreshToken)
+		if nerr != nil {
+			return "", fmt.Errorf("packages: seal the rotated GitHub refresh token: %w", nerr)
+		}
+		nextRefresh = sealedNext
+	}
+	if werr := s.recordRefreshedGrantToken(ctx, grantTokenSeed{
+		CredentialId:   credentialId,
+		EncryptedValue: sealedValue,
+		Fingerprint:    fingerprint,
+		RefreshToken:   nextRefresh,
+		ExpiresAt:      set.ExpiresAt,
+	}); werr != nil {
+		return "", werr
+	}
+	return set.AccessToken, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +446,14 @@ func normalizeCredentialHost(raw string) (string, error) {
 // revoked. Under the caller's actor and NOT stamped: the mutation is an
 // ordinary owned one, and the write guard -- not this handler -- is what
 // decides that the caller owns the row (or is a cluster owner).
+//
+// FOR A GRANT IT ALSO DISCONNECTS AT GITHUB (epic memql#4912, A.6), and the
+// ORDER is the point: GitHub first, the row second, and a GitHub-side failure
+// does not stop the row. The person asked to disconnect, and the local row is
+// what actually stops every fetch, poll and probe on this cluster -- so
+// refusing the disconnect because GitHub was unreachable would leave the
+// cluster still fetching under an authorization the person believes they
+// ended. The reply says which halves happened.
 func (i *Integration) handleSourceCredentialRevoke(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	deps, err := i.resolve()
 	if err != nil {
@@ -262,11 +463,43 @@ func (i *Integration) handleSourceCredentialRevoke(ctx context.Context, args map
 	if credentialId == "" {
 		return nil, fmt.Errorf("packages: credentialId is required")
 	}
+
+	remote := deps.revokeAtGitHub(ctx, credentialId)
 	if err := deps.Store.revokeSourceCredential(ctx, credentialId); err != nil {
 		return nil, err
 	}
 	return resultNode(map[string]any{
 		"credentialId": credentialId,
 		"status":       credentialStatusRevoked,
+		// remoteRevoked is FALSE for every pasted token, which is correct
+		// rather than a failure: there is nothing at GitHub to revoke for a
+		// value somebody typed in, and the person revokes it at GitHub
+		// themselves if they want to.
+		"remoteRevoked": remote,
 	}), nil
+}
+
+// revokeAtGitHub ends the authorization at GitHub for a grant, and answers
+// whether it did.
+//
+// EVERY FAILURE IS A WARNING AND A FALSE, never an error. It reads the sealed
+// row under the CALLER's actor, which means a cluster owner revoking somebody
+// else's credential reads zero rows and skips the remote half entirely -- the
+// honest outcome, since the token they would revoke is not theirs to hold and
+// the local revoke is the part that matters. A token credential returns false
+// with nothing attempted.
+func (d *Deps) revokeAtGitHub(ctx context.Context, credentialId string) bool {
+	if d.PeekCredentials == nil || d.GitHubApp == nil || !d.GitHubApp.Configured() {
+		return false
+	}
+	grant, err := d.PeekCredentials(ctx, credentialId, actorFromContext(ctx).UserId)
+	if err != nil || !grant.IsGrant() {
+		return false
+	}
+	if rerr := d.GitHubApp.RevokeGrant(ctx, grant.Bearer); rerr != nil {
+		d.log().Warn("packages: could not end a GitHub App authorization at GitHub; the local credential is revoked regardless",
+			"component", "packages.credentials", "credential", credentialId, "err", rerr)
+		return false
+	}
+	return true
 }
