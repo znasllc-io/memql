@@ -47,6 +47,7 @@ export {
 } from "./controls";
 export { LiveList, type LiveListSource } from "../live/LiveList";
 export { useLiveView, type LiveView } from "../live/liveView";
+export { useThreeFeedView, useTwoFeedView } from "../live/mergedView";
 export { useNow } from "./useNow";
 export { formatBytes, formatDuration, formatFreshness, formatMoment } from "./format";
 export { boolOr, flatten, stringsOf } from "./rows";

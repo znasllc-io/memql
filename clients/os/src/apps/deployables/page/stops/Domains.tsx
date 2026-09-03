@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { Check, Copy, Globe } from "lucide-react";
 
-import { Button, Caption, FormRow, Input, Notice, Panel, Subhead } from "../../kit";
-import { formatFreshness } from "../../kit/format";
-import { useNow } from "../../kit/useNow";
-import { LiveList } from "../../live/LiveList";
-import { useLiveView } from "../../live/liveView";
-import { useAddDomain, useRemoveDomain } from "./domainActions";
+import { Button, Caption, FormRow, Input, Notice, Subhead } from "../../../../kit";
+import { formatFreshness } from "../../../../kit/format";
+import { useNow } from "../../../../kit/useNow";
+import { LiveList } from "../../../../live/LiveList";
+import { useLiveView } from "../../../../live/liveView";
+import { useAddDomain, useRemoveDomain } from "../../domainActions";
 import {
   DOMAIN_STEPS,
   domainFingerprint,
@@ -25,11 +25,16 @@ import {
   stepIndexFor,
   type DnsRecord,
   type DomainRow,
-} from "./domains";
-import { useCustomDomains } from "./useCustomDomains";
-import type { SiteRow } from "./rows";
+} from "../../domains";
+import { useCustomDomains } from "../../useCustomDomains";
+import type { SiteRow } from "../../rows";
 
-// The Domains panel: a client's own domain, bound to this deployable.
+// A client's own domain, bound to this deployable -- the content of what was
+// the Domains panel (memql#4805), mounted as the Where-it-lives stop's body
+// (epic memql#4885): on a redeploy the stop is facts, and each bound domain's
+// stepped rail with its two records and what the sweep last saw is one of
+// them. Nothing below changed in the move; `domains.ts`, `domainActions.ts`
+// and `useCustomDomains.ts` are untouched.
 //
 // ===========================================================================
 // THE SURFACE IS ABOUT TWO RECORDS AND WHAT WE SEE AT THEM
@@ -59,7 +64,7 @@ import type { SiteRow } from "./rows";
 // clicks fastest. The panel says so in as many words, because an absent control
 // with no explanation reads as an omission.
 
-export function DomainsPanel({ site, domain }: { site: SiteRow; domain: string }) {
+export function DomainsContent({ site, domain }: { site: SiteRow; domain: string }) {
   const { source: collection } = useCustomDomains();
 
   // PROJECT, THEN NARROW, in one pass -- the collection holds RAW wire rows,
@@ -78,7 +83,7 @@ export function DomainsPanel({ site, domain }: { site: SiteRow; domain: string }
   );
 
   return (
-    <Panel label={`Domains for ${site.hostname || site.id}`}>
+    <section className="os-report-part" aria-label={`Domains for ${site.hostname || site.id}`}>
       <Subhead>Domains</Subhead>
       <Caption>
         A client's own domain, served by this deployable. Its own hostname{" "}
@@ -130,7 +135,7 @@ export function DomainsPanel({ site, domain }: { site: SiteRow; domain: string }
         fingerprint={domainFingerprint}
         renderRow={(d) => <DomainCard key={d.id} domain={d} clusterDomain={domain} />}
       />
-    </Panel>
+    </section>
   );
 }
 

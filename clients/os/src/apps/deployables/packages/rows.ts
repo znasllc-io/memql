@@ -1,6 +1,9 @@
 import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { boolOr, flatten } from "../../../kit";
+// The kit's LEAF rather than its barrel: page/rail.ts imports `sourceLabel`
+// from here and is pure by contract, and the barrel re-exports every
+// component the kit has, React included.
+import { boolOr, flatten } from "../../../kit/rows";
 
 // What the Packages surface reads, projected once.
 //
@@ -23,7 +26,8 @@ export interface PackageRow {
   sourceKind: string;
   repoUrl: string;
   repoRef: string;
-  repoTokenRef: string;
+  /** A v1:platform:sourceCredential id, or "" for a public repository. Never a value. */
+  credentialId: string;
   artifactId: string;
   deployedVersion: string;
   latestKnownVersion: string;
@@ -41,7 +45,7 @@ export function packageFromRow(row: Row): PackageRow {
     sourceKind: rowString(flat, "sourceKind"),
     repoUrl: rowString(flat, "repoUrl"),
     repoRef: rowString(flat, "repoRef"),
-    repoTokenRef: rowString(flat, "repoTokenRef"),
+    credentialId: rowString(flat, "credentialId"),
     artifactId: rowString(flat, "artifactId"),
     deployedVersion: rowString(flat, "deployedVersion"),
     latestKnownVersion: rowString(flat, "latestKnownVersion"),
@@ -70,7 +74,7 @@ export function packageFingerprint(p: PackageRow): string {
     p.sourceKind,
     p.repoUrl,
     p.repoRef,
-    p.repoTokenRef,
+    p.credentialId,
     p.deployedVersion,
     p.latestKnownVersion,
     p.updateAvailable ? "update" : "current",
@@ -78,6 +82,19 @@ export function packageFingerprint(p: PackageRow): string {
   ].join(" ");
 }
 
+/**
+ * What became of ONE app in a run -- one entry per manifest deployable, as
+ * the concept promises, a skipped app included.
+ *
+ * THE THREE REFUSAL FIELDS ARE THREE DIFFERENT ANSWERS (memql#4887).
+ * `refusal` is about the APP -- refused, or skipped as a kind this cluster
+ * does not offer -- and carries no siteId. `accountRefusal` and
+ * `domainRefusal` are about the optional PLACEMENT halves, applied after the
+ * publish under the caller's own actor: the app IS live at its cluster
+ * address and one of the two things asked for beside the address did not
+ * land. Reading the three as one would report a deploy that succeeded as a
+ * deploy that failed.
+ */
 export interface DeployableOutcome {
   name: string;
   siteId: string;
@@ -86,6 +103,12 @@ export interface DeployableOutcome {
   version: string;
   created: boolean;
   refusal?: { code: string; message: string; scope?: string };
+  /** The client tie that LANDED, when the placement named one. */
+  accountId?: string;
+  /** The client's own domain that LANDED, when the placement named one. */
+  ownDomain?: string;
+  accountRefusal?: { code: string; message: string; scope?: string };
+  domainRefusal?: { code: string; message: string; scope?: string };
 }
 
 export interface DeploymentRow {
@@ -214,7 +237,7 @@ function listOf<T>(row: Record<string, unknown>, key: string): T[] {
 // ---------------------------------------------------------------------------
 
 /** What this package's source IS, in the words a person used to add it. */
-export function sourceLabel(p: PackageRow): string {
+export function sourceLabel(p: Pick<PackageRow, "sourceKind" | "repoUrl" | "repoRef">): string {
   if (p.sourceKind === "repo") {
     const ref = p.repoRef === "" ? "default branch" : p.repoRef;
     return `${shortRepo(p.repoUrl)} at ${ref}`;

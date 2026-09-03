@@ -33,7 +33,28 @@ export function ReportView({ report }: { report: AnalysisReport | null }) {
   const goPacks = report.goPacks ?? [];
   const problems = report.problems ?? [];
   const blocking = problems.filter((p) => p.fatal);
-  const notes = problems.filter((p) => !p.fatal);
+  // A PROBLEM ALREADY SHOWN ON ITS APP IS NOT SHOWN AGAIN. `rep.add` records
+  // every problem on the report AND the per-deployable ones on their own
+  // deployable, so a non-fatal problem scoped to an app is in both places --
+  // and until `deployable_target_not_offered` arrived (epic memql#4885) the
+  // only non-fatal problem was the Go pack's, which this block already
+  // suppressed by hand with `goPacks.length === 0`. The new one printed
+  // "iOS is not offered on this cluster yet" twice on one screen: once inside
+  // the mobile app's card, where it belongs, and once at the foot of the
+  // report under the MemQL heading, which is about DSL domains and has nothing
+  // to say about an iOS app. Found by looking at the rendered page; the diff
+  // showed a filter that had been correct for its whole previous life.
+  //
+  // Keyed on (code, scope) rather than on the object, because the report is
+  // JSON off a row and the two copies are separate values.
+  const shownOnAnApp = new Set(
+    (report.deployables ?? [])
+      .filter((d) => d.problem !== undefined)
+      .map((d) => `${d.problem?.code}|${d.problem?.scope ?? d.name}`),
+  );
+  const notes = problems.filter(
+    (p) => !p.fatal && !shownOnAnApp.has(`${p.code}|${p.scope ?? ""}`),
+  );
 
   return (
     <div className="os-report">

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -86,6 +87,33 @@ type Deps struct {
 	// NewId mints deployment and site ids. Injected so a test reads a stable
 	// timeline rather than a random one.
 	NewId func(prefix string) string
+	// Credentials unseals a package's source credential under its owner's
+	// actor (epic memql#4885, D10). Shared by the fetcher and the D11 poll,
+	// which is the point of it living here: the two paths that present a
+	// bearer to GitHub resolve it through ONE function, so "refused for a
+	// credential the owner cannot read" cannot be true on one path and false
+	// on the other. Nil on a node that cannot resolve credentials; a package
+	// naming one is then refused rather than fetched anonymously.
+	Credentials CredentialResolver
+	// PeekCredentials is the PROBE's resolver (epic memql#4885, D11): the
+	// same read, the same two refusals, and no lastUsedAt heartbeat -- a
+	// probe is a question, not a fetch, and it writes nothing. A separate
+	// field rather than a flag on Credentials so a test can see which of the
+	// two a path reached for, and so the fetcher can never be handed the one
+	// that does not stamp.
+	PeekCredentials CredentialResolver
+	// HTTP is the client the D11 poll and the source probe ask GitHub with.
+	// Nil means a 30s default. Injected so a test can stand a fake GitHub
+	// behind it and read which requests carried a bearer -- and which were
+	// never made.
+	HTTP *http.Client
+}
+
+func (d *Deps) httpClient() *http.Client {
+	if d.HTTP != nil {
+		return d.HTTP
+	}
+	return &http.Client{Timeout: 30 * time.Second}
 }
 
 func (d *Deps) now() time.Time {
@@ -113,10 +141,28 @@ type DeployRequest struct {
 	// sets it in one click, which is the same code path with the person's
 	// answer already in hand.
 	Confirmed bool
-	// Hostnames maps a deployable name to the hostname to create its site at,
-	// supplied at FIRST deploy only. Later deploys find the site through
-	// (packageId, packageDeployableName) and never re-ask.
-	Hostnames map[string]string
+	// Placements maps a deployable name to where it goes, supplied at FIRST
+	// deploy only (epic memql#4885, D8). Later deploys find the site through
+	// (packageId, packageDeployableName) and never re-ask: a placement is
+	// chosen once, and a later deploy of the same source keeps the same
+	// addresses.
+	Placements map[string]Placement
+}
+
+// Placement is where one deployable goes on its first deploy (D8): the
+// hostname its site is created at, the client it is FOR, and the client's own
+// domain. The hostname is the only required part -- a placement naming
+// neither of the other two is exactly the first deploy there was before them.
+//
+// The pipeline APPLIES the two optional parts itself, after the site exists,
+// as the same two calls the page would make (updateSiteAccount and
+// customDomainAdd) under the caller's own actor -- so the guards behind them
+// decide exactly as they do from the page, and there is no client-side
+// follow-up write for a closed window to lose.
+type Placement struct {
+	Hostname  string
+	AccountId string
+	OwnDomain string
 }
 
 // DeployOutcome is what a run produced.
@@ -359,11 +405,18 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 func (d *Deps) fetch(ctx context.Context, pkg map[string]any) (*SourceSnapshot, error) {
 	switch rowString(pkg, "sourceKind") {
 	case "repo":
-		return d.Fetcher.FetchRepo(ctx,
-			rowString(pkg, "repoUrl"),
-			rowString(pkg, "repoRef"),
-			rowString(pkg, "repoTokenRef"),
-			d.Limits)
+		// The owner rides along with the credential NAME, because the name
+		// is resolved under the owner's actor and not the caller's: a
+		// cluster owner deploying a colleague's package fetches under the
+		// colleague's credential, which is correct -- they are deploying that
+		// package -- and a package naming somebody else's credential resolves
+		// nothing.
+		return d.Fetcher.FetchRepo(ctx, RepoSource{
+			RepoUrl:      rowString(pkg, "repoUrl"),
+			Ref:          rowString(pkg, "repoRef"),
+			CredentialId: rowString(pkg, "credentialId"),
+			OwnerUserId:  rowString(pkg, "ownerUserId"),
+		}, d.Limits)
 	case "artifact":
 		return d.Fetcher.FetchArtifact(ctx, rowString(pkg, "artifactId"), d.Limits)
 	default:

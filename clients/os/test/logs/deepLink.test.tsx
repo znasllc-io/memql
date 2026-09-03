@@ -43,13 +43,20 @@ const ACME: Row = {
   sourceKind: "repo",
   repoUrl: "https://github.com/acme/storefront",
   repoRef: "main",
-  repoTokenRef: "",
+  credentialId: "",
   artifactId: "",
   deployedVersion: "aaaaaaaaaaaaaaaaaaaa",
   latestKnownVersion: "aaaaaaaaaaaaaaaaaaaa",
   updateAvailable: false,
   status: "active",
   createdAt: "2026-09-01T10:00:00Z",
+} as unknown as Row;
+
+/** SHOP, bound to the package above, so the page reads its timeline. */
+const SHOP_FROM_PACKAGE: Row = {
+  ...(SHOP as object),
+  packageId: "pkg-acme",
+  packageDeployableName: "storefront",
 } as unknown as Row;
 
 const DONE: Row = {
@@ -84,8 +91,8 @@ beforeEach(() => {
 
 describe("the deployable's Logs action", () => {
   it("opens the Logs app on Search carrying the site as the subject", async () => {
-    mount(fakeConnection({ sites: [SHOP] }), "sites");
-    await click(await screen.findByText("shop.memql.example.com"));
+    mount(fakeConnection({ sites: [SHOP] }), "deployables");
+    await click((await screen.findByText("shop.memql.example.com")).closest("button"));
     await click(screen.getByRole("button", { name: "Logs for shop.memql.example.com" }));
 
     const opened = windows();
@@ -95,16 +102,16 @@ describe("the deployable's Logs action", () => {
   });
 
   it("focuses an already-open Logs window rather than opening a second", async () => {
-    mount(fakeConnection({ sites: [SHOP] }), "sites");
-    await click(await screen.findByText("shop.memql.example.com"));
+    mount(fakeConnection({ sites: [SHOP] }), "deployables");
+    await click((await screen.findByText("shop.memql.example.com")).closest("button"));
     await click(screen.getByRole("button", { name: "Logs for shop.memql.example.com" }));
     await click(screen.getByRole("button", { name: "Logs for shop.memql.example.com" }));
     expect(windows().filter((w) => w.appId === "logs")).toHaveLength(1);
   });
 
   it("is absent below admin -- a writer sees the detail and no Logs action", async () => {
-    mount(fakeConnection({ sites: [SHOP] }), "sites", "writer");
-    await click(await screen.findByText("shop.memql.example.com"));
+    mount(fakeConnection({ sites: [SHOP] }), "deployables", "writer");
+    await click((await screen.findByText("shop.memql.example.com")).closest("button"));
     expect(screen.queryByRole("button", { name: /^Logs for / })).toBeNull();
     expect(windows()).toHaveLength(0);
   });
@@ -112,8 +119,8 @@ describe("the deployable's Logs action", () => {
 
 describe("the deployment's Logs action", () => {
   it("opens the Logs app on Search carrying the deployment as the subject", async () => {
-    mount(fakeConnection({ packages: [ACME], deployments: { "pkg-acme": [DONE] } }), "packages", "admin");
-    await click(await screen.findByText("acme"));
+    mount(fakeConnection({ sites: [SHOP_FROM_PACKAGE], packages: [ACME], deployments: { "pkg-acme": [DONE] } }), "deployables", "admin");
+    await click((await screen.findByText("shop.memql.example.com")).closest("button"));
     const attempts = await screen.findByRole("list", { name: "Deployments of acme" });
     await click(within(attempts).getByRole("button", { name: /^Logs of the .* deploy$/ }));
 

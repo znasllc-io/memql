@@ -5150,6 +5150,27 @@ QueryClient.prototype.packageDeployments = function (this: QueryClient, args: Pa
   return this.executeNamed("packageDeployments", buildPackageDeployments(args), opts);
 };
 
+/** Every deploy parked at the confirm gate that is waiting for this caller, newest first -- the Deployables list's "a deploy is waiting for you" mark, and the ONE parked-runs feed the OS retains at its app root (epic memql#4885, design section A). That feed is a deliberate exception to the rule that a deployment timeline is retained by the page and never by the root: the rule guards against subscribing a window to every deploy in the cluster, and a feed over parked runs alone is the handful of rows a person needs to see before they open anything.
+No `paginate`, deliberately, and the reason is the population: a run parks here only between a person's Analyze and their Deploy, so a caller has a handful of these at most and a cluster owner a handful per person -- a page size would be a bound on a set that is bounded by how many things somebody has half-composed. The sort is what keeps the read a bounded one for the parser. */
+// Bound concept: v1:platform:packageDeployment (machine-readable: BoundConcepts["packageDeploymentsAwaitingConfirm"] in generated_concepts.ts).
+export interface PackageDeploymentsAwaitingConfirmArgs {
+}
+
+export function buildPackageDeploymentsAwaitingConfirm(args: PackageDeploymentsAwaitingConfirmArgs): string {
+  void args;
+  return "query packageDeploymentsAwaitingConfirm()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packageDeploymentsAwaitingConfirm(args?: PackageDeploymentsAwaitingConfirmArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packageDeploymentsAwaitingConfirm = function (this: QueryClient, args: PackageDeploymentsAwaitingConfirmArgs = {} as PackageDeploymentsAwaitingConfirmArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packageDeploymentsAwaitingConfirm", buildPackageDeploymentsAwaitingConfirm(args), opts);
+};
+
 /** The packages this caller may see, active only. The OS packages list. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.ts).
 export interface PackagesAllArgs {
@@ -9948,6 +9969,49 @@ declare module "./query.js" {
 
 QueryClient.prototype.soldByVariant = function (this: QueryClient, args: SoldByVariantArgs = {} as SoldByVariantArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("soldByVariant", buildSoldByVariant(args), opts);
+};
+
+/** One credential by id -- the Source stop's credential chip. Card shape, so metadata only. */
+// Bound concept: v1:platform:sourceCredential (machine-readable: BoundConcepts["sourceCredentialById"] in generated_concepts.ts).
+export interface SourceCredentialByIdArgs {
+  credentialId: string;
+}
+
+export function buildSourceCredentialById(args: SourceCredentialByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("credentialId: " + renderMemQLValue(args.credentialId));
+  return "query sourceCredentialById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sourceCredentialById(args: SourceCredentialByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sourceCredentialById = function (this: QueryClient, args: SourceCredentialByIdArgs = {} as SourceCredentialByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sourceCredentialById", buildSourceCredentialById(args), opts);
+};
+
+/** Every credential this caller holds, revoked ones included and marked -- the Settings Sources group. A cluster owner reads every row's metadata, which is the oversight the composite tier exists for; nothing here can return the ciphertext, because the card shape does not carry it.
+The composite term is PARENTHESIZED even though it stands alone, and the parens are load-bearing: the struct form splices this filter after the concept predicate (buildStructQueryExpr), and a bare top-level `a || b` reaches the row-authz shadow analyzer in a shape isCompositeScopeConjunct does not recognise, so TestRowAuthzEnforcementLandGate reports the read undecidable. Written the way every composite-tier sibling writes the term, it is recognised as the tier's own. */
+// Bound concept: v1:platform:sourceCredential (machine-readable: BoundConcepts["sourceCredentialsMine"] in generated_concepts.ts).
+export interface SourceCredentialsMineArgs {
+}
+
+export function buildSourceCredentialsMine(args: SourceCredentialsMineArgs): string {
+  void args;
+  return "query sourceCredentialsMine()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sourceCredentialsMine(args?: SourceCredentialsMineArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sourceCredentialsMine = function (this: QueryClient, args: SourceCredentialsMineArgs = {} as SourceCredentialsMineArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sourceCredentialsMine", buildSourceCredentialsMine(args), opts);
 };
 
 /** Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view. */

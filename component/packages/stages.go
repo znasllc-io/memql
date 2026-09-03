@@ -335,14 +335,27 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 	for _, dep := range rep.Deployables {
 		bundle, ok := bundles[dep.Name]
 		if !ok {
+			// An app the build stage skipped over a NON-fatal problem -- a
+			// target the model knows and does not offer (D9) -- is recorded
+			// on the row with that problem rather than omitted. The row's
+			// `deployables` promises one entry per manifest deployable, and
+			// a missing entry reads as "nothing happened" where the truth
+			// is "skipped, and here is why". A FATAL problem never reaches
+			// this loop: the analysis refused the run before the build.
+			if dep.Problem != nil && !dep.Problem.Fatal {
+				skipped := *dep.Problem
+				outcomes = append(outcomes, DeployableOutcome{Name: dep.Name, Refusal: &skipped})
+			}
 			continue
 		}
 
 		siteId := rowString(byName[dep.Name], "id")
 		hostname := rowString(byName[dep.Name], "hostname")
 		created := false
+		outcome := DeployableOutcome{Name: dep.Name}
 		if siteId == "" {
-			requested := strings.TrimSpace(req.Hostnames[dep.Name])
+			placement := req.Placements[dep.Name]
+			requested := strings.TrimSpace(placement.Hostname)
 			if requested == "" {
 				return outcomes, refuseScoped(CodeDeployableBindingMissing, dep.Name,
 					"deployable %q has never been deployed and no hostname was chosen for it. The first deploy picks a hostname; later ones remember it.",
@@ -362,27 +375,58 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 			if berr := d.Store.bindSiteToPackage(ctx, siteId, req.PackageId, dep.Name); berr != nil {
 				return outcomes, berr
 			}
+			d.place(ctx, siteId, dep.Name, placement, &outcome)
 		}
 
 		res, perr := d.Publisher.PublishBundle(ctx, siteId, bundle)
 		if perr != nil {
-			outcomes = append(outcomes, DeployableOutcome{
-				Name:    dep.Name,
-				SiteId:  siteId,
-				Refusal: &Problem{Code: "deployable_publish_failed", Message: perr.Error(), Scope: dep.Name, Fatal: true},
-			})
+			outcome.SiteId = siteId
+			outcome.Refusal = &Problem{Code: "deployable_publish_failed", Message: perr.Error(), Scope: dep.Name, Fatal: true}
+			outcomes = append(outcomes, outcome)
 			return outcomes, perr
 		}
-		outcomes = append(outcomes, DeployableOutcome{
-			Name:      dep.Name,
-			SiteId:    siteId,
-			Hostname:  firstNonEmpty(res.Hostname, hostname),
-			BundleRef: res.BundleRef,
-			Version:   res.Version,
-			Created:   created,
-		})
+		outcome.SiteId = siteId
+		outcome.Hostname = firstNonEmpty(res.Hostname, hostname)
+		outcome.BundleRef = res.BundleRef
+		outcome.Version = res.Version
+		outcome.Created = created
+		outcomes = append(outcomes, outcome)
 	}
 	return outcomes, nil
+}
+
+// place applies the two optional halves of a first-deploy placement (D8) --
+// the client the site is FOR and the client's own domain -- and records on
+// the outcome what was applied and what was refused.
+//
+// BOTH RUN UNDER THE CALLER'S ACTOR, UNSTAMPED, and that is the whole
+// authorization shape of the feature: they are the SAME two calls the page
+// issues (updateSiteAccount, customDomainAdd), so the account write's guard
+// and the three custom-domain guards (platform_custom_domain_policy.go)
+// decide exactly as they do from the page. The pipeline gains no bypass of
+// either; it only saves the person a second click.
+//
+// A REFUSAL DOES NOT FAIL THE PUBLISH. The site is live at its cluster
+// address either way, and a hostname collision or a per-site cap is a fact
+// about the domain, not about the deploy -- so it lands on the outcome with
+// the server's own sentence, for the Where-it-lives stop to render, and the
+// deploy goes on to publish. Recorded rather than logged, because a row is
+// what the person reads and a pod log is not.
+func (d *Deps) place(ctx context.Context, siteId, name string, p Placement, out *DeployableOutcome) {
+	if accountId := strings.TrimSpace(p.AccountId); accountId != "" {
+		if err := d.Store.setSiteAccount(ctx, siteId, accountId); err != nil {
+			out.AccountRefusal = &Problem{Code: CodeDeployableAccountRefused, Message: err.Error(), Scope: name}
+		} else {
+			out.AccountId = accountId
+		}
+	}
+	if own := strings.TrimSpace(p.OwnDomain); own != "" {
+		if err := d.Store.addCustomDomain(ctx, siteId, own); err != nil {
+			out.DomainRefusal = &Problem{Code: CodeDeployableDomainRefused, Message: err.Error(), Scope: name}
+		} else {
+			out.OwnDomain = own
+		}
+	}
 }
 
 func firstNonEmpty(vals ...string) string {
