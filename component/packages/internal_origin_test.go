@@ -76,6 +76,12 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	_ = s.touchSourceCredential(ctx, "c", time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC))
 	_ = s.revokeSourceCredential(ctx, "c")
 
+	// GitHub App grants (epic memql#4912): one more stamped read and two more
+	// stamped writes.
+	_, _ = s.githubAppGrantForCaller(ctx)
+	_ = s.recordRefreshedGrantToken(ctx, grantTokenSeed{CredentialId: "c", EncryptedValue: "e", Fingerprint: "f"})
+	_ = s.recordGrantInstallations(ctx, "c", []string{"1"})
+
 	// Placements (epic memql#4885, D8): two more caller-actor writes.
 	_ = s.setSiteAccount(ctx, "s", "a")
 	_ = s.addCustomDomain(ctx, "s", "www.example.com")
@@ -83,7 +89,8 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	reads := []string{"packageById", "packageDeploymentById", "sitesForPackage", "siteById", "packagesByRepoUrl", "packagesTrackingRepos", "libraryArtifactById"}
 	writes := []string{"advancePackageDeployment", "recordPackageDeployedVersion", "recordPackageName",
 		"recordPackageUpstreamVersion", "recordSitePackageOrigin", "setPackageStatus", "setSiteStatus",
-		"recordPackageDeploymentReport", "createSourceCredential", "touchSourceCredential"}
+		"recordPackageDeploymentReport", "createSourceCredential", "touchSourceCredential",
+		"refreshGithubAppGrantToken", "recordGithubAppInstallations"}
 	// THE ONE STAMPED READ. sourceCredentialSealedById is @serverOnly because
 	// it returns ciphertext -- a client-callable projection of encryptedValue
 	// is a ciphertext oracle even for the row's own owner -- so without the
@@ -91,7 +98,12 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	// CONSTRUCT and does not widen the ROWS: the read path has no
 	// internal-origin bypass, and the actor (the package owner, borrowed by
 	// resolveCredential) still decides what comes back.
-	stampedReads := []string{"sourceCredentialSealedById"}
+	// githubAppGrantForCaller joins it for exactly the same reason and with
+	// exactly the same limit: it carries the sealed shape, so the query is
+	// @serverOnly and the stamp is what lets the engine reach the construct;
+	// the read path has no internal-origin bypass, so the caller's own actor
+	// still decides the rows, and the query's filter is the owner term.
+	stampedReads := []string{"sourceCredentialSealedById", "githubAppGrantForCaller"}
 	// THE CALLER-ACTOR WRITES. revokeSourceCredential is an ordinary owned
 	// mutation the write guard decides for the caller; stamping it internal
 	// would hand the guard its first escape and let anyone revoke anything.

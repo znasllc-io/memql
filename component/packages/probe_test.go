@@ -95,9 +95,16 @@ func TestSourceProbeAnswersAPublicRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("probe: %v", err)
 	}
-	want := SourceProbeResult{Host: "github.com", Reachable: true, Private: false, DefaultBranch: "main", Reason: ProbeReasonOK}
-	if res != want {
-		t.Fatalf("got %+v, want %+v", res, want)
+	// FIELD-WISE rather than a struct comparison: the result carries slices
+	// since epic memql#4912 (the branch list and the manifest preview), so it
+	// is no longer comparable with != -- and pinning the five scalar facts is
+	// what those comparisons were always checking anyway.
+	assertProbe(t, res, SourceProbeResult{Host: "github.com", Reachable: true, Private: false, DefaultBranch: "main", Reason: ProbeReasonOK})
+	// Neither extra is answered without a grant: they are a grant's own
+	// prefill, and a public repository probed anonymously has no grant to
+	// read them under.
+	if len(res.Branches) != 0 || len(res.Manifest.Deployables) != 0 || res.Manifest.Name != "" {
+		t.Fatalf("an anonymous probe answers no branches and no manifest, got %+v", res)
 	}
 	reqs := gh.seen()
 	if len(reqs) != 1 {
@@ -119,10 +126,32 @@ func TestSourceProbeAnswersAPublicRepository(t *testing.T) {
 			t.Errorf("header %s = %q, want %q", k, got, want)
 		}
 	}
-	// NOTHING WRITTEN, NOTHING READ: no credential was named, so the engine
-	// was not consulted at all.
-	if stmts := engine.statements(); len(stmts) != 0 {
-		t.Fatalf("a probe of a public repository touches the graph for nothing, got %v", stmts)
+	// NOTHING WRITTEN, AND EXACTLY ONE READ. Since epic memql#4912 a probe
+	// naming no credential first asks whether the CALLER holds a GitHub App
+	// grant -- that is what makes a connected person's picker prefill without
+	// anybody naming a credential -- and this caller holds none, so the read
+	// answers zero rows and the probe goes on anonymously. The property that
+	// matters is unchanged: a probe writes nothing.
+	stmts := engine.statements()
+	if len(stmts) != 1 || !strings.HasPrefix(stmts[0], "query githubAppGrantForCaller(") {
+		t.Fatalf("a probe of a public repository asks for the caller's grant and nothing else, got %v", stmts)
+	}
+	if engine.sawStatement("mutation ") {
+		t.Fatalf("a probe WRITES NOTHING, got %v", stmts)
+	}
+}
+
+// assertProbe compares the scalar half of a probe result field by field.
+//
+// The struct stopped being comparable when the grant's prefill landed on it,
+// and a reflect.DeepEqual over the whole thing would force every caller to
+// spell out two empty slices to say nothing about them. This says exactly what
+// the != comparisons said.
+func assertProbe(t *testing.T, got, want SourceProbeResult) {
+	t.Helper()
+	if got.Host != want.Host || got.Reachable != want.Reachable || got.Private != want.Private ||
+		got.DefaultBranch != want.DefaultBranch || got.Reason != want.Reason {
+		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }
 
@@ -158,10 +187,7 @@ func TestSourceProbeUnderACredentialPresentsTheBearerAndStampsNothing(t *testing
 	if err != nil {
 		t.Fatalf("probe: %v", err)
 	}
-	want := SourceProbeResult{Host: "github.com", Reachable: true, Private: true, DefaultBranch: "trunk", Reason: ProbeReasonOK}
-	if res != want {
-		t.Fatalf("got %+v, want %+v", res, want)
-	}
+	assertProbe(t, res, SourceProbeResult{Host: "github.com", Reachable: true, Private: true, DefaultBranch: "trunk", Reason: ProbeReasonOK})
 	reqs := gh.seen()
 	if len(reqs) != 1 || reqs[0].Header.Get("Authorization") != "Bearer "+testToken {
 		t.Fatalf("the probe must present the resolved credential as its bearer, got %v", authHeaders(reqs))
@@ -290,10 +316,7 @@ func TestSourceProbeAnswersANonGitHubHostAsAReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a non-GitHub host is a typed reason, not an error: %v", err)
 	}
-	want := SourceProbeResult{Host: "gitlab.com", Reachable: false, Reason: ProbeReasonSourceHostUnsupported}
-	if res != want {
-		t.Fatalf("got %+v, want %+v", res, want)
-	}
+	assertProbe(t, res, SourceProbeResult{Host: "gitlab.com", Reachable: false, Reason: ProbeReasonSourceHostUnsupported})
 	if n := len(gh.seen()); n != 0 {
 		t.Fatalf("%d request(s) left the cluster for a host it does not fetch from", n)
 	}
@@ -342,7 +365,12 @@ func TestSourceProbeRefusesACredentialOnANodeThatCannotResolve(t *testing.T) {
 	}
 }
 
-// The handler's reply carries exactly the five keys the Source stop reads.
+// The handler's reply carries exactly the seven keys the Source stop reads.
+//
+// SEVEN SINCE epic memql#4912, not five: `branches` fills the ref picker and
+// `manifest` is the What-it-is preview, and both are ALWAYS PRESENT -- empty
+// when there is nothing to say -- so a client never has to tell an absent key
+// from an empty one.
 func TestSourceProbeHandlerRepliesTheWireShape(t *testing.T) {
 	gh := &probeGitHub{status: http.StatusOK, body: publicRepoBody}
 	d, engine := probeHarness(t, gh)
@@ -354,13 +382,21 @@ func TestSourceProbeHandlerRepliesTheWireShape(t *testing.T) {
 		t.Fatalf("probe: %v", err)
 	}
 	reply := replyPayload(t, nodes)
-	for _, key := range []string{"host", "reachable", "private", "defaultBranch", "reason"} {
+	for _, key := range []string{"host", "reachable", "private", "defaultBranch", "reason", "branches", "manifest"} {
 		if _, ok := reply[key]; !ok {
 			t.Errorf("reply is missing %q: %v", key, reply)
 		}
 	}
-	if len(reply) != 5 {
-		t.Fatalf("reply carries exactly the five keys, got %v", reply)
+	if len(reply) != 7 {
+		t.Fatalf("reply carries exactly the seven keys, got %v", reply)
+	}
+	// The two new keys render as an empty LIST and an empty OBJECT rather
+	// than as null: a client iterates without a guard.
+	if branches, ok := reply["branches"].([]any); !ok || len(branches) != 0 {
+		t.Fatalf("branches must be an empty list, got %#v", reply["branches"])
+	}
+	if manifest, ok := reply["manifest"].(map[string]any); !ok || manifest["name"] != "" {
+		t.Fatalf("manifest must be an empty summary object, got %#v", reply["manifest"])
 	}
 	if reply["reason"] != ProbeReasonOK || reply["defaultBranch"] != "main" || reply["reachable"] != true {
 		t.Fatalf("reply %v", reply)

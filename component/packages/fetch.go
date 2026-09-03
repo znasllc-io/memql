@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/component/packages/githubapp"
 )
 
 // SourceSnapshot is one fetched package source, expanded and validated.
@@ -81,6 +83,13 @@ type githubFetcher struct {
 	// artifactBytes reads a Library zip artifact's bytes. Separate from the
 	// HTTP client because the two source forms share nothing but their output.
 	artifactBytes func(ctx context.Context, artifactId string) ([]byte, string, error)
+	// github is the cluster's GitHub App client (epic memql#4912). It is what
+	// turns a grant into the INSTALLATION token this fetch carries, so a
+	// deploy never depends on the person's own eight-hour token being alive
+	// (C6). Nil on a node with no app configured, which a grant-sourced
+	// package then refuses against by name rather than fetching under a token
+	// this node could not renew.
+	github *githubapp.Client
 	// tempDir is the expansion root; empty means os.TempDir.
 	tempDir string
 }
@@ -161,19 +170,33 @@ func (f *githubFetcher) FetchRepo(ctx context.Context, src RepoSource, limits Li
 	// leaves the cluster before the credential has resolved, so a package
 	// naming a credential its owner cannot read is refused with no request
 	// made.
+	grant := ResolvedCredential{}
 	if id := strings.TrimSpace(src.CredentialId); id != "" {
 		if f.credentials == nil {
 			return nil, refuse(CodeSourceUnreadable,
 				"this package fetches under credential %q, and this node cannot resolve credentials", id)
 		}
-		token, cerr := f.credentials(ctx, id, src.OwnerUserId)
+		resolved, cerr := f.credentials(ctx, id, src.OwnerUserId)
 		if cerr != nil {
-			// A typed refusal (credential_not_found / credential_revoked)
-			// passes through untouched: the code is what the Source stop
-			// renders its repair from.
+			// A typed refusal (credential_not_found / credential_revoked /
+			// reconnect_required) passes through untouched: the code is what
+			// the Source stop renders its repair from.
 			return nil, cerr
 		}
-		req.Header.Set("Authorization", "Bearer "+token)
+		grant = resolved
+		// UNDER A GRANT THE BEARER IS AN INSTALLATION TOKEN, not the person's
+		// user token (C6). A deploy that ran under somebody's user token would
+		// stop working the first time they went a day without signing in, and
+		// an auto-deploy at three in the morning would be the first to notice.
+		owner, repo, perr := parseGitHubRepo(src.RepoUrl)
+		if perr != nil {
+			return nil, perr
+		}
+		bearer, berr := installationBearer(ctx, f.github, resolved, owner, repo)
+		if berr != nil {
+			return nil, berr
+		}
+		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
 
 	client := f.http
@@ -187,10 +210,20 @@ func (f *githubFetcher) FetchRepo(ctx context.Context, src RepoSource, limits Li
 	defer resp.Body.Close()
 
 	switch {
+	case resp.StatusCode == http.StatusUnauthorized && grant.IsGrant():
+		// UNDER A GRANT A 401 IS A DIFFERENT FACT (epic memql#4912, D): the
+		// authorization itself is refused, and the repair is one click of
+		// Connect rather than choosing another credential. Reading it as
+		// source_unreadable would send somebody hunting for a permission
+		// problem that does not exist.
+		return nil, refuse(CodeReconnectRequired, "%s", reconnectSentence(grant))
 	case resp.StatusCode == http.StatusNotFound:
 		// 404 is what GitHub answers for a private repository the token
 		// cannot see, so the message names BOTH possibilities rather than
-		// asserting the one it cannot distinguish.
+		// asserting the one it cannot distinguish. Under a grant this arm is
+		// nearly unreachable -- installationBearer already refused a
+		// repository the app is not installed on, by name -- and what is left
+		// is a ref that does not exist, which the sentence covers.
 		return nil, refuse(CodeSourceUnreadable,
 			"GitHub answered 404 for this repository at ref %q. Either it does not exist, or it is private and this package's credential does not reach it.",
 			refOrDefault(src.Ref))

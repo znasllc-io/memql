@@ -347,12 +347,19 @@ func TestResolveCredentialUnsealsUnderThePackageOwnerAndStampsTheHeartbeat(t *te
 	// The inbound context is a DIFFERENT person -- the cluster owner clicking
 	// deploy on alice's package.
 	inbound := callerCtx("v1:identity:user:operator")
-	token, err := s.resolveCredential(inbound, "v1:platform:sourceCredential:abc", "v1:identity:user:alice")
+	resolved, err := s.resolveCredential(inbound, "v1:platform:sourceCredential:abc", "v1:identity:user:alice")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if token != testToken {
-		t.Fatalf("the resolver must answer the plaintext to its one caller, got %q", token)
+	if resolved.Bearer != testToken {
+		t.Fatalf("the resolver must answer the plaintext to its one caller, got %q", resolved.Bearer)
+	}
+	// A row with no `kind` reads as a pasted token, which is the whole reason
+	// the field is not required: every credential stored before Connect
+	// existed carries no value, and reading an absent kind as anything else
+	// would change what all of them mean.
+	if resolved.Kind != credentialKindToken || resolved.IsGrant() {
+		t.Fatalf("an ABSENT kind must read as %q, got %q", credentialKindToken, resolved.Kind)
 	}
 	if got := engine.actors["sourceCredentialSealedById"]; got != "v1:identity:user:alice" {
 		t.Fatalf("the sealed read must run under the PACKAGE OWNER's actor, got %q (the inbound caller was the operator)", got)
@@ -386,12 +393,12 @@ func TestResolveCredentialSurvivesAFailedHeartbeat(t *testing.T) {
 	engine.fail = map[string]error{"mutation touchSourceCredential": errors.New("the row moved")}
 	s := &store{engine: engine, logger: logger}
 
-	token, err := s.resolveCredential(context.Background(), "v1:platform:sourceCredential:abc", "v1:identity:user:alice")
+	resolved, err := s.resolveCredential(context.Background(), "v1:platform:sourceCredential:abc", "v1:identity:user:alice")
 	if err != nil {
 		t.Fatalf("a failed heartbeat must not fail the fetch: %v", err)
 	}
-	if token != testToken {
-		t.Fatalf("got %q", token)
+	if resolved.Bearer != testToken {
+		t.Fatalf("got %q", resolved.Bearer)
 	}
 	// The reachable positive for every "the log does not contain the token"
 	// assertion in this file: a line WAS written, it names the credential
@@ -436,7 +443,7 @@ func TestSourceCredentialCapabilitiesAreRegistered(t *testing.T) {
 	for _, c := range i.Capabilities() {
 		found[c.Name] = true
 	}
-	for _, name := range []string{"sourceCredentialCreate", "sourceCredentialRevoke"} {
+	for _, name := range []string{"sourceCredentialCreate", "sourceCredentialRevoke", "sourceRepositories"} {
 		if !found[name] {
 			t.Errorf("capability %q is not registered; dsl/platform/builtins.memql names integration.packages.%s", name, name)
 		}

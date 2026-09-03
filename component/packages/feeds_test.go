@@ -225,9 +225,9 @@ func TestThePollRefusesACredentialThatDoesNotResolveBeforeAnyRequest(t *testing.
 	i.deps.HTTP = &http.Client{Transport: gh}
 
 	var asked []string
-	i.deps.Credentials = func(_ context.Context, credentialId, ownerUserId string) (string, error) {
+	i.deps.Credentials = func(_ context.Context, credentialId, ownerUserId string) (ResolvedCredential, error) {
 		asked = append(asked, credentialId+" as "+ownerUserId)
-		return "", refuse(CodeCredentialRevoked, "revoked in the test")
+		return ResolvedCredential{}, refuse(CodeCredentialRevoked, "revoked in the test")
 	}
 
 	if _, err := i.handlePollUpstream(context.Background(), nil, 0); err != nil {
@@ -247,7 +247,9 @@ func TestThePollRefusesACredentialThatDoesNotResolveBeforeAnyRequest(t *testing.
 	// THE REACHABLE POSITIVE: the same package, a credential that resolves.
 	// One request, carrying the bearer, and the version it answered recorded
 	// -- so the silence above is about the refusal, not about the fake.
-	i.deps.Credentials = func(context.Context, string, string) (string, error) { return "ghp_POLLTOKEN", nil }
+	i.deps.Credentials = func(_ context.Context, id, _ string) (ResolvedCredential, error) {
+		return ResolvedCredential{Id: id, Kind: credentialKindToken, Bearer: "ghp_POLLTOKEN"}, nil
+	}
 	if _, err := i.handlePollUpstream(context.Background(), nil, 0); err != nil {
 		t.Fatalf("poll: %v", err)
 	}
@@ -275,9 +277,9 @@ func TestThePollSendsNoBearerForAPublicRepository(t *testing.T) {
 	i, _ := feedHarness(t, trackedPackage("oldsha0000000000", "", false))
 	gh := &recordingTransport{sha: "newsha0000000000"}
 	i.deps.HTTP = &http.Client{Transport: gh}
-	i.deps.Credentials = func(context.Context, string, string) (string, error) {
+	i.deps.Credentials = func(context.Context, string, string) (ResolvedCredential, error) {
 		t.Fatal("a package naming no credential must not consult the resolver")
-		return "", nil
+		return ResolvedCredential{}, nil
 	}
 
 	if _, err := i.handlePollUpstream(context.Background(), nil, 0); err != nil {
