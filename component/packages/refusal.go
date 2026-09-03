@@ -111,16 +111,26 @@ const (
 	// CodeSourceHostUnsupported: a credential (or a source) names a host this
 	// cluster does not fetch from. github.com is the only host today, and
 	// the alternative is the other source form -- a zip of the same tree.
-	// Declared here because the catalogue is closed; the probe (a sibling
-	// task) answers with the same code for a non-GitHub repository URL.
+	// Raised by normalizeCredentialHost and parseGitHubRepo alike, and
+	// answered by the probe as a typed REASON rather than thrown, so the
+	// Source stop renders one repair for the condition however it was
+	// reached.
 	CodeSourceHostUnsupported = "source_host_unsupported"
 
-	// -- reported, not fatal (D3) --
+	// -- reported, not fatal (D3, and the target model's D9) --
 
 	// CodeGoPackNotDeployable: a bff/ with a go.mod. Reported per-half and
 	// NON-fatal: the rest of the package deploys, and the report says where
 	// Go delivery actually happens today. Full Go delivery is its own epic.
 	CodeGoPackNotDeployable = "go_pack_not_deployable"
+	// CodeDeployableTargetNotOffered (epic memql#4885, D9): a declared kind
+	// the target model KNOWS and does not OFFER -- ios, android, macos
+	// (KnownUnofferedKinds). Scoped to the app, fatal to that app and NOT to
+	// the package, reported exactly as go_pack_not_deployable is: the build
+	// and publish stages skip the app and the rest deploys. Distinct from
+	// deployable_kind_unknown, which stays fatal, because the two say
+	// opposite things to an author -- "not yet" versus "not a thing".
+	CodeDeployableTargetNotOffered = "deployable_target_not_offered"
 
 	// -- raised outside this package, catalogued here --
 

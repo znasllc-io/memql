@@ -335,6 +335,17 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 	for _, dep := range rep.Deployables {
 		bundle, ok := bundles[dep.Name]
 		if !ok {
+			// An app the build stage skipped over a NON-fatal problem -- a
+			// target the model knows and does not offer (D9) -- is recorded
+			// on the row with that problem rather than omitted. The row's
+			// `deployables` promises one entry per manifest deployable, and
+			// a missing entry reads as "nothing happened" where the truth
+			// is "skipped, and here is why". A FATAL problem never reaches
+			// this loop: the analysis refused the run before the build.
+			if dep.Problem != nil && !dep.Problem.Fatal {
+				skipped := *dep.Problem
+				outcomes = append(outcomes, DeployableOutcome{Name: dep.Name, Refusal: &skipped})
+			}
 			continue
 		}
 

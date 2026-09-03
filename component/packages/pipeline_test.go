@@ -423,6 +423,48 @@ func TestTheCredentialIsResolvedUnderThePackageOwnerAtFetchTimeAndReachesNoRow(t
 	}
 }
 
+// TestANotOfferedTargetDeploysTheRestOfThePackage is D9 end to end: a manifest
+// declaring an iOS app beside a static one deploys the static one, builds and
+// publishes nothing for the iOS one, finishes SUCCEEDED, and records the
+// unoffered app on the row with its non-fatal refusal so the timeline says
+// what happened to it rather than omitting it.
+func TestANotOfferedTargetDeploysTheRestOfThePackage(t *testing.T) {
+	h := newHarness(t, unofferedTargetPackage(), ownerPackage())
+	out, err := Deploy(context.Background(), h.deps, DeployRequest{
+		PackageId: "v1:platform:package:abc",
+		Actor:     plainUser(),
+		Confirmed: true,
+		Hostnames: map[string]string{"docs": "docs.example.com"},
+	})
+	if err != nil {
+		t.Fatalf("an unoffered target must not fail the deploy: %v", err)
+	}
+	if out.Status != StatusSucceeded {
+		t.Fatalf("want succeeded, got %q (%+v)", out.Status, out.Problem)
+	}
+	if got := strings.Join(h.builder.built, ","); got != "docs" {
+		t.Fatalf("only the offered app may build, got %q", got)
+	}
+	if got := strings.Join(h.publisher.published, ","); got != "v1:platform:site:docs" {
+		t.Fatalf("only the offered app may publish, got %q", got)
+	}
+	if len(out.Deployables) != 2 {
+		t.Fatalf("the row records one outcome per manifest deployable, got %+v", out.Deployables)
+	}
+	var mobile *DeployableOutcome
+	for i := range out.Deployables {
+		if out.Deployables[i].Name == "mobile" {
+			mobile = &out.Deployables[i]
+		}
+	}
+	if mobile == nil || mobile.Refusal == nil || mobile.Refusal.Code != CodeDeployableTargetNotOffered {
+		t.Fatalf("the unoffered app must be recorded with its refusal, got %+v", out.Deployables)
+	}
+	if mobile.Refusal.Fatal || mobile.SiteId != "" {
+		t.Fatalf("not offered is non-fatal and produces no site: %+v", mobile)
+	}
+}
+
 func TestBothOutcomesAudit(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		h := newHarness(t, spaOnlyPackage(), ownerPackage())
