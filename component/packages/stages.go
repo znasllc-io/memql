@@ -114,7 +114,7 @@ func (d *Deps) build(ctx context.Context, req DeployRequest, pkg map[string]any,
 				return nil, err
 			}
 			bundles[dep.Name] = bundle
-			out.recordBuiltOn(dep.Name, BuiltOn{Surface: SurfacePrebuilt})
+			out.recordBuiltOn(BuiltOn{Surface: SurfacePrebuilt})
 			continue
 		}
 		builder := d.builderFor(dep)
@@ -127,7 +127,7 @@ func (d *Deps) build(ctx context.Context, req DeployRequest, pkg map[string]any,
 		// RECORDED WHETHER IT WORKED OR NOT, and before the error is examined:
 		// where a build ran is a fact about the attempt, and the case where
 		// somebody most needs it is the one where it failed.
-		out.recordBuiltOn(dep.Name, res.BuiltOn)
+		out.recordBuiltOn(res.BuiltOn)
 		if nodeId := strings.TrimSpace(res.BuiltOn.NodeId); nodeId != "" {
 			// The next deployable of this run prefers the same replica: its
 			// npm cache is warm and, more to the point, one run reads as one

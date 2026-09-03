@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"path"
@@ -247,16 +249,10 @@ func bundleFromTarGz(raw []byte, limits Limits) (edge.Bundle, error) {
 	var total int64
 	for {
 		hdr, nerr := tr.Next()
+		if errors.Is(nerr, io.EOF) {
+			break
+		}
 		if nerr != nil {
-			if nerr.Error() == "EOF" {
-				break
-			}
-			if nerr == fs.ErrClosed {
-				break
-			}
-			if strings.Contains(nerr.Error(), "EOF") {
-				break
-			}
 			return nil, nerr
 		}
 		if hdr.Typeflag != tar.TypeReg {
@@ -289,7 +285,11 @@ func bundleFromTarGz(raw []byte, limits Limits) (edge.Bundle, error) {
 			return nil, refuse(CodeSourceTooLarge, "the built output exceeds %d bytes", limits.MaxSourceBytes)
 		}
 		data := make([]byte, hdr.Size)
-		if _, rerr := readFull(tr, data); rerr != nil {
+		// io.ReadFull rather than a loop: a tar entry shorter than its header
+		// claims is a TRUNCATED archive, and ErrUnexpectedEOF says exactly
+		// that. A hand-rolled read that treated the short answer as the end
+		// would publish a half-written file as though it were the whole one.
+		if _, rerr := io.ReadFull(tr, data); rerr != nil {
 			return nil, rerr
 		}
 		bundle[clean] = data
@@ -298,22 +298,4 @@ func bundleFromTarGz(raw []byte, limits Limits) (edge.Bundle, error) {
 		return nil, fmt.Errorf("the built output holds no files")
 	}
 	return bundle, nil
-}
-
-// readFull fills p or answers why it could not. Spelled out rather than
-// io.ReadFull so the EOF-shaped end of a tar entry is not read as a short
-// file.
-func readFull(r interface{ Read([]byte) (int, error) }, p []byte) (int, error) {
-	n := 0
-	for n < len(p) {
-		got, err := r.Read(p[n:])
-		n += got
-		if err != nil {
-			if n == len(p) {
-				return n, nil
-			}
-			return n, err
-		}
-	}
-	return n, nil
 }

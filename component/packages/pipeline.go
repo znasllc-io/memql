@@ -170,10 +170,12 @@ type DeployOutcome struct {
 
 // recordBuiltOn keeps the run's build surface and the node it ran on.
 //
-// The FIRST answer wins for the surface and the LAST non-empty node wins,
-// which is the honest reading of a run whose apps are a prebuilt one and a
-// built one: the run built something, and it built it somewhere.
-func (o *DeployOutcome) recordBuiltOn(name string, on BuiltOn) {
+// A REAL SURFACE OUTRANKS `prebuilt`, and the last non-empty node wins. That
+// is the honest summary of a package whose apps are one committed tree and one
+// that had to be built: the run built something, and it built it somewhere,
+// and "prebuilt" alone would say it built nothing. Each app's own answer is on
+// its outcome, which is where a per-app reading comes from.
+func (o *DeployOutcome) recordBuiltOn(on BuiltOn) {
 	if on.Surface == "" {
 		return
 	}
@@ -183,7 +185,6 @@ func (o *DeployOutcome) recordBuiltOn(name string, on BuiltOn) {
 	if strings.TrimSpace(on.NodeId) != "" {
 		o.BuiltOn.NodeId = on.NodeId
 	}
-	_ = name
 }
 
 // Deploy runs one deployment attempt to a terminal status, or parks it at the
