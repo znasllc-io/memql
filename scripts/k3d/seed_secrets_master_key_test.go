@@ -143,6 +143,12 @@ type scenario struct {
 	envBootstrapToken       string // MEMQL_NODE_BOOTSTRAP_TOKEN; exported only when non-empty
 	clusterBootstrapToken   string // plaintext bootstrap token the "cluster" holds
 	bootstrapTokenReadFails bool   // only that one read fails
+
+	// githubApp is the MEMQL_GITHUB_APP_* environment for this run (epic
+	// memql#4912). A MAP rather than six fields, because the interesting
+	// cases are "all six" and "some subset", and naming the subset in the
+	// test is what makes a partial-configuration case readable.
+	githubApp map[string]string
 }
 
 func repoRoot(t *testing.T) string {
@@ -268,6 +274,9 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 	}
 	if sc.envBootstrapToken != "" {
 		env = append(env, "MEMQL_NODE_BOOTSTRAP_TOKEN="+sc.envBootstrapToken)
+	}
+	for name, value := range sc.githubApp {
+		env = append(env, name+"="+value)
 	}
 	cmd.Env = env
 
