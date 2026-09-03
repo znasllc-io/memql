@@ -640,7 +640,7 @@ mutate auditEvent createAuditEvent {
     actorEmail       string
     actorRole        string
     actorIdentityId  string
-    targetType       enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings", "deviceCode", "delegation", "workerPairingCode", "enrolmentToken", "passkeyIdentity", "badgeIdentity", "appSession", "shopifyStore", "releaseCut", "oauthClient", "upstreamIdentity", "rowOwnership")
+    targetType       enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings", "deviceCode", "delegation", "workerPairingCode", "enrolmentToken", "passkeyIdentity", "badgeIdentity", "appSession", "shopifyStore", "releaseCut", "oauthClient", "upstreamIdentity", "rowOwnership", "githubGrant")
     targetId         string
     targetEmail      string
     detail           object
@@ -3480,6 +3480,76 @@ mutate invitation rotateGuestInvitationToken {
     stamp {
       id: args.invitationId
       previousTokenHash: args.previousTokenHash ?? ""
+    }
+  }
+}
+
+// GitHub Connect state (epic memql#4912, issue memql#4913)
+// ========================================================
+//
+// Both are @serverOnly, and for the reason createEnrolmentToken's siblings
+// are: each writes or spends a `stateHash`, which IS the credential the
+// callback matches on. A client-reachable create would be a primitive for
+// minting a connect that lands a GitHub grant on an account of the caller's
+// choosing; a client-reachable consume would let anyone burn somebody else's
+// in-flight connect.
+//
+// The consume is a plain update{}, which cannot express a compare-and-swap --
+// that is why component/identity/store_githubconnect.go takes a Postgres
+// advisory lock around the re-read and this write. A browser redirect can be
+// replayed, and two identity replicas would otherwise both read "not
+// consumed" and both land a grant.
+
+/// Persist a GitHub-Connect state row at begin time. Server-only: `stateHash` is the whole
+/// credential the callback matches on, so a client able to write one could mint a connect that
+/// lands a grant on an account it chose.
+///
+/// Why actor.userId scoping is not the fix: the row is written by one caller and READ by another
+/// that has no actor at all -- GitHub redirects a browser to the callback carrying no MemQL bearer
+/// -- so the account this row names has to survive as a FIELD rather than as an actor stamp. That
+/// is why `userId` is an argument, and it is also why a client-reachable write is a
+/// credential-forging primitive rather than merely an over-broad one: the argument names whose
+/// account a later grant lands on. The capability that calls this refuses an empty actor before
+/// rendering it.
+@serverOnly
+mutate githubConnectState createGithubConnectState {
+  args {
+    stateId     string!
+    userId      string!
+    stateHash   string!
+    expiresAt   string!
+    returnPath  string
+    sourceIP    string
+  }
+  insert {
+    accept { userId, stateHash, expiresAt }
+    stamp {
+      id: args.stateId
+      returnPath: args.returnPath ?? ""
+      sourceIP: args.sourceIP ?? ""
+    }
+  }
+}
+
+/// Stamp a GitHub-Connect state row consumed. The swap half of the compare-and-swap: the compare is
+/// githubConnectStateByHash re-read inside the same advisory lock.
+///
+/// Why actor.userId scoping is not the fix: this runs inside the callback, where actor.userId is
+/// the empty string -- GitHub redirects a browser here and it carries no MemQL bearer. A
+/// self-scoped write would match nothing and every connect would fail at its last step. What
+/// authorizes it instead is possession of the plaintext state, whose digest resolved this row.
+@serverOnly
+mutate githubConnectState consumeGithubConnectState {
+  args {
+    stateId         string!
+    consumedAt      string!
+    consumedFromIP  string
+  }
+  update {
+    accept { consumedAt }
+    stamp {
+      id: args.stateId
+      consumedFromIP: args.consumedFromIP ?? ""
     }
   }
 }

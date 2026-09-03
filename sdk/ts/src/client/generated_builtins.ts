@@ -534,6 +534,32 @@ QueryClient.prototype.fleetModels = function (this: QueryClient, args: FleetMode
   return this.executeNamed("fleetModels", buildFleetModels(args), opts);
 };
 
+/** Begin GitHub Connect: answer the URL the browser navigates to, with a server-held state bound to the signed-in caller.
+THE FLOW STARTS OVER THE STREAM, NOT OVER HTTP (epic memql#4912, decision C4). The callback is the only HTTP surface this feature has; everything a signed-in person does goes through the stream like every other call, which is what keeps the state bound to a caller the engine has already authenticated.
+It answers `{authorizeUrl, reason, installUrl}` and never an error a client has to parse. Three reasons a caller can see:
+  ok                        -- authorizeUrl is set; navigate to it.   github_app_not_configured -- this cluster has no GitHub App (the six MEMQL_GITHUB_APP_*                                values are absent). authorizeUrl and installUrl are empty and                                the Source stop offers the pasted-token path alone. An                                operator's condition, not a person's.   connect_state_invalid     -- the state row could not be written. The person retries; there                                is nothing for them to fix.
+A call carrying no actor is REFUSED rather than answered, because the state row names the account the callback may land a grant on and a row naming nobody is a grant nobody owns. */
+export interface GithubConnectBeginArgs {
+  /** Where in MemQL OS to land when the callback finishes -- a same-origin path such as "/packages/new". Validated as a relative path on the way in and again on the way out; anything absolute, protocol-relative or carrying a control character is dropped for the OS root. */
+  returnPath?: string;
+}
+
+export function buildGithubConnectBegin(args: GithubConnectBeginArgs): string {
+  const parts: string[] = [];
+  if (args.returnPath !== undefined) parts.push("returnPath: " + renderMemQLValue(args.returnPath));
+  return "builtin githubConnectBegin(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    githubConnectBegin(args: GithubConnectBeginArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.githubConnectBegin = function (this: QueryClient, args: GithubConnectBeginArgs = {} as GithubConnectBeginArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("githubConnectBegin", buildGithubConnectBegin(args), opts);
+};
+
 /** Fetch a harness plan's full execution timeline (every plan/step version transition + all observations, ordered by createdAt) reconstructed from the append-only graph event stream. Returns one synthetic node carrying the rendered timeline string, a completion flag, and the step count. Owner-scoped to the caller's own plan. The history-over-gRPC contract for the cockpit `harness trace` CLI (memql-cockpit#142). */
 export interface HarnessTraceArgs {
   planId: string;

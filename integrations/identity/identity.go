@@ -9,6 +9,8 @@
 package identity
 
 import (
+	"log/slog"
+
 	"github.com/uptrace/bun"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -21,11 +23,18 @@ import (
 // see docs/public/operate/auth/per-row-authz-audit.md.
 type IdentityIntegration struct {
 	// engine and db are nil on a node whose plug-in factory had neither.
-	// Only ownership transfer (memql#4838) needs them; every delegation
-	// capability above is pure and keeps working without them, which is why
-	// the factory does not refuse when they are absent.
+	// Only ownership transfer (memql#4838) and GitHub Connect (memql#4913)
+	// need them; every delegation capability above is pure and keeps working
+	// without them, which is why the factory does not refuse when they are
+	// absent.
 	engine memql.IntegrationEngineAccess
 	db     func() *bun.DB
+	// logger records what a TYPED REFUSAL would otherwise swallow. A
+	// capability that answers a reason rather than an error is easier for a
+	// client and harder for an operator: without this, "the state row could
+	// not be written" reaches a person as connect_state_invalid and reaches
+	// nobody else at all. Nil on a node whose factory had none.
+	logger *slog.Logger
 }
 
 // NewIdentityIntegration creates an identity integration.
@@ -36,8 +45,8 @@ func NewIdentityIntegration() *IdentityIntegration {
 // NewIdentityIntegrationWithEngine creates one that can also transfer row
 // ownership -- the capability that needs to read every declared concept and
 // write back through the engine.
-func NewIdentityIntegrationWithEngine(engine memql.IntegrationEngineAccess, db func() *bun.DB) *IdentityIntegration {
-	return &IdentityIntegration{engine: engine, db: db}
+func NewIdentityIntegrationWithEngine(engine memql.IntegrationEngineAccess, db func() *bun.DB, logger *slog.Logger) *IdentityIntegration {
+	return &IdentityIntegration{engine: engine, db: db, logger: logger}
 }
 
 // IntegrationName returns the stable identifier.
@@ -75,6 +84,17 @@ func (i *IdentityIntegration) Capabilities() []memql.IntegrationCapability {
 				"toUserId":   "string",
 				"concept":    "string?",
 				"rowId":      "string?",
+			},
+		},
+		{
+			Name: "githubConnectBegin",
+			Description: "Begin GitHub Connect: write a short-lived state row bound to the caller " +
+				"and answer the authorize URL the browser navigates to. Answers a typed reason " +
+				"rather than an error when this cluster has no GitHub App, so the Source stop can " +
+				"offer the pasted-token path instead of rendering a failure.",
+			Handler: i.handleGithubConnectBegin,
+			ArgsSchema: map[string]string{
+				"returnPath": "string?",
 			},
 		},
 		{
