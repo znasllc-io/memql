@@ -215,6 +215,26 @@ func spaOnlyPackage() fstest.MapFS {
 	return p
 }
 
+// firstDeployPlacements is the plainest first deploy of validPackage: a
+// hostname per deployable and nothing else (D8) -- no account, no own domain.
+func firstDeployPlacements() map[string]Placement {
+	return map[string]Placement{
+		"storefront": {Hostname: "shop.example.com"},
+		"docs":       {Hostname: "docs.example.com"},
+	}
+}
+
+// statementIndex reports where the first statement containing sub sits in
+// the recorded order, or -1.
+func statementIndex(stmts []string, sub string) int {
+	for i, q := range stmts {
+		if strings.Contains(q, sub) {
+			return i
+		}
+	}
+	return -1
+}
+
 // ---------------------------------------------------------------------------
 // The tests
 // ---------------------------------------------------------------------------
@@ -249,10 +269,10 @@ func TestTheConfirmGateIsAlwaysPresent(t *testing.T) {
 func TestTheD9GateRefusesADslDeployBeforeAnythingRuns(t *testing.T) {
 	h := newHarness(t, validPackage(), ownerPackage())
 	out, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     plainUser(),
-		Confirmed: true,
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      plainUser(),
+		Confirmed:  true,
+		Placements: firstDeployPlacements(),
 	})
 	if err == nil {
 		t.Fatalf("a DSL-carrying package must be refused for a non-cluster-owner: %+v", out)
@@ -283,10 +303,10 @@ func TestAnSpaOnlyPackageDeploysUnderTheCallersOwnAuthority(t *testing.T) {
 	// everything, minus the DSL.
 	h := newHarness(t, spaOnlyPackage(), ownerPackage())
 	out, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     plainUser(),
-		Confirmed: true,
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      plainUser(),
+		Confirmed:  true,
+		Placements: firstDeployPlacements(),
 	})
 	if err != nil {
 		t.Fatalf("an SPAs-only package must deploy for an ordinary user: %v", err)
@@ -302,10 +322,10 @@ func TestAnSpaOnlyPackageDeploysUnderTheCallersOwnAuthority(t *testing.T) {
 func TestAnSpaOnlyDeploySkipsStageAndRollEntirely(t *testing.T) {
 	h := newHarness(t, spaOnlyPackage(), ownerPackage())
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     clusterOwner(),
-		Confirmed: true,
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: firstDeployPlacements(),
 	}); err != nil {
 		t.Fatalf("deploy: %v", err)
 	}
@@ -328,10 +348,10 @@ func TestAnSpaOnlyDeploySkipsStageAndRollEntirely(t *testing.T) {
 func TestUnchangedDslSkipsTheRollAndPublishesAnyway(t *testing.T) {
 	h := newHarness(t, validPackage(), ownerPackage())
 	req := DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     clusterOwner(),
-		Confirmed: true,
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: firstDeployPlacements(),
 	}
 	if _, err := Deploy(context.Background(), h.deps, req); err != nil {
 		t.Fatalf("first deploy: %v", err)
@@ -360,10 +380,10 @@ func TestAFailedBuildLandsALogTailAndPublishesNothing(t *testing.T) {
 	h.builder.tail = "npm ERR! missing script: build"
 
 	out, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     clusterOwner(),
-		Confirmed: true,
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: firstDeployPlacements(),
 	})
 	if err == nil {
 		t.Fatal("a failed build must fail the deploy")
@@ -394,10 +414,10 @@ func TestTheCredentialIsResolvedUnderThePackageOwnerAtFetchTimeAndReachesNoRow(t
 	h.fetcher.credentials = map[string]string{"v1:platform:sourceCredential:acme": "ghp_SUPERSECRETVALUE"}
 
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     clusterOwner(),
-		Confirmed: true,
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: firstDeployPlacements(),
 	}); err != nil {
 		t.Fatalf("deploy: %v", err)
 	}
@@ -431,10 +451,10 @@ func TestTheCredentialIsResolvedUnderThePackageOwnerAtFetchTimeAndReachesNoRow(t
 func TestANotOfferedTargetDeploysTheRestOfThePackage(t *testing.T) {
 	h := newHarness(t, unofferedTargetPackage(), ownerPackage())
 	out, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     plainUser(),
-		Confirmed: true,
-		Hostnames: map[string]string{"docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      plainUser(),
+		Confirmed:  true,
+		Placements: map[string]Placement{"docs": {Hostname: "docs.example.com"}},
 	})
 	if err != nil {
 		t.Fatalf("an unoffered target must not fail the deploy: %v", err)
@@ -465,14 +485,227 @@ func TestANotOfferedTargetDeploysTheRestOfThePackage(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Placements (epic memql#4885, D8)
+// ---------------------------------------------------------------------------
+
+// TestPlacementsStampTheAccountAndBindTheDomainAfterTheSiteExists is D8: the
+// pipeline runs the account write and the domain binding itself, AFTER the
+// site row exists and is bound to the package, as two ordinary calls under
+// the caller's actor -- the same updateSiteAccount and customDomainAdd the
+// page would issue, so the guards behind them decide exactly as they do
+// from the page. No client-side follow-up writes.
+func TestPlacementsStampTheAccountAndBindTheDomainAfterTheSiteExists(t *testing.T) {
+	h := newHarness(t, spaOnlyPackage(), ownerPackage())
+	out, err := Deploy(context.Background(), h.deps, DeployRequest{
+		PackageId: "v1:platform:package:abc",
+		Actor:     clusterOwner(),
+		Confirmed: true,
+		Placements: map[string]Placement{
+			"storefront": {Hostname: "shop.example.com", AccountId: "v1:accounts:account:acme", OwnDomain: "shop.acme.com"},
+			"docs":       {Hostname: "docs.example.com"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("deploy: %v", err)
+	}
+	if out.Status != StatusSucceeded {
+		t.Fatalf("want succeeded, got %q", out.Status)
+	}
+
+	stmts := h.engine.statements()
+	bind := statementIndex(stmts, `mutation recordSitePackageOrigin(siteId: "v1:platform:site:storefront"`)
+	account := statementIndex(stmts, `mutation updateSiteAccount(siteId: "v1:platform:site:storefront", accountId: "v1:accounts:account:acme")`)
+	domain := statementIndex(stmts, `builtin customDomainAdd(siteId: "v1:platform:site:storefront", hostname: "shop.acme.com")`)
+	closed := statementIndex(stmts, "mutation closePackageDeployment")
+	if bind < 0 || account < 0 || domain < 0 || closed < 0 {
+		t.Fatalf("want the bind, the account write, the domain binding and the close, got %v", stmts)
+	}
+	// After the site exists and is bound; account, then domain; and before
+	// the row closes, so the outcome that lands on it can say what happened.
+	if !(bind < account && account < domain && domain < closed) {
+		t.Fatalf("want bind(%d) < account(%d) < domain(%d) < close(%d)", bind, account, domain, closed)
+	}
+	// The docs placement named neither, so neither call was made for it.
+	for _, forbidden := range []string{
+		`updateSiteAccount(siteId: "v1:platform:site:docs"`,
+		`customDomainAdd(siteId: "v1:platform:site:docs"`,
+	} {
+		if statementIndex(stmts, forbidden) >= 0 {
+			t.Fatalf("a placement naming no account and no domain must issue neither call: %s", forbidden)
+		}
+	}
+	// Exactly once each: a redeploy finds the site and never re-asks, so
+	// the two writes belong to the first deploy alone.
+	if n := strings.Count(strings.Join(stmts, "\n"), "mutation updateSiteAccount("); n != 1 {
+		t.Fatalf("want one account write, got %d", n)
+	}
+	if n := strings.Count(strings.Join(stmts, "\n"), "builtin customDomainAdd("); n != 1 {
+		t.Fatalf("want one domain binding, got %d", n)
+	}
+
+	// The outcome records what was applied, and no refusal.
+	var storefront *DeployableOutcome
+	for i := range out.Deployables {
+		if out.Deployables[i].Name == "storefront" {
+			storefront = &out.Deployables[i]
+		}
+	}
+	if storefront == nil {
+		t.Fatalf("no storefront outcome: %+v", out.Deployables)
+	}
+	if storefront.AccountId != "v1:accounts:account:acme" || storefront.OwnDomain != "shop.acme.com" {
+		t.Fatalf("the outcome must record the placement it applied: %+v", storefront)
+	}
+	if storefront.AccountRefusal != nil || storefront.DomainRefusal != nil {
+		t.Fatalf("nothing was refused: %+v", storefront)
+	}
+}
+
+// TestARefusedDomainIsRecordedWithoutFailingThePublish: the guards behind
+// customDomainAdd decide, and when they refuse, the site is still live at its
+// cluster address -- the refusal lands on the outcome for the Where-it-lives
+// stop, with the server's sentence, and the publish is not failed over it.
+func TestARefusedDomainIsRecordedWithoutFailingThePublish(t *testing.T) {
+	h := newHarness(t, spaOnlyPackage(), ownerPackage())
+	h.engine.fail = map[string]error{
+		"builtin customDomainAdd": errors.New(`v1:platform:customDomain: hostname "shop.acme.com" is already bound by "v1:platform:customDomain:x". Remove that binding first`),
+	}
+	out, err := Deploy(context.Background(), h.deps, DeployRequest{
+		PackageId: "v1:platform:package:abc",
+		Actor:     clusterOwner(),
+		Confirmed: true,
+		Placements: map[string]Placement{
+			"storefront": {Hostname: "shop.example.com", OwnDomain: "shop.acme.com"},
+			"docs":       {Hostname: "docs.example.com"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("a refused domain must not fail the deploy: %v", err)
+	}
+	if out.Status != StatusSucceeded {
+		t.Fatalf("want succeeded, got %q (%+v)", out.Status, out.Problem)
+	}
+	if len(h.publisher.published) != 2 {
+		t.Fatalf("both sites must still publish: %v", h.publisher.published)
+	}
+
+	var storefront *DeployableOutcome
+	for i := range out.Deployables {
+		if out.Deployables[i].Name == "storefront" {
+			storefront = &out.Deployables[i]
+		}
+	}
+	if storefront == nil || storefront.DomainRefusal == nil {
+		t.Fatalf("the refusal must land on the outcome: %+v", out.Deployables)
+	}
+	if storefront.DomainRefusal.Code != CodeDeployableDomainRefused || storefront.DomainRefusal.Fatal {
+		t.Fatalf("want a non-fatal %s, got %+v", CodeDeployableDomainRefused, storefront.DomainRefusal)
+	}
+	if !strings.Contains(storefront.DomainRefusal.Message, "already bound by") {
+		t.Fatalf("the outcome must carry the server's own sentence, got %q", storefront.DomainRefusal.Message)
+	}
+	if storefront.OwnDomain != "" {
+		t.Fatalf("a refused domain was not applied and must not read as one: %+v", storefront)
+	}
+	if storefront.SiteId == "" || storefront.BundleRef == "" {
+		t.Fatalf("the site is live at its cluster address regardless: %+v", storefront)
+	}
+	// And the refusal reached the row, where the stop reads it from.
+	if !h.engine.sawStatement(`"domainRefusal"`) {
+		t.Fatalf("the refusal must land on the deployment row; statements: %v", h.engine.statements())
+	}
+
+	// The account write is recorded the same way on its sibling field.
+	h = newHarness(t, spaOnlyPackage(), ownerPackage())
+	h.engine.fail = map[string]error{"mutation updateSiteAccount": errors.New("row authz: not the owner")}
+	out, err = Deploy(context.Background(), h.deps, DeployRequest{
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: map[string]Placement{"docs": {Hostname: "docs.example.com", AccountId: "v1:accounts:account:acme"}, "storefront": {Hostname: "shop.example.com"}},
+	})
+	if err != nil || out.Status != StatusSucceeded {
+		t.Fatalf("a refused account write must not fail the deploy: %v (%+v)", err, out)
+	}
+	for _, o := range out.Deployables {
+		if o.Name == "docs" {
+			if o.AccountRefusal == nil || o.AccountRefusal.Code != CodeDeployableAccountRefused || o.AccountRefusal.Fatal || o.AccountId != "" {
+				t.Fatalf("want a non-fatal %s on the docs outcome, got %+v", CodeDeployableAccountRefused, o)
+			}
+		}
+	}
+}
+
+// A placement with neither an account nor a domain is exactly today's first
+// deploy: the hostname, and nothing else on the wire.
+func TestAPlacementWithNeitherIsExactlyAFirstDeploy(t *testing.T) {
+	h := newHarness(t, spaOnlyPackage(), ownerPackage())
+	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: firstDeployPlacements(),
+	}); err != nil {
+		t.Fatalf("deploy: %v", err)
+	}
+	if h.engine.sawStatement("updateSiteAccount") || h.engine.sawStatement("customDomainAdd") {
+		t.Fatalf("a placement naming neither must issue neither call: %v", h.engine.statements())
+	}
+	if len(h.publisher.created) != 2 || len(h.publisher.published) != 2 {
+		t.Fatalf("created=%v published=%v", h.publisher.created, h.publisher.published)
+	}
+
+	// The first-deploy refusal stays: a never-deployed app with no hostname
+	// in its placement is refused by name, and nothing is published.
+	h = newHarness(t, spaOnlyPackage(), ownerPackage())
+	_, err := Deploy(context.Background(), h.deps, DeployRequest{
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: map[string]Placement{"storefront": {AccountId: "v1:accounts:account:acme"}},
+	})
+	if got := RefusalCode(err); got != CodeDeployableBindingMissing {
+		t.Fatalf("want %s, got %s (%v)", CodeDeployableBindingMissing, got, err)
+	}
+	if len(h.publisher.published) != 0 || h.engine.sawStatement("updateSiteAccount") {
+		t.Fatal("nothing may be published or placed for a deployable with no hostname")
+	}
+}
+
+// placementsArg reads the wire shape the OS sends: a map of deployable name
+// to {hostname, accountId, ownDomain}, every key optional.
+func TestPlacementsArgReadsTheWireShape(t *testing.T) {
+	got := placementsArg(map[string]any{"placements": map[string]any{
+		"storefront": map[string]any{"hostname": " shop.example.com ", "accountId": "v1:accounts:account:acme", "ownDomain": "shop.acme.com"},
+		"docs":       map[string]any{"hostname": "docs.example.com"},
+		"broken":     "not an object",
+	}}, "placements")
+	want := map[string]Placement{
+		"storefront": {Hostname: "shop.example.com", AccountId: "v1:accounts:account:acme", OwnDomain: "shop.acme.com"},
+		"docs":       {Hostname: "docs.example.com"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+	for name, p := range want {
+		if got[name] != p {
+			t.Errorf("%s: got %+v, want %+v", name, got[name], p)
+		}
+	}
+	if got := placementsArg(nil, "placements"); len(got) != 0 {
+		t.Fatalf("no args, no placements: %+v", got)
+	}
+}
+
 func TestBothOutcomesAudit(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		h := newHarness(t, spaOnlyPackage(), ownerPackage())
 		if _, err := Deploy(context.Background(), h.deps, DeployRequest{
-			PackageId: "v1:platform:package:abc",
-			Actor:     clusterOwner(),
-			Confirmed: true,
-			Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+			PackageId:  "v1:platform:package:abc",
+			Actor:      clusterOwner(),
+			Confirmed:  true,
+			Placements: firstDeployPlacements(),
 		}); err != nil {
 			t.Fatalf("deploy: %v", err)
 		}
@@ -502,10 +735,10 @@ func TestBothOutcomesAudit(t *testing.T) {
 func TestARetryIsANewRow(t *testing.T) {
 	h := newHarness(t, spaOnlyPackage(), ownerPackage())
 	req := DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     clusterOwner(),
-		Confirmed: true,
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: firstDeployPlacements(),
 	}
 	first, err := Deploy(context.Background(), h.deps, req)
 	if err != nil {
@@ -534,10 +767,10 @@ func TestEveryStatusTheMachineWritesIsInTheDeclaredEnum(t *testing.T) {
 
 	h := newHarness(t, validPackage(), ownerPackage())
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     clusterOwner(),
-		Confirmed: true,
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: firstDeployPlacements(),
 	}); err != nil {
 		t.Fatalf("deploy: %v", err)
 	}
@@ -569,10 +802,10 @@ func TestEveryStatusTheMachineWritesIsInTheDeclaredEnum(t *testing.T) {
 func TestTheStageOrderIsTheD6Law(t *testing.T) {
 	h := newHarness(t, validPackage(), ownerPackage())
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     clusterOwner(),
-		Confirmed: true,
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: firstDeployPlacements(),
 	}); err != nil {
 		t.Fatalf("deploy: %v", err)
 	}

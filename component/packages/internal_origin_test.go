@@ -75,6 +75,10 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	_ = s.touchSourceCredential(ctx, "c", time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC))
 	_ = s.revokeSourceCredential(ctx, "c")
 
+	// Placements (epic memql#4885, D8): two more caller-actor writes.
+	_ = s.setSiteAccount(ctx, "s", "a")
+	_ = s.addCustomDomain(ctx, "s", "www.example.com")
+
 	reads := []string{"packageById", "packageDeploymentById", "sitesForPackage", "siteById", "packagesByRepoUrl", "packagesTrackingRepos"}
 	writes := []string{"advancePackageDeployment", "recordPackageDeployedVersion", "recordPackageName",
 		"recordPackageUpstreamVersion", "recordSitePackageOrigin", "setPackageStatus", "setSiteStatus",
@@ -87,10 +91,15 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	// internal-origin bypass, and the actor (the package owner, borrowed by
 	// resolveCredential) still decides what comes back.
 	stampedReads := []string{"sourceCredentialSealedById"}
-	// THE ONE CALLER-ACTOR WRITE. revokeSourceCredential is an ordinary owned
+	// THE CALLER-ACTOR WRITES. revokeSourceCredential is an ordinary owned
 	// mutation the write guard decides for the caller; stamping it internal
 	// would hand the guard its first escape and let anyone revoke anything.
-	callerWrites := []string{"revokeSourceCredential"}
+	// updateSiteAccount and customDomainAdd are the D8 placement writes: the
+	// SAME calls the page issues, run by the pipeline under the caller's
+	// actor so the account write's guard and the three custom-domain guards
+	// decide exactly as they do from the page. Stamped, the pipeline would be
+	// a bypass of both, which is what the design says it must not gain.
+	callerWrites := []string{"revokeSourceCredential", "updateSiteAccount", "customDomainAdd"}
 
 	for _, name := range reads {
 		got, ok := e.origins[name]

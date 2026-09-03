@@ -71,12 +71,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "deploy",
-			Description: "Run one deployment attempt for a package (epic memql#4794). Without confirm, the run parks at awaiting_confirm with the analysis report on the deployment row and nothing else happens; with confirm, it builds, stages, rolls and publishes in the D6 order. Returns {deploymentId, status, awaitingConfirm, deployables}.",
+			Description: "Run one deployment attempt for a package (epic memql#4794). Without confirm, the run parks at awaiting_confirm with the analysis report on the deployment row and nothing else happens; with confirm, it builds, stages, rolls and publishes in the D6 order. placements (epic memql#4885, D8) is per deployable name -- {hostname, accountId, ownDomain} -- read on a deployable's FIRST deploy only: the site is created at hostname, then the account write and the domain binding run under the caller's actor as the same two calls the page makes, and a refused one lands on the outcome (accountRefusal / domainRefusal) without failing the publish. Returns {deploymentId, status, awaitingConfirm, deployables, report}.",
 			Handler:     i.handleDeploy,
 			ArgsSchema: map[string]string{
-				"packageId": "string (required) -- the package to deploy",
-				"confirm":   "boolean -- pass true to proceed past the always-present confirm gate",
-				"hostnames": "object -- deployable name -> hostname, required on a deployable's FIRST deploy only",
+				"packageId":  "string (required) -- the package to deploy",
+				"confirm":    "boolean -- pass true to proceed past the always-present confirm gate",
+				"placements": "object -- deployable name -> {hostname, accountId, ownDomain}; hostname is required on a deployable's FIRST deploy, the other two are optional and applied after the site exists",
 			},
 		},
 		{
@@ -206,10 +206,10 @@ func (i *Integration) handleDeploy(ctx context.Context, args map[string]any, _ i
 		return nil, err
 	}
 	out, derr := Deploy(ctx, deps, DeployRequest{
-		PackageId: strings.TrimSpace(stringArg(args, "packageId")),
-		Actor:     actorFromContext(ctx),
-		Confirmed: boolArg(args, "confirm"),
-		Hostnames: stringMapArg(args, "hostnames"),
+		PackageId:  strings.TrimSpace(stringArg(args, "packageId")),
+		Actor:      actorFromContext(ctx),
+		Confirmed:  boolArg(args, "confirm"),
+		Placements: placementsArg(args, "placements"),
 	})
 	if out == nil {
 		return nil, derr
@@ -385,15 +385,26 @@ func boolArg(args map[string]any, key string) bool {
 	return false
 }
 
-func stringMapArg(args map[string]any, key string) map[string]string {
-	out := map[string]string{}
+// placementsArg reads the D8 wire shape: an object of deployable name to
+// {hostname, accountId, ownDomain}, every key optional, values trimmed. An
+// entry that is not an object is dropped rather than read as an empty
+// placement -- the publish stage then refuses the deployable by name for its
+// missing hostname, which is a better answer than a silent empty.
+func placementsArg(args map[string]any, key string) map[string]Placement {
+	out := map[string]Placement{}
 	if args == nil {
 		return out
 	}
 	raw, _ := args[key].(map[string]any)
-	for k, v := range raw {
-		if s, ok := v.(string); ok {
-			out[k] = s
+	for name, v := range raw {
+		fields, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		out[name] = Placement{
+			Hostname:  strings.TrimSpace(stringArg(fields, "hostname")),
+			AccountId: strings.TrimSpace(stringArg(fields, "accountId")),
+			OwnDomain: strings.TrimSpace(stringArg(fields, "ownDomain")),
 		}
 	}
 	return out

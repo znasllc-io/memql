@@ -139,6 +139,13 @@ func captureStore(t *testing.T) []string {
 	_ = s.revokeSourceCredential(ctx, "v1:platform:sourceCredential:jkl")
 	_ = s.touchSourceCredential(ctx, "v1:platform:sourceCredential:jkl", at)
 
+	// Placements (epic memql#4885, D8): the two caller-actor calls the
+	// publish stage makes after the site exists. The hostname is remote text
+	// -- a person types it -- so it carries the four control bytes; the
+	// guard behind the call refuses it, which is the point of the call.
+	_ = s.setSiteAccount(ctx, "v1:platform:site:ghi", "v1:accounts:account:acme")
+	_ = s.addCustomDomain(ctx, "v1:platform:site:ghi", awkwardText)
+
 	if len(rec.queries) == 0 {
 		t.Fatal("no statements captured; this test would pass vacuously")
 	}
@@ -244,6 +251,14 @@ func TestRenderedArgumentsAreDeclared(t *testing.T) {
 		if fn.ArgsSchema != nil {
 			for _, f := range fn.ArgsSchema.Fields {
 				declared[f.Name] = true
+			}
+		}
+		// A builtin's declaration is its body, and the converter carries it
+		// as the arg CONTRACT rather than an args block -- so a builtin this
+		// package calls (customDomainAdd) is checked against that.
+		if fn.BuiltinArgs != nil {
+			for f := range fn.BuiltinArgs.Properties {
+				declared[f] = true
 			}
 		}
 		if len(declared) == 0 {
