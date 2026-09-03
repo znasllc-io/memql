@@ -2588,6 +2588,55 @@ variables:
     optional: true
     description: "Passed through to skip the provider's account picker for a known tenant. Cosmetic; providers that do not know it ignore it."
 
+  # GITHUB CONNECT -- THE CLUSTER'S GITHUB APP (epic memql#4912). ALL SIX OR
+  # NONE. With none of them set, Connect is simply absent: the Source stop
+  # offers the pasted-token path alone and githubConnectBegin answers
+  # github_app_not_configured. With one to five set, the identity node REFUSES
+  # BOOT naming both the ones it has and the ones it lacks -- the
+  # Anthropic-federation rule, for the same reason: a Connect button that
+  # appears and then fails per person reports the operator's mistake to
+  # everybody except the operator. The redirect URI to register at GitHub is
+  # https://identity.<domain>/auth/github/callback, derived from
+  # MEMQL_IDENTITY_BASE_URL and never typed into a manifest.
+  - name: MEMQL_GITHUB_APP_ID
+    component: identity
+    scope: node
+    optional: true
+    description: "The GitHub App's numeric id, from its settings page. Carried as text: nothing does arithmetic on it."
+
+  - name: MEMQL_GITHUB_APP_SLUG
+    component: identity
+    scope: node
+    optional: true
+    description: "The GitHub App's URL slug -- the last segment of https://github.com/apps/<slug>. It composes the INSTALLATION link, which is a different page from the authorize endpoint: authorizing grants this cluster a person's own authority, installing is what puts the app on a repository, and a person who authorized and installed nothing has a grant that reaches no repository at all."
+
+  - name: MEMQL_GITHUB_APP_CLIENT_ID
+    component: identity
+    scope: node
+    optional: true
+    description: "The App's OAuth client id, used in the authorize URL and the user-token exchange."
+
+  - name: MEMQL_GITHUB_APP_CLIENT_SECRET
+    component: identity
+    scope: node
+    secret: true
+    optional: true
+    description: "The App's OAuth client secret. Sent only from a node, only to GitHub's token endpoint, and never stored on a row."
+
+  - name: MEMQL_GITHUB_APP_PRIVATE_KEY_B64
+    component: identity
+    scope: node
+    secret: true
+    optional: true
+    description: "The App's private key, base64 of the PEM. It mints INSTALLATION tokens -- the credential background fetch, poll and auto-deploy run under, so none of them depends on a person's user token being alive. Required even though the identity node never reads it: a cluster that can connect a person and cannot fetch under the resulting grant fails in the background, where nobody is watching."
+
+  - name: MEMQL_GITHUB_APP_WEBHOOK_SECRET
+    component: identity
+    scope: node
+    secret: true
+    optional: true
+    description: "The App's webhook secret, which is also the HMAC key the inbound seam verifies deliveries with (MEMQL_INBOUND_SOURCE_GITHUB_SECRET). Required for the same reason the private key is: without it a grant's installation list goes stale the first time somebody adds or removes a repository, and a stale list turns a clear repository_not_installed back into an unexplained 404."
+
   - name: MEMQL_IDENTITY_REGISTRATION_MODE
     component: identity
     scope: node

@@ -138,6 +138,10 @@ export interface FakeSeed {
   credentialCreateError?: string;
   /** Fails the next `sourceCredentialRevoke` with this server message. */
   credentialRevokeError?: string;
+  /** Whether `sourceCredentialRevoke` also ended the authorization at GitHub.
+   *  Defaults to true, which is what a grant answers when both halves
+   *  happened and what a pasted token's revoke is never asked about. */
+  credentialRevokeRemote?: boolean;
   /** Fails the next `updatePackageSource` with this server message. */
   updateSourceError?: string;
   /**
@@ -179,6 +183,23 @@ export interface FakeSeed {
    * row written at or before `t`, which is exactly the read the walk makes.
    */
   siteHistory?: Row[];
+
+  // -- GitHub Connect (epic memql#4915) --
+
+  /** The whole `sourceRepositories` reply row: repositories, installations,
+   *  pending, nextPage, reason. Absent answers no rows at all, which is the
+   *  shape a picker sees before anybody has pressed anything. */
+  repositories?: Row;
+  /** Fails the next `sourceRepositories` with this server message. */
+  repositoriesError?: string;
+  /** What `githubConnectBegin` answers as the URL to navigate to. */
+  connectUrl?: string;
+  /** What `githubConnectBegin` answers as its reason. Defaults to `ok`. */
+  connectReason?: string;
+  /** What `githubConnectBegin` answers as the app's installation page. */
+  installUrl?: string;
+  /** Fails the next `githubConnectBegin` with this server message. */
+  connectError?: string;
 }
 
 export interface FakeConnection {
@@ -309,7 +330,35 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
 
       if (call.startsWith("builtin sourceCredentialRevoke(")) {
         if (seed.credentialRevokeError !== undefined) throw new Error(seed.credentialRevokeError);
-        return rowsResult([]);
+        const credentialId = /credentialId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        // THE REPLY'S THIRD KEY, AS TEXT. A scalar boolean crosses the wire
+        // as the STRING "true" on a builtin's reply row, and the connected-
+        // account card only says "GitHub did not confirm" for a false one --
+        // so a fake answering a real boolean, or no row at all, would make
+        // every disconnect in every test look like a half-finished one.
+        return rowsResult([
+          {
+            credentialId,
+            status: "revoked",
+            remoteRevoked: seed.credentialRevokeRemote === false ? "false" : "true",
+          } as unknown as Row,
+        ]);
+      }
+
+      if (call.startsWith("builtin githubConnectBegin(")) {
+        if (seed.connectError !== undefined) throw new Error(seed.connectError);
+        return rowsResult([
+          {
+            authorizeUrl: seed.connectUrl ?? "",
+            reason: seed.connectReason ?? "ok",
+            installUrl: seed.installUrl ?? "",
+          } as unknown as Row,
+        ]);
+      }
+
+      if (call.startsWith("builtin sourceRepositories(")) {
+        if (seed.repositoriesError !== undefined) throw new Error(seed.repositoriesError);
+        return rowsResult(seed.repositories ? [seed.repositories] : []);
       }
 
       if (call.startsWith("mutation updatePackageSource(")) {
@@ -512,6 +561,61 @@ export function credentialRow(over: Partial<Row> & { id: string }): Row {
   };
 }
 
+/**
+ * A GitHub App GRANT, as the card projection carries one.
+ *
+ * A separate fixture rather than an argument to `credentialRow`, because the
+ * two are genuinely different cards: a grant has a login and a set of
+ * installations where a token has a label and a fingerprint, and the default
+ * above deliberately carries NO `kind` at all -- which is what every row
+ * written before memql#4915 looks like and therefore the case worth having a
+ * fixture for.
+ */
+export function githubGrantRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    ownerUserId: "u-me",
+    host: "github.com",
+    kind: "github_app",
+    login: "octocat",
+    installationIds: ["i-acme", "i-octocat"],
+    label: "",
+    fingerprint: "",
+    status: "active",
+    lastUsedAt: "",
+    revokedAt: "",
+    createdAt: "2026-08-25T00:00:00Z",
+    ...over,
+  };
+}
+
+/** One repository, as `sourceRepositories` answers it. */
+export function repositoryFixture(over: Partial<Row> & { fullName: string }): Row {
+  const [owner = "", name = ""] = String(over["fullName"] ?? "").split("/");
+  return {
+    owner,
+    name,
+    url: `https://github.com/${over["fullName"]}`,
+    private: false,
+    visibility: "public",
+    defaultBranch: "main",
+    pushedAt: "2026-08-30T00:00:00Z",
+    installationId: "i-acme",
+    ...over,
+  };
+}
+
+/** A `sourceRepositories` reply, assembled from parts. */
+export function repositoriesReply(over: Partial<Row> = {}): Row {
+  return {
+    repositories: [],
+    installations: [],
+    pending: [],
+    nextPage: 0,
+    reason: "ok",
+    ...over,
+  } as unknown as Row;
+}
+
 /** A `sourceProbe` reply. `ok` and public by default: the commonest answer. */
 export function probeReply(over: Partial<Row> = {}): Row {
   return {
@@ -523,6 +627,17 @@ export function probeReply(over: Partial<Row> = {}): Row {
     ...over,
   } as unknown as Row;
 }
+
+/**
+ * A GitHub personal access token, COMPOSED rather than written out.
+ *
+ * Same reason as `FIXTURE_TOKEN` above: gitleaks judges a test fixture
+ * exactly like production code, and `ghp_` followed by thirty-six characters
+ * is its github-pat rule whatever the file is for. This exists so a test can
+ * plant a token-shaped string in a seed and prove the page never renders it
+ * -- an assertion that would be worthless with nothing to find.
+ */
+export const FIXTURE_GITHUB_PAT = "gh" + "p_" + "abcdefghijklmnopqrstuvwxyz0123456789";
 
 /** An `artifactProbe` reply. Neither a package nor a built site by default. */
 export function zipReply(over: Partial<Row> = {}): Row {

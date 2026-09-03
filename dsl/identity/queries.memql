@@ -2836,3 +2836,47 @@ query invitation pendingUserInvitations {
   // nothing logged. Before adding a shape to an existing query, check every caller's accessor.
   shape   invitationAdminSummary
 }
+
+// githubConnectStateByHash -- the connect callback's one lookup
+// =============================================================
+//
+// The plaintext `state` GitHub sent back, digested, resolves the row that
+// begun the flow (epic memql#4912, issue memql#4913).
+//
+// IT DECLARES NO @rowAuthz TIER, and the argument is enrolmentTokenByHash's
+// word for word: this read runs PRE-ACTOR by construction. GitHub redirects a
+// browser carrying no MemQL bearer, so actor.userId is the empty string and
+// any owner tier would compare the row's userId against "" , match nothing,
+// and turn every completed connect into connect_state_invalid -- a flow that
+// never works, failing in the one direction nobody tests.
+//
+// Registered in component/memql/rowauthz_undeclared_gate_test.go naming
+// memql#4913, so the position is stated rather than merely occupied.
+//
+// It is ALSO the re-read half of the compare-and-swap. The consume takes a
+// Postgres advisory lock keyed on this digest and calls this query again
+// inside it, exactly as ConsumeMagicLinkRequest re-reads through
+// magicLinkRequestById: a DSL update{} cannot express a CAS predicate, so the
+// compare and the swap happen while one caller holds the lock.
+//
+// NOTE IT FILTERS NEITHER expiresAt NOR consumedAt. Resolving an expired or
+// already-consumed row is what lets the callback tell those two apart in the
+// audit trail instead of reporting both as "unknown state" -- the same
+// four-state honesty recoveryKeyByHash records.
+
+/// GitHub-Connect state lookup by stateHash, for the callback. Returns the row in EVERY state
+/// (expired and already-consumed included) so the consume can say which one.
+///
+/// Why actor.userId scoping is not the fix: this read runs BEFORE any actor exists -- the request
+/// is a browser redirect from GitHub with no MemQL bearer on it. A self-scoped filter would compare
+/// the row's userId against "" , match nothing, and refuse every legitimate connect. Same
+/// circularity enrolmentTokenByHash records; registered in rowauthz_undeclared_gate_test.go.
+@serverOnly
+@unbounded("GitHub-Connect state by unique stateHash -- a credential lookup bounded to a single row")
+query githubConnectState githubConnectStateByHash {
+  args {
+    stateHash  string!
+  }
+  filter  stateHash==args.stateHash
+  shape   githubConnectStateFull
+}

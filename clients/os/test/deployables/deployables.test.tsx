@@ -922,6 +922,13 @@ describe("the credential card", () => {
       label: "acme deploy token",
       fingerprint: "sha256:ab12cd34",
       status: "active",
+      // A row written before memql#4915 carries no `kind` at all, and it
+      // reads as the pasted kind rather than as a third state. Three states
+      // where the model has two is how every pre-epic credential would come
+      // to be listed under neither heading in the Sources group.
+      kind: "token",
+      login: "",
+      installationIds: [],
       lastUsedAt: "2026-09-01T12:00:00Z",
       revokedAt: "",
       createdAt: "2026-08-20T00:00:00Z",
@@ -958,6 +965,37 @@ describe("the credential card", () => {
       ]) {
         expect(credentialFingerprint({ ...base, ...change })).not.toBe(credentialFingerprint(base));
       }
+    });
+
+    it("fires when a grant reaches a new organisation, or is remade as somebody else", () => {
+      // The grant half (epic memql#4915). An installation webhook moving
+      // `installationIds` IS what the connected-account card exists to show,
+      // and a reconnect under a different GitHub account is a different
+      // connection wearing the same row id.
+      const grant = credentialFromRow({ ...CARD, kind: "github_app", login: "octocat", installationIds: ["i-1"] });
+      for (const change of [
+        { installationIds: ["i-1", "i-2"] },
+        { installationIds: [] },
+        { login: "someone-else" },
+        { kind: "token" },
+      ]) {
+        expect(credentialFingerprint({ ...grant, ...change })).not.toBe(credentialFingerprint(grant));
+      }
+    });
+
+    it("stays silent when the same installations come back in a different order", () => {
+      // GitHub answers no ordering guarantee, so a re-read is free to hand
+      // back the same set reversed. Ringing on that would announce a change
+      // to a card nothing had happened to.
+      const grant = credentialFromRow({
+        ...CARD,
+        kind: "github_app",
+        login: "octocat",
+        installationIds: ["i-1", "i-2"],
+      });
+      expect(credentialFingerprint({ ...grant, installationIds: ["i-2", "i-1"] })).toBe(
+        credentialFingerprint(grant),
+      );
     });
 
     it("stays SILENT on lastUsedAt -- a heartbeat is not news", () => {

@@ -38,6 +38,7 @@ import (
 	"github.com/znasllc-io/memql/component/identity/refresh"
 	"github.com/znasllc-io/memql/component/identity/webauthn"
 
+	"github.com/znasllc-io/memql/component/identity/githubconnect"
 	"github.com/znasllc-io/memql/component/identity/oidc"
 )
 
@@ -170,6 +171,13 @@ type Server struct {
 	// checked for.
 	OIDCLookup func(ctx context.Context, c oidc.Claims) oidc.LinkLookup
 	OIDCSignIn OIDCSignInHook
+
+	// GitHubClient is the GitHub transport the Connect callback uses
+	// (epic memql#4912). Nil means a client against the real github.com and
+	// api.github.com hosts, which is the shipped configuration; it is a field
+	// only so the acceptance tests can drive the whole callback against an
+	// httptest server. There is no configuration path that sets it.
+	GitHubClient *githubconnect.Client
 }
 
 // effectiveTokenSettings returns the live TTL + cookie settings for
@@ -259,6 +267,19 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// configured, so the route table does not vary with configuration.
 	mux.HandleFunc("GET /auth/oidc/start", wrap(s.handleOIDCStart))
 	mux.HandleFunc("GET /auth/oidc/callback", wrap(s.handleOIDCCallback))
+
+	// GITHUB CONNECT (epic memql#4912, decision C3). The same exception class
+	// as the two above -- GitHub redirects a BROWSER here, and there is no gRPC
+	// form of "the person came back from GitHub" -- and the only HTTP surface
+	// this feature has: the flow is STARTED over the stream by
+	// githubConnectBegin. No s.cors: it is a top-level navigation, not a fetch.
+	// Registered unconditionally and 404s when no App is configured, so the
+	// route table does not vary with configuration. It needs no front-door
+	// change: identity is routed by a single `/` prefix rule to the identity
+	// Service, so every path here is already reachable -- see the header of
+	// github_callback.go for why declaring it in component/server would be
+	// wrong rather than merely unnecessary.
+	mux.HandleFunc("GET "+githubconnect.CallbackPath, wrap(s.handleGitHubCallback))
 	mux.HandleFunc("POST /oauth/token", wrap(s.cors(s.handleToken)))
 	mux.HandleFunc("OPTIONS /oauth/token", wrap(s.cors(s.handleOptions)))
 

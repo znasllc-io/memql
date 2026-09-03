@@ -169,17 +169,27 @@ shape syncState syncStateFull {
 
 // ---- source credentials (epic memql#4885) ----
 
-/// The client-readable projection of v1:platform:sourceCredential -- the Settings Sources group and
-/// the Source stop's credential chip. Everything BUT `encryptedValue`, and that omission is the
-/// security property: no client read can return ciphertext, because no client-reachable query
-/// carries a shape that projects it. `fingerprint` is what tells two credentials apart;
-/// `lastUsedAt` is a heartbeat and must never enter an arrival-cue fingerprint.
+/// The client-readable projection of v1:platform:sourceCredential -- the Settings Sources group, the
+/// Source stop's credential chip, and the connected-account card. Everything BUT the two sealed
+/// fields, and that omission is the security property: no client read can return ciphertext, because
+/// no client-reachable query carries a shape that projects it. `fingerprint` is what tells two
+/// credentials apart; `lastUsedAt` is a heartbeat and must never enter an arrival-cue fingerprint.
+///
+/// `kind`, `login` and `installationIds` are here because the card has to say what a person is
+/// looking at -- a pasted token, or a grant connected as @somebody that reaches these installations
+/// -- and `installationIds` moving IS news: it means somebody installed the app somewhere, which is
+/// exactly the change the card exists to show. `externalId` and `expiresAt` are deliberately absent:
+/// one is an internal key nothing renders and the other is a timestamp the engine refreshes on its
+/// own, so a card driven by it would announce a change every eight hours.
 @row
 shape sourceCredential sourceCredentialCard {
   row.id
   ownerUserId
   host
+  kind
   label
+  login
+  installationIds
   fingerprint
   status
   lastUsedAt
@@ -188,15 +198,28 @@ shape sourceCredential sourceCredentialCard {
 }
 
 /// The server-only projection: what a fetch needs and nothing a person does. Reached through
-/// sourceCredentialSealedById alone, which is @serverOnly and resolved under the package owner's
-/// actor from inside a fetch; the ciphertext is unsealed into a local that dies with the call.
+/// sourceCredentialSealedById and githubAppGrantByExternalId alone, both @serverOnly and both
+/// resolved under the OWNER's actor from inside a fetch, a poll or the connect callback; the
+/// ciphertext is unsealed into a local that dies with the call.
+///
+/// It carries BOTH sealed fields, and the pair is what makes a grant usable without a browser: the
+/// user token expires in eight hours, so a resolution that could read only `encryptedValue` would
+/// send a person back through GitHub every working day. `kind` decides which shape of credential
+/// the resolver is holding, and therefore whether a 401 reads as "this token cannot see it" or as
+/// reconnect_required.
 @row
 shape sourceCredential sourceCredentialSealed {
   row.id
   ownerUserId
   host
+  kind
   status
   encryptedValue
+  login
+  externalId
+  refreshToken
+  expiresAt
+  installationIds
 }
 
 /// Full projection of v1:platform:package -- the OS packages list and detail.

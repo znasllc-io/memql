@@ -3,14 +3,22 @@ package packages
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
 	"strings"
+	// testing/fstest in production code, deliberately: MapFS is the smallest
+	// fs.FS over bytes already in memory, and the package imports neither
+	// `testing` nor `flag`, so nothing about a test binary comes with it. The
+	// alternative -- a second one-file fs.FS written here -- would be a second
+	// implementation for no gain.
+	"testing/fstest"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/packages/githubapp"
 )
 
 // probe.go -- the two compose probes (epic memql#4885, D11).
@@ -50,6 +58,13 @@ const (
 	ProbeReasonCredentialRevoked     = CodeCredentialRevoked
 	ProbeReasonSourceHostUnsupported = CodeSourceHostUnsupported
 	ProbeReasonRateLimited           = "rate_limited"
+
+	// The two reasons a GRANT can produce and a pasted token cannot (epic
+	// memql#4912, D). Under a token, 401 and 404 are both
+	// credential_cannot_see_it because the cluster cannot tell them apart;
+	// under a grant it can, and each names a different repair.
+	ProbeReasonReconnectRequired      = CodeReconnectRequired
+	ProbeReasonRepositoryNotInstalled = CodeRepositoryNotInstalled
 )
 
 // SourceProbeResult is what sourceProbe answers. Every field is JSON-tagged
@@ -69,6 +84,52 @@ type SourceProbeResult struct {
 	DefaultBranch string `json:"defaultBranch"`
 	// Reason is exactly one of the ProbeReason* values.
 	Reason string `json:"reason"`
+
+	// Branches is every branch the repository has, DEFAULT BRANCH FIRST, and
+	// it is answered only under a grant (epic memql#4912). It fills the ref
+	// picker on the Source stop, so a person chooses a branch that exists
+	// instead of typing one that does not.
+	Branches []string `json:"branches"`
+	// Manifest is what memql-package.yaml says about itself, read through the
+	// contents API before anything is fetched. It is a PREVIEW: the What-it-is
+	// stop shows it so a person recognises the package they picked, and
+	// Analyze over the real snapshot remains the authority on every question
+	// it answers.
+	Manifest ManifestSummary `json:"manifest"`
+}
+
+// ManifestSummary is the probe's preview of a package's own manifest.
+//
+// EMPTY IS A VALID ANSWER and never a refusal. A repository with no manifest,
+// a manifest that does not parse, a manifest this cluster's format version does
+// not read -- all of them answer an empty summary and let Analyze report the
+// real problem against the real snapshot. Refusing here would turn a courtesy
+// into a gate, and it would report a manifest problem twice with two different
+// sentences.
+type ManifestSummary struct {
+	Name        string                      `json:"name"`
+	Deployables []ManifestSummaryDeployable `json:"deployables"`
+	// DslDomains is the directory names directly under dsl/, which IS the
+	// declaration (analyze.go's DslRoot -- domains are discovered, never
+	// declared). Empty when the repository has no dsl/ at all, which is the
+	// ordinary SPAs-only package.
+	DslDomains []string `json:"dslDomains"`
+}
+
+// ManifestSummaryDeployable is one declared deployable, in the three facts the
+// preview shows. Deliberately not the build plan or the binding: those are
+// Analyze's to report against a tree it has actually read.
+type ManifestSummaryDeployable struct {
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+	Path string `json:"path"`
+}
+
+// emptyManifestSummary is what a probe answers when there is nothing to
+// preview. Non-nil slices, so the wire shape is `[]` rather than `null` and a
+// client can iterate without a guard.
+func emptyManifestSummary() ManifestSummary {
+	return ManifestSummary{Deployables: []ManifestSummaryDeployable{}, DslDomains: []string{}}
 }
 
 // ProbeSource asks GitHub whether repoUrl can be read, under the caller's
@@ -85,7 +146,7 @@ func ProbeSource(ctx context.Context, d *Deps, repoUrl, credentialId string) (So
 		}
 		return SourceProbeResult{}, err
 	}
-	res := SourceProbeResult{Host: credentialHostGitHub}
+	res := SourceProbeResult{Host: credentialHostGitHub, Branches: []string{}, Manifest: emptyManifestSummary()}
 
 	req, rerr := http.NewRequestWithContext(ctx, http.MethodGet,
 		fmt.Sprintf("https://api.github.com/repos/%s/%s", owner, repo), nil)
@@ -100,30 +161,33 @@ func ProbeSource(ctx context.Context, d *Deps, repoUrl, credentialId string) (So
 	req.Header.Set("User-Agent", "memql-packages")
 
 	credentialled := false
-	if id := strings.TrimSpace(credentialId); id != "" {
-		if d.PeekCredentials == nil {
-			return SourceProbeResult{}, refuse(CodeSourceUnreadable,
-				"this probe names credential %q, and this node cannot resolve credentials", id)
+	credential, cerr := resolveProbeCredential(ctx, d, credentialId)
+	if cerr != nil {
+		switch RefusalCode(cerr) {
+		case CodeCredentialNotFound:
+			res.Reason = ProbeReasonCredentialNotFound
+			return res, nil
+		case CodeCredentialRevoked:
+			res.Reason = ProbeReasonCredentialRevoked
+			return res, nil
+		case CodeReconnectRequired:
+			// The refresh already failed, so the authorization is over and
+			// the repair is one click. A probe that reported this as "the
+			// credential cannot see it" would send somebody looking for a
+			// permission problem that does not exist.
+			res.Reason = ProbeReasonReconnectRequired
+			return res, nil
 		}
-		// Under the CALLER's actor: the person composing is choosing their
-		// own credential, so the caller is the owner the sealed read runs
-		// as. A credential they cannot read -- somebody else's, or none --
-		// and a revoked one are the two typed reasons; any other failure
-		// (a ciphertext this node cannot unseal) is an error, because the
-		// repair is an operator's and the stop should say so.
-		token, cerr := d.PeekCredentials(ctx, id, actorFromContext(ctx).UserId)
-		if cerr != nil {
-			switch RefusalCode(cerr) {
-			case CodeCredentialNotFound:
-				res.Reason = ProbeReasonCredentialNotFound
-				return res, nil
-			case CodeCredentialRevoked:
-				res.Reason = ProbeReasonCredentialRevoked
-				return res, nil
-			}
-			return SourceProbeResult{}, cerr
-		}
-		req.Header.Set("Authorization", "Bearer "+token)
+		return SourceProbeResult{}, cerr
+	}
+	if credential.Bearer != "" {
+		// UNDER A GRANT THE PROBE PRESENTS THE USER TOKEN, not an
+		// installation token, and the difference is what the probe is FOR: the
+		// question is whether the PERSON can see this repository, which is
+		// the question the picker and the Source stop are asking. The fetcher
+		// asks a different question -- whether the APP can read it in the
+		// background -- and carries a different bearer for it.
+		req.Header.Set("Authorization", "Bearer "+credential.Bearer)
 		credentialled = true
 	}
 
@@ -151,6 +215,15 @@ func ProbeSource(ctx context.Context, d *Deps, repoUrl, credentialId string) (So
 		res.Private = payload.Private
 		res.DefaultBranch = strings.TrimSpace(payload.DefaultBranch)
 		res.Reason = ProbeReasonOK
+		// The prefill, and only under a grant (epic memql#4912): the branch
+		// list and the manifest preview. BEST EFFORT throughout -- a failure
+		// here leaves the fields empty and the reason `ok`, because the
+		// repository really is reachable and the preview is a courtesy on top
+		// of that answer, not part of it.
+		if credential.IsGrant() {
+			res.Branches = probeBranches(ctx, d, credential.Bearer, owner, repo, res.DefaultBranch)
+			res.Manifest = probeManifest(ctx, d, credential.Bearer, owner, repo)
+		}
 		return res, nil
 
 	case resp.StatusCode == http.StatusTooManyRequests,
@@ -168,10 +241,34 @@ func ProbeSource(ctx context.Context, d *Deps, repoUrl, credentialId string) (So
 		res.Reason = ProbeReasonNotFoundOrPrivate
 		return res, nil
 
+	case credentialled && credential.IsGrant() && resp.StatusCode == http.StatusUnauthorized:
+		// UNDER A GRANT, 401 IS THE AUTHORIZATION being refused rather than
+		// the repository being out of reach, and the two have different
+		// repairs. Never collapsed into credential_cannot_see_it: that
+		// sentence tells somebody to choose another credential, and there is
+		// no other credential to choose.
+		res.Reason = ProbeReasonReconnectRequired
+		return res, nil
+
+	case credentialled && credential.IsGrant() && resp.StatusCode == http.StatusNotFound:
+		// THE ONE PLACE THE PROBE ASKS A SECOND QUESTION, because under a
+		// grant it can. The person's token answering 404 leaves two readings
+		// open -- they cannot see the repository, or the app is not installed
+		// on it -- so the app asks about ITSELF, under its own JWT: a 404
+		// there means the app is not installed, which is a link away and not a
+		// credential problem at all. Anything else leaves the honest
+		// collapsed answer standing.
+		if notInstalled(ctx, d, owner, repo) {
+			res.Reason = ProbeReasonRepositoryNotInstalled
+			return res, nil
+		}
+		res.Reason = ProbeReasonCredentialCannotSeeIt
+		return res, nil
+
 	case credentialled && (resp.StatusCode == http.StatusNotFound ||
 		resp.StatusCode == http.StatusUnauthorized ||
 		resp.StatusCode == http.StatusForbidden):
-		// Under a credential the three refusals collapse to one fact: this
+		// Under a PASTED TOKEN the three refusals collapse to one fact: this
 		// token does not reach this repository -- it cannot see it (404),
 		// it is not a valid token (401), or it is forbidden from it (403).
 		// The repair is the same for all three, which is why they are one
@@ -185,6 +282,156 @@ func ProbeSource(ctx context.Context, d *Deps, repoUrl, credentialId string) (So
 	// for it would file a real fault as one of the person's mistakes.
 	return SourceProbeResult{}, refuse(CodeSourceUnreadable,
 		"GitHub answered HTTP %d for this repository", resp.StatusCode)
+}
+
+// resolveProbeCredential answers what the probe presents to GitHub.
+//
+// TWO WAYS IN, and the second one is the whole point of Connect. A NAMED
+// credential resolves exactly as it always has -- under the CALLER's actor,
+// because the person composing is choosing among their own credentials. An
+// EMPTY credentialId falls back to the caller's own active GRANT when they
+// hold one, so a connected person's picker prefills without anybody having to
+// name a credential; with no grant it answers nothing, and the probe is
+// anonymous, which is what a public repository needs.
+//
+// The fallback is deliberately silent about failure: a grant lookup that
+// errors leaves the probe anonymous rather than refusing, because the caller
+// asked about a repository and named no credential, and a public repository
+// must not stop being probeable because a grant read went wrong.
+func resolveProbeCredential(ctx context.Context, d *Deps, credentialId string) (ResolvedCredential, error) {
+	if id := strings.TrimSpace(credentialId); id != "" {
+		if d.PeekCredentials == nil {
+			return ResolvedCredential{}, refuse(CodeSourceUnreadable,
+				"this probe names credential %q, and this node cannot resolve credentials", id)
+		}
+		// A credential the caller cannot read -- somebody else's, or none --
+		// and a revoked one are typed reasons; any other failure (a ciphertext
+		// this node cannot unseal) is an error, because the repair is an
+		// operator's and the stop should say so.
+		return d.PeekCredentials(ctx, id, actorFromContext(ctx).UserId)
+	}
+	if d.Store == nil || d.PeekCredentials == nil {
+		return ResolvedCredential{}, nil
+	}
+	grant, err := d.Store.githubAppGrantForCaller(ctx)
+	if err != nil || grant == nil {
+		return ResolvedCredential{}, nil
+	}
+	// Through the resolver rather than unsealing the row just read, even
+	// though that row already carries the sealed fields: the resolver is the
+	// one place a grant is unsealed AND refreshed, and a second unseal here
+	// would be a second place to keep the expiry rule in step with. One extra
+	// owner-scoped read is the honest price of one code path.
+	resolved, rerr := d.PeekCredentials(ctx, rowString(grant, "id"), actorFromContext(ctx).UserId)
+	if rerr != nil {
+		// The one exception to "silent": a grant whose authorization GitHub
+		// has ended is worth saying so about even though nobody named it,
+		// because the person IS connected and the repair is theirs. Every
+		// other failure leaves the probe anonymous.
+		if RefusalCode(rerr) == CodeReconnectRequired {
+			return ResolvedCredential{}, rerr
+		}
+		return ResolvedCredential{}, nil
+	}
+	return resolved, nil
+}
+
+// notInstalled asks the APP whether it is installed on owner/repo.
+//
+// It answers a BOOLEAN rather than an error because it is used to choose
+// between two readings of somebody else's 404, and every way of failing to
+// find out -- no app configured, GitHub unreachable, a status nobody expected
+// -- means the same thing here: this cluster does not know, so it keeps the
+// collapsed answer it already had rather than asserting the more specific one.
+func notInstalled(ctx context.Context, d *Deps, owner, repo string) bool {
+	if d.GitHubApp == nil || !d.GitHubApp.Configured() {
+		return false
+	}
+	_, err := d.GitHubApp.InstallationForRepo(ctx, owner, repo)
+	return errors.Is(err, githubapp.ErrNotInstalled)
+}
+
+// probeBranches lists the repository's branches with the DEFAULT FIRST.
+//
+// Default first because the ref picker's first entry is what a person takes
+// when they do not care, and an alphabetical list would offer them whatever
+// branch happens to sort first -- which for most repositories is somebody's
+// half-finished feature.
+//
+// Best effort: a failure answers an empty list. The repository is reachable --
+// that is the answer the probe already gave -- and a branch list nobody could
+// read must not turn a reachable repository into an error.
+func probeBranches(ctx context.Context, d *Deps, bearer, owner, repo, defaultBranch string) []string {
+	if d.GitHubApp == nil {
+		return []string{}
+	}
+	names, err := d.GitHubApp.Branches(ctx, bearer, owner, repo)
+	if err != nil || len(names) == 0 {
+		return []string{}
+	}
+	hasDefault := false
+	if defaultBranch != "" {
+		for _, n := range names {
+			if n == defaultBranch {
+				hasDefault = true
+				break
+			}
+		}
+	}
+	out := make([]string, 0, len(names))
+	if hasDefault {
+		out = append(out, defaultBranch)
+	}
+	for _, n := range names {
+		if hasDefault && n == defaultBranch {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+// probeManifest previews memql-package.yaml through the contents API.
+//
+// IT READS THE MANIFEST WITH ReadManifest, the same function Analyze uses,
+// over an fstest.MapFS holding the one fetched file. That is the whole reason
+// the preview is trustworthy: a second YAML reader here would drift from the
+// analyser, and the preview's entire job is to say in advance what Analyze
+// will say -- a preview that disagreed with the run it previews is worse than
+// no preview.
+//
+// Every failure -- no manifest, unparseable YAML, a format version this
+// cluster does not read, GitHub refusing the contents call -- answers the
+// EMPTY summary. The analysis is the authority (design section A.4), and
+// reporting a manifest problem here would report it twice, in two sentences,
+// one of them before the tree was even fetched.
+func probeManifest(ctx context.Context, d *Deps, bearer, owner, repo string) ManifestSummary {
+	out := emptyManifestSummary()
+	if d.GitHubApp == nil {
+		return out
+	}
+	raw, err := d.GitHubApp.FileContents(ctx, bearer, owner, repo, "", ManifestName)
+	if err != nil || len(raw) == 0 {
+		return out
+	}
+	manifest, merr := ReadManifest(fstest.MapFS{ManifestName: &fstest.MapFile{Data: raw}})
+	if merr != nil || manifest == nil {
+		return out
+	}
+	out.Name = manifest.Name
+	for _, dep := range manifest.Deployables {
+		out.Deployables = append(out.Deployables, ManifestSummaryDeployable{
+			Name: dep.Name, Kind: dep.Kind, Path: dep.Path,
+		})
+	}
+	// The DSL domains are the DIRECTORY NAMES under dsl/, because that is
+	// what a domain IS in this model -- discovered, never declared (D2). A
+	// repository with no dsl/ answers a 404 here and an empty list, which is
+	// the ordinary SPAs-only package rather than a problem.
+	if domains, derr := d.GitHubApp.DirectoryNames(ctx, bearer, owner, repo, "", DslRoot); derr == nil {
+		out.DslDomains = append(out.DslDomains, domains...)
+	}
+	return out
 }
 
 // hostOf reads the hostname out of a URL for the unsupported-host reason,
@@ -273,12 +520,19 @@ func (i *Integration) handleSourceProbe(ctx context.Context, args map[string]any
 	if perr != nil {
 		return nil, perr
 	}
+	// SEVEN KEYS: the five the Source stop has always read, plus the two the
+	// grant makes answerable -- `branches` (the ref picker) and `manifest`
+	// (the What-it-is preview). Both are always PRESENT and empty when there
+	// is nothing to say, so a client iterates without a guard and an absent
+	// key never has to be told apart from an empty one.
 	return resultNode(map[string]any{
 		"host":          res.Host,
 		"reachable":     res.Reachable,
 		"private":       res.Private,
 		"defaultBranch": res.DefaultBranch,
 		"reason":        res.Reason,
+		"branches":      res.Branches,
+		"manifest":      res.Manifest,
 	}), nil
 }
 

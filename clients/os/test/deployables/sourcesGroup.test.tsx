@@ -95,7 +95,10 @@ describe("Settings -> Sources", () => {
     mount(fakeConnection(SEED));
     const group = await screen.findByRole("list", { name: "Your source credentials" });
 
-    expect(within(group).getByText("acme deploy token ...ab12")).toBeTruthy();
+    // The label and the digest are two things, and read as two: the id in
+    // the code face, the name somebody chose in the reading face.
+    expect(within(group).getByText("acme deploy token")).toBeTruthy();
+    expect(within(group).getByText("...ab12").className).toContain("os-mono");
     expect(within(group).getAllByText("github.com").length).toBeGreaterThan(0);
     // The join: the sources fetching under it, by the label a person reads a
     // source by.
@@ -111,7 +114,8 @@ describe("Settings -> Sources", () => {
     // The NAME is the name; "revoked" is said once, beside it, in the warn
     // tone (DESIGN.md rule 7) -- and the row's Revoke button is gone, because
     // there is nothing left to revoke.
-    expect(within(group).getByText("old laptop ...77aa")).toBeTruthy();
+    expect(within(group).getByText("old laptop")).toBeTruthy();
+    expect(within(group).getByText("...77aa")).toBeTruthy();
     expect(within(group).getByText("revoked").getAttribute("data-tone")).toBe("warn");
     // A revoked one is not offered a second revoke.
     expect(within(group).queryByRole("button", { name: /Revoke old laptop/ })).toBeNull();

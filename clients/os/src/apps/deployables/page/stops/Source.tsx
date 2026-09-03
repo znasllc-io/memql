@@ -8,7 +8,7 @@ import { ProblemNotice } from "../../packages/ReportView";
 import { shortVersion, type PackageRow } from "../../packages/rows";
 import { bundleForm, bundleFormNote, siteName, type SiteRow } from "../../rows";
 import { CredentialField } from "../../sources/CredentialField";
-import { credentialIsRevoked, type CredentialRow } from "../../sources/rows";
+import { credentialIsRevoked, isGithubAppGrant, type CredentialRow } from "../../sources/rows";
 import { isPlaceholderBundle, type RailProblem } from "../rail";
 import { ZipPicker } from "./ZipPicker";
 
@@ -163,12 +163,27 @@ function SwitchCredential({ pkg, credentials }: { pkg: PackageRow; credentials: 
 }
 
 /**
- * The credential a repository is fetched under, as its CARD: the label and
- * the fingerprint, never a value -- there is no field on the projection that
- * could hold one. `revoked` is said in the warn tone because the next fetch
- * under it will refuse, and a person reading this stop is the one who can
- * switch it. An id that resolves to no card belongs to somebody else's
- * credential, and the chip says exactly that rather than printing the id.
+ * The credential a repository is fetched under, as its CARD: never a value --
+ * there is no field on the projection that could hold one. An id that
+ * resolves to no card belongs to somebody else's credential, and the chip
+ * says exactly that rather than printing the id.
+ *
+ * A GRANT AND A PASTED TOKEN READ DIFFERENTLY, because they are different
+ * things (epic memql#4915). A token's card is a label somebody chose and a
+ * digest of the value; a GitHub App grant has neither in any useful sense --
+ * what it has is an account, so it names the login. Rendering a grant
+ * through the token spelling would print an empty label beside an empty
+ * fingerprint and read as a credential that had lost its own facts.
+ *
+ * MUTED HERE, not accent. The accent chip that names a connected login is
+ * the Sources card's, in Settings; this stop's one accent already belongs to
+ * `update`, and a second on the same chips row would make accent a status
+ * colour rather than the shell's one emphasis.
+ *
+ * The ended state is said in the warn tone either way, because the next
+ * fetch under it will refuse and a person reading this stop is the one who
+ * can put it right -- but a grant is `disconnected` rather than `revoked`,
+ * which is the word the act that ended it used.
  */
 function CredentialChip({ pkg, credentials }: { pkg: PackageRow; credentials: readonly CredentialRow[] }) {
   // A zip has nothing to fetch, so it has no credential to name.
@@ -189,14 +204,24 @@ function CredentialChip({ pkg, credentials }: { pkg: PackageRow; credentials: re
       </Chip>
     );
   }
+  const grant = isGithubAppGrant(card);
   return (
     <>
-      <Chip tone="muted" title={`Fetched under your credential for ${card.host}. The value is read only at fetch time and is never shown.`}>
-        {card.label} <span>{card.fingerprint}</span>
-      </Chip>
+      {grant ? (
+        <Chip
+          tone="muted"
+          title="Fetched under your GitHub connection. This cluster renews it for you, and there is no token to manage."
+        >
+          {card.login === "" ? "your GitHub connection" : `@${card.login}`}
+        </Chip>
+      ) : (
+        <Chip tone="muted" title={`Fetched under your credential for ${card.host}. The value is read only at fetch time and is never shown.`}>
+          {card.label} <span>{card.fingerprint}</span>
+        </Chip>
+      )}
       {credentialIsRevoked(card) ? (
         <span className="os-deploy-status" data-tone="warn">
-          revoked
+          {grant ? "disconnected" : "revoked"}
         </span>
       ) : null}
     </>

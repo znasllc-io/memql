@@ -97,6 +97,21 @@ async function chooseSource(region: HTMLElement, name: RegExp): Promise<void> {
   await click(within(region).getByRole("radio", { name }));
 }
 
+/**
+ * Choose the repository source, and ask for the URL-plus-token form.
+ *
+ * Since GitHub Connect (memql#4915) the repository branch leads with the
+ * connection -- a picker for somebody who has one, Connect GitHub for
+ * somebody who does not -- and the pasted URL and token live behind "Use a
+ * token instead", closed. Every case below answers with a URL, so every case
+ * asks for that form the way a person would; nothing they assert about it
+ * changed.
+ */
+async function chooseRepository(region: HTMLElement): Promise<void> {
+  await chooseSource(region, /A repository/);
+  await click(within(region).getByRole("button", { name: "Use a token instead" }));
+}
+
 /** Type into a field by its accessible name, the way a person would. */
 async function fill(label: string, value: string): Promise<void> {
   const input = screen.getByLabelText(label) as HTMLInputElement;
@@ -204,7 +219,7 @@ describe("the compose flow: the Source stop's probe", () => {
   it("says a public repository is public, and names the branch it will follow", async () => {
     const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
     const { region } = await compose(connection);
-    await chooseSource(region, /A repository/);
+    await chooseRepository(region);
     await fill(URL_FIELD, REPO);
     await blur(URL_FIELD);
 
@@ -223,7 +238,7 @@ describe("the compose flow: the Source stop's probe", () => {
       credentials: [CREDENTIAL],
     });
     const { region } = await compose(connection);
-    await chooseSource(region, /A repository/);
+    await chooseRepository(region);
     await fill(URL_FIELD, REPO);
     await blur(URL_FIELD);
 
@@ -245,7 +260,7 @@ describe("the compose flow: the Source stop's probe", () => {
       credentials: [CREDENTIAL],
     });
     const { region } = await compose(connection);
-    await chooseSource(region, /A repository/);
+    await chooseRepository(region);
     await fill(URL_FIELD, REPO);
     await blur(URL_FIELD);
     await within(region).findByText("private, or not there");
@@ -264,7 +279,7 @@ describe("the compose flow: the Source stop's probe", () => {
     ] as const) {
       const connection = fakeConnection({ sourceProbe: { "": probeReply({ reachable: false, reason }) } });
       const { region, view } = await compose(connection);
-      await chooseSource(region, /A repository/);
+      await chooseRepository(region);
       await fill(URL_FIELD, REPO);
       await blur(URL_FIELD);
       expect(await within(region).findByText(headline)).toBeTruthy();
@@ -279,7 +294,7 @@ describe("the compose flow: the Source stop's probe", () => {
       },
     });
     const { region } = await compose(connection);
-    await chooseSource(region, /A repository/);
+    await chooseRepository(region);
     await fill(URL_FIELD, "https://gitlab.com/acme/storefront");
     await blur(URL_FIELD);
 
@@ -295,7 +310,7 @@ describe("the compose flow: the Source stop's probe", () => {
       sourceProbe: { "": probeReply({ reachable: false, defaultBranch: "", reason: "rate_limited" }) },
     });
     const { region } = await compose(connection);
-    await chooseSource(region, /A repository/);
+    await chooseRepository(region);
     await fill(URL_FIELD, REPO);
     await blur(URL_FIELD);
 
@@ -311,7 +326,7 @@ describe("the compose flow: the Source stop's probe", () => {
     // probe that threw must not stop somebody deploying a public repository.
     const connection = fakeConnection({ sourceProbeError: "source_unreadable: api.github.com is unreachable" });
     const { region } = await compose(connection);
-    await chooseSource(region, /A repository/);
+    await chooseRepository(region);
     await fill(URL_FIELD, REPO);
     await blur(URL_FIELD);
 
@@ -338,7 +353,7 @@ describe("the compose flow: a token, pasted once", () => {
       credentials: [],
     });
     const { region } = await compose(connection);
-    await chooseSource(region, /A repository/);
+    await chooseRepository(region);
     await fill(URL_FIELD, REPO);
     await blur(URL_FIELD);
     await within(region).findByText("private, or not there");
@@ -367,7 +382,7 @@ describe("the compose flow: a token, pasted once", () => {
       credentialCreateError: "source_host_unsupported: only github.com is admitted today",
     });
     const { region } = await compose(connection);
-    await chooseSource(region, /A repository/);
+    await chooseRepository(region);
     await fill(URL_FIELD, REPO);
     await blur(URL_FIELD);
     await within(region).findByText("private, or not there");
@@ -522,7 +537,7 @@ async function analyzed(
 ): Promise<{ connection: FakeConnection; region: HTMLElement; view: ReturnType<typeof render> }> {
   const connection = fakeConnection({ sourceProbe: { "": probeReply() }, ...seed });
   const { region, view } = await compose(connection, opts);
-  await chooseSource(region, /A repository/);
+  await chooseRepository(region);
   await fill(URL_FIELD, REPO);
   await blur(URL_FIELD);
   await fill(NAME_FIELD, "acme");
@@ -678,7 +693,7 @@ describe("the compose flow: what the run answers", () => {
   it("stops the rail where a refused run stopped, in the server's own words", async () => {
     const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
     const { region } = await compose(connection);
-    await chooseSource(region, /A repository/);
+    await chooseRepository(region);
     await fill(URL_FIELD, REPO);
     await blur(URL_FIELD);
     await fill(NAME_FIELD, "acme");
@@ -744,16 +759,19 @@ describe("the compose flow: leaving and coming back", () => {
 // ---------------------------------------------------------------------------
 
 describe("what the compose flow does not do", () => {
-  it("mounts no toast and no dialog, and offers no repository picker yet", async () => {
+  it("mounts no toast and no dialog, and keeps the pasted URL one click away", async () => {
     const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
     const { region } = await compose(connection);
     await chooseSource(region, /A repository/);
 
     expect(document.querySelector("[data-toast], .os-toast, dialog, [role='dialog']")).toBeNull();
-    // GitHub Connect (memql#4912) is a later epic. Until it lands the pasted
-    // URL is the whole of it, and half a picker would be the surface that
-    // epic replaces.
-    expect(within(region).queryByText(/Connect GitHub/i)).toBeNull();
+    // GitHub Connect (memql#4915) landed, so a person with no connection is
+    // offered one -- and the pasted URL is still a legitimate first answer
+    // rather than something behind "Advanced": one plain control, in the
+    // surface, saying what it does.
+    expect(within(region).getByRole("button", { name: "Connect GitHub" })).toBeTruthy();
+    expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
+    await click(within(region).getByRole("button", { name: "Use a token instead" }));
     expect(within(region).getByLabelText(URL_FIELD)).toBeTruthy();
   });
 
@@ -784,7 +802,7 @@ describe("a private repository whose build output is committed", () => {
     const { region } = await compose(connection);
 
     // Source: a repository this cluster cannot see anonymously.
-    await chooseSource(region, /A repository/);
+    await chooseRepository(region);
     await fill(URL_FIELD, REPO);
     await blur(URL_FIELD);
     await within(region).findByText("private, or not there");

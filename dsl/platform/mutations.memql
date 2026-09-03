@@ -1408,6 +1408,7 @@ mutate sourceCredential createSourceCredential {
     stamp {
       id:          args.credentialId
       ownerUserId: actor.userId
+      kind:        "token"
       status:      "active"
     }
   }
@@ -1445,6 +1446,152 @@ mutate sourceCredential touchSourceCredential {
   }
   update {
     accept { lastUsedAt }
+    stamp {
+      id: args.credentialId
+    }
+  }
+}
+
+// ---- GitHub App grants (epic memql#4912, C5/C6) ----
+//
+// Four writes, and the split is by WHO IS SPEAKING rather than by what changes.
+// createGithubAppGrant and updateGithubAppGrant are the CALLBACK's, running on
+// the identity node with a browser redirect in hand and no actor of its own --
+// so both borrow the state row's user through auth.ContextWithUserActor before
+// the stamp, and a blank one is refused in Go before either is rendered, because
+// ContextWithUserActor is a no-op on an empty id and the row would land owned by
+// nobody. refreshGithubAppGrantToken is the ENGINE's account of a token it
+// renewed without anybody watching; recordGithubAppInstallations is the WEBHOOK's
+// account of an installation somebody added or removed. Naming them apart is what
+// keeps each argument list to the fields its writer can actually vouch for.
+//
+// All four are @serverOnly for the reason createSourceCredential is: every one of
+// them writes a value sealed under MEMQL_MASTER_KEY, or a fact only a verified
+// GitHub delivery establishes, and neither can be vouched for by a browser.
+
+/// Land a new grant. The connect callback's insert, chosen over update when no grant for this
+/// (owner, externalId) exists yet.
+///
+/// `externalId` rather than the login is the identity: a person who renames their GitHub account
+/// keeps the same numeric id, and a grant keyed on the login would silently become a second row.
+///
+/// actor.userId scoping is not the fix, for the reason createSourceCredential records: the row IS
+/// the caller's -- ownerUserId is stamped from actor.userId below -- so a scoped form would admit
+/// exactly the call being refused, a browser writing an `encryptedValue` and a `refreshToken` it
+/// composed itself. Neither can be vouched for by anyone but the Go frame that ran secret.Encrypt
+/// under MEMQL_MASTER_KEY, a key that exists on nodes and must never exist on a laptop.
+@serverOnly
+@actor
+@description("Land a GitHub App grant from the connect callback")
+mutate sourceCredential createGithubAppGrant {
+  args {
+    credentialId     string!
+    host             string!
+    label            string!  @maxLength(120)
+    encryptedValue   string!
+    fingerprint      string!
+    refreshToken     string
+    expiresAt        datetime
+    login            string!
+    externalId       string!
+    installationIds  []string
+  }
+  insert {
+    accept { host, label, encryptedValue, fingerprint, refreshToken, expiresAt, login, externalId, installationIds }
+    stamp {
+      id:          args.credentialId
+      ownerUserId: actor.userId
+      kind:        "github_app"
+      status:      "active"
+    }
+  }
+}
+
+/// Update a grant in place. The connect callback's other half: reconnecting replaces the tokens and
+/// re-reads the login and the installations, and does NOT mint a second row.
+///
+/// It stamps `status: "active"`, so reconnecting after a disconnect is the repair rather than a
+/// second credential to choose between. `revokedAt` is deliberately left alone: a datetime cannot be
+/// cleared, and the timestamp of the last disconnect stays true as history -- which is why the card
+/// reads it only alongside `status`.
+///
+/// actor.userId scoping is not the fix, and the filter is not what is missing: the callback resolves
+/// the row by (owner, externalId) under the state row's own user before it gets here. What
+/// @serverOnly withholds is the WIRE. Every value this writes is sealed ciphertext, so a
+/// client-reachable form would let a browser write an `encryptedValue` and a `refreshToken` of its
+/// choosing onto its own grant -- a row that reads as connected and unseals to whatever the client
+/// picked. The seal is the authorization, and only a node holds the key.
+@serverOnly
+@description("Replace a GitHub App grant's tokens and installations on reconnect")
+mutate sourceCredential updateGithubAppGrant {
+  args {
+    credentialId     string!
+    encryptedValue   string!
+    fingerprint      string!
+    refreshToken     string
+    expiresAt        datetime
+    login            string!
+    installationIds  []string
+  }
+  update {
+    accept { encryptedValue, fingerprint, refreshToken, expiresAt, login, installationIds }
+    stamp {
+      id:     args.credentialId
+      status: "active"
+    }
+  }
+}
+
+/// Record a token the engine renewed on its own. Written after a server-side refresh, inside the
+/// fetch or poll that needed it, so a person is never sent back through the browser for an expiry.
+///
+/// It writes the four token fields and NOTHING else -- not the login, not the installations, not the
+/// status. A refresh is evidence about a token, and a writer that also touched the installations
+/// would be reporting a fact it did not observe.
+///
+/// actor.userId scoping is not the fix, for the reason touchSourceCredential gives: the value is a
+/// claim about what the ENGINE did, and a caller stamping a sealed token on their own grant would be
+/// equally wrong and equally unscoped away. The poll also runs on a schedule with nobody attached,
+/// so a self-scoped filter would refuse the one path that most needs to refresh.
+@serverOnly
+@description("Record a GitHub App user token the engine refreshed server-side")
+mutate sourceCredential refreshGithubAppGrantToken {
+  args {
+    credentialId    string!
+    encryptedValue  string!
+    fingerprint     string!
+    refreshToken    string
+    expiresAt       datetime
+  }
+  update {
+    accept { encryptedValue, fingerprint, refreshToken, expiresAt }
+    stamp {
+      id: args.credentialId
+    }
+  }
+}
+
+/// Record the installations a grant can reach. The webhook's write, from an `installation` or
+/// `installation_repositories` delivery the inbound seam already HMAC-verified.
+///
+/// The list is REPLACED rather than merged, because a read carries the whole set and a merge could
+/// never remove one -- and an installation that stays in the list after it was uninstalled is
+/// exactly the state that turns a clear repository_not_installed into an unexplained 404.
+///
+/// actor.userId scoping is not the fix: this records what GITHUB answered, not what a person typed,
+/// and a caller-reachable form would let a browser claim its grant reaches an installation it does
+/// not -- which is the one field the picker's "install it here" link is decided from. The writer
+/// already runs under the owner's actor, so the row is scoped; what @serverOnly withholds is a wire
+/// on which that claim could be composed.
+@serverOnly
+@description("Replace a GitHub App grant's installation ids from a webhook delivery")
+mutate sourceCredential recordGithubAppInstallations {
+  args {
+    credentialId     string!
+    installationIds  []string
+  }
+  update {
+    accept { installationIds }
     stamp {
       id: args.credentialId
     }

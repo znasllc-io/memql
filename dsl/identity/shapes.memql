@@ -579,3 +579,23 @@ shape enrolmentToken enrolmentTokenFull {
   sourceIP
   row.createdAt
 }
+
+/// Full projection of v1:identity:githubConnectState -- everything the connect callback needs to
+/// decide whether to land a grant, and nothing a person reads. Reached through
+/// githubConnectStateByHash alone, which is @serverOnly.
+///
+/// `stateHash` is projected deliberately even though the caller already holds the value it looked
+/// the row up by: the compare-and-swap re-reads INSIDE the advisory lock and the re-read has to
+/// prove it found the row it was asked for, not merely a row.
+@row
+shape githubConnectState githubConnectStateFull {
+  row.id
+  userId
+  stateHash
+  returnPath
+  expiresAt
+  consumedAt
+  consumedFromIP
+  sourceIP
+  row.createdAt
+}

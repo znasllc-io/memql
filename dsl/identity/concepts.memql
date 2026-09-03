@@ -78,7 +78,7 @@ concept auditEvent {
   actorRole       string  @description("Cluster role of the actor at the time of the event (owner / admin / developer / writer / reader). Captured for point-in-time accuracy.")
   actorIdentityId string  @description("v1:identity:identity.id of the credential the actor used (magic_link, api_key, etc.). Distinguishes 'logged in via web' from 'PAT in CI'.")
 
-  targetType      enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings", "deviceCode", "delegation", "workerPairingCode", "enrolmentToken", "passkeyIdentity", "badgeIdentity", "appSession", "shopifyStore", "releaseCut", "oauthClient", "upstreamIdentity", "rowOwnership", "")  @default("")  @description("Concept type of the target row, if any. oauthClient names the RELYING PARTY rather than a row this cluster necessarily holds -- a built-in first-party client is compiled in, not stored (memql#4515) -- and is what a role-floor refusal on the SSO fast path targets, where no credential row was created to name instead. releaseCut names a v1:cluster:releaseCut row -- the DECISION to ship a version of MemQL itself, which belongs in this log rather than only in the cluster history (epic memql#4434). passkeyIdentity and badgeIdentity name the v1:identity:identity VARIANT rather than the concept, so a credential whose lifecycle is audited on its own (passkey register / login / rename / revoke, badge grant) stays distinguishable in the trail without parsing `action`. rowOwnership names a TRANSFER of who owns a set of rows (memql#4838) -- not a row, and not a user, but the relationship between them. It is the one targetType whose subject is a pair of principals, which is why targetId carries the RECIPIENT and the departing principal rides in detail alongside the rows moved -- the question an auditor asks of this event is who holds these rows now. upstreamIdentity names an EXTERNAL identity provider's statement about a person (memql#4611) -- an Entra ID or generic OIDC sign-in. Not `identity`, which names a credential row this cluster holds: the whole point of federation is that the credential lives somewhere else, and there is often no row here at all yet (the linking decision is what determines whether one is created). Every value here must also be accepted by createAuditEvent, and every value a Go writer emits must be here -- test/dslconformance/identity_audit_enum_contract_test.go walks the writers (memql#4213).")
+  targetType      enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings", "deviceCode", "delegation", "workerPairingCode", "enrolmentToken", "passkeyIdentity", "badgeIdentity", "appSession", "shopifyStore", "releaseCut", "oauthClient", "upstreamIdentity", "rowOwnership", "githubGrant", "")  @default("")  @description("Concept type of the target row, if any. oauthClient names the RELYING PARTY rather than a row this cluster necessarily holds -- a built-in first-party client is compiled in, not stored (memql#4515) -- and is what a role-floor refusal on the SSO fast path targets, where no credential row was created to name instead. releaseCut names a v1:cluster:releaseCut row -- the DECISION to ship a version of MemQL itself, which belongs in this log rather than only in the cluster history (epic memql#4434). passkeyIdentity and badgeIdentity name the v1:identity:identity VARIANT rather than the concept, so a credential whose lifecycle is audited on its own (passkey register / login / rename / revoke, badge grant) stays distinguishable in the trail without parsing `action`. rowOwnership names a TRANSFER of who owns a set of rows (memql#4838) -- not a row, and not a user, but the relationship between them. It is the one targetType whose subject is a pair of principals, which is why targetId carries the RECIPIENT and the departing principal rides in detail alongside the rows moved -- the question an auditor asks of this event is who holds these rows now. githubGrant names a v1:platform:sourceCredential row of kind=\"github_app\" -- an AUTHORIZATION this cluster holds on somebody's behalf at GitHub (epic memql#4912). Not `identity`, which names a credential that proves who a person IS here: a grant proves nothing about identity and authenticates nobody at this cluster, it is authority to act at another one. Not `config` either, because it belongs to one person rather than to the deployment, and the audit question asked of it -- who connected, reconnected, or had a callback refused -- is about that person. targetId carries the credential row id and the GitHub login rides in detail. upstreamIdentity names an EXTERNAL identity provider's statement about a person (memql#4611) -- an Entra ID or generic OIDC sign-in. Not `identity`, which names a credential row this cluster holds: the whole point of federation is that the credential lives somewhere else, and there is often no row here at all yet (the linking decision is what determines whether one is created). Every value here must also be accepted by createAuditEvent, and every value a Go writer emits must be here -- test/dslconformance/identity_audit_enum_contract_test.go walks the writers (memql#4213).")
   targetId        string  @description("Identifier of the target row when targetType is set.")
   targetEmail     string  @description("Email associated with the target, if applicable. Useful for filtering audit history by user without needing a join.")
 
@@ -780,4 +780,48 @@ concept accountEntitlement {
   note               string  @description("Free-text operator / billing note about why this entitlement was set (e.g. 'pro plan', 'temporary bump during migration'). Audit aid only; the resolver ignores it.")
 
   @relationship(type="parent", field="accountId", target=user, direction="outgoing")
+}
+
+// githubConnectState -- the server-held state of one in-flight GitHub Connect
+// (epic memql#4912, issue memql#4913).
+// ==========================================================================
+//
+// WHY A ROW AND NOT A COOKIE. The OIDC sign-in keeps its state, nonce and PKCE
+// verifier in one short-lived cookie (component/identity/http/oidc_start.go),
+// and that is right for a sign-in: a flow that has not started needs no row,
+// and a table of them is a table somebody has to expire. Connect is the other
+// case. It is started from the OS over the gRPC stream (design C4) and
+// finished by a browser redirect that may land on a DIFFERENT identity
+// replica, so the two halves share no cookie jar and no process. A row on the
+// graph is the only thing both halves can see.
+//
+// THE STATE VALUE IS STORED AS A DIGEST, never in the clear, for the reason
+// every other credential row in this domain is: a row read is not a credential.
+// Anyone who could read this row could otherwise complete somebody else's
+// connect and land a grant on their account.
+//
+// NO @rowAuthz TIER, and the argument is enrolmentToken's word for word: the
+// callback read is PRE-ACTOR. GitHub redirects a browser carrying no MemQL
+// bearer, so at lookup time actor.userId is the empty string; an owner tier
+// would compare userId against "" , match nothing, and turn every completed
+// connect into connect_state_invalid -- a flow that never works, failing in
+// the one direction nobody tests. The compensating controls are the ones the
+// enrolment token uses: the lookup is bounded to a single row by a 256-bit
+// digest, both reads are @serverOnly, the row is consumed exactly once under a
+// Postgres advisory lock, and every outcome is audited.
+// githubConnectStateByHash is registered in
+// component/memql/rowauthz_undeclared_gate_test.go naming memql#4913.
+// @no-displayCard: single-use credential row -- a secret digest plus a user id
+//   and a TTL, the same reasoning as v1:identity:enrolmentToken and
+//   v1:identity:workerPairingCode.
+concept githubConnectState {
+  userId          string!    @description("v1:identity:user.id the connect was begun by, and the ONLY account the callback may land a grant on. The callback resolves the grant owner from THIS field and never from anything GitHub sent, which is what makes a replayed or forged callback unable to attach somebody else's GitHub account to an account it chooses.")
+  stateHash       string!    @description("SHA-256 hex digest of the plaintext `state` value that travels in the authorize URL. The plaintext is returned to the caller of githubConnectBegin ONCE, inside the URL it answers, and is never persisted or logged -- the same convention every other credential row here follows (pat, workerToken, workerPairingCode, invitation, magicLinkRequest, enrolmentToken).")
+  returnPath      string     @description("Where in MemQL OS the browser should land when the callback finishes, as a SAME-ORIGIN path. Client-supplied, so it is passed through identity.SafeRelativeRedirect on the way in AND again on the way out: a value that was safe when it was stored is not evidence it is safe when it is used, which is why TakePostLoginRedirect re-validates for the identical reason. Empty means the OS root.")
+  expiresAt       datetime!  @description("Absolute expiry. Ten minutes from issue: longer than any human takes to authorize and install an app, and short enough that a state value left in a browser history is worthless. The consume refuses a row past this even when consumedAt is empty.")
+  consumedAt      datetime   @description("Stamped when the callback completes the flow. Single-use: a row with a non-empty consumedAt is dead, and the SECOND click on a callback URL is connect_state_invalid rather than a second grant. Written under a Postgres advisory lock (component/identity/store_githubconnect.go), because a browser redirect can be replayed and two identity replicas would otherwise both read 'not consumed'.")
+  consumedFromIP  string     @description("Source IP the callback arrived from. Audit signal, and the one that distinguishes a person finishing their own connect from somebody replaying a URL they found.")
+  sourceIP        string     @description("IP the begin call came from. Audit signal; deliberately NOT compared against consumedFromIP, because a person who starts on wifi and finishes on a mobile network is the ordinary case and refusing it would break the flow for a threat this row's TTL and single-use already bound.")
+
+  @relationship(type="parent", field="userId", target=user, direction="outgoing")
 }

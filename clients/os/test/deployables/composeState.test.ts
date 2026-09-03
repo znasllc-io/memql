@@ -18,7 +18,11 @@ import {
 } from "../../src/apps/deployables/page/compose";
 import { placementsPayload } from "../../src/apps/deployables/packages/calls";
 import {
+  EMPTY_MANIFEST,
   PROBE_REASON_CODES,
+  branchNamesFrom,
+  manifestFrom,
+  manifestIsEmpty,
   probeNote,
   probeParks,
   probeWantsCredential,
@@ -47,7 +51,19 @@ function address(over: Partial<AddressDraft> = {}): AddressDraft {
 }
 
 function reply(over: Partial<SourceProbeReply> = {}): SourceProbeReply {
-  return { host: "github.com", reachable: true, private: false, defaultBranch: "main", reason: "ok", ...over };
+  // `branches` and `manifest` are the two keys a GRANT makes answerable
+  // (memql#4915). Both are always present on the wire and empty when there is
+  // nothing to say, so the default here is what a pasted-token probe answers.
+  return {
+    host: "github.com",
+    reachable: true,
+    private: false,
+    defaultBranch: "main",
+    reason: "ok",
+    branches: [],
+    manifest: { ...EMPTY_MANIFEST },
+    ...over,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -92,12 +108,21 @@ describe("what a probe reason is worth", () => {
       "credential_not_found",
       "credential_revoked",
       "source_host_unsupported",
+      // The two a GRANT adds (memql#4915). Each is a definite answer about
+      // this repository whose repair is one click, so analyzing anyway would
+      // fetch and refuse with the same information a round trip later.
+      "reconnect_required",
+      "repository_not_installed",
     ]) {
       expect(probeParks(reason), `${reason} must park`).toBe(true);
     }
     for (const reason of ["ok", "rate_limited", "", "something_new"]) {
       expect(probeParks(reason), `${reason} must not park`).toBe(false);
     }
+    // `github_app_not_configured` is deliberately NOT a parking reason: it is
+    // an operator's condition, the token path still works, and parking on it
+    // would block a deploy this cluster can perform.
+    expect(probeParks("github_app_not_configured")).toBe(false);
   });
 
   it("offers a credential only where one could change the answer", () => {
@@ -344,5 +369,57 @@ describe("the suggestions", () => {
     expect(seedAddress("acme", "storefront")).toEqual({ slug: "storefront", accountId: "", ownDomain: "" });
     // ...and falls back to the source when the app has no usable name.
     expect(seedAddress("acme", "").slug).toBe("acme");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The two keys a grant adds to the probe's reply (epic memql#4915)
+// ---------------------------------------------------------------------------
+
+describe("reading the branches and the manifest a probe answered", () => {
+  it("keeps the branch order the engine sent, because the default is first", () => {
+    expect(branchNamesFrom(["main", "release", "spike"])).toEqual(["main", "release", "spike"]);
+    // ...and the same list as the JSON text a builtin's reply row can carry.
+    expect(branchNamesFrom('["trunk","dev"]')).toEqual(["trunk", "dev"]);
+  });
+
+  it("drops a member that is not a branch name rather than offering an empty option", () => {
+    expect(branchNamesFrom(["main", "", "   ", 7, null])).toEqual(["main"]);
+  });
+
+  it("answers no branches for anything it cannot read, and never throws", () => {
+    expect(branchNamesFrom(undefined)).toEqual([]);
+    expect(branchNamesFrom("not json at all")).toEqual([]);
+    expect(branchNamesFrom({ main: true })).toEqual([]);
+  });
+
+  it("projects the manifest summary field by field", () => {
+    expect(
+      manifestFrom({
+        name: "acme-storefront",
+        deployables: [{ name: "web", kind: "static", path: "clients/web" }],
+        dslDomains: ["shop"],
+      }),
+    ).toEqual({
+      name: "acme-storefront",
+      deployables: [{ name: "web", kind: "static", path: "clients/web" }],
+      dslDomains: ["shop"],
+    });
+  });
+
+  it("drops a declared deployable with no name, which nothing could preview", () => {
+    expect(manifestFrom({ deployables: [{ kind: "static", path: "clients/web" }] }).deployables).toEqual([]);
+  });
+
+  it("answers an empty summary for every shape it cannot read", () => {
+    // EMPTY IS A VALID ANSWER AND NEVER A COMPLAINT: a repository with no
+    // manifest, one that does not parse, and a reply this build cannot read
+    // all render no preview and say nothing. The analysis is the authority.
+    for (const value of [undefined, null, "", "not json", "[]", 7]) {
+      expect(manifestIsEmpty(manifestFrom(value)), `${String(value)} is not empty`).toBe(true);
+    }
+    expect(manifestIsEmpty(EMPTY_MANIFEST)).toBe(true);
+    // The reachable positive: a summary with anything in it is NOT empty.
+    expect(manifestIsEmpty(manifestFrom({ name: "acme" }))).toBe(false);
   });
 });
