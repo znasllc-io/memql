@@ -1220,6 +1220,18 @@ button:not(:disabled):active {
   padding: 0;
   border: 0;
 }
+/* A SETTINGS GROUP THAT HOLDS SUB-SECTIONS SEPARATES THEM WITH SPACE, because
+ * space is the only thing that can carry the level here: a `legend` and a
+ * `.os-subhead` are one declaration in this shell (13px, 600, ink), so
+ * `Sources` and the `GitHub` card inside it are typographically identical.
+ * With a 0px gap the card's heading sat directly under the group's own
+ * sentence and read as a SIBLING of `Sources` rather than as a part inside
+ * it -- a flat list of headings where there are two levels. No bottom margin:
+ * the space belongs above each part, and the group's own 18px still closes
+ * the whole thing. */
+.os-field-group .os-field-group {
+  margin: 14px 0 0;
+}
 .os-field-group legend {
   padding: 0;
   margin-bottom: 6px;
@@ -2743,8 +2755,32 @@ button:not(:disabled):active {
 .os-repo-cell[data-cell="visibility"] {
   flex: 0 0 10ch;
 }
+/* THE TWO TEXT CELLS ARE BLOCKS, AND THAT IS WHAT MAKES THE ELLIPSIS REAL.
+ *
+ * `text-overflow` applies to a BLOCK CONTAINER's inline content. A flex
+ * container's text is an anonymous flex item, which is blockified, so the
+ * declaration was inert on all three cells and the branch column HARD-CLIPPED
+ * instead: `release-candidate` measured 112px of text in a 59px cell and
+ * rendered `release-c`, with nothing on the line to say a word had been cut.
+ * That is the failure the pushed cell's own note names -- a reader cannot tell
+ * a clipped value from a real one -- arriving through the cell beside it.
+ *
+ * Only the two TEXT cells change: `visibility` holds a chip and needs to stay
+ * a flex box to centre it, and a chip is a closed vocabulary that cannot
+ * overflow. `line-height` is what keeps a block cell the same 18px box the
+ * flex ones make. */
+.os-repo-cell[data-cell="branch"],
+.os-repo-cell[data-cell="pushed"] {
+  display: block;
+  line-height: 18px;
+}
+/* Wide enough for the branch names that are not `main`: `release-candidate`,
+ * `feature/checkout`. A branch name has no bound, so the cell cannot be sized
+ * to hold every one -- what it can do is ellipsise honestly and carry the
+ * whole value in its `title`, which is the same answer the row's own name
+ * gives (RepositoryPicker.tsx). */
 .os-repo-cell[data-cell="branch"] {
-  flex: 0 0 9ch;
+  flex: 0 0 16ch;
 }
 /* Wide enough for the longest freshness this build can print -- `formatFreshness`
  * tops out at "pushed 9999d ago", ~97px in the caption face -- because a cell
@@ -5162,6 +5198,12 @@ a.os-button {
 .os-settings-danger {
   display: grid;
   gap: 6px;
+  /* AIR ABOVE THE HAIRLINE, because the hairline is the block's first pixel.
+   * With none, the warm rule drew itself immediately under the "Install on
+   * another organisation" link and read as that link's underline -- so the
+   * destructive corner appeared to be headed by the one control on the card
+   * that opens a new tab. */
+  margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid color-mix(in oklab, var(--os-warn) 35%, var(--os-line));
 }

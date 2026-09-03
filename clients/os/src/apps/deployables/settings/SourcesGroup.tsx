@@ -207,17 +207,21 @@ export function SourcesGroup({
             installations={lookup.readAt === "" ? null : lookup.page.installations}
             pending={lookup.readAt === "" ? null : lookup.page.pending}
             installUrl={install.installUrl}
+            /* INSIDE THE CARD, under the facts it refreshes. Its own sentence
+               says "the count above", and mounted as a SIBLING of the card it
+               sat below the whole Disconnect block -- so "above" pointed past
+               a destructive control at a chip row two blocks away. NOT FOR A
+               LAPSED CONNECTION: a disconnected grant reads nothing from
+               GitHub, so the control could only ever refuse, and the
+               reconnect below is the repair -- a different sentence from a
+               refusal. */
+            reaches={credentialIsRevoked(grant) ? null : <LookedUp lookup={lookup} grantId={grant.id} now={now} />}
             sourceNames={sourceNames}
             busy={disconnect.busy}
             refusal={disconnect.refusal}
             remoteRevoked={disconnect.remoteRevoked}
             onDisconnect={() => void disconnect.revoke(grant.id)}
           />
-          {/* NOT FOR A LAPSED CONNECTION. A disconnected grant reads nothing
-              from GitHub, so the control could only ever refuse -- and the
-              reconnect below is the repair, which is a different sentence
-              from a refusal. */}
-          {credentialIsRevoked(grant) ? null : <LookedUp lookup={lookup} grantId={grant.id} now={now} />}
           {credentialIsRevoked(grant) ? (
             /* The copy for `reconnect_required` sends a person to
                "Settings > Sources", so the control it names has to be here --
@@ -237,35 +241,46 @@ export function SourcesGroup({
       {/* THE TOKEN HALF, NAMED, because there is now a connection above it:
           an unheaded list would read as belonging to that card rather than as
           the other way in. The sealing sentence sits here, over the values it
-          is about, rather than over a group that is half connection. */}
-      <Subhead>Tokens you pasted</Subhead>
-      <Caption>
-        A credential lets this cluster fetch a private repository. The value is sealed here and read only at fetch
-        time -- nothing, including this page, can show it again.
-      </Caption>
+          is about, rather than over a group that is half connection.
 
-      <LiveList<CredentialRow>
-        source={pasted}
-        rowId={(c) => c.id}
-        fingerprint={credentialFingerprint}
-        label="Your source credentials"
-        emptyText="No credentials yet. A public repository needs none; add one when a private repository asks for it."
-        renderRow={(card) => <CredentialLine card={card} packages={packages} now={now} />}
-      />
+          A SECTION, LIKE THE CARD ABOVE IT, and that is what carries the
+          level. A legend and a Subhead are ONE declaration in this shell --
+          13px, 600, ink -- so `Sources`, `GitHub` and `Tokens you pasted` are
+          typographically identical and the only thing that can say which
+          contains which is the space around them. Measured as a bare Subhead
+          this heading sat 0px under the caption above it and read as a third
+          sibling of `Sources`; as a section it is a part inside it
+          (styles/index.css, `.os-field-group .os-field-group`). */}
+      <section className="os-field-group" aria-label="Tokens you pasted">
+        <Subhead>Tokens you pasted</Subhead>
+        <Caption>
+          A credential lets this cluster fetch a private repository. The value is sealed here and read only at fetch
+          time -- nothing, including this page, can show it again.
+        </Caption>
 
-      {adding ? (
-        <AddCredential
-          id="os-sources-add"
-          host={SOURCE_HOST}
-          onAdded={() => setAdding(false)}
-          onCancel={() => setAdding(false)}
+        <LiveList<CredentialRow>
+          source={pasted}
+          rowId={(c) => c.id}
+          fingerprint={credentialFingerprint}
+          label="Your source credentials"
+          emptyText="No credentials yet. A public repository needs none; add one when a private repository asks for it."
+          renderRow={(card) => <CredentialLine card={card} packages={packages} now={now} />}
         />
-      ) : (
-        <div className="os-form-row">
-          <Button onClick={() => setAdding(true)}>Add a credential</Button>
-          <Caption>Only {SOURCE_HOST} today.</Caption>
-        </div>
-      )}
+
+        {adding ? (
+          <AddCredential
+            id="os-sources-add"
+            host={SOURCE_HOST}
+            onAdded={() => setAdding(false)}
+            onCancel={() => setAdding(false)}
+          />
+        ) : (
+          <div className="os-form-row">
+            <Button onClick={() => setAdding(true)}>Add a credential</Button>
+            <Caption>Only {SOURCE_HOST} today.</Caption>
+          </div>
+        )}
+      </section>
     </fieldset>
   );
 }

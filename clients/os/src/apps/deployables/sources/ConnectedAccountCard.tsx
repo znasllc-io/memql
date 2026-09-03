@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { Button, Caption, Chip, Chips, Fact, Facts } from "../../../kit";
 import type { Refusal } from "../packages/actions";
@@ -38,6 +38,7 @@ export function ConnectedAccountCard({
   installations = null,
   pending = null,
   installUrl = "",
+  reaches = null,
   sourceNames,
   busy,
   refusal,
@@ -50,6 +51,21 @@ export function ConnectedAccountCard({
   /** Organisations awaiting an owner's approval, when a caller knows them. */
   pending?: readonly PendingInstallation[] | null;
   installUrl?: string;
+  /**
+   * The control that goes and asks GitHub what this connection reaches, and
+   * says when it last did.
+   *
+   * A SLOT RATHER THAN A HOOK, so the round trip stays the mounting group's
+   * (this card owns none) while the control sits where its own sentence
+   * points. It renders directly under the FACTS -- the chips and `Since` --
+   * because "the count above" is the chip row and a control that dates a
+   * reading belongs after the whole reading, which is the shape the picker's
+   * own footer takes. Mounted after the card as a sibling it landed BELOW the
+   * Disconnect block instead: a reading that dates itself, two blocks and a
+   * destructive control away from the reading it dates, which is exactly what
+   * `.os-refresh-row` exists to prevent (styles/index.css).
+   */
+  reaches?: ReactNode;
   /** The deployables that fetch under this connection, by name. */
   sourceNames: readonly string[];
   busy: boolean;
@@ -60,7 +76,7 @@ export function ConnectedAccountCard({
   onDisconnect: () => void;
 }) {
   const revoked = credentialIsRevoked(grant);
-  const reaches = grant.installationIds.length;
+  const reachCount = grant.installationIds.length;
   return (
     <section className="os-field-group" aria-label="GitHub">
       <h4 className="os-subhead">GitHub</h4>
@@ -73,9 +89,9 @@ export function ConnectedAccountCard({
           @{grant.login || "unknown"}
         </Chip>
         {installations === null ? (
-          reaches === 0 ? null : (
+          reachCount === 0 ? null : (
             <Chip tone="muted" title="How many accounts or organisations this connection can reach.">
-              {reaches} installation{reaches === 1 ? "" : "s"}
+              {reachCount} installation{reachCount === 1 ? "" : "s"}
             </Chip>
           )
         ) : (
@@ -124,7 +140,9 @@ export function ConnectedAccountCard({
         <Fact label="Since" value={formatDay(grant.createdAt)} />
       </Facts>
 
-      {reaches === 0 && installations === null ? (
+      {reaches}
+
+      {reachCount === 0 && installations === null ? (
         <Caption>This connection reaches no organisations yet.</Caption>
       ) : null}
 

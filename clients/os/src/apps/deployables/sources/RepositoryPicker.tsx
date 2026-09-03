@@ -190,6 +190,14 @@ export function RepositoryPicker({
  * is rendered EVEN WHEN IT IS EMPTY -- an absent cell is exactly what let
  * the next one move. The names are the visible content and the cells are
  * geometry, so the empty ones say nothing.
+ *
+ * A DEFINITE WIDTH MAKES THE OVERFLOW SOMEBODY ELSE'S PROBLEM, and the two
+ * text cells answer it in the browser (styles/index.css): they are BLOCKS, so
+ * `text-overflow` actually applies, and the branch carries its whole value on
+ * a `title`. Measured before that, `release-candidate` rendered `release-c`
+ * with no ellipsis -- a clipped branch name is indistinguishable from a real
+ * one, which is the same objection the pushed cell's width was chosen to
+ * avoid.
  */
 function RepositoryChoice({
   repo,
@@ -218,7 +226,15 @@ function RepositoryChoice({
           <Chip tone="muted">private</Chip>
         ) : null}
       </span>
-      <span className="os-repo-cell os-caption os-mono" data-cell="branch">
+      {/* THE WHOLE BRANCH NAME IS ON THE `title`, for the reason the row's own
+          name carries one: the cell has a definite width, a branch name has
+          no bound, and `release-candidate` ellipsises. The mark says a word
+          was cut and the title says which. */}
+      <span
+        className="os-repo-cell os-caption os-mono"
+        data-cell="branch"
+        {...(repo.defaultBranch === "" ? {} : { title: repo.defaultBranch })}
+      >
         {repo.defaultBranch}
       </span>
       <span className="os-repo-cell os-caption" data-cell="pushed">

@@ -1,6 +1,6 @@
-import { Box, FileCode2 } from "lucide-react";
+import { FileCode2 } from "lucide-react";
 
-import { Caption, Chip } from "../../../../../kit";
+import { Caption, Chip, Subhead } from "../../../../../kit";
 import { manifestIsEmpty, type ManifestSummary } from "../../../sources/probe";
 
 // What the package says about itself, before anything is fetched (epic
@@ -11,10 +11,11 @@ import { manifestIsEmpty, type ManifestSummary } from "../../../sources/probe";
 // ===========================================================================
 // The probe reads memql-package.yaml through the contents API and answers a
 // summary. It renders in `ReportView`'s classes -- `.os-report-part`,
-// `.os-report-heading`, `.os-report-item` -- so the preview and the report
-// that replaces it read as one thing rather than as two designs for the same
+// `.os-report-item`, `.os-report-name` -- so the preview and the report that
+// replaces it read as one thing rather than as two designs for the same
 // facts. Nothing new was invented: what changes between them is how much is
-// known, not what kind of thing is being said.
+// known, not what kind of thing is being said. (The one class it does NOT
+// borrow is the report's HEADING; the last section below says why.)
 //
 // ===========================================================================
 // NO MANIFEST GETS NO PREVIEW AND NO COMPLAINT
@@ -30,14 +31,32 @@ import { manifestIsEmpty, type ManifestSummary } from "../../../sources/probe";
 // two answer different questions -- what the package claims, and what this
 // cluster found -- and a preview that dressed as a report would be making a
 // promise the run has not made yet.
+//
+// ===========================================================================
+// THE NAME IS A SUBHEAD, NOT THE REPORT'S HEADING, AND THAT IS THE ONE PLACE
+// THIS PARTS FROM `ReportView`
+// ===========================================================================
+// `.os-report-heading` is an 11px all-caps tracked eyebrow, and it earns that
+// in the report because everything it labels is a CATEGORY -- "Web apps",
+// "MemQL this adds". Here the heading is the package's own NAME, and measured
+// on the What-it-is stop `acme-widget` rendered as `ACME-WIDGET`: the only
+// all-caps words on the surface, a proper noun in a shape reserved for
+// labels, beside five 13px ink `Subhead`s. That is two heading languages on
+// one surface, which is the objection the connected-account card already
+// answered once (`ConnectedAccountCard.tsx`), and an eyebrow, which this
+// epic's own type rule forbids by name.
+//
+// Nothing else changes: the part, the items and the captions stay the
+// report's, so the preview and the report that replaces it still read as one
+// thing. They are never on screen together -- the report REPLACES this
+// (`ComposePage.tsx`) -- so what "one thing" has to survive is a person's
+// memory of the last screen, not a side-by-side.
 
 export function ManifestPreview({ manifest }: { manifest: ManifestSummary }) {
   if (manifestIsEmpty(manifest)) return null;
   return (
     <section className="os-report-part">
-      <h4 className="os-report-heading">
-        <Box size={12} aria-hidden /> {manifest.name === "" ? "This package" : manifest.name}
-      </h4>
+      <Subhead>{manifest.name === "" ? "This package" : manifest.name}</Subhead>
       <Caption>
         Read from the repository&apos;s manifest. Analyze reads the tree itself and is the authority on all of it.
       </Caption>
