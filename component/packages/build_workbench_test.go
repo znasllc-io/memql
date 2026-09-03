@@ -69,10 +69,10 @@ func TestTheBuildSurfaceIsAskedForWhatTheManifestSaid(t *testing.T) {
 	h.deps.Builder = NewWorkbenchBuilder(runner, discardLogger())
 
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     clusterOwner(),
-		Confirmed: true,
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 	}); err != nil {
 		t.Fatalf("deploy: %v", err)
 	}
@@ -110,10 +110,10 @@ func TestTheSecondAppOfARunPrefersTheNodeTheFirstBuiltOn(t *testing.T) {
 	h.deps.Builder = NewWorkbenchBuilder(runner, discardLogger())
 
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     clusterOwner(),
-		Confirmed: true,
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 	}); err != nil {
 		t.Fatalf("deploy: %v", err)
 	}
@@ -142,10 +142,10 @@ func TestTheBuiltBundleIsWhatThePublisherReceives(t *testing.T) {
 	}
 
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     clusterOwner(),
-		Confirmed: true,
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 	}); err != nil {
 		t.Fatalf("deploy: %v", err)
 	}
@@ -186,10 +186,10 @@ func TestATypedRefusalFromTheBuildSurfaceKeepsItsCode(t *testing.T) {
 			h.deps.Builder = NewWorkbenchBuilder(runner, discardLogger())
 
 			out, err := Deploy(context.Background(), h.deps, DeployRequest{
-				PackageId: "v1:platform:package:abc",
-				Actor:     clusterOwner(),
-				Confirmed: true,
-				Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+				PackageId:  "v1:platform:package:abc",
+				Actor:      clusterOwner(),
+				Confirmed:  true,
+				Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 			})
 			if err == nil {
 				t.Fatal("a refused build must fail the deploy")
@@ -225,10 +225,10 @@ func TestAPrebuiltAppRecordsThatNothingRan(t *testing.T) {
 	h.deps.Builder = NewWorkbenchBuilder(runner, discardLogger())
 
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     clusterOwner(),
-		Confirmed: true,
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 	}); err != nil {
 		t.Fatalf("deploy: %v", err)
 	}
@@ -259,10 +259,10 @@ func TestTheOutputIsReadBackUnderThePipelinesOwnCaps(t *testing.T) {
 	h.deps.Builder = NewWorkbenchBuilder(runner, discardLogger())
 
 	_, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     clusterOwner(),
-		Confirmed: true,
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 	})
 	if err == nil {
 		t.Fatal("an output over the per-file cap must be refused")

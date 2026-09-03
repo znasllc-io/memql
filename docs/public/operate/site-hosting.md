@@ -584,6 +584,19 @@ clients) the site's own client id. An unregistered site still gets a `200`
 with an empty client id rather than an error: the honest answer for "this
 site has no client to present."
 
+It also carries **`settings`**: the site row's own runtime settings, the
+key-values your bundle reads as `config.settings.<key>`. The key is ALWAYS
+present -- an empty object when the row carries none -- so a bundle reads a
+value without first asking whether the object exists. That is what lets one
+bundle serve two sites against different endpoints with no rebuild: the bytes
+are identical and the document differs.
+
+**Nothing in `settings` is a secret.** The document is served to every
+visitor, unauthenticated, so a value there is public by construction; a key
+ending in `Ref` is refused at the write so nothing can imitate the storefront
+binding's one resolved reference. The rules, the limits and the write are in
+[deployables.md](deployables.md#runtime-settings).
+
 ---
 
 ## Live data in a hosted site
@@ -856,6 +869,35 @@ every hostname the wildcard routes), and near-zero-byte entries would never
 be evicted by a byte cap, so it needs its own entry cap and is a separate
 decision. Prerendering the routes that matter removes the cost entirely --
 see [The prerender budget](#the-prerender-budget).
+
+---
+
+## What the edge records about a request
+
+Every request the edge serves for a site is recorded once -- which
+deployable, the status answered, the bytes, the duration, and what the edge
+did with it (an asset, an HTML document, the SPA fallback, a proxied call,
+the runtime-config document, or nothing at all for a paused or draft site).
+That log is what a deployable's traffic figure is folded from; the figure and
+the log cannot disagree, because the figure is the log folded by the
+database.
+
+Three things about it are worth knowing while reading this page:
+
+- **Nothing about a visitor is recorded.** No address, no user agent, no path
+  and no referrer.
+- **System-owned sites are excluded**, by their own row field rather than by
+  name: the portal and MemQL OS never write a request line, so their traffic
+  reads as unmeasured forever and a third system-owned surface added later is
+  excluded by the same line.
+- **The write is off the request path.** It is a non-blocking hand-off to a
+  batching writer that drops and counts under pressure; nothing a visitor
+  waits for touches the database. `MEMQL_EDGE_REQUEST_LOG_ENABLED=false`
+  switches it off on a replica, and the aggregate is then short by exactly
+  that replica's share -- which reads as a low figure, not as an error.
+
+The window, the buckets, the retention and how "unmeasured" differs from zero
+are in [deployables.md](deployables.md#traffic-and-health).
 
 ---
 

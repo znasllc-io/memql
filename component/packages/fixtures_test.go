@@ -144,3 +144,26 @@ func fixtureTarGz(tree fs.FS) []byte {
 	_ = gz.Close()
 	return buf.Bytes()
 }
+
+// unofferedManifest declares an offered app beside one the target model knows
+// and does not offer (design section B): `ios` is written down as a shape, not
+// registered, so the analysis must report it per-app and deploy the rest.
+const unofferedManifest = `formatVersion: 1
+name: acme
+deployables:
+  - name: docs
+    path: clients/docs
+    kind: static
+  - name: mobile
+    path: clients/mobile
+    kind: ios
+`
+
+// unofferedTargetPackage is an SPAs-only tree (no DSL, so an ordinary user may
+// deploy it) whose manifest carries the iOS app above.
+func unofferedTargetPackage() fstest.MapFS {
+	p := spaOnlyPackage()
+	p[ManifestName] = file(unofferedManifest)
+	p["clients/mobile/Package.swift"] = file("// swift-tools-version:5.9\n")
+	return p
+}

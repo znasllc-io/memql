@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -23,9 +23,9 @@ import {
   packageFingerprint,
   packageFromRow,
 } from "../../src/apps/deployables/packages/rows";
-import { railFor } from "../../src/apps/deployables/packages/StageRail";
+import { railFor } from "../../src/apps/deployables/page/rail";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
-import { click, fakeConnection, withSession, type FakeConnection } from "./harness";
+import { click, fakeConnection, siteRow, withSession, type FakeConnection } from "./harness";
 
 // build.test.tsx is the OS half of the Build epic (memql#4900, task
 // memql#4905): what the surface SAYS once builds are real, what it calls, and
@@ -81,20 +81,38 @@ function deploymentRow(over: Record<string, unknown> = {}): Row {
   } as unknown as Row;
 }
 
+// The deployable this source produces. Since epic memql#4885 the page is the
+// DEPLOYABLE rather than the package, so everything this epic added to the
+// surface is read through the site that carries the source.
+const STOREFRONT = siteRow({
+  id: "site-acme",
+  hostname: "acme.memql.example.com",
+  kind: "spa",
+  status: "live",
+  bundleRef: "blob://sites/site-acme/v2/",
+  packageId: "pkg-acme",
+  packageDeployableName: "storefront",
+  createdAt: "2026-09-01T12:01:00Z",
+});
+
 function mount(connection: FakeConnection | null) {
   h.connection = connection;
   return render(
-    withSession(<DeployablesApp sectionId="packages" navigate={() => {}} askContext={() => {}} store={memStore()} />, {
-      role: "owner",
-      userId: "u-me",
-    }),
+    withSession(
+      <DeployablesApp sectionId="deployables" navigate={() => {}} askContext={() => {}} store={memStore()} />,
+      { role: "owner", userId: "u-me" },
+    ),
   );
 }
 
+/** Opens the deployable whose source is ACME, and returns its page. */
 async function openPackage(connection: FakeConnection) {
   mount(connection);
-  await click((await screen.findByText("acme")).closest("button"));
-  return screen.findByRole("region", { name: /acme/i });
+  await waitFor(() =>
+    expect(document.querySelector("[data-os-livelist]")?.getAttribute("data-state")).toBe("live"),
+  );
+  await click((await screen.findByText("acme.memql.example.com")).closest("button"));
+  return screen.findByRole("region", { name: "Deployable acme.memql.example.com" });
 }
 
 beforeEach(() => {
@@ -165,7 +183,7 @@ describe("what the Build reading says", () => {
 describe("an abandoned run", () => {
   it("stops the rail where it stopped rather than reading as finished", () => {
     const row = deploymentFromRow(deploymentRow({ status: "abandoned", buildLogTail: "npm ..." }));
-    const rail = railFor(row);
+    const rail = railFor({ mode: "deploy", deployment: row });
     const build = rail.stages.find((s) => s.id === "building");
     const publish = rail.stages.find((s) => s.id === "publishing");
     expect(build?.state).toBe("stopped");
@@ -180,9 +198,9 @@ describe("an abandoned run", () => {
     // Analyze. The sweep keeps the stage before it overwrites the status, and
     // this is what that field is for.
     const row = deploymentFromRow(deploymentRow({ status: "abandoned", stoppedAt: "building", report: null }));
-    const build = railFor(row).stages.find((s) => s.id === "building");
+    const build = railFor({ mode: "deploy", deployment: row }).stages.find((s) => s.id === "building");
     expect(build?.state).toBe("stopped");
-    const analyze = railFor(row).stages.find((s) => s.id === "analyzing");
+    const analyze = railFor({ mode: "deploy", deployment: row }).stages.find((s) => s.id === "analyzing");
     expect(analyze?.state).toBe("done");
   });
 
@@ -191,7 +209,7 @@ describe("an abandoned run", () => {
     // an empty one, and the rail must still draw those rather than throwing
     // or drawing nothing.
     const row = deploymentFromRow(deploymentRow({ status: "abandoned", stoppedAt: "" }));
-    expect(railFor(row).stages.some((s) => s.state === "stopped")).toBe(true);
+    expect(railFor({ mode: "deploy", deployment: row }).stages.some((s) => s.state === "stopped")).toBe(true);
   });
 
   it("has copy that says nothing failed", () => {
@@ -209,6 +227,7 @@ describe("an abandoned run", () => {
 describe("the seams the surface calls", () => {
   it("Retry sends the lost run's id, so the retry deploys what it was deploying", async () => {
     const connection = fakeConnection({
+      sites: [STOREFRONT],
       packages: [ACME],
       deployments: { "pkg-acme": [deploymentRow({ id: "dep-lost", status: "abandoned" })] },
     });
@@ -227,7 +246,7 @@ describe("the seams the surface calls", () => {
   });
 
   it("the switch sends the package and the value, and nothing else", async () => {
-    const connection = fakeConnection({ packages: [ACME], deployments: { "pkg-acme": [] } });
+    const connection = fakeConnection({ sites: [STOREFRONT], packages: [ACME], deployments: { "pkg-acme": [] } });
     const page = await openPackage(connection);
 
     await click(within(page).getByRole("checkbox", { name: /Deploy the update by itself/ }));
@@ -239,7 +258,7 @@ describe("the seams the surface calls", () => {
   });
 
   it("says what the switch does before somebody uses it", async () => {
-    const connection = fakeConnection({ packages: [ACME], deployments: { "pkg-acme": [] } });
+    const connection = fakeConnection({ sites: [STOREFRONT], packages: [ACME], deployments: { "pkg-acme": [] } });
     const page = await openPackage(connection);
     // The promise is the whole value of the control: without it somebody
     // either will not arm it or will arm it believing something untrue.
@@ -248,6 +267,7 @@ describe("the seams the surface calls", () => {
 
   it("marks a run nobody clicked", async () => {
     const connection = fakeConnection({
+      sites: [STOREFRONT],
       packages: [ACME],
       deployments: { "pkg-acme": [deploymentRow({ id: "dep-auto", automatic: true })] },
     });
@@ -257,6 +277,7 @@ describe("the seams the surface calls", () => {
 
   it("does not mark a run somebody did click", async () => {
     const connection = fakeConnection({
+      sites: [STOREFRONT],
       packages: [ACME],
       deployments: { "pkg-acme": [deploymentRow({ id: "dep-manual" })] },
     });

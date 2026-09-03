@@ -15,13 +15,30 @@ import { boolOr, flatten } from "../../kit/rows";
 // (memql#4721); the reasoning they carried -- seed rows and CDC envelopes must
 // project identically, and an absent boolean takes the concept's own default
 // -- moved with them. `flatten` is re-exported because it was already part of
-// this module's surface (PublishPicker reads it).
+// this module's surface (the page's zip picker reads it).
 export { flatten };
 
 function objectOf(row: Row, key: string): Record<string, unknown> {
   const v = row[key];
   if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
   return {};
+}
+
+/**
+ * An object field whose values are meant to be plain strings, keeping only
+ * the entries that ARE strings.
+ *
+ * The server's guard admits nothing else, so a number here is a raw write
+ * that bypassed it. Dropping the entry rather than stringifying it keeps the
+ * editor honest: what it shows is what a save would send back, and coercing
+ * would let somebody "save" a value they never typed.
+ */
+function stringMapOf(row: Row, key: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(objectOf(row, key))) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
 }
 
 /**
@@ -72,11 +89,27 @@ export interface SiteRow {
   deleted: boolean;
   binding: Record<string, unknown>;
   /**
+   * The key-values this app reads at load (epic memql#4906, decision P7),
+   * merged by the edge into the deployable's runtime-config document. Plain
+   * strings only -- a non-string on the row is a raw write that bypassed the
+   * server's guard, and keeping it here would put a value in an editor that
+   * cannot be saved back.
+   */
+  settings: Record<string, string>;
+  /**
    * The client this deployable is FOR (epic memql#4800, D5). Optional, and a
    * plain reference with no read effect -- a site with no tie lists, resolves
    * and serves exactly as it always has.
    */
   accountId: string;
+  /**
+   * The package this site was deployed from (epic memql#4794, D7), or "" for
+   * a hand-made site. The page joins a deployable to its SOURCE through it;
+   * a site with none is its own source, and its bundle form says which.
+   */
+  packageId: string;
+  /** The manifest deployable name this site serves; "" whenever packageId is. */
+  packageDeployableName: string;
   createdAt: string;
 }
 
@@ -100,7 +133,10 @@ export function siteFromRow(raw: Row): SiteRow {
     // that did not touch the field.
     deleted: boolOr(row, "deleted", false),
     binding: objectOf(row, "binding"),
+    settings: stringMapOf(row, "settings"),
     accountId: rowString(row, "accountId"),
+    packageId: rowString(row, "packageId"),
+    packageDeployableName: rowString(row, "packageDeployableName"),
     createdAt: rowString(row, "createdAt"),
   };
 }
@@ -201,11 +237,11 @@ export function ownerLabel(site: SiteRow, viewerUserId: string): string {
 /**
  * What counts as a CHANGE to a deployable.
  *
- * ONE definition, read by the Sites list's `LiveList` and by the app-level
- * `useArrivals` the map draws from. Two literals would be two literals that can
- * disagree, and the disagreement is visible: the list pulses a row while the
- * map beside it does not, in an app whose whole point is that the two are the
- * same rows.
+ * ONE definition, read by the Deployables list (inside the group fingerprint
+ * `list.ts` composes) and by the app-level `useArrivals` the map draws from.
+ * Two literals would be two literals that can disagree, and the disagreement
+ * is visible: the list pulses a row while the map beside it does not, in an
+ * app whose whole point is that the two are the same rows.
  *
  * A site row carries no liveness field -- there is no `lastSeenAt` here to turn
  * the surface into a strobe -- so the risk this guards against is the opposite

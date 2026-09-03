@@ -538,6 +538,24 @@ query packageDeployment packageDeployments {
   shape     packageDeploymentFull
 }
 
+/// Every deploy parked at the confirm gate that is waiting for this caller, newest first -- the
+/// Deployables list's "a deploy is waiting for you" mark, and the ONE parked-runs feed the OS retains
+/// at its app root (epic memql#4885, design section A). That feed is a deliberate exception to the
+/// rule that a deployment timeline is retained by the page and never by the root: the rule guards
+/// against subscribing a window to every deploy in the cluster, and a feed over parked runs alone
+/// is the handful of rows a person needs to see before they open anything.
+///
+/// No `paginate`, deliberately, and the reason is the population: a run parks here only between a
+/// person's Analyze and their Deploy, so a caller has a handful of these at most and a cluster owner
+/// a handful per person -- a page size would be a bound on a set that is bounded by how many things
+/// somebody has half-composed. The sort is what keeps the read a bounded one for the parser.
+@actor
+query packageDeployment packageDeploymentsAwaitingConfirm {
+  filter  status=="awaiting_confirm" && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  sort    "row.createdAt", "desc"
+  shape   packageDeploymentFull
+}
+
 /// One deployment attempt by id -- what the OS polls while a deploy advances and
 /// what the confirm gate reads the report from.
 @actor
@@ -591,4 +609,66 @@ query site sitesArchived {
   filter  statusIsArchived && isNotDeleted && (ownerUserId==actor.userId || actor.isClusterOwner==true)
   sort    "hostname", "asc"
   shape   siteFull
+}
+
+// ---- source credentials (epic memql#4885) ----
+//
+// Two reads for people and one for the engine, and the split is the whole
+// security shape of the concept: no client-reachable query carries a shape
+// that projects `encryptedValue`, and the one query that does is @serverOnly,
+// resolved under the PACKAGE OWNER's actor from inside a fetch. The caller term
+// on the two people-facing reads is the composite tier's own predicate written
+// out, exactly as the package queries above write it.
+
+/// Every credential this caller holds, revoked ones included and marked -- the Settings Sources
+/// group. A cluster owner reads every row's metadata, which is the oversight the composite tier
+/// exists for; nothing here can return the ciphertext, because the card shape does not carry it.
+///
+/// The composite term is PARENTHESIZED even though it stands alone, and the parens are load-bearing:
+/// the struct form splices this filter after the concept predicate (buildStructQueryExpr), and a
+/// bare top-level `a || b` reaches the row-authz shadow analyzer in a shape isCompositeScopeConjunct
+/// does not recognise, so TestRowAuthzEnforcementLandGate reports the read undecidable. Written
+/// the way every composite-tier sibling writes the term, it is recognised as the tier's own.
+@actor
+query sourceCredential sourceCredentialsMine {
+  filter  (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  sort    "label", "asc"
+  shape   sourceCredentialCard
+}
+
+/// One credential by id -- the Source stop's credential chip. Card shape, so metadata only.
+@unbounded("credential by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query sourceCredential sourceCredentialById {
+  args {
+    credentialId  string!
+  }
+  filter  row.id==args.credentialId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  shape   sourceCredentialCard
+}
+
+/// THE ONE READ THAT RETURNS CIPHERTEXT, and @serverOnly for exactly that reason: it exists so the
+/// fetcher and the poll can unseal a credential from inside a fetch, under
+/// auth.ContextWithUserActor(ctx, <the package's owner>), into a local that dies with the call.
+///
+/// DELIBERATELY NO cluster-owner branch. A cluster owner never needs ciphertext through a query --
+/// decryption happens only inside a fetch, and a cluster owner deploying somebody's package fetches
+/// under that package's OWN credential, resolved as its owner. The owner term is the whole
+/// authorization: a package naming somebody else's credential resolves zero rows here and is
+/// refused by name (credential_not_found) before any request leaves the cluster.
+///
+/// actor.userId scoping is not the fix, and it is already here -- the filter IS owner-scoped. What
+/// @serverOnly adds over the scope is the WIRE: a client-callable projection of `encryptedValue` is
+/// a ciphertext oracle even for the row's own owner, and nothing a person does needs one, because
+/// no browser holds the master key. The only legitimate caller is component/packages, from inside
+/// a fetch, under the package owner's borrowed actor and stamped internal origin.
+@serverOnly
+@unbounded("sealed credential by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query sourceCredential sourceCredentialSealedById {
+  args {
+    credentialId  string!
+  }
+  filter  row.id==args.credentialId && ownerUserId==actor.userId
+  shape   sourceCredentialSealed
 }

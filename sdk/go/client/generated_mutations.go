@@ -5546,7 +5546,7 @@ func CreatePATIdentityBuild(args CreatePATIdentityArgs) string {
 
 // CreatePackage -- Register a tracked package. The person's write: they supply the source, the engine supplies the identity and the name.
 // `name` is an ARG here and only here, because at registration time no analysis has run yet and the tree has not been read -- so the manifest cannot have supplied it. The first successful analysis overwrites it through recordPackageAnalysis, which is why the field's doc says the name comes from the manifest: this value is a placeholder with a person's guess in it.
-// `repoTokenRef` NAMES a globalSecret and is a plain string here on purpose (D14). There is no arg on this mutation, or anywhere else in this epic, that carries a token VALUE.
+// `credentialId` NAMES one of the caller's v1:platform:sourceCredential rows and is a plain string here on purpose (epic memql#4885, D10). There is no arg on this mutation, or anywhere else in the packages surface, that carries a token VALUE: the token crossed the wire once, inside sourceCredentialCreate, and the fetcher resolves the name under THIS package's owner -- so naming somebody else's credential here buys nothing but a credential_not_found at the next fetch.
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["createPackage"] in generated_concepts.go).
 type CreatePackageArgs struct {
@@ -5556,7 +5556,7 @@ type CreatePackageArgs struct {
 	SourceKind   string
 	RepoUrl      string
 	RepoRef      string
-	RepoTokenRef string
+	CredentialId string
 	ArtifactId   string
 }
 
@@ -5595,12 +5595,12 @@ func CreatePackageBuild(args CreatePackageArgs) string {
 		b.WriteString("repoRef: ")
 		b.WriteString(quoteMemQL(args.RepoRef))
 	}
-	if args.RepoTokenRef != "" {
+	if args.CredentialId != "" {
 		if b.Len() > 23 {
 			b.WriteString(", ")
 		}
-		b.WriteString("repoTokenRef: ")
-		b.WriteString(quoteMemQL(args.RepoTokenRef))
+		b.WriteString("credentialId: ")
+		b.WriteString(quoteMemQL(args.CredentialId))
 	}
 	if args.ArtifactId != "" {
 		if b.Len() > 23 {
@@ -12643,6 +12643,28 @@ func RevokePasskeyIdentityBuild(args RevokePasskeyIdentityArgs) string {
 	return b.String()
 }
 
+// RevokeSourceCredential -- Revoke a credential. The person's write, and an owned one: the write guard resolves the target row and admits its owner (or a cluster owner, through the explicit escape), so a caller cannot revoke a credential they do not hold. The row stays -- it is the audit history of what fetched under it -- and every source fetching under it refuses at its next fetch until it is switched.
+//
+// Bound concept: v1:platform:sourceCredential (machine-readable: BoundConcepts["revokeSourceCredential"] in generated_concepts.go).
+type RevokeSourceCredentialArgs struct {
+	CredentialId string
+}
+
+// RevokeSourceCredential calls the engine mutation revokeSourceCredential.
+func (qc *QueryClient) RevokeSourceCredential(ctx context.Context, args RevokeSourceCredentialArgs) (*Result, error) {
+	call := RevokeSourceCredentialBuild(args)
+	return qc.executeNamed(ctx, "revokeSourceCredential", call)
+}
+
+func RevokeSourceCredentialBuild(args RevokeSourceCredentialArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation revokeSourceCredential(")
+	b.WriteString("credentialId: ")
+	b.WriteString(quoteMemQL(args.CredentialId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RevokeWorker -- Revoke a worker registration.
 //
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["revokeWorker"] in generated_concepts.go).
@@ -16488,13 +16510,13 @@ func UpdateOutboundRequestStatusBuild(args UpdateOutboundRequestStatusArgs) stri
 	return b.String()
 }
 
-// UpdatePackageSource -- Edit the source facts of a tracked package: which ref to deploy, and which named secret to fetch under. Minimal arguments deliberately -- update{} has been a read-merge since memql#1628, so re-supplying every discriminator is dead weight that an undeclared-argument DISCARD hides.
+// UpdatePackageSource -- Edit the source facts of a tracked package: which ref to deploy, and which of the owner's credentials to fetch under -- switching a source to a fresh credential after revoking the old one is this write. Minimal arguments deliberately -- update{} has been a read-merge since memql#1628, so re-supplying every discriminator is dead weight that an undeclared-argument DISCARD hides.
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["updatePackageSource"] in generated_concepts.go).
 type UpdatePackageSourceArgs struct {
 	PackageId    string
 	RepoRef      string
-	RepoTokenRef string
+	CredentialId string
 }
 
 // UpdatePackageSource calls the engine mutation updatePackageSource.
@@ -16515,12 +16537,12 @@ func UpdatePackageSourceBuild(args UpdatePackageSourceArgs) string {
 		b.WriteString("repoRef: ")
 		b.WriteString(quoteMemQL(args.RepoRef))
 	}
-	if args.RepoTokenRef != "" {
+	if args.CredentialId != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
 		}
-		b.WriteString("repoTokenRef: ")
-		b.WriteString(quoteMemQL(args.RepoTokenRef))
+		b.WriteString("credentialId: ")
+		b.WriteString(quoteMemQL(args.CredentialId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -17413,6 +17435,37 @@ func UpdateSiteBundleBuild(args UpdateSiteBundleArgs) string {
 		b.WriteString("artifactId: ")
 		b.WriteString(quoteMemQL(args.ArtifactId))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateSiteSettings -- Replace a deployable's runtime settings (epic memql#4906, decision P7): the key-values the edge merges into the site's runtime-config document under `settings`, read by the bundle at load.
+// A REPLACE, NOT A MERGE, and the whole object is the argument. `settings` is stamped from the required arg rather than accepted, so an empty object is written as an empty object and clearing every setting is expressible -- an accepted optional arg would be dropped from the payload when omitted and the read-merge would re-save whatever was there (updateSiteAccount's reasoning). The editor sends the map it shows, so what a person sees is what the row holds.
+// The shape half is here: an object. The half that decides -- every key of the identifier form [A-Za-z][A-Za-z0-9_]{0,63} and not ending in `Ref`, every value a plain string within MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH, at most MEMQL_SITE_SETTINGS_MAX_KEYS keys, and the systemOwned refusal -- is the Go guard beside the status guard (component/memql/platform_site_settings_guard.go), because a mutation body cannot see an object's keys. NOT A PLACE FOR A SECRET: the document is served to every visitor.
+// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, as on updateSiteBundle: the row's owner, or a cluster owner through the explicit escape. A systemOwned row is refused for both, because the seed re-writes it at every boot.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteSettings"] in generated_concepts.go).
+type UpdateSiteSettingsArgs struct {
+	SiteId   string
+	Settings map[string]any
+}
+
+// UpdateSiteSettings calls the engine mutation updateSiteSettings.
+func (qc *QueryClient) UpdateSiteSettings(ctx context.Context, args UpdateSiteSettingsArgs) (*Result, error) {
+	call := UpdateSiteSettingsBuild(args)
+	return qc.executeNamed(ctx, "updateSiteSettings", call)
+}
+
+func UpdateSiteSettingsBuild(args UpdateSiteSettingsArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateSiteSettings(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("settings: ")
+	b.WriteString(renderMemQLValue(args.Settings))
 	b.WriteString(")")
 	return b.String()
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -36,8 +37,27 @@ type Engine interface {
 //     returns ZERO ROWS rather than an error -- silently, which is how a
 //     pipeline reading its own package row under no actor would conclude the
 //     package does not exist.
+//
+// Two exceptions, both in the source-credentials section at the bottom and
+// both stated there rather than here: sourceCredentialSealedById is a STAMPED
+// READ (the query is @serverOnly because it returns ciphertext, and the stamp
+// admits the construct without widening the rows -- the actor still decides
+// those), and revokeSourceCredential is an UNSTAMPED WRITE (an ordinary owned
+// mutation the write guard decides for the caller; stamping it would hand the
+// guard its internal-origin escape and let anyone revoke anything).
+// internal_origin_test.go asserts all four lists.
 type store struct {
 	engine Engine
+	// logger is for the one thing the store does on its own account -- the
+	// best-effort heartbeat behind resolveCredential. Nil means slog.Default.
+	logger *slog.Logger
+}
+
+func (s *store) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
 }
 
 // ---------------------------------------------------------------------------
@@ -145,14 +165,26 @@ func (s *store) deploymentsInFlight(ctx context.Context) ([]map[string]any, erro
 // Writes (stamped internal origin)
 // ---------------------------------------------------------------------------
 
-// writeInternal runs one @serverOnly mutation under a context this function
-// constructs. The stamp is applied here and nowhere else in the package.
-func (s *store) writeInternal(ctx context.Context, query string) error {
-	_, err := s.engine.Execute(auth.ContextWithInternalOrigin(ctx), query)
+// executeInternal runs one @serverOnly construct under a context this function
+// constructs. The stamp is applied here and nowhere else in the package --
+// INLINE, as the argument to the one Execute that needs it, so it dies at that
+// call (memql#2879; TestTheStampNeverEscapesItsCall counts this site and
+// requires exactly one). Every stamped statement funnels through here: the
+// pipeline's writes through writeInternal below, and the one stamped read,
+// sourceCredentialSealedById.
+func (s *store) executeInternal(ctx context.Context, query string) ([]map[string]any, error) {
+	res, err := s.engine.Execute(auth.ContextWithInternalOrigin(ctx), query)
 	if err != nil {
-		return fmt.Errorf("%s: %w", firstToken(query), err)
+		return nil, fmt.Errorf("%s: %w", firstToken(query), err)
 	}
-	return nil
+	return memqlRows(res), nil
+}
+
+// writeInternal runs one @serverOnly mutation. A wrapper over executeInternal
+// rather than a second stamp, which is what keeps the call-site count at one.
+func (s *store) writeInternal(ctx context.Context, query string) error {
+	_, err := s.executeInternal(ctx, query)
+	return err
 }
 
 // openDeployment is the ONE write in this package that runs under a BORROWED
@@ -292,8 +324,127 @@ func (s *store) setSiteStatus(ctx context.Context, siteId, status string) error 
 }
 
 // ---------------------------------------------------------------------------
+// Source credentials (epic memql#4885, D10)
+// ---------------------------------------------------------------------------
+
+// sourceCredentialSealedById is THE ONE STAMPED READ in this package, and the
+// exception to the header's rule is narrower than it looks. The query is
+// @serverOnly -- it returns ciphertext, and a client-callable projection of
+// encryptedValue would be a ciphertext oracle even for the row's own owner --
+// so the stamp is what lets the engine reach the construct at all. What the
+// stamp does NOT do is widen the read: origin decides whether the construct may
+// be called, the actor decides which rows come back, and there is no
+// internal-origin bypass on the read path. The caller (resolveCredential)
+// passes a ctx already carrying the PACKAGE OWNER's actor, and the query's own
+// owner term -- plus the tier the engine ANDs in -- admits exactly that owner's
+// rows. Nil, not an error, for zero rows: "does not exist" and "belongs to
+// somebody else" are the same answer here and the caller's sentence says so.
+func (s *store) sourceCredentialSealedById(ctx context.Context, credentialId string) (map[string]any, error) {
+	rows, err := s.executeInternal(ctx, fmt.Sprintf(
+		"query sourceCredentialSealedById(credentialId: %s)", langparser.QuoteString(credentialId)))
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rows[0], nil
+}
+
+// createSourceCredential lands a sealed credential under the CALLER's own
+// actor: ownerUserId is stamped from actor.userId inside the mutation, so the
+// ctx handed here must be the person's and never a borrowed one. Stamped
+// internal because the mutation is @serverOnly -- the ciphertext is a value
+// only the Go frame that sealed it can vouch for, and the stamp is origin, not
+// identity, so the owner stays the person who asked.
+func (s *store) createSourceCredential(ctx context.Context, c credentialSeed) error {
+	return s.writeInternal(ctx, fmt.Sprintf(
+		"mutation createSourceCredential(credentialId: %s, host: %s, label: %s, encryptedValue: %s, fingerprint: %s)",
+		langparser.QuoteString(c.CredentialId),
+		langparser.QuoteString(c.Host),
+		langparser.QuoteString(c.Label),
+		langparser.QuoteString(c.EncryptedValue),
+		langparser.QuoteString(c.Fingerprint),
+	))
+}
+
+// touchSourceCredential stamps the heartbeat after an unseal -- the engine's
+// own account of a fetch, which is why the mutation is @serverOnly and why the
+// caller treats a failure here as bookkeeping rather than as a failed fetch.
+func (s *store) touchSourceCredential(ctx context.Context, credentialId string, at time.Time) error {
+	return s.writeInternal(ctx, fmt.Sprintf(
+		"mutation touchSourceCredential(credentialId: %s, lastUsedAt: %s)",
+		langparser.QuoteString(credentialId),
+		langparser.QuoteString(at.UTC().Format(time.RFC3339))))
+}
+
+// revokeSourceCredential is a CALLER-ACTOR write and is deliberately NOT
+// stamped. The mutation is an ordinary owned one: the write guard resolves the
+// target row and admits its owner, or a cluster owner through the explicit
+// escape, and refuses everyone else. Stamping it internal would hand the guard
+// its FIRST escape -- internal origin is trusted server-side Go -- and let any
+// caller who can reach this capability revoke any credential on the cluster.
+func (s *store) revokeSourceCredential(ctx context.Context, credentialId string) error {
+	return s.writeAsCaller(ctx, fmt.Sprintf(
+		"mutation revokeSourceCredential(credentialId: %s)", langparser.QuoteString(credentialId)))
+}
+
+// ---------------------------------------------------------------------------
+// Placements (epic memql#4885, D8) -- caller-actor writes
+// ---------------------------------------------------------------------------
+
+// writeAsCaller runs one statement under whatever actor and origin the caller
+// already has -- the plain Execute, named so a reader can tell it from
+// writeInternal at a glance. Everything that goes through here is a call the
+// PAGE could make, and is authorized by the guard behind the construct rather
+// than by anything in this package; internal_origin_test.go's callerWrites
+// list names each one and asserts the stamp is absent.
+func (s *store) writeAsCaller(ctx context.Context, query string) error {
+	if _, err := s.engine.Execute(ctx, query); err != nil {
+		return fmt.Errorf("%s: %w", firstToken(query), err)
+	}
+	return nil
+}
+
+// setSiteAccount points a freshly created site at the client it is FOR. The
+// same updateSiteAccount the site detail's account picker issues, under the
+// caller's actor, so v1:platform:site's composite write guard admits the row's
+// owner (or a cluster owner) and refuses everyone else -- exactly as it does
+// from the page.
+func (s *store) setSiteAccount(ctx context.Context, siteId, accountId string) error {
+	return s.writeAsCaller(ctx, fmt.Sprintf(
+		"mutation updateSiteAccount(siteId: %s, accountId: %s)",
+		langparser.QuoteString(siteId), langparser.QuoteString(accountId)))
+}
+
+// addCustomDomain binds a client's own domain to a freshly created site. The
+// same customDomainAdd builtin the Domains panel issues, under the caller's
+// actor, so the three guards in platform_custom_domain_policy.go -- not under
+// the cluster's own domain, not a collision, not past the per-site cap --
+// decide exactly as they do from the page. Any error is the guard's own
+// sentence, which the publish stage records on the outcome rather than
+// failing over.
+func (s *store) addCustomDomain(ctx context.Context, siteId, hostname string) error {
+	return s.writeAsCaller(ctx, fmt.Sprintf(
+		"builtin customDomainAdd(siteId: %s, hostname: %s)",
+		langparser.QuoteString(siteId), langparser.QuoteString(hostname)))
+}
+
+// ---------------------------------------------------------------------------
 // Row payloads
 // ---------------------------------------------------------------------------
+
+// credentialSeed is what createSourceCredential writes. No owner field, and
+// that absence is the design: the mutation stamps ownerUserId from the actor,
+// and a seed that could carry one would be the caller-supplied owner
+// TestDeclaredOwnerFieldsAreServerStamped exists to refuse.
+type credentialSeed struct {
+	CredentialId   string
+	Host           string
+	Label          string
+	EncryptedValue string
+	Fingerprint    string
+}
 
 type deploymentSeed struct {
 	DeploymentId  string
@@ -335,6 +486,17 @@ type DeployableOutcome struct {
 	Version   string   `json:"version,omitempty"`
 	Created   bool     `json:"created,omitempty"`
 	Refusal   *Problem `json:"refusal,omitempty"`
+
+	// The placement halves a first deploy applied (epic memql#4885, D8), and
+	// the ones it could not. AccountId and OwnDomain are set only when the
+	// write LANDED; a refusal is recorded on the sibling field with the
+	// server's own sentence and is NOT fatal -- the site is live at its
+	// cluster address regardless, and the Where-it-lives stop renders the
+	// refusal in place.
+	AccountId      string   `json:"accountId,omitempty"`
+	OwnDomain      string   `json:"ownDomain,omitempty"`
+	AccountRefusal *Problem `json:"accountRefusal,omitempty"`
+	DomainRefusal  *Problem `json:"domainRefusal,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

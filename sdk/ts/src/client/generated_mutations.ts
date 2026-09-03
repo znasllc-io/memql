@@ -3044,7 +3044,7 @@ QueryClient.prototype.createPATIdentity = function (this: QueryClient, args: Cre
 
 /** Register a tracked package. The person's write: they supply the source, the engine supplies the identity and the name.
 `name` is an ARG here and only here, because at registration time no analysis has run yet and the tree has not been read -- so the manifest cannot have supplied it. The first successful analysis overwrites it through recordPackageAnalysis, which is why the field's doc says the name comes from the manifest: this value is a placeholder with a person's guess in it.
-`repoTokenRef` NAMES a globalSecret and is a plain string here on purpose (D14). There is no arg on this mutation, or anywhere else in this epic, that carries a token VALUE. */
+`credentialId` NAMES one of the caller's v1:platform:sourceCredential rows and is a plain string here on purpose (epic memql#4885, D10). There is no arg on this mutation, or anywhere else in the packages surface, that carries a token VALUE: the token crossed the wire once, inside sourceCredentialCreate, and the fetcher resolves the name under THIS package's owner -- so naming somebody else's credential here buys nothing but a credential_not_found at the next fetch. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["createPackage"] in generated_concepts.ts).
 export interface CreatePackageArgs {
   packageId: string;
@@ -3053,7 +3053,7 @@ export interface CreatePackageArgs {
   sourceKind: string;
   repoUrl?: string;
   repoRef?: string;
-  repoTokenRef?: string;
+  credentialId?: string;
   artifactId?: string;
 }
 
@@ -3064,7 +3064,7 @@ export function buildCreatePackage(args: CreatePackageArgs): string {
   parts.push("sourceKind: " + renderMemQLValue(args.sourceKind));
   if (args.repoUrl !== undefined) parts.push("repoUrl: " + renderMemQLValue(args.repoUrl));
   if (args.repoRef !== undefined) parts.push("repoRef: " + renderMemQLValue(args.repoRef));
-  if (args.repoTokenRef !== undefined) parts.push("repoTokenRef: " + renderMemQLValue(args.repoTokenRef));
+  if (args.credentialId !== undefined) parts.push("credentialId: " + renderMemQLValue(args.credentialId));
   if (args.artifactId !== undefined) parts.push("artifactId: " + renderMemQLValue(args.artifactId));
   return "mutation createPackage(" + parts.join(", ") + ")";
 }
@@ -7122,6 +7122,28 @@ QueryClient.prototype.revokePasskeyIdentity = function (this: QueryClient, args:
   return this.executeNamed("revokePasskeyIdentity", buildRevokePasskeyIdentity(args), opts);
 };
 
+/** Revoke a credential. The person's write, and an owned one: the write guard resolves the target row and admits its owner (or a cluster owner, through the explicit escape), so a caller cannot revoke a credential they do not hold. The row stays -- it is the audit history of what fetched under it -- and every source fetching under it refuses at its next fetch until it is switched. */
+// Bound concept: v1:platform:sourceCredential (machine-readable: BoundConcepts["revokeSourceCredential"] in generated_concepts.ts).
+export interface RevokeSourceCredentialArgs {
+  credentialId: string;
+}
+
+export function buildRevokeSourceCredential(args: RevokeSourceCredentialArgs): string {
+  const parts: string[] = [];
+  parts.push("credentialId: " + renderMemQLValue(args.credentialId));
+  return "mutation revokeSourceCredential(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    revokeSourceCredential(args: RevokeSourceCredentialArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.revokeSourceCredential = function (this: QueryClient, args: RevokeSourceCredentialArgs = {} as RevokeSourceCredentialArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("revokeSourceCredential", buildRevokeSourceCredential(args), opts);
+};
+
 /** Revoke a worker registration. */
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["revokeWorker"] in generated_concepts.ts).
 export interface RevokeWorkerArgs {
@@ -9491,19 +9513,19 @@ QueryClient.prototype.updateOutboundRequestStatus = function (this: QueryClient,
   return this.executeNamed("updateOutboundRequestStatus", buildUpdateOutboundRequestStatus(args), opts);
 };
 
-/** Edit the source facts of a tracked package: which ref to deploy, and which named secret to fetch under. Minimal arguments deliberately -- update{} has been a read-merge since memql#1628, so re-supplying every discriminator is dead weight that an undeclared-argument DISCARD hides. */
+/** Edit the source facts of a tracked package: which ref to deploy, and which of the owner's credentials to fetch under -- switching a source to a fresh credential after revoking the old one is this write. Minimal arguments deliberately -- update{} has been a read-merge since memql#1628, so re-supplying every discriminator is dead weight that an undeclared-argument DISCARD hides. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["updatePackageSource"] in generated_concepts.ts).
 export interface UpdatePackageSourceArgs {
   packageId: string;
   repoRef?: string;
-  repoTokenRef?: string;
+  credentialId?: string;
 }
 
 export function buildUpdatePackageSource(args: UpdatePackageSourceArgs): string {
   const parts: string[] = [];
   parts.push("packageId: " + renderMemQLValue(args.packageId));
   if (args.repoRef !== undefined) parts.push("repoRef: " + renderMemQLValue(args.repoRef));
-  if (args.repoTokenRef !== undefined) parts.push("repoTokenRef: " + renderMemQLValue(args.repoTokenRef));
+  if (args.credentialId !== undefined) parts.push("credentialId: " + renderMemQLValue(args.credentialId));
   return "mutation updatePackageSource(" + parts.join(", ") + ")";
 }
 
@@ -9968,6 +9990,33 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateSiteBundle = function (this: QueryClient, args: UpdateSiteBundleArgs = {} as UpdateSiteBundleArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateSiteBundle", buildUpdateSiteBundle(args), opts);
+};
+
+/** Replace a deployable's runtime settings (epic memql#4906, decision P7): the key-values the edge merges into the site's runtime-config document under `settings`, read by the bundle at load.
+A REPLACE, NOT A MERGE, and the whole object is the argument. `settings` is stamped from the required arg rather than accepted, so an empty object is written as an empty object and clearing every setting is expressible -- an accepted optional arg would be dropped from the payload when omitted and the read-merge would re-save whatever was there (updateSiteAccount's reasoning). The editor sends the map it shows, so what a person sees is what the row holds.
+The shape half is here: an object. The half that decides -- every key of the identifier form [A-Za-z][A-Za-z0-9_]{0,63} and not ending in `Ref`, every value a plain string within MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH, at most MEMQL_SITE_SETTINGS_MAX_KEYS keys, and the systemOwned refusal -- is the Go guard beside the status guard (component/memql/platform_site_settings_guard.go), because a mutation body cannot see an object's keys. NOT A PLACE FOR A SECRET: the document is served to every visitor.
+AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, as on updateSiteBundle: the row's owner, or a cluster owner through the explicit escape. A systemOwned row is refused for both, because the seed re-writes it at every boot. */
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteSettings"] in generated_concepts.ts).
+export interface UpdateSiteSettingsArgs {
+  siteId: string;
+  settings: Record<string, unknown>;
+}
+
+export function buildUpdateSiteSettings(args: UpdateSiteSettingsArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("settings: " + renderMemQLValue(args.settings));
+  return "mutation updateSiteSettings(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateSiteSettings(args: UpdateSiteSettingsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateSiteSettings = function (this: QueryClient, args: UpdateSiteSettingsArgs = {} as UpdateSiteSettingsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateSiteSettings", buildUpdateSiteSettings(args), opts);
 };
 
 /** Move a site between draft / live / disabled.

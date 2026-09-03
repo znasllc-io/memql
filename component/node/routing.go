@@ -278,6 +278,30 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.updated.v1:platform:package", TargetType: ""},
 		{Pattern: "graph.node.created.v1:platform:packageDeployment", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:platform:packageDeployment", TargetType: ""},
+		// Personal source credentials (epic memql#4885, D10). Same shape as
+		// the package rules above and the same reason: the rows are written
+		// on whichever node ran the capability or the fetch and read in the
+		// OS window the bff is serving -- the Settings Sources group, and the
+		// Source stop's credential chip. Without these rules a person who
+		// revokes a credential in one tab watches the chip stay green in
+		// another, which is the failure that looks like it is working.
+		//
+		// `created` and `updated` both, and both are cheap. A create or a
+		// revoke is a HUMAN action, a handful of rows per person over the
+		// life of a cluster. The other writer is the lastUsedAt heartbeat,
+		// one update per fetch and per scheduled poll per credentialled
+		// package -- a few rows an hour on a busy cluster, nowhere near the
+		// ground v1:worker:invocation is excluded on. The OS's own rule
+		// handles the rest: lastUsedAt is a heartbeat and must never enter an
+		// arrival-cue fingerprint, so the event moves a timestamp and
+		// announces nothing.
+		//
+		// The ciphertext rides the event payload exactly as it rides a row,
+		// and row admission is what gates both (memql#4309): the concept's
+		// composite tier admits the owner and a cluster owner, so the
+		// broadcast reaches the same people the read does and nobody else.
+		{Pattern: "graph.node.created.v1:platform:sourceCredential", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:platform:sourceCredential", TargetType: ""},
 		// ---- The browser-facing completion (memql#4542) -------------------
 		//
 		// Everything from here to the end of this block was added by ONE

@@ -218,36 +218,183 @@ THIRD app gets wrong by default.
   because the shared behaviour is what had to move. The measure that it was
   the right size: Users ships two classes of its own.
 
-## Deployables, the third app (memql#4725)
+## Deployables, the third app (memql#4725, recomposed by epic memql#4885)
 
-`src/apps/deployables/` is the sites this cluster serves, the **deploy map**,
-and the two writes that change either -- create a site, publish a Library zip
-to one. Three things about it are new rules rather than repetitions of the two
-apps before it.
+`src/apps/deployables/` is what this cluster serves for people, and the one
+flow that composes it, deploys it and manages it afterwards. Three sections --
+**Map**, **Deployables**, **Settings** -- where there were five: Actions, Sites
+and Packages retired, because "create a deployable, give it an address, bind a
+domain, tie it to a client" was four screens for one intention. The map is
+untouched and stays first.
 
-- **One feed, three surfaces, one selection.** The list, the map and the detail
-  panel are readings of a single `LiveCollection` retained at the app root and
-  passed down. A second `useSites()` inside the map would open a second
-  subscription and run a second seed, and the two would then be free to
-  disagree about what the cluster currently holds -- which is the one failure
-  an app that is a picture and a table of the same thing must not have. The
-  selection is shared for the same reason: walking a cluster on the map and
-  switching to the list lands on the same deployable.
-- **`v1:platform:site` broadcasts BOTH created and updated**, unlike
+Ten things about it are new rules rather than repetitions of the apps before
+it. The first nine are the compose epic's, and they are the ones the next
+multi-step surface in this shell will get wrong by default; the tenth came out
+of the Packages half this passage replaces and survived it unchanged.
+
+- **THE RAIL IS THE FORM.** Composing a deployable, watching it deploy and
+  reading its standing status are ONE vertical device, top to bottom: Source,
+  What it is, Where it lives, Build, Live. Not a stepper beside a status
+  panel, not a wizard modal, not numbered circles with Next and Back. The
+  order is a law the pipeline enforces (`stage -> roll -> publish`, reversed
+  on rollback), which is what earns a sequenced device at all -- normally the
+  most over-used structure in software design. The Head's ONE action follows
+  the state; the next unanswered stop is the open one; an earlier stop reopens
+  on click. A stepper would have been a second device beside the rail, and a
+  refusal at step four would page somebody back to step one to re-read it.
+
+- **`railFor` READS THREE WAYS, AND EACH MODE READS DIFFERENT ROWS**
+  (`page/rail.ts`, pure, no DOM; `page/Rail.tsx` draws the result).
+  `deploy` is the six-stage reading over one `DeploymentRow`, reproduced
+  exactly -- its tests moved into the mode unmodified, because the D6 rail was
+  already right and a rewrite of a correct reading is a rewrite of its bugs
+  back in. `standing` reads the target's five stops off the rows: the package,
+  the NEWEST run whatever its status, and the site. `compose` reads the same
+  five stops as INPUTS -- answered, being answered, not reachable yet, or
+  parked by a refusal.
+
+  Two consequences worth knowing before adding a fourth mode, because neither
+  needed one. An IN-FLIGHT run is reported inside `standing`: the stop the run
+  is at is `current` and every later stop is `ahead`, which is how "the same
+  stops report progress during a deploy" is true with three modes. And a
+  REFUSED run does not dim the stops after it -- a site that was live before a
+  redeploy failed at Build is still serving, and a rail reading it as "not
+  reached" would be lying about the one fact somebody came to check. The
+  skipped-stage rule survives unchanged and is still the point: a prebuilt app
+  draws Build skipped, "its built output is in the source", because a person
+  counting missing steps cannot tell a fast deploy from a broken one.
+
+- **A KIND'S SHAPE LIVES IN THE TARGET REGISTRY, NOT IN THE PAGE**
+  (`targets.ts`). A target states its address stop, its build surface, its
+  live states and its row, and every stop renders from it -- so the page has
+  no branch on "which kind is this", and the Build epic changes what the Build
+  stop SAYS rather than where it is. `web` is the only registered target;
+  ios / android / macos are the design's table and not code, so nothing
+  renders a control for them. **`OFFERED_KINDS` is a single-line literal on
+  purpose**: `component/memql/site_kind_os_parity_test.go` reads it out of the
+  file and holds it equal to `v1:platform:site.kind`, the way
+  `TestFleetOnlineWindowMatchesPortal` holds the online window equal across
+  client and engine. A kind the OS offers and the enum does not is a form
+  somebody can fill in and nothing can store.
+
+- **THE HEAD HAS ONE ACTION AND IT FOLLOWS THE STATE** (`page/head.ts` names
+  the state, `headActionFor` in `page/rail.ts` answers it): Analyze, Deploy,
+  Make it live, Deploy the update, Retry, Redeploy -- plus the quiet Ask and
+  Open beside it. **Null is a statement, not a gap.** A system-owned row, an
+  archived deployable, an archived source and a reader each get NO lifecycle
+  control rather than a disabled one, for the reason this app already gave
+  once: six greyed-out buttons are six controls somebody has to read past to
+  learn they are not for them. A run at a non-terminal stage also gets none --
+  a button beside a moving rail is a button competing with it.
+
+- **THE LIST IS ONE `LiveList` OVER THE SITE FEED, JOINED CLIENT-SIDE TO THE
+  PACKAGE FEED.** One row per thing that serves or will, so a package with two
+  apps is TWO rows sharing a source, grouped under it -- not one row somebody
+  has to open to discover it is two things. Each row carries the standing rail
+  in its `compact` form: the same five marks, no labels, each carrying its
+  label as its accessible name. A row is read as the shape it opens into.
+
+- **THE PARKED-RUNS FEED IS A FOURTH FEED AT THE APP ROOT, AND IT IS THE ONE
+  RECORDED EXCEPTION** to the rule this app's own Packages half wrote down: a
+  deployment TIMELINE is retained by the page and never by the root. That rule
+  guards against subscribing a window to every deploy in the cluster to render
+  one row, and it still does. `packageDeploymentsAwaitingConfirm` is parked
+  runs ALONE -- a handful of rows, and rows a person needs to see BEFORE they
+  open anything, because the whole point of a gate that lives on the row is
+  that somebody who closed the window finds their deploy where they left it.
+  The list marks that row "a deploy is waiting for you". **Any other timeline
+  feed at the root is the thing the rule forbids**, and the exception's code
+  comment cites this passage rather than restating it.
+
+- **A CREDENTIAL IS A CARD, AND THERE IS NO TYPE THAT COULD HOLD THE VALUE**
+  (`sources/rows.ts`, `sources/useSourceCredentials.ts`). `CredentialRow`
+  projects label, host, fingerprint and status; it has no field for a token,
+  so a row that carried one would be dropped here rather than rendered. There
+  is no chip, fact or tooltip in this app that could show a value.
+  **`lastUsedAt` is the heartbeat rule's second sharpest case** after
+  `lastCheckedAt`: every fetch of every source under a credential writes it,
+  the ten-minute poll feed included, so naming it in the arrival-cue
+  fingerprint would ring the card on a timer for as long as anything tracks a
+  repository. The fingerprint is label, status, host and fingerprint;
+  `lastUsedAt` and `revokedAt` are displayed and never rung.
+
+- **A STOP OWNS ITS OWN REFUSAL** (`page/stops/*`, one component per stop).
+  Every refusal renders AT the stop it belongs to -- the OS's headline above
+  and the server's sentence beneath, verbatim -- and the rail marks that stop
+  stopped and every later one unreached. A refusal with no known code renders
+  under a NEUTRAL heading with the server's sentence alone, never under a
+  guessed one: `packages/refusals.ts` keys copy by code, and
+  `test/deployables/refusals.test.ts` reads `component/packages/refusal.go`
+  AND every inline code raised across that package, so a code the engine can
+  emit and this build has no name for fails the build rather than reaching a
+  browser unnamed. No toasts, no dialogs, no `window.confirm` -- a refusal
+  inside a modal that then closes is a refusal nobody can re-read.
+
+- **THE SOURCES GROUP LIVES IN THIS APP'S SETTINGS, NOT IN THE SHELL'S**
+  (`settings/SourcesGroup.tsx`). A source credential is this app's own record
+  -- the person's token for the repositories THEY deploy -- rather than a
+  cluster credential an operator rotates from a shell, which is the same line
+  Campaigns draws between its sending identities and Settings -> Integrations.
+  Revoking says what it will cost before it is done: sources fetching under it
+  will refuse at their next fetch until you switch them. Rotation is adding a
+  credential and repointing the source on its Source stop; there is no
+  in-place replace, because a replace would change what a source fetches under
+  without a row saying so.
+
+- **A CUE AND A STANDING MARK ARE DIFFERENT STATEMENTS, and the update needs
+  both.** The arrival ring says "this just changed" and decays on the clock;
+  the update chip says "there is a newer version than the one you are running"
+  and stays until somebody deploys. A cue alone would make the news visible
+  only to whoever happened to be looking. A chip alone would make it arrive in
+  silence. `updateAvailable` is named in the fingerprint DESPITE being written
+  by a ten-minute poll, because the engine's feed only writes it when the
+  upstream actually moved -- so a flip is news by construction rather than a
+  heartbeat.
+
+The rules the app was built on in memql#4725 all still hold, and three are
+worth restating because the recomposition tested each of them:
+
+- **ONE FEED PER CONCEPT, RETAINED AT THE APP ROOT.** The list, the map and
+  the page are readings of ONE retained `LiveCollection` of sites, and a
+  second `useSites()` inside the map would open a second subscription and run
+  a second seed, free to disagree with the first about what the cluster holds
+  -- the one failure an app that is a picture and a table of the same thing
+  must not have. **The rule is per CONCEPT, not per app**: sites, packages and
+  credentials are three concepts and three feeds, and three concepts cannot
+  disagree because they describe different things. The parked-runs feed above
+  is the fourth, and the reason it is written down is that it is the only one
+  that needed an argument.
+- **`v1:platform:site` BROADCASTS BOTH created AND updated**, unlike
   `v1:identity:user`, which broadcasts creates and deliberately not updates
-  because the row churns on `lastSeenAt`. That asymmetry is why Users re-reads
-  a person on open and this app does not, and it is what makes the epic's
+  because the row churns on `lastSeenAt`. That asymmetry is what makes the
   headline true with no engine work: a CI publish through
   `POST /sites/{id}/bundles` flips `bundleRef` on a node nobody in the browser
-  is talking to, and the row changes under the person watching it. Read the
-  ROUTING RULES before deciding what a concept's live feed does.
-- **The cue is a mechanism now, not a list feature.** `live/useArrivals.ts` is
-  the fold `LiveList` used to own. The map is the first live surface in the OS
-  that is not a list, and a site whose bundle just flipped has to announce
-  itself there exactly as it does in the list beside it. Promoted rather than
-  copied -- a second copy of a cue is a cue that drifts, and "the map pulses on
-  a heartbeat while the list does not" is the bug the fingerprint rule exists
-  to stop.
+  is talking to, and the row changes under the person watching it. The same
+  went for this epic's rows -- `v1:platform:sourceCredential` needed broadcast
+  routing rules in `component/node/routing.go` before the Sources group and a
+  Source stop's credential chip could be live. Read the ROUTING RULES before
+  deciding what a concept's live feed does.
+- **NOTHING IS INSERTED LOCALLY.** A created site, a new credential and a new
+  source each arrive on their own broadcast with the arrival cue, exactly like
+  one somebody else created. The Source stop marks a `bundleRef` flip because
+  the VALUE changed, not because a tick fired -- an `updated` tick fires for a
+  rename too, and a marker driven by it would announce a publish that did not
+  happen.
+
+Two things the app deliberately does not do, both inherited and both still
+true. There is no raw `bundleRef` editor anywhere (a field that accepts any
+URI is a way to point a live site at nothing). And a `systemOwned` row renders
+NO lifecycle controls at all: the seeded portal and OS sites are exempt from
+the lifecycle entirely, the server refuses those writes regardless
+(`component/memql/platform_site_status_guard.go` is the gate), and the
+presentation is the courtesy.
+
+### A filter re-baselines through `useLiveView`'s key
+
+Revealing rows the browser already had is not the cluster sending them, so the
+Archived flip must not fire the arrival cue for every newly-visible row.
+`viewKey` is where a re-baseline is expressed (`live/liveView.ts` rebuilds on
+it), and it is one line rather than an unmount.
 
 ### The map is plain SVG, and that is enforced
 
@@ -285,9 +432,10 @@ of their rules are worth knowing before editing them:
 The app itself carries no role. `v1:platform:site` declares the composite tier
 (`@rowAuthz(owner="ownerUserId", clusterOwner)`), so every signed-in person has
 deployables of their own to read and the engine decides how far the list
-reaches; only the **Actions** section is admin+, and that is presentation over
-writes the Go hostname policy and `sitePublishFromArtifact` remain the
-authority on.
+reaches. What is gated is presentation over writes the Go hostname policy,
+`sitePublishFromArtifact` and the pipeline remain the authority on: rank 200
+and above for the write controls, and the OWNER rung for a client's own domain
+and a CI-pushed source.
 
 - **The slug rules are mirrored for a keystroke-rate answer, and say so.**
   Cluster-wide uniqueness and the cluster-owner exemption are deliberately NOT
@@ -295,24 +443,25 @@ authority on.
   the server and render verbatim, because the server's sentence names the
   colliding site and a friendlier paraphrase would drop the one fact that
   helps.
-- **A publish refusal is keyed by its stable reason and rendered as a
-  sentence**, never as the token. An error carrying NO known reason keeps its
-  own message: inventing a friendly sentence for an unknown failure is how a
-  real fault gets mistaken for a user error.
-- **Nothing is inserted locally.** A created site arrives on its own broadcast
-  with the arrival cue, exactly like one somebody else created. The detail
-  panel marks a `bundleRef` flip because the VALUE changed, not because a tick
-  fired -- an `updated` tick fires for a rename too, and a marker driven by it
-  would announce a publish that did not happen.
+- **A placement is one write, not three.** `packageDeploy` takes
+  `{hostname, accountId, ownDomain}` per app and the pipeline applies the two
+  optional halves itself, under the caller's actor, as the same calls this app
+  makes. So there is no client-side follow-up write to get half-done, and a
+  refused domain lands on the deploy's own outcome for the Where-it-lives stop
+  to render rather than as a second failure somewhere else on the page.
 
-### Custom domains: the Domains panel (memql#4805)
+### Custom domains: the Where-it-lives stop (memql#4805)
 
-`DomainsPanel.tsx` on the deployable detail is a client's own domain bound to a
+`page/stops/Domains.tsx`, mounted as the deployable page's Where-it-lives stop
+for a cluster owner (epic memql#4885), is a client's own domain bound to a
 site -- the add flow, the two DNS records to create, the live typed status, and
-the remove. Three things about it are worth knowing before touching it.
+the remove. It was a panel of its own before the recomposition, and moving it
+onto the stop is the whole point of the stop: the address, the client and the
+domain are one question asked in one place. Three things about it are worth
+knowing before touching it.
 
 - **The surface is TWO RECORDS AND WHAT WE SEE AT THEM.** Somebody reading this
-  panel is a tab away from a registrar's form whose fields are called Type, Name
+  is a tab away from a registrar's form whose fields are called Type, Name
   and Value, so a record renders as exactly those three parts, in that
   vocabulary, each separately copyable -- a single "copy record" button would
   hand them a line they then have to take apart. Beneath it sits the server's
@@ -330,12 +479,50 @@ the remove. Three things about it are worth knowing before touching it.
   records check out, we are waiting on a certificate" is a different situation
   from "the records are wrong". `removing` / `removed` are deliberately OFF the
   rail: they are a different journey that can start anywhere, and a fifth stop
-  would say a removed domain had got further than a live one.
-- **There is no re-check button anywhere, and the panel says why.** Retries ride
+  would say a removed domain had got further than a live one. It is a rail of
+  its own inside a stop of the deployable's rail, and that is fine for the same
+  reason the deploy rail is: the sequence is the binding's own law.
+- **There is no re-check button anywhere, and the stop says why.** Retries ride
   the sweep's schedule (design D5) -- a button would invite hammering a
   recursive resolver and an ACME endpoint. An absent control with no account of
   itself reads as something somebody forgot to build, so the footer says what
-  DOES happen rather than apologising for what does not.
+  DOES happen rather than apologising for what does not. The deploy does not
+  wait on any of it: the app is live at its cluster address and the domain
+  stays "waiting on your DNS records" beside it.
+
+### Builds, and a run that gets lost (epic memql#4900)
+
+Builds are real now, so three things the surface says are rules rather than
+repetitions of what the app already had.
+
+- **A HEARTBEAT ARRIVED, AND THE FINGERPRINT DID NOT MOVE.** A running deploy
+  writes `heartbeatAt` every fifteen seconds, and every one of those writes
+  broadcasts the whole row. `deploymentFingerprint` is still `status` alone,
+  which is this app's arrival-cue rule at its sharpest: the cue would fire
+  hardest for the run somebody is already watching move. `autoDeploy` goes the
+  OTHER way, into the PACKAGE fingerprint -- it is a field somebody else can
+  flip, and the consequence is that pushes start deploying themselves.
+
+- **`abandoned` IS NOT A FLAVOUR OF FAILED.** A run whose node the cluster lost
+  gets its own terminal status, its own word in the timeline ("lost", never
+  "failed"), and copy saying nothing failed and nothing was published. The
+  natural reading of a stopped deploy is that it broke; this one did not, and
+  the surface's job is to say so before somebody debugs a build script that is
+  fine. Two readings came out of a BROWSER rather than jsdom, which renders the
+  same DOM and asserts nothing about either: a lost run was appearing under
+  "Deploying now" beside a rail that had stopped, and the rail was drawing it
+  as having stopped at Analyze because the evidence rule reads fields a stage
+  WRITES and a run that dies part-way writes none of them. The fix for the
+  second is `stoppedAt` on the row, and it outranks every inference.
+
+- **RETRY AND REDEPLOY ARE DIFFERENT PROMISES, so they are different buttons in
+  different places.** The Head's Retry deploys the source again. Retrying a
+  LOST run deploys the bytes that run had already fetched, so it lives on the
+  attempt that names the run and nowhere else -- two controls both reading
+  Retry and doing different things is the thing being avoided. The auto-deploy
+  switch is on the SOURCE stop for the same reason: it answers "when this
+  source moves, then what", which is a property of the source rather than of
+  any one run.
 
 ## Training, the fourth app (memql#4737)
 
@@ -613,7 +800,8 @@ of the six apps before it.
   irrelevant and misleading -- a file whose origin is gone would show green for
   as long as the machine that no longer holds it stays awake.
 
-Two smaller things. The list merges TWO feeds (`apps/bin/mergedView.ts`), and
+Two smaller things. The list merges TWO feeds (`live/mergedView.ts`, promoted
+out of this app when Deployables' list needed the three-feed form), and
 `useLiveView` cannot do that: it caches against ONE upstream snapshot's
 identity, so a folder arriving while the artifacts are unchanged folds into
 nothing -- the list never moves, nothing errors, the folder is simply missing.
@@ -923,93 +1111,6 @@ wrong by default.
   bottom (and back), and the parent decides what that means. The jump pill
   is absolute against the list's relative root, never fixed -- the desk plate
   is CSS-transformed and becomes a fixed element's containing block.
-
-## Packages, inside Deployables (epic memql#4794)
-
-`src/apps/deployables/packages/` is the other half of what a deployable IS: a
-site is what serves, and a package is where it came from. It ships a live
-packages list, a package detail with the analysis report and the deployment
-timeline, an always-present confirm gate, and the per-site lifecycle the portal
-used to own. Five things about it are new rules rather than repetitions of the
-five apps before it.
-
-- **THE ONE-FEED RULE IS PER CONCEPT, NOT PER APP.** Deployables now retains
-  TWO collections at its root -- sites and packages -- and that is not a
-  violation of the rule the app was built on. What must never happen is two
-  subscriptions over the SAME concept, free to disagree about what the cluster
-  holds; two concepts cannot disagree, because they are describing different
-  things. A package's deployment TIMELINE is a third, and it is retained by the
-  detail panel rather than the root, because keeping every package's timeline
-  live would subscribe the window to every deploy in the cluster to render one.
-
-- **A FILTER RE-BASELINES THROUGH `useLiveView`'s KEY, not through a `key` prop
-  on the list.** Revealing rows the browser already had is not the cluster
-  sending them, so the Archived toggle must not fire the arrival cue for every
-  newly-visible row. `viewKey` is where a re-baseline is expressed
-  (`live/liveView.ts` rebuilds on it), and it is one line rather than an
-  unmount.
-
-- **A CUE AND A STANDING MARK ARE DIFFERENT STATEMENTS, and the update needs
-  both.** The arrival ring says "this just changed" and decays on the clock;
-  the `update` chip says "there is a newer version than the one you are
-  running" and stays until somebody deploys. A cue alone would make the news
-  visible only to whoever happened to be looking. A chip alone would make it
-  arrive in silence. `updateAvailable` is named in the fingerprint DESPITE
-  being written by a ten-minute poll, because the engine's feed only writes it
-  when the upstream actually moved -- so a flip is news by construction rather
-  than a heartbeat.
-
-- **THE STAGE RAIL DRAWS WHAT DID NOT HAPPEN.** `StageRail.tsx` is the one new
-  visual idea here, and the reason it earns a sequenced device -- normally the
-  most over-used structure in software design -- is that a deploy has a LAW
-  about its order (`stage -> roll -> publish`, reversed on rollback). The part
-  that matters is the SKIPPED stages: an app-only package draws them, dimmed,
-  with the reason beside them, because "nothing had to restart" is what
-  explains a deploy that took seconds and a person counting missing steps
-  cannot find it. `railFor` is pure and exported for exactly that reason --
-  what the rail SAYS is the assertion, not what it renders.
-
-  Two smaller rules came out of looking at it in a browser rather than in
-  jsdom, which has no CSS engine and would have passed either version: the
-  unreached stages dim their CONTENT rather than the whole row, or the
-  connector goes with them and the rail stops dead where the run is; and they
-  carry no glyph, because a crossed circle reads as "forbidden" and put five
-  refusal symbols on a healthy deploy.
-
-- **THE CONFIRM GATE IS A PANEL, NOT A DIALOG.** The report is the size of a
-  page, and a scrolling modal is a worse page. More importantly a refusal
-  inside a modal that then closes is a refusal nobody can re-read, which is the
-  same reason this shell has no toasts. The gate lives on the ROW
-  (`status: "awaiting_confirm"`) rather than in component state, so somebody
-  who closed the window finds their deploy exactly where they left it.
-
-- **A HEARTBEAT ARRIVED, AND THE FINGERPRINT DID NOT MOVE** (epic memql#4900).
-  A running deploy now writes `heartbeatAt` every fifteen seconds, and every one
-  of those writes broadcasts the whole row. `deploymentFingerprint` is still
-  `status` alone, which is the rule this app already states -- and this is the
-  sharpest case of it yet, because the cue would fire hardest for the run
-  somebody is already watching move. `autoDeploy` goes the OTHER way, into the
-  package fingerprint: it is the one field on a source that somebody else can
-  flip, and the consequence is that pushes start deploying themselves.
-
-- **`abandoned` IS NOT A FLAVOUR OF FAILED.** A run whose node this cluster lost
-  gets its own terminal status, its own word in the timeline ("lost", not
-  "failed"), and its own copy saying nothing failed and nothing was published.
-  The natural reading of a stopped deploy is that it broke; this one did not,
-  and the surface's job is to say so before somebody starts debugging a build
-  script that is fine. Its action is **Retry**, which is a different promise
-  from Redeploy: it deploys the bytes the lost run had already fetched, not
-  whatever the branch holds now.
-
-Two things it deliberately does not do. There is no raw `bundleRef` editor
-anywhere (D13: parity covers the four features somebody uses, not the operator
-escape hatch -- a field that accepts any URI is a way to point a live site at
-nothing). And a `systemOwned` row renders NO lifecycle controls at all, not
-disabled ones: the seeded portal and OS sites are exempt from the lifecycle
-entirely, and six greyed-out buttons are six controls somebody has to read past
-to learn they are not for them. The server refuses those writes regardless --
-the presentation is the courtesy, `component/memql/platform_site_status_guard.go`
-is the gate.
 
 ## Ask voice (epic memql#4747)
 

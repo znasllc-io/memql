@@ -5169,6 +5169,24 @@ func PackageDeploymentsBuild(args PackageDeploymentsArgs) string {
 	return b.String()
 }
 
+// PackageDeploymentsAwaitingConfirm -- Every deploy parked at the confirm gate that is waiting for this caller, newest first -- the Deployables list's "a deploy is waiting for you" mark, and the ONE parked-runs feed the OS retains at its app root (epic memql#4885, design section A). That feed is a deliberate exception to the rule that a deployment timeline is retained by the page and never by the root: the rule guards against subscribing a window to every deploy in the cluster, and a feed over parked runs alone is the handful of rows a person needs to see before they open anything.
+// No `paginate`, deliberately, and the reason is the population: a run parks here only between a person's Analyze and their Deploy, so a caller has a handful of these at most and a cluster owner a handful per person -- a page size would be a bound on a set that is bounded by how many things somebody has half-composed. The sort is what keeps the read a bounded one for the parser.
+//
+// Bound concept: v1:platform:packageDeployment (machine-readable: BoundConcepts["packageDeploymentsAwaitingConfirm"] in generated_concepts.go).
+type PackageDeploymentsAwaitingConfirmArgs struct {
+}
+
+// PackageDeploymentsAwaitingConfirm calls the engine query packageDeploymentsAwaitingConfirm.
+func (qc *QueryClient) PackageDeploymentsAwaitingConfirm(ctx context.Context, args PackageDeploymentsAwaitingConfirmArgs) (*Result, error) {
+	call := PackageDeploymentsAwaitingConfirmBuild(args)
+	return qc.executeNamed(ctx, "packageDeploymentsAwaitingConfirm", call)
+}
+
+func PackageDeploymentsAwaitingConfirmBuild(args PackageDeploymentsAwaitingConfirmArgs) string {
+	_ = args
+	return "query packageDeploymentsAwaitingConfirm()"
+}
+
 // PackageDeploymentsInFlight -- Every run that is still moving, across every owner -- the abandoned sweep's read (epic memql#4900, task memql#4902).
 // CLUSTER-OWNER TIER BY ITS ACTOR rather than by a spec: the concept's composite tier already admits a cluster owner to every row, and the sweep runs under the maintenance actor, which IS one. So the filter says only what it is looking for -- a run at a non-terminal status -- and the tier decides who may see it. The same query read by an ordinary caller answers their own stranded runs, which is correct and is not a second code path.
 // The AGE comparison is deliberately NOT here. "older than the threshold" is arithmetic against a window the sweep is already holding (it comes from the env registry), so comparing in Go over a bounded page keeps ONE answer to "how old is too old" rather than two that can disagree.
@@ -10569,6 +10587,46 @@ func SoldByVariantBuild(args SoldByVariantArgs) string {
 	b.WriteString(quoteMemQL(args.VariantGid))
 	b.WriteString(")")
 	return b.String()
+}
+
+// SourceCredentialById -- One credential by id -- the Source stop's credential chip. Card shape, so metadata only.
+//
+// Bound concept: v1:platform:sourceCredential (machine-readable: BoundConcepts["sourceCredentialById"] in generated_concepts.go).
+type SourceCredentialByIdArgs struct {
+	CredentialId string
+}
+
+// SourceCredentialById calls the engine query sourceCredentialById.
+func (qc *QueryClient) SourceCredentialById(ctx context.Context, args SourceCredentialByIdArgs) (*Result, error) {
+	call := SourceCredentialByIdBuild(args)
+	return qc.executeNamed(ctx, "sourceCredentialById", call)
+}
+
+func SourceCredentialByIdBuild(args SourceCredentialByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query sourceCredentialById(")
+	b.WriteString("credentialId: ")
+	b.WriteString(quoteMemQL(args.CredentialId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SourceCredentialsMine -- Every credential this caller holds, revoked ones included and marked -- the Settings Sources group. A cluster owner reads every row's metadata, which is the oversight the composite tier exists for; nothing here can return the ciphertext, because the card shape does not carry it.
+// The composite term is PARENTHESIZED even though it stands alone, and the parens are load-bearing: the struct form splices this filter after the concept predicate (buildStructQueryExpr), and a bare top-level `a || b` reaches the row-authz shadow analyzer in a shape isCompositeScopeConjunct does not recognise, so TestRowAuthzEnforcementLandGate reports the read undecidable. Written the way every composite-tier sibling writes the term, it is recognised as the tier's own.
+//
+// Bound concept: v1:platform:sourceCredential (machine-readable: BoundConcepts["sourceCredentialsMine"] in generated_concepts.go).
+type SourceCredentialsMineArgs struct {
+}
+
+// SourceCredentialsMine calls the engine query sourceCredentialsMine.
+func (qc *QueryClient) SourceCredentialsMine(ctx context.Context, args SourceCredentialsMineArgs) (*Result, error) {
+	call := SourceCredentialsMineBuild(args)
+	return qc.executeNamed(ctx, "sourceCredentialsMine", call)
+}
+
+func SourceCredentialsMineBuild(args SourceCredentialsMineArgs) string {
+	_ = args
+	return "query sourceCredentialsMine()"
 }
 
 // SpaceMedia -- Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view.

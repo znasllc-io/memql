@@ -105,3 +105,30 @@ concept logLine {
 
   @relationship(type="references", as="recordedBy", field="userId", target=user, direction="outgoing")
 }
+
+/// One bucket of one deployable's traffic, folded from the edge's request log (epic memql#4906,
+/// the Run epic of the Deployables program). A DECLARATION OF A RELATION'S SHAPE, the `invocation`
+/// and `codeMetric` precedent: rows live in the edge_request_1m / _1h aggregates TimescaleDB
+/// maintains, never in the graph, and reach a client as synthetic nodes from `siteTrafficInWindow`.
+/// Nothing maps a field here to a column; the mapping is component/sitetraffic's.
+///
+/// AN ABSENT ROW IS THE UNMEASURED ANSWER. A window nothing recorded produces NO ROW for that
+/// deployable, and a window with requests and no errors produces a row whose errorCount is 0 --
+/// "nobody visited" and "we were not recording" send a person to two different places, which is
+/// the same rule campaignStats states about a unique-open count it could not measure.
+///
+/// windowEnd - windowStart says whether a row is a BUCKET or a SUMMARY: a bucket's span is the
+/// bucket size and a summary's is the window the caller asked for. Read the span rather than
+/// looking for a flag, which is codeMetric's own convention.
+@displayCard(primary="siteId", secondary="bucket", tertiary="windowStart", status="bucket")
+concept siteTraffic {
+  siteId            string!  @description("The v1:platform:site this traffic belongs to, as a BARE id -- what the edge stamped on the rows and what a client sends. Authorization is this deployable's own: a caller reads its traffic exactly when they may read it, checked through siteById / sitesAll under their actor.")
+  bucket            enum("1m", "1h")!  @description("Which aggregate the row came from. A minute bucket answers an hour-long window; an hour bucket answers a day or a week, because a week of minute buckets is ten thousand rows to draw one line.")
+  windowStart       datetime!  @description("Inclusive start of the row's window, aligned to the bucket boundary for a bucket row and to the caller's own window for a summary row.")
+  windowEnd         datetime!  @description("Exclusive end. Half-open, so two adjacent windows add up rather than double-counting the instant they share.")
+  requestCount      int!  @description("Requests the edge served for this deployable in the window, whatever the outcome -- including the ones it refused to serve because the deployable was paused or in draft. A request to a deployable is a request to it.")
+  errorCount        int!  @description("The 5xx subset: the deployable failing. Counted apart from clientErrorCount because folding the two together makes a healthy site with a broken inbound link look unhealthy.")
+  clientErrorCount  int!  @description("The 4xx subset: somebody asking for a page this deployable does not have. Worth showing beside the 5xx count and never instead of it.")
+  bytesTotal        int!  @description("Response bytes served in the window, as counted through the edge's own writer. A hijacked connection (a WebSocket through the API proxy) contributes 0, because its bytes leave through the raw connection -- an undercount that is named rather than guessed at.")
+  lastServedAt      datetime  @description("The newest request in the window. ABSENT rather than zero when the relation answered no timestamp: a zero datetime renders as the year 1, which is a worse answer than none.")
+}

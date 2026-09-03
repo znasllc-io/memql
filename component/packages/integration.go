@@ -98,12 +98,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "deploy",
-			Description: "Run one deployment attempt for a package (epic memql#4794). Without confirm, the run parks at awaiting_confirm with the analysis report on the deployment row and nothing else happens; with confirm, it builds, stages, rolls and publishes in the D6 order. Returns {deploymentId, status, awaitingConfirm, deployables}.",
+			Description: "Run one deployment attempt for a package (epic memql#4794). Without confirm, the run parks at awaiting_confirm with the analysis report on the deployment row and nothing else happens; with confirm, it builds, stages, rolls and publishes in the D6 order. placements (epic memql#4885, D8) is per deployable name -- {hostname, accountId, ownDomain} -- read on a deployable's FIRST deploy only: the site is created at hostname, then the account write and the domain binding run under the caller's actor as the same two calls the page makes, and a refused one lands on the outcome (accountRefusal / domainRefusal) without failing the publish. Returns {deploymentId, status, awaitingConfirm, deployables, report}.",
 			Handler:     i.handleDeploy,
 			ArgsSchema: map[string]string{
-				"packageId": "string (required) -- the package to deploy",
-				"confirm":   "boolean -- pass true to proceed past the always-present confirm gate",
-				"hostnames": "object -- deployable name -> hostname, required on a deployable's FIRST deploy only",
+				"packageId":  "string (required) -- the package to deploy",
+				"confirm":    "boolean -- pass true to proceed past the always-present confirm gate",
+				"placements": "object -- deployable name -> {hostname, accountId, ownDomain}; hostname is required on a deployable's FIRST deploy, the other two are optional and applied after the site exists",
 			},
 		},
 		{
@@ -132,7 +132,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "archivePackage",
-			Description: "Archive a package after verifying the typed name and that no deployable is still serving (epic memql#4794, D10).",
+			Description: "Archive a package and every app it produced (epic memql#4794 D10, epic memql#4885). Verifies the typed name, refuses with package_has_active_deployables naming the LIVE hostnames while any app is still serving -- pausing stays the person's decision -- and otherwise archives each paused or never-published app through the same guarded status write the site archive uses (a draft is walked through disabled first), sites first and the package last. Apps already archived are left alone. Returns {packageId, name, status, archivedSites}.",
 			Handler:     i.handleArchivePackage,
 			ArgsSchema: map[string]string{
 				"packageId":   "string (required)",
@@ -176,6 +176,39 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Handler:     i.handleRestorePackage,
 			ArgsSchema:  map[string]string{"packageId": "string (required)"},
 		},
+		{
+			Name:        "sourceCredentialCreate",
+			Description: "Store a personal source credential (epic memql#4885, D10). The token crosses the wire once, inside this call, is sealed under MEMQL_MASTER_KEY on this node, and lands on a v1:platform:sourceCredential row owned by the caller; it appears in no row, log line or reply. Only github.com is admitted as a host today. Returns {credentialId, fingerprint}.",
+			Handler:     i.handleSourceCredentialCreate,
+			ArgsSchema: map[string]string{
+				"host":  "string (required) -- github.com is the only host admitted today",
+				"label": "string (required) -- the person's own name for the credential",
+				"token": "string (required) -- the access token; read once, sealed, never echoed",
+			},
+		},
+		{
+			Name:        "sourceCredentialRevoke",
+			Description: "Revoke one of the caller's source credentials (epic memql#4885, D10). Flips status and stamps revokedAt through the owned mutation, so the write guard admits the row's owner (or a cluster owner) and nobody else; the row is kept as history. Returns {credentialId, status}.",
+			Handler:     i.handleSourceCredentialRevoke,
+			ArgsSchema:  map[string]string{"credentialId": "string (required)"},
+		},
+		{
+			Name:        "sourceProbe",
+			Description: "Ask whether this cluster can read a repository before a source is committed to (epic memql#4885, D11). Parses the URL, resolves the named credential under the CALLER's actor the way a fetch does, asks GitHub for the repository, and answers {host, reachable, private, defaultBranch, reason} where reason is exactly one of ok, not_found_or_private, credential_cannot_see_it, credential_not_found, credential_revoked, source_host_unsupported, rate_limited -- a typed reason, never the API's own body. Writes nothing and stamps nothing, not even lastUsedAt. A GitHub this cluster cannot reach is an error, not a reason.",
+			Handler:     i.handleSourceProbe,
+			ArgsSchema: map[string]string{
+				"repoUrl":      "string (required) -- the repository URL as typed",
+				"credentialId": "string -- one of the caller's v1:platform:sourceCredential rows to probe under; empty probes anonymously",
+			},
+		},
+		{
+			Name:        "artifactProbe",
+			Description: "Ask what kind of tree a zip in the caller's Library is (epic memql#4885, D11). Opens it through the same fetch a deploy uses -- the caller's bytes, OpenZip under the packages limits -- and answers {isPackage, isBuiltSite, fileCount, totalBytes}: isPackage when memql-package.yaml sits at the root, isBuiltSite when index.html does and there is no manifest, neither otherwise. Writes nothing.",
+			Handler:     i.handleArtifactProbe,
+			ArgsSchema: map[string]string{
+				"artifactId": "string (required) -- the v1:library:artifact index row of the zip",
+			},
+		},
 	}
 }
 
@@ -215,10 +248,10 @@ func (i *Integration) handleDeploy(ctx context.Context, args map[string]any, _ i
 		return nil, err
 	}
 	out, derr := Deploy(ctx, deps, DeployRequest{
-		PackageId: strings.TrimSpace(stringArg(args, "packageId")),
-		Actor:     actorFromContext(ctx),
-		Confirmed: boolArg(args, "confirm"),
-		Hostnames: stringMapArg(args, "hostnames"),
+		PackageId:  strings.TrimSpace(stringArg(args, "packageId")),
+		Actor:      actorFromContext(ctx),
+		Confirmed:  boolArg(args, "confirm"),
+		Placements: placementsArg(args, "placements"),
 		// `automatic` is NOT read from the args and there is no argument for
 		// it. "A person did this" is what a call over the wire means, and a
 		// caller able to claim otherwise could put a run in the timeline
@@ -310,27 +343,64 @@ func (i *Integration) handleArchivePackage(ctx context.Context, args map[string]
 
 	// THE D10 CROSS-ROW RULE. A package is the source its deployables came
 	// from, and filing it away while one is still serving the internet would
-	// put the record and the reality in different states.
+	// put the record and the reality in different states. So a LIVE app
+	// refuses the whole call, naming only the live hostnames, before any
+	// site is touched: pausing is the step that gives anyone still using it
+	// a chance to notice, and it stays the person's decision.
+	//
+	// EVERYTHING ELSE CASCADES (epic memql#4885, design sections A and F --
+	// "archive this source and every app it produced"). A disabled app is
+	// archived; a draft one -- a first deploy never made live, the commonest
+	// state a composed source is abandoned in -- is walked through disabled
+	// first, because the status guard admits `archived` from `disabled`
+	// alone and a draft resolves for nobody, so the pause it insists on is
+	// the law's own path with nobody to notice. An app already archived is
+	// left alone. Each write is the same stamped setSiteStatus the site
+	// archive uses, and the guard beside executeWrite still decides every
+	// one: a refusal surfaces and the cascade STOPS there, sites first and
+	// the package last, so the record never claims more than the reality.
 	sites, err := deps.Store.sitesForPackage(ctx, packageId)
 	if err != nil {
 		return nil, err
 	}
 	var live []string
 	for _, s := range sites {
-		if rowString(s, "status") != siteStatusArchived {
+		if rowString(s, "status") == siteStatusLive {
 			live = append(live, rowString(s, "hostname"))
 		}
 	}
 	if len(live) > 0 {
 		return nil, refuse(CodePackageHasActiveDeployables,
-			"this package still has %d deployable(s) that are not archived (%s). Archive them first -- a package is the source its sites came from, and filing it away while one is still serving would leave the record and the reality disagreeing.",
+			"this package still has %d deployable(s) still serving (%s). Pause them first -- archiving is the end of a deployable's life, and pausing is the step that gives anyone still using it a chance to notice. Every paused or never-published app is archived with the package.",
 			len(live), strings.Join(live, ", "))
+	}
+
+	var archivedSites []string
+	for _, s := range sites {
+		siteId := rowString(s, "id")
+		switch rowString(s, "status") {
+		case siteStatusArchived:
+			continue
+		case siteStatusDraft:
+			if err := deps.Store.setSiteStatus(ctx, siteId, siteStatusDisabled); err != nil {
+				return nil, err
+			}
+		}
+		if err := deps.Store.setSiteStatus(ctx, siteId, siteStatusArchived); err != nil {
+			return nil, err
+		}
+		archivedSites = append(archivedSites, rowString(s, "hostname"))
 	}
 
 	if err := deps.Store.setPackageStatus(ctx, packageId, "archived"); err != nil {
 		return nil, err
 	}
-	return resultNode(map[string]any{"packageId": packageId, "name": name, "status": "archived"}), nil
+	return resultNode(map[string]any{
+		"packageId":     packageId,
+		"name":          name,
+		"status":        "archived",
+		"archivedSites": archivedSites,
+	}), nil
 }
 
 // handleSetAutoDeploy flips the switch. Under the CALLER's actor, unstamped:
@@ -378,18 +448,20 @@ func (i *Integration) resolve() (*Deps, error) {
 			i.depsErr = fmt.Errorf("packages: no engine")
 			return
 		}
-		s := &store{engine: i.engine}
+		s := &store{engine: i.engine, logger: i.logger}
 		i.deps = &Deps{
-			Store:        s,
-			Fetcher:      newProductionFetcher(s, i.logger),
-			Builder:      NewWorkbenchBuilder(i.workbench, i.logger),
-			FleetBuilder: i.fleet,
-			Stager:       newBlobStager(),
-			Roller:       newDeployControlRoller(i.logger),
-			Publisher:    newEnginePublisher(i.engine, s, i.logger),
-			Auditor:      &engineAuditor{engine: i.engine, logger: i.logger},
-			Logger:       i.logger,
-			Limits:       DefaultLimits(),
+			Store:           s,
+			Fetcher:         newProductionFetcher(s, i.logger),
+			Builder:         NewWorkbenchBuilder(i.workbench, i.logger),
+			FleetBuilder:    i.fleet,
+			Stager:          newBlobStager(),
+			Roller:          newDeployControlRoller(i.logger),
+			Publisher:       newEnginePublisher(i.engine, s, i.logger),
+			Auditor:         &engineAuditor{engine: i.engine, logger: i.logger},
+			Credentials:     s.resolveCredential,
+			PeekCredentials: s.peekCredential,
+			Logger:          i.logger,
+			Limits:          DefaultLimits(),
 		}
 	})
 	return i.deps, i.depsErr
@@ -416,15 +488,26 @@ func boolArg(args map[string]any, key string) bool {
 	return false
 }
 
-func stringMapArg(args map[string]any, key string) map[string]string {
-	out := map[string]string{}
+// placementsArg reads the D8 wire shape: an object of deployable name to
+// {hostname, accountId, ownDomain}, every key optional, values trimmed. An
+// entry that is not an object is dropped rather than read as an empty
+// placement -- the publish stage then refuses the deployable by name for its
+// missing hostname, which is a better answer than a silent empty.
+func placementsArg(args map[string]any, key string) map[string]Placement {
+	out := map[string]Placement{}
 	if args == nil {
 		return out
 	}
 	raw, _ := args[key].(map[string]any)
-	for k, v := range raw {
-		if s, ok := v.(string); ok {
-			out[k] = s
+	for name, v := range raw {
+		fields, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		out[name] = Placement{
+			Hostname:  strings.TrimSpace(stringArg(fields, "hostname")),
+			AccountId: strings.TrimSpace(stringArg(fields, "accountId")),
+			OwnDomain: strings.TrimSpace(stringArg(fields, "ownDomain")),
 		}
 	}
 	return out

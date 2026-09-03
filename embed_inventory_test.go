@@ -86,7 +86,7 @@ import (
 var embedInventory = map[string]int{
 	"github.com/znasllc-io/memql":                                 1,  // VERSION
 	"github.com/znasllc-io/memql/component/architecture/embedded": 1,  // topology.model.json
-	"github.com/znasllc-io/memql/component/database":              32, // memory-nodes/migrations/*.sql (+2: the log_line hypertable up/down pair, epic memql#4893)
+	"github.com/znasllc-io/memql/component/database":              34, // memory-nodes/migrations/*.sql (+2: the log_line hypertable up/down pair, epic memql#4893; +2: the edge_request hypertable pair, epic memql#4906)
 	"github.com/znasllc-io/memql/component/envregistry":           1,  // manifest.yaml
 	// 20 = 18 static + 2 legal, WITH the generated stylesheet present. The old
 	// pin of 13 encoded the opposite state: app.css is gitignored and was

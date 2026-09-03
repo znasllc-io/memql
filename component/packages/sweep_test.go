@@ -150,10 +150,10 @@ func TestTheThresholdCannotBeConfiguredBelowTheCadence(t *testing.T) {
 func TestARunningDeployWritesItsHeartbeat(t *testing.T) {
 	h := newHarness(t, spaOnlyPackage(), ownerPackage())
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     clusterOwner(),
-		Confirmed: true,
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 	}); err != nil {
 		t.Fatalf("deploy: %v", err)
 	}
@@ -170,10 +170,10 @@ func TestARetryReadsTheStoredSnapshotInsteadOfFetching(t *testing.T) {
 	h := newHarness(t, spaOnlyPackage(), ownerPackage())
 	// The earlier run: succeeded once, so its snapshot is stored.
 	first, err := Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId: "v1:platform:package:abc",
-		Actor:     clusterOwner(),
-		Confirmed: true,
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		PackageId:  "v1:platform:package:abc",
+		Actor:      clusterOwner(),
+		Confirmed:  true,
+		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 	})
 	if err != nil {
 		t.Fatalf("first deploy: %v", err)
@@ -202,7 +202,7 @@ func TestARetryReadsTheStoredSnapshotInsteadOfFetching(t *testing.T) {
 		// the publish stage asks for hostnames as it would on a FIRST deploy.
 		// Supplied here rather than seeded, because what this test is about is
 		// where the BYTES came from.
-		Hostnames: map[string]string{"storefront": "shop.example.com", "docs": "docs.example.com"},
+		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 	})
 	if err != nil {
 		t.Fatalf("retry: %v", err)

@@ -80,6 +80,38 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # from go-checks to db-tests whole. Nothing is lost -- the lane runs whole
 # packages -- and the package's other suites are ordinary unit tests against a
 # fake Admin endpoint that now happen to run beside a database they ignore.
+#
+# memql#4885 added `component/packages`. A package's source credential is
+# resolved under the PACKAGE OWNER's actor through an owner-scoped @serverOnly
+# query, and the claim worth testing -- a package owned by B naming A's
+# credential resolves zero rows and is refused before any request leaves the
+# cluster, while a cluster owner deploying A's package fetches under A's
+# credential -- is a claim about the read gate's decision over real rows. The
+# recording engine the package's other suites drive parses nothing and gates
+# nothing, so it passes the correct resolver and the one that resolves under
+# the caller equally well; only a real engine over a real Postgres can tell
+# them apart, and a db-gated test outside this lane only ever runs on the
+# machine of whoever happened to have one up.
+#
+# What the complement now means, having looked: `component/packages` moves
+# from go-checks to db-tests whole. Nothing is lost -- the lane runs whole
+# packages -- and the pipeline, analysis and feed suites are ordinary unit
+# tests against fakes that now happen to run beside a database they ignore.
+#
+# memql#4906 added `component/sitetraffic`. The edge's request log is folded
+# into a TimescaleDB continuous aggregate, and every claim worth testing about
+# it is the DATABASE's: that the fold produces the counts the raw rows imply,
+# that a half-open window makes two adjacent windows add up rather than
+# double-count, and that a window nothing measured comes back as NO ROW rather
+# than a zero. A fake would be asserting its own arithmetic. The authorization
+# half is the same shape -- a caller reads a deployable's traffic exactly when
+# `sitesAll` / `siteById` hand it back under their actor, which is a decision a
+# real engine makes over real rows and a stub makes by construction.
+#
+# What the complement now means, having looked: `component/sitetraffic` moves
+# from go-checks to db-tests whole. Nothing is lost -- the lane runs whole
+# packages -- and the sink's own suite is DB-free through its insert seam, so
+# it now happens to run beside a database it ignores.
 readonly DB_GATED_TREES=(
 	"component/memql"
 	"component/automations"
@@ -87,6 +119,8 @@ readonly DB_GATED_TREES=(
 	"component/grpc"
 	"component/identity"
 	"component/logstore"
+	"component/packages"
+	"component/sitetraffic"
 	"integrations/cognition"
 	"integrations/embedding"
 	"integrations/planner"

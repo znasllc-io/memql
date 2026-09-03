@@ -134,15 +134,72 @@ const COPY: Record<string, RefusalCopy> = {
     title: "The build surface refused this request",
     next: "",
   },
-  deploy_failed: {
-    title: "This deploy did not finish",
-    next: "",
-  },
   deployable_publish_failed: {
     title: "The site could not be published",
     next: "",
   },
+  deploy_failed: {
+    // The pipeline's own code for a fault that is not a refusal -- a store or
+    // a storage call that failed mid-run. The server's sentence is the error
+    // itself, and the honest next step is the one the append-only rule
+    // prescribes everywhere else: a new attempt.
+    title: "This deploy did not finish",
+    next: "Nothing about the source was changed. Deploy again to start a fresh attempt.",
+  },
+
+  // -- the compose epic (memql#4885): personal source credentials and the
+  //    target model. The engine half lands beside these; the copy is here
+  //    first so the first refusal to reach a browser has a name. --
+
+  credential_not_found: {
+    title: "This source's credential is not one you can use",
+    next: "Pick one of your own credentials on the Source stop, or add a new one there.",
+  },
+  credential_revoked: {
+    title: "This source's credential was revoked",
+    next: "Switch the source to another credential on its Source stop.",
+  },
+  source_host_unsupported: {
+    title: "Only github.com today",
+    next: "Paste a github.com URL, or upload the tree as a zip in Files.",
+  },
+  deployable_target_not_offered: {
+    // The server's sentence names the kind ("iOS is not offered on this
+    // cluster yet"); it is rendered on the What-it-is stop verbatim and the
+    // rest of the package deploys, so there is no next step to give.
+    title: "That kind is not offered on this cluster yet",
+    next: "",
+  },
+
+  // -- the two PLACEMENT halves (memql#4887). Both say the deploy SUCCEEDED
+  //    and one optional half of the address did not. The pipeline applies
+  //    them after the publish, under the caller's own actor, and records the
+  //    guard's refusal on the outcome rather than failing the run -- so a
+  //    headline reading as a failed deploy would be the opposite of what
+  //    happened, and would send somebody looking for a site that is already
+  //    serving. The server's sentence, beneath, names the specific guard. --
+
+  deployable_account_refused: {
+    title: "It is live, but not tied to that client",
+    next: "The deployable is serving at its address. Set the client on its Where it lives stop.",
+  },
+  deployable_domain_refused: {
+    title: "It is live at its cluster address, but the domain was not bound",
+    next: "The deployable is serving. Add the domain again on its Where it lives stop, where the two DNS records are.",
+  },
 };
+
+/**
+ * Codes the engine emits for which the server's sentence IS the whole copy:
+ * no headline this build could add would say more than the sentence does.
+ *
+ * Empty today, and kept so the coverage test (test/deployables/refusals.test.ts)
+ * has a second acceptable home for a code: every code the engine can emit
+ * must be in COPY or here, and a code in neither renders under the neutral
+ * heading -- the designed fallback for a fault nobody anticipated, not a
+ * place to leave a known one.
+ */
+export const SERVER_SENTENCE_ONLY: readonly string[] = [];
 
 /**
  * copyFor returns the headline and next step for a code, or null when this

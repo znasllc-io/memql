@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
@@ -237,16 +236,28 @@ func (i *Integration) upstreamHead(ctx context.Context, d *Deps, pkg map[string]
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	req.Header.Set("User-Agent", "memql-packages")
 
-	// D14 again: resolved here, used once, stored nowhere.
-	if name := strings.TrimSpace(rowString(pkg, "repoTokenRef")); name != "" {
-		token, serr := d.Store.resolveSecret(ctx, name)
-		if serr == nil && strings.TrimSpace(token) != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
+	// D10 again: resolved here, under the package owner's actor, used once,
+	// stored nowhere. A credential that does not resolve is a REFUSAL of this
+	// package's poll, not a fall-through to an anonymous request: polling a
+	// private repository without its bearer answers 404, which would read as
+	// "unreachable" today and as "unchanged" the day the comparison is
+	// tightened -- and either way the person whose credential was revoked
+	// would learn it from a stale cue rather than from the warning this
+	// returns. The caller logs it and skips the package, exactly as an
+	// unreachable repository is skipped.
+	if id := strings.TrimSpace(rowString(pkg, "credentialId")); id != "" {
+		if d.Credentials == nil {
+			return "", refuse(CodeSourceUnreadable,
+				"this package fetches under credential %q, and this node cannot resolve credentials", id)
 		}
+		token, cerr := d.Credentials(ctx, id, rowString(pkg, "ownerUserId"))
+		if cerr != nil {
+			return "", cerr
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, derr := client.Do(req)
+	resp, derr := d.httpClient().Do(req)
 	if derr != nil {
 		return "", derr
 	}

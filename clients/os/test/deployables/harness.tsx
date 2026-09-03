@@ -118,6 +118,67 @@ export interface FakeSeed {
   createError?: string;
   /** Fails the next `sitePublishFromArtifact` with this server message. */
   publishError?: string;
+  /** v1:platform:sourceCredential CARDS `sourceCredentialsMine` answers with -- never a value. */
+  credentials?: Row[];
+  /**
+   * What `sourceProbe` answers, keyed by the credentialId the call carries
+   * ("" for an anonymous probe). A key that is not present falls back to
+   * `""`, so a test that cares about only one answer names only that one.
+   */
+  sourceProbe?: Record<string, Row>;
+  /** Fails the next `sourceProbe` with this server message -- the probe that could not RUN. */
+  sourceProbeError?: string;
+  /** What `artifactProbe` answers, keyed by artifactId. */
+  artifactProbe?: Record<string, Row>;
+  /** Fails the next `artifactProbe` with this server message. */
+  artifactProbeError?: string;
+  /** What `sourceCredentialCreate` answers with. The token NEVER comes back. */
+  credentialCreated?: Row;
+  /** Fails the next `sourceCredentialCreate` with this server message. */
+  credentialCreateError?: string;
+  /** Fails the next `sourceCredentialRevoke` with this server message. */
+  credentialRevokeError?: string;
+  /** Fails the next `updatePackageSource` with this server message. */
+  updateSourceError?: string;
+  /**
+   * v1:platform:packageDeployment rows at `awaiting_confirm`, which
+   * `packageDeploymentsAwaitingConfirm` answers with: the list's fourth feed,
+   * for the waiting mark (epic memql#4885, design section A).
+   */
+  awaitingConfirm?: Row[];
+  /**
+   * What `siteTrafficInWindow` answers with, keyed by the mode the call is
+   * in: "series" for a stop's per-bucket read, "summary" for the list's
+   * one-row-per-deployable read.
+   *
+   * ABSENT MEANS UNMEASURED, which is exactly what the server does -- it
+   * sends no row for a window it measured nothing in -- so a seed that says
+   * nothing about traffic exercises the unmeasured path rather than a
+   * zero-filled one.
+   */
+  traffic?: { series?: Row[]; summary?: Row[] };
+  /** Fails the next `siteTrafficInWindow` with this server message. */
+  trafficError?: string;
+  /** Fails the next `updateSiteSettings` with this server message. */
+  settingsError?: string;
+  /** Fails the next `updateSiteStatus` with this server message. */
+  siteStatusError?: string;
+  /** Fails the next `siteArchive` with this server message. */
+  siteArchiveError?: string;
+  /** Fails the next `siteRestore` with this server message. */
+  siteRestoreError?: string;
+  /** Fails the next `updateSiteBundle` (a roll back to a version) with this server message. */
+  repointError?: string;
+  /** Fails the next `packageRollback` with this server message. */
+  rollbackError?: string;
+  /** Fails the next `packageRestore` with this server message. */
+  restoreError?: string;
+  /**
+   * A site's own row history, NEWEST FIRST, for the version walk. `siteById`
+   * answers the first; each `asOf(siteById(...), <t>)` answers the newest
+   * row written at or before `t`, which is exactly the read the walk makes.
+   */
+  siteHistory?: Row[];
 }
 
 export interface FakeConnection {
@@ -177,6 +238,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
 
       if (call === "query packagesAll()") return rowsResult(seed.packages ?? []);
+      if (call === "query packageDeploymentsAwaitingConfirm()") return rowsResult(seed.awaitingConfirm ?? []);
 
       if (call.startsWith("query packageDeployments(")) {
         const id = /packageId: "([^"]*)"/.exec(call)?.[1] ?? "";
@@ -191,13 +253,103 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         ]);
       }
 
+      if (call.startsWith("builtin siteTrafficInWindow(")) {
+        if (seed.trafficError !== undefined) throw new Error(seed.trafficError);
+        // The MODE is read off the rendered call string rather than from a
+        // separate stub, so the generated builder is what decides which
+        // fixture answers -- the same reason this fake sits under
+        // executeNamed at all.
+        const summary = call.includes("summary: true");
+        return rowsResult((summary ? seed.traffic?.summary : seed.traffic?.series) ?? []);
+      }
+
+      if (call.startsWith("mutation updateSiteSettings(")) {
+        if (seed.settingsError !== undefined) throw new Error(seed.settingsError);
+        return rowsResult([]);
+      }
+
       if (call.startsWith("builtin packageArchive(")) {
         if (seed.archiveError !== undefined) throw new Error(seed.archiveError);
         return rowsResult([]);
       }
 
-      if (call.startsWith("builtin packageRollback(") || call.startsWith("builtin packageRestore(")) {
+      if (call.startsWith("builtin packageRollback(")) {
+        if (seed.rollbackError !== undefined) throw new Error(seed.rollbackError);
         return rowsResult([]);
+      }
+
+      if (call.startsWith("builtin packageRestore(")) {
+        if (seed.restoreError !== undefined) throw new Error(seed.restoreError);
+        return rowsResult([]);
+      }
+
+      if (call === "query sourceCredentialsMine()") return rowsResult(seed.credentials ?? []);
+
+      if (call.startsWith("builtin sourceProbe(")) {
+        if (seed.sourceProbeError !== undefined) throw new Error(seed.sourceProbeError);
+        const credentialId = /credentialId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const answers = seed.sourceProbe ?? {};
+        const reply = answers[credentialId] ?? answers[""] ?? null;
+        return rowsResult(reply === null ? [] : [reply]);
+      }
+
+      if (call.startsWith("builtin artifactProbe(")) {
+        if (seed.artifactProbeError !== undefined) throw new Error(seed.artifactProbeError);
+        const artifactId = /artifactId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const reply = (seed.artifactProbe ?? {})[artifactId] ?? null;
+        return rowsResult(reply === null ? [] : [reply]);
+      }
+
+      if (call.startsWith("builtin sourceCredentialCreate(")) {
+        if (seed.credentialCreateError !== undefined) throw new Error(seed.credentialCreateError);
+        return rowsResult([
+          seed.credentialCreated ?? ({ credentialId: "cred-new", fingerprint: "...9f2c" } as unknown as Row),
+        ]);
+      }
+
+      if (call.startsWith("builtin sourceCredentialRevoke(")) {
+        if (seed.credentialRevokeError !== undefined) throw new Error(seed.credentialRevokeError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("mutation updatePackageSource(")) {
+        if (seed.updateSourceError !== undefined) throw new Error(seed.updateSourceError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("mutation updateSiteStatus(")) {
+        if (seed.siteStatusError !== undefined) throw new Error(seed.siteStatusError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("builtin siteArchive(")) {
+        if (seed.siteArchiveError !== undefined) throw new Error(seed.siteArchiveError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("builtin siteRestore(")) {
+        if (seed.siteRestoreError !== undefined) throw new Error(seed.siteRestoreError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("mutation updateSiteBundle(")) {
+        if (seed.repointError !== undefined) throw new Error(seed.repointError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("mutation updateSiteAccount(")) return rowsResult([]);
+
+      // The version walk: the current row, then the newest row at or before
+      // each `asOf` instant. History is the seed's `siteHistory`, newest first.
+      if (call.startsWith("query siteById(")) {
+        const history = seed.siteHistory ?? [];
+        return rowsResult(history[0] ? [history[0]] : []);
+      }
+      if (call.startsWith("asOf(siteById(")) {
+        const at = /\), "([^"]+)"\)$/.exec(call)?.[1] ?? "";
+        const history = seed.siteHistory ?? [];
+        const found = history.find((row) => String(row["createdAt"] ?? "") <= at);
+        return rowsResult(found ? [found] : []);
       }
 
       if (call.startsWith("mutation createPackage(")) {
@@ -281,6 +433,7 @@ export function siteRow(over: Partial<Row> & { id: string }): Row {
     systemOwned: false,
     deleted: false,
     binding: {},
+    settings: {},
     createdAt: "2026-08-01T00:00:00Z",
     ...over,
   };
@@ -344,6 +497,44 @@ export const DELETED = siteRow({
   deleted: true,
 });
 
+/** A credential CARD: the projection a browser receives, which has no token. */
+export function credentialRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    ownerUserId: "u-me",
+    host: "github.com",
+    label: "acme deploy token",
+    fingerprint: "sha256:ab12cd34",
+    status: "active",
+    lastUsedAt: "",
+    revokedAt: "",
+    createdAt: "2026-08-20T00:00:00Z",
+    ...over,
+  };
+}
+
+/** A `sourceProbe` reply. `ok` and public by default: the commonest answer. */
+export function probeReply(over: Partial<Row> = {}): Row {
+  return {
+    host: "github.com",
+    reachable: true,
+    private: false,
+    defaultBranch: "main",
+    reason: "ok",
+    ...over,
+  } as unknown as Row;
+}
+
+/** An `artifactProbe` reply. Neither a package nor a built site by default. */
+export function zipReply(over: Partial<Row> = {}): Row {
+  return {
+    isPackage: false,
+    isBuiltSite: false,
+    fileCount: 12,
+    totalBytes: 2097152,
+    ...over,
+  } as unknown as Row;
+}
+
 export function artifactRow(over: Partial<Row> & { id: string }): Row {
   return {
     lens: "artifact",
@@ -365,6 +556,27 @@ export const NOTE = artifactRow({
   title: "Standup notes",
   mimeType: "",
 });
+
+/**
+ * One v1:observability:siteTraffic row, as the builtin answers it.
+ *
+ * The counts are numbers rather than strings, which is what the wire carries;
+ * the projection tolerates both, and a fixture in the wrong one would let a
+ * string-only projection pass here and fail against a cluster.
+ */
+export function trafficRow(over: Partial<Row> & { windowStart: string }): Row {
+  return {
+    siteId: "site-shop",
+    bucket: "1h",
+    windowEnd: "",
+    requestCount: 0,
+    errorCount: 0,
+    clientErrorCount: 0,
+    bytesTotal: 0,
+    lastServedAt: "",
+    ...over,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Interaction helpers

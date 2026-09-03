@@ -38,58 +38,167 @@ const (
 // ---------------------------------------------------------------------------
 
 func newProductionFetcher(s *store, logger *slog.Logger) Fetcher {
+	blobs := &blobReader{}
 	return &githubFetcher{
-		http:    &http.Client{Timeout: 5 * time.Minute},
-		secrets: s.resolveSecret,
+		http: &http.Client{Timeout: 5 * time.Minute},
+		// The same resolver the D11 poll uses (Deps.Credentials), wired here
+		// as well so the fetcher is complete on its own: a fetch resolves its
+		// credential under the package owner's actor, never through a
+		// cluster-wide secret (epic memql#4885).
+		credentials: s.resolveCredential,
 		artifactBytes: func(ctx context.Context, artifactId string) ([]byte, string, error) {
-			return s.artifactBytes(ctx, artifactId)
+			return s.artifactBytes(ctx, artifactId, blobs.read)
 		},
 	}
 }
 
-// resolveSecret reads a v1:platform:globalSecret by NAME through the engine's
-// own resolver builtin, so the decrypt path and the master key stay where they
-// already are. The value is returned to one caller (the fetch) and stored
-// nowhere.
-func (s *store) resolveSecret(ctx context.Context, name string) (string, error) {
-	res, err := s.engine.Execute(ctx, fmt.Sprintf("resolveSecret({name: %s})", langparser.QuoteString(name)))
-	if err != nil {
-		return "", err
-	}
-	rows := memqlRows(res)
-	if len(rows) == 0 {
-		return "", fmt.Errorf("packages: no secret named %q", name)
-	}
-	for _, key := range []string{"value", "secret", "result"} {
-		if v := rowString(rows[0], key); v != "" {
-			return v, nil
-		}
-	}
-	return "", fmt.Errorf("packages: the secret named %q resolved to no value", name)
+// blobRead reads one object out of the cluster's object storage by its
+// container-relative key. The seam artifactBytes reads bytes through, so a
+// test hands it a map and production hands it the blob store.
+type blobRead func(ctx context.Context, key string) ([]byte, error)
+
+// blobReader is the production blobRead: the same lazy resolve blobStager and
+// enginePublisher do, for the same reason -- the plug-in factory runs on every
+// node type, and building an Azure client eagerly would fail the factory on a
+// cluster that hosts no packages at all.
+type blobReader struct {
+	uploader  *azureblob.AzureBlobUploader
+	container string
 }
 
-// artifactBytes reads a Library artifact's bytes through the engine, under the
-// CALLER's actor -- so a caller who does not own the artifact resolves zero
-// rows and is refused by name.
-func (s *store) artifactBytes(ctx context.Context, artifactId string) ([]byte, string, error) {
-	res, err := s.engine.Execute(ctx, fmt.Sprintf("libraryArtifactBytes({artifactId: %s})",
-		langparser.QuoteString(artifactId)))
-	if err != nil {
-		return nil, "", err
-	}
-	rows := memqlRows(res)
-	if len(rows) == 0 {
-		return nil, "", refuse(CodeSourceUnreadable,
-			"no artifact %q is readable by this caller", artifactId)
-	}
-	raw, ok := rows[0]["bytes"].([]byte)
-	if !ok {
-		if b64 := rowString(rows[0], "content"); b64 != "" {
-			return []byte(b64), rowString(rows[0], "mimeType"), nil
+func (b *blobReader) read(ctx context.Context, key string) ([]byte, error) {
+	if b.uploader == nil {
+		container := azureblob.ContainerFromEnv()
+		if strings.TrimSpace(container) == "" {
+			return nil, refuse(CodeSourceUnreadable,
+				"this cluster has no object storage configured (MEMQL_AZURE_BLOB_CONTAINER), so a Library zip cannot be read")
 		}
-		return nil, "", refuse(CodeSourceUnreadable, "artifact %q returned no bytes", artifactId)
+		up, err := azureblob.New(ctx)
+		if err != nil {
+			return nil, err
+		}
+		b.uploader, b.container = up, container
 	}
-	return raw, rowString(rows[0], "mimeType"), nil
+	return b.uploader.Download(ctx, b.container, key)
+}
+
+// zipMimeTypes is the closed set of types a Library file may carry and still
+// be a zip. sitePublishFromArtifact's own set, copied rather than shared for
+// the reason rows.go records about memqlRows: the two packages sit at
+// different module tiers, and five strings are not worth a dependency.
+var zipMimeTypes = map[string]struct{}{
+	"application/zip":              {},
+	"application/x-zip":            {},
+	"application/x-zip-compressed": {},
+	"application/zip-compressed":   {},
+	"multipart/x-zip":              {},
+}
+
+// artifactBytes resolves a Library zip artifact to its bytes, the way
+// sitePublishFromArtifact does and under the same rule: the index row through
+// libraryArtifactById, the backing file through libraryFileById -- both
+// owner-scoped named queries run under the CALLER's actor, so a caller who
+// does not own the artifact resolves zero rows and is refused by name -- and
+// the bytes from object storage at the file row's own blobUrl.
+//
+// It used to call `libraryArtifactBytes`, a builtin nothing in the tree
+// declares, so a zip source could never be read on a real cluster; every fake
+// answered it and nothing parsed it. The two reads here are driven through
+// the real front end by render_parse_test.go.
+func (s *store) artifactBytes(ctx context.Context, artifactId string, read blobRead) ([]byte, string, error) {
+	artifact, err := s.queryOne(ctx, fmt.Sprintf("query libraryArtifactById(artifactId: %s)", langparser.QuoteString(artifactId)))
+	if err != nil {
+		return nil, "", fmt.Errorf("libraryArtifactById: %w", err)
+	}
+	if artifact == nil {
+		// Zero rows means "no artifact by this id that YOU may read" -- one
+		// answer to two questions on purpose, so this is not an existence
+		// oracle over other people's files.
+		return nil, "", refuse(CodeSourceUnreadable, "no artifact %q is readable by this caller", artifactId)
+	}
+	if rowBool(artifact, "archived") {
+		return nil, "", refuse(CodeSourceUnreadable, "artifact %q is archived; restore it before deploying from it", artifactId)
+	}
+	if kind := rowString(artifact, "kind"); kind != "file" {
+		return nil, "", refuse(CodeSourceUnreadable, "artifact %q is kind %q; only a file artifact carries bytes to deploy", artifactId, kind)
+	}
+	fileId, ok := fileIdFromSourceRef(rowString(artifact, "sourceConceptRef"))
+	if !ok {
+		return nil, "", refuse(CodeSourceUnreadable,
+			"artifact %q names backing row %q, which is not a v1:library:file", artifactId, rowString(artifact, "sourceConceptRef"))
+	}
+
+	file, err := s.queryOne(ctx, fmt.Sprintf("query libraryFileById(fileId: %s)", langparser.QuoteString(fileId)))
+	if err != nil {
+		return nil, "", fmt.Errorf("libraryFileById: %w", err)
+	}
+	if file == nil {
+		return nil, "", refuse(CodeSourceUnreadable,
+			"artifact %q names backing file %q, which is not visible to this caller", artifactId, fileId)
+	}
+	if rowBool(file, "archived") {
+		return nil, "", refuse(CodeSourceUnreadable, "file %q is archived; restore it before deploying from it", fileId)
+	}
+	// Zip by the row's own recorded type, BEFORE a byte is fetched: OpenZip
+	// would refuse a text file anyway, after reading it in full.
+	mime := normalizeMimeType(rowString(file, "mimeType"))
+	if _, ok := zipMimeTypes[mime]; !ok {
+		return nil, "", refuse(CodeSourceUnreadable,
+			"file %q is %q; a package source must be a zip of the tree", fileId, rowString(file, "mimeType"))
+	}
+	key := storageKey(rowString(file, "blobUrl"))
+	if key == "" {
+		return nil, "", refuse(CodeSourceUnreadable, "file %q records no storage location", fileId)
+	}
+	if read == nil {
+		return nil, "", refuse(CodeSourceUnreadable, "this node cannot read object storage, so a Library zip cannot be deployed from here")
+	}
+	raw, rerr := read(ctx, key)
+	if rerr != nil {
+		if RefusalCode(rerr) != "" {
+			return nil, "", rerr
+		}
+		return nil, "", refuse(CodeSourceUnreadable, "reading %q from object storage: %v", key, rerr)
+	}
+	return raw, mime, nil
+}
+
+// fileIdFromSourceRef reads the bare file id out of an artifact's
+// sourceConceptRef. The field is an outgoing @relationship, so the engine
+// stores it canonical (v1:library:file:<id>); a bare id is accepted too, for
+// a row read through a projection that bare-ified it. A reference naming any
+// OTHER concept is refused: the Library's index row can point at a note or a
+// document, and neither carries bytes to deploy.
+func fileIdFromSourceRef(ref string) (string, bool) {
+	const prefix = "v1:library:file:"
+	ref = strings.TrimSpace(ref)
+	if strings.HasPrefix(ref, prefix) {
+		id := strings.TrimPrefix(ref, prefix)
+		return id, id != ""
+	}
+	if ref != "" && !strings.Contains(ref, ":") {
+		return ref, true
+	}
+	return "", false
+}
+
+// normalizeMimeType lowercases and drops any parameters ("application/zip;
+// charset=binary"), so the closed set above is matched on the type alone.
+func normalizeMimeType(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if i := strings.IndexByte(v, ';'); i >= 0 {
+		v = strings.TrimSpace(v[:i])
+	}
+	return v
+}
+
+// storageKey normalizes v1:library:file.blobUrl into the container-relative
+// key the blob reader wants: the field is a STORAGE PATH, and the only
+// normalization is the two prefixes a writer might have stored.
+func storageKey(blobUrl string) string {
+	key := strings.TrimSpace(blobUrl)
+	key = strings.TrimPrefix(key, "blob://")
+	return strings.TrimPrefix(key, "/")
 }
 
 // ---------------------------------------------------------------------------

@@ -32,6 +32,33 @@ const (
 	KindStorefront = "shopify_storefront"
 )
 
+// UnofferedTarget is a kind the target model has written down and not
+// registered (design section B, epic memql#4885 D9): what a person sees it
+// called, and where the design's table says it will go.
+type UnofferedTarget struct {
+	// Display is the name the not-offered sentence is built from -- "iOS",
+	// never the manifest's `ios`.
+	Display string
+	// Address is the address stop the target will carry once it is offered,
+	// so the sentence can say where the app is headed rather than only that
+	// it is not going anywhere today.
+	Address string
+}
+
+// KnownUnofferedKinds are the manifest kinds the engine KNOWS and does not
+// OFFER. They are deliberately NOT in v1:platform:site.kind
+// (TestSiteKindEnumIsExactlyThreeValues): a site is a hostname the edge
+// resolves, and a store listing is not one, so an ios site row would be a
+// value that never resolves. The three live here instead so the analysis can
+// tell the truth about them -- "not offered yet", scoped to the app and not
+// fatal to the package -- rather than filing `ios` beside `banana` as a kind
+// nobody has heard of, which would tell an author their roadmap item is a typo.
+var KnownUnofferedKinds = map[string]UnofferedTarget{
+	"ios":     {Display: "iOS", Address: "a bundle id and an App Store Connect app"},
+	"android": {Display: "Android", Address: "an application id and a Play listing"},
+	"macos":   {Display: "macOS", Address: "a bundle id, and a notarized disk image or the Mac App Store"},
+}
+
 // Manifest is memql-package.yaml.
 //
 // It describes the SOFTWARE and never its placement: there is no hostname and

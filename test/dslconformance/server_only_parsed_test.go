@@ -367,6 +367,39 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "heartbeatPackageDeployment"}:    true,
 		{Path: "platform/mutations.memql", Name: "abandonPackageDeployment"}:      true,
 		{Path: "platform/mutations.memql", Name: "recordSitePackageOrigin"}:       true,
+		// epic memql#4885 (D10). Personal source credentials: the two engine
+		// writes and the ONE read that returns ciphertext. None is a case of
+		// "caller-scoping was inconvenient" -- all three are already
+		// owner-scoped, and a scoped form would admit exactly the calls being
+		// refused.
+		//
+		// createSourceCredential writes a SEALED value. The row is genuinely
+		// the caller's (ownerUserId is stamped from actor.userId), so
+		// caller-scoping bounds nothing here; what has to be withheld is the
+		// ability to supply `encryptedValue` and `fingerprint` at all. Only
+		// the Go frame that ran secret.Encrypt under MEMQL_MASTER_KEY can vouch
+		// for that ciphertext -- a browser-composed one would read as a
+		// configured credential and unseal to nothing, or to whatever the
+		// browser chose -- so the sourceCredentialCreate capability is the one
+		// way in, and it reaches this mutation under stamped internal origin
+		// WITH the caller's own actor.
+		//
+		// touchSourceCredential is the ENGINE's own account of a fetch:
+		// `lastUsedAt` says the fetcher or the poll unsealed the credential,
+		// and a person stamping it on their own row would be equally wrong
+		// and equally unscoped away. The poll also runs on a schedule with
+		// nobody attached, where a self-scoped filter would refuse the only
+		// legitimate caller.
+		//
+		// sourceCredentialSealedById is the read that RETURNS CIPHERTEXT. It
+		// is owner-scoped already, and deliberately carries no cluster-owner
+		// branch; what @serverOnly withholds is the wire -- a client-callable
+		// projection of `encryptedValue` is a ciphertext oracle even for the
+		// row's own owner, and nothing a person does needs it: decryption
+		// happens only inside a fetch, under the package owner's actor.
+		{Path: "platform/mutations.memql", Name: "createSourceCredential"}:   true,
+		{Path: "platform/mutations.memql", Name: "touchSourceCredential"}:    true,
+		{Path: "platform/queries.memql", Name: "sourceCredentialSealedById"}: true,
 		// memql#4270 / memql#4606 / memql#4601. The four writes of the
 		// user-invitation lifecycle, and none is caller-scopable for the same
 		// underlying reason: the row is not the caller's.

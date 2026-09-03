@@ -5,14 +5,19 @@ import {
   archivePackage,
   archiveSite,
   createPackage,
+  createSourceCredential,
   deployPackage,
   repointSite,
   restorePackage,
   restoreSite,
+  revokeSourceCredential,
   rollbackPackage,
   setPackageAutoDeploy,
+  setPackageCredential,
   setSiteLive,
+  type NewCredential,
   type NewPackageInput,
+  type Placement,
 } from "./calls";
 
 // The writes this surface makes, each with its own busy/refusal pair.
@@ -97,7 +102,7 @@ function useWrite(): WriteState & { run: <T>(fn: (query: NonNullable<ReturnType<
 
 export interface PackageActions extends WriteState {
   /** Start a run. `confirm: false` parks it at the gate with its report. */
-  deploy: (packageId: string, confirm: boolean, hostnames?: Record<string, string>) => Promise<void>;
+  deploy: (packageId: string, confirm: boolean, placements?: Record<string, Placement>) => Promise<void>;
   /**
    * Retry a run that was lost, from the bytes it already fetched (memql#4900).
    * A separate verb from `deploy` because it is a different promise: deploy
@@ -110,6 +115,8 @@ export interface PackageActions extends WriteState {
   rollback: (packageId: string, deploymentId: string) => Promise<void>;
   archive: (packageId: string, confirmName: string) => Promise<void>;
   restore: (packageId: string) => Promise<void>;
+  /** Switch which of the caller's credentials this source fetches under. */
+  setCredential: (packageId: string, credentialId: string) => Promise<void>;
 }
 
 export function usePackageActions(): PackageActions {
@@ -118,8 +125,8 @@ export function usePackageActions(): PackageActions {
     busy,
     refusal,
     clear,
-    deploy: async (packageId, confirm, hostnames) => {
-      await run((query) => deployPackage(query, packageId, { confirm, ...(hostnames ? { hostnames } : {}) }));
+    deploy: async (packageId, confirm, placements) => {
+      await run((query) => deployPackage(query, packageId, { confirm, ...(placements ? { placements } : {}) }));
     },
     retry: async (packageId, fromDeploymentId) => {
       await run((query) => deployPackage(query, packageId, { confirm: false, fromDeploymentId }));
@@ -135,6 +142,40 @@ export function usePackageActions(): PackageActions {
     },
     restore: async (packageId) => {
       await run((query) => restorePackage(query, packageId));
+    },
+    setCredential: async (packageId, credentialId) => {
+      await run((query) => setPackageCredential(query, packageId, credentialId));
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Personal source credentials
+// ---------------------------------------------------------------------------
+
+export interface CredentialActions extends WriteState {
+  /** Seal a token and answer its card. "" for `credentialId` means the write was refused. */
+  add: (input: { host: string; label: string; token: string }) => Promise<NewCredential>;
+  revoke: (credentialId: string) => Promise<void>;
+}
+
+/**
+ * The two credential writes.
+ *
+ * THE TOKEN IS A PARAMETER AND NEVER STATE. It reaches `add`, goes into the
+ * one call that takes it, and is gone -- there is nothing on this hook that
+ * holds it, so a later write cannot carry it by accident (design G).
+ */
+export function useCredentialActions(): CredentialActions {
+  const { busy, refusal, clear, run } = useWrite();
+  return {
+    busy,
+    refusal,
+    clear,
+    add: async (input) =>
+      (await run((query) => createSourceCredential(query, input))) ?? { credentialId: "", fingerprint: "" },
+    revoke: async (credentialId) => {
+      await run((query) => revokeSourceCredential(query, credentialId));
     },
   };
 }
