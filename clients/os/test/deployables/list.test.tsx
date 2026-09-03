@@ -250,18 +250,52 @@ describe("the list", () => {
 // ---------------------------------------------------------------------------
 
 describe("a deploy waiting for you", () => {
-  it("marks the rows of the source whose run is parked, and adds the app that has no site yet", async () => {
+  it("marks the SOURCE once, and adds the app that has no site yet", async () => {
     mount(fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] }));
     await screen.findByText("storefront");
 
-    const marks = screen.getAllByText("a deploy is waiting for you");
-    // Both of the source's apps, and the one the report names that has never
-    // been deployed -- and not the hand-made site beside them.
-    expect(marks).toHaveLength(3);
+    // ONE parked run belongs to ONE source, so the mark is said once, on the
+    // source line beside the update chip -- not repeated down every row the
+    // source produced (DESIGN.md rule 7).
+    expect(screen.getAllByText("a deploy is waiting for you")).toHaveLength(1);
+    const group = screen.getByText("acme/storefront at main").closest(".os-deploy-group") as HTMLElement;
+    const sourceLine = group.querySelector(".os-deploy-group-source") as HTMLElement;
+    expect(within(sourceLine).getByText("a deploy is waiting for you")).toBeTruthy();
+    const storefront = screen.getByText("storefront").closest(".os-row") as HTMLElement;
+    expect(within(storefront).queryByText("a deploy is waiting for you")).toBeNull();
+
     const reports = screen.getByText("reports").closest(".os-row") as HTMLElement;
     expect(within(reports).getByText("no address yet")).toBeTruthy();
     const shop = screen.getByText("Storefront").closest(".os-row") as HTMLElement;
     expect(within(shop).queryByText("a deploy is waiting for you")).toBeNull();
+  });
+
+  it("keeps the mark ON the row when the row IS the scope: a hand-made deployable", async () => {
+    // A hand-made site stands alone, so there is no source line to say it on
+    // and the row is the only place the fact belongs. Still said once.
+    mount(
+      fakeConnection({
+        sites: [SHOP, { ...(SHOP as object), id: "site-two", hostname: "two.memql.example.com", title: "Two" } as unknown as Row],
+        packages: [],
+        awaitingConfirm: [],
+      }),
+    );
+    await screen.findByText("Storefront");
+    // The reachable positive: with no parked run there is no mark anywhere,
+    // so the absence below is about the fold rather than about the query.
+    expect(screen.queryByText("a deploy is waiting for you")).toBeNull();
+  });
+
+  it("keeps the compact rail out of the address, in the row's trailing state cluster", async () => {
+    // `store.memql.example.com` followed flush by five dots read as one
+    // string, the marks as punctuation after the host. The rail belongs on
+    // the trailing edge with the chips, never beside the address.
+    mount(fakeConnection(WITH_PACKAGE));
+    const store = (await screen.findByText("storefront")).closest(".os-row") as HTMLElement;
+    const rail = within(store).getByRole("list", { name: "storefront stops" });
+    expect(rail.closest(".os-row-state"), "the compact rail is not in the row's state cluster").not.toBeNull();
+    const address = within(store).getByText("store.memql.example.com");
+    expect(address.closest(".os-row-state"), "the address is in the state cluster").toBeNull();
   });
 
   it("clears the mark when the run moves on, on its own event", async () => {
@@ -405,7 +439,11 @@ describe("New deployable", () => {
       "pending",
       "pending",
     ]);
-    expect(within(compose).getByText("Choose where it comes from")).toBeTruthy();
+    // The Source stop is the OS's own choice control: three answers, chosen
+    // once. The third is a cluster owner's, and this session is one.
+    expect(within(compose).getByRole("radio", { name: /A repository/ })).toBeTruthy();
+    expect(within(compose).getByRole("radio", { name: /A zip in Files/ })).toBeTruthy();
+    expect(within(compose).getByRole("radio", { name: /Pushed by your CI/ })).toBeTruthy();
     // Analyze, disabled: nothing has been chosen yet.
     const analyze = within(compose).getByRole("button", { name: "Analyze" }) as HTMLButtonElement;
     expect(analyze.disabled).toBe(true);
@@ -442,18 +480,28 @@ describe("New deployable", () => {
 
     const compose = await screen.findByRole("region", { name: "New deployable" });
     const rail = within(compose).getByRole("list", { name: "Deployable stops" });
+    // A run parked at the confirm gate has ANSWERED What it is -- its report
+    // is what parked it -- so the open stop is Where it lives, which is what
+    // the Deploy beneath is waiting for.
     expect([...rail.querySelectorAll(":scope > li")].map((li) => li.getAttribute("data-state"))).toEqual([
       "complete",
+      "complete",
       "open",
-      "pending",
       "skipped",
       "pending",
     ]);
     // The source it came from, as its answer, and the report the run parked with.
     expect(within(compose).getByText("acme/storefront at main")).toBeTruthy();
-    expect(within(compose).getByText("reports")).toBeTruthy();
-    // Deploy, disabled: the placements are the compose task's stop.
-    expect((within(compose).getByRole("button", { name: "Deploy" }) as HTMLButtonElement).disabled).toBe(true);
+    // The report the run parked with, at the What-it-is stop: the app and its
+    // path, as the report names them.
+    expect(within(compose).getByText("clients/reports")).toBeTruthy();
+    // Deploy, and it is REACHABLE: the one app with no site yet arrived with
+    // a suggested address, so there is nothing left to answer. "storefront"
+    // already serves, so it is not re-asked -- the pipeline reads a placement
+    // on a first deploy only.
+    expect((within(compose).getByRole("button", { name: "Deploy" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(within(compose).getByText("reports.memql.example.com")).toBeTruthy();
+    expect(within(compose).queryByLabelText("The name storefront answers at")).toBeNull();
   });
 });
 

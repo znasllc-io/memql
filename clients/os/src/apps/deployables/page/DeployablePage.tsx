@@ -124,7 +124,7 @@ export function DeployablePage({
     switch (state.at) {
       case "awaiting_confirm":
         // Every app of an existing deployable already has an address, so the
-        // confirm sends no hostnames: the pipeline republishes through the
+        // confirm sends no placements: the pipeline republishes through the
         // (packageId, deployable name) key it recorded on the first deploy.
         if (pkg !== null) void headActions.deploy(pkg.id, true).then(reseed);
         return;

@@ -882,12 +882,29 @@ export function ChoiceStack({
   onChange,
   options,
   label,
+  voice = "data",
 }: {
   name: string;
   value: string;
   onChange: (next: string) => void;
   options: readonly ChoiceOption[];
   label: string;
+  /**
+   * How the option NAMES read.
+   *
+   * `data` -- the default and the original -- is for options that ARE the
+   * value: Fleet's `leastLoaded` and `nextMatching` are what a policy row
+   * stores and what somebody types elsewhere, so the mono face is telling
+   * them something true. `prose` is for options that are a SENTENCE about a
+   * choice ("A repository", "Pushed by your CI"): those are not values,
+   * nothing is typed anywhere, and setting them in the code face says they
+   * are when they are not.
+   *
+   * Promoted on the second use rather than invented for the first (this
+   * file's header rule). It defaults to the original so no existing caller
+   * moves a pixel.
+   */
+  voice?: "data" | "prose";
 }) {
   return (
     <div className="os-choice-stack" role="radiogroup" aria-label={label}>
@@ -900,7 +917,9 @@ export function ChoiceStack({
           className="os-choice-card"
           onClick={() => onChange(option.value)}
         >
-          <span className="os-choice-card-name os-mono">{option.label}</span>
+          <span className={voice === "prose" ? "os-choice-card-name" : "os-choice-card-name os-mono"}>
+            {option.label}
+          </span>
           {option.description ? (
             <span className="os-choice-card-note">{option.description}</span>
           ) : null}

@@ -3,7 +3,7 @@ import type { LiveSnapshot, Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Head, Panel, roleAdmits } from "../../kit";
 import { useSession } from "../../chrome/access";
-import { useLiveView } from "../../live/liveView";
+import { useLiveView, type LiveView } from "../../live/liveView";
 import { useArrivals } from "../../live/useArrivals";
 import type { OsAppProps } from "../../system/registry";
 import { DeployablesSection } from "./DeployablesSection";
@@ -222,7 +222,7 @@ export function DeployablesApp({
         settings={settings}
         update={update}
         actorRole={actorRole}
-        credentials={credentialRows}
+        credentials={credentials}
         packages={packageSnapshot.rows}
         connectResult={connectResult}
       />
@@ -279,8 +279,11 @@ function DeployablesSettingsSection({
   settings: DeployablesSettings;
   update: (patch: Partial<DeployablesSettings>) => void;
   actorRole: string;
-  credentials: readonly CredentialRow[];
+  /** The app root's one credentials feed, for the Sources group. */
+  credentials: LiveView<CredentialRow> | null;
+  /** The app root's package rows, joined onto each credential by `credentialId`. */
   packages: readonly PackageRow[];
+  /** The answer from a GitHub connect, rendered by the group that asked. */
   connectResult: ConnectReturn | null;
 }) {
   // OFFER ONLY WHAT THIS SESSION CAN OPEN. A preference naming a section the
@@ -339,19 +342,20 @@ function DeployablesSettingsSection({
           </p>
         </fieldset>
 
+        {/* THE SOURCES GROUP IS NOT A PREFERENCE, and it is here anyway: the
+            two credential acts a person takes outside a compose flow --
+            add one ahead of time, revoke one that leaked -- have nowhere
+            else to live, and Settings is where an app keeps what is about
+            the app rather than about one row (DESIGN.md rule 4's home, one
+            step out). The two above ARE preferences and stay above it. */}
+        <SourcesGroup credentials={credentials} packages={packages} connectResult={connectResult} />
+
         <p className="os-caption">
           These are kept in this browser, separately from your desktop, so an app learning a
           preference can never cost you your desks. The defaults are{" "}
           {DEFAULT_DEPLOYABLES_SETTINGS.defaultSection} at{" "}
           {DEFAULT_DEPLOYABLES_SETTINGS.density} density.
         </p>
-
-        {/* SOURCES SITS BELOW THE PREFERENCES, and it is not one. The two
-            groups above are view choices kept in this browser; this one is
-            cluster state -- a connection and a set of credentials -- so it
-            comes after them and says what it is rather than dressing as a
-            third preference. */}
-        <SourcesGroup credentials={credentials} packages={packages} connectResult={connectResult} />
       </Panel>
     </div>
   );

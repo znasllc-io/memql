@@ -577,7 +577,9 @@ function mountSources(seed: FakeSeed) {
 }
 
 async function sourcesGroup(): Promise<HTMLElement> {
-  return await screen.findByRole("region", { name: "Sources" });
+  // A fieldset named by its legend: the settings-group semantics DESIGN.md
+  // rule 8 keeps, which is a `group` and not a `region`.
+  return await screen.findByRole("group", { name: "Sources" });
 }
 
 /**
@@ -633,9 +635,11 @@ describe("Settings > Sources", () => {
     ).toBeTruthy();
     // The token path is NOT behind "Advanced": it is a legitimate first
     // choice for a host the app does not cover, and calling it advanced
-    // would be a judgement about the person.
+    // would be a judgement about the person. It is named, listed and
+    // addable in the same breath as the connection.
     expect(within(group).getByText("Tokens you pasted")).toBeTruthy();
-    expect(within(group).getByText(/A token is only needed for a host/)).toBeTruthy();
+    expect(within(group).getByRole("button", { name: "Add a credential" })).toBeTruthy();
+    expect(within(group).getByText(/No credentials yet. A public repository needs none/)).toBeTruthy();
     // No connection means nothing was asked of the cluster.
     expect(h.connection).toBeTruthy();
   });
@@ -735,7 +739,7 @@ describe("Settings > Sources", () => {
   it("renders a refused disconnect beside the button that produced it", async () => {
     mountSources({
       credentials: [GRANT],
-      revokeError: "credential_not_found: That credential is not one you can use.",
+      credentialRevokeError: "credential_not_found: That credential is not one you can use.",
     });
     const card = await screen.findByRole("region", { name: "GitHub" });
     await click(within(card).getByRole("button", { name: "Disconnect" }));
@@ -756,17 +760,20 @@ describe("Settings > Sources", () => {
     expect(within(card).queryByRole("button", { name: "Disconnect" })).toBeNull();
   });
 
-  it("lists a pasted credential as a card, and revokes it by name", async () => {
+  it("lists a pasted credential beside what fetches under it, and revokes it by name", async () => {
     const { connection } = mountSources({
       credentials: [credentialRow({ id: "cred-1" })],
       packages: [
-        { id: "pkg-a", ownerUserId: "u-me", name: "widget", sourceKind: "repo", credentialId: "cred-1", status: "active", createdAt: "2026-08-01T00:00:00Z" } as unknown as Row,
+        { id: "pkg-a", ownerUserId: "u-me", name: "widget", sourceKind: "repo", repoUrl: "https://github.com/acme/widget", repoRef: "main", credentialId: "cred-1", status: "active", createdAt: "2026-08-01T00:00:00Z" } as unknown as Row,
       ],
     });
     const group = await sourcesGroup();
-    expect(await within(group).findByText("acme deploy token")).toBeTruthy();
-    expect(within(group).getByText("sha256:ab12cd34")).toBeTruthy();
-    expect(within(group).getByText(/widget will refuse at the next fetch/)).toBeTruthy();
+    // The name and the digest are one node, which is how the list draws a
+    // card: two cards are told apart by the mark beside the name.
+    expect(await within(group).findByText("acme deploy token sha256:ab12cd34")).toBeTruthy();
+    // What a revoke would break, named before it is offered.
+    expect(within(group).getByText("acme/widget at main")).toBeTruthy();
+    await click(within(group).getByRole("button", { name: /Revoke acme deploy token/ }));
     await click(within(group).getByRole("button", { name: "Revoke" }));
     expect(connection.callsNamed("sourceCredentialRevoke")).toEqual([
       'builtin sourceCredentialRevoke(credentialId: "cred-1")',
@@ -784,7 +791,7 @@ describe("Settings > Sources", () => {
     // The reachable positive: the seed really does carry a token-shaped
     // string, and the cards it is attached to really did render.
     expect(FIXTURE_GITHUB_PAT.startsWith("ghp_")).toBe(true);
-    expect(within(group).getByText("acme deploy token")).toBeTruthy();
+    expect(within(group).getByText(/acme deploy token/)).toBeTruthy();
     expect((await within(group).findAllByText("@octocat")).length).toBeGreaterThan(0);
     expect(container.textContent).not.toContain("ghp_");
     expect(container.textContent).not.toContain(FIXTURE_GITHUB_PAT);

@@ -4715,6 +4715,82 @@ a.os-button {
   color: var(--os-ink);
 }
 
+/* ---- the compose stops (epic memql#4885, task memql#4891) --------------
+ *
+ * A VERDICT is what the cluster answered about something the person just
+ * typed or chose: "public, default branch main", the composed hostname, the
+ * slug rule that is not met. It is CONTENT rather than a notice -- nothing
+ * has gone wrong and there is nothing to dismiss -- so it reads at the
+ * surface's own size in one of two tones, and neither is `error`: `warn` is
+ * "this cannot go on as it is" and `ok` is the answer. Amber and the accent,
+ * the shell's own two, and no new colour. */
+.os-stop-verdict {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+.os-stop-verdict[data-tone="ok"] {
+  color: var(--os-accent);
+}
+.os-stop-verdict[data-tone="warn"] {
+  color: var(--os-warn);
+}
+
+/* The form a stop holds while it is being answered. Same grid as the stop's
+ * own body -- a form inside a stop is not a second container language (rule
+ * 8), it is the stop's body with fields in it. */
+.os-stop-form {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* ---- the Sources settings group ---------------------------------------
+ *
+ * One credential is a ROW plus, while it is being revoked, the confirmation
+ * attached beneath it. The act sits in the row's own trailing cluster
+ * (DESIGN.md rule 6): loose beneath the row it read as a control of the whole
+ * group, and a second one under the second row said so twice. */
+.os-source-credential {
+  display: grid;
+  /* TIGHTER THAN THE LIST'S OWN GAP (4px), so the dependants line reads as
+   * belonging to the row above it rather than as a sibling of the next
+   * credential. Two rows and two lines at one spacing is four things in a
+   * column with nothing saying which pairs with which. */
+  gap: 2px;
+}
+
+/* WHAT FETCHES UNDER IT wraps rather than truncating. The deployables list
+ * ellipses an address because the row's name already identifies it; here the
+ * dependants ARE the fact that makes a revoke legible, and an ellipsis hides
+ * exactly the thing somebody is about to break. */
+.os-source-fetching {
+  margin: 0 0 0 14px;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+  min-width: 0;
+}
+
+/* The heartbeat, displayed continuously and never fingerprinted. One line:
+ * "used 19d ago" broken over two reads as two facts. */
+.os-source-used {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  white-space: nowrap;
+}
+
+/* The confirmation, INSET under the row it belongs to, so the sentence and
+ * the two buttons read as that credential's and not as the group's. */
+.os-source-confirm {
+  display: grid;
+  gap: 6px;
+  margin-left: 14px;
+  padding: 8px 11px;
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+  border: 1px solid var(--os-line);
+}
+
 .os-report {
   display: grid;
   gap: 14px;

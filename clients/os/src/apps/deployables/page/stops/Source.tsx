@@ -1,12 +1,13 @@
 import { useState } from "react";
-import { Archive, ArrowUpCircle, RotateCcw } from "lucide-react";
+import { Archive, ArrowUpCircle, KeyRound, RotateCcw } from "lucide-react";
 
-import { Button, Caption, Chip, Chips, Fact, Facts, Input } from "../../../../kit";
+import { Button, Caption, Chip, Chips, Fact, Facts, FormRow, Input } from "../../../../kit";
 import { formatMoment } from "../../../../kit/format";
 import { usePackageActions } from "../../packages/actions";
 import { ProblemNotice } from "../../packages/ReportView";
 import { shortVersion, type PackageRow } from "../../packages/rows";
 import { bundleForm, bundleFormNote, siteName, type SiteRow } from "../../rows";
+import { CredentialField } from "../../sources/CredentialField";
 import { credentialIsRevoked, isGithubAppGrant, type CredentialRow } from "../../sources/rows";
 import { isPlaceholderBundle, type RailProblem } from "../rail";
 import { ZipPicker } from "./ZipPicker";
@@ -51,7 +52,7 @@ export function SourceStop({
       {pkg === null ? (
         <HandMadeSource site={site} flipped={flipped} />
       ) : (
-        <PackageSource pkg={pkg} site={site} credentials={credentials} flipped={flipped} />
+        <PackageSource pkg={pkg} site={site} credentials={credentials} flipped={flipped} canWrite={canWrite} />
       )}
       {pkg !== null && canWrite ? <PackageLifecycle pkg={pkg} site={site} siblings={siblings} /> : null}
       {/* A system-owned row is baked into the image and takes no zip: it
@@ -72,11 +73,13 @@ function PackageSource({
   site,
   credentials,
   flipped,
+  canWrite,
 }: {
   pkg: PackageRow;
   site: SiteRow;
   credentials: readonly CredentialRow[];
   flipped: boolean;
+  canWrite: boolean;
 }) {
   return (
     <>
@@ -112,7 +115,50 @@ function PackageSource({
         <BundleFact site={site} flipped={flipped} />
         <Fact label="Added" value={formatMoment(pkg.createdAt)} />
       </Facts>
+      {pkg.sourceKind === "repo" && canWrite ? <SwitchCredential pkg={pkg} credentials={credentials} /> : null}
     </>
+  );
+}
+
+/**
+ * Switch which of the caller's credentials this source fetches under.
+ *
+ * ROTATION IS THIS CONTROL (design section D). There is no "rotate" write:
+ * a credential's value is sealed once and never replaced, so rotating means
+ * adding a new one and pointing the source at it -- which the picker does in
+ * one place, add included. It lives on the SOURCE stop because a credential
+ * is a fact about the source and not about any one app it produced, and the
+ * chip above already names the one in force.
+ *
+ * Its own write hook, so the refusal renders beside the control that produced
+ * it: `updatePackageSource` is owner-tier, and a cluster owner reading
+ * somebody else's source gets the guard's own sentence here rather than a
+ * silent no-op.
+ */
+function SwitchCredential({ pkg, credentials }: { pkg: PackageRow; credentials: readonly CredentialRow[] }) {
+  const actions = usePackageActions();
+  const [chosen, setChosen] = useState(pkg.credentialId);
+  const changed = chosen.trim() !== pkg.credentialId.trim();
+
+  return (
+    <section className="os-report-part">
+      <h4 className="os-report-heading">
+        <KeyRound size={12} aria-hidden /> Fetches under
+      </h4>
+      <CredentialField
+        id={`os-source-credential-${pkg.id}`}
+        credentials={credentials}
+        value={chosen}
+        onChange={setChosen}
+      />
+      <FormRow>
+        <Button tone="primary" disabled={!changed} busy={actions.busy} onClick={() => void actions.setCredential(pkg.id, chosen)}>
+          Save
+        </Button>
+        <Caption>The next fetch uses it. Nothing already deployed changes.</Caption>
+      </FormRow>
+      {actions.refusal ? <ProblemNotice problem={{ ...actions.refusal, fatal: true }} tone="error" /> : null}
+    </section>
   );
 }
 

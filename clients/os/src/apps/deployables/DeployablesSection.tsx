@@ -182,6 +182,11 @@ export function DeployablesSection({
         onBack={() => setCompose(null)}
         onAsk={onAsk}
         parked={parkedFor ?? undefined}
+        placed={
+          parkedFor === null
+            ? []
+            : siteRows.filter((s) => s.packageId === parkedFor.pkg.id).map((s) => s.packageDeployableName)
+        }
       />
     );
   }
@@ -366,27 +371,36 @@ function GroupLine({
   onOpenSite: (siteId: string) => void;
   onOpenParked: (packageId: string) => void;
 }) {
-  const line = (row: DeployableListRow, rowTick: ArrivalKind | null) => (
+  const line = (row: DeployableListRow, rowTick: ArrivalKind | null, waiting: boolean) => (
     <DeployableLine
       key={row.key}
       row={row}
       tick={rowTick}
+      waiting={waiting}
       accounts={accounts}
       open={row.site !== null && row.site.id === selectedSiteId}
       onOpen={() => (row.site === null ? onOpenParked(row.pkg?.id ?? "") : onOpenSite(row.site.id))}
     />
   );
 
-  if (group.pkg === null) return line(group.rows[0]!, tick);
+  // A HAND-MADE DEPLOYABLE IS ITS OWN SCOPE. There is no source line above it
+  // to carry the waiting mark, so the row is where the fact belongs -- which
+  // is still exactly one place.
+  if (group.pkg === null) return line(group.rows[0]!, tick, group.rows[0]!.parked !== null);
 
   const pkg = group.pkg;
+  // ONE PARKED RUN BELONGS TO ONE SOURCE. Every row of a group carries the
+  // same run, so saying it per row said one fact three times, stacked
+  // (DESIGN.md rule 7). It is said here, once, beside the update chip.
+  const waiting = group.rows.some((row) => row.parked !== null);
   return (
     <div className="os-deploy-group" data-archived={pkg.status === "archived" || undefined}>
       {/* THE SOURCE LINE, ONCE (DESIGN.md rule 7). The update chip lives here
           because a newer upstream version is a fact about the source, not
           about any one app it produced: it is a STANDING mark, true until
           somebody deploys, beside the arrival ring that says it just landed
-          (clients/os/README.md: the update needs both). */}
+          (clients/os/README.md: the update needs both). The waiting mark is
+          the same class of fact and sits beside it. */}
       <div className="os-deploy-group-source">
         <span className="os-pkg-source">
           {pkg.sourceKind === "repo" ? <GitBranch size={11} aria-hidden /> : null}
@@ -402,9 +416,10 @@ function GroupLine({
             <Archive size={11} aria-hidden /> archived
           </Chip>
         ) : null}
+        {waiting ? <span className="os-deploy-waiting">a deploy is waiting for you</span> : null}
         {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
       </div>
-      {group.rows.map((row) => line(row, null))}
+      {group.rows.map((row) => line(row, null, false))}
     </div>
   );
 }
@@ -412,12 +427,15 @@ function GroupLine({
 function DeployableLine({
   row,
   tick,
+  waiting,
   accounts,
   open,
   onOpen,
 }: {
   row: DeployableListRow;
   tick: ArrivalKind | null;
+  /** The waiting mark belongs on the row only when the row IS the scope. */
+  waiting: boolean;
   accounts: AccountRow[];
   open: boolean;
   onOpen: () => void;
@@ -434,8 +452,15 @@ function DeployableLine({
       onOpen={onOpen}
       state={
         <>
-          {row.parked === null ? null : <span className="os-deploy-waiting">a deploy is waiting for you</span>}
+          {waiting ? <span className="os-deploy-waiting">a deploy is waiting for you</span> : null}
           <AccountChip name={accountNameFrom(accounts, site?.accountId ?? "")} />
+          {/* THE RAIL IS NOT PART OF THE ADDRESS. Rendered after the hostname
+              with the same spacing, the five marks read as punctuation on the
+              end of it -- `store.example.com` and the dots ran on as one
+              string. It belongs on the trailing edge, and LAST there rather
+              than first: the rail is what a person scans DOWN a list, so it
+              wants the one position that is the same on every row. */}
+          <Rail compact input={standingInputFor(row)} label={`${row.name} stops`} />
           {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
         </>
       }
@@ -448,7 +473,6 @@ function DeployableLine({
       ) : row.hostname === row.name ? null : (
         <span className="os-deploy-address os-mono">{row.hostname}</span>
       )}
-      <Rail compact input={standingInputFor(row)} label={`${row.name} stops`} />
     </ListRow>
   );
 }
