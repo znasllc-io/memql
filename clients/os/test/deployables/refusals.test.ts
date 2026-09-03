@@ -59,11 +59,18 @@ describe("refusal copy coverage", () => {
   });
 
   it("still finds the inline codes the pipeline spells at its raise sites", () => {
-    // The reachable positive for the inline scan: these four are known to be
+    // The reachable positive for the inline scan: these three are known to be
     // spelled inline today. If the scan stops seeing them the regexes have
     // drifted from the Go, not the Go from the OS.
+    //
+    // `deployable_build_failed` was a fourth until epic memql#4900 promoted it
+    // to `CodeDeployableBuildFailed` in refusal.go, which the CATALOGUE scan
+    // covers instead. Its coverage did not weaken -- the assertion below reads
+    // the union of both scans -- so a code moving from one scan to the other
+    // belongs out of this list rather than propped up by an inline literal
+    // kept only to satisfy a test.
     const inline = inlineCodes();
-    for (const code of ["deploy_failed", "deployable_build_failed", "deployable_publish_failed", "archive_confirmation_mismatch"]) {
+    for (const code of ["deploy_failed", "deployable_publish_failed", "archive_confirmation_mismatch"]) {
       expect(inline, `the inline scan no longer finds ${code}`).toContain(code);
     }
   });

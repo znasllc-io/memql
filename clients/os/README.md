@@ -490,6 +490,40 @@ knowing before touching it.
   wait on any of it: the app is live at its cluster address and the domain
   stays "waiting on your DNS records" beside it.
 
+### Builds, and a run that gets lost (epic memql#4900)
+
+Builds are real now, so three things the surface says are rules rather than
+repetitions of what the app already had.
+
+- **A HEARTBEAT ARRIVED, AND THE FINGERPRINT DID NOT MOVE.** A running deploy
+  writes `heartbeatAt` every fifteen seconds, and every one of those writes
+  broadcasts the whole row. `deploymentFingerprint` is still `status` alone,
+  which is this app's arrival-cue rule at its sharpest: the cue would fire
+  hardest for the run somebody is already watching move. `autoDeploy` goes the
+  OTHER way, into the PACKAGE fingerprint -- it is a field somebody else can
+  flip, and the consequence is that pushes start deploying themselves.
+
+- **`abandoned` IS NOT A FLAVOUR OF FAILED.** A run whose node the cluster lost
+  gets its own terminal status, its own word in the timeline ("lost", never
+  "failed"), and copy saying nothing failed and nothing was published. The
+  natural reading of a stopped deploy is that it broke; this one did not, and
+  the surface's job is to say so before somebody debugs a build script that is
+  fine. Two readings came out of a BROWSER rather than jsdom, which renders the
+  same DOM and asserts nothing about either: a lost run was appearing under
+  "Deploying now" beside a rail that had stopped, and the rail was drawing it
+  as having stopped at Analyze because the evidence rule reads fields a stage
+  WRITES and a run that dies part-way writes none of them. The fix for the
+  second is `stoppedAt` on the row, and it outranks every inference.
+
+- **RETRY AND REDEPLOY ARE DIFFERENT PROMISES, so they are different buttons in
+  different places.** The Head's Retry deploys the source again. Retrying a
+  LOST run deploys the bytes that run had already fetched, so it lives on the
+  attempt that names the run and nowhere else -- two controls both reading
+  Retry and doing different things is the thing being avoided. The auto-deploy
+  switch is on the SOURCE stop for the same reason: it answers "when this
+  source moves, then what", which is a property of the source rather than of
+  any one run.
+
 ## Training, the fourth app (memql#4737)
 
 `src/apps/training/` is teaching MemQL from files: a dropzone into the

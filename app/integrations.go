@@ -15,5 +15,8 @@ func (a *App) integrationsCore() {
 	// runs after registration and in the background. See
 	// app/integrations_shopify.go for why it cannot be in the factory.
 	a.registerShopifyConnector()
+	// The deploy pipeline's build surface, after materialization because it
+	// joins two plug-ins that each register themselves (epic memql#4900).
+	a.wirePackageBuildSurface()
 	a.Logger.Info("core integration providers registered")
 }

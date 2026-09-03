@@ -18,6 +18,9 @@ import (
 
 type fakeFetcher struct {
 	tree fs.FS
+	// repoFetches counts trips to the repository, which is how a retry test
+	// asserts that it made none.
+	repoFetches int
 	// sourceSeen records what the fetch was told: the credential NAME and the
 	// OWNER it is to be resolved under, straight off the package row.
 	sourceSeen RepoSource
@@ -33,11 +36,14 @@ func (f *fakeFetcher) FetchRepo(_ context.Context, src RepoSource, _ Limits) (*S
 	if f.err != nil {
 		return nil, f.err
 	}
+	f.repoFetches++
 	f.sourceSeen = src
 	if v, ok := f.credentials[src.CredentialId]; ok {
 		f.resolvedTokens = append(f.resolvedTokens, v)
 	}
-	return &SourceSnapshot{Tree: f.tree, Version: "sha-abc123", cleanup: func() {}}, nil
+	// Bytes, as the real repo fetch now keeps them: without a snapshot there
+	// is nothing for a retry to read back.
+	return &SourceSnapshot{Tree: f.tree, Version: "sha-abc123", Bytes: fixtureTarGz(f.tree), cleanup: func() {}}, nil
 }
 
 func (f *fakeFetcher) FetchArtifact(_ context.Context, _ string, _ Limits) (*SourceSnapshot, error) {
@@ -49,16 +55,25 @@ func (f *fakeFetcher) FetchArtifact(_ context.Context, _ string, _ Limits) (*Sou
 
 type fakeBuilder struct {
 	built []string
-	err   error
-	tail  string
+	// runs records the BuildRun each call carried, so a test can assert on
+	// what the pipeline told the build surface about the attempt -- the
+	// deployment it belongs to, whose it is, and which node the previous
+	// deployable of this same run built on.
+	runs []BuildRun
+	err  error
+	tail string
+	// nodeId is the workbench replica this fake claims to have built on.
+	nodeId string
 }
 
-func (b *fakeBuilder) Build(_ context.Context, _ *SourceSnapshot, dep DeployableReport) (BuildResult, error) {
+func (b *fakeBuilder) Build(_ context.Context, run BuildRun, _ *SourceSnapshot, dep DeployableReport) (BuildResult, error) {
 	b.built = append(b.built, dep.Name)
+	b.runs = append(b.runs, run)
+	on := BuiltOn{Surface: SurfaceWorkbench, NodeId: b.nodeId}
 	if b.err != nil {
-		return BuildResult{LogTail: b.tail}, b.err
+		return BuildResult{LogTail: b.tail, BuiltOn: on}, b.err
 	}
-	return BuildResult{Bundle: edge.Bundle{"index.html": []byte("<!doctype html>")}}, nil
+	return BuildResult{Bundle: edge.Bundle{"index.html": []byte("<!doctype html>")}, BuiltOn: on}, nil
 }
 
 type fakeStager struct {
@@ -113,8 +128,17 @@ type fakePublisher struct {
 	published []string
 	repointed []string
 	snapshots int
-	err       error
-	onRepoint func()
+	// stored is what StoreSnapshot kept, keyed by the ref it minted, so a
+	// retry test can read back exactly the bytes the earlier run fetched.
+	stored map[string][]byte
+	// snapshotReads records every ReadSnapshot, which is how a test asserts a
+	// retry read the snapshot INSTEAD of fetching.
+	snapshotReads []string
+	err           error
+	onRepoint     func()
+	// onPublish sees the bundle that would actually be SERVED, which is the
+	// only place a build's output can be asserted end to end.
+	onPublish func(edge.Bundle)
 }
 
 func (p *fakePublisher) EnsureSite(_ context.Context, req EnsureSiteRequest) (string, string, bool, error) {
@@ -122,9 +146,12 @@ func (p *fakePublisher) EnsureSite(_ context.Context, req EnsureSiteRequest) (st
 	return "v1:platform:site:" + req.DeployableName, req.Hostname, true, nil
 }
 
-func (p *fakePublisher) PublishBundle(_ context.Context, siteId string, _ edge.Bundle) (PublishResult, error) {
+func (p *fakePublisher) PublishBundle(_ context.Context, siteId string, bundle edge.Bundle) (PublishResult, error) {
 	if p.err != nil {
 		return PublishResult{}, p.err
+	}
+	if p.onPublish != nil {
+		p.onPublish(bundle)
 	}
 	p.published = append(p.published, siteId)
 	return PublishResult{SiteId: siteId, BundleRef: "blob://sites/x/v1/", Version: "v1"}, nil
@@ -138,9 +165,23 @@ func (p *fakePublisher) RepointSite(_ context.Context, siteId, bundleRef string)
 	return nil
 }
 
-func (p *fakePublisher) StoreSnapshot(context.Context, string, string, []byte) (string, error) {
+func (p *fakePublisher) StoreSnapshot(_ context.Context, _, _ string, raw []byte) (string, error) {
 	p.snapshots++
-	return "v1:library:artifact:snap", nil
+	if p.stored == nil {
+		p.stored = map[string][]byte{}
+	}
+	ref := "blob://packages/snapshots/snap.tar.gz"
+	p.stored[ref] = raw
+	return ref, nil
+}
+
+func (p *fakePublisher) ReadSnapshot(_ context.Context, ref string) ([]byte, error) {
+	p.snapshotReads = append(p.snapshotReads, ref)
+	raw, ok := p.stored[ref]
+	if !ok {
+		return nil, refuse(CodeSnapshotUnavailable, "no snapshot at %q", ref)
+	}
+	return raw, nil
 }
 
 type fakeAuditor struct{ events []DeployAuditEvent }

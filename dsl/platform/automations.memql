@@ -95,3 +95,21 @@ automation pollPackageUpstreams {
     builtin packagePollUpstream ()
   }
 }
+
+/// Close the runs whose nodes are gone (epic memql#4900, task memql#4902).
+///
+/// EVERY TWO MINUTES, which is the cadence the threshold is a multiple of: a run heartbeats every
+/// fifteen seconds, a stranded one is noticed within a couple of minutes of its node going away, and
+/// the OS's rail stops claiming a deploy is building when nothing is.
+///
+/// Scheduled, so it runs on the CRON LEADER only (component/automations.CronLeader) -- one replica
+/// closing each stranded row once, with no advisory lock of its own to get wrong. It is also a
+/// MAINTENANCE automation (component/auth/maintenance_actor.go): its read is every owner's runs,
+/// which the composite tier admits only to a cluster owner, and the default automation actor is a
+/// reader.
+@trigger(schedule="0 */2 * * * *")
+automation sweepAbandonedPackageDeployments {
+  step sweep {
+    builtin packageSweepAbandoned ()
+  }
+}

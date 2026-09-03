@@ -323,6 +323,10 @@ mismatch writes nothing.
 | `MEMQL_PACKAGES_MAX_FILE_COUNT` | `20000` | Cap on the file count |
 | `MEMQL_PACKAGES_ROLL_TARGETS` | *(unset)* | Comma-separated workloads a DSL roll restarts. **Unset means the roll refuses** rather than guessing |
 | `MEMQL_PACKAGES_WEBHOOK_SOURCE` | `github` | Which `/inbound/{source}` segment carries package webhooks |
+| `MEMQL_PACKAGES_BUILD_TIMEOUT_SECONDS` | `900` | How long ONE deployable's build may run before it is stopped, process group and all |
+| `MEMQL_PACKAGES_HEARTBEAT_SECONDS` | `15` | How often a running deploy says its node is alive |
+| `MEMQL_PACKAGES_ABANDONED_AFTER_SECONDS` | `90` | How stale that heartbeat must be before the sweep closes the run `abandoned`. Clamped up to three heartbeats |
+| `MEMQL_PACKAGES_BUILD_UID` | `10001` | The uid a build's command runs as. `0` runs it as the engine's own user, which is an explicit choice |
 
 A cap that is set and unparseable, or non-positive, falls back to its DEFAULT
 rather than to "no limit".
@@ -335,23 +339,142 @@ Sealing and unsealing a source credential uses `MEMQL_MASTER_KEY`, which every
 node already has; a ciphertext this node cannot unseal is refused as
 `source_unreadable` naming that variable, because the repair is an operator's.
 
-## Builds: what ships today
+## Builds
 
 A deployable whose built output is **already in the source** (`dist/index.html`
 present) deploys with no build at all -- no build surface, no network, nothing
 to configure. That covers every tree whose own CI already builds it, which is
-what the memql-project template produces. The Build stop draws itself skipped,
-with the reason: its built output is in the source.
+what the memql-project template produces, and it is still the fastest path.
+The Build stop draws itself skipped, with the reason: its built output is in
+the source.
 
-A deployable that needs a build in-cluster is **refused with a typed message
-naming the command it would have run**, and the two ways forward: commit the
-built output, or wait for the workbench binding. The reasoning is in
-`component/packages/builder.go` and it is short: a package's build script is
-somebody else's code, `npm ci` runs whatever a dependency put in a
-`postinstall` hook, and the sandbox that exists for exactly this
-(`workbench_use`) reaches its isolation through a per-Plan workspace that a
-package deploy does not have. Running it in the engine process instead would
-deliver the feature by deleting the property that made it safe.
+Everything else **builds on the workbench** (epic memql#4900).
+
+### Where a build runs, and what it can see
+
+A package's build script is somebody else's code: `npm ci` runs whatever a
+dependency put in a `postinstall` hook. So the command never runs in an engine
+process. It runs on a **workbench node**, in a directory that exists for the
+length of one build, under an environment this cluster **constructs**:
+
+| The build gets | It does not get |
+|---|---|
+| `PATH`, a `HOME` and `TMPDIR` inside its own directory, the locale, `CI=true`, npm's cache pointed inside the directory | Any variable from the node's own environment -- the database DSN, the master key, the storage connection string, every vendor key |
+| `MEMQL_BUILD_DEPLOYMENT_ID` and `MEMQL_BUILD_DEPLOYABLE`, so a build can name itself in its own logs | A cluster credential of any kind, in any form |
+
+Constructing the environment covers what the command is **handed**. It runs as
+**uid 10001** as well, which covers what it can go and **read**: the engine runs
+as root, and a build running as root could read `/proc/1/environ` and take
+everything the pod holds. `MEMQL_PACKAGES_BUILD_UID` names the uid.
+
+That is a boundary, not a jail. A build can still reach the network and spend
+the pod's CPU; those are bounded by the pod's own limits, by the timeout, and by
+the directory being destroyed when the call returns -- whether the build
+succeeded, failed or timed out.
+
+### The image
+
+The `workbench` node type is the only one whose image carries a Node toolchain
+and `git` (the `workbench-runtime` stage in the `Dockerfile`). Node comes from
+the same pinned `node:22` image this repo builds its own SPAs with, so a package
+builds against the toolchain the platform's own bundles do.
+
+### Which node builds
+
+The bff serves `packageDeploy`, and it forwards the build to a workbench replica
+over `NodeService.Stream` -- `MEMQL_WORKBENCH_REMOTE=1` plus
+`MEMQL_WORKER_PEERS=workbench=workbench:50060`, both set in
+`deploy/k8s/components/engine-bff`. **With no reachable workbench peer a build is
+refused** (`no_workbench_peer`), never run on the bff: running somebody else's
+build script in the process holding the cluster's front door is not the
+isolation that flag asks for.
+
+The forward carries a **system-class assertion** -- this cluster's engine acting
+for itself -- and the workbench refuses a build request carrying any other. That
+is what keeps the build entry unreachable from an agent's tool loop, which
+re-asserts its own caller's class and can never mint a system one.
+
+The apps of one package prefer the **same replica**: the first app's node is
+passed as the second's affinity pin, so one run reads as one place in the logs.
+`builtOn` on the deployment row records the surface and the node.
+
+### When a build goes wrong
+
+| Code | What it means | Whose repair |
+|---|---|---|
+| `deployable_build_failed` | The command exited non-zero. The log tail is on the row | the author's |
+| `deployable_build_timeout` | The command outlived `MEMQL_PACKAGES_BUILD_TIMEOUT_SECONDS` and was stopped, process group and all | the author's, or an operator raising the cap |
+| `build_output_missing` | The command succeeded and wrote no output directory | the author's |
+| `no_workbench_peer` | This cluster has no workbench to build on | an operator's |
+
+Every one of them leaves **every site serving exactly what it was serving**: the
+build stage is before publish in the D6 order.
+
+### Builds on your own machine
+
+A target can declare that its kind builds on a machine in the owner's own Fleet
+-- an iOS or macOS build needs Xcode, which needs macOS. The route ships as the
+**selection mechanism and its hop test, with no registered kind that reaches
+it**: `targets.go` maps every offered kind to the workbench, and a test pins
+that. What is real is choosing the machine (by exact label, under the owner,
+with `no_worker_available` naming every machine considered and why each was
+ruled out); what is deliberately refused is the dispatch, because building on
+somebody's laptop is a computer-use act and a deploy has no approved plan to
+hang that consent on. The first target that needs a Mac brings that decision
+with it.
+
+## When a node is lost mid-deploy
+
+A deploy is one call on one node. Until epic memql#4900 a node lost mid-run left
+its row at a non-terminal status forever, and the surface said "building" for as
+long as anybody looked.
+
+A running pipeline now writes `heartbeatAt` every
+`MEMQL_PACKAGES_HEARTBEAT_SECONDS`, and a sweep every two minutes closes any run
+whose heartbeat is older than `MEMQL_PACKAGES_ABANDONED_AFTER_SECONDS` with the
+terminal status **`abandoned`**.
+
+- **Never `failed`.** The sweep does not know whether the build was about to
+  succeed; it knows the node stopped answering. The error it stamps names the
+  node and when it was last heard from, and the OS says "this cluster lost the
+  node that was running it; nothing was published".
+- **The threshold is six heartbeats, not two.** A run that misses one had a slow
+  moment. Six in a row is a node that is gone. The threshold is clamped up to
+  three heartbeats if configured below that, because a cluster that sweeps its
+  own healthy deploys presents as a broken build surface rather than as a
+  setting.
+- **Retry deploys what the lost run was deploying.** `packageDeploy` takes
+  `fromDeploymentId`, and a run started that way re-analyses the snapshot the
+  earlier run stored rather than fetching the source again -- so a Retry does not
+  quietly deploy whatever the branch has moved to since. A run that kept no
+  snapshot (every run from before this epic) is refused with
+  `snapshot_unavailable`, and the sentence says to deploy again instead.
+
+The sweep runs on the **cron leader only**, so each stranded row is closed once,
+and under the maintenance actor, because it reads every owner's runs.
+
+## Auto-deploy
+
+A per-source switch: **deploy the update by itself when the plan is unchanged**.
+Off by default and off for every source that has never been switched.
+
+With it on, the update feeds start the run they have never been allowed to start
+-- requested by the source's **owner**, marked `automatic` on the row -- and the
+run **confirms itself only when the new analysis plans exactly what the last
+successful deploy planned**: the same apps by name, kind, path, build command and
+output directory, the same MemQL domains. Anything else parks at the confirm
+gate exactly as a person's deploy does, and the surface says why.
+
+The gate is not skipped. It is answered, and only by a plan somebody already
+said yes to. A changed build command is the case that matters most -- it is
+somebody else's shell command arriving on your cluster -- and it always parks.
+
+Two other rules:
+
+- **Never more than one auto-run live per source.** Two pushes seconds apart
+  compose the same deployment id, so the second lands on a row that already
+  exists and the append-only rule refuses to reopen it.
+- **A cluster-owned source cannot auto-deploy.** There is nobody to run as.
 
 Workbench builds are the Build epic of
 [the Deployables program](../../superpowers/specs/2026-09-02-deployables-program-design.md).
@@ -371,4 +494,9 @@ and the log -- not where the stop is.
 | The D10 lifecycle law | `component/memql/platform_site_status_guard.go` |
 | The boot-time fetcher | `subcommand_dsl_fetch.go`, `component/packages/fetch_active_set.go` |
 | The kustomize component | `deploy/k8s/components/dsl-packages/` |
+| The build surface's entry | `integrations/workbench/build.go` |
+| The binding, and the two translations | `component/packages/build_workbench.go` |
+| The abandoned sweep and the heartbeat | `component/packages/sweep.go` |
+| The auto-deploy switch and the plan comparison | `component/packages/autodeploy.go` |
+| The Fleet route (a seam, with no consumer) | `component/packages/fleetbuild.go` |
 | The surface | `clients/os/src/apps/deployables/` |

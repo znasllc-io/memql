@@ -56,6 +56,17 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 	// failure, arrived at through authorization rather than through the gate
 	// D3 actually warns about.
 	//
+	// sweepAbandonedPackageDeployments joined them with epic memql#4900, and it
+	// has both properties. It is engine-owned (dsl/platform/automations.memql),
+	// and its read spans owners BY NATURE rather than inconveniently: a node
+	// that died was running SOMEBODY's deploy and there is nobody left to ask,
+	// which is the whole reason the sweep exists -- the person watching a stuck
+	// rail is exactly the person who cannot fix it. Borrowing one owner's
+	// authority is not available to it, because it does not know whose runs are
+	// stranded until it has read them. Under the default reader actor the read
+	// answers zero rows and no error, so a sweep that closes nothing would be
+	// indistinguishable from a cluster with nothing stranded.
+	//
 	// logsRetentionSweep joined in epic memql#4893. It is a sweep in the plain
 	// sense -- every node's log lines, past their retention -- but the rows
 	// it sweeps carry NO row tier: log_line is a dedicated hypertable outside
@@ -63,7 +74,13 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 	// builtin logsSweep is reserved to a cluster owner in its Go handler
 	// (design L3), and the automation's default RoleReader actor would be
 	// refused by the sweep it exists to run.
-	want := []string{"auditEventRetentionSweep", "logsRetentionSweep", "seedSelfAccount", "workerInvocationRetentionSweep"}
+	want := []string{
+		"auditEventRetentionSweep",
+		"logsRetentionSweep",
+		"seedSelfAccount",
+		"sweepAbandonedPackageDeployments",
+		"workerInvocationRetentionSweep",
+	}
 	got := auth.MaintenanceAutomationNames()
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("the maintenance list is %v, pinned as %v.\n\n"+

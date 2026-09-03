@@ -36,9 +36,36 @@ type Integration struct {
 	engine Engine
 	logger *slog.Logger
 
+	// workbench is the build surface (epic memql#4900, task memql#4901),
+	// injected by app/ after both plug-ins are materialized rather than
+	// resolved here -- this package holds a one-method Engine and has no way
+	// to reach the integration registry, which is exactly the narrowness that
+	// makes the pipeline testable with no cluster.
+	//
+	// NIL IS AN ANSWER. A node with no build surface keeps Deps.Builder nil,
+	// and a package needing a build gets the typed refusal it has always got.
+	workbench workbenchRunner
+	// fleet is the same seam for the machine route (task memql#4904). Nil on
+	// every node type that holds no worker streams, which is every one but
+	// the agent.
+	fleet Builder
+
 	depsOnce sync.Once
 	deps     *Deps
 	depsErr  error
+}
+
+// SetWorkbench installs the in-cluster build surface. Called once, from app/,
+// before the first deploy; a later call is ignored because Deps is built once
+// and a builder that changed under a running pipeline would make two halves of
+// one deploy disagree about where they built.
+func (i *Integration) SetWorkbench(runner workbenchRunner) {
+	i.workbench = runner
+}
+
+// SetFleetBuilder installs the machine route (task memql#4904).
+func (i *Integration) SetFleetBuilder(b Builder) {
+	i.fleet = b
 }
 
 // NewIntegration wires the engine handle. The factory is in init(); this
@@ -128,6 +155,21 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Walk every repo-sourced package and record any upstream that moved (epic memql#4794, D11). The polling fallback for clusters no webhook reaches. Writes only latestKnownVersion and updateAvailable, and only where something changed.",
 			Handler:     i.handlePollUpstream,
 			ArgsSchema:  map[string]string{},
+		},
+		{
+			Name:        "sweepAbandoned",
+			Description: "Close every run whose node stopped saying it was alive (epic memql#4900, task memql#4902). A run whose heartbeatAt is older than MEMQL_PACKAGES_ABANDONED_AFTER_SECONDS is closed with the terminal status 'abandoned' and a typed error naming the node that was running it and when it was last heard; a run that is merely slow is untouched. NEVER writes 'failed': nothing failed that this sweep can name, and the D6 order guarantees every site is still serving what it was serving. Returns {checked, abandoned}.",
+			Handler:     i.handleSweepAbandoned,
+			ArgsSchema:  map[string]string{},
+		},
+		{
+			Name:        "setAutoDeploy",
+			Description: "Turn a source's auto-deploy switch on or off (epic memql#4900, task memql#4903). Runs the owned setPackageAutoDeploy mutation under the CALLER's actor, so the write guard admits the source's owner or a cluster owner and nobody else. Returns {packageId, autoDeploy}.",
+			Handler:     i.handleSetAutoDeploy,
+			ArgsSchema: map[string]string{
+				"packageId":  "string (required) -- the v1:platform:package row to switch",
+				"autoDeploy": "boolean (required) -- true arms it; false restores the click",
+			},
 		},
 		{
 			Name:        "restorePackage",
@@ -220,6 +262,11 @@ func (i *Integration) handleDeploy(ctx context.Context, args map[string]any, _ i
 		Actor:      actorFromContext(ctx),
 		Confirmed:  boolArg(args, "confirm"),
 		Placements: placementsArg(args, "placements"),
+		// `automatic` is NOT read from the args and there is no argument for
+		// it. "A person did this" is what a call over the wire means, and a
+		// caller able to claim otherwise could put a run in the timeline
+		// marked as something nobody chose.
+		FromDeploymentId: strings.TrimSpace(stringArg(args, "fromDeploymentId")),
 	})
 	if out == nil {
 		return nil, derr
@@ -366,6 +413,24 @@ func (i *Integration) handleArchivePackage(ctx context.Context, args map[string]
 	}), nil
 }
 
+// handleSetAutoDeploy flips the switch. Under the CALLER's actor, unstamped:
+// the mutation is owned and the write guard is the authorization.
+func (i *Integration) handleSetAutoDeploy(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	deps, err := i.resolve()
+	if err != nil {
+		return nil, err
+	}
+	packageId := strings.TrimSpace(stringArg(args, "packageId"))
+	if packageId == "" {
+		return nil, refuse(CodeSourceUnreadable, "packageId is required")
+	}
+	on := boolArg(args, "autoDeploy")
+	if err := deps.Store.setAutoDeploy(ctx, packageId, on); err != nil {
+		return nil, err
+	}
+	return resultNode(map[string]any{"packageId": packageId, "autoDeploy": on}), nil
+}
+
 func (i *Integration) handleRestorePackage(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	deps, err := i.resolve()
 	if err != nil {
@@ -406,6 +471,8 @@ func (i *Integration) resolve() (*Deps, error) {
 		i.deps = &Deps{
 			Store:           s,
 			Fetcher:         newProductionFetcher(s, i.logger, gh),
+			Builder:         NewWorkbenchBuilder(i.workbench, i.logger),
+			FleetBuilder:    i.fleet,
 			Stager:          newBlobStager(),
 			Roller:          newDeployControlRoller(i.logger),
 			Publisher:       newEnginePublisher(i.engine, s, i.logger),
@@ -415,7 +482,6 @@ func (i *Integration) resolve() (*Deps, error) {
 			GitHubApp:       gh,
 			Logger:          i.logger,
 			Limits:          DefaultLimits(),
-			// Builder is deliberately nil. See builder.go.
 		}
 	})
 	return i.deps, i.depsErr

@@ -167,7 +167,7 @@ func TestPackageDeploymentIsAppendOnlyPastTerminal(t *testing.T) {
 	})
 
 	t.Run("every terminal status refuses further writes", func(t *testing.T) {
-		for _, s := range []string{"succeeded", "refused", "failed"} {
+		for _, s := range []string{"succeeded", "refused", "failed", "abandoned"} {
 			err := validatePackageDeploymentAppendOnly(true, s)
 			if err == nil {
 				t.Fatalf("a write onto a %q deployment must be refused", s)

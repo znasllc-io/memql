@@ -240,6 +240,7 @@ shape package packageFull {
   deployedVersion
   latestKnownVersion
   updateAvailable
+  autoDeploy
   status
   row.createdAt
 }
@@ -261,9 +262,14 @@ shape packageDeployment packageDeploymentFull {
   deployables
   snapshotArtifactId
   buildLogTail
+  builtOn
   error
   requestedBy
+  automatic
+  nodeId
+  stoppedAt
   startedAt
   finishedAt
+  heartbeatAt
   row.createdAt
 }

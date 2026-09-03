@@ -5171,6 +5171,28 @@ QueryClient.prototype.packageDeploymentsAwaitingConfirm = function (this: QueryC
   return this.executeNamed("packageDeploymentsAwaitingConfirm", buildPackageDeploymentsAwaitingConfirm(args), opts);
 };
 
+/** Every run that is still moving, across every owner -- the abandoned sweep's read (epic memql#4900, task memql#4902).
+CLUSTER-OWNER TIER BY ITS ACTOR rather than by a spec: the concept's composite tier already admits a cluster owner to every row, and the sweep runs under the maintenance actor, which IS one. So the filter says only what it is looking for -- a run at a non-terminal status -- and the tier decides who may see it. The same query read by an ordinary caller answers their own stranded runs, which is correct and is not a second code path.
+The AGE comparison is deliberately NOT here. "older than the threshold" is arithmetic against a window the sweep is already holding (it comes from the env registry), so comparing in Go over a bounded page keeps ONE answer to "how old is too old" rather than two that can disagree. */
+// Bound concept: v1:platform:packageDeployment (machine-readable: BoundConcepts["packageDeploymentsInFlight"] in generated_concepts.ts).
+export interface PackageDeploymentsInFlightArgs {
+}
+
+export function buildPackageDeploymentsInFlight(args: PackageDeploymentsInFlightArgs): string {
+  void args;
+  return "query packageDeploymentsInFlight()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packageDeploymentsInFlight(args?: PackageDeploymentsInFlightArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packageDeploymentsInFlight = function (this: QueryClient, args: PackageDeploymentsInFlightArgs = {} as PackageDeploymentsInFlightArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packageDeploymentsInFlight", buildPackageDeploymentsInFlight(args), opts);
+};
+
 /** The packages this caller may see, active only. The OS packages list. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.ts).
 export interface PackagesAllArgs {

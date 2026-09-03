@@ -2805,6 +2805,34 @@ variables:
     optional: true
     description: "Comma-separated workload names a DSL roll restarts after the active-set pointer moves (epic memql#4794, D5). A LIST rather than 'every Deployment', because a roll IS a restart and its blast radius must be a decision somebody made rather than whatever happens to be running. UNSET MEANS THE ROLL REFUSES rather than guessing: restarting the wrong set is worse than not restarting, and a package with no DSL never reaches this stage at all. Only clusters that host DSL-carrying packages need it."
 
+  - name: MEMQL_PACKAGES_BUILD_TIMEOUT_SECONDS
+    component: packages
+    scope: node
+    default: "900"
+    optional: true
+    description: "How long ONE deployable's build command may run before it is stopped, in seconds (epic memql#4900). Default 900 (15 minutes): generous for `npm ci && npm run build` on a cold cache, and short enough that a wedged build does not hold a workbench replica and a deployment row open for an hour. A TIMEOUT PER DEPLOYABLE rather than per run, because a package of three apps is three independent builds and a shared budget would make the third one's success depend on how slow the first two were. The build is killed with its whole process group -- npm spawns node spawns vite, and killing only the shell leaves the tree holding the directory the teardown is about to remove -- and the run is refused with deployable_build_timeout, which is its own code precisely so the repair (make the build faster, or raise this) is not confused with a failing build script. Same fallback posture as the size caps: set-but-unparseable or non-positive falls back to the default rather than to 'no timeout', because an unbounded build is a replica held by somebody else's script forever."
+
+  - name: MEMQL_PACKAGES_HEARTBEAT_SECONDS
+    component: packages
+    scope: node
+    default: "15"
+    optional: true
+    description: "How often a running deploy writes heartbeatAt to say its node is still alive, in seconds (epic memql#4900). Default 15, the fleet's own cadence; a deploy is minutes long, so this costs a handful of writes per run. PAIRED with MEMQL_PACKAGES_ABANDONED_AFTER_SECONDS, which must be a multiple of it -- AbandonedAfter() clamps the threshold to at least three heartbeats for that reason, because a cluster whose threshold is under its cadence sweeps its own healthy deploys and the failure presents as a broken build surface rather than as a setting. The field is a HEARTBEAT and is deliberately absent from the OS's arrival-cue fingerprint: a surface that re-fired on it would announce a change every fifteen seconds of every deploy."
+
+  - name: MEMQL_PACKAGES_ABANDONED_AFTER_SECONDS
+    component: packages
+    scope: node
+    default: "90"
+    optional: true
+    description: "How stale a running deploy's heartbeat must be before the sweep closes its row as 'abandoned', in seconds (epic memql#4900). Default 90 -- SIX heartbeats, not two, and the margin is the point: a run that misses one heartbeat had a slow moment (a GC pause, a database hiccup, a saturated mesh) and closing it would turn a transient into a permanent record on an append-only row. Six in a row is a node that is gone. The cost of waiting is ninety seconds of a rail that says 'building'; the cost of not waiting is a deploy declared lost while it is still running, which then publishes anyway with nothing able to record that it did. Clamped up to three times MEMQL_PACKAGES_HEARTBEAT_SECONDS when set below it."
+
+  - name: MEMQL_PACKAGES_BUILD_UID
+    component: packages
+    scope: node
+    default: "10001"
+    optional: true
+    description: "The uid a package build's command runs as on the workbench node (epic memql#4900). Default 10001, the user the workbench-runtime image creates. It is the second half of 'no cluster credentials in the build environment': the engine constructs the environment the command is GIVEN, and this decides what it can go and READ -- the engine runs as root, so a build running as root could read /proc/1/environ and take every secret the pod holds. Set it to a uid your own image creates if you build the workbench image yourself; set it to 0 to run builds as the engine's own user, which is an explicit and dangerous choice rather than one you reach by configuring nothing. Ignored when the process is not root, where setuid is unavailable and unnecessary."
+
   - name: MEMQL_PACKAGES_WEBHOOK_SOURCE
     component: packages
     scope: node

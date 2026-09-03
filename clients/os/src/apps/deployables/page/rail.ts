@@ -288,10 +288,17 @@ const STAGES: readonly { id: string; label: string; blurb: string }[] = [
   { id: "publishing", label: "Publish", blurb: "Point each site at its new files" },
 ];
 
-const TERMINAL: Record<string, "done" | "refused" | "failed"> = {
+const TERMINAL: Record<string, "done" | "refused" | "failed" | "abandoned"> = {
   succeeded: "done",
   refused: "refused",
   failed: "failed",
+  // memql#4900: a run whose node stopped saying it was alive. Terminal, and
+  // deliberately NOT a flavour of `failed` -- nothing failed that this
+  // cluster can name, and the D6 order guarantees every site is still
+  // serving what it was serving. The MARK is the same, because the run did
+  // stop where it stopped; the SENTENCE is what differs, and it comes from
+  // the row's own error naming the node and when it was last heard.
+  abandoned: "abandoned",
 };
 
 function deployRail(deployment: DeploymentRow): RailStage[] {
@@ -352,6 +359,15 @@ function deployRail(deployment: DeploymentRow): RailStage[] {
 // stage its evidence supports: a report means analysis ran, deployables mean
 // publishing did.
 function lastReachedIndex(d: DeploymentRow): number {
+  // A run the SWEEP closed kept the stage it was at (memql#4900), because
+  // closing the row is what destroys it: the status field held `building`,
+  // and `abandoned` replaced it. Without this the evidence below would draw
+  // a run that died mid-build as having stopped at Analyze -- understating
+  // what it did and sending somebody to look in the wrong place.
+  if (d.stoppedAt !== "") {
+    const at = indexOf(d.stoppedAt);
+    if (at >= 0) return at;
+  }
   if (d.deployables.length > 0) return indexOf("publishing");
   if (d.dslVersion !== "") return indexOf("rolling");
   if (d.buildLogTail !== "") return indexOf("building");
@@ -371,7 +387,7 @@ function standingRail(input: StandingInput): RailStage[] {
   const { pkg, app, run, site } = input;
   const terminal = run === null ? undefined : TERMINAL[run.status];
   const inFlightAt = run !== null && terminal === undefined ? (RUN_STOP[run.status] ?? null) : null;
-  const stoppedAt = run !== null && (terminal === "refused" || terminal === "failed") ? stoppedStopFor(run) : null;
+  const stoppedAt = run !== null && terminal !== undefined && terminal !== "done" ? stoppedStopFor(run) : null;
   const report = run?.report ?? null;
   const appReport = findApp(report, app);
 
@@ -476,7 +492,10 @@ function liveStop(stop: StopDef, site: StandingSite | null): RailStage {
 export function refusalStopFor(run: DeploymentRow | null): StopId | null {
   if (run === null) return null;
   const terminal = TERMINAL[run.status];
-  if (terminal !== "refused" && terminal !== "failed") return null;
+  // `abandoned` is placed here too (memql#4900): the sweep writes a typed
+  // error naming the node, so there IS a sentence to put at a stop, and the
+  // stop it belongs at is where the run got to.
+  if (terminal === undefined || terminal === "done") return null;
   return stoppedStopFor(run);
 }
 
@@ -489,6 +508,16 @@ export function refusalStopFor(run: DeploymentRow | null): StopId | null {
  * the evidence cannot: a build or publish refusal leaves no later row field.
  */
 function stoppedStopFor(run: DeploymentRow): StopId {
+  // A run the sweep closed RECORDED the stage it was at (memql#4900), which
+  // outranks every inference below: the evidence rule reads row fields a
+  // stage WRITES, and a run that died part-way through a stage wrote none of
+  // them. Without this a build that was lost places its sentence on the
+  // What-it-is stop, which is where the person then looks for a node that
+  // went away.
+  if (run.stoppedAt !== "") {
+    const at = RUN_STOP[run.stoppedAt];
+    if (at !== undefined) return at;
+  }
   const code = run.error?.code ?? "";
   if (run.deployables.length > 0 || code === "deployable_publish_failed") return "live";
   if (run.dslVersion !== "") return "live";

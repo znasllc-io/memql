@@ -1481,6 +1481,8 @@ type PackageDeployArgs struct {
 	ConfirmSet bool // set true to send confirm; required because zero-value bool is ambiguous
 	// Where each deployable goes on its FIRST deploy: an object keyed by deployable name, each value {hostname, accountId, ownDomain}. hostname is the site's own hostname under the cluster domain and is required for a never-deployed app (deployable_binding_missing otherwise); accountId ties the site to the client it is for; ownDomain binds the client's own domain. The pipeline applies the two optional halves itself after the site exists, as the same updateSiteAccount and customDomainAdd calls the page makes, under the caller's actor -- so the existing guards decide, and a refused one lands on the outcome without failing the publish. Chosen once and remembered on the site row.
 	Placements map[string]any
+	// Retry an earlier run from the bytes it already fetched (epic memql#4900, task memql#4902), rather than fetching the source again. The run re-analyses the SAME snapshot, so a Retry after a node was lost deploys exactly what the lost run was deploying -- not whatever the branch has moved to since. Refused with snapshot_unavailable when that run kept no snapshot, which is every run from before snapshots were stored; deploy without it to fetch fresh. Ignored for a zip-sourced package, whose Library artifact IS its snapshot.
+	FromDeploymentId string
 }
 
 // PackageDeploy calls the engine builtin packageDeploy.
@@ -1507,6 +1509,13 @@ func PackageDeployBuild(args PackageDeployArgs) string {
 		}
 		b.WriteString("placements: ")
 		b.WriteString(renderMemQLValue(args.Placements))
+	}
+	if args.FromDeploymentId != "" {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("fromDeploymentId: ")
+		b.WriteString(quoteMemQL(args.FromDeploymentId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -1557,6 +1566,34 @@ func PackageRollbackBuild(args PackageRollbackArgs) string {
 	}
 	b.WriteString("deploymentId: ")
 	b.WriteString(quoteMemQL(args.DeploymentId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PackageSetAutoDeploy -- Turn a source's auto-deploy switch on or off (epic memql#4900, task memql#4903). With it ON, a push the update feeds notice starts a run by itself, requested by the package's owner and marked automatic; the run CONFIRMS ITSELF only when the new analysis plans exactly what the last confirmed run planned -- the same apps by name, kind and path, the same DSL domains, and every placement already remembered -- and parks at the confirm gate for anything else, which is the same gate a person's deploy passes. Never more than one auto-run is live per package. With it OFF, which is the default and the state of every source that has never been switched, a push lights the update chip and waits for a click, exactly as before. The write is owned: the guard admits the source's owner or a cluster owner. Returns {packageId, autoDeploy}.
+type PackageSetAutoDeployArgs struct {
+	// The v1:platform:package row to switch.
+	PackageId string
+	// True arms it; false restores the click.
+	AutoDeploy bool
+}
+
+// PackageSetAutoDeploy calls the engine builtin packageSetAutoDeploy.
+func (qc *QueryClient) PackageSetAutoDeploy(ctx context.Context, args PackageSetAutoDeployArgs) (*Result, error) {
+	call := PackageSetAutoDeployBuild(args)
+	return qc.executeNamed(ctx, "packageSetAutoDeploy", call)
+}
+
+func PackageSetAutoDeployBuild(args PackageSetAutoDeployArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin packageSetAutoDeploy(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("autoDeploy: ")
+	b.WriteString(fmt.Sprintf("%v", args.AutoDeploy))
 	b.WriteString(")")
 	return b.String()
 }

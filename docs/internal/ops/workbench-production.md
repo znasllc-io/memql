@@ -381,10 +381,17 @@ Items deliberately deferred; revisit at production cutover:
 - **Network egress policy.** `http_fetch` currently allows arbitrary
   outbound HTTP. Add an allowlist (or deny-by-default + agent opt-in)
   before going production.
-- **Image hardening.** The workbench binary's base image needs a
-  decision (Alpine vs. distroless + busybox vs. Ubuntu-minimal) and
-  pre-installed runtimes (`curl`, `git`, Python, Node) that the
-  prompt's `workbench:environment` chunk promises agents will find.
+- **Image hardening.** PARTLY CLOSED by epic memql#4900, and it is worth being
+  precise about which part. The workbench node now builds from its own
+  Dockerfile stage, `workbench-runtime`: debian-slim plus `git`, the pinned
+  `node:22` toolchain, and a non-root uid (10001) that package builds run as.
+  That was driven by the package-build entry, which needs Node and needs the
+  build not to be able to read `/proc/1/environ`.
+  What is still OPEN is the AGENT-facing promise: the `workbench:environment`
+  knowledge chunk tells agents they will find `curl`, Python and the rest, and
+  `python3` is on the exec allowlist while the image does not carry it. The
+  allowlist and the image still disagree, and an agent meets that as a command
+  that is allowed and not found.
 - **Audit telemetry.** No `v1:worker:invocation` equivalent for
   workbench calls yet. Decide whether high-volume telemetry is needed
   for the sandboxed path.

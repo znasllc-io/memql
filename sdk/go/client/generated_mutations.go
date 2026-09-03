@@ -14192,6 +14192,35 @@ func SetPackEnabledBuild(args SetPackEnabledArgs) string {
 	return b.String()
 }
 
+// SetPackageAutoDeploy -- Turn a source's auto-deploy switch on or off (epic memql#4900).
+// The PERSON's write, and an owned one: the write guard resolves the target row and admits its owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's decision, which is what makes an auto-run's provenance honest.
+//
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["setPackageAutoDeploy"] in generated_concepts.go).
+type SetPackageAutoDeployArgs struct {
+	PackageId  string
+	AutoDeploy bool
+}
+
+// SetPackageAutoDeploy calls the engine mutation setPackageAutoDeploy.
+func (qc *QueryClient) SetPackageAutoDeploy(ctx context.Context, args SetPackageAutoDeployArgs) (*Result, error) {
+	call := SetPackageAutoDeployBuild(args)
+	return qc.executeNamed(ctx, "setPackageAutoDeploy", call)
+}
+
+func SetPackageAutoDeployBuild(args SetPackageAutoDeployArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setPackageAutoDeploy(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("autoDeploy: ")
+	b.WriteString(fmt.Sprintf("%v", args.AutoDeploy))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SetPartitionSecret -- Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.
 //
 // Bound concept: v1:platform:partitionSecret (machine-readable: BoundConcepts["setPartitionSecret"] in generated_concepts.go).

@@ -101,13 +101,18 @@ export function placementsPayload(placements: Record<string, Placement>): Record
 export async function deployPackage(
   query: QueryClient,
   packageId: string,
-  opts: { confirm: boolean; placements?: Record<string, Placement> },
+  opts: { confirm: boolean; placements?: Record<string, Placement>; fromDeploymentId?: string },
 ): Promise<DeployOutcome> {
   const placements = opts.placements === undefined ? {} : placementsPayload(opts.placements);
   const result = await query.packageDeploy({
     packageId,
     confirm: opts.confirm,
     ...(Object.keys(placements).length > 0 ? { placements } : {}),
+    // Retrying a run that was lost deploys the bytes IT fetched (memql#4900),
+    // not whatever the branch has moved to since. Sent only when there is a
+    // run to retry, because an empty value would ask the engine to look up
+    // nothing.
+    ...(opts.fromDeploymentId ? { fromDeploymentId: opts.fromDeploymentId } : {}),
   });
   const row = result.rows()[0];
   return {
@@ -164,6 +169,17 @@ export async function archivePackage(query: QueryClient, packageId: string, conf
 
 export async function restorePackage(query: QueryClient, packageId: string): Promise<void> {
   await query.packageRestore({ packageId });
+}
+
+/**
+ * Arm or disarm a source's auto-deploy (memql#4900).
+ *
+ * The write is owned server-side, so this makes no role check of its own: the
+ * guard admits the source's owner or a cluster owner, and a refusal renders
+ * beside the switch that produced it.
+ */
+export async function setPackageAutoDeploy(query: QueryClient, packageId: string, autoDeploy: boolean): Promise<void> {
+  await query.packageSetAutoDeploy({ packageId, autoDeploy });
 }
 
 export async function archiveSite(query: QueryClient, siteId: string, confirmHostname: string): Promise<void> {

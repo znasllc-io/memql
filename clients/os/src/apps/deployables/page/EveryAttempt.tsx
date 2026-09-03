@@ -1,5 +1,5 @@
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
-import { Undo2 } from "lucide-react";
+import { RotateCcw, Undo2 } from "lucide-react";
 
 import { Button, Caption, Chip, LiveList } from "../../../kit";
 import { formatMoment } from "../../../kit/format";
@@ -70,6 +70,20 @@ export function EveryAttempt({
                   <span className="os-attempt-status" data-status={d.status}>
                     {statusWord(d.status)}
                   </span>
+                  {d.automatic ? (
+                    /* WHO STARTED IT (memql#4900). A run nobody clicked is
+                       the one fact about an attempt its rail cannot show,
+                       and the first one somebody looking at an unexpected
+                       deploy needs. It sits BEFORE the controls because it
+                       is a fact about the row rather than something to
+                       press. */
+                    <Chip
+                      tone="muted"
+                      title="This source's auto-deploy switch started this run: the push planned exactly what the last deploy planned."
+                    >
+                      automatic
+                    </Chip>
+                  ) : null}
                   {/* Every line of this attempt (epic memql#4895): the
                       pipeline stamps each one with the deployment as its
                       subject, so the Logs app narrowed to this row IS the
@@ -88,6 +102,23 @@ export function EveryAttempt({
                       ariaLabel={`Roll back to ${shortVersion(d.sourceVersion)}`}
                     >
                       <Undo2 size={12} aria-hidden /> Roll back to this
+                    </Button>
+                  ) : null}
+                  {canWrite && d.status === "abandoned" ? (
+                    /* RETRY, not Redeploy, and the two are different
+                       promises (memql#4900). This one starts the run that
+                       was LOST again, from the bytes it had already fetched,
+                       so it deploys what that run was deploying rather than
+                       whatever the branch holds now. The Head's Retry is the
+                       other promise, which is why this one lives on the
+                       attempt whose run it names. */
+                    <Button
+                      tone="primary"
+                      onClick={() => void actions.retry(pkg.id, d.id).then(reseed)}
+                      busy={actions.busy}
+                      ariaLabel={`Retry the run of ${d.sourceVersion === "" ? "the unversioned source" : shortVersion(d.sourceVersion)} that was lost`}
+                    >
+                      <RotateCcw size={12} aria-hidden /> Retry
                     </Button>
                   ) : null}
                 </header>
@@ -129,6 +160,10 @@ function statusWord(status: string): string {
       return "failed";
     case "awaiting_confirm":
       return "waiting for you";
+    case "abandoned":
+      // Not "failed" (memql#4900). The run stopped because this cluster lost
+      // the node running it, and the row's own sentence says the rest.
+      return "lost";
     default:
       return status.replace(/_/g, " ");
   }

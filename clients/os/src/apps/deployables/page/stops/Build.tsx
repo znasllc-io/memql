@@ -1,6 +1,6 @@
 import { Fact, Facts } from "../../../../kit";
 import { BuildLog, ProblemNotice } from "../../packages/ReportView";
-import type { DeploymentRow } from "../../packages/rows";
+import { buildSurfaceLabel, type DeploymentRow } from "../../packages/rows";
 import type { RailProblem } from "../rail";
 
 // The Build stop, in its two readings (design section C).
@@ -13,9 +13,12 @@ import type { RailProblem } from "../rail";
 // command it would have run and the two ways forward, and a paraphrase would
 // drop exactly the half a person acts on. The build output follows it.
 //
-// The Build epic replaces the second reading with progress on the surface
-// that built it, and the log; it changes what this stop says, not where it
-// is.
+// The Build epic filled that in (epic memql#4900): a run that actually built
+// says WHERE it built and on WHICH replica, above the log. Both come off the
+// run's own row, so they are the only durable record of it -- the directory
+// the build ran in is deleted when the plan ends, and on a two-replica
+// workbench "which node" is the difference between a bad build script and
+// one sick machine.
 
 export function BuildStop({
   run,
@@ -31,7 +34,9 @@ export function BuildStop({
   const appReport = app === "" ? null : ((run?.report?.deployables ?? []).find((d) => d.name === app) ?? null);
   const log = run?.buildLogTail ?? "";
 
-  if (refusal === null && appReport === null && log.trim() === "") return null;
+  const surface = run === null ? "" : buildSurfaceLabel(run);
+
+  if (refusal === null && appReport === null && surface === "" && log.trim() === "") return null;
 
   return (
     <div className="os-stop-body">
@@ -40,6 +45,15 @@ export function BuildStop({
         <Facts>
           <Fact label="Plan" value={appReport.buildPlan} />
           <Fact label="Output" value={appReport.output} mono />
+        </Facts>
+      )}
+      {/* Rendered only when there IS a surface. A run that never reached the
+          build stage has none on it, and an empty pair of labels would be
+          four words claiming a fact this cluster does not hold. */}
+      {surface === "" ? null : (
+        <Facts>
+          <Fact label="Built" value={surface} />
+          {(run?.builtOn?.nodeId ?? "") === "" ? null : <Fact label="On" value={run!.builtOn!.nodeId} mono />}
         </Facts>
       )}
       <BuildLog tail={log} />

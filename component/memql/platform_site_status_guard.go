@@ -127,10 +127,20 @@ func (e *MemQLEngine) validateSiteStatusTransition(
 }
 
 // Terminal packageDeployment statuses (design section C).
+//
+// `abandoned` joined them with epic memql#4900, and joining THIS map is the
+// whole of what makes it terminal: the sweep closes a stranded row with it, and
+// from that moment the row accepts no further writes -- including from the node
+// that was running it, if it comes back. That is the case worth stating,
+// because it is the one that happens: a partitioned node reconnects, resumes
+// its pipeline, and tries to advance a row the cluster has already closed. It
+// is refused, and the person sees one honest record of a run that was lost
+// rather than a row that changed its mind.
 var packageDeploymentTerminal = map[string]struct{}{
 	"succeeded": {},
 	"refused":   {},
 	"failed":    {},
+	"abandoned": {},
 }
 
 // validatePackageDeploymentAppendOnly enforces D7's append-only rule: a

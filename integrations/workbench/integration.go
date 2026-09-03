@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -73,6 +74,25 @@ type Integration struct {
 	// promotion then falls back to the inline pointer row.
 	uploader attachmentUploader
 	bucket   string
+
+	// The build entry's own wiring (epic memql#4900, task #4901). Held
+	// beside the dispatch entry's rather than in a struct of its own because
+	// the two share the Manager's root and the remote/localFallback pair --
+	// a build and a tool call disagree about where the workbench is only if
+	// somebody gives them two ways to be told.
+	//
+	// buildForwarder is normally nil and the router above is used; it exists
+	// so the in-process hop test can wire a real handler to a real router
+	// without a PeerManager, which cannot be constructed outside
+	// component/node.
+	buildForwarder buildForwarder
+	// buildBlob is the object store a tarball past the inline cap travels
+	// through, resolved lazily so a node that never builds never builds a
+	// client.
+	buildBlob      buildBlobStore
+	buildContainer string
+	buildBlobOnce  sync.Once
+	buildBlobErr   error
 }
 
 // attachmentUploader is the minimal slice of the blob storage FileUploader the
@@ -174,6 +194,17 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 	planId, _ := args["planId"].(string)
 	if strings.TrimSpace(planId) == "" {
 		return nil, fmt.Errorf("workbench: missing required arg `planId`")
+	}
+	// THE BUILD ENTRY IS NOT REACHABLE FROM HERE (epic memql#4900, task
+	// #4901). `build` has no case in the action switch below, so a call
+	// naming it would already fall through to unknown_action -- but only
+	// AFTER the remote branch had forwarded it, and the receiving node
+	// decides what a forwarded `build` means. Refusing by name here is what
+	// keeps a model's tool call from ever reaching that decision.
+	if action == BuildAction {
+		return errorResultNode(planId, action, "unknown_action",
+			"workbench: `build` is not a workbenchHost action. Building a package is the deploy pipeline's, "+
+				"and it is reached from the engine rather than from a tool call.", started), nil
 	}
 	innerArgs, _ := args["args"].(map[string]any)
 	if innerArgs == nil {

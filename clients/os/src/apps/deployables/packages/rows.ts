@@ -32,6 +32,8 @@ export interface PackageRow {
   deployedVersion: string;
   latestKnownVersion: string;
   updateAvailable: boolean;
+  /** Whether a push deploys itself when the plan has not changed (memql#4900). */
+  autoDeploy: boolean;
   status: string;
   createdAt: string;
 }
@@ -50,6 +52,7 @@ export function packageFromRow(row: Row): PackageRow {
     deployedVersion: rowString(flat, "deployedVersion"),
     latestKnownVersion: rowString(flat, "latestKnownVersion"),
     updateAvailable: boolOr(flat, "updateAvailable", false),
+    autoDeploy: boolOr(flat, "autoDeploy", false),
     status: rowString(flat, "status"),
     createdAt: rowString(flat, "createdAt"),
   };
@@ -78,6 +81,11 @@ export function packageFingerprint(p: PackageRow): string {
     p.deployedVersion,
     p.latestKnownVersion,
     p.updateAvailable ? "update" : "current",
+    // A PERSON WOULD CALL ARMING THIS A CHANGE (memql#4900). It is the one
+    // field here somebody else can flip -- a cluster owner, on a source they
+    // share -- and the consequence is that pushes start deploying themselves.
+    // Silence about that would be the wrong kind of quiet.
+    p.autoDeploy ? "auto" : "manual",
     p.status,
   ].join(" ");
 }
@@ -121,11 +129,27 @@ export interface DeploymentRow {
   deployables: DeployableOutcome[];
   snapshotArtifactId: string;
   buildLogTail: string;
+  /** Where this run built, and on which node (memql#4900). */
+  builtOn: BuiltOn | null;
   error: { code: string; message: string; scope?: string } | null;
   requestedBy: string;
+  /** True when the source's own switch started this run rather than a person. */
+  automatic: boolean;
+  /** The replica that ran the pipeline -- what the abandoned sentence names. */
+  nodeId: string;
+  /** The stage a lost run had reached, kept by the sweep before it closed the row. */
+  stoppedAt: string;
   startedAt: string;
   finishedAt: string;
+  /** When the running node last said it was alive. A HEARTBEAT: never in a fingerprint. */
+  heartbeatAt: string;
   createdAt: string;
+}
+
+/** Where a run built. `surface` is one of the three the engine declares. */
+export interface BuiltOn {
+  surface: string;
+  nodeId?: string;
 }
 
 export interface AnalysisReport {
@@ -183,10 +207,15 @@ export function deploymentFromRow(row: Row): DeploymentRow {
     deployables: listOf<DeployableOutcome>(flat, "deployables"),
     snapshotArtifactId: rowString(flat, "snapshotArtifactId"),
     buildLogTail: rowString(flat, "buildLogTail"),
+    builtOn: objectOf<BuiltOn>(flat, "builtOn"),
     error: objectOf<{ code: string; message: string; scope?: string }>(flat, "error"),
     requestedBy: rowString(flat, "requestedBy"),
+    automatic: boolOr(flat, "automatic", false),
+    nodeId: rowString(flat, "nodeId"),
+    stoppedAt: rowString(flat, "stoppedAt"),
     startedAt: rowString(flat, "startedAt"),
     finishedAt: rowString(flat, "finishedAt"),
+    heartbeatAt: rowString(flat, "heartbeatAt"),
     createdAt: rowString(flat, "createdAt"),
   };
 }
@@ -196,10 +225,43 @@ export function deploymentFromRow(row: Row): DeploymentRow {
  * that ever changes about one is which stage it has reached. That IS the
  * change a person is watching, so `status` is the fingerprint and there is
  * nothing else worth naming.
+ *
+ * `heartbeatAt` is the field that makes this worth restating (memql#4900). A
+ * running deploy now writes it every fifteen seconds, and every one of those
+ * writes broadcasts the whole row. Naming it here would turn a deploy into a
+ * strobe -- the exact "a heartbeat is not news" failure `clients/os/README.md`
+ * describes -- and the cue would then fire hardest for the run somebody is
+ * already watching move.
  */
 export function deploymentFingerprint(d: DeploymentRow): string {
   return d.status;
 }
+
+/**
+ * What the Build stop says a run's build ran ON. Empty when the run never
+ * reached the build stage, which reads as nothing rather than as a guess.
+ *
+ * EACH VALUE COMPLETES THE LABEL "Built", which is what fixes the wording:
+ * the first draft said "built in this cluster's sandbox" and rendered as
+ * "Built  built in this cluster's sandbox". A browser is what caught it --
+ * jsdom asserts the string and never puts it beside its own label, and the
+ * assertion that the value contains "sandbox" passed either way.
+ */
+export function buildSurfaceLabel(d: DeploymentRow): string {
+  switch (d.builtOn?.surface) {
+    case "prebuilt":
+      return "before it got here -- the output was in the source";
+    case "workbench":
+      return "in this cluster's sandbox";
+    case "fleet":
+      return "on your own machine";
+    default:
+      return "";
+  }
+}
+
+/** The set the engine declares, for the parity test. */
+export const BUILD_SURFACES = ["prebuilt", "workbench", "fleet"] as const;
 
 function objectOf<T>(row: Record<string, unknown>, key: string): T | null {
   const raw = row[key];

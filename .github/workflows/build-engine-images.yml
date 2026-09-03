@@ -126,9 +126,12 @@ jobs:
             cgo: "0"
             target: ""
             portal: portal-skip
+          # workbench: the one node that runs somebody else's build command
+          # (epic memql#4900), so it takes the stage carrying a Node
+          # toolchain, git and the non-root uid the build runs as.
           - node: workbench
             cgo: "0"
-            target: ""
+            target: workbench-runtime
             portal: portal-skip
           # edge: serves every hosted site, including the portal (site #1,
           # memql#3711) -- the only node type that takes portal-build, so

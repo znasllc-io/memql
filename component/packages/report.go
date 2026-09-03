@@ -1,5 +1,7 @@
 package packages
 
+import "encoding/json"
+
 // The analysis report (design section E).
 //
 // It is FIRST-CLASS DATA, not a log: it lands on packageDeployment.report, it
@@ -135,4 +137,34 @@ func (rep *Report) FirstFatal() *Problem {
 		}
 	}
 	return nil
+}
+
+// reportFromRow reads a report back off a deployment row.
+//
+// The row's `report` is an OBJECT field, so the engine hands it back as a
+// map -- not as this struct -- and the round trip is a re-marshal. Spelled out
+// here rather than at the call site because getting it wrong is silent: a type
+// assertion to *Report would answer nil for every row ever written, and a plan
+// comparison against nil would refuse every auto-deploy while looking like the
+// switch simply never fired.
+func reportFromRow(row map[string]any) *Report {
+	if row == nil {
+		return nil
+	}
+	raw, ok := row["report"]
+	if !ok || raw == nil {
+		return nil
+	}
+	if rep, ok := raw.(*Report); ok {
+		return rep
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var rep Report
+	if err := json.Unmarshal(encoded, &rep); err != nil {
+		return nil
+	}
+	return &rep
 }

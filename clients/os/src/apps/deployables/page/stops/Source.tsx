@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Archive, ArrowUpCircle, KeyRound, RotateCcw } from "lucide-react";
+import { Archive, ArrowUpCircle, KeyRound, RotateCcw, Zap } from "lucide-react";
 
-import { Button, Caption, Chip, Chips, Fact, Facts, FormRow, Input } from "../../../../kit";
+import { Button, Caption, Check, Chip, Chips, Fact, Facts, FormRow, Input } from "../../../../kit";
 import { formatMoment } from "../../../../kit/format";
 import { usePackageActions } from "../../packages/actions";
 import { ProblemNotice } from "../../packages/ReportView";
@@ -116,7 +116,50 @@ function PackageSource({
         <Fact label="Added" value={formatMoment(pkg.createdAt)} />
       </Facts>
       {pkg.sourceKind === "repo" && canWrite ? <SwitchCredential pkg={pkg} credentials={credentials} /> : null}
+      {canWrite && pkg.status !== "archived" ? <AutoDeploySwitch pkg={pkg} /> : null}
     </>
+  );
+}
+
+/**
+ * The auto-deploy switch (epic memql#4900, task memql#4903).
+ *
+ * ON THE SOURCE STOP because it is a property of the SOURCE rather than of
+ * any one run: it answers "when this source moves, then what", which is the
+ * same question the version facts above it answer for the past.
+ *
+ * A CHECKBOX IS CORRECT HERE, and it is the case DESIGN.md rule 10 leaves
+ * open: it states a CHOICE in a form, which is what a checkbox is for,
+ * rather than filtering content in front of a list, which is what the rule
+ * forbids.
+ *
+ * The caption carries the whole promise, because the switch is worthless
+ * without it -- somebody arming this needs to know the confirm gate is still
+ * there for anything that changed, or they will either not use it or use it
+ * believing something untrue. It writes immediately rather than behind a
+ * Save: there is one bit to change and no second field to keep it company.
+ */
+function AutoDeploySwitch({ pkg }: { pkg: PackageRow }) {
+  const actions = usePackageActions();
+  return (
+    <section className="os-report-part">
+      <h4 className="os-report-heading">
+        <Zap size={12} aria-hidden /> When this source moves
+      </h4>
+      <Check
+        checked={pkg.autoDeploy}
+        disabled={actions.busy}
+        onChange={(on) => void actions.setAutoDeploy(pkg.id, on)}
+      >
+        Deploy the update by itself when the plan is unchanged
+      </Check>
+      <Caption>
+        {pkg.autoDeploy
+          ? "A push that plans exactly what the last deploy planned goes live without a click. Anything new -- an app, some MemQL, a changed build command, a problem -- still waits for you here."
+          : "A push lights the update chip and waits for you. Turn this on and one that changes nothing about the plan deploys itself."}
+      </Caption>
+      {actions.refusal ? <ProblemNotice problem={{ ...actions.refusal, fatal: true }} tone="error" /> : null}
+    </section>
   );
 }
 

@@ -200,6 +200,50 @@ const (
 	// under the cluster's own domain, a collision, or the per-site cap.
 	CodeDeployableDomainRefused = "deployable_domain_refused"
 
+	// -- the build surface (epic memql#4900, task memql#4901) --
+	//
+	// Four codes rather than one, because they send a reader to four
+	// different places. A FAILED build is the author's build script; a
+	// TIMEOUT is the author's build script taking too long, which is a
+	// different repair and a different sentence; no_workbench_peer is an
+	// operator fact about this cluster that the author can do nothing about;
+	// and no_worker_available is the same shape one layer over, about the
+	// person's own machines.
+
+	// CodeDeployableBuildFailed: the build command exited non-zero, or the
+	// surface could not read its output back. Carries the log tail. Spelled
+	// as a constant now that four codes share the family; the string is
+	// unchanged, because it already crossed the wire to the OS.
+	CodeDeployableBuildFailed = "deployable_build_failed"
+	// CodeDeployableBuildTimeout: the command outlived its timeout and was
+	// stopped, process group and all. Distinct from a failure because the
+	// repair is: make the build faster, or raise
+	// MEMQL_PACKAGES_BUILD_TIMEOUT_SECONDS.
+	CodeDeployableBuildTimeout = "deployable_build_timeout"
+	// CodeNoWorkbenchPeer: this node is configured to build on a workbench
+	// node and cannot reach one. NOT a flavour of build_failed: nothing was
+	// built, nothing was wrong with the package, and the fix is a cluster's
+	// rather than a person's.
+	CodeNoWorkbenchPeer = "no_workbench_peer"
+	// CodeNoWorkerAvailable: a deployable whose target builds on the owner's
+	// own Fleet, with no machine that matches. The sentence names every
+	// machine considered and why each was ruled out (task memql#4904).
+	CodeNoWorkerAvailable = "no_worker_available"
+
+	// CodeDeploymentAbandoned: the sweep closed a run whose node stopped
+	// answering (epic memql#4900, task memql#4902). Catalogued beside the
+	// build codes because a person meets it in the same place, and stated as
+	// its own because it is the one refusal in this catalogue that is about
+	// the CLUSTER rather than about the package: nothing was wrong with the
+	// source, nothing was published, and the repair is Retry.
+	CodeDeploymentAbandoned = "deployment_abandoned"
+
+	// CodeSnapshotUnavailable: a retry named an earlier run whose stored
+	// snapshot this cluster cannot read -- most often a run from before
+	// snapshots were kept. The repair is an ordinary deploy, which fetches
+	// the source again, and the sentence says so.
+	CodeSnapshotUnavailable = "snapshot_unavailable"
+
 	// -- raised outside this package, catalogued here --
 
 	// CodeDslRequiresClusterOwner (D9): raised by the pipeline at deploy

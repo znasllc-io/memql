@@ -49,6 +49,14 @@ export function headStateFor({ site, pkg, run, canWrite }: HeadInput): HeadState
     if (run.status === "awaiting_confirm") return { at: "awaiting_confirm", placementsComplete: true };
     if (IN_FLIGHT.has(run.status)) return { at: "running" };
     if (run.status === "refused" || run.status === "failed") return { at: "refused_or_failed" };
+    // `abandoned` is DELIBERATELY not one of those (memql#4900), and the
+    // omission is the design rather than a gap. This row's Retry means
+    // "deploy the source again"; retrying a LOST run means "deploy the bytes
+    // that run had already fetched", which is a different promise and lives
+    // on the attempt that names the run. Two buttons both reading Retry and
+    // doing different things is the thing to avoid. A lost run therefore
+    // falls through to the site's own state below, where a live site offers
+    // Redeploy -- honest, because that is what it would do.
   }
 
   switch (site.status) {
