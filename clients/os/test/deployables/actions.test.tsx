@@ -74,6 +74,7 @@ describe("who is offered the write half", () => {
       "sites",
       "packages",
       "actions",
+      "logs",
       "settings",
     ]);
     expect(sectionsForRole(app, "owner").map((s) => s.id)).toContain("actions");
