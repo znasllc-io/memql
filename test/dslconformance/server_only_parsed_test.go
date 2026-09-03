@@ -411,6 +411,35 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "createSourceCredential"}:   true,
 		{Path: "platform/mutations.memql", Name: "touchSourceCredential"}:    true,
 		{Path: "platform/queries.memql", Name: "sourceCredentialSealedById"}: true,
+		// epic memql#4912. The GitHub App grant's six writes and reads, and
+		// NOT ONE of them is caller-scoping avoided -- every filter here is
+		// already owner-scoped, and createGithubAppGrant stamps the owner from
+		// actor.userId. What @serverOnly withholds is the WIRE, for two
+		// distinct reasons.
+		//
+		// The four writes all land SEALED CIPHERTEXT. Only the Go frame that
+		// ran secret.Encrypt under MEMQL_MASTER_KEY can vouch for an
+		// `encryptedValue` or a `refreshToken`, and that key exists on nodes
+		// and must never exist on a laptop; a client-supplied one would be a
+		// row that reads as connected and unseals to whatever the client
+		// chose. refreshGithubAppGrantToken and recordGithubAppInstallations
+		// add the touchSourceCredential argument on top: both are claims about
+		// what the ENGINE observed, and the poll that makes them runs on a
+		// schedule with nobody attached, so a self-scoped filter would refuse
+		// the one path that legitimately calls them.
+		//
+		// The two reads carry sourceCredentialSealed, which projects both
+		// sealed fields -- so they are the ciphertext oracle
+		// sourceCredentialSealedById already argues against, and nothing a
+		// person does needs them: a grant is unsealed only inside a fetch, a
+		// poll, a probe or the connect callback, into a local that dies with
+		// the call.
+		{Path: "platform/mutations.memql", Name: "createGithubAppGrant"}:         true,
+		{Path: "platform/mutations.memql", Name: "updateGithubAppGrant"}:         true,
+		{Path: "platform/mutations.memql", Name: "refreshGithubAppGrantToken"}:   true,
+		{Path: "platform/mutations.memql", Name: "recordGithubAppInstallations"}: true,
+		{Path: "platform/queries.memql", Name: "githubAppGrantByExternalId"}:     true,
+		{Path: "platform/queries.memql", Name: "githubAppGrantForCaller"}:        true,
 		// memql#4270 / memql#4606 / memql#4601. The four writes of the
 		// user-invitation lifecycle, and none is caller-scopable for the same
 		// underlying reason: the row is not the caller's.
