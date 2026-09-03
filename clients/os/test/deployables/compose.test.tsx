@@ -512,7 +512,7 @@ describe("the compose flow: pushed by your CI", () => {
     expect(create).toContain('status: "draft"');
     expect(create).toContain("/pending/");
 
-    expect(await within(region).findByText(/POST https:\/\/api\.memql\.example\.com\/sites\/.*\/bundles/)).toBeTruthy();
+    expect(await within(region).findByText(/^POST https:\/\/api\.memql\.example\.com\/sites\/[^/]+\/bundles$/)).toBeTruthy();
     expect(
       within(region).getByText(/memql service-account-token mint --label marketing-site-ci --subject system:ci-publish/),
     ).toBeTruthy();
@@ -655,7 +655,7 @@ describe("the compose flow: what the run answers", () => {
       await within(region).findByText("It is live at its cluster address, but the domain was not bound"),
     ).toBeTruthy();
     expect(within(region).getByText("custom_domain_reserved: acme.com is this cluster's own domain")).toBeTruthy();
-    expect(within(region).getByText(/Published to shop\.memql\.example\.com/)).toBeTruthy();
+    expect(within(region).getByText("Published to shop.memql.example.com", { exact: false })).toBeTruthy();
   });
 
   it("renders a refused CLIENT tie the same way, and says the deployable is live", async () => {
