@@ -621,6 +621,7 @@ func (p *pgSource) nodeTypesForDay(ctx context.Context, day time.Time) ([]string
 	return out, rows.Err()
 }
 
+// staged-data: INDIFFERENT -- this reads the log_line hypertable, never MemoryNodes; no staged-data row can exist in it, so the gate has nothing to withhold.
 func (p *pgSource) page(ctx context.Context, day time.Time, nodeType string, afterAt time.Time, afterId string, limit int) ([]Row, error) {
 	rows := make([]Row, 0, limit)
 	sel := p.db.NewSelect().Model(&rows).

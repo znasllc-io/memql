@@ -127,6 +127,7 @@ func applyFacets(sel *bun.SelectQuery, q Query) *bun.SelectQuery {
 	return sel
 }
 
+// staged-data: INDIFFERENT -- this reads the log_line hypertable, never MemoryNodes; no staged-data row can exist in it, so the gate has nothing to withhold.
 // searchQuery builds logsSearch: newest first, keyset-paged older by
 // (BeforeAt, BeforeId).
 func searchQuery(db *bun.DB, q Query, rows *[]Row) *bun.SelectQuery {
@@ -137,6 +138,7 @@ func searchQuery(db *bun.DB, q Query, rows *[]Row) *bun.SelectQuery {
 	return sel.OrderExpr("occurred_at DESC, id DESC").Limit(normalizeLimit(q.Limit))
 }
 
+// staged-data: INDIFFERENT -- this reads the log_line hypertable, never MemoryNodes; no staged-data row can exist in it, so the gate has nothing to withhold.
 // tailQuery builds logsTail. With a cursor: rows newer than (AfterAt,
 // AfterId), oldest first, so a client appends. Without one: the newest Limit
 // rows, fetched newest-first and reversed by the caller into ascending order
