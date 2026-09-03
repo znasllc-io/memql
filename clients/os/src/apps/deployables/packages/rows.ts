@@ -26,7 +26,8 @@ export interface PackageRow {
   sourceKind: string;
   repoUrl: string;
   repoRef: string;
-  repoTokenRef: string;
+  /** A v1:platform:sourceCredential id, or "" for a public repository. Never a value. */
+  credentialId: string;
   artifactId: string;
   deployedVersion: string;
   latestKnownVersion: string;
@@ -44,7 +45,7 @@ export function packageFromRow(row: Row): PackageRow {
     sourceKind: rowString(flat, "sourceKind"),
     repoUrl: rowString(flat, "repoUrl"),
     repoRef: rowString(flat, "repoRef"),
-    repoTokenRef: rowString(flat, "repoTokenRef"),
+    credentialId: rowString(flat, "credentialId"),
     artifactId: rowString(flat, "artifactId"),
     deployedVersion: rowString(flat, "deployedVersion"),
     latestKnownVersion: rowString(flat, "latestKnownVersion"),
@@ -73,7 +74,7 @@ export function packageFingerprint(p: PackageRow): string {
     p.sourceKind,
     p.repoUrl,
     p.repoRef,
-    p.repoTokenRef,
+    p.credentialId,
     p.deployedVersion,
     p.latestKnownVersion,
     p.updateAvailable ? "update" : "current",

@@ -37,7 +37,7 @@ const ACME: Row = {
   sourceKind: "repo",
   repoUrl: "https://github.com/acme/storefront",
   repoRef: "main",
-  repoTokenRef: "",
+  credentialId: "",
   artifactId: "",
   deployedVersion: "aaaaaaaaaaaaaaaaaaaa",
   latestKnownVersion: "aaaaaaaaaaaaaaaaaaaa",
@@ -239,7 +239,7 @@ describe("the arrival cue's fingerprint", () => {
       { latestKnownVersion: "eeeeeeeeeeeeeeeeeeee" },
       { updateAvailable: true },
       { status: "archived" },
-      { repoTokenRef: "acme-token" },
+      { credentialId: "cred-1" },
     ];
     for (const change of changes) {
       expect(packageFingerprint({ ...base, ...change })).not.toBe(packageFingerprint(base));

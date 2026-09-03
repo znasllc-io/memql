@@ -129,9 +129,9 @@ export function PackageDetail({
         </span>
         <Chip>{sourceLabel(pkg)}</Chip>
         {pkg.ownerUserId === viewerUserId && pkg.ownerUserId !== "" ? <Chip tone="accent">yours</Chip> : null}
-        {pkg.repoTokenRef === "" ? null : (
-          <Chip title="The NAME of a stored secret. The token itself is never on this row, and this cluster reads it only at the moment of a fetch.">
-            private, via {pkg.repoTokenRef}
+        {pkg.credentialId === "" ? null : (
+          <Chip title="The id of one of your source credentials. The token itself is never on this row, and this cluster reads it only at the moment of a fetch.">
+            private, via {pkg.credentialId}
           </Chip>
         )}
       </Chips>
