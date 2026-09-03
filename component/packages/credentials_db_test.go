@@ -24,6 +24,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/secret"
 )
@@ -211,7 +212,7 @@ func mustExecute(t *testing.T, eng *memqlengine.MemQLEngine, ctx context.Context
 
 func cardFor(t *testing.T, eng *memqlengine.MemQLEngine, ctx context.Context, credentialId string) map[string]any {
 	t.Helper()
-	rows := mustExecute(t, eng, ctx, fmt.Sprintf("query sourceCredentialById(credentialId: %q)", credentialId))
+	rows := mustExecute(t, eng, ctx, fmt.Sprintf("query sourceCredentialById(credentialId: %s)", langparser.QuoteString(credentialId)))
 	if len(rows) != 1 {
 		t.Fatalf("want one credential card, got %d", len(rows))
 	}
@@ -278,14 +279,14 @@ func TestCredentialResolutionIsOwnerScopedOverRealRows(t *testing.T) {
 	if rowString(card, "lastUsedAt") != "" {
 		t.Fatal("lastUsedAt must be empty before the first use")
 	}
-	if _, serr := eng.Execute(ctxA, fmt.Sprintf("query sourceCredentialSealedById(credentialId: %q)", credentialId)); serr == nil || !strings.Contains(serr.Error(), "server-only") {
+	if _, serr := eng.Execute(ctxA, fmt.Sprintf("query sourceCredentialSealedById(credentialId: %s)", langparser.QuoteString(credentialId))); serr == nil || !strings.Contains(serr.Error(), "server-only") {
 		t.Fatalf("the sealed read must be refused to a client-origin call, got: %v", serr)
 	}
 
 	// ---- A registers a package fetching under it ----
 	mustExecute(t, eng, ctxA, fmt.Sprintf(
-		`mutation createPackage(packageId: %q, name: "acme", sourceKind: "repo", repoUrl: %q, credentialId: %q)`,
-		pkgA, repoUrl, credentialId))
+		`mutation createPackage(packageId: %s, name: "acme", sourceKind: "repo", repoUrl: %s, credentialId: %s)`,
+		langparser.QuoteString(pkgA), langparser.QuoteString(repoUrl), langparser.QuoteString(credentialId)))
 	rowA, err := s.packageById(ctxA, pkgA)
 	if err != nil || rowA == nil {
 		t.Fatalf("A cannot read its own package: %v %v", rowA, err)
@@ -339,8 +340,8 @@ func TestCredentialResolutionIsOwnerScopedOverRealRows(t *testing.T) {
 	// (2) B registers a package naming A's credential: refused by name,
 	// before any request, and skipped by the poll.
 	mustExecute(t, eng, ctxB, fmt.Sprintf(
-		`mutation createPackage(packageId: %q, name: "acme-b", sourceKind: "repo", repoUrl: %q, credentialId: %q)`,
-		pkgB, repoUrl+"-b", credentialId))
+		`mutation createPackage(packageId: %s, name: "acme-b", sourceKind: "repo", repoUrl: %s, credentialId: %s)`,
+		langparser.QuoteString(pkgB), langparser.QuoteString(repoUrl+"-b"), langparser.QuoteString(credentialId)))
 	rowB := mustPackage(t, s, ctxB, pkgB)
 	gh.reset()
 	if _, ferr := i.deps.fetch(ctxB, rowB); RefusalCode(ferr) != CodeCredentialNotFound {
