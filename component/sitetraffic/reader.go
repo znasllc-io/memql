@@ -52,6 +52,21 @@ const (
 // no traffic".
 const maxSitesPerRead = 200
 
+// maxIndividualLookups bounds the per-id fallback below.
+//
+// `sitesAll` answers the common case in ONE read, and the fallback exists for
+// exactly one situation: an ARCHIVED deployable, which that read excludes by
+// design and whose traffic is what somebody deciding whether to restore it
+// wants to see. That is a DETAIL surface asking about one id.
+//
+// Unbounded, it is also a way to make one call cost two hundred engine reads
+// by naming two hundred ids nobody can read -- work a caller gets for free
+// and the cluster pays for. Past this many unknown ids the rest are treated
+// as unreadable, which is the answer they were overwhelmingly going to get
+// anyway: a LIST never needs the fallback, because everything it shows is
+// active and `sitesAll` already covered it.
+const maxIndividualLookups = 16
+
 // Reading is one answer: a bucket of one deployable's traffic, or -- in
 // summary mode -- one deployable's whole window folded into a single row.
 //
@@ -307,10 +322,19 @@ func (r *Reader) readableSites(ctx context.Context, ids []string) ([]string, err
 		}
 	}
 
+	lookups := 0
 	for _, id := range ordered {
 		if _, ok := allowed[id]; ok {
 			continue
 		}
+		if lookups >= maxIndividualLookups {
+			// See the constant. The remaining unknown ids are treated as
+			// unreadable, which is the same answer they get for being
+			// unreadable -- no rows, indistinguishable from a deployable
+			// with no traffic.
+			break
+		}
+		lookups++
 		// Not in the caller's active list. It may still be one of theirs and
 		// archived, which sitesAll excludes, so ask directly. A miss here is
 		// a deployable this caller may not read, and it is dropped.

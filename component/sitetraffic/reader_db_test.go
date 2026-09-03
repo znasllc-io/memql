@@ -522,3 +522,65 @@ func TestApplyRetentionRefusesOnlyANilHandle(t *testing.T) {
 		t.Error("a nil handle must be an error -- silently doing nothing would leave an operator's configured window unapplied with nothing said")
 	}
 }
+
+// An ARCHIVED deployable's traffic is readable, and that is the whole reason
+// the per-id fallback exists: `sitesAll` excludes archived rows by design, and
+// what somebody deciding whether to restore one wants to see is exactly how
+// much it was serving.
+func TestAnArchivedDeployablesTrafficIsStillReadable(t *testing.T) {
+	eng, db, _ := trafficEngine(t)
+	sfx := suffix(t)
+	owner := "user-traffic-" + sfx
+	siteId := seedDeployable(t, eng, owner, sfx)
+	writeRequests(t, db, siteId, []int{200, 200, 200})
+
+	// The D10 lifecycle: archive requires disabled first.
+	for _, status := range []string{"disabled", "archived"} {
+		q := fmt.Sprintf(`mutation setSiteStatus(siteId: %s, status: %s)`,
+			langparser.QuoteString(siteId), langparser.QuoteString(status))
+		if _, err := eng.Execute(auth.ContextWithInternalOrigin(operatorCtx("user-op-"+sfx)), q); err != nil {
+			t.Fatalf("move the deployable to %s: %v", status, err)
+		}
+	}
+
+	got, err := NewReader(db, eng).Read(userCtx(owner), Query{
+		SiteIds: []string{siteId}, Bucket: Bucket1h, Summary: true,
+		WindowStart: trafficWindowStart, WindowEnd: trafficWindowEnd,
+	})
+	if err != nil {
+		t.Fatalf("read an archived deployable's traffic: %v", err)
+	}
+	if len(got) != 1 || got[0].RequestCount != 3 {
+		t.Fatalf("got %+v, want the archived deployable's own three requests -- sitesAll excludes it, so this is the per-id fallback doing its job", got)
+	}
+}
+
+// The per-id fallback is BOUNDED, so one call naming many unknown ids cannot
+// cost the cluster one engine read each. Past the bound the rest are treated
+// as unreadable, which is the answer they were going to get anyway.
+func TestTheFallbackLookupIsBounded(t *testing.T) {
+	eng, db, _ := trafficEngine(t)
+	sfx := suffix(t)
+	owner := "user-traffic-" + sfx
+	mine := seedDeployable(t, eng, owner, sfx)
+	writeRequests(t, db, mine, []int{200})
+
+	// One readable id, then far more unknown ones than the bound.
+	ids := []string{mine}
+	for i := 0; i < maxIndividualLookups*3; i++ {
+		ids = append(ids, fmt.Sprintf("site-nobody-%s-%d", sfx, i))
+	}
+
+	got, err := NewReader(db, eng).Read(userCtx(owner), Query{
+		SiteIds: ids, Bucket: Bucket1h, Summary: true,
+		WindowStart: trafficWindowStart, WindowEnd: trafficWindowEnd,
+	})
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	// The readable one still answers: it comes back through sitesAll, which
+	// is the ONE read, not through the bounded fallback.
+	if len(got) != 1 || got[0].SiteId != memql.BareShortId(mine) {
+		t.Fatalf("got %+v, want exactly the caller's own deployable", got)
+	}
+}

@@ -125,7 +125,7 @@ The short design pass issue memql#4908 asked for.
 | `request_count` | "is anybody using it" |
 | `error_count` (5xx) | "is it healthy" |
 | `client_error_count` (4xx) | counted APART: a 500 is the deployable failing and a 404 is somebody asking for a page it does not have. Folding them makes a healthy site with a broken inbound link look unhealthy |
-| `bytes_total` | the only cost signal available without new measurement |
+| `bytes_total` | the only cost signal available without new measurement. Carried to a client and deliberately NOT shown: the panel's budget is four facts, and bytes is the one a person asks for least often |
 | `last_served_at` | what a LIST row shows; the single most useful figure per deployable |
 
 Rejected columns: a p50/p95 duration pair (`duration_ns` is on the raw rows
@@ -165,6 +165,20 @@ tier is the whole of it, so there is nothing here that can drift from it.
 **An unreadable id is dropped rather than refused**, because a refusal naming
 the id would answer "does this deployable exist" for anybody who can spell
 one. Dropping it gives the same answer a deployable with no traffic gives.
+
+**The per-id fallback is bounded.** `sitesAll` answers the common case in one
+read; the fallback exists for the ARCHIVED case, which is a detail surface
+asking about one id. Unbounded it would also be a way to make one call cost
+two hundred engine reads by naming ids nobody can read, so past sixteen
+unknown ids the rest are treated as unreadable -- the answer they were
+overwhelmingly going to get, since a list only ever shows active deployables
+and `sitesAll` has already covered those.
+
+**The client PAGES rather than validating.** The server refuses a call past
+its cap instead of truncating one, which is the honest server behaviour; a
+list longer than the cap therefore makes several calls. A client that
+trusted the cap to be generous enough would show a whole list with no figures
+on the day a cluster outgrew it.
 
 ## R5. Unmeasured is not zero, at every layer
 
