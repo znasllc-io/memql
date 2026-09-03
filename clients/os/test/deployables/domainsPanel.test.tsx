@@ -45,7 +45,7 @@ function mount(connection: FakeConnection, opts: { role?: string } = {}) {
   return render(
     withSession(
       <DeployablesApp
-        sectionId="sites"
+        sectionId="deployables"
         navigate={vi.fn()}
         askContext={vi.fn()}
         store={memStore()}
@@ -58,8 +58,18 @@ function mount(connection: FakeConnection, opts: { role?: string } = {}) {
 /** Opens the deployable's page, whose Where-it-lives stop mounts the content. */
 async function openShop(connection: FakeConnection, opts: { role?: string } = {}) {
   mount(connection, opts);
-  await screen.findByText("shop.memql.example.com");
-  await click(screen.getByText("shop.memql.example.com"));
+  // An ARCHIVED deployable is found under the list's quiet archived flip
+  // (memql#4889): the default population is what serves. The wait is for the
+  // feed rather than for the row, so "not on the active list" is a real
+  // answer rather than "has not arrived yet".
+  await waitFor(() =>
+    expect(document.querySelector("[data-os-livelist]")?.getAttribute("data-state")).toBe("live"),
+  );
+  if (screen.queryAllByText("shop.memql.example.com").length === 0) {
+    const flip = screen.queryByRole("button", { name: /Show archived/ });
+    if (flip !== null) await click(flip);
+  }
+  await click(await screen.findByText("shop.memql.example.com"));
 }
 
 /**

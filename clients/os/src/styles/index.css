@@ -4853,6 +4853,52 @@ a.os-button {
   border-top: 1px solid var(--os-line);
 }
 
+/* ---- the deployables list (epic memql#4885) ---------------------------- */
+
+/* A SOURCE AND THE ROWS IT PRODUCED: the source line once, the rows beneath
+ * it, inset so they read as belonging to the line above rather than as
+ * siblings of a hand-made site's own row. The arrival ring is the list
+ * item's (`.os-livelist-row`), so a source that just deployed rings as one
+ * thing -- which is what happened. */
+.os-deploy-group {
+  display: grid;
+  gap: 6px;
+}
+.os-deploy-group-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+  padding: 0 2px;
+}
+.os-deploy-group > .os-row {
+  width: calc(100% - 14px);
+  margin-left: 14px;
+}
+
+/* The address, in the data voice: mono and quiet beside the name. A row that
+ * will serve and has no address yet says so in prose instead. */
+.os-deploy-address {
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* THE WAITING MARK: quiet accent text, never a badge. It is a standing
+ * statement -- "a deploy is waiting for you" -- true until the run moves,
+ * which is what distinguishes it from the arrival ring beside it: the ring
+ * says something just happened and decays on the clock; this says something
+ * is still yours to do. */
+.os-deploy-waiting {
+  font-size: var(--os-text-xs);
+  color: var(--os-accent);
+  white-space: nowrap;
+}
+
 /* ---- one attempt in the timeline --------------------------------------- */
 
 .os-attempt {

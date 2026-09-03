@@ -61,7 +61,7 @@ function mount(connection: FakeConnection | null, opts: { role?: string; userId?
   return render(
     withSession(
       <DeployablesApp
-        sectionId={opts.section ?? "sites"}
+        sectionId={opts.section ?? "deployables"}
         navigate={vi.fn()}
         askContext={vi.fn()}
         store={memStore()}
@@ -73,6 +73,18 @@ function mount(connection: FakeConnection | null, opts: { role?: string; userId?
 
 /** Opens a deployable from the list and returns its page. */
 async function open(hostname: string): Promise<HTMLElement> {
+  // AN ARCHIVED DEPLOYABLE IS FOUND UNDER THE FLIP, which is where a person
+  // finds one: the list's default population is what serves, and the archive
+  // is a place below it rather than a checkbox in front of it (DESIGN.md
+  // rule 10). The wait is for the feed rather than for the row, so "not on
+  // the active list" is a real answer rather than "has not arrived yet".
+  await waitFor(() =>
+    expect(document.querySelector("[data-os-livelist]")?.getAttribute("data-state")).toBe("live"),
+  );
+  if (screen.queryAllByText(hostname).length === 0) {
+    const flip = screen.queryByRole("button", { name: /Show archived/ });
+    if (flip !== null) await click(flip);
+  }
   // Before the page opens, the only element carrying the hostname is the
   // list row; once it is open the Head, the rail and the address all do.
   await click((await screen.findByText(hostname)).closest("button"));
@@ -712,10 +724,13 @@ describe("the bundle flip marker", () => {
   });
 
   it("does NOT mark a change that left the bundle alone", async () => {
-    const { connection } = await mountAndOpen({ sites: [SHOP] }, "shop.memql.example.com");
+    const { connection, page } = await mountAndOpen({ sites: [SHOP] }, "shop.memql.example.com");
     await emit(connection, SITE_CONCEPT, { ...SHOP, title: "Renamed" });
     await waitFor(() => expect(screen.queryByText("changed just now")).toBeNull());
-    expect(screen.getByText("Renamed")).toBeTruthy();
+    // The reachable positive, scoped to the PAGE: the rename really did
+    // arrive. It also renames the list row behind the page, which is why the
+    // query is scoped rather than global.
+    expect(within(page).getByText("Renamed")).toBeTruthy();
   });
 });
 

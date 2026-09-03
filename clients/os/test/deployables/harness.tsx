@@ -118,6 +118,12 @@ export interface FakeSeed {
   publishError?: string;
   /** v1:platform:sourceCredential CARDS `sourceCredentialsMine` answers with -- never a value. */
   credentials?: Row[];
+  /**
+   * v1:platform:packageDeployment rows at `awaiting_confirm`, which
+   * `packageDeploymentsAwaitingConfirm` answers with: the list's fourth feed,
+   * for the waiting mark (epic memql#4885, design section A).
+   */
+  awaitingConfirm?: Row[];
   /** Fails the next `updateSiteStatus` with this server message. */
   siteStatusError?: string;
   /** Fails the next `siteArchive` with this server message. */
@@ -195,6 +201,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
 
       if (call === "query packagesAll()") return rowsResult(seed.packages ?? []);
+      if (call === "query packageDeploymentsAwaitingConfirm()") return rowsResult(seed.awaitingConfirm ?? []);
 
       if (call.startsWith("query packageDeployments(")) {
         const id = /packageId: "([^"]*)"/.exec(call)?.[1] ?? "";

@@ -11,7 +11,7 @@ import type { MapNode } from "./layout";
 
 // The Map section: the picture, and whatever it is pointing at.
 //
-// The map and the Sites list are two readings of ONE feed and share ONE
+// The map and the Deployables list are two readings of ONE feed and share ONE
 // selection, so walking a cluster on the map and then switching to the list
 // lands on the same deployable. A second selection would let the two disagree
 // about what is being looked at -- in an app whose whole subject is a thing

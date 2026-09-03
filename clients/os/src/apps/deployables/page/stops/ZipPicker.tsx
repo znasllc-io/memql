@@ -5,7 +5,7 @@ import { FileArchive } from "lucide-react";
 import { Button, Caption, LiveList, Notice, Row as ListRow, Subhead } from "../../../../kit";
 import { useLiveView } from "../../../../live/liveView";
 import { usePublish } from "../../actions";
-import { PICKER_PAGE_SIZE, useZipArtifacts } from "../../actions/useZipArtifacts";
+import { PICKER_PAGE_SIZE, useZipArtifacts } from "../../sources/useZipArtifacts";
 import { flatten, type SiteRow } from "../../rows";
 import { isPublished } from "../rail";
 

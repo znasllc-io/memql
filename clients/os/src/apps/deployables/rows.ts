@@ -211,11 +211,11 @@ export function ownerLabel(site: SiteRow, viewerUserId: string): string {
 /**
  * What counts as a CHANGE to a deployable.
  *
- * ONE definition, read by the Sites list's `LiveList` and by the app-level
- * `useArrivals` the map draws from. Two literals would be two literals that can
- * disagree, and the disagreement is visible: the list pulses a row while the
- * map beside it does not, in an app whose whole point is that the two are the
- * same rows.
+ * ONE definition, read by the Deployables list (inside the group fingerprint
+ * `list.ts` composes) and by the app-level `useArrivals` the map draws from.
+ * Two literals would be two literals that can disagree, and the disagreement
+ * is visible: the list pulses a row while the map beside it does not, in an
+ * app whose whole point is that the two are the same rows.
  *
  * A site row carries no liveness field -- there is no `lastSeenAt` here to turn
  * the surface into a strobe -- so the risk this guards against is the opposite
