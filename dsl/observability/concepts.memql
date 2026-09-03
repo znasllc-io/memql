@@ -72,3 +72,36 @@ concept codeMetric {
   p99DurationNs  int  @description("99th-percentile latency. Same scale as p50/p95.")
   totalDurationNs int  @description("Sum of all durations in the bucket. Lets cockpit show 'time spent in X' on the topology overlay without pulling raw rows.")
 }
+
+/// One persisted log line from any node type or from the MemQL OS front end
+/// (epic memql#4893). Backed by the log_line TimescaleDB hypertable
+/// (component/database/memory-nodes/migrations/20260903000000_log_line_hypertable),
+/// written by the store sink core/logger installs beside every node's console
+/// handler and by logsRecordClient for OS lines, and NEVER a graph row: like
+/// invocation, this concept declares the table's shape and nothing maps a
+/// field to a column. Rows are read through the @sdk builtins in
+/// builtins.memql (logsSearch, logsTail, logsSources), all floored at admin
+/// in their Go handlers, which is why the concept declares no row tier --
+/// no row of it ever passes graph admission. Retention is the nightly
+/// logsRetentionSweep automation: archive to blob storage first, delete
+/// second, thirty days by MEMQL_LOGS_RETENTION_DAYS. `subject` plus
+/// `subjectConcept` is the one seam between a line and the thing it is about
+/// (a deployment, a site, a plan); logger.Subject stamps both. Design:
+/// docs/superpowers/specs/2026-09-03-logs-design.md.
+@displayCard(primary="message", secondary="component", tertiary="node", status="level")
+concept logLine {
+  occurredAt      datetime!  @description("When the line was written. The hypertable time column; createdAt on the wire.")
+  nodeType        enum("identity", "bff", "cognition", "agent", "planner", "voice", "workbench", "mcp", "edge", "os")!  @description("Which kind of process wrote it. `os` is the MemQL OS front end, whose lines arrive through logsRecordClient.")
+  node            string  @description("MEMQL_NODE_ID of the writing replica (the pod name). Blank for an OS line, which has no node.")
+  level           enum("debug", "info", "warn", "error")!  @description("The slog level. `debug` persists only on a node whose MEMQL_LOGS_LEVEL says so.")
+  component       string!  @description("The logger's component attribute, dotted parent.child (`edge`, `packages.pipeline`). An OS line carries `os.<app>` or `os.shell`.")
+  app             string  @description("The OS app id for an OS line (`files`, `deployables`); blank for an engine line. The per-app Logs section selects on it.")
+  message         string!  @description("The line's message, capped at 4 KiB.")
+  attributes      object  @description("Every other attribute the line carried, already through the console redactor, keys dotted for groups. Never holds a `payload` or `body` key: those are redacted before they get here.")
+  subject         string  @description("Bare id of what the line is about -- a deployment, a site, a plan -- stamped by logger.Subject. Blank when the line is about nothing in particular.")
+  subjectConcept  string  @description("The concept id of `subject` (`v1:platform:site`). An app's slice of the store is `app` OR any of the concepts the app owns.")
+  session         string  @description("The OS tab session that wrote an OS line (`os-<shortId>`, minted once per tab and kept in sessionStorage). A correlation key, never an authority; blank for an engine line.")
+  userId          string  @serverSet  @description("v1:identity:user.id of the person whose browser wrote an OS line, stamped server-side from the actor and never accepted from the caller. Blank for an engine line.")
+
+  @relationship(type="references", as="recordedBy", field="userId", target=user, direction="outgoing")
+}

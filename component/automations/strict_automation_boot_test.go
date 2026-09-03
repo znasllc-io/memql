@@ -80,8 +80,10 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // domain's boot seed for the owner's own company (epic memql#4800); 43 -> 44
 // with reconcileCustomDomains, the custom-domain verification + provisioning
 // sweep (epic memql#4805); 44 -> 46 with the two D11 package update feeds --
-// notePackageUpstreamFromWebhook and pollPackageUpstreams (epic memql#4794).
-const shippedAutomationCount = 46
+// notePackageUpstreamFromWebhook and pollPackageUpstreams (epic memql#4794);
+// 46 -> 47 with logsRetentionSweep, the log store's nightly archive-then-delete
+// sweep (epic memql#4893).
+const shippedAutomationCount = 47
 
 // TestStrictAutomationBoot_MalformedAutomationRefusesBoot is the core
 // acceptance test: a malformed automation injected as a throwaway domain (the

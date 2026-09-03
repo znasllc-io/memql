@@ -1,0 +1,15 @@
+// Per-construct DSL layout: every <kind>s.memql file in a domain holds
+// every construct of that kind in the domain.
+
+/// The log store's retention sweep (epic memql#4893, the authActivity
+/// precedent): nightly at 03:20 UTC on the cron leader, archive every
+/// expired day to blob storage, then delete it -- and never the second
+/// without the first. The work is builtin logsSweep in component/logstore;
+/// this automation only decides when it is asked. Retention is
+/// MEMQL_LOGS_RETENTION_DAYS (default 30).
+@trigger(schedule="0 20 3 * * *")
+automation logsRetentionSweep {
+  step sweep {
+    builtin logsSweep ()
+  }
+}
