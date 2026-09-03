@@ -2758,6 +2758,26 @@ silent last-wins overwrite it always was, and is still refused.
 
 ---
 
+### A core reference to a runtime-declared name is the late-binding seam (memql#4882)
+
+The cross-namespace-import gate reads the MERGED tree at boot (memql#4051):
+embedded core plus every runtime domain a product bundle mounts at
+`MEMQL_DSL_PATH`. One reference shape in the core tree is therefore declared
+elsewhere by construction: `dsl/cognition/logic.memql` calls
+`mutation mutationCreateCanvasState(...)`, which the engine documents as
+"supplied by a product bundle at runtime". The `use` the gate would ask for
+cannot be written -- the core file does not know the product namespace exists
+-- and a violation lands on the load report as a skip, which strict boot
+refuses. So a bundle that did exactly what the engine asks refused every node
+that mounted it.
+
+The gate exempts that direction and no other: a CORE file referencing a name
+declared only by a NON-core domain is not reported. Runtime -> core, runtime
+-> runtime and core -> core still need their `use`. The verdict on which
+domains are core arrives through `dslgate.Options.CoreDomain`
+(`contract_gates.go` passes the embedded tree's own directory list); a caller
+that passes nothing gets the whole rule, which is the fail-closed direction.
+
 ## 32. `startsWith` is a selection, never a pass-through (memql#4208)
 
 **Rule.** `<field> startsWith <prefix>` matches a row whose string

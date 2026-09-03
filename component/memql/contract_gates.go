@@ -18,6 +18,19 @@ package memql
 // Init over a mounted bundle, so a bundle author gets the same verdict offline
 // before the deploy instead of a CrashLoop after it.
 //
+// # The core tree's late-bound calls are not violations (memql#4882)
+//
+// The merged tree is what made the cross-namespace gate honest, and it is also
+// what made it fire against the engine itself: dsl/cognition/logic.memql calls
+// `mutationCreateCanvasState`, which the engine documents as "supplied by a
+// product bundle at runtime". On a node mounting a bundle that declares it,
+// pass 1 finds the declaration in the product namespace and the gate asks the
+// CORE file to import it -- an import the engine cannot write, because it does
+// not know the product namespace exists. Every conforming bundle therefore
+// refused strict boot. contractGateOptions now passes the embedded tree's own
+// domain list, and dslgate exempts a core file's reference to a name only a
+// runtime domain declares -- that direction and no other.
+//
 // Only CONTRACT gates live here -- authorization scoping, retired operators the
 // engine still honours, the `row.` namespace that decides whether a filter
 // compiles to a table column or a JSONB path, and the cross-namespace import
@@ -63,6 +76,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/memql/baseloader"
 	"github.com/znasllc-io/memql/component/memql/dslgate"
+	"github.com/znasllc-io/memql/dsl"
 )
 
 // contractGateOptions builds the scan options from the engine's OWN loaded
@@ -89,8 +103,17 @@ func contractGateOptions(functions *FunctionRegistry) dslgate.Options {
 			serverOnly[strings.TrimPrefix(fn.Origin, "unified:")+" "+fn.Name] = true
 		}
 	}
+	// The core-domain verdict (memql#4882). Read once per Init off the embedded
+	// tree's own directory list, the same set MountRuntimeDomainsFromEnv refuses
+	// a runtime domain for colliding with -- so "core" here means exactly what
+	// it means at mount time.
+	core := map[string]bool{}
+	for _, d := range dsl.CoreDomains() {
+		core[d] = true
+	}
 	return dslgate.Options{
 		ServerOnly: func(file, name string) bool { return serverOnly[file+" "+name] },
+		CoreDomain: func(domain string) bool { return core[domain] },
 	}
 }
 
