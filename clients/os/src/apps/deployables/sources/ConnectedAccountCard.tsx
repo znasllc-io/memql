@@ -41,6 +41,7 @@ export function ConnectedAccountCard({
   sourceNames,
   busy,
   refusal,
+  remoteRevoked = null,
   onDisconnect,
 }: {
   grant: CredentialRow;
@@ -53,6 +54,9 @@ export function ConnectedAccountCard({
   sourceNames: readonly string[];
   busy: boolean;
   refusal: Refusal | null;
+  /** Whether the disconnect this surface just made also ended the
+   *  authorization at GitHub; null while nothing has been disconnected. */
+  remoteRevoked?: boolean | null;
   onDisconnect: () => void;
 }) {
   const revoked = credentialIsRevoked(grant);
@@ -119,6 +123,19 @@ export function ConnectedAccountCard({
           <InstallLink installUrl={installUrl} />
         </div>
       )}
+
+      {/* THE HALF THAT DID NOT HAPPEN, and only when it did not. The engine
+          revokes at GitHub first and flips this row even when that failed, so
+          this cluster has stopped fetching either way -- what is left is at
+          GitHub, and this is the only place that says so. `--os-warn` and not
+          `--os-error`: the disconnect worked, and this is somebody's next
+          step. */}
+      {remoteRevoked === false ? (
+        <p className="os-stop-verdict" data-tone="warn" role="status">
+          This cluster has stopped fetching under it, but GitHub did not confirm the authorization was ended. Remove
+          it yourself under Applications in your GitHub settings.
+        </p>
+      ) : null}
 
       {revoked ? null : (
         <Disconnect sourceNames={sourceNames} busy={busy} refusal={refusal} onDisconnect={onDisconnect} />

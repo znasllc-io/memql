@@ -39,6 +39,7 @@ import {
 } from "./compose";
 import { Rail } from "./Rail";
 import { headActionFor, type ComposeInput, type HeadAction, type RailProblem, type RailStage } from "./rail";
+import { ManifestPreview } from "./stops/compose/ManifestPreview";
 import { ComposeSourceStop } from "./stops/compose/Source";
 import { ComposeWhereItLivesStop } from "./stops/compose/WhereItLives";
 
@@ -115,6 +116,11 @@ export function ComposePage(props: ComposePageProps) {
   // rows reach them on their own broadcasts rather than from here.
   const [created, setCreated] = useState({ packageId: "", siteId: "" });
   const [publishedZip, setPublishedZip] = useState(false);
+  // "USE A TOKEN INSTEAD", HELD HERE, which is `ZipPicker`'s arrangement on
+  // the standing Source stop and holds for the same reason: a fold whose
+  // state lived in the stop would close under somebody every time a probe
+  // answered or a credential arrived on its own feed.
+  const [tokenFormOpen, setTokenFormOpen] = useState(false);
 
   const probe = useSourceProbe();
   const zipProbe = useArtifactProbe();
@@ -298,10 +304,28 @@ export function ComposePage(props: ComposePageProps) {
             siteId={created.siteId}
             clusterDomain={clusterDomain}
             locked={parked !== undefined || phase !== "composing"}
+            tokenFormOpen={tokenFormOpen}
+            onTokenFormOpenChange={setTokenFormOpen}
           />
         );
       case "whatItIs":
-        if (report === null) return null;
+        // THE PREVIEW STANDS IN UNTIL THE REPORT EXISTS, and never beside it.
+        // A probe under a grant answers what the manifest CLAIMS, which is
+        // enough to recognise the package you just picked; the run answers
+        // what this cluster FOUND, and the moment it has, the claim is the
+        // weaker of two sentences about one thing.
+        if (report === null) {
+          // ...and a stop nobody can reach yet says nothing, which is the
+          // rule the address stop below states: a preview inside a pending
+          // stop would contradict the mark beside it.
+          if (stage.state === "pending" || stage.state === "ahead") return null;
+          if (probe.reply === null) return null;
+          return (
+            <div className="os-stop-body">
+              <ManifestPreview manifest={probe.reply.manifest} />
+            </div>
+          );
+        }
         return (
           <div className="os-stop-body">
             <ReportView report={report} />

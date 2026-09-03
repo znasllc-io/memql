@@ -43,10 +43,12 @@ import {
   emit,
   fakeConnection,
   githubGrantRow,
+  probeReply,
   repositoriesReply,
   repositoryFixture,
   type as typeInto,
   withSession,
+  type FakeConnection,
   type FakeSeed,
 } from "./harness";
 
@@ -803,5 +805,233 @@ describe("Settings > Sources", () => {
     const { container } = mountSources({ credentials: [GRANT] });
     await sourcesGroup();
     expect(container.querySelector("[data-toast], .os-toast, dialog, [role='dialog']")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The compose Source stop, through the real app
+// ---------------------------------------------------------------------------
+
+// The three readings of the repository answer (design sections A and C), and
+// what a connection changes about the stop that names where a deployable
+// comes from. The Compose epic (memql#4885) left the mount point and kept the
+// URL-plus-token form separable exactly so this could land above it; what is
+// asserted here is which of the three a person gets, and that the third --
+// the only one reachable on a cluster with no GitHub App -- is unchanged.
+
+const URL_FIELD = "The repository this deployable is built from";
+const BRANCH_FIELD = "Which branch or tag to deploy";
+const NAME_FIELD = "What this deployable is called";
+
+async function composeSource(seed: FakeSeed): Promise<{ connection: FakeConnection; region: HTMLElement }> {
+  const connection = fakeConnection(seed);
+  h.connection = connection;
+  render(
+    withSession(
+      <DeployablesApp sectionId="deployables" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} />,
+      { role: "owner", userId: "u-me" },
+    ),
+  );
+  await click(await screen.findByRole("button", { name: /New deployable/ }));
+  const region = await screen.findByRole("region", { name: "New deployable" });
+  await click(within(region).getByRole("radio", { name: /A repository/ }));
+  return { connection, region };
+}
+
+const WIDGET = repositoryFixture({ fullName: "acme/widget", private: true, visibility: "private" });
+
+describe("the compose Source stop, with a connection", () => {
+  afterEach(() => {
+    h.connection = null;
+  });
+
+  it("reads the list on its own, so a connected person opens the stop and picks", async () => {
+    const { connection, region } = await composeSource({
+      credentials: [GRANT],
+      repositories: repositoriesReply({ repositories: [WIDGET] }),
+    });
+
+    // NOTHING WAS TYPED AND NOTHING WAS PRESSED. The measure of this surface
+    // is that a connected person never notices it.
+    expect(await within(region).findByRole("button", { name: /widget/ })).toBeTruthy();
+    expect(connection.callsNamed("sourceRepositories")).toEqual([
+      'builtin sourceRepositories(credentialId: "", page: 1)',
+    ]);
+    // The token form is under it, closed: one answer on screen at a time.
+    expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
+    expect(within(region).getByRole("button", { name: "Use a token instead" })).toBeTruthy();
+  });
+
+  it("fills the URL, the credential and the branches from the one it was given", async () => {
+    const { connection, region } = await composeSource({
+      credentials: [GRANT],
+      repositories: repositoriesReply({ repositories: [WIDGET] }),
+      sourceProbe: {
+        "cred-grant": probeReply({ private: true, branches: ["main", "release", "spike"] }),
+      },
+    });
+    await click(await within(region).findByRole("button", { name: /widget/ }));
+
+    // The probe was asked about the repository that was just chosen, UNDER
+    // the grant -- which is what makes its answer about this connection.
+    await waitFor(() =>
+      expect(connection.callsNamed("sourceProbe")).toEqual([
+        'builtin sourceProbe(repoUrl: "https://github.com/acme/widget", credentialId: "cred-grant")',
+      ]),
+    );
+    // The name came with it, so nothing else has to be typed -- read as what
+    // is on screen in the field, never off a `.value`.
+    expect(within(region).getByDisplayValue("widget")).toBeTruthy();
+    // ...and the rail's own answer says what was chosen.
+    expect(within(region).getByText("acme/widget at default branch")).toBeTruthy();
+  });
+
+  it("offers the branches the probe answered, default first, and following it as its own answer", async () => {
+    const { region } = await composeSource({
+      credentials: [GRANT],
+      repositories: repositoriesReply({ repositories: [WIDGET] }),
+      sourceProbe: { "cred-grant": probeReply({ branches: ["main", "release"] }) },
+    });
+    await click(await within(region).findByRole("button", { name: /widget/ }));
+
+    await click(await within(region).findByLabelText(BRANCH_FIELD));
+    const options = (await screen.findAllByRole("option")).map((o) => o.textContent);
+    // Following the default is a DIFFERENT answer from pinning the branch
+    // that is the default today, so both are offered and the order is the
+    // engine's: the default branch leads the names.
+    expect(options).toEqual(["Follow the default branch", "main", "release"]);
+  });
+
+  it("draws no branch picker when the probe answered no branches", async () => {
+    const { region } = await composeSource({
+      credentials: [GRANT],
+      repositories: repositoriesReply({ repositories: [WIDGET] }),
+      sourceProbe: { "cred-grant": probeReply() },
+    });
+    await click(await within(region).findByRole("button", { name: /widget/ }));
+    await within(region).findByLabelText(NAME_FIELD);
+    // An empty select is a control that can only be wrong.
+    expect(within(region).queryByLabelText(BRANCH_FIELD)).toBeNull();
+  });
+
+  it("previews what the manifest claims at What it is, in the report's own vocabulary", async () => {
+    const { region } = await composeSource({
+      credentials: [GRANT],
+      repositories: repositoriesReply({ repositories: [WIDGET] }),
+      sourceProbe: {
+        "cred-grant": probeReply({
+          branches: ["main"],
+          manifest: {
+            name: "acme-storefront",
+            deployables: [{ name: "web", kind: "static", path: "clients/web" }],
+            dslDomains: ["shop"],
+          },
+        }),
+      },
+    });
+    await click(await within(region).findByRole("button", { name: /widget/ }));
+
+    expect(await within(region).findByText("acme-storefront")).toBeTruthy();
+    expect(within(region).getByText("web")).toBeTruthy();
+    expect(within(region).getByText("clients/web")).toBeTruthy();
+    expect(within(region).getByText("shop")).toBeTruthy();
+    // It says what it IS: a claim read from the manifest, not a finding.
+    expect(within(region).getByText(/Analyze reads the tree itself and is the authority/)).toBeTruthy();
+  });
+
+  it("says nothing at all about a repository with no manifest", async () => {
+    const { region } = await composeSource({
+      credentials: [GRANT],
+      repositories: repositoriesReply({ repositories: [WIDGET] }),
+      sourceProbe: { "cred-grant": probeReply({ branches: ["main"] }) },
+    });
+    await click(await within(region).findByRole("button", { name: /widget/ }));
+    await within(region).findByLabelText(NAME_FIELD);
+
+    // No preview AND no complaint: the analysis is the authority, and a
+    // warning here would report a manifest problem twice.
+    expect(within(region).queryByText(/Analyze reads the tree itself/)).toBeNull();
+    expect(within(region).queryByText(/manifest/i)).toBeNull();
+  });
+});
+
+describe("the compose Source stop, without one", () => {
+  afterEach(() => {
+    restoreLocation?.();
+    h.connection = null;
+  });
+
+  it("offers Connect above the token form, and asks the cluster nothing until something is pressed", async () => {
+    const { connection, region } = await composeSource({ credentials: [] });
+
+    expect(within(region).getByRole("button", { name: "Connect GitHub" })).toBeTruthy();
+    // Beginning a connect mints a state row, so nothing asks whether this
+    // cluster has an app until somebody presses something.
+    expect(connection.callsNamed("githubConnectBegin")).toHaveLength(0);
+    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
+    // The fold is closed, and one click away.
+    expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
+    await click(within(region).getByRole("button", { name: "Use a token instead" }));
+    expect(within(region).getByLabelText(URL_FIELD)).toBeTruthy();
+    await click(within(region).getByRole("button", { name: "Hide the token form" }));
+    expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
+  });
+
+  it("says Reconnect, not Connect, once a connection has lapsed", async () => {
+    const { region } = await composeSource({
+      credentials: [githubGrantRow({ id: "cred-grant", status: "revoked" })],
+    });
+    expect(within(region).getByRole("button", { name: "Reconnect GitHub" })).toBeTruthy();
+    // A lapsed grant reads no repositories, so it is offered no picker.
+    expect(within(region).queryByRole("button", { name: "Look again" })).toBeNull();
+  });
+
+  it("makes the token form the whole stop on a cluster with no GitHub App", async () => {
+    const { region } = await composeSource({
+      credentials: [],
+      connectError: "github_app_not_configured: This cluster has no GitHub App configured.",
+    });
+    await click(within(region).getByRole("button", { name: "Connect GitHub" }));
+
+    // The OS headline, the cluster's own sentence beneath it, verbatim.
+    expect(await within(region).findByText("This cluster has no GitHub connection set up")).toBeTruthy();
+    expect(within(region).getByText("This cluster has no GitHub App configured.")).toBeTruthy();
+    // A disabled Connect would invite somebody to fix a cluster that is not
+    // theirs, so the control is gone -- and the form is the stop, open, with
+    // no fold to find it behind.
+    expect(within(region).queryByRole("button", { name: "Connect GitHub" })).toBeNull();
+    expect(within(region).queryByRole("button", { name: "Use a token instead" })).toBeNull();
+    expect(within(region).getByLabelText(URL_FIELD)).toBeTruthy();
+  });
+});
+
+describe("what a disconnect says about GitHub", () => {
+  afterEach(() => {
+    h.connection = null;
+  });
+
+  async function disconnect(seed: FakeSeed): Promise<{ card: HTMLElement; connection: FakeConnection }> {
+    const { connection } = mountSources(seed);
+    const card = await screen.findByRole("region", { name: "GitHub" });
+    await click(within(card).getByRole("button", { name: "Disconnect" }));
+    await click(within(card).getAllByRole("button", { name: "Disconnect" }).at(-1)!);
+    await waitFor(() => expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(1));
+    return { card, connection };
+  }
+
+  it("says nothing extra when both halves happened", async () => {
+    const { card } = await disconnect({ credentials: [GRANT] });
+    expect(within(card).queryByText(/GitHub did not confirm/)).toBeNull();
+  });
+
+  it("names the half that did not, because only the person can finish it", async () => {
+    // The engine revokes at GitHub FIRST and flips the row either way, so a
+    // disconnect that could not reach GitHub succeeded HERE and left the
+    // authorization standing THERE. `--os-warn` and not `--os-error`: the
+    // disconnect worked, and this is somebody's next step.
+    const { card } = await disconnect({ credentials: [GRANT], credentialRevokeRemote: false });
+    const said = await within(card).findByText(/GitHub did not confirm the authorization was ended/);
+    expect(said.getAttribute("data-tone")).toBe("warn");
+    expect(said.textContent).toContain("Applications in your GitHub settings");
   });
 });

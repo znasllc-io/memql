@@ -192,6 +192,7 @@ export function SourcesGroup({
             sourceNames={sourceNames}
             busy={disconnect.busy}
             refusal={disconnect.refusal}
+            remoteRevoked={disconnect.remoteRevoked}
             onDisconnect={() => void disconnect.revoke(grant.id)}
           />
           {credentialIsRevoked(grant) ? (

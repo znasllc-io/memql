@@ -136,6 +136,10 @@ export interface FakeSeed {
   credentialCreateError?: string;
   /** Fails the next `sourceCredentialRevoke` with this server message. */
   credentialRevokeError?: string;
+  /** Whether `sourceCredentialRevoke` also ended the authorization at GitHub.
+   *  Defaults to true, which is what a grant answers when both halves
+   *  happened and what a pasted token's revoke is never asked about. */
+  credentialRevokeRemote?: boolean;
   /** Fails the next `updatePackageSource` with this server message. */
   updateSourceError?: string;
   /**
@@ -294,7 +298,19 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
 
       if (call.startsWith("builtin sourceCredentialRevoke(")) {
         if (seed.credentialRevokeError !== undefined) throw new Error(seed.credentialRevokeError);
-        return rowsResult([]);
+        const credentialId = /credentialId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        // THE REPLY'S THIRD KEY, AS TEXT. A scalar boolean crosses the wire
+        // as the STRING "true" on a builtin's reply row, and the connected-
+        // account card only says "GitHub did not confirm" for a false one --
+        // so a fake answering a real boolean, or no row at all, would make
+        // every disconnect in every test look like a half-finished one.
+        return rowsResult([
+          {
+            credentialId,
+            status: "revoked",
+            remoteRevoked: seed.credentialRevokeRemote === false ? "false" : "true",
+          } as unknown as Row,
+        ]);
       }
 
       if (call.startsWith("builtin githubConnectBegin(")) {

@@ -131,6 +131,17 @@ export function useSourceRepositories(): SourceRepositoriesActions {
 
 export interface CredentialRevokeActions extends WriteState {
   revoke: (credentialId: string) => Promise<void>;
+  /**
+   * Whether the last revoke also ended the authorization AT GITHUB, or null
+   * while nothing has been revoked in this session.
+   *
+   * THREE STATES, NOT TWO. The engine flips the local row even when the
+   * GitHub half failed, so a disconnect that answers `false` succeeded here
+   * and left something standing there -- which is the one case a person has
+   * more to do. `null` is what keeps that sentence off a card nobody has
+   * pressed anything on.
+   */
+  remoteRevoked: boolean | null;
 }
 
 /**
@@ -147,12 +158,19 @@ export interface CredentialRevokeActions extends WriteState {
  */
 export function useCredentialRevoke(): CredentialRevokeActions {
   const { busy, refusal, clear, run } = useWrite();
+  const [remoteRevoked, setRemoteRevoked] = useState<boolean | null>(null);
   return {
     busy,
     refusal,
     clear,
+    remoteRevoked,
     revoke: async (credentialId) => {
-      await run((query) => revokeSourceCredential(query, credentialId));
+      const answered = await run((query) => revokeSourceCredential(query, credentialId));
+      // A REFUSED REVOKE ANSWERS NOTHING ABOUT GITHUB. `run` returns null for
+      // one, and recording `false` there would say the authorization is still
+      // standing when nothing was attempted -- beside a refusal that already
+      // says what happened.
+      if (answered !== null) setRemoteRevoked(answered);
     },
   };
 }

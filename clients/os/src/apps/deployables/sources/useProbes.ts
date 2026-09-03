@@ -3,7 +3,7 @@ import { rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/clien
 
 import { boolOr, flatten } from "../../../kit/rows";
 import { useOsConnection } from "../../../live/connection";
-import type { ArtifactProbeReply, SourceProbeReply } from "./probe";
+import { EMPTY_MANIFEST, branchNamesFrom, manifestFrom, type ArtifactProbeReply, type SourceProbeReply } from "./probe";
 
 // The two compose probes, as hooks (epic memql#4885, task memql#4891).
 //
@@ -140,6 +140,15 @@ function sourceProbeFromRow(raw: Row | null): SourceProbeReply {
     private: boolOr(row, "private", false),
     defaultBranch: rowString(row, "defaultBranch"),
     reason: rowString(row, "reason"),
+    // THE TWO KEYS A GRANT MAKES ANSWERABLE (epic memql#4915). Both are
+    // always present on the wire and empty when there is nothing to say, so
+    // there is no absent-versus-empty question to get wrong -- but they are
+    // read through the tolerant readers anyway, because a probe answered by
+    // an older engine carries neither and a pasted-token probe answers both
+    // empty. An empty answer is a stop with a text ref field and no preview,
+    // which is exactly what this surface did before either key existed.
+    branches: branchNamesFrom(row["branches"]),
+    manifest: raw === null ? { ...EMPTY_MANIFEST } : manifestFrom(row["manifest"]),
   };
 }
 

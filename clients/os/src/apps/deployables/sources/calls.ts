@@ -76,7 +76,26 @@ export async function readSourceRepositories(
  * ONE call for both, because it is one act -- the engine flips the row to
  * revoked and, for a grant, revokes the authorization at GitHub as well. The
  * row is never deleted; it is the record of what fetched under it.
+ *
+ * IT ANSWERS WHETHER GITHUB WAS TOLD, and that is worth reading. The engine
+ * revokes at GitHub FIRST and flips the row even when that half failed
+ * (`handleSourceCredentialRevoke`) -- the local row is what actually stops
+ * every fetch on this cluster, so refusing the disconnect because GitHub was
+ * unreachable would leave the cluster fetching under an authorization the
+ * person believes they ended. What the person then still has to do is undo it
+ * at GitHub themselves, and only this field says so.
+ *
+ * FALSE IS THE ORDINARY ANSWER FOR A PASTED TOKEN and means nothing went
+ * wrong: there is nothing at GitHub to revoke for a value somebody typed in.
+ * Only the connected-account card reads it, and only for a grant.
  */
-export async function revokeSourceCredential(query: QueryClient, credentialId: string): Promise<void> {
-  await query.sourceCredentialRevoke({ credentialId });
+export async function revokeSourceCredential(query: QueryClient, credentialId: string): Promise<boolean> {
+  const result = await query.sourceCredentialRevoke({ credentialId });
+  const row = result.rows()[0];
+  // READ AS TEXT, which is `packages/calls.ts`'s own reading of
+  // `awaitingConfirm` and for the same reason: a scalar boolean crosses the
+  // wire as the STRING "true" on a builtin's reply row, so the SDK's
+  // `rowBool` -- which answers false for anything that is not a real boolean
+  // -- would report every successful GitHub-side revoke as a failed one.
+  return row ? rowString(row, "remoteRevoked") === "true" : false;
 }

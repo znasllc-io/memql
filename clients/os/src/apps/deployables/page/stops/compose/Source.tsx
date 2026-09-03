@@ -18,7 +18,7 @@ import type { CredentialRow } from "../../../sources/rows";
 import { suggestName, type ComposeDraft } from "../../compose";
 import { CiHandoff } from "./CiHandoff";
 import { KindField, NameField } from "./fields";
-import { TokenSourceForm } from "./TokenSourceForm";
+import { RepositorySource } from "./RepositorySource";
 
 // The compose Source stop: where this deployable comes from, asked once
 // (epic memql#4885, design section C).
@@ -44,12 +44,15 @@ import { TokenSourceForm } from "./TokenSourceForm";
 // that could not run (design H).
 //
 // ===========================================================================
-// THE REPOSITORY PICKER IS NOT HERE, AND THAT IS ON PURPOSE
+// THE REPOSITORY BRANCH IS THREE READINGS, AND IT OWNS THEM
 // ===========================================================================
-// GitHub Connect (memql#4912) is a later epic: with a grant, this stop
-// becomes a picker over the repositories that grant can see. Until then the
-// pasted URL and a personal token are the whole of it, and building half a
-// picker now would be building the surface that epic replaces.
+// GitHub Connect (memql#4915) landed in the slot this file left for it: with
+// a grant the branch is a picker over the repositories that grant can see,
+// without one it offers Connect, and on a cluster with no GitHub App it is
+// the URL-plus-token form it has always been. `RepositorySource` decides
+// which, because that decision is about a person's credentials rather than
+// about which of the three SOURCES they chose -- which is all this file is
+// for.
 
 export function ComposeSourceStop({
   draft,
@@ -62,6 +65,8 @@ export function ComposeSourceStop({
   siteId,
   clusterDomain,
   locked,
+  tokenFormOpen,
+  onTokenFormOpenChange,
 }: {
   draft: ComposeDraft;
   onDraft: (patch: Partial<ComposeDraft>) => void;
@@ -77,6 +82,9 @@ export function ComposeSourceStop({
   clusterDomain: string;
   /** Chosen once: after Analyze the stop is facts, not fields. */
   locked: boolean;
+  /** "Use a token instead", held by the page for `ZipPicker`'s reason. */
+  tokenFormOpen: boolean;
+  onTokenFormOpenChange: (open: boolean) => void;
 }) {
   if (locked) return <ChosenSource draft={draft} zip={zip} siteId={siteId} clusterDomain={clusterDomain} />;
 
@@ -119,7 +127,14 @@ export function ComposeSourceStop({
       />
 
       {draft.choice === "repo" ? (
-        <TokenSourceForm draft={draft} onDraft={onDraft} credentials={credentials} probe={probe} />
+        <RepositorySource
+          draft={draft}
+          onDraft={onDraft}
+          credentials={credentials}
+          probe={probe}
+          tokenFormOpen={tokenFormOpen}
+          onTokenFormOpenChange={onTokenFormOpenChange}
+        />
       ) : null}
       {draft.choice === "zip" ? (
         <ZipBranch draft={draft} onDraft={onDraft} zipProbe={zipProbe} zip={zip} />
