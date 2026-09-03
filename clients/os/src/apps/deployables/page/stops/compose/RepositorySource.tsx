@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
 import { Button, Caption, Field, Select, Subhead } from "../../../../../kit";
+import { toneFor } from "../../../packages/refusals";
 import { ProblemNotice } from "../../../packages/ReportView";
 import { shortRepo } from "../../../packages/rows";
 import { ConnectGitHub } from "../../../sources/ConnectGitHub";
@@ -132,7 +133,11 @@ export function RepositorySource({
   if (noApp !== null) {
     return (
       <>
-        <ProblemNotice problem={noApp} tone="error" />
+        {/* THE TONE IS READ FROM THE CODE, never fixed to error: a cluster
+            with no GitHub App is an operator's condition and this person's
+            next step, and the fault colour would say they broke it
+            (`toneFor`). */}
+        <ProblemNotice problem={noApp} tone={toneFor(noApp.code)} />
         <TokenSourceForm draft={draft} onDraft={onDraft} credentials={credentials} probe={probe} />
       </>
     );

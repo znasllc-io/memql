@@ -211,3 +211,38 @@ export function copyFor(code: string): RefusalCopy | null {
 export function knownCodes(): string[] {
   return Object.keys(COPY).sort();
 }
+
+/**
+ * Codes that are somebody's NEXT STEP rather than a fault.
+ *
+ * `--os-warn`, NEVER `--os-error` (epic memql#4915's design plan states it
+ * for the first two by name: "neither is a fault and both are somebody's
+ * next step"). The other three are the same shape, and each one's own copy
+ * above says so: the app is not installed on that repository yet, this
+ * cluster never had a GitHub App, the link was already used. Nothing is
+ * broken in any of them, and painting them in the fault colour teaches a
+ * person to read the fault colour as decoration.
+ *
+ * It is a CLOSED list rather than a rule over the copy table, because "has a
+ * next step" is true of half the package refusals and several of those --
+ * MemQL that would stop a node booting -- are faults with a repair.
+ */
+const NOT_A_FAULT: ReadonlySet<string> = new Set([
+  "reconnect_required",
+  "installation_pending",
+  "repository_not_installed",
+  "github_app_not_configured",
+  "connect_state_invalid",
+]);
+
+/**
+ * The tone a refusal renders in.
+ *
+ * Read at the RENDER SITE rather than baked into `ProblemNotice`, because the
+ * same component carries a build's own failures elsewhere in this app and
+ * those are faults. An unknown code is an error: a fault nobody anticipated
+ * is the one thing that must not be dressed as a next step.
+ */
+export function toneFor(code: string): "error" | "warn" {
+  return NOT_A_FAULT.has(code.trim()) ? "warn" : "error";
+}

@@ -4,6 +4,7 @@ import { KeyRound } from "lucide-react";
 import { Button, Caption, Chip, LiveList, Row as ListRow, Subhead, formatFreshness, useNow } from "../../../kit";
 import { useLiveView, type LiveView } from "../../../live/liveView";
 import { useCredentialActions } from "../packages/actions";
+import { toneFor } from "../packages/refusals";
 import { ProblemNotice } from "../packages/ReportView";
 import { sourceLabel, type PackageRow } from "../packages/rows";
 import { AddCredential, cardName } from "../sources/CredentialField";
@@ -18,7 +19,12 @@ import {
   pastedCredentials,
   type CredentialRow,
 } from "../sources/rows";
-import { useCredentialRevoke, useGithubConnect } from "../sources/useGithubConnect";
+import {
+  useCredentialRevoke,
+  useGithubConnect,
+  useSourceRepositories,
+  type SourceRepositoriesActions,
+} from "../sources/useGithubConnect";
 
 // Settings -> Sources: where a person's deployables fetch from -- the GitHub
 // connection, and every credential they hold (epic memql#4885 design section
@@ -96,6 +102,12 @@ export function SourcesGroup({
   // the cluster" under a button nobody pressed.
   const install = useGithubConnect();
   const disconnect = useCredentialRevoke();
+  // THE CARD'S ORGANISATIONS, ON DEMAND. The credential row projects
+  // installation IDS and nothing else -- only `sourceRepositories` answers
+  // LOGINS and which organisations are still waiting for an owner -- so
+  // without this the card can only ever say "2 installations" and the pending
+  // state is unreachable on the surface built to show it. See `LookedUp`.
+  const lookup = useSourceRepositories();
   const returnPath = returnPathFor(SETTINGS_SECTION);
 
   // THE CONNECTION IS READ OFF THE FEED THE LIST RENDERS, never a second
@@ -174,7 +186,7 @@ export function SourcesGroup({
             code: connectResult.reason,
             message: "GitHub sent you back without completing the connection.",
           }}
-          tone="error"
+          tone={toneFor(connectResult.reason)}
         />
       ) : null}
 
@@ -188,6 +200,12 @@ export function SourcesGroup({
         <>
           <ConnectedAccountCard
             grant={grant}
+            /* NULL UNTIL SOMEBODY ASKED. The card falls back to the COUNT the
+               row itself carries, which is the reaches fact at the resolution
+               the row can support; passing an empty list from an unread
+               lookup would say this connection reaches nothing. */
+            installations={lookup.readAt === "" ? null : lookup.page.installations}
+            pending={lookup.readAt === "" ? null : lookup.page.pending}
             installUrl={install.installUrl}
             sourceNames={sourceNames}
             busy={disconnect.busy}
@@ -195,6 +213,11 @@ export function SourcesGroup({
             remoteRevoked={disconnect.remoteRevoked}
             onDisconnect={() => void disconnect.revoke(grant.id)}
           />
+          {/* NOT FOR A LAPSED CONNECTION. A disconnected grant reads nothing
+              from GitHub, so the control could only ever refuse -- and the
+              reconnect below is the repair, which is a different sentence
+              from a refusal. */}
+          {credentialIsRevoked(grant) ? null : <LookedUp lookup={lookup} grantId={grant.id} now={now} />}
           {credentialIsRevoked(grant) ? (
             /* The copy for `reconnect_required` sends a person to
                "Settings > Sources", so the control it names has to be here --
@@ -247,6 +270,48 @@ export function SourcesGroup({
   );
 }
 
+/**
+ * The one control that fills in WHICH organisations this connection reaches.
+ *
+ * ===========================================================================
+ * AN ACTION, NEVER SOMETHING A RENDER DOES
+ * ===========================================================================
+ * `sourceRepositories` is a GitHub round trip through the cluster, so calling
+ * it while the card draws would dial a vendor every time somebody opened
+ * Settings -- for a fact most visits do not need. This is the same shape the
+ * Integrations section already uses for its live vendor check
+ * (`apps/settings/IntegrationsSection.tsx`): the card renders immediately from
+ * the row it already holds, and one `.os-refresh-row` control offers to go and
+ * look.
+ *
+ * IT SAYS WHEN IT LOOKED, which is what keeps the card honest. Before anybody
+ * asks, the chips are the count off the row and the caption says the logins
+ * have not been read; after, they are logins and a pending organisation can
+ * appear -- the `--os-warn` state this design exists to make reachable. The
+ * picker's own footer says the same two things in the same words for the same
+ * reason: this is a READING, and a reading that does not date itself gets read
+ * as a feed.
+ *
+ * A REFUSED LOOKUP KEEPS THE CARD. `useSourceRepositories` holds the last
+ * good page and renders the refusal in place; the card goes on saying what
+ * the row says.
+ */
+function LookedUp({ lookup, grantId, now }: { lookup: SourceRepositoriesActions; grantId: string; now: Date }) {
+  return (
+    <div className="os-refresh-row">
+      <Button onClick={() => void lookup.read(grantId, 1)} busy={lookup.busy} busyLabel="Asking GitHub">
+        Check what it reaches
+      </Button>
+      <Caption>
+        {lookup.readAt === ""
+          ? "The count above is off this cluster's own row. Which organisations, and any waiting for an owner to approve, are GitHub's to answer."
+          : `Asked GitHub ${formatFreshness(lookup.readAt, now)}.`}
+      </Caption>
+      {lookup.refusal ? <ProblemNotice problem={lookup.refusal} tone={toneFor(lookup.refusal.code)} /> : null}
+    </div>
+  );
+}
+
 function CredentialLine({
   card,
   packages,
@@ -265,7 +330,19 @@ function CredentialLine({
     <div className="os-source-credential">
       <ListRow
         icon={<KeyRound size={16} aria-hidden />}
-        name={cardName(card)}
+        /* MONO FOR THE DIGEST, NOT FOR THE NAME. `cardName` is one string --
+           the label somebody chose plus the fingerprint that tells two cards
+           apart -- and the two are different kinds of thing: an id reads in
+           the code face everywhere else in this shell, and a name somebody
+           typed does not. */
+        name={
+          <>
+            {card.label.trim() === "" ? card.id : card.label.trim()}
+            {card.fingerprint.trim() === "" ? null : (
+              <> <span className="os-mono">{card.fingerprint.trim()}</span></>
+            )}
+          </>
+        }
         current={!revoked}
         dim={revoked}
         state={
@@ -315,7 +392,14 @@ function CredentialLine({
           </div>
         </div>
       ) : null}
-      {actions.refusal ? <p className="os-ask-error">{actions.refusal.message}</p> : null}
+      {/* THROUGH `ProblemNotice`, LIKE EVERY OTHER REFUSAL ON THIS SURFACE:
+          the OS headline above and the server's own sentence beneath, and the
+          TONE read from the code -- a revoked credential and a cluster with
+          no GitHub App are somebody's next step, and the fault colour would
+          say this person broke something. */}
+      {actions.refusal ? (
+        <ProblemNotice problem={actions.refusal} tone={toneFor(actions.refusal.code)} />
+      ) : null}
     </div>
   );
 }

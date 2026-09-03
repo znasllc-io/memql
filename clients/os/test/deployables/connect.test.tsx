@@ -683,13 +683,17 @@ describe("Settings > Sources", () => {
       installUrl: "https://github.com/apps/memql/installations/new",
     });
     const card = await screen.findByRole("region", { name: "GitHub" });
-    // Twice on purpose: the accent chip is for scanning, the fact for
-    // reading. The INSTALLATIONS are the pair that was cut -- the chips are
-    // that fact, so no `Reaches` row repeats them.
-    expect(within(card).getAllByText("@octocat")).toHaveLength(2);
-    expect(within(card).getByText("Connected as")).toBeTruthy();
-    expect(within(card).getByText("2 installations")).toBeTruthy();
+    // ONCE. The accent chip IS the fact -- a `Connected as @octocat` row
+    // directly beneath a chip reading `@octocat` is the same duplication this
+    // design already removed when it dropped `Reaches`, whose content the
+    // installation chips were carrying (rule 7).
+    expect(within(card).getAllByText("@octocat")).toHaveLength(1);
+    expect(within(card).queryByText("Connected as")).toBeNull();
     expect(within(card).queryByText("Reaches")).toBeNull();
+    // Until somebody asks GitHub, the reach is the COUNT the row itself
+    // carries -- which is the honest resolution of a fact this cluster holds
+    // installation ids for and no logins.
+    expect(within(card).getByText("2 installations")).toBeTruthy();
     const link = await within(card).findByRole("link", { name: "Install on another organisation" });
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noreferrer noopener");
@@ -697,6 +701,39 @@ describe("Settings > Sources", () => {
     expect(connection.callsNamed("githubConnectBegin")).toEqual([
       'builtin githubConnectBegin(returnPath: "/?connect=settings")',
     ]);
+  });
+
+  it("asks GitHub which organisations only when somebody presses, and says when it looked", async () => {
+    const { connection } = mountSources({
+      credentials: [GRANT],
+      repositories: repositoriesReply({
+        installations: [{ id: "i-acme", login: "acme", accountType: "Organization" }],
+        pending: [{ login: "beta-corp" }],
+      }),
+    });
+    const group = await sourcesGroup();
+    const card = within(group).getByRole("region", { name: "GitHub" });
+
+    // OPENING SETTINGS DIALS NOBODY. The row carries installation ids, not
+    // logins, so the count is what it can honestly say -- and the caption
+    // says whose answer the rest would be.
+    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
+    expect(within(card).getByText("2 installations")).toBeTruthy();
+    expect(within(group).getByText(/Which organisations, and any waiting for an owner/)).toBeTruthy();
+
+    await click(within(group).getByRole("button", { name: "Check what it reaches" }));
+    expect(connection.callsNamed("sourceRepositories")).toEqual([
+      'builtin sourceRepositories(credentialId: "cred-grant", page: 1)',
+    ]);
+    // The logins replace the count, and the organisation still waiting for
+    // its owner becomes reachable on the surface built to show it -- in the
+    // warn tone, because nobody has done anything wrong.
+    expect(await within(card).findByText("acme")).toBeTruthy();
+    expect(within(card).queryByText("2 installations")).toBeNull();
+    expect(within(card).getByText("beta-corp pending").getAttribute("data-tone")).toBe("warn");
+    expect(within(card).getByText(/An owner of beta-corp has to approve/)).toBeTruthy();
+    // ...and the reading dates itself, exactly as the picker's footer does.
+    expect(within(group).getByText(/Asked GitHub/)).toBeTruthy();
   });
 
   it("follows the connection live, with no reload", async () => {
@@ -758,8 +795,10 @@ describe("Settings > Sources", () => {
     expect(await within(group).findByRole("button", { name: "Reconnect GitHub" })).toBeTruthy();
     const card = within(group).getByRole("region", { name: "GitHub" });
     expect(within(card).getByText("disconnected").getAttribute("data-tone")).toBe("warn");
-    // Nothing to disconnect twice.
+    // Nothing to disconnect twice, and nothing to ask GitHub: a lapsed grant
+    // reads nothing, so a control that could only refuse is not offered.
     expect(within(card).queryByRole("button", { name: "Disconnect" })).toBeNull();
+    expect(within(group).queryByRole("button", { name: "Check what it reaches" })).toBeNull();
   });
 
   it("lists a pasted credential beside what fetches under it, and revokes it by name", async () => {
@@ -770,9 +809,10 @@ describe("Settings > Sources", () => {
       ],
     });
     const group = await sourcesGroup();
-    // The name and the digest are one node, which is how the list draws a
-    // card: two cards are told apart by the mark beside the name.
-    expect(await within(group).findByText("acme deploy token sha256:ab12cd34")).toBeTruthy();
+    // The name and the digest are two nodes, because they are two kinds of
+    // thing: the label somebody chose, and the id that tells two cards apart.
+    expect(await within(group).findByText("acme deploy token")).toBeTruthy();
+    expect(within(group).getByText("sha256:ab12cd34").className).toContain("os-mono");
     // What a revoke would break, named before it is offered.
     expect(within(group).getByText("acme/widget at main")).toBeTruthy();
     await click(within(group).getByRole("button", { name: /Revoke acme deploy token/ }));
@@ -994,8 +1034,11 @@ describe("the compose Source stop, without one", () => {
     await click(within(region).getByRole("button", { name: "Connect GitHub" }));
 
     // The OS headline, the cluster's own sentence beneath it, verbatim.
-    expect(await within(region).findByText("This cluster has no GitHub connection set up")).toBeTruthy();
+    const headline = await within(region).findByText("This cluster has no GitHub connection set up");
     expect(within(region).getByText("This cluster has no GitHub App configured.")).toBeTruthy();
+    // WARN, never ERROR: an operator's condition rather than this person's,
+    // and the fault colour would say they broke the cluster.
+    expect(headline.closest("[data-tone]")?.getAttribute("data-tone")).toBe("warn");
     // A disabled Connect would invite somebody to fix a cluster that is not
     // theirs, so the control is gone -- and the form is the stop, open, with
     // no fold to find it behind.

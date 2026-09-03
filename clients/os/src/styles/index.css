@@ -2216,6 +2216,23 @@ button:not(:disabled):active {
 .os-chip[data-tone="muted"] {
   background: var(--os-field-dot);
 }
+
+/* A STATUS WORD STANDING IN A CHIP ROW WEARS THE CHIP'S BOX.
+ *
+ * `.os-deploy-status` is the tone-carrying word (`pending`, `revoked`,
+ * `disconnected`); the chip tones are deliberately closed at neutral / accent
+ * / muted, so a fourth would make a status colour out of a vocabulary that
+ * has none. But left bare among pills it read as a stray label rather than as
+ * a member of the row, and measured 14px tall at y+2 beside their 18px.
+ *
+ * The ink stays the word's own -- `--os-warn` for a pending installation,
+ * which is somebody's next step and never a fault -- and `currentColor` is
+ * what turns that ink into the ring, exactly as the accent chip does. */
+.os-chips .os-deploy-status {
+  padding: 1px 8px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+}
 .os-fleet-overridden {
   font-size: var(--os-text-xs);
   text-transform: uppercase;
@@ -2666,10 +2683,75 @@ button:not(:disabled):active {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
   padding: 10px;
   border: 1px solid var(--os-line);
   border-radius: var(--os-radius-sm);
   background: var(--os-raised);
+}
+
+/* ---- the repository picker's rows are COLUMNS, not a sentence ----------
+ *
+ * `.os-row` is a plain flex line, which is right for a list whose rows carry
+ * one trailing state and wrong for one carrying three repeated facts: each
+ * fact started at whatever x the name before it happened to end at, so over
+ * seven repositories the branch column began at seven different offsets
+ * (101.75 / 142.94 / 164.19 / 188.05 / 192.2 / 228.09 / 283.08) and so did
+ * "pushed". A person scanning for one repository's default branch had to
+ * re-find the column on every line.
+ *
+ * EVERY BASIS IS THE SAME ON EVERY ROW, AND THAT IS THE WHOLE MECHANISM. A
+ * flex item with `flex-basis: auto` is sized by its own content, so the row's
+ * geometry became a property of the words in it. Here the three fact cells are
+ * `0 0 <n>ch` and the name is the only thing that may give ground -- so when a
+ * narrow stop forces a shrink, every row is over by the same amount and
+ * shrinks by the same amount, and the columns stay columns instead of
+ * re-scattering at small widths. (The earlier epic's `flex: 0 1 16ch` failed
+ * for the mirror-image reason: its rows differed in what came AFTER the basis,
+ * so each one absorbed a different overflow.) The name ellipsises when it
+ * runs out; the full `owner/name` is already on the row's `title`.
+ *
+ * The cells are rendered even when EMPTY (`RepositoryPicker.tsx`), because an
+ * absent cell is what let the next one move. `min-height` is what keeps a row
+ * with a chip the same height as one without: the list was 38px and 36px
+ * alternating down its own length. */
+/* The chain that lets the name actually give ground. A flex or grid box
+ * reports its own min-content to the box above it, so without `min-width: 0`
+ * at every step the picker simply overflowed a narrow stop rather than
+ * ellipsising -- the name never shrank because nothing above it was willing
+ * to be smaller than the row wanted to be. */
+.os-repo-rows,
+.os-repo-rows .os-row {
+  min-width: 0;
+}
+.os-repo-rows .os-row-name {
+  flex: 0 1 22ch;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-repo-cell {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-repo-cell[data-cell="visibility"] {
+  flex: 0 0 10ch;
+}
+.os-repo-cell[data-cell="branch"] {
+  flex: 0 0 9ch;
+}
+/* Wide enough for the longest freshness this build can print -- `formatFreshness`
+ * tops out at "pushed 9999d ago", ~97px in the caption face -- because a cell
+ * that clips its last word ("pushed 276d ag") is worse than the jitter it
+ * replaced: the reader cannot tell a clipped number from a real one. */
+.os-repo-cell[data-cell="pushed"] {
+  flex: 0 0 15ch;
 }
 
 /* ---- the map ----
@@ -5062,6 +5144,29 @@ a.os-button {
 
 .os-danger-part {
   border-top-color: color-mix(in oklab, var(--os-warn) 35%, var(--os-line));
+}
+
+/* A DESTRUCTIVE CORNER INSIDE A SETTINGS GROUP.
+ *
+ * It borrows the report part's hairline -- warm-tinted, so the corner is
+ * legible before a word of it is read -- and NOT its heading: a settings
+ * group's grammar is Subhead + Field (DESIGN.md rule 8), and the report's
+ * all-caps 11px eyebrow between two 13px ink Subheads was two heading
+ * languages on one card.
+ *
+ * `justify-self: start` on the control is the other half. A grid stretches
+ * its only child, which made the un-armed Disconnect 534px wide beside a 71px
+ * Revoke on the same card -- the widest control on the surface being the
+ * destructive one. The confirm row is flex and was already honest, so the
+ * block used to change button language on a click. */
+.os-settings-danger {
+  display: grid;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in oklab, var(--os-warn) 35%, var(--os-line));
+}
+.os-settings-danger > .os-button {
+  justify-self: start;
 }
 
 .os-confirm-row {

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { Button, Caption } from "../../../kit";
 import type { Refusal } from "../packages/actions";
+import { toneFor } from "../packages/refusals";
 import { ProblemNotice } from "../packages/ReportView";
 
 // Connect GitHub: one button and one sentence (epic memql#4915).
@@ -58,8 +59,11 @@ export function ConnectGitHub({
       </div>
       {/* IN PLACE, NEVER A TOAST. `github_app_not_configured` is an
           operator's condition rather than this person's, and its copy says
-          so -- which only works if it is rendered where they just clicked. */}
-      {refusal ? <ProblemNotice problem={refusal} tone="error" /> : null}
+          so -- which only works if it is rendered where they just clicked.
+          It is also why the TONE is read from the code (`toneFor`) rather
+          than fixed to error: a cluster with no GitHub App is somebody's next
+          step, and the fault colour would say this person broke it. */}
+      {refusal ? <ProblemNotice problem={refusal} tone={toneFor(refusal.code)} /> : null}
     </>
   );
 }
