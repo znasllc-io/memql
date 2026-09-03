@@ -501,6 +501,10 @@ describe("the compose flow: pushed by your CI", () => {
     expect(
       within(region).getByText(/memql service-account-token mint --label marketing-site-ci --subject system:ci-publish/),
     ).toBeTruthy();
+    // CHOSEN ONCE: the address is now a fact, not a field. Editing a slug
+    // `createSite` has already claimed would change nothing.
+    expect(within(region).queryByLabelText("The name Marketing site answers at")).toBeNull();
+    expect(within(region).getByText("marketing.memql.example.com")).toBeTruthy();
     // Nothing is deployed from here: the Live stop is what waits.
     expect(within(region).queryByRole("button", { name: "Deploy" })).toBeNull();
     expect(within(region).getByText(/Waiting for the first push from your CI/)).toBeTruthy();
@@ -792,6 +796,9 @@ describe("a private repository whose build output is committed", () => {
 
     expect(await within(region).findByText("Published. It is not serving yet.")).toBeTruthy();
     expect(railStates(region)).toEqual(["complete", "complete", "complete", "skipped", "complete"]);
+    // The addresses are facts now, and the one that landed is the run's own.
+    expect(within(region).queryByLabelText("The name storefront answers at")).toBeNull();
+    expect(within(region).getAllByText("shop.memql.example.com").length).toBeGreaterThan(0);
 
     // THE WHOLE POINT: the token reached exactly one call.
     const carrying = connection.calls.filter((call) => call.includes(secret));

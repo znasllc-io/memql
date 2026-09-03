@@ -64,10 +64,31 @@ export function ComposeWhereItLivesStop({
   locked: boolean;
 }) {
   if (locked) {
+    // THE RUN'S OWN ANSWER WHERE THERE IS ONE. A hand-made deployable never
+    // produces outcomes -- there is no run -- and a package run that named no
+    // app produces none either, so the drafts stand in: they are what was
+    // WRITTEN, and rendering nothing would leave the stop blank at exactly
+    // the moment somebody wants to read the address back.
+    const placed: DeployableOutcome[] =
+      outcomes.length > 0
+        ? [...outcomes]
+        : apps.map((app) => {
+            const held = addresses[app] ?? EMPTY_ADDRESS;
+            return {
+              name: app === "" ? sourceName : app,
+              siteId: "",
+              hostname: hostnameFor(held.slug, clusterDomain),
+              bundleRef: "",
+              version: "",
+              created: true,
+              accountId: held.accountId,
+              ownDomain: normalizeHostname(held.ownDomain),
+            };
+          });
     return (
       <div className="os-stop-body">
-        {outcomes.map((outcome) => (
-          <PlacedApp key={outcome.name} outcome={outcome} accounts={accounts} many={outcomes.length > 1} />
+        {placed.map((outcome) => (
+          <PlacedApp key={outcome.name} outcome={outcome} accounts={accounts} many={placed.length > 1} />
         ))}
       </div>
     );
@@ -203,10 +224,18 @@ function PlacedApp({
   const tied = accountNameFrom(accounts, outcome.accountId ?? "");
   return (
     <section className="os-report-part" aria-label={`Where ${outcome.name || "it"} lives`}>
-      {many ? <Subhead>{outcome.name}</Subhead> : null}
-      <p className="os-stop-address">
-        <code className="os-mono">{outcome.hostname || "--"}</code>
-      </p>
+      {/* SAID ONCE (rule 7). With ONE app the rail's own note is the address,
+          directly above this body, so repeating it here is a stutter. With
+          several the note joins them and each needs naming under its own
+          heading, which is the only reading the note cannot give. */}
+      {many ? (
+        <>
+          <Subhead>{outcome.name}</Subhead>
+          <p className="os-stop-address">
+            <code className="os-mono">{outcome.hostname || "--"}</code>
+          </p>
+        </>
+      ) : null}
       {tied === "" ? null : <Caption>For {tied}.</Caption>}
       {outcome.ownDomain ? <Caption>Bound to {outcome.ownDomain}, once its DNS records check out.</Caption> : null}
       {outcome.accountRefusal ? <ProblemNotice problem={outcome.accountRefusal} tone="warn" /> : null}

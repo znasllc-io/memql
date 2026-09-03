@@ -186,6 +186,8 @@ export function ComposePage(props: ComposePageProps) {
   const busy = newPackage.busy || pkgActions.busy || createSite.busy || publish.busy || tie.busy || addDomain.busy;
 
   const outcomes: readonly DeployableOutcome[] = run?.deployables ?? [];
+  const placementsLocked =
+    phase === "deploying" || phase === "published" || (path === "handmade" && created.siteId !== "");
   const siteHostname = created.siteId === "" ? "" : hostnameFor(addresses[""]?.slug ?? "", clusterDomain);
 
   // -------------------------------------------------------------------------
@@ -321,7 +323,12 @@ export function ComposePage(props: ComposePageProps) {
             isClusterOwner={isClusterOwner}
             clusterDomain={clusterDomain}
             outcomes={outcomes}
-            locked={phase === "published" && outcomes.length > 0}
+            /* CHOSEN ONCE. The moment the flow has written something at these
+               addresses -- a package run past its gate, or the hand-made
+               draft site -- the fields become facts: editing a slug that
+               `createSite` already claimed changes nothing, and a field that
+               accepts a value and does nothing is worse than no field. */
+            locked={placementsLocked}
           />
         );
       default:
