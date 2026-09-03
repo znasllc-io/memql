@@ -74,6 +74,25 @@ type RuntimeConfig struct {
 	// or static site's document is byte-identical to what it was before this
 	// field existed.
 	Storefront *StorefrontConfig `json:"storefront,omitempty"`
+	// Settings is the site row's runtime settings (epic memql#4906, decision
+	// P7): plain string values under identifier keys, written whole by
+	// updateSiteSettings and read by the bundle as `config.settings.<key>`.
+	// This is what lets ONE bundle serve TWO deployables against different
+	// endpoints with no rebuild -- the document differs per site, the bytes
+	// do not.
+	//
+	// ALWAYS PRESENT, as an empty object when the row carries none, unlike
+	// Storefront above. Storefront is kind-specific, so its absence is
+	// information; settings apply to every kind, and a bundle should be able
+	// to read `config.settings.apiBase` without first asking whether the
+	// object exists. Additive: a bundle built before the key existed never
+	// read it.
+	//
+	// NEVER A SECRET. Every value here is served to every visitor as typed;
+	// the write guard refuses a key ending in `Ref` precisely so nothing
+	// here can pretend to be the storefront binding's resolved reference.
+	// Merged AFTER the storefront block so the two cannot be confused.
+	Settings map[string]string `json:"settings"`
 }
 
 // StorefrontConfig is the shopify_storefront binding as the browser sees it:
@@ -156,7 +175,23 @@ func runtimeConfigForSite(ctx context.Context, site *Site, env func(string) stri
 		AuthEnabled:        authEnabled,
 		Domain:             domainFromEnv(env),
 		Storefront:         storefrontForSite(ctx, site, resolveSecret),
+		Settings:           settingsForSite(site),
 	}
+}
+
+// settingsForSite copies the row's settings onto the document. A copy rather
+// than the row's own map: the resolver caches the Site, and a document that
+// aliased the cached map would let one encoder's view drift from another's
+// if anything ever mutated it. Never nil, so the JSON always carries `{}`.
+func settingsForSite(site *Site) map[string]string {
+	out := map[string]string{}
+	if site == nil {
+		return out
+	}
+	for k, v := range site.Settings {
+		out[k] = v
+	}
+	return out
 }
 
 // storefrontKind is the one site kind that carries a storefront binding.

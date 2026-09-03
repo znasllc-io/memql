@@ -545,6 +545,139 @@ See [front-door.md](front-door.md) for both regimes and
 
 ---
 
+## Runtime settings
+
+A deployable carries **`settings`**: key-values its bundle reads when it
+loads, served in the runtime-config document the edge already answers with
+(`GET /runtime-config.json`). A bundle reads one as `config.settings.apiBase`.
+
+The point is that **one bundle can serve two deployables against different
+endpoints with no rebuild**. Publish the same bytes to `eu.<domain>` and
+`us.<domain>`, give each its own `apiBase`, and each reads its own.
+
+Set them on a deployable's Live stop in MemQL OS, or write them directly:
+
+```
+mutation updateSiteSettings(siteId: "v1:platform:site:abc", settings: {apiBase: "https://api.eu.example.com", region: "eu"})
+```
+
+**The write REPLACES rather than merges.** The whole object is the argument,
+which is what makes removing a setting expressible -- a merge would make
+every "delete this one" silently re-save the value already there. The OS
+editor sends the map it shows for the same reason.
+
+### Not a place for a secret
+
+Every value here is served to **every visitor**, unauthenticated, in a
+document their browser fetches. A value in `settings` is public by
+construction.
+
+A key ending in **`Ref` is refused**, and that refusal is the reason worth
+knowing. `...Ref` is already this platform's convention for a value that must
+NOT be public: the storefront binding's `storefrontTokenRef` NAMES a
+`v1:platform:globalSecret` row that the edge resolves at serve time for
+exactly one site kind. A settings key spelled that way would look like that
+convention and be honoured by nothing -- the edge serves the string as typed
+-- so the natural mistake would publish a secret's name, and the natural next
+mistake would be teaching the edge to resolve it. Put a credential in the
+cluster's secrets and name it from the deployable's `binding`.
+
+### The limits
+
+| Rule | Value |
+|---|---|
+| Key form | `[A-Za-z][A-Za-z0-9_]{0,63}` -- what a bundle can read as `config.settings.<key>` |
+| Keys per deployable | `MEMQL_SITE_SETTINGS_MAX_KEYS`, default 64 |
+| Characters per value | `MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH`, default 2048 |
+| Value type | a plain string; anything else is refused |
+| System-owned rows | refused, for a cluster owner too |
+
+The caps are on the row because the document is served on every page load and
+grows with it. A system-owned deployable (the portal, MemQL OS) refuses the
+write whoever asks: those rows are re-seeded at every boot, so a value set on
+one would be reverted and would look like it had worked until then.
+
+Enforced beside the engine's write path
+(`component/memql/platform_site_settings_guard.go`), not in the mutation
+body: a mutation sees a value and never an object's KEYS.
+
+---
+
+## Traffic and health
+
+Is anybody using this deployable, and is it healthy. Both are read from what
+the edge actually served, never from a guess.
+
+**What is measured.** The edge writes one row per served request into its own
+`edge_request` log -- the deployable it resolved to, the status it answered,
+the bytes, how long it took, and what it did with the request (an asset, an
+HTML document, the SPA fallback, a proxied call, the runtime-config document,
+or nothing at all for a deployable that is paused or in draft). TimescaleDB
+folds those rows into per-minute and per-hour aggregates. The figure and the
+raw log cannot disagree, because the figure IS the log, folded.
+
+**What is not measured.** Nothing that identifies a visitor: no address, no
+user agent, no path, no referrer. The question this exists to answer needs
+counts and outcomes and nothing about who.
+
+**The buckets.** A window of an hour reads minute buckets; a day or a week
+reads hour buckets, because a week of minute buckets is ten thousand rows to
+draw one line. Both are kept for `MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS`
+(default 30, clamped 1..365) -- the raw rows and both aggregates on the same
+schedule, so "unmeasured" means the same thing at every horizon.
+
+**Unmeasured is not zero.** A window with no rows answers *unmeasured* and
+says so in words; a window with requests and no errors answers zero errors.
+Read them as different facts: one means nobody visited, the other means
+nothing was recording, and they send you to different places. Three things
+make a window unmeasured:
+
+- nobody visited;
+- `MEMQL_EDGE_REQUEST_LOG_ENABLED` is `false` on the replica that served
+  (the aggregate is then short by that replica's share);
+- the deployable is **system-owned**. The portal and MemQL OS are excluded by
+  construction, so they are always unmeasured -- measuring the console
+  somebody reads a figure in would be measuring the act of looking.
+
+**Errors and not-found are counted apart.** 5xx is the deployable failing;
+4xx is somebody asking for a page it does not have. Folding them together
+makes a healthy site with a broken inbound link look unhealthy.
+
+**Who can read it.** Whoever can read the deployable: the read resolves each
+id through `siteById` / `sitesAll` under the caller's own actor, so a
+deployable you cannot read contributes no rows -- the same answer one with no
+traffic gives, which is what keeps the call from telling you whether somebody
+else's id exists.
+
+**The cost to a visitor.** None that is measurable. The write is a
+non-blocking hand-off to a batching writer that drops and counts under
+pressure rather than making anybody wait on Postgres; serving a bundle asset
+measured 3139-3202 ns/op without the log and 3000-3188 ns/op with it, at one
+extra 32-byte allocation. Drops are on `memql_site_traffic_dropped_total`
+(labelled `queue_full` / `write_failed`) and writes on
+`memql_site_traffic_written_total` -- read them together when a figure looks
+low, because the figure itself cannot say what is missing from it.
+
+Read it on a deployable's Live stop in MemQL OS, or directly:
+
+```
+builtin siteTrafficInWindow(siteIds: ["v1:platform:site:abc"], bucket: "1h", windowStart: "2026-09-02T00:00:00Z", windowEnd: "2026-09-03T00:00:00Z")
+```
+
+`summary: true` folds the window into one row per deployable instead of one
+per bucket -- what a list needs to say "last served" for twenty of them
+without pulling twenty series. At most 200 deployables per call, refused past
+it rather than truncated: a silently short answer would read as "those have
+no traffic".
+
+### What it is not
+
+No alerting, no uptime probing from outside the cluster, no per-path
+analytics and no geographic breakdown. Each is out of scope by decision
+rather than by omission.
+
+---
+
 ## Where the surface is
 
 **MemQL OS, the Deployables app**, in three sections: **Map** (what serves

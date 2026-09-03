@@ -114,6 +114,36 @@ builtin packageRestore {
   packageId  string!  @description("The archived v1:platform:package row to restore.")
 }
 
+// ---- traffic and health (epic memql#4906, the Run epic) ----
+//
+// The read half of the edge's request log. It lives in PLATFORM rather than
+// in observability, with the row shape it answers in, because what it is
+// gated on is the SITE: a caller reads a deployable's traffic exactly when
+// they may read the deployable. The rows are observability's; the
+// authorization is platform's, and the authorization is what decides where a
+// capability belongs.
+//
+// A BUILTIN RATHER THAN A QUERY, and codeMetricsInWindow is the cautionary
+// case: a DSL `query` reads the graph, these rows live in a dedicated
+// TimescaleDB relation with no concept mapping, and a query over one answers
+// nothing at all. The working shape for a read served from Go is the @sdk
+// builtin whose executor returns synthetic nodes.
+
+/// The traffic figure a deployable's Live stop reads. Gated by the SITE: a deployable the caller
+/// cannot read contributes no rows, which is the same answer a deployable with no traffic gives --
+/// so the call is never an existence oracle for somebody else's id.
+@sdk
+@executor("integration.siteTraffic.inWindow")
+@args(profile="object")
+@description("Read deployables' traffic over a window, from the aggregate the edge's request log is folded into (epic memql#4906). Answers v1:observability:siteTraffic rows: one per bucket per deployable, or -- with summary -- one per deployable for the whole window, which is what a list needs to say `last served` for twenty of them without pulling twenty series. A DEPLOYABLE WITH NO ROWS IN THE WINDOW GETS NO ROW: an absent figure and a zero are different answers, and the client says `unmeasured` in words. A deployable the caller may not read is dropped, not refused, so the call cannot be used to learn whether an id exists. The cluster's own system-owned surfaces are never recorded, so they are always unmeasured. Bounded at 200 deployables per call, refused past it rather than truncated -- a silently short answer reads as `those have no traffic`.")
+builtin siteTrafficInWindow {
+  siteIds      []string!  @description("The deployables to read, as bare ids.")
+  bucket       string!    @description("Which aggregate to read: `1m` for an hour-long window, `1h` for a day or a week.")
+  windowStart  string!    @description("Inclusive start, RFC3339. The caller aligns it to the bucket.")
+  windowEnd    string!    @description("Exclusive end, RFC3339. Half-open, so two adjacent windows add up.")
+  summary      boolean    @description("Fold the whole window into one row per deployable instead of one row per bucket. Summed in the database, which is the point of the mode.")
+}
+
 // ---- the deploy pipeline (epic memql#4794) ----
 //
 // Three capabilities and one shape: each runs under the CALLER's actor,

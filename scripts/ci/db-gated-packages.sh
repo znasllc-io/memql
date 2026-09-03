@@ -97,6 +97,21 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # from go-checks to db-tests whole. Nothing is lost -- the lane runs whole
 # packages -- and the pipeline, analysis and feed suites are ordinary unit
 # tests against fakes that now happen to run beside a database they ignore.
+#
+# memql#4906 added `component/sitetraffic`. The edge's request log is folded
+# into a TimescaleDB continuous aggregate, and every claim worth testing about
+# it is the DATABASE's: that the fold produces the counts the raw rows imply,
+# that a half-open window makes two adjacent windows add up rather than
+# double-count, and that a window nothing measured comes back as NO ROW rather
+# than a zero. A fake would be asserting its own arithmetic. The authorization
+# half is the same shape -- a caller reads a deployable's traffic exactly when
+# `sitesAll` / `siteById` hand it back under their actor, which is a decision a
+# real engine makes over real rows and a stub makes by construction.
+#
+# What the complement now means, having looked: `component/sitetraffic` moves
+# from go-checks to db-tests whole. Nothing is lost -- the lane runs whole
+# packages -- and the sink's own suite is DB-free through its insert seam, so
+# it now happens to run beside a database it ignores.
 readonly DB_GATED_TREES=(
 	"component/memql"
 	"component/automations"
@@ -105,6 +120,7 @@ readonly DB_GATED_TREES=(
 	"component/identity"
 	"component/logstore"
 	"component/packages"
+	"component/sitetraffic"
 	"integrations/cognition"
 	"integrations/embedding"
 	"integrations/planner"
