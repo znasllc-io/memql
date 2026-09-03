@@ -79,6 +79,22 @@ MEMQL_INBOUND_SOURCE_GH_SIGNATURE_PREFIX=sha256=
 MEMQL_INBOUND_SOURCE_GH_SECRET=<shared secret>
 ```
 
+**The `github` source specifically** is the one a cluster running
+[GitHub Connect](github-connect.md) configures, and its secret is not a value you
+choose here: it is `MEMQL_GITHUB_APP_WEBHOOK_SECRET`, the GitHub App's own
+webhook secret, so the app signs with it and this receiver verifies with it. The
+name must be `github` rather than `gh`, because that is the segment
+`MEMQL_PACKAGES_WEBHOOK_SOURCE` defaults to and therefore the one the packages
+feed reads deliveries from.
+
+```bash
+MEMQL_INBOUND_SOURCE_ALLOWLIST=github
+MEMQL_INBOUND_SOURCE_GITHUB_SIGNATURE_SCHEME=hmac-sha256-hex
+MEMQL_INBOUND_SOURCE_GITHUB_SIGNATURE_HEADER=X-Hub-Signature-256
+MEMQL_INBOUND_SOURCE_GITHUB_SIGNATURE_PREFIX=sha256=
+MEMQL_INBOUND_SOURCE_GITHUB_SECRET=<the same value as MEMQL_GITHUB_APP_WEBHOOK_SECRET>
+```
+
 A Stripe-shaped one, whose single header carries both the timestamp and the
 digest (`Stripe-Signature: t=1614556800,v1=<hex>`):
 

@@ -195,7 +195,9 @@ Two feeds, one effect. Both write exactly `latestKnownVersion` and
   plus per-source HMAC (memql#2957). No new HTTP route. Point a repository
   webhook at `https://api.<domain>/inbound/github`, add `github` to
   `MEMQL_INBOUND_SOURCE_ALLOWLIST`, and set its HMAC secret the way that
-  runbook describes.
+  runbook describes. A cluster running [GitHub Connect](github-connect.md)
+  configures ONE webhook on the app instead of one per repository, and its
+  secret is the app's own.
 - **Polling.** A scheduled automation every ten minutes, for clusters no
   webhook can reach. It reads each repo-sourced package's upstream head under
   that package's own named secret.

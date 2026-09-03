@@ -220,3 +220,5 @@ Two things the page deliberately does not offer:
 - [The Library](library.md) -- where the zip artifact you deploy comes from.
 - [Site hosting](site-hosting.md) -- the request path and the per-site CSP.
 - [Front door](front-door.md) -- hosts, certificates and the two TLS regimes.
+- [GitHub Connect](github-connect.md) -- connect GitHub once and pick a
+  repository from a list; the pasted token stays behind "Use a token instead".
