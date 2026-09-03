@@ -1569,3 +1569,37 @@ QueryClient.prototype.siteRestore = function (this: QueryClient, args: SiteResto
   return this.executeNamed("siteRestore", buildSiteRestore(args), opts);
 };
 
+/** The traffic figure a deployable's Live stop reads. Gated by the SITE: a deployable the caller cannot read contributes no rows, which is the same answer a deployable with no traffic gives -- so the call is never an existence oracle for somebody else's id. */
+export interface SiteTrafficInWindowArgs {
+  /** The deployables to read, as bare ids. */
+  siteIds: string[];
+  /** Which aggregate to read: `1m` for an hour-long window, `1h` for a day or a week. */
+  bucket: string;
+  /** Inclusive start, RFC3339. The caller aligns it to the bucket. */
+  windowStart: string;
+  /** Exclusive end, RFC3339. Half-open, so two adjacent windows add up. */
+  windowEnd: string;
+  /** Fold the whole window into one row per deployable instead of one row per bucket. Summed in the database, which is the point of the mode. */
+  summary?: boolean;
+}
+
+export function buildSiteTrafficInWindow(args: SiteTrafficInWindowArgs): string {
+  const parts: string[] = [];
+  parts.push("siteIds: " + renderMemQLValue(args.siteIds));
+  parts.push("bucket: " + renderMemQLValue(args.bucket));
+  parts.push("windowStart: " + renderMemQLValue(args.windowStart));
+  parts.push("windowEnd: " + renderMemQLValue(args.windowEnd));
+  if (args.summary !== undefined) parts.push("summary: " + renderMemQLValue(args.summary));
+  return "builtin siteTrafficInWindow(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    siteTrafficInWindow(args: SiteTrafficInWindowArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.siteTrafficInWindow = function (this: QueryClient, args: SiteTrafficInWindowArgs = {} as SiteTrafficInWindowArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("siteTrafficInWindow", buildSiteTrafficInWindow(args), opts);
+};
+

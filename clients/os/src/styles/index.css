@@ -6724,3 +6724,219 @@ a.os-button {
 .os-window-fault {
   max-width: 560px;
 }
+=======
+/* ---- a deployable's readings (epic memql#4906) -------------------------
+ *
+ * Two panels on the deployable's own detail: what it is serving, and what it
+ * reads at load. Both sit inside `.os-report-part`, the section grammar the
+ * lifecycle and the domains panel already use, so neither invents a container
+ * beside Panel (DESIGN.md rule 8). */
+
+/* The heading and the window pills share a line, and the pills sit at the
+ * trailing edge -- the scope control belongs beside the thing it scopes, not
+ * in a strip above the content (rule 1: nothing stands before the content but
+ * the Head). */
+.os-traffic-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Quieter and shorter than a form's choice row: this is a reading's scope,
+ * not an answer somebody is giving. The margin the shared `.os-choice-row`
+ * carries for a settings group is removed, because here the pills sit ON the
+ * heading line rather than above a field. */
+.os-traffic-windows {
+  margin-bottom: 0;
+}
+.os-traffic-windows .os-choice {
+  height: 24px;
+  padding: 0 10px;
+  font-size: var(--os-text-sm);
+}
+
+/* THE STRIP.
+ *
+ * One series, one hue, drawn small: it is a shape rather than a chart, and
+ * everything numeric about it is in the four facts beneath. The columns grow
+ * from a single hairline baseline, which runs the full width so an empty
+ * stretch reads as part of the series rather than as the series ending.
+ *
+ * The error band is a 2px row BELOW the baseline rather than a segment
+ * stacked on the column, and the reason is the scale: a stacked segment needs
+ * a 2px surface gap to separate it, and at a strip this tall the gap would be
+ * wider than the marks it separates. Below the line it is also the honest
+ * shape -- errors are a STATE of a bucket, not a share of it. */
+/* A READABLE MEASURE, not the window (DESIGN.md rule 9's other half: a form
+ * takes a measure and a list takes the window). Twenty-four buckets across a
+ * thousand pixels drew ten-pixel marks with forty pixels of air between them
+ * -- twenty-four lollipops rather than a series, which is what a shape read
+ * at real size says and no test can. At this width a day's buckets land about
+ * twenty pixels apart and read as one line of traffic. */
+.os-traffic-strip {
+  margin: 2px 0 4px;
+  padding: 0;
+  max-width: 560px;
+}
+
+.os-traffic-buckets {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: var(--os-traffic-h, 34px);
+  margin: 0;
+  padding: 0 0 4px;
+  list-style: none;
+  /* The hairline the columns stand on. Solid, never dashed: a dashed rule
+   * reads as a threshold, and this is a floor.
+   *
+   * `--os-rail` rather than `--os-line`, which is what a hairline in this
+   * shell usually wears. At 8% on a near-black ground the line was invisible
+   * at real size, and an invisible floor takes the strip's whole quiet-stretch
+   * property with it -- the empty buckets have nothing to sit on, so a night
+   * with no traffic reads as the series ending rather than as a night with no
+   * traffic. `--os-rail` is the token for a thin line meant to be SEEN, which
+   * is the scrollbar's own; a value picked by hand here would be a fourth
+   * grey nobody could theme. */
+  border-bottom: 1px solid var(--os-rail);
+}
+
+.os-traffic-bucket {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+/* Thin, capped, square at the baseline -- and never wider than it needs to
+ * be. A `max-width` rather than a fixed width so an hour of minute buckets
+ * (sixty columns) and a day of hour buckets (twenty-four) both fill the strip
+ * without one of them turning into blocks. */
+.os-traffic-bar {
+  display: block;
+  width: 100%;
+  max-width: 14px;
+  margin: 0 auto;
+  border-radius: 2px 2px 0 0;
+  background: var(--os-accent);
+}
+
+/* The error band. Present in the DOM for every bucket so the row's height is
+ * constant and the baseline does not move under a hover; INKED only where
+ * there were errors. */
+.os-traffic-tick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 2px;
+  border-radius: 1px;
+  background: transparent;
+}
+.os-traffic-bucket[data-errors="true"] .os-traffic-tick {
+  background: var(--os-error);
+}
+
+/* The whole column is the hit target, not the drawn mark: a two-pixel column
+ * you have to land on dead-centre is the pinpoint-hover anti-pattern. */
+.os-traffic-bucket::after {
+  content: "";
+  position: absolute;
+  inset: -2px 0;
+}
+.os-traffic-bucket:hover .os-traffic-bar {
+  background: var(--os-ink);
+}
+
+/* ---- the runtime-settings editor -------------------------------------- */
+
+/* THE STRIP'S ONE LABEL, and it is the extreme rather than a value on every
+ * column. A number beside every mark is chaos and goes unread; the peak is
+ * what turns a shape into a reading, because it is the only number that says
+ * what the tallest column MEANS. Everything else is in the four facts below
+ * and in each column's own hover. */
+.os-traffic-peak {
+  display: block;
+  margin: 0 0 3px;
+  text-align: right;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A READABLE MEASURE, like every other form in the shell (DESIGN.md rule 9,
+ * and the Backups panel's own note): a value field stretched to the width of
+ * a maximised window is one a person's eye has to travel the whole screen to
+ * read back, and it made the short name field beside it look like an error. */
+.os-settings-rows {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  max-width: 720px;
+}
+
+/* Names the two columns ONCE, at the top, rather than a label per row. Every
+ * field's own label stays for assistive tech and stays visually hidden; a
+ * visible label on each of six controls would be the same two words printed
+ * three times (rule 7). */
+.os-settings-header {
+  display: grid;
+  grid-template-columns: minmax(0, 14rem) minmax(0, 1fr) auto;
+  gap: 8px;
+  max-width: 720px;
+  margin-top: 6px;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+
+/* Name, value, remove -- on one line where there is room, stacking on a
+ * phone. The value takes the slack because it is the longer of the two and
+ * the one a person reads back to check. */
+.os-settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 14rem) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.os-settings-row .os-settings-problem {
+  grid-column: 1 / -1;
+}
+
+/* WIDTH ONLY, never `(hover: none)`. The shell keys its CHROME off pointer
+ * and hover, which is right for chrome and wrong here: a wide touch tablet
+ * has room for three columns, and a headless browser reports `hover: none`
+ * and got the phone stacking on a 1400px window -- nine full-width rows for
+ * three settings, which is what the rendered pass caught and no test could. */
+@media (max-width: 640px) {
+  .os-settings-header {
+    display: none;
+  }
+  .os-settings-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A form's own answer about a field, in the surface's voice and beside the
+ * field that caused it -- never a toast, and never a colour on its own. */
+.os-settings-problem {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-error);
+}
+
+.os-settings-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+/* Motion is emphasis, never information: the strip carries its whole meaning
+ * standing still, so there is nothing here to disable. Stated so the next
+ * person does not add a grow-in animation to sixty columns. */

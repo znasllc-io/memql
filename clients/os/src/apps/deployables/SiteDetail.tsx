@@ -14,6 +14,8 @@ import { TICK_TTL_MS } from "../../live/arrival";
 import { STOREFRONT_KIND, kindLabel } from "./concepts";
 import { PublishPicker } from "./actions/PublishPicker";
 import { DomainsPanel } from "./DomainsPanel";
+import { RuntimeSettingsPanel } from "./RuntimeSettings";
+import { TrafficPanel } from "./Traffic";
 import {
   bundleForm,
   bundleFormLabel,
@@ -210,6 +212,19 @@ export function SiteDetail({
           detail={tie.error}
         />
       )}
+
+      {/* IS ANYBODY USING IT, AND IS IT HEALTHY (epic memql#4906). Above the
+          acts that change the deployable, because it is what somebody opening
+          a live one came to find out. A read, so it is not behind the write
+          gate: a person who owns a deployable but does not hold the admin rung
+          the lifecycle controls need can still see whether anybody is using
+          their own app. */}
+      <TrafficPanel site={site} />
+
+      {/* What the app reads at load. Beneath the reading because it is
+          configuration rather than status, and above the lifecycle because it
+          is a smaller act than pausing. */}
+      <RuntimeSettingsPanel site={site} canWrite={canManage} />
 
       {canPublish ? <PublishPicker site={site} /> : null}
 

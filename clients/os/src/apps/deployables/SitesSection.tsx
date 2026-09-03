@@ -1,7 +1,8 @@
 import type { LiveSnapshot } from "@znasllc-io/memql-sdk-core/client";
 import { Globe } from "lucide-react";
 
-import { Button, Chip, Head, LiveList, Notice, ProvenanceDot, Row as ListRow } from "../../kit";
+import { Button, Chip, Head, LiveList, Notice, ProvenanceDot, Row as ListRow, useNow } from "../../kit";
+import { formatFreshness } from "../../kit/format";
 import type { LiveView } from "../../live/liveView";
 import { SiteDetail } from "./SiteDetail";
 import { kindLabel } from "./concepts";
@@ -17,6 +18,8 @@ import {
   type SiteRow,
 } from "./rows";
 import type { ListDensity } from "./settings";
+import { LIST_TRAFFIC_WINDOW, type TrafficSummary } from "./traffic";
+import { useSiteTraffic } from "./useSiteTraffic";
 
 // The deployables of this cluster, live.
 //
@@ -53,7 +56,20 @@ export function SitesSection({
   onAsk?: (tag: string) => void;
   onReseed: () => void;
 }) {
-  const open = source?.snapshot.rows.find((s) => s.id === selectedSiteId) ?? null;
+  const rows = source?.snapshot.rows ?? [];
+  // IS ANYBODY USING IT, answerable from the LIST (epic memql#4906). One call
+  // for every deployable on screen, in the summary mode built for it; a
+  // deployable the read did not cover is unmeasured and its row says nothing
+  // rather than "never".
+  //
+  // The cluster's own surfaces are excluded from the request log by
+  // construction, so they are always unmeasured here and the row is silent
+  // about them -- which is the honest reading, not a special case.
+  const { figures } = useSiteTraffic(
+    rows.filter((s) => !s.systemOwned).map((s) => s.id),
+    LIST_TRAFFIC_WINDOW,
+  );
+  const open = rows.find((s) => s.id === selectedSiteId) ?? null;
 
   return (
     <div className="os-app-stack" data-density={density}>
@@ -88,6 +104,7 @@ export function SitesSection({
             viewerUserId={viewerUserId}
             open={selectedSiteId === site.id}
             onToggle={() => onSelectSite(selectedSiteId === site.id ? "" : site.id)}
+            traffic={figures.get(site.id) ?? null}
           />
         )}
       />
@@ -113,13 +130,17 @@ function SiteLine({
   viewerUserId,
   open,
   onToggle,
+  traffic,
 }: {
   site: SiteRow;
   tick: "added" | "updated" | null;
   viewerUserId: string;
   open: boolean;
   onToggle: () => void;
+  /** This deployable's figure for the list's window, or null: unmeasured. */
+  traffic: TrafficSummary | null;
 }) {
+  const now = useNow();
   const live = siteIsCurrent(site);
   const form = bundleForm(site.bundleRef);
   return (
@@ -151,6 +172,16 @@ function SiteLine({
       <Chip tone={ownerLabel(site, viewerUserId) === "yours" ? "accent" : "muted"}>
         {ownerLabel(site, viewerUserId)}
       </Chip>
+      {/* AN UNMEASURED FIGURE RENDERS NOTHING, and that is why this is a chip
+          that comes and goes rather than a column that would be empty for
+          every deployable nobody has visited. A chip saying "never" would be
+          a claim: the honest reading is that we have no measurement, and the
+          Live stop says so in words for somebody who asks. */}
+      {traffic === null || traffic.lastServedAt === "" ? null : (
+        <Chip title={`${traffic.requests.toLocaleString()} requests over the last week`}>
+          served {formatFreshness(traffic.lastServedAt, now)}
+        </Chip>
+      )}
     </ListRow>
   );
 }

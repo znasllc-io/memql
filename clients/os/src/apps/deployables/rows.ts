@@ -25,6 +25,23 @@ function objectOf(row: Row, key: string): Record<string, unknown> {
 }
 
 /**
+ * An object field whose values are meant to be plain strings, keeping only
+ * the entries that ARE strings.
+ *
+ * The server's guard admits nothing else, so a number here is a raw write
+ * that bypassed it. Dropping the entry rather than stringifying it keeps the
+ * editor honest: what it shows is what a save would send back, and coercing
+ * would let somebody "save" a value they never typed.
+ */
+function stringMapOf(row: Row, key: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(objectOf(row, key))) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
+}
+
+/**
  * The values `v1:platform:site.status` declares.
  *
  * ONE LIST, and the type below is derived from it rather than restated. The
@@ -72,6 +89,14 @@ export interface SiteRow {
   deleted: boolean;
   binding: Record<string, unknown>;
   /**
+   * The key-values this app reads at load (epic memql#4906, decision P7),
+   * merged by the edge into the deployable's runtime-config document. Plain
+   * strings only -- a non-string on the row is a raw write that bypassed the
+   * server's guard, and keeping it here would put a value in an editor that
+   * cannot be saved back.
+   */
+  settings: Record<string, string>;
+  /**
    * The client this deployable is FOR (epic memql#4800, D5). Optional, and a
    * plain reference with no read effect -- a site with no tie lists, resolves
    * and serves exactly as it always has.
@@ -100,6 +125,7 @@ export function siteFromRow(raw: Row): SiteRow {
     // that did not touch the field.
     deleted: boolOr(row, "deleted", false),
     binding: objectOf(row, "binding"),
+    settings: stringMapOf(row, "settings"),
     accountId: rowString(row, "accountId"),
     createdAt: rowString(row, "createdAt"),
   };

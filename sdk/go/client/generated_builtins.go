@@ -2039,3 +2039,55 @@ func SiteRestoreBuild(args SiteRestoreArgs) string {
 	b.WriteString(")")
 	return b.String()
 }
+
+// SiteTrafficInWindow -- The traffic figure a deployable's Live stop reads. Gated by the SITE: a deployable the caller cannot read contributes no rows, which is the same answer a deployable with no traffic gives -- so the call is never an existence oracle for somebody else's id.
+type SiteTrafficInWindowArgs struct {
+	// The deployables to read, as bare ids.
+	SiteIds []string
+	// Which aggregate to read: `1m` for an hour-long window, `1h` for a day or a week.
+	Bucket string
+	// Inclusive start, RFC3339. The caller aligns it to the bucket.
+	WindowStart string
+	// Exclusive end, RFC3339. Half-open, so two adjacent windows add up.
+	WindowEnd string
+	// Fold the whole window into one row per deployable instead of one row per bucket. Summed in the database, which is the point of the mode.
+	Summary    bool
+	SummarySet bool // set true to send summary; required because zero-value bool is ambiguous
+}
+
+// SiteTrafficInWindow calls the engine builtin siteTrafficInWindow.
+func (qc *QueryClient) SiteTrafficInWindow(ctx context.Context, args SiteTrafficInWindowArgs) (*Result, error) {
+	call := SiteTrafficInWindowBuild(args)
+	return qc.executeNamed(ctx, "siteTrafficInWindow", call)
+}
+
+func SiteTrafficInWindowBuild(args SiteTrafficInWindowArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin siteTrafficInWindow(")
+	b.WriteString("siteIds: ")
+	b.WriteString(renderMemQLValue(args.SiteIds))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("bucket: ")
+	b.WriteString(quoteMemQL(args.Bucket))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("windowStart: ")
+	b.WriteString(quoteMemQL(args.WindowStart))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("windowEnd: ")
+	b.WriteString(quoteMemQL(args.WindowEnd))
+	if args.SummarySet {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("summary: ")
+		b.WriteString(fmt.Sprintf("%v", args.Summary))
+	}
+	b.WriteString(")")
+	return b.String()
+}
