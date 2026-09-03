@@ -5169,6 +5169,25 @@ func PackageDeploymentsBuild(args PackageDeploymentsArgs) string {
 	return b.String()
 }
 
+// PackageDeploymentsInFlight -- Every run that is still moving, across every owner -- the abandoned sweep's read (epic memql#4900, task memql#4902).
+// CLUSTER-OWNER TIER BY ITS ACTOR rather than by a spec: the concept's composite tier already admits a cluster owner to every row, and the sweep runs under the maintenance actor, which IS one. So the filter says only what it is looking for -- a run at a non-terminal status -- and the tier decides who may see it. The same query read by an ordinary caller answers their own stranded runs, which is correct and is not a second code path.
+// The AGE comparison is deliberately NOT here. "older than the threshold" is arithmetic against a window the sweep is already holding (it comes from the env registry), so comparing in Go over a bounded page keeps ONE answer to "how old is too old" rather than two that can disagree.
+//
+// Bound concept: v1:platform:packageDeployment (machine-readable: BoundConcepts["packageDeploymentsInFlight"] in generated_concepts.go).
+type PackageDeploymentsInFlightArgs struct {
+}
+
+// PackageDeploymentsInFlight calls the engine query packageDeploymentsInFlight.
+func (qc *QueryClient) PackageDeploymentsInFlight(ctx context.Context, args PackageDeploymentsInFlightArgs) (*Result, error) {
+	call := PackageDeploymentsInFlightBuild(args)
+	return qc.executeNamed(ctx, "packageDeploymentsInFlight", call)
+}
+
+func PackageDeploymentsInFlightBuild(args PackageDeploymentsInFlightArgs) string {
+	_ = args
+	return "query packageDeploymentsInFlight()"
+}
+
 // PackagesAll -- The packages this caller may see, active only. The OS packages list.
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.go).

@@ -16,7 +16,8 @@
 # Contract: call engine_build_args_for_node <nodeType> <sourceDir>; it sets
 #   ENGINE_BUILD_ARGS  -- array of docker build args (BUILD_TAGS [+ CGO] +
 #                         MEMQL_COMMIT)
-#   ENGINE_BUILD_TARGET -- Dockerfile target stage (runtime | voice-runtime)
+#   ENGINE_BUILD_TARGET -- Dockerfile target stage
+#                         (runtime | voice-runtime | workbench-runtime)
 #
 # <sourceDir> is the checkout the build context comes from, and it is REQUIRED
 # rather than optional on purpose: under `set -u` a caller that forgets it fails
@@ -87,6 +88,13 @@ function engine_build_args_for_node() {
     if [[ "$node" == "voice" ]]; then
         ENGINE_BUILD_ARGS+=(--build-arg CGO_ENABLED=1)
         ENGINE_BUILD_TARGET="voice-runtime"
+    fi
+    # The workbench is the node that RUNS SOMEBODY ELSE'S BUILD (epic
+    # memql#4900), so it takes a stage carrying a Node toolchain, git, and a
+    # non-root uid to run the command as. Every other node type would gain
+    # nothing from those and a package manager it should not have.
+    if [[ "$node" == "workbench" ]]; then
+        ENGINE_BUILD_TARGET="workbench-runtime"
     fi
     if [[ "$node" == "edge" ]]; then
         ENGINE_BUILD_ARGS+=(--build-arg PORTAL_DIST_STAGE=portal-build)

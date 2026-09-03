@@ -367,6 +367,29 @@ func (p *enginePublisher) StoreSnapshot(ctx context.Context, packageId, version 
 	return "blob://" + key, nil
 }
 
+// ReadSnapshot fetches a stored snapshot back.
+//
+// It accepts only the `blob://<object>` form StoreSnapshot mints. A ref in any
+// other shape -- a Library artifact id, a URL somebody pasted -- is refused by
+// name rather than best-effort resolved: a retry that silently fetched
+// something else would deploy bytes nobody chose.
+func (p *enginePublisher) ReadSnapshot(ctx context.Context, ref string) ([]byte, error) {
+	object, ok := strings.CutPrefix(strings.TrimSpace(ref), "blob://")
+	if !ok || object == "" {
+		return nil, refuse(CodeSnapshotUnavailable,
+			"the earlier run's snapshot reference %q is not one this cluster stores", ref)
+	}
+	if err := p.resolve(ctx); err != nil {
+		return nil, err
+	}
+	raw, err := p.uploader.Download(ctx, p.container, object)
+	if err != nil {
+		return nil, refuse(CodeSnapshotUnavailable,
+			"the earlier run's snapshot could not be read back: %v", err)
+	}
+	return raw, nil
+}
+
 func shortId(canonical string) string {
 	if i := strings.LastIndexByte(canonical, ':'); i >= 0 && i+1 < len(canonical) {
 		return canonical[i+1:]

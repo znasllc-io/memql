@@ -321,6 +321,61 @@ EXPOSE 8085 50051
 
 ENTRYPOINT ["./memql"]
 
+# --- Runtime: workbench node -- the only image that RUNS SOMEBODY ELSE'S CODE.
+#
+# The workbench builds packages (epic memql#4900), and a package's build
+# command is `npm ci && npm run build` by default: it needs a Node toolchain,
+# a shell, git for a dependency pulled from a repository, and a CA bundle. The
+# shared runtime stage has the shell and the CA bundle and neither of the other
+# two, so a build would fail with "npm: not found" on a cluster that looked
+# correctly configured.
+#
+# NODE IS COPIED FROM THE PINNED node:22 IMAGE rather than apt-installed, for
+# two reasons. Debian 12 ships Node 18, which a growing share of front-end
+# toolchains refuse outright -- so apt would deliver a build surface that fails
+# on a version nobody chose. And the digest above is already the version this
+# repo builds its own SPAs with, so a package building here builds against the
+# same toolchain the platform's own bundles do.
+#
+# THE BUILD USER is the other half of "no cluster credentials in the build's
+# environment". component/packages hands the command a CONSTRUCTED environment,
+# which covers what the child is given -- and covers nothing about what it can
+# go and read. The engine runs as root, so a build running as root could read
+# /proc/1/environ and take every secret the pod holds. It runs as uid 10001
+# instead, which cannot.
+FROM debian:12-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS workbench-runtime
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        git ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd --uid 10001 --create-home --home-dir /home/memql-build --shell /usr/sbin/nologin memql-build && \
+    mkdir -p /var/lib/memql/workbenches && \
+    chown 10001:10001 /var/lib/memql/workbenches
+
+# The Node toolchain, from the same pinned image the portal build uses. Both
+# are bookworm, so the C library matches and the binaries run as they were
+# built.
+COPY --from=node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
+    node --version && npm --version && git --version
+
+WORKDIR /app
+
+COPY --from=builder /app/bin/memql ./memql
+COPY --from=builder /app/bin/healthcheck ./healthcheck
+# Same portal copy as every other runtime stage: empty for this node type, and
+# present so a stage selector change cannot silently ship an image with no
+# bundle directory at all.
+COPY --from=portal-dist /portal-dist ./portal
+COPY --from=portal-dist /os-dist ./os
+
+EXPOSE 8085 50051
+
+ENTRYPOINT ["./memql"]
+
 # --- Runtime: voice node (CGO) needs the libopus shared libraries. --------
 # The voice binary links libopus/opusfile/soxr dynamically, so distroless
 # (no libc package manager, no shared libs) cannot run it. This stage uses

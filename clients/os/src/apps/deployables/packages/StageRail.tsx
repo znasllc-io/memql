@@ -48,10 +48,16 @@ const STAGES: readonly { id: string; label: string; blurb: string }[] = [
   { id: "publishing", label: "Publish", blurb: "Point each site at its new files" },
 ];
 
-const TERMINAL: Record<string, "done" | "refused" | "failed"> = {
+const TERMINAL: Record<string, "done" | "refused" | "failed" | "abandoned"> = {
   succeeded: "done",
   refused: "refused",
   failed: "failed",
+  // memql#4900: a run whose node went away. Terminal, and deliberately not a
+  // flavour of `failed` -- nothing failed, and the rail's job here is to say
+  // that rather than to leave somebody reading a stopped deploy as a broken
+  // one. The mark is the same (the run stopped where it stopped); the
+  // SENTENCE is what differs, and it comes from the row's own error.
+  abandoned: "abandoned",
 };
 
 type StageState = "done" | "current" | "skipped" | "stopped" | "ahead";
@@ -132,6 +138,15 @@ export function railFor(deployment: DeploymentRow): { stages: RailStage[]; rever
 // stage its evidence supports: a report means analysis ran, deployables mean
 // publishing did.
 function lastReachedIndex(d: DeploymentRow): number {
+  // A run the SWEEP closed kept the stage it was at (memql#4900), because
+  // closing the row is what destroys it: the status field held `building`,
+  // and `abandoned` replaced it. Without this the evidence below would draw a
+  // run that died mid-build as having stopped at Analyze -- understating what
+  // it did and sending somebody to look in the wrong place.
+  if (d.stoppedAt !== "") {
+    const at = indexOf(d.stoppedAt);
+    if (at >= 0) return at;
+  }
   if (d.deployables.length > 0) return indexOf("publishing");
   if (d.dslVersion !== "") return indexOf("rolling");
   if (d.buildLogTail !== "") return indexOf("building");

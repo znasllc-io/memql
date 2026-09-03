@@ -83,6 +83,61 @@ const COPY: Record<string, RefusalCopy> = {
     title: "The build did not finish",
     next: "Every site is still serving what it was serving. The build output is below.",
   },
+  deployable_build_timeout: {
+    title: "The build ran out of time",
+    // The two repairs, in the order somebody should try them. Naming the
+    // variable matters: without it the only apparent option is "make the
+    // build faster", which is not always possible.
+    next: "Every site is still serving what it was serving. Make the build faster, or ask an operator to raise MEMQL_PACKAGES_BUILD_TIMEOUT_SECONDS.",
+  },
+  no_workbench_peer: {
+    title: "This cluster has no build surface running",
+    // Nothing here is the author's to fix, and saying so is the useful half:
+    // otherwise somebody spends an afternoon on a build script that is fine.
+    next: "Nothing was built and nothing was published. This is a cluster problem rather than one with your source -- an operator needs to look at the workbench.",
+  },
+  no_worker_available: {
+    title: "None of your machines can build this",
+    next: "",
+  },
+  deployment_abandoned: {
+    title: "This cluster lost the node that was running it",
+    // Said plainly, because the natural reading of a stopped deploy is that
+    // it broke -- and this one did not.
+    next: "Nothing was published and nothing failed: every site is still serving what it was serving. Retry starts a fresh run.",
+  },
+  snapshot_unavailable: {
+    title: "There is nothing stored to retry from",
+    next: "",
+  },
+  build_request_invalid: {
+    title: "This cluster could not read the build request",
+    next: "",
+  },
+  build_source_unreadable: {
+    title: "The build surface could not read the source",
+    next: "",
+  },
+  build_output_missing: {
+    title: "The build finished and produced no files",
+    next: "",
+  },
+  build_output_too_large: {
+    title: "The built output is over the size this cluster accepts",
+    next: "",
+  },
+  build_forward_failed: {
+    title: "The build surface stopped answering mid-build",
+    next: "Nothing was published. Retry starts a fresh run.",
+  },
+  build_entry_refused: {
+    title: "The build surface refused this request",
+    next: "",
+  },
+  deploy_failed: {
+    title: "This deploy did not finish",
+    next: "",
+  },
   deployable_publish_failed: {
     title: "The site could not be published",
     next: "",

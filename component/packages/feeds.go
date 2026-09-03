@@ -146,6 +146,30 @@ func noteUpstream(ctx context.Context, d *Deps, repoUrl, version string) (int, e
 			return matched, err
 		}
 		matched++
+
+		// AND THEN, ONLY IF THE SOURCE ASKED FOR IT (epic memql#4900, task
+		// memql#4903), the deploy this feed has never been allowed to start.
+		//
+		// The rule the header states -- "neither ever starts a deployment" --
+		// held for one reason: deploying somebody's code is a decision, and a
+		// feed had no way to know it had been made. The switch is that
+		// decision, taken once, in advance, by the person who owns the
+		// source. So the feed still decides nothing; it acts on a decision
+		// that is already on the row.
+		//
+		// Only when there is genuinely something newer than what is live: a
+		// re-announcement of the version already deployed must not start a
+		// run, or a repository with a chatty webhook would redeploy itself
+		// forever.
+		if available {
+			if _, aerr := d.startAutoRun(ctx, pkg, version); aerr != nil {
+				// One package's auto-run must not stop the sweep: the feed's
+				// own job -- recording what moved -- is already done for this
+				// row, and every other package still deserves its cue.
+				d.log().Warn("packages: an auto-deploy could not be started",
+					"component", "packages.autodeploy", "package", id, "err", aerr)
+			}
+		}
 	}
 	return matched, nil
 }

@@ -1,11 +1,13 @@
 package packages
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -53,6 +55,10 @@ const (
 	StatusSucceeded  = "succeeded"
 	StatusRefused    = "refused"
 	StatusFailed     = "failed"
+	// StatusAbandoned is the sweep's (epic memql#4900, task memql#4902): a run
+	// whose node stopped saying it was alive. Terminal, and deliberately NOT a
+	// flavour of failed -- see sweep.go.
+	StatusAbandoned = "abandoned"
 )
 
 // Actor is what the pipeline knows about who asked.
@@ -71,16 +77,22 @@ type Actor struct {
 // object storage -- which is what the D6 ordering law needs, because "the
 // publish never happened" is only assertable if the test can see the publish.
 type Deps struct {
-	Store     *store
-	Fetcher   Fetcher
-	Builder   Builder
-	Stager    Stager
-	Roller    Roller
-	Publisher SitePublisher
-	Auditor   Auditor
-	Logger    *slog.Logger
-	Limits    Limits
-	Now       func() time.Time
+	Store   *store
+	Fetcher Fetcher
+	Builder Builder
+	// FleetBuilder builds a deployable whose target needs the person's own
+	// machine (task memql#4904). Nil on every node that holds no worker
+	// streams, and nil is the ANSWER rather than a gap: a target asking for
+	// the fleet on a cluster with no fleet route is refused by name at the
+	// build stage, which is where every other missing surface is refused.
+	FleetBuilder Builder
+	Stager       Stager
+	Roller       Roller
+	Publisher    SitePublisher
+	Auditor      Auditor
+	Logger       *slog.Logger
+	Limits       Limits
+	Now          func() time.Time
 	// NewId mints deployment and site ids. Injected so a test reads a stable
 	// timeline rather than a random one.
 	NewId func(prefix string) string
@@ -115,6 +127,19 @@ type DeployRequest struct {
 	// supplied at FIRST deploy only. Later deploys find the site through
 	// (packageId, packageDeployableName) and never re-ask.
 	Hostnames map[string]string
+	// Automatic marks a run the source's own auto-deploy switch started
+	// rather than a person (epic memql#4900, task memql#4903). On the REQUEST
+	// rather than derived, because the only caller who can honestly answer is
+	// the one that decided to start it -- and deliberately not readable from
+	// the wire, so nothing a client sends can put a run in the timeline
+	// marked as something nobody chose.
+	Automatic bool
+	// FromDeploymentId retries an earlier run from the bytes it already
+	// fetched (task memql#4902): the run re-analyses the same snapshot rather
+	// than going back to the repository, so a Retry after a lost node deploys
+	// exactly what the lost run was deploying -- not whatever the branch has
+	// moved to since.
+	FromDeploymentId string
 }
 
 // DeployOutcome is what a run produced.
@@ -128,7 +153,35 @@ type DeployOutcome struct {
 	// reported separately from Status so a caller does not have to compare
 	// against a string to learn that nothing is wrong.
 	AwaitingConfirm bool
-	Problem         *Problem
+	// ConfirmReason says why an AUTO run parked instead of confirming itself
+	// -- "this push changes what deploying would do", and the like. Empty for
+	// a person's run, which parks because that is what the gate does.
+	ConfirmReason string
+	Problem       *Problem
+	// BuiltOn is where this run's build happened, for the row (epic
+	// memql#4900). One value for the run rather than one per app: a run
+	// builds every app on one surface, and the pin keeps them on one node,
+	// so the honest summary is the surface plus the node -- and the
+	// per-deployable record rides on each outcome as well.
+	BuiltOn BuiltOn
+}
+
+// recordBuiltOn keeps the run's build surface and the node it ran on.
+//
+// The FIRST answer wins for the surface and the LAST non-empty node wins,
+// which is the honest reading of a run whose apps are a prebuilt one and a
+// built one: the run built something, and it built it somewhere.
+func (o *DeployOutcome) recordBuiltOn(name string, on BuiltOn) {
+	if on.Surface == "" {
+		return
+	}
+	if o.BuiltOn.Surface == "" || o.BuiltOn.Surface == SurfacePrebuilt {
+		o.BuiltOn.Surface = on.Surface
+	}
+	if strings.TrimSpace(on.NodeId) != "" {
+		o.BuiltOn.NodeId = on.NodeId
+	}
+	_ = name
 }
 
 // Deploy runs one deployment attempt to a terminal status, or parks it at the
@@ -186,13 +239,26 @@ func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, er
 		PackageId:    req.PackageId,
 		OwnerUserId:  ownerUserId,
 		RequestedBy:  req.Actor.UserId,
+		Automatic:    req.Automatic,
+		NodeId:       selfNodeId(),
 		StartedAt:    d.now(),
 	}); err != nil {
 		return nil, err
 	}
 
 	out := &DeployOutcome{DeploymentId: deploymentId, Status: StatusAnalyzing}
-	if err := runDeploy(ctx, d, req, pkg, out); err != nil {
+
+	// THE HEARTBEAT RUNS FOR THE LENGTH OF THE RUN (epic memql#4900, task
+	// memql#4902). Started here rather than inside runDeploy so it covers
+	// every exit from it -- the refusals, and the parked case below -- and
+	// stopped before the row is closed, because a beat landing after a
+	// terminal write is refused by the append-only guard and would log an
+	// error about a rule that is working.
+	stopHeartbeat := d.heartbeat(ctx, deploymentId)
+	runErr := runDeploy(ctx, d, req, pkg, out)
+	stopHeartbeat()
+
+	if err := runErr; err != nil {
 		var ref *Refusal
 		status := StatusFailed
 		problem := &Problem{Code: "deploy_failed", Message: err.Error(), Fatal: true}
@@ -235,6 +301,7 @@ func (d *Deps) closeRun(ctx context.Context, deploymentId string, out *DeployOut
 		Deployables:  out.Deployables,
 		DslVersion:   out.DslVersion,
 		BuildLogTail: buildLog,
+		BuiltOn:      out.BuiltOn,
 		Error:        problem,
 		FinishedAt:   d.now(),
 	}); err != nil {
@@ -250,7 +317,7 @@ func (d *Deps) closeRun(ctx context.Context, deploymentId string, out *DeployOut
 // below lands in the same place.
 func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]any, out *DeployOutcome) error {
 	// ---- fetch ----
-	snapshot, err := d.fetch(ctx, pkg)
+	snapshot, err := d.fetchFor(ctx, req, pkg)
 	if err != nil {
 		return err
 	}
@@ -293,17 +360,38 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	}
 
 	// ---- confirm (D12) ----
+	//
+	// An AUTO run answers the gate itself when the plan has not changed
+	// (epic memql#4900, task memql#4903). The gate is not skipped: the run
+	// reaches it, the comparison happens here where the fresh report is in
+	// hand, and anything but an exact match parks exactly as a person's
+	// unconfirmed run does -- with the reason on the row, so the OS can say
+	// why it stopped rather than only that it did.
 	if !req.Confirmed {
-		out.AwaitingConfirm = true
-		out.Status = StatusAwaitingConfirm
-		return d.Store.advance(ctx, out.DeploymentId, StatusAwaitingConfirm)
+		if req.Automatic {
+			ok, why := d.autoConfirm(ctx, req, rep)
+			if ok {
+				d.log().Info("packages: an auto-deploy confirmed itself -- the plan is unchanged",
+					"component", "packages.autodeploy",
+					"package", req.PackageId, "deployment", out.DeploymentId)
+			} else {
+				out.AwaitingConfirm = true
+				out.Status = StatusAwaitingConfirm
+				out.ConfirmReason = why
+				return d.Store.advance(ctx, out.DeploymentId, StatusAwaitingConfirm)
+			}
+		} else {
+			out.AwaitingConfirm = true
+			out.Status = StatusAwaitingConfirm
+			return d.Store.advance(ctx, out.DeploymentId, StatusAwaitingConfirm)
+		}
 	}
 
 	// ---- build ----
 	if err := d.Store.advance(ctx, out.DeploymentId, StatusBuilding); err != nil {
 		return err
 	}
-	bundles, err := d.build(ctx, snapshot, rep, out)
+	bundles, err := d.build(ctx, req, pkg, snapshot, rep, out)
 	if err != nil {
 		return err
 	}
@@ -341,6 +429,65 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 			"component", "packages.pipeline", "err", verr)
 	}
 	return nil
+}
+
+// fetchFor gets the bytes this run deploys.
+//
+// A RETRY REUSES WHAT THE EARLIER RUN FETCHED (epic memql#4900, task
+// memql#4902), and the reason is not saving a request. A run that was
+// abandoned when its node died was deploying a particular commit; going back
+// to the repository would deploy whatever the branch has moved to since, which
+// is a different deploy wearing the word Retry. The button says "start the run
+// that was lost again", so it starts THAT run again.
+//
+// An artifact-sourced package needs nothing special: its zip in the Library IS
+// the snapshot, and re-reading it is byte-identical by construction.
+func (d *Deps) fetchFor(ctx context.Context, req DeployRequest, pkg map[string]any) (*SourceSnapshot, error) {
+	from := strings.TrimSpace(req.FromDeploymentId)
+	if from == "" || rowString(pkg, "sourceKind") != "repo" {
+		return d.fetch(ctx, pkg)
+	}
+	prior, err := d.Store.deploymentById(ctx, from)
+	if err != nil {
+		return nil, err
+	}
+	if prior == nil {
+		return nil, refuse(CodeSourceUnreadable,
+			"no deployment %q is readable by this caller, so there is nothing to retry from", from)
+	}
+	if got := rowString(prior, "packageId"); got != req.PackageId {
+		return nil, refuse(CodeSourceUnreadable, "deployment %q belongs to a different package", from)
+	}
+	ref := rowString(prior, "snapshotArtifactId")
+	if ref == "" || d.Publisher == nil {
+		return nil, refuse(CodeSnapshotUnavailable,
+			"the run being retried kept no snapshot of its source, so this cluster cannot repeat it exactly. Deploy again to fetch the source fresh -- it will deploy whatever the source holds now.")
+	}
+	raw, rerr := d.Publisher.ReadSnapshot(ctx, ref)
+	if rerr != nil {
+		return nil, rerr
+	}
+	dir, mkErr := os.MkdirTemp("", "memql-package-retry-*")
+	if mkErr != nil {
+		return nil, mkErr
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	root, xerr := ExtractTarGz(bytes.NewReader(raw), dir, d.Limits)
+	if xerr != nil {
+		cleanup()
+		return nil, xerr
+	}
+	return &SourceSnapshot{
+		Tree: os.DirFS(root),
+		// The VERSION the earlier run recorded, not one derived from the
+		// bytes: it is the same source, so it is the same version, and
+		// deriving it again would risk two spellings of one commit.
+		Version: rowString(prior, "sourceVersion"),
+		// Bytes deliberately nil: the snapshot is already stored, and storing
+		// it again would give one set of bytes two references.
+		Root:    root,
+		cleanup: cleanup,
+	}, nil
 }
 
 func (d *Deps) fetch(ctx context.Context, pkg map[string]any) (*SourceSnapshot, error) {
@@ -414,6 +561,7 @@ var packageDeploymentTerminalStatuses = map[string]struct{}{
 	StatusSucceeded: {},
 	StatusRefused:   {},
 	StatusFailed:    {},
+	StatusAbandoned: {},
 }
 
 var _ = stageIndex

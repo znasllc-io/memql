@@ -1,6 +1,10 @@
 package packages
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"io/fs"
 	"testing/fstest"
 )
 
@@ -98,4 +102,45 @@ func reservedDomainPackage() fstest.MapFS {
 	p := validPackage()
 	p["dsl/cognition/concepts.memql"] = file(validConcepts)
 	return p
+}
+
+// prebuiltNoDslPackage is the D4 fast path with no DSL: both deployables carry
+// their built output, so a deploy publishes without reaching a build surface
+// at all.
+func prebuiltNoDslPackage() fstest.MapFS {
+	p := prebuiltPackage()
+	delete(p, "dsl/acme/concepts.memql")
+	p["clients/docs/dist/index.html"] = file("<!doctype html><title>docs</title>\n")
+	return p
+}
+
+// fixtureTarGz packs a fixture tree as the tar.gz a real repo fetch keeps, so
+// a retry test reads back bytes that actually expand into the same tree.
+func fixtureTarGz(tree fs.FS) []byte {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	_ = fs.WalkDir(tree, ".", func(p string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		data, rerr := fs.ReadFile(tree, p)
+		if rerr != nil {
+			return rerr
+		}
+		if werr := tw.WriteHeader(&tar.Header{
+			Typeflag: tar.TypeReg,
+			Name:     "acme-widget-abc123/" + p,
+			Mode:     0o644,
+			Size:     int64(len(data)),
+			Format:   tar.FormatPAX,
+		}); werr != nil {
+			return werr
+		}
+		_, werr := tw.Write(data)
+		return werr
+	})
+	_ = tw.Close()
+	_ = gz.Close()
+	return buf.Bytes()
 }

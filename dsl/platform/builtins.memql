@@ -137,6 +137,7 @@ builtin packageAnalyze {
 builtin packageDeploy {
   packageId  string!  @description("The v1:platform:package row to deploy.")
   confirm    boolean  @description("Pass true to proceed past the confirm gate. Absent or false parks the run with its report and returns.")
+  fromDeploymentId  string  @description("Retry an earlier run from the bytes it already fetched (epic memql#4900, task memql#4902), rather than fetching the source again. The run re-analyses the SAME snapshot, so a Retry after a node was lost deploys exactly what the lost run was deploying -- not whatever the branch has moved to since. Refused with snapshot_unavailable when that run kept no snapshot, which is every run from before snapshots were stored; deploy without it to fetch fresh. Ignored for a zip-sourced package, whose Library artifact IS its snapshot.")
   hostnames  object   @description("Deployable name -> hostname, for deployables being deployed for the FIRST time. A hostname is chosen once and remembered on the site row.")
 }
 
@@ -176,4 +177,21 @@ builtin packageNoteUpstreamFromWebhook {
 @args(profile="object")
 @description("The D11 polling fallback: walk every repo-sourced package and compare the upstream head against what is deployed (epic memql#4794). Runs under each package's own repoTokenRef where one is set, resolved at call time and never stored. Writes only latestKnownVersion and updateAvailable, and only for a package whose upstream actually moved -- a package that has not changed is not written, so the OS cue does not flicker and the mesh does not carry an event per package per poll.")
 builtin packagePollUpstream {
+}
+
+// ---- run lifecycle (epic memql#4900, tasks memql#4902 and memql#4903) ----
+
+@executor("integration.packages.sweepAbandoned")
+@args(profile="object")
+@description("Close every run whose node stopped saying it was alive (epic memql#4900, task memql#4902). A deploy is one call on one node; a node lost mid-run leaves the row at a non-terminal status with nothing to say so, and this is what says so. A run whose heartbeatAt is older than MEMQL_PACKAGES_ABANDONED_AFTER_SECONDS is closed with the terminal status 'abandoned' -- NEVER 'failed', because nothing failed that this sweep can name and the D6 order guarantees every site is still serving what it was serving -- and a typed error naming the node that was running it and when it was last heard. A run that is merely SLOW is not touched: the threshold is a multiple of the heartbeat cadence, so a run still writing its heartbeat is by definition still alive. Runs on the cron leader only, so each stranded row is closed once. Answers {checked, abandoned}.")
+builtin packageSweepAbandoned {
+}
+
+@sdk
+@executor("integration.packages.setAutoDeploy")
+@args(profile="object")
+@description("Turn a source's auto-deploy switch on or off (epic memql#4900, task memql#4903). With it ON, a push the update feeds notice starts a run by itself, requested by the package's owner and marked provenance='auto'; the run CONFIRMS ITSELF only when the new analysis plans exactly what the last confirmed run planned -- the same apps by name, kind and path, the same DSL domains, and every placement already remembered -- and parks at the confirm gate for anything else, which is the same gate a person's deploy passes. Never more than one auto-run is live per package. With it OFF, which is the default and the state of every source that has never been switched, a push lights the update chip and waits for a click, exactly as before. The write is owned: the guard admits the source's owner or a cluster owner. Returns {packageId, autoDeploy}.")
+builtin packageSetAutoDeploy {
+  packageId   string!  @description("The v1:platform:package row to switch.")
+  autoDeploy  boolean! @description("True arms it; false restores the click.")
 }

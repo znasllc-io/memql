@@ -42,7 +42,16 @@ func (a *App) wireWorkbenchForwarding(
 	integ := a.lookupWorkbenchIntegration()
 
 	switch nodeIdentity.Type {
-	case node.NodeTypeAgent:
+	// THE BFF ROUTES TOO, since epic memql#4900. It is not an agent and holds
+	// no tool loop -- what it holds is packageDeploy, which the OS calls and
+	// which now builds. Without this case the bff's workbench integration has
+	// no router, `remote` is whatever its env says, and a build would run on
+	// the bff pod: somebody else's npm postinstall in the process that holds
+	// this cluster's front door. The env half is deploy/k8s/components/
+	// engine-bff/bff.yaml, which sets MEMQL_WORKBENCH_REMOTE and names the
+	// peer; with the flag unset this case installs a router that is simply
+	// never consulted.
+	case node.NodeTypeAgent, node.NodeTypeBFF:
 		// Only wire the remote path when explicitly enabled. Without
 		// the env var the agent keeps the MVP behavior: local dispatch
 		// against /var/lib/memql/workbenches on its own disk.

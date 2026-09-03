@@ -1,6 +1,7 @@
 package packages
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -187,7 +188,25 @@ func (f *githubFetcher) FetchRepo(ctx context.Context, repoUrl, ref, tokenRef st
 	}
 	cleanup := func() { _ = os.RemoveAll(dir) }
 
-	root, xerr := ExtractTarGz(io.LimitReader(resp.Body, limits.normalized().MaxSourceBytes+1), dir, limits)
+	// THE BYTES ARE KEPT, and until epic memql#4900 they were not.
+	//
+	// SourceSnapshot.Bytes has documented since D8 that it carries "the
+	// archive as fetched, for storing as the content-addressed Library
+	// snapshot" -- and nothing on this path ever set it, so storeSnapshot's
+	// len(s.Bytes) == 0 guard returned early on every repo deploy and
+	// `snapshotArtifactId` was empty on every row. The field was declared,
+	// projected, and written by nothing: exactly the shape a reader takes for
+	// a feature that works. Retry-from-snapshot (task memql#4902) is what
+	// needs it to be true, and a re-analysis "repeatable from the stored
+	// snapshot without refetching" was already the design's claim.
+	//
+	// TEE'd rather than read-then-extract: the expansion is bounded and
+	// streaming, and buffering the whole response first would hold the
+	// compressed archive AND the expanded tree before the caps had a chance
+	// to refuse either.
+	var raw bytes.Buffer
+	body := io.TeeReader(io.LimitReader(resp.Body, limits.normalized().MaxSourceBytes+1), &raw)
+	root, xerr := ExtractTarGz(body, dir, limits)
 	if xerr != nil {
 		cleanup()
 		return nil, xerr
@@ -196,6 +215,7 @@ func (f *githubFetcher) FetchRepo(ctx context.Context, repoUrl, ref, tokenRef st
 	return &SourceSnapshot{
 		Tree:    os.DirFS(root),
 		Version: versionFromTarballRoot(root, resp.Header.Get("ETag")),
+		Bytes:   raw.Bytes(),
 		Root:    root,
 		cleanup: cleanup,
 	}, nil

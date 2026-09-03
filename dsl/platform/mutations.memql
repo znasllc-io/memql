@@ -1071,6 +1071,24 @@ mutate package updatePackageSource {
   }
 }
 
+/// Turn a source's auto-deploy switch on or off (epic memql#4900).
+///
+/// The PERSON's write, and an owned one: the write guard resolves the target row and admits its
+/// owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There
+/// is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's
+/// decision, which is what makes an auto-run's provenance honest.
+@description("Turn auto-deploy on or off for a tracked source")
+mutate package setPackageAutoDeploy {
+  args {
+    packageId   string!
+    autoDeploy  boolean!
+  }
+  update {
+    id:         args.packageId
+    autoDeploy: args.autoDeploy
+  }
+}
+
 /// Set a package's lifecycle status (D10). Pipeline/capability writer.
 ///
 /// @serverOnly, and the reason is the whole D10 shape: archiving is a read-then-verify-then-write
@@ -1199,16 +1217,85 @@ mutate packageDeployment openPackageDeployment {
     packageId      string!
     sourceVersion  string
     requestedBy    string
+    automatic      boolean
+    nodeId         string
     startedAt      datetime!
   }
   insert {
-    accept { sourceVersion, requestedBy }
+    accept { sourceVersion, requestedBy, nodeId }
     stamp {
       id:           args.deploymentId
       packageId:    args.packageId
       ownerUserId:  actor.userId
       status:       "analyzing"
+      automatic:    args.automatic ?? false
       startedAt:    args.startedAt
+      heartbeatAt:  args.startedAt
+    }
+  }
+}
+
+/// Say a run is still alive. Written on a fixed cadence by the node running the pipeline, and by
+/// nothing else -- it is the engine's own account of its own liveness, which is exactly why it is
+/// @serverOnly and why actor scoping is not the fix: a caller stamping it on their own deployment
+/// would be asserting something only the running node can know, and the abandoned sweep reads it as
+/// evidence.
+///
+/// It is a plain update onto a NON-TERMINAL row: the append-only guard already refuses a write onto
+/// a terminal one, so a heartbeat arriving after a run finished is refused rather than reopening it.
+///
+/// actor.userId scoping is not the fix, for the reason recordPackageDeployedVersion gives one block
+/// up: the value is a claim about what a NODE is doing, and a caller stamping it on their own
+/// deployment would be asserting something only the running node can know -- while the sweep reads
+/// it as evidence that a run is alive. Scoping it to the caller would make that claim forgeable by
+/// exactly the party it is about. The run also has no caller for most of its life: the pipeline
+/// heartbeats from a goroutine after the request that started it has returned, so a self-scoped
+/// filter would refuse the only path that legitimately calls it.
+@serverOnly
+@description("Record that a package deployment's node is still running it")
+mutate packageDeployment heartbeatPackageDeployment {
+  args {
+    deploymentId  string!
+    heartbeatAt   datetime!
+  }
+  update {
+    id:          args.deploymentId
+    heartbeatAt: args.heartbeatAt
+  }
+}
+
+/// Close a run whose node stopped saying it was alive.
+///
+/// A STATUS OF ITS OWN, never 'failed'. Nothing failed that this sweep can name: the D6 order
+/// guarantees every site is still serving what it was serving, and writing 'failed' would put a
+/// verdict on somebody's package that the evidence does not support. The error it stamps names the
+/// node and when it was last heard, which is the whole of what is known.
+///
+/// The sweep is the ONE writer allowed to close a stranded row, and this mutation is how: it exists
+/// so that permission is a named construct a reader can find rather than a special case inside a
+/// general close.
+///
+/// actor.userId scoping is not the fix, and here it is close to backwards. The row belongs to the
+/// package's owner, and the caller is a SWEEP with nobody attached -- it runs on the cron leader on
+/// a schedule, across every owner, precisely because the person watching a stuck rail is the one
+/// who cannot fix it. A self-scoped filter would refuse every row the sweep exists to close. Nor
+/// would caller-scoping buy anything: what must not happen is a CLIENT closing somebody's run as
+/// abandoned, and @serverOnly is what forbids that, while the maintenance actor's cluster-owner
+/// tier is what admits the sweep to the rows.
+@serverOnly
+@description("Close a package deployment whose node was lost mid-run")
+mutate packageDeployment abandonPackageDeployment {
+  args {
+    deploymentId  string!
+    stoppedAt     string
+    error         object!
+    finishedAt    datetime!
+  }
+  update {
+    accept { stoppedAt, error, finishedAt }
+    stamp {
+      id:         args.deploymentId
+      status:     "abandoned"
     }
   }
 }
@@ -1275,15 +1362,16 @@ mutate packageDeployment recordPackageDeploymentReport {
 mutate packageDeployment closePackageDeployment {
   args {
     deploymentId  string!
-    status        enum("succeeded", "refused", "failed")!
+    status        enum("succeeded", "refused", "failed", "abandoned")!
     deployables   []object
     dslVersion    string
     buildLogTail  string
+    builtOn       object
     error         object
     finishedAt    datetime!
   }
   update {
-    accept { deployables, dslVersion, buildLogTail, error }
+    accept { deployables, dslVersion, buildLogTail, builtOn, error }
     stamp {
       id:          args.deploymentId
       status:      args.status

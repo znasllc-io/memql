@@ -113,7 +113,16 @@ spec:
             # registered -- and it grants reachability, not mesh membership:
             # identity stays out of every event broadcast
             # (EventBridge.meshEventParticipants).
-            - { name: MEMQL_WORKER_PEERS, value: "identity=identity:50061" }
+            # identity for DeployControlService (above), workbench because a
+            # package deploy BUILDS (epic memql#4900): the bff serves
+            # packageDeploy, and a build is somebody else's code, so it runs on
+            # a workbench replica rather than in the process holding this
+            # cluster's front door.
+            - { name: MEMQL_WORKER_PEERS, value: "identity=identity:50061,workbench=workbench:50060" }
+            # An ASSERTION, not a preference (memql#3506): with no reachable
+            # workbench peer a build is REFUSED (no_workbench_peer) rather than
+            # run here. Every site keeps serving what it was serving.
+            - { name: MEMQL_WORKBENCH_REMOTE, value: "1" }
             - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
             - { name: MEMQL_SERVER_ADDRESS, value: "0.0.0.0:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }

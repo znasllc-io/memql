@@ -356,6 +356,16 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "advancePackageDeployment"}:      true,
 		{Path: "platform/mutations.memql", Name: "recordPackageDeploymentReport"}: true,
 		{Path: "platform/mutations.memql", Name: "closePackageDeployment"}:        true,
+		// epic memql#4900. Two more writes about a RUN rather than about a
+		// person, and neither is caller-scopable for the reason the four
+		// above are not: the value is a claim about what a node did.
+		// heartbeatPackageDeployment says a node is still alive, which only
+		// that node can know and which the abandoned sweep reads as evidence;
+		// abandonPackageDeployment is the sweep's own close, running on a
+		// schedule with nobody attached and across every owner, so a
+		// self-scoped filter would refuse every row it exists to close.
+		{Path: "platform/mutations.memql", Name: "heartbeatPackageDeployment"}:    true,
+		{Path: "platform/mutations.memql", Name: "abandonPackageDeployment"}:      true,
 		{Path: "platform/mutations.memql", Name: "recordSitePackageOrigin"}:       true,
 		// memql#4270 / memql#4606 / memql#4601. The four writes of the
 		// user-invitation lifecycle, and none is caller-scopable for the same

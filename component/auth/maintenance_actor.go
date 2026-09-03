@@ -102,6 +102,15 @@ var maintenanceAutomations = map[string]string{
 		"boot forever, which is exactly the clobbering of a human's edits that decision D3 exists to forbid. " +
 		"@createOnly on createClientAccount is the second guard, and it would hold -- but a probe that is " +
 		"wrong on every call is not something to leave standing behind a guard",
+	"sweepAbandonedPackageDeployments": "the abandoned-run sweep over v1:platform:packageDeployment, which " +
+		"declares the composite owner tier (epic memql#4900). It reads EVERY owner's in-flight runs, because a " +
+		"node that died was running somebody's deploy and nobody is left to ask -- the whole point of the sweep " +
+		"is that the person watching a stuck rail cannot fix it themselves. Under the default reader actor the " +
+		"owned branch matches nothing and the cluster-owner escape does not apply, so the read answers ZERO " +
+		"ROWS and no error: a sweep that closes nothing is indistinguishable from a cluster with nothing " +
+		"stranded, which is precisely the state it exists to end. It is also the ONE writer allowed to close a " +
+		"stranded row (abandonPackageDeployment), so a sweep that cannot see one is a permission granted to " +
+		"nobody",
 }
 
 // IsMaintenanceAutomation reports whether this automation runs under the

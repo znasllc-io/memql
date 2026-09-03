@@ -10,6 +10,7 @@ import {
   restorePackage,
   restoreSite,
   rollbackPackage,
+  setPackageAutoDeploy,
   setSiteLive,
   type NewPackageInput,
 } from "./calls";
@@ -97,6 +98,15 @@ function useWrite(): WriteState & { run: <T>(fn: (query: NonNullable<ReturnType<
 export interface PackageActions extends WriteState {
   /** Start a run. `confirm: false` parks it at the gate with its report. */
   deploy: (packageId: string, confirm: boolean, hostnames?: Record<string, string>) => Promise<void>;
+  /**
+   * Retry a run that was lost, from the bytes it already fetched (memql#4900).
+   * A separate verb from `deploy` because it is a different promise: deploy
+   * takes whatever the source holds now, retry takes what the lost run was
+   * deploying.
+   */
+  retry: (packageId: string, fromDeploymentId: string) => Promise<void>;
+  /** Arm or disarm auto-deploy for this source. */
+  setAutoDeploy: (packageId: string, autoDeploy: boolean) => Promise<void>;
   rollback: (packageId: string, deploymentId: string) => Promise<void>;
   archive: (packageId: string, confirmName: string) => Promise<void>;
   restore: (packageId: string) => Promise<void>;
@@ -110,6 +120,12 @@ export function usePackageActions(): PackageActions {
     clear,
     deploy: async (packageId, confirm, hostnames) => {
       await run((query) => deployPackage(query, packageId, { confirm, ...(hostnames ? { hostnames } : {}) }));
+    },
+    retry: async (packageId, fromDeploymentId) => {
+      await run((query) => deployPackage(query, packageId, { confirm: false, fromDeploymentId }));
+    },
+    setAutoDeploy: async (packageId, autoDeploy) => {
+      await run((query) => setPackageAutoDeploy(query, packageId, autoDeploy));
     },
     rollback: async (packageId, deploymentId) => {
       await run((query) => rollbackPackage(query, packageId, deploymentId));

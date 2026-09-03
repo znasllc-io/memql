@@ -55,7 +55,23 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 	// name a human typed into the first-run card. That is decision D3's
 	// failure, arrived at through authorization rather than through the gate
 	// D3 actually warns about.
-	want := []string{"auditEventRetentionSweep", "seedSelfAccount", "workerInvocationRetentionSweep"}
+	//
+	// sweepAbandonedPackageDeployments joined them with epic memql#4900, and it
+	// has both properties. It is engine-owned (dsl/platform/automations.memql),
+	// and its read spans owners BY NATURE rather than inconveniently: a node
+	// that died was running SOMEBODY's deploy and there is nobody left to ask,
+	// which is the whole reason the sweep exists -- the person watching a stuck
+	// rail is exactly the person who cannot fix it. Borrowing one owner's
+	// authority is not available to it, because it does not know whose runs are
+	// stranded until it has read them. Under the default reader actor the read
+	// answers zero rows and no error, so a sweep that closes nothing would be
+	// indistinguishable from a cluster with nothing stranded.
+	want := []string{
+		"auditEventRetentionSweep",
+		"seedSelfAccount",
+		"sweepAbandonedPackageDeployments",
+		"workerInvocationRetentionSweep",
+	}
 	got := auth.MaintenanceAutomationNames()
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("the maintenance list is %v, pinned as %v.\n\n"+

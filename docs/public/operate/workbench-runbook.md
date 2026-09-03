@@ -73,6 +73,34 @@ The dispatch builtin behind the tool (`workbenchDispatchHost`) also takes an
 optional `environment` hint alongside `action` / `args` / `planId` / `agentId` /
 `taskId`. Section 10 is what it does.
 
+### 3.1 The build entry, which is not a tool
+
+`workbenchHost` is one of TWO entries. The other is the package build (epic
+memql#4900): the deploy pipeline's, reached from Go and from nowhere else.
+
+|  | `workbenchHost` | the build entry |
+|---|---|---|
+| Reached by | an agent's tool loop, through `workbenchDispatchHost` | `component/packages`, through `workbench.Integration.RunBuild` |
+| A DSL construct? | yes, `tool workbenchHost` | **no**, deliberately -- there is nothing for a model to name |
+| Keyed on | a Plan | a **deployment**, plus the deployable's name |
+| Workspace row | `v1:workbench:workspace`, released on the Plan's terminal status | **none** -- the directory lives for one call and is torn down whatever happens |
+| The command | allowlisted binaries only (section 4.1) | the manifest's own, whatever it is |
+| The environment | the node's, plus what the call passes | **constructed**: PATH, a HOME inside the directory, the locale, `CI=true`, and nothing of the node's |
+| Runs as | the engine's user | uid `MEMQL_PACKAGES_BUILD_UID` (10001), so `/proc/1/environ` is unreadable |
+| On the wire | `WorkbenchForwardRequest`, the caller's own assertion re-asserted | the same message with `action: "build"` under a **system-class** assertion |
+
+**The class is the gate.** Only this cluster's engine can mint a system-class
+`ForwardedAuthority` (`auth.ForwardedAuthorityForSystem`, which refuses a user
+subject); every tool-loop forward re-asserts the caller's own class. So the
+workbench refuses `build` under anything else, and `handleDispatchHost` refuses
+the action by name before it forwards -- a model naming it never leaves the
+agent node.
+
+**The image is different too.** `workbench-runtime` in the `Dockerfile` is the
+only engine image carrying a Node toolchain and `git`, plus the build uid.
+Building the workbench node with any other stage produces a node whose builds
+fail with `npm: not found` on a cluster that looks correctly configured.
+
 ## 4. Authorization
 
 Universal -- `workbench_use` is injected into every role's
@@ -223,6 +251,9 @@ at boot if the remote flag is set but the router could not be wired at all
 | `dsl/workbench/`                                       | Concept + mutations + queries + shapes + automation + logic + builtins |
 | the product pack's `tools.memql`                       | `tool workbenchHost { ... }` definition (pack-owned) |
 | `integrations/workbench/`                              | Go integration: Manager, dispatch handlers, forward router/handler |
+| `integrations/workbench/build.go`                      | The package-build entry (epic memql#4900): the request, the constructed environment, the bounded tail, the teardown |
+| `integrations/workbench/build_user_unix.go`            | The uid drop, and what it does and does not cover |
+| `component/packages/build_workbench.go`                | The pipeline's side: the two translations, and the refusal mapping |
 | `integrations/workbench/environment.go`                | The `environment` hint: the closed `needs` set, the typed mismatch, the two error codes |
 | `integrations/workbench/workspace_store.go`            | The Go writer for `v1:workbench:workspace` -- provision / touch / release, all under the plan owner's actor |
 | `integrations/agent/workbench_reroute_agent.go`        | The reroute: mismatch -> the fleet, or the consent card |

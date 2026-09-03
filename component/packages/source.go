@@ -23,7 +23,27 @@ const (
 	MaxSourceBytesEnv = "MEMQL_PACKAGES_MAX_SOURCE_BYTES"
 	MaxFileBytesEnv   = "MEMQL_PACKAGES_MAX_FILE_BYTES"
 	MaxFileCountEnv   = "MEMQL_PACKAGES_MAX_FILE_COUNT"
+	// BuildTimeoutEnv bounds ONE deployable's build command (epic memql#4900).
+	// A timeout rather than a total: a package of three apps is three
+	// independent builds, and a shared budget would make the third one's
+	// success depend on how slow the first two were.
+	BuildTimeoutEnv = "MEMQL_PACKAGES_BUILD_TIMEOUT_SECONDS"
 )
+
+// DefaultBuildTimeoutSeconds is fifteen minutes: generous for `npm ci && npm
+// run build` on a cold cache, and short enough that a wedged build does not
+// hold a deployment open for an hour.
+const DefaultBuildTimeoutSeconds = 900
+
+// BuildTimeoutSeconds resolves the per-deployable build timeout.
+//
+// Same fallback posture as the caps above -- set-but-unparseable or
+// non-positive falls back to the DEFAULT rather than to "no timeout" -- and
+// for a sharper reason: an unbounded build is a workbench replica held by
+// somebody else's script forever.
+func BuildTimeoutSeconds() int {
+	return int(envInt64(BuildTimeoutEnv, DefaultBuildTimeoutSeconds))
+}
 
 // The publisher-grade defaults (D1). They are sitePublishFromArtifact's
 // numbers deliberately: a package source is an archive of roughly the same

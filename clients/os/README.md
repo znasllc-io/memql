@@ -920,6 +920,24 @@ five apps before it.
   (`status: "awaiting_confirm"`) rather than in component state, so somebody
   who closed the window finds their deploy exactly where they left it.
 
+- **A HEARTBEAT ARRIVED, AND THE FINGERPRINT DID NOT MOVE** (epic memql#4900).
+  A running deploy now writes `heartbeatAt` every fifteen seconds, and every one
+  of those writes broadcasts the whole row. `deploymentFingerprint` is still
+  `status` alone, which is the rule this app already states -- and this is the
+  sharpest case of it yet, because the cue would fire hardest for the run
+  somebody is already watching move. `autoDeploy` goes the OTHER way, into the
+  package fingerprint: it is the one field on a source that somebody else can
+  flip, and the consequence is that pushes start deploying themselves.
+
+- **`abandoned` IS NOT A FLAVOUR OF FAILED.** A run whose node this cluster lost
+  gets its own terminal status, its own word in the timeline ("lost", not
+  "failed"), and its own copy saying nothing failed and nothing was published.
+  The natural reading of a stopped deploy is that it broke; this one did not,
+  and the surface's job is to say so before somebody starts debugging a build
+  script that is fine. Its action is **Retry**, which is a different promise
+  from Redeploy: it deploys the bytes the lost run had already fetched, not
+  whatever the branch holds now.
+
 Two things it deliberately does not do. There is no raw `bundleRef` editor
 anywhere (D13: parity covers the four features somebody uses, not the operator
 escape hatch -- a field that accepts any URI is a way to point a live site at

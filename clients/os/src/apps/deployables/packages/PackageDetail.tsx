@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { Archive, ArrowUpCircle, ExternalLink, RotateCcw, Rocket, Sparkles, Undo2 } from "lucide-react";
+import { Archive, ArrowUpCircle, ExternalLink, RotateCcw, Rocket, Sparkles, Undo2, Zap } from "lucide-react";
 
 import {
   Button,
   Caption,
+  Check,
   Chip,
   Chips,
   Fact,
@@ -23,6 +24,7 @@ import { BuildLog, ProblemNotice, ReportView } from "./ReportView";
 import { StageRail } from "./StageRail";
 import { usePackageDeployments } from "./usePackages";
 import {
+  buildSurfaceLabel,
   deploymentFingerprint,
   deploymentFromRow,
   shortVersion,
@@ -47,7 +49,13 @@ import {
 // is still serving what it was", and the second one is what tells somebody
 // whether to worry.
 
-const TERMINAL = new Set(["succeeded", "refused", "failed"]);
+// The statuses a run can END at. `abandoned` joined them with memql#4900, and
+// a browser is what caught the omission: without it a lost run rendered under
+// the heading "Deploying now", with a rail that had stopped -- which is the
+// one thing the abandoned status exists to stop the surface saying. jsdom
+// renders the same DOM and asserts nothing about which section a run appears
+// under, so 1295 green tests said nothing about it.
+const TERMINAL = new Set(["succeeded", "refused", "failed", "abandoned"]);
 
 export function PackageDetail({
   pkg,
@@ -157,6 +165,14 @@ export function PackageDetail({
         </Notice>
       ) : null}
 
+      {/* AUTO-DEPLOY (memql#4900). On the SOURCE's facts because it is a
+          property of the source rather than of any one run, and stated as one
+          sentence with the promise in it: the switch does not remove the
+          confirm gate, it answers it when the answer has not changed. */}
+      {canWrite && pkg.status !== "archived" ? (
+        <AutoDeploySwitch pkg={pkg} onChange={(on) => void actions.setAutoDeploy(pkg.id, on).then(reseed)} busy={actions.busy} />
+      ) : null}
+
       <Facts>
         <Fact label="Deployed" value={pkg.deployedVersion === "" ? "" : shortVersion(pkg.deployedVersion)} mono />
         <Fact label="Latest upstream" value={pkg.latestKnownVersion === "" ? "" : shortVersion(pkg.latestKnownVersion)} mono />
@@ -213,6 +229,14 @@ export function PackageDetail({
                 <span className="os-attempt-status" data-status={d.status}>
                   {statusWord(d.status)}
                 </span>
+                {d.automatic ? (
+                  /* WHO STARTED IT. A run nobody clicked is the one fact
+                     about an attempt that the rail cannot show, and the one
+                     somebody looking at an unexpected deploy needs first. */
+                  <Chip tone="muted" title="This source's auto-deploy switch started this run: the push planned exactly what the last deploy planned.">
+                    automatic
+                  </Chip>
+                ) : null}
                 {canWrite && d.status === "succeeded" && d.id !== latest?.id ? (
                   <Button
                     onClick={() => void actions.rollback(pkg.id, d.id).then(reseed)}
@@ -222,9 +246,24 @@ export function PackageDetail({
                     <Undo2 size={12} aria-hidden /> Roll back to this
                   </Button>
                 ) : null}
+                {canWrite && d.status === "abandoned" ? (
+                  /* RETRY, not Redeploy. The two are different promises: this
+                     one starts the run that was lost again, from the bytes it
+                     had already fetched, so it deploys what that run was
+                     deploying rather than whatever the branch holds now. */
+                  <Button
+                    tone="primary"
+                    onClick={() => void actions.retry(pkg.id, d.id).then(reseed)}
+                    busy={actions.busy}
+                    ariaLabel={`Retry the run of ${shortVersion(d.sourceVersion)} that was lost`}
+                  >
+                    <RotateCcw size={12} aria-hidden /> Retry
+                  </Button>
+                ) : null}
               </header>
               <StageRail deployment={d} />
               {d.error ? <ProblemNotice problem={d.error} tone="error" /> : null}
+              <BuildFacts deployment={d} />
               <BuildLog tail={d.buildLogTail} />
               {d.deployables.length > 0 ? (
                 <ul className="os-attempt-sites">
@@ -296,6 +335,58 @@ export function PackageDetail({
   );
 }
 
+/**
+ * The auto-deploy switch (memql#4900).
+ *
+ * A CHECKBOX HERE IS CORRECT, and it is the one case DESIGN.md rule 10 leaves
+ * open: it states a CHOICE in a form, which is what a checkbox is for, rather
+ * than filtering content in front of a list, which is what the rule forbids.
+ *
+ * The caption carries the whole promise, because the switch is worthless
+ * without it: somebody arming this needs to know that the gate is still there
+ * for anything that changed, or they will either not use it or use it
+ * believing something untrue.
+ */
+function AutoDeploySwitch({ pkg, onChange, busy }: { pkg: PackageRow; onChange: (on: boolean) => void; busy: boolean }) {
+  return (
+    <section className="os-report-part">
+      <h4 className="os-report-heading">
+        <Zap size={12} aria-hidden /> When this source moves
+      </h4>
+      <Check checked={pkg.autoDeploy} disabled={busy} onChange={onChange}>
+        Deploy the update by itself when the plan is unchanged
+      </Check>
+      <Caption>
+        {pkg.autoDeploy
+          ? "A push that plans exactly what the last deploy planned goes live without a click. Anything new -- an app, some MemQL, a changed build command, a problem -- still waits for you here."
+          : "A push lights the update chip above and waits for you. Turn this on and one that changes nothing about the plan deploys itself."}
+      </Caption>
+    </section>
+  );
+}
+
+/**
+ * Where a run built, and how long it took.
+ *
+ * Rendered only when there is something to say. A run that never reached the
+ * build stage has no surface on it, and an empty row of labels would be four
+ * words claiming a fact this cluster does not have.
+ */
+function BuildFacts({ deployment }: { deployment: DeploymentRow }) {
+  const surface = buildSurfaceLabel(deployment);
+  if (surface === "") return null;
+  const node = deployment.builtOn?.nodeId ?? "";
+  return (
+    <Facts>
+      <Fact label="Built" value={surface} />
+      {/* WHICH REPLICA. On a two-replica workbench this is the difference
+          between a bad build script and one sick node, and it is the only
+          durable record of it: the directory the build ran in is gone. */}
+      {node === "" ? null : <Fact label="On" value={node} mono />}
+    </Facts>
+  );
+}
+
 /** What a deployment's status means, in the reader's terms rather than the
  *  state machine's. `succeeded` is the one worth translating: what a person
  *  cares about is that it is live. */
@@ -309,6 +400,10 @@ function statusWord(status: string): string {
       return "failed";
     case "awaiting_confirm":
       return "waiting for you";
+    case "abandoned":
+      // Not "failed". The run stopped because this cluster lost the node
+      // running it, and the row's own sentence says the rest.
+      return "lost";
     default:
       return status.replace(/_/g, " ");
   }

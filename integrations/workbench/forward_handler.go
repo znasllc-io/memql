@@ -84,6 +84,22 @@ func (h *ForwardHandler) HandleForwardedRequest(ctx context.Context, req *nodev1
 		return
 	}
 
+	// THE BUILD ENTRY (epic memql#4900, task #4901) is a different caller with
+	// a different contract, and it forks here rather than inside
+	// handleDispatchHost so the two never share a code path: a build's command
+	// is the manifest's rather than the allowlist's, its key is a deployment
+	// rather than a Plan, and it writes no workspace row. What makes it
+	// checkable is the CLASS inside the assertion this handler just verified:
+	// only the engine can mint a SYSTEM-class authority (a node acting for
+	// itself, which ForwardedAuthorityForSystem refuses to give a user
+	// subject), and every tool-loop forward re-asserts the caller's own class
+	// instead. So a `build` arriving under any other class is refused having
+	// run nothing.
+	if req.GetAction() == BuildAction {
+		h.handleForwardedBuild(cctx, req, send)
+		return
+	}
+
 	innerArgs, err := DecodeArgs(req.GetArgsJson())
 	if err != nil {
 		h.sendError(send, requestId, "decode_args", err.Error())
@@ -139,6 +155,58 @@ func (h *ForwardHandler) HandleForwardedRequest(ctx context.Context, req *nodev1
 	}); err != nil {
 		h.logger.Warn("workbench forward response send failed",
 			"request_id", requestId, "error", err)
+	}
+}
+
+// handleForwardedBuild answers a `build` forward: verify the class, run the
+// build on this node's disk, and send the typed result back.
+//
+// The class check is the whole gate and it is deliberately NOT a check on the
+// subject or the role. A SYSTEM principal is already constrained by
+// VerifyForwardedAuthority to RoleReader and to a subject that is not a person,
+// so what is left to say here is which ENTRY that principal may reach -- and
+// the answer is this one only.
+func (h *ForwardHandler) handleForwardedBuild(ctx context.Context, req *nodev1.WorkbenchForwardRequest, send func(*nodev1.NodeServerMessage) error) {
+	requestId := req.GetRequestId()
+	class := node.ForwardedAuthorityFromProto(req.GetAuthority()).CredentialClass
+	if class != auth.ForwardedClassSystem {
+		h.logger.Warn("workbench: refused a build forward -- the assertion is not the engine's own",
+			slog.String("requestId", requestId),
+			slog.String("credentialClass", class))
+		h.sendError(send, requestId, BuildCodeEntryRefused,
+			"workbench: the build entry answers only to this cluster's own engine, and this request carries a "+
+				class+" assertion. Nothing was built.")
+		return
+	}
+	var buildReq BuildRequest
+	if err := json.Unmarshal(req.GetArgsJson(), &buildReq); err != nil {
+		h.sendError(send, requestId, BuildCodeInvalid, "workbench: the build request could not be read: "+err.Error())
+		return
+	}
+	// runBuildLocal rather than RunBuild: this IS the workbench node, and
+	// asking RunBuild would consult the remote flag again and forward the
+	// build back out to a peer -- which on a two-replica workbench is a loop
+	// with a hop in it.
+	res := h.integration.runBuildLocal(ctx, buildReq)
+	payload, err := json.Marshal(res)
+	if err != nil {
+		h.sendError(send, requestId, BuildCodeForwardFailed, "workbench: the build result could not be encoded: "+err.Error())
+		return
+	}
+	resp := &nodev1.WorkbenchForwardResponse{RequestId: requestId, PayloadJson: payload}
+	if !res.OK {
+		resp.ErrorCode = res.ErrorCode
+		resp.ErrorMessage = res.ErrorMessage
+	}
+	if serr := send(&nodev1.NodeServerMessage{
+		MessageId:   id.NewShortId(),
+		CorrelateTo: requestId,
+		Payload: &nodev1.NodeServerMessage_WorkbenchForwardResponse{
+			WorkbenchForwardResponse: resp,
+		},
+	}); serr != nil {
+		h.logger.Warn("workbench build forward response send failed",
+			"request_id", requestId, "error", serr)
 	}
 }
 
