@@ -7,7 +7,6 @@ import { useCreateSite, usePublish, useSiteAccount } from "../actions";
 import { useAddDomain } from "../domainActions";
 import { hostnameFor } from "../hostname";
 import { useNewPackage, usePackageActions } from "../packages/actions";
-import { suggestSlug } from "../packages/hostname";
 import { ProblemNotice, ReportView } from "../packages/ReportView";
 import {
   deploymentFromRow,
@@ -31,6 +30,7 @@ import {
   phaseOf,
   placementsComplete,
   placementsFrom,
+  seedAddress,
   sourceReady,
   type AddressDraft,
   type ComposeDraft,
@@ -167,7 +167,7 @@ export function ComposePage(props: ComposePageProps) {
       const next = { ...held };
       for (const app of apps) {
         if (next[app] !== undefined) continue;
-        next[app] = { ...EMPTY_ADDRESS, slug: suggestSlug(sourceName, app) };
+        next[app] = seedAddress(sourceName, app);
         changed = true;
       }
       return changed ? next : held;

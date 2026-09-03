@@ -85,6 +85,10 @@ export function ComposeSourceStop({
       <ChoiceStack
         name="os-compose-source"
         label="Where it comes from"
+        /* PROSE, not the data voice: "A repository" is a sentence about a
+           choice rather than a value anybody types anywhere, and the code
+           face would say it was one. */
+        voice="prose"
         value={draft.choice}
         onChange={(choice) =>
           onDraft({ choice: choice as ComposeDraft["choice"], name: "", kind: "", artifactId: "", repoUrl: "" })

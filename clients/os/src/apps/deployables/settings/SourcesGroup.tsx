@@ -5,7 +5,7 @@ import { Button, Caption, Chip, LiveList, Row as ListRow, formatFreshness, useNo
 import type { LiveView } from "../../../live/liveView";
 import { useCredentialActions } from "../packages/actions";
 import { sourceLabel, type PackageRow } from "../packages/rows";
-import { AddCredential, cardLabel } from "../sources/CredentialField";
+import { AddCredential, cardName } from "../sources/CredentialField";
 import { SOURCE_HOST } from "../sources/probe";
 import { credentialFingerprint, credentialIsRevoked, type CredentialRow } from "../sources/rows";
 
@@ -101,51 +101,60 @@ function CredentialLine({
   const fetching = packages.filter((p) => p.credentialId === card.id);
 
   return (
-    <>
+    <div className="os-source-credential">
       <ListRow
         icon={<KeyRound size={16} aria-hidden />}
-        name={cardLabel(card)}
+        name={cardName(card)}
         current={!revoked}
         dim={revoked}
         state={
           <>
             <Chip tone="muted">{card.host}</Chip>
             {/* A HEARTBEAT, displayed and never fingerprinted. */}
-            <span className="os-caption">used {formatFreshness(card.lastUsedAt, now)}</span>
-            {revoked ? <span className="os-deploy-status" data-tone="warn">revoked</span> : null}
+            <span className="os-source-used">used {formatFreshness(card.lastUsedAt, now)}</span>
+            {revoked ? (
+              <span className="os-deploy-status" data-tone="warn">
+                revoked
+              </span>
+            ) : (
+              /* THE ACT BELONGS TO THE ROW. Beneath it, a lone button read as
+                 a control of the whole group rather than of the credential it
+                 revokes -- and the second one under the second row said so
+                 twice. */
+              <Button onClick={() => setConfirming(true)} ariaLabel={`Revoke ${cardName(card)}`}>
+                Revoke
+              </Button>
+            )}
           </>
         }
-      >
-        <span className="os-deploy-address">
-          {fetching.length === 0
-            ? "nothing fetches under it"
-            : fetching.map((p) => sourceLabel(p)).join(", ")}
-        </span>
-      </ListRow>
+      />
 
-      {revoked ? null : confirming ? (
-        <div className="os-confirm-row">
+      {/* WHAT FETCHES UNDER IT gets its own line beneath the row rather than
+          the row's middle slot. It is the fact that makes a revoke legible --
+          an ellipsis here would hide the very thing somebody is about to
+          break -- and a row already holding a name, a host, a heartbeat and
+          an act has no room to give it. */}
+      <p className="os-source-fetching">
+        {fetching.length === 0 ? "nothing fetches under it" : fetching.map((p) => sourceLabel(p)).join(", ")}
+      </p>
+
+      {confirming && !revoked ? (
+        <div className="os-source-confirm">
           <Caption>
             Sources fetching under it will refuse at their next fetch until you switch them. The credential stays
             listed; nothing is deleted.
           </Caption>
-          <Button tone="quiet" onClick={() => setConfirming(false)}>
-            Cancel
-          </Button>
-          <Button tone="danger" busy={actions.busy} onClick={() => void actions.revoke(card.id)}>
-            Revoke
-          </Button>
+          <div className="os-form-row">
+            <Button tone="quiet" onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+            <Button tone="danger" busy={actions.busy} onClick={() => void actions.revoke(card.id)}>
+              Revoke
+            </Button>
+          </div>
         </div>
-      ) : (
-        <div className="os-form-row">
-          <Button onClick={() => setConfirming(true)} ariaLabel={`Revoke ${cardLabel(card)}`}>
-            Revoke
-          </Button>
-        </div>
-      )}
-      {actions.refusal ? (
-        <p className="os-ask-error">{actions.refusal.message}</p>
       ) : null}
-    </>
+      {actions.refusal ? <p className="os-ask-error">{actions.refusal.message}</p> : null}
+    </div>
   );
 }

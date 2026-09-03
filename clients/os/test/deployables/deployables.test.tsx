@@ -264,7 +264,7 @@ describe("the Head's action, by state", () => {
     expect(states).toEqual(["done", "done", "done", "current", "ahead"]);
   });
 
-  it("a parked run: Deploy, enabled, and it sends confirm: true with no hostnames", async () => {
+  it("a parked run: Deploy, enabled, and it sends confirm: true with no placements", async () => {
     const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, deployments: { "pkg-acme": [PARKED, SUCCEEDED] } }, "store.memql.example.com");
     const deploy = headAction(page);
     expect(deploy?.textContent).toBe("Deploy");

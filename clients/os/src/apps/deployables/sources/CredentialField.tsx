@@ -201,9 +201,21 @@ export function AddCredential({
   );
 }
 
-/** A card as one line: what somebody called it, and the fingerprint that tells two apart. */
-export function cardLabel(card: CredentialRow): string {
+/** What somebody called it, and the fingerprint that tells two of them apart. */
+export function cardName(card: CredentialRow): string {
   const name = card.label.trim() === "" ? card.id : card.label.trim();
   const mark = card.fingerprint.trim() === "" ? "" : ` ${card.fingerprint.trim()}`;
-  return credentialIsRevoked(card) ? `${name}${mark} (revoked)` : `${name}${mark}`;
+  return `${name}${mark}`;
+}
+
+/**
+ * The same, for an `<option>`, which has no room for a mark beside it.
+ *
+ * A LIST ROW SAYS "revoked" ONCE, in the warn tone, in its trailing cluster
+ * -- so the row uses `cardName` and this suffix would be the second saying of
+ * it (DESIGN.md rule 7). Inside a select there is nowhere else to put it, and
+ * an option that does not say it is one somebody picks by mistake.
+ */
+export function cardLabel(card: CredentialRow): string {
+  return credentialIsRevoked(card) ? `${cardName(card)} (revoked)` : cardName(card);
 }

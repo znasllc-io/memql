@@ -108,8 +108,11 @@ describe("Settings -> Sources", () => {
     mount(fakeConnection(SEED));
     const group = await screen.findByRole("list", { name: "Your source credentials" });
 
-    expect(within(group).getByText("old laptop ...77aa (revoked)")).toBeTruthy();
-    expect(within(group).getByText("revoked")).toBeTruthy();
+    // The NAME is the name; "revoked" is said once, beside it, in the warn
+    // tone (DESIGN.md rule 7) -- and the row's Revoke button is gone, because
+    // there is nothing left to revoke.
+    expect(within(group).getByText("old laptop ...77aa")).toBeTruthy();
+    expect(within(group).getByText("revoked").getAttribute("data-tone")).toBe("warn");
     // A revoked one is not offered a second revoke.
     expect(within(group).queryByRole("button", { name: /Revoke old laptop/ })).toBeNull();
     expect(within(group).getByRole("button", { name: /Revoke acme deploy token/ })).toBeTruthy();
@@ -139,12 +142,13 @@ describe("Settings -> Sources", () => {
     await click(await screen.findByRole("button", { name: /Revoke acme deploy token/ }));
     await click(screen.getByRole("button", { name: "Revoke" }));
 
-    // Still active on screen -- nothing was written into the feed by hand.
+    // Still active on screen -- nothing was written into the feed by hand:
+    // only the credential that was ALREADY revoked carries the mark.
     const group = screen.getByRole("list", { name: "Your source credentials" });
-    expect(within(group).queryByText("acme deploy token ...ab12 (revoked)")).toBeNull();
+    expect(within(group).getAllByText("revoked")).toHaveLength(1);
 
     await emit(connection, SOURCE_CREDENTIAL_CONCEPT, credential({ id: "cred-acme", status: "revoked" }));
-    await waitFor(() => expect(within(group).getByText("acme deploy token ...ab12 (revoked)")).toBeTruthy());
+    await waitFor(() => expect(within(group).getAllByText("revoked")).toHaveLength(2));
   });
 
   it("renders the server's own sentence when a revoke is refused", async () => {
