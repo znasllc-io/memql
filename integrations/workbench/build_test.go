@@ -668,3 +668,62 @@ func TestAnArchiveCannotWriteThroughASymlink(t *testing.T) {
 		t.Fatal("the archive wrote a file outside the destination directory")
 	}
 }
+
+// TestAPlantedRunDirectoryIsNotFollowed covers the one path the two controls
+// above leave unquestioned: PROVISIONING.
+//
+// They prove nothing escapes on the way in (a source archive cannot write
+// through a symlink) or on the way out (a build cannot publish through one).
+// Neither says anything about the directory the build RUNS in, which this
+// package makes and destroys from a name composed out of a deployment id and
+// a deployable's own name. A symlink standing at that name is the question,
+// and the answer has to be that it is DESTROYED rather than followed.
+//
+// WHAT THIS DOES NOT CLAIM. Writing the provisioning through an os.Root did
+// not close a reachable hole here -- `RemoveAll` deletes a symlink as the
+// link it is under either spelling, which this test discovered by asserting
+// a refusal and getting a successful build. It is uniformity and defense in
+// depth: every filesystem write in this file is now addressed root-relative,
+// so there is no remaining site where somebody has to re-derive whether a
+// string check was the right tool. The reachable bug was the OUTPUT
+// directory, and its control is TestABuildCannotPublishSomebodyElsesFiles.
+func TestAPlantedRunDirectoryIsNotFollowed(t *testing.T) {
+	i, root := buildIntegration(t)
+
+	elsewhere := t.TempDir()
+	req := buildRequest(t, "mkdir -p dist && printf 'x' > dist/index.html", webFixture())
+	link := filepath.Join(root, buildKey(req))
+	if err := os.Symlink(elsewhere, link); err != nil {
+		t.Skipf("this filesystem does not support symlinks: %v", err)
+	}
+
+	res := i.RunBuild(context.Background(), req, "")
+
+	// NOTHING ON THE FAR SIDE. This is the assertion. `tmp` and `src` are the
+	// two directories provisioning makes, so either appearing over there is
+	// the escape -- whether or not the build itself went on to succeed.
+	for _, name := range []string{"tmp", "src"} {
+		if _, err := os.Stat(filepath.Join(elsewhere, name)); err == nil {
+			t.Fatalf("provisioning wrote %q through the symlink, outside the workspace root", name)
+		}
+	}
+
+	// AND THE LINK IS GONE. The teardown removes the run directory whatever
+	// happens, so the honest reading after the call is that the NAME is free
+	// -- which is what says the stale link was destroyed rather than left
+	// standing for the next run to follow. `elsewhere` still existing (the
+	// t.TempDir above) is what makes this a statement about the link and not
+	// about the directory it pointed at.
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatalf("the run directory's name is still taken after teardown (err=%v), so the stale link survived", err)
+	}
+	if _, err := os.Stat(elsewhere); err != nil {
+		t.Fatalf("the teardown followed the link and removed its target: %v", err)
+	}
+
+	// THE REACHABLE POSITIVE: the same request must actually build, or every
+	// assertion above would pass against a surface that refused everything.
+	if !res.OK {
+		t.Fatalf("the build must still succeed once the stale link is replaced: %s: %s", res.ErrorCode, res.ErrorMessage)
+	}
+}

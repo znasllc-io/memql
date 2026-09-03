@@ -117,10 +117,12 @@ func containedJoin(root, rel string) (string, error) {
 // composes one: GitHub wraps a repository in `<owner>-<repo>-<sha>`, which is
 // not part of the tree the author wrote, and the caller strips it by naming it
 // relative to the same root.
+// destDir MUST ALREADY EXIST, and that is a property of the containment
+// rather than an inconvenience: an os.Root cannot confine the creation of its
+// own directory, so the one mkdir that has to happen outside a root is the
+// caller's, made through the root ABOVE it. Creating it here would put an
+// unconfined write back into the middle of the confined path.
 func extractTarGz(r io.Reader, destDir string, maxFiles int, maxFileBytes, maxTotalBytes int64) (string, error) {
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return "", err
-	}
 	root, err := os.OpenRoot(destDir)
 	if err != nil {
 		return "", err

@@ -494,28 +494,52 @@ func (i *Integration) runBuildLocal(ctx context.Context, req BuildRequest) Build
 		return res
 	}
 
-	// The build directory, under the workspace root and CHECKED to be under
-	// it. buildKey composes it from the deployment id and the deployable's
-	// name through shortId and safeName, so the string is already bounded --
-	// and this checks the RESULT anyway, because the next thing that happens
-	// to it is RemoveAll.
+	// THE WORKSPACE ROOT IS OPENED, NOT JOINED INTO.
+	//
+	// Provisioning and tearing down the run directory are filesystem writes
+	// like any other in this file, so they are addressed root-relative like
+	// every other one. This is UNIFORMITY, not a fix: `RemoveAll` deletes a
+	// symlink as the link it is either way, so no escape was open here. What
+	// it buys is that no site in this file is left for somebody to re-derive
+	// whether a string check was the right tool -- a question this surface
+	// got wrong once, on the OUTPUT directory, where `..` being a property of
+	// the string and a symlink a property of the filesystem was the whole
+	// bug. `containedJoin` still runs, because the ABSOLUTE path is what the
+	// command's working directory and the chown walk need; it is no longer
+	// what any write is addressed by.
 	root := i.manager.Root()
-	dir, derr := containedJoin(root, buildKey(req))
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return finish(buildRefusal(BuildCodeSourceUnreadable, "workbench build: could not provision the workspace root: "+err.Error()))
+	}
+	wsRoot, wserr := os.OpenRoot(root)
+	if wserr != nil {
+		return finish(buildRefusal(BuildCodeSourceUnreadable, "workbench build: the workspace root could not be opened: "+wserr.Error()))
+	}
+	defer wsRoot.Close()
+
+	key := buildKey(req)
+	dir, derr := containedJoin(root, key)
 	if derr != nil {
 		return finish(buildRefusal(BuildCodeInvalid, "workbench build: "+derr.Error()))
 	}
-	tmp, terr := containedJoin(dir, "tmp")
-	if terr != nil {
-		return finish(buildRefusal(BuildCodeInvalid, "workbench build: "+terr.Error()))
-	}
-	_ = os.RemoveAll(dir)
-	if err := os.MkdirAll(tmp, 0o755); err != nil {
+	// A LEFTOVER FROM AN EARLIER RUN IS REMOVED THROUGH THE ROOT, so a
+	// symlink standing where the directory should be is refused rather than
+	// followed -- and removed as the link it is rather than emptying whatever
+	// it points at.
+	_ = wsRoot.RemoveAll(key)
+	if err := wsRoot.MkdirAll(path.Join(key, "tmp"), 0o755); err != nil {
 		return finish(buildRefusal(BuildCodeSourceUnreadable, "workbench build: could not provision the build directory: "+err.Error()))
+	}
+	// The source directory is made HERE rather than by the extractor: an
+	// os.Root cannot confine the creation of its own directory, so the one
+	// mkdir that has to happen outside a root happens under the root above.
+	if err := wsRoot.MkdirAll(path.Join(key, "src"), 0o755); err != nil {
+		return finish(buildRefusal(BuildCodeSourceUnreadable, "workbench build: could not provision the source directory: "+err.Error()))
 	}
 	// TORN DOWN WHATEVER HAPPENS. The directory is the whole of the build's
 	// footprint on this replica; a build that failed, timed out or panicked
 	// leaves exactly as much behind as one that succeeded: nothing.
-	defer func() { _ = os.RemoveAll(dir) }()
+	defer func() { _ = wsRoot.RemoveAll(key) }()
 
 	src, err := i.buildBytes(ctx, req.Source)
 	if err != nil {
