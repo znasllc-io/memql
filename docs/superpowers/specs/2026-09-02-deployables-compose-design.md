@@ -190,7 +190,7 @@ what the stop says, not where it is.
 
 ### Live
 
-After a first publish: "Published to shop.znas.io. Not serving yet." and
+After a first publish: "Published to shop.example.com. Not serving yet." and
 Make it live as the Head's action (`updateSiteStatus` to `live`). Afterwards:
 live since when, the version list walked from the row's own history with
 roll back on each, pause and resume with the 503-versus-404 sentence,
