@@ -83,10 +83,21 @@ describe("every shipped role requirement names a real rung", () => {
 describe("the flipped ordering reaches the registry", () => {
   // The defect, measured where it was visible: a developer could not see an
   // app the engine considered them MORE privileged for.
-  it("offers a developer the admin-floored apps", () => {
+  it("offers a developer the admin-FLOORED apps", () => {
     const forDeveloper = appsForRole(OS_REGISTRY, "developer").map((a) => a.name);
-    expect(forDeveloper).toContain("Users");
     expect(forDeveloper).toContain("Accounts");
+  });
+
+  // Accounts is gated on RANK -- its constructs declare `@requiresRank("admin")`,
+  // so rank >= 200 is right and a developer qualifies. Users is gated on a
+  // CAPABILITY: every read and write inside goes through `auth.AtLeastAdmin`
+  // (create-on-principal), which developer does not hold. A floor cannot tell
+  // those apart, which is why the Users manifest states a set.
+  it("withholds the capability-gated Users app from a developer", () => {
+    const forDeveloper = appsForRole(OS_REGISTRY, "developer").map((a) => a.name);
+    expect(forDeveloper).not.toContain("Users");
+    expect(appsForRole(OS_REGISTRY, "admin").map((a) => a.name)).toContain("Users");
+    expect(appsForRole(OS_REGISTRY, "owner").map((a) => a.name)).toContain("Users");
   });
 
   it("still withholds them from a writer and a reader", () => {
@@ -173,24 +184,48 @@ describe("the rung mark", () => {
 
 describe("the refused surface", () => {
   it("names the surface, the floor and where the viewer stands", () => {
-    render(<SurfaceRefused surface="Accounts" required="admin" actorRole="reader" />);
+    render(<SurfaceRefused surface="Accounts" requirement={{ min: "admin" }} actorRole="reader" />);
     expect(screen.getByRole("heading", { name: /Accounts needs a higher role/ })).toBeTruthy();
     const body = screen.getByText(/This app is open to/);
     expect(within(body).getByText("admin")).toBeTruthy();
     expect(within(body).getByText("viewer")).toBeTruthy();
+    // A FLOOR really is "and above", so it keeps saying so.
+    expect(body.textContent).toContain("and above");
+  });
+
+  // A SET IS NOT "AND ABOVE", and this is the case that was wrong.
+  //
+  // The panel used to receive `requirementFloor(manifest.roles)`, which
+  // reports a set's WEAKEST member. The live set form in the registry is
+  // Settings > Integrations, `{ any: ["owner", "developer"] }` -- whose
+  // weakest member is developer, so collapsing it told a refused ADMIN the
+  // surface was "open to developer and above" while refusing them. The
+  // explanation contradicted the refusal it existed to explain.
+  it("names every member of a set and never says 'and above'", () => {
+    render(
+      <SurfaceRefused
+        surface="Users"
+        requirement={{ any: ["admin", "owner"] }}
+        actorRole="developer"
+      />,
+    );
+    const body = screen.getByText(/This app is open to/);
+    expect(body.textContent).toContain("admin or owner");
+    expect(body.textContent).not.toContain("and above");
+    expect(within(body).getByText("developer")).toBeTruthy();
   });
 
   // It says what resolves it. "Access denied" describes what already happened;
   // the person needs the next move.
   it("names the action that resolves it", () => {
-    render(<SurfaceRefused surface="Accounts" required="admin" actorRole="reader" />);
+    render(<SurfaceRefused surface="Accounts" requirement={{ min: "admin" }} actorRole="reader" />);
     expect(screen.getByText(/An owner can change your role in Users\./)).toBeTruthy();
   });
 
   // An unreported role is not a refusal about the person -- it is the shell
   // not knowing yet, and it must not be phrased as a verdict on them.
   it("distinguishes an unreported role from a low one", () => {
-    render(<SurfaceRefused surface="Accounts" required="admin" actorRole="" />);
+    render(<SurfaceRefused surface="Accounts" requirement={{ min: "admin" }} actorRole="" />);
     expect(screen.getByText(/has not been reported by the cluster/)).toBeTruthy();
   });
 });

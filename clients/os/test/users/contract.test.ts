@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { OS_REGISTRY } from "../../src/apps/registry";
-import { appById, sectionsForRole, settingsSectionProblem } from "../../src/system/registry";
+import { appById, settingsSectionProblem } from "../../src/system/registry";
+import { roleAdmits } from "../../src/system/roles";
 import {
   DEFAULT_USERS_SETTINGS,
   USERS_SECTION_IDS,
@@ -25,12 +26,23 @@ describe("the Users manifest", () => {
     expect(users?.component).toBeTruthy();
   });
 
-  it("declares admin as its floor", () => {
-    expect(users?.roles).toEqual({ min: "admin" });
-    // Presentation gating (spec E). The reads carry `requiresOwnerOrAdmin` in
-    // their own DSL filters and every write goes through `adminops.authorize`;
-    // this only decides whether the icon is in the launcher.
-    expect(sectionsForRole(users!, "writer")).toEqual(sectionsForRole(users!, "writer"));
+  it("names admin and owner as a SET rather than a floor", () => {
+    // A floor is a statement about RANK, and developer (300) sits ABOVE admin
+    // (200) on the cluster's one ladder -- so `min: "admin"` admitted a
+    // developer. Every gate inside this app is `auth.AtLeastAdmin`, which asks
+    // for the create-on-principal capability rather than a rank, and developer
+    // does not hold it.
+    expect(users?.roles).toEqual({ any: ["admin", "owner"] });
+  });
+
+  it("is offered to admin and owner and withheld from developer", () => {
+    // Asserted through the predicate the launcher actually calls rather than
+    // by re-reading the manifest. The ladder is installed by test/setup.ts.
+    expect(roleAdmits("admin", users?.roles)).toBe(true);
+    expect(roleAdmits("owner", users?.roles)).toBe(true);
+    expect(roleAdmits("developer", users?.roles)).toBe(false);
+    expect(roleAdmits("writer", users?.roles)).toBe(false);
+    expect(roleAdmits("reader", users?.roles)).toBe(false);
   });
 
   it("carries a settings section the gear can actually reach", () => {

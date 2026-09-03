@@ -89,22 +89,85 @@ func TestUnsetRegistrationPolicyDegradesToOpen(t *testing.T) {
 
 // An inviter cannot grant above their own role. Without this an admin could
 // mint an owner invitation and hold the cluster through the account it creates.
-func TestRoleRankOrdersEveryClusterRole(t *testing.T) {
-	for _, role := range []string{"reader", "writer", "developer", "admin", "owner"} {
-		if roleRank[role] == 0 {
-			t.Errorf("%q has no rank, so it would compare as lowest and could be used to escalate", role)
-		}
+//
+// ASSERTED THROUGH THE OPERATION, NOT THROUGH A RANK TABLE (epic memql#4832,
+// D1). The test this replaced compared entries in a private `roleRank` map
+// that this package no longer has -- and comparing a table against itself is
+// how the defect survived: the map ranked admin ABOVE developer, disagreeing
+// with component/auth, and every assertion in the old test passed anyway
+// because it only ever compared owner/admin/reader, the three pairs both
+// orderings agree on. The pair that mattered was never named.
+func TestAnInviterCannotGrantAboveTheirOwnRole(t *testing.T) {
+	// developer OUTRANKS admin in the one model (300 vs 200), so this is the
+	// case the deleted table got backwards: it ranked developer 3 and admin 4,
+	// and let an admin mint a principal above themselves.
+	for _, tc := range []struct {
+		name    string
+		inviter auth.Role
+		grant   string
+		refused bool
+	}{
+		{"admin cannot grant owner", auth.RoleAdmin, "owner", true},
+		{"admin cannot grant developer", auth.RoleAdmin, "developer", true},
+
+		{"admin may grant admin", auth.RoleAdmin, "admin", false},
+		{"admin may grant writer", auth.RoleAdmin, "writer", false},
+		{"owner may grant developer", auth.RoleOwner, "developer", false},
+		{"owner may grant owner", auth.RoleOwner, "owner", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, audit := newTestService(t)
+
+			res := svc.IssueUserInvitation(ctxAs(tc.inviter), UserInvitation{
+				Email: "invitee@example.test",
+				Role:  tc.grant,
+			})
+
+			if !tc.refused {
+				// Not asserting success: the happy path runs on past this
+				// check into registration policy and the engine, which other
+				// tests cover. What matters here is that it was NOT refused
+				// for outranking the inviter.
+				if res.Code == CodePermissionDenied {
+					t.Fatalf("%s was refused as PERMISSION_DENIED: %s", tc.name, res.Message)
+				}
+				return
+			}
+			if res.OK {
+				t.Fatalf("%s was permitted", tc.name)
+			}
+			if res.Code != CodePermissionDenied {
+				t.Errorf("code = %d, want %d (PERMISSION_DENIED)", res.Code, CodePermissionDenied)
+			}
+			if len(audit.events) != 1 {
+				t.Fatalf("want exactly 1 audit event, got %d", len(audit.events))
+			}
+			if got := audit.events[0].FailureReason; got != "role_above_inviter" {
+				t.Errorf("audit failure reason = %q, want role_above_inviter", got)
+			}
+		})
 	}
-	if roleRank["owner"] <= roleRank["admin"] {
-		t.Error("owner must outrank admin")
+}
+
+// An unrecognised role is refused as unknown rather than ranked. It would rank
+// at the floor either way, but the two answers are different sentences and the
+// operator gets the one that names the mistake.
+func TestAnUnknownRoleIsRefusedByName(t *testing.T) {
+	svc, _, audit := newTestService(t)
+
+	res := svc.IssueUserInvitation(ctxAs(auth.RoleOwner), UserInvitation{
+		Email: "invitee@example.test",
+		Role:  "superuser",
+	})
+
+	if res.OK {
+		t.Fatal("an invitation was issued for a role that does not exist")
 	}
-	if roleRank["admin"] <= roleRank["reader"] {
-		t.Error("admin must outrank reader")
+	if res.Code != CodeInvalidArgument {
+		t.Errorf("code = %d, want %d (INVALID_ARGUMENT)", res.Code, CodeInvalidArgument)
 	}
-	// An unknown role ranks zero, which is BELOW every real role -- so it can
-	// never pass the "not above your own" comparison.
-	if roleRank["superuser"] != 0 {
-		t.Error("an unknown role must rank lowest")
+	if len(audit.events) != 1 || audit.events[0].FailureReason != "unknown_role" {
+		t.Errorf("want one audit event reasoned unknown_role, got %+v", audit.events)
 	}
 }
 

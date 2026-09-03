@@ -7,10 +7,9 @@
 // read, and a person who reads this table as a permission audit would be
 // reading it wrong.
 
-import { roleAdmits } from "../../system/roles";
+import { describeRequirement, roleAdmits } from "../../system/roles";
 import { sectionsForRole } from "../../system/registry";
 import type { OsRegistry } from "../../system/registry";
-import type { RoleRequirement } from "../../system/roles";
 
 export interface HiddenSurface {
   /** "app" | "section" | "widget" -- what kind of thing is hidden. */
@@ -35,7 +34,7 @@ export function hiddenSurfaces(registry: OsRegistry, actorRole: string): HiddenS
 
   for (const app of registry.apps) {
     if (!roleAdmits(actorRole, app.roles)) {
-      hidden.push({ kind: "app", label: app.name, requires: requirementOf(app.roles) });
+      hidden.push({ kind: "app", label: app.name, requires: describeRequirement(app.roles) });
       continue;
     }
     const admitted = new Set(sectionsForRole(app, actorRole).map((s) => s.id));
@@ -44,38 +43,21 @@ export function hiddenSurfaces(registry: OsRegistry, actorRole: string): HiddenS
       hidden.push({
         kind: "section",
         label: `${app.name} -- ${section.name}`,
-        requires: requirementOf(section.roles),
+        requires: describeRequirement(section.roles),
       });
     }
   }
 
   for (const widget of registry.widgets) {
     if (roleAdmits(actorRole, widget.roles)) continue;
-    hidden.push({ kind: "widget", label: widget.name, requires: requirementOf(widget.roles) });
+    hidden.push({ kind: "widget", label: widget.name, requires: describeRequirement(widget.roles) });
   }
 
   return hidden;
 }
 
-/**
- * A surface with no requirement that is still hidden can only be hidden
- * because the ACTOR's role is unrankable (`roleAdmits` refuses to let an
- * unknown role unlock anything). Saying "requires none" there would be
- * true and useless; naming the real cause is what lets someone act on it.
- *
- * A SET requirement is rendered as the roles themselves, joined -- "owner or
- * developer" -- because that is the whole fact. Collapsing it to its lowest
- * member would print "developer" beside a surface an admin outranks and
- * still cannot see, which is the one thing somebody reading this table for
- * an explanation must not be told.
- */
-function requirementOf(requirement?: RoleRequirement): string {
-  if (!requirement) return "a recognized role";
-  if ("any" in requirement) {
-    // An empty set admits nobody. Rendering it as an empty string would read
-    // as "requires nothing", which is its exact opposite.
-    if (requirement.any.length === 0) return "a role this surface does not name";
-    return requirement.any.join(" or ");
-  }
-  return requirement.min;
-}
+// The wording this file used to own lives in system/roles.ts now, because the
+// refused-window panel had a SECOND spelling of the same question and the two
+// disagreed: this one joined a set ("admin or owner"), that one reported its
+// weakest member ("admin"), and the second is false whenever a set leaves a
+// rung out of the middle. One helper, so there is nothing left to drift.

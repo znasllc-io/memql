@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/oidc"
 	"github.com/znasllc-io/memql/component/identity/registration"
@@ -169,25 +170,38 @@ func (s *Server) oidcRoleFor(c oidc.Claims) string {
 	if len(s.Cfg.OIDC.GroupRoles) == 0 || len(c.Groups) == 0 {
 		return ""
 	}
-	return s.Cfg.OIDC.GroupRoles.MapRole(c.Groups, oidcRoleRank)
+	return s.Cfg.OIDC.GroupRoles.MapRole(c.Groups, clusterRoleRank)
 }
 
-// oidcRoleRank is component/auth's rank model, restated because
-// component/identity must not import it -- the same reason
-// oidc.GroupRoleMap.MapRole takes the ranker as a parameter.
-// TestOidcRoleRankMatchesTheClusterRoleSet keeps the two in step.
-func oidcRoleRank(role string) int {
-	switch strings.ToLower(strings.TrimSpace(role)) {
-	case "owner":
-		return 5
-	case "admin":
-		return 4
-	case "developer":
-		return 3
-	case "writer":
-		return 2
-	case "reader":
-		return 1
-	}
-	return 0
+// clusterRoleRank adapts the ONE rank model to the ranker
+// oidc.GroupRoleMap.MapRole takes (epic memql#4832, D1).
+//
+// THE RANK MODEL IS NO LONGER RESTATED HERE, and the reason it was is worth
+// recording because it was not true. The deleted `oidcRoleRank` said
+// "component/identity must not import component/auth" -- but this file is in
+// component/identity/http, which already imports it (webauthn_login.go,
+// webauthn_register.go), and component/auth imports nothing from identity, so
+// there was never a cycle to avoid. The parameter on MapRole exists for
+// component/identity/oidc, a package genuinely below auth; passing it from
+// HERE costs nothing.
+//
+// What the restatement cost was correctness. It ranked admin (4) above
+// developer (3) -- the ordering epic memql#4832 deleted from MemQL OS as "the
+// defect" -- so a person in two directory groups got the opposite answer to
+// the one the cluster's own ladder gives.
+//
+// THAT FIX CHANGES A LIVE MAPPING, deliberately: somebody in groups mapped to
+// BOTH admin and developer now resolves to developer, where they previously
+// resolved to admin. MapRole's contract is "the most privileged group wins",
+// and developer is the more privileged rung. The two roles are orthogonal in
+// CAPABILITY (admin holds the principal verbs, developer holds authoring), so
+// picking by rank is lossy in whichever direction it points -- which is an
+// argument about MapRole's contract, not a licence for a second ladder. An
+// operator who wants both sets of verbs maps the group to owner.
+//
+// Case folding is preserved from the deleted function: auth.RoleRank matches
+// slugs EXACTLY, and these values come from an operator-authored
+// `group=role` string rather than from a row.
+func clusterRoleRank(role string) int {
+	return auth.RoleRank(auth.Role(strings.ToLower(strings.TrimSpace(role))))
 }

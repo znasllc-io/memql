@@ -186,34 +186,29 @@ const logs: OsAppManifest = {
 // disagree -- a preference naming a section the manifest does not declare
 // leaves the window on People with the nav highlighting nothing.
 //
-// `roles: { min: "admin" }` is PRESENTATION (spec section E). The engine's
+// `roles` here is PRESENTATION (spec section E). The engine's
 // `requiresOwnerOrAdmin` specs, `adminops.authorize` and row admission remain
 // the authority on every read and write this app makes.
 //
-// RE-READ UNDER THE FLIPPED LADDER (epic memql#4832, D1), because this line
-// changed meaning without changing.
+// A SET, NOT A FLOOR (epic memql#4832, D1). `min: "admin"` was written when
+// the shell ranked admin ABOVE developer, so it meant {admin, owner}. The
+// engine ranks developer (300) above admin (200) and that ordering is now the
+// only one, so the same line silently came to admit developer -- while every
+// gate inside this app is `auth.AtLeastAdmin`, which asks for the
+// create-on-principal CAPABILITY and not a rank. A developer was offered the
+// app, served two empty lists by `requiresOwnerOrAdmin`, and pointed at an
+// Invite form that answered PERMISSION_DENIED.
 //
-// It was written when the shell ranked admin ABOVE developer, so `min:
-// "admin"` meant {admin, owner}. The engine ranks developer (300) above admin
-// (200) and that ordering is now the only one, so the same line means {admin,
-// developer, owner} -- a developer sees this app where they did not before.
-//
-// KEPT, deliberately, and the alternative is worth naming: `min: "developer"`
-// would exclude admins from the user-management app, which is precisely
-// backwards, since admin is the tier holding the full `principal` verbs.
-//
-// What a rank floor CANNOT say here is the thing one might want -- "admin but
-// not developer" is a CAPABILITY distinction, not a rank one, and the two
-// tiers are orthogonal by construction (admin holds principal management and
-// no authoring; developer holds authoring and no principal management). A
-// developer opening Users therefore READS it and is refused the writes by the
-// engine's own principal-verb checks, which is the honest division: this line
-// decides what is offered, the engine decides what happens.
+// NEITHER FLOOR CAN SAY THIS. `min: "admin"` admits a developer the engine
+// refuses; `min: "developer"` would exclude the admins the app exists for.
+// admin and developer are ORTHOGONAL -- admin holds the principal verbs and no
+// authoring, developer the reverse -- so the requirement is a set. Settings >
+// Integrations needs the same form for the same reason.
 const users: OsAppManifest = {
   id: "users",
   name: "Users",
   icon: Users,
-  roles: { min: "admin" },
+  roles: { any: ["admin", "owner"] },
   sections: USERS_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",

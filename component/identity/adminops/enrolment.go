@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/enrolment"
 )
@@ -77,6 +78,41 @@ func (s *Service) IssueEnrolmentLink(ctx context.Context, in EnrolmentLink) Resu
 	user, err := s.userById(ctx, userID)
 	if err != nil || user == nil {
 		return s.notFound(ctx, "enrolment_link_issued", act, userID, detail, err)
+	}
+
+	// ===================================================================
+	// THE TARGET MUST NOT OUTRANK THE CALLER
+	// ===================================================================
+	// An enrolment link authorizes exactly one action -- register a passkey
+	// AS THE NAMED USER -- and neither the /enroll page nor the WebAuthn
+	// registration ceremony compares any ranks. So whoever can mint one for a
+	// person can sign in as that person.
+	//
+	// Until this block existed there was no comparison at all: the target had
+	// to EXIST and nothing more. An admin could mint a link for the OWNER,
+	// follow it, and register their own passkey on the owner's account. That
+	// hole predates the admission capability, and the capability made it
+	// strictly worse by adding developer to the set of callers -- so it is
+	// closed here rather than left for the widening to inherit.
+	//
+	// auth.GovernPrincipal is the model's own answer to "may this actor act on
+	// that principal", rather than a rank comparison spelled out again: an
+	// owner-ranked target is reachable only by an owner, an owner reaches
+	// everyone, minting for YOURSELF is always allowed (registering another
+	// passkey of your own), and otherwise the actor must STRICTLY outrank the
+	// target. GovernUpdate is the right verb because issuing this credential
+	// is at least as powerful as editing the account it names.
+	//
+	// A consequence worth stating: an admin can no longer mint a link for
+	// ANOTHER admin, because peers do not outrank each other. That matches
+	// what auth.CanManageUser already refuses for a role change on the same
+	// account, so the two now agree; an owner can still do it.
+	if !auth.GovernPrincipal(principalOf(act.userID, string(act.role)), principalOf(user.ID, user.Role), auth.GovernUpdate) {
+		detail["targetRole"] = strings.ToLower(strings.TrimSpace(user.Role))
+		return fail(CodePermissionDenied, s.emit(ctx, identity.AuditCategoryAdmin, "enrolment_link_issued",
+			act, userID, user.PrimaryEmail, detail, identity.AuditOutcomeBlocked, "target_outranks_caller"),
+			"identity admin: you cannot issue an enrolment link for "+user.PrimaryEmail+
+				" -- that account is not one your role may act on")
 	}
 
 	ttl := enrolment.ClampTTL(time.Duration(in.TTLSeconds) * time.Second)

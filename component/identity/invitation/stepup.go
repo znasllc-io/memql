@@ -24,14 +24,20 @@ package invitation
 // which is exactly backwards -- a tightening should apply to the credentials
 // already in flight, since those are the ones nobody has re-examined.
 //
-// # Why not reuse adminops.roleRank
+// # Why this is a set and not a rank threshold
 //
-// That map is unexported and lives in the ADMIN surface, where it answers a
-// different question: whether an inviter may grant a role at all ("you cannot
-// invite somebody as owner -- that is above your own role"). This answers what
-// redeeming one costs. Two questions, two homes; sharing the map would couple
-// the redeem path to the admin package for a four-line lookup and invite the
-// two policies to be edited as though they were one.
+// It once said "why not reuse adminops.roleRank", and that map is gone: the
+// admin surface now calls auth.RoleRank, the cluster's one ordering (epic
+// memql#4832, D1). So the coupling argument no longer applies -- auth is
+// exported, sits below both packages, and this file could call it.
+//
+// The reason to keep a set is that this is NOT a ranking question. The admin
+// surface asks whether an inviter OUTRANKS the role they are granting, which
+// is an ordering. This asks which invitations are worth an extra mailbox round
+// trip, which is a policy choice about a handful of named roles -- and under
+// the one ladder that list is not even a contiguous top of it. Expressing it as
+// a threshold would silently enrol whatever rung a future release adds above
+// the cut, which is the opposite of a deliberate list.
 
 import "strings"
 
@@ -56,9 +62,10 @@ var stepUpRoles = map[string]bool{
 // treating the absence of a role as though it were the presence of a powerful
 // one would put every ordinary invitation through the slow path. An unknown
 // role does not step up either, for the same reason and one more: it cannot
-// have been granted by IssueUserInvitation, which refuses any role not in its
-// own table, so a value arriving here that is neither empty nor known is a row
-// this build does not understand rather than a privileged one.
+// have been granted by IssueUserInvitation, which refuses any role
+// auth.IsValidRole does not name, so a value arriving here that is neither
+// empty nor known is a row this build does not understand rather than a
+// privileged one.
 func RequiresStepUp(role string) bool {
 	return stepUpRoles[strings.ToLower(strings.TrimSpace(role))]
 }

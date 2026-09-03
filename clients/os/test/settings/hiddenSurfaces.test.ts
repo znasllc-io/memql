@@ -19,7 +19,10 @@ describe("the permissions self-view (memql#4744)", () => {
     expect(labels).toContain("Users");
     expect(labels).toContain("Training");
     expect(labels).toContain("Settings -- Cluster");
-    expect(hidden.find((h) => h.label === "Users")?.requires).toBe("admin");
+    // "admin or owner", not "admin": Users states a SET, and a set renders as
+    // its members. Collapsing it to a floor would print "admin" beside a
+    // surface that developer OUTRANKS and still cannot open.
+    expect(hidden.find((h) => h.label === "Users")?.requires).toBe("admin or owner");
     expect(hidden.find((h) => h.label === "Training")?.requires).toBe("writer");
   });
 
@@ -97,6 +100,6 @@ describe("the permissions self-view (memql#4744)", () => {
     // nothing. "requires none" would be true and useless there.
     const hidden = hiddenSurfaces(OS_REGISTRY, "");
     expect(hidden.length).toBeGreaterThan(0);
-    expect(hidden.find((h) => h.label === "Users")?.requires).toBe("admin");
+    expect(hidden.find((h) => h.label === "Users")?.requires).toBe("admin or owner");
   });
 });
