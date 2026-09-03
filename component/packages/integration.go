@@ -134,6 +134,22 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Handler:     i.handleRestorePackage,
 			ArgsSchema:  map[string]string{"packageId": "string (required)"},
 		},
+		{
+			Name:        "sourceCredentialCreate",
+			Description: "Store a personal source credential (epic memql#4885, D10). The token crosses the wire once, inside this call, is sealed under MEMQL_MASTER_KEY on this node, and lands on a v1:platform:sourceCredential row owned by the caller; it appears in no row, log line or reply. Only github.com is admitted as a host today. Returns {credentialId, fingerprint}.",
+			Handler:     i.handleSourceCredentialCreate,
+			ArgsSchema: map[string]string{
+				"host":  "string (required) -- github.com is the only host admitted today",
+				"label": "string (required) -- the person's own name for the credential",
+				"token": "string (required) -- the access token; read once, sealed, never echoed",
+			},
+		},
+		{
+			Name:        "sourceCredentialRevoke",
+			Description: "Revoke one of the caller's source credentials (epic memql#4885, D10). Flips status and stamps revokedAt through the owned mutation, so the write guard admits the row's owner (or a cluster owner) and nobody else; the row is kept as history. Returns {credentialId, status}.",
+			Handler:     i.handleSourceCredentialRevoke,
+			ArgsSchema:  map[string]string{"credentialId": "string (required)"},
+		},
 	}
 }
 
@@ -313,16 +329,17 @@ func (i *Integration) resolve() (*Deps, error) {
 			i.depsErr = fmt.Errorf("packages: no engine")
 			return
 		}
-		s := &store{engine: i.engine}
+		s := &store{engine: i.engine, logger: i.logger}
 		i.deps = &Deps{
-			Store:     s,
-			Fetcher:   newProductionFetcher(s, i.logger),
-			Stager:    newBlobStager(),
-			Roller:    newDeployControlRoller(i.logger),
-			Publisher: newEnginePublisher(i.engine, s, i.logger),
-			Auditor:   &engineAuditor{engine: i.engine, logger: i.logger},
-			Logger:    i.logger,
-			Limits:    DefaultLimits(),
+			Store:       s,
+			Fetcher:     newProductionFetcher(s, i.logger),
+			Stager:      newBlobStager(),
+			Roller:      newDeployControlRoller(i.logger),
+			Publisher:   newEnginePublisher(i.engine, s, i.logger),
+			Auditor:     &engineAuditor{engine: i.engine, logger: i.logger},
+			Credentials: s.resolveCredential,
+			Logger:      i.logger,
+			Limits:      DefaultLimits(),
 			// Builder is deliberately nil. See builder.go.
 		}
 	})

@@ -39,33 +39,16 @@ const (
 
 func newProductionFetcher(s *store, logger *slog.Logger) Fetcher {
 	return &githubFetcher{
-		http:    &http.Client{Timeout: 5 * time.Minute},
-		secrets: s.resolveSecret,
+		http: &http.Client{Timeout: 5 * time.Minute},
+		// The same resolver the D11 poll uses (Deps.Credentials), wired here
+		// as well so the fetcher is complete on its own: a fetch resolves its
+		// credential under the package owner's actor, never through a
+		// cluster-wide secret (epic memql#4885).
+		credentials: s.resolveCredential,
 		artifactBytes: func(ctx context.Context, artifactId string) ([]byte, string, error) {
 			return s.artifactBytes(ctx, artifactId)
 		},
 	}
-}
-
-// resolveSecret reads a v1:platform:globalSecret by NAME through the engine's
-// own resolver builtin, so the decrypt path and the master key stay where they
-// already are. The value is returned to one caller (the fetch) and stored
-// nowhere.
-func (s *store) resolveSecret(ctx context.Context, name string) (string, error) {
-	res, err := s.engine.Execute(ctx, fmt.Sprintf("resolveSecret({name: %s})", langparser.QuoteString(name)))
-	if err != nil {
-		return "", err
-	}
-	rows := memqlRows(res)
-	if len(rows) == 0 {
-		return "", fmt.Errorf("packages: no secret named %q", name)
-	}
-	for _, key := range []string{"value", "secret", "result"} {
-		if v := rowString(rows[0], key); v != "" {
-			return v, nil
-		}
-	}
-	return "", fmt.Errorf("packages: the secret named %q resolved to no value", name)
 }
 
 // artifactBytes reads a Library artifact's bytes through the engine, under the

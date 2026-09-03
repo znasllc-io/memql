@@ -1618,3 +1618,59 @@ func SiteRestoreBuild(args SiteRestoreArgs) string {
 	b.WriteString(")")
 	return b.String()
 }
+
+// SourceCredentialCreate -- Store a personal source credential (epic memql#4885, D10). The token crosses the wire ONCE, inside this call, is sealed server-side under MEMQL_MASTER_KEY, and lands on a v1:platform:sourceCredential row owned by the caller; it appears in no row, no log line and no reply. Only github.com is admitted as a host today -- any other host is refused with source_host_unsupported, and the answer is to upload the tree as a zip instead. Returns {credentialId, fingerprint}, the fingerprint being the token's last four characters prefixed with '...', for telling two credentials apart. Name the credential on a package through createPackage or updatePackageSource; the fetcher resolves it under that package's OWNER, so a package naming somebody else's credential is refused by name.
+type SourceCredentialCreateArgs struct {
+	// The host the token authenticates against. github.com is the only value admitted today.
+	Host string
+	// The person's own name for it, e.g. 'work laptop'. Display only.
+	Label string
+	// The access token itself. Read once, sealed, and discarded; never stored or echoed in the clear.
+	Token string
+}
+
+// SourceCredentialCreate calls the engine builtin sourceCredentialCreate.
+func (qc *QueryClient) SourceCredentialCreate(ctx context.Context, args SourceCredentialCreateArgs) (*Result, error) {
+	call := SourceCredentialCreateBuild(args)
+	return qc.executeNamed(ctx, "sourceCredentialCreate", call)
+}
+
+func SourceCredentialCreateBuild(args SourceCredentialCreateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin sourceCredentialCreate(")
+	b.WriteString("host: ")
+	b.WriteString(quoteMemQL(args.Host))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("label: ")
+	b.WriteString(quoteMemQL(args.Label))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("token: ")
+	b.WriteString(quoteMemQL(args.Token))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SourceCredentialRevoke -- Revoke one of the caller's source credentials (epic memql#4885, D10). Flips status to revoked and stamps revokedAt through the owned revokeSourceCredential mutation, so the write guard admits the row's owner (or a cluster owner) and nobody else. The row is never deleted -- it is the audit history of what fetched under it -- and every source fetching under it refuses at its next fetch with credential_revoked until it is switched to another credential on its Source stop. Returns {credentialId, status}.
+type SourceCredentialRevokeArgs struct {
+	// The v1:platform:sourceCredential row to revoke.
+	CredentialId string
+}
+
+// SourceCredentialRevoke calls the engine builtin sourceCredentialRevoke.
+func (qc *QueryClient) SourceCredentialRevoke(ctx context.Context, args SourceCredentialRevokeArgs) (*Result, error) {
+	call := SourceCredentialRevokeBuild(args)
+	return qc.executeNamed(ctx, "sourceCredentialRevoke", call)
+}
+
+func SourceCredentialRevokeBuild(args SourceCredentialRevokeArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin sourceCredentialRevoke(")
+	b.WriteString("credentialId: ")
+	b.WriteString(quoteMemQL(args.CredentialId))
+	b.WriteString(")")
+	return b.String()
+}

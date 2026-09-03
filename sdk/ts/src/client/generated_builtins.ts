@@ -1309,3 +1309,53 @@ QueryClient.prototype.siteRestore = function (this: QueryClient, args: SiteResto
   return this.executeNamed("siteRestore", buildSiteRestore(args), opts);
 };
 
+/** Store a personal source credential (epic memql#4885, D10). The token crosses the wire ONCE, inside this call, is sealed server-side under MEMQL_MASTER_KEY, and lands on a v1:platform:sourceCredential row owned by the caller; it appears in no row, no log line and no reply. Only github.com is admitted as a host today -- any other host is refused with source_host_unsupported, and the answer is to upload the tree as a zip instead. Returns {credentialId, fingerprint}, the fingerprint being the token's last four characters prefixed with '...', for telling two credentials apart. Name the credential on a package through createPackage or updatePackageSource; the fetcher resolves it under that package's OWNER, so a package naming somebody else's credential is refused by name. */
+export interface SourceCredentialCreateArgs {
+  /** The host the token authenticates against. github.com is the only value admitted today. */
+  host: string;
+  /** The person's own name for it, e.g. 'work laptop'. Display only. */
+  label: string;
+  /** The access token itself. Read once, sealed, and discarded; never stored or echoed in the clear. */
+  token: string;
+}
+
+export function buildSourceCredentialCreate(args: SourceCredentialCreateArgs): string {
+  const parts: string[] = [];
+  parts.push("host: " + renderMemQLValue(args.host));
+  parts.push("label: " + renderMemQLValue(args.label));
+  parts.push("token: " + renderMemQLValue(args.token));
+  return "builtin sourceCredentialCreate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sourceCredentialCreate(args: SourceCredentialCreateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sourceCredentialCreate = function (this: QueryClient, args: SourceCredentialCreateArgs = {} as SourceCredentialCreateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sourceCredentialCreate", buildSourceCredentialCreate(args), opts);
+};
+
+/** Revoke one of the caller's source credentials (epic memql#4885, D10). Flips status to revoked and stamps revokedAt through the owned revokeSourceCredential mutation, so the write guard admits the row's owner (or a cluster owner) and nobody else. The row is never deleted -- it is the audit history of what fetched under it -- and every source fetching under it refuses at its next fetch with credential_revoked until it is switched to another credential on its Source stop. Returns {credentialId, status}. */
+export interface SourceCredentialRevokeArgs {
+  /** The v1:platform:sourceCredential row to revoke. */
+  credentialId: string;
+}
+
+export function buildSourceCredentialRevoke(args: SourceCredentialRevokeArgs): string {
+  const parts: string[] = [];
+  parts.push("credentialId: " + renderMemQLValue(args.credentialId));
+  return "builtin sourceCredentialRevoke(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sourceCredentialRevoke(args: SourceCredentialRevokeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sourceCredentialRevoke = function (this: QueryClient, args: SourceCredentialRevokeArgs = {} as SourceCredentialRevokeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sourceCredentialRevoke", buildSourceCredentialRevoke(args), opts);
+};
+

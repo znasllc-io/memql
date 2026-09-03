@@ -124,28 +124,97 @@ func captureStore(t *testing.T) []string {
 	_ = s.setPackageStatus(ctx, "v1:platform:package:abc", "archived")
 	_ = s.setSiteStatus(ctx, "v1:platform:site:ghi", "archived")
 
+	// Source credentials (epic memql#4885). The label is remote text -- a
+	// person types it -- so it carries the four control bytes; the
+	// ciphertext is base64 and the fingerprint is what secret.Encrypt
+	// answers, so neither exercises the quoter and neither needs to.
+	_, _ = s.sourceCredentialSealedById(ctx, "v1:platform:sourceCredential:jkl")
+	_ = s.createSourceCredential(ctx, credentialSeed{
+		CredentialId:   "v1:platform:sourceCredential:jkl",
+		Host:           "github.com",
+		Label:          awkwardText,
+		EncryptedValue: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		Fingerprint:    "...1234",
+	})
+	_ = s.revokeSourceCredential(ctx, "v1:platform:sourceCredential:jkl")
+	_ = s.touchSourceCredential(ctx, "v1:platform:sourceCredential:jkl", at)
+
 	if len(rec.queries) == 0 {
 		t.Fatal("no statements captured; this test would pass vacuously")
 	}
 	return rec.queries
 }
 
+// serverOnlyQueryTwins maps a @serverOnly QUERY to a client-reachable sibling
+// declaring the SAME args block.
+//
+// The public Parse carries no origin, and the origin gate runs at resolution
+// -- before the arguments are read -- so a statement against a @serverOnly
+// query is refused by the front end as written and cannot be driven through
+// the lexer. Its twin can: the same argument text under a name the gate
+// admits is the same lexer exercise. The refusal itself is still checked (it
+// is produced AFTER the construct resolved by name; an unknown construct
+// answers "not found"), TestRenderedArgumentsAreDeclared checks the names
+// against the @serverOnly declaration itself, and the test below refuses a
+// twin whose declared args differ, so the substitution cannot drift.
+//
+// Mutations need no twin: the gate for those runs at dispatch, so Parse
+// accepts them whatever their annotation.
+var serverOnlyQueryTwins = map[string]string{
+	"sourceCredentialSealedById": "sourceCredentialById",
+}
+
 func TestEveryRenderedStatementParsesAndResolves(t *testing.T) {
 	eng := realEngine(t)
+	twinsUsed := 0
 	for _, q := range captureStore(t) {
-		if _, err := eng.Parse(q); err != nil {
-			t.Errorf("does not parse through the real front end: %v\n  %s", err, q)
-			continue
-		}
 		name := callName(q)
 		if name == "" {
 			t.Errorf("could not read a construct name out of: %s", q)
 			continue
 		}
-		if fn, err := eng.Functions().Get(name); err != nil || fn == nil {
+		fn, err := eng.Functions().Get(name)
+		if err != nil || fn == nil {
 			t.Errorf("%s does not resolve in the function registry: %v", name, err)
+			continue
+		}
+		if _, perr := eng.Parse(q); perr != nil {
+			twin, hasTwin := serverOnlyQueryTwins[name]
+			if !fn.ServerOnly || !hasTwin || !strings.Contains(perr.Error(), "server-only") {
+				t.Errorf("does not parse through the real front end: %v\n  %s", perr, q)
+				continue
+			}
+			twinFn, terr := eng.Functions().Get(twin)
+			if terr != nil || twinFn == nil {
+				t.Errorf("%s's parse twin %s does not resolve: %v", name, twin, terr)
+				continue
+			}
+			if got, want := argNames(twinFn), argNames(fn); got != want {
+				t.Errorf("%s's parse twin %s declares args %s, want %s -- it is not a twin, so parsing through it proves nothing", name, twin, got, want)
+				continue
+			}
+			twinned := strings.Replace(q, name+"(", twin+"(", 1)
+			if _, terr := eng.Parse(twinned); terr != nil {
+				t.Errorf("does not parse through the real front end (via its twin %s): %v\n  %s", twin, terr, twinned)
+			}
+			twinsUsed++
 		}
 	}
+	if twinsUsed != len(serverOnlyQueryTwins) {
+		t.Errorf("used %d of %d parse twins; a twin nothing exercises is a stale exemption", twinsUsed, len(serverOnlyQueryTwins))
+	}
+}
+
+// argNames renders a function's declared args block as one comparable string.
+func argNames(fn *memqlengine.Function) string {
+	if fn == nil || fn.ArgsSchema == nil {
+		return ""
+	}
+	names := make([]string, 0, len(fn.ArgsSchema.Fields))
+	for _, f := range fn.ArgsSchema.Fields {
+		names = append(names, f.Name+" "+f.Type)
+	}
+	return strings.Join(names, ", ")
 }
 
 // TestRenderedArgumentsAreDeclared is the half resolution does NOT cover.

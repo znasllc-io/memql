@@ -18,21 +18,23 @@ import (
 
 type fakeFetcher struct {
 	tree fs.FS
-	// tokenRefSeen records the secret NAME the fetch was asked to resolve.
-	tokenRefSeen string
-	// resolvedTokens records every secret VALUE the fetch resolved, so a test
-	// can assert none of them reached a row.
+	// sourceSeen records what the fetch was told: the credential NAME and the
+	// OWNER it is to be resolved under, straight off the package row.
+	sourceSeen RepoSource
+	// resolvedTokens records every credential VALUE the fetch resolved, so a
+	// test can assert none of them reached a row.
 	resolvedTokens []string
-	secrets        map[string]string
-	err            error
+	// credentials maps a credential id to the token a resolver would unseal.
+	credentials map[string]string
+	err         error
 }
 
-func (f *fakeFetcher) FetchRepo(_ context.Context, _, _, tokenRef string, _ Limits) (*SourceSnapshot, error) {
+func (f *fakeFetcher) FetchRepo(_ context.Context, src RepoSource, _ Limits) (*SourceSnapshot, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	f.tokenRefSeen = tokenRef
-	if v, ok := f.secrets[tokenRef]; ok {
+	f.sourceSeen = src
+	if v, ok := f.credentials[src.CredentialId]; ok {
 		f.resolvedTokens = append(f.resolvedTokens, v)
 	}
 	return &SourceSnapshot{Tree: f.tree, Version: "sha-abc123", cleanup: func() {}}, nil
@@ -379,11 +381,17 @@ func TestAFailedBuildLandsALogTailAndPublishesNothing(t *testing.T) {
 	}
 }
 
-func TestTheRepoTokenIsResolvedOnlyAtFetchTimeAndReachesNoRow(t *testing.T) {
+// TestTheCredentialIsResolvedUnderThePackageOwnerAtFetchTimeAndReachesNoRow
+// pins the D10 handoff (epic memql#4885): the pipeline hands the fetch the
+// credential NAME and the package's OWNER, straight off the row, and never a
+// value. The caller here is a CLUSTER OWNER deploying somebody else's package,
+// which is the case the owner field exists for -- the fetch resolves under the
+// package owner, not under the person clicking.
+func TestTheCredentialIsResolvedUnderThePackageOwnerAtFetchTimeAndReachesNoRow(t *testing.T) {
 	pkg := ownerPackage()
-	pkg["repoTokenRef"] = "acme-repo-token"
+	pkg["credentialId"] = "v1:platform:sourceCredential:acme"
 	h := newHarness(t, spaOnlyPackage(), pkg)
-	h.fetcher.secrets = map[string]string{"acme-repo-token": "ghp_SUPERSECRETVALUE"}
+	h.fetcher.credentials = map[string]string{"v1:platform:sourceCredential:acme": "ghp_SUPERSECRETVALUE"}
 
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId: "v1:platform:package:abc",
@@ -394,11 +402,17 @@ func TestTheRepoTokenIsResolvedOnlyAtFetchTimeAndReachesNoRow(t *testing.T) {
 		t.Fatalf("deploy: %v", err)
 	}
 
-	if h.fetcher.tokenRefSeen != "acme-repo-token" {
-		t.Fatalf("the fetch must be handed the secret NAME, got %q", h.fetcher.tokenRefSeen)
+	if got := h.fetcher.sourceSeen.CredentialId; got != "v1:platform:sourceCredential:acme" {
+		t.Fatalf("the fetch must be handed the credential NAME, got %q", got)
+	}
+	if got, want := h.fetcher.sourceSeen.OwnerUserId, rowString(pkg, "ownerUserId"); got != want {
+		t.Fatalf("the fetch must be handed the PACKAGE owner to resolve under, got %q want %q -- the caller was a cluster owner, and resolving under them would be resolving under the wrong person", got, want)
+	}
+	if h.fetcher.sourceSeen.OwnerUserId == clusterOwner().UserId {
+		t.Fatal("control failed: the package owner and the caller are the same id, so this test cannot tell them apart")
 	}
 	if len(h.fetcher.resolvedTokens) != 1 {
-		t.Fatalf("the secret must be resolved exactly once, at fetch time: %v", h.fetcher.resolvedTokens)
+		t.Fatalf("the credential must be resolved exactly once, at fetch time: %v", h.fetcher.resolvedTokens)
 	}
 	// The reachable positive: the NAME does appear in the package row this
 	// test seeded, so a search that found nothing would be searching wrongly.
@@ -406,6 +420,48 @@ func TestTheRepoTokenIsResolvedOnlyAtFetchTimeAndReachesNoRow(t *testing.T) {
 		if strings.Contains(q, "ghp_SUPERSECRETVALUE") {
 			t.Fatalf("the token VALUE reached a row: %s", q)
 		}
+	}
+}
+
+// TestANotOfferedTargetDeploysTheRestOfThePackage is D9 end to end: a manifest
+// declaring an iOS app beside a static one deploys the static one, builds and
+// publishes nothing for the iOS one, finishes SUCCEEDED, and records the
+// unoffered app on the row with its non-fatal refusal so the timeline says
+// what happened to it rather than omitting it.
+func TestANotOfferedTargetDeploysTheRestOfThePackage(t *testing.T) {
+	h := newHarness(t, unofferedTargetPackage(), ownerPackage())
+	out, err := Deploy(context.Background(), h.deps, DeployRequest{
+		PackageId: "v1:platform:package:abc",
+		Actor:     plainUser(),
+		Confirmed: true,
+		Hostnames: map[string]string{"docs": "docs.example.com"},
+	})
+	if err != nil {
+		t.Fatalf("an unoffered target must not fail the deploy: %v", err)
+	}
+	if out.Status != StatusSucceeded {
+		t.Fatalf("want succeeded, got %q (%+v)", out.Status, out.Problem)
+	}
+	if got := strings.Join(h.builder.built, ","); got != "docs" {
+		t.Fatalf("only the offered app may build, got %q", got)
+	}
+	if got := strings.Join(h.publisher.published, ","); got != "v1:platform:site:docs" {
+		t.Fatalf("only the offered app may publish, got %q", got)
+	}
+	if len(out.Deployables) != 2 {
+		t.Fatalf("the row records one outcome per manifest deployable, got %+v", out.Deployables)
+	}
+	var mobile *DeployableOutcome
+	for i := range out.Deployables {
+		if out.Deployables[i].Name == "mobile" {
+			mobile = &out.Deployables[i]
+		}
+	}
+	if mobile == nil || mobile.Refusal == nil || mobile.Refusal.Code != CodeDeployableTargetNotOffered {
+		t.Fatalf("the unoffered app must be recorded with its refusal, got %+v", out.Deployables)
+	}
+	if mobile.Refusal.Fatal || mobile.SiteId != "" {
+		t.Fatalf("not offered is non-fatal and produces no site: %+v", mobile)
 	}
 }
 

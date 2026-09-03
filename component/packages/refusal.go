@@ -89,12 +89,48 @@ const (
 	// condition one layer down, on a different object.
 	CodeSourceUnreadable = "source_unreadable"
 
-	// -- reported, not fatal (D3) --
+	// -- personal source credentials (epic memql#4885, D10) --
+	//
+	// The three below are raised where a package's credentialId is RESOLVED
+	// -- the fetcher, the poll, and the sourceCredentialCreate capability --
+	// and none is a flavour of source_unreadable, because each names a
+	// repair that lives somewhere else: on the Source stop (switch the
+	// credential), in Settings (add one), or in the choice of source form.
+
+	// CodeCredentialNotFound: the package names a credential its OWNER
+	// cannot read. Resolution runs under the package owner's actor through
+	// an owner-scoped query, so "does not exist" and "belongs to somebody
+	// else" are the SAME zero rows -- and the sentence must not claim to
+	// know which. A package naming another person's credential is refused
+	// by name, before any request leaves the cluster.
+	CodeCredentialNotFound = "credential_not_found"
+	// CodeCredentialRevoked: the credential resolves and is `revoked`. The
+	// row stays as history; every source fetching under it refuses here
+	// until it is switched to another credential.
+	CodeCredentialRevoked = "credential_revoked"
+	// CodeSourceHostUnsupported: a credential (or a source) names a host this
+	// cluster does not fetch from. github.com is the only host today, and
+	// the alternative is the other source form -- a zip of the same tree.
+	// Raised by normalizeCredentialHost and parseGitHubRepo alike, and
+	// answered by the probe as a typed REASON rather than thrown, so the
+	// Source stop renders one repair for the condition however it was
+	// reached.
+	CodeSourceHostUnsupported = "source_host_unsupported"
+
+	// -- reported, not fatal (D3, and the target model's D9) --
 
 	// CodeGoPackNotDeployable: a bff/ with a go.mod. Reported per-half and
 	// NON-fatal: the rest of the package deploys, and the report says where
 	// Go delivery actually happens today. Full Go delivery is its own epic.
 	CodeGoPackNotDeployable = "go_pack_not_deployable"
+	// CodeDeployableTargetNotOffered (epic memql#4885, D9): a declared kind
+	// the target model KNOWS and does not OFFER -- ios, android, macos
+	// (KnownUnofferedKinds). Scoped to the app, fatal to that app and NOT to
+	// the package, reported exactly as go_pack_not_deployable is: the build
+	// and publish stages skip the app and the rest deploys. Distinct from
+	// deployable_kind_unknown, which stays fatal, because the two say
+	// opposite things to an author -- "not yet" versus "not a thing".
+	CodeDeployableTargetNotOffered = "deployable_target_not_offered"
 
 	// -- raised outside this package, catalogued here --
 

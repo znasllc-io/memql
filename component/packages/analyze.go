@@ -93,7 +93,22 @@ func analyzeDeployables(tree fs.FS, manifest *Manifest, rep *Report) {
 			Binding: d.Binding,
 		}
 
+		// THREE CASES FOR A KIND (design section B, D9), and the order is
+		// the point: an offered kind, a kind the target model knows and does
+		// not offer, and a kind nobody has heard of. The middle one is
+		// checked FIRST because ValidKind is false for it too, and reading
+		// `ios` as unknown would tell an author their roadmap item is a
+		// typo. It is scoped to the app and NON-fatal -- the rest of the
+		// package deploys around it, exactly as around a Go pack -- so its
+		// path is not checked and its build plan is not worked out: nothing
+		// here would run either.
 		switch {
+		case isKnownUnofferedKind(d.Kind):
+			target := KnownUnofferedKinds[d.Kind]
+			dr.Problem = ptr(problemFrom(refuseScoped(CodeDeployableTargetNotOffered, d.Name,
+				"%s is not offered on this cluster yet. Its address will be %s, and nothing here serves one today; the rest of this package deploys around it.",
+				target.Display, target.Address), false))
+
 		case !ValidKind(d.Kind):
 			dr.Problem = ptr(problemFrom(refuseScoped(CodeDeployableKindUnknown, d.Name,
 				"deployable %q declares kind %q. This cluster serves %s, %s and %s.",
@@ -124,11 +139,23 @@ func analyzeDeployables(tree fs.FS, manifest *Manifest, rep *Report) {
 			}
 		} else {
 			dr.BuildPlan = "not analyzed -- see the problem on this deployable"
+			if !dr.Problem.Fatal {
+				dr.BuildPlan = "skipped -- not offered on this cluster yet"
+			}
 			rep.add(*dr.Problem)
 		}
 
 		rep.Deployables = append(rep.Deployables, dr)
 	}
+}
+
+// isKnownUnofferedKind reports whether kind is one the target model has
+// written down and not registered. Exact, like ValidKind: the manifest's kind
+// values are lowercase literals, and a case-folded match here paired with an
+// exact lookup at the use site would name a target with no display name.
+func isKnownUnofferedKind(kind string) bool {
+	_, ok := KnownUnofferedKinds[kind]
+	return ok
 }
 
 // analyzeGoPacks records a Go pack and defers it (D3).

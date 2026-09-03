@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -84,6 +85,25 @@ type Deps struct {
 	// NewId mints deployment and site ids. Injected so a test reads a stable
 	// timeline rather than a random one.
 	NewId func(prefix string) string
+	// Credentials unseals a package's source credential under its owner's
+	// actor (epic memql#4885, D10). Shared by the fetcher and the D11 poll,
+	// which is the point of it living here: the two paths that present a
+	// bearer to GitHub resolve it through ONE function, so "refused for a
+	// credential the owner cannot read" cannot be true on one path and false
+	// on the other. Nil on a node that cannot resolve credentials; a package
+	// naming one is then refused rather than fetched anonymously.
+	Credentials CredentialResolver
+	// HTTP is the client the D11 poll asks GitHub with. Nil means a 30s
+	// default. Injected so a test can stand a fake GitHub behind it and read
+	// which requests carried a bearer -- and which were never made.
+	HTTP *http.Client
+}
+
+func (d *Deps) httpClient() *http.Client {
+	if d.HTTP != nil {
+		return d.HTTP
+	}
+	return &http.Client{Timeout: 30 * time.Second}
 }
 
 func (d *Deps) now() time.Time {
@@ -346,11 +366,18 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 func (d *Deps) fetch(ctx context.Context, pkg map[string]any) (*SourceSnapshot, error) {
 	switch rowString(pkg, "sourceKind") {
 	case "repo":
-		return d.Fetcher.FetchRepo(ctx,
-			rowString(pkg, "repoUrl"),
-			rowString(pkg, "repoRef"),
-			rowString(pkg, "repoTokenRef"),
-			d.Limits)
+		// The owner rides along with the credential NAME, because the name
+		// is resolved under the owner's actor and not the caller's: a
+		// cluster owner deploying a colleague's package fetches under the
+		// colleague's credential, which is correct -- they are deploying that
+		// package -- and a package naming somebody else's credential resolves
+		// nothing.
+		return d.Fetcher.FetchRepo(ctx, RepoSource{
+			RepoUrl:      rowString(pkg, "repoUrl"),
+			Ref:          rowString(pkg, "repoRef"),
+			CredentialId: rowString(pkg, "credentialId"),
+			OwnerUserId:  rowString(pkg, "ownerUserId"),
+		}, d.Limits)
 	case "artifact":
 		return d.Fetcher.FetchArtifact(ctx, rowString(pkg, "artifactId"), d.Limits)
 	default:
