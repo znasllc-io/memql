@@ -32,8 +32,10 @@ export const INVITATION_CONCEPT = "v1:identity:invitation";
  * Every outstanding user invitation, live.
  *
  * The gate is the query's own: `pendingUserInvitations` carries
- * `requiresOwnerOrAdmin` as a top-level conjunct, so the engine empties the
- * result below the floor whatever this code renders.
+ * `requiresDeveloperOrAbove` as a top-level conjunct, so the engine empties
+ * the result below that whatever this code renders. Developer is included
+ * because it can ISSUE an invitation, and a caller who can send one but not
+ * see the outstanding ones cannot revoke a link sent to the wrong address.
  *
  * Its projection is `invitationAdminSummary` (memql#4735), which is what makes
  * this read safe to run from a browser at all: the query used to declare no

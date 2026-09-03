@@ -53,7 +53,7 @@ func (s *Service) IssueEnrolmentLink(ctx context.Context, in EnrolmentLink) Resu
 	userID := strings.TrimSpace(in.UserId)
 	detail := map[string]any{"userId": userID}
 
-	act, refusal, allowed := s.authorize(ctx, "issuing an enrolment link", detail)
+	act, refusal, allowed := s.authorizeAdmission(ctx, "issuing an enrolment link", detail)
 	if !allowed {
 		return refusal
 	}
@@ -107,7 +107,15 @@ func (s *Service) IssueEnrolmentLink(ctx context.Context, in EnrolmentLink) Resu
 	// ANOTHER admin, because peers do not outrank each other. That matches
 	// what auth.CanManageUser already refuses for a role change on the same
 	// account, so the two now agree; an owner can still do it.
-	if !auth.GovernPrincipal(principalOf(act.userID, string(act.role)), principalOf(user.ID, user.Role), auth.GovernUpdate) {
+	// TWO CHECKS, BECAUSE RANK AND AUTHORITY DISAGREE AT ONE RUNG.
+	// GovernPrincipal answers the relational question (owner-only targets,
+	// self, strictly outrank). It compares RANK -- and developer ranks 300
+	// against admin's 200 while holding strictly FEWER principal verbs, so it
+	// alone would admit developer -> admin and hand the minter user management
+	// they do not have. GrantsPrincipalAuthorityBeyond is that second question.
+	if auth.GrantsPrincipalAuthorityBeyond(auth.Role(strings.ToLower(strings.TrimSpace(string(act.role)))),
+		auth.Role(strings.ToLower(strings.TrimSpace(user.Role)))) ||
+		!auth.GovernPrincipal(principalOf(act.userID, string(act.role)), principalOf(user.ID, user.Role), auth.GovernUpdate) {
 		detail["targetRole"] = strings.ToLower(strings.TrimSpace(user.Role))
 		return fail(CodePermissionDenied, s.emit(ctx, identity.AuditCategoryAdmin, "enrolment_link_issued",
 			act, userID, user.PrimaryEmail, detail, identity.AuditOutcomeBlocked, "target_outranks_caller"),
@@ -159,7 +167,7 @@ func (s *Service) RevokeEnrolmentLink(ctx context.Context, enrolmentId string) R
 	target := strings.TrimSpace(enrolmentId)
 	detail := map[string]any{"enrolmentTokenId": target}
 
-	act, refusal, allowed := s.authorize(ctx, "revoking an enrolment link", detail)
+	act, refusal, allowed := s.authorizeAdmission(ctx, "revoking an enrolment link", detail)
 	if !allowed {
 		return refusal
 	}

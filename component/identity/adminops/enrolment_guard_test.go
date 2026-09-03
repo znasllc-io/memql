@@ -75,8 +75,19 @@ func TestEnrolmentLinkRefusesATargetTheCallerDoesNotOutrank(t *testing.T) {
 		refused    bool
 	}{
 		// THE HOLE: an admin could mint a link for the OWNER and take the
-		// account. Only an owner reaches an owner-ranked target.
+		// account. Only an owner reaches an owner-ranked target -- and once
+		// developers could reach this operation at all (create-on-admission),
+		// they would have inherited it.
+		{"developer cannot mint for the owner", auth.RoleDeveloper, "owner", true},
 		{"admin cannot mint for the owner", auth.RoleAdmin, "owner", true},
+
+		// THE RANK INVERSION. developer (300) outranks admin (200), so a rank
+		// rule alone admits this -- while admin holds the principal verbs
+		// developer lacks, making the link a two-move path to owner.
+		{"developer cannot mint for an admin", auth.RoleDeveloper, "admin", true},
+
+		// Below the principal-holding tiers, rank is the whole question again.
+		{"developer may mint for a writer", auth.RoleDeveloper, "writer", false},
 
 		// Peers do not outrank each other, which is what auth.CanManageUser
 		// already refuses for a role change on the same account.

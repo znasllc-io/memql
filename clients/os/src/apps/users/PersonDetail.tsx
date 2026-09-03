@@ -130,6 +130,20 @@ export function PersonDetail({
 
   const busy = actions.busyKey === local.id;
 
+  // WHO MAY MANAGE A PERSON, as opposed to who may admit one.
+  //
+  // Developer reaches this app because it holds create-on-admission -- it may
+  // invite people and mint enrolment links. It does NOT hold create, update or
+  // delete on `principal`, so changing a role and re-enabling sign-in links
+  // are refused server-side, every time, by adminops' unchanged owner/admin
+  // gate.
+  //
+  // So those two controls are not RENDERED for a developer. That is the narrow
+  // case the rule below allows: hiding is honest only for what ALWAYS fails,
+  // and for a developer these two always do. The enrolment-link control stays,
+  // because for a developer it now succeeds.
+  const canManagePeople = roleAdmits(ownerRole, { any: ["admin", "owner"] });
+
   return (
     <Panel label={`Details for ${personName(local)}`}>
       <Subhead>{personName(local)}</Subhead>
@@ -143,7 +157,15 @@ export function PersonDetail({
           value={formatFreshness(local.lastSeenAt, now)}
           title={local.lastSeenAt || undefined}
         />
-        <Fact label="Recent sessions" value={sessions.label} />
+        {/* NOT SHOWN BELOW ADMIN, because the number would be a lie rather
+            than a gap. `sessionsForSubjectAdmin` still carries
+            requiresOwnerOrAdmin, and a spec conjunct EMPTIES a result rather
+            than refusing it -- so a developer gets zero rows, no thrown error,
+            and countLive([]) renders a confident "0 recent" for an account
+            that may have several live sessions. "How many ways into this
+            account are open" is the one field where a fabricated zero is worse
+            than no field at all. */}
+        {canManagePeople ? <Fact label="Recent sessions" value={sessions.label} /> : null}
         <Fact label="Joined" value={formatMoment(local.createdAt)} />
         {local.sharedMailbox ? (
           <Fact label="Mailbox" value={<Chip>shared</Chip>} />
@@ -160,6 +182,20 @@ export function PersonDetail({
       ) : null}
 
       {/* ---- role ---- */}
+      {!canManagePeople ? (
+        <>
+          {/* Facts, not FormRow: Fact renders a <dt>/<dd> pair and Facts is
+              the <dl> that makes them legal. */}
+          <Facts>
+            <Fact label="Cluster role" value={local.role || "reader"} />
+          </Facts>
+          <p className="os-caption">
+            Changing somebody's role is an owner or admin action. Your role can invite people and
+            mint enrolment links, which is a different authority from editing the accounts that
+            already exist.
+          </p>
+        </>
+      ) : (
       <FormRow>
         <Select
           id={`role-${local.id}`}
@@ -200,9 +236,10 @@ export function PersonDetail({
           ))}
         </Select>
       </FormRow>
+      )}
 
       {/* ---- sign-in policy ---- */}
-      {local.signInPolicy === "passkey_only" ? (
+      {!canManagePeople ? null : local.signInPolicy === "passkey_only" ? (
         <FormRow>
           <Button onClick={() => void applyReset()} busy={busy} busyLabel="Resetting...">
             Re-enable sign-in links

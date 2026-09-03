@@ -26,21 +26,24 @@ describe("the Users manifest", () => {
     expect(users?.component).toBeTruthy();
   });
 
-  it("names admin and owner as a SET rather than a floor", () => {
-    // A floor is a statement about RANK, and developer (300) sits ABOVE admin
-    // (200) on the cluster's one ladder -- so `min: "admin"` admitted a
-    // developer. Every gate inside this app is `auth.AtLeastAdmin`, which asks
-    // for the create-on-principal capability rather than a rank, and developer
-    // does not hold it.
-    expect(users?.roles).toEqual({ any: ["admin", "owner"] });
+  it("declares admin as its floor", () => {
+    // A FLOOR, because the admitted set is a contiguous top of the ladder:
+    // {admin 200, developer 300, owner 400} is exactly rank >= 200. Developer
+    // belongs there because it holds create-on-admission -- it can invite
+    // people and mint enrolment links -- not because it can manage them.
+    //
+    // roles.ts states the rule: a set that is really a contiguous top is a
+    // `min` written the long way, and it stops admitting whatever rung is
+    // added above it.
+    expect(users?.roles).toEqual({ min: "admin" });
   });
 
-  it("is offered to admin and owner and withheld from developer", () => {
+  it("is offered from admin upward and withheld below it", () => {
     // Asserted through the predicate the launcher actually calls rather than
     // by re-reading the manifest. The ladder is installed by test/setup.ts.
     expect(roleAdmits("admin", users?.roles)).toBe(true);
+    expect(roleAdmits("developer", users?.roles)).toBe(true);
     expect(roleAdmits("owner", users?.roles)).toBe(true);
-    expect(roleAdmits("developer", users?.roles)).toBe(false);
     expect(roleAdmits("writer", users?.roles)).toBe(false);
     expect(roleAdmits("reader", users?.roles)).toBe(false);
   });

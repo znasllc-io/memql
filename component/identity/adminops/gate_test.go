@@ -93,10 +93,12 @@ func ctxAs(role auth.Role) context.Context {
 // operations is every gated write, named as the audit trail names it. A new
 // operation added to the service without a row here is invisible to these
 // tests, which is why the table is the file's first citizen.
-var operations = []struct {
+type gatedOp struct {
 	name string
 	call func(*Service, context.Context) Result
-}{
+}
+
+var ownerAdminOperations = []gatedOp{
 	{"update_user_profile", func(s *Service, ctx context.Context) Result {
 		return s.UpdateUserProfile(ctx, UserProfile{UserId: "v1:identity:user:target", DisplayName: "Target"})
 	}},
@@ -115,21 +117,22 @@ var operations = []struct {
 	{"revoke_node_token", func(s *Service, ctx context.Context) Result {
 		return s.RevokeNodeToken(ctx, "v1:identity:identity:node")
 	}},
+	// ADDED after code review: these three were absent, so the "the split did
+	// not leak" test never exercised them -- including recovery-key rotation,
+	// which the epic's success criteria name by name.
+	{"reset_sign_in_policy", func(s *Service, ctx context.Context) Result {
+		return s.ResetSignInPolicy(ctx, "v1:identity:user:target")
+	}},
+	{"set_user_shared_mailbox", func(s *Service, ctx context.Context) Result {
+		return s.SetUserSharedMailbox(ctx, "v1:identity:user:target", true)
+	}},
+	{"rotate_recovery_key", func(s *Service, ctx context.Context) Result {
+		return s.RotateRecoveryKey(ctx, "v1:identity:user:target")
+	}},
 	{"update_cluster_settings", func(s *Service, ctx context.Context) Result {
 		return s.UpdateClusterSettings(ctx, ClusterSettings{
 			RegistrationMode: "open", InternalDefaultRole: "writer",
 		})
-	}},
-	// memql#3408. An enrolment link is the ability to hand somebody a
-	// credential for another person's account, so it belongs on this table
-	// more obviously than most: the refusal test below asserts the engine is
-	// never reached, which for THIS operation means no enrolment row is
-	// written for a caller the gate would refuse.
-	{"issue_enrolment_link", func(s *Service, ctx context.Context) Result {
-		return s.IssueEnrolmentLink(ctx, EnrolmentLink{UserId: "v1:identity:user:target"})
-	}},
-	{"revoke_enrolment_link", func(s *Service, ctx context.Context) Result {
-		return s.RevokeEnrolmentLink(ctx, "v1:identity:enrolmentToken:tok")
 	}},
 	// memql#3716. The reason this operation exists AT ALL is that the write it
 	// performs must not be reachable without the gate: an origin on identity's
@@ -150,12 +153,116 @@ var operations = []struct {
 	}},
 }
 
+// admissionOperations is every write that hands somebody a credential letting
+// them into this cluster. Owner, admin and developer hold that authority
+// (auth.CanAdmitPeople); writer, reader and a roleless caller do not.
+//
+// TWO TABLES BECAUSE THERE ARE TWO GATES. Every write on this surface used to
+// answer to one owner/admin check, which meant "a developer helping an owner
+// set a cluster up should be able to invite people" could only be granted by
+// handing developers role changes, suspensions, token revocation, cluster
+// settings and recovery-key rotation as well.
+var admissionOperations = []gatedOp{
+	{"issue_user_invitation", func(s *Service, ctx context.Context) Result {
+		return s.IssueUserInvitation(ctx, UserInvitation{Email: "invitee@example.test"})
+	}},
+	{"revoke_user_invitation", func(s *Service, ctx context.Context) Result {
+		return s.RevokeUserInvitation(ctx, "v1:identity:invitation:inv")
+	}},
+	{"issue_enrolment_link", func(s *Service, ctx context.Context) Result {
+		return s.IssueEnrolmentLink(ctx, EnrolmentLink{UserId: "v1:identity:user:target"})
+	}},
+	{"revoke_enrolment_link", func(s *Service, ctx context.Context) Result {
+		return s.RevokeEnrolmentLink(ctx, "v1:identity:enrolmentToken:tok")
+	}},
+}
+
+// allOperations is both tables. The two properties that use it -- an
+// unresolved caller fails closed, and an admitted caller reaches the engine --
+// hold for every gated write regardless of WHICH gate it answers to.
+var allOperations = append(append([]gatedOp{}, ownerAdminOperations...), admissionOperations...)
+
+// A DEVELOPER REACHES THE ADMISSION OPERATIONS, which is the point of the
+// second gate. Asserted as "not refused by the gate" rather than as success:
+// these calls run on into registration policy and the engine, and the test
+// double has no database. What must not happen is a PERMISSION_DENIED.
+func TestAdmissionOperationsAdmitADeveloper(t *testing.T) {
+	for _, op := range admissionOperations {
+		t.Run(op.name, func(t *testing.T) {
+			svc, _, audit := newTestService(t)
+
+			res := op.call(svc, ctxAs(auth.RoleDeveloper))
+
+			if res.Code == CodePermissionDenied {
+				t.Fatalf("a developer was refused %s by the gate: %s", op.name, res.Message)
+			}
+			for _, ev := range audit.events {
+				if ev.FailureReason == "role_cannot_admit" || ev.FailureReason == "role_not_admin" {
+					t.Fatalf("a developer was refused %s at the gate, audited as %q",
+						op.name, ev.FailureReason)
+				}
+			}
+		})
+	}
+}
+
+// ...AND NOBODY BELOW IT DOES. Its own audit reason: `role_cannot_admit` and
+// `role_not_admin` are deliberately different strings, so the trail says which
+// gate turned somebody away.
+func TestAdmissionOperationsRefuseBelowDeveloper(t *testing.T) {
+	for _, role := range []auth.Role{"reader", "writer", ""} {
+		for _, op := range admissionOperations {
+			t.Run(string(role)+"/"+op.name, func(t *testing.T) {
+				svc, eng, audit := newTestService(t)
+
+				res := op.call(svc, ctxAs(role))
+
+				if res.OK {
+					t.Fatalf("role %q was permitted to %s", role, op.name)
+				}
+				if res.Code != CodePermissionDenied {
+					t.Errorf("code = %d, want %d (PERMISSION_DENIED)", res.Code, CodePermissionDenied)
+				}
+				if eng.calls != 0 {
+					t.Errorf("engine was reached %d time(s) for a refused caller: %v", eng.calls, eng.queries)
+				}
+				if len(audit.events) != 1 {
+					t.Fatalf("want exactly 1 audit event, got %d", len(audit.events))
+				}
+				if got := audit.events[0].FailureReason; got != "role_cannot_admit" {
+					t.Errorf("audit failure reason = %q, want role_cannot_admit", got)
+				}
+			})
+		}
+	}
+}
+
+// THE TEN THAT DID NOT MOVE. A developer must still be refused every
+// user-management write, or the split leaked.
+func TestOwnerAdminOperationsStillRefuseADeveloper(t *testing.T) {
+	for _, op := range ownerAdminOperations {
+		t.Run(op.name, func(t *testing.T) {
+			svc, _, audit := newTestService(t)
+
+			res := op.call(svc, ctxAs(auth.RoleDeveloper))
+
+			if res.Code != CodePermissionDenied {
+				t.Fatalf("a developer was permitted %s (code=%d) -- admission has leaked into "+
+					"the user-management gate", op.name, res.Code)
+			}
+			if len(audit.events) != 1 || audit.events[0].FailureReason != "role_not_admin" {
+				t.Errorf("want one role_not_admin event, got %+v", audit.events)
+			}
+		})
+	}
+}
+
 // Every role below owner/admin is refused, at every operation, with
 // PERMISSION_DENIED and an audited `admin_auth_forbidden` -- and the engine is
 // never touched.
 func TestEveryWriteRefusesBelowOwnerOrAdmin(t *testing.T) {
 	for _, role := range []auth.Role{"reader", "writer", "developer", ""} {
-		for _, op := range operations {
+		for _, op := range ownerAdminOperations {
 			t.Run(string(role)+"/"+op.name, func(t *testing.T) {
 				svc, eng, audit := newTestService(t)
 
@@ -202,7 +309,7 @@ func TestEveryWriteRefusesBelowOwnerOrAdmin(t *testing.T) {
 // A stream that resolved no actor at all fails CLOSED -- UNAUTHENTICATED, not
 // "treat the empty role as a reader and carry on".
 func TestUnauthenticatedCallerIsRefusedAndAudited(t *testing.T) {
-	for _, op := range operations {
+	for _, op := range allOperations {
 		t.Run(op.name, func(t *testing.T) {
 			svc, eng, audit := newTestService(t)
 
@@ -226,7 +333,7 @@ func TestUnauthenticatedCallerIsRefusedAndAudited(t *testing.T) {
 // replaced by `return false`.
 func TestOwnerAndAdminReachTheEngine(t *testing.T) {
 	for _, role := range []auth.Role{"owner", "admin"} {
-		for _, op := range operations {
+		for _, op := range allOperations {
 			t.Run(string(role)+"/"+op.name, func(t *testing.T) {
 				svc, eng, audit := newTestService(t)
 

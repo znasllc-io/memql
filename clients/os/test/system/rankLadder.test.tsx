@@ -83,19 +83,20 @@ describe("every shipped role requirement names a real rung", () => {
 describe("the flipped ordering reaches the registry", () => {
   // The defect, measured where it was visible: a developer could not see an
   // app the engine considered them MORE privileged for.
-  it("offers a developer the admin-FLOORED apps", () => {
+  it("offers a developer the admin-floored apps", () => {
     const forDeveloper = appsForRole(OS_REGISTRY, "developer").map((a) => a.name);
+    expect(forDeveloper).toContain("Users");
     expect(forDeveloper).toContain("Accounts");
   });
 
-  // Accounts is gated on RANK -- its constructs declare `@requiresRank("admin")`,
-  // so rank >= 200 is right and a developer qualifies. Users is gated on a
-  // CAPABILITY: every read and write inside goes through `auth.AtLeastAdmin`
-  // (create-on-principal), which developer does not hold. A floor cannot tell
-  // those apart, which is why the Users manifest states a set.
-  it("withholds the capability-gated Users app from a developer", () => {
-    const forDeveloper = appsForRole(OS_REGISTRY, "developer").map((a) => a.name);
-    expect(forDeveloper).not.toContain("Users");
+  // WHY USERS IS ON THAT LIST IS A SERVER FACT, NOT A LADDER ONE. When the
+  // ladder flipped, `min: "admin"` started admitting developer while every
+  // gate inside the app was create-on-principal, which developer does not
+  // hold -- the app was offered and served nothing. It is correct now because
+  // the SERVER changed: developer holds create-on-admission. If that is ever
+  // taken back, this line must change with it, and a floor cannot express
+  // "rank >= 200 except developer".
+  it("admits admin and owner to Users as well", () => {
     expect(appsForRole(OS_REGISTRY, "admin").map((a) => a.name)).toContain("Users");
     expect(appsForRole(OS_REGISTRY, "owner").map((a) => a.name)).toContain("Users");
   });

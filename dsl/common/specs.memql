@@ -29,3 +29,26 @@ spec actorEnvelope requiresAdmin {
 spec actorEnvelope requiresOwnerOrAdmin {
   return role == "admin" || role == "owner"
 }
+
+/// Caller must hold the developer, admin, or owner role.
+///
+/// Moved here from dsl/deployment/specs.memql, for the reason its sibling
+/// above moved in memql#2800: it is a generic role predicate rather than a
+/// deployment concept, and a second namespace now needs it.
+///
+/// TWO UNRELATED POLICIES NAME THIS ONE PREDICATE, and they are free to
+/// diverge:
+///
+///   - deployment: the FORWARD-DEPLOY gate (#1876), mirroring
+///     auth.AtLeastDeveloper -- cut a version and ship it. Rollback stays
+///     owner-only via requiresOwner.
+///   - identity: the PEOPLE-SURFACE read gate -- the user list and the
+///     pending-invitations list. Its Go counterpart is auth.CanAdmitPeople,
+///     a SEPARATE capability (create-on-admission) precisely so a cluster can
+///     later grant one without the other.
+///
+/// The three roles coincide today. If they stop coinciding, this spec splits
+/// rather than picking a side.
+spec actorEnvelope requiresDeveloperOrAbove {
+  return role == "developer" || role == "admin" || role == "owner"
+}

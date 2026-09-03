@@ -19,12 +19,17 @@ import {
 // Users: the people of this cluster, the invitations outstanding, and the
 // three admin actions the identity service exposes (epic memql#4733).
 //
-// The manifest declares `roles: { min: "admin" }` and every control inside is
-// gated by the same one predicate. All of it is PRESENTATION (spec section E):
-// `searchUsers` and `pendingUserInvitations` carry `requiresOwnerOrAdmin` in
-// their own filters, `adminops.authorize` gates every write, and row admission
-// gates the subscriptions. Hiding a control here is a courtesy to the person
-// reading, never the boundary.
+// The manifest declares `roles: { min: "admin" }`, which under the cluster's
+// one ladder is rank >= 200 = {admin, developer, owner}. Developer is in that
+// set because it holds the ADMISSION capability -- it may invite people and
+// mint enrolment links -- and NOT because it can manage them (memql#4917).
+//
+// All of it is PRESENTATION (spec section E): `searchUsers` and
+// `pendingUserInvitations` carry `requiresDeveloperOrAbove` in their own
+// filters, `adminops` gates every write behind one of its TWO gates (the
+// admission four, the owner/admin ten), and row admission gates the
+// subscriptions. Hiding a control here is a courtesy to the person reading,
+// never the boundary.
 //
 // Sections are the app's own navigation. It never opens a window.
 

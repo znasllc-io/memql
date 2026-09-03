@@ -135,7 +135,7 @@ concept's own `role` field:
 |-----------|--------------------------------------------------------------------------|
 | owner     | The cluster operator. The only role `auth.IsClusterOwner()` accepts.      |
 | admin     | User + cluster management. Not the same as owner -- see below.            |
-| developer | Engineering power: authoring, inline DSL, deploy / cut-version. Not user management. |
+| developer | Engineering power: authoring, inline DSL, deploy / cut-version. May ADMIT people (invitations, enrolment links) and read the user list; may not manage the accounts that result. |
 | writer    | Regular data producer.                                                    |
 | reader    | Regular data consumer.                                                    |
 
