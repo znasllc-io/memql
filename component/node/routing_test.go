@@ -366,3 +366,35 @@ func TestPackageRowsReachABrowserOnAnotherNode(t *testing.T) {
 		t.Error("control failed: an unlisted concept forwarded, so the checks above prove nothing")
 	}
 }
+
+// TestSourceCredentialRowsReachABrowserOnAnotherNode is the packages
+// assertion above, for the rows epic memql#4885 added beside them.
+//
+// A credential is created by a capability on whichever bff the person's
+// stream landed on, revoked the same way, and touched by the fetcher or the
+// poll on whichever node ran those -- and read in the Settings Sources group
+// and on a Source stop's credential chip in a window some other bff is
+// serving. Both verbs: a revoke is an UPDATE, and a chip that stays green
+// after a revoke is the failure that looks like it is working.
+func TestSourceCredentialRowsReachABrowserOnAnotherNode(t *testing.T) {
+	rules := defaultRoutingRules()
+	for _, topic := range []string{
+		"graph.node.created.v1:platform:sourceCredential",
+		"graph.node.updated.v1:platform:sourceCredential",
+	} {
+		d := evaluateRouting(rules, topic)
+		if !d.Forward {
+			t.Errorf("%s does not forward: a revoked credential would stay green on every other bff's Source stop", topic)
+		}
+		if !d.Broadcast {
+			t.Errorf("%s forwards to one node type rather than broadcasting: whichever bff is serving the window has to receive it", topic)
+		}
+	}
+
+	// The reachable positive, so the checks above are evidence about the
+	// table rather than about evaluateRouting: a sibling concept with no rule
+	// does NOT forward.
+	if d := evaluateRouting(rules, "graph.node.updated.v1:platform:sourceCredentialNotAThing"); d.Forward {
+		t.Error("control failed: an unlisted concept forwarded, so the checks above prove nothing")
+	}
+}

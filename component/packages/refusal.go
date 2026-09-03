@@ -89,6 +89,32 @@ const (
 	// condition one layer down, on a different object.
 	CodeSourceUnreadable = "source_unreadable"
 
+	// -- personal source credentials (epic memql#4885, D10) --
+	//
+	// The three below are raised where a package's credentialId is RESOLVED
+	// -- the fetcher, the poll, and the sourceCredentialCreate capability --
+	// and none is a flavour of source_unreadable, because each names a
+	// repair that lives somewhere else: on the Source stop (switch the
+	// credential), in Settings (add one), or in the choice of source form.
+
+	// CodeCredentialNotFound: the package names a credential its OWNER
+	// cannot read. Resolution runs under the package owner's actor through
+	// an owner-scoped query, so "does not exist" and "belongs to somebody
+	// else" are the SAME zero rows -- and the sentence must not claim to
+	// know which. A package naming another person's credential is refused
+	// by name, before any request leaves the cluster.
+	CodeCredentialNotFound = "credential_not_found"
+	// CodeCredentialRevoked: the credential resolves and is `revoked`. The
+	// row stays as history; every source fetching under it refuses here
+	// until it is switched to another credential.
+	CodeCredentialRevoked = "credential_revoked"
+	// CodeSourceHostUnsupported: a credential (or a source) names a host this
+	// cluster does not fetch from. github.com is the only host today, and
+	// the alternative is the other source form -- a zip of the same tree.
+	// Declared here because the catalogue is closed; the probe (a sibling
+	// task) answers with the same code for a non-GitHub repository URL.
+	CodeSourceHostUnsupported = "source_host_unsupported"
+
 	// -- reported, not fatal (D3) --
 
 	// CodeGoPackNotDeployable: a bff/ with a go.mod. Reported per-half and

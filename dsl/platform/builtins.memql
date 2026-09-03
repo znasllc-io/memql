@@ -174,6 +174,38 @@ builtin packageNoteUpstreamFromWebhook {
 
 @executor("integration.packages.pollUpstream")
 @args(profile="object")
-@description("The D11 polling fallback: walk every repo-sourced package and compare the upstream head against what is deployed (epic memql#4794). Runs under each package's own repoTokenRef where one is set, resolved at call time and never stored. Writes only latestKnownVersion and updateAvailable, and only for a package whose upstream actually moved -- a package that has not changed is not written, so the OS cue does not flicker and the mesh does not carry an event per package per poll.")
+@description("The D11 polling fallback: walk every repo-sourced package and compare the upstream head against what is deployed (epic memql#4794). Runs under each package's own credential where one is named (credentialId), unsealed at call time under the PACKAGE OWNER's actor and stored nowhere; a package whose credential cannot be resolved -- revoked, or not its owner's -- is skipped with a warning rather than polled anonymously, so a private repository never reads as unchanged because the request answered 404. Writes only latestKnownVersion and updateAvailable, and only for a package whose upstream actually moved -- a package that has not changed is not written, so the OS cue does not flicker and the mesh does not carry an event per package per poll.")
 builtin packagePollUpstream {
+}
+
+// ---- personal source credentials (epic memql#4885, D10) ----
+//
+// The write half of v1:platform:sourceCredential, and the reason the create is
+// a capability rather than the browser calling a mutation: a secret cannot be
+// sealed in a browser. secret.Encrypt runs under MEMQL_MASTER_KEY, a key that
+// exists on nodes and must never exist on a laptop, so what crosses the wire is
+// the plaintext, once, over the same TLS-terminated stream every other call
+// uses -- and it is never sent back. The same argument integrations/email's
+// configure capability records for a vendor key.
+//
+// AUTHORIZATION IS NOT IN THESE DECLARATIONS. Both run under the CALLER's
+// actor: the create stamps the owner from it and refuses an empty one, and the
+// revoke is an owned mutation the write guard admits for the row's owner.
+
+@sdk
+@executor("integration.packages.sourceCredentialCreate")
+@args(profile="object")
+@description("Store a personal source credential (epic memql#4885, D10). The token crosses the wire ONCE, inside this call, is sealed server-side under MEMQL_MASTER_KEY, and lands on a v1:platform:sourceCredential row owned by the caller; it appears in no row, no log line and no reply. Only github.com is admitted as a host today -- any other host is refused with source_host_unsupported, and the answer is to upload the tree as a zip instead. Returns {credentialId, fingerprint}, the fingerprint being the token's last four characters prefixed with '...', for telling two credentials apart. Name the credential on a package through createPackage or updatePackageSource; the fetcher resolves it under that package's OWNER, so a package naming somebody else's credential is refused by name.")
+builtin sourceCredentialCreate {
+  host   string!  @description("The host the token authenticates against. github.com is the only value admitted today.")
+  label  string!  @description("The person's own name for it, e.g. 'work laptop'. Display only.")
+  token  string!  @description("The access token itself. Read once, sealed, and discarded; never stored or echoed in the clear.")
+}
+
+@sdk
+@executor("integration.packages.sourceCredentialRevoke")
+@args(profile="object")
+@description("Revoke one of the caller's source credentials (epic memql#4885, D10). Flips status to revoked and stamps revokedAt through the owned revokeSourceCredential mutation, so the write guard admits the row's owner (or a cluster owner) and nobody else. The row is never deleted -- it is the audit history of what fetched under it -- and every source fetching under it refuses at its next fetch with credential_revoked until it is switched to another credential on its Source stop. Returns {credentialId, status}.")
+builtin sourceCredentialRevoke {
+  credentialId  string!  @description("The v1:platform:sourceCredential row to revoke.")
 }

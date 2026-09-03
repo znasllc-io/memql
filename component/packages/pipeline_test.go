@@ -18,21 +18,23 @@ import (
 
 type fakeFetcher struct {
 	tree fs.FS
-	// tokenRefSeen records the secret NAME the fetch was asked to resolve.
-	tokenRefSeen string
-	// resolvedTokens records every secret VALUE the fetch resolved, so a test
-	// can assert none of them reached a row.
+	// sourceSeen records what the fetch was told: the credential NAME and the
+	// OWNER it is to be resolved under, straight off the package row.
+	sourceSeen RepoSource
+	// resolvedTokens records every credential VALUE the fetch resolved, so a
+	// test can assert none of them reached a row.
 	resolvedTokens []string
-	secrets        map[string]string
-	err            error
+	// credentials maps a credential id to the token a resolver would unseal.
+	credentials map[string]string
+	err         error
 }
 
-func (f *fakeFetcher) FetchRepo(_ context.Context, _, _, tokenRef string, _ Limits) (*SourceSnapshot, error) {
+func (f *fakeFetcher) FetchRepo(_ context.Context, src RepoSource, _ Limits) (*SourceSnapshot, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	f.tokenRefSeen = tokenRef
-	if v, ok := f.secrets[tokenRef]; ok {
+	f.sourceSeen = src
+	if v, ok := f.credentials[src.CredentialId]; ok {
 		f.resolvedTokens = append(f.resolvedTokens, v)
 	}
 	return &SourceSnapshot{Tree: f.tree, Version: "sha-abc123", cleanup: func() {}}, nil
@@ -379,11 +381,17 @@ func TestAFailedBuildLandsALogTailAndPublishesNothing(t *testing.T) {
 	}
 }
 
-func TestTheRepoTokenIsResolvedOnlyAtFetchTimeAndReachesNoRow(t *testing.T) {
+// TestTheCredentialIsResolvedUnderThePackageOwnerAtFetchTimeAndReachesNoRow
+// pins the D10 handoff (epic memql#4885): the pipeline hands the fetch the
+// credential NAME and the package's OWNER, straight off the row, and never a
+// value. The caller here is a CLUSTER OWNER deploying somebody else's package,
+// which is the case the owner field exists for -- the fetch resolves under the
+// package owner, not under the person clicking.
+func TestTheCredentialIsResolvedUnderThePackageOwnerAtFetchTimeAndReachesNoRow(t *testing.T) {
 	pkg := ownerPackage()
-	pkg["repoTokenRef"] = "acme-repo-token"
+	pkg["credentialId"] = "v1:platform:sourceCredential:acme"
 	h := newHarness(t, spaOnlyPackage(), pkg)
-	h.fetcher.secrets = map[string]string{"acme-repo-token": "ghp_SUPERSECRETVALUE"}
+	h.fetcher.credentials = map[string]string{"v1:platform:sourceCredential:acme": "ghp_SUPERSECRETVALUE"}
 
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId: "v1:platform:package:abc",
@@ -394,11 +402,17 @@ func TestTheRepoTokenIsResolvedOnlyAtFetchTimeAndReachesNoRow(t *testing.T) {
 		t.Fatalf("deploy: %v", err)
 	}
 
-	if h.fetcher.tokenRefSeen != "acme-repo-token" {
-		t.Fatalf("the fetch must be handed the secret NAME, got %q", h.fetcher.tokenRefSeen)
+	if got := h.fetcher.sourceSeen.CredentialId; got != "v1:platform:sourceCredential:acme" {
+		t.Fatalf("the fetch must be handed the credential NAME, got %q", got)
+	}
+	if got, want := h.fetcher.sourceSeen.OwnerUserId, rowString(pkg, "ownerUserId"); got != want {
+		t.Fatalf("the fetch must be handed the PACKAGE owner to resolve under, got %q want %q -- the caller was a cluster owner, and resolving under them would be resolving under the wrong person", got, want)
+	}
+	if h.fetcher.sourceSeen.OwnerUserId == clusterOwner().UserId {
+		t.Fatal("control failed: the package owner and the caller are the same id, so this test cannot tell them apart")
 	}
 	if len(h.fetcher.resolvedTokens) != 1 {
-		t.Fatalf("the secret must be resolved exactly once, at fetch time: %v", h.fetcher.resolvedTokens)
+		t.Fatalf("the credential must be resolved exactly once, at fetch time: %v", h.fetcher.resolvedTokens)
 	}
 	// The reachable positive: the NAME does appear in the package row this
 	// test seeded, so a search that found nothing would be searching wrongly.

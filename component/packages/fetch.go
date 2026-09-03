@@ -42,17 +42,27 @@ func (s *SourceSnapshot) Close() {
 	}
 }
 
-// SecretResolver turns a globalSecret NAME into its value.
+// RepoSource is what a repository fetch is told: the four facts off the package
+// row, and nothing resolved.
 //
-// The whole D14 shape is in this signature: the pipeline holds a NAME, asks
-// for the value at the moment of the fetch, and never stores what comes back.
-// The value never lands on a row, a snapshot, or a log line.
-type SecretResolver func(ctx context.Context, name string) (string, error)
+// CredentialId is a NAME and OwnerUserId is whose name it is resolved under.
+// The pair travels together because resolution is owner-scoped by
+// construction (epic memql#4885, D10): the fetcher asks for the value at the
+// moment of the fetch, under the PACKAGE OWNER's actor rather than the
+// caller's, and never stores what comes back. A cluster owner deploying
+// somebody's package fetches under that package's own credential, and a
+// package naming another person's credential is refused by name.
+type RepoSource struct {
+	RepoUrl      string
+	Ref          string
+	CredentialId string
+	OwnerUserId  string
+}
 
 // Fetcher fetches a package source. Its two implementations are the two source
 // forms; everything downstream sees one SourceSnapshot either way.
 type Fetcher interface {
-	FetchRepo(ctx context.Context, repoUrl, ref, tokenRef string, limits Limits) (*SourceSnapshot, error)
+	FetchRepo(ctx context.Context, src RepoSource, limits Limits) (*SourceSnapshot, error)
 	FetchArtifact(ctx context.Context, artifactId string, limits Limits) (*SourceSnapshot, error)
 }
 
@@ -63,8 +73,11 @@ type Fetcher interface {
 // it fetches history nobody deploys. One authenticated GET returns exactly the
 // tree at a ref.
 type githubFetcher struct {
-	http    *http.Client
-	secrets SecretResolver
+	http *http.Client
+	// credentials unseals the package's credential at fetch time. Nil on a
+	// node that cannot resolve credentials, which a private repository then
+	// REFUSES against rather than fetching anonymously and reading 404.
+	credentials CredentialResolver
 	// artifactBytes reads a Library zip artifact's bytes. Separate from the
 	// HTTP client because the two source forms share nothing but their output.
 	artifactBytes func(ctx context.Context, artifactId string) ([]byte, string, error)
@@ -120,8 +133,8 @@ func parseGitHubRepo(repoUrl string) (owner, repo string, err error) {
 	return parts[0], strings.TrimSuffix(parts[1], ".git"), nil
 }
 
-func (f *githubFetcher) FetchRepo(ctx context.Context, repoUrl, ref, tokenRef string, limits Limits) (*SourceSnapshot, error) {
-	target, err := tarballURL(repoUrl, ref)
+func (f *githubFetcher) FetchRepo(ctx context.Context, src RepoSource, limits Limits) (*SourceSnapshot, error) {
+	target, err := tarballURL(src.RepoUrl, src.Ref)
 	if err != nil {
 		return nil, err
 	}
@@ -134,19 +147,23 @@ func (f *githubFetcher) FetchRepo(ctx context.Context, repoUrl, ref, tokenRef st
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	req.Header.Set("User-Agent", "memql-packages")
 
-	// D14: resolved HERE, at the moment of the fetch, into a local that dies
-	// with this function. Nothing above this line holds a token and nothing
-	// below it stores one.
-	if name := strings.TrimSpace(tokenRef); name != "" {
-		if f.secrets == nil {
+	// D10: resolved HERE, at the moment of the fetch, under the package
+	// owner's actor, into a local that dies with this function. Nothing above
+	// this line holds a token and nothing below it stores one -- and nothing
+	// leaves the cluster before the credential has resolved, so a package
+	// naming a credential its owner cannot read is refused with no request
+	// made.
+	if id := strings.TrimSpace(src.CredentialId); id != "" {
+		if f.credentials == nil {
 			return nil, refuse(CodeSourceUnreadable,
-				"this package names the secret %q for its repository, and this node cannot resolve secrets", name)
+				"this package fetches under credential %q, and this node cannot resolve credentials", id)
 		}
-		token, serr := f.secrets(ctx, name)
-		if serr != nil || strings.TrimSpace(token) == "" {
-			return nil, refuse(CodeSourceUnreadable,
-				"this package names the secret %q for its repository, and this cluster has no usable value stored under that name. Add it under Settings, or clear the field if the repository is public.",
-				name)
+		token, cerr := f.credentials(ctx, id, src.OwnerUserId)
+		if cerr != nil {
+			// A typed refusal (credential_not_found / credential_revoked)
+			// passes through untouched: the code is what the Source stop
+			// renders its repair from.
+			return nil, cerr
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -167,11 +184,11 @@ func (f *githubFetcher) FetchRepo(ctx context.Context, repoUrl, ref, tokenRef st
 		// cannot see, so the message names BOTH possibilities rather than
 		// asserting the one it cannot distinguish.
 		return nil, refuse(CodeSourceUnreadable,
-			"GitHub answered 404 for this repository at ref %q. Either it does not exist, or it is private and this package's access token does not reach it.",
-			refOrDefault(ref))
+			"GitHub answered 404 for this repository at ref %q. Either it does not exist, or it is private and this package's credential does not reach it.",
+			refOrDefault(src.Ref))
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		return nil, refuse(CodeSourceUnreadable,
-			"GitHub refused this cluster's access to the repository (HTTP %d). Check the token this package names.", resp.StatusCode)
+			"GitHub refused this cluster's access to the repository (HTTP %d). Check the credential this package fetches under.", resp.StatusCode)
 	case resp.StatusCode >= 300:
 		return nil, refuse(CodeSourceUnreadable, "GitHub answered HTTP %d for this repository", resp.StatusCode)
 	}

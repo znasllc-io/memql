@@ -9950,6 +9950,48 @@ QueryClient.prototype.soldByVariant = function (this: QueryClient, args: SoldByV
   return this.executeNamed("soldByVariant", buildSoldByVariant(args), opts);
 };
 
+/** One credential by id -- the Source stop's credential chip. Card shape, so metadata only. */
+// Bound concept: v1:platform:sourceCredential (machine-readable: BoundConcepts["sourceCredentialById"] in generated_concepts.ts).
+export interface SourceCredentialByIdArgs {
+  credentialId: string;
+}
+
+export function buildSourceCredentialById(args: SourceCredentialByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("credentialId: " + renderMemQLValue(args.credentialId));
+  return "query sourceCredentialById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sourceCredentialById(args: SourceCredentialByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sourceCredentialById = function (this: QueryClient, args: SourceCredentialByIdArgs = {} as SourceCredentialByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sourceCredentialById", buildSourceCredentialById(args), opts);
+};
+
+/** Every credential this caller holds, revoked ones included and marked -- the Settings Sources group. A cluster owner reads every row's metadata, which is the oversight the composite tier exists for; nothing here can return the ciphertext, because the card shape does not carry it. */
+// Bound concept: v1:platform:sourceCredential (machine-readable: BoundConcepts["sourceCredentialsMine"] in generated_concepts.ts).
+export interface SourceCredentialsMineArgs {
+}
+
+export function buildSourceCredentialsMine(args: SourceCredentialsMineArgs): string {
+  void args;
+  return "query sourceCredentialsMine()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sourceCredentialsMine(args?: SourceCredentialsMineArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sourceCredentialsMine = function (this: QueryClient, args: SourceCredentialsMineArgs = {} as SourceCredentialsMineArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sourceCredentialsMine", buildSourceCredentialsMine(args), opts);
+};
+
 /** Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view. */
 // Bound concept: v1:common:media (machine-readable: BoundConcepts["spaceMedia"] in generated_concepts.ts).
 export interface SpaceMediaArgs {

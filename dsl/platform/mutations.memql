@@ -1027,8 +1027,11 @@ mutate syncState setSyncPaused {
 /// analysis overwrites it through recordPackageAnalysis, which is why the field's doc says the name
 /// comes from the manifest: this value is a placeholder with a person's guess in it.
 ///
-/// `repoTokenRef` NAMES a globalSecret and is a plain string here on purpose (D14). There is no arg
-/// on this mutation, or anywhere else in this epic, that carries a token VALUE.
+/// `credentialId` NAMES one of the caller's v1:platform:sourceCredential rows and is a plain string
+/// here on purpose (epic memql#4885, D10). There is no arg on this mutation, or anywhere else in the
+/// packages surface, that carries a token VALUE: the token crossed the wire once, inside
+/// sourceCredentialCreate, and the fetcher resolves the name under THIS package's owner -- so naming
+/// somebody else's credential here buys nothing but a credential_not_found at the next fetch.
 @actor
 @description("Register a package this cluster tracks and can deploy")
 mutate package createPackage {
@@ -1038,11 +1041,11 @@ mutate package createPackage {
     sourceKind    enum("repo", "artifact")!
     repoUrl       string   @maxLength(400)
     repoRef       string   @maxLength(200)
-    repoTokenRef  string   @maxLength(120)
+    credentialId  string
     artifactId    string
   }
   insert {
-    accept { name, repoUrl, repoRef, repoTokenRef, artifactId }
+    accept { name, repoUrl, repoRef, credentialId, artifactId }
     stamp {
       id:              args.packageId
       ownerUserId:     actor.userId
@@ -1053,18 +1056,19 @@ mutate package createPackage {
   }
 }
 
-/// Edit the source facts of a tracked package: which ref to deploy, and which named secret to fetch
-/// under. Minimal arguments deliberately -- update{} has been a read-merge since memql#1628, so
-/// re-supplying every discriminator is dead weight that an undeclared-argument DISCARD hides.
-@description("Update a package's tracked ref or secret name")
+/// Edit the source facts of a tracked package: which ref to deploy, and which of the owner's
+/// credentials to fetch under -- switching a source to a fresh credential after revoking the old one
+/// is this write. Minimal arguments deliberately -- update{} has been a read-merge since memql#1628,
+/// so re-supplying every discriminator is dead weight that an undeclared-argument DISCARD hides.
+@description("Update a package's tracked ref or the credential it fetches under")
 mutate package updatePackageSource {
   args {
     packageId     string!
     repoRef       string   @maxLength(200)
-    repoTokenRef  string   @maxLength(120)
+    credentialId  string
   }
   update {
-    accept { repoRef, repoTokenRef }
+    accept { repoRef, credentialId }
     stamp {
       id: args.packageId
     }
@@ -1336,5 +1340,82 @@ mutate site setSiteStatus {
   update {
     id:     args.siteId
     status: args.status
+  }
+}
+
+// ---- source credentials (epic memql#4885, D10) ----
+//
+// Three writes, split the way the packages block above is split.
+// createSourceCredential and touchSourceCredential are the ENGINE's: the first
+// lands a value only the Go frame that sealed it can vouch for, the second is
+// the fetcher's own account of a fetch. revokeSourceCredential is the PERSON's:
+// an owned, client-reachable status flip the write guard admits for the row's
+// owner and refuses for everyone else.
+
+/// Land a sealed credential. @serverOnly, and caller-scoping is not the fix: the row IS the caller's
+/// (ownerUserId is stamped from actor.userId below), so a scoped form would admit exactly the call
+/// being refused -- a browser writing an `encryptedValue` and `fingerprint` it composed itself.
+/// Neither value can be vouched for by anyone but the Go frame that ran secret.Encrypt under
+/// MEMQL_MASTER_KEY, a key that exists on nodes and must never exist on a laptop; a client-supplied
+/// ciphertext would be a row that reads as configured and unseals to nothing, or to whatever the
+/// client chose. So the only way in is the sourceCredentialCreate capability: the token crosses the
+/// wire once, is sealed, and reaches this mutation under stamped internal origin WITH the caller's
+/// own actor -- which is what makes the owner stamp the person who asked, and refuses an empty one.
+@serverOnly
+@actor
+@description("Land a credential sealed by the sourceCredentialCreate capability")
+mutate sourceCredential createSourceCredential {
+  args {
+    credentialId    string!
+    host            string!
+    label           string!  @maxLength(120)
+    encryptedValue  string!
+    fingerprint     string!
+  }
+  insert {
+    accept { host, label, encryptedValue, fingerprint }
+    stamp {
+      id:          args.credentialId
+      ownerUserId: actor.userId
+      status:      "active"
+    }
+  }
+}
+
+/// Revoke a credential. The person's write, and an owned one: the write guard resolves the target
+/// row and admits its owner (or a cluster owner, through the explicit escape), so a caller cannot
+/// revoke a credential they do not hold. The row stays -- it is the audit history of what fetched
+/// under it -- and every source fetching under it refuses at its next fetch until it is switched.
+@description("Revoke a source credential; the row is kept as history")
+mutate sourceCredential revokeSourceCredential {
+  args {
+    credentialId  string!
+  }
+  update {
+    id:        args.credentialId
+    status:    "revoked"
+    revokedAt: now
+  }
+}
+
+/// Stamp the heartbeat. Pipeline writer: the fetcher and the poll call it right after unsealing, so
+/// `lastUsedAt` is the engine's own account of a fetch and never enters an arrival-cue fingerprint.
+///
+/// actor.userId scoping is not the fix, for the reason recordPackageDeployedVersion gives: the value
+/// is a claim about what the engine DID, and a caller stamping it on their own credential would be
+/// equally wrong and equally unscoped away. And the poll runs on a schedule with nobody attached, so
+/// a self-scoped filter would refuse the one path that legitimately calls it.
+@serverOnly
+@description("Record when a source credential was last unsealed for a fetch or a poll")
+mutate sourceCredential touchSourceCredential {
+  args {
+    credentialId  string!
+    lastUsedAt    datetime!
+  }
+  update {
+    accept { lastUsedAt }
+    stamp {
+      id: args.credentialId
+    }
   }
 }

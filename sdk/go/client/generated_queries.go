@@ -10552,6 +10552,45 @@ func SoldByVariantBuild(args SoldByVariantArgs) string {
 	return b.String()
 }
 
+// SourceCredentialById -- One credential by id -- the Source stop's credential chip. Card shape, so metadata only.
+//
+// Bound concept: v1:platform:sourceCredential (machine-readable: BoundConcepts["sourceCredentialById"] in generated_concepts.go).
+type SourceCredentialByIdArgs struct {
+	CredentialId string
+}
+
+// SourceCredentialById calls the engine query sourceCredentialById.
+func (qc *QueryClient) SourceCredentialById(ctx context.Context, args SourceCredentialByIdArgs) (*Result, error) {
+	call := SourceCredentialByIdBuild(args)
+	return qc.executeNamed(ctx, "sourceCredentialById", call)
+}
+
+func SourceCredentialByIdBuild(args SourceCredentialByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query sourceCredentialById(")
+	b.WriteString("credentialId: ")
+	b.WriteString(quoteMemQL(args.CredentialId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SourceCredentialsMine -- Every credential this caller holds, revoked ones included and marked -- the Settings Sources group. A cluster owner reads every row's metadata, which is the oversight the composite tier exists for; nothing here can return the ciphertext, because the card shape does not carry it.
+//
+// Bound concept: v1:platform:sourceCredential (machine-readable: BoundConcepts["sourceCredentialsMine"] in generated_concepts.go).
+type SourceCredentialsMineArgs struct {
+}
+
+// SourceCredentialsMine calls the engine query sourceCredentialsMine.
+func (qc *QueryClient) SourceCredentialsMine(ctx context.Context, args SourceCredentialsMineArgs) (*Result, error) {
+	call := SourceCredentialsMineBuild(args)
+	return qc.executeNamed(ctx, "sourceCredentialsMine", call)
+}
+
+func SourceCredentialsMineBuild(args SourceCredentialsMineArgs) string {
+	_ = args
+	return "query sourceCredentialsMine()"
+}
+
 // SpaceMedia -- Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view.
 //
 // Bound concept: v1:common:media (machine-readable: BoundConcepts["spaceMedia"] in generated_concepts.go).
