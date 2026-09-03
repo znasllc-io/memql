@@ -55,13 +55,22 @@ export function describe(err: unknown): Refusal {
   return { code: "", message: raw };
 }
 
-interface WriteState {
+export interface WriteState {
   busy: boolean;
   refusal: Refusal | null;
   clear: () => void;
 }
 
-function useWrite(): WriteState & { run: <T>(fn: (query: NonNullable<ReturnType<typeof useOsConnection>>["query"]) => Promise<T>) => Promise<T | null> } {
+/**
+ * The shape every write hook in this app is built from.
+ *
+ * EXPORTED so `sources/useGithubConnect.ts` can build on it rather than
+ * respell it (epic memql#4915). A second copy of this would be a second
+ * refusal-parsing path, and the two would drift on exactly the case that
+ * matters: what happens to an error whose shape `describe` does not
+ * recognise.
+ */
+export function useWrite(): WriteState & { run: <T>(fn: (query: NonNullable<ReturnType<typeof useOsConnection>>["query"]) => Promise<T>) => Promise<T | null> } {
   const connection = useOsConnection();
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
