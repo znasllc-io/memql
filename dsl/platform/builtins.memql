@@ -209,3 +209,33 @@ builtin sourceCredentialCreate {
 builtin sourceCredentialRevoke {
   credentialId  string!  @description("The v1:platform:sourceCredential row to revoke.")
 }
+
+// ---- the compose probes (epic memql#4885, D11) ----
+//
+// Two questions the Source stop asks before a person commits to a source, and
+// the answer to each is a TYPED REASON rather than a row: neither probe writes
+// anything, and neither stamps anything -- not even the credential heartbeat a
+// fetch records, because a probe is a question and a question is not a use.
+//
+// AUTHORIZATION IS NOT IN THESE DECLARATIONS. Both run under the CALLER's
+// actor: the source probe resolves the named credential exactly as a fetch
+// would, so a credential the caller cannot read is answered as a reason before
+// any request leaves the cluster; the artifact probe reads the zip through the
+// same owner-scoped Library read the deploy uses.
+
+@sdk
+@executor("integration.packages.sourceProbe")
+@args(profile="object")
+@description("Ask whether this cluster can read a repository (epic memql#4885, D11). Parses the URL, resolves credentialId under the caller's own actor the way a fetch does, asks GitHub for the repository, and answers {host, reachable, private, defaultBranch, reason}. reason is exactly one of: ok (reachable; private and defaultBranch are GitHub's answer), not_found_or_private (404 with no credential -- GitHub answers the two alike, and the stop offers a credential), credential_cannot_see_it (refused under the credential: choose another, or fix its grant), credential_not_found (the caller cannot read the named credential), credential_revoked, source_host_unsupported (only github.com today, or upload a zip), rate_limited (ask again later). A typed reason, never the API's own body. A GitHub this cluster cannot reach is an ERROR rather than a reason, so the stop says so and stays editable; the fetch is the authority and the probe is a courtesy. Writes nothing and stamps nothing.")
+builtin sourceProbe {
+  repoUrl       string!  @description("The repository URL as typed, e.g. https://github.com/acme/widget.")
+  credentialId  string   @description("One of the caller's v1:platform:sourceCredential rows to probe under. Empty probes anonymously, which is what a public repository needs.")
+}
+
+@sdk
+@executor("integration.packages.artifactProbe")
+@args(profile="object")
+@description("Ask what kind of tree a zip in the caller's Library is (epic memql#4885, D11). Opens it through the same fetch a deploy uses -- the caller's own bytes, expanded by OpenZip under the packages limits, so a zip the deploy would refuse is refused here by the same code -- and answers {isPackage, isBuiltSite, fileCount, totalBytes}. isPackage: memql-package.yaml sits at the root, and the package path takes it from here. isBuiltSite: index.html sits at the root and there is no manifest, and the hand-made path takes it and asks for the kind. Neither: the zip is something else, commonly a folder wrapping the site one level down. fileCount and totalBytes are counted over the opened tree. Writes nothing; the artifact stays exactly the Library row it was.")
+builtin artifactProbe {
+  artifactId  string!  @description("The v1:library:artifact index row of the zip to probe.")
+}

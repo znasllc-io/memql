@@ -93,9 +93,17 @@ type Deps struct {
 	// on the other. Nil on a node that cannot resolve credentials; a package
 	// naming one is then refused rather than fetched anonymously.
 	Credentials CredentialResolver
-	// HTTP is the client the D11 poll asks GitHub with. Nil means a 30s
-	// default. Injected so a test can stand a fake GitHub behind it and read
-	// which requests carried a bearer -- and which were never made.
+	// PeekCredentials is the PROBE's resolver (epic memql#4885, D11): the
+	// same read, the same two refusals, and no lastUsedAt heartbeat -- a
+	// probe is a question, not a fetch, and it writes nothing. A separate
+	// field rather than a flag on Credentials so a test can see which of the
+	// two a path reached for, and so the fetcher can never be handed the one
+	// that does not stamp.
+	PeekCredentials CredentialResolver
+	// HTTP is the client the D11 poll and the source probe ask GitHub with.
+	// Nil means a 30s default. Injected so a test can stand a fake GitHub
+	// behind it and read which requests carried a bearer -- and which were
+	// never made.
 	HTTP *http.Client
 }
 

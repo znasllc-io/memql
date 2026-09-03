@@ -150,6 +150,23 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Handler:     i.handleSourceCredentialRevoke,
 			ArgsSchema:  map[string]string{"credentialId": "string (required)"},
 		},
+		{
+			Name:        "sourceProbe",
+			Description: "Ask whether this cluster can read a repository before a source is committed to (epic memql#4885, D11). Parses the URL, resolves the named credential under the CALLER's actor the way a fetch does, asks GitHub for the repository, and answers {host, reachable, private, defaultBranch, reason} where reason is exactly one of ok, not_found_or_private, credential_cannot_see_it, credential_not_found, credential_revoked, source_host_unsupported, rate_limited -- a typed reason, never the API's own body. Writes nothing and stamps nothing, not even lastUsedAt. A GitHub this cluster cannot reach is an error, not a reason.",
+			Handler:     i.handleSourceProbe,
+			ArgsSchema: map[string]string{
+				"repoUrl":      "string (required) -- the repository URL as typed",
+				"credentialId": "string -- one of the caller's v1:platform:sourceCredential rows to probe under; empty probes anonymously",
+			},
+		},
+		{
+			Name:        "artifactProbe",
+			Description: "Ask what kind of tree a zip in the caller's Library is (epic memql#4885, D11). Opens it through the same fetch a deploy uses -- the caller's bytes, OpenZip under the packages limits -- and answers {isPackage, isBuiltSite, fileCount, totalBytes}: isPackage when memql-package.yaml sits at the root, isBuiltSite when index.html does and there is no manifest, neither otherwise. Writes nothing.",
+			Handler:     i.handleArtifactProbe,
+			ArgsSchema: map[string]string{
+				"artifactId": "string (required) -- the v1:library:artifact index row of the zip",
+			},
+		},
 	}
 }
 
@@ -331,15 +348,16 @@ func (i *Integration) resolve() (*Deps, error) {
 		}
 		s := &store{engine: i.engine, logger: i.logger}
 		i.deps = &Deps{
-			Store:       s,
-			Fetcher:     newProductionFetcher(s, i.logger),
-			Stager:      newBlobStager(),
-			Roller:      newDeployControlRoller(i.logger),
-			Publisher:   newEnginePublisher(i.engine, s, i.logger),
-			Auditor:     &engineAuditor{engine: i.engine, logger: i.logger},
-			Credentials: s.resolveCredential,
-			Logger:      i.logger,
-			Limits:      DefaultLimits(),
+			Store:           s,
+			Fetcher:         newProductionFetcher(s, i.logger),
+			Stager:          newBlobStager(),
+			Roller:          newDeployControlRoller(i.logger),
+			Publisher:       newEnginePublisher(i.engine, s, i.logger),
+			Auditor:         &engineAuditor{engine: i.engine, logger: i.logger},
+			Credentials:     s.resolveCredential,
+			PeekCredentials: s.peekCredential,
+			Logger:          i.logger,
+			Limits:          DefaultLimits(),
 			// Builder is deliberately nil. See builder.go.
 		}
 	})
