@@ -29,8 +29,15 @@ import (
 type SinkComponent struct {
 	logger   *slog.Logger
 	provider func() *bun.DB
-	sink     *Sink
 	enabled  bool
+
+	// sink is ATOMIC, and that is not defensive tidiness. It is written by
+	// Start on the bootstrap goroutine and read by Record on whichever
+	// goroutine is serving an HTTP request -- and on an edge those overlap by
+	// construction, because the handler is mounted before the database
+	// component has finished starting. A plain field here is a data race the
+	// detector finds and a production node experiences as a torn pointer.
+	sink atomic.Pointer[Sink]
 
 	running atomic.Bool
 	readyCh chan struct{}
@@ -77,7 +84,7 @@ func NewSinkComponent(logger *slog.Logger, provider func() *bun.DB, order int) *
 // climbed during every boot would put a permanent floor under the one series
 // an operator is meant to alert on.
 func (c *SinkComponent) Record(r Record) {
-	sink := c.sink
+	sink := c.sink.Load()
 	if sink == nil {
 		return
 	}
@@ -102,8 +109,13 @@ func (c *SinkComponent) Start(ctx context.Context) {
 		return
 	}
 
-	c.sink = NewSink(db, SinkOptions{Logger: c.logger, Node: nodeId()})
-	c.sink.Start()
+	sink := NewSink(db, SinkOptions{Logger: c.logger, Node: nodeId()})
+	sink.Start()
+	// PUBLISHED LAST. The store happens after Start, so the first record a
+	// serving goroutine files can never reach a sink whose drain is not yet
+	// running -- it is dropped by the nil branch instead, which is the honest
+	// outcome for a request served before this node was recording.
+	c.sink.Store(sink)
 	c.running.Store(true)
 
 	days := RetentionDays()
@@ -120,11 +132,12 @@ func (c *SinkComponent) Start(ctx context.Context) {
 }
 
 func (c *SinkComponent) Stop(ctx context.Context) {
-	if c.sink == nil {
+	sink := c.sink.Load()
+	if sink == nil {
 		return
 	}
-	written, dropped := c.sink.Stats()
-	if err := c.sink.Stop(ctx); err != nil {
+	written, dropped := sink.Stats()
+	if err := sink.Stop(ctx); err != nil {
 		c.logger.Warn("the request log did not finish flushing before shutdown", "err", err)
 	}
 	c.running.Store(false)

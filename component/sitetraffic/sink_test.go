@@ -2,11 +2,19 @@ package sitetraffic
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
+	"os"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/znasllc-io/memql/component/edge"
 	"github.com/znasllc-io/memql/component/metrics"
@@ -260,4 +268,130 @@ func TestPathClassesMatchTheEdgesOwnSpelling(t *testing.T) {
 			t.Errorf("path class %d: the edge says %q, this package says %q", i, edge.PathClassesForTest()[i], class)
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The lifecycle
+// ---------------------------------------------------------------------------
+
+// A REQUEST SERVED WHILE THE COMPONENT IS STARTING is not a corner case on an
+// edge: the site handler is mounted before the database component has
+// finished starting, so the very first requests a replica answers arrive
+// while Start is still resolving its handle. The component is therefore read
+// from a serving goroutine and written from the bootstrap one at the same
+// time.
+//
+// THE PROVIDER MUST HAND BACK A REAL HANDLE, and that is the whole reason
+// this test is written the way it is. A first cut let the provider answer nil,
+// which sends Start down its no-database branch -- it then writes the field
+// at all, so the readers had nothing to race with and the test passed under
+// -race against the plain pointer field it was written to catch. A test that
+// passes for the wrong reason is worse than no test.
+//
+// The handle points at a port nothing is listening on: `sql.OpenDB` does not
+// dial, so Start resolves it, publishes the sink, and finds out the database
+// is unreachable only when the retention call and the first flush fail --
+// both of which are warnings by design. What matters here is that the field
+// is WRITTEN while eight goroutines read it.
+func TestRecordIsSafeWhileTheComponentIsStarting(t *testing.T) {
+	unreachable := bun.NewDB(
+		sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN("postgres://nobody:nobody@127.0.0.1:1/none?sslmode=disable"))),
+		pgdialect.New(),
+	)
+	t.Cleanup(func() { _ = unreachable.Close() })
+
+	c := NewSinkComponent(slog.New(slog.NewTextHandler(io.Discard, nil)), func() *bun.DB { return unreachable }, 0)
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					// Must never panic and never race, whatever Start is
+					// doing to the field underneath.
+					c.Record(aRecord("site-1"))
+				}
+			}
+		}()
+	}
+
+	c.Start(context.Background())
+	<-c.Ready()
+	if !c.IsRunning() {
+		t.Fatal("Start did not resolve a sink, so this test is racing nothing -- see the note above")
+	}
+
+	close(stop)
+	wg.Wait()
+	c.Stop(context.Background())
+}
+
+// A component whose provider never yields a handle records nothing and says
+// so through its own state -- and files no drop, because nothing was
+// measuring yet and a counter that climbed during every boot would put a
+// permanent floor under the one series an operator alerts on.
+func TestAComponentWithNoDatabaseRecordsNothingAndCountsNothing(t *testing.T) {
+	before := metrics.SiteTrafficDroppedValue(metrics.SiteTrafficDropQueueFull)
+	c := NewSinkComponent(slog.New(slog.NewTextHandler(io.Discard, nil)), func() *bun.DB { return nil }, 0)
+	c.Start(context.Background())
+	<-c.Ready()
+	if c.IsRunning() {
+		t.Error("a component with no database handle must not report itself running")
+	}
+	for i := 0; i < 20; i++ {
+		c.Record(aRecord("site-1")) // must not panic
+	}
+	if after := metrics.SiteTrafficDroppedValue(metrics.SiteTrafficDropQueueFull); after != before {
+		t.Errorf("the drop counter moved by %v during a boot that never started recording", after-before)
+	}
+	c.Stop(context.Background())
+}
+
+// The two knobs, read from the environment.
+func TestRequestLogEnvKnobs(t *testing.T) {
+	t.Run("recording is on by default", func(t *testing.T) {
+		if !RequestLogEnabled() {
+			t.Error("unset must mean ON -- a cluster where nobody opted in would answer unmeasured forever with nothing to say why")
+		}
+	})
+	t.Run("an explicit false switches it off", func(t *testing.T) {
+		t.Setenv("MEMQL_EDGE_REQUEST_LOG_ENABLED", "false")
+		if RequestLogEnabled() {
+			t.Error("false must switch it off")
+		}
+	})
+	t.Run("an unparseable value stays on", func(t *testing.T) {
+		// Failing CLOSED here would silently stop a cluster measuring
+		// anything over a typo in an overlay, and the figure would read as
+		// "nobody is visiting".
+		t.Setenv("MEMQL_EDGE_REQUEST_LOG_ENABLED", "sometimes")
+		if !RequestLogEnabled() {
+			t.Error("an unparseable value must take the default")
+		}
+	})
+	t.Run("retention is clamped, and a bad value takes the default", func(t *testing.T) {
+		for value, want := range map[string]int{
+			"":     DefaultRetentionDays,
+			"lots": DefaultRetentionDays,
+			"0":    1,
+			"-5":   1,
+			"7":    7,
+			"9000": 365,
+		} {
+			if value == "" {
+				os.Unsetenv("MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS")
+			} else {
+				t.Setenv("MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS", value)
+			}
+			if got := RetentionDays(); got != want {
+				t.Errorf("MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS=%q gives %d days, want %d", value, got, want)
+			}
+		}
+	})
 }
