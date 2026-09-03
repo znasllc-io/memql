@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 import { Archive, ArrowUpCircle, ExternalLink, RotateCcw, Rocket, Sparkles, Undo2 } from "lucide-react";
 
 import {
@@ -17,6 +18,7 @@ import {
   useLiveView,
 } from "../../../kit";
 import { formatMoment } from "../../../kit/format";
+import { OpenLogsButton } from "../../../logs/OpenLogs";
 import { usePackageActions } from "./actions";
 import { ConfirmGate } from "./ConfirmGate";
 import { BuildLog, ProblemNotice, ReportView } from "./ReportView";
@@ -213,6 +215,15 @@ export function PackageDetail({
                 <span className="os-attempt-status" data-status={d.status}>
                   {statusWord(d.status)}
                 </span>
+                {/* Every line of this attempt (epic memql#4895): the pipeline
+                    stamps each one with the deployment as its subject, so the
+                    Logs app on Search, narrowed to this row, IS the run's
+                    full log rather than the tail kept on the row. */}
+                <OpenLogsButton
+                  subject={d.id}
+                  subjectConcept={Concepts.PLATFORM_PACKAGE_DEPLOYMENT}
+                  ariaLabel={`Logs of the ${d.sourceVersion === "" ? "unversioned" : shortVersion(d.sourceVersion)} deploy`}
+                />
                 {canWrite && d.status === "succeeded" && d.id !== latest?.id ? (
                   <Button
                     onClick={() => void actions.rollback(pkg.id, d.id).then(reseed)}

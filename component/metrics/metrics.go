@@ -166,6 +166,40 @@ var (
 		Name:      "signing_key_rotation_supported",
 		Help:      "IDENTITY NODES ONLY -- select app=\"identity\"; every other node type exports this series at a constant 0 because it holds no signing key. 1 when this replica can rotate its own signing key (on-disk MEMQL_IDENTITY_KEY_DIR mode, dev), 0 when it cannot (env-seed mode -- staging/prod). At 0 the in-process 90-day rotation scheduler is INERT and rotation is the manual re-seal-and-roll runbook (memql#3381).",
 	})
+
+	// The log store (epic memql#4893): every node's log lines, persisted in
+	// the log_line hypertable by component/logstore.Sink. Four series, all
+	// written on EVERY NODE TYPE, so no app= selector is needed to read them.
+	logsWrittenTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: "logs",
+		Name:      "written_total",
+		Help:      "EVERY NODE TYPE writes this series: log lines this node persisted into the log_line hypertable (v1:observability:logLine) since it started. A steady non-zero rate is what a healthy store looks like on any node that logs at or above MEMQL_LOGS_LEVEL. Alert on a FLAT ZERO across the whole mesh for more than a few minutes: nothing is being kept, and the Logs app is showing history rather than the present.",
+	})
+
+	logsDroppedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "logs",
+			Name:      "dropped_total",
+			Help:      "EVERY NODE TYPE writes this series: log lines this node did NOT persist, by reason. queue: the 4096-line queue was full (the database is slower than the node logs). rate: the per-node bucket (MEMQL_LOGS_MAX_LINES_PER_SECOND, default 2000) was empty. level: the line was below MEMQL_LOGS_LEVEL on a path the handler does not pre-filter (the OS write). db: a batch insert failed and the whole batch was lost. Every drop is a gap in the Logs app that the app itself reports once a minute. Alert on ANY sustained rate of reason=\"db\" -- the store is not reaching its table -- and on reason=\"queue\" above a few per second, which is the database falling behind.",
+		},
+		[]string{"reason"},
+	)
+
+	logsArchivedTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: "logs",
+		Name:      "archived_total",
+		Help:      "EVERY NODE TYPE exports this series, but only the node that ran the nightly retention sweep (the cron leader, or an owner calling logsSweep by hand) ever moves it; the rest export a constant 0. Log lines the sweep wrote into the archive container as logs/<day>/<nodeType>.ndjson.gz before deleting them. On a cluster with an archive container a non-zero daily step is the sweep working; a FLAT ZERO on every node for more than a day means the sweep is not running or is refusing, and the store grows past its retention. On a cluster with NO archive container the sweep refuses by design and this stays at 0.",
+	})
+
+	logsDeletedTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: "logs",
+		Name:      "deleted_total",
+		Help:      "EVERY NODE TYPE exports this series, moved only by the node that ran the retention sweep. Log lines deleted from log_line AFTER their day was archived -- never before, so this can never exceed memql_logs_archived_total over the same run. Alert on it moving while memql_logs_archived_total does not: that is a delete without an archive, which the sweep is built never to do.",
+	})
 )
 
 func init() {
@@ -182,6 +216,10 @@ func init() {
 		subscriptionRowsDenied,
 		authActivityPruned,
 		aiFederationExchanges,
+		logsWrittenTotal,
+		logsDroppedTotal,
+		logsArchivedTotal,
+		logsDeletedTotal,
 		resultCacheInvalidationEvictions,
 		resultCacheInvalidationEvents,
 		resultCacheQueryReads,
@@ -223,6 +261,17 @@ func init() {
 	aiFederationExchanges.WithLabelValues(FederationExchangeOK).Add(0)
 	aiFederationExchanges.WithLabelValues(FederationExchangeDenied).Add(0)
 	aiFederationExchanges.WithLabelValues(FederationExchangeError).Add(0)
+	// The log store's four series exist at 0 from boot, for the reason the
+	// federation outcomes do: the Help strings tell an operator to alert on a
+	// flat zero and on reason="db", and a rule over a series that does not
+	// exist yet evaluates to no data rather than to zero. A CounterVec child
+	// appears on its first Inc, so each drop reason is created here.
+	logsWrittenTotal.Add(0)
+	logsArchivedTotal.Add(0)
+	logsDeletedTotal.Add(0)
+	for _, reason := range []string{LogsDropQueue, LogsDropRate, LogsDropLevel, LogsDropDB} {
+		logsDroppedTotal.WithLabelValues(reason).Add(0)
+	}
 }
 
 // SubscriptionRowDenied records one graph-subscription event dropped at
@@ -438,3 +487,63 @@ func AIFederationExchangesValue(outcome string) float64 {
 	}
 	return m.Counter.GetValue()
 }
+
+// Log-store drop reasons (epic memql#4893). Closed set: a reason is a
+// dimension of an alert, so it is these four and never a free string.
+const (
+	LogsDropQueue = "queue" // the 4096-line queue was full
+	LogsDropRate  = "rate"  // the per-node MEMQL_LOGS_MAX_LINES_PER_SECOND bucket was empty
+	LogsDropLevel = "level" // below MEMQL_LOGS_LEVEL on an un-prefiltered path (the OS write)
+	LogsDropDB    = "db"    // a batch insert failed; the whole batch was lost
+)
+
+// LogsWritten records n log lines persisted by this node's store sink.
+func LogsWritten(n int) {
+	if n <= 0 {
+		return
+	}
+	logsWrittenTotal.Add(float64(n))
+}
+
+// LogsDropped records n log lines this node's store did not persist, under
+// one of the LogsDrop* reasons.
+func LogsDropped(reason string, n uint64) {
+	if n == 0 {
+		return
+	}
+	logsDroppedTotal.WithLabelValues(reason).Add(float64(n))
+}
+
+// LogsArchived records n log lines the retention sweep wrote to the archive.
+func LogsArchived(n int64) {
+	if n <= 0 {
+		return
+	}
+	logsArchivedTotal.Add(float64(n))
+}
+
+// LogsDeleted records n log lines the retention sweep deleted after archiving.
+func LogsDeleted(n int64) {
+	if n <= 0 {
+		return
+	}
+	logsDeletedTotal.Add(float64(n))
+}
+
+// LogsWrittenValue returns the current count, for tests.
+func LogsWrittenValue() float64 { return counterValue(logsWrittenTotal) }
+
+// LogsDroppedValue returns the current count for one reason, for tests.
+func LogsDroppedValue(reason string) float64 {
+	c, err := logsDroppedTotal.GetMetricWithLabelValues(reason)
+	if err != nil {
+		return 0
+	}
+	return counterValue(c)
+}
+
+// LogsArchivedValue returns the current count, for tests.
+func LogsArchivedValue() float64 { return counterValue(logsArchivedTotal) }
+
+// LogsDeletedValue returns the current count, for tests.
+func LogsDeletedValue() float64 { return counterValue(logsDeletedTotal) }

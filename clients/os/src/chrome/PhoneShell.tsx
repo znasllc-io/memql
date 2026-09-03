@@ -5,6 +5,7 @@ import { useAsk } from "../ask/AskProvider";
 import { appsForRole, canOpen, sectionsForRole } from "../system/registry";
 import { Mark } from "./Mark";
 import { useOs } from "./state";
+import { WindowErrorBoundary } from "./WindowErrorBoundary";
 
 // Phone chrome (spec D13): no desks, no windows, no pins. The Launcher
 // grid is home; an app opens full screen, one at a time, with its section
@@ -64,11 +65,13 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
               ))}
             </nav>
           ) : null}
-          <current.component
-            sectionId={activeSection?.id ?? ""}
-            navigate={setSectionId}
-            askContext={(tag) => openAsk(tag)}
-          />
+          <WindowErrorBoundary key={current.id} app={current.id} section={activeSection?.id ?? ""}>
+            <current.component
+              sectionId={activeSection?.id ?? ""}
+              navigate={setSectionId}
+              askContext={(tag) => openAsk(tag)}
+            />
+          </WindowErrorBoundary>
         </main>
       ) : (
         <main className="os-phone-home">

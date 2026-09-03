@@ -22,6 +22,7 @@ import {
 
 import type { OsAuthSource } from "../auth/source";
 import { ConnectionStatusContext, type ShellConnectionStatus } from "../chrome/connection";
+import { setCaptureTransport } from "../logs/capture";
 
 /** The edge's same-origin API marker, resolved against document.location. */
 export function bridgePathFor(baseUrl: string): string {
@@ -115,6 +116,20 @@ export function OsConnectionProvider({
       setConnection(null);
     };
   }, [enabled, authSource]);
+
+  // The log capture's send (epic memql#4895): `logsRecordClient` over THIS
+  // connection while there is one, and nothing while there is not -- the
+  // capture holds its queue up to the cap and sends when a connection comes
+  // back. An unawaited call whose rejection the capture swallows, so a
+  // failing send can never re-enter the capture that made it.
+  useEffect(() => {
+    if (connection === null) {
+      setCaptureTransport(null);
+      return undefined;
+    }
+    setCaptureTransport((session, lines) => connection.query.logsRecordClient({ session, lines }));
+    return () => setCaptureTransport(null);
+  }, [connection]);
 
   const value = useMemo(() => ({ connection }), [connection]);
   return (

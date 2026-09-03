@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	memoryNodesDatabase "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/logstore"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/observe"
 	"github.com/znasllc-io/memql/component/server"
@@ -106,4 +107,15 @@ func (a *App) databaseAndConcepts() {
 	}
 	observeSink := observe.NewSinkComponent(a.Logger, provider, observe.TimescaleSinkOptions{Logger: a.Logger}, 0)
 	a.Dependencies = append(a.Dependencies, observeSink)
+
+	// The log store (epic memql#4893): the batching sink that persists every
+	// line core/logger's handler chain forwards -- this node's own lines and
+	// the OS's, through logsRecordClient -- into the log_line hypertable. On
+	// EVERY node type, beside the observe sink and over the same lazily
+	// resolved handle, at the same order. Registering it installs it as the
+	// process's logger.Sink, which drains the pre-boot ring so the lines
+	// written before this point are kept too. Without a database it installs
+	// a no-op sink and says so once; the console is untouched either way.
+	logsSink := logstore.NewSinkComponent(a.Logger, provider, logstore.SinkOptions{Logger: a.Logger}, 0)
+	a.Dependencies = append(a.Dependencies, logsSink)
 }

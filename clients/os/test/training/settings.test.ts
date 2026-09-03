@@ -94,15 +94,22 @@ describe("the Training manifest", () => {
     expect(settingsSectionProblem(app!)).toBeNull();
   });
 
-  it("gates the APP at writer and no section above it", () => {
+  it("gates the APP at writer and no section of its own above it", () => {
     // Every surface here reads or writes the same two populations, so there is
-    // no line inside the app where the answer changes.
+    // no line inside the app where the answer changes -- except the Logs
+    // section (epic memql#4895), whose floor is the log store's and not this
+    // app's to choose.
     const app = appById(OS_REGISTRY, "training");
     expect(app?.roles).toEqual({ min: "writer" });
     for (const section of app?.sections ?? []) {
+      if (section.id === "logs") {
+        expect(section.roles).toEqual({ min: "admin" });
+        continue;
+      }
       expect(section.roles).toBeUndefined();
     }
-    // A writer therefore sees all four, and a reader sees the app not at all.
+    // A writer therefore sees the four that are this app's, and a reader sees
+    // the app not at all.
     expect(sectionsForRole(app!, "writer")).toHaveLength(4);
   });
 

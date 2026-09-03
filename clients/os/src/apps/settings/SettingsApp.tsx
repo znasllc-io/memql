@@ -5,6 +5,7 @@ import { useSession } from "../../chrome/access";
 import { useOs } from "../../chrome/state";
 import { readStoredTheme, setTheme, type ThemeChoice } from "../../app/theme";
 import { themePacks } from "../../themes/registry";
+import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { AppsIndexSection } from "./AppsIndexSection";
 import { ClusterSection } from "./ClusterSection";
@@ -24,20 +25,27 @@ import { ConnectionHistoryProvider } from "./useConnectionHistory";
 // node's integration registry and states in surface why it does not yet
 // save.
 
-export function SettingsApp({ sectionId }: OsAppProps) {
+export function SettingsApp({ sectionId, intent, consumeIntent }: OsAppProps) {
   // The history provider wraps the WHOLE app, not the Diagnostics section:
   // the buffer has to cover the window's lifetime, and a person navigating
   // to Diagnostics because they saw the dot change is the case it is for.
-  return <ConnectionHistoryProvider>{sectionFor(sectionId)}</ConnectionHistoryProvider>;
+  return (
+    <ConnectionHistoryProvider>
+      {sectionFor(sectionId, intent, consumeIntent)}
+    </ConnectionHistoryProvider>
+  );
 }
 
-function sectionFor(sectionId: string) {
+function sectionFor(sectionId: string, intent: OsAppProps["intent"], consumeIntent: OsAppProps["consumeIntent"]) {
   if (sectionId === "appearance") return <AppearanceSection />;
   if (sectionId === "ask") return <AskSection />;
   if (sectionId === "apps") return <AppsIndexSection />;
   if (sectionId === "cluster") return <ClusterSection />;
   if (sectionId === "diagnostics") return <DiagnosticsSection />;
   if (sectionId === "integrations") return <IntegrationsSection />;
+  // No owned concepts: the shell's own lines are tagged with no app, and
+  // this app's slice is what its surfaces logged under "settings".
+  if (sectionId === "logs") return <AppLogsSection app="settings" intent={intent} consumeIntent={consumeIntent} />;
   return <AboutSection />;
 }
 

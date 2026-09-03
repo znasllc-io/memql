@@ -18,6 +18,7 @@ import { type UploadProvider } from "../items/upload";
 import { SdkDesktopGateway } from "../live/desktopGateway";
 import { MachinesProvider } from "../live/machines";
 import { OsConnectionProvider, useOsConnection } from "../live/connection";
+import { installCapture } from "../logs/capture";
 import type { ProfileAccess } from "../modules/profile/access";
 import { useResolvedAccess } from "../modules/profile/useResolvedAccess";
 import { useRoleLadder } from "../modules/profile/useRoleLadder";
@@ -25,6 +26,7 @@ import type { PlacementTokens } from "../system/placement";
 import { GraphDesktopStore } from "../system/graphStore";
 import { LocalDesktopStore, type DesktopStore } from "../system/store";
 import { SessionProvider, useSession } from "./access";
+import { CaptureContextInstaller } from "./CaptureContext";
 import { Desktop } from "./Desktop";
 import { suppressBrowserMenu } from "./browserMenu";
 import { Dock } from "./Dock";
@@ -84,6 +86,16 @@ export function Shell({
   }, []);
 
   const grid = useMemo(() => gridForViewport(viewport.w, viewport.h), [viewport]);
+
+  // The front end's own log capture (epic memql#4895): window errors,
+  // unhandled rejections, console.error and console.warn, batched to the
+  // cluster through the connection below. Installed ONCE per page -- the
+  // installer is idempotent -- and here rather than in main.tsx because the
+  // two seams it needs, the connection and the focused window, are both this
+  // shell's.
+  useEffect(() => {
+    installCapture();
+  }, []);
 
   // ===========================================================================
   // SESSION RESOLVES *INSIDE* THE CONNECTION, AND THAT ORDER IS THE FIX
@@ -203,6 +215,9 @@ function ShellRoster({
       grid={grid}
       store={store}
     >
+      {/* Where a captured line comes from: the focused window's app and
+          section, read from this provider's state at capture time. */}
+      <CaptureContextInstaller />
       {children}
     </OsProvider>
   );

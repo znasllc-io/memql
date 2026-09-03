@@ -55,7 +55,15 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 	// name a human typed into the first-run card. That is decision D3's
 	// failure, arrived at through authorization rather than through the gate
 	// D3 actually warns about.
-	want := []string{"auditEventRetentionSweep", "seedSelfAccount", "workerInvocationRetentionSweep"}
+	//
+	// logsRetentionSweep joined in epic memql#4893. It is a sweep in the plain
+	// sense -- every node's log lines, past their retention -- but the rows
+	// it sweeps carry NO row tier: log_line is a dedicated hypertable outside
+	// graph admission. What needs the principal is the executor's own floor:
+	// builtin logsSweep is reserved to a cluster owner in its Go handler
+	// (design L3), and the automation's default RoleReader actor would be
+	// refused by the sweep it exists to run.
+	want := []string{"auditEventRetentionSweep", "logsRetentionSweep", "seedSelfAccount", "workerInvocationRetentionSweep"}
 	got := auth.MaintenanceAutomationNames()
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("the maintenance list is %v, pinned as %v.\n\n"+

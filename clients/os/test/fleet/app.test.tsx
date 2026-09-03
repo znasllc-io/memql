@@ -75,13 +75,14 @@ beforeEach(() => {
 });
 
 describe("the Fleet manifest", () => {
-  it("declares the epic's four sections, Machines first, with a settings gear target", () => {
+  it("declares the epic's four sections plus Logs, Machines first, with a settings gear target", () => {
     const fleet = appById(OS_REGISTRY, "fleet");
     expect(fleet).toBeTruthy();
     expect(sectionsForRole(fleet!, "owner").map((s) => s.id)).toEqual([
       "machines",
       "routing",
       "workbenches",
+      "logs",
       "settings",
     ]);
     // The gear has somewhere to go, and the settings picker offers exactly
@@ -95,6 +96,8 @@ describe("the Fleet manifest", () => {
   it("admits every signed-in user: the engine's row tiers decide what comes back", () => {
     const fleet = appById(OS_REGISTRY, "fleet")!;
     expect(fleet.roles).toBeUndefined();
+    // Four for a reader: the Logs section is the one floored at admin (epic
+    // memql#4895), because every read on the log store is.
     expect(sectionsForRole(fleet, "reader").map((s) => s.id)).toHaveLength(4);
   });
 });

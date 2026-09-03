@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 import { ExternalLink, Sparkles } from "lucide-react";
 
 import { Button, Chip, Chips, Fact, Facts, Field, Notice, Panel, ProvenanceDot, Subhead } from "../../kit";
+import { OpenLogsButton } from "../../logs/OpenLogs";
 import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
 import { accountNameFrom } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
@@ -76,6 +78,15 @@ export function SiteDetail({
               <ExternalLink size={13} aria-hidden /> Open
             </a>
           )}
+          {/* Every line about this deployable (epic memql#4895): the Logs
+              app on Search, narrowed to this site. Admin and above, because
+              every read on the log store is; below that the action is absent
+              rather than a refusal waiting to be clicked. */}
+          <OpenLogsButton
+            subject={site.id}
+            subjectConcept={Concepts.PLATFORM_SITE}
+            ariaLabel={`Logs for ${siteName(site)}`}
+          />
           {onAsk ? (
             <Button
               onClick={() => onAsk(`app:deployables site:${site.hostname || site.id}`)}
