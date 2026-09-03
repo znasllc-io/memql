@@ -11,7 +11,8 @@
   seam (`integrations/agent/worker/`). Each epic gets its own design record;
   the first, Compose, is
   [2026-09-02-deployables-compose-design.md](2026-09-02-deployables-compose-design.md).
-- **Order:** Compose, then Logs, then Build, then Run (P8 below).
+- **Order:** Compose, then Logs, then Build, then Run (P8 below), with
+  GitHub Connect landing between Compose's engine PR and its OS PRs (P10).
 
 ## Why
 
@@ -85,8 +86,10 @@ fault.
 | P7 | Management scope | **All four**: auto-deploy when the source moves, abandoned-run detection and retry, runtime settings per deployable, traffic and health on the Live stop. The first two belong to Build, the last two to Run |
 | P8 | Order | **Compose, Logs, Build, Run.** Compose fixes what the owner hit and needs nothing from Logs. Logs lands the store, the app and the per-app sections before Build, so build output is written to the store from day one and Run's traffic and health ride the edge's request log. Rejected: Logs first (the disjointed surface survives for the length of that epic); Build before Logs (the bounded log tail would be re-pointed afterwards, a second pass over the same stage) |
 | P9 | The Logs requirements | Persist every node's log lines to the database beside the observability rows; thirty-day retention with an archive to blob storage before the sweep; consolidate engine, integrations, components, observability, deployments and the OS front end; skip the portal; capture hosted sites' browser console output where possible and the OS's own front-end errors always; a Logs app with filtering by app, component, integration, node, level, time and subject; a Logs section on every app, admin and above (owner, developer, admin under the one ladder) |
+| P10 | How a repository is named | **Connect GitHub is the default; the pasted token is the fallback.** A GitHub App, connected once per person, lists the repositories the person may pick from and prefills the flow from the manifest; the token field sits behind "Use a token instead". Its own epic, landing right after Compose PR 1 and before Compose's OS PRs, so the Source stop is built once with the picker as its default. Design record: [2026-09-03-github-connect-design.md](2026-09-03-github-connect-design.md). Rejected: folding into Compose; after Logs |
+| P11 | The callback route | **`GET /auth/github/callback` on the identity service is approved** as an HTTP exception of the OAuth-callback class, declared on identity's route table beside `/auth/oidc/callback`. The only HTTP surface Connect adds; the flow starts over the stream |
 
-## The four epics
+## The five epics
 
 ### Epic 1 -- Compose
 
@@ -102,6 +105,20 @@ pasted once and never shown again; a package with two apps lands as two
 rows sharing a source; a manifest declaring `kind: ios` deploys its web
 apps and says why the iOS one did not; the deployable's page carries every
 manage-time act the portal and the three retired sections offered.
+
+### Epic 1b -- GitHub Connect
+
+A GitHub App connected once per person: the callback on the identity
+service, the grant as an owned `sourceCredential` of kind `github_app`,
+installation tokens for the engine's fetch, poll and webhook-driven work,
+the repository picker with prefill from the manifest, and the
+connected-account card with disconnect. Design record:
+[2026-09-03-github-connect-design.md](2026-09-03-github-connect-design.md).
+
+Done when: a person connects GitHub once, picks a private repository from
+a list, sees the flow prefilled, and deploys with no token pasted; a push
+to that repository lights the update cue through the app's webhook; the
+pasted token still works behind the fold.
 
 ### Epic 2 -- Logs
 
@@ -174,7 +191,7 @@ what is fixed.
 - **`placements` on `packageDeploy`** is the one write that places an app:
   hostname, client, own domain. Build and Run add nothing to it.
 - **A credential is resolved under the package owner's actor**, never the
-  caller's and never cluster-wide. Build's Fleet route inherits this: a
+  caller's and never cluster-wide. A GitHub grant is such a credential. Build's Fleet route inherits this: a
   machine that fetches does so under the same rule.
 - **The Rail renders from the target.** Build changes what the Build stop
   says, not where it is; Run changes what the Live stop says. Neither adds a
@@ -187,7 +204,7 @@ what is fixed.
 
 ## Out of scope for the whole program
 
-A GitHub App installation, non-GitHub hosts, any mobile schema or store
-submission, a bundle upload from the browser, any portal work, and archive
-purge for deployables. Each is recorded here so it is a decision rather than
+Non-GitHub hosts, any mobile schema or store submission, a bundle upload
+from the browser, any portal work, sign-in with GitHub as an identity route,
+and archive purge for deployables. Each is recorded here so it is a decision rather than
 a drift.
