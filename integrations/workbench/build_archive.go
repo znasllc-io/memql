@@ -91,14 +91,42 @@ func containedJoin(root, rel string) (string, error) {
 	return abs, nil
 }
 
-// extractTarGz expands a gzip'd tar into destDir and reports the directory
-// holding the tree -- stripping ONE synthesized top-level directory when the
-// archive has exactly one and no top-level files, which is the shape GitHub's
-// tarball API returns and the shape packTarGz writes.
+// extractTarGz expands a gzip'd tar INTO an os.Root and reports the single
+// synthesized top-level directory the archive wrapped its tree in, or "" when
+// it had none.
+//
+// ===========================================================================
+// THE ROOT IS THE CONTAINMENT, AND IT IS THE KERNEL'S RATHER THAN MINE
+// ===========================================================================
+// This started as a string check: reject `..`, reject absolute, join, then
+// compare the join against the root. That is correct as far as it goes, and it
+// has two problems. It does not cover SYMLINKS -- an archive can contain a
+// link whose own name is impeccable and whose target is not, and every
+// string-level check passes it. And a reader (human or analyser) has to trust
+// that the check ran, which is why static analysis kept flagging these lines
+// even once it had: the guard lived in a helper and the operation lived here.
+//
+// os.Root closes both. Every method on it is confined to the directory by an
+// open file descriptor, it refuses a name that resolves outside even through a
+// symlink, and the confinement is a property of the HANDLE rather than of a
+// comparison somebody remembered to write. safeEntryPath stays, because a
+// refusal that names the bad entry is better than an opaque error from the
+// filesystem -- but it is no longer what makes this safe.
+//
+// It returns the top-level directory NAME rather than a path, so nothing here
+// composes one: GitHub wraps a repository in `<owner>-<repo>-<sha>`, which is
+// not part of the tree the author wrote, and the caller strips it by naming it
+// relative to the same root.
 func extractTarGz(r io.Reader, destDir string, maxFiles int, maxFileBytes, maxTotalBytes int64) (string, error) {
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return "", err
 	}
+	root, err := os.OpenRoot(destDir)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+
 	gz, err := gzip.NewReader(r)
 	if err != nil {
 		return "", fmt.Errorf("not a gzip archive: %w", err)
@@ -113,7 +141,7 @@ func extractTarGz(r io.Reader, destDir string, maxFiles int, maxFileBytes, maxTo
 	)
 	for {
 		hdr, nerr := tr.Next()
-		if nerr == io.EOF {
+		if errors.Is(nerr, io.EOF) {
 			break
 		}
 		if nerr != nil {
@@ -133,13 +161,9 @@ func extractTarGz(r io.Reader, destDir string, maxFiles int, maxFileBytes, maxTo
 			topLevel[first] = true
 		}
 
-		target, terr := containedJoin(destDir, clean)
-		if terr != nil {
-			return "", terr
-		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if mkErr := os.MkdirAll(target, 0o755); mkErr != nil {
+			if mkErr := root.MkdirAll(clean, 0o755); mkErr != nil {
 				return "", mkErr
 			}
 			continue
@@ -147,9 +171,10 @@ func extractTarGz(r io.Reader, destDir string, maxFiles int, maxFileBytes, maxTo
 			// fall through
 		default:
 			// Symlinks, hardlinks and devices are DROPPED rather than
-			// materialized, exactly as component/packages drops them: a
-			// symlink's own name is a clean relative path while its target is
-			// arbitrary, which is the traversal check's blind spot.
+			// materialized. os.Root would refuse an escaping link, so this is
+			// no longer the only thing standing between an archive and the
+			// filesystem -- but nothing in a package needs one, and a tree
+			// with no links is a tree with nothing to reason about.
 			continue
 		}
 
@@ -163,10 +188,12 @@ func extractTarGz(r io.Reader, destDir string, maxFiles int, maxFileBytes, maxTo
 		if total+hdr.Size > maxTotalBytes {
 			return "", fmt.Errorf("the archive expands to more than %d bytes", maxTotalBytes)
 		}
-		if mkErr := os.MkdirAll(filepath.Dir(target), 0o755); mkErr != nil {
-			return "", mkErr
+		if dir := path.Dir(clean); dir != "." {
+			if mkErr := root.MkdirAll(dir, 0o755); mkErr != nil {
+				return "", mkErr
+			}
 		}
-		out, oerr := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, entryMode(hdr))
+		out, oerr := root.OpenFile(clean, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, entryMode(hdr))
 		if oerr != nil {
 			return "", oerr
 		}
@@ -190,11 +217,11 @@ func extractTarGz(r io.Reader, destDir string, maxFiles int, maxFileBytes, maxTo
 	if len(topLevel) == 1 {
 		for name, isDir := range topLevel {
 			if isDir {
-				return containedJoin(destDir, name)
+				return name, nil
 			}
 		}
 	}
-	return destDir, nil
+	return "", nil
 }
 
 // entryMode keeps the executable bit and nothing else. A tree that arrives
@@ -206,29 +233,39 @@ func entryMode(hdr *tar.Header) os.FileMode {
 	return 0o644
 }
 
-// packTarGz walks root and returns it as a gzip'd tar whose entries all sit
-// under top/, the shape extractTarGz strips on the way back.
+// packTarGz walks a directory THROUGH AN os.Root and returns it as a gzip'd
+// tar whose entries all sit under top/.
 //
-// Entries are written in SORTED order, so the same tree packs to the same
-// bytes twice -- which is what lets a caller compare two builds' output
-// without unpacking them.
-func packTarGz(root, top string, maxFiles int, maxFileBytes, maxTotalBytes int64) ([]byte, int, int64, error) {
+// Read through the root for the same reason the extractor writes through one:
+// the tree being packed was produced by somebody else's build command, so a
+// symlink in it pointing at /etc is a thing that can happen, and a walk that
+// followed one would pack the host's files into a bundle this cluster then
+// serves on the internet. os.Root refuses to leave the directory; fs.WalkDir
+// over root.FS() never composes a path outside it.
+//
+// Entries are written in SORTED order with no timestamps, so the same tree
+// packs to the same bytes twice -- which is what lets a caller compare two
+// builds' output without unpacking them.
+func packTarGz(dir, top string, maxFiles int, maxFileBytes, maxTotalBytes int64) ([]byte, int, int64, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	defer root.Close()
+	tree := root.FS()
+
 	var names []string
-	err := filepath.WalkDir(root, func(p string, entry os.DirEntry, werr error) error {
+	err = fs.WalkDir(tree, ".", func(p string, entry fs.DirEntry, werr error) error {
 		if werr != nil {
 			return werr
 		}
 		if entry.IsDir() || !entry.Type().IsRegular() {
-			// A symlink in a built output is dropped for the reason the
-			// extractor drops one: nothing a bundle serves needs it, and its
-			// target is not checkable from here.
+			// A symlink in a built output is dropped: nothing a bundle serves
+			// needs one, and what it points at is not this cluster's to
+			// publish.
 			return nil
 		}
-		rel, rerr := filepath.Rel(root, p)
-		if rerr != nil {
-			return rerr
-		}
-		names = append(names, filepath.ToSlash(rel))
+		names = append(names, p)
 		return nil
 	})
 	if err != nil {
@@ -244,11 +281,7 @@ func packTarGz(root, top string, maxFiles int, maxFileBytes, maxTotalBytes int64
 	tw := tar.NewWriter(gz)
 	var total int64
 	for _, name := range names {
-		full, jerr := containedJoin(root, name)
-		if jerr != nil {
-			return nil, 0, 0, jerr
-		}
-		info, serr := os.Lstat(full)
+		info, serr := root.Lstat(name)
 		if serr != nil {
 			return nil, 0, 0, serr
 		}
@@ -258,7 +291,7 @@ func packTarGz(root, top string, maxFiles int, maxFileBytes, maxTotalBytes int64
 		if total+info.Size() > maxTotalBytes {
 			return nil, 0, 0, fmt.Errorf("the built output exceeds %d bytes", maxTotalBytes)
 		}
-		data, rerr := os.ReadFile(full)
+		data, rerr := root.ReadFile(name)
 		if rerr != nil {
 			return nil, 0, 0, rerr
 		}

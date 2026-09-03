@@ -521,21 +521,41 @@ func (i *Integration) runBuildLocal(ctx context.Context, req BuildRequest) Build
 	if err != nil {
 		return finish(buildRefusal(BuildCodeSourceUnreadable, "workbench build: the source snapshot could not be read: "+err.Error()))
 	}
-	srcDir, serr := containedJoin(dir, "src")
-	if serr != nil {
-		return finish(buildRefusal(BuildCodeInvalid, "workbench build: "+serr.Error()))
-	}
-	treeRoot, err := extractTarGz(bytes.NewReader(src), srcDir, limits.MaxFileCount, limits.MaxFileBytes, limits.MaxSourceBytes)
+	// `src` and `tmp` are literals under a directory this function just made,
+	// so they need no validation of their own -- what needs it is the
+	// deployable's PATH out of the manifest, below.
+	srcDir := filepath.Join(dir, "src")
+	topDir, err := extractTarGz(bytes.NewReader(src), srcDir, limits.MaxFileCount, limits.MaxFileBytes, limits.MaxSourceBytes)
 	if err != nil {
 		return finish(buildRefusal(BuildCodeSourceUnreadable, "workbench build: the source snapshot could not be expanded: "+err.Error()))
 	}
-	workdir, err := underTree(treeRoot, req.Path)
+	// EVERYTHING FROM HERE IS RELATIVE TO A ROOT. The manifest's path and
+	// output directory are the untrusted strings in this function, and they
+	// are never joined into a filesystem call -- they are handed to os.Root,
+	// which refuses a name resolving outside its directory even through a
+	// symlink the build itself created.
+	srcRoot, rerr := os.OpenRoot(srcDir)
+	if rerr != nil {
+		return finish(buildRefusal(BuildCodeSourceUnreadable, "workbench build: the expanded source could not be opened: "+rerr.Error()))
+	}
+	defer srcRoot.Close()
+
+	workRel, err := treeRelative(topDir, req.Path)
 	if err != nil {
 		return finish(buildRefusal(BuildCodeInvalid, "workbench build: "+err.Error()))
 	}
-	if info, serr := os.Stat(workdir); serr != nil || !info.IsDir() {
+	if info, serr := srcRoot.Stat(workRel); serr != nil || !info.IsDir() {
 		return finish(buildRefusal(BuildCodeSourceUnreadable,
 			fmt.Sprintf("workbench build: the deployable's path %q is not a directory in the snapshot", req.Path)))
+	}
+	// The ONE real path this function composes from untrusted input, and it
+	// exists because exec.Cmd.Dir takes a path rather than a directory
+	// handle. Every component of it has been through safeName/cleanTreePath
+	// AND been resolved by os.Root above, so what is joined here is a name
+	// the kernel has already confirmed lands inside srcDir.
+	workdir, jerr := containedJoin(srcDir, workRel)
+	if jerr != nil {
+		return finish(buildRefusal(BuildCodeInvalid, "workbench build: "+jerr.Error()))
 	}
 
 	tail := newTailBuffer(limits.MaxLogTailBytes)
@@ -613,15 +633,24 @@ func (i *Integration) runBuildLocal(ctx context.Context, req BuildRequest) Build
 		return finish(res)
 	}
 
-	outDir, err := underTree(workdir, req.Output)
+	// The output directory, resolved through the SAME root -- so a build that
+	// tried to point its output at somewhere else, by writing a symlink named
+	// `dist`, is refused by the kernel rather than by a comparison.
+	outRel, err := treeRelative(workRel, req.Output)
 	if err != nil {
 		res.ErrorCode = BuildCodeInvalid
 		res.ErrorMessage = "workbench build: " + err.Error()
 		return finish(res)
 	}
-	if info, serr := os.Stat(outDir); serr != nil || !info.IsDir() {
+	if info, serr := srcRoot.Stat(outRel); serr != nil || !info.IsDir() {
 		res.ErrorCode = BuildCodeOutputMissing
 		res.ErrorMessage = fmt.Sprintf("the build for %q finished but left no %q directory under %q", req.DeployableName, req.Output, req.Path)
+		return finish(res)
+	}
+	outDir, jerr := containedJoin(srcDir, outRel)
+	if jerr != nil {
+		res.ErrorCode = BuildCodeInvalid
+		res.ErrorMessage = "workbench build: " + jerr.Error()
 		return finish(res)
 	}
 	packed, count, total, err := packTarGz(outDir, buildOutputTop, limits.MaxFileCount, limits.MaxFileBytes, limits.MaxOutputBytes)
@@ -659,21 +688,26 @@ func buildOutputObject(req BuildRequest) string {
 	return "packages/builds/" + shortId(req.DeploymentId) + "/" + safeName(req.DeployableName) + "/output.tar.gz"
 }
 
-// underTree joins a validated tree path under root and refuses anything that
-// resolves outside it.
+// treeRelative composes one root-RELATIVE name from a prefix and a manifest
+// path, for handing to os.Root.
 //
-// TWO CHECKS, and the second is the one that counts. cleanTreePath rejects the
-// STRING -- absolute, `..`, not a valid fs path -- and containedJoin rejects
-// the RESULT, which is what the filesystem call actually receives. Validating
-// only the string is how traversal bugs survive review: every reader agrees
-// the input looked fine.
-func underTree(root, p string) (string, error) {
+// It returns a NAME rather than a path, and that is the whole point: a name
+// is something os.Root resolves under a directory it holds open, so the
+// containment is the kernel's. The previous version of this function joined a
+// path and then checked it, which is correct and is a check a reader has to
+// find and trust -- and which said nothing about symlinks.
+func treeRelative(prefix, p string) (string, error) {
 	clean, err := cleanTreePath(p)
 	if err != nil {
 		return "", fmt.Errorf("the path %q escapes the tree", p)
 	}
-	joined, jerr := containedJoin(root, clean)
-	if jerr != nil {
+	joined := path.Join(prefix, clean)
+	if joined == "" {
+		return ".", nil
+	}
+	// path.Join has already cleaned; a `..` surviving it means the prefix was
+	// shallower than the path climbs, which is an escape however it is spelled.
+	if joined == ".." || strings.HasPrefix(joined, "../") {
 		return "", fmt.Errorf("the path %q escapes the tree", p)
 	}
 	return joined, nil

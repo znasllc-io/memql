@@ -583,3 +583,88 @@ func TestNothingEscapesTheBuildDirectory(t *testing.T) {
 		}
 	})
 }
+
+// TestABuildCannotPublishSomebodyElsesFiles is the attack os.Root closes and
+// a string check never did.
+//
+// The build script is the package author's, so it can create whatever it
+// likes inside its own directory -- including a symlink named `dist` pointing
+// at somewhere else on the node. Every path this cluster composes is then
+// impeccable: the manifest said `dist`, `dist` is a clean relative name, the
+// join lands inside the build directory. And following it would pack the
+// node's own files into a bundle this cluster serves on the internet.
+//
+// os.Root refuses to leave the directory it holds open, so the symlink is
+// simply not resolvable and the build is refused for having no output.
+func TestABuildCannotPublishSomebodyElsesFiles(t *testing.T) {
+	i, _ := buildIntegration(t)
+
+	// A secret somewhere else on this node, which the fixture will try to
+	// reach. Written OUTSIDE the workspace root, exactly as /etc would be.
+	elsewhere := t.TempDir()
+	if err := os.WriteFile(filepath.Join(elsewhere, "id_rsa"), []byte("PRIVATE KEY"), 0o600); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+
+	req := buildRequest(t, "ln -s "+elsewhere+" dist", webFixture())
+	res := i.RunBuild(context.Background(), req, "")
+
+	if res.OK {
+		files := unpack(t, res.Output.Inline)
+		for name := range files {
+			if strings.Contains(name, "id_rsa") {
+				t.Fatalf("the build published a file from outside its directory: %v", files)
+			}
+		}
+		t.Fatalf("a symlinked output directory must not produce a bundle at all, got %v", files)
+	}
+	// Refused for the honest reason: as far as this cluster is concerned the
+	// build left no output directory, because the one it left does not
+	// resolve inside the tree.
+	if res.ErrorCode != BuildCodeOutputMissing {
+		t.Fatalf("want %s, got %s: %s", BuildCodeOutputMissing, res.ErrorCode, res.ErrorMessage)
+	}
+
+	// THE REACHABLE POSITIVE. The same fixture with a real directory builds,
+	// so the refusal above is about the symlink rather than about this test
+	// being unable to build anything.
+	ok := buildRequest(t, "mkdir -p dist && printf 'x' > dist/index.html", webFixture())
+	if got := i.RunBuild(context.Background(), ok, ""); !got.OK {
+		t.Fatalf("a real output directory must still build: %s: %s", got.ErrorCode, got.ErrorMessage)
+	}
+}
+
+// TestAnArchiveCannotWriteThroughASymlink is the same property on the way IN.
+//
+// A source archive can contain a directory-symlink followed by entries
+// "inside" it. Each entry's name is clean; the write lands wherever the link
+// points. The extractor drops link entries AND writes through an os.Root, so
+// neither half of that works.
+func TestAnArchiveCannotWriteThroughASymlink(t *testing.T) {
+	elsewhere := t.TempDir()
+	dest := t.TempDir()
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	// A symlink named `escape` pointing outside, then a file "inside" it.
+	if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeSymlink, Name: "escape", Linkname: elsewhere, Mode: 0o777}); err != nil {
+		t.Fatalf("tar: %v", err)
+	}
+	body := "owned"
+	if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: "escape/planted", Mode: 0o644, Size: int64(len(body))}); err != nil {
+		t.Fatalf("tar: %v", err)
+	}
+	if _, err := tw.Write([]byte(body)); err != nil {
+		t.Fatalf("tar: %v", err)
+	}
+	_ = tw.Close()
+	_ = gz.Close()
+
+	// It may extract or refuse; what it must not do is write outside.
+	_, _ = extractTarGz(bytes.NewReader(buf.Bytes()), dest, 100, 1<<20, 1<<24)
+
+	if _, err := os.Stat(filepath.Join(elsewhere, "planted")); err == nil {
+		t.Fatal("the archive wrote a file outside the destination directory")
+	}
+}
