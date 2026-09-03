@@ -5150,6 +5150,27 @@ QueryClient.prototype.packageDeployments = function (this: QueryClient, args: Pa
   return this.executeNamed("packageDeployments", buildPackageDeployments(args), opts);
 };
 
+/** Every deploy parked at the confirm gate that is waiting for this caller, newest first -- the Deployables list's "a deploy is waiting for you" mark, and the ONE parked-runs feed the OS retains at its app root (epic memql#4885, design section A). That feed is a deliberate exception to the rule that a deployment timeline is retained by the page and never by the root: the rule guards against subscribing a window to every deploy in the cluster, and a feed over parked runs alone is the handful of rows a person needs to see before they open anything.
+No `paginate`, deliberately, and the reason is the population: a run parks here only between a person's Analyze and their Deploy, so a caller has a handful of these at most and a cluster owner a handful per person -- a page size would be a bound on a set that is bounded by how many things somebody has half-composed. The sort is what keeps the read a bounded one for the parser. */
+// Bound concept: v1:platform:packageDeployment (machine-readable: BoundConcepts["packageDeploymentsAwaitingConfirm"] in generated_concepts.ts).
+export interface PackageDeploymentsAwaitingConfirmArgs {
+}
+
+export function buildPackageDeploymentsAwaitingConfirm(args: PackageDeploymentsAwaitingConfirmArgs): string {
+  void args;
+  return "query packageDeploymentsAwaitingConfirm()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packageDeploymentsAwaitingConfirm(args?: PackageDeploymentsAwaitingConfirmArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packageDeploymentsAwaitingConfirm = function (this: QueryClient, args: PackageDeploymentsAwaitingConfirmArgs = {} as PackageDeploymentsAwaitingConfirmArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packageDeploymentsAwaitingConfirm", buildPackageDeploymentsAwaitingConfirm(args), opts);
+};
+
 /** The packages this caller may see, active only. The OS packages list. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.ts).
 export interface PackagesAllArgs {

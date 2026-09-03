@@ -5,6 +5,28 @@ import { QueryClient, type QueryCallOptions } from "./query.js";
 import type { Result } from "./types.js";
 import { renderMemQLValue } from "./memqlValue.js";
 
+/** Ask what kind of tree a zip in the caller's Library is (epic memql#4885, D11). Opens it through the same fetch a deploy uses -- the caller's own bytes, expanded by OpenZip under the packages limits, so a zip the deploy would refuse is refused here by the same code -- and answers {isPackage, isBuiltSite, fileCount, totalBytes}. isPackage: memql-package.yaml sits at the root, and the package path takes it from here. isBuiltSite: index.html sits at the root and there is no manifest, and the hand-made path takes it and asks for the kind. Neither: the zip is something else, commonly a folder wrapping the site one level down. fileCount and totalBytes are counted over the opened tree. Writes nothing; the artifact stays exactly the Library row it was. */
+export interface ArtifactProbeArgs {
+  /** The v1:library:artifact index row of the zip to probe. */
+  artifactId: string;
+}
+
+export function buildArtifactProbe(args: ArtifactProbeArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  return "builtin artifactProbe(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    artifactProbe(args: ArtifactProbeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.artifactProbe = function (this: QueryClient, args: ArtifactProbeArgs = {} as ArtifactProbeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("artifactProbe", buildArtifactProbe(args), opts);
+};
+
 /** Generate an event-email rule's automation construct and arm it (memql#4829). The generator is a DETERMINISTIC template over the rule's form -- the LLM authoring path stays off, because a rule that mails strangers is not a place for a model to improvise and a deterministic generator is one a person can read the output of. The generated .memql goes through the ordinary authoring pipeline: bundle, validate, activate. Activation takes effect IMMEDIATELY rather than at next boot. The rule row records the bundle and construct it produced; on refusal it records the engine's own sentence on lastError and the rule goes to 'failed' rather than silently staying draft. */
 export interface CampaignActivateEmailRuleArgs {
   /** The rule to generate and arm. The caller must own it: the generated construct runs under the AUTHOR's envelope, so who armed it decides what it can read. */
@@ -777,7 +799,7 @@ QueryClient.prototype.packageAnalyze = function (this: QueryClient, args: Packag
   return this.executeNamed("packageAnalyze", buildPackageAnalyze(args), opts);
 };
 
-/** Archive one of the caller's packages (epic memql#4794, D10). Refuses with package_has_active_deployables when any site this package deployed is not itself archived -- a package is the source its deployables came from, and filing it away while it is still serving the internet would put the record and the reality in different states. Also refuses unless confirmName matches the package's stored name exactly. Archived packages stay listed behind the Archived filter. Returns {packageId, name, status}. */
+/** Archive one of the caller's packages AND every app it produced (epic memql#4794 D10; the cascade is epic memql#4885, 'archive this source and every app it produced'). Refuses with package_has_active_deployables, naming only the LIVE hostnames and before any site is touched, while any app this package deployed is still serving -- a package is the source its deployables came from, and filing it away while one is still serving the internet would put the record and the reality in different states; pausing first is the step that gives anyone still using it a chance to notice, and it stays the person's decision. Every paused app is archived, and a never-published (draft) app is walked through disabled first, each through the same guarded status write siteArchive uses, sites first and the package last; a write the guard refuses surfaces and stops the cascade there. Apps already archived are left alone. Also refuses unless confirmName matches the package's stored name exactly. packageRestore does NOT cascade back. Archived packages stay listed behind the Archived filter. Returns {packageId, name, status, archivedSites}. */
 export interface PackageArchiveArgs {
   /** The v1:platform:package row to archive. */
   packageId: string;
@@ -802,21 +824,21 @@ QueryClient.prototype.packageArchive = function (this: QueryClient, args: Packag
   return this.executeNamed("packageArchive", buildPackageArchive(args), opts);
 };
 
-/** Run one deployment attempt for a package (epic memql#4794). WITHOUT confirm the run parks at awaiting_confirm with the analysis report on a new deployment row and nothing else happens -- that gate is always present (D12), and a redeploy passes it in one click. WITH confirm the run builds, stages, rolls and publishes in the D6 order: a failure anywhere before publish leaves every site serving exactly what it was serving, and a package with no DSL (or unchanged DSL) skips stage and roll entirely so nothing restarts. A package carrying DSL requires the cluster-owner actor and is refused with dsl_requires_cluster_owner at the START, before any build. hostnames is required only for a deployable's FIRST deploy; later deploys find the site through (packageId, packageDeployableName). Returns {deploymentId, status, awaitingConfirm, deployables, report}. */
+/** Run one deployment attempt for a package (epic memql#4794). WITHOUT confirm the run parks at awaiting_confirm with the analysis report on a new deployment row and nothing else happens -- that gate is always present (D12), and a redeploy passes it in one click. WITH confirm the run builds, stages, rolls and publishes in the D6 order: a failure anywhere before publish leaves every site serving exactly what it was serving, and a package with no DSL (or unchanged DSL) skips stage and roll entirely so nothing restarts. A package carrying DSL requires the cluster-owner actor and is refused with dsl_requires_cluster_owner at the START, before any build. placements is read only for a deployable's FIRST deploy (epic memql#4885, D8); later deploys find the site through (packageId, packageDeployableName) and never re-ask. Returns {deploymentId, status, awaitingConfirm, deployables, report}; each deployables entry carries {name, siteId, hostname, bundleRef, version, created} on success, {name, refusal} for a half that was refused or skipped, plus accountId / ownDomain for the placement halves that landed and accountRefusal / domainRefusal for the ones the guards refused. */
 export interface PackageDeployArgs {
   /** The v1:platform:package row to deploy. */
   packageId: string;
   /** Pass true to proceed past the confirm gate. Absent or false parks the run with its report and returns. */
   confirm?: boolean;
-  /** Deployable name -> hostname, for deployables being deployed for the FIRST time. A hostname is chosen once and remembered on the site row. */
-  hostnames?: Record<string, unknown>;
+  /** Where each deployable goes on its FIRST deploy: an object keyed by deployable name, each value {hostname, accountId, ownDomain}. hostname is the site's own hostname under the cluster domain and is required for a never-deployed app (deployable_binding_missing otherwise); accountId ties the site to the client it is for; ownDomain binds the client's own domain. The pipeline applies the two optional halves itself after the site exists, as the same updateSiteAccount and customDomainAdd calls the page makes, under the caller's actor -- so the existing guards decide, and a refused one lands on the outcome without failing the publish. Chosen once and remembered on the site row. */
+  placements?: Record<string, unknown>;
 }
 
 export function buildPackageDeploy(args: PackageDeployArgs): string {
   const parts: string[] = [];
   parts.push("packageId: " + renderMemQLValue(args.packageId));
   if (args.confirm !== undefined) parts.push("confirm: " + renderMemQLValue(args.confirm));
-  if (args.hostnames !== undefined) parts.push("hostnames: " + renderMemQLValue(args.hostnames));
+  if (args.placements !== undefined) parts.push("placements: " + renderMemQLValue(args.placements));
   return "builtin packageDeploy(" + parts.join(", ") + ")";
 }
 
@@ -1357,5 +1379,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.sourceCredentialRevoke = function (this: QueryClient, args: SourceCredentialRevokeArgs = {} as SourceCredentialRevokeArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("sourceCredentialRevoke", buildSourceCredentialRevoke(args), opts);
+};
+
+/** Ask whether this cluster can read a repository (epic memql#4885, D11). Parses the URL, resolves credentialId under the caller's own actor the way a fetch does, asks GitHub for the repository, and answers {host, reachable, private, defaultBranch, reason}. reason is exactly one of: ok (reachable; private and defaultBranch are GitHub's answer), not_found_or_private (404 with no credential -- GitHub answers the two alike, and the stop offers a credential), credential_cannot_see_it (refused under the credential: choose another, or fix its grant), credential_not_found (the caller cannot read the named credential), credential_revoked, source_host_unsupported (only github.com today, or upload a zip), rate_limited (ask again later). A typed reason, never the API's own body. A GitHub this cluster cannot reach is an ERROR rather than a reason, so the stop says so and stays editable; the fetch is the authority and the probe is a courtesy. Writes nothing and stamps nothing. */
+export interface SourceProbeArgs {
+  /** The repository URL as typed, e.g. https://github.com/acme/widget. */
+  repoUrl: string;
+  /** One of the caller's v1:platform:sourceCredential rows to probe under. Empty probes anonymously, which is what a public repository needs. */
+  credentialId?: string;
+}
+
+export function buildSourceProbe(args: SourceProbeArgs): string {
+  const parts: string[] = [];
+  parts.push("repoUrl: " + renderMemQLValue(args.repoUrl));
+  if (args.credentialId !== undefined) parts.push("credentialId: " + renderMemQLValue(args.credentialId));
+  return "builtin sourceProbe(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sourceProbe(args: SourceProbeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sourceProbe = function (this: QueryClient, args: SourceProbeArgs = {} as SourceProbeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sourceProbe", buildSourceProbe(args), opts);
 };
 
