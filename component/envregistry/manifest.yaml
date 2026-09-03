@@ -3282,6 +3282,37 @@ variables:
     optional: true
     description: "Process-wide default verbosity of the per-invocation observe runtime: off / count / meta / verbose. Read once at package init(), so it cannot be changed without a restart -- per-FQN overrides via the v1:observability:codeProfile concept are the live mechanism and take precedence over this. Anything above off writes a record per instrumented call, so verbose on a busy node is a volume decision, not just a logging one."
 
+  # --- the log store (epic memql#4893) ---
+  # Every node's log lines persisted in the log_line hypertable
+  # (v1:observability:logLine) by component/logstore, on every node type.
+
+  - name: MEMQL_LOGS_LEVEL
+    component: observability
+    scope: node
+    default: "info"
+    optional: true
+    description: "The log STORE's own floor on this node: debug / info / warn / error, or off to keep no lines here at all. Independent of the console level, which is untouched -- a node at MEMQL_LOGS_LEVEL=debug persists debug lines the console never prints. Read once at process start by core/logger (a change needs a restart). Default info: info and above persist on every node type; debug is opt-in per node because it is a volume decision."
+
+  - name: MEMQL_LOGS_RETENTION_DAYS
+    component: observability
+    scope: node
+    default: "30"
+    optional: true
+    description: "How many UTC days of log lines the store keeps. The nightly logsRetentionSweep automation (03:20 UTC, on the cron leader) archives each day older than this per node type as logs/<day>/<nodeType>.ndjson.gz and only then deletes it. Clamped to 1..365; unparseable falls back to 30. There is deliberately no TimescaleDB retention policy on log_line: the sweep owns retention because the archive must come first."
+
+  - name: MEMQL_LOGS_MAX_LINES_PER_SECOND
+    component: observability
+    scope: node
+    default: "2000"
+    optional: true
+    description: "Per-node token bucket in front of the log store's queue: lines above this rate are DROPPED and counted (memql_logs_dropped_total{reason=\"rate\"}) rather than queued, so one chatty replica cannot starve its siblings or its own database. Clamped to 10..100000; unparseable falls back to 2000. The console keeps printing every line regardless; only the store is bounded."
+
+  - name: MEMQL_LOGS_ARCHIVE_CONTAINER
+    component: observability
+    scope: node
+    optional: true
+    description: "The blob container the retention sweep archives expired days into, as logs/<day>/<nodeType>.ndjson.gz. Defaults to the cluster's own container, MEMQL_AZURE_BLOB_CONTAINER; the client is the MEMQL_AZURE_STORAGE_CONNECTION_STRING one. With neither container set the sweep REFUSES to delete anything and says so in its own log line every night -- a cluster without object storage keeps its lines. logsArchiveRestore reads the same container back."
+
   # --- legacy aliases (deprecated; resolved via ApplyLegacyEnvAliases) ---
   # Epic 7.3 / memql#2106. Registered so reverse-drift passes and the old
   # names are documented as deprecated. The boot-time shim in

@@ -260,6 +260,22 @@ func newApp(serviceLogger *slog.Logger, version string, overrides Overrides) *Ap
 		overrides: overrides,
 	}
 
+	// The app logger is the PROCESS DEFAULT from here on (epic memql#4893).
+	// Nothing in the tree called slog.SetDefault before, so every
+	// slog.Default() fallback -- a component built without a logger, a
+	// package-level helper, a library that logs on its own -- bypassed
+	// logger.New's chain entirely: no redaction, no ordered JSON, and now no
+	// store. Set once, here, on the one path every build_*.go shares, those
+	// lines take the same redactor -> fanout(console, store) path as
+	// everything else, so the log store keeps them and the console prints
+	// them the way it prints the rest. The standard library's log package
+	// output rides the same handler from this point. Guarded like
+	// logBuildIdentity below: a nil logger (tests) must not panic the
+	// process on the line whose whole job is to be present.
+	if serviceLogger != nil {
+		slog.SetDefault(serviceLogger)
+	}
+
 	if a.overrides.NewDatabase == nil {
 		a.overrides.NewDatabase = memoryNodesDatabase.NewMemoryNodesDatabase
 	}

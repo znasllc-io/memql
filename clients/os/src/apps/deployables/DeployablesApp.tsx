@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { LiveSnapshot, Row } from "@znasllc-io/memql-sdk-core/client";
+import { Concepts, type LiveSnapshot, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Head, Panel, roleAdmits } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { useLiveView, type LiveView } from "../../live/liveView";
 import { useArrivals } from "../../live/useArrivals";
+import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { DeployablesSection } from "./DeployablesSection";
 import { MapSection, NO_SELECTION, type MapSelection } from "./map/MapSection";
@@ -56,6 +57,15 @@ const EMPTY_SNAPSHOT = <T,>(): LiveSnapshot<T> => ({
   error: "",
   version: 0,
 });
+
+/** The concepts this app owns, for its Logs section: what serves, where it
+ *  came from, each attempt to deploy it, and a client's own domain on it. */
+const DEPLOYABLES_LOG_CONCEPTS = [
+  Concepts.PLATFORM_SITE,
+  Concepts.PLATFORM_PACKAGE,
+  Concepts.PLATFORM_PACKAGE_DEPLOYMENT,
+  Concepts.PLATFORM_CUSTOM_DOMAIN,
+] as const;
 
 export function DeployablesApp({
   sectionId,
@@ -225,6 +235,21 @@ export function DeployablesApp({
         credentials={credentials}
         packages={packageSnapshot.rows}
         connectResult={connectResult}
+      />
+    );
+  }
+  // The app's slice of the cluster's logs (epic memql#4895). It survived the
+  // compose restructure while Sites, Packages and Actions did not, and the
+  // difference is whose section it is: those three were this app's own reading
+  // of its subject and became one, and this is a shell convention every app
+  // carries at the log store's own admin floor.
+  if (sectionId === "logs") {
+    return (
+      <AppLogsSection
+        app="deployables"
+        subjectConcepts={DEPLOYABLES_LOG_CONCEPTS}
+        intent={intent}
+        consumeIntent={consumeIntent}
       />
     );
   }

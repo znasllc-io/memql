@@ -803,6 +803,266 @@ QueryClient.prototype.libraryTrainFile = function (this: QueryClient, args: Libr
   return this.executeNamed("libraryTrainFile", buildLibraryTrainFile(args), opts);
 };
 
+/** The archived days: one row per logs/<day>/<nodeType>.ndjson.gz object in the archive container with its size, newest day first. Empty when no archive is configured, and the row says which. Admin and above. */
+export interface LogsArchiveListArgs {
+}
+
+export function buildLogsArchiveList(args: LogsArchiveListArgs): string {
+  void args;
+  return "builtin logsArchiveList()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    logsArchiveList(args?: LogsArchiveListArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.logsArchiveList = function (this: QueryClient, args: LogsArchiveListArgs = {} as LogsArchiveListArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("logsArchiveList", buildLogsArchiveList(args), opts);
+};
+
+/** Bring an archived day back into the store: download logs/<day>/<nodeType>.ndjson.gz (every node type of the day when nodeType is blank), gunzip, and insert the rows with ON CONFLICT DO NOTHING on (occurredAt, id), so running it twice restores nothing twice. A restored day is older than the retention boundary by definition and is swept again at the next nightly run; read it now. Owner only. Answers { restored, skipped, objects }. */
+export interface LogsArchiveRestoreArgs {
+  /** The UTC day, YYYY-MM-DD. */
+  day: string;
+  /** One node type, or blank for every node type archived that day. */
+  nodeType?: string;
+}
+
+export function buildLogsArchiveRestore(args: LogsArchiveRestoreArgs): string {
+  const parts: string[] = [];
+  parts.push("day: " + renderMemQLValue(args.day));
+  if (args.nodeType !== undefined) parts.push("nodeType: " + renderMemQLValue(args.nodeType));
+  return "builtin logsArchiveRestore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    logsArchiveRestore(args: LogsArchiveRestoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.logsArchiveRestore = function (this: QueryClient, args: LogsArchiveRestoreArgs = {} as LogsArchiveRestoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("logsArchiveRestore", buildLogsArchiveRestore(args), opts);
+};
+
+/** Record lines from the MemQL OS front end: window errors, unhandled rejections and console warnings, batched by the shell. Every line is stamped nodeType=os, node blank, and userId from the caller's actor -- never from the payload -- so a line can never claim to be somebody else's. `session` is the tab's own correlation id (4 to 64 URL-safe characters). Refused WHOLE with a sentence when a call carries more than 50 lines, a message over 4 KiB or attributes over 8 KiB, and with reason `rate_limited` when the (user, session) bucket -- 120 lines, refilled two per second -- is empty; the shell drops and counts rather than retrying. A client `at` within five minutes of the node clock is kept, one outside it is replaced. Any signed-in principal may call it; an anonymous or connector actor is refused. Answers { accepted, dropped, reason }. */
+export interface LogsRecordClientArgs {
+  /** The tab session id the shell minted (`os-<shortId>`). */
+  session: string;
+  /** Up to 50 of { at, level, app, component, message, attributes, subject, subjectConcept }. `level` and `message` are required per line. */
+  lines: Record<string, unknown>[];
+}
+
+export function buildLogsRecordClient(args: LogsRecordClientArgs): string {
+  const parts: string[] = [];
+  parts.push("session: " + renderMemQLValue(args.session));
+  parts.push("lines: " + renderMemQLValue(args.lines));
+  return "builtin logsRecordClient(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    logsRecordClient(args: LogsRecordClientArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.logsRecordClient = function (this: QueryClient, args: LogsRecordClientArgs = {} as LogsRecordClientArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("logsRecordClient", buildLogsRecordClient(args), opts);
+};
+
+/** Lines inside [windowStart, windowEnd), newest first, narrowed by every facet given. `apps` and `subjectConcepts` together form ONE scope predicate ORed -- an app's slice is 'lines tagged with me OR about the things I own' -- and every other facet ANDs. `text` is a case-insensitive substring of the message. Keyset-paged: pass the oldest row's occurredAt and id back as beforeAt and beforeId for the next page. `limit` defaults to 200 and is capped at 500. Admin and above; the handler repeats the floor. */
+export interface LogsSearchArgs {
+  /** Inclusive start of the window (RFC 3339). */
+  windowStart: string;
+  /** Exclusive end of the window (RFC 3339). */
+  windowEnd: string;
+  /** Node types to include (identity, bff, ..., os). Empty means every node type. */
+  nodeTypes?: string[];
+  /** Node ids to include. Empty means every node. */
+  nodes?: string[];
+  /** Component names to include, exact. Empty means every component. */
+  components?: string[];
+  /** OS app ids; ORed with subjectConcepts into the scope predicate. */
+  apps?: string[];
+  /** Levels to include (debug, info, warn, error). Empty means every level. */
+  levels?: string[];
+  /** Only lines about this bare id. */
+  subject?: string;
+  /** Only lines whose subject is of this concept, used with `subject` to disambiguate. */
+  subjectConcept?: string;
+  /** Concept ids an app owns; ORed with `apps` into the scope predicate. */
+  subjectConcepts?: string[];
+  /** Only lines from this OS tab session. */
+  session?: string;
+  /** Only OS lines written by this user. */
+  userId?: string;
+  /** Case-insensitive substring of the message. */
+  text?: string;
+  /** Rows per page: 1 to 500, default 200. */
+  limit?: number;
+  /** Keyset cursor: the occurredAt of the oldest row already seen. */
+  beforeAt?: string;
+  /** Keyset cursor: the id of that row. */
+  beforeId?: string;
+}
+
+export function buildLogsSearch(args: LogsSearchArgs): string {
+  const parts: string[] = [];
+  parts.push("windowStart: " + renderMemQLValue(args.windowStart));
+  parts.push("windowEnd: " + renderMemQLValue(args.windowEnd));
+  if (args.nodeTypes !== undefined) parts.push("nodeTypes: " + renderMemQLValue(args.nodeTypes));
+  if (args.nodes !== undefined) parts.push("nodes: " + renderMemQLValue(args.nodes));
+  if (args.components !== undefined) parts.push("components: " + renderMemQLValue(args.components));
+  if (args.apps !== undefined) parts.push("apps: " + renderMemQLValue(args.apps));
+  if (args.levels !== undefined) parts.push("levels: " + renderMemQLValue(args.levels));
+  if (args.subject !== undefined) parts.push("subject: " + renderMemQLValue(args.subject));
+  if (args.subjectConcept !== undefined) parts.push("subjectConcept: " + renderMemQLValue(args.subjectConcept));
+  if (args.subjectConcepts !== undefined) parts.push("subjectConcepts: " + renderMemQLValue(args.subjectConcepts));
+  if (args.session !== undefined) parts.push("session: " + renderMemQLValue(args.session));
+  if (args.userId !== undefined) parts.push("userId: " + renderMemQLValue(args.userId));
+  if (args.text !== undefined) parts.push("text: " + renderMemQLValue(args.text));
+  if (args.limit !== undefined) parts.push("limit: " + renderMemQLValue(args.limit));
+  if (args.beforeAt !== undefined) parts.push("beforeAt: " + renderMemQLValue(args.beforeAt));
+  if (args.beforeId !== undefined) parts.push("beforeId: " + renderMemQLValue(args.beforeId));
+  return "builtin logsSearch(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    logsSearch(args: LogsSearchArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.logsSearch = function (this: QueryClient, args: LogsSearchArgs = {} as LogsSearchArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("logsSearch", buildLogsSearch(args), opts);
+};
+
+/** What logged inside [windowStart, windowEnd): one row per distinct component, per (nodeType, node) and per OS app, each with its line count. The facet lists in the Logs app come from here, so a value that never logged in the window is never offered, and the portal -- which is not instrumented and has no component name -- is absent by construction rather than by a list. Admin and above. */
+export interface LogsSourcesArgs {
+  /** Inclusive start of the window (RFC 3339). */
+  windowStart: string;
+  /** Exclusive end of the window (RFC 3339). */
+  windowEnd: string;
+}
+
+export function buildLogsSources(args: LogsSourcesArgs): string {
+  const parts: string[] = [];
+  parts.push("windowStart: " + renderMemQLValue(args.windowStart));
+  parts.push("windowEnd: " + renderMemQLValue(args.windowEnd));
+  return "builtin logsSources(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    logsSources(args: LogsSourcesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.logsSources = function (this: QueryClient, args: LogsSourcesArgs = {} as LogsSourcesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("logsSources", buildLogsSources(args), opts);
+};
+
+/** What this cluster keeps: the retention in days, whether an archive is configured and which container, the store level and the per-second cap on the answering node, the lines written and dropped (by reason) since that node started, and the oldest and newest occurredAt in the store with an estimated row count. One row. Admin and above. */
+export interface LogsStatusArgs {
+}
+
+export function buildLogsStatus(args: LogsStatusArgs): string {
+  void args;
+  return "builtin logsStatus()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    logsStatus(args?: LogsStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.logsStatus = function (this: QueryClient, args: LogsStatusArgs = {} as LogsStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("logsStatus", buildLogsStatus(args), opts);
+};
+
+/** Run the retention sweep now: archive every expired UTC day per node type as logs/<day>/<nodeType>.ndjson.gz in MEMQL_LOGS_ARCHIVE_CONTAINER, then delete that day; at most sixty days per run. NO ARCHIVE, NO DELETE: with no container configured the sweep keeps every line and says so in its own log line. A second sweep while one runs answers skipped. The nightly logsRetentionSweep automation calls this on the cron leader; an owner may call it by hand. Answers { daysArchived, rowsArchived, rowsDeleted, skipped, refused }. */
+export interface LogsSweepArgs {
+}
+
+export function buildLogsSweep(args: LogsSweepArgs): string {
+  void args;
+  return "builtin logsSweep()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    logsSweep(args?: LogsSweepArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.logsSweep = function (this: QueryClient, args: LogsSweepArgs = {} as LogsSweepArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("logsSweep", buildLogsSweep(args), opts);
+};
+
+/** The live tail: lines newer than a keyset cursor, OLDEST first so a client appends, narrowed by the same facets as logsSearch (the same scope rule for `apps` and `subjectConcepts`). With no cursor it answers the newest `limit` lines in ascending order -- the baseline a stream starts from after any facet change. Poll it with the newest row's occurredAt and id as afterAt and afterId; an empty answer is 'nothing new', never an error. `limit` defaults to 200 and is capped at 500. Admin and above. */
+export interface LogsTailArgs {
+  /** Node types to include. Empty means every node type. */
+  nodeTypes?: string[];
+  /** Node ids to include. Empty means every node. */
+  nodes?: string[];
+  /** Component names to include, exact. */
+  components?: string[];
+  /** OS app ids; ORed with subjectConcepts into the scope predicate. */
+  apps?: string[];
+  /** Levels to include. Empty means every level. */
+  levels?: string[];
+  /** Only lines about this bare id. */
+  subject?: string;
+  /** Only lines whose subject is of this concept. */
+  subjectConcept?: string;
+  /** Concept ids an app owns; ORed with `apps`. */
+  subjectConcepts?: string[];
+  /** Only lines from this OS tab session. */
+  session?: string;
+  /** Only OS lines written by this user. */
+  userId?: string;
+  /** Case-insensitive substring of the message. */
+  text?: string;
+  /** Rows per answer: 1 to 500, default 200. */
+  limit?: number;
+  /** Keyset cursor: the occurredAt of the newest row already seen. */
+  afterAt?: string;
+  /** Keyset cursor: the id of that row. */
+  afterId?: string;
+}
+
+export function buildLogsTail(args: LogsTailArgs): string {
+  const parts: string[] = [];
+  if (args.nodeTypes !== undefined) parts.push("nodeTypes: " + renderMemQLValue(args.nodeTypes));
+  if (args.nodes !== undefined) parts.push("nodes: " + renderMemQLValue(args.nodes));
+  if (args.components !== undefined) parts.push("components: " + renderMemQLValue(args.components));
+  if (args.apps !== undefined) parts.push("apps: " + renderMemQLValue(args.apps));
+  if (args.levels !== undefined) parts.push("levels: " + renderMemQLValue(args.levels));
+  if (args.subject !== undefined) parts.push("subject: " + renderMemQLValue(args.subject));
+  if (args.subjectConcept !== undefined) parts.push("subjectConcept: " + renderMemQLValue(args.subjectConcept));
+  if (args.subjectConcepts !== undefined) parts.push("subjectConcepts: " + renderMemQLValue(args.subjectConcepts));
+  if (args.session !== undefined) parts.push("session: " + renderMemQLValue(args.session));
+  if (args.userId !== undefined) parts.push("userId: " + renderMemQLValue(args.userId));
+  if (args.text !== undefined) parts.push("text: " + renderMemQLValue(args.text));
+  if (args.limit !== undefined) parts.push("limit: " + renderMemQLValue(args.limit));
+  if (args.afterAt !== undefined) parts.push("afterAt: " + renderMemQLValue(args.afterAt));
+  if (args.afterId !== undefined) parts.push("afterId: " + renderMemQLValue(args.afterId));
+  return "builtin logsTail(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    logsTail(args: LogsTailArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.logsTail = function (this: QueryClient, args: LogsTailArgs = {} as LogsTailArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("logsTail", buildLogsTail(args), opts);
+};
+
 /** Analyze a package source offline and return the report, deploying nothing (epic memql#4794, D12). Fetches the tracked source, walks the manifest, discovers the DSL domains and runs the SAME Init-grade gates strict boot runs -- so 'this DSL would refuse boot' is an answer produced here, before a pod is ever asked to run it. Returns {report, ok}: the report names every deployable with its build plan (or 'prebuilt output found -- build skipped'), every DSL domain with construct counts, any Go pack as reported-not-deployable, and every problem found. A refusal carries one of the stable codes in component/packages/refusal.go. */
 export interface PackageAnalyzeArgs {
   /** The v1:platform:package row to analyze. */

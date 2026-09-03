@@ -8,6 +8,7 @@ import { sectionsForRole, type OsAppManifest } from "../system/registry";
 import { requirementFloor, roleAdmits } from "../system/roles";
 import type { OsWindow } from "../system/windows";
 import { useOs } from "./state";
+import { WindowErrorBoundary } from "./WindowErrorBoundary";
 
 // The window (spec A): glass frame on a token-carrying root, computed rect
 // (the desk animates BETWEEN rects; during a drag dnd-kit's transform
@@ -150,13 +151,21 @@ export function WindowFrame({
               Rendering the app body anyway would run its reads and show the
               refusals one at a time, which says nothing about why. */}
           {roleAdmits(actorRole, manifest.roles) ? (
-            <Body
-              sectionId={current?.id ?? ""}
-              navigate={(sectionId) => actions.navigateSection(win.id, sectionId)}
-              askContext={(tag) => openAsk(tag)}
-              intent={win.intent}
-              consumeIntent={(intentId) => actions.consumeWindowIntent(win.id, intentId)}
-            />
+            /* THE BOUNDARY (epic memql#4895): a render error in this app
+               stays in this window -- a Notice with the error's own sentence
+               and a reload -- and is REPORTED with the app id and section
+               exactly, which the boundary knows from here and the capture's
+               focused-window guess does not. Keyed by window so one window's
+               fault never carries into another's. */
+            <WindowErrorBoundary key={win.id} app={manifest.id} section={current?.id ?? ""}>
+              <Body
+                sectionId={current?.id ?? ""}
+                navigate={(sectionId) => actions.navigateSection(win.id, sectionId)}
+                askContext={(tag) => openAsk(tag)}
+                intent={win.intent}
+                consumeIntent={(intentId) => actions.consumeWindowIntent(win.id, intentId)}
+              />
+            </WindowErrorBoundary>
           ) : (
             <SurfaceRefused
               surface={manifest.name}

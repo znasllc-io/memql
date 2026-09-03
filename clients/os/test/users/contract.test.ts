@@ -42,7 +42,7 @@ describe("the Users manifest", () => {
     // naming a section the manifest does not declare leaves the window on
     // People with the nav highlighting nothing.
     expect(users?.sections).toBe(USERS_SECTIONS);
-    expect(USERS_SECTION_IDS).toEqual(["people", "invites", "settings"]);
+    expect(USERS_SECTION_IDS).toEqual(["people", "invites", "logs", "settings"]);
   });
 });
 

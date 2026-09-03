@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 import { ArrowLeft, ExternalLink, Sparkles } from "lucide-react";
 
 import { Button, Chip, Chips, Head, Panel, useLiveView } from "../../../kit";
+import { OpenLogsButton } from "../../../logs/OpenLogs";
 import { useAccountOptions } from "../../accounts/tie";
 import { usePackageActions, useSiteLifecycle } from "../packages/actions";
 import { ProblemNotice } from "../packages/ReportView";
@@ -203,6 +205,16 @@ export function DeployablePage({
             <ExternalLink size={13} aria-hidden /> Open
           </a>
         )}
+        {/* Every line about this deployable (epic memql#4895): the Logs app on
+            Search, narrowed to this site. Admin and above, because every read
+            on the log store is; below that the control is ABSENT rather than a
+            refusal waiting to be clicked. It moved here from SiteDetail, which
+            this page replaced. */}
+        <OpenLogsButton
+          subject={site.id}
+          subjectConcept={Concepts.PLATFORM_SITE}
+          ariaLabel={`Logs for ${name}`}
+        />
         {onAsk ? (
           <Button onClick={() => onAsk(`app:deployables site:${site.hostname || site.id}`)} ariaLabel={`Ask about ${name}`}>
             <Sparkles size={13} aria-hidden /> Ask

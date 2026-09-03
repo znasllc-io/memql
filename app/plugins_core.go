@@ -64,6 +64,14 @@ import (
 	// integration registered NOWHERE only warns, while one registered with a
 	// capability MISSING fails boot.
 	_ "github.com/znasllc-io/memql/component/packages"
+	// The log store's `logs` plug-in (epic memql#4893) lives in component/, in
+	// the ROOT module, for the reason packages does: it is engine internals.
+	// The eight builtins it executes are declared in dsl/observability, which
+	// every binary loads, so a capability missing from the registry is a
+	// boot-time resolution failure on every node type -- and it imports
+	// integrations/azureblob for the archive, which the root module already
+	// requires and integrations could not import back.
+	_ "github.com/znasllc-io/memql/component/logstore"
 	_ "github.com/znasllc-io/memql/integrations/library"
 	_ "github.com/znasllc-io/memql/integrations/liveknowledge"
 	_ "github.com/znasllc-io/memql/integrations/openairealtime"

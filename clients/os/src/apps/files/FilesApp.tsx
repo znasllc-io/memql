@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { newShortId, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { Concepts, newShortId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useAuthSource } from "../../auth/context";
 import { EdgeUploadProvider } from "../../items/edgeUpload";
@@ -8,6 +8,7 @@ import { Check, Head, Panel } from "../../kit";
 import { useOsConnection } from "../../live/connection";
 import { useLiveView } from "../../live/liveView";
 import { useOs } from "../../chrome/state";
+import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { BackupsSection } from "./backups/BackupsSection";
 import { backupFromRow, type BackupRow } from "./backups/rows";
@@ -50,6 +51,15 @@ import { useUploadTasks } from "./useUploadTasks";
 // a server-side folder filter could not see pre-field rows at all: a row
 // promoted before folders existed has no `folderId` member, and only a
 // client-side fold reads absence and "" as the same answer, the root.
+
+/** The concepts this app owns, for its Logs section: the index, the bytes,
+ *  the folders and the arrangements that fill them. */
+const FILES_LOG_CONCEPTS = [
+  Concepts.LIBRARY_ARTIFACT,
+  Concepts.LIBRARY_FILE,
+  Concepts.LIBRARY_FOLDER,
+  Concepts.LIBRARY_WATCHED_FOLDER,
+] as const;
 
 export function FilesApp({
   sectionId,
@@ -296,6 +306,16 @@ export function FilesApp({
 
   if (sectionId === "settings") {
     return <FilesSettingsSection settings={settings} update={update} />;
+  }
+  if (sectionId === "logs") {
+    return (
+      <AppLogsSection
+        app="files"
+        subjectConcepts={FILES_LOG_CONCEPTS}
+        intent={intent}
+        consumeIntent={consumeIntent}
+      />
+    );
   }
   if (sectionId === "backups") {
     return (

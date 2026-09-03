@@ -1997,8 +1997,21 @@ schema does not say.
   `<slug>.<domain>` against a reserved set DERIVED from `frontdoor.Roles()` +
   the portal, so a new role can never become claimable by omission; Android /
   iOS / macOS deliberately have NO enum values, being distribution rather than
-  hostnames ([deployables.md](docs/public/operate/deployables.md)). Also
-  `globalSecret` / `globalVariable`, `outboundRequest` / `inboundRequest`,
+  hostnames ([deployables.md](docs/public/operate/deployables.md)) -- they are
+  a written-down TARGET shape instead (epic memql#4885), and a manifest
+  declaring one is reported `deployable_target_not_offered`, scoped to that app
+  and not fatal to the package. `package` / `packageDeployment` are the SOURCE
+  and its append-only run timeline
+  ([packages.md](docs/public/operate/packages.md)); `sourceCredential` is the
+  personal token a private source fetches under -- sealed once server-side, and
+  resolved under the **package owner's** actor rather than the caller's, so a
+  package naming somebody else's credential resolves zero rows and is refused
+  `credential_not_found` before any request leaves the cluster. There is no
+  cluster-wide source credential any more: the `globalSecret` a package used to
+  NAME is deleted with no shim, because nothing in the OS could create one and
+  any package owner could name any secret. Also
+  `globalSecret` / `globalVariable` (still the storefront binding's and every
+  integration's named-secret home), `outboundRequest` / `inboundRequest`,
   `missingCapability`, and `dataOrigin` -- a VIRTUAL projection (the
   `v1:router:modelCatalog` pattern, never persisted) of every concept's
   data-origins declaration.
@@ -2053,6 +2066,23 @@ schema does not say.
   read through `codeMetricsInWindow`: one bucket, one `[windowStart, windowEnd)`
   range, `codeReference startsWith` any of the caller's prefixes (memql#4208).
   [Design](docs/internal/design/auto-generated-diagrams.md).
+  **`logLine` is the log store** (epic memql#4893): every node type's log
+  lines in the `log_line` hypertable, written by the sink `core/logger`'s
+  fan-out handler forwards to and `component/logstore` batches (bounded,
+  non-blocking, drops counted on `memql_logs_dropped_total{reason}`), plus
+  the OS front end's own errors through `logsRecordClient`. Rows never enter
+  the graph and never broadcast; the reads are `@sdk` builtins
+  (`logsSearch`, `logsTail`, `logsSources`, `logsStatus`) floored at admin
+  IN THEIR HANDLERS, because a builtin's annotation set carries no
+  `@requiresRank`. `logger.Subject(concept, id)` is the one seam between a
+  line and the thing it is about; an OS app's Logs section is `app` OR the
+  concepts the app owns. Retention is the nightly `logsRetentionSweep` on
+  the cron leader: archive `logs/<day>/<nodeType>.ndjson.gz` to blob
+  storage FIRST, delete second, and **no archive means no delete**. The
+  portal is not instrumented and a hosted site's console is an owner
+  decision still open (the design record's section G).
+  [logs.md](docs/public/operate/logs.md) ·
+  [design](docs/superpowers/specs/2026-09-03-logs-design.md).
 - **Identity** (`dsl/identity/concepts.memql`, loaded by every node) -- `user`,
   `authSession`, `magiclink`, `accessRequest`, `invitation`, `delegation`,
   `enrolmentToken`, and `identity`, a credential set that is a discriminated

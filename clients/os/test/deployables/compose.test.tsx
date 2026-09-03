@@ -658,6 +658,38 @@ describe("the compose flow: what the run answers", () => {
     expect(within(region).getByText(/Published to shop\.memql\.example\.com/)).toBeTruthy();
   });
 
+  it("renders a refused CLIENT tie the same way, and says the deployable is live", async () => {
+    const { connection, region } = await analyzed();
+
+    await emit(
+      connection,
+      DEPLOYMENT_CONCEPT,
+      parkedRun(mintedPackageId(connection), {
+        status: "succeeded",
+        deployables: [
+          {
+            name: "storefront",
+            siteId: "site-shop",
+            hostname: "shop.memql.example.com",
+            bundleRef: "blob://sites/site-shop/v1/",
+            version: "v1",
+            created: true,
+            accountRefusal: {
+              code: "deployable_account_refused",
+              message: "account_not_found: no client with that id is one you can read",
+              scope: "storefront",
+              fatal: false,
+            },
+          },
+        ],
+        finishedAt: "2026-09-01T13:05:00Z",
+      }),
+    );
+
+    expect(await within(region).findByText("It is live, but not tied to that client")).toBeTruthy();
+    expect(within(region).getByText("account_not_found: no client with that id is one you can read")).toBeTruthy();
+  });
+
   it("stops the rail where a refused run stopped, in the server's own words", async () => {
     const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
     const { region } = await compose(connection);
