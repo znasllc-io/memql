@@ -439,7 +439,11 @@ describe("New deployable", () => {
       "pending",
       "pending",
     ]);
-    expect(within(compose).getByText("Choose where it comes from")).toBeTruthy();
+    // The Source stop is the OS's own choice control: three answers, chosen
+    // once. The third is a cluster owner's, and this session is one.
+    expect(within(compose).getByRole("radio", { name: /A repository/ })).toBeTruthy();
+    expect(within(compose).getByRole("radio", { name: /A zip in Files/ })).toBeTruthy();
+    expect(within(compose).getByRole("radio", { name: /Pushed by your CI/ })).toBeTruthy();
     // Analyze, disabled: nothing has been chosen yet.
     const analyze = within(compose).getByRole("button", { name: "Analyze" }) as HTMLButtonElement;
     expect(analyze.disabled).toBe(true);
@@ -476,18 +480,28 @@ describe("New deployable", () => {
 
     const compose = await screen.findByRole("region", { name: "New deployable" });
     const rail = within(compose).getByRole("list", { name: "Deployable stops" });
+    // A run parked at the confirm gate has ANSWERED What it is -- its report
+    // is what parked it -- so the open stop is Where it lives, which is what
+    // the Deploy beneath is waiting for.
     expect([...rail.querySelectorAll(":scope > li")].map((li) => li.getAttribute("data-state"))).toEqual([
       "complete",
+      "complete",
       "open",
-      "pending",
       "skipped",
       "pending",
     ]);
     // The source it came from, as its answer, and the report the run parked with.
     expect(within(compose).getByText("acme/storefront at main")).toBeTruthy();
-    expect(within(compose).getByText("reports")).toBeTruthy();
-    // Deploy, disabled: the placements are the compose task's stop.
-    expect((within(compose).getByRole("button", { name: "Deploy" }) as HTMLButtonElement).disabled).toBe(true);
+    // The report the run parked with, at the What-it-is stop: the app and its
+    // path, as the report names them.
+    expect(within(compose).getByText("clients/reports")).toBeTruthy();
+    // Deploy, and it is REACHABLE: the one app with no site yet arrived with
+    // a suggested address, so there is nothing left to answer. "storefront"
+    // already serves, so it is not re-asked -- the pipeline reads a placement
+    // on a first deploy only.
+    expect((within(compose).getByRole("button", { name: "Deploy" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(within(compose).getByText("reports.memql.example.com")).toBeTruthy();
+    expect(within(compose).queryByLabelText("The name storefront answers at")).toBeNull();
   });
 });
 

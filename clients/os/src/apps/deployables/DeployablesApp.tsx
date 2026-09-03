@@ -3,7 +3,7 @@ import type { LiveSnapshot, Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Head, Panel, roleAdmits } from "../../kit";
 import { useSession } from "../../chrome/access";
-import { useLiveView } from "../../live/liveView";
+import { useLiveView, type LiveView } from "../../live/liveView";
 import { useArrivals } from "../../live/useArrivals";
 import type { OsAppProps } from "../../system/registry";
 import { DeployablesSection } from "./DeployablesSection";
@@ -13,6 +13,7 @@ import { deploymentFromRow, packageFromRow, type DeploymentRow, type PackageRow 
 import { useAwaitingConfirm } from "./packages/useAwaitingConfirm";
 import { usePackages } from "./packages/usePackages";
 import { siteFingerprint, siteFromRow, type SiteRow } from "./rows";
+import { SourcesGroup } from "./settings/SourcesGroup";
 import { credentialFromRow, type CredentialRow } from "./sources/rows";
 import { useSourceCredentials } from "./sources/useSourceCredentials";
 import {
@@ -192,7 +193,15 @@ export function DeployablesApp({
   }, []);
 
   if (sectionId === "settings") {
-    return <DeployablesSettingsSection settings={settings} update={update} actorRole={actorRole} />;
+    return (
+      <DeployablesSettingsSection
+        settings={settings}
+        update={update}
+        actorRole={actorRole}
+        credentials={credentials}
+        packages={packageSnapshot.rows}
+      />
+    );
   }
   if (sectionId === "deployables") {
     return (
@@ -238,10 +247,16 @@ function DeployablesSettingsSection({
   settings,
   update,
   actorRole,
+  credentials,
+  packages,
 }: {
   settings: DeployablesSettings;
   update: (patch: Partial<DeployablesSettings>) => void;
   actorRole: string;
+  /** The app root's one credentials feed, for the Sources group. */
+  credentials: LiveView<CredentialRow> | null;
+  /** The app root's package rows, joined onto each credential by `credentialId`. */
+  packages: readonly PackageRow[];
 }) {
   // OFFER ONLY WHAT THIS SESSION CAN OPEN. A preference naming a section the
   // reader is not admitted to would silently do nothing -- WindowFrame falls
@@ -298,6 +313,14 @@ function DeployablesSettingsSection({
             nothing about which deployables are read or shown.
           </p>
         </fieldset>
+
+        {/* THE SOURCES GROUP IS NOT A PREFERENCE, and it is here anyway: the
+            two credential acts a person takes outside a compose flow --
+            add one ahead of time, revoke one that leaked -- have nowhere
+            else to live, and Settings is where an app keeps what is about
+            the app rather than about one row (DESIGN.md rule 4's home, one
+            step out). The two above ARE preferences and stay above it. */}
+        <SourcesGroup credentials={credentials} packages={packages} />
 
         <p className="os-caption">
           These are kept in this browser, separately from your desktop, so an app learning a

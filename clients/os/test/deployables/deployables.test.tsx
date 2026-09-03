@@ -459,6 +459,43 @@ describe("the Source stop", () => {
       expect(within(page).queryByText("cred-1")).toBeNull();
     });
 
+    it("switches which credential the source fetches under, for a writer", async () => {
+      // ROTATION IS THIS CONTROL: a credential's value is sealed once and
+      // never replaced, so rotating one means adding another and pointing
+      // the source at it. The picker does both in one place.
+      const card = credentialRow({ id: "cred-1" });
+      const other = credentialRow({ id: "cred-2", label: "new laptop", fingerprint: "sha256:9f2c" });
+      const { connection, page } = await mountAndOpen(
+        { ...WITH_PACKAGE, packages: [PRIVATE], credentials: [card, other] },
+        "store.memql.example.com",
+      );
+      const save = within(page).getByRole("button", { name: "Save" }) as HTMLButtonElement;
+      // Nothing has changed yet, so there is nothing to save.
+      expect(save.disabled).toBe(true);
+
+      await click(within(page).getByLabelText("The credential this source is fetched under, on github.com"));
+      await click(await screen.findByRole("option", { name: /new laptop/ }));
+      expect(save.disabled).toBe(false);
+      await click(save);
+
+      expect(connection.callsNamed("updatePackageSource")).toEqual([
+        'mutation updatePackageSource(packageId: "pkg-acme", credentialId: "cred-2")',
+      ]);
+    });
+
+    it("offers a reader no switch at all, disabled or otherwise", async () => {
+      const card = credentialRow({ id: "cred-1" });
+      const { page } = await mountAndOpen(
+        { ...WITH_PACKAGE, packages: [PRIVATE], credentials: [card] },
+        "store.memql.example.com",
+        { role: "reader" },
+      );
+      // The chip still says which credential is in force -- reading is not
+      // the privileged half.
+      expect(await within(page).findByText("acme deploy token")).toBeTruthy();
+      expect(within(page).queryByLabelText("The credential this source is fetched under, on github.com")).toBeNull();
+    });
+
     it("follows a revocation live, because the feed broadcasts updates", async () => {
       const card = credentialRow({ id: "cred-1" });
       const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, packages: [PRIVATE], credentials: [card] }, "store.memql.example.com");

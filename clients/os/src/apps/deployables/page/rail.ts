@@ -139,6 +139,24 @@ export interface ComposeInput {
   problem: RailProblem | null;
   /** A settled stop's one-line answer ("acme/shop at main", the hostname), when the caller has one. */
   answers?: Partial<Record<StopId, string>>;
+  /**
+   * The stop a RUN is at right now, while the compose flow is watching one.
+   *
+   * It draws as `current` -- the one thing on the rail that moves -- and
+   * every later stop reads as not reachable yet. Without it a flow watching
+   * its own analysis would have to draw that stop `open`, which is a HELD
+   * ring meaning "waiting on you", while the person is waiting on the
+   * cluster. The design's rule that the ring is the only motion is why this
+   * is a stop id and not a second spinner.
+   */
+  moving?: StopId | null;
+  /**
+   * The source carries its built output, so Build reads skipped with the
+   * reason before anything runs. A hand-made zip and a CI push are always
+   * this -- they ARE the built output -- and a package answers the same
+   * question through its report instead.
+   */
+  prebuilt?: boolean;
 }
 
 export type RailInput = DeployInput | StandingInput | ComposeInput;
@@ -512,6 +530,7 @@ function composeRail(input: ComposeInput): RailStage[] {
     parkedReason = problem.message;
   }
   const parkedIndex = parkedAt === null ? -1 : STOP_INDEX[parkedAt];
+  const movingIndex = input.moving === null || input.moving === undefined ? -1 : STOP_INDEX[input.moving];
 
   return RAIL_STOPS.map((stop): RailStage => {
     const index = STOP_INDEX[stop.id];
@@ -520,11 +539,17 @@ function composeRail(input: ComposeInput): RailStage[] {
       if (index > parkedIndex) return stage(stop, "pending");
     }
     // A FORECAST, the way the confirm gate's rail always was: once the
-    // report says every app is prebuilt, Build reads skipped before anything
-    // runs, so a person learns before the click that this source needs no
-    // build.
-    if (stop.id === "build" && input.report !== null && everyAppPrebuilt(input.report)) {
+    // report says every app is prebuilt -- or the source IS its built output
+    // -- Build reads skipped before anything runs, so a person learns before
+    // the click that this source needs no build. It is read BEFORE the moving
+    // stop below, because a skipped stage is a fact about the source and not
+    // about where a run has got to.
+    if (stop.id === "build" && (input.prebuilt === true || (input.report !== null && everyAppPrebuilt(input.report)))) {
       return stage(stop, "skipped", PREBUILT_REASON);
+    }
+    if (movingIndex >= 0) {
+      if (index === movingIndex) return stage(stop, "current");
+      if (index > movingIndex) return stage(stop, "pending");
     }
     if (answered.has(stop.id)) {
       const answer = input.answers?.[stop.id] ?? "";

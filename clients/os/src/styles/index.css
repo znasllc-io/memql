@@ -4715,6 +4715,36 @@ a.os-button {
   color: var(--os-ink);
 }
 
+/* ---- the compose stops (epic memql#4885, task memql#4891) --------------
+ *
+ * A VERDICT is what the cluster answered about something the person just
+ * typed or chose: "public, default branch main", the composed hostname, the
+ * slug rule that is not met. It is CONTENT rather than a notice -- nothing
+ * has gone wrong and there is nothing to dismiss -- so it reads at the
+ * surface's own size in one of two tones, and neither is `error`: `warn` is
+ * "this cannot go on as it is" and `ok` is the answer. Amber and the accent,
+ * the shell's own two, and no new colour. */
+.os-stop-verdict {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+.os-stop-verdict[data-tone="ok"] {
+  color: var(--os-accent);
+}
+.os-stop-verdict[data-tone="warn"] {
+  color: var(--os-warn);
+}
+
+/* The form a stop holds while it is being answered. Same grid as the stop's
+ * own body -- a form inside a stop is not a second container language (rule
+ * 8), it is the stop's body with fields in it. */
+.os-stop-form {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
 .os-report {
   display: grid;
   gap: 14px;

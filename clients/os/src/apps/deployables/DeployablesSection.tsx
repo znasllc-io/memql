@@ -182,6 +182,11 @@ export function DeployablesSection({
         onBack={() => setCompose(null)}
         onAsk={onAsk}
         parked={parkedFor ?? undefined}
+        placed={
+          parkedFor === null
+            ? []
+            : siteRows.filter((s) => s.packageId === parkedFor.pkg.id).map((s) => s.packageDeployableName)
+        }
       />
     );
   }

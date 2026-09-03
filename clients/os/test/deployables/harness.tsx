@@ -119,6 +119,26 @@ export interface FakeSeed {
   /** v1:platform:sourceCredential CARDS `sourceCredentialsMine` answers with -- never a value. */
   credentials?: Row[];
   /**
+   * What `sourceProbe` answers, keyed by the credentialId the call carries
+   * ("" for an anonymous probe). A key that is not present falls back to
+   * `""`, so a test that cares about only one answer names only that one.
+   */
+  sourceProbe?: Record<string, Row>;
+  /** Fails the next `sourceProbe` with this server message -- the probe that could not RUN. */
+  sourceProbeError?: string;
+  /** What `artifactProbe` answers, keyed by artifactId. */
+  artifactProbe?: Record<string, Row>;
+  /** Fails the next `artifactProbe` with this server message. */
+  artifactProbeError?: string;
+  /** What `sourceCredentialCreate` answers with. The token NEVER comes back. */
+  credentialCreated?: Row;
+  /** Fails the next `sourceCredentialCreate` with this server message. */
+  credentialCreateError?: string;
+  /** Fails the next `sourceCredentialRevoke` with this server message. */
+  credentialRevokeError?: string;
+  /** Fails the next `updatePackageSource` with this server message. */
+  updateSourceError?: string;
+  /**
    * v1:platform:packageDeployment rows at `awaiting_confirm`, which
    * `packageDeploymentsAwaitingConfirm` answers with: the list's fourth feed,
    * for the waiting mark (epic memql#4885, design section A).
@@ -232,6 +252,38 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
 
       if (call === "query sourceCredentialsMine()") return rowsResult(seed.credentials ?? []);
+
+      if (call.startsWith("builtin sourceProbe(")) {
+        if (seed.sourceProbeError !== undefined) throw new Error(seed.sourceProbeError);
+        const credentialId = /credentialId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const answers = seed.sourceProbe ?? {};
+        const reply = answers[credentialId] ?? answers[""] ?? null;
+        return rowsResult(reply === null ? [] : [reply]);
+      }
+
+      if (call.startsWith("builtin artifactProbe(")) {
+        if (seed.artifactProbeError !== undefined) throw new Error(seed.artifactProbeError);
+        const artifactId = /artifactId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const reply = (seed.artifactProbe ?? {})[artifactId] ?? null;
+        return rowsResult(reply === null ? [] : [reply]);
+      }
+
+      if (call.startsWith("builtin sourceCredentialCreate(")) {
+        if (seed.credentialCreateError !== undefined) throw new Error(seed.credentialCreateError);
+        return rowsResult([
+          seed.credentialCreated ?? ({ credentialId: "cred-new", fingerprint: "...9f2c" } as unknown as Row),
+        ]);
+      }
+
+      if (call.startsWith("builtin sourceCredentialRevoke(")) {
+        if (seed.credentialRevokeError !== undefined) throw new Error(seed.credentialRevokeError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("mutation updatePackageSource(")) {
+        if (seed.updateSourceError !== undefined) throw new Error(seed.updateSourceError);
+        return rowsResult([]);
+      }
 
       if (call.startsWith("mutation updateSiteStatus(")) {
         if (seed.siteStatusError !== undefined) throw new Error(seed.siteStatusError);
@@ -417,6 +469,29 @@ export function credentialRow(over: Partial<Row> & { id: string }): Row {
     createdAt: "2026-08-20T00:00:00Z",
     ...over,
   };
+}
+
+/** A `sourceProbe` reply. `ok` and public by default: the commonest answer. */
+export function probeReply(over: Partial<Row> = {}): Row {
+  return {
+    host: "github.com",
+    reachable: true,
+    private: false,
+    defaultBranch: "main",
+    reason: "ok",
+    ...over,
+  } as unknown as Row;
+}
+
+/** An `artifactProbe` reply. Neither a package nor a built site by default. */
+export function zipReply(over: Partial<Row> = {}): Row {
+  return {
+    isPackage: false,
+    isBuiltSite: false,
+    fileCount: 12,
+    totalBytes: 2097152,
+    ...over,
+  } as unknown as Row;
 }
 
 export function artifactRow(over: Partial<Row> & { id: string }): Row {
