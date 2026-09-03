@@ -110,6 +110,14 @@ func tarballURL(repoUrl, ref string) (string, error) {
 // speaks GitHub's tarball API and its auth header, so a GitLab URL would
 // produce an authenticated request to an endpoint that does not exist and a
 // refusal naming the wrong thing.
+//
+// The host refusal carries its OWN code (source_host_unsupported, epic
+// memql#4885) rather than source_unreadable, because the repair is different:
+// an unreadable source is fixed at the source, an unsupported host is fixed by
+// choosing the other source form. The probe answers the same code as a typed
+// reason, and the Source stop renders one repair for the condition however it
+// was reached -- which is why the sentence is the one normalizeCredentialHost
+// already uses.
 func parseGitHubRepo(repoUrl string) (owner, repo string, err error) {
 	raw := strings.TrimSpace(repoUrl)
 	if raw == "" {
@@ -120,9 +128,9 @@ func parseGitHubRepo(repoUrl string) (owner, repo string, err error) {
 		return "", "", refuse(CodeSourceUnreadable, "%q is not a URL this cluster can read: %v", raw, perr)
 	}
 	host := strings.ToLower(u.Hostname())
-	if host != "github.com" && host != "www.github.com" {
-		return "", "", refuse(CodeSourceUnreadable,
-			"this cluster fetches packages from github.com, and %q is on %q. Upload the tree as a zip instead -- the two source forms are interchangeable.",
+	if host != credentialHostGitHub && host != "www."+credentialHostGitHub {
+		return "", "", refuse(CodeSourceHostUnsupported,
+			"%q is on %q, which is not a host this cluster fetches sources from -- only github.com today, or upload a zip of the tree instead; the two source forms are interchangeable.",
 			raw, u.Hostname())
 	}
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
