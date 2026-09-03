@@ -160,6 +160,22 @@ var (
 		[]string{"outcome"},
 	)
 
+	siteTrafficWritten = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: "site_traffic",
+		Name:      "written_total",
+		Help:      "EDGE NODES ONLY -- select app=\"edge\"; every other node type exports this at a constant 0 because only the edge serves sites. Requests recorded into the edge_request log, which is what the traffic figure on a deployable's Live stop is folded from (epic memql#4906). A steady non-zero rate on a cluster serving traffic is the healthy shape. Read it BESIDE site_traffic_dropped_total: the two together are the honest denominator, and a figure that looks low is explained by one of them or by nobody visiting.",
+	})
+	siteTrafficDropped = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "site_traffic",
+			Name:      "dropped_total",
+			Help:      "EDGE NODES ONLY -- select app=\"edge\". Requests the edge served but did NOT record, labelled by reason: queue_full (the writer's buffer was full, which is the deliberate lossy branch -- an observability write must never make a visitor wait) or write_failed (a batch the database refused). EVERY DROP MAKES THE TRAFFIC FIGURE LOW, and this is the only place that is visible: the figure itself cannot say what is missing from it. Alert on a sustained non-zero rate, because a low figure read as \"nobody is visiting\" is the wrong conclusion to draw about a deployable somebody is deciding whether to keep.",
+		},
+		[]string{"reason"},
+	)
+
 	identitySigningKeyRotationSupported = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Subsystem: "identity",
@@ -215,6 +231,8 @@ func init() {
 		identitySigningKeyRotationSupported,
 		subscriptionRowsDenied,
 		authActivityPruned,
+		siteTrafficWritten,
+		siteTrafficDropped,
 		aiFederationExchanges,
 		logsWrittenTotal,
 		logsDroppedTotal,
@@ -272,6 +290,71 @@ func init() {
 	for _, reason := range []string{LogsDropQueue, LogsDropRate, LogsDropLevel, LogsDropDB} {
 		logsDroppedTotal.WithLabelValues(reason).Add(0)
 	}
+	// Both drop reasons exist at 0 from boot, for the reason the federation
+	// outcomes above do: the runbook says to alert on a sustained drop rate,
+	// and a Prometheus rule over a series that does not exist yet evaluates
+	// to no data rather than to zero. On a cluster that has never dropped a
+	// record the alert would be silently unarmed, which is exactly the state
+	// it is meant to watch for.
+	siteTrafficDropped.WithLabelValues(SiteTrafficDropQueueFull).Add(0)
+	siteTrafficDropped.WithLabelValues(SiteTrafficDropWriteFailed).Add(0)
+}
+
+// The two reasons a served request goes unrecorded (epic memql#4906). A
+// closed set, so the label stays low-cardinality and an alert can name the
+// one it cares about.
+const (
+	// SiteTrafficDropQueueFull is the deliberate lossy branch: the writer's
+	// buffer was full and the serving path did not wait.
+	SiteTrafficDropQueueFull = "queue_full"
+	// SiteTrafficDropWriteFailed is a batch the database refused. Counted as
+	// dropped rather than only as an error, because what a reader of the
+	// figure needs is how many requests are missing from it.
+	SiteTrafficDropWriteFailed = "write_failed"
+)
+
+// SiteTrafficWritten records n requests written into the edge request log.
+func SiteTrafficWritten(n int) {
+	if n <= 0 {
+		return
+	}
+	siteTrafficWritten.Add(float64(n))
+}
+
+// SiteTrafficWrittenValue returns the current count, for tests.
+func SiteTrafficWrittenValue() float64 {
+	var m dto.Metric
+	if err := siteTrafficWritten.Write(&m); err != nil {
+		return 0
+	}
+	return m.GetCounter().GetValue()
+}
+
+// SiteTrafficDropped records n requests the edge served and did not record.
+//
+// Labelled by REASON and by nothing else. The site id is the dimension
+// somebody would reach for next, and it is deliberately absent: site ids are
+// unbounded in a way reasons are not, and a metrics store is usually read
+// more widely than the graph is -- the same rule SubscriptionRowDenied
+// states about row ids.
+func SiteTrafficDropped(reason string, n int) {
+	if n <= 0 {
+		return
+	}
+	siteTrafficDropped.WithLabelValues(reason).Add(float64(n))
+}
+
+// SiteTrafficDroppedValue returns the current count for one reason, for tests.
+func SiteTrafficDroppedValue(reason string) float64 {
+	var m dto.Metric
+	c, err := siteTrafficDropped.GetMetricWithLabelValues(reason)
+	if err != nil {
+		return 0
+	}
+	if err := c.Write(&m); err != nil {
+		return 0
+	}
+	return m.GetCounter().GetValue()
 }
 
 // SubscriptionRowDenied records one graph-subscription event dropped at

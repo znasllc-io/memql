@@ -76,6 +76,19 @@ var pluginKinds = map[string]moduleKind{
 	"deployversion": kindComponent,
 	"packages":      kindComponent, // see the note below
 	"sitePublish":   kindComponent, // see the note below
+	// The edge's request log and the traffic figure folded from it (epic
+	// memql#4906). A COMPONENT by this table's own test: turning it off does
+	// not remove a feature, it breaks the engine. `siteTrafficInWindow` is
+	// declared in dsl/platform/builtins.memql, which EVERY binary loads, and
+	// a capability present in the DSL and absent from the registry is a
+	// boot-time resolution failure -- the same reason `customDomain` and
+	// `release` register on every node type.
+	//
+	// It is also not an integration: it calls nobody's API. It writes to this
+	// cluster's own database and reads this cluster's own aggregate, which is
+	// the relationship `database` has to Postgres rather than the one
+	// `shopify` has to Shopify.
+	"siteTraffic": kindComponent,
 	// Custom domains (epic memql#4805). A COMPONENT by this table's own test:
 	// does turning it off remove a feature, or break the engine?
 	//

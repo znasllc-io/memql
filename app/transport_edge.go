@@ -8,7 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uptrace/bun"
+
 	"github.com/znasllc-io/memql/component/edge"
+	"github.com/znasllc-io/memql/component/sitetraffic"
 	"github.com/znasllc-io/memql/core/env"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
@@ -77,12 +80,32 @@ func (a *App) mountEdgeEndpoints() {
 	executor := edge.NewEngineExecutor(&EdgeEngineAdapter{Engine: a.engine})
 	resolver := edge.NewResolver(executor, edgeSiteCacheTTLFromEnv(a.Logger))
 
+	// The request log (epic memql#4906): one row per served request, which is
+	// what a deployable's traffic figure is folded from. Built HERE and only
+	// here, because the edge is the only node type that serves a site -- the
+	// READ half is a plug-in and registers on every node, since its builtin is
+	// declared in a DSL file every binary loads.
+	//
+	// The component resolves its own database handle after the database
+	// component has started, so the recorder handed to the handler is nil
+	// until then and a request served in that window records nothing rather
+	// than blocking on a handle that does not exist yet. Appended as a
+	// Dependency the same way the observe sink is.
+	requestLog := sitetraffic.NewSinkComponent(a.Logger, func() *bun.DB {
+		if a.db == nil {
+			return nil
+		}
+		return a.db.BunDB()
+	}, 0)
+	a.Dependencies = append(a.Dependencies, requestLog)
+
 	handler := edge.NewHandler(edge.Options{
 		Resolver:       resolver,
 		Opener:         edgeBundleOpener(a.Logger),
 		Logger:         a.Logger,
 		APITarget:      edgeAPITargetFromEnv(a.Logger),
 		IdentityTarget: edgeIdentityTargetFromEnv(a.Logger),
+		RequestLog:     edgeRequestRecorder{sink: requestLog},
 		// The engine's own global-secret read, handed over as a one-method
 		// function rather than as the engine itself: a shopify_storefront
 		// site's runtime-config document resolves the v1:platform:globalSecret
@@ -213,4 +236,25 @@ func edgeBundleOpener(logger *slog.Logger) edge.BundleOpener {
 	}
 	openers["blob"] = edge.NewBlobOpener(edge.NewAzureBlobClient(uploader, container))
 	return edge.NewMuxOpener(openers)
+}
+
+// edgeRequestRecorder is the adapter between the edge's own record shape and
+// component/sitetraffic's.
+//
+// IT LIVES HERE BECAUSE THIS IS THE WIRING LAYER. component/edge declares its
+// own one-method interface rather than importing the writer, so the edge
+// depends on nothing new; component/sitetraffic knows nothing about HTTP. The
+// translation between them is exactly what app/ is for, and it is six fields
+// long precisely because neither side had to bend toward the other.
+type edgeRequestRecorder struct{ sink sitetraffic.Recorder }
+
+func (e edgeRequestRecorder) Record(r edge.RequestRecord) {
+	e.sink.Record(sitetraffic.Record{
+		SiteId:     r.SiteId,
+		ServedAt:   r.ServedAt,
+		Status:     r.Status,
+		PathClass:  r.PathClass,
+		Bytes:      r.Bytes,
+		DurationNs: r.DurationNs,
+	})
 }

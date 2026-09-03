@@ -454,6 +454,16 @@ var idBearingFieldExemptions = map[string]string{
 	"deployment/deploymentNodeSpec.deploymentId": "plain-fk-by-design; hashed into the composite concept id (#2885)",
 	"cluster/node.deploymentId":                  "plain-fk-by-design (@description declares plain string FK)",
 	"library/documentVersion.documentId":         "plain-fk-by-design; cross-concept content-history grouping key (@description declares NOT an @relationship)",
+	// --- bare by construction: a virtual projection nothing writes ---
+	// v1:observability:siteTraffic is a declaration of a RELATION's shape, the
+	// invocation / codeMetric precedent: its rows live in the edge_request
+	// aggregates and reach a client as synthetic nodes from
+	// siteTrafficInWindow. They never pass through executeWrite, so nothing
+	// canonicalizes anything -- and the column really does hold a bare id,
+	// which is what the edge stamped and what the reader compares against the
+	// caller's own bare ids. Annotating it would promise a canonical form no
+	// writer produces and no reader expects (epic memql#4906).
+	"observability/siteTraffic.siteId": "bare-by-construction; a virtual projection over a TimescaleDB aggregate, never written through executeWrite, and the reader matches the caller's bare ids against it (memql#4906)",
 	// --- non-node correlation ids (description mentions a concept but value is a random UUID) ---
 	"cognition/request.callId":        "non-node-correlation-id (UUID correlating a client tool call, not a node FK)",
 	"cognition/response.callId":       "non-node-correlation-id (UUID correlating a client tool call, not a node FK)",
