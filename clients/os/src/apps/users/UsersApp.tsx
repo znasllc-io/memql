@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
 import { Check, Head, Panel } from "../../kit";
 import { useSession } from "../../chrome/access";
+import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { useUsersActions } from "./actions";
 import { InvitesSection } from "./InvitesSection";
@@ -26,9 +28,14 @@ import {
 //
 // Sections are the app's own navigation. It never opens a window.
 
+/** The concepts this app owns, for its Logs section. */
+const USERS_LOG_CONCEPTS = [Concepts.IDENTITY_USER, Concepts.IDENTITY_INVITATION] as const;
+
 export function UsersApp({
   sectionId,
   navigate,
+  intent,
+  consumeIntent,
   store,
 }: OsAppProps & { store?: UsersSettingsStore }) {
   // Injectable for tests, which is the whole reason the parameter exists --
@@ -73,6 +80,16 @@ export function UsersApp({
 
   if (sectionId === "settings") {
     return <UsersSettingsSection settings={settings} update={update} />;
+  }
+  if (sectionId === "logs") {
+    return (
+      <AppLogsSection
+        app="users"
+        subjectConcepts={USERS_LOG_CONCEPTS}
+        intent={intent}
+        consumeIntent={consumeIntent}
+      />
+    );
   }
   if (sectionId === "invites") {
     return <InvitesSection actions={actions} ownerRole={ownerRole} />;
