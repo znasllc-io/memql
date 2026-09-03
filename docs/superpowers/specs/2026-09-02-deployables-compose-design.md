@@ -32,7 +32,7 @@ the credential it needs, and the model the future kinds will fill.
 | D3 | The page | **The rail, top to bottom**: Source, What it is, Where it lives, Build, Live, then Every attempt. The Head's one primary action follows the state |
 | D4 | Composition | **The rail is the form.** New deployable is the Head's primary action on Deployables and opens the same page in compose mode, inside the section. A parked run lives on its row |
 | D5 | Clicks | **Two on a first deploy, one after.** Analyze creates the source record and parks a run at the existing confirm gate; Deploy confirms it with the placements. A redeploy is Deploy alone |
-| D6 | Sources | **Three, chosen once**: a repository (probed), a zip in Files (the analysis decides whether it is a package tree or a built site), or the person's own CI pushing bundles (cluster owners; the stop shows the route and the mint command) |
+| D6 | Sources | **Three, chosen once**: a repository (picked from the GitHub grant's list when one exists, else a URL, probed; see the GitHub Connect record), a zip in Files (the analysis decides whether it is a package tree or a built site), or the person's own CI pushing bundles (cluster owners; the stop shows the route and the mint command) |
 | D7 | Going live | **Stays a deliberate click** at the end of the rail. A first deploy creates the site as a draft and publishes; Make it live is the Head's action afterwards. The publisher's reasoning stands: a first deploy that went straight to live would put a stranger's code on a hostname the moment it built |
 | D8 | Placements | **`packageDeploy` takes `placements` per app**, `{hostname, accountId, ownDomain}`, replacing `hostnames`. The pipeline stamps the client and creates the domain binding after the site exists. No client-side follow-up writes |
 | D9 | Targets | **A target has four parts**: the address stop's shape, the build surface, the live states, the row. Web is registered; ios, android and macos are written down as shapes. A known-but-unoffered kind is `deployable_target_not_offered`, scoped to the app and not fatal to the package |
@@ -124,9 +124,13 @@ across client and engine.
 
 Chosen once; a later deploy shows it as facts.
 
-- **A repository.** URL and an optional branch or tag (empty follows the
-  default branch, resolved at fetch time as today). On blur the stop calls
-  `sourceProbe`. Reachable and public: "public, default branch main". Not
+- **A repository.** When the person holds a GitHub grant (the
+  [GitHub Connect](2026-09-03-github-connect-design.md) epic, P10), the
+  stop is a picker over the repositories that grant can see, grouped by
+  owner, and choosing one prefills the ref and the What-it-is preview.
+  Without a grant, or behind "Use a token instead": URL and an optional
+  branch or tag (empty follows the default branch, resolved at fetch time
+  as today). On blur the stop calls `sourceProbe`. Reachable and public: "public, default branch main". Not
   reachable: "private, or not there", and a credential field appears
   offering the person's active credentials for that host or a new one
   (label and token, the token field write-only and unmasked, the
@@ -432,10 +436,10 @@ The portal stays maintenance-only and is not touched.
 
 ## K. Out of scope, and neighbours
 
-Out of scope for this epic: the log store and the Logs app (Epic 2);
+Out of scope for this epic: the GitHub App, its callback and the picker (the GitHub Connect epic, which lands between this epic's PRs); the log store and the Logs app (Epic 2);
 workbench builds, Fleet routing, abandoned-run detection and the auto-deploy
-switch (Epic 3); runtime settings and traffic and health (Epic 4); a GitHub
-App; non-GitHub hosts; any mobile schema; a bundle upload from the browser.
+switch (Epic 3); runtime settings and traffic and health (Epic 4);
+non-GitHub hosts; any mobile schema; a bundle upload from the browser.
 
 Neighbours: the Accounts app owns the account picker this epic mounts on
 the address stop; the custom-domains sweep and scripts are consumed
