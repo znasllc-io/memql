@@ -52,29 +52,68 @@ export interface GithubConnectActions extends WriteState {
   learn: (returnPath: string) => Promise<boolean>;
 }
 
+/**
+ * The sentence beneath the OS headline for a reason the engine ANSWERED
+ * rather than threw. Written here because the engine's `connectResult`
+ * carries the code alone -- the person-facing copy for each code lives in
+ * `packages/refusals.ts`, and this is only the detail line under it.
+ */
+export function reasonSentence(reason: string): string {
+  switch (reason) {
+    case "github_app_not_configured":
+      return "This cluster has no GitHub App configured.";
+    case "connect_state_invalid":
+      return "The cluster could not store the connect state.";
+    default:
+      return `The cluster answered ${JSON.stringify(reason)}.`;
+  }
+}
+
 export function useGithubConnect(): GithubConnectActions {
   const { busy, refusal, clear, run } = useWrite();
   const [installUrl, setInstallUrl] = useState("");
 
+  // A BEGIN THAT ANSWERS A REASON IS A REFUSAL. The engine never throws for
+  // "this cluster has no GitHub App" or "the state row could not be written":
+  // it answers the row with an empty `authorizeUrl` and the reason as a typed
+  // code (integrations/identity/githubconnect.go, `connectResult`). `useWrite`
+  // only records what is THROWN, so the reason is raised here, inside `run`,
+  // in the `<code>: <sentence>` shape `describe` reads -- which is what puts
+  // the same ProblemNotice under the button that a thrown refusal gets, and
+  // what lets the Source stop recognise `github_app_not_configured` and make
+  // the token form the whole stop. Before this, a not-configured cluster's
+  // Connect button went busy for one round trip and then did nothing at all.
+  const begin = useCallback(
+    (returnPath: string) =>
+      run(async (query) => {
+        const begun = await githubConnectBegin(query, returnPath);
+        // The installation page is learnable from a refused begin too
+        // (connect_state_invalid still names it), so it is kept first.
+        if (begun.installUrl !== "") setInstallUrl(begun.installUrl);
+        if (begun.reason !== "" && begun.reason !== "ok") {
+          throw new Error(`${begun.reason}: ${reasonSentence(begun.reason)}`);
+        }
+        return begun;
+      }),
+    [run],
+  );
+
   const connect = useCallback(
     async (returnPath: string) => {
-      const begun = await run((query) => githubConnectBegin(query, returnPath));
+      const begun = await begin(returnPath);
       if (begun === null) return;
-      if (begun.installUrl !== "") setInstallUrl(begun.installUrl);
       if (begun.authorizeUrl === "") return;
       window.location.assign(begun.authorizeUrl);
     },
-    [run],
+    [begin],
   );
 
   const learn = useCallback(
     async (returnPath: string) => {
-      const begun = await run((query) => githubConnectBegin(query, returnPath));
-      if (begun === null) return false;
-      setInstallUrl(begun.installUrl);
-      return true;
+      const begun = await begin(returnPath);
+      return begun !== null;
     },
-    [run],
+    [begin],
   );
 
   return { busy, refusal, clear, installUrl, connect, learn };

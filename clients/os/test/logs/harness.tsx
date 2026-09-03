@@ -26,8 +26,29 @@ import { AppLogsSection, type AppLogsSectionProps } from "../../src/logs/AppLogs
 // builders and asserts on the STRING that reached the wire -- which is also
 // how "each facet narrows the call" is a property rather than a hope.
 
-export function rowsResult(rows: Row[]): Result {
-  return new Result({ data: rows } as never);
+/**
+ * What a top-level `builtin X(...)` answers ON THE WIRE: one data value keyed
+ * by node id, each value the node envelope with the handler's fields under
+ * `payload`, stamped with DECREASING createdAt in slice order the way the
+ * engine's PreserveOrder path does (executor_builtin.go) -- so a tail's
+ * "oldest first" is the order these rows are given in. A fake answering flat
+ * rows here passed every test against a shape the engine never sends, which
+ * is how the Logs app shipped rendering nothing at all.
+ */
+export function builtinReply(name: string, rows: Row[]): Result {
+  const wrapper: Record<string, unknown> = {};
+  rows.forEach((row, index) => {
+    const own = typeof row["id"] === "string" && row["id"] !== "" ? (row["id"] as string) : name;
+    const id = own in wrapper ? `${own}-${index}` : own;
+    wrapper[id] = {
+      id,
+      concept: name === "logsTail" || name === "logsSearch" ? "v1:observability:logLine" : `integration:logs:${name}`,
+      type: "object",
+      createdAt: `2026-01-01T00:00:00.${String(999_999_999 - index).padStart(9, "0")}Z`,
+      payload: row,
+    };
+  });
+  return new Result({ data: rows.length === 0 ? [] : [wrapper] } as never);
 }
 
 /** An answer as rows, or as a function of the rendered call and how many
@@ -69,16 +90,16 @@ export function fakeConnection(seed: FakeLogsSeed = {}): FakeConnection {
       calls.push(call);
       const refusal = seed.refuse?.[name];
       if (refusal !== undefined) throw new Error(refusal);
-      if (call.startsWith("builtin logsTail(")) return rowsResult(answer(seed.tail, "logsTail", call));
-      if (call.startsWith("builtin logsSearch(")) return rowsResult(answer(seed.search, "logsSearch", call));
-      if (call.startsWith("builtin logsSources(")) return rowsResult(seed.sources ?? []);
-      if (call === "builtin logsStatus()") return rowsResult(seed.status ? [seed.status] : []);
-      if (call === "builtin logsArchiveList()") return rowsResult(seed.archive ?? []);
-      if (call.startsWith("builtin logsArchiveRestore(")) return rowsResult(seed.restore ? [seed.restore] : []);
+      if (call.startsWith("builtin logsTail(")) return builtinReply("logsTail", answer(seed.tail, "logsTail", call));
+      if (call.startsWith("builtin logsSearch(")) return builtinReply("logsSearch", answer(seed.search, "logsSearch", call));
+      if (call.startsWith("builtin logsSources(")) return builtinReply("logsSources", seed.sources ?? []);
+      if (call === "builtin logsStatus()") return builtinReply("logsStatus", seed.status ? [seed.status] : []);
+      if (call === "builtin logsArchiveList()") return builtinReply("logsArchiveList", seed.archive ?? []);
+      if (call.startsWith("builtin logsArchiveRestore(")) return builtinReply("logsArchiveRestore", seed.restore ? [seed.restore] : []);
       if (call.startsWith("builtin logsRecordClient(")) {
-        return rowsResult([seed.record ?? ({ accepted: 0, dropped: 0, reason: "" } as Row)]);
+        return builtinReply("logsRecordClient", [seed.record ?? ({ accepted: 0, dropped: 0, reason: "" } as Row)]);
       }
-      return rowsResult([]);
+      return builtinReply("unknown", []);
     }),
   };
   return {

@@ -302,7 +302,18 @@ export class Result {
       const out: Row[] = [];
       for (const item of p.data) {
         if (item && typeof item === "object" && !Array.isArray(item)) {
-          out.push(item as Row);
+          // A top-level `builtin X(...)` does NOT come back as a row set:
+          // the engine returns the handler's node map (executor.go's
+          // BuiltinFunctionExpression arm) and ToAPIResult marshals it as
+          // ONE value keyed by node id. That wrapper is not a row -- it
+          // carries no payload field of any node -- so it is unwrapped
+          // here, once, into the same flattened shape a bundle node gets.
+          const nodes = builtinReplyNodes(item as Record<string, unknown>);
+          if (nodes !== null) {
+            for (const node of nodes) out.push(flattenNode(node));
+          } else {
+            out.push(item as Row);
+          }
         }
       }
       return out;
@@ -349,6 +360,61 @@ function flattenNode(node: import("./wire.js").MemoryNodeWire): Row {
     for (const [k, v] of Object.entries(node.payload)) out[k] = v;
   }
   return out;
+}
+
+// builtinReplyNodes recognises a builtin reply's id-keyed node map and
+// answers its node envelopes IN THE HANDLER'S ORDER, or null when the value
+// is anything else (a logic's object-literal return, a scalar bag), which is
+// then a row as it always was.
+//
+// THE SHAPE TEST IS STRICT: a non-empty object whose EVERY value is a node
+// envelope -- an object carrying a string `id` and a string `concept`. A
+// payload that happens to nest objects with an `id` is not mistaken for one,
+// and an empty map (a builtin that answered no nodes) stays what it was.
+//
+// THE ORDER IS THE ENGINE'S OWN. A JSON object carries key order, which on
+// this wire is id-lexicographic -- protojson sorts map keys -- so the
+// handler's slice order would be lost. The engine solved that in-process by
+// stamping a PreserveOrder handler's nodes with monotonically DECREASING
+// createdAt in slice order and sorting createdAt descending
+// (executor_builtin.go, mapToSortedSlice); this reproduces that sort here,
+// at NANOSECOND precision, because two nodes from one handler differ by a
+// nanosecond and Date.parse keeps milliseconds.
+function builtinReplyNodes(value: Record<string, unknown>): import("./wire.js").MemoryNodeWire[] | null {
+  const keys = Object.keys(value);
+  if (keys.length === 0) return null;
+  const nodes: import("./wire.js").MemoryNodeWire[] = [];
+  for (const key of keys) {
+    const v = value[key];
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
+    const node = v as Record<string, unknown>;
+    if (typeof node.id !== "string" || typeof node.concept !== "string") return null;
+    nodes.push(node as import("./wire.js").MemoryNodeWire);
+  }
+  return nodes.sort((a, b) => compareInstant(b.createdAt, a.createdAt));
+}
+
+// compareInstant orders two RFC 3339 timestamps by the instant they name,
+// keeping every fractional digit the wire carried. Go's RFC3339Nano trims
+// trailing zeros, so "…1453048Z" names a LATER instant than "…145304797Z"
+// while being the shorter and lexicographically smaller string; comparing
+// whole seconds through Date.parse (which also folds a zone offset) and then
+// the fraction padded to nine digits gets both right. An unparseable or
+// absent stamp sorts after every parseable one.
+function compareInstant(a: string | undefined, b: string | undefined): number {
+  const pa = instantParts(a);
+  const pb = instantParts(b);
+  if (pa === null || pb === null) return pa === null ? (pb === null ? 0 : 1) : -1;
+  if (pa.seconds !== pb.seconds) return pa.seconds < pb.seconds ? -1 : 1;
+  return pa.fraction < pb.fraction ? -1 : pa.fraction > pb.fraction ? 1 : 0;
+}
+
+function instantParts(stamp: string | undefined): { seconds: number; fraction: string } | null {
+  if (typeof stamp !== "string" || stamp === "") return null;
+  const ms = Date.parse(stamp);
+  if (Number.isNaN(ms)) return null;
+  const digits = /\.(\d+)(?=[Zz+-]|$)/.exec(stamp)?.[1] ?? "";
+  return { seconds: Math.floor(ms / 1000), fraction: (digits + "000000000").slice(0, 9) };
 }
 
 // Internal converters -- not exported through the package barrel.
