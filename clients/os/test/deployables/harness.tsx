@@ -35,6 +35,30 @@ export function rowsResult(rows: Row[]): Result {
 }
 
 /**
+ * What a top-level `builtin X(...)` answers ON THE WIRE: one data value keyed
+ * by node id, each value the node envelope with the handler's fields under
+ * `payload`, stamped with DECREASING createdAt in slice order the way the
+ * engine's PreserveOrder path does (executor_builtin.go). A fake answering
+ * flat rows here passed every test against a shape the engine never sends --
+ * which is how the Logs app and Connect GitHub shipped reading nothing.
+ */
+export function builtinReply(name: string, rows: Row[]): Result {
+  const wrapper: Record<string, unknown> = {};
+  rows.forEach((row, index) => {
+    const own = typeof row["id"] === "string" && row["id"] !== "" ? (row["id"] as string) : name;
+    const id = own in wrapper ? `${own}-${index}` : own;
+    wrapper[id] = {
+      id,
+      concept: `integration:test:${name}`,
+      type: "object",
+      createdAt: `2026-01-01T00:00:00.${String(999_999_999 - index).padStart(9, "0")}Z`,
+      payload: row,
+    };
+  });
+  return new Result({ data: rows.length === 0 ? [] : [wrapper] } as never);
+}
+
+/**
  * A BUNDLE envelope -- a different wire shape, and not interchangeable.
  *
  * `getRowByConceptAndId` reads `rawNodes()`, which looks at
@@ -250,7 +274,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
 
       if (call.startsWith("builtin customDomainAdd(")) {
         if (seed.addDomainError !== undefined) throw new Error(seed.addDomainError);
-        return rowsResult([ADD_DOMAIN_RESULT as unknown as Row]);
+        return builtinReply("customDomainAdd", [ADD_DOMAIN_RESULT as unknown as Row]);
       }
 
       if (call.startsWith("mutation removeCustomDomain(")) {
@@ -268,7 +292,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
 
       if (call.startsWith("builtin packageDeploy(")) {
         if (seed.deployError !== undefined) throw new Error(seed.deployError);
-        return rowsResult([
+        return builtinReply("packageDeploy", [
           seed.deployResult ??
             ({ deploymentId: "dep-new", status: "awaiting_confirm", awaitingConfirm: "true" } as unknown as Row),
         ]);
@@ -281,7 +305,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         // fixture answers -- the same reason this fake sits under
         // executeNamed at all.
         const summary = call.includes("summary: true");
-        return rowsResult((summary ? seed.traffic?.summary : seed.traffic?.series) ?? []);
+        return builtinReply("siteTrafficInWindow", (summary ? seed.traffic?.summary : seed.traffic?.series) ?? []);
       }
 
       if (call.startsWith("mutation updateSiteSettings(")) {
@@ -291,17 +315,17 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
 
       if (call.startsWith("builtin packageArchive(")) {
         if (seed.archiveError !== undefined) throw new Error(seed.archiveError);
-        return rowsResult([]);
+        return builtinReply("packageArchive", []);
       }
 
       if (call.startsWith("builtin packageRollback(")) {
         if (seed.rollbackError !== undefined) throw new Error(seed.rollbackError);
-        return rowsResult([]);
+        return builtinReply("packageRollback", []);
       }
 
       if (call.startsWith("builtin packageRestore(")) {
         if (seed.restoreError !== undefined) throw new Error(seed.restoreError);
-        return rowsResult([]);
+        return builtinReply("packageRestore", []);
       }
 
       if (call === "query sourceCredentialsMine()") return rowsResult(seed.credentials ?? []);
@@ -311,19 +335,19 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         const credentialId = /credentialId: "([^"]*)"/.exec(call)?.[1] ?? "";
         const answers = seed.sourceProbe ?? {};
         const reply = answers[credentialId] ?? answers[""] ?? null;
-        return rowsResult(reply === null ? [] : [reply]);
+        return builtinReply("sourceProbe", reply === null ? [] : [reply]);
       }
 
       if (call.startsWith("builtin artifactProbe(")) {
         if (seed.artifactProbeError !== undefined) throw new Error(seed.artifactProbeError);
         const artifactId = /artifactId: "([^"]*)"/.exec(call)?.[1] ?? "";
         const reply = (seed.artifactProbe ?? {})[artifactId] ?? null;
-        return rowsResult(reply === null ? [] : [reply]);
+        return builtinReply("artifactProbe", reply === null ? [] : [reply]);
       }
 
       if (call.startsWith("builtin sourceCredentialCreate(")) {
         if (seed.credentialCreateError !== undefined) throw new Error(seed.credentialCreateError);
-        return rowsResult([
+        return builtinReply("sourceCredentialCreate", [
           seed.credentialCreated ?? ({ credentialId: "cred-new", fingerprint: "...9f2c" } as unknown as Row),
         ]);
       }
@@ -336,7 +360,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         // account card only says "GitHub did not confirm" for a false one --
         // so a fake answering a real boolean, or no row at all, would make
         // every disconnect in every test look like a half-finished one.
-        return rowsResult([
+        return builtinReply("sourceCredentialRevoke", [
           {
             credentialId,
             status: "revoked",
@@ -347,7 +371,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
 
       if (call.startsWith("builtin githubConnectBegin(")) {
         if (seed.connectError !== undefined) throw new Error(seed.connectError);
-        return rowsResult([
+        return builtinReply("githubConnectBegin", [
           {
             authorizeUrl: seed.connectUrl ?? "",
             reason: seed.connectReason ?? "ok",
@@ -358,7 +382,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
 
       if (call.startsWith("builtin sourceRepositories(")) {
         if (seed.repositoriesError !== undefined) throw new Error(seed.repositoriesError);
-        return rowsResult(seed.repositories ? [seed.repositories] : []);
+        return builtinReply("sourceRepositories", seed.repositories ? [seed.repositories] : []);
       }
 
       if (call.startsWith("mutation updatePackageSource(")) {
@@ -373,12 +397,12 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
 
       if (call.startsWith("builtin siteArchive(")) {
         if (seed.siteArchiveError !== undefined) throw new Error(seed.siteArchiveError);
-        return rowsResult([]);
+        return builtinReply("siteArchive", []);
       }
 
       if (call.startsWith("builtin siteRestore(")) {
         if (seed.siteRestoreError !== undefined) throw new Error(seed.siteRestoreError);
-        return rowsResult([]);
+        return builtinReply("siteRestore", []);
       }
 
       if (call.startsWith("mutation updateSiteBundle(")) {
@@ -412,7 +436,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
 
       if (call.startsWith("builtin sitePublishFromArtifact(")) {
         if (seed.publishError !== undefined) throw new Error(seed.publishError);
-        return rowsResult([PUBLISH_RESULT as unknown as Row]);
+        return builtinReply("sitePublishFromArtifact", [PUBLISH_RESULT as unknown as Row]);
       }
 
       // `getRowByConceptAndId` composes `concept==<c> && id==<id>`.

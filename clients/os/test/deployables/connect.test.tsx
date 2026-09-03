@@ -666,12 +666,15 @@ describe("Settings > Sources", () => {
   it("renders a refused connect in place, under the OS headline", async () => {
     const { connection } = mountSources({
       credentials: [],
-      connectError: "github_app_not_configured: This cluster has no GitHub App configured.",
+      // ANSWERED, not thrown: the engine's connectResult carries the reason as a
+      // typed code on the row, and a fake that threw it modelled a wire that
+      // does not exist.
+      connectReason: "github_app_not_configured",
     });
     const group = await sourcesGroup();
     await click(within(group).getByRole("button", { name: "Connect GitHub" }));
     expect(await within(group).findByText("This cluster has no GitHub connection set up")).toBeTruthy();
-    // The server's own sentence, verbatim and beneath.
+    // The sentence for the answered code, beneath.
     expect(within(group).getByText("This cluster has no GitHub App configured.")).toBeTruthy();
     expect(within(group).getByText(/ask an operator to set up the GitHub App/)).toBeTruthy();
     expect(connection.callsNamed("githubConnectBegin")).toHaveLength(1);
@@ -1029,11 +1032,14 @@ describe("the compose Source stop, without one", () => {
   it("makes the token form the whole stop on a cluster with no GitHub App", async () => {
     const { region } = await composeSource({
       credentials: [],
-      connectError: "github_app_not_configured: This cluster has no GitHub App configured.",
+      // ANSWERED, not thrown: the engine's connectResult carries the reason as a
+      // typed code on the row, and a fake that threw it modelled a wire that
+      // does not exist.
+      connectReason: "github_app_not_configured",
     });
     await click(within(region).getByRole("button", { name: "Connect GitHub" }));
 
-    // The OS headline, the cluster's own sentence beneath it, verbatim.
+    // The OS headline, the sentence for the answered code beneath it.
     const headline = await within(region).findByText("This cluster has no GitHub connection set up");
     expect(within(region).getByText("This cluster has no GitHub App configured.")).toBeTruthy();
     // WARN, never ERROR: an operator's condition rather than this person's,
