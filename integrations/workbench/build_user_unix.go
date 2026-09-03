@@ -57,6 +57,16 @@ const BuildUserEnv = "MEMQL_PACKAGES_BUILD_UID"
 // workbench-runtime stage).
 const DefaultBuildUid = 10001
 
+// MaxBuildUid bounds what MEMQL_PACKAGES_BUILD_UID may name.
+//
+// A BOUND rather than a bare parse, and the reason is what the value becomes:
+// syscall.Credential takes a uint32, so an `int` past that range does not
+// error -- it WRAPS. On a 64-bit node "4294967296" would silently become uid
+// 0, which is to say the build would run as root while the configuration
+// claimed it did not. 2^31-1 is comfortably above every real uid and safely
+// inside uint32.
+const MaxBuildUid = 1<<31 - 1
+
 // buildUid resolves the uid to run a build as, or 0 for "do not drop".
 func buildUid() int {
 	raw := strings.TrimSpace(os.Getenv(BuildUserEnv))
@@ -64,7 +74,7 @@ func buildUid() int {
 		return DefaultBuildUid
 	}
 	n, err := strconv.Atoi(raw)
-	if err != nil || n < 0 {
+	if err != nil || n < 0 || n > MaxBuildUid {
 		return DefaultBuildUid
 	}
 	// An explicit 0 is an operator saying "run it as me", which is the
@@ -96,14 +106,17 @@ func applyBuildUser(cmd *exec.Cmd, dir string) (int, string) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
+	// Converted ONCE, after buildUid has bounded it to [0, MaxBuildUid] --
+	// which is what makes the narrowing to uint32 safe rather than wrapping.
+	id := uint32(uid) //nolint:gosec // bounded by buildUid above
 	cmd.SysProcAttr.Credential = &syscall.Credential{
-		Uid: uint32(uid),
-		Gid: uint32(uid),
+		Uid: id,
+		Gid: id,
 		// NO SUPPLEMENTARY GROUPS. Without this the child inherits root's,
 		// which on some images includes groups with read access to mounted
 		// secrets -- the exact thing the uid is here to put out of reach.
 		NoSetGroups: false,
-		Groups:      []uint32{uint32(uid)},
+		Groups:      []uint32{id},
 	}
 	return uid, ""
 }

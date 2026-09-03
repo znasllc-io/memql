@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -169,7 +170,7 @@ func TestBuildEnvironmentCarriesNoClusterCredential(t *testing.T) {
 	// buildEnv ever went back to appending to os.Environ(), every one of
 	// these would appear in the dump.
 	secrets := map[string]string{
-		"MEMQL_MASTER_KEY":                      "mk_thisisthemasterkey",
+		"MEMQL_MASTER_KEY": "mk_thisisthemasterkey",
 		// NOT the shared test DSN literal: this fixture is about a string
 		// NEVER reaching the child, so it is deliberately a value nothing
 		// else in the tree uses (scripts/cidb's TestNoHardcodedSharedDSNInTests
@@ -523,4 +524,62 @@ func TestTheBuildEntryAnswersOnlyToTheEngine(t *testing.T) {
 	if got == nil || got.GetErrorCode() != "" {
 		t.Fatalf("the engine's own assertion must be admitted, got %+v", got)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The containment check
+// ---------------------------------------------------------------------------
+
+// TestNothingEscapesTheBuildDirectory is the traversal gate, tested on the
+// JOINED path rather than on the entry name.
+//
+// Validating the string is what everybody does and it is not the check that
+// matters: an entry can look fine and still resolve outside the tree once
+// joined, through a symlinked root or a name the cleaner normalises
+// differently than the filesystem does. containedJoin constrains what the
+// filesystem call actually receives, which is the only thing an attacker
+// cannot route around.
+func TestNothingEscapesTheBuildDirectory(t *testing.T) {
+	root := t.TempDir()
+
+	t.Run("an ordinary path lands inside", func(t *testing.T) {
+		// The reachable positive, first: without it every assertion below
+		// would pass against a function that refused everything.
+		got, err := containedJoin(root, "clients/web/dist/index.html")
+		if err != nil {
+			t.Fatalf("an ordinary relative path must be joined: %v", err)
+		}
+		if !strings.HasPrefix(got, root+string(os.PathSeparator)) {
+			t.Fatalf("%q is not under %q", got, root)
+		}
+	})
+
+	t.Run("the root itself is inside", func(t *testing.T) {
+		if _, err := containedJoin(root, "."); err != nil {
+			t.Fatalf("the root is not outside itself: %v", err)
+		}
+	})
+
+	for _, escape := range []string{
+		"../etc/passwd",
+		"../../../../etc/passwd",
+		"clients/../../etc/passwd",
+		"/etc/passwd",
+		"clients/web/../../../../../etc/shadow",
+	} {
+		t.Run("refuses "+escape, func(t *testing.T) {
+			if got, err := containedJoin(root, escape); err == nil {
+				t.Fatalf("%q must be refused, got %q", escape, got)
+			}
+		})
+	}
+
+	t.Run("a sibling directory sharing a prefix is still outside", func(t *testing.T) {
+		// The case a naive HasPrefix check gets wrong: /tmp/x-evil starts with
+		// /tmp/x, and a check without the separator would admit it.
+		sibling := root + "-evil"
+		if _, err := containedJoin(root, "../"+filepath.Base(sibling)); err == nil {
+			t.Fatal("a sibling whose name extends the root's must not be treated as inside it")
+		}
+	})
 }

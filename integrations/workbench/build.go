@@ -494,10 +494,22 @@ func (i *Integration) runBuildLocal(ctx context.Context, req BuildRequest) Build
 		return res
 	}
 
+	// The build directory, under the workspace root and CHECKED to be under
+	// it. buildKey composes it from the deployment id and the deployable's
+	// name through shortId and safeName, so the string is already bounded --
+	// and this checks the RESULT anyway, because the next thing that happens
+	// to it is RemoveAll.
 	root := i.manager.Root()
-	dir := filepath.Join(root, buildKey(req))
+	dir, derr := containedJoin(root, buildKey(req))
+	if derr != nil {
+		return finish(buildRefusal(BuildCodeInvalid, "workbench build: "+derr.Error()))
+	}
+	tmp, terr := containedJoin(dir, "tmp")
+	if terr != nil {
+		return finish(buildRefusal(BuildCodeInvalid, "workbench build: "+terr.Error()))
+	}
 	_ = os.RemoveAll(dir)
-	if err := os.MkdirAll(filepath.Join(dir, "tmp"), 0o755); err != nil {
+	if err := os.MkdirAll(tmp, 0o755); err != nil {
 		return finish(buildRefusal(BuildCodeSourceUnreadable, "workbench build: could not provision the build directory: "+err.Error()))
 	}
 	// TORN DOWN WHATEVER HAPPENS. The directory is the whole of the build's
@@ -509,7 +521,11 @@ func (i *Integration) runBuildLocal(ctx context.Context, req BuildRequest) Build
 	if err != nil {
 		return finish(buildRefusal(BuildCodeSourceUnreadable, "workbench build: the source snapshot could not be read: "+err.Error()))
 	}
-	treeRoot, err := extractTarGz(bytes.NewReader(src), filepath.Join(dir, "src"), limits.MaxFileCount, limits.MaxFileBytes, limits.MaxSourceBytes)
+	srcDir, serr := containedJoin(dir, "src")
+	if serr != nil {
+		return finish(buildRefusal(BuildCodeInvalid, "workbench build: "+serr.Error()))
+	}
+	treeRoot, err := extractTarGz(bytes.NewReader(src), srcDir, limits.MaxFileCount, limits.MaxFileBytes, limits.MaxSourceBytes)
 	if err != nil {
 		return finish(buildRefusal(BuildCodeSourceUnreadable, "workbench build: the source snapshot could not be expanded: "+err.Error()))
 	}
@@ -528,7 +544,32 @@ func (i *Integration) runBuildLocal(ctx context.Context, req BuildRequest) Build
 
 	cctx, cancel := context.WithTimeout(ctx, req.timeout())
 	defer cancel()
-	cmd := exec.CommandContext(cctx, "/bin/sh", "-c", req.Command)
+	// ===================================================================
+	// YES, THIS RUNS A COMMAND FROM AN UNTRUSTED SOURCE. THAT IS THE JOB.
+	// ===================================================================
+	// Static analysis flags this line, correctly, as a command built from
+	// user-controlled input -- and there is no version of this feature where
+	// it is not. `npm ci && npm run build` comes out of somebody's
+	// memql-package.yaml, and deploying their package means running it.
+	//
+	// So the answer is not to sanitise the command, which would be theatre
+	// (any shell metacharacter it needs is one their build legitimately
+	// uses). The answer is everything around it, and each piece is here
+	// because this line is:
+	//
+	//   - it runs on a WORKBENCH node, never on the node that took the
+	//     request, and never on the bff holding the cluster's front door;
+	//   - in a directory that exists for this one call and is removed when
+	//     it returns, whatever the outcome;
+	//   - under an environment this cluster CONSTRUCTS (buildEnv), so the
+	//     node's own credentials are not in it;
+	//   - as a non-root uid (applyBuildUser), so it cannot read them out of
+	//     /proc/1/environ either;
+	//   - with a timeout, and killed by process group so its children go too.
+	//
+	// Removing any one of those would make this line the vulnerability the
+	// analyser thinks it already is.
+	cmd := exec.CommandContext(cctx, "/bin/sh", "-c", req.Command) //nolint:gosec // the manifest's build command is the feature; see the block above
 	cmd.Dir = workdir
 	cmd.Env = buildEnv(dir, req)
 	cmd.Stdout = sink
@@ -620,14 +661,19 @@ func buildOutputObject(req BuildRequest) string {
 
 // underTree joins a validated tree path under root and refuses anything that
 // resolves outside it.
+//
+// TWO CHECKS, and the second is the one that counts. cleanTreePath rejects the
+// STRING -- absolute, `..`, not a valid fs path -- and containedJoin rejects
+// the RESULT, which is what the filesystem call actually receives. Validating
+// only the string is how traversal bugs survive review: every reader agrees
+// the input looked fine.
 func underTree(root, p string) (string, error) {
 	clean, err := cleanTreePath(p)
 	if err != nil {
 		return "", fmt.Errorf("the path %q escapes the tree", p)
 	}
-	joined := filepath.Join(root, filepath.FromSlash(clean))
-	rel, rerr := filepath.Rel(root, joined)
-	if rerr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	joined, jerr := containedJoin(root, clean)
+	if jerr != nil {
 		return "", fmt.Errorf("the path %q escapes the tree", p)
 	}
 	return joined, nil
@@ -819,6 +865,16 @@ func (l *buildLineLogger) emit(line string) {
 		return
 	}
 	l.logged++
+	// THE BUILD'S OWN OUTPUT, verbatim. Static analysis reads this as
+	// clear-text logging, and the honest answer is that a build log IS its
+	// output -- truncating or filtering it would defeat the one thing it is
+	// for, which is answering "why did my build fail".
+	//
+	// What bounds the exposure is upstream: the build is handed no cluster
+	// credential to print (buildEnv), so anything secret in these lines is
+	// something the package's OWN build script chose to echo, on a log the
+	// package's owner is the one who reads. That is their decision about
+	// their code, and the same one they make on any CI.
 	l.logger.LogAttrs(l.ctx, slog.LevelInfo, strings.TrimRight(line, "\r"), l.attrs...)
 }
 

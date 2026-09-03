@@ -42,8 +42,22 @@ const DefaultBuildTimeoutSeconds = 900
 // for a sharper reason: an unbounded build is a workbench replica held by
 // somebody else's script forever.
 func BuildTimeoutSeconds() int {
-	return int(envInt64(BuildTimeoutEnv, DefaultBuildTimeoutSeconds))
+	// CLAMPED, not narrowed. envInt64 answers an int64, and converting one
+	// straight to `int` is the narrowing core/num exists to make a named
+	// decision -- and here the answer is neither saturate nor zero but a
+	// CEILING, because the value bounds how long a workbench replica may be
+	// held by somebody else's script. MaxBuildTimeoutSeconds is the same two
+	// hours the build surface clamps to, so the two agree.
+	seconds := envInt64(BuildTimeoutEnv, DefaultBuildTimeoutSeconds)
+	if seconds > MaxBuildTimeoutSeconds {
+		return MaxBuildTimeoutSeconds
+	}
+	return int(seconds)
 }
+
+// MaxBuildTimeoutSeconds is the ceiling an operator may ask for, mirroring
+// the build surface's own (workbench.MaxBuildTimeout). Two hours.
+const MaxBuildTimeoutSeconds = 2 * 60 * 60
 
 // The publisher-grade defaults (D1). They are sitePublishFromArtifact's
 // numbers deliberately: a package source is an archive of roughly the same

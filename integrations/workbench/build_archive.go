@@ -55,6 +55,42 @@ func safeEntryPath(name string) (string, error) {
 	return cleaned, nil
 }
 
+// containedJoin joins one relative path under root and REFUSES anything whose
+// result is not inside it.
+//
+// The check is on the JOINED path rather than on the entry name, and that is
+// the difference between a validator a reader believes and one a machine can
+// verify. safeEntryPath already rejects `..`, absolute paths and NUL, so this
+// is defence in depth -- but it is the check that actually closes Zip Slip,
+// because it constrains the thing the filesystem call receives rather than the
+// string it was derived from. It is also the shape static analysis recognises,
+// which matters: a sanitiser nothing can see is one every future reader has to
+// re-derive by hand.
+func containedJoin(root, rel string) (string, error) {
+	// AN ABSOLUTE INPUT IS REFUSED, not reinterpreted. filepath.Join would
+	// treat "/etc/passwd" as relative and quietly produce "<root>/etc/passwd"
+	// -- safe, in that nothing escapes, and dishonest: the caller named one
+	// path and the filesystem would receive another. The callers all validate
+	// for this already; refusing here is what makes the function true on its
+	// own, which is the property a security primitive has to have.
+	if filepath.IsAbs(rel) || strings.HasPrefix(rel, "/") {
+		return "", fmt.Errorf("the path %q is absolute", rel)
+	}
+	cleanRoot, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return "", err
+	}
+	joined := filepath.Join(cleanRoot, filepath.FromSlash(rel))
+	abs, err := filepath.Abs(joined)
+	if err != nil {
+		return "", err
+	}
+	if abs != cleanRoot && !strings.HasPrefix(abs, cleanRoot+string(os.PathSeparator)) {
+		return "", fmt.Errorf("the path %q resolves outside %q", rel, root)
+	}
+	return abs, nil
+}
+
 // extractTarGz expands a gzip'd tar into destDir and reports the directory
 // holding the tree -- stripping ONE synthesized top-level directory when the
 // archive has exactly one and no top-level files, which is the shape GitHub's
@@ -97,7 +133,10 @@ func extractTarGz(r io.Reader, destDir string, maxFiles int, maxFileBytes, maxTo
 			topLevel[first] = true
 		}
 
-		target := filepath.Join(destDir, filepath.FromSlash(clean))
+		target, terr := containedJoin(destDir, clean)
+		if terr != nil {
+			return "", terr
+		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if mkErr := os.MkdirAll(target, 0o755); mkErr != nil {
@@ -151,7 +190,7 @@ func extractTarGz(r io.Reader, destDir string, maxFiles int, maxFileBytes, maxTo
 	if len(topLevel) == 1 {
 		for name, isDir := range topLevel {
 			if isDir {
-				return filepath.Join(destDir, filepath.FromSlash(name)), nil
+				return containedJoin(destDir, name)
 			}
 		}
 	}
@@ -205,7 +244,10 @@ func packTarGz(root, top string, maxFiles int, maxFileBytes, maxTotalBytes int64
 	tw := tar.NewWriter(gz)
 	var total int64
 	for _, name := range names {
-		full := filepath.Join(root, filepath.FromSlash(name))
+		full, jerr := containedJoin(root, name)
+		if jerr != nil {
+			return nil, 0, 0, jerr
+		}
 		info, serr := os.Lstat(full)
 		if serr != nil {
 			return nil, 0, 0, serr
