@@ -97,12 +97,19 @@ describe("the flipped ordering reaches the registry", () => {
     }
   });
 
-  it("offers the deploy tier the Actions section it used to hide", () => {
-    const deployables = OS_REGISTRY.apps.find((a) => a.id === "deployables");
-    expect(deployables).toBeTruthy();
-    const ids = sectionsForRole(deployables!, "developer").map((s) => s.id);
-    expect(ids).toContain("actions");
-    expect(sectionsForRole(deployables!, "reader").map((s) => s.id)).not.toContain("actions");
+  // The section this case used to name was Deployables' Actions, gated
+  // `{ min: "admin" }`: under the old ordering that excluded DEVELOPER, so the
+  // launcher hid deploy actions from the deploy tier. Actions retired with the
+  // compose epic (memql#4885) and Deployables' gate moved INSIDE its one
+  // section -- New deployable renders at rank >= 200 -- so the registry-level
+  // statement is made here against a gate that still exists, and the rendered
+  // half lives in `test/deployables/list.test.tsx`.
+  it("offers the deploy tier an admin-floored SECTION", () => {
+    const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
+    expect(settings).toBeTruthy();
+    const ids = sectionsForRole(settings!, "developer").map((s) => s.id);
+    expect(ids).toContain("cluster");
+    expect(sectionsForRole(settings!, "reader").map((s) => s.id)).not.toContain("cluster");
   });
 
   // Widgets are role-gated the same way apps are, and the desk context menu

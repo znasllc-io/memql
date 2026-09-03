@@ -1996,8 +1996,21 @@ schema does not say.
   `<slug>.<domain>` against a reserved set DERIVED from `frontdoor.Roles()` +
   the portal, so a new role can never become claimable by omission; Android /
   iOS / macOS deliberately have NO enum values, being distribution rather than
-  hostnames ([deployables.md](docs/public/operate/deployables.md)). Also
-  `globalSecret` / `globalVariable`, `outboundRequest` / `inboundRequest`,
+  hostnames ([deployables.md](docs/public/operate/deployables.md)) -- they are
+  a written-down TARGET shape instead (epic memql#4885), and a manifest
+  declaring one is reported `deployable_target_not_offered`, scoped to that app
+  and not fatal to the package. `package` / `packageDeployment` are the SOURCE
+  and its append-only run timeline
+  ([packages.md](docs/public/operate/packages.md)); `sourceCredential` is the
+  personal token a private source fetches under -- sealed once server-side, and
+  resolved under the **package owner's** actor rather than the caller's, so a
+  package naming somebody else's credential resolves zero rows and is refused
+  `credential_not_found` before any request leaves the cluster. There is no
+  cluster-wide source credential any more: the `globalSecret` a package used to
+  NAME is deleted with no shim, because nothing in the OS could create one and
+  any package owner could name any secret. Also
+  `globalSecret` / `globalVariable` (still the storefront binding's and every
+  integration's named-secret home), `outboundRequest` / `inboundRequest`,
   `missingCapability`, and `dataOrigin` -- a VIRTUAL projection (the
   `v1:router:modelCatalog` pattern, never persisted) of every concept's
   data-origins declaration.

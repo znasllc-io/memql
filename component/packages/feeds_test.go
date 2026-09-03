@@ -2,7 +2,11 @@ package packages
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"net/http"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -162,5 +166,147 @@ func TestRepoUrlSpellingsCollapse(t *testing.T) {
 		if got := normalizeRepoUrl(raw); got != "https://github.com/acme/widget" {
 			t.Errorf("%q normalized to %q", raw, got)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The poll under a personal credential (epic memql#4885, D10)
+// ---------------------------------------------------------------------------
+
+// recordingTransport is a fake GitHub for the poll: it records every request
+// it is handed and answers the commits endpoint with one fixed sha. What the
+// tests read off it is which requests were MADE and what bearer they carried
+// -- and, for a credential that does not resolve, that none was made at all.
+type recordingTransport struct {
+	mu       sync.Mutex
+	requests []*http.Request
+	sha      string
+}
+
+func (r *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.mu.Lock()
+	r.requests = append(r.requests, req.Clone(context.Background()))
+	r.mu.Unlock()
+	body := fmt.Sprintf(`{"sha":%q}`, r.sha)
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+	}, nil
+}
+
+func (r *recordingTransport) seen() []*http.Request {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*http.Request, len(r.requests))
+	copy(out, r.requests)
+	return out
+}
+
+func credentialledPackage() map[string]any {
+	pkg := trackedPackage("oldsha0000000000", "", false)
+	pkg["ownerUserId"] = "v1:identity:user:someone"
+	pkg["credentialId"] = "v1:platform:sourceCredential:acme"
+	return pkg
+}
+
+// TestThePollRefusesACredentialThatDoesNotResolveBeforeAnyRequest is the
+// feed half of D10's "resolution is owner-scoped by construction". A
+// credential the package owner cannot read -- revoked, or somebody else's --
+// is a REFUSAL of that package's poll: no request leaves the cluster, nothing
+// is written, and the sweep goes on to the next package exactly as it does
+// past an unreachable repository. Polling anonymously instead would answer
+// 404 for a private repository, and the person whose credential was revoked
+// would learn it from a stale cue rather than from the warning.
+func TestThePollRefusesACredentialThatDoesNotResolveBeforeAnyRequest(t *testing.T) {
+	i, engine := feedHarness(t, credentialledPackage())
+	gh := &recordingTransport{sha: "newsha0000000000"}
+	i.deps.HTTP = &http.Client{Transport: gh}
+
+	var asked []string
+	i.deps.Credentials = func(_ context.Context, credentialId, ownerUserId string) (string, error) {
+		asked = append(asked, credentialId+" as "+ownerUserId)
+		return "", refuse(CodeCredentialRevoked, "revoked in the test")
+	}
+
+	if _, err := i.handlePollUpstream(context.Background(), nil, 0); err != nil {
+		t.Fatalf("one package whose credential refused must not stop the sweep: %v", err)
+	}
+	if got := gh.seen(); len(got) != 0 {
+		t.Fatalf("a request left the cluster for a package whose credential did not resolve: %s", got[0].URL)
+	}
+	if engine.sawStatement("mutation ") {
+		t.Fatalf("nothing may be written for a package whose credential refused; statements: %v", engine.statements())
+	}
+	// Resolved under the PACKAGE owner, by name, and exactly once.
+	if len(asked) != 1 || asked[0] != "v1:platform:sourceCredential:acme as v1:identity:user:someone" {
+		t.Fatalf("the resolver must be asked for the row's credential under the row's owner, got %v", asked)
+	}
+
+	// THE REACHABLE POSITIVE: the same package, a credential that resolves.
+	// One request, carrying the bearer, and the version it answered recorded
+	// -- so the silence above is about the refusal, not about the fake.
+	i.deps.Credentials = func(context.Context, string, string) (string, error) { return "ghp_POLLTOKEN", nil }
+	if _, err := i.handlePollUpstream(context.Background(), nil, 0); err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	got := gh.seen()
+	if len(got) != 1 {
+		t.Fatalf("want exactly one request once the credential resolves, got %d", len(got))
+	}
+	if auth := got[0].Header.Get("Authorization"); auth != "Bearer ghp_POLLTOKEN" {
+		t.Fatalf("the request must carry the resolved credential as its bearer, got %q", auth)
+	}
+	if !engine.sawStatement("mutation recordPackageUpstreamVersion") {
+		t.Fatalf("the moved upstream must be recorded; statements: %v", engine.statements())
+	}
+	for _, q := range engine.statements() {
+		if strings.Contains(q, "ghp_POLLTOKEN") {
+			t.Fatalf("the token VALUE reached a row: %s", q)
+		}
+	}
+}
+
+// A public repository -- no credentialId -- is polled with NO bearer at all,
+// and never consults the resolver. The control for the test above's bearer
+// assertion: the header is set by the credential path and by nothing else.
+func TestThePollSendsNoBearerForAPublicRepository(t *testing.T) {
+	i, _ := feedHarness(t, trackedPackage("oldsha0000000000", "", false))
+	gh := &recordingTransport{sha: "newsha0000000000"}
+	i.deps.HTTP = &http.Client{Transport: gh}
+	i.deps.Credentials = func(context.Context, string, string) (string, error) {
+		t.Fatal("a package naming no credential must not consult the resolver")
+		return "", nil
+	}
+
+	if _, err := i.handlePollUpstream(context.Background(), nil, 0); err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	got := gh.seen()
+	if len(got) != 1 {
+		t.Fatalf("want one request, got %d", len(got))
+	}
+	if auth := got[0].Header.Get("Authorization"); auth != "" {
+		t.Fatalf("a public repository is polled anonymously, got Authorization %q", auth)
+	}
+}
+
+// A node with no resolver wired refuses a credentialled package rather than
+// polling it anonymously -- the same direction the fetcher takes.
+func TestThePollRefusesACredentialledPackageOnANodeThatCannotResolve(t *testing.T) {
+	i, engine := feedHarness(t, credentialledPackage())
+	gh := &recordingTransport{sha: "newsha0000000000"}
+	i.deps.HTTP = &http.Client{Transport: gh}
+	i.deps.Credentials = nil
+
+	if _, err := i.handlePollUpstream(context.Background(), nil, 0); err != nil {
+		t.Fatalf("the sweep itself must not fail: %v", err)
+	}
+	if len(gh.seen()) != 0 {
+		t.Fatal("a node that cannot resolve credentials must not poll a credentialled package anonymously")
+	}
+	if engine.sawStatement("mutation ") {
+		t.Fatal("nothing may be written for a package that was not polled")
 	}
 }

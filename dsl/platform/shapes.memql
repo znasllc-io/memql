@@ -167,11 +167,43 @@ shape syncState syncStateFull {
 
 // ---- packages (epic memql#4794) ----
 
+// ---- source credentials (epic memql#4885) ----
+
+/// The client-readable projection of v1:platform:sourceCredential -- the Settings Sources group and
+/// the Source stop's credential chip. Everything BUT `encryptedValue`, and that omission is the
+/// security property: no client read can return ciphertext, because no client-reachable query
+/// carries a shape that projects it. `fingerprint` is what tells two credentials apart;
+/// `lastUsedAt` is a heartbeat and must never enter an arrival-cue fingerprint.
+@row
+shape sourceCredential sourceCredentialCard {
+  row.id
+  ownerUserId
+  host
+  label
+  fingerprint
+  status
+  lastUsedAt
+  revokedAt
+  row.createdAt
+}
+
+/// The server-only projection: what a fetch needs and nothing a person does. Reached through
+/// sourceCredentialSealedById alone, which is @serverOnly and resolved under the package owner's
+/// actor from inside a fetch; the ciphertext is unsealed into a local that dies with the call.
+@row
+shape sourceCredential sourceCredentialSealed {
+  row.id
+  ownerUserId
+  host
+  status
+  encryptedValue
+}
+
 /// Full projection of v1:platform:package -- the OS packages list and detail.
 ///
-/// `repoTokenRef` is projected deliberately: it is a NAME, never a value (D14), and the person
-/// editing a package has to be able to see which secret it points at. Nothing here can leak a
-/// credential, because no credential is ever on the row.
+/// `credentialId` is projected deliberately: it is a NAME, never a value (epic memql#4885), and the
+/// person editing a package has to be able to see which of their credentials it fetches under.
+/// Nothing here can leak a credential, because no credential is ever on the row.
 @row
 shape package packageFull {
   row.id
@@ -180,7 +212,7 @@ shape package packageFull {
   sourceKind
   repoUrl
   repoRef
-  repoTokenRef
+  credentialId
   artifactId
   deployedVersion
   latestKnownVersion

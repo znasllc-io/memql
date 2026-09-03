@@ -112,11 +112,12 @@ const files: OsAppManifest = {
 // does not declare leaves the window on the first section with the nav
 // highlighting nothing.
 //
-// THE APP ITSELF CARRIES NO ROLE, and its Actions section carries admin+. That
-// split is the point: `v1:platform:site` declares the composite tier
-// (`@rowAuthz(owner="ownerUserId", clusterOwner)`), so every signed-in person
-// has deployables of their own to read and there is nothing to gate -- the
-// engine decides how far the list reaches. The section role is PRESENTATION
+// NO SECTION CARRIES A ROLE, and that is the point: `v1:platform:site`
+// declares the composite tier (`@rowAuthz(owner="ownerUserId",
+// clusterOwner)`), so every signed-in person has deployables of their own to
+// read and there is nothing to gate -- the engine decides how far the list
+// reaches. The write half is gated INSIDE the one section instead (New
+// deployable at rank >= 200, epic memql#4885), and that gate is PRESENTATION
 // (spec section E) over writes the Go hostname policy and
 // `sitePublishFromArtifact` remain the authority on.
 const deployables: OsAppManifest = {

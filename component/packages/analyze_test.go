@@ -131,6 +131,20 @@ func TestEachManifestRuleRefusesWithItsCatalogedCode(t *testing.T) {
 			want: CodeDeployableKindUnknown,
 		},
 		{
+			// The third of the target model's three cases (design section
+			// B): a kind nobody has heard of stays FATAL and unknown. The
+			// second case -- a kind the model knows and does not offer -- is
+			// TestAKnownUnofferedKindIsReportedAndTheRestStillDeploys, and
+			// the two must not collapse: reading `banana` as "not offered"
+			// would tell an author their typo is a platform roadmap item.
+			name: "a kind nobody has heard of",
+			mutate: func(p fstest.MapFS) {
+				p[ManifestName] = file("formatVersion: 1\nname: acme\ndeployables:\n" +
+					"  - {name: w, path: clients/web, kind: banana}\n")
+			},
+			want: CodeDeployableKindUnknown,
+		},
+		{
 			name: "a storefront with no binding",
 			mutate: func(p fstest.MapFS) {
 				p[ManifestName] = file("formatVersion: 1\nname: acme\ndeployables:\n" +
@@ -231,6 +245,98 @@ func TestGoPackIsReportedAndTheRestStillDeploys(t *testing.T) {
 	}
 	if len(rep.Deployables) != 2 {
 		t.Fatalf("the other halves still analyze: %+v", rep.Deployables)
+	}
+}
+
+// TestAKnownUnofferedKindIsReportedAndTheRestStillDeploys is the target
+// model's second case (design section B, D9): `ios`, `android` and `macos` are
+// written down as shapes and not registered, so a manifest declaring one gets
+// a per-app problem that is NOT fatal to the package -- reported exactly as a
+// Go pack is -- and the offered apps beside it analyze clean.
+func TestAKnownUnofferedKindIsReportedAndTheRestStillDeploys(t *testing.T) {
+	rep, err := Analyze(unofferedTargetPackage(), Options{})
+	if err != nil {
+		t.Fatalf("an unoffered target must not refuse the package: %v", err)
+	}
+	if !rep.OK {
+		t.Fatalf("the rest of the package must still deploy: %+v", rep.Problems)
+	}
+	if len(rep.Deployables) != 2 {
+		t.Fatalf("both declared apps must be in the report: %+v", rep.Deployables)
+	}
+
+	var docs, mobile *DeployableReport
+	for i := range rep.Deployables {
+		switch rep.Deployables[i].Name {
+		case "docs":
+			docs = &rep.Deployables[i]
+		case "mobile":
+			mobile = &rep.Deployables[i]
+		}
+	}
+	if docs == nil || mobile == nil {
+		t.Fatalf("report is missing an app: %+v", rep.Deployables)
+	}
+	if docs.Problem != nil {
+		t.Fatalf("the offered app beside an unoffered one must analyze clean: %+v", docs.Problem)
+	}
+	if mobile.Problem == nil {
+		t.Fatal("the iOS app must carry its problem on the row it is about")
+	}
+	if mobile.Problem.Code != CodeDeployableTargetNotOffered {
+		t.Fatalf("want %s, got %+v", CodeDeployableTargetNotOffered, mobile.Problem)
+	}
+	if mobile.Problem.Fatal {
+		t.Fatalf("not offered is scoped to the app and NOT fatal to the package: %+v", mobile.Problem)
+	}
+	if mobile.Problem.Scope != "mobile" {
+		t.Fatalf("the problem must name the app it is about: %+v", mobile.Problem)
+	}
+	// The sentence is the product copy for this stop: it names the display
+	// name, not the manifest value, and says "yet" because the kind is a
+	// shape the model has written down.
+	if !strings.Contains(mobile.Problem.Message, "iOS is not offered on this cluster yet") {
+		t.Fatalf("want the not-offered sentence, got %q", mobile.Problem.Message)
+	}
+	// It is in the package-wide problem list too, non-fatal, so the What-it-is
+	// stop and the confirm gate both see it.
+	var listed bool
+	for _, p := range rep.Problems {
+		if p.Code == CodeDeployableTargetNotOffered {
+			listed = true
+			if p.Fatal {
+				t.Fatalf("the listed problem must be non-fatal: %+v", p)
+			}
+		}
+	}
+	if !listed {
+		t.Fatalf("want a %s problem in the report, got %+v", CodeDeployableTargetNotOffered, rep.Problems)
+	}
+}
+
+// Every kind the target model knows and does not offer has a display name the
+// sentence is built from, and none of them is an offered kind -- the two sets
+// are disjoint by construction, or an app could be "not offered" and served.
+func TestKnownUnofferedKindsAreNamedAndDisjointFromTheOfferedOnes(t *testing.T) {
+	want := map[string]string{"ios": "iOS", "android": "Android", "macos": "macOS"}
+	if len(KnownUnofferedKinds) != len(want) {
+		t.Fatalf("want exactly %d known-unoffered kinds, got %v", len(want), KnownUnofferedKinds)
+	}
+	for kind, display := range want {
+		target, ok := KnownUnofferedKinds[kind]
+		if !ok {
+			t.Errorf("kind %q is not in KnownUnofferedKinds", kind)
+			continue
+		}
+		if target.Display != display {
+			t.Errorf("kind %q: display %q, want %q", kind, target.Display, display)
+		}
+		if strings.TrimSpace(target.Address) == "" {
+			t.Errorf("kind %q: the design's table names where it will go; the entry must too", kind)
+		}
+		if ValidKind(kind) {
+			t.Errorf("kind %q is both offered and known-unoffered", kind)
+		}
 	}
 }
 

@@ -18,7 +18,7 @@ import {
   type FilesSettingsStore,
 } from "../files/settings";
 import { BinDetail } from "./BinDetail";
-import { useTwoFeedView } from "./mergedView";
+import { useTwoFeedView } from "../../live/mergedView";
 import { planRestore, runRestore } from "./restore";
 import { binFingerprint, binItemFromArtifact, binItemFromFolder, filterBinItems, orderBinItems, type BinItem } from "./rows";
 import { useBinFeeds } from "./useBin";

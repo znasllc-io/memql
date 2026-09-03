@@ -118,10 +118,34 @@ export interface FakeSeed {
   createError?: string;
   /** Fails the next `sitePublishFromArtifact` with this server message. */
   publishError?: string;
-
-
   /** v1:platform:sourceCredential CARDS `sourceCredentialsMine` answers with -- never a value. */
   credentials?: Row[];
+  /**
+   * What `sourceProbe` answers, keyed by the credentialId the call carries
+   * ("" for an anonymous probe). A key that is not present falls back to
+   * `""`, so a test that cares about only one answer names only that one.
+   */
+  sourceProbe?: Record<string, Row>;
+  /** Fails the next `sourceProbe` with this server message -- the probe that could not RUN. */
+  sourceProbeError?: string;
+  /** What `artifactProbe` answers, keyed by artifactId. */
+  artifactProbe?: Record<string, Row>;
+  /** Fails the next `artifactProbe` with this server message. */
+  artifactProbeError?: string;
+  /** What `sourceCredentialCreate` answers with. The token NEVER comes back. */
+  credentialCreated?: Row;
+  /** Fails the next `sourceCredentialCreate` with this server message. */
+  credentialCreateError?: string;
+  /** Fails the next `sourceCredentialRevoke` with this server message. */
+  credentialRevokeError?: string;
+  /** Fails the next `updatePackageSource` with this server message. */
+  updateSourceError?: string;
+  /**
+   * v1:platform:packageDeployment rows at `awaiting_confirm`, which
+   * `packageDeploymentsAwaitingConfirm` answers with: the list's fourth feed,
+   * for the waiting mark (epic memql#4885, design section A).
+   */
+  awaitingConfirm?: Row[];
   /**
    * What `siteTrafficInWindow` answers with, keyed by the mode the call is
    * in: "series" for a stop's per-bucket read, "summary" for the list's
@@ -214,6 +238,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
 
       if (call === "query packagesAll()") return rowsResult(seed.packages ?? []);
+      if (call === "query packageDeploymentsAwaitingConfirm()") return rowsResult(seed.awaitingConfirm ?? []);
 
       if (call.startsWith("query packageDeployments(")) {
         const id = /packageId: "([^"]*)"/.exec(call)?.[1] ?? "";
@@ -248,8 +273,83 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return rowsResult([]);
       }
 
-      if (call.startsWith("builtin packageRollback(") || call.startsWith("builtin packageRestore(")) {
+      if (call.startsWith("builtin packageRollback(")) {
+        if (seed.rollbackError !== undefined) throw new Error(seed.rollbackError);
         return rowsResult([]);
+      }
+
+      if (call.startsWith("builtin packageRestore(")) {
+        if (seed.restoreError !== undefined) throw new Error(seed.restoreError);
+        return rowsResult([]);
+      }
+
+      if (call === "query sourceCredentialsMine()") return rowsResult(seed.credentials ?? []);
+
+      if (call.startsWith("builtin sourceProbe(")) {
+        if (seed.sourceProbeError !== undefined) throw new Error(seed.sourceProbeError);
+        const credentialId = /credentialId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const answers = seed.sourceProbe ?? {};
+        const reply = answers[credentialId] ?? answers[""] ?? null;
+        return rowsResult(reply === null ? [] : [reply]);
+      }
+
+      if (call.startsWith("builtin artifactProbe(")) {
+        if (seed.artifactProbeError !== undefined) throw new Error(seed.artifactProbeError);
+        const artifactId = /artifactId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const reply = (seed.artifactProbe ?? {})[artifactId] ?? null;
+        return rowsResult(reply === null ? [] : [reply]);
+      }
+
+      if (call.startsWith("builtin sourceCredentialCreate(")) {
+        if (seed.credentialCreateError !== undefined) throw new Error(seed.credentialCreateError);
+        return rowsResult([
+          seed.credentialCreated ?? ({ credentialId: "cred-new", fingerprint: "...9f2c" } as unknown as Row),
+        ]);
+      }
+
+      if (call.startsWith("builtin sourceCredentialRevoke(")) {
+        if (seed.credentialRevokeError !== undefined) throw new Error(seed.credentialRevokeError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("mutation updatePackageSource(")) {
+        if (seed.updateSourceError !== undefined) throw new Error(seed.updateSourceError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("mutation updateSiteStatus(")) {
+        if (seed.siteStatusError !== undefined) throw new Error(seed.siteStatusError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("builtin siteArchive(")) {
+        if (seed.siteArchiveError !== undefined) throw new Error(seed.siteArchiveError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("builtin siteRestore(")) {
+        if (seed.siteRestoreError !== undefined) throw new Error(seed.siteRestoreError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("mutation updateSiteBundle(")) {
+        if (seed.repointError !== undefined) throw new Error(seed.repointError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("mutation updateSiteAccount(")) return rowsResult([]);
+
+      // The version walk: the current row, then the newest row at or before
+      // each `asOf` instant. History is the seed's `siteHistory`, newest first.
+      if (call.startsWith("query siteById(")) {
+        const history = seed.siteHistory ?? [];
+        return rowsResult(history[0] ? [history[0]] : []);
+      }
+      if (call.startsWith("asOf(siteById(")) {
+        const at = /\), "([^"]+)"\)$/.exec(call)?.[1] ?? "";
+        const history = seed.siteHistory ?? [];
+        const found = history.find((row) => String(row["createdAt"] ?? "") <= at);
+        return rowsResult(found ? [found] : []);
       }
 
       if (call.startsWith("mutation createPackage(")) {
@@ -396,6 +496,44 @@ export const DELETED = siteRow({
   hostname: "gone.memql.example.com",
   deleted: true,
 });
+
+/** A credential CARD: the projection a browser receives, which has no token. */
+export function credentialRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    ownerUserId: "u-me",
+    host: "github.com",
+    label: "acme deploy token",
+    fingerprint: "sha256:ab12cd34",
+    status: "active",
+    lastUsedAt: "",
+    revokedAt: "",
+    createdAt: "2026-08-20T00:00:00Z",
+    ...over,
+  };
+}
+
+/** A `sourceProbe` reply. `ok` and public by default: the commonest answer. */
+export function probeReply(over: Partial<Row> = {}): Row {
+  return {
+    host: "github.com",
+    reachable: true,
+    private: false,
+    defaultBranch: "main",
+    reason: "ok",
+    ...over,
+  } as unknown as Row;
+}
+
+/** An `artifactProbe` reply. Neither a package nor a built site by default. */
+export function zipReply(over: Partial<Row> = {}): Row {
+  return {
+    isPackage: false,
+    isBuiltSite: false,
+    fileCount: 12,
+    totalBytes: 2097152,
+    ...over,
+  } as unknown as Row;
+}
 
 export function artifactRow(over: Partial<Row> & { id: string }): Row {
   return {

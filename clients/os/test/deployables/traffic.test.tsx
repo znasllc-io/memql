@@ -305,21 +305,33 @@ describe("the runtime-settings editor", () => {
 function mount(connection: FakeConnection) {
   h.connection = connection;
   return render(
-    withSession(<DeployablesApp sectionId="sites" navigate={vi.fn()} askContext={vi.fn()} />, {
+    withSession(<DeployablesApp sectionId="deployables" navigate={vi.fn()} askContext={vi.fn()} />, {
       role: "owner",
       userId: "u-me",
     }),
   );
 }
 
-/** Open the Deployables list with a seed, and select one deployable. */
-async function openDeployable(seed: FakeSeed, siteId: string): Promise<FakeConnection> {
+/**
+ * Open a deployable and return its PAGE.
+ *
+ * Scoped to the page region rather than to the document, and that is the
+ * lesson from the section growing a map beside its list: a hostname matches
+ * the list row AND the page head AND the rail's address, so a
+ * document-wide query for one finds several. Every assertion below reads
+ * inside the region the page owns.
+ */
+async function openDeployable(seed: FakeSeed, hostname: string): Promise<{ connection: FakeConnection; page: HTMLElement }> {
   const connection = fakeConnection(seed);
   mount(connection);
-  const site = seed.sites?.find((s) => s.id === siteId);
-  const row = await screen.findByRole("button", { name: new RegExp(String(site?.hostname ?? siteId), "i") });
-  await click(row);
-  return connection;
+  await waitFor(() =>
+    expect(document.querySelector("[data-os-livelist]")?.getAttribute("data-state")).toBe("live"),
+  );
+  // Before the page opens the only element carrying the hostname is the list
+  // row; once it is open the head and the rail do too.
+  await click((await screen.findByText(hostname)).closest("button"));
+  const page = await screen.findByRole("region", { name: `Deployable ${hostname}` });
+  return { connection, page };
 }
 
 describe("a deployable's readings, rendered", () => {
@@ -340,26 +352,26 @@ describe("a deployable's readings, rendered", () => {
   const SHOP_LIVE = siteRow({ ...SHOP, id: "site-shop", status: "live" });
 
   it("says a window was unmeasured in words rather than showing zeroes", async () => {
-    await openDeployable({ sites: [SHOP_LIVE] }, "site-shop");
+    const { page } = await openDeployable({ sites: [SHOP_LIVE] }, "shop.memql.example.com");
     await waitFor(() => {
-      expect(screen.getByText(unmeasuredSentence(DEFAULT_TRAFFIC_WINDOW))).toBeTruthy();
+      expect(within(page).getByText(unmeasuredSentence(DEFAULT_TRAFFIC_WINDOW))).toBeTruthy();
     });
     // NO FIGURE AT ALL, rather than a row of zeroes: an absent figure and a
     // zero are different answers.
-    expect(screen.queryByText("Requests")).toBeNull();
+    expect(within(page).queryByText("Requests")).toBeNull();
   });
 
   it("states zero errors when the window had requests and none failed", async () => {
     const bounds = windowBounds("day", new Date("2026-09-03T12:34:00Z"));
-    await openDeployable(
+    const { page } = await openDeployable(
       {
         sites: [SHOP_LIVE],
         traffic: { series: [trafficRow({ windowStart: bounds.start, requestCount: 42, lastServedAt: "2026-09-03T11:58:00Z" })] },
       },
-      "site-shop",
+      "shop.memql.example.com",
     );
-    await waitFor(() => expect(screen.getByText("Requests")).toBeTruthy());
-    const facts = screen.getByText("Requests").closest("dl")!;
+    await waitFor(() => expect(within(page).getByText("Requests")).toBeTruthy());
+    const facts = within(page).getByText("Requests").closest("dl")!;
     expect(within(facts).getByText("42")).toBeTruthy();
     // Zero, stated. Not an em dash and not an absence.
     expect(within(facts).getByText("Errors").nextElementSibling?.textContent).toBe("0");
@@ -369,7 +381,7 @@ describe("a deployable's readings, rendered", () => {
   it("draws one column per bucket, with the empty ones drawn empty", async () => {
     const bounds = windowBounds("day", new Date("2026-09-03T12:34:00Z"));
     const start = Date.parse(bounds.start);
-    await openDeployable(
+    const { page } = await openDeployable(
       {
         sites: [SHOP_LIVE],
         traffic: {
@@ -379,9 +391,9 @@ describe("a deployable's readings, rendered", () => {
           ],
         },
       },
-      "site-shop",
+      "shop.memql.example.com",
     );
-    const strip = await screen.findByRole("list", { name: /requests per hour/i });
+    const strip = await within(page).findByRole("list", { name: /requests per hour/i });
     const columns = within(strip).getAllByRole("listitem");
     expect(columns).toHaveLength(24);
     // The error band is inked on the bucket that had errors and nowhere else,
@@ -390,12 +402,12 @@ describe("a deployable's readings, rendered", () => {
   });
 
   it("changes the bucket and the read when the window changes", async () => {
-    const connection = await openDeployable({ sites: [SHOP_LIVE] }, "site-shop");
+    const { connection, page } = await openDeployable({ sites: [SHOP_LIVE] }, "shop.memql.example.com");
     await waitFor(() => expect(connection.callsNamed("siteTrafficInWindow").length).toBeGreaterThan(0));
     const before = connection.callsNamed("siteTrafficInWindow").at(-1)!;
     expect(before).toContain('bucket: "1h"');
 
-    await click(screen.getByRole("radio", { name: windowLabel("hour") }));
+    await click(within(page).getByRole("radio", { name: windowLabel("hour") }));
     await waitFor(() => {
       const after = connection.callsNamed("siteTrafficInWindow").at(-1)!;
       expect(after).toContain('bucket: "1m"');
@@ -403,12 +415,12 @@ describe("a deployable's readings, rendered", () => {
   });
 
   it("says nothing about a system-owned surface's traffic, and accounts for the absence", async () => {
-    const connection = await openDeployable({ sites: [PORTAL] }, "site-portal");
+    const { connection, page } = await openDeployable({ sites: [PORTAL] }, "portal.memql.example.com");
     // ONE note covering every absence on the stop, rather than one per
     // missing control -- and it names the traffic among them, so the missing
     // figure reads as a decision rather than as something unbuilt.
-    await waitFor(() => expect(screen.getByText(/traffic is not recorded/i)).toBeTruthy());
-    expect(screen.queryByRole("radiogroup", { name: /traffic window/i })).toBeNull();
+    await waitFor(() => expect(within(page).getByText(/traffic is not recorded/i)).toBeTruthy());
+    expect(within(page).queryByRole("radiogroup", { name: /traffic window/i })).toBeNull();
     // AND NOTHING WAS ASKED FOR. The cluster's own surfaces are excluded from
     // the request log by construction, so a read would have been a call whose
     // answer is known in advance.
@@ -416,33 +428,33 @@ describe("a deployable's readings, rendered", () => {
   });
 
   it("reports a refused read in the server's own words", async () => {
-    await openDeployable(
+    const { page } = await openDeployable(
       { sites: [SHOP_LIVE], trafficError: "a traffic read covers at most 200 deployables at once" },
-      "site-shop",
+      "shop.memql.example.com",
     );
     await waitFor(() => {
-      expect(screen.getByText(/a traffic read covers at most 200 deployables/)).toBeTruthy();
+      expect(within(page).getByText(/a traffic read covers at most 200 deployables/)).toBeTruthy();
     });
   });
 
   it("shows the settings a deployable carries, and the sentence about secrets", async () => {
-    await openDeployable(
+    const { page } = await openDeployable(
       { sites: [siteRow({ ...SHOP_LIVE, id: "site-shop", settings: { apiBase: "https://api.eu.example" } })] },
-      "site-shop",
+      "shop.memql.example.com",
     );
-    await waitFor(() => expect(screen.getByText(/Not a place for a secret/i)).toBeTruthy());
-    expect((screen.getAllByRole("textbox") as HTMLInputElement[]).some((i) => i.value === "apiBase")).toBe(true);
-    expect((screen.getAllByRole("textbox") as HTMLInputElement[]).some((i) => i.value === "https://api.eu.example")).toBe(true);
+    await waitFor(() => expect(within(page).getByText(/Not a place for a secret/i)).toBeTruthy());
+    expect((within(page).getAllByRole("textbox") as HTMLInputElement[]).some((i) => i.value === "apiBase")).toBe(true);
+    expect((within(page).getAllByRole("textbox") as HTMLInputElement[]).some((i) => i.value === "https://api.eu.example")).toBe(true);
   });
 
   it("sends the whole map, so removing a setting is expressible", async () => {
-    const connection = await openDeployable(
+    const { connection, page } = await openDeployable(
       { sites: [siteRow({ ...SHOP_LIVE, id: "site-shop", settings: { apiBase: "https://api.eu.example", region: "eu" } })] },
-      "site-shop",
+      "shop.memql.example.com",
     );
-    await waitFor(() => expect(screen.getAllByRole("button", { name: /^Remove region$/ }).length).toBe(1));
-    await click(screen.getByRole("button", { name: /^Remove region$/ }));
-    await click(screen.getByRole("button", { name: /save settings/i }));
+    await waitFor(() => expect(within(page).getAllByRole("button", { name: /^Remove region$/ }).length).toBe(1));
+    await click(within(page).getByRole("button", { name: /^Remove region$/ }));
+    await click(within(page).getByRole("button", { name: /save settings/i }));
 
     await waitFor(() => expect(connection.callsNamed("updateSiteSettings").length).toBe(1));
     const call = connection.callsNamed("updateSiteSettings")[0]!;
@@ -453,25 +465,25 @@ describe("a deployable's readings, rendered", () => {
   });
 
   it("reports a refused save verbatim", async () => {
-    await openDeployable(
+    const { page } = await openDeployable(
       {
         sites: [siteRow({ ...SHOP_LIVE, id: "site-shop", settings: { apiBase: "x" } })],
         settingsError:
           'v1:platform:site: settings key "apiTokenRef" ends in Ref, and a setting is never a reference',
       },
-      "site-shop",
+      "shop.memql.example.com",
     );
-    const value = (screen.getAllByRole("textbox") as HTMLInputElement[]).find((i) => i.value === "x")!;
+    const value = (within(page).getAllByRole("textbox") as HTMLInputElement[]).find((i) => i.value === "x")!;
     await typeInto(value, "y");
-    await click(screen.getByRole("button", { name: /save settings/i }));
-    await waitFor(() => expect(screen.getByText(/ends in Ref/)).toBeTruthy());
+    await click(within(page).getByRole("button", { name: /save settings/i }));
+    await waitFor(() => expect(within(page).getByText(/ends in Ref/)).toBeTruthy());
   });
 
   it("renders no settings controls at all on a system-owned row", async () => {
-    await openDeployable({ sites: [PORTAL] }, "site-portal");
-    await waitFor(() => expect(screen.getByText(/traffic is not recorded/i)).toBeTruthy());
-    expect(screen.queryByRole("button", { name: /add a setting/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /save settings/i })).toBeNull();
+    const { page } = await openDeployable({ sites: [PORTAL] }, "portal.memql.example.com");
+    await waitFor(() => expect(within(page).getByText(/traffic is not recorded/i)).toBeTruthy());
+    expect(within(page).queryByRole("button", { name: /add a setting/i })).toBeNull();
+    expect(within(page).queryByRole("button", { name: /save settings/i })).toBeNull();
   });
 });
 
@@ -489,7 +501,10 @@ describe("the list row's figure", () => {
     });
     mount(connection);
 
-    await waitFor(() => expect(screen.getByText(/^served /)).toBeTruthy());
+    // Scoped to the LIST rather than to a page: nothing is open here, and the
+    // map beside the list draws the same deployables.
+    const list = await screen.findByRole("list", { name: /deployables/i });
+    await waitFor(() => expect(within(list).getByText(/^served /)).toBeTruthy());
     // ONE CALL for the whole list, in the summary mode built for it.
     const calls = connection.callsNamed("siteTrafficInWindow");
     expect(calls.filter((c) => c.includes("summary: true"))).toHaveLength(1);
@@ -497,6 +512,6 @@ describe("the list row's figure", () => {
 
     // The deployable the answer did not cover is unmeasured, and its row says
     // NOTHING rather than "never" -- which would be a claim.
-    expect(screen.getAllByText(/^served /)).toHaveLength(1);
+    expect(within(list).getAllByText(/^served /)).toHaveLength(1);
   });
 });

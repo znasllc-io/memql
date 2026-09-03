@@ -479,6 +479,41 @@ concept syncState {
 
 // ---- packages (epic memql#4794) ----
 
+/// A PERSON'S credential for reading a private source (epic memql#4885, D10). One row is one token
+/// on one host, sealed once, server-side, and named by the packages that fetch under it.
+///
+/// It replaces the cluster-wide globalSecret a package used to NAME: any package owner could name
+/// any secret, so the fetcher could be made to fetch under an owner's token by whoever knew the
+/// name. Here the credential belongs to the person, the composite tier decides who reads it, and
+/// the fetcher resolves it under the PACKAGE OWNER's actor -- so a package naming somebody else's
+/// credential resolves zero rows and is refused by name, before any request leaves the cluster.
+///
+/// The COMPOSITE tier, for the reason v1:platform:site and v1:platform:package record: a plain
+/// owner tier has no cluster-owner escape on the read path, so "every credential in this cluster"
+/// would not be EXPRESSIBLE and an operator would silently read a subset. A cluster owner reads
+/// every row's METADATA -- host, label, fingerprint, last used -- which is the oversight the tier
+/// exists for, and can decrypt none of it from a browser: `sourceCredentialCard` projects everything
+/// but the ciphertext, and decryption happens only inside a fetch.
+///
+/// A REVOKED ROW IS NEVER DELETED. It is the audit history of what fetched under it -- every
+/// deployment whose source arrived through this token is a fact about this row -- and a deleted
+/// row answers no question anybody asks after an incident. Revocation flips `status` and stamps
+/// `revokedAt`; rotation is adding a new credential and switching a source to it.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="label", secondary="host", tertiary="fingerprint", status="status")
+concept sourceCredential {
+  ownerUserId     string    @description("v1:identity:user.id of the person this credential belongs to. Stamped from the actor by the writer (createSourceCredential), never accepted from an argument -- it is the row-authz key the composite tier compares against actor.userId, and a caller-supplied value would record a guarantee nothing provides. NOT `string!`, for the reason its siblings are not: the declaration form is shared, and an empty value is the meaningful cluster-owned state even though nothing writes one here.")
+  host            string!   @description("The host this token authenticates against. `github.com` today, and the only value sourceCredentialCreate admits; the probe and the fetcher match on it, so a credential can never be presented to a host it was not minted for.")
+  label           string!   @description("The person's own name for it -- 'work laptop', 'acme deploy key'. Display only; nothing keys on it.")
+  encryptedValue  string!  @secret  @description("Base64-encoded nonce || NaCl-secretbox ciphertext of the token, sealed under MEMQL_MASTER_KEY by component/secret.Encrypt on the node that received it. Opaque -- never rendered to humans, never projected by a client-readable shape, and unsealed only inside a fetch into a local that dies with the call. @secret redacts a rejected value in the function-args validator ONLY, and matches by ARGUMENT NAME, so a mutation writing encryptedValue: args.somethingElse is not covered -- see Concept.SecretFields for the full scope.")
+  fingerprint     string!   @description("The last four characters of the token, prefixed with '...', for telling two credentials apart in a list without revealing either. Display only.")
+  status          enum("active", "revoked")!  @description("'active' fetches; 'revoked' refuses every fetch and poll under it with credential_revoked, and the row stays. The transition is one-way: a revoked credential is not reactivated, a new one is added.")
+  lastUsedAt      datetime  @description("When the fetcher or the poll last unsealed this credential. A HEARTBEAT stamped by the engine on every fetch and every poll, and it must never enter an arrival-cue fingerprint: a surface that re-fired on it would announce a change every time a scheduled poll ran, which is exactly the 'a heartbeat is not news' failure clients/os/README.md names. Empty until the first use.")
+  revokedAt       datetime  @description("When it was revoked. Set by revokeSourceCredential and never cleared; the row is never deleted.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
 /// A TRACKED SOURCE this cluster can deploy: a memql-project-shaped tree that arrives either as a
 /// Git repo or as a zip of exactly the same tree (D1). The two forms are interchangeable and
 /// equally validated, which is why `sourceKind` discriminates provenance and nothing else -- every
@@ -500,7 +535,7 @@ concept package {
   sourceKind          enum("repo", "artifact")!  @description("Where the source comes from. 'repo' tracks a Git repository as the source of truth and is the form the D11 update feeds watch. 'artifact' is a zip already in the Library -- a complete, self-contained snapshot with nothing upstream to notice, so it never carries an update cue. Both analyze, build, stage, roll and publish through exactly the same pipeline.")
   repoUrl             string   @description("HTTPS URL of the tracked repository. Empty for sourceKind='artifact'. Also the match key the webhook feed uses to find this row when a push arrives (D11), which is why it is stored normalized rather than as typed.")
   repoRef             string   @description("Branch, tag or commit to deploy. EMPTY means the repository's default branch, resolved at fetch time -- storing a resolved default here would freeze a package to whatever 'main' meant on the day it was added.")
-  repoTokenRef        string   @description("NAMES a v1:platform:globalSecret holding a repository access token; EMPTY means a public repository (D14). The storefront-token pattern exactly: the VALUE never lands on this row, on a snapshot, or in a log, and is resolved only at fetch time. That is what makes private repositories work on day one without this row becoming a credential.")
+  credentialId        string   @description("The v1:platform:sourceCredential this package fetches under, or EMPTY for a public repository (epic memql#4885, D10). A NAME rather than a value: the token never lands on this row, on a snapshot, or in a log, and is unsealed only at fetch time -- under the PACKAGE OWNER's actor, so a package naming somebody else's credential resolves nothing and is refused as credential_not_found. A row still carrying a token NAME from before this field existed reads as 'no credential' -- there is no shim -- and the OS asks for one on its Source stop.")
   artifactId          string   @description("The v1:library:artifact this package's source zip was read from, for sourceKind='artifact'. Provenance: Files stores and identifies, packages consume (D8).")
   deployedVersion     string   @description("Commit SHA or content hash of the source currently LIVE. Written by the pipeline when a deployment reaches 'succeeded' -- so it lags the repository deliberately, and the gap between it and latestKnownVersion is the whole update cue.")
   latestKnownVersion  string   @description("Newest upstream version either D11 feed has seen. WRITTEN ONLY BY THE FEEDS. A feed that wrote anything else would be deciding to deploy, which is a person's click.")
@@ -509,6 +544,7 @@ concept package {
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="fetchedFrom", field="artifactId", target=artifact, direction="outgoing")
+  @relationship(type="references", as="fetchesUnder", field="credentialId", target=sourceCredential, direction="outgoing")
 }
 
 /// ONE ATTEMPT to deploy one version of one package -- the append-only timeline (D7).

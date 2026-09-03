@@ -80,6 +80,24 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # from go-checks to db-tests whole. Nothing is lost -- the lane runs whole
 # packages -- and the package's other suites are ordinary unit tests against a
 # fake Admin endpoint that now happen to run beside a database they ignore.
+#
+# memql#4885 added `component/packages`. A package's source credential is
+# resolved under the PACKAGE OWNER's actor through an owner-scoped @serverOnly
+# query, and the claim worth testing -- a package owned by B naming A's
+# credential resolves zero rows and is refused before any request leaves the
+# cluster, while a cluster owner deploying A's package fetches under A's
+# credential -- is a claim about the read gate's decision over real rows. The
+# recording engine the package's other suites drive parses nothing and gates
+# nothing, so it passes the correct resolver and the one that resolves under
+# the caller equally well; only a real engine over a real Postgres can tell
+# them apart, and a db-gated test outside this lane only ever runs on the
+# machine of whoever happened to have one up.
+#
+# What the complement now means, having looked: `component/packages` moves
+# from go-checks to db-tests whole. Nothing is lost -- the lane runs whole
+# packages -- and the pipeline, analysis and feed suites are ordinary unit
+# tests against fakes that now happen to run beside a database they ignore.
+#
 # memql#4906 added `component/sitetraffic`. The edge's request log is folded
 # into a TimescaleDB continuous aggregate, and every claim worth testing about
 # it is the DATABASE's: that the fold produces the counts the raw rows imply,
@@ -101,6 +119,7 @@ readonly DB_GATED_TREES=(
 	"component/grpc"
 	"component/identity"
 	"component/logstore"
+	"component/packages"
 	"component/sitetraffic"
 	"integrations/cognition"
 	"integrations/embedding"
