@@ -2,8 +2,10 @@ import type { LiveSnapshot } from "@znasllc-io/memql-sdk-core/client";
 
 import { Button, Caption, Head, Notice } from "../../../kit";
 import type { ArrivalTick } from "../../../live/arrival";
-import { SiteDetail } from "../SiteDetail";
+import { DeployablePage } from "../page/DeployablePage";
+import type { PackageRow } from "../packages/rows";
 import { siteName, type SiteRow } from "../rows";
+import type { CredentialRow } from "../sources/rows";
 import { DeployMap } from "./DeployMap";
 import type { MapNode } from "./layout";
 
@@ -25,7 +27,7 @@ export interface MapSelection {
    * node object would be a snapshot of a shape that has since moved. An id
    * survives, and the row it names is looked up in the CURRENT rows -- so a
    * deployable that has since gone simply resolves to nothing rather than
-   * rendering a detail panel of a row that is no longer there.
+   * rendering a page for a row that is no longer there.
    */
   siteIds: string[];
 }
@@ -40,8 +42,11 @@ export function MapSection({
   onSelectNode,
   onSelectSite,
   viewerUserId,
-  canPublish,
+  canWrite,
+  isClusterOwner,
   clusterDomain,
+  packages,
+  credentials,
   onAsk,
   onReseed,
 }: {
@@ -52,14 +57,20 @@ export function MapSection({
   onSelectNode: (node: MapNode) => void;
   onSelectSite: (siteId: string) => void;
   viewerUserId: string;
-  canPublish: boolean;
-  /** The domain this cluster serves, threaded to the detail's Domains panel. */
+  canWrite: boolean;
+  isClusterOwner: boolean;
+  /** The domain this cluster serves, threaded to the page's Domains content. */
   clusterDomain: string;
+  packages: readonly PackageRow[];
+  credentials: readonly CredentialRow[];
   onAsk?: (tag: string) => void;
   onReseed: () => void;
 }) {
   const chosen = sites.filter((s) => selection.siteIds.includes(s.id));
-  const only = chosen.length === 1 ? chosen[0] : null;
+  const only = chosen.length === 1 ? (chosen[0] ?? null) : null;
+  const pkg = only === null || only.packageId === "" ? null : (packages.find((p) => p.id === only.packageId) ?? null);
+  const siblings =
+    only === null || only.packageId === "" ? [] : sites.filter((s) => s.packageId === only.packageId && s.id !== only.id);
 
   return (
     <div className="os-app-stack">
@@ -84,16 +95,20 @@ export function MapSection({
       />
 
       {only ? (
-        <SiteDetail
+        <DeployablePage
           key={only.id}
           site={only}
+          pkg={pkg}
+          siblings={siblings}
+          credentials={credentials}
           viewerUserId={viewerUserId}
-          canPublish={canPublish}
+          canWrite={canWrite}
+          isClusterOwner={isClusterOwner}
           clusterDomain={clusterDomain}
           onAsk={onAsk}
         />
       ) : chosen.length > 1 ? (
-        /* A bundle serving several deployables. There is no ONE detail to
+        /* A bundle serving several deployables. There is no ONE page to
            open, so the choice is offered rather than made arbitrarily -- and
            the fact itself, that one bundle is serving all of these, is the
            thing the map was drawn to show. */

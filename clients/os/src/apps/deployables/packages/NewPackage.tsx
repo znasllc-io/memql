@@ -44,7 +44,7 @@ export function NewPackage({ onDone, onCancel }: { onDone: (packageId: string) =
   const [name, setName] = useState("");
   const [repoUrl, setRepoUrl] = useState("");
   const [repoRef, setRepoRef] = useState("");
-  const [repoTokenRef, setRepoTokenRef] = useState("");
+  const [credentialId, setCredentialId] = useState("");
   const [artifactId, setArtifactId] = useState("");
 
   const ready =
@@ -70,7 +70,7 @@ export function NewPackage({ onDone, onCancel }: { onDone: (packageId: string) =
                 sourceKind,
                 repoUrl: sourceKind === "repo" ? repoUrl.trim() : "",
                 repoRef: sourceKind === "repo" ? repoRef.trim() : "",
-                repoTokenRef: sourceKind === "repo" ? repoTokenRef.trim() : "",
+                credentialId: sourceKind === "repo" ? credentialId.trim() : "",
                 artifactId: sourceKind === "artifact" ? artifactId : "",
               }).then((id) => {
                 if (id !== "") onDone(id);
@@ -148,8 +148,8 @@ export function NewPackage({ onDone, onCancel }: { onDone: (packageId: string) =
             <Input
               id="os-pkg-secret"
               label="Name of the stored secret holding the access token"
-              value={repoTokenRef}
-              onChange={setRepoTokenRef}
+              value={credentialId}
+              onChange={setCredentialId}
               placeholder="acme-repo-token"
             />
           </FormRow>

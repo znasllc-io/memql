@@ -1,6 +1,9 @@
 import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { boolOr, flatten } from "../../../kit";
+// The kit's LEAF rather than its barrel: page/rail.ts imports `sourceLabel`
+// from here and is pure by contract, and the barrel re-exports every
+// component the kit has, React included.
+import { boolOr, flatten } from "../../../kit/rows";
 
 // What the Packages surface reads, projected once.
 //
@@ -23,7 +26,8 @@ export interface PackageRow {
   sourceKind: string;
   repoUrl: string;
   repoRef: string;
-  repoTokenRef: string;
+  /** A v1:platform:sourceCredential id, or "" for a public repository. Never a value. */
+  credentialId: string;
   artifactId: string;
   deployedVersion: string;
   latestKnownVersion: string;
@@ -41,7 +45,7 @@ export function packageFromRow(row: Row): PackageRow {
     sourceKind: rowString(flat, "sourceKind"),
     repoUrl: rowString(flat, "repoUrl"),
     repoRef: rowString(flat, "repoRef"),
-    repoTokenRef: rowString(flat, "repoTokenRef"),
+    credentialId: rowString(flat, "credentialId"),
     artifactId: rowString(flat, "artifactId"),
     deployedVersion: rowString(flat, "deployedVersion"),
     latestKnownVersion: rowString(flat, "latestKnownVersion"),
@@ -70,7 +74,7 @@ export function packageFingerprint(p: PackageRow): string {
     p.sourceKind,
     p.repoUrl,
     p.repoRef,
-    p.repoTokenRef,
+    p.credentialId,
     p.deployedVersion,
     p.latestKnownVersion,
     p.updateAvailable ? "update" : "current",
@@ -214,7 +218,7 @@ function listOf<T>(row: Record<string, unknown>, key: string): T[] {
 // ---------------------------------------------------------------------------
 
 /** What this package's source IS, in the words a person used to add it. */
-export function sourceLabel(p: PackageRow): string {
+export function sourceLabel(p: Pick<PackageRow, "sourceKind" | "repoUrl" | "repoRef">): string {
   if (p.sourceKind === "repo") {
     const ref = p.repoRef === "" ? "default branch" : p.repoRef;
     return `${shortRepo(p.repoUrl)} at ${ref}`;

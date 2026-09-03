@@ -5,7 +5,7 @@ import { Button, Caption, Input, Notice, Panel, Subhead } from "../../../kit";
 import { validateSlug } from "../hostname";
 import { hostnameFor, suggestSlug } from "./hostname";
 import { ReportView } from "./ReportView";
-import { StageRail } from "./StageRail";
+import { Rail } from "../page/Rail";
 import type { DeploymentRow, PackageRow } from "./rows";
 
 // The confirm gate (design D12): what deploying would do, and the one control
@@ -101,7 +101,7 @@ export function ConfirmGate({
       {/* The rail, here, is a FORECAST rather than a record: it shows which
           stages this run will pass through, which is how somebody learns
           before the fact that an app-only package restarts nothing. */}
-      <StageRail deployment={deployment} />
+      <Rail input={{ mode: "deploy", deployment: deployment }} />
 
       <ReportView report={report} />
 

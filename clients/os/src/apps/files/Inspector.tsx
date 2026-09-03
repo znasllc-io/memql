@@ -70,7 +70,7 @@ import { artifactName, fileStory, type ArtifactRow } from "./rows";
 // emphasis (the Button contract says so) -- dropping it to quiet would make
 // archiving look exactly like downloading.
 //
-// ASK IS THE SHELL'S ASK AFFORDANCE, IN THE HEADER (the SiteDetail pattern),
+// ASK IS THE SHELL'S ASK AFFORDANCE, IN THE HEADER (the deployable page's pattern),
 // not a full-width button at the foot of the panel. The tag string is
 // unchanged: it is a contract with the Ask surface.
 //

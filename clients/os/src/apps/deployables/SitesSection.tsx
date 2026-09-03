@@ -3,8 +3,9 @@ import { Globe } from "lucide-react";
 
 import { Button, Chip, Head, LiveList, Notice, ProvenanceDot, Row as ListRow } from "../../kit";
 import type { LiveView } from "../../live/liveView";
-import { SiteDetail } from "./SiteDetail";
+import { DeployablePage } from "./page/DeployablePage";
 import { kindLabel } from "./concepts";
+import type { PackageRow } from "./packages/rows";
 import {
   bundleForm,
   bundleFormLabel,
@@ -17,6 +18,7 @@ import {
   type SiteRow,
 } from "./rows";
 import type { ListDensity } from "./settings";
+import type { CredentialRow } from "./sources/rows";
 
 // The deployables of this cluster, live.
 //
@@ -24,6 +26,10 @@ import type { ListDensity } from "./settings";
 // through `POST /sites/{id}/bundles` on a node nobody in this browser is
 // talking to, `graph.node.updated.v1:platform:site` broadcasts, and the row
 // pulses under whoever is watching. Nothing polls and nothing refetches.
+//
+// Selecting a row opens the deployable's PAGE beneath the list (epic
+// memql#4885): its source is joined from the package feed by `packageId`,
+// and its siblings are the other rows the same package produced.
 
 export function SitesSection({
   source,
@@ -32,9 +38,11 @@ export function SitesSection({
   selectedSiteId,
   onSelectSite,
   viewerUserId,
-  canPublish,
+  canWrite,
+  isClusterOwner,
   clusterDomain,
-  canManage = false,
+  packages,
+  credentials,
   onAsk,
   onReseed,
 }: {
@@ -44,16 +52,24 @@ export function SitesSection({
   selectedSiteId: string;
   onSelectSite: (siteId: string) => void;
   viewerUserId: string;
-  canPublish: boolean;
-  /** The domain this cluster serves, threaded to the detail's Domains panel. */
+  /** Rank >= 200. Presentation over a server-side law: the guard is the gate. */
+  canWrite: boolean;
+  /** The client's own domain renders only for one. */
+  isClusterOwner: boolean;
+  /** The domain this cluster serves, threaded to the page's Domains content. */
   clusterDomain: string;
-  /** Whether to render the lifecycle controls -- presentation over a
-   *  server-side law, so hiding them is UX and the guard is the gate. */
-  canManage?: boolean;
+  /** The package feed's rows, for the join. */
+  packages: readonly PackageRow[];
+  /** The credential feed's cards, for the Source stop's chip. */
+  credentials: readonly CredentialRow[];
   onAsk?: (tag: string) => void;
   onReseed: () => void;
 }) {
-  const open = source?.snapshot.rows.find((s) => s.id === selectedSiteId) ?? null;
+  const rows = source?.snapshot.rows ?? [];
+  const open = rows.find((s) => s.id === selectedSiteId) ?? null;
+  const pkg = open === null || open.packageId === "" ? null : (packages.find((p) => p.id === open.packageId) ?? null);
+  const siblings =
+    open === null || open.packageId === "" ? [] : rows.filter((s) => s.packageId === open.packageId && s.id !== open.id);
 
   return (
     <div className="os-app-stack" data-density={density}>
@@ -93,13 +109,16 @@ export function SitesSection({
       />
 
       {open === null ? null : (
-        <SiteDetail
+        <DeployablePage
           key={open.id}
           site={open}
+          pkg={pkg}
+          siblings={siblings}
+          credentials={credentials}
           viewerUserId={viewerUserId}
-          canPublish={canPublish}
+          canWrite={canWrite}
+          isClusterOwner={isClusterOwner}
           clusterDomain={clusterDomain}
-          canManage={canManage}
           onAsk={onAsk}
         />
       )}

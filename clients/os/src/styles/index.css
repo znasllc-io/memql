@@ -4566,7 +4566,10 @@ a.os-button {
   text-wrap: pretty;
 }
 
-.os-rail-stage[data-state="done"] .os-rail-mark {
+/* `complete` is `done` in the compose reading -- an answered stop and a
+ * finished stage are the same picture. One rule, so they cannot drift. */
+.os-rail-stage[data-state="done"] .os-rail-mark,
+.os-rail-stage[data-state="complete"] .os-rail-mark {
   border-color: var(--os-accent);
   background: var(--os-accent-soft);
   color: var(--os-accent);
@@ -4607,6 +4610,21 @@ a.os-button {
   }
 }
 
+/* A STOP WAITING ON THE PERSON holds a still ring: the stop being answered in
+ * the compose flow, and a published site not yet made live. It is the current
+ * stage's ring with the motion taken out -- nothing is moving, and the next
+ * thing that happens is theirs -- so it does not pulse, and reduced motion
+ * has nothing here to reduce. The plate ground rather than the accent fill
+ * keeps it distinct from a stage that is running. */
+.os-rail-stage[data-state="open"] .os-rail-mark {
+  border-color: var(--os-accent);
+  background: var(--os-plate);
+  box-shadow: 0 0 0 3px var(--os-accent-soft);
+}
+.os-rail-stage[data-state="open"] .os-rail-label {
+  color: var(--os-accent);
+}
+
 .os-rail-stage[data-state="skipped"] .os-rail-mark {
   border-style: dashed;
   color: var(--os-muted);
@@ -4629,7 +4647,9 @@ a.os-button {
  * that have not happened yet. The line is the one part that has to stay whole:
  * it is what says these are one sequence. */
 .os-rail-stage[data-state="ahead"] .os-rail-mark,
-.os-rail-stage[data-state="ahead"] .os-rail-body {
+.os-rail-stage[data-state="ahead"] .os-rail-body,
+.os-rail-stage[data-state="pending"] .os-rail-mark,
+.os-rail-stage[data-state="pending"] .os-rail-body {
   opacity: 0.45;
 }
 
@@ -4641,7 +4661,59 @@ a.os-button {
   bottom: 22px;
 }
 
+/* THE COMPACT RAIL is the list row's form: the five marks in a row, no labels
+ * and no connector, so a person reads a row as the shape they will see on the
+ * page. Same element, same states, same colours -- the vocabulary at row
+ * scale rather than a second device. Each mark carries its stop's label and
+ * state as its accessible name, because five dots with no name are five
+ * dots. */
+.os-rail[data-compact="true"] {
+  grid-auto-flow: column;
+  justify-content: start;
+  gap: 4px;
+  margin: 0;
+}
+.os-rail[data-compact="true"] .os-rail-stage {
+  display: block;
+  padding: 0;
+}
+.os-rail[data-compact="true"] .os-rail-stage::before {
+  display: none;
+}
+.os-rail[data-compact="true"] .os-rail-mark {
+  width: 12px;
+  height: 12px;
+}
+
 /* ---- the report -------------------------------------------------------- */
+
+/* ---- the deployable page: what a stop holds beneath its note ----------
+ *
+ * The rail's body is a 1px-gapped grid of label and note; a stop's BODY --
+ * its facts once set, or the control that answers it -- sits beneath the
+ * note at the surface's ordinary spacing, so a stop with nothing to add
+ * reads exactly as it did before the page existed. */
+.os-stop-body {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+  min-width: 0;
+}
+
+/* The address is CONTENT rather than a note (design: a settled stop's answer
+ * reads at --os-text-base), and it is the one link on the page whose text is
+ * the thing it opens. */
+.os-stop-address {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: var(--os-text-base);
+}
+.os-stop-address a {
+  color: var(--os-ink);
+}
 
 .os-report {
   display: grid;

@@ -30,8 +30,8 @@ export interface NewPackageInput {
   sourceKind: "repo" | "artifact";
   repoUrl: string;
   repoRef: string;
-  /** The NAME of a stored secret. This surface never handles a token value. */
-  repoTokenRef: string;
+  /** A v1:platform:sourceCredential id. This surface never handles a token value. */
+  credentialId: string;
   artifactId: string;
 }
 
@@ -44,7 +44,7 @@ export async function createPackage(query: QueryClient, input: NewPackageInput):
   ];
   if (input.repoUrl !== "") parts.push(`repoUrl: ${renderMemQLValue(input.repoUrl)}`);
   if (input.repoRef !== "") parts.push(`repoRef: ${renderMemQLValue(input.repoRef)}`);
-  if (input.repoTokenRef !== "") parts.push(`repoTokenRef: ${renderMemQLValue(input.repoTokenRef)}`);
+  if (input.credentialId !== "") parts.push(`credentialId: ${renderMemQLValue(input.credentialId)}`);
   if (input.artifactId !== "") parts.push(`artifactId: ${renderMemQLValue(input.artifactId)}`);
   await query.executeNamed("createPackage", `mutation createPackage(${parts.join(", ")})`);
   return packageId;

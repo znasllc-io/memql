@@ -14,6 +14,8 @@ import { packageFromRow, type PackageRow } from "./packages/rows";
 import { usePackages } from "./packages/usePackages";
 import { siteFingerprint, siteFromRow, type SiteRow } from "./rows";
 import { SitesSection } from "./SitesSection";
+import { credentialFromRow, type CredentialRow } from "./sources/rows";
+import { useSourceCredentials } from "./sources/useSourceCredentials";
 import {
   DEFAULT_DEPLOYABLES_SETTINGS,
   DEPLOYABLES_SECTIONS,
@@ -74,6 +76,11 @@ export function DeployablesApp({
   // uses. Before the flip this excluded developer, so the deploy tier saw a
   // read-only Deployables app.
   const canWrite = roleAdmits(actorRole, { min: "admin" });
+  // The OWNER rung, under the same ladder: a client's own domain is a
+  // cluster owner's act (memql#4805, D1), and the page renders the Domains
+  // content for one and for nobody else. Presentation; the concept's
+  // clusterOwner tier is the gate.
+  const isClusterOwner = roleAdmits(actorRole, { min: "owner" });
 
   const { source: collection, reseed } = useSites();
   // A SECOND FEED, over a second concept, and deliberately not folded into the
@@ -84,6 +91,11 @@ export function DeployablesApp({
   // total: what must never happen is two subscriptions over the SAME concept
   // free to disagree about what the cluster holds.
   const { source: packageCollection, reseed: reseedPackages } = usePackages();
+  // A THIRD FEED, over a third concept (epic memql#4885): the caller's own
+  // source credentials, read once here as CARDS and passed down so the
+  // Source stop's chip and, later, the Sources settings group are two
+  // readings of one feed rather than two subscriptions free to disagree.
+  const { source: credentialCollection } = useSourceCredentials();
 
   // PROJECT, then narrow, in one pass. The collection holds RAW wire rows --
   // the fold upserts an event payload as the row type with no projection hook
@@ -107,6 +119,11 @@ export function DeployablesApp({
     rows.map(packageFromRow).filter((p) => p.id !== ""),
   );
   const packageSnapshot = packages?.snapshot ?? EMPTY_SNAPSHOT<PackageRow>();
+
+  const credentials = useLiveView<Row, CredentialRow>(credentialCollection, "credentials", (rows) =>
+    rows.map(credentialFromRow).filter((c) => c.id !== ""),
+  );
+  const credentialRows = credentials?.snapshot.rows ?? [];
   const [selectedPackageId, setSelectedPackageId] = useState("");
 
   const [selection, setSelection] = useState<MapSelection>(NO_SELECTION);
@@ -180,9 +197,11 @@ export function DeployablesApp({
         selectedSiteId={selectedSiteId}
         onSelectSite={selectSite}
         viewerUserId={viewerUserId}
-        canPublish={canWrite}
+        canWrite={canWrite}
+        isClusterOwner={isClusterOwner}
         clusterDomain={config.domain}
-        canManage={canWrite}
+        packages={packageSnapshot.rows}
+        credentials={credentialRows}
         onAsk={askContext}
         onReseed={reseed}
       />
@@ -197,8 +216,11 @@ export function DeployablesApp({
       onSelectNode={selectNode}
       onSelectSite={selectSite}
       viewerUserId={viewerUserId}
-      canPublish={canWrite}
+      canWrite={canWrite}
+      isClusterOwner={isClusterOwner}
       clusterDomain={config.domain}
+      packages={packageSnapshot.rows}
+      credentials={credentialRows}
       onAsk={askContext}
       onReseed={reseed}
     />
