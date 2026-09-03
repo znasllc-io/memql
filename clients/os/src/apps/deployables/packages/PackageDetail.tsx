@@ -20,7 +20,7 @@ import { formatMoment } from "../../../kit/format";
 import { usePackageActions } from "./actions";
 import { ConfirmGate } from "./ConfirmGate";
 import { BuildLog, ProblemNotice, ReportView } from "./ReportView";
-import { StageRail } from "./StageRail";
+import { Rail } from "../page/Rail";
 import { usePackageDeployments } from "./usePackages";
 import {
   deploymentFingerprint,
@@ -184,7 +184,7 @@ export function PackageDetail({
       {running ? (
         <section className="os-report-part">
           <h4 className="os-report-heading">Deploying now</h4>
-          <StageRail deployment={running} />
+          <Rail input={{ mode: "deploy", deployment: running }} />
         </section>
       ) : null}
 
@@ -223,7 +223,7 @@ export function PackageDetail({
                   </Button>
                 ) : null}
               </header>
-              <StageRail deployment={d} />
+              <Rail input={{ mode: "deploy", deployment: d }} />
               {d.error ? <ProblemNotice problem={d.error} tone="error" /> : null}
               <BuildLog tail={d.buildLogTail} />
               {d.deployables.length > 0 ? (

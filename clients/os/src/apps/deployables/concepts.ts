@@ -24,50 +24,13 @@ export const ARTIFACT_CONCEPT = "v1:library:artifact";
 // The kinds
 // ---------------------------------------------------------------------------
 
-export interface DeployableKind {
-  value: string;
-  label: string;
-  blurb: string;
-}
-
-/**
- * The three values `v1:platform:site.kind` declares, with what each one means
- * for the request that misses.
- *
- * ANDROID, iOS AND macOS ARE DELIBERATELY ABSENT, and that is not an omission
- * to be fixed. They are artifact DISTRIBUTION -- stores, TestFlight,
- * notarisation -- not hostname-resolved web surfaces, so there is nothing for
- * the edge to resolve; `TestSiteKindEnumIsExactlyThreeValues` pins the enum to
- * exactly these three precisely so the next addition is a decision rather than
- * a drift. The create form says so in a caption rather than offering three
- * disabled controls: a control nobody can use is still a control everybody has
- * to read past.
- */
-export const DEPLOYABLE_KINDS: readonly DeployableKind[] = [
-  {
-    value: "spa",
-    label: "Single-page app",
-    blurb:
-      "Any path the bundle does not have falls back to index.html, so client-side routing works.",
-  },
-  {
-    value: "static",
-    label: "Website",
-    blurb: "A mistyped path answers 404 rather than silently rendering the home page.",
-  },
-  {
-    value: "shopify_storefront",
-    label: "Shopify storefront",
-    blurb:
-      "A single-page app bound to a Shopify store. Checkout stays Shopify's own hosted checkout.",
-  },
-];
-
-export const STOREFRONT_KIND = "shopify_storefront";
-
-export function kindLabel(kind: string): string {
-  return DEPLOYABLE_KINDS.find((k) => k.value === kind)?.label ?? kind;
-}
+// The kinds live in the target registry now (targets.ts, epic memql#4885):
+// the three offered ones are the web target's, and the picker entries, the
+// storefront discriminator and the label all read from it. Re-exported here
+// because this module was already their surface and the list must exist ONCE
+// -- a second spelling would be a second list that could disagree with the
+// one the Go parity test reads.
+export { DEPLOYABLE_KINDS, STOREFRONT_KIND, kindLabel, type DeployableKind } from "./targets";
 
 // ---------------------------------------------------------------------------
 // The Library side of the publish picker

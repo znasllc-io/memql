@@ -896,7 +896,8 @@ five apps before it.
   when the upstream actually moved -- so a flip is news by construction rather
   than a heartbeat.
 
-- **THE STAGE RAIL DRAWS WHAT DID NOT HAPPEN.** `StageRail.tsx` is the one new
+- **THE STAGE RAIL DRAWS WHAT DID NOT HAPPEN.** `page/Rail.tsx`, over the
+  readings in `page/rail.ts`, is the one new
   visual idea here, and the reason it earns a sequenced device -- normally the
   most over-used structure in software design -- is that a deploy has a LAW
   about its order (`stage -> roll -> publish`, reversed on rollback). The part

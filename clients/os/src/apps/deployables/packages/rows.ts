@@ -1,6 +1,9 @@
 import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { boolOr, flatten } from "../../../kit";
+// The kit's LEAF rather than its barrel: page/rail.ts imports `sourceLabel`
+// from here and is pure by contract, and the barrel re-exports every
+// component the kit has, React included.
+import { boolOr, flatten } from "../../../kit/rows";
 
 // What the Packages surface reads, projected once.
 //
@@ -214,7 +217,7 @@ function listOf<T>(row: Record<string, unknown>, key: string): T[] {
 // ---------------------------------------------------------------------------
 
 /** What this package's source IS, in the words a person used to add it. */
-export function sourceLabel(p: PackageRow): string {
+export function sourceLabel(p: Pick<PackageRow, "sourceKind" | "repoUrl" | "repoRef">): string {
   if (p.sourceKind === "repo") {
     const ref = p.repoRef === "" ? "default branch" : p.repoRef;
     return `${shortRepo(p.repoUrl)} at ${ref}`;

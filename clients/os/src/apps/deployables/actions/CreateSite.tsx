@@ -12,6 +12,7 @@ import {
   Subhead,
 } from "../../../kit";
 import { DEPLOYABLE_KINDS, STOREFRONT_KIND } from "../concepts";
+import { NOT_OFFERED_SENTENCE } from "../targets";
 import { hostnameFor, validateSlug } from "../hostname";
 import { useCreateSite } from "../actions";
 
@@ -93,11 +94,7 @@ export function CreateSite({ domain }: { domain: string }) {
           description: k.blurb,
         }))}
       />
-      <Caption>
-        Android, iOS and macOS builds are not deployables. They are distributed through stores and
-        signed downloads rather than answered at a hostname, so this cluster's edge has nothing to
-        resolve for them.
-      </Caption>
+      <Caption>{NOT_OFFERED_SENTENCE}</Caption>
 
       {storefront ? (
         <>
