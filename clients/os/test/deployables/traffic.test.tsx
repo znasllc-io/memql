@@ -14,6 +14,8 @@ import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import {
   DEFAULT_TRAFFIC_WINDOW,
   LIST_TRAFFIC_WINDOW,
+  MAX_SITES_PER_READ,
+  fetchTrafficSummaries,
   readingFromRows,
   seriesSummary,
   unmeasuredSentence,
@@ -199,6 +201,29 @@ describe("the traffic reading", () => {
     expect(summary).toContain("9 requests");
     expect(summary).toContain("24 hour buckets");
     expect(summary).toContain("23 were empty");
+  });
+
+  it("pages the list read at the server's own cap", async () => {
+    // The server REFUSES a call past its cap rather than truncating it, so a
+    // cluster with more deployables than that must produce several calls --
+    // one refusal would leave the whole list with no figures, which reads as
+    // "nobody is using any of these".
+    const ids = Array.from({ length: MAX_SITES_PER_READ + 3 }, (_, i) => `site-${i}`);
+    const calls: string[] = [];
+    const query = {
+      siteTrafficInWindow: async (args: { siteIds: string[] }) => {
+        calls.push(args.siteIds.join(","));
+        return { rows: () => [] };
+      },
+    } as unknown as Parameters<typeof fetchTrafficSummaries>[0];
+
+    await fetchTrafficSummaries(query, ids, "week", new Date("2026-09-03T12:34:00Z"));
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.split(",")).toHaveLength(MAX_SITES_PER_READ);
+    expect(calls[1]!.split(",")).toHaveLength(3);
+    // Every id is asked about exactly once: a page boundary that dropped or
+    // repeated one would be invisible in the rendered list.
+    expect(new Set(calls.join(",").split(","))).toEqual(new Set(ids));
   });
 
   it("reads a WIDER window for the list than for the stop", () => {

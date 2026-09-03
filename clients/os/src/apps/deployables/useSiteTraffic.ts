@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useOsConnection } from "../../live/connection";
 import { fetchTrafficSummaries, windowSpec, type TrafficSummary, type TrafficWindow } from "./traffic";
@@ -33,14 +33,23 @@ export function useSiteTraffic(siteIds: readonly string[], window: TrafficWindow
   const connection = useOsConnection();
   const [figures, setFigures] = useState<Map<string, TrafficSummary>>(new Map());
   const [readAt, setReadAt] = useState("");
-  const key = [...siteIds].sort().join(",");
+  const ids = useMemo(() => [...siteIds].sort(), [siteIds.join(",")]);
+  // The DEPENDENCY, not the data. `ids` is a fresh array every render, so an
+  // effect keyed on it would re-read on every folded event in the cluster;
+  // the joined string changes only when the SET on screen does. The ids
+  // themselves travel in a ref rather than being recovered by splitting the
+  // key -- a split would be a second, lossy spelling of the same list, and
+  // the day an id contains the separator it fails silently.
+  const key = ids.join(",");
+  const latest = useRef(ids);
+  latest.current = ids;
   const asked = useRef(0);
 
   const read = useCallback(async () => {
     if (connection === null || key === "") return;
     const mine = ++asked.current;
     try {
-      const next = await fetchTrafficSummaries(connection.query, key.split(","), window, new Date());
+      const next = await fetchTrafficSummaries(connection.query, latest.current, window, new Date());
       if (mine !== asked.current) return;
       setFigures(next);
       setReadAt(new Date().toISOString());

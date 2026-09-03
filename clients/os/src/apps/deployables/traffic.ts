@@ -229,6 +229,18 @@ export async function fetchTraffic(
   return { reading: readingFromRows(result.rows(), window, bounds), bounds };
 }
 
+/**
+ * How many deployables one traffic read may name, mirroring
+ * `maxSitesPerRead` in component/sitetraffic/reader.go.
+ *
+ * MIRRORED SO THE CLIENT PAGES, not so it can validate: the server refuses a
+ * call past its own cap rather than truncating one, which is the honest
+ * server behaviour (a silently short answer reads as "those have no
+ * traffic") and is precisely why a caller must split. A cluster whose list
+ * exceeds this gets several calls, not one refusal.
+ */
+export const MAX_SITES_PER_READ = 200;
+
 /** What a list row shows: one deployable's totals and last-served, no series. */
 export interface TrafficSummary {
   requests: number;
@@ -254,21 +266,31 @@ export async function fetchTrafficSummaries(
   const out = new Map<string, TrafficSummary>();
   if (siteIds.length === 0) return out;
   const bounds = windowBounds(window, now);
-  const result = await query.siteTrafficInWindow({
-    siteIds: [...siteIds],
-    bucket: windowSpec(window).bucket,
-    windowStart: bounds.start,
-    windowEnd: bounds.end,
-    summary: true,
-  });
-  for (const row of result.rows()) {
-    const siteId = rowString(row, "siteId");
-    if (siteId === "") continue;
-    out.set(siteId, {
-      requests: numberOf(row, "requestCount"),
-      errors: numberOf(row, "errorCount"),
-      lastServedAt: rowString(row, "lastServedAt"),
+  const bucket = windowSpec(window).bucket;
+
+  // PAGED, because the server REFUSES a call past its cap rather than
+  // truncating it -- which is the right server behaviour and exactly why the
+  // client must not hand it more than it takes. A cluster with three hundred
+  // deployables would otherwise get one refusal and a list with no figures at
+  // all, which reads as "nobody is using any of these".
+  for (let i = 0; i < siteIds.length; i += MAX_SITES_PER_READ) {
+    const page = siteIds.slice(i, i + MAX_SITES_PER_READ);
+    const result = await query.siteTrafficInWindow({
+      siteIds: [...page],
+      bucket,
+      windowStart: bounds.start,
+      windowEnd: bounds.end,
+      summary: true,
     });
+    for (const row of result.rows()) {
+      const siteId = rowString(row, "siteId");
+      if (siteId === "") continue;
+      out.set(siteId, {
+        requests: numberOf(row, "requestCount"),
+        errors: numberOf(row, "errorCount"),
+        lastServedAt: rowString(row, "lastServedAt"),
+      });
+    }
   }
   return out;
 }
