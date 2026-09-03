@@ -82,7 +82,7 @@ handler:
 
 From any client that executes MemQL calls, the same reads are one line:
 
-```memql
+```memql fragment
 builtin logsSearch(windowStart: "2026-09-02T00:00:00Z", windowEnd: "2026-09-03T00:00:00Z", levels: ["error"], components: ["packages.pipeline"])
 ```
 
@@ -129,7 +129,7 @@ same figures for alerting. An owner may run the sweep by hand with
 Owner only. From the Logs app: Settings, Archived days, "Bring back" beside
 the day. From any client:
 
-```memql
+```memql fragment
 builtin logsArchiveRestore(day: "2026-08-01")
 ```
 
