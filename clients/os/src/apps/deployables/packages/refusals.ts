@@ -119,6 +119,52 @@ const COPY: Record<string, RefusalCopy> = {
     title: "That kind is not offered on this cluster yet",
     next: "",
   },
+
+  // -- the GitHub Connect epic (memql#4915): a credential that is an
+  //    authorization GRANT rather than a pasted token. Each of these exists
+  //    because the token vocabulary above answers the wrong question under a
+  //    grant -- "private, or not there" is one 404 under a token and three
+  //    distinct facts with three different repairs under a grant. The engine
+  //    half lands in its own task; the copy is here first so the first
+  //    refusal to reach a browser has a name. --
+
+  reconnect_required: {
+    // NOT an error tone anywhere it renders: nothing is broken and nothing
+    // was lost. GitHub stopped honouring the grant -- the token expired, or
+    // somebody revoked the authorization there -- and the repair is one
+    // click with no typing.
+    title: "Your GitHub connection needs renewing",
+    next: "Reconnect GitHub in Settings > Sources. Nothing else changes.",
+  },
+  repository_not_installed: {
+    // The grant is good and the person CAN see the repository; the app is
+    // simply not installed on it. Saying "not found" here would send
+    // somebody hunting for a permission problem that does not exist.
+    title: "The app is not installed on that repository",
+    next: "Install it on that repository at GitHub, then pick it again.",
+  },
+  installation_pending: {
+    // The server's sentence NAMES THE ORGANISATION, and that name is the
+    // whole useful content: the repair belongs to somebody else, and the
+    // person's one next step is knowing whom to ask. A next step composed
+    // here could only be a worse copy of it.
+    title: "Waiting for an organisation owner to approve",
+    next: "",
+  },
+  github_app_not_configured: {
+    // An OPERATOR's condition, not a person's. The sentence says what to do
+    // instead AND who could change it, because a person reading this did
+    // nothing wrong and cannot fix the cluster.
+    title: "This cluster has no GitHub connection set up",
+    next: "Paste a URL and a token instead, or ask an operator to set up the GitHub App.",
+  },
+  connect_state_invalid: {
+    // A connect state is consumed exactly once, so this is the SECOND click
+    // on a link as often as it is an expired one. Starting again costs
+    // nothing, which is why the copy does not dwell on which it was.
+    title: "That sign-in link is no longer valid",
+    next: "Start again from Connect GitHub.",
+  },
 };
 
 /**
