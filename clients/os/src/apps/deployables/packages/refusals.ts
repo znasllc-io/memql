@@ -112,6 +112,23 @@ const COPY: Record<string, RefusalCopy> = {
     title: "Only github.com today",
     next: "Paste a github.com URL, or upload the tree as a zip in Files.",
   },
+  // The placement halves (epic memql#4885, D8). Both are recorded on a
+  // deployable's OUTCOME rather than failing the publish -- the app is live at
+  // its cluster address either way -- so the headline says what did not happen
+  // and the next step is where to try it again. The copy belongs to the
+  // compose epic; it is written here because the codes are already in
+  // component/packages/refusal.go and the coverage gate holds every emitted
+  // code to an entry.
+  deployable_account_refused: {
+    title: "The client was not set on this deployable",
+    next: "The app is live at its address. Set the client on its Where-it-lives stop.",
+  },
+  deployable_domain_refused: {
+    // The server's sentence names which of the three it was -- a hostname
+    // under the cluster's own domain, a collision, or the per-site cap.
+    title: "That domain was not bound",
+    next: "The app is live at its cluster address. Try the domain again on its Where-it-lives stop.",
+  },
   deployable_target_not_offered: {
     // The server's sentence names the kind ("iOS is not offered on this
     // cluster yet"); it is rendered on the What-it-is stop verbatim and the

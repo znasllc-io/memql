@@ -207,6 +207,17 @@ const STOP_FOR_CODE: Readonly<Record<string, StopId>> = {
   source_host_unsupported: "source",
   credential_not_found: "source",
   credential_revoked: "source",
+  // The GitHub App grant codes (epic memql#4912) all park the SOURCE stop,
+  // because every repair they name is a choice about where this deployable
+  // comes from: reconnect, install the app, ask an organisation owner, or use
+  // a token instead. Without an entry here a grant refusal would park
+  // whichever stop happened to be open, which is the one place a person would
+  // not look for it.
+  reconnect_required: "source",
+  repository_not_installed: "source",
+  installation_pending: "source",
+  github_app_not_configured: "source",
+  connect_state_invalid: "source",
   package_manifest_missing: "whatItIs",
   package_manifest_invalid: "whatItIs",
   deployable_path_missing: "whatItIs",
