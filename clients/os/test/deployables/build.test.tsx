@@ -224,6 +224,53 @@ describe("an abandoned run", () => {
 // The calls
 // ---------------------------------------------------------------------------
 
+describe("a lost FIRST deploy", () => {
+  // THE OTHER HALF OF A DESIGN DECISION. head.ts deliberately does not treat
+  // `abandoned` as refused_or_failed: its Retry means "deploy the source
+  // again" and a lost run's Retry means "deploy the bytes that run had
+  // fetched", and two controls reading Retry doing different things is the
+  // thing being avoided. That decision is only safe if the OTHER control is
+  // reachable -- and on a DRAFT site, where the Head offers nothing at all,
+  // the attempt's Retry is the only way forward. Nothing asserted that, and a
+  // future gate on `EveryAttempt` would strand a first deploy in silence.
+  it("offers Retry on the attempt even where the Head offers nothing", async () => {
+    const draft = siteRow({
+      id: "site-acme",
+      hostname: "acme.memql.example.com",
+      kind: "spa",
+      status: "draft",
+      // The placeholder a new deployable starts with: not a bundle, so the
+      // Head has no draft_with_bundle action either.
+      bundleRef: "blob://sites/site-acme/pending/",
+      packageId: "pkg-acme",
+      packageDeployableName: "storefront",
+      createdAt: "2026-09-01T12:01:00Z",
+    });
+    const connection = fakeConnection({
+      sites: [draft],
+      packages: [ACME],
+      deployments: { "pkg-acme": [deploymentRow({ id: "dep-first", status: "abandoned", stoppedAt: "building" })] },
+    });
+    mount(connection);
+    await waitFor(() =>
+      expect(document.querySelector("[data-os-livelist]")?.getAttribute("data-state")).toBe("live"),
+    );
+    await click((await screen.findByText("acme.memql.example.com")).closest("button"));
+    const page = await screen.findByRole("region", { name: "Deployable acme.memql.example.com" });
+
+    // The reachable positive for the premise: the Head really does offer
+    // nothing here, so the assertion below is about the only control there is.
+    for (const label of [/^Redeploy$/, /^Deploy$/, /^Make it live$/]) {
+      expect(within(page).queryByRole("button", { name: label })).toBeNull();
+    }
+    await click(within(page).getByRole("button", { name: /Retry/ }));
+
+    const deploys = connection.callsNamed("packageDeploy");
+    expect(deploys.length, `no packageDeploy reached the wire: ${connection.calls.join(" | ")}`).toBe(1);
+    expect(deploys[0]).toContain("dep-first");
+  });
+});
+
 describe("the seams the surface calls", () => {
   it("Retry sends the lost run's id, so the retry deploys what it was deploying", async () => {
     const connection = fakeConnection({
