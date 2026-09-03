@@ -203,22 +203,27 @@ export function roleGrantSlug(rung: RoleRung): string {
 }
 
 /**
- * The floor a requirement states, for a surface that has to NAME it -- the
- * refused-surface panel is the one caller.
+ * A requirement written out for somebody who has to READ it -- the two
+ * surfaces that name one are the refused-window panel and the permissions
+ * self-view.
  *
- * The set form has no single floor, so it reports its weakest member: that is
- * the honest thing to show somebody who was refused, since it is the least
- * they could hold and still be admitted. Returns "" when there is nothing to
- * name.
+ * A SET IS RENDERED AS ITS MEMBERS, and this replaced a `requirementFloor`
+ * that reported the weakest one instead. That was defensible while every set
+ * was a contiguous top of the ladder -- `{owner, developer}` really is
+ * "developer and above" -- and it became false the moment one left a rung out
+ * of the MIDDLE. `{admin, owner}` skips developer at 300, so naming its floor
+ * printed "admin and above" to a developer who outranks admin and still
+ * cannot open the app: an explanation that contradicts the refusal it is
+ * explaining.
+ *
+ * An EMPTY set admits nobody, so it is named as such rather than as "" --
+ * which would read as "requires nothing", its exact opposite.
  */
-export function requirementFloor(requirement?: RoleRequirement): string {
-  if (!requirement) return "";
+export function describeRequirement(requirement?: RoleRequirement): string {
+  if (!requirement) return "a recognized role";
   if ("any" in requirement) {
-    const ranked = requirement.any
-      .map((slug) => ({ slug, rank: roleRank(slug) }))
-      .filter((r) => r.rank >= 0)
-      .sort((a, b) => a.rank - b.rank);
-    return ranked[0]?.slug ?? "";
+    if (requirement.any.length === 0) return "a role this surface does not name";
+    return requirement.any.join(" or ");
   }
   return requirement.min;
 }

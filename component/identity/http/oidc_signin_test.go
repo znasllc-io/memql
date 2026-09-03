@@ -74,38 +74,56 @@ func TestOidcProvisionRefusesNoEmail(t *testing.T) {
 	}
 }
 
-// THE RANK MODEL IS RESTATED HERE because component/identity must not import
-// component/auth. A restatement that drifts would silently change which
-// directory group wins, so it is asserted against the real one.
-func TestOidcRoleRankMatchesTheClusterRoleSet(t *testing.T) {
-	// Every role component/auth considers valid must rank above the unknown
-	// floor here, and the ORDER must agree.
-	ordered := []string{"reader", "writer", "developer", "admin", "owner"}
-	for i := 1; i < len(ordered); i++ {
-		lo, hi := ordered[i-1], ordered[i]
-		if oidcRoleRank(lo) >= oidcRoleRank(hi) {
-			t.Errorf("rank(%s)=%d is not below rank(%s)=%d; a group mapping would pick the wrong "+
-				"role when somebody is in both groups", lo, oidcRoleRank(lo), hi, oidcRoleRank(hi))
-		}
-	}
-	for _, role := range ordered {
-		if !auth.IsValidRole(auth.Role(role)) {
-			t.Errorf("%q ranks here but component/auth does not consider it a role", role)
-		}
-		if oidcRoleRank(role) == 0 {
-			t.Errorf("%q ranks at the unknown floor", role)
-		}
-	}
-	// And every role component/auth names must be rankable here, or a mapping
-	// onto it would silently lose to anything else.
+// THE RANK MODEL IS NO LONGER RESTATED HERE (epic memql#4832, D1), so what is
+// asserted has changed shape: not "does the copy still agree", but "is there
+// still no copy".
+//
+// The deleted `oidcRoleRank` ranked admin (4) above developer (3) -- the very
+// ordering the epic removed from MemQL OS as "the defect" -- and the test that
+// guarded it passed the whole time, because it only compared pairs the two
+// orderings agree on. It never named the one pair that differed.
+func TestClusterRoleRankIsTheOneModelAndNotACopy(t *testing.T) {
+	// EXACT agreement with component/auth for every role it names. A
+	// restatement reintroduced here fails on the first slug it gets wrong,
+	// rather than on whichever pair a hand-written table happened to compare.
 	for _, role := range auth.ValidRoles() {
-		if oidcRoleRank(string(role)) == 0 {
+		if got, want := clusterRoleRank(string(role)), auth.RoleRank(role); got != want {
+			t.Errorf("clusterRoleRank(%q) = %d, but auth.RoleRank says %d -- this adapter has "+
+				"grown an ordering of its own", role, got, want)
+		}
+		if clusterRoleRank(string(role)) == 0 {
 			t.Errorf("component/auth names role %q, which ranks at the unknown floor here -- a "+
 				"group mapped to it would lose every tie", role)
 		}
 	}
-	if oidcRoleRank("wizard") != 0 {
+
+	// THE PAIR THE OLD TEST NEVER NAMED, spelled out because it is the one the
+	// restatement got backwards and the one whose fix changes a live mapping.
+	if clusterRoleRank("developer") <= clusterRoleRank("admin") {
+		t.Error("developer must outrank admin: that is the cluster's one ladder (D1), and a " +
+			"person in both directory groups must resolve the same way here as everywhere else")
+	}
+
+	// Operator-authored `group=role` strings are not row values, so the fold
+	// is real here in a way it is not on the invitation path.
+	if clusterRoleRank("  Owner  ") != auth.RoleRank(auth.RoleOwner) {
+		t.Error("an operator-spelled role with padding or capitals ranks at the floor, so the " +
+			"group mapping it configures would silently lose every tie")
+	}
+
+	if clusterRoleRank("wizard") != 0 {
 		t.Error("an unknown role does not rank at the floor")
+	}
+}
+
+// The reachable positive: the ranker is not merely correct in isolation, it is
+// the one MapRole actually consults. Somebody in BOTH groups resolves to
+// developer -- the answer that changed when the copy went away.
+func TestGroupRoleMapPrefersDeveloperOverAdmin(t *testing.T) {
+	m := oidc.GroupRoleMap{"eng": "developer", "ops": "admin"}
+	if got := m.MapRole([]string{"ops", "eng"}, clusterRoleRank); got != "developer" {
+		t.Errorf("MapRole picked %q for somebody in both groups, want developer -- the cluster "+
+			"ranks developer (300) above admin (200)", got)
 	}
 }
 

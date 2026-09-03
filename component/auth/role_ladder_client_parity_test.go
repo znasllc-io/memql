@@ -1,11 +1,17 @@
 package auth
 
 import (
+	"go/scanner"
+	"go/token"
 	"os"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // ONE ROLE LADDER, PINNED ACROSS THE LANGUAGES THAT READ IT (epic
@@ -330,4 +336,193 @@ func requiresRankFloor(t *testing.T, dsl, construct string) string {
 			"end -- the requirement has to be enforced somewhere.", construct)
 	}
 	return all[len(all)-1][1]
+}
+
+// ===========================================================================
+// THE SAME RULE, ON THE SIDE THAT WAS NEVER SCANNED
+// ===========================================================================
+//
+// TestClientShipsNoRoleOrdering refuses a hand-written ladder in MemQL OS. It
+// was written believing the client was the only place a second copy could
+// live, and while it stood guard TWO more copies sat in Go, both older than
+// the gate and neither visible to it:
+//
+//	component/identity/adminops/invitation.go  reader1 writer2 developer3 admin4 owner5
+//	component/identity/http/oidc_signin.go     reader1 writer2 developer3 admin4 owner5
+//
+// Both ranked admin ABOVE developer -- the exact inversion epic memql#4832
+// deleted from the shell -- and both had a test of their own that passed,
+// because each compared the copy against itself. The invitation one decided
+// whether an inviter may grant a role, so an admin could mint a developer:
+// a principal the cluster's own model ranks above them, through the check
+// whose only job is to refuse that.
+//
+// Each carried a comment explaining why a restatement was necessary
+// ("component/identity must not import component/auth"). It was not true --
+// component/auth imports nothing from identity, and identity/http already
+// imported auth in two files. A plausible reason written once outlived the
+// review that would have checked it, which is why this is a build gate and
+// not a convention.
+
+// roleSlugs are the names an ordering would rank. Both vocabularies, because
+// a copy could be written against either: the user row's
+// owner/admin/developer/writer/reader or the catalog's
+// owner/developer/admin/user/viewer.
+var roleSlugs = map[string]bool{
+	"owner": true, "admin": true, "developer": true,
+	"writer": true, "reader": true, "user": true, "viewer": true,
+}
+
+// goTreesExemptFromTheLadderScan are the paths allowed to map a role name to a
+// number. component/auth OWNS the ordering; the DSL seeds are the catalog it
+// mirrors, checked against it by TestEngineRankModelMatchesTheSeeds.
+var goTreesExemptFromTheLadderScan = []string{
+	"component/auth",
+}
+
+// goFileRanksRoles reports the distinct role slugs a Go file maps to a number.
+//
+// IT TOKENIZES RATHER THAN MATCHING TEXT, and that is the whole reason it is
+// not three lines of regexp over stripComments.
+//
+// stripComments is written for TypeScript: it has no notion of a Go string or
+// a backtick literal, so `"http://..."` opens a comment that eats to the end
+// of the line, and an unterminated `/*` inside a literal makes it RETURN --
+// discarding the rest of the file. Over ~1500 files that is a gate reporting
+// success on input it never read, which is the failure mode this whole file
+// exists to argue against.
+//
+// go/scanner is the compiler's own lexer. Comments are skipped by default
+// (no ScanComments), so prose naming the roles cannot match; a role name
+// inside a longer string is ONE token whose value is not a slug, so
+// t.Errorf("admin: 5 things") does not match either.
+func goFileRanksRoles(path string, src []byte) map[string]bool {
+	fset := token.NewFileSet()
+	file := fset.AddFile(path, fset.Base(), len(src))
+	var s scanner.Scanner
+	// A nil error handler and mode 0: syntax errors are not this gate's
+	// business, and comments are not emitted at all.
+	s.Init(file, src, nil, 0)
+
+	found := map[string]bool{}
+	// pending is the slug seen most recently, and howFar counts tokens since.
+	// A rank follows its name within a few tokens in both shapes a copy takes:
+	// `"admin": 200` is two, and `case "admin":\n return 200` is three.
+	pending, howFar := "", 0
+	for {
+		_, tok, lit := s.Scan()
+		if tok == token.EOF {
+			return found
+		}
+		if tok == token.STRING {
+			if unquoted, err := strconv.Unquote(lit); err == nil && roleSlugs[unquoted] {
+				pending, howFar = unquoted, 0
+				continue
+			}
+		}
+		if pending == "" {
+			continue
+		}
+		if tok == token.INT {
+			found[pending] = true
+			pending = ""
+			continue
+		}
+		if howFar++; howFar > 3 {
+			pending = ""
+		}
+	}
+}
+
+// TestNoGoFileShipsARoleOrdering fails if any Go file outside component/auth
+// maps two or more role names to numbers.
+//
+// TWO SLUGS, NOT ONE, and the threshold is the whole design. A single role
+// name near a number is ordinary code -- a fixture, a struct literal, an
+// offset. An ORDERING needs at least two rungs to be one, so two is the
+// smallest count that means what this gate is looking for.
+//
+// It keys on SHAPE rather than on a function name, for the reason its client
+// sibling does: the next copy will not be called roleRank. Neither of the two
+// this was written for was.
+func TestNoGoFileShipsARoleOrdering(t *testing.T) {
+	const root = "../.."
+	scanned, flagged := 0, []string{}
+
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // an unreadable directory is not this gate's business
+		}
+		if info.IsDir() {
+			// THE SHARED SKIP LIST FIRST, and `.claude` is the entry that
+			// matters here: it holds git WORKTREES, whole copies of this
+			// repo. A walk that descends into one reads a colleague's branch
+			// -- so a developer with the pre-fix ladder checked out there
+			// would fail this gate on code that is not in their tree, red
+			// locally and green in CI. core/repowalk exists because that
+			// exact bug has now happened twice (memql#4871, memql#4878).
+			if repowalk.SkipDir(info.Name()) {
+				return filepath.SkipDir
+			}
+			// One skip of this gate's own: `go test` ignores testdata, and a
+			// fixture there may hold deliberately odd Go.
+			if info.Name() == "testdata" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		// Generated protobuf carries enum values that trip the shape and are
+		// not an ordering anybody maintains.
+		if strings.HasSuffix(path, ".pb.go") {
+			return nil
+		}
+		rel := strings.TrimPrefix(filepath.ToSlash(path), "../../")
+		for _, exempt := range goTreesExemptFromTheLadderScan {
+			if strings.HasPrefix(rel, exempt+"/") {
+				return nil
+			}
+		}
+		body, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		scanned++
+		if ranked := goFileRanksRoles(rel, body); len(ranked) >= 2 {
+			slugs := make([]string, 0, len(ranked))
+			for slug := range ranked {
+				slugs = append(slugs, slug)
+			}
+			sort.Strings(slugs)
+			flagged = append(flagged, rel+": "+strings.Join(slugs, " "))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking the Go tree: %v", err)
+	}
+
+	// THE REACHABLE POSITIVE. Without it a broken walk, a bad prefix trim or a
+	// path that stopped resolving would leave this gate passing while reading
+	// nothing -- the failure mode its client sibling calls out by name.
+	if scanned < 100 {
+		t.Fatalf("scanned only %d Go files from %q; the walk is not reaching the tree, so this "+
+			"gate is passing while measuring nothing", scanned, root)
+	}
+
+	if len(flagged) > 0 {
+		sort.Strings(flagged)
+		t.Fatalf("these Go files map role names to numbers, which is a role ordering:\n  %s\n\n"+
+			"The ladder is ONE model (epic memql#4832, D1): component/auth's roleRank, mirrored by\n"+
+			"dsl/rbac/seeds.memql and read by MemQL OS from cluster state. Two hand-maintained\n"+
+			"ladders is the defect -- both copies this gate was written for ranked admin above\n"+
+			"developer and disagreed with the cluster for months, each guarded by a test that\n"+
+			"compared the copy against itself.\n\n"+
+			"Call auth.RoleRank. There is no import cycle to avoid: component/auth imports nothing\n"+
+			"from component/identity. Where a package genuinely sits below auth, take the ranker as\n"+
+			"a parameter (oidc.GroupRoleMap.MapRole) rather than restating the numbers.",
+			strings.Join(flagged, "\n  "))
+	}
 }

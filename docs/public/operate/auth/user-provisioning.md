@@ -150,7 +150,29 @@ flows:
   | `directory` | The normal path for somebody the directory does NOT cover -- a contractor, an auditor. Staff need no invitation, which is the mode's whole point; an invitation is the escape hatch for everyone else, and it still works. |
   | `open` | Permitted, and the reply says the mode so a console can tell the operator this is a courtesy: the recipient could have registered unaided. |
 
-  An inviter cannot grant a role above their own.
+  An inviter cannot grant a role above their own, compared on the cluster's
+  one ladder (`auth.RoleRank`). Note the ordering: **developer outranks
+  admin**, so an admin cannot mint a developer invitation. That comparison used
+  to run against a private table in `adminops` which ranked admin above
+  developer, so an admin could mint a developer invitation -- a principal the
+  canonical model ranks above them -- through the one check whose job is to
+  refuse exactly that.
+
+  **An enrolment link is bounded by WHO IT NAMES, not only by who mints it**
+  (and this is stricter than it used to be). The link authorizes exactly one
+  action, registering a passkey as the named user, and neither `/enroll` nor
+  the WebAuthn ceremony compares ranks -- so whoever holds a link for an
+  account can sign in as it. `IssueEnrolmentLink` therefore applies
+  `auth.GovernPrincipal`: an owner-ranked target is reachable only by an
+  owner, an owner reaches everyone, minting one for **yourself** is always
+  allowed, and otherwise the caller must STRICTLY outrank the target.
+
+  Before this, the target only had to exist. An admin could mint a link for
+  the OWNER and take the account, and the admission capability would have
+  extended that to developer. Two consequences to expect: an admin can no
+  longer mint a link for another admin (peers do not outrank each other, which
+  is what a role change on the same account already refuses), and nobody but
+  an owner can mint one for an owner.
 
   `revoke_user_invitation` is the undo for a link sent to the wrong address.
   It is a SOFT cancel -- the row stays and its token hash stays taken, because

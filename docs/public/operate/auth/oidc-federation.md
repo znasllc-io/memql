@@ -130,6 +130,15 @@ Group membership is a **set** and people are legitimately in several, so the
 **highest** matching role wins — taking the first would make the outcome depend
 on the order the directory happened to return them.
 
+"Highest" is the cluster's one role ladder (epic memql#4832, D1), and the one
+pair worth stating outright is **developer (300) over admin (200)** -- somebody
+in a group mapped to `admin` and a group mapped to `developer` resolves to
+**developer**. That is not the intuitive reading of the two names, and it is
+what the ladder says: the two tiers are orthogonal in capability (admin holds
+the principal verbs and no authoring, developer the reverse), so ranking them
+is lossy in whichever direction it points. Map the group to `owner` for
+somebody who needs both sets of verbs.
+
 An unmapped group is **not a ban**. It means "the cluster default", and
 conflating the two would make a missing mapping silently equivalent to
 exclusion.

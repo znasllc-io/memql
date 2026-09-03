@@ -69,17 +69,6 @@ type UserInvitation struct {
 	SourceIP string
 }
 
-// roleRank orders the cluster roles by power, for the "cannot grant above your
-// own" check. Unknown roles rank lowest, so an unrecognized value can never be
-// used to escalate.
-var roleRank = map[string]int{
-	"reader":    1,
-	"writer":    2,
-	"developer": 3,
-	"admin":     4,
-	"owner":     5,
-}
-
 // IssueUserInvitation mints a user-targeted invitation and returns the link
 // that redeems it.
 //
@@ -129,12 +118,37 @@ func (s *Service) IssueUserInvitation(ctx context.Context, in UserInvitation) Re
 	// it creates -- privilege escalation with a delay and a paper trail that
 	// looks like an ordinary invitation.
 	if role != "" {
-		if _, known := roleRank[role]; !known {
+		if !auth.IsValidRole(auth.Role(role)) {
 			return fail(CodeInvalidArgument, s.emit(ctx, identity.AuditCategoryAdmin, "user_invitation_issued",
 				act, "", email, detail, identity.AuditOutcomeFailure, "unknown_role"),
 				"identity admin: "+role+" is not a cluster role")
 		}
-		if roleRank[role] > roleRank[strings.ToLower(string(act.role))] {
+		// THE ONE RANK MODEL, NOT A RESTATEMENT OF IT (epic memql#4832, D1).
+		//
+		// This compared against a private map that ranked admin ABOVE
+		// developer -- the ordering the epic deleted from MemQL OS as "the
+		// defect", still alive here because nothing scanned Go for a second
+		// copy. It let an admin invite somebody as developer: minting a
+		// principal the canonical model ranks ABOVE the inviter, through the
+		// one check whose entire job is to refuse that.
+		//
+		// auth.RoleRank is the cluster's one ordering -- the Go model and
+		// dsl/rbac/seeds.memql mirror each other, neither is generated from
+		// the other, and TestEngineRankModelMatchesTheSeeds fails the build
+		// when they disagree. Calling it means this site cannot drift from
+		// whichever way that pair is edited. An unknown role is unreachable
+		// above but would rank 0 regardless, which is below every real role.
+		//
+		// The inviter's own role is lowercased exactly as it was before this
+		// call site changed, and that fold is BELT-AND-BRACES rather than
+		// load-bearing: auth.RoleRank matches slugs EXACTLY, but so does
+		// AtLeastAdmin, so authorize() has already refused a caller whose row
+		// spelled the role "Admin" and this line cannot be reached with one.
+		// Kept because it costs a call and makes the swap to the shared model
+		// a pure one -- dropping it would leave this comparison ranking 0 on
+		// the day that gate learns to fold case.
+		inviterRank := auth.RoleRank(auth.Role(strings.ToLower(strings.TrimSpace(string(act.role)))))
+		if auth.RoleRank(auth.Role(role)) > inviterRank {
 			return fail(CodePermissionDenied, s.emit(ctx, identity.AuditCategoryAdmin, "user_invitation_issued",
 				act, "", email, detail, identity.AuditOutcomeBlocked, "role_above_inviter"),
 				"identity admin: you cannot invite somebody as "+role+" -- that is above your own role")

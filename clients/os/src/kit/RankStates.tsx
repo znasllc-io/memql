@@ -1,5 +1,6 @@
 import { RankMark } from "./RankMark";
-import { roleRungOf } from "../system/roles";
+import { describeRequirement, roleRungOf } from "../system/roles";
+import type { RoleRequirement } from "../system/roles";
 
 /**
  * A SURFACE THIS PERSON MAY NOT REACH (epic memql#4832, D6).
@@ -27,27 +28,45 @@ import { roleRungOf } from "../system/roles";
  */
 export function SurfaceRefused({
   surface,
-  required,
+  requirement,
   actorRole,
 }: {
   /** What they tried to open, named as they saw it -- "Accounts", not "accounts". */
   surface: string;
-  /** The role slug the surface requires. */
-  required: string;
+  /** What the surface asks of the actor, in the manifest's own form. */
+  requirement?: RoleRequirement;
   /** The role the cluster reported for them. Empty while unresolved. */
   actorRole: string;
 }) {
-  const requiredRung = roleRungOf(required);
+  // IT TAKES THE REQUIREMENT, NOT A FLOOR, and the difference is a sentence
+  // that was false. This used to receive `requirementFloor(manifest.roles)`,
+  // which reports a SET's weakest member -- so the Users app's
+  // `{ any: ["admin", "owner"] }` arrived as "admin" and this panel told a
+  // developer the app was "open to admin and above" while refusing them.
+  // Developer is 300 and admin 200, so the explanation contradicted the
+  // refusal, and the RankMark drew their tick ABOVE the required one.
+  //
+  // A floor genuinely is "and above"; a set is not, and only the requirement
+  // itself knows which it is.
+  const isSet = requirement !== undefined && "any" in requirement;
+  const requiredRung = isSet ? null : roleRungOf((requirement as { min: string } | undefined)?.min ?? "");
   const actorRung = roleRungOf(actorRole);
   return (
     <div className="os-rank-refused" data-os-rank-refused>
-      <RankMark actorRole={actorRole} ownerRole={required} className="os-rank-mark-lg" />
+      {/* No ownerRole for a set: there is no single required rung, and marking
+          its weakest member draws the same false claim as a picture. */}
+      <RankMark
+        actorRole={actorRole}
+        ownerRole={isSet ? undefined : requiredRung?.slug}
+        className="os-rank-mark-lg"
+      />
       <h2 className="os-rank-refused-head">
         {surface} needs a higher role
       </h2>
       <p className="os-rank-refused-body">
-        This app is open to <span className="os-role-slug">{requiredRung?.slug ?? required}</span>{" "}
-        and above.{" "}
+        This app is open to{" "}
+        <span className="os-role-slug">{describeRequirement(requirement)}</span>
+        {isSet ? "." : " and above."}{" "}
         {actorRung
           ? <>You are signed in as <span className="os-role-slug">{actorRung.slug}</span>.</>
           : <>Your role has not been reported by the cluster.</>}

@@ -351,6 +351,24 @@ func (s *Service) authorize(ctx context.Context, verb string, detail map[string]
 	return act, Result{}, true
 }
 
+// principalOf projects a (userId, role) pair into the governance core's
+// Principal, resolving the rank through the cluster's one ladder.
+//
+// The role is lowercased because auth.RoleRank matches slugs EXACTLY and the
+// identity resolver stamps AccessContext.Role straight off the user row
+// without folding case. An unfolded value would rank 0, which for a TARGET
+// reads as "the least privileged person in the cluster" -- the fail-OPEN
+// direction on a guard whose whole job is to refuse a target that outranks the
+// caller.
+func principalOf(userID, role string) auth.Principal {
+	slug := strings.ToLower(strings.TrimSpace(role))
+	return auth.Principal{
+		UserId:  userID,
+		Rank:    auth.RoleRank(auth.Role(slug)),
+		IsOwner: slug == string(auth.RoleOwner),
+	}
+}
+
 func (a actor) userContext() auth.UserContext {
 	return auth.UserContext{ID: a.userID, Email: a.email, Role: a.role}
 }
