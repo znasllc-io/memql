@@ -104,7 +104,13 @@ const COPY: Record<string, RefusalCopy> = {
     title: "This cluster lost the node that was running it",
     // Said plainly, because the natural reading of a stopped deploy is that
     // it broke -- and this one did not.
-    next: "Nothing was published and nothing failed: every site is still serving what it was serving. Retry starts a fresh run.",
+    // "the same source" rather than "a fresh run", because that is what the
+    // button next to this actually does: Retry deploys the bytes THIS run had
+    // already fetched, so it deploys what this run was deploying rather than
+    // whatever the branch has moved to since. The first draft said "a fresh
+    // run" and contradicted its own control, which a browser caught by
+    // putting the two side by side.
+    next: "Nothing was published and nothing failed: every site is still serving what it was serving. Retry runs it again from the same source it had already fetched.",
   },
   snapshot_unavailable: {
     title: "There is nothing stored to retry from",

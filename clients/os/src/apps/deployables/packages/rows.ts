@@ -238,18 +238,23 @@ export function deploymentFingerprint(d: DeploymentRow): string {
 }
 
 /**
- * What the Build stop says a run's build ran ON, in the words the design
- * fixes. Empty when the run never reached the build stage, which reads as
- * nothing rather than as a guess.
+ * What the Build stop says a run's build ran ON. Empty when the run never
+ * reached the build stage, which reads as nothing rather than as a guess.
+ *
+ * EACH VALUE COMPLETES THE LABEL "Built", which is what fixes the wording:
+ * the first draft said "built in this cluster's sandbox" and rendered as
+ * "Built  built in this cluster's sandbox". A browser is what caught it --
+ * jsdom asserts the string and never puts it beside its own label, and the
+ * assertion that the value contains "sandbox" passed either way.
  */
 export function buildSurfaceLabel(d: DeploymentRow): string {
   switch (d.builtOn?.surface) {
     case "prebuilt":
-      return "its built output is in the source";
+      return "before it got here -- the output was in the source";
     case "workbench":
-      return "built in this cluster's sandbox";
+      return "in this cluster's sandbox";
     case "fleet":
-      return "built on your own machine";
+      return "on your own machine";
     default:
       return "";
   }
