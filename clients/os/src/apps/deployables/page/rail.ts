@@ -437,6 +437,21 @@ function liveStop(stop: StopDef, site: StandingSite | null): RailStage {
 }
 
 /**
+ * The stop a refused or failed run's error belongs to, so the page can render
+ * the OS headline beneath the sentence the rail already shows there (design
+ * H: the copy above, the server's sentence beneath). Null for a run that is
+ * in flight, parked or finished, and for no run at all: those have no
+ * refusal to place, and a page that guessed a stop for one would send the
+ * person to repair the wrong thing.
+ */
+export function refusalStopFor(run: DeploymentRow | null): StopId | null {
+  if (run === null) return null;
+  const terminal = TERMINAL[run.status];
+  if (terminal !== "refused" && terminal !== "failed") return null;
+  return stoppedStopFor(run);
+}
+
+/**
  * Where a terminal run stopped, in stop terms: the furthest stop its
  * evidence supports, the same rule the deploy reading uses -- deployables
  * mean publishing ran, a staged version means the cluster rolled, a build

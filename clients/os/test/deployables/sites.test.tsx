@@ -18,7 +18,6 @@ import {
   DOCS,
   PORTAL,
   SHOP,
-  click,
   emit,
   fakeConnection,
   siteRow,
@@ -26,7 +25,8 @@ import {
   type FakeConnection,
 } from "./harness";
 
-// The Sites section and the detail panel, through the real LiveCollection.
+// The Sites section, through the real LiveCollection. The page it opens
+// beneath the list is tested in deployables.test.tsx.
 
 function memStore() {
   const data = new Map<string, string>();
@@ -145,74 +145,6 @@ describe("the arrival cue", () => {
       expect(document.querySelector("[data-arrival='added']")).not.toBeNull();
     });
     expect(screen.getByText("new")).toBeTruthy();
-  });
-});
-
-describe("one deployable, in full", () => {
-  async function openShop() {
-    const connection = fakeConnection({ sites: [SHOP] });
-    mount(connection);
-    await click((await screen.findByText("shop.memql.example.com")).closest("button"));
-    return connection;
-  }
-
-  it("shows every row fact", async () => {
-    await openShop();
-    const panel = await screen.findByRole("region", {
-      name: "Deployable shop.memql.example.com",
-    });
-    const facts = within(panel);
-    expect(facts.getByText("Hostname")).toBeTruthy();
-    expect(facts.getByText("blob://sites/site-shop/v1/")).toBeTruthy();
-    expect(facts.getByText("uploaded bundle")).toBeTruthy();
-    expect(facts.getByText("artifact-zip")).toBeTruthy();
-    expect(facts.getByText("Published from the Library.")).toBeTruthy();
-  });
-
-  it("names the storefront's secret and NEVER fetches its value", async () => {
-    const connection = await openShop();
-    const panel = await screen.findByRole("region", {
-      name: "Deployable shop.memql.example.com",
-    });
-    expect(within(panel).getByText("example.myshopify.com")).toBeTruthy();
-    expect(within(panel).getByText("shopify-storefront-token")).toBeTruthy();
-    // The token itself lives in a globalSecret. Nothing here reads one.
-    expect(connection.calls.some((c) => c.includes("globalSecret"))).toBe(false);
-    expect(connection.calls.some((c) => c.toLowerCase().includes("secret"))).toBe(false);
-  });
-
-  it("links to where the deployable actually is, over https", async () => {
-    await openShop();
-    const link = await screen.findByRole("link", { name: /Open/ });
-    expect(link.getAttribute("href")).toBe("https://shop.memql.example.com/");
-    expect(link.getAttribute("rel")).toContain("noopener");
-  });
-
-  it("MARKS a bundle that flipped while it was open", async () => {
-    const connection = fakeConnection({ sites: [SHOP] });
-    mount(connection);
-    await click((await screen.findByText("shop.memql.example.com")).closest("button"));
-    await screen.findByText("blob://sites/site-shop/v1/");
-    expect(screen.queryByText("changed just now")).toBeNull();
-
-    await emit(connection, SITE_CONCEPT, { ...SHOP, bundleRef: "blob://sites/site-shop/v9/" });
-
-    expect(await screen.findByText("changed just now")).toBeTruthy();
-    expect(screen.getByText("blob://sites/site-shop/v9/")).toBeTruthy();
-  });
-
-  it("does NOT mark a change that left the bundle alone", async () => {
-    // An `updated` tick fires for a rename too. What is claimed here is
-    // specific, so what is watched is specific.
-    const connection = fakeConnection({ sites: [SHOP] });
-    mount(connection);
-    await click((await screen.findByText("shop.memql.example.com")).closest("button"));
-    await screen.findByText("blob://sites/site-shop/v1/");
-
-    await emit(connection, SITE_CONCEPT, { ...SHOP, title: "Renamed" });
-
-    await waitFor(() => expect(screen.getByText("Renamed")).toBeTruthy());
-    expect(screen.queryByText("changed just now")).toBeNull();
   });
 });
 

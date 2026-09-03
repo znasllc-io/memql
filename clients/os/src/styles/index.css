@@ -4687,6 +4687,34 @@ a.os-button {
 
 /* ---- the report -------------------------------------------------------- */
 
+/* ---- the deployable page: what a stop holds beneath its note ----------
+ *
+ * The rail's body is a 1px-gapped grid of label and note; a stop's BODY --
+ * its facts once set, or the control that answers it -- sits beneath the
+ * note at the surface's ordinary spacing, so a stop with nothing to add
+ * reads exactly as it did before the page existed. */
+.os-stop-body {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+  min-width: 0;
+}
+
+/* The address is CONTENT rather than a note (design: a settled stop's answer
+ * reads at --os-text-base), and it is the one link on the page whose text is
+ * the thing it opens. */
+.os-stop-address {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: var(--os-text-base);
+}
+.os-stop-address a {
+  color: var(--os-ink);
+}
+
 .os-report {
   display: grid;
   gap: 14px;

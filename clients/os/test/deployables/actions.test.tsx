@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -12,20 +12,11 @@ import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settin
 import { OS_REGISTRY } from "../../src/apps/registry";
 import { appById, sectionsForRole } from "../../src/system/registry";
 import { RESERVED_LABELS } from "../../src/apps/deployables/hostname";
-import {
-  NOTE,
-  PDF,
-  SHOP,
-  ZIP,
-  click,
-  fakeConnection,
-  type FakeConnection,
-  type,
-  withSession,
-} from "./harness";
+import { click, fakeConnection, type FakeConnection, type, withSession } from "./harness";
 
 // The write half: who is offered it, what reaches the wire, and what a refusal
-// looks like on the screen.
+// looks like on the screen. Deploying a zip to a deployable is the page's
+// Source stop now, and is tested in deployables.test.tsx.
 
 function memStore() {
   const data = new Map<string, string>();
@@ -91,20 +82,6 @@ describe("who is offered the write half", () => {
     expect(app.roles).toBeUndefined();
   });
 
-  it("offers no publish control on a reader's detail panel", async () => {
-    const connection = fakeConnection({ sites: [SHOP] });
-    mount(connection, { section: "sites", role: "reader" });
-    await click((await screen.findByText("shop.memql.example.com")).closest("button"));
-    await screen.findByRole("region", { name: "Deployable shop.memql.example.com" });
-    expect(screen.queryByRole("button", { name: "Publish from the Library" })).toBeNull();
-  });
-
-  it("offers it to an admin", async () => {
-    const connection = fakeConnection({ sites: [SHOP] });
-    mount(connection, { section: "sites", role: "admin" });
-    await click((await screen.findByText("shop.memql.example.com")).closest("button"));
-    expect(await screen.findByRole("button", { name: "Publish from the Library" })).toBeTruthy();
-  });
 });
 
 describe("creating a deployable", () => {
@@ -222,127 +199,6 @@ describe("creating a deployable", () => {
     );
     await type(screen.getByLabelText("Name") as HTMLInputElement, "shop");
     expect(screen.getByText(/<name>\.<domain unknown>/)).toBeTruthy();
-  });
-});
-
-describe("publishing a bundle", () => {
-  async function openPicker(connection: FakeConnection) {
-    mount(connection, { section: "sites", role: "owner" });
-    await click((await screen.findByText("shop.memql.example.com")).closest("button"));
-    await click(await screen.findByRole("button", { name: "Publish from the Library" }));
-  }
-
-  it("offers only the zips, and reads the Library once", async () => {
-    const connection = fakeConnection({ sites: [SHOP], artifacts: [ZIP, PDF, NOTE] });
-    await openPicker(connection);
-
-    expect(await screen.findByText("storefront-build.zip")).toBeTruthy();
-    // A PDF and a note have no bytes a deployable could serve.
-    expect(screen.queryByText("brief.pdf")).toBeNull();
-    expect(screen.queryByText("Standup notes")).toBeNull();
-    expect(connection.calls.filter((c) => c === "query libraryArtifacts()")).toHaveLength(1);
-  });
-
-  it("reads NOTHING from the Library until the picker is opened", async () => {
-    const connection = fakeConnection({ sites: [SHOP], artifacts: [ZIP] });
-    mount(connection, { section: "sites" });
-    await click((await screen.findByText("shop.memql.example.com")).closest("button"));
-    await screen.findByRole("region", { name: "Deployable shop.memql.example.com" });
-    expect(connection.calls.filter((c) => c === "query libraryArtifacts()")).toHaveLength(0);
-  });
-
-  it("publishes the chosen bundle and summarises what the cluster did", async () => {
-    const connection = fakeConnection({ sites: [SHOP], artifacts: [ZIP] });
-    await openPicker(connection);
-    await click(await screen.findByText("storefront-build.zip"));
-    await click(screen.getByRole("button", { name: /^Publish storefront-build\.zip$/ }));
-
-    expect(connection.callsNamed("sitePublishFromArtifact")).toEqual([
-      'builtin sitePublishFromArtifact(siteId: "site-shop", artifactId: "artifact-zip")',
-    ]);
-    expect(await screen.findByText(/Published version v7f3c19a2bb01 -- 12 files, 2\.0 MB\./)).toBeTruthy();
-    expect(screen.getByText("blob://sites/site-shop/v7f3c19a2bb01/")).toBeTruthy();
-  });
-
-  it("turns a stable refusal reason into a sentence, and never prints the token", async () => {
-    const connection = fakeConnection({
-      sites: [SHOP],
-      artifacts: [ZIP],
-      publishError:
-        "sitePublishFromArtifact refused: bundle_missing_index -- bundle for site-shop has no index.html at its root",
-    });
-    await openPicker(connection);
-    await click(await screen.findByText("storefront-build.zip"));
-    await click(screen.getByRole("button", { name: /^Publish storefront-build\.zip$/ }));
-
-    expect(await screen.findByText(/no index\.html at its top level/)).toBeTruthy();
-    expect(screen.getByText(/still serving what it was serving/)).toBeTruthy();
-    expect(screen.queryByText(/bundle_missing_index/)).toBeNull();
-  });
-
-  it("does NOT retry, and clears the refusal only when a different bundle is chosen", async () => {
-    const zip2 = { ...ZIP, id: "artifact-zip-2", title: "second.zip" };
-    const connection = fakeConnection({
-      sites: [SHOP],
-      artifacts: [ZIP, zip2],
-      publishError: "sitePublishFromArtifact refused: artifact_not_a_zip -- not a zip",
-    });
-    await openPicker(connection);
-    await click(await screen.findByText("storefront-build.zip"));
-    await click(screen.getByRole("button", { name: /^Publish storefront-build\.zip$/ }));
-    await screen.findByText(/has to be a zip/);
-    expect(connection.callsNamed("sitePublishFromArtifact")).toHaveLength(1);
-
-    await click(screen.getByText("second.zip"));
-    await waitFor(() => expect(screen.queryByText(/has to be a zip/)).toBeNull());
-    // Still one call: choosing does not publish.
-    expect(connection.callsNamed("sitePublishFromArtifact")).toHaveLength(1);
-  });
-
-  it("keeps an UNKNOWN failure's own message -- inventing a friendly one hides a fault", async () => {
-    const connection = fakeConnection({
-      sites: [SHOP],
-      artifacts: [ZIP],
-      publishError: "stream closed before a reply arrived",
-    });
-    await openPicker(connection);
-    await click(await screen.findByText("storefront-build.zip"));
-    await click(screen.getByRole("button", { name: /^Publish storefront-build\.zip$/ }));
-    expect(await screen.findByText("stream closed before a reply arrived")).toBeTruthy();
-  });
-
-  it("says there may be older bundles when the LIBRARY page was full, not when the zip list is", async () => {
-    // The case a row-count condition gets wrong, and the one most likely to
-    // matter: fifty Library entries of which two are zips is a full page and a
-    // short list. Somebody whose bundle is older than those fifty entries would
-    // otherwise be told nothing at all.
-    const filler = Array.from({ length: 48 }, (_, i) => ({ ...PDF, id: `pdf-${i}` }));
-    const connection = fakeConnection({
-      sites: [SHOP],
-      artifacts: [ZIP, { ...ZIP, id: "artifact-zip-2", title: "second.zip" }, ...filler],
-    });
-    await openPicker(connection);
-    await screen.findByText("storefront-build.zip");
-    expect(screen.getByText(/50 most recent Library entries/)).toBeTruthy();
-    // ...and only the two zips are offered.
-    expect(screen.getByText("second.zip")).toBeTruthy();
-    expect(screen.queryByText("brief.pdf")).toBeNull();
-  });
-
-  it("stays quiet when the Library page was not full", async () => {
-    const connection = fakeConnection({ sites: [SHOP], artifacts: [ZIP, PDF] });
-    await openPicker(connection);
-    await screen.findByText("storefront-build.zip");
-    expect(screen.queryByText(/most recent Library entries/)).toBeNull();
-  });
-
-  it("will not publish before a bundle is chosen", async () => {
-    const connection = fakeConnection({ sites: [SHOP], artifacts: [ZIP] });
-    await openPicker(connection);
-    const button = (await screen.findByRole("button", {
-      name: "Pick a bundle",
-    })) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
   });
 });
 

@@ -6,6 +6,7 @@ import {
   RAIL_STOPS,
   headActionFor,
   railFor,
+  refusalStopFor,
   type ComposeInput,
   type RailInput,
   type StandingInput,
@@ -338,6 +339,26 @@ describe("the standing reading", () => {
     const unanalyzed = standing({ run: null, site: null });
     expect(stageOf(unanalyzed, "source").state).toBe("done");
     expect(stageOf(unanalyzed, "whatItIs").state).toBe("ahead");
+  });
+
+  it("names the stop a refused run's error belongs to, and no stop for any other run", () => {
+    // The page renders the OS headline beneath the sentence the rail already
+    // shows at that stop, so it has to ask the same question the rail
+    // answers -- and a page that guessed would send the person to repair the
+    // wrong thing.
+    const refusedAtBuild = deployment({
+      status: "refused",
+      buildLogTail: "npm ERR! missing script: build",
+      error: { code: "deployable_build_failed", message: "npm run build exited 1" },
+    });
+    expect(refusalStopFor(refusedAtBuild)).toBe("build");
+    expect(refusalStopFor(deployment({ status: "failed", report: null, error: { code: "credential_revoked", message: "revoked" } }))).toBe("source");
+    expect(refusalStopFor(deployment({ status: "refused", report: report(), error: { code: "package_manifest_invalid", message: "bad yaml" } }))).toBe("whatItIs");
+    // In flight, parked, finished, or nothing at all: no refusal to place.
+    for (const status of ["analyzing", "awaiting_confirm", "building", "publishing", "succeeded"]) {
+      expect(refusalStopFor(deployment({ status }))).toBeNull();
+    }
+    expect(refusalStopFor(null)).toBeNull();
   });
 
   it("never reads a DOM", () => {

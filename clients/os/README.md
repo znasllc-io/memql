@@ -307,7 +307,8 @@ authority on.
 
 ### Custom domains: the Domains panel (memql#4805)
 
-`DomainsPanel.tsx` on the deployable detail is a client's own domain bound to a
+`page/stops/Domains.tsx`, mounted as the deployable page's Where-it-lives stop
+for a cluster owner (epic memql#4885), is a client's own domain bound to a
 site -- the add flow, the two DNS records to create, the live typed status, and
 the remove. Three things about it are worth knowing before touching it.
 
