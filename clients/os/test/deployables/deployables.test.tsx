@@ -510,7 +510,7 @@ describe("the Source stop", () => {
       const { connection, page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
       await click(within(page).getByRole("button", { name: "Archive this source and every app it produced" }));
       // The confirmation names what "every app" means.
-      expect(within(page).getByText(/admin\.memql\.example\.com/)).toBeTruthy();
+      expect(within(page).getByText("admin.memql.example.com", { exact: false })).toBeTruthy();
       const archive = within(page).getByRole("button", { name: "Archive" }) as HTMLButtonElement;
       expect(archive.disabled).toBe(true);
       await typeInto(within(page).getByLabelText("Type acme to confirm") as HTMLInputElement, "acme");
