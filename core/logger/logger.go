@@ -28,8 +28,16 @@ func New(componentName common.ComponentName, writer io.Writer, level slog.Level)
 	// slog.Info("login", "password", pw)) without relying on every
 	// caller remembering the discipline. See core/logger/redact.go
 	// for the predicate.
+	//
+	// The chain is redactingHandler -> fanout(JSONHandler, storeHandler)
+	// (epic memql#4893). The store handler forwards each line to the
+	// process's registered logger.Sink -- component/logstore, the log_line
+	// hypertable -- and it sits INSIDE the redactor on purpose: a stored
+	// attribute is exactly what the console would have printed, so a
+	// `token` reaches the store as "<redacted>". The redactor must stay
+	// OUTERMOST for that to hold; see store.go.
 	base := slog.NewJSONHandler(writer, &slog.HandlerOptions{Level: level})
-	return slog.New(NewRedactingHandler(base)).With("component", componentName)
+	return slog.New(NewRedactingHandler(newFanoutHandler(base, newStoreHandler()))).With("component", componentName)
 }
 
 func componentLoggingEnabled(component common.ComponentName) bool {

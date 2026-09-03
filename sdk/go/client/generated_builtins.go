@@ -973,6 +973,427 @@ func LibraryTrainFileBuild(args LibraryTrainFileArgs) string {
 	return b.String()
 }
 
+// LogsArchiveList -- The archived days: one row per logs/<day>/<nodeType>.ndjson.gz object in the archive container with its size, newest day first. Empty when no archive is configured, and the row says which. Admin and above.
+type LogsArchiveListArgs struct {
+}
+
+// LogsArchiveList calls the engine builtin logsArchiveList.
+func (qc *QueryClient) LogsArchiveList(ctx context.Context, args LogsArchiveListArgs) (*Result, error) {
+	call := LogsArchiveListBuild(args)
+	return qc.executeNamed(ctx, "logsArchiveList", call)
+}
+
+func LogsArchiveListBuild(args LogsArchiveListArgs) string {
+	_ = args
+	return "builtin logsArchiveList()"
+}
+
+// LogsArchiveRestore -- Bring an archived day back into the store: download logs/<day>/<nodeType>.ndjson.gz (every node type of the day when nodeType is blank), gunzip, and insert the rows with ON CONFLICT DO NOTHING on (occurredAt, id), so running it twice restores nothing twice. A restored day is older than the retention boundary by definition and is swept again at the next nightly run; read it now. Owner only. Answers { restored, skipped, objects }.
+type LogsArchiveRestoreArgs struct {
+	// The UTC day, YYYY-MM-DD.
+	Day string
+	// One node type, or blank for every node type archived that day.
+	NodeType string
+}
+
+// LogsArchiveRestore calls the engine builtin logsArchiveRestore.
+func (qc *QueryClient) LogsArchiveRestore(ctx context.Context, args LogsArchiveRestoreArgs) (*Result, error) {
+	call := LogsArchiveRestoreBuild(args)
+	return qc.executeNamed(ctx, "logsArchiveRestore", call)
+}
+
+func LogsArchiveRestoreBuild(args LogsArchiveRestoreArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin logsArchiveRestore(")
+	b.WriteString("day: ")
+	b.WriteString(quoteMemQL(args.Day))
+	if args.NodeType != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("nodeType: ")
+		b.WriteString(quoteMemQL(args.NodeType))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// LogsRecordClient -- Record lines from the MemQL OS front end: window errors, unhandled rejections and console warnings, batched by the shell. Every line is stamped nodeType=os, node blank, and userId from the caller's actor -- never from the payload -- so a line can never claim to be somebody else's. `session` is the tab's own correlation id (4 to 64 URL-safe characters). Refused WHOLE with a sentence when a call carries more than 50 lines, a message over 4 KiB or attributes over 8 KiB, and with reason `rate_limited` when the (user, session) bucket -- 120 lines, refilled two per second -- is empty; the shell drops and counts rather than retrying. A client `at` within five minutes of the node clock is kept, one outside it is replaced. Any signed-in principal may call it; an anonymous or connector actor is refused. Answers { accepted, dropped, reason }.
+type LogsRecordClientArgs struct {
+	// The tab session id the shell minted (`os-<shortId>`).
+	Session string
+	// Up to 50 of { at, level, app, component, message, attributes, subject, subjectConcept }. `level` and `message` are required per line.
+	Lines []map[string]any
+}
+
+// LogsRecordClient calls the engine builtin logsRecordClient.
+func (qc *QueryClient) LogsRecordClient(ctx context.Context, args LogsRecordClientArgs) (*Result, error) {
+	call := LogsRecordClientBuild(args)
+	return qc.executeNamed(ctx, "logsRecordClient", call)
+}
+
+func LogsRecordClientBuild(args LogsRecordClientArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin logsRecordClient(")
+	b.WriteString("session: ")
+	b.WriteString(quoteMemQL(args.Session))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("lines: ")
+	b.WriteString(renderMemQLValue(args.Lines))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LogsSearch -- Lines inside [windowStart, windowEnd), newest first, narrowed by every facet given. `apps` and `subjectConcepts` together form ONE scope predicate ORed -- an app's slice is 'lines tagged with me OR about the things I own' -- and every other facet ANDs. `text` is a case-insensitive substring of the message. Keyset-paged: pass the oldest row's occurredAt and id back as beforeAt and beforeId for the next page. `limit` defaults to 200 and is capped at 500. Admin and above; the handler repeats the floor.
+type LogsSearchArgs struct {
+	// Inclusive start of the window (RFC 3339).
+	WindowStart string
+	// Exclusive end of the window (RFC 3339).
+	WindowEnd string
+	// Node types to include (identity, bff, ..., os). Empty means every node type.
+	NodeTypes []string
+	// Node ids to include. Empty means every node.
+	Nodes []string
+	// Component names to include, exact. Empty means every component.
+	Components []string
+	// OS app ids; ORed with subjectConcepts into the scope predicate.
+	Apps []string
+	// Levels to include (debug, info, warn, error). Empty means every level.
+	Levels []string
+	// Only lines about this bare id.
+	Subject string
+	// Only lines whose subject is of this concept, used with `subject` to disambiguate.
+	SubjectConcept string
+	// Concept ids an app owns; ORed with `apps` into the scope predicate.
+	SubjectConcepts []string
+	// Only lines from this OS tab session.
+	Session string
+	// Only OS lines written by this user.
+	UserId string
+	// Case-insensitive substring of the message.
+	Text string
+	// Rows per page: 1 to 500, default 200.
+	Limit int
+	// Keyset cursor: the occurredAt of the oldest row already seen.
+	BeforeAt string
+	// Keyset cursor: the id of that row.
+	BeforeId string
+}
+
+// LogsSearch calls the engine builtin logsSearch.
+func (qc *QueryClient) LogsSearch(ctx context.Context, args LogsSearchArgs) (*Result, error) {
+	call := LogsSearchBuild(args)
+	return qc.executeNamed(ctx, "logsSearch", call)
+}
+
+func LogsSearchBuild(args LogsSearchArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin logsSearch(")
+	b.WriteString("windowStart: ")
+	b.WriteString(quoteMemQL(args.WindowStart))
+	if b.Len() > 19 {
+		b.WriteString(", ")
+	}
+	b.WriteString("windowEnd: ")
+	b.WriteString(quoteMemQL(args.WindowEnd))
+	if args.NodeTypes != nil {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("nodeTypes: ")
+		b.WriteString(renderMemQLValue(args.NodeTypes))
+	}
+	if args.Nodes != nil {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("nodes: ")
+		b.WriteString(renderMemQLValue(args.Nodes))
+	}
+	if args.Components != nil {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("components: ")
+		b.WriteString(renderMemQLValue(args.Components))
+	}
+	if args.Apps != nil {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("apps: ")
+		b.WriteString(renderMemQLValue(args.Apps))
+	}
+	if args.Levels != nil {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("levels: ")
+		b.WriteString(renderMemQLValue(args.Levels))
+	}
+	if args.Subject != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("subject: ")
+		b.WriteString(quoteMemQL(args.Subject))
+	}
+	if args.SubjectConcept != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("subjectConcept: ")
+		b.WriteString(quoteMemQL(args.SubjectConcept))
+	}
+	if args.SubjectConcepts != nil {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("subjectConcepts: ")
+		b.WriteString(renderMemQLValue(args.SubjectConcepts))
+	}
+	if args.Session != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("session: ")
+		b.WriteString(quoteMemQL(args.Session))
+	}
+	if args.UserId != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("userId: ")
+		b.WriteString(quoteMemQL(args.UserId))
+	}
+	if args.Text != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("text: ")
+		b.WriteString(quoteMemQL(args.Text))
+	}
+	if args.Limit != 0 {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("limit: ")
+		b.WriteString(fmt.Sprintf("%v", args.Limit))
+	}
+	if b.Len() > 19 {
+		b.WriteString(", ")
+	}
+	b.WriteString("beforeAt: ")
+	b.WriteString(quoteMemQL(args.BeforeAt))
+	if args.BeforeId != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("beforeId: ")
+		b.WriteString(quoteMemQL(args.BeforeId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// LogsSources -- What logged inside [windowStart, windowEnd): one row per distinct component, per (nodeType, node) and per OS app, each with its line count. The facet lists in the Logs app come from here, so a value that never logged in the window is never offered, and the portal -- which is not instrumented and has no component name -- is absent by construction rather than by a list. Admin and above.
+type LogsSourcesArgs struct {
+	// Inclusive start of the window (RFC 3339).
+	WindowStart string
+	// Exclusive end of the window (RFC 3339).
+	WindowEnd string
+}
+
+// LogsSources calls the engine builtin logsSources.
+func (qc *QueryClient) LogsSources(ctx context.Context, args LogsSourcesArgs) (*Result, error) {
+	call := LogsSourcesBuild(args)
+	return qc.executeNamed(ctx, "logsSources", call)
+}
+
+func LogsSourcesBuild(args LogsSourcesArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin logsSources(")
+	b.WriteString("windowStart: ")
+	b.WriteString(quoteMemQL(args.WindowStart))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("windowEnd: ")
+	b.WriteString(quoteMemQL(args.WindowEnd))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LogsStatus -- What this cluster keeps: the retention in days, whether an archive is configured and which container, the store level and the per-second cap on the answering node, the lines written and dropped (by reason) since that node started, and the oldest and newest occurredAt in the store with an estimated row count. One row. Admin and above.
+type LogsStatusArgs struct {
+}
+
+// LogsStatus calls the engine builtin logsStatus.
+func (qc *QueryClient) LogsStatus(ctx context.Context, args LogsStatusArgs) (*Result, error) {
+	call := LogsStatusBuild(args)
+	return qc.executeNamed(ctx, "logsStatus", call)
+}
+
+func LogsStatusBuild(args LogsStatusArgs) string {
+	_ = args
+	return "builtin logsStatus()"
+}
+
+// LogsSweep -- Run the retention sweep now: archive every expired UTC day per node type as logs/<day>/<nodeType>.ndjson.gz in MEMQL_LOGS_ARCHIVE_CONTAINER, then delete that day; at most sixty days per run. NO ARCHIVE, NO DELETE: with no container configured the sweep keeps every line and says so in its own log line. A second sweep while one runs answers skipped. The nightly logsRetentionSweep automation calls this on the cron leader; an owner may call it by hand. Answers { daysArchived, rowsArchived, rowsDeleted, skipped, refused }.
+type LogsSweepArgs struct {
+}
+
+// LogsSweep calls the engine builtin logsSweep.
+func (qc *QueryClient) LogsSweep(ctx context.Context, args LogsSweepArgs) (*Result, error) {
+	call := LogsSweepBuild(args)
+	return qc.executeNamed(ctx, "logsSweep", call)
+}
+
+func LogsSweepBuild(args LogsSweepArgs) string {
+	_ = args
+	return "builtin logsSweep()"
+}
+
+// LogsTail -- The live tail: lines newer than a keyset cursor, OLDEST first so a client appends, narrowed by the same facets as logsSearch (the same scope rule for `apps` and `subjectConcepts`). With no cursor it answers the newest `limit` lines in ascending order -- the baseline a stream starts from after any facet change. Poll it with the newest row's occurredAt and id as afterAt and afterId; an empty answer is 'nothing new', never an error. `limit` defaults to 200 and is capped at 500. Admin and above.
+type LogsTailArgs struct {
+	// Node types to include. Empty means every node type.
+	NodeTypes []string
+	// Node ids to include. Empty means every node.
+	Nodes []string
+	// Component names to include, exact.
+	Components []string
+	// OS app ids; ORed with subjectConcepts into the scope predicate.
+	Apps []string
+	// Levels to include. Empty means every level.
+	Levels []string
+	// Only lines about this bare id.
+	Subject string
+	// Only lines whose subject is of this concept.
+	SubjectConcept string
+	// Concept ids an app owns; ORed with `apps`.
+	SubjectConcepts []string
+	// Only lines from this OS tab session.
+	Session string
+	// Only OS lines written by this user.
+	UserId string
+	// Case-insensitive substring of the message.
+	Text string
+	// Rows per answer: 1 to 500, default 200.
+	Limit int
+	// Keyset cursor: the occurredAt of the newest row already seen.
+	AfterAt string
+	// Keyset cursor: the id of that row.
+	AfterId string
+}
+
+// LogsTail calls the engine builtin logsTail.
+func (qc *QueryClient) LogsTail(ctx context.Context, args LogsTailArgs) (*Result, error) {
+	call := LogsTailBuild(args)
+	return qc.executeNamed(ctx, "logsTail", call)
+}
+
+func LogsTailBuild(args LogsTailArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin logsTail(")
+	if args.NodeTypes != nil {
+		b.WriteString("nodeTypes: ")
+		b.WriteString(renderMemQLValue(args.NodeTypes))
+	}
+	if args.Nodes != nil {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("nodes: ")
+		b.WriteString(renderMemQLValue(args.Nodes))
+	}
+	if args.Components != nil {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("components: ")
+		b.WriteString(renderMemQLValue(args.Components))
+	}
+	if args.Apps != nil {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("apps: ")
+		b.WriteString(renderMemQLValue(args.Apps))
+	}
+	if args.Levels != nil {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("levels: ")
+		b.WriteString(renderMemQLValue(args.Levels))
+	}
+	if args.Subject != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("subject: ")
+		b.WriteString(quoteMemQL(args.Subject))
+	}
+	if args.SubjectConcept != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("subjectConcept: ")
+		b.WriteString(quoteMemQL(args.SubjectConcept))
+	}
+	if args.SubjectConcepts != nil {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("subjectConcepts: ")
+		b.WriteString(renderMemQLValue(args.SubjectConcepts))
+	}
+	if args.Session != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("session: ")
+		b.WriteString(quoteMemQL(args.Session))
+	}
+	if args.UserId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("userId: ")
+		b.WriteString(quoteMemQL(args.UserId))
+	}
+	if args.Text != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("text: ")
+		b.WriteString(quoteMemQL(args.Text))
+	}
+	if args.Limit != 0 {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("limit: ")
+		b.WriteString(fmt.Sprintf("%v", args.Limit))
+	}
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("afterAt: ")
+	b.WriteString(quoteMemQL(args.AfterAt))
+	if args.AfterId != "" {
+		if b.Len() > 17 {
+			b.WriteString(", ")
+		}
+		b.WriteString("afterId: ")
+		b.WriteString(quoteMemQL(args.AfterId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // PackageAnalyze -- Analyze a package source offline and return the report, deploying nothing (epic memql#4794, D12). Fetches the tracked source, walks the manifest, discovers the DSL domains and runs the SAME Init-grade gates strict boot runs -- so 'this DSL would refuse boot' is an answer produced here, before a pod is ever asked to run it. Returns {report, ok}: the report names every deployable with its build plan (or 'prebuilt output found -- build skipped'), every DSL domain with construct counts, any Go pack as reported-not-deployable, and every problem found. A refusal carries one of the stable codes in component/packages/refusal.go.
 type PackageAnalyzeArgs struct {
 	// The v1:platform:package row to analyze.

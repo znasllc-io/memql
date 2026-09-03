@@ -6,7 +6,7 @@
 import type { ComponentType } from "react";
 
 import type { RoleRequirement } from "./roles";
-import { roleAdmits } from "./roles";
+import { roleAdmits, roleRank } from "./roles";
 
 export interface OsAppSection {
   id: string;
@@ -53,6 +53,23 @@ export interface OsAppManifest {
    * `test/system/settingsContract.test.ts` runs it over the real registry.
    */
   settingsSection: string;
+  /**
+   * Section id that shows this app's slice of the cluster's logs. REQUIRED
+   * on every app (epic memql#4895, spec H "The convention"), for the reason
+   * `settingsSection` is: an admin follows a fault the same way in every
+   * window, and a Logs section some apps happen not to have is a section
+   * somebody looks for and cannot find.
+   *
+   * It must name a section this manifest declares, and that section must be
+   * floored at admin -- on the section itself (`roles: { min: "admin" }`),
+   * or on the whole app when the app's own floor is at or above it (the
+   * Logs app names its Stream and carries the floor itself). Reads on the
+   * log store are admin-and-above in the engine (spec L3); a section
+   * offered below that floor would open on a refusal for everyone in it.
+   * `logsSectionProblem` is the check; `test/logs/logsContract.test.ts`
+   * runs it over the real registry.
+   */
+  logsSection: string;
   /**
    * A DOCK FIXTURE is always in the dock and cannot be taken out of it
    * (memql#4784). The Bin is the only one, and it is the reason the flag
@@ -145,6 +162,55 @@ export function settingsSectionProblem(app: OsAppManifest): string | null {
   if (!sections.some((s) => s.id === target)) {
     const declared = sections.map((s) => s.id).join(", ") || "none";
     return `${app.id}: settingsSection "${target}" names no declared section (declared: ${declared})`;
+  }
+  return null;
+}
+
+/** The rank floor every log read carries in the engine (spec L3). */
+export const LOGS_ROLE_FLOOR = "admin";
+
+/**
+ * Whether a requirement admits nobody below the logs floor.
+ *
+ * `{ min: "admin" }` is accepted by name, so the check holds before the
+ * cluster's ladder has loaded; any other minimum is ranked against the floor
+ * and an unrankable one FAILS -- a floor that cannot be resolved is not a
+ * floor that admits everyone, which is the fail-closed reading `roleAdmits`
+ * takes too. A set form must name only rungs at or above the floor.
+ */
+function flooredAtLogs(requirement?: RoleRequirement): boolean {
+  if (!requirement) return false;
+  const floor = roleRank(LOGS_ROLE_FLOOR);
+  if ("any" in requirement) {
+    if (requirement.any.length === 0 || floor < 0) return false;
+    return requirement.any.every((slug) => roleRank(slug) >= floor);
+  }
+  if (requirement.min === LOGS_ROLE_FLOOR) return true;
+  const rank = roleRank(requirement.min);
+  return floor >= 0 && rank >= floor;
+}
+
+/**
+ * The logs-section contract, the way `settingsSectionProblem` is: a
+ * function rather than a test assertion, returning null when the manifest
+ * is well-formed and otherwise the sentence to show.
+ *
+ * Over DECLARED sections, like its sibling. The floor is checked as well as
+ * the existence, because a Logs section a writer can open is a section that
+ * opens on the engine's refusal -- and "this app is broken" is what that
+ * reads as from inside the window.
+ */
+export function logsSectionProblem(app: OsAppManifest): string | null {
+  const target = app.logsSection.trim();
+  if (target === "") return `${app.id}: logsSection is empty`;
+  const sections = app.sections ?? [];
+  const section = sections.find((s) => s.id === target);
+  if (!section) {
+    const declared = sections.map((s) => s.id).join(", ") || "none";
+    return `${app.id}: logsSection "${target}" names no declared section (declared: ${declared})`;
+  }
+  if (!flooredAtLogs(section.roles) && !flooredAtLogs(app.roles)) {
+    return `${app.id}: logsSection "${target}" is not floored at ${LOGS_ROLE_FLOOR} on the section or the app`;
   }
   return null;
 }

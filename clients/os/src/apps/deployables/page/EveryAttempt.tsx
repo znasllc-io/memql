@@ -1,7 +1,9 @@
+import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 import { Undo2 } from "lucide-react";
 
 import { Button, Caption, Chip, LiveList } from "../../../kit";
 import { formatMoment } from "../../../kit/format";
+import { OpenLogsButton } from "../../../logs/OpenLogs";
 import type { LiveView } from "../../../live/liveView";
 import { usePackageActions } from "../packages/actions";
 import { BuildLog, ProblemNotice } from "../packages/ReportView";
@@ -68,6 +70,17 @@ export function EveryAttempt({
                   <span className="os-attempt-status" data-status={d.status}>
                     {statusWord(d.status)}
                   </span>
+                  {/* Every line of this attempt (epic memql#4895): the
+                      pipeline stamps each one with the deployment as its
+                      subject, so the Logs app narrowed to this row IS the
+                      run's full log rather than the bounded tail the row
+                      keeps. It moved here from PackageDetail, whose timeline
+                      this replaced. */}
+                  <OpenLogsButton
+                    subject={d.id}
+                    subjectConcept={Concepts.PLATFORM_PACKAGE_DEPLOYMENT}
+                    ariaLabel={`Logs of the ${d.sourceVersion === "" ? "unversioned" : shortVersion(d.sourceVersion)} deploy`}
+                  />
                   {canWrite && d.status === "succeeded" && d.id !== latest?.id ? (
                     <Button
                       onClick={() => void actions.rollback(pkg.id, d.id).then(reseed)}

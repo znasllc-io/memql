@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { LiveSnapshot, Row } from "@znasllc-io/memql-sdk-core/client";
+import { Concepts, type LiveSnapshot, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Check, Head, Panel } from "../../kit";
 import { useAuthSource } from "../../auth/context";
 import { useSession } from "../../chrome/access";
 import { useLiveView } from "../../live/liveView";
+import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { useChunkDecisions } from "./actions";
 import {
@@ -55,10 +56,20 @@ const EMPTY_SNAPSHOT: LiveSnapshot<AnalysisPlan> = {
   version: 0,
 };
 
+/** The concepts this app owns, for its Logs section: the knowledge it
+ *  feeds, the chunks it reviews, and the analysis plans that produce them. */
+const TRAINING_LOG_CONCEPTS = [
+  Concepts.KNOWLEDGE_KNOWLEDGE_DOMAIN,
+  Concepts.KNOWLEDGE_DOCUMENT_CHUNK,
+  Concepts.PLANNER_PLAN,
+] as const;
+
 export function TrainingApp({
   sectionId,
   navigate,
   askContext,
+  intent,
+  consumeIntent,
   store,
   uploads: injectedUploads,
 }: OsAppProps & {
@@ -204,6 +215,16 @@ export function TrainingApp({
 
   if (sectionId === "settings") {
     return <TrainingSettingsSection settings={settings} update={update} />;
+  }
+  if (sectionId === "logs") {
+    return (
+      <AppLogsSection
+        app="training"
+        subjectConcepts={TRAINING_LOG_CONCEPTS}
+        intent={intent}
+        consumeIntent={consumeIntent}
+      />
+    );
   }
   if (sectionId === "review") {
     return (

@@ -25,6 +25,11 @@ export const CAMPAIGNS_SECTIONS: OsAppSection[] = [
   { id: "templates", name: "Templates" },
   { id: "senders", name: "Senders" },
   { id: "rules", name: "Rules" },
+  // The app's slice of the cluster's logs (epic memql#4895): the lines it
+  // tagged and the lines about the things it owns. Admin-floored because
+  // every read on the log store is (spec L3), and this is the ONE section
+  // whose floor is not this app's to choose.
+  { id: "logs", name: "Logs", roles: { min: "admin" } },
   { id: "settings", name: "Settings" },
 ];
 

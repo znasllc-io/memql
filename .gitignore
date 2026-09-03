@@ -113,6 +113,11 @@ __debug*
 # Temporary files and logs
 temp/
 logs/
+# ...but not the OS's log SURFACES (epic memql#4895): `clients/os/src/logs/`
+# is the reading over the cluster's log store, `src/apps/logs/` the Logs app,
+# `test/logs/` their suites. The rule above is for log OUTPUT, and it hid all
+# three from `git add` and from every `git ls-files` gate.
+!clients/os/**/logs/
 
 # Node.js -- the TS SDK under sdk/ts/ and the view-kit renderer under
 # sdk/ts-viewkit/ are checked-in node consumers in this monorepo

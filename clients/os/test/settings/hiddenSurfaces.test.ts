@@ -66,6 +66,7 @@ describe("the permissions self-view (memql#4744)", () => {
           icon: () => null,
           sections: [{ id: "integrations", name: "Integrations", roles: OWNER_OR_DEVELOPER }],
           settingsSection: "integrations",
+          logsSection: "integrations",
           component: () => null,
         },
       ],

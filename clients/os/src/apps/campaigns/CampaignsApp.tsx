@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
 import { useAuthSource } from "../../auth/context";
 import { EdgeUploadProvider } from "../../items/edgeUpload";
 import type { UploadProvider } from "../../items/upload";
 import { Check, Head, Notice, Panel } from "../../kit";
+import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { AudiencesSection } from "./AudiencesSection";
 import { CampaignsSection } from "./CampaignsSection";
@@ -43,9 +45,23 @@ import { useCampaignFeeds, useEmailReadiness } from "./useCampaigns";
 // and the engine decides how far each list reaches. Gating the app would be
 // presentation pretending to be authorization.
 
+/** The concepts this app owns, for its Logs section: everything a send is
+ *  made of, plus the engine-owned job that carries it out. */
+const CAMPAIGNS_LOG_CONCEPTS = [
+  Concepts.CAMPAIGNS_CAMPAIGN,
+  Concepts.CAMPAIGNS_AUDIENCE,
+  Concepts.CAMPAIGNS_TEMPLATE,
+  Concepts.CAMPAIGNS_SENDER_IDENTITY,
+  Concepts.CAMPAIGNS_EMAIL_RULE,
+  Concepts.CAMPAIGNS_SEND_JOB,
+  Concepts.CAMPAIGNS_DELIVERY,
+] as const;
+
 export function CampaignsApp({
   sectionId,
   navigate,
+  intent,
+  consumeIntent,
   store,
   uploads,
 }: OsAppProps & { store?: CampaignsSettingsStore; uploads?: UploadProvider }) {
@@ -96,6 +112,16 @@ export function CampaignsApp({
 
   if (sectionId === "settings") {
     return <CampaignsSettingsSection settings={settings} update={updateSettings} />;
+  }
+  if (sectionId === "logs") {
+    return (
+      <AppLogsSection
+        app="campaigns"
+        subjectConcepts={CAMPAIGNS_LOG_CONCEPTS}
+        intent={intent}
+        consumeIntent={consumeIntent}
+      />
+    );
   }
 
   return (

@@ -2065,6 +2065,23 @@ schema does not say.
   read through `codeMetricsInWindow`: one bucket, one `[windowStart, windowEnd)`
   range, `codeReference startsWith` any of the caller's prefixes (memql#4208).
   [Design](docs/internal/design/auto-generated-diagrams.md).
+  **`logLine` is the log store** (epic memql#4893): every node type's log
+  lines in the `log_line` hypertable, written by the sink `core/logger`'s
+  fan-out handler forwards to and `component/logstore` batches (bounded,
+  non-blocking, drops counted on `memql_logs_dropped_total{reason}`), plus
+  the OS front end's own errors through `logsRecordClient`. Rows never enter
+  the graph and never broadcast; the reads are `@sdk` builtins
+  (`logsSearch`, `logsTail`, `logsSources`, `logsStatus`) floored at admin
+  IN THEIR HANDLERS, because a builtin's annotation set carries no
+  `@requiresRank`. `logger.Subject(concept, id)` is the one seam between a
+  line and the thing it is about; an OS app's Logs section is `app` OR the
+  concepts the app owns. Retention is the nightly `logsRetentionSweep` on
+  the cron leader: archive `logs/<day>/<nodeType>.ndjson.gz` to blob
+  storage FIRST, delete second, and **no archive means no delete**. The
+  portal is not instrumented and a hosted site's console is an owner
+  decision still open (the design record's section G).
+  [logs.md](docs/public/operate/logs.md) ·
+  [design](docs/superpowers/specs/2026-09-03-logs-design.md).
 - **Identity** (`dsl/identity/concepts.memql`, loaded by every node) -- `user`,
   `authSession`, `magiclink`, `accessRequest`, `invitation`, `delegation`,
   `enrolmentToken`, and `identity`, a credential set that is a discriminated

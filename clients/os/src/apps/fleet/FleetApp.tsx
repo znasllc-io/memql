@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
+import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { MachinesSection } from "./machines/MachinesSection";
 import { RoutingSection } from "./routing/RoutingSection";
@@ -24,7 +26,21 @@ import { Panel, Head } from "../../kit";
 //
 // Sections are the app's own navigation. It never opens a window.
 
-export function FleetApp({ sectionId, navigate, store }: OsAppProps & { store?: FleetSettingsStore }) {
+/** The concepts this app owns, for its Logs section: a line about a
+ *  machine, a routing policy or a workspace is this app's line. */
+const FLEET_LOG_CONCEPTS = [
+  Concepts.WORKER_REGISTRATION,
+  Concepts.WORKER_ROUTING_POLICY,
+  Concepts.WORKBENCH_WORKSPACE,
+] as const;
+
+export function FleetApp({
+  sectionId,
+  navigate,
+  intent,
+  consumeIntent,
+  store,
+}: OsAppProps & { store?: FleetSettingsStore }) {
   // The store is injectable for tests, which is the whole reason the
   // parameter exists -- nothing in the shell passes one.
   const settingsStore = useMemo(() => store ?? new LocalFleetSettingsStore(), [store]);
@@ -69,6 +85,16 @@ export function FleetApp({ sectionId, navigate, store }: OsAppProps & { store?: 
 
   if (sectionId === "settings") {
     return <FleetSettingsSection settings={settings} update={update} />;
+  }
+  if (sectionId === "logs") {
+    return (
+      <AppLogsSection
+        app="fleet"
+        subjectConcepts={FLEET_LOG_CONCEPTS}
+        intent={intent}
+        consumeIntent={consumeIntent}
+      />
+    );
   }
   if (sectionId === "routing") return <RoutingSection />;
   if (sectionId === "workbenches") return <WorkbenchesSection />;

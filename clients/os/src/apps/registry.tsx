@@ -4,6 +4,7 @@ import {
   GraduationCap,
   MonitorSmartphone,
   Rocket,
+  ScrollText,
   Send,
   Settings as SettingsIcon,
   Sparkles,
@@ -26,6 +27,8 @@ import { FilesApp } from "./files/FilesApp";
 import { FILES_SECTIONS } from "./files/settings";
 import { FleetApp } from "./fleet/FleetApp";
 import { FLEET_SECTIONS } from "./fleet/settings";
+import { LogsApp } from "./logs/LogsApp";
+import { LOGS_SECTIONS } from "./logs/settings";
 import { SettingsApp } from "./settings/SettingsApp";
 import { TrainingApp } from "./training/TrainingApp";
 import { TRAINING_SECTIONS } from "./training/settings";
@@ -62,8 +65,14 @@ const settings: OsAppManifest = {
     // says exactly that, and it is presentation over a gate the status
     // capability's own `statusAuthorized` remains the authority on.
     { id: "integrations", name: "Integrations", roles: { any: ["owner", "developer"] } },
+    // The shell's own lines (epic memql#4895): what the OS front end
+    // recorded under no app, plus everything the Settings surfaces logged.
+    // Last rather than before a settings section, because this app HAS no
+    // settings section -- every section here is one.
+    { id: "logs", name: "Logs", roles: { min: "admin" } },
   ],
   settingsSection: "appearance",
+  logsSection: "logs",
   component: SettingsApp,
 };
 
@@ -87,6 +96,7 @@ const files: OsAppManifest = {
   icon: FilesIcon,
   sections: FILES_SECTIONS,
   settingsSection: "settings",
+  logsSection: "logs",
   component: FilesApp,
 };
 
@@ -116,6 +126,7 @@ const deployables: OsAppManifest = {
   icon: Rocket,
   sections: DEPLOYABLES_SECTIONS,
   settingsSection: "settings",
+  logsSection: "logs",
   component: DeployablesApp,
 };
 
@@ -134,7 +145,35 @@ const fleet: OsAppManifest = {
   icon: MonitorSmartphone,
   sections: FLEET_SECTIONS,
   settingsSection: "settings",
+  logsSection: "logs",
   component: FleetApp,
+};
+
+// Logs, in full (epic memql#4895 / #4897). ONE app over everything every
+// node wrote: Stream is first and is therefore the section a window opens
+// on -- the store, following -- and Search is the same store asked about a
+// window. The app's own settings can point a window at Search instead.
+//
+// The section list is LOGS_SECTIONS rather than a literal, for the reason
+// its siblings are: the settings picker offers an "open Logs on" choice over
+// exactly these ids, and a second copy of the list is one that can disagree.
+//
+// `roles: { min: "admin" }` is PRESENTATION over a floor the ENGINE enforces
+// (spec L3): every read on the log store is admin-and-above in the Go
+// handler, and `logsSweep` and `logsArchiveRestore` are owner-only there.
+// Rank >= 200 under the one ladder is {admin, developer, owner}, which is
+// the set the engine admits. Because the floor is on the app, no section
+// carries one of its own, and `logsSection` names the Stream -- the one app
+// whose Logs section is not called "Logs", because the whole app is.
+const logs: OsAppManifest = {
+  id: "logs",
+  name: "Logs",
+  icon: ScrollText,
+  roles: { min: "admin" },
+  sections: LOGS_SECTIONS,
+  settingsSection: "settings",
+  logsSection: "stream",
+  component: LogsApp,
 };
 
 // Users, in full (epic #4733). People is first and is therefore the section a
@@ -177,6 +216,7 @@ const users: OsAppManifest = {
   roles: { min: "admin" },
   sections: USERS_SECTIONS,
   settingsSection: "settings",
+  logsSection: "logs",
   component: UsersApp,
 };
 
@@ -207,6 +247,7 @@ const training: OsAppManifest = {
   roles: { min: "writer" },
   sections: TRAINING_SECTIONS,
   settingsSection: "settings",
+  logsSection: "logs",
   component: TrainingApp,
 };
 
@@ -253,6 +294,7 @@ const accounts: OsAppManifest = {
   roles: { min: "admin" },
   sections: ACCOUNTS_SECTIONS,
   settingsSection: "settings",
+  logsSection: "logs",
   component: AccountsApp,
 };
 
@@ -278,6 +320,7 @@ const campaigns: OsAppManifest = {
   icon: Send,
   sections: CAMPAIGNS_SECTIONS,
   settingsSection: "settings",
+  logsSection: "logs",
   component: CampaignsApp,
 };
 
@@ -302,6 +345,7 @@ const bin: OsAppManifest = {
   icon: Trash2,
   sections: BIN_SECTIONS,
   settingsSection: "settings",
+  logsSection: "logs",
   dockFixture: true,
   component: BinApp,
 };
@@ -322,6 +366,6 @@ const askWidget: OsWidgetManifest = {
 };
 
 export const OS_REGISTRY: OsRegistry = {
-  apps: [accounts, campaigns, files, deployables, fleet, users, training, settings, bin],
+  apps: [accounts, campaigns, files, deployables, fleet, logs, users, training, settings, bin],
   widgets: [askWidget],
 };

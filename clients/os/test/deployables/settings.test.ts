@@ -26,11 +26,20 @@ describe("the manifest", () => {
     expect(deployables?.component.name).toBe("DeployablesApp");
   });
 
-  it("declares exactly Map, Deployables and Settings, in that order (design D1)", () => {
+  it("declares exactly Map, Deployables, Logs and Settings, in that order (design D1)", () => {
     // Actions, Sites and Packages retired with the compose epic (memql#4885):
     // one list and one page replaced three sections and two mental models.
-    expect(DEPLOYABLES_SECTION_IDS).toEqual(["map", "deployables", "settings"]);
-    expect(DEPLOYABLES_SECTIONS.map((s) => s.name)).toEqual(["Map", "Deployables", "Settings"]);
+    // FOUR, not the three the compose restructure left: Logs is a shell
+    // convention every app carries (epic memql#4895) and is not this app's to
+    // drop. What retired is this app's own three readings of its subject --
+    // Sites, Packages, Actions -- which became one.
+    expect(DEPLOYABLES_SECTION_IDS).toEqual(["map", "deployables", "logs", "settings"]);
+    expect(DEPLOYABLES_SECTIONS.map((s) => s.name)).toEqual(["Map", "Deployables", "Logs", "Settings"]);
+    // The gated one is offered to an admin and withheld below, so the window
+    // nav genuinely differs by role -- the assertion the three-section version
+    // of this file could not make, because it had nothing gated.
+    expect(sectionsForRole(deployables!, "reader").map((s) => s.id)).toEqual(["map", "deployables", "settings"]);
+    expect(sectionsForRole(deployables!, "admin").map((s) => s.id)).toEqual(["map", "deployables", "logs", "settings"]);
   });
 
   it("opens on the MAP", () => {
@@ -40,15 +49,26 @@ describe("the manifest", () => {
     expect(deployables?.sections?.[0]?.id).toBe("map");
   });
 
-  it("gates no section: every signed-in person has deployables of their own to read", () => {
-    // The concept's composite tier means the ENGINE decides how far the list
-    // reaches. Writes are gated inside the section -- New deployable renders
-    // for rank >= 200 -- exactly as Sites gated publishing rather than the
-    // list. So the window nav is the same three for everybody.
+  it("gates Logs at admin and nothing else", () => {
+    // The app itself admits every signed-in user, because the concept's
+    // composite tier means everyone has deployables of their own to read, and
+    // the WRITE half is gated inside the section -- New deployable renders for
+    // rank >= 200 -- exactly as Sites gated publishing rather than the list.
+    //
+    // Logs is the one gated section, and the compose restructure did not
+    // choose that floor: every read on the log store is admin-and-above in the
+    // engine (epic memql#4895, spec L3), so the section's floor is the store's.
+    // Actions used to sit here too and retired with the three-section
+    // restructure (epic memql#4885).
     expect(deployables?.roles).toBeUndefined();
-    expect((deployables?.sections ?? []).filter((s) => s.roles !== undefined)).toEqual([]);
-    for (const role of ["reader", "writer", "admin", "developer", "owner", ""]) {
-      expect(sectionsForRole(deployables!, role).map((s) => s.id)).toEqual(["map", "deployables", "settings"]);
+    const gated = (deployables?.sections ?? []).filter((s) => s.roles !== undefined);
+    expect(gated.map((s) => s.id)).toEqual(["logs"]);
+    // Whole-requirement equality rather than `?.min`: RoleRequirement is a
+    // union since issue #4826 gave it a set form, and reading `.min` off it
+    // no longer typechecks. The assertion is the same one and is stricter --
+    // it would also catch this becoming a set that happens to contain admin.
+    for (const section of gated) {
+      expect(section.roles).toEqual({ min: "admin" });
     }
   });
 

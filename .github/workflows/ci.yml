@@ -1747,7 +1747,7 @@ jobs:
       - name: db-gated -- the fast packages (tight budget)
         run: |
           start=$SECONDS
-          go test -count=1 -timeout=180s ./component/automations/... ./component/backup/... ./component/grpc/... ./component/identity/... ./component/packages/... ./integrations/cognition/... ./integrations/embedding/... ./integrations/planner/... ./integrations/shopify/... ./examples/referencepack/...
+          go test -count=1 -timeout=180s ./component/automations/... ./component/backup/... ./component/grpc/... ./component/identity/... ./component/logstore/... ./component/packages/... ./examples/referencepack/... ./integrations/cognition/... ./integrations/embedding/... ./integrations/planner/... ./integrations/shopify/...
           echo "headroom: the fast packages used $((SECONDS - start))s of their 180s budget"
 
   # VS Code extension lane: run every cmd/memql-lsp drift guard over the
