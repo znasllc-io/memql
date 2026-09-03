@@ -614,7 +614,8 @@ of the six apps before it.
   irrelevant and misleading -- a file whose origin is gone would show green for
   as long as the machine that no longer holds it stays awake.
 
-Two smaller things. The list merges TWO feeds (`apps/bin/mergedView.ts`), and
+Two smaller things. The list merges TWO feeds (`live/mergedView.ts`, promoted
+out of this app when Deployables' list needed the three-feed form), and
 `useLiveView` cannot do that: it caches against ONE upstream snapshot's
 identity, so a folder arriving while the artifacts are unchanged folds into
 nothing -- the list never moves, nothing errors, the folder is simply missing.
