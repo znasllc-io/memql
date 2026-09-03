@@ -470,15 +470,26 @@ func TestApplyRetentionMovesAllThreeRelationsAndCanChangeThem(t *testing.T) {
 		t.Skip("no timescaledb: there are no retention policies to move, which is the plain-Postgres case ApplyRetention no-ops for")
 	}
 
-	// The two aggregates are backed by internal hypertables, so the policies
-	// are counted by their WINDOW rather than looked up by view name -- which
-	// is also the only property worth asserting.
+	// COUNTED BY THEIR WINDOW ALONE, with no predicate on the relation's name,
+	// and that is a correctness requirement rather than brevity.
+	//
+	// `timescaledb_information.jobs.hypertable_name` reports a continuous
+	// aggregate's retention policy under DIFFERENT names across TimescaleDB
+	// versions: 2.19 gives the internal `_materialized_hypertable_<n>` and
+	// 2.22 gives the view name (`edge_request_1m`). A name predicate written
+	// against either one passes on that version and silently counts ONE
+	// policy instead of three on the other -- which is exactly how this test
+	// passed locally on 2.19 and failed in CI, where the image is newer.
+	//
+	// The WINDOW is the discriminator instead, which is why `first` and
+	// `second` below are two values nothing else in the tree uses: a policy
+	// found at 23 days is one of these three, whatever the version calls the
+	// relation it hangs off.
 	countAt := func(days int) int {
 		var n int
 		q := `SELECT count(*) FROM timescaledb_information.jobs
 		      WHERE proc_name = 'policy_retention'
-		        AND config->>'drop_after' = ?
-		        AND (hypertable_name = 'edge_request' OR hypertable_name LIKE '\_materialized\_hypertable\_%')`
+		        AND config->>'drop_after' = ?`
 		if err := db.NewRaw(q, fmt.Sprintf("%d days", days)).Scan(ctx, &n); err != nil {
 			t.Fatalf("count retention jobs at %d days: %v", days, err)
 		}
@@ -492,15 +503,15 @@ func TestApplyRetentionMovesAllThreeRelationsAndCanChangeThem(t *testing.T) {
 	if err := ApplyRetention(ctx, db, first); err != nil {
 		t.Fatalf("ApplyRetention(%d): %v", first, err)
 	}
-	if got := countAt(first); got < 3 {
-		t.Fatalf("%d retention policies at %d days, want at least the raw table and both aggregates", got, first)
+	if got := countAt(first); got != 3 {
+		t.Fatalf("%d retention policies at %d days, want exactly the raw table and both aggregates -- the window is unique to this test, so anything else means a relation was missed or one was moved twice", got, first)
 	}
 
 	if err := ApplyRetention(ctx, db, second); err != nil {
 		t.Fatalf("ApplyRetention(%d): %v", second, err)
 	}
-	if got := countAt(second); got < 3 {
-		t.Fatalf("%d retention policies at %d days after a second call, want at least three -- add_retention_policy alone cannot change an interval, so this is the remove-then-add doing its job", got, second)
+	if got := countAt(second); got != 3 {
+		t.Fatalf("%d retention policies at %d days after a second call, want exactly three -- add_retention_policy alone cannot change an interval, so this is the remove-then-add doing its job", got, second)
 	}
 	if got := countAt(first); got != 0 {
 		t.Errorf("%d retention policies still at the OLD %d days; the change did not take and the call reported success", got, first)
