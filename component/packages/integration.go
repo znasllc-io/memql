@@ -105,7 +105,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "archivePackage",
-			Description: "Archive a package after verifying the typed name and that no deployable is still serving (epic memql#4794, D10).",
+			Description: "Archive a package and every app it produced (epic memql#4794 D10, epic memql#4885). Verifies the typed name, refuses with package_has_active_deployables naming the LIVE hostnames while any app is still serving -- pausing stays the person's decision -- and otherwise archives each paused or never-published app through the same guarded status write the site archive uses (a draft is walked through disabled first), sites first and the package last. Apps already archived are left alone. Returns {packageId, name, status, archivedSites}.",
 			Handler:     i.handleArchivePackage,
 			ArgsSchema: map[string]string{
 				"packageId":   "string (required)",
@@ -296,27 +296,64 @@ func (i *Integration) handleArchivePackage(ctx context.Context, args map[string]
 
 	// THE D10 CROSS-ROW RULE. A package is the source its deployables came
 	// from, and filing it away while one is still serving the internet would
-	// put the record and the reality in different states.
+	// put the record and the reality in different states. So a LIVE app
+	// refuses the whole call, naming only the live hostnames, before any
+	// site is touched: pausing is the step that gives anyone still using it
+	// a chance to notice, and it stays the person's decision.
+	//
+	// EVERYTHING ELSE CASCADES (epic memql#4885, design sections A and F --
+	// "archive this source and every app it produced"). A disabled app is
+	// archived; a draft one -- a first deploy never made live, the commonest
+	// state a composed source is abandoned in -- is walked through disabled
+	// first, because the status guard admits `archived` from `disabled`
+	// alone and a draft resolves for nobody, so the pause it insists on is
+	// the law's own path with nobody to notice. An app already archived is
+	// left alone. Each write is the same stamped setSiteStatus the site
+	// archive uses, and the guard beside executeWrite still decides every
+	// one: a refusal surfaces and the cascade STOPS there, sites first and
+	// the package last, so the record never claims more than the reality.
 	sites, err := deps.Store.sitesForPackage(ctx, packageId)
 	if err != nil {
 		return nil, err
 	}
 	var live []string
 	for _, s := range sites {
-		if rowString(s, "status") != siteStatusArchived {
+		if rowString(s, "status") == siteStatusLive {
 			live = append(live, rowString(s, "hostname"))
 		}
 	}
 	if len(live) > 0 {
 		return nil, refuse(CodePackageHasActiveDeployables,
-			"this package still has %d deployable(s) that are not archived (%s). Archive them first -- a package is the source its sites came from, and filing it away while one is still serving would leave the record and the reality disagreeing.",
+			"this package still has %d deployable(s) still serving (%s). Pause them first -- archiving is the end of a deployable's life, and pausing is the step that gives anyone still using it a chance to notice. Every paused or never-published app is archived with the package.",
 			len(live), strings.Join(live, ", "))
+	}
+
+	var archivedSites []string
+	for _, s := range sites {
+		siteId := rowString(s, "id")
+		switch rowString(s, "status") {
+		case siteStatusArchived:
+			continue
+		case siteStatusDraft:
+			if err := deps.Store.setSiteStatus(ctx, siteId, siteStatusDisabled); err != nil {
+				return nil, err
+			}
+		}
+		if err := deps.Store.setSiteStatus(ctx, siteId, siteStatusArchived); err != nil {
+			return nil, err
+		}
+		archivedSites = append(archivedSites, rowString(s, "hostname"))
 	}
 
 	if err := deps.Store.setPackageStatus(ctx, packageId, "archived"); err != nil {
 		return nil, err
 	}
-	return resultNode(map[string]any{"packageId": packageId, "name": name, "status": "archived"}), nil
+	return resultNode(map[string]any{
+		"packageId":     packageId,
+		"name":          name,
+		"status":        "archived",
+		"archivedSites": archivedSites,
+	}), nil
 }
 
 func (i *Integration) handleRestorePackage(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
