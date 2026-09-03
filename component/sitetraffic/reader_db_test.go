@@ -439,3 +439,86 @@ func TestAnUnreadableIdNarrowsRatherThanFails(t *testing.T) {
 		t.Errorf("requestCount = %d, want my own deployable's 1 -- not their 2", got[0].RequestCount)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Retention
+// ---------------------------------------------------------------------------
+
+// ApplyRetention runs at EDGE BOOT and only warns when it fails, which is the
+// right posture -- an edge that refused to serve sites because a metric's
+// retention window did not take would be trading the product for a number --
+// and it is exactly the shape that goes wrong silently. So the behaviour is
+// pinned here rather than trusted.
+//
+// What it proves beyond "the call returns nil":
+//
+//   - all THREE relations move, the raw rows and both aggregates, which is
+//     what makes "unmeasured" mean the same thing at every horizon;
+//   - a SECOND call with a different window actually changes them. That is
+//     the whole reason the function removes before it adds:
+//     `add_retention_policy` will not alter an existing policy's interval, so
+//     an add alone leaves the migration's thirty days in force and reports
+//     success -- a configured window that silently did not take.
+func TestApplyRetentionMovesAllThreeRelationsAndCanChangeThem(t *testing.T) {
+	_, db, ctx := trafficEngine(t)
+
+	var installed bool
+	if err := db.NewRaw("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb')").Scan(ctx, &installed); err != nil {
+		t.Fatalf("check for timescaledb: %v", err)
+	}
+	if !installed {
+		t.Skip("no timescaledb: there are no retention policies to move, which is the plain-Postgres case ApplyRetention no-ops for")
+	}
+
+	// The two aggregates are backed by internal hypertables, so the policies
+	// are counted by their WINDOW rather than looked up by view name -- which
+	// is also the only property worth asserting.
+	countAt := func(days int) int {
+		var n int
+		q := `SELECT count(*) FROM timescaledb_information.jobs
+		      WHERE proc_name = 'policy_retention'
+		        AND config->>'drop_after' = ?
+		        AND (hypertable_name = 'edge_request' OR hypertable_name LIKE '\_materialized\_hypertable\_%')`
+		if err := db.NewRaw(q, fmt.Sprintf("%d days", days)).Scan(ctx, &n); err != nil {
+			t.Fatalf("count retention jobs at %d days: %v", days, err)
+		}
+		return n
+	}
+
+	// Two windows nothing else in the tree uses, so a policy found at one of
+	// them is this call's and not a neighbour's.
+	const first, second = 23, 29
+
+	if err := ApplyRetention(ctx, db, first); err != nil {
+		t.Fatalf("ApplyRetention(%d): %v", first, err)
+	}
+	if got := countAt(first); got < 3 {
+		t.Fatalf("%d retention policies at %d days, want at least the raw table and both aggregates", got, first)
+	}
+
+	if err := ApplyRetention(ctx, db, second); err != nil {
+		t.Fatalf("ApplyRetention(%d): %v", second, err)
+	}
+	if got := countAt(second); got < 3 {
+		t.Fatalf("%d retention policies at %d days after a second call, want at least three -- add_retention_policy alone cannot change an interval, so this is the remove-then-add doing its job", got, second)
+	}
+	if got := countAt(first); got != 0 {
+		t.Errorf("%d retention policies still at the OLD %d days; the change did not take and the call reported success", got, first)
+	}
+
+	// Leave the shared database on the default, so a later run in this lane
+	// reads the window the migration ships rather than this test's.
+	if err := ApplyRetention(ctx, db, DefaultRetentionDays); err != nil {
+		t.Fatalf("restore the default window: %v", err)
+	}
+}
+
+// A cluster without TimescaleDB has no policies to move, and that is a no-op
+// rather than an error: the views the migration created there are computed
+// live from rows nothing drops. Asserted without a database, so it runs
+// everywhere.
+func TestApplyRetentionRefusesOnlyANilHandle(t *testing.T) {
+	if err := ApplyRetention(context.Background(), nil, 30); err == nil {
+		t.Error("a nil handle must be an error -- silently doing nothing would leave an operator's configured window unapplied with nothing said")
+	}
+}
