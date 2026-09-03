@@ -3772,7 +3772,7 @@ func InvitationByTokenHashBuild(args InvitationByTokenHashArgs) string {
 
 // InvitationsForAccount -- The guest invitations sent on behalf of one account.
 // `invitationAdminSummary`, NEVER `invitationFull`, and this is the rule the Users app's own review wrote (memql#4735): `invitationFull` projects `tokenHash`, `previousTokenHash` and `bindingHash` -- not the plaintext token, but the key the resolve path looks an invitation up BY -- and a rollup that says how many guests a client has has never needed them.
-// `requiresOwnerOrAdmin` is `pendingUserInvitations`' own gate, carried here for the same reason: the invitation concept declares no row tier, so the spec IS the authorization on this read, and a rollup that dropped it would be the shortest path in the product to reading every invitation in the cluster. The Accounts app is not admin-gated, so below that floor this section renders empty -- which is the engine's answer, rendered.
+// `requiresDeveloperOrAbove` is `pendingUserInvitations`' own gate, carried here for the same reason: the invitation concept declares no row tier, so the spec IS the authorization on this read, and a rollup that dropped it would be the shortest path in the product to reading every invitation in the cluster. It FOLLOWS that gate rather than restating one, which is what keeps the two in step -- the pair widened together when developers gained the admission capability. Below the floor this section renders empty -- which is the engine's answer, rendered.
 //
 // Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["invitationsForAccount"] in generated_concepts.go).
 type InvitationsForAccountArgs struct {
@@ -5525,7 +5525,7 @@ func PendingAccessRequestsBuild(args PendingAccessRequestsArgs) string {
 }
 
 // PendingUserInvitations -- Every pending user invitation on this cluster -- who was invited, by whom, and until when.
-// The console's "who is still outstanding" read, and the list a revoke acts on. Owner/admin only: an invitation names an address somebody chose to invite, which is not a fact every authenticated reader is owed.
+// The console's "who is still outstanding" read, and the list a revoke acts on. Developer and above: an invitation names an address somebody chose to invite, which is not a fact every authenticated reader is owed -- but it is one every caller who can ISSUE an invitation needs, and developer can (auth.CanAdmitPeople). A caller able to send invitations and unable to see the outstanding ones cannot revoke a link sent to the wrong address, which is the one repair this list exists for.
 // kind=="user" is load-bearing rather than decorative: guest invitations live in the same concept, belong to a space rather than to the cluster, and have their own product-side surface.
 //
 // Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["pendingUserInvitations"] in generated_concepts.go).
@@ -6500,9 +6500,11 @@ func ScheduledSendJobsBuild(args ScheduledSendJobsArgs) string {
 	return "query scheduledSendJobs()"
 }
 
-// SearchUsers -- Search users, optionally gated by active status. Omit `active` to list active and deactivated users alike; pass true to return only active users or false for only deactivated ones. Owner-or-admin only. Backs the searchUsers tool.
+// SearchUsers -- Search users, optionally gated by active status. Omit `active` to list active and deactivated users alike; pass true to return only active users or false for only deactivated ones. Developer-or-above only. Backs the searchUsers tool.
 // memql#2883: `when(args.active)` is DROPPED when the arg is absent (authoring rules), so before this gate `searchUsers()` with no arguments applied no predicate at all and returned every user in the cluster in userFull -- every @pii field plus the cluster-wide auth role. It is also on the agent tool surface (dsl/memql/tools.memql), so a prompt-injected or over-eager agent could pull the whole user table.
-// requiresOwnerOrAdmin rather than @serverOnly, because unlike its three siblings this one has a genuine client caller: the MCP tool. Gating by origin would delete the tool; gating by role keeps it working for the administrators it was built for. This is the same gate #2860 put on userById.
+// A ROLE GATE rather than @serverOnly, because unlike its three siblings this one has a genuine client caller: the MCP tool. Gating by origin would delete the tool; gating by role keeps it working for the administrators it was built for.
+// WIDENED FROM requiresOwnerOrAdmin TO requiresDeveloperOrAbove (memql#4917), which restores what the capability catalog already said: dsl/rbac/seeds.memql grants developer `read` on `principal`, described as "see the user list; no management". The narrower spec contradicted that seed -- and once developers could invite people (auth.CanAdmitPeople) they would have been inviting them into a cluster whose roster they could not see.
+// The MANAGEMENT verbs are untouched: a developer reading this list still cannot edit, re-role, suspend or delete anybody on it.
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["searchUsers"] in generated_concepts.go).
 type SearchUsersArgs struct {

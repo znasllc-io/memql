@@ -26,6 +26,12 @@ const (
 	// Phase 2 #1532): it can author constructs + run inline DSL + write data,
 	// but CANNOT manage users/identities (that stays admin/owner). owner is a
 	// superset of developer; admin gains neither authoring nor inline.
+	//
+	// ONE EXCEPTION, AND IT IS ADMISSION RATHER THAN MANAGEMENT (memql#4917):
+	// developer holds create-on-admission (CanAdmitPeople), so it may issue
+	// and revoke user invitations and enrolment links, and read the user list.
+	// It holds no create, update or delete on `principal`, so it still cannot
+	// edit, re-role, suspend or remove an account -- including one it invited.
 	RoleDeveloper Role = "developer"
 	RoleWriter    Role = "writer"
 	RoleReader    Role = "reader"
@@ -206,6 +212,32 @@ func IsPrivilegedUser(u UserContext) bool {
 // admin), preserving the prior owner||admin result.
 func AtLeastAdmin(u UserContext) bool {
 	return roleHasCapability(u.Role, "create", "principal")
+}
+
+// CanAdmitPeople reports whether the caller may hand somebody a credential
+// that admits them to this cluster: a user invitation or an enrolment link.
+// == the create-on-admission capability (owner, admin, developer).
+//
+// WHY THIS IS NOT AtLeastAdmin. It was, and that was the whole of the bug: a
+// developer helping an owner stand a cluster up could not invite anybody,
+// because the single owner/admin gate on the identity-admin surface covers
+// fourteen operations at once. Widening THAT gate would have handed developers
+// role changes, suspensions, token revocation and recovery-key rotation along
+// with the invite they actually needed.
+//
+// WHY IT IS NOT AtLeastDeveloper EITHER, which admits exactly the same three
+// roles today and would have been one word. That predicate is the
+// execute-on-deployment grant -- "may cut and ship a version". Reusing it here
+// would make one capability answer two unrelated policy questions, so a
+// cluster that later wants a role which deploys but does not invite (or the
+// reverse) could not say so, and whichever gate moved first would silently
+// move the other. Two questions, two capabilities.
+//
+// REVOKING RIDES THE SAME GRANT rather than a separate delete-on-admission.
+// An issuer who cannot take back a link sent to the wrong address is worse
+// than one who can, and no policy anybody has asked for distinguishes them.
+func CanAdmitPeople(u UserContext) bool {
+	return roleHasCapability(u.Role, "create", "admission")
 }
 
 // AtLeastDeveloper returns true if the user has owner, admin, or developer

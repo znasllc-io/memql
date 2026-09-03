@@ -125,8 +125,8 @@ flows:
   sends a guest a link via `SendGuestInviteMsg`. Guests authenticate with
   `Authorization: Guest <token>` (the gRPC stream interceptor's
   guest-aware path).
-- **User invitations** (memql#4270): an owner or admin issues one over
-  `IdentityAdminMsg.issue_user_invitation`, and the reply carries the link
+- **User invitations** (memql#4270): an owner, admin **or developer** issues one
+  over `IdentityAdminMsg.issue_user_invitation`, and the reply carries the link
   ONCE -- only the token's SHA-256 digest is persisted, the same convention
   every other credential row in this domain follows. The recipient opens
   `/invitation?code=<token>` (memql#4601): the page resolves the token
@@ -151,12 +151,25 @@ flows:
   | `open` | Permitted, and the reply says the mode so a console can tell the operator this is a courtesy: the recipient could have registered unaided. |
 
   An inviter cannot grant a role above their own, compared on the cluster's
-  one ladder (`auth.RoleRank`). Note the ordering: **developer outranks
-  admin**, so an admin cannot mint a developer invitation. That comparison used
-  to run against a private table in `adminops` which ranked admin above
-  developer, so an admin could mint a developer invitation -- a principal the
-  canonical model ranks above them -- through the one check whose job is to
-  refuse exactly that.
+  one ladder (`auth.RoleRank`) -- **and cannot grant one whose people-authority
+  exceeds their own**, which is a second, different question.
+
+  The two are not the same because rank and authority disagree at one rung.
+  developer ranks 300 and admin 200, so the rank cap alone would let a
+  developer invite an address they control **as an admin** -- and an admin
+  holds the `principal` verbs a developer does not. That is a two-move path to
+  owner, since `SetUserRole` caps nothing. `auth.GrantsPrincipalAuthorityBeyond`
+  refuses it. An admin still cannot mint a developer invitation, on rank.
+
+  **Why developer is on this list** (memql#4917). Issuing an invitation is the
+  `create` verb on the `admission` resource (`auth.CanAdmitPeople`), held by
+  owner, admin and developer. It is deliberately NOT `create` on `principal`,
+  the user-management authority behind `auth.AtLeastAdmin`, which gates ten
+  other operations here including role changes, suspensions, token revocation
+  and recovery-key rotation. A developer standing a cluster up alongside the
+  owner can get colleagues in; they still cannot edit, re-role or suspend
+  anybody who accepts. Enrolment links ride the same capability, for the same
+  reason: both are a credential that admits a named person.
 
   **An enrolment link is bounded by WHO IT NAMES, not only by who mints it**
   (and this is stricter than it used to be). The link authorizes exactly one
@@ -165,7 +178,11 @@ flows:
   account can sign in as it. `IssueEnrolmentLink` therefore applies
   `auth.GovernPrincipal`: an owner-ranked target is reachable only by an
   owner, an owner reaches everyone, minting one for **yourself** is always
-  allowed, and otherwise the caller must STRICTLY outrank the target.
+  allowed, and otherwise the caller must STRICTLY outrank the target. It is
+  ANDed with `auth.GrantsPrincipalAuthorityBeyond`, because outranking is not
+  the same as holding more authority -- a developer outranks an admin and holds
+  fewer `principal` verbs, so rank alone would let them mint a link for an
+  admin account and sign in as it.
 
   Before this, the target only had to exist. An admin could mint a link for
   the OWNER and take the account, and the admission capability would have

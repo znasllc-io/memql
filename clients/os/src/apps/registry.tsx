@@ -186,29 +186,43 @@ const logs: OsAppManifest = {
 // disagree -- a preference naming a section the manifest does not declare
 // leaves the window on People with the nav highlighting nothing.
 //
-// `roles` here is PRESENTATION (spec section E). The engine's
-// `requiresOwnerOrAdmin` specs, `adminops.authorize` and row admission remain
-// the authority on every read and write this app makes.
+// `roles: { min: "admin" }` is PRESENTATION (spec section E). The engine's
+// specs, `adminops`' two gates and row admission remain the authority on every
+// read and write this app makes.
 //
-// A SET, NOT A FLOOR (epic memql#4832, D1). `min: "admin"` was written when
-// the shell ranked admin ABOVE developer, so it meant {admin, owner}. The
-// engine ranks developer (300) above admin (200) and that ordering is now the
-// only one, so the same line silently came to admit developer -- while every
-// gate inside this app is `auth.AtLeastAdmin`, which asks for the
-// create-on-principal CAPABILITY and not a rank. A developer was offered the
-// app, served two empty lists by `requiresOwnerOrAdmin`, and pointed at an
-// Invite form that answered PERMISSION_DENIED.
+// A FLOOR, AND IT HAS BEEN WRONG TWICE IN OPPOSITE DIRECTIONS, so the
+// reasoning is worth keeping.
 //
-// NEITHER FLOOR CAN SAY THIS. `min: "admin"` admits a developer the engine
-// refuses; `min: "developer"` would exclude the admins the app exists for.
-// admin and developer are ORTHOGONAL -- admin holds the principal verbs and no
-// authoring, developer the reverse -- so the requirement is a set. Settings >
-// Integrations needs the same form for the same reason.
+// It was written when the shell ranked admin ABOVE developer, so it meant
+// {admin, owner}. Epic memql#4832 made the engine's ordering the only one and
+// developer sits at 300 above admin's 200, so the same line silently came to
+// mean {admin, developer, owner}. At that moment it was WRONG: every gate
+// inside was `auth.AtLeastAdmin`, the create-on-principal capability, which
+// developer does not hold. A developer was offered the app, served two empty
+// lists, and pointed at an Invite form that answered PERMISSION_DENIED. The
+// repair was briefly to state the set `{ any: ["admin", "owner"] }`.
+//
+// Then the owner decided the premise was wrong for this cluster (memql#4917):
+// a developer helping an owner stand a cluster up SHOULD be able to invite
+// people. Developer gained a capability of its own, create-on-admission, which
+// covers user invitations and enrolment links and nothing else.
+//
+// That makes the admitted set {admin, developer, owner} = rank >= 200: a
+// CONTIGUOUS TOP, and therefore a floor. roles.ts states the rule -- a set
+// that is really a contiguous top is a `min` written the long way, and it
+// silently stops admitting whatever rung is added above it. The set form is
+// still right for Settings > Integrations, which leaves a rung out of the
+// MIDDLE.
+//
+// A DEVELOPER DOES NOT GET THE WHOLE APP, and this floor is not claiming
+// otherwise. They read the people list, issue and revoke invitations, and mint
+// enrolment links. Changing a role and re-enabling sign-in links stay
+// owner/admin and are not rendered for them -- see PersonDetail.
 const users: OsAppManifest = {
   id: "users",
   name: "Users",
   icon: Users,
-  roles: { any: ["admin", "owner"] },
+  roles: { min: "admin" },
   sections: USERS_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",

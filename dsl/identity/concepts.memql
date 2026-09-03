@@ -577,7 +577,8 @@ concept magicLinkRequest {
 //     the write path's rowAuthzWriteEscape has no read-side counterpart
 //     -- so no tier can spare them.
 //   - THE ADMIN READS ARE A ROLL-UP. searchUsers / userById are
-//     "the users of this cluster", gated requiresOwnerOrAdmin. `owned`
+//     "the users of this cluster", gated by a role spec -- searchUsers on
+//     requiresDeveloperOrAbove, userById still on requiresOwnerOrAdmin. `owned`
 //     ANDs its predicate with no cluster-owner escape, so declaring it
 //     would narrow an admin's user list to the admin's own row and
 //     return a confidently wrong answer.

@@ -38,10 +38,13 @@ export const USER_CONCEPT = "v1:identity:user";
  * and re-baseline every arrival cue, so flipping it would announce the whole
  * list as new.
  *
- * The gate is the query's own -- `searchUsers` carries `requiresOwnerOrAdmin`
- * as a top-level conjunct, so the engine empties the result for a caller below
- * the floor whatever this code renders. The manifest's `roles: { min: "admin" }`
- * is presentation on top of that, never instead of it.
+ * The gate is the query's own -- `searchUsers` carries
+ * `requiresDeveloperOrAbove` as a top-level conjunct, so the engine empties
+ * the result below that whatever this code renders. Developer is included
+ * deliberately: the RBAC catalog has granted it read-on-principal all along,
+ * described as "see the user list", and a caller who can INVITE people needs
+ * to see the roster they are inviting into. The manifest's
+ * `roles: { min: "admin" }` is presentation on top of that, never instead.
  */
 export function usePeople(): LiveCollectionHandle<Row> {
   return useLiveCollection<Row>("users:people", (connection) => ({

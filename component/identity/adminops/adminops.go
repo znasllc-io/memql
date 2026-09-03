@@ -335,6 +335,45 @@ func resolveActor(ctx context.Context) (actor, bool) {
 // boolean, not the zero Result, is what says "proceed": a Result is a value
 // and an empty one is indistinguishable from a successful no-op.
 func (s *Service) authorize(ctx context.Context, verb string, detail map[string]any) (actor, Result, bool) {
+	return s.authorizeWith(ctx, verb, detail, auth.AtLeastAdmin, "the owner or admin role", "role_not_admin")
+}
+
+// authorizeAdmission enforces the ADMISSION gate: may this caller hand
+// somebody a credential that lets them into the cluster -- a user invitation
+// or an enrolment link? Owner, admin and developer hold it
+// (auth.CanAdmitPeople).
+//
+// THE SECOND GATE EXISTS BECAUSE THE FIRST COVERS FOURTEEN OPERATIONS. Every
+// write here used to answer to one owner/admin check, so "a developer should
+// be able to invite people" had no expressible answer short of handing
+// developers role changes, suspensions, token revocation, cluster settings and
+// recovery-key rotation too. Splitting per operation is the shape
+// component/deploycontrol already uses for the same reason.
+//
+// Everything NOT named here keeps the owner/admin gate. When adding an
+// operation, `authorize` is the default and this is the deliberate exception;
+// an op that silently picks this one widens the surface.
+func (s *Service) authorizeAdmission(ctx context.Context, verb string, detail map[string]any) (actor, Result, bool) {
+	return s.authorizeWith(ctx, verb, detail, auth.CanAdmitPeople,
+		"the owner, admin, or developer role", "role_cannot_admit")
+}
+
+// authorizeWith is the one implementation both gates share: resolve the
+// caller, apply the predicate, and on refusal write the single audit event and
+// build the Result the caller returns verbatim.
+//
+// `refusalReason` differs per gate on purpose: `role_not_admin` has meant
+// "below owner/admin" since the /admin routes wrote it, and reusing it for a
+// caller refused by the admission gate would make two different denials
+// indistinguishable to anyone reading the trail.
+func (s *Service) authorizeWith(
+	ctx context.Context,
+	verb string,
+	detail map[string]any,
+	permits func(auth.UserContext) bool,
+	describe string,
+	refusalReason string,
+) (actor, Result, bool) {
 	act, resolved := resolveActor(ctx)
 	if !resolved {
 		eventID := s.emit(ctx, identity.AuditCategoryAdmin, "admin_auth_forbidden", actor{}, "", "", detail,
@@ -342,11 +381,11 @@ func (s *Service) authorize(ctx context.Context, verb string, detail map[string]
 		return actor{}, fail(CodeUnauthenticated, eventID,
 			"identity admin: no authenticated caller on this connection"), false
 	}
-	if !auth.AtLeastAdmin(act.userContext()) {
+	if !permits(act.userContext()) {
 		eventID := s.emit(ctx, identity.AuditCategoryAdmin, "admin_auth_forbidden", act, "", "", detail,
-			identity.AuditOutcomeBlocked, "role_not_admin")
+			identity.AuditOutcomeBlocked, refusalReason)
 		return actor{}, fail(CodePermissionDenied, eventID, fmt.Sprintf(
-			"identity admin: %s requires the owner or admin role (you hold %q)", verb, act.role)), false
+			"identity admin: %s requires %s (you hold %q)", verb, describe, act.role)), false
 	}
 	return act, Result{}, true
 }

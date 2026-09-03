@@ -26,8 +26,7 @@
 
 use campaigns.concepts.{ campaign }
 use campaigns.shapes.{ campaignFull }
-use common.specs.{ requiresOwnerOrAdmin }
-use deployment.specs.{ requiresDeveloperOrAbove }
+use common.specs.{ requiresDeveloperOrAbove }
 use common.traits.{ isNotArchived, isNotDeleted }
 use identity.concepts.{ invitation }
 use identity.shapes.{ invitationAdminSummary }
@@ -232,18 +231,20 @@ query knowledgeDomain domainsForAccount {
 /// token, but the key the resolve path looks an invitation up BY -- and a
 /// rollup that says how many guests a client has has never needed them.
 ///
-/// `requiresOwnerOrAdmin` is `pendingUserInvitations`' own gate, carried here
-/// for the same reason: the invitation concept declares no row tier, so the
-/// spec IS the authorization on this read, and a rollup that dropped it would
-/// be the shortest path in the product to reading every invitation in the
-/// cluster. The Accounts app is not admin-gated, so below that floor this
-/// section renders empty -- which is the engine's answer, rendered.
+/// `requiresDeveloperOrAbove` is `pendingUserInvitations`' own gate, carried
+/// here for the same reason: the invitation concept declares no row tier, so
+/// the spec IS the authorization on this read, and a rollup that dropped it
+/// would be the shortest path in the product to reading every invitation in
+/// the cluster. It FOLLOWS that gate rather than restating one, which is what
+/// keeps the two in step -- the pair widened together when developers gained
+/// the admission capability. Below the floor this section renders empty --
+/// which is the engine's answer, rendered.
 @actor
 query invitation invitationsForAccount {
   args {
     accountId  string!
   }
-  filter  accountId==args.accountId && requiresOwnerOrAdmin
+  filter  accountId==args.accountId && requiresDeveloperOrAbove
   shape   invitationAdminSummary
   sort    "row.createdAt", "desc"
 }

@@ -76,6 +76,7 @@ var capabilitySets = map[Role]map[verbResource]bool{
 		vr("create", "agent"),
 		vr("create", "group"),
 		vr("read", "role"), vr("create", "role"), vr("update", "role"), vr("delete", "role"),
+		vr("create", "admission"),
 	),
 	RoleDeveloper: setOf(
 		// engineering: authoring + inline + data + forward deploy. NO principal mgmt.
@@ -85,6 +86,22 @@ var capabilitySets = map[Role]map[verbResource]bool{
 		vr("execute", "deployment"),
 		vr("read", "agent"),
 		vr("read", "role"),
+		// ADMISSION: may hand somebody a credential that lets them into this
+		// cluster -- a user invitation or an enrolment link.
+		//
+		// This is the one piece of people-work a developer holds, and it is
+		// deliberately NOT `create` on `principal`: that is the
+		// user-management authority AtLeastAdmin tests, gating fourteen
+		// operations including role changes, suspensions and recovery-key
+		// rotation. Admission is its own resource because the resource
+		// vocabulary is open by design -- v1:rbac:capability documents
+		// resourceType as "an open string (not a closed enum) so product
+		// layers can introduce their own resource kinds without an engine
+		// change".
+		//
+		// A developer still holds NO update or delete on `principal`, so they
+		// cannot edit, suspend or re-role anybody who accepts.
+		vr("create", "admission"),
 	),
 	RoleAdmin: setOf(
 		// user-management: full principal verbs + agent/group + data + deploy. NO authoring.
@@ -95,6 +112,7 @@ var capabilitySets = map[Role]map[verbResource]bool{
 		vr("create", "agent"),
 		vr("create", "group"),
 		vr("read", "role"), vr("create", "role"), vr("update", "role"),
+		vr("create", "admission"),
 	),
 	RoleWriter: setOf(
 		// writer -> member tier: read/write data plane + read catalogs. No mgmt/authoring/deploy.
@@ -141,6 +159,7 @@ const (
 	ResourceConstruct  = "construct"
 	ResourceData       = "data"
 	ResourceDeployment = "deployment"
+	ResourceAdmission  = "admission"
 	ResourceAgent      = "agent"
 	ResourceGroup      = "group"
 	ResourceRole       = "role"
@@ -166,6 +185,44 @@ const (
 // GovernPrincipal narrows the principal-resource verbs by rank + self.
 func Capable(role Role, verb, resourceType string) bool {
 	return roleHasCapability(role, verb, resourceType)
+}
+
+// GrantsPrincipalAuthorityBeyond reports whether `target` holds any verb on
+// the `principal` resource that `actor` does not.
+//
+// RANK IS NOT AUTHORITY, and this exists because of the one pair where they
+// disagree. developer ranks 300 and admin 200, so every "must strictly
+// outrank" rule admits developer -> admin -- while admin holds create, update
+// and delete on `principal` and developer holds only read. A gate that mints a
+// credential FOR an account (an enrolment link registers a passkey as that
+// person; an invitation creates one at a chosen role) therefore cannot ask
+// "do I outrank them". It has to ask this.
+//
+// Left unasked, the gap is a two-move path to owner: mint a credential for an
+// existing admin, sign in as them, then use the uncapped SetUserRole to make
+// anybody an owner.
+//
+// SCOPED TO `principal`, NOT TO EVERY RESOURCE, and that is deliberate. Full
+// capability containment refuses developer -> writer, because writer holds
+// read-on-group and developer does not, and even owner -> developer, because
+// developer holds read-on-agent and owner does not. Both are nonsense here.
+// `principal` is the governance-bearing resource -- the one whose verbs ARE
+// user management -- so it is the one that decides whether minting a
+// credential hands the minter authority they lack.
+//
+// It COMPLEMENTS GovernPrincipal rather than replacing it: the owner carve-out
+// is still what refuses admin -> owner, since both hold the same four verbs
+// and this predicate sees no difference between them.
+func GrantsPrincipalAuthorityBeyond(actor, target Role) bool {
+	for vr := range capabilitySets[target] {
+		if vr.resource != ResourcePrincipal {
+			continue
+		}
+		if !capabilitySets[actor][vr] {
+			return true
+		}
+	}
+	return false
 }
 
 // RoleRank exposes a role's numeric rank (HIGHER == more privileged) from the

@@ -13,11 +13,13 @@
 //     The gate for ROLLBACK (RollbackDeployment) -- not even admin may
 //     roll back; only the cluster owner can.
 //
-//   - requiresDeveloperOrAbove: the FORWARD-DEPLOY gate (#1876).
-//     Mirrors auth.AtLeastDeveloper (developer / admin / owner). Gates
-//     CutVersion + Deploy (and the SuggestNextVersion read companion).
-//     A developer is engineering power that may cut + ship a version;
-//     writer/reader stay read-only.
+//   - requiresDeveloperOrAbove MOVED to dsl/common/specs.memql, for the
+//     reason requiresOwnerOrAdmin moved there in memql#2800: it is a
+//     generic role predicate rather than a deployment concept, and
+//     identity now needs it too -- to gate the people list and the
+//     pending-invitations read, neither of which has anything to do with
+//     shipping a version. It still gates CutVersion + Deploy (and the
+//     SuggestNextVersion read companion) exactly as before.
 //
 //   - requiresOwnerOrAdmin: the original Deployment Console gate (#728).
 //     Mirrors auth.AtLeastAdmin. Still the gate for the legacy console
@@ -38,8 +40,5 @@ spec actorEnvelope requiresOwner {
   return role == "owner"
 }
 
-/// Caller must hold developer, admin, or owner role. The forward-deploy gate (#1876): cut a version
-/// + deploy. Writer/reader are read-only; rollback is owner-only via requiresOwner.
-spec actorEnvelope requiresDeveloperOrAbove {
-  return role == "developer" || role == "admin" || role == "owner"
-}
+// requiresDeveloperOrAbove now lives in dsl/common/specs.memql -- see the
+// header above.

@@ -110,6 +110,13 @@ func TestAnInviterCannotGrantAboveTheirOwnRole(t *testing.T) {
 		{"admin cannot grant owner", auth.RoleAdmin, "owner", true},
 		{"admin cannot grant developer", auth.RoleAdmin, "developer", true},
 
+		// THE RANK INVERSION, the second door to the same escalation. A
+		// developer outranks admin, so the rank cap alone lets them invite an
+		// address they control AS an admin -- and an admin holds the principal
+		// verbs they lack, including the uncapped SetUserRole.
+		{"developer cannot grant admin", auth.RoleDeveloper, "admin", true},
+		{"developer may grant writer", auth.RoleDeveloper, "writer", false},
+		{"developer may grant developer", auth.RoleDeveloper, "developer", false},
 		{"admin may grant admin", auth.RoleAdmin, "admin", false},
 		{"admin may grant writer", auth.RoleAdmin, "writer", false},
 		{"owner may grant developer", auth.RoleOwner, "developer", false},

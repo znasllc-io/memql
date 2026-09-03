@@ -98,7 +98,7 @@ func (s *Service) IssueUserInvitation(ctx context.Context, in UserInvitation) Re
 		detail["sharedMailbox"] = true
 	}
 
-	act, refusal, allowed := s.authorize(ctx, "issuing a user invitation", detail)
+	act, refusal, allowed := s.authorizeAdmission(ctx, "issuing a user invitation", detail)
 	if !allowed {
 		return refusal
 	}
@@ -142,13 +142,22 @@ func (s *Service) IssueUserInvitation(ctx context.Context, in UserInvitation) Re
 		// The inviter's own role is lowercased exactly as it was before this
 		// call site changed, and that fold is BELT-AND-BRACES rather than
 		// load-bearing: auth.RoleRank matches slugs EXACTLY, but so does
-		// AtLeastAdmin, so authorize() has already refused a caller whose row
-		// spelled the role "Admin" and this line cannot be reached with one.
+		// roleHasCapability, so authorizeAdmission() has already refused a
+		// caller whose row spelled the role "Admin" and this line cannot be
+		// reached with one.
 		// Kept because it costs a call and makes the swap to the shared model
 		// a pure one -- dropping it would leave this comparison ranking 0 on
 		// the day that gate learns to fold case.
 		inviterRank := auth.RoleRank(auth.Role(strings.ToLower(strings.TrimSpace(string(act.role)))))
-		if auth.RoleRank(auth.Role(role)) > inviterRank {
+		// THE RANK CAP IS NOT ENOUGH ON ITS OWN. developer outranks admin and
+		// holds strictly fewer principal verbs, so rank alone lets a developer
+		// invite an address they control AS an admin -- and an admin can then
+		// do the user management the developer cannot, including the uncapped
+		// SetUserRole. The second clause is what refuses granting a role whose
+		// people-authority exceeds the inviter's own.
+		inviterSlug := auth.Role(strings.ToLower(strings.TrimSpace(string(act.role))))
+		if auth.RoleRank(auth.Role(role)) > inviterRank ||
+			auth.GrantsPrincipalAuthorityBeyond(inviterSlug, auth.Role(role)) {
 			return fail(CodePermissionDenied, s.emit(ctx, identity.AuditCategoryAdmin, "user_invitation_issued",
 				act, "", email, detail, identity.AuditOutcomeBlocked, "role_above_inviter"),
 				"identity admin: you cannot invite somebody as "+role+" -- that is above your own role")
@@ -352,7 +361,7 @@ func (s *Service) RevokeUserInvitation(ctx context.Context, invitationID string)
 	invitationID = strings.TrimSpace(invitationID)
 	detail := map[string]any{"invitationId": invitationID}
 
-	act, refusal, allowed := s.authorize(ctx, "revoking a user invitation", detail)
+	act, refusal, allowed := s.authorizeAdmission(ctx, "revoking a user invitation", detail)
 	if !allowed {
 		return refusal
 	}

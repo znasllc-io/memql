@@ -67,6 +67,55 @@ describe("People, live", () => {
     view.unmount();
   });
 
+  // ===========================================================================
+  // WHAT A DEVELOPER SEES IN A PERSON PANEL
+  // ===========================================================================
+  // Developer reaches this app because it holds create-on-admission: it may
+  // invite people and mint enrolment links. It holds NO verb on `principal`,
+  // so changing a role and re-enabling sign-in links are refused server-side
+  // every time by adminops' unchanged owner/admin gate.
+  //
+  // Those two controls are therefore not rendered for a developer, and the
+  // third is. Without these cases the app-level floor keeps passing while
+  // offering a developer a role picker whose every option fails.
+
+  it("offers a developer the enrolment link and no role picker", async () => {
+    const view = mount(
+      fakeConnection({
+        searchUsers: [userRow({ id: "v1:identity:user:ada", displayName: "Ada", role: "reader" })],
+      }),
+      "people",
+      "developer",
+    );
+
+    const row = await screen.findByRole("button", { name: /Ada/ });
+    act(() => row.click());
+
+    expect(screen.queryByLabelText(/Cluster role for/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Re-enable sign-in links/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Mint enrolment link/ })).toBeTruthy();
+    view.unmount();
+  });
+
+  it("offers an admin the role picker the developer does not get", async () => {
+    // The positive control. Without it the case above is satisfied by a panel
+    // that renders no controls for anybody.
+    const view = mount(
+      fakeConnection({
+        searchUsers: [userRow({ id: "v1:identity:user:ada", displayName: "Ada", role: "reader" })],
+      }),
+      "people",
+      "admin",
+    );
+
+    const row = await screen.findByRole("button", { name: /Ada/ });
+    act(() => row.click());
+
+    expect(screen.getByLabelText(/Cluster role for/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Mint enrolment link/ })).toBeTruthy();
+    view.unmount();
+  });
+
   it("shows the LiveState caption rather than an empty cluster while it seeds", async () => {
     const connection = fakeConnection({ searchUsers: [] });
     const view = mount(connection);

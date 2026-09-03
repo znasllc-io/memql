@@ -138,10 +138,14 @@ seed capability cap-owner-create-role { roleSlug: "owner"  verb: "create"  resou
 seed capability cap-owner-update-role { roleSlug: "owner"  verb: "update"  resourceType: "role"  predefined: true }
 @description("owner: delete custom roles.")
 seed capability cap-owner-delete-role { roleSlug: "owner"  verb: "delete"  resourceType: "role"  predefined: true }
+@description("owner: admit people -- issue and revoke the credentials that let somebody into this cluster (a user invitation, an enrolment link).")
+seed capability cap-owner-create-admission { roleSlug: "owner"  verb: "create"  resourceType: "admission"  predefined: true }
 
 // =============================================================================
-//   developer -- engineering power: authoring + inline + data + deploy.
-//   NO principal management (cannot create/update/delete users).
+//   developer -- engineering power: authoring + inline + data + deploy,
+//   plus ADMISSION (invite a person, mint an enrolment link).
+//   NO principal management (cannot create/update/delete users): admission
+//   and principal are separate resources precisely so this line stays true.
 // =============================================================================
 
 @description("developer: read principals (see the user list; no management).")
@@ -168,6 +172,8 @@ seed capability cap-developer-execute-deployment { roleSlug: "developer"  verb: 
 seed capability cap-developer-read-agent { roleSlug: "developer"  verb: "read"    resourceType: "agent"  predefined: true }
 @description("developer: read the RBAC role catalog.")
 seed capability cap-developer-read-role { roleSlug: "developer"  verb: "read"    resourceType: "role"  predefined: true }
+@description("developer: admit people -- issue and revoke user invitations and enrolment links (auth.CanAdmitPeople). A developer standing a cluster up alongside the owner can get colleagues in. Deliberately NOT create-on-principal, the user-management authority gating role changes, suspensions and recovery keys: a developer holds no update or delete on a principal, so it cannot edit, re-role or suspend anybody who accepts.")
+seed capability cap-developer-create-admission { roleSlug: "developer"  verb: "create"  resourceType: "admission"  predefined: true }
 
 // =============================================================================
 //   admin -- user-management power: full principal verbs + agent/group
@@ -204,6 +210,8 @@ seed capability cap-admin-read-role { roleSlug: "admin"  verb: "read"    resourc
 seed capability cap-admin-create-role { roleSlug: "admin"  verb: "create"  resourceType: "role"  predefined: true }
 @description("admin: edit custom roles within rank bound.")
 seed capability cap-admin-update-role { roleSlug: "admin"  verb: "update"  resourceType: "role"  predefined: true }
+@description("admin: admit people -- issue and revoke user invitations and enrolment links. Implied by the full principal verbs an admin already holds, and seeded explicitly so the admission gate is one lookup for every role rather than a lookup plus a special case.")
+seed capability cap-admin-create-admission { roleSlug: "admin"  verb: "create"  resourceType: "admission"  predefined: true }
 
 // =============================================================================
 //   user -- the member tier (writer collapses here). Read/write data plane
