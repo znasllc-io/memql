@@ -107,4 +107,19 @@ describe("refusal copy coverage", () => {
     // cluster yet"), and nothing this build could add would help.
     expect(copyFor("deployable_target_not_offered")?.next).toBe("");
   });
+
+  it("says the DEPLOY SUCCEEDED for the two placement halves", () => {
+    // The pipeline applies the account and the domain AFTER the publish and
+    // records a refusal on the outcome without failing the run
+    // (component/packages/stages.go). Copy that read as a failed deploy would
+    // send somebody looking for a site that is already serving, so both
+    // headlines say it is live and both next steps name the stop that fixes
+    // the half that was refused.
+    for (const code of ["deployable_account_refused", "deployable_domain_refused"]) {
+      const copy = copyFor(code);
+      expect(copy, `${code} has no copy`).not.toBeNull();
+      expect(copy?.title, `${code} does not say it is live`).toContain("live");
+      expect(copy?.next, `${code} does not name the stop that repairs it`).toContain("Where it lives");
+    }
+  });
 });
