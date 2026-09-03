@@ -102,6 +102,12 @@ var maintenanceAutomations = map[string]string{
 		"boot forever, which is exactly the clobbering of a human's edits that decision D3 exists to forbid. " +
 		"@createOnly on createClientAccount is the second guard, and it would hold -- but a probe that is " +
 		"wrong on every call is not something to leave standing behind a guard",
+	"logsRetentionSweep": "the nightly log-store sweep (epic memql#4893), a retention sweep over every " +
+		"node's log lines. What it runs is builtin logsSweep, whose Go executor is floored at CLUSTER OWNER " +
+		"(design L3) -- the same floor an owner running it by hand clears, and the only floor the rows have, " +
+		"because log_line is a dedicated hypertable no row admission ever sees. Without this principal the " +
+		"automation's RoleReader system actor is refused by the very sweep it exists to run, every night, " +
+		"and the store grows past its retention with one refusal line per night as the only sign",
 }
 
 // IsMaintenanceAutomation reports whether this automation runs under the

@@ -10,6 +10,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 // Auditor records the outcome of a deploy on v1:identity:auditEvent.
@@ -119,7 +120,8 @@ func (a *engineAuditor) Deploy(ctx context.Context, ev DeployAuditEvent) {
 
 	if _, err := a.engine.Execute(ctx, b.String()); err != nil {
 		a.logger.Warn("packages: the deploy audit event could not be written",
-			"component", "packages.pipeline", "package", ev.PackageId,
+			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, ev.DeploymentId),
+			"deployment", ev.DeploymentId, "package", ev.PackageId,
 			"outcome", outcome, "err", err)
 	}
 }

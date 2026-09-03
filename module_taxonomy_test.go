@@ -110,6 +110,16 @@ var pluginKinds = map[string]moduleKind{
 	// DELIVERY and nothing else -- which is the shape of a component's
 	// tunable, not of a pack's on/off.
 	"datasync": kindComponent,
+	// The log store (epic memql#4893). A COMPONENT by this table's own test:
+	// turning it off breaks the engine rather than removing a feature. Its
+	// eight builtins are declared in dsl/observability, which every binary
+	// loads, so a node without the executor fails boot resolution on every
+	// node type. And it is not an integration: it calls nobody's API for its
+	// own sake -- the archive rides the cluster's own blob container through
+	// the same client the `storage` integration wraps, which is the
+	// relationship `database` has to Postgres rather than the one `shopify`
+	// has to Shopify.
+	"logs": kindComponent,
 
 	// --- PACKS: product features with a coherent "off". ---
 	"chat":          kindPack,
