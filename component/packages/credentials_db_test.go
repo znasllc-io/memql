@@ -129,6 +129,14 @@ func (g *fakeGitHub) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	prefix := "/repos/" + g.repoPath + "/"
 	switch {
+	case req.URL.Path == "/repos/"+g.repoPath:
+		// The probe's endpoint. A PRIVATE repository, so the probe under
+		// A's credential is the reachable positive for the bearer -- and
+		// the 404 below is what a stranger, or no credential, gets.
+		if req.Header.Get("Authorization") == "" {
+			return answer(http.StatusNotFound, []byte(`{"message":"Not Found"}`), "application/json"), nil
+		}
+		return answer(http.StatusOK, []byte(`{"private":true,"default_branch":"main"}`), "application/json"), nil
 	case strings.HasPrefix(req.URL.Path, prefix+"tarball"):
 		return answer(http.StatusOK, g.tarball, "application/gzip"), nil
 	case strings.HasPrefix(req.URL.Path, prefix+"commits/"):
@@ -143,7 +151,9 @@ func (g *fakeGitHub) ours() []*http.Request {
 	defer g.mu.Unlock()
 	var out []*http.Request
 	for _, r := range g.requests {
-		if strings.Contains(r.URL.Path, "/repos/"+g.repoPath+"/") {
+		// The repository itself (the probe's endpoint) or anything under
+		// it; the trailing slash keeps B's "<repo>-b" from matching.
+		if r.URL.Path == "/repos/"+g.repoPath || strings.HasPrefix(r.URL.Path, "/repos/"+g.repoPath+"/") {
 			out = append(out, r)
 		}
 	}
@@ -305,8 +315,38 @@ func TestCredentialResolutionIsOwnerScopedOverRealRows(t *testing.T) {
 	if reqs := gh.ours(); len(reqs) != 1 || reqs[0].Header.Get("Authorization") != "Bearer "+token {
 		t.Fatalf("want one tarball request carrying the bearer, got %d request(s): %v", len(reqs), authHeaders(reqs))
 	}
-	if got := rowString(cardFor(t, eng, ctxA, credentialId), "lastUsedAt"); got == "" {
+	usedAt := rowString(cardFor(t, eng, ctxA, credentialId), "lastUsedAt")
+	if usedAt == "" {
 		t.Fatal("a successful fetch must stamp lastUsedAt on the credential")
+	}
+
+	// (1b) A PROBES under the same credential (epic memql#4885, D11): the
+	// sealed read resolves over real rows under A's own actor, GitHub sees
+	// the bearer, the answer is the typed reason -- and the heartbeat does
+	// not move, because a probe is not a fetch. The statement-level half of
+	// that claim is probe_test.go; this is the row-level half.
+	gh.reset()
+	probe, perr := ProbeSource(ctxA, i.deps, repoUrl, credentialId)
+	if perr != nil {
+		t.Fatalf("A's probe under its own credential: %v", perr)
+	}
+	if probe.Reason != ProbeReasonOK || !probe.Reachable || !probe.Private || probe.DefaultBranch != "main" {
+		t.Fatalf("probe answered %+v", probe)
+	}
+	if reqs := gh.ours(); len(reqs) != 1 || reqs[0].Header.Get("Authorization") != "Bearer "+token {
+		t.Fatalf("the probe must present A's bearer, got: %v", authHeaders(reqs))
+	}
+	if got := rowString(cardFor(t, eng, ctxA, credentialId), "lastUsedAt"); got != usedAt {
+		t.Fatalf("a probe stamps nothing: lastUsedAt moved from %q to %q", usedAt, got)
+	}
+	// And anonymously the same repository is "not found or private", with
+	// no bearer on the wire.
+	gh.reset()
+	if probe, perr = ProbeSource(ctxA, i.deps, repoUrl, ""); perr != nil || probe.Reason != ProbeReasonNotFoundOrPrivate {
+		t.Fatalf("an anonymous probe of a private repository: %+v %v", probe, perr)
+	}
+	if reqs := gh.ours(); len(reqs) != 1 || reqs[0].Header.Get("Authorization") != "" {
+		t.Fatalf("an anonymous probe sends no bearer, got: %v", authHeaders(reqs))
 	}
 
 	// (4) A cluster owner deploying A's package fetches under A's credential:
@@ -358,6 +398,15 @@ func TestCredentialResolutionIsOwnerScopedOverRealRows(t *testing.T) {
 			t.Fatalf("the poll asked GitHub for B's repository under a credential B cannot read: %s", r.URL)
 		}
 	}
+	// B probing under A's credential is refused by name too, before any
+	// request: the probe resolves under the CALLER, and B is not the owner.
+	gh.reset()
+	if probe, perr := ProbeSource(ctxB, i.deps, repoUrl, credentialId); perr != nil || probe.Reason != ProbeReasonCredentialNotFound {
+		t.Fatalf("B's probe under A's credential must answer %s, got %+v %v", ProbeReasonCredentialNotFound, probe, perr)
+	}
+	if n := len(gh.requests); n != 0 {
+		t.Fatalf("%d request(s) left the cluster for a probe under a credential the caller cannot read", n)
+	}
 	// And B cannot revoke it either: the owned write guard is the decision.
 	if _, rerr := i.handleSourceCredentialRevoke(ctxB, map[string]any{"credentialId": credentialId}, 0); rerr == nil {
 		t.Fatal("B revoked A's credential -- the owned write guard did not decide")
@@ -377,6 +426,13 @@ func TestCredentialResolutionIsOwnerScopedOverRealRows(t *testing.T) {
 	}
 	if n := len(gh.requests); n != 0 {
 		t.Fatalf("%d request(s) left the cluster under a revoked credential", n)
+	}
+	// The probe answers the revocation as a reason, and makes no request.
+	if probe, perr := ProbeSource(ctxA, i.deps, repoUrl, credentialId); perr != nil || probe.Reason != ProbeReasonCredentialRevoked {
+		t.Fatalf("a probe under a revoked credential must answer %s, got %+v %v", ProbeReasonCredentialRevoked, probe, perr)
+	}
+	if n := len(gh.requests); n != 0 {
+		t.Fatalf("%d request(s) left the cluster for a probe under a revoked credential", n)
 	}
 	card = cardFor(t, eng, ctxA, credentialId)
 	if rowString(card, "status") != credentialStatusRevoked || rowString(card, "revokedAt") == "" {

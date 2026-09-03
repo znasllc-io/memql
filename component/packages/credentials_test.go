@@ -72,7 +72,7 @@ func credentialHarness(t *testing.T, engine Engine, logger *slog.Logger) (*Integ
 	i := NewIntegration(engine, logger)
 	s := &store{engine: engine, logger: logger}
 	i.depsOnce.Do(func() {
-		i.deps = &Deps{Store: s, Credentials: s.resolveCredential, Logger: logger}
+		i.deps = &Deps{Store: s, Credentials: s.resolveCredential, PeekCredentials: s.peekCredential, Logger: logger}
 	})
 	return i, s
 }
