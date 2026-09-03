@@ -181,6 +181,23 @@ export async function setSiteLive(query: QueryClient, siteId: string, status: "l
   );
 }
 
+/**
+ * Replace a deployable's runtime settings (epic memql#4906).
+ *
+ * THE WHOLE MAP, because the mutation replaces rather than merges -- which is
+ * what makes removing a setting expressible at all. Through the generated
+ * builder, which renders the object argument the engine parses; a hand-built
+ * one would be a second spelling of a nested literal, and a nested object in
+ * a call string is exactly where hand-building goes wrong.
+ */
+export async function saveSiteSettings(
+  query: QueryClient,
+  siteId: string,
+  settings: Record<string, string>,
+): Promise<void> {
+  await query.updateSiteSettings({ siteId, settings });
+}
+
 // ---------------------------------------------------------------------------
 // The version walk
 // ---------------------------------------------------------------------------

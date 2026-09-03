@@ -5,6 +5,8 @@ import { Button, Caption, Chip, Fact, Facts, Input } from "../../../../kit";
 import { formatMoment } from "../../../../kit/format";
 import { useOsConnection } from "../../../../live/connection";
 import type { SiteLifecycleActions } from "../../packages/actions";
+import { RuntimeSettingsPanel } from "./RuntimeSettings";
+import { TrafficPanel } from "./Traffic";
 import { fetchSiteVersions, MAX_HISTORY_VERSIONS, type SiteVersion } from "../../packages/calls";
 import { ProblemNotice } from "../../packages/ReportView";
 import type { SiteRow } from "../../rows";
@@ -51,8 +53,17 @@ import { isPublished, type RailProblem } from "../rail";
 // rollback, pause and resume, archive -- and not the operator escape hatch. A
 // text field that accepts any URI is a way to point a live site at nothing.
 
+// ONE NOTE FOR EVERY ABSENCE ON THIS STOP, not one per missing control.
+// Three things are not here for a system-owned row -- the lifecycle, the
+// runtime settings and the traffic figure -- for two reasons worth saying
+// once: the row is re-seeded at boot, so a value set on it would be reverted;
+// and the request log excludes these surfaces by their own row field, because
+// measuring the console somebody reads a figure in would be measuring the act
+// of looking. An absent control with no account of itself reads as something
+// nobody built, which is the rule the Domains panel's missing re-check button
+// already follows.
 const SYSTEM_OWNED_NOTE =
-  "This is one of the cluster's own surfaces. It is re-seeded live at every boot, so it has no lifecycle to change.";
+  "This is one of the cluster's own surfaces. It is re-seeded live at every boot, so it has no lifecycle to change and no settings to give it -- and its traffic is not recorded, because measuring the console somebody reads a figure in would be measuring the act of looking.";
 
 export function LiveStop({
   site,
@@ -113,7 +124,14 @@ export function LiveStop({
   const archived = site.status === "archived";
   const serving = live || paused;
 
-  if (refusal === null && !live && !canWrite) return null;
+  // THE READINGS ARE A READ, so they are not behind the write gate. Somebody
+  // who owns a deployable but does not hold the admin rung the lifecycle
+  // controls need can still see whether anybody is using their own app, and
+  // what it is configured with. Before the readings existed this stop had
+  // nothing to show such a reader and returned null, which is why the
+  // condition grew a term rather than being replaced.
+  const hasReadings = site.status !== "draft";
+  if (refusal === null && !live && !canWrite && !hasReadings) return null;
 
   return (
     <div className="os-stop-body">
@@ -124,6 +142,11 @@ export function LiveStop({
           <Fact label="Live since" value={formatMoment(site.createdAt)} />
         </Facts>
       ) : null}
+
+      {/* IS ANYBODY USING IT, AND IS IT HEALTHY (epic memql#4906) -- above the
+          history and the acts that change it, because it is what somebody
+          opening a live deployable came to find out. */}
+      <TrafficPanel site={site} />
 
       {canWrite && serving && isPublished(site) ? (
         <section className="os-report-part">
@@ -162,6 +185,11 @@ export function LiveStop({
           )}
         </section>
       ) : null}
+
+      {/* What the app reads at load. Beneath the history because it is
+          configuration rather than status, and above Availability because it
+          is a smaller act than pausing. */}
+      <RuntimeSettingsPanel site={site} canWrite={canWrite} />
 
       {canWrite && archived ? (
         <section className="os-report-part">

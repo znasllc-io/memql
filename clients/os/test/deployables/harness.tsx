@@ -146,6 +146,21 @@ export interface FakeSeed {
    * for the waiting mark (epic memql#4885, design section A).
    */
   awaitingConfirm?: Row[];
+  /**
+   * What `siteTrafficInWindow` answers with, keyed by the mode the call is
+   * in: "series" for a stop's per-bucket read, "summary" for the list's
+   * one-row-per-deployable read.
+   *
+   * ABSENT MEANS UNMEASURED, which is exactly what the server does -- it
+   * sends no row for a window it measured nothing in -- so a seed that says
+   * nothing about traffic exercises the unmeasured path rather than a
+   * zero-filled one.
+   */
+  traffic?: { series?: Row[]; summary?: Row[] };
+  /** Fails the next `siteTrafficInWindow` with this server message. */
+  trafficError?: string;
+  /** Fails the next `updateSiteSettings` with this server message. */
+  settingsError?: string;
   /** Fails the next `updateSiteStatus` with this server message. */
   siteStatusError?: string;
   /** Fails the next `siteArchive` with this server message. */
@@ -236,6 +251,21 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
           seed.deployResult ??
             ({ deploymentId: "dep-new", status: "awaiting_confirm", awaitingConfirm: "true" } as unknown as Row),
         ]);
+      }
+
+      if (call.startsWith("builtin siteTrafficInWindow(")) {
+        if (seed.trafficError !== undefined) throw new Error(seed.trafficError);
+        // The MODE is read off the rendered call string rather than from a
+        // separate stub, so the generated builder is what decides which
+        // fixture answers -- the same reason this fake sits under
+        // executeNamed at all.
+        const summary = call.includes("summary: true");
+        return rowsResult((summary ? seed.traffic?.summary : seed.traffic?.series) ?? []);
+      }
+
+      if (call.startsWith("mutation updateSiteSettings(")) {
+        if (seed.settingsError !== undefined) throw new Error(seed.settingsError);
+        return rowsResult([]);
       }
 
       if (call.startsWith("builtin packageArchive(")) {
@@ -403,6 +433,7 @@ export function siteRow(over: Partial<Row> & { id: string }): Row {
     systemOwned: false,
     deleted: false,
     binding: {},
+    settings: {},
     createdAt: "2026-08-01T00:00:00Z",
     ...over,
   };
@@ -525,6 +556,27 @@ export const NOTE = artifactRow({
   title: "Standup notes",
   mimeType: "",
 });
+
+/**
+ * One v1:observability:siteTraffic row, as the builtin answers it.
+ *
+ * The counts are numbers rather than strings, which is what the wire carries;
+ * the projection tolerates both, and a fixture in the wrong one would let a
+ * string-only projection pass here and fail against a cluster.
+ */
+export function trafficRow(over: Partial<Row> & { windowStart: string }): Row {
+  return {
+    siteId: "site-shop",
+    bucket: "1h",
+    windowEnd: "",
+    requestCount: 0,
+    errorCount: 0,
+    clientErrorCount: 0,
+    bytesTotal: 0,
+    lastServedAt: "",
+    ...over,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Interaction helpers

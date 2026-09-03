@@ -33,6 +33,16 @@ type Site struct {
 	// reading the site row (or this cached copy of it) sees only the name of
 	// the thing they would have to be allowed to read.
 	Binding map[string]any
+
+	// Settings is the site row's runtime settings (epic memql#4906, P7): the
+	// plain string values a bundle reads at load, merged into the site's
+	// runtime-config document under `settings` by runtimeconfig.go. Empty
+	// for a row that carries none; never nil on the document, which always
+	// carries the key. Only STRING values survive the projection
+	// (siteFromRow): the write guard admits nothing else, and a raw row that
+	// slipped one past it must not put a number where a bundle reads a
+	// string.
+	Settings map[string]string
 }
 
 // QueryExecutor is the narrow read the resolver needs. Narrow deliberately:

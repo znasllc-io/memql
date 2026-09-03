@@ -11,9 +11,11 @@ import {
   Refine,
   Row as ListRow,
   Select,
+  useNow,
   useThreeFeedView,
   type RefineChip,
 } from "../../kit";
+import { formatFreshness } from "../../kit/format";
 import type { LiveView } from "../../live/liveView";
 import type { ArrivalKind } from "../../live/arrival";
 import { AccountChip, NO_ACCOUNT_LABEL } from "../accounts/AccountPicker";
@@ -40,6 +42,8 @@ import { DeployablePage } from "./page/DeployablePage";
 import { Rail } from "./page/Rail";
 import { SITE_STATUSES, type SiteRow } from "./rows";
 import type { ListDensity } from "./settings";
+import { LIST_TRAFFIC_WINDOW, type TrafficSummary } from "./traffic";
+import { useSiteTraffic } from "./useSiteTraffic";
 import type { CredentialRow } from "./sources/rows";
 import { DEPLOYABLE_KINDS, kindLabel } from "./targets";
 
@@ -139,6 +143,15 @@ export function DeployablesSection({
   );
   const groups = list?.snapshot.rows ?? [];
   const listedCount = groups.reduce((n, g) => n + g.rows.length, 0);
+
+  // IS ANYBODY USING IT (epic memql#4906), for every deployable on screen in
+  // ONE call. The cluster's own surfaces are excluded from the request log by
+  // construction, so they are always unmeasured here and their rows stay
+  // silent about it -- which is the honest reading rather than a special case.
+  const { figures } = useSiteTraffic(
+    groups.flatMap((g) => g.rows.map((r) => r.site).filter((s): s is SiteRow => s !== null && !s.systemOwned).map((s) => s.id)),
+    LIST_TRAFFIC_WINDOW,
+  );
 
   // How many rows the flip would reveal: the whole archived population, before
   // any facet -- the number is about the place, not about the question.
@@ -297,6 +310,7 @@ export function DeployablesSection({
         renderRow={(group, tick) => (
           <GroupLine
             group={group}
+            figures={figures}
             tick={tick}
             accounts={accounts}
             selectedSiteId={selectedSiteId}
@@ -363,6 +377,7 @@ function GroupLine({
   selectedSiteId,
   onOpenSite,
   onOpenParked,
+  figures,
 }: {
   group: DeployableListGroup;
   tick: ArrivalKind | null;
@@ -370,6 +385,8 @@ function GroupLine({
   selectedSiteId: string;
   onOpenSite: (siteId: string) => void;
   onOpenParked: (packageId: string) => void;
+  /** Every deployable's figure for the list's window; absent means unmeasured. */
+  figures: Map<string, TrafficSummary>;
 }) {
   const line = (row: DeployableListRow, rowTick: ArrivalKind | null, waiting: boolean) => (
     <DeployableLine
@@ -380,6 +397,7 @@ function GroupLine({
       accounts={accounts}
       open={row.site !== null && row.site.id === selectedSiteId}
       onOpen={() => (row.site === null ? onOpenParked(row.pkg?.id ?? "") : onOpenSite(row.site.id))}
+      traffic={row.site === null ? null : (figures.get(row.site.id) ?? null)}
     />
   );
 
@@ -431,6 +449,7 @@ function DeployableLine({
   accounts,
   open,
   onOpen,
+  traffic,
 }: {
   row: DeployableListRow;
   tick: ArrivalKind | null;
@@ -439,7 +458,10 @@ function DeployableLine({
   accounts: AccountRow[];
   open: boolean;
   onOpen: () => void;
+  /** This deployable's figure for the list's window, or null: unmeasured. */
+  traffic: TrafficSummary | null;
 }) {
+  const now = useNow();
   const site = row.site;
   const archived = site?.status === "archived" || row.pkg?.status === "archived";
   return (
@@ -460,6 +482,18 @@ function DeployableLine({
               string. It belongs on the trailing edge, and LAST there rather
               than first: the rail is what a person scans DOWN a list, so it
               wants the one position that is the same on every row. */}
+          {/* IS ANYBODY USING IT (epic memql#4906), answerable from the LIST.
+              AN UNMEASURED FIGURE RENDERS NOTHING, which is why this is a
+              chip that comes and goes rather than a column empty for every
+              deployable nobody has visited: a chip saying "never" would be a
+              claim, and the honest reading is that we have no measurement.
+              Before the rail, because the rail wants the one position that is
+              the same on every row. */}
+          {traffic === null || traffic.lastServedAt === "" ? null : (
+            <Chip title={`${traffic.requests.toLocaleString()} requests over the last week`}>
+              served {formatFreshness(traffic.lastServedAt, now)}
+            </Chip>
+          )}
           <Rail compact input={standingInputFor(row)} label={`${row.name} stops`} />
           {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
         </>

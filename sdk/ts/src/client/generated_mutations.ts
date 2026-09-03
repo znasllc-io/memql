@@ -9967,6 +9967,33 @@ QueryClient.prototype.updateSiteBundle = function (this: QueryClient, args: Upda
   return this.executeNamed("updateSiteBundle", buildUpdateSiteBundle(args), opts);
 };
 
+/** Replace a deployable's runtime settings (epic memql#4906, decision P7): the key-values the edge merges into the site's runtime-config document under `settings`, read by the bundle at load.
+A REPLACE, NOT A MERGE, and the whole object is the argument. `settings` is stamped from the required arg rather than accepted, so an empty object is written as an empty object and clearing every setting is expressible -- an accepted optional arg would be dropped from the payload when omitted and the read-merge would re-save whatever was there (updateSiteAccount's reasoning). The editor sends the map it shows, so what a person sees is what the row holds.
+The shape half is here: an object. The half that decides -- every key of the identifier form [A-Za-z][A-Za-z0-9_]{0,63} and not ending in `Ref`, every value a plain string within MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH, at most MEMQL_SITE_SETTINGS_MAX_KEYS keys, and the systemOwned refusal -- is the Go guard beside the status guard (component/memql/platform_site_settings_guard.go), because a mutation body cannot see an object's keys. NOT A PLACE FOR A SECRET: the document is served to every visitor.
+AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, as on updateSiteBundle: the row's owner, or a cluster owner through the explicit escape. A systemOwned row is refused for both, because the seed re-writes it at every boot. */
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteSettings"] in generated_concepts.ts).
+export interface UpdateSiteSettingsArgs {
+  siteId: string;
+  settings: Record<string, unknown>;
+}
+
+export function buildUpdateSiteSettings(args: UpdateSiteSettingsArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("settings: " + renderMemQLValue(args.settings));
+  return "mutation updateSiteSettings(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateSiteSettings(args: UpdateSiteSettingsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateSiteSettings = function (this: QueryClient, args: UpdateSiteSettingsArgs = {} as UpdateSiteSettingsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateSiteSettings", buildUpdateSiteSettings(args), opts);
+};
+
 /** Move a site between draft / live / disabled.
 Owner-or-cluster-owner, enforced by guardRowAuthzWrite against v1:platform:site's composite tier rather than by anything here -- see updateSiteBundle's note for why the split is where it is. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteStatus"] in generated_concepts.ts).

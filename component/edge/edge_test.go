@@ -83,6 +83,12 @@ func TestEngineExecutorSiteByHostnameProjectsTheRow(t *testing.T) {
 		ID: "abc123", Hostname: "shop.example.com", Kind: "spa",
 		BundleRef: "file:///app/portal", Status: "live", Title: "Shop",
 		APIProxy: true, SystemOwned: true,
+		// EMPTY, NOT NIL, and the difference is the assertion: a row with no
+		// `settings` projects an empty map (epic memql#4906) so the runtime-
+		// config document always carries the key. Both print as `map[]` under
+		// %+v, so a failure here reads as "want X, got X" -- which is what
+		// this line exists to stop somebody hunting for.
+		Settings: map[string]string{},
 	}
 	// reflect.DeepEqual rather than *got != *want: Site carries the row's
 	// `binding` object as a map now (memql#4345), and a struct holding a map

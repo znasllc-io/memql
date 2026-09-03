@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 )
 
 // Options configures a Handler. APITarget names the bff's plain-HTTP address
@@ -28,6 +29,12 @@ type Options struct {
 	APITarget      string
 	IdentityTarget string
 	SecretResolver SecretResolver
+	// RequestLog records one row per served request, which is what the
+	// traffic figure on a deployable's Live stop is folded from (epic
+	// memql#4906). NIL IS THE OFF SWITCH and it is the ordinary state for a
+	// handler built by a test: recording costs one nil check per request
+	// when it is absent. See requestlog.go for why it must not block.
+	RequestLog RequestRecorder
 }
 
 // Handler serves whichever site the request's Host names.
@@ -38,6 +45,7 @@ type Handler struct {
 	apiTarget      string
 	identityTarget string
 	secretResolver SecretResolver
+	requestLog     RequestRecorder
 }
 
 var _ http.Handler = (*Handler)(nil)
@@ -54,6 +62,7 @@ func NewHandler(opts Options) *Handler {
 		apiTarget:      opts.APITarget,
 		identityTarget: opts.IdentityTarget,
 		secretResolver: opts.SecretResolver,
+		requestLog:     opts.RequestLog,
 	}
 }
 
@@ -68,6 +77,44 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// AN UNKNOWN HOST IS NOT RECORDED. There is no deployable to attribute
+	// the request to, and inventing one would put requests for hostnames
+	// nobody in this cluster owns into somebody's figure.
+	if site == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	// THE CLUSTER'S OWN SURFACES ARE EXCLUDED, and it is the ROW FIELD that
+	// excludes them rather than a name this package recognises -- the portal
+	// and the OS are `systemOwned`, so a third one added tomorrow is excluded
+	// by the same line. A deployable's traffic figure is about somebody's
+	// app; folding the console an operator is reading it in into the same
+	// table would measure the act of looking.
+	if h.requestLog == nil || site.SystemOwned {
+		h.serve(w, r, site)
+		return
+	}
+
+	started := time.Now()
+	rec := &recordingWriter{ResponseWriter: w}
+	pathClass := h.serve(rec, r, site)
+	// AFTER the response, so nothing a visitor waits for happens here beyond
+	// a channel send the recorder promises not to block on.
+	h.requestLog.Record(RequestRecord{
+		SiteId:     site.ID,
+		ServedAt:   time.Now().UTC(),
+		Status:     rec.statusOr(http.StatusOK),
+		PathClass:  pathClass,
+		Bytes:      rec.bytes,
+		DurationNs: time.Since(started).Nanoseconds(),
+	})
+}
+
+// serve is the whole of what the edge does with a resolved site, and it
+// returns the path class of what it did -- the one fact the record needs that
+// cannot be read off the response.
+func (h *Handler) serve(w http.ResponseWriter, r *http.Request, site *Site) string {
 	// STATUS BEFORE ANY FILE LOOKUP. An unknown host and a draft site are both
 	// 404 -- neither exists as far as the internet is concerned. A DISABLED
 	// site is 503, deliberately: a deliberately paused site and a typo'd
@@ -84,18 +131,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// resolves for nobody, so the next value added to the enum is inert here
 	// until somebody decides what it should do.
 	switch {
-	case site == nil:
-		http.NotFound(w, r)
-		return
 	case site.Status == "live":
 		// serves; fall through
 	case site.Status == "disabled":
 		http.Error(w, "this site is unavailable", http.StatusServiceUnavailable)
-		return
+		return pathClassUnserved
 	default:
 		// draft, archived, and any status a future release adds.
 		http.NotFound(w, r)
-		return
+		return pathClassUnserved
 	}
 
 	// Cluster-wide identity discovery, ahead of the bundle lookup and for
@@ -104,12 +148,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// "/", and this path lives under it.
 	if r.URL.Path == runtimeConfigPath {
 		h.serveRuntimeConfig(w, r, site)
-		return
+		return pathClassConfig
 	}
 
 	if strings.HasPrefix(r.URL.Path, apiPrefix) {
 		h.serveAPI(w, r, site)
-		return
+		return pathClassProxy
 	}
 
 	// Exact-path identity JSON, ahead of the bundle / SPA fallback.
@@ -117,7 +161,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// used to get index.html 200 (memql#4154).
 	if isIdentityXHRPath(r.URL.Path) {
 		h.serveIdentityXHR(w, r, site)
-		return
+		return pathClassProxy
 	}
 
 	fsys, err := h.opener.Open(site.BundleRef)
@@ -125,7 +169,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("edge: opening the bundle failed",
 			"component", "edge", "site", site.ID, "bundleRef", site.BundleRef, "err", err)
 		http.Error(w, "this site is unavailable", http.StatusServiceUnavailable)
-		return
+		return pathClassUnserved
 	}
 
 	securityHeaders(w, r)
@@ -133,7 +177,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if name, ok := resolveAsset(fsys, r.URL.Path); ok {
 		h.serveFile(w, r, fsys, name, site.BundleRef)
-		return
+		return classifyServed(name, false)
 	}
 
 	// The last rung of D11's order, and the only place kind is consulted. A
@@ -145,11 +189,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if site.Kind == "spa" || site.Kind == storefrontKind {
 		if _, err := fs.Stat(fsys, "index.html"); err == nil {
 			h.serveFile(w, r, fsys, "index.html", site.BundleRef)
-			return
+			return pathClassFallback
 		}
 	}
 	noCache(w)
 	http.NotFound(w, r)
+	return pathClassUnserved
 }
 
 // resolveAsset walks D11's resolution order and returns the first name that
