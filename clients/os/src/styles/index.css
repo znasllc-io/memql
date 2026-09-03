@@ -6724,7 +6724,6 @@ a.os-button {
 .os-window-fault {
   max-width: 560px;
 }
-=======
 /* ---- a deployable's readings (epic memql#4906) -------------------------
  *
  * Two panels on the deployable's own detail: what it is serving, and what it
