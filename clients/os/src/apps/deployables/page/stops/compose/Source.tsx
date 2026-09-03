@@ -4,31 +4,21 @@ import { FileArchive } from "lucide-react";
 import {
   Caption,
   ChoiceStack,
-  Field,
-  Input,
   LiveList,
   Notice,
   Row as ListRow,
-  Select,
   formatBytes,
   useLiveView,
 } from "../../../../../kit";
 import { flatten } from "../../../../../kit/rows";
-import { CredentialField } from "../../../sources/CredentialField";
-import {
-  SOURCE_HOST,
-  probeNote,
-  probeParks,
-  probeWantsCredential,
-  zipUnusableNote,
-  type ZipVerdict,
-} from "../../../sources/probe";
+import { zipUnusableNote, type ZipVerdict } from "../../../sources/probe";
 import type { ArtifactProbeHandle, SourceProbeHandle } from "../../../sources/useProbes";
 import { PICKER_PAGE_SIZE, useZipArtifacts } from "../../../sources/useZipArtifacts";
 import type { CredentialRow } from "../../../sources/rows";
-import { DEPLOYABLE_KINDS, NOT_OFFERED_SENTENCE } from "../../../targets";
 import { suggestName, type ComposeDraft } from "../../compose";
 import { CiHandoff } from "./CiHandoff";
+import { KindField, NameField } from "./fields";
+import { TokenSourceForm } from "./TokenSourceForm";
 
 // The compose Source stop: where this deployable comes from, asked once
 // (epic memql#4885, design section C).
@@ -125,120 +115,13 @@ export function ComposeSourceStop({
       />
 
       {draft.choice === "repo" ? (
-        <RepositoryBranch draft={draft} onDraft={onDraft} credentials={credentials} probe={probe} />
+        <TokenSourceForm draft={draft} onDraft={onDraft} credentials={credentials} probe={probe} />
       ) : null}
       {draft.choice === "zip" ? (
         <ZipBranch draft={draft} onDraft={onDraft} zipProbe={zipProbe} zip={zip} />
       ) : null}
       {draft.choice === "ci" ? <CiBranch draft={draft} onDraft={onDraft} /> : null}
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// A repository
-// ---------------------------------------------------------------------------
-
-function RepositoryBranch({
-  draft,
-  onDraft,
-  credentials,
-  probe,
-}: {
-  draft: ComposeDraft;
-  onDraft: (patch: Partial<ComposeDraft>) => void;
-  credentials: readonly CredentialRow[];
-  probe: SourceProbeHandle;
-}) {
-  const reply = probe.reply;
-  const reason = reply?.reason ?? "";
-  const note = reply === null ? "" : probeNote(reply);
-  // The credential field appears when GitHub's answer is one a credential
-  // could change, and stays once one is chosen: switching between two of
-  // your own is exactly what somebody does when the first cannot see it.
-  const wantsCredential = probeWantsCredential(reason) || draft.credentialId !== "";
-
-  return (
-    <>
-      {/* THE PROBE FIRES ON BLUR, and the handler sits on a WRAPPER rather
-          than on the input: React's onBlur is `focusout`, which bubbles, and
-          the kit's Input carries a visually-hidden label plus no blur prop of
-          its own. Adding one to the kit for a single caller would be
-          promoting a control on its FIRST use, which the kit's own header
-          asks surfaces not to do. */}
-      <div onBlur={() => void probe.probe(draft.repoUrl, draft.credentialId)}>
-        <Field label="Repository URL">
-          <Input
-            id="os-compose-repo-url"
-            label="The repository this deployable is built from"
-            value={draft.repoUrl}
-            onChange={(repoUrl) => {
-              // A NEW URL MAKES THE OLD ANSWER WRONG, not stale: "private, or
-              // not there" beside a URL it was never about is worse than no
-              // answer at all.
-              probe.clear();
-              onDraft({ repoUrl });
-            }}
-            placeholder={`https://${SOURCE_HOST}/acme/storefront`}
-            onEnter={() => void probe.probe(draft.repoUrl, draft.credentialId)}
-          />
-        </Field>
-      </div>
-
-      {probe.busy ? <Caption>Asking whether this cluster can read it...</Caption> : null}
-      {/* SAID ONCE (DESIGN.md rule 7). A reason that PARKS the flow is the
-          rail's note -- a stopped stop names its reason there -- so the body
-          would be repeating the sentence directly beneath it. What the body
-          adds is the answer the rail has no room for: the branch a public
-          repository will follow, or that a token is working. */}
-      {note === "" || probeParks(reason) ? null : (
-        <p className="os-stop-verdict" data-tone="ok" role="status">
-          {note}
-        </p>
-      )}
-      {/* A PROBE THAT COULD NOT RUN IS NOT AN ANSWER ABOUT THE REPOSITORY.
-          The server's sentence renders here, the field stays editable, and
-          Analyze stays reachable -- the fetch is the authority. */}
-      {probe.error === "" ? null : (
-        <Notice
-          tone="warn"
-          sentence="This cluster could not check the repository just now."
-          next="Nothing is wrong with what you typed. Deploying still works: the fetch asks again, and it is the one that decides."
-          detail={probe.error}
-        />
-      )}
-
-      <Field label="Branch or tag">
-        <Input
-          id="os-compose-repo-ref"
-          label="Which branch or tag to deploy"
-          value={draft.repoRef}
-          onChange={(repoRef) => onDraft({ repoRef })}
-          placeholder="the default branch"
-        />
-      </Field>
-
-      {wantsCredential ? (
-        <>
-          <CredentialField
-            id="os-compose-credential"
-            credentials={credentials}
-            value={draft.credentialId}
-            onChange={(credentialId) => {
-              onDraft({ credentialId });
-              // THE POINT OF CHOOSING ONE IS TO ASK AGAIN UNDER IT.
-              void probe.probe(draft.repoUrl, credentialId);
-            }}
-          />
-          <Caption>
-            A private repository is fetched under one of your own credentials. It is read at fetch time, on this
-            cluster, and never leaves it.
-          </Caption>
-        </>
-      ) : null}
-
-      <NameField draft={draft} onDraft={onDraft} label="Call it" placeholderFrom={suggestName(draft, "")} />
-    </>
   );
 }
 
@@ -365,67 +248,6 @@ function CiBranch({ draft, onDraft }: { draft: ComposeDraft; onDraft: (patch: Pa
       </Caption>
       <NameField draft={draft} onDraft={onDraft} label="Call it" placeholderFrom="" />
       <KindField draft={draft} onDraft={onDraft} />
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// The two fields the hand-made paths share
-// ---------------------------------------------------------------------------
-
-function NameField({
-  draft,
-  onDraft,
-  label,
-  placeholderFrom,
-}: {
-  draft: ComposeDraft;
-  onDraft: (patch: Partial<ComposeDraft>) => void;
-  label: string;
-  placeholderFrom: string;
-}) {
-  return (
-    <Field label={label}>
-      <Input
-        id="os-compose-name"
-        label="What this deployable is called"
-        value={draft.name}
-        onChange={(name) => onDraft({ name })}
-        placeholder={placeholderFrom || "storefront"}
-      />
-    </Field>
-  );
-}
-
-/**
- * The kind, for a deployable this cluster is not analyzing.
- *
- * A package declares each app's kind in its manifest and the report reads it
- * back; a built-site zip and a CI push declare nothing, so the choice is the
- * person's. The one sentence about the three kinds that are NOT offered sits
- * beneath it, said once, in place of three disabled controls.
- */
-function KindField({ draft, onDraft }: { draft: ComposeDraft; onDraft: (patch: Partial<ComposeDraft>) => void }) {
-  const chosen = DEPLOYABLE_KINDS.find((k) => k.value === draft.kind);
-  return (
-    <>
-      <Field label="What kind">
-        <Select
-          id="os-compose-kind"
-          label="What kind of deployable this is"
-          value={draft.kind}
-          onChange={(kind) => onDraft({ kind })}
-        >
-          <option value="">Choose a kind</option>
-          {DEPLOYABLE_KINDS.map((kind) => (
-            <option key={kind.value} value={kind.value}>
-              {kind.label}
-            </option>
-          ))}
-        </Select>
-      </Field>
-      {chosen ? <Caption>{chosen.blurb}</Caption> : null}
-      <Caption>{NOT_OFFERED_SENTENCE}</Caption>
     </>
   );
 }
