@@ -81,16 +81,20 @@ it knows and the server's own sentence verbatim for the rest.
 | `package_manifest_missing` | No `memql-package.yaml` at the tree root |
 | `package_manifest_invalid` | Unparseable, an unknown key, a missing name, an unknown `formatVersion`, or two deployables sharing a name |
 | `deployable_path_missing` | A declared `path` is not a directory in the tree |
-| `deployable_kind_unknown` | `kind` is not one of the three live values |
-| `deployable_binding_missing` | A storefront with no `binding` |
+| `deployable_kind_unknown` | `kind` is a value nobody has heard of -- not one of the three live values, and not one of the known-but-unoffered ones below |
+| `deployable_target_not_offered` | `kind` is one the target model knows and does not offer yet (`ios`, `android`, `macos`). Scoped to that app and **not fatal** -- the app is reported with "iOS is not offered on this cluster yet" and the rest of the package deploys around it |
+| `deployable_binding_missing` | A storefront with no `binding`; also a never-deployed app whose placement names no hostname |
 | `dsl_domain_reserved` | A `dsl/<domain>/` whose name the engine already owns |
 | `dsl_refuses_boot` | The package's DSL does not survive the Init-grade gates; carries the construct-level errors |
 | `source_too_large` | Over the per-file, whole-tree or file-count cap |
-| `source_unreadable` | Not an archive this cluster can open, or a repository it cannot reach |
+| `source_unreadable` | Not an archive this cluster can open, or a repository or a GitHub it cannot reach |
+| `source_host_unsupported` | The repository (or a credential) names a host this cluster does not fetch from -- only github.com today, or upload a zip of the tree instead. The source probe answers it as a reason rather than an error |
+| `credential_not_found` | The package names a credential its OWNER cannot read: it does not exist, or it belongs to somebody else. Refused by name, before any request leaves the cluster |
+| `credential_revoked` | The credential the package fetches under was revoked; every source fetching under it refuses until it is switched to another one |
 | `bundle_path_invalid` | An archive entry escaping the package root |
 | `go_pack_not_deployable` | Reported, **not fatal** -- the rest of the package deploys |
 | `dsl_requires_cluster_owner` | A DSL-carrying deploy by a non-cluster-owner |
-| `package_has_active_deployables` | Archiving a package whose sites are not all archived |
+| `package_has_active_deployables` | Archiving a package while one of its apps is still serving (`live`). Pause it first; every paused or never-published app is archived with the package |
 
 An **unknown `formatVersion` refuses** rather than parsing the subset it
 recognises, and so does an **unknown KEY**: `deployabels:` parses fine and

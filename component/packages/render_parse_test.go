@@ -66,7 +66,13 @@ const awkwardText = "npm ERR! code ELIFECYCLE \"build\" \\ failed\nat line 2\x00
 // the statements they produced.
 func captureStore(t *testing.T) []string {
 	t.Helper()
-	rec := &recordingEngine{}
+	// The two Library rows the zip-source read resolves through, canned so
+	// the read reaches its SECOND statement: with no rows it would stop
+	// after the first and the file read would go unparsed.
+	rec := &recordingEngine{rows: map[string][]map[string]any{
+		"query libraryArtifactById": {{"id": "v1:library:artifact:mno", "kind": "file", "sourceConceptRef": "v1:library:file:mno"}},
+		"query libraryFileById":     {{"id": "v1:library:file:mno", "mimeType": "application/zip", "blobUrl": "library/u/mno/tree.zip"}},
+	}}
 	s := &store{engine: rec}
 	ctx := context.Background()
 	at := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
@@ -78,6 +84,7 @@ func captureStore(t *testing.T) []string {
 	_, _ = s.siteById(ctx, "v1:platform:site:ghi")
 	_, _ = s.packagesByRepoUrl(ctx, "https://github.com/acme/widget")
 	_, _ = s.packagesTrackingRepos(ctx)
+	_, _, _ = s.artifactBytes(ctx, "v1:library:artifact:mno", func(context.Context, string) ([]byte, error) { return nil, nil })
 
 	// Writes.
 	_ = s.openDeployment(ctx, deploymentSeed{
@@ -138,6 +145,13 @@ func captureStore(t *testing.T) []string {
 	})
 	_ = s.revokeSourceCredential(ctx, "v1:platform:sourceCredential:jkl")
 	_ = s.touchSourceCredential(ctx, "v1:platform:sourceCredential:jkl", at)
+
+	// Placements (epic memql#4885, D8): the two caller-actor calls the
+	// publish stage makes after the site exists. The hostname is remote text
+	// -- a person types it -- so it carries the four control bytes; the
+	// guard behind the call refuses it, which is the point of the call.
+	_ = s.setSiteAccount(ctx, "v1:platform:site:ghi", "v1:accounts:account:acme")
+	_ = s.addCustomDomain(ctx, "v1:platform:site:ghi", awkwardText)
 
 	if len(rec.queries) == 0 {
 		t.Fatal("no statements captured; this test would pass vacuously")
@@ -244,6 +258,14 @@ func TestRenderedArgumentsAreDeclared(t *testing.T) {
 		if fn.ArgsSchema != nil {
 			for _, f := range fn.ArgsSchema.Fields {
 				declared[f.Name] = true
+			}
+		}
+		// A builtin's declaration is its body, and the converter carries it
+		// as the arg CONTRACT rather than an args block -- so a builtin this
+		// package calls (customDomainAdd) is checked against that.
+		if fn.BuiltinArgs != nil {
+			for f := range fn.BuiltinArgs.Properties {
+				declared[f] = true
 			}
 		}
 		if len(declared) == 0 {

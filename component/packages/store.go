@@ -292,11 +292,49 @@ func (s *store) touchSourceCredential(ctx context.Context, credentialId string, 
 // its FIRST escape -- internal origin is trusted server-side Go -- and let any
 // caller who can reach this capability revoke any credential on the cluster.
 func (s *store) revokeSourceCredential(ctx context.Context, credentialId string) error {
-	if _, err := s.engine.Execute(ctx, fmt.Sprintf(
-		"mutation revokeSourceCredential(credentialId: %s)", langparser.QuoteString(credentialId))); err != nil {
-		return fmt.Errorf("revokeSourceCredential: %w", err)
+	return s.writeAsCaller(ctx, fmt.Sprintf(
+		"mutation revokeSourceCredential(credentialId: %s)", langparser.QuoteString(credentialId)))
+}
+
+// ---------------------------------------------------------------------------
+// Placements (epic memql#4885, D8) -- caller-actor writes
+// ---------------------------------------------------------------------------
+
+// writeAsCaller runs one statement under whatever actor and origin the caller
+// already has -- the plain Execute, named so a reader can tell it from
+// writeInternal at a glance. Everything that goes through here is a call the
+// PAGE could make, and is authorized by the guard behind the construct rather
+// than by anything in this package; internal_origin_test.go's callerWrites
+// list names each one and asserts the stamp is absent.
+func (s *store) writeAsCaller(ctx context.Context, query string) error {
+	if _, err := s.engine.Execute(ctx, query); err != nil {
+		return fmt.Errorf("%s: %w", firstToken(query), err)
 	}
 	return nil
+}
+
+// setSiteAccount points a freshly created site at the client it is FOR. The
+// same updateSiteAccount the site detail's account picker issues, under the
+// caller's actor, so v1:platform:site's composite write guard admits the row's
+// owner (or a cluster owner) and refuses everyone else -- exactly as it does
+// from the page.
+func (s *store) setSiteAccount(ctx context.Context, siteId, accountId string) error {
+	return s.writeAsCaller(ctx, fmt.Sprintf(
+		"mutation updateSiteAccount(siteId: %s, accountId: %s)",
+		langparser.QuoteString(siteId), langparser.QuoteString(accountId)))
+}
+
+// addCustomDomain binds a client's own domain to a freshly created site. The
+// same customDomainAdd builtin the Domains panel issues, under the caller's
+// actor, so the three guards in platform_custom_domain_policy.go -- not under
+// the cluster's own domain, not a collision, not past the per-site cap --
+// decide exactly as they do from the page. Any error is the guard's own
+// sentence, which the publish stage records on the outcome rather than
+// failing over.
+func (s *store) addCustomDomain(ctx context.Context, siteId, hostname string) error {
+	return s.writeAsCaller(ctx, fmt.Sprintf(
+		"builtin customDomainAdd(siteId: %s, hostname: %s)",
+		langparser.QuoteString(siteId), langparser.QuoteString(hostname)))
 }
 
 // ---------------------------------------------------------------------------
@@ -344,6 +382,17 @@ type DeployableOutcome struct {
 	Version   string   `json:"version,omitempty"`
 	Created   bool     `json:"created,omitempty"`
 	Refusal   *Problem `json:"refusal,omitempty"`
+
+	// The placement halves a first deploy applied (epic memql#4885, D8), and
+	// the ones it could not. AccountId and OwnDomain are set only when the
+	// write LANDED; a refusal is recorded on the sibling field with the
+	// server's own sentence and is NOT fatal -- the site is live at its
+	// cluster address regardless, and the Where-it-lives stop renders the
+	// refusal in place.
+	AccountId      string   `json:"accountId,omitempty"`
+	OwnDomain      string   `json:"ownDomain,omitempty"`
+	AccountRefusal *Problem `json:"accountRefusal,omitempty"`
+	DomainRefusal  *Problem `json:"domainRefusal,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

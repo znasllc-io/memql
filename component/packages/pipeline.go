@@ -93,9 +93,17 @@ type Deps struct {
 	// on the other. Nil on a node that cannot resolve credentials; a package
 	// naming one is then refused rather than fetched anonymously.
 	Credentials CredentialResolver
-	// HTTP is the client the D11 poll asks GitHub with. Nil means a 30s
-	// default. Injected so a test can stand a fake GitHub behind it and read
-	// which requests carried a bearer -- and which were never made.
+	// PeekCredentials is the PROBE's resolver (epic memql#4885, D11): the
+	// same read, the same two refusals, and no lastUsedAt heartbeat -- a
+	// probe is a question, not a fetch, and it writes nothing. A separate
+	// field rather than a flag on Credentials so a test can see which of the
+	// two a path reached for, and so the fetcher can never be handed the one
+	// that does not stamp.
+	PeekCredentials CredentialResolver
+	// HTTP is the client the D11 poll and the source probe ask GitHub with.
+	// Nil means a 30s default. Injected so a test can stand a fake GitHub
+	// behind it and read which requests carried a bearer -- and which were
+	// never made.
 	HTTP *http.Client
 }
 
@@ -131,10 +139,28 @@ type DeployRequest struct {
 	// sets it in one click, which is the same code path with the person's
 	// answer already in hand.
 	Confirmed bool
-	// Hostnames maps a deployable name to the hostname to create its site at,
-	// supplied at FIRST deploy only. Later deploys find the site through
-	// (packageId, packageDeployableName) and never re-ask.
-	Hostnames map[string]string
+	// Placements maps a deployable name to where it goes, supplied at FIRST
+	// deploy only (epic memql#4885, D8). Later deploys find the site through
+	// (packageId, packageDeployableName) and never re-ask: a placement is
+	// chosen once, and a later deploy of the same source keeps the same
+	// addresses.
+	Placements map[string]Placement
+}
+
+// Placement is where one deployable goes on its first deploy (D8): the
+// hostname its site is created at, the client it is FOR, and the client's own
+// domain. The hostname is the only required part -- a placement naming
+// neither of the other two is exactly the first deploy there was before them.
+//
+// The pipeline APPLIES the two optional parts itself, after the site exists,
+// as the same two calls the page would make (updateSiteAccount and
+// customDomainAdd) under the caller's own actor -- so the guards behind them
+// decide exactly as they do from the page, and there is no client-side
+// follow-up write for a closed window to lose.
+type Placement struct {
+	Hostname  string
+	AccountId string
+	OwnDomain string
 }
 
 // DeployOutcome is what a run produced.

@@ -132,6 +132,23 @@ const (
 	// opposite things to an author -- "not yet" versus "not a thing".
 	CodeDeployableTargetNotOffered = "deployable_target_not_offered"
 
+	// -- recorded on an outcome, not fatal (epic memql#4885, D8) --
+	//
+	// The two optional halves of a first-deploy placement run under the
+	// caller's actor as the same calls the page makes, and when the guard
+	// behind one refuses, the refusal lands on that deployable's OUTCOME
+	// (DeployableOutcome.AccountRefusal / DomainRefusal) with the server's
+	// own sentence, and the publish goes on: the site is live at its cluster
+	// address either way. Codes rather than bare sentences so the
+	// Where-it-lives stop can key a headline; the sentence is the guard's.
+
+	// CodeDeployableAccountRefused: updateSiteAccount was refused for the
+	// site the deploy just created.
+	CodeDeployableAccountRefused = "deployable_account_refused"
+	// CodeDeployableDomainRefused: customDomainAdd was refused -- a hostname
+	// under the cluster's own domain, a collision, or the per-site cap.
+	CodeDeployableDomainRefused = "deployable_domain_refused"
+
 	// -- raised outside this package, catalogued here --
 
 	// CodeDslRequiresClusterOwner (D9): raised by the pipeline at deploy

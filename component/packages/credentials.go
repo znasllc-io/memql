@@ -31,9 +31,12 @@ import (
 //     auth.ContextWithUserActor(ctx, <package owner>), through a query whose
 //     only predicate is the owner term, so "does not exist" and "belongs to
 //     somebody else" are the same zero rows and the same refusal.
-//   - DECRYPTION HAPPENS ONLY INSIDE A FETCH. No query returns plaintext, no
-//     capability returns plaintext, and the one query returning ciphertext is
-//     @serverOnly.
+//   - DECRYPTION HAPPENS ONLY INSIDE A FETCH, OR THE PROBE THAT STANDS IN FOR
+//     ONE. No query returns plaintext, no capability returns plaintext, and
+//     the one query returning ciphertext is @serverOnly. The probe (probe.go)
+//     unseals through the same function to present the bearer to GitHub and
+//     answers a typed reason, never the value -- and, unlike a fetch, stamps
+//     no heartbeat (peekCredential).
 
 // CredentialResolver unseals a package's credential at the moment of a fetch.
 //
@@ -57,14 +60,30 @@ const (
 // sourceCredentialConcept is the row kind the create handler mints ids for.
 const sourceCredentialConcept = "v1:platform:sourceCredential"
 
-// resolveCredential is the production CredentialResolver, and the ONE place in
-// this package a credential is unsealed.
+// resolveCredential is the production CredentialResolver for a FETCH: the
+// unseal, plus the lastUsedAt heartbeat, because a fetch is what the heartbeat
+// records.
+func (s *store) resolveCredential(ctx context.Context, credentialId, ownerUserId string) (string, error) {
+	return s.unsealCredential(ctx, credentialId, ownerUserId, true)
+}
+
+// peekCredential is the resolver for a PROBE (epic memql#4885, D11): the same
+// read under the same rule, the same two refusals, and NO heartbeat. A probe
+// is a question, and a question is not a use -- a lastUsedAt that moved on
+// every keystroke in the Source stop would make "last used" mean "last
+// looked at", which is the fact the Sources group is there to show.
+func (s *store) peekCredential(ctx context.Context, credentialId, ownerUserId string) (string, error) {
+	return s.unsealCredential(ctx, credentialId, ownerUserId, false)
+}
+
+// unsealCredential is the ONE place in this package a credential is unsealed;
+// the two resolvers above differ only in `touch`.
 //
 // The plaintext exists in exactly two locals: `token` below and whatever the
 // caller binds the return value to. It is never wrapped into an error -- an
 // error string reaches a log -- and secret.Decrypt's own errors name the key
 // or the ciphertext, never the value, which is what makes THEM safe to wrap.
-func (s *store) resolveCredential(ctx context.Context, credentialId, ownerUserId string) (string, error) {
+func (s *store) unsealCredential(ctx context.Context, credentialId, ownerUserId string, touch bool) (string, error) {
 	credentialId = strings.TrimSpace(credentialId)
 	if credentialId == "" {
 		return "", refuse(CodeCredentialNotFound, "this package names no credential to fetch under")
@@ -119,13 +138,17 @@ func (s *store) resolveCredential(ctx context.Context, credentialId, ownerUserId
 			"credential %q unsealed to an empty value, so this package cannot fetch under it", credentialId)
 	}
 
-	// The heartbeat, BEST EFFORT. A fetch that cannot record when it happened
-	// is still a fetch, and refusing a deploy over bookkeeping would be the
-	// wrong trade -- so a failure is a warning that names the credential and
-	// the error, never the value, and the fetch proceeds.
-	if terr := s.touchSourceCredential(readCtx, credentialId, time.Now().UTC()); terr != nil {
-		s.log().Warn("packages: could not stamp lastUsedAt on a source credential",
-			"component", "packages.credentials", "credential", credentialId, "err", terr)
+	// The heartbeat, BEST EFFORT, and only for a fetch. A fetch that cannot
+	// record when it happened is still a fetch, and refusing a deploy over
+	// bookkeeping would be the wrong trade -- so a failure is a warning that
+	// names the credential and the error, never the value, and the fetch
+	// proceeds. A probe skips it entirely: the unseal above is the whole of
+	// what it needed, and it writes nothing.
+	if touch {
+		if terr := s.touchSourceCredential(readCtx, credentialId, time.Now().UTC()); terr != nil {
+			s.log().Warn("packages: could not stamp lastUsedAt on a source credential",
+				"component", "packages.credentials", "credential", credentialId, "err", terr)
+		}
 	}
 	return token, nil
 }
