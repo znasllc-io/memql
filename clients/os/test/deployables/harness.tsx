@@ -116,6 +116,32 @@ export interface FakeSeed {
   createError?: string;
   /** Fails the next `sitePublishFromArtifact` with this server message. */
   publishError?: string;
+  /** v1:platform:sourceCredential CARDS `sourceCredentialsMine` answers with -- never a value. */
+  credentials?: Row[];
+  /**
+   * v1:platform:packageDeployment rows at `awaiting_confirm`, which
+   * `packageDeploymentsAwaitingConfirm` answers with: the list's fourth feed,
+   * for the waiting mark (epic memql#4885, design section A).
+   */
+  awaitingConfirm?: Row[];
+  /** Fails the next `updateSiteStatus` with this server message. */
+  siteStatusError?: string;
+  /** Fails the next `siteArchive` with this server message. */
+  siteArchiveError?: string;
+  /** Fails the next `siteRestore` with this server message. */
+  siteRestoreError?: string;
+  /** Fails the next `updateSiteBundle` (a roll back to a version) with this server message. */
+  repointError?: string;
+  /** Fails the next `packageRollback` with this server message. */
+  rollbackError?: string;
+  /** Fails the next `packageRestore` with this server message. */
+  restoreError?: string;
+  /**
+   * A site's own row history, NEWEST FIRST, for the version walk. `siteById`
+   * answers the first; each `asOf(siteById(...), <t>)` answers the newest
+   * row written at or before `t`, which is exactly the read the walk makes.
+   */
+  siteHistory?: Row[];
 }
 
 export interface FakeConnection {
@@ -175,6 +201,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
 
       if (call === "query packagesAll()") return rowsResult(seed.packages ?? []);
+      if (call === "query packageDeploymentsAwaitingConfirm()") return rowsResult(seed.awaitingConfirm ?? []);
 
       if (call.startsWith("query packageDeployments(")) {
         const id = /packageId: "([^"]*)"/.exec(call)?.[1] ?? "";
@@ -194,8 +221,51 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return rowsResult([]);
       }
 
-      if (call.startsWith("builtin packageRollback(") || call.startsWith("builtin packageRestore(")) {
+      if (call.startsWith("builtin packageRollback(")) {
+        if (seed.rollbackError !== undefined) throw new Error(seed.rollbackError);
         return rowsResult([]);
+      }
+
+      if (call.startsWith("builtin packageRestore(")) {
+        if (seed.restoreError !== undefined) throw new Error(seed.restoreError);
+        return rowsResult([]);
+      }
+
+      if (call === "query sourceCredentialsMine()") return rowsResult(seed.credentials ?? []);
+
+      if (call.startsWith("mutation updateSiteStatus(")) {
+        if (seed.siteStatusError !== undefined) throw new Error(seed.siteStatusError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("builtin siteArchive(")) {
+        if (seed.siteArchiveError !== undefined) throw new Error(seed.siteArchiveError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("builtin siteRestore(")) {
+        if (seed.siteRestoreError !== undefined) throw new Error(seed.siteRestoreError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("mutation updateSiteBundle(")) {
+        if (seed.repointError !== undefined) throw new Error(seed.repointError);
+        return rowsResult([]);
+      }
+
+      if (call.startsWith("mutation updateSiteAccount(")) return rowsResult([]);
+
+      // The version walk: the current row, then the newest row at or before
+      // each `asOf` instant. History is the seed's `siteHistory`, newest first.
+      if (call.startsWith("query siteById(")) {
+        const history = seed.siteHistory ?? [];
+        return rowsResult(history[0] ? [history[0]] : []);
+      }
+      if (call.startsWith("asOf(siteById(")) {
+        const at = /\), "([^"]+)"\)$/.exec(call)?.[1] ?? "";
+        const history = seed.siteHistory ?? [];
+        const found = history.find((row) => String(row["createdAt"] ?? "") <= at);
+        return rowsResult(found ? [found] : []);
       }
 
       if (call.startsWith("mutation createPackage(")) {
@@ -333,6 +403,21 @@ export const DELETED = siteRow({
   hostname: "gone.memql.example.com",
   deleted: true,
 });
+
+/** A credential CARD: the projection a browser receives, which has no token. */
+export function credentialRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    ownerUserId: "u-me",
+    host: "github.com",
+    label: "acme deploy token",
+    fingerprint: "sha256:ab12cd34",
+    status: "active",
+    lastUsedAt: "",
+    revokedAt: "",
+    createdAt: "2026-08-20T00:00:00Z",
+    ...over,
+  };
+}
 
 export function artifactRow(over: Partial<Row> & { id: string }): Row {
   return {

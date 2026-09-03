@@ -10,16 +10,24 @@ import type { OsAppSection } from "../../system/registry";
 /**
  * The sections this app declares, in manifest order.
  *
- * MAP IS FIRST, and therefore the section a window opens on. It is the app's
- * signature surface -- the whole reason the epic exists is that "what serves
- * where" is a shape rather than a table -- and the default-landing preference
- * below is what takes somebody who disagrees straight to the list instead.
+ * THREE (epic memql#4885, design D1): Map, Deployables, Settings. Actions,
+ * Sites and Packages retired together, because creating a deployable, giving
+ * it an address and reading where it came from took three sections and two
+ * mental models; one list and one page replaced them.
  *
- * ACTIONS CARRIES A ROLE, and that role is PRESENTATION (spec section E). The
- * engine's composite tier on `v1:platform:site`, the Go hostname policy and
- * `sitePublishFromArtifact`'s own validation remain the authority on every
- * write this app makes; hiding the section is a courtesy to a reader who
- * cannot use it, never the boundary.
+ * MAP IS FIRST, and therefore the section a window opens on. It is the app's
+ * signature surface -- the whole reason the earlier epic exists is that "what
+ * serves where" is a shape rather than a table -- and the default-landing
+ * preference below is what takes somebody who disagrees straight to the list
+ * instead.
+ *
+ * NO SECTION CARRIES A ROLE. `v1:platform:site` and `v1:platform:package`
+ * declare the composite tier, so every signed-in person has deployables and
+ * sources of their own to read and the engine decides how far the list
+ * reaches. The write half -- New deployable, and every act on the page -- is
+ * gated INSIDE the section at rank >= 200, exactly as Sites gated publishing
+ * rather than the list; that gate is presentation over the Go hostname policy
+ * and the engine's own write guards, never the boundary.
  *
  * Exported rather than written twice, because the manifest and the settings
  * picker must offer the SAME set: a second literal is one that can disagree,
@@ -29,27 +37,29 @@ import type { OsAppSection } from "../../system/registry";
  */
 export const DEPLOYABLES_SECTIONS: OsAppSection[] = [
   { id: "map", name: "Map" },
-  { id: "sites", name: "Sites" },
-  // Packages sits BEFORE Actions and after the two views of what is already
-  // serving, which is the order somebody works in: look at what is live, then
-  // at the sources it came from, then at the one-off writes. It carries no
-  // role of its own -- v1:platform:package declares the composite tier, so
-  // every signed-in person has packages of their own to read and the engine
-  // decides how far the list reaches. Only the WRITE controls inside it are
-  // gated, exactly as the Sites section gates publishing (epic memql#4794).
-  { id: "packages", name: "Packages" },
-  // THE FLIP FIXES THIS ONE (epic memql#4832, D1). Under the shell's old
-  // ordering `min: "admin"` meant {admin, owner} and excluded DEVELOPER --
-  // the tier the engine's own deploy gate is built around
-  // (`requiresDeveloperOrAbove`, and auth.AtLeastDeveloper, both of which are
-  // {owner, developer, admin}). The launcher was hiding deploy actions from
-  // the deploy tier. Under the one ladder the same line means rank >= 200,
-  // which is exactly that set.
-  { id: "actions", name: "Actions", roles: { min: "admin" } },
+  { id: "deployables", name: "Deployables" },
   { id: "settings", name: "Settings" },
 ];
 
 export const DEPLOYABLES_SECTION_IDS = DEPLOYABLES_SECTIONS.map((s) => s.id);
+
+/**
+ * The sections that no longer exist, and where each one's readers went.
+ *
+ * A person's stored `defaultSection` may still name one of these, and the
+ * sanitiser maps it rather than dropping it: a preference naming a section
+ * that is gone must not open that section (the window would land on the
+ * first one with the nav highlighting nothing), and it must not be silently
+ * reset to the map either -- somebody who asked for the list is still asking
+ * for the list, and the list is now Deployables. All three map there because
+ * all three were readings of what Deployables now holds: the sites, the
+ * sources they came from, and the writes that make one.
+ */
+export const RETIRED_SECTIONS: Readonly<Record<string, string>> = {
+  sites: "deployables",
+  packages: "deployables",
+  actions: "deployables",
+};
 
 /** Rows per screen, as a reading choice rather than a data one. */
 export type ListDensity = "comfortable" | "compact";
@@ -61,7 +71,7 @@ export interface DeployablesSettings {
   /** The section the app navigates to when its window opens. */
   defaultSection: string;
   /**
-   * How tightly the Sites list packs.
+   * How tightly the Deployables list packs.
    *
    * A VIEW setting and not a filter: it changes nothing about which rows are
    * read or shown, so flipping it re-baselines no arrival cue and costs no
@@ -96,10 +106,13 @@ export function sanitizeDeployablesSettings(raw: unknown): DeployablesSettings {
   const doc = raw as Partial<DeployablesSettings>;
   if (doc.version !== 1) return { ...DEFAULT_DEPLOYABLES_SETTINGS };
 
-  const defaultSection =
-    typeof doc.defaultSection === "string" && DEPLOYABLES_SECTION_IDS.includes(doc.defaultSection)
-      ? doc.defaultSection
-      : DEFAULT_DEPLOYABLES_SETTINGS.defaultSection;
+  // A retired section is mapped BEFORE the membership check, so a document
+  // written before the restructure lands on the list rather than on the map.
+  const named =
+    typeof doc.defaultSection === "string" ? (RETIRED_SECTIONS[doc.defaultSection] ?? doc.defaultSection) : "";
+  const defaultSection = DEPLOYABLES_SECTION_IDS.includes(named)
+    ? named
+    : DEFAULT_DEPLOYABLES_SETTINGS.defaultSection;
 
   const density =
     doc.density !== undefined && LIST_DENSITIES.includes(doc.density as ListDensity)

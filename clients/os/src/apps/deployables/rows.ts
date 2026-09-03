@@ -15,7 +15,7 @@ import { boolOr, flatten } from "../../kit/rows";
 // (memql#4721); the reasoning they carried -- seed rows and CDC envelopes must
 // project identically, and an absent boolean takes the concept's own default
 // -- moved with them. `flatten` is re-exported because it was already part of
-// this module's surface (PublishPicker reads it).
+// this module's surface (the page's zip picker reads it).
 export { flatten };
 
 function objectOf(row: Row, key: string): Record<string, unknown> {
@@ -77,6 +77,14 @@ export interface SiteRow {
    * and serves exactly as it always has.
    */
   accountId: string;
+  /**
+   * The package this site was deployed from (epic memql#4794, D7), or "" for
+   * a hand-made site. The page joins a deployable to its SOURCE through it;
+   * a site with none is its own source, and its bundle form says which.
+   */
+  packageId: string;
+  /** The manifest deployable name this site serves; "" whenever packageId is. */
+  packageDeployableName: string;
   createdAt: string;
 }
 
@@ -101,6 +109,8 @@ export function siteFromRow(raw: Row): SiteRow {
     deleted: boolOr(row, "deleted", false),
     binding: objectOf(row, "binding"),
     accountId: rowString(row, "accountId"),
+    packageId: rowString(row, "packageId"),
+    packageDeployableName: rowString(row, "packageDeployableName"),
     createdAt: rowString(row, "createdAt"),
   };
 }
@@ -201,11 +211,11 @@ export function ownerLabel(site: SiteRow, viewerUserId: string): string {
 /**
  * What counts as a CHANGE to a deployable.
  *
- * ONE definition, read by the Sites list's `LiveList` and by the app-level
- * `useArrivals` the map draws from. Two literals would be two literals that can
- * disagree, and the disagreement is visible: the list pulses a row while the
- * map beside it does not, in an app whose whole point is that the two are the
- * same rows.
+ * ONE definition, read by the Deployables list (inside the group fingerprint
+ * `list.ts` composes) and by the app-level `useArrivals` the map draws from.
+ * Two literals would be two literals that can disagree, and the disagreement
+ * is visible: the list pulses a row while the map beside it does not, in an
+ * app whose whole point is that the two are the same rows.
  *
  * A site row carries no liveness field -- there is no `lastSeenAt` here to turn
  * the surface into a strobe -- so the risk this guards against is the opposite

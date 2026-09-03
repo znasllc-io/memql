@@ -22,8 +22,11 @@ import {
   type FakeConnection,
 } from "./harness";
 
-// The Domains panel, through the real LiveCollection and the real generated
-// builders (epic memql#4805, task memql#4804).
+// The Domains content -- the Where-it-lives stop of the deployable page
+// (epic memql#4885), which is where the Domains panel's body lives now --
+// through the real LiveCollection and the real generated builders (epic
+// memql#4805, task memql#4804). The sentences are the panel's; the surface
+// that renders them is the page, opened as a cluster owner.
 //
 // Every call the panel makes reaches `executeNamed` as MemQL TEXT, so a
 // mutation whose argument list does not render fails here rather than on a
@@ -42,7 +45,7 @@ function mount(connection: FakeConnection, opts: { role?: string } = {}) {
   return render(
     withSession(
       <DeployablesApp
-        sectionId="sites"
+        sectionId="deployables"
         navigate={vi.fn()}
         askContext={vi.fn()}
         store={memStore()}
@@ -52,11 +55,21 @@ function mount(connection: FakeConnection, opts: { role?: string } = {}) {
   );
 }
 
-/** Opens the deployable's detail, which is where the panel is mounted. */
+/** Opens the deployable's page, whose Where-it-lives stop mounts the content. */
 async function openShop(connection: FakeConnection, opts: { role?: string } = {}) {
   mount(connection, opts);
-  await screen.findByText("shop.memql.example.com");
-  await click(screen.getByText("shop.memql.example.com"));
+  // An ARCHIVED deployable is found under the list's quiet archived flip
+  // (memql#4889): the default population is what serves. The wait is for the
+  // feed rather than for the row, so "not on the active list" is a real
+  // answer rather than "has not arrived yet".
+  await waitFor(() =>
+    expect(document.querySelector("[data-os-livelist]")?.getAttribute("data-state")).toBe("live"),
+  );
+  if (screen.queryAllByText("shop.memql.example.com").length === 0) {
+    const flip = screen.queryByRole("button", { name: /Show archived/ });
+    if (flip !== null) await click(flip);
+  }
+  await click(await screen.findByText("shop.memql.example.com"));
 }
 
 /**
@@ -86,7 +99,7 @@ beforeEach(() => {
 // ===========================================================================
 
 describe("who sees the panel", () => {
-  it("renders on the deployable detail for an operator", async () => {
+  it("renders on the deployable page for a cluster owner", async () => {
     const connection = fakeConnection({ sites: [SHOP], domains: [domainRow({ id: "cd-1" })] });
     await openShop(connection);
 
@@ -95,7 +108,7 @@ describe("who sees the panel", () => {
   });
 
   // PRESENTATION, NEVER THE BOUNDARY. The concept's clusterOwner tier and the
-  // three Go guards are the enforcement; hiding the panel from a reader who
+  // three Go guards are the enforcement; hiding the content from a reader who
   // cannot use it is a courtesy.
   it("renders nowhere for a reader who is not an operator", async () => {
     const connection = fakeConnection({ sites: [SHOP], domains: [domainRow({ id: "cd-1" })] });

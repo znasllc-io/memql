@@ -307,7 +307,8 @@ authority on.
 
 ### Custom domains: the Domains panel (memql#4805)
 
-`DomainsPanel.tsx` on the deployable detail is a client's own domain bound to a
+`page/stops/Domains.tsx`, mounted as the deployable page's Where-it-lives stop
+for a cluster owner (epic memql#4885), is a client's own domain bound to a
 site -- the add flow, the two DNS records to create, the live typed status, and
 the remove. Three things about it are worth knowing before touching it.
 
@@ -613,7 +614,8 @@ of the six apps before it.
   irrelevant and misleading -- a file whose origin is gone would show green for
   as long as the machine that no longer holds it stays awake.
 
-Two smaller things. The list merges TWO feeds (`apps/bin/mergedView.ts`), and
+Two smaller things. The list merges TWO feeds (`live/mergedView.ts`, promoted
+out of this app when Deployables' list needed the three-feed form), and
 `useLiveView` cannot do that: it caches against ONE upstream snapshot's
 identity, so a folder arriving while the artifacts are unchanged folds into
 nothing -- the list never moves, nothing errors, the folder is simply missing.
@@ -896,15 +898,16 @@ five apps before it.
   when the upstream actually moved -- so a flip is news by construction rather
   than a heartbeat.
 
-- **THE STAGE RAIL DRAWS WHAT DID NOT HAPPEN.** `StageRail.tsx` is the one new
-  visual idea here, and the reason it earns a sequenced device -- normally the
-  most over-used structure in software design -- is that a deploy has a LAW
-  about its order (`stage -> roll -> publish`, reversed on rollback). The part
-  that matters is the SKIPPED stages: an app-only package draws them, dimmed,
-  with the reason beside them, because "nothing had to restart" is what
-  explains a deploy that took seconds and a person counting missing steps
-  cannot find it. `railFor` is pure and exported for exactly that reason --
-  what the rail SAYS is the assertion, not what it renders.
+- **THE STAGE RAIL DRAWS WHAT DID NOT HAPPEN.** `page/Rail.tsx`, over the
+  readings in `page/rail.ts`, is the one new visual idea here, and the reason
+  it earns a sequenced device -- normally the most over-used structure in
+  software design -- is that a deploy has a LAW about its order (`stage ->
+  roll -> publish`, reversed on rollback). The part that matters is the
+  SKIPPED stages: an app-only package draws them, dimmed, with the reason
+  beside them, because "nothing had to restart" is what explains a deploy that
+  took seconds and a person counting missing steps cannot find it. `railFor`
+  is pure and exported for exactly that reason -- what the rail SAYS is the
+  assertion, not what it renders.
 
   Two smaller rules came out of looking at it in a browser rather than in
   jsdom, which has no CSS engine and would have passed either version: the

@@ -22,9 +22,9 @@ import { describePublishFailure } from "./publishRefusal";
 // ===========================================================================
 // `createSite` stamps `ownerUserId` from the verified actor and the Go hostname
 // policy decides every claim; `sitePublishFromArtifact` re-resolves both rows
-// under the caller's own actor before it reads a byte. The manifest's admin
-// gate on the Actions section is presentation (spec section E) -- editing a
-// boolean in a browser changes none of it.
+// under the caller's own actor before it reads a byte. The section's own
+// rank gate on New deployable and on every act of the page is presentation
+// (spec section E) -- editing a boolean in a browser changes none of it.
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
