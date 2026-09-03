@@ -261,6 +261,32 @@ const undeclared3410DeviceCodeReason = "memql#3410 -- device-grant credential lo
 // most one row and only for a caller who already holds the plaintext.
 const undeclared3408EnrolmentReason = "memql#3408 -- /enroll redeem lookup; pre-actor by construction (the token IS the credential), so no owner tier can be compared against"
 
+// undeclared4913GithubConnectReason covers githubConnectStateByHash, the
+// GitHub Connect callback's one lookup (epic memql#4912, issue memql#4913).
+//
+// It postdates the seed and names its own issue rather than carrying the
+// grandfather marker, and the argument is enrolmentTokenByHash's above, not a
+// variation on it: THE READ RUNS PRE-ACTOR BY CONSTRUCTION. GitHub redirects a
+// browser to /auth/github/callback carrying an OAuth code, a state value and
+// no MemQL bearer of any kind. There is no session to resolve, because the
+// person is mid-way through granting this cluster authority at a DIFFERENT
+// service; a tier on v1:identity:githubConnectState would compare the row's
+// userId against an empty actor.userId, match nothing, and turn every
+// completed connect into connect_state_invalid -- a flow that never works,
+// failing in the one direction nobody tests.
+//
+// It is not a candidate for caller-scoping later, either. The row exists
+// SPECIFICALLY to carry the caller's identity across a round trip through a
+// third party, which is the shape that has no actor at the far end.
+//
+// What bounds it instead is arithmetic and time, rather than authorship: the
+// filter is equality on a SHA-256 digest of 32 CSPRNG bytes, so the read
+// resolves to at most one row and only for a caller who already holds the
+// plaintext; the row's TTL is ten minutes; the query is @serverOnly, so no
+// client can reach it at all; and the consume that follows spends it exactly
+// once under a Postgres advisory lock.
+const undeclared4913GithubConnectReason = "memql#4913 -- GitHub Connect callback lookup; pre-actor by construction (GitHub redirects a browser carrying no MemQL bearer), so no owner tier can be compared against"
+
 // undeclared4301MagicLinkByIdReason covers the by-id read the device-bound
 // magic-link flow added.
 //
@@ -804,6 +830,9 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 
 	// v1:identity:enrolmentToken
 	"enrolmentTokenByHash": {"v1:identity:enrolmentToken", undeclared3408EnrolmentReason},
+
+	// v1:identity:githubConnectState
+	"githubConnectStateByHash": {"v1:identity:githubConnectState", undeclared4913GithubConnectReason},
 
 	// v1:identity:invitation
 	"invitationById":                {"v1:identity:invitation", undeclaredGrandfatherReason},

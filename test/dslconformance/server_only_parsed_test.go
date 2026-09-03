@@ -252,7 +252,28 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "identity/queries.memql", Name: "usersForSeedSweep"}:         true,
 		{Path: "identity/queries.memql", Name: "usersInDeletionCooldown"}:   true,
 		{Path: "identity/queries.memql", Name: "usersScheduledForDeletion"}: true,
-		{Path: "worker/queries.memql", Name: "runningPlansForUser"}:         true,
+		// epic memql#4912 / memql#4913. GitHub Connect's server-held state:
+		// one read and two writes over v1:identity:githubConnectState.
+		//
+		// Caller scoping has nobody to scope to at the moment that matters.
+		// The read runs inside the callback GitHub redirects a BROWSER to,
+		// carrying an OAuth code, a state value and no MemQL bearer of any
+		// kind -- the person is mid-way through granting this cluster
+		// authority at a different service, so actor.userId is empty and a
+		// self-scoped filter would match zero rows and turn every completed
+		// connect into connect_state_invalid.
+		//
+		// The two writes carry a `stateHash`, which IS the credential the
+		// callback matches on: a client-reachable create would be a primitive
+		// for minting a connect that lands a GitHub grant on an account of the
+		// caller's choosing, and a client-reachable consume would let anyone
+		// burn somebody else's in-flight connect. What bounds them instead is
+		// a SHA-256 digest of 32 CSPRNG bytes, a ten-minute TTL, and a
+		// Postgres advisory lock that spends the row exactly once.
+		{Path: "identity/queries.memql", Name: "githubConnectStateByHash"}:    true,
+		{Path: "identity/mutations.memql", Name: "createGithubConnectState"}:  true,
+		{Path: "identity/mutations.memql", Name: "consumeGithubConnectState"}: true,
+		{Path: "worker/queries.memql", Name: "runningPlansForUser"}:           true,
 		// epic memql#4378, the SYNC RUNTIME's own bookkeeping. Eight
 		// writers over two engine-owned concepts -- an outbox queue and a
 		// health timeline -- and the argument is one argument, not eight.
