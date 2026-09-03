@@ -79,7 +79,6 @@ export function StreamSection({ settings }: { settings: LogsSettings }) {
           onSearch={(next) => patch({ text: next })}
           chips={chips}
           label="Refine stream"
-          placeholder="Search messages"
         >
           <LevelFloorChoice value={filters.levelFloor} onChange={(levelFloor) => patch({ levelFloor })} />
           <WindowChoice value={filters.window} onChange={(window) => patch({ window })} options={STREAM_WINDOWS} />

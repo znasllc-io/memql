@@ -119,7 +119,6 @@ export function SearchSection({
           onSearch={(next) => patch({ text: next })}
           chips={chips}
           label="Refine search"
-          placeholder="Search messages"
         >
           <WindowChoice value={filters.window} onChange={(window) => patch({ window })} options={WINDOW_PRESETS} />
           {filters.window === "custom" ? (

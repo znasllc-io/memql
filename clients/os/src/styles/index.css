@@ -6404,7 +6404,8 @@ a.os-button {
   position: relative;
   overflow-y: auto;
   overflow-x: hidden;
-  height: clamp(240px, 52vh, 720px);
+  flex: 1;
+  min-height: 240px;
   border: 1px solid var(--os-line);
   border-radius: var(--os-radius-sm);
   background: var(--os-plate);
@@ -6446,8 +6447,26 @@ a.os-button {
  * never fixed. The desk plate is CSS-transformed for paging and would become
  * a fixed element's containing block, which is the trap the Select's file
  * header records at length. */
+/* The stack FILLS the window and the list takes what the Head, the scope
+ * line and any open detail panel leave -- rule 9, real estate belongs to
+ * content. A viewport fraction was the first spelling and it painted 112px
+ * of dead space below the list in a 1000px window, which is the shape of
+ * the rule's own counter-example. The 240px floor on .os-vlist is what
+ * keeps a selected row's detail panel from squeezing the list to nothing;
+ * past that the window scrolls, which is the honest outcome.
+ *
+ * THE HEIGHT MUST BE DEFINITE. `min-height: 100%` reads as "at least the
+ * window" and lets the box grow to its content instead: the list measured
+ * itself at 6002px and rendered two hundred rows, which is the windowing
+ * gone -- silently, and only visible at real size. */
+.os-logs {
+  height: 100%;
+}
 .os-logs-list {
   position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .os-logs-jump {
   position: absolute;
@@ -6505,8 +6524,12 @@ a.os-button {
 .os-logs-level[data-level="error"] {
   color: var(--os-error);
 }
+/* FIXED, never shrink-to-fit. A log list is read by scanning one column
+ * down, and a component cell that shrank to its content started the
+ * message at five different x positions in a single screenful. */
 .os-logs-component {
-  flex: 0 1 16ch;
+  flex: none;
+  width: 16ch;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6514,7 +6537,7 @@ a.os-button {
   color: var(--os-muted);
 }
 .os-logs-message {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6584,7 +6607,14 @@ a.os-button {
   color: var(--os-ink);
 }
 
-/* ---- the facets inside Refine ---- */
+/* ---- the facets inside Refine ----
+ *
+ * The logs panel is wider than the kit's 264px floor because the level row
+ * is four choices, and at the floor the fourth wrapped alone onto a line of
+ * its own -- a set that reads as three plus an afterthought. */
+.os-logs .os-refine-panel {
+  min-width: 296px;
+}
 .os-logs-facet {
   display: flex;
   flex-direction: column;

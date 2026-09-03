@@ -69,7 +69,7 @@ describe("each facet narrows the rendered call", () => {
     h.connection = connection;
     await renderAppLogs({ app: "files" });
     await openRefine();
-    await type(screen.getByLabelText("Search messages") as HTMLInputElement, "timeout");
+    await type(screen.getByLabelText("Search") as HTMLInputElement, "timeout");
     // Not yet: a word arrives as one question, not six.
     expect(connection.callsNamed("logsTail")).toHaveLength(1);
     await settle();

@@ -196,7 +196,7 @@ describe("Search", () => {
     await renderLogsApp({ section: "search" });
     await click(screen.getByRole("button", { name: "Refine search" }));
     await click(screen.getByRole("radio", { name: "Errors" }));
-    await type(screen.getByLabelText("Search messages") as HTMLInputElement, "refused");
+    await type(screen.getByLabelText("Search") as HTMLInputElement, "refused");
     await settle();
     const calls = connection.callsNamed("logsSearch");
     expect(calls[calls.length - 1]).toMatch(/levels: \["error"\], text: "refused", limit: 200\)$/);

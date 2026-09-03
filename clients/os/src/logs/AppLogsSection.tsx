@@ -111,7 +111,6 @@ export function AppLogsSection({ app, subjectConcepts = [], intent, consumeInten
           onSearch={(next) => patch({ text: next })}
           chips={chips}
           label="Refine logs"
-          placeholder="Search messages"
         >
           <LevelFloorChoice value={filters.levelFloor} onChange={(levelFloor) => patch({ levelFloor })} />
           <WindowChoice value={filters.window} onChange={(window) => patch({ window })} options={TAIL_WINDOWS} />
