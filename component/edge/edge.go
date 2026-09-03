@@ -156,7 +156,29 @@ func siteFromRow(r map[string]any) *Site {
 		APIProxy:    rowBool(r, "apiProxy"),
 		SystemOwned: rowBool(r, "systemOwned"),
 		Binding:     rowObject(r, "binding"),
+		Settings:    rowStringMap(r, "settings"),
 	}
+}
+
+// rowStringMap projects an object field whose values are meant to be plain
+// strings (v1:platform:site.settings) onto a string map, keeping only the
+// entries that ARE strings. The write guard admits nothing else, so a
+// non-string here is a raw write that bypassed it; dropping the entry rather
+// than stringifying it keeps the document honest about what the guard
+// promises a bundle -- a value typed as a string, never one coerced into one.
+// Absent, null or a non-object yields an empty map, never nil.
+func rowStringMap(m map[string]any, key string) map[string]string {
+	out := map[string]string{}
+	obj, ok := m[key].(map[string]any)
+	if !ok {
+		return out
+	}
+	for k, v := range obj {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
 }
 
 func rowString(m map[string]any, key string) string {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -87,8 +88,12 @@ func TestRuntimeConfigForSite_FullDerivation(t *testing.T) {
 		OAuthClientID:      "shop",
 		AuthEnabled:        true,
 		Domain:             "",
+		Settings:           map[string]string{},
 	}
-	if got != want {
+	// reflect.DeepEqual rather than !=: Settings is a map, so the struct is
+	// no longer comparable, and a nil-vs-empty map difference here would be
+	// exactly the "always carries the key" property the settings tests pin.
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("runtimeConfigForSite = %+v, want %+v", got, want)
 	}
 }
@@ -433,5 +438,145 @@ func TestClientIDForHostname_OsHostResolvesToPortalClient(t *testing.T) {
 	}
 	if got := clientIDForHostname("portal.example.com", clients); got != "portal" {
 		t.Errorf("clientIDForHostname(portal.example.com) = %q, want portal still", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Runtime settings (epic memql#4906, decision P7)
+// ---------------------------------------------------------------------------
+
+// The document ALWAYS carries `settings`, as an empty object when the row has
+// none -- unlike `storefront`, which is kind-specific and absent by design. A
+// bundle reads config.settings.<key> without first asking whether the object
+// exists.
+func TestRuntimeConfigForSite_SettingsKeyIsAlwaysPresent(t *testing.T) {
+	for name, site := range map[string]*Site{
+		"nil site":        nil,
+		"no settings":     {ID: "s1", Hostname: "app.example.com", Kind: "spa"},
+		"empty settings":  {ID: "s1", Hostname: "app.example.com", Kind: "spa", Settings: map[string]string{}},
+		"static kind":     {ID: "s2", Hostname: "docs.example.com", Kind: "static"},
+		"storefront kind": {ID: "s3", Hostname: "shop.example.com", Kind: "shopify_storefront"},
+	} {
+		doc := runtimeConfigForSite(context.Background(), site, fakeEnv(nil), true, nil)
+		if doc.Settings == nil {
+			t.Errorf("%s: Settings is nil; the document must always carry the key", name)
+		}
+		raw, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), `"settings":{}`) {
+			t.Errorf("%s: document does not carry an empty settings object: %s", name, raw)
+		}
+	}
+}
+
+// The shape a bundle reads: the row's values, verbatim, under `settings`,
+// after the storefront block. Pinned on the SERVED bytes, not the struct, since
+// the bytes are the contract an older cached bundle keeps working against.
+func TestServeRuntimeConfig_CarriesTheSettings(t *testing.T) {
+	site := &Site{
+		ID: "s1", Hostname: "app.example.com", Status: "live", Kind: "spa",
+		Settings: map[string]string{"apiBase": "https://api.acme.example", "region": "eu"},
+	}
+	h := NewHandler(Options{Resolver: staticResolver{site: site}, Opener: mapOpener{"index.html": "ROOT"}})
+	req := httptest.NewRequest(http.MethodGet, runtimeConfigPath, nil)
+	req.Host = site.Hostname
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET %s = %d, want 200", runtimeConfigPath, rec.Code)
+	}
+	var doc struct {
+		Settings map[string]string `json:"settings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if doc.Settings["apiBase"] != "https://api.acme.example" || doc.Settings["region"] != "eu" {
+		t.Errorf("settings = %v, want the row's values verbatim", doc.Settings)
+	}
+	if len(doc.Settings) != 2 {
+		t.Errorf("settings carries %d keys, want exactly the row's 2", len(doc.Settings))
+	}
+}
+
+// ONE BUNDLE, TWO DEPLOYABLES, TWO DOCUMENTS. The bytes served are the same
+// for both hosts; only the runtime-config document differs, which is the
+// whole reason settings exist (P7: "one bundle can serve two deployables
+// against different endpoints without a rebuild").
+func TestServeRuntimeConfig_TwoDeployablesOneBundleReadDifferentSettings(t *testing.T) {
+	bundle := mapOpener{"index.html": "SAME-BYTES"}
+	sites := map[string]*Site{
+		"eu.example.com": {ID: "eu", Hostname: "eu.example.com", Status: "live", Kind: "spa", BundleRef: "blob://sites/shared/v1/",
+			Settings: map[string]string{"apiBase": "https://api.eu.example"}},
+		"us.example.com": {ID: "us", Hostname: "us.example.com", Status: "live", Kind: "spa", BundleRef: "blob://sites/shared/v1/",
+			Settings: map[string]string{"apiBase": "https://api.us.example"}},
+	}
+	got := map[string]string{}
+	for host, site := range sites {
+		h := NewHandler(Options{Resolver: staticResolver{site: site}, Opener: bundle})
+
+		page := httptest.NewRequest(http.MethodGet, "/", nil)
+		page.Host = host
+		pageRec := httptest.NewRecorder()
+		h.ServeHTTP(pageRec, page)
+		if pageRec.Body.String() != "SAME-BYTES" {
+			t.Fatalf("%s served %q, want the shared bundle", host, pageRec.Body.String())
+		}
+
+		req := httptest.NewRequest(http.MethodGet, runtimeConfigPath, nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		var doc struct {
+			Settings map[string]string `json:"settings"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+			t.Fatalf("%s: decode: %v", host, err)
+		}
+		got[host] = doc.Settings["apiBase"]
+	}
+	if got["eu.example.com"] != "https://api.eu.example" || got["us.example.com"] != "https://api.us.example" {
+		t.Errorf("the two deployables did not read their own settings: %v", got)
+	}
+}
+
+// The document copies the row's map rather than aliasing it: the resolver
+// caches the Site, and a document handed the cached map would let a mutation
+// of one leak into the other.
+func TestSettingsForSite_CopiesRatherThanAliases(t *testing.T) {
+	site := &Site{Settings: map[string]string{"a": "1"}}
+	doc := settingsForSite(site)
+	doc["a"] = "changed"
+	if site.Settings["a"] != "1" {
+		t.Error("the document's settings alias the cached row's map")
+	}
+}
+
+// siteFromRow keeps only STRING values, and never yields nil: the guard admits
+// nothing but strings, so a number here is a raw write that bypassed it, and a
+// bundle reading config.settings.<key> must never get one coerced into a
+// string it never was.
+func TestSiteFromRow_ProjectsOnlyStringSettings(t *testing.T) {
+	row := map[string]any{
+		"id":       "v1:platform:site:s1",
+		"hostname": "app.example.com",
+		"settings": map[string]any{"apiBase": "https://api.example", "retries": 3.0, "debug": true, "nested": map[string]any{"x": "y"}},
+	}
+	site := siteFromRow(row)
+	if len(site.Settings) != 1 || site.Settings["apiBase"] != "https://api.example" {
+		t.Errorf("Settings = %v, want only the string entry", site.Settings)
+	}
+	for name, raw := range map[string]any{"absent": nil, "null": map[string]any{"settings": nil}, "scalar": map[string]any{"settings": "x"}} {
+		r := map[string]any{"id": "v1:platform:site:s1"}
+		if m, ok := raw.(map[string]any); ok {
+			for k, v := range m {
+				r[k] = v
+			}
+		}
+		if got := siteFromRow(r).Settings; got == nil || len(got) != 0 {
+			t.Errorf("%s: Settings = %v, want an empty, non-nil map", name, got)
+		}
 	}
 }

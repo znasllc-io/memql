@@ -1106,6 +1106,13 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := e.validateSiteStatusTransition(ctx, payload, meta.priorExisted, meta.priorStatus, meta.priorSystemOwned, actor); err != nil {
 			return nil, meta, err
 		}
+		// Runtime settings (epic memql#4906, P7), beside the three above and
+		// for the same reason: the form of a KEY and the plainness of a value
+		// are not predicates a mutation body can state, and the systemOwned
+		// exemption reads the PRIOR row. See platform_site_settings_guard.go.
+		if err := e.validateSiteSettings(ctx, payload, meta.priorSystemOwned, actor); err != nil {
+			return nil, meta, err
+		}
 	}
 
 	// v1:platform:packageDeployment is APPEND-ONLY past a terminal status

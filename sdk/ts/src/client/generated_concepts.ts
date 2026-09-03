@@ -1011,6 +1011,7 @@ export const BoundConcepts = {
   updateSessionStreams: "v1:cognition:session",
   updateSiteAccount: "v1:platform:site",
   updateSiteBundle: "v1:platform:site",
+  updateSiteSettings: "v1:platform:site",
   updateSiteStatus: "v1:platform:site",
   updateStore: "v1:shopify:store",
   updateTaskStatus: "v1:planner:task",
