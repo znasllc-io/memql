@@ -77,16 +77,31 @@ func (a *App) wireWorkbenchForwarding(
 		if parentConnector != nil {
 			parentConnector.SetWorkbenchForwardResponseSink(forwarder)
 		}
-		// Outbound dialer narrowed to workbench peers so the router
-		// has a *peerConnection to Send on. Mirrors the cognition /
-		// planner -> agent dialer pattern in cluster.go.
-		seeds := a.workerPeerSeedsFromEnv()
-		if dialer := node.NewWorkerDialer(
+		// The router needs an OUTBOUND stream to send on: accepting inbound
+		// ones only yields a server-side handle, and the forward envelope is
+		// a client->server message.
+		//
+		// REUSE THE DIALER THIS NODE ALREADY HAS, if it has one. The bff is
+		// the case that makes this matter: cluster.go already builds it an
+		// unfiltered WorkerDialer for the AI and deploy-control routes, and
+		// that dialer dials every seed in MEMQL_WORKER_PEERS -- which, since
+		// this epic added the workbench to that list, already includes the
+		// workbench. Adding a second dialer here would open a second outbound
+		// stream to the same peer from the same process, with two reconcile
+		// loops racing over one connection set and two identically-named
+		// event-bus subscriptions behind them.
+		//
+		// The agent has no dialer at this point (wireWorkerForwarding builds
+		// its own, later), so it still gets one here, narrowed to workbench
+		// peers as before.
+		if existing := a.existingWorkerDialer(); existing != nil {
+			existing.SetWorkbenchForwardResponseSink(forwarder)
+		} else if dialer := node.NewWorkerDialer(
 			nodeIdentity,
 			peerMgr,
 			a.engine,
 			a.eventBus,
-			seeds,
+			a.workerPeerSeedsFromEnv(),
 			a.Logger,
 		); dialer != nil {
 			dialer.SetDialTypes(node.NodeTypeWorkbench)
@@ -115,6 +130,21 @@ func (a *App) wireWorkbenchForwarding(
 		nodeServer.SetWorkbenchForwardHandler(handler)
 		a.Logger.Info("workbench node: forward handler installed on NodeService.Stream")
 	}
+}
+
+// existingWorkerDialer returns the WorkerDialer this node has already
+// installed, or nil.
+//
+// Found by TYPE in a.Dependencies rather than kept in a field, because the two
+// places that build one are in different files and neither owns the other. A
+// field would be a third place for them to disagree about which is current.
+func (a *App) existingWorkerDialer() *node.WorkerDialer {
+	for _, dep := range a.Dependencies {
+		if dialer, ok := dep.(*node.WorkerDialer); ok {
+			return dialer
+		}
+	}
+	return nil
 }
 
 // lookupWorkbenchIntegration walks the engine's IntegrationProvider
