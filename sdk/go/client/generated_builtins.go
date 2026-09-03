@@ -1696,11 +1696,11 @@ func SourceCredentialRevokeBuild(args SourceCredentialRevokeArgs) string {
 	return b.String()
 }
 
-// SourceProbe -- Ask whether this cluster can read a repository (epic memql#4885, D11). Parses the URL, resolves credentialId under the caller's own actor the way a fetch does, asks GitHub for the repository, and answers {host, reachable, private, defaultBranch, reason}. reason is exactly one of: ok (reachable; private and defaultBranch are GitHub's answer), not_found_or_private (404 with no credential -- GitHub answers the two alike, and the stop offers a credential), credential_cannot_see_it (refused under the credential: choose another, or fix its grant), credential_not_found (the caller cannot read the named credential), credential_revoked, source_host_unsupported (only github.com today, or upload a zip), rate_limited (ask again later). A typed reason, never the API's own body. A GitHub this cluster cannot reach is an ERROR rather than a reason, so the stop says so and stays editable; the fetch is the authority and the probe is a courtesy. Writes nothing and stamps nothing.
+// SourceProbe -- Ask whether this cluster can read a repository (epic memql#4885, D11). Parses the URL, resolves credentialId under the caller's own actor the way a fetch does, asks GitHub for the repository, and answers {host, reachable, private, defaultBranch, reason}. reason is exactly one of: ok (reachable; private and defaultBranch are GitHub's answer), not_found_or_private (404 with no credential -- GitHub answers the two alike, and the stop offers a credential), credential_cannot_see_it (refused under the credential: choose another, or fix its grant), credential_not_found (the caller cannot read the named credential), credential_revoked, source_host_unsupported (only github.com today, or upload a zip), rate_limited (ask again later), reconnect_required (GitHub refused the grant itself -- never read as 'private, or not there', because the repair is reconnecting and not choosing another credential), repository_not_installed (the grant is good and the app is not installed on this repository, which is a link away). Under a grant the probe also answers `branches` and a `manifest` summary read from memql-package.yaml through the contents API -- {name, deployables:[{name, kind, path}], dslDomains} -- so the ref picker and the What-it-is preview are filled before Analyze runs; both are empty when there is no grant, no manifest, or the manifest does not parse, and a manifest that does not parse is NOT a refusal here, because the analysis is the authority. A typed reason, never the API's own body. A GitHub this cluster cannot reach is an ERROR rather than a reason, so the stop says so and stays editable; the fetch is the authority and the probe is a courtesy. Writes nothing and stamps nothing.
 type SourceProbeArgs struct {
 	// The repository URL as typed, e.g. https://github.com/acme/widget.
 	RepoUrl string
-	// One of the caller's v1:platform:sourceCredential rows to probe under. Empty probes anonymously, which is what a public repository needs.
+	// One of the caller's v1:platform:sourceCredential rows to probe under -- a pasted token or a GitHub App grant. Empty resolves the caller's active grant when they hold one and probes anonymously otherwise, which is what a public repository needs and what makes a connected person's picker prefill without naming anything.
 	CredentialId string
 }
 
@@ -1721,6 +1721,38 @@ func SourceProbeBuild(args SourceProbeArgs) string {
 		}
 		b.WriteString("credentialId: ")
 		b.WriteString(quoteMemQL(args.CredentialId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// SourceRepositories -- List the repositories a GitHub App grant can reach (epic memql#4912, C7). Resolves the caller's active grant -- or the one named by credentialId -- reads its installations live from GitHub and walks each one's repositories, and answers {repositories, installations, pending, nextPage, reason}. Each repository carries {fullName, owner, name, url, private, visibility, defaultBranch, pushedAt, installationId}, so the picker can group by owner and prefill a ref without a second call. `installations` names every installation the grant reaches, and `pending` names those still awaiting an organisation owner's approval BY NAME -- a pending installation is not a reachable one, and saying so is what stops a person hunting for a repository that will appear when somebody else clicks. reason is one of: ok, github_app_not_configured (this cluster has no GitHub App, so only the token path is offered), reconnect_required (GitHub refused the grant -- the person reconnects), credential_not_found (no grant, or not the caller's), credential_revoked, rate_limited. Writes nothing except the grant's own installation ids, which it refreshes from what it just read.
+type SourceRepositoriesArgs struct {
+	// A github_app grant of the caller's to list under. Empty resolves the caller's active grant, which is what a person with one connection has.
+	CredentialId string
+	// 1-based page through the repositories of every installation, 100 per page. Empty or 0 means the first page; nextPage in the reply is 0 when there are no more.
+	Page int
+}
+
+// SourceRepositories calls the engine builtin sourceRepositories.
+func (qc *QueryClient) SourceRepositories(ctx context.Context, args SourceRepositoriesArgs) (*Result, error) {
+	call := SourceRepositoriesBuild(args)
+	return qc.executeNamed(ctx, "sourceRepositories", call)
+}
+
+func SourceRepositoriesBuild(args SourceRepositoriesArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin sourceRepositories(")
+	if args.CredentialId != "" {
+		b.WriteString("credentialId: ")
+		b.WriteString(quoteMemQL(args.CredentialId))
+	}
+	if args.Page != 0 {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("page: ")
+		b.WriteString(fmt.Sprintf("%v", args.Page))
 	}
 	b.WriteString(")")
 	return b.String()

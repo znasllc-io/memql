@@ -652,3 +652,82 @@ query sourceCredential sourceCredentialSealedById {
   filter  row.id==args.credentialId && ownerUserId==actor.userId
   shape   sourceCredentialSealed
 }
+
+// ---- GitHub App grants (epic memql#4912, C5/C6) ----
+//
+// Four server-only reads, and they split on WHOSE ACTOR IS AVAILABLE, which is
+// the only thing that decides how a filter can be written.
+//
+// The first two run under the GRANT OWNER's actor -- the connect callback
+// borrows the state row's user before it reads, and sourceRepositories runs
+// under the person who clicked -- so they are owner-scoped exactly as
+// sourceCredentialSealedById is, and that term IS the whole authorization.
+//
+// The last two run from a WEBHOOK, where there is no person at all: a delivery
+// says an app was installed somewhere, and the grant it belongs to is owned by
+// whoever installed it. So they carry NO owner term and reach across owners,
+// and the authority that makes them work is the maintenance actor their
+// automation is listed under (component/auth/maintenance_actor.go) -- not the
+// filter. They take the CARD shape rather than the sealed one for the same
+// reason: a writer of installation ids has no business holding ciphertext.
+
+/// The caller's grant for one GitHub account. The connect callback's read, and the compare half of
+/// its decision: a grant already here is UPDATED in place, and its absence is what mints a new row.
+///
+/// Keyed on `externalId`, GitHub's numeric user id, rather than on the login: a person who renames
+/// their GitHub account must not acquire a second grant, and a login is a display string that moves.
+@serverOnly
+@unbounded("one grant per (owner, GitHub account) -- bounded by construction, not by a page")
+@actor
+query sourceCredential githubAppGrantByExternalId {
+  args {
+    externalId  string!
+  }
+  filter  kind=="github_app" && externalId==args.externalId && ownerUserId==actor.userId
+  shape   sourceCredentialSealed
+}
+
+/// The caller's active grant. What sourceRepositories and the prefill probe resolve when no
+/// credential was named -- a person who has connected GitHub should not have to say which grant,
+/// because there is one.
+///
+/// Revoked grants are excluded by the trait rather than by a bare `status=="active"`, and the
+/// exclusion is the point: a disconnected grant must read as ABSENT here, so the surface offers
+/// Connect rather than a picker that would refuse every repository in it.
+@serverOnly
+@actor
+query sourceCredential githubAppGrantForCaller {
+  filter  kind=="github_app" && statusIsActive && ownerUserId==actor.userId
+  sort    "row.createdAt", "desc"
+  shape   sourceCredentialSealed
+}
+
+/// Grants that name one installation. The `installation_repositories` and `installation.deleted`
+/// path: the delivery carries an installation id that is already on the grant, so the id is how the
+/// row is found.
+@serverOnly
+@unbounded("grants naming one installation -- a handful of rows, keyed by an id the delivery carried")
+query sourceCredential githubAppGrantsByInstallation {
+  args {
+    installationId  string!
+  }
+  filter  kind=="github_app" && args.installationId in installationIds
+  shape   sourceCredentialCard
+}
+
+/// Grants belonging to one GitHub login. The `installation.created` path, where the installation id
+/// is NEW and therefore on no grant yet, so the sender's login is the only handle the delivery
+/// carries that any row already holds.
+///
+/// A login is not unique across MemQL users in principle -- two people could connect the same GitHub
+/// account -- so this answers a SET and the caller updates every row in it. That is correct: each of
+/// those grants really can reach the new installation.
+@serverOnly
+@unbounded("grants for one GitHub login -- ordinarily one row, and never a page")
+query sourceCredential githubAppGrantsByLogin {
+  args {
+    login  string!
+  }
+  filter  kind=="github_app" && login==args.login
+  shape   sourceCredentialCard
+}
