@@ -86,3 +86,22 @@ export function settingsKeyProblem(key: string, rows: readonly SettingRow[]): st
   }
   return "";
 }
+
+/**
+ * A canonical string for a settings object, for comparing two of them.
+ *
+ * SORTED, because `JSON.stringify` preserves INSERTION order and the two
+ * sides being compared are built differently: the stored map arrives from the
+ * wire in whatever order the payload carried, and the draft is rebuilt from
+ * rows this module sorts by key. A raw stringify comparison therefore reports
+ * a difference whenever the wire's order is not alphabetical -- which shows
+ * up as a Save button that is enabled on a form nobody has touched, and, more
+ * quietly, as an edit that looks unsaved after it saved.
+ */
+export function settingsFingerprint(settings: Record<string, string>): string {
+  return JSON.stringify(
+    Object.keys(settings)
+      .sort()
+      .map((k) => [k, settings[k] ?? ""]),
+  );
+}

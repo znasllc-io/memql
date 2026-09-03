@@ -6,7 +6,14 @@ import { useOsConnection } from "../../live/connection";
 import { ProblemNotice } from "./packages/ReportView";
 import { saveSiteSettings } from "./packages/calls";
 import type { SiteRow } from "./rows";
-import { SETTINGS_KEY_FORM, settingsKeyProblem, settingsRows, toSettingsMap, type SettingRow } from "./settings-editor";
+import {
+  SETTINGS_KEY_FORM,
+  settingsFingerprint,
+  settingsKeyProblem,
+  settingsRows,
+  toSettingsMap,
+  type SettingRow,
+} from "./settings-editor";
 
 // The key-values a bundle reads at load (epic memql#4906, decision P7).
 //
@@ -46,20 +53,31 @@ const NOT_A_SECRET =
 
 export function RuntimeSettingsPanel({ site, canWrite }: { site: SiteRow; canWrite: boolean }) {
   const connection = useOsConnection();
-  const stored = useMemo(() => settingsRows(site.settings), [site.settings]);
+  // THE SETTINGS' OWN VALUES, not the object holding them, and the difference
+  // is a bug somebody types into. `site` is re-projected whenever the live
+  // collection changes -- which is whenever ANY deployable in the cluster is
+  // published, renamed or paused -- so `site.settings` is a fresh object many
+  // times a minute on a busy cluster. An effect keyed on it would reset the
+  // draft under the hands of somebody halfway through typing a value,
+  // because a colleague deployed something unrelated.
+  //
+  // Keyed on the serialized VALUES, the re-seed happens when this
+  // deployable's settings actually changed, which is the case it is for.
+  const storedKey = settingsFingerprint(site.settings);
+  const stored = useMemo(() => settingsRows(site.settings), [storedKey]);
   const [draft, setDraft] = useState<SettingRow[]>(stored);
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState("");
 
-  // Re-seed from the row when the row changes -- a publish, another tab's
-  // save, or a different deployable selected. An edit in progress is
-  // deliberately discarded rather than merged: a half-typed key silently
-  // surviving a change somebody else made is how two people overwrite each
-  // other and neither is told.
+  // Re-seed when this deployable's stored settings change -- this save
+  // landing, another tab's, or a different deployable selected. An edit in
+  // progress is then deliberately discarded rather than merged: a half-typed
+  // key silently surviving a change somebody else made is how two people
+  // overwrite each other and neither is told.
   useEffect(() => {
     setDraft(stored);
     setRefusal("");
-  }, [stored]);
+  }, [stored, site.id]);
 
   // SYSTEM-OWNED ROWS RENDER NO CONTROLS AT ALL, the rule this app already
   // states for the lifecycle: the server refuses the write whoever asks, and a row of
@@ -87,7 +105,7 @@ export function RuntimeSettingsPanel({ site, canWrite }: { site: SiteRow; canWri
 
   const problems = draft.map((row) => settingsKeyProblem(row.key, draft));
   const firstProblem = problems.find((p) => p !== "") ?? "";
-  const dirty = JSON.stringify(toSettingsMap(draft)) !== JSON.stringify(site.settings);
+  const dirty = settingsFingerprint(toSettingsMap(draft)) !== storedKey;
 
   function update(index: number, patch: Partial<SettingRow>) {
     setDraft((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));

@@ -26,6 +26,7 @@ import {
 } from "../../src/apps/deployables/traffic";
 import {
   SETTINGS_KEY_FORM,
+  settingsFingerprint,
   settingsKeyProblem,
   settingsRows,
   toSettingsMap,
@@ -269,6 +270,20 @@ describe("the runtime-settings editor", () => {
 
   it("names the form when a key cannot be read by an app", () => {
     expect(settingsKeyProblem("api-base", [{ id: "1", key: "api-base", value: "" }])).toContain("config.settings");
+  });
+
+  it("compares two settings objects by their VALUES, not by key order", () => {
+    // The stored map arrives from the wire in the payload's order and the
+    // draft is rebuilt from rows sorted by key, so a raw stringify comparison
+    // reports a difference on a form nobody has touched -- a Save button lit
+    // on an untouched panel, and an edit that looks unsaved after it saved.
+    const wireOrder = { zulu: "1", alpha: "2" };
+    const draftOrder = { alpha: "2", zulu: "1" };
+    expect(JSON.stringify(wireOrder)).not.toBe(JSON.stringify(draftOrder));
+    expect(settingsFingerprint(wireOrder)).toBe(settingsFingerprint(draftOrder));
+    // And it still tells a real change apart.
+    expect(settingsFingerprint(wireOrder)).not.toBe(settingsFingerprint({ alpha: "2", zulu: "changed" }));
+    expect(settingsFingerprint(wireOrder)).not.toBe(settingsFingerprint({ alpha: "2" }));
   });
 
   it("catches two rows sharing a name, which the server structurally cannot", () => {
