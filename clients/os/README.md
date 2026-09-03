@@ -897,15 +897,15 @@ five apps before it.
   than a heartbeat.
 
 - **THE STAGE RAIL DRAWS WHAT DID NOT HAPPEN.** `page/Rail.tsx`, over the
-  readings in `page/rail.ts`, is the one new
-  visual idea here, and the reason it earns a sequenced device -- normally the
-  most over-used structure in software design -- is that a deploy has a LAW
-  about its order (`stage -> roll -> publish`, reversed on rollback). The part
-  that matters is the SKIPPED stages: an app-only package draws them, dimmed,
-  with the reason beside them, because "nothing had to restart" is what
-  explains a deploy that took seconds and a person counting missing steps
-  cannot find it. `railFor` is pure and exported for exactly that reason --
-  what the rail SAYS is the assertion, not what it renders.
+  readings in `page/rail.ts`, is the one new visual idea here, and the reason
+  it earns a sequenced device -- normally the most over-used structure in
+  software design -- is that a deploy has a LAW about its order (`stage ->
+  roll -> publish`, reversed on rollback). The part that matters is the
+  SKIPPED stages: an app-only package draws them, dimmed, with the reason
+  beside them, because "nothing had to restart" is what explains a deploy that
+  took seconds and a person counting missing steps cannot find it. `railFor`
+  is pure and exported for exactly that reason -- what the rail SAYS is the
+  assertion, not what it renders.
 
   Two smaller rules came out of looking at it in a browser rather than in
   jsdom, which has no CSS engine and would have passed either version: the
