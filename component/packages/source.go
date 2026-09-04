@@ -250,6 +250,22 @@ func ExtractTarGz(r io.Reader, destDir string, limits Limits) (string, error) {
 			return "", refuse(CodeSourceUnreadable, "this source could not be read: %v", nerr)
 		}
 
+		// A PAX global header is metadata about the archive, not a member of
+		// the tree, and archive/tar hands it back as an entry of its own
+		// (Typeflag 'g', Name "pax_global_header"). Every GitHub tarball
+		// starts with one -- git archive writes `comment=<sha>` into it -- so
+		// it has to be skipped BEFORE the top-level bookkeeping below: counted
+		// as a second top-level name it stopped the synthesized
+		// <owner>-<repo>-<sha>/ directory from being stripped, the manifest
+		// sat one level below the returned root, and every repository-sourced
+		// package was refused package_manifest_missing while the probe, which
+		// reads the same file through the contents API, kept saying it was
+		// there. Per-file PAX and GNU long-name records never reach here;
+		// the reader folds them into the entry they describe.
+		if hdr.Typeflag == tar.TypeXGlobalHeader {
+			continue
+		}
+
 		clean, perr := safeArchivePath(hdr.Name)
 		if perr != nil {
 			return "", perr
