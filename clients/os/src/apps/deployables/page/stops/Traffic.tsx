@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Caption, Fact, Facts, useNow } from "../../../../kit";
 import { formatFreshness, formatMoment } from "../../../../kit/format";
 import { useOsConnection } from "../../../../live/connection";
+import { useDeployablesSettings } from "../../settingsContext";
 import type { SiteRow } from "../../rows";
 import {
   DEFAULT_TRAFFIC_WINDOW,
@@ -80,7 +81,16 @@ const STRIP_HEIGHT = 34;
 export function TrafficPanel({ site }: { site: SiteRow }) {
   const connection = useOsConnection();
   const now = useNow();
-  const [window, setWindow] = useState<TrafficWindow>(DEFAULT_TRAFFIC_WINDOW);
+  // THE WINDOW IS A REMEMBERED CHOICE, NOT A PER-PAGE ONE (the app's settings
+  // document). Somebody troubleshooting moves between deployables asking the
+  // same question, so re-picking the window on each one is exactly the
+  // clicking this is here to stop -- and the read is the settings document
+  // rather than local state so it survives the page being closed.
+  //
+  // The DEFAULT is the hour; a person who picks otherwise keeps their pick.
+  const { settings, update } = useDeployablesSettings();
+  const window = settings.trafficWindow ?? DEFAULT_TRAFFIC_WINDOW;
+  const setWindow = (next: TrafficWindow) => update({ trafficWindow: next });
   const [reading, setReading] = useState<TrafficReading | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
   const [failure, setFailure] = useState("");

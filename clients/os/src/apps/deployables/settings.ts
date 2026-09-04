@@ -6,6 +6,7 @@
 // loses their desks because an app learned a checkbox.
 
 import type { OsAppSection } from "../../system/registry";
+import { TRAFFIC_WINDOWS, type TrafficWindow } from "./traffic";
 
 /**
  * The sections this app declares, in manifest order.
@@ -86,6 +87,23 @@ export interface DeployablesSettings {
    * round trip. That is why it is safe to be instant.
    */
   density: ListDensity;
+  /**
+   * The traffic window a deployable's page opens on.
+   *
+   * ONE CHOICE FOR EVERY DEPLOYABLE, not one per site. Somebody troubleshooting
+   * moves between deployables asking the same question, and a per-site memory
+   * would make them re-pick the window on each one -- which is the clicking
+   * this field exists to stop.
+   */
+  trafficWindow: TrafficWindow;
+  /**
+   * The source groups a person has opened, by group id.
+   *
+   * THE OPEN SET RATHER THAN THE CLOSED ONE, because closed is the default: a
+   * list of what is shut would have to name every source that has ever
+   * existed, and a source added tomorrow would arrive open.
+   */
+  expandedSources: string[];
 }
 
 export const DEPLOYABLES_SETTINGS_KEY = "memql-os-deployables-v1";
@@ -97,6 +115,15 @@ export const DEFAULT_DEPLOYABLES_SETTINGS: DeployablesSettings = {
   // is first in an array" would move with an unrelated edit.
   defaultSection: "map",
   density: "comfortable",
+  // THE HOUR, not the day. A person opening a deployable is nearly always
+  // checking on it -- "is it up", which is the hour's question -- rather than
+  // measuring it. The day and the week stay one click away, and a click is
+  // remembered.
+  trafficWindow: "hour",
+  // Nothing open. With sources in their own section, a closed group is one
+  // line naming the source and how many apps it carries, which is the shape
+  // the list is for.
+  expandedSources: [],
 };
 
 /**
@@ -127,7 +154,19 @@ export function sanitizeDeployablesSettings(raw: unknown): DeployablesSettings {
       ? (doc.density as ListDensity)
       : DEFAULT_DEPLOYABLES_SETTINGS.density;
 
-  return { version: 1, defaultSection, density };
+  const trafficWindow =
+    doc.trafficWindow !== undefined && TRAFFIC_WINDOWS.includes(doc.trafficWindow as TrafficWindow)
+      ? (doc.trafficWindow as TrafficWindow)
+      : DEFAULT_DEPLOYABLES_SETTINGS.trafficWindow;
+
+  // Entries are filtered rather than the list being rejected: a stored id is
+  // a key groups are looked up by, so a stray number never matches anything
+  // and presents as "expanding does not stick" rather than as a bad document.
+  const expandedSources = Array.isArray(doc.expandedSources)
+    ? (doc.expandedSources as unknown[]).filter((v): v is string => typeof v === "string")
+    : [...DEFAULT_DEPLOYABLES_SETTINGS.expandedSources];
+
+  return { version: 1, defaultSection, density, trafficWindow, expandedSources };
 }
 
 export interface DeployablesSettingsStore {

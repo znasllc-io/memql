@@ -13,6 +13,7 @@ vi.mock("../../src/live/connection", () => ({
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import {
   DEFAULT_TRAFFIC_WINDOW,
+  TRAFFIC_WINDOWS,
   LIST_TRAFFIC_WINDOW,
   MAX_SITES_PER_READ,
   fetchTrafficSummaries,
@@ -228,10 +229,15 @@ describe("the traffic reading", () => {
   });
 
   it("reads a WIDER window for the list than for the stop", () => {
-    // The stop asks "how is it doing"; a list row asks "is anybody using this
-    // at all", and a day-wide row would call a weekly app abandoned.
-    expect(DEFAULT_TRAFFIC_WINDOW).toBe("day");
+    // The stop asks "is it up" -- the first question somebody opening a
+    // deployable has -- and a list row asks "is anybody using this at all",
+    // which an hour-wide row would answer "no" for a perfectly healthy weekly
+    // app. The two windows are chosen for two different questions, and the
+    // ordering between them is what this pins; the panel's own default moved
+    // from the day to the hour without changing it.
+    expect(DEFAULT_TRAFFIC_WINDOW).toBe("hour");
     expect(LIST_TRAFFIC_WINDOW).toBe("week");
+    expect(TRAFFIC_WINDOWS.indexOf(DEFAULT_TRAFFIC_WINDOW)).toBeLessThan(TRAFFIC_WINDOWS.indexOf(LIST_TRAFFIC_WINDOW));
   });
 });
 
@@ -336,6 +342,11 @@ async function openDeployable(seed: FakeSeed, hostname: string): Promise<{ conne
 
 describe("a deployable's readings, rendered", () => {
   beforeEach(() => {
+    // THE WINDOW IS REMEMBERED NOW, and vitest isolates per FILE rather than
+    // per test -- so without this a test that picks the day leaves the next
+    // one starting there, and the failure reads as a projection bug in
+    // whichever test happens to run second.
+    globalThis.localStorage?.clear();
     vi.useFakeTimers({ shouldAdvanceTime: true });
     // NOT ON A BUCKET BOUNDARY. `windowBounds` aligns the end UP, so at
     // exactly 12:00:00.000 a fixture built here and the component's own read
@@ -370,6 +381,11 @@ describe("a deployable's readings, rendered", () => {
       },
       "shop.memql.example.com",
     );
+    // THE FIXTURE IS DAY-SHAPED, so the window is chosen rather than assumed:
+    // the panel opens on the hour, and a row an hour-wide window cannot see is
+    // correctly absent. Naming the window here is what the test is about
+    // anyway -- the facts a measured window states.
+    await click(within(page).getByRole("radio", { name: windowLabel("day") }));
     await waitFor(() => expect(within(page).getByText("Requests")).toBeTruthy());
     const facts = within(page).getByText("Requests").closest("dl")!;
     expect(within(facts).getByText("42")).toBeTruthy();
@@ -393,6 +409,7 @@ describe("a deployable's readings, rendered", () => {
       },
       "shop.memql.example.com",
     );
+    await click(within(page).getByRole("radio", { name: windowLabel("day") }));
     const strip = await within(page).findByRole("list", { name: /requests per hour/i });
     const columns = within(strip).getAllByRole("listitem");
     expect(columns).toHaveLength(24);
@@ -404,13 +421,32 @@ describe("a deployable's readings, rendered", () => {
   it("changes the bucket and the read when the window changes", async () => {
     const { connection, page } = await openDeployable({ sites: [SHOP_LIVE] }, "shop.memql.example.com");
     await waitFor(() => expect(connection.callsNamed("siteTrafficInWindow").length).toBeGreaterThan(0));
+    // OPENS ON THE HOUR, which is a minute bucket; picking the day widens it
+    // to an hour bucket and re-reads. The direction is the other way round
+    // from how this was written, because the default moved.
     const before = connection.callsNamed("siteTrafficInWindow").at(-1)!;
-    expect(before).toContain('bucket: "1h"');
+    expect(before).toContain('bucket: "1m"');
 
-    await click(within(page).getByRole("radio", { name: windowLabel("hour") }));
+    await click(within(page).getByRole("radio", { name: windowLabel("day") }));
     await waitFor(() => {
       const after = connection.callsNamed("siteTrafficInWindow").at(-1)!;
-      expect(after).toContain('bucket: "1m"');
+      expect(after).toContain('bucket: "1h"');
+    });
+  });
+
+  it("opens on the hour, and remembers a different window once it is chosen", async () => {
+    // THE WHOLE POINT OF THE PREFERENCE. Somebody troubleshooting moves
+    // between deployables asking the same question; the window they picked has
+    // to survive the page closing, or they re-pick it on every one. The
+    // storage document is the evidence that it will, because that is what the
+    // next window reads at mount.
+    const { page } = await openDeployable({ sites: [SHOP_LIVE] }, "shop.memql.example.com");
+    expect(within(page).getByRole("radio", { name: windowLabel("hour") }).getAttribute("aria-checked")).toBe("true");
+
+    await click(within(page).getByRole("radio", { name: windowLabel("week") }));
+    await waitFor(() => {
+      const saved = JSON.parse(globalThis.localStorage.getItem("memql-os-deployables-v1") ?? "{}");
+      expect(saved.trafficWindow).toBe("week");
     });
   });
 

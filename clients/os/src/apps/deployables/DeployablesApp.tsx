@@ -27,6 +27,7 @@ import {
   type DeployablesSettingsStore,
   type ListDensity,
 } from "./settings";
+import { DeployablesSettingsProvider } from "./settingsContext";
 import { useSites } from "./useSites";
 
 // Deployables: the things this cluster serves, the map of what serves where,
@@ -178,9 +179,33 @@ export function DeployablesApp({
   }
 
   function update(patch: Partial<DeployablesSettings>) {
-    const next = { ...settings, ...patch, version: 1 as const };
-    setSettings(next);
-    settingsStore.save(next);
+    // THE FUNCTIONAL FORM, because a patch is applied to the LATEST document
+    // rather than to the one this render closed over. With one preference per
+    // screen that distinction never showed; the per-group open/shut set made
+    // it visible immediately -- two toggles in a tick and the second wrote its
+    // own id over the first's, so opening two sources left one open.
+    //
+    // The save sits inside the updater so it cannot be handed a stale value
+    // either. It is idempotent -- the same document written twice is the same
+    // document -- which is what makes it safe under StrictMode's double
+    // invocation.
+    setSettings((held) => {
+      const next = { ...held, ...patch, version: 1 as const };
+      settingsStore.save(next);
+      return next;
+    });
+  }
+
+  /** Open or shut one source group, as a function of the LATEST open set. */
+  function toggleSource(id: string) {
+    setSettings((held) => {
+      const open = held.expandedSources.includes(id)
+        ? held.expandedSources.filter((s) => s !== id)
+        : [...held.expandedSources, id];
+      const next = { ...held, expandedSources: open, version: 1 as const };
+      settingsStore.save(next);
+      return next;
+    });
   }
 
   // THE ANSWER FROM A GITHUB CONNECT, delivered as a window intent (epic
@@ -255,22 +280,29 @@ export function DeployablesApp({
   }
   if (sectionId === "deployables") {
     return (
-      <DeployablesSection
-        sites={sites}
-        packages={packages}
-        parked={parked}
-        feedError={snapshot.error || packageSnapshot.error || parkedSnapshot.error}
-        density={settings.density}
-        selectedSiteId={selectedSiteId}
-        onSelectSite={selectSite}
-        viewerUserId={viewerUserId}
-        canWrite={canWrite}
-        isClusterOwner={isClusterOwner}
-        clusterDomain={config.domain}
-        credentials={credentialRows}
-        onAsk={askContext}
-        onReseed={reseedAll}
-      />
+      // THE ONE BRANCH THAT NEEDS IT. The traffic window is read four levels
+      // down (Live stop -> traffic panel) and the open-source set is read by
+      // the list itself; both are written here. The settings section takes
+      // `settings` and `update` directly because it is one level away, and the
+      // map has neither.
+      <DeployablesSettingsProvider value={{ settings, update, toggleSource }}>
+        <DeployablesSection
+          sites={sites}
+          packages={packages}
+          parked={parked}
+          feedError={snapshot.error || packageSnapshot.error || parkedSnapshot.error}
+          density={settings.density}
+          selectedSiteId={selectedSiteId}
+          onSelectSite={selectSite}
+          viewerUserId={viewerUserId}
+          canWrite={canWrite}
+          isClusterOwner={isClusterOwner}
+          clusterDomain={config.domain}
+          credentials={credentialRows}
+          onAsk={askContext}
+          onReseed={reseedAll}
+        />
+      </DeployablesSettingsProvider>
     );
   }
   return (

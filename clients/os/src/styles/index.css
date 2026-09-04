@@ -4788,7 +4788,7 @@ a.os-button {
 .os-rail[data-compact="true"] {
   grid-auto-flow: column;
   justify-content: start;
-  gap: 4px;
+  gap: var(--os-rail-compact-gap);
   margin: 0;
 }
 .os-rail[data-compact="true"] .os-rail-stage {
@@ -4799,8 +4799,8 @@ a.os-button {
   display: none;
 }
 .os-rail[data-compact="true"] .os-rail-mark {
-  width: 12px;
-  height: 12px;
+  width: var(--os-rail-compact-mark);
+  height: var(--os-rail-compact-mark);
 }
 
 /* ---- the report -------------------------------------------------------- */
@@ -7461,10 +7461,75 @@ a.os-button {
  * decoration. */
 .os-deploy-railcol {
   flex: none;
-  width: 58px;
+  /* EXACTLY THE RAIL: five marks and the four gaps between them. A fixed 58px
+     here was 18px short, and `justify-content: flex-end` sent the overflow
+     LEFT onto the label beside it -- which is why it read as intermittent,
+     appearing only when the label was long enough to reach. */
+  width: calc(5 * var(--os-rail-compact-mark) + 4 * var(--os-rail-compact-gap));
   display: flex;
   justify-content: flex-end;
 }
+/* THE TWO SECTIONS. A heading rather than a divider, because the two halves
+   answer different questions -- "what did I deploy from somewhere" and "what
+   stands on its own" -- and a rule between them would say they are the same
+   kind of thing with a gap. Sticky so the heading survives a long source list
+   scrolling under it. */
+.os-deploy-sectionhead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 14px 0 2px;
+  padding: 3px 0;
+  font-size: var(--os-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--os-muted);
+  background: var(--os-plate);
+}
+.os-livelist-row:first-child .os-deploy-sectionhead {
+  margin-top: 0;
+}
+
+/* The source's own line: disclosure, then the row. */
+.os-deploy-grouphead {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.os-deploy-grouphead > :last-child {
+  flex: 1;
+  min-width: 0;
+}
+.os-deploy-disclose {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--os-muted);
+  cursor: pointer;
+}
+.os-deploy-disclose:hover {
+  background: var(--os-hover);
+  color: var(--os-text);
+}
+.os-deploy-disclose svg {
+  transition: transform 120ms ease;
+}
+.os-deploy-disclose[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .os-deploy-disclose svg {
+    transition: none;
+  }
+}
+
 .os-deploy-group-apps {
   display: flex;
   flex-direction: column;

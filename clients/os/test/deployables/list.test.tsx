@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -27,7 +27,14 @@ import { PORTAL, SHOP, click, emit, fakeConnection, siteRow, withSession, type F
 
 function memStore(saved?: { defaultSection: string }) {
   const data = new Map<string, string>();
-  if (saved) data.set("memql-os-deployables-v1", JSON.stringify({ version: 1, density: "comfortable", ...saved }));
+  // SOURCE GROUPS START COLLAPSED IN PRODUCTION (epic memql#4937 follow-up),
+  // and every assertion in this file is about what the list SHOWS rather than
+  // about the disclosure -- so the group is seeded open, which is the
+  // precondition those tests were written under. The default itself is
+  // asserted in list.test.tsx ("collapsed until you open it"), where it
+  // belongs.
+  const seeded = { version: 1, density: "comfortable", expandedSources: ["pkg:pkg-acme"] };
+  data.set("memql-os-deployables-v1", JSON.stringify({ ...seeded, ...saved }));
   return new LocalDeployablesSettingsStore({
     getItem: (k) => data.get(k) ?? null,
     setItem: (k, v) => void data.set(k, v),
@@ -170,6 +177,24 @@ function parkedRun(over: Partial<Record<string, unknown>> = {}): Row {
 
 const WITH_PACKAGE: FakeSeed = { sites: [STORE, ADMIN, SHOP], packages: [ACME] };
 
+/** A SECOND source, so "open two groups" is expressible. */
+const WIDGETS: Row = {
+  ...(ACME as unknown as Record<string, unknown>),
+  id: "pkg-widgets",
+  name: "widgets-co",
+  repoUrl: "https://github.com/acme/widgets",
+} as unknown as Row;
+
+const WIDGET_SITE = siteRow({
+  id: "site-widget",
+  hostname: "widgets.memql.example.com",
+  status: "live",
+  packageId: "pkg-widgets",
+  packageDeployableName: "widgets",
+});
+
+const TWO_SOURCES: FakeSeed = { sites: [STORE, ADMIN, WIDGET_SITE], packages: [ACME, WIDGETS] };
+
 // ---------------------------------------------------------------------------
 // The three sections
 // ---------------------------------------------------------------------------
@@ -202,11 +227,18 @@ describe("the list", () => {
     // credential, its auto-deploy switch, its history and its archive live.
     expect(screen.getAllByText("acme/storefront at main")).toHaveLength(1);
     const group = screen.getByText("acme/storefront at main").closest(".os-deploy-group") as HTMLElement;
-    expect(within(group).getAllByRole("button").map((b) => b.querySelector(".os-row-name")?.textContent)).toEqual([
-      "acme/storefront at main",
-      "admin",
-      "storefront",
-    ]);
+    // The named rows: the source, then its apps. The group also carries a
+    // DISCLOSURE button, which has no name of its own and is asserted below.
+    expect(
+      within(group)
+        .getAllByRole("button")
+        .map((b) => b.querySelector(".os-row-name")?.textContent)
+        .filter((name) => name !== undefined),
+    ).toEqual(["acme/storefront at main", "admin", "storefront"]);
+    // TWO CONTROLS, TWO JOBS: the chevron opens and shuts the group, the row
+    // opens the source's own view. A single control could not do both.
+    const disclose = within(group).getByRole("button", { name: /Collapse acme\/storefront at main/ });
+    expect(disclose.getAttribute("aria-expanded")).toBe("true");
     // ...and each row carries its address beside the app's name.
     expect(within(group).getByText("store.memql.example.com")).toBeTruthy();
 
@@ -220,15 +252,86 @@ describe("the list", () => {
     mount(fakeConnection(WITH_PACKAGE));
     const store = (await screen.findByText("storefront")).closest(".os-row") as HTMLElement;
     const rail = within(store).getByRole("list", { name: "storefront stops" });
+    // EVERY STOP DONE, because this app is live and serving a published
+    // bundle. This assertion used to read done/ahead/done/ahead/done and was
+    // WRITTEN THAT WAY TO MATCH THE BUG: the list hands the rail only the
+    // PARKED run, a finished run is not parked, and What-it-is and Build both
+    // derived their state from that run's report -- so they reported "not
+    // reached" for work whose output the same row was serving. The stops read
+    // the row's own standing facts now (its kind, its bundle), which is what a
+    // settled deployable actually knows about itself.
     expect([...rail.querySelectorAll(":scope > li")].map((li) => li.getAttribute("data-state"))).toEqual([
       "done",
-      "ahead",
       "done",
-      "ahead",
+      "done",
+      "done",
       "done",
     ]);
     // Five dots with no name are five dots: each mark says which stop it is.
     expect(within(rail).getByRole("img", { name: "Live, finished" })).toBeTruthy();
+  });
+
+  it("names the two sections, so a source and a standalone site never interleave", async () => {
+    mount(fakeConnection(WITH_PACKAGE));
+    await screen.findByText("acme/storefront at main");
+    // The headings are carried by the first group of each section, which is
+    // decided in the fold where the order is known.
+    const heads = [...document.querySelectorAll(".os-deploy-sectionhead")].map((h) => h.textContent);
+    expect(heads).toEqual(["From a source", "Standalone"]);
+  });
+
+  it("starts a source group COLLAPSED, and opening it is remembered", async () => {
+    // The default the seeded store in this file deliberately overrides, tested
+    // here where it belongs: a fresh document has no open groups.
+    const store = new LocalDeployablesSettingsStore({ getItem: () => null, setItem: () => {} });
+    h.connection = fakeConnection(WITH_PACKAGE);
+    render(
+      withSession(
+        <DeployablesApp sectionId="deployables" navigate={vi.fn()} askContext={vi.fn()} store={store} />,
+        { role: "owner", userId: "u-me" },
+      ),
+    );
+    const source = await screen.findByText("acme/storefront at main");
+    // The source line is there; its apps are NOT RENDERED AT ALL -- not hidden
+    // with CSS, which is what makes the app count on the row an honest summary.
+    expect(screen.queryByText("storefront")).toBeNull();
+    expect(screen.queryByText("admin")).toBeNull();
+
+    const group = source.closest(".os-deploy-group") as HTMLElement;
+    const disclose = within(group).getByRole("button", { name: /Expand acme\/storefront at main/ });
+    expect(disclose.getAttribute("aria-expanded")).toBe("false");
+
+    await click(disclose);
+    expect(await screen.findByText("storefront")).toBeTruthy();
+  });
+
+  it("opens TWO sources without one closing the other", async () => {
+    // Found in a browser, not here: `update` applied its patch to the document
+    // the RENDER closed over, so two toggles in one tick wrote the second id
+    // over the first and only one group opened. One preference per screen
+    // never showed it; a set with one entry per source did immediately.
+    const store = new LocalDeployablesSettingsStore({ getItem: () => null, setItem: () => {} });
+    h.connection = fakeConnection(TWO_SOURCES);
+    render(
+      withSession(
+        <DeployablesApp sectionId="deployables" navigate={vi.fn()} askContext={vi.fn()} store={store} />,
+        { role: "owner", userId: "u-me" },
+      ),
+    );
+    await screen.findByText("acme/storefront at main");
+    // BOTH CLICKS IN ONE TICK, which is what the browser does and what an
+    // `await click()` per button does NOT: awaiting flushes React between
+    // them, so each handler sees fresh state and the stale-closure write can
+    // never happen. This test passed against the bug until it fired them
+    // together.
+    const buttons = screen.getAllByRole("button", { name: /^Expand / });
+    expect(buttons).toHaveLength(2);
+    await act(async () => {
+      for (const b of buttons) b.click();
+    });
+    // Both sources' apps, not just the last one clicked.
+    expect(await screen.findByText("storefront")).toBeTruthy();
+    expect(screen.getByText("widgets")).toBeTruthy();
   });
 
   it("says what to do when there is nothing yet", async () => {

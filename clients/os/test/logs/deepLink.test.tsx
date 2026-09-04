@@ -20,6 +20,14 @@ import { SHOP, click, fakeConnection, withSession, type FakeConnection } from ".
 
 function memStore() {
   const data = new Map<string, string>();
+  // SOURCE GROUPS START COLLAPSED IN PRODUCTION (epic memql#4937 follow-up),
+  // and every assertion in this file is about what the list SHOWS rather than
+  // about the disclosure -- so the group is seeded open, which is the
+  // precondition those tests were written under. The default itself is
+  // asserted in list.test.tsx ("collapsed until you open it"), where it
+  // belongs.
+  const seeded = { version: 1, density: "comfortable", expandedSources: ["pkg:pkg-acme"] };
+  data.set("memql-os-deployables-v1", JSON.stringify(seeded));
   return new LocalDeployablesSettingsStore({
     getItem: (k) => data.get(k) ?? null,
     setItem: (k, v) => void data.set(k, v),

@@ -208,7 +208,11 @@ describe("the archived flip is a place", () => {
     const active = fold([STORE, ARCHIVED, oldApp], [ACME, retired]);
     expect(active.map((g) => g.id)).toEqual(["pkg:pkg-acme"]);
     const archived = fold([STORE, ARCHIVED, oldApp], [ACME, retired], [], DEFAULT_LIST_FILTER, true);
-    expect(archived.map((g) => g.id)).toEqual(["site:site-old", "pkg:pkg-old"]);
+    // SECTION FIRST, THEN ADDRESS -- so the retired SOURCE precedes the
+    // retired standalone site even though `old.` sorts before `retired.`.
+    // The archived flip is the same list under a different predicate, and it
+    // would be a worse place if it sorted by a rule the active list does not.
+    expect(archived.map((g) => g.id)).toEqual(["pkg:pkg-old", "site:site-old"]);
   });
 });
 
@@ -283,5 +287,48 @@ describe("what counts as a change to a group", () => {
     expect(groupFingerprint(notes)).toBe(before);
     const created = fold([STORE, ADMIN], [{ ...ACME, createdAt: "2027-01-01T00:00:00Z" }])[0]!;
     expect(groupFingerprint(created)).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TWO SECTIONS, SO THE TWO KINDS NEVER INTERLEAVE
+// ---------------------------------------------------------------------------
+//
+// Groups used to be sorted by first address alone, with no distinction between
+// a package group and a standalone site -- so a two-app source sorted
+// alphabetically between two hand-made ones and the list read as a jumble of
+// two different shapes. The order is now section first, address within it.
+describe("the two sections", () => {
+  it("puts every source-backed group before every standalone one", () => {
+    // `store` and `admin` belong to ACME; `shop` is hand-made. By address
+    // alone `admin` < `ci` < `shop` < `store` would interleave them.
+    const groups = fold([STORE, ADMIN, SHOP, PENDING], [ACME]);
+    expect(groups.map((g) => g.section)).toEqual(["source", "standalone", "standalone"]);
+  });
+
+  it("marks the first group of each section, and only the first", () => {
+    const groups = fold([STORE, ADMIN, SHOP, PENDING], [ACME]);
+    expect(groups.map((g) => g.startsSection)).toEqual([true, true, false]);
+  });
+
+  it("still sorts by address WITHIN a section", () => {
+    const groups = fold([STORE, ADMIN, SHOP, PENDING], [ACME]);
+    const standalone = groups.filter((g) => g.section === "standalone");
+    expect(standalone.map((g) => g.rows[0]!.hostname)).toEqual([
+      "ci.memql.example.com",
+      "shop.memql.example.com",
+    ]);
+  });
+
+  it("marks the first group even when a section has no groups before it", () => {
+    // Standalone only: it is still the first of its section and still carries
+    // the heading, or a list of hand-made sites would render with none.
+    const groups = fold([SHOP], []);
+    expect(groups.map((g) => [g.section, g.startsSection])).toEqual([["standalone", true]]);
+  });
+
+  it("marks the first source group when there are no standalone sites at all", () => {
+    const groups = fold([STORE, ADMIN], [ACME]);
+    expect(groups.map((g) => [g.section, g.startsSection])).toEqual([["source", true]]);
   });
 });

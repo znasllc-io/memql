@@ -417,9 +417,13 @@ function standingRail(input: StandingInput): RailStage[] {
         return sourceStop(stop, pkg, site);
       case "whatItIs":
         if (report !== null) return stage(stop, "done", whatItIsNote(report, app, null));
-        // A hand-made site's kind is what it is; a package that has never
-        // been analyzed has no verdict yet.
-        if (pkg === null && site !== null) return stage(stop, "done", kindLabel(site.kind));
+        // THE SITE'S OWN KIND IS A STANDING FACT, and it does not stop being
+        // one because the run that established it has finished. This read used
+        // to require `pkg === null`, which meant a package app fell through to
+        // `ahead` the moment its run was no longer the parked one the list
+        // hands over -- i.e. always, once it had deployed. A row cannot be
+        // serving a kind it has not been determined to be.
+        if (site !== null) return stage(stop, "done", kindLabel(site.kind));
         return stage(stop, "ahead");
       case "whereItLives":
         if (site !== null && site.hostname.trim() !== "") return stage(stop, "done", site.hostname);
@@ -455,6 +459,14 @@ function buildStop(
   if (pkg === null && site !== null) return stage(stop, "skipped", PREBUILT_REASON);
   if (appReport?.prebuilt === true) return stage(stop, "skipped", PREBUILT_REASON);
   if (appReport !== null && built) return stage(stop, "done");
+  // A PUBLISHED BUNDLE IS THE BUILD, STANDING. `built` above is derived from a
+  // RUN, and the list hands this rail only the PARKED run -- so once a deploy
+  // finished there was no run left to read and the stop reported `ahead` for
+  // work whose output the same row was serving. The bundle ref is the evidence
+  // that survives the run: a site holding one was built, whoever built it and
+  // however long ago. A placeholder or absent ref is not one, which is what
+  // keeps a never-published draft honest.
+  if (site !== null && isPublished(site)) return stage(stop, "done");
   return stage(stop, "ahead");
 }
 

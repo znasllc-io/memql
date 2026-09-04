@@ -734,7 +734,15 @@ func boolArg(args map[string]any, key string) bool {
 }
 
 // placementsArg reads the D8 wire shape: an object of deployable name to
-// {hostname, accountId, ownDomain}, every key optional, values trimmed. An
+// {hostname, accountId, ownDomain, skip}, every key optional, values trimmed.
+//
+// `skip` is read as either a real bool or the string "true" (boolArg), and the
+// tolerance earns its keep: the OS sends a JSON boolean, and for a while it
+// sent nothing at all -- its wire builder typed each entry as a string map, so
+// the flag had nowhere to go and every "leave this one out" arrived as an
+// ordinary placement. The app was then built, published and left at `draft`,
+// which is what the person saw. Nothing was wrong on this side, which is
+// exactly why finding it took a look at the wire. An
 // entry that is not an object is dropped rather than read as an empty
 // placement -- the publish stage then refuses the deployable by name for its
 // missing hostname, which is a better answer than a silent empty.

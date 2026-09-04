@@ -26,7 +26,15 @@ export const TRAFFIC_WINDOWS = ["hour", "day", "week"] as const;
 
 export type TrafficWindow = (typeof TRAFFIC_WINDOWS)[number];
 
-export const DEFAULT_TRAFFIC_WINDOW: TrafficWindow = "day";
+/**
+ * The window a page opens on when nobody has chosen one.
+ *
+ * THE HOUR (not the day, which this was): "is it up" is the question somebody
+ * opening a deployable is nearly always asking. A choice they make instead is
+ * remembered -- `DeployablesSettings.trafficWindow` -- so this is the first
+ * answer rather than the only one.
+ */
+export const DEFAULT_TRAFFIC_WINDOW: TrafficWindow = "hour";
 
 /**
  * The window the LIST reads.
