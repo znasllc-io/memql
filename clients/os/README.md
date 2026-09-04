@@ -391,6 +391,12 @@ presentation is the courtesy.
 
 ### The recomposition (epic memql#4937), and the four rules it left behind
 
+Design record:
+[2026-09-04-deployables-recomposed-design.md](../../docs/superpowers/specs/2026-09-04-deployables-recomposed-design.md).
+The rendered pass that accepted it, and the four defects it caught with the
+whole suite green:
+[2026-09-04-deployables-recomposed-visual-qa.md](../../docs/internal/ops/2026-09-04-deployables-recomposed-visual-qa.md).
+
 The app above was measured in a browser on a live cluster and found to carry
 **5,069px over 5.9 viewports** on one deployable page: two stacked `os-head`
 elements, thirteen rails at three different meanings, 36 controls -- with
