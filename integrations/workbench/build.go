@@ -445,8 +445,15 @@ func buildAuthoritySubject(selfNodeId string) string {
 // buildKey is the directory name under MEMQL_WORKBENCH_ROOT and the plan_id
 // slot of the forward request: keyed on the DEPLOYMENT, as the design fixes,
 // with the deployable's name so a package's apps never share a tree.
+//
+// NO ':' IN IT. The key is also the directory's name, and `npm run` composes
+// the script PATH by joining every ancestor's node_modules/.bin with ":" -- a
+// colon inside the directory name split that entry in two and every locally
+// installed bin was "not found" while sitting right there (aks-memql,
+// v0.20.18: "sh: 1: astro: not found" after a clean `npm ci`).
+// TestTheBuildDirectoryIsSafeInsideAPathList pins the shape.
 func buildKey(req BuildRequest) string {
-	return "deployment:" + shortId(req.DeploymentId) + "-" + safeName(req.DeployableName)
+	return "deployment-" + shortId(req.DeploymentId) + "-" + safeName(req.DeployableName)
 }
 
 var unsafeNameRune = regexp.MustCompile(`[^A-Za-z0-9_.-]`)
