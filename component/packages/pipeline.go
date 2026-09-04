@@ -11,6 +11,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/znasllc-io/memql/component/packages/githubapp"
@@ -63,6 +64,16 @@ const (
 	// whose node stopped saying it was alive. Terminal, and deliberately NOT a
 	// flavour of failed -- see sweep.go.
 	StatusAbandoned = "abandoned"
+	// StatusCancelled is a PERSON's stop (epic memql#4937, D3). Terminal, and
+	// deliberately not a flavour of failed for the same reason StatusAbandoned
+	// is not -- nothing broke, nothing was published, and the D6 order
+	// guarantees every site is still serving what it was serving.
+	//
+	// The distinction between these two terminal words is WHO DECIDED:
+	// abandoned is a loss this cluster OBSERVED, cancelled is a choice
+	// somebody MADE. Collapsing them would report a person's own click back to
+	// them as a fault.
+	StatusCancelled = "cancelled"
 )
 
 // Actor is what the pipeline knows about who asked.
@@ -199,6 +210,20 @@ type Placement struct {
 	Hostname  string
 	AccountId string
 	OwnDomain string
+	// Skip leaves this deployable out of the run (memql#4930, epic
+	// memql#4937). A PLACEMENT-TIME CHOICE, never a manifest one: the manifest
+	// describes the SOFTWARE, and a repository that ships a storefront and a
+	// starter SPA should not have to change to let somebody host only the
+	// storefront.
+	//
+	// A skipped deployable is RECORDED, not omitted. The row's `deployables`
+	// list promises one entry per manifest deployable, and a missing entry
+	// reads as "nothing happened" where the truth is "you chose not to, and
+	// nothing it already serves was touched". It reuses the same skipped
+	// outcome shape a target the cluster does not offer produces, because a
+	// reader asking "why is there no site for this" wants one answer shape,
+	// not two.
+	Skip bool
 }
 
 // DeployOutcome is what a run produced.
@@ -314,8 +339,22 @@ func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, er
 	// stopped before the row is closed, because a beat landing after a
 	// terminal write is refused by the append-only guard and would log an
 	// error about a rule that is working.
-	stopHeartbeat := d.heartbeat(ctx, deploymentId)
-	runErr := runDeploy(ctx, d, req, pkg, out)
+	//
+	// THE CANCEL SIGNAL RIDES THE SAME LOOP (epic memql#4937, D3). The beat
+	// re-reads the row's cancelRequested flag; the first time it is set, the
+	// run's own context is cancelled -- which is what stops a build that is
+	// mid-command -- and `cancelled` is latched so the next stage boundary
+	// returns the refusal rather than whatever error the dying context
+	// produced. The HEARTBEAT keeps its original ctx: it has to outlive the
+	// cancellation in order to close the row.
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+	var cancelled atomic.Bool
+	stopHeartbeat := d.heartbeat(ctx, deploymentId, func() {
+		cancelled.Store(true)
+		cancelRun()
+	})
+	runErr := runDeploy(runCtx, d, req, pkg, out, &cancelled)
 	stopHeartbeat()
 
 	if err := runErr; err != nil {
@@ -325,6 +364,13 @@ func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, er
 		if errors.As(err, &ref) {
 			status = StatusRefused
 			problem = &Problem{Code: ref.Code, Message: ref.Detail, Scope: ref.Scope, Fatal: true}
+			// A STOP IS NOT A REFUSAL, and it is not a failure. It gets its
+			// own terminal status so the timeline can say "cancelled" -- see
+			// StatusCancelled for why collapsing it into `failed` would
+			// report somebody's own click back to them as a fault.
+			if ref.Code == CodeDeploymentCancelled {
+				status = StatusCancelled
+			}
 		}
 		out.Status = status
 		out.Problem = problem
@@ -382,13 +428,43 @@ func (d *Deps) closeRun(ctx context.Context, deploymentId string, out *DeployOut
 // runDeploy is the stage walk. Split out so Deploy owns exactly one thing --
 // turning whatever this returns into a terminal row -- and every `return err`
 // below lands in the same place.
-func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]any, out *DeployOutcome) error {
+func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]any, out *DeployOutcome, cancelled *atomic.Bool) error {
+	// checkCancelled is the stage boundary (epic memql#4937, D3). It reads the
+	// latch the heartbeat sets rather than the row, so a boundary costs
+	// nothing and cannot itself fail -- and it is checked BEFORE each stage
+	// begins, never inside one, which is what makes "nothing was published" a
+	// property of the shape rather than of the timing.
+	checkCancelled := func() error {
+		if cancelled != nil && cancelled.Load() {
+			return refuse(CodeDeploymentCancelled,
+				"this run was stopped before it %s. Nothing was published, and every site is still serving what it was serving.",
+				"reached the point of no return")
+		}
+		return nil
+	}
+
+	if err := checkCancelled(); err != nil {
+		return err
+	}
+
 	// ---- fetch ----
 	snapshot, err := d.fetchFor(ctx, req, pkg)
 	if err != nil {
+		// A CANCEL LOOKS LIKE A FETCH FAILURE FROM HERE, because cancelling
+		// the run's context is what aborts the request in flight. The latch
+		// is the authority on which of the two happened, so it is consulted
+		// before the fetch's own error is reported -- otherwise a person who
+		// pressed Cancel is told their repository could not be read.
+		if cerr := checkCancelled(); cerr != nil {
+			return cerr
+		}
 		return err
 	}
 	defer snapshot.Close()
+
+	if err := checkCancelled(); err != nil {
+		return err
+	}
 
 	// ---- analyze ----
 	rep, aerr := Analyze(snapshot.Tree, Options{
@@ -457,11 +533,21 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	}
 
 	// ---- build ----
+	if err := checkCancelled(); err != nil {
+		return err
+	}
 	if err := d.Store.advance(ctx, out.DeploymentId, StatusBuilding); err != nil {
 		return err
 	}
 	bundles, err := d.build(ctx, req, pkg, snapshot, rep, out)
 	if err != nil {
+		// The build is the long one, so it is the stage a cancel usually
+		// lands in the middle of -- and cancelling the run's context is what
+		// aborts the command. The latch decides which happened, so somebody
+		// who pressed Cancel is not shown a build failure they did not cause.
+		if cerr := checkCancelled(); cerr != nil {
+			return cerr
+		}
 		return err
 	}
 
@@ -471,6 +557,18 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	// one whose DSL is byte-identical to what is already staged, restarts
 	// nothing and lands in seconds. It is decided by CONTENT rather than by a
 	// flag, so "unchanged" cannot drift from what is actually mounted.
+	//
+	// THE LAST CANCEL CHECKPOINT IS HERE, immediately before the roll, and
+	// there is deliberately none after it: `stage DSL` writes the package's
+	// MemQL into storage and `rolling` restarts this cluster onto it, so a run
+	// stopped between the two leaves the cluster half-rolled -- the one
+	// outcome worse than either finishing or not starting. CancellableStage
+	// refuses the ASK from this status onward, so a person is told rather than
+	// left watching a Cancel that will never be read.
+	if err := checkCancelled(); err != nil {
+		return err
+	}
+
 	if len(rep.DslDomains) > 0 {
 		dslVersion, staged, serr := d.stageAndRoll(ctx, snapshot, rep, out)
 		if serr != nil {
@@ -641,6 +739,31 @@ var packageDeploymentTerminalStatuses = map[string]struct{}{
 	StatusRefused:   {},
 	StatusFailed:    {},
 	StatusAbandoned: {},
+	StatusCancelled: {},
+}
+
+// CancellableStage reports whether a run at this status can still be stopped
+// (epic memql#4937, D3).
+//
+// THE LINE IS THE ROLL, and it is drawn by what is unsafe rather than by what
+// is slow. `staging_dsl` writes the package's MemQL into storage and `rolling`
+// restarts this cluster onto it; a run stopped between those two leaves the
+// cluster half-rolled, which is the one outcome worse than either finishing or
+// not starting. Everything before -- the fetch, the analysis, the confirm gate
+// a person is already sitting at, and the build, where the minutes actually go
+// -- has published nothing, so abandoning it leaves every site serving exactly
+// what it was serving.
+//
+// A CLOSED LIST OF WHAT IS ALLOWED, rather than an exclusion of what is not: a
+// status this function has never heard of is NOT cancellable, so a stage added
+// later is safe by default and has to opt in deliberately.
+func CancellableStage(status string) bool {
+	switch strings.TrimSpace(status) {
+	case StatusAnalyzing, StatusAwaitingConfirm, StatusBuilding:
+		return true
+	default:
+		return false
+	}
 }
 
 var _ = stageIndex

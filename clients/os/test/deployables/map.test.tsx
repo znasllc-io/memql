@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -97,14 +97,21 @@ describe("what the map draws", () => {
   });
 });
 
+// THE MAP POINTS; THE PAGE LIVES ELSEWHERE (epic memql#4937, DESIGN.md rule
+// 11). Selecting a node used to render the WHOLE DeployablePage beneath the
+// picture -- 5,000px of rail, settings, domains and history under a drawing
+// whose job is to answer "which host, which site, which bundle" at a glance.
+// It shows a CARD now, with the way in.
 describe("selection", () => {
-  it("opens a deployable's detail on click", async () => {
+  it("shows a card for the chosen deployable, with the way into its page", async () => {
     const connection = fakeConnection({ sites: [SHOP] });
     mount(connection);
     await click(await screen.findByLabelText(/^Deployable shop.memql.example.com/));
 
-    const panel = await screen.findByRole("region", { name: "Deployable shop.memql.example.com" });
-    expect(within(panel).getByText("blob://sites/site-shop/v1/")).toBeTruthy();
+    // The card answers what the map raised -- which host, what state -- and
+    // offers the way to the page rather than being one.
+    expect(await screen.findByText("published")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open this deployable" })).toBeTruthy();
   });
 
   it("opens it from the keyboard too", async () => {
@@ -112,7 +119,7 @@ describe("selection", () => {
     mount(connection);
     const node = await screen.findByLabelText("Host shop.memql.example.com");
     fireEvent.keyDown(node, { key: "Enter" });
-    expect(await screen.findByRole("region", { name: "Deployable shop.memql.example.com" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Open this deployable" })).toBeTruthy();
   });
 
   it("marks the selected cluster so the picture says what is open", async () => {
@@ -134,7 +141,7 @@ describe("selection", () => {
 
     expect(screen.getByText(/serves more than one deployable/)).toBeTruthy();
     await click(screen.getByRole("button", { name: "docs.memql.example.com" }));
-    expect(await screen.findByRole("region", { name: "Deployable docs.memql.example.com" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Open this deployable" })).toBeTruthy();
   });
 
   it("closes on a second activation of the same node", async () => {
@@ -142,9 +149,9 @@ describe("selection", () => {
     mount(connection);
     const node = await screen.findByLabelText(/^Deployable shop.memql.example.com/);
     await click(node);
-    expect(screen.getByRole("region", { name: "Deployable shop.memql.example.com" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open this deployable" })).toBeTruthy();
     await click(node);
-    expect(screen.queryByRole("region", { name: "Deployable shop.memql.example.com" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open this deployable" })).toBeNull();
   });
 });
 
@@ -219,7 +226,7 @@ describe("steering", () => {
     fireEvent.pointerUp(canvas(), { pointerId: 1, clientX: 101, clientY: 101 });
     await click(node);
 
-    expect(screen.getByRole("region", { name: "Deployable shop.memql.example.com" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open this deployable" })).toBeTruthy();
   });
 
   it("never suppresses the KEYBOARD path, however far the map was dragged", async () => {
@@ -232,7 +239,7 @@ describe("steering", () => {
     fireEvent.pointerUp(canvas(), { pointerId: 1, clientX: 300, clientY: 300 });
     fireEvent.keyDown(node, { key: "Enter" });
 
-    expect(await screen.findByRole("region", { name: "Deployable shop.memql.example.com" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Open this deployable" })).toBeTruthy();
   });
 
   it("PINCHES, and does not jump on the frame the second finger lands", async () => {

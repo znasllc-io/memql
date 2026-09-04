@@ -53,8 +53,18 @@ function mount(
 }
 
 /** Every row on the list, by the name it renders under. */
+/**
+ * The APP rows' names.
+ *
+ * A source is a real row now (epic memql#4937), so it appears among the
+ * `.os-row-name` elements too. These assertions are about which DEPLOYABLES
+ * the list is showing, so the source lines are excluded -- the grouping test
+ * above is where the source row itself is asserted.
+ */
 function rowNames(): string[] {
-  return [...document.querySelectorAll(".os-livelist-rows .os-row-name")].map((el) => el.textContent ?? "");
+  return [...document.querySelectorAll(".os-livelist-rows .os-row-name")]
+    .filter((el) => el.closest(".os-deploy-group-apps") !== null || el.closest(".os-deploy-group") === null)
+    .map((el) => el.textContent ?? "");
 }
 
 /** The list item a row sits in -- where the arrival cue lands. */
@@ -186,10 +196,14 @@ describe("the list", () => {
     mount(fakeConnection(WITH_PACKAGE));
     await screen.findByText("storefront");
 
-    // The source is named ONCE, above the rows it produced (DESIGN.md rule 7).
+    // The source is named ONCE, above the rows it produced (DESIGN.md rule 7)
+    // -- and it is a REAL ROW now (epic memql#4937), not a caption wedged
+    // between clickable ones. It opens the source's own view, where its
+    // credential, its auto-deploy switch, its history and its archive live.
     expect(screen.getAllByText("acme/storefront at main")).toHaveLength(1);
     const group = screen.getByText("acme/storefront at main").closest(".os-deploy-group") as HTMLElement;
     expect(within(group).getAllByRole("button").map((b) => b.querySelector(".os-row-name")?.textContent)).toEqual([
+      "acme/storefront at main",
       "admin",
       "storefront",
     ]);
@@ -236,12 +250,19 @@ describe("the list", () => {
     expect(connection.calls.filter((c) => c === "query sourceCredentialsMine()")).toHaveLength(1);
     expect(connection.callsNamed("packageDeployments")).toHaveLength(0);
 
+    // OPENING A ROW REPLACES THE LIST (rule 11), so the page is what is on
+    // screen after this -- which is the whole point, and why the Refine
+    // affordance is no longer beside it.
     await click(screen.getByText("storefront").closest("button"));
     await waitFor(() => expect(connection.callsNamed("packageDeployments")).toHaveLength(1));
     expect(connection.callsNamed("packageDeployments")[0]).toContain('packageId: "pkg-acme"');
-    // Opening a row opens the page BENEATH the list: the list is still there.
+    // Opening a row REPLACES the list, so there is exactly one Head on screen
+    // (DESIGN.md rule 11). Two stacked Heads in one scroller was the tell that
+    // neither of the shell's two detail patterns had been adopted -- and it is
+    // where the measured 5,069px started.
     expect(await screen.findByRole("region", { name: "Deployable store.memql.example.com" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Refine deployables" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Refine deployables" })).toBeNull();
+    expect(document.querySelectorAll(".os-head")).toHaveLength(1);
   });
 });
 
@@ -259,8 +280,12 @@ describe("a deploy waiting for you", () => {
     // source produced (DESIGN.md rule 7).
     expect(screen.getAllByText("a deploy is waiting for you")).toHaveLength(1);
     const group = screen.getByText("acme/storefront at main").closest(".os-deploy-group") as HTMLElement;
-    const sourceLine = group.querySelector(".os-deploy-group-source") as HTMLElement;
+    // The source line is a REAL ROW now (epic memql#4937), so the mark sits on
+    // the row rather than on a caption div -- still exactly once, still on the
+    // source rather than repeated down every app it produced.
+    const sourceLine = screen.getByText("acme/storefront at main").closest(".os-row") as HTMLElement;
     expect(within(sourceLine).getByText("a deploy is waiting for you")).toBeTruthy();
+    expect(group).toBeTruthy();
     const storefront = screen.getByText("storefront").closest(".os-row") as HTMLElement;
     expect(within(storefront).queryByText("a deploy is waiting for you")).toBeNull();
 
@@ -340,7 +365,7 @@ describe("Refine", () => {
     mount(fakeConnection(WITH_PACKAGE));
     await screen.findByText("storefront");
 
-    await refine("Status", "disabled");
+    await refine("Status", "Unpublished");
     expect(rowNames()).toEqual(["admin"]);
     await click(screen.getByRole("button", { name: "Remove disabled" }));
 
@@ -444,11 +469,15 @@ describe("New deployable", () => {
     expect(within(compose).getByRole("radio", { name: /A repository/ })).toBeTruthy();
     expect(within(compose).getByRole("radio", { name: /A zip in Files/ })).toBeTruthy();
     expect(within(compose).getByRole("radio", { name: /Pushed by your CI/ })).toBeTruthy();
-    // Analyze, disabled: nothing has been chosen yet.
-    const analyze = within(compose).getByRole("button", { name: "Analyze" }) as HTMLButtonElement;
-    expect(analyze.disabled).toBe(true);
+    // THE FORWARD ACT IS ON THE BAR NOW (rule 12), not in the Head -- it was
+    // at the top, so answering a long Source stop meant scrolling back UP to
+    // continue. Nothing is chosen yet, so it is ABSENT rather than disabled,
+    // and the bar says what is still needed.
+    const bar = document.querySelector(".os-actbar") as HTMLElement;
+    expect(within(bar).queryByRole("button", { name: "Analyze" })).toBeNull();
+    expect(within(bar).getByRole("button", { name: "Cancel" })).toBeTruthy();
 
-    await click(within(compose).getByRole("button", { name: "Back" }));
+    await click(within(compose).getByRole("button", { name: "Deployables" }));
     expect(await screen.findByText("storefront")).toBeTruthy();
   });
 
@@ -495,11 +524,12 @@ describe("New deployable", () => {
     // The report the run parked with, at the What-it-is stop: the app and its
     // path, as the report names them.
     expect(within(compose).getByText("clients/reports")).toBeTruthy();
-    // Deploy, and it is REACHABLE: the one app with no site yet arrived with
-    // a suggested address, so there is nothing left to answer. "storefront"
-    // already serves, so it is not re-asked -- the pipeline reads a placement
-    // on a first deploy only.
-    expect((within(compose).getByRole("button", { name: "Deploy" }) as HTMLButtonElement).disabled).toBe(false);
+    // Deploy, on the BAR and REACHABLE (rule 12): the one app with no site yet
+    // arrived with a suggested address, so there is nothing left to answer.
+    // "storefront" already serves, so it is not re-asked -- the pipeline reads
+    // a placement on a first deploy only.
+    const bar = document.querySelector(".os-actbar") as HTMLElement;
+    expect(within(bar).getByRole("button", { name: /^Deploy/ })).toBeTruthy();
     expect(within(compose).getByText("reports.memql.example.com")).toBeTruthy();
     expect(within(compose).queryByLabelText("The name storefront answers at")).toBeNull();
   });

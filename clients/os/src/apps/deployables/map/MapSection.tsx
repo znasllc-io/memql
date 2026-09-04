@@ -2,10 +2,8 @@ import type { LiveSnapshot } from "@znasllc-io/memql-sdk-core/client";
 
 import { Button, Caption, Head, Notice } from "../../../kit";
 import type { ArrivalTick } from "../../../live/arrival";
-import { DeployablePage } from "../page/DeployablePage";
-import type { PackageRow } from "../packages/rows";
-import { siteName, type SiteRow } from "../rows";
-import type { CredentialRow } from "../sources/rows";
+import { sourceLabel, type PackageRow } from "../packages/rows";
+import { liveUrlFor, siteName, statusTone, type SiteRow } from "../rows";
 import { DeployMap } from "./DeployMap";
 import type { MapNode } from "./layout";
 
@@ -41,13 +39,8 @@ export function MapSection({
   selection,
   onSelectNode,
   onSelectSite,
-  viewerUserId,
-  canWrite,
-  isClusterOwner,
-  clusterDomain,
+  onOpenDeployable,
   packages,
-  credentials,
-  onAsk,
   onReseed,
 }: {
   sites: readonly SiteRow[];
@@ -56,21 +49,20 @@ export function MapSection({
   selection: MapSelection;
   onSelectNode: (node: MapNode) => void;
   onSelectSite: (siteId: string) => void;
-  viewerUserId: string;
-  canWrite: boolean;
-  isClusterOwner: boolean;
-  /** The domain this cluster serves, threaded to the page's Domains content. */
-  clusterDomain: string;
+  /**
+   * Opens a deployable's own page, in the Deployables section.
+   *
+   * The map no longer renders one itself (rule 11): it points, and the page
+   * lives where the page lives. Everything the old inline page needed --
+   * credentials, the cluster domain, the write gate -- went with it.
+   */
+  onOpenDeployable: (siteId: string) => void;
   packages: readonly PackageRow[];
-  credentials: readonly CredentialRow[];
-  onAsk?: (tag: string) => void;
   onReseed: () => void;
 }) {
   const chosen = sites.filter((s) => selection.siteIds.includes(s.id));
   const only = chosen.length === 1 ? (chosen[0] ?? null) : null;
   const pkg = only === null || only.packageId === "" ? null : (packages.find((p) => p.id === only.packageId) ?? null);
-  const siblings =
-    only === null || only.packageId === "" ? [] : sites.filter((s) => s.packageId === only.packageId && s.id !== only.id);
 
   return (
     <div className="os-app-stack">
@@ -95,18 +87,41 @@ export function MapSection({
       />
 
       {only ? (
-        <DeployablePage
-          key={only.id}
-          site={only}
-          pkg={pkg}
-          siblings={siblings}
-          credentials={credentials}
-          viewerUserId={viewerUserId}
-          canWrite={canWrite}
-          isClusterOwner={isClusterOwner}
-          clusterDomain={clusterDomain}
-          onAsk={onAsk}
-        />
+        /* THE MAP POINTS; THE PAGE IS ELSEWHERE (DESIGN.md rule 11, epic
+           memql#4937). This used to render the WHOLE DeployablePage beneath
+           the picture -- 5,000px of rail, settings, domains and history under
+           a drawing whose whole job is to answer "which host, which site,
+           which bundle" at a glance. The same fault the list had, in the same
+           app.
+
+           A card answers what the map raised, and Open takes you to the one
+           page that owns the deployable. */
+        <div className="os-panel os-map-card">
+          <div className="os-map-card-head">
+            <span className="os-map-card-name">{siteName(only)}</span>
+            <span className="os-mono os-map-card-host">{only.hostname}</span>
+            <span className="os-map-card-state" data-tone={statusTone(only)}>
+              {mapStatusWord(only.status)}
+            </span>
+          </div>
+          {pkg === null ? null : <Caption>From {sourceLabel(pkg)}</Caption>}
+          <div className="os-form-row">
+            <Button tone="primary" onClick={() => onOpenDeployable(only.id)}>
+              Open this deployable
+            </Button>
+            {liveUrlFor(only.hostname) === "" ? null : (
+              <a
+                className="os-button"
+                data-tone="quiet"
+                href={liveUrlFor(only.hostname)}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                Visit
+              </a>
+            )}
+          </div>
+        </div>
       ) : chosen.length > 1 ? (
         /* A bundle serving several deployables. There is no ONE page to
            open, so the choice is offered rather than made arbitrarily -- and
@@ -125,4 +140,18 @@ export function MapSection({
       ) : null}
     </div>
   );
+}
+
+/** The map's own status word, matching the bar's vocabulary (D6). */
+function mapStatusWord(status: string): string {
+  switch (status) {
+    case "live":
+      return "published";
+    case "disabled":
+      return "unpublished";
+    case "archived":
+      return "archived";
+    default:
+      return "draft";
+  }
 }

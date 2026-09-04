@@ -7280,3 +7280,333 @@ a.os-button {
 /* Motion is emphasis, never information: the strip carries its whole meaning
  * standing still, so there is nothing here to disable. Stated so the next
  * person does not add a grow-in animation to sixty columns. */
+
+/* ===========================================================================
+ * Deployables, recomposed (epic memql#4937)
+ * ===========================================================================
+ * Three structures, each encoding a rule rather than a preference:
+ *
+ *   .os-deploy-pane    the view owns its scroll, so the bar can be pinned
+ *   .os-actbar         DESIGN.md rule 12 -- acts follow the state, in one place
+ *   .os-rail-line      a settled stop is ONE LINE, and reopens on click
+ *
+ * Between them they take a deployable page from 5,069px over 5.9 viewports to
+ * one screen with the acts always visible.
+ * ======================================================================== */
+
+/* THE VIEW OWNS ITS SCROLL. `.os-window-content` is the window's scroller, so
+ * anything inside it scrolls -- including a bar that must not. Filling the
+ * height and scrolling INSIDE is the arrangement Bin already uses
+ * (`.os-bin-list { overflow-y: auto }`), and it is what lets the bar sit at
+ * the bottom edge without `position: fixed` -- which would anchor to the
+ * CSS-transformed desk plate rather than to the window. */
+.os-deploy-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  /* Cancels the window's own padding so the bar can meet the window's edges,
+   * then gives it back to the scrolling half. A bar inset from the edge reads
+   * as a card that happens to be at the bottom, not as the floor. */
+  margin: -18px -20px;
+}
+.os-deploy-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---- the action bar (rule 12) ---- */
+.os-actbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 20px;
+  border-top: 1px solid var(--os-line);
+  /* The raised ground rather than the plate: the bar is the floor of the
+   * window, and it has to read as a different plane from the content that
+   * scrolls under it -- otherwise a long page looks like it simply ends. */
+  background: var(--os-raised);
+}
+.os-actbar:empty {
+  display: none;
+}
+.os-actbar-state {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.os-actbar-word {
+  font-weight: 600;
+  font-size: var(--os-text-base);
+  color: var(--os-ink);
+  white-space: nowrap;
+}
+.os-actbar-detail {
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-actbar-acts {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.os-actbar-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  align-self: center;
+}
+.os-actbar-dot[data-tone="live"] {
+  background: var(--os-accent);
+  box-shadow: 0 0 0 3px var(--os-accent-soft);
+}
+.os-actbar-dot[data-tone="paused"] {
+  background: var(--os-warn);
+}
+.os-actbar-dot[data-tone="busy"] {
+  background: var(--os-accent);
+  animation: os-actbar-pulse 1.6s var(--os-ease) infinite;
+}
+.os-actbar-dot[data-tone="none"] {
+  border: 1px solid var(--os-rail);
+}
+@keyframes os-actbar-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px var(--os-accent-soft);
+  }
+  50% {
+    box-shadow: 0 0 0 5px var(--os-accent-soft);
+  }
+}
+/* THE CONFIRMATION SAYS WHAT IT COSTS BEFORE IT ASKS. It wraps onto its own
+ * line and takes a readable measure, because it is prose somebody has to read
+ * rather than a label beside a control. */
+.os-actbar-confirm {
+  flex: 1 1 32ch;
+  max-width: 78ch;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+  line-height: 1.45;
+}
+
+/* ---- the rail's collapsed line ---- */
+.os-rail-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  background: none;
+  border: 0;
+  border-radius: var(--os-radius-xs);
+  padding: 1px 4px 1px 0;
+  cursor: pointer;
+  color: inherit;
+}
+.os-rail-line:hover .os-rail-answer {
+  color: var(--os-ink);
+}
+.os-rail-line:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 2px;
+}
+.os-rail-line .os-rail-label {
+  flex: none;
+  min-width: 92px;
+}
+.os-rail-answer {
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* inline-BLOCK, because `transform` does nothing to a non-replaced inline
+ * element -- the chevron simply never turns, which reads as a control that
+ * does not respond. */
+.os-rail-chev {
+  margin-left: auto;
+  display: inline-block;
+  flex: none;
+  font-size: 10px;
+  color: var(--os-muted);
+  transition: transform var(--os-duration-fast) var(--os-ease);
+}
+.os-rail-line[aria-expanded="true"] .os-rail-chev {
+  transform: rotate(90deg);
+}
+
+/* ---- the list: one language, and a fixed rail column ---- */
+/* THE RAIL LANDS AT THE SAME x ON EVERY ROW, so it can be scanned DOWN the
+ * list. It used to follow a variable-length hostname and land somewhere
+ * different on each -- which is the difference between a column and a
+ * decoration. */
+.os-deploy-railcol {
+  flex: none;
+  width: 58px;
+  display: flex;
+  justify-content: flex-end;
+}
+.os-deploy-group-apps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 22px;
+  margin-top: 6px;
+}
+
+/* ---- the history line ---- */
+.os-deploy-history-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--os-line);
+  padding: 10px 2px 2px;
+  margin-top: 4px;
+  cursor: pointer;
+}
+.os-deploy-history-line:hover {
+  color: var(--os-ink);
+}
+.os-deploy-history-line:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 2px;
+  border-radius: var(--os-radius-xs);
+}
+.os-deploy-history-line > span:last-child {
+  margin-left: auto;
+}
+
+/* ---- the source view's app list ---- */
+.os-source-apps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.os-source-app {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  padding: 7px 10px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+  color: var(--os-muted);
+  cursor: pointer;
+}
+.os-source-app:hover {
+  border-color: var(--os-accent);
+}
+.os-source-app:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+}
+.os-source-app-name {
+  font-weight: 600;
+  font-size: var(--os-text-base);
+  color: var(--os-ink);
+}
+.os-source-app-host {
+  font-size: var(--os-text-xs);
+}
+.os-source-app > :last-child {
+  margin-left: auto;
+}
+
+/* ---- the map's card (rule 11: the map points, it does not hold the page) ---- */
+.os-map-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.os-map-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.os-map-card-name {
+  font-weight: 600;
+  font-size: var(--os-text-md);
+}
+.os-map-card-host {
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+.os-map-card-state {
+  margin-left: auto;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+.os-map-card-state[data-tone="ok"] {
+  color: var(--os-accent);
+}
+.os-map-card-state[data-tone="warn"] {
+  color: var(--os-warn);
+}
+
+/* ---- compose: the per-app deploy/skip choice (memql#4930) ---- */
+.os-place-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+/* THE SHELL'S OWN SELECTION PILL (rule 5), not a second spelling of one:
+ * `.os-choice-row` + `.os-choice[aria-checked]` is what Settings already uses,
+ * so a choice here reads and behaves as a choice does everywhere else. All
+ * this adds is where the group sits on the line. */
+.os-place-head .os-choice-row {
+  margin-left: auto;
+  margin-bottom: 0;
+}
+/* A SKIPPED APP DIMS RATHER THAN DISAPPEARS: it is still one of the things
+ * this source declares, and hiding it would make the count on the bar
+ * unexplainable. */
+.os-report-part[data-skipped] .os-subhead {
+  opacity: 0.62;
+}
+
+@media (max-width: 720px) {
+  .os-actbar {
+    align-items: flex-start;
+  }
+  .os-actbar-acts {
+    margin-left: 0;
+    width: 100%;
+  }
+  .os-deploy-railcol {
+    display: none;
+  }
+}

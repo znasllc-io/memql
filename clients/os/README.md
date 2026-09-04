@@ -389,6 +389,102 @@ the lifecycle entirely, the server refuses those writes regardless
 (`component/memql/platform_site_status_guard.go` is the gate), and the
 presentation is the courtesy.
 
+### The recomposition (epic memql#4937), and the four rules it left behind
+
+The app above was measured in a browser on a live cluster and found to carry
+**5,069px over 5.9 viewports** on one deployable page: two stacked `os-head`
+elements, thirteen rails at three different meanings, 36 controls -- with
+Pause at y=2412, Archive at 2499, and "archive this source **and every app it
+produced**" at y=885, three sections higher than either. Six controls read
+"Retry", carrying two different promises. Four rules came out of fixing it.
+
+- **A LIST AND ITS DETAIL NEVER SHARE A SCROLL COLUMN** (DESIGN.md rule 11).
+  This app held `selectedSiteId` and rendered `<DeployablePage>` as a SIBLING
+  of `<LiveList>`, so selecting a row appended a whole page beneath the list.
+  Every other app already did better -- Bin puts the detail beside the list in
+  its own scroller, and Campaigns, Users, Accounts and Training do variants --
+  so this was the one app that had not adopted the pattern the shell already
+  had. It is four sibling views now (list, deployable, source, history) plus
+  compose, one at a time, one Head each. **The Map is not an exception**: it
+  used to render the same 5,000px page under the picture and now shows a card
+  with the way in.
+
+- **ACTS FOLLOW THE STATE, IN ONE PLACE** (rule 12, `kit/ActionBar`), and the
+  decision is a PURE function (`page/acts.ts`) so the table is what gets
+  asserted. **An illegal act is ABSENT, never disabled** -- that is not a
+  preference, it is the bug: a draft rendered an ENABLED "Archive this
+  deployable" that `validateSiteStatusTransition` refuses, and had no control
+  anywhere that could reach the `disabled` state that guard demands. The only
+  lifecycle control a draft offered was one the engine rejected.
+
+- **A SOURCE IS A THING, WITH ITS OWN PAGE.** The credential, the auto-deploy
+  switch, the run history and the archive-the-source cascade used to render
+  inside the Source stop of EVERY app the source produced. Two consequences,
+  both measured: `usePackageDeployments` reads the PACKAGE's timeline, so a
+  two-app source drew the identical 2,600px history TWICE; and the cascade --
+  which archives every app -- sat 1,614px above the page's own archive, on a
+  page about one of its siblings. A control that destroys a sibling, easier to
+  reach than the one that destroys what you are looking at, is not a layout
+  problem.
+
+- **THE STOP THAT IS OPEN IS THE ONE THAT IS A QUESTION** (`openStopFor`,
+  pure). A settled stop is one line -- mark, label, its answer, a chevron. A
+  run in flight opens the stop it is at; a REFUSED run opens the stop it
+  stopped at, which is the case that carries the reading: opening Live to say
+  "the build failed" sends somebody to repair the wrong thing.
+
+Two smaller ones worth knowing. **`transform` does nothing to a non-replaced
+INLINE element**, so a disclosure chevron needs `display: inline-block` or it
+silently never turns -- jsdom cannot see it, and it reads as a control that
+does not respond. And the bar is a **grid row, never `position: fixed`**: the
+desk plate is CSS-transformed and becomes the containing block for any fixed
+descendant, which is the same trap the Logs jump pill records.
+
+### The lifecycle grew a fourth rung, and it is the one that frees a name
+
+`Draft -> Published <-> Unpublished -> Archived -> Deleted`, with `Discard`
+skipping straight from Draft.
+
+**ARCHIVING NEVER FREED THE HOSTNAME**, and nothing in the OS could.
+`liveSiteIdsForHostname` -- the cluster-wide uniqueness probe -- excludes rows
+carrying `deleted: true` and **never reads `status`**. So an archived
+`shop.example.com` refused a new deployable at that name permanently. And no
+automation reacts to a site status change, so an archived site kept its
+`v1:platform:customDomain` rows at `live`: Ingress and Certificate still
+applied, hostname still claimed against both concepts.
+
+`siteDelete` is the cascade, as ONE decision: the domains walk to `removing`,
+auto-deploy is disarmed when this was the source's last app, and the site row
+is stamped **LAST** -- so a failure part-way leaves a deployable that is still
+findable and still says what state it is in, rather than an invisible row
+holding a name nobody can reclaim and nobody can see.
+
+**The surface's words changed; the enum did not** (no migration, no new member
+on `v1:platform:site.status`). `live` reads Published and `disabled` reads
+Unpublished, and what the engine's distinction bought -- 503 for a deliberate
+pause, 404 for an archive -- moved into the sentence beneath the state.
+
+### A run can be stopped, up to the roll
+
+`cancelled` is a fifth terminal status on `v1:platform:packageDeployment`, and
+it is **not a flavour of `failed`** for the reason `abandoned` is not: nothing
+broke and nothing was published. The distinction between the two is WHO
+DECIDED -- abandoned is a loss the cluster OBSERVED, cancelled is a choice
+somebody MADE, and collapsing them reports a person's own click back to them
+as a fault.
+
+The verb FLAGS the row and ends nothing; the node running the attempt closes
+it at its next stage boundary, so the timeline can never claim a run stopped
+while its build is still going somewhere. The flag rides the HEARTBEAT rather
+than a poll of its own, which is what lets a long single stage -- the build --
+learn about a cancel within one beat. **The last checkpoint is immediately
+before the roll**: from `staging_dsl` on, a roll restarts the cluster onto
+staged MemQL, and stopping half way through is worse than either finishing or
+not starting, so the ASK is refused there rather than setting a flag nothing
+will read. A PARKED run is the one exception the capability closes itself --
+nothing is running, so nothing would ever read the flag, and leaving it would
+let the abandoned sweep blame the cluster for a person's decision.
+
 ### A filter re-baselines through `useLiveView`'s key
 
 Revealing rows the browser already had is not the cluster sending them, so the

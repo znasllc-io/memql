@@ -59,6 +59,21 @@ builtin customDomainAdd {
 /// It does the DNS half itself and dispatches the Kubernetes half through the capability-script
 /// seam, which is what keeps client-go out of the engine's module graph (design D2). Both are one
 /// builtin because they are one decision: the check's result IS what selects the next action, and
+/// The delete cascade's domain half (epic memql#4937). Its own builtin rather than a step inside
+/// siteDelete because the ROWS and the STATE MACHINE belong to the custom-domain integration: having
+/// component/packages reach into them would make a component depend on an integration, and would put
+/// the walk to `removing` in two places that could disagree about what terminal means.
+///
+/// NO @sdk, which is how a builtin stays off the client wire -- the same way customDomainReconcile
+/// below does. (A builtin takes no @serverOnly; its annotation set is closed, and the absence of
+/// @sdk IS the wire decision.) The reachable act is `siteDelete`, which authorizes against the SITE
+/// first and then calls this.
+@executor("integration.customDomain.releaseForSite")
+@description("Walk every live custom-domain binding on one deployable to `removing`, so a deleted deployable stops answering on its client's domains immediately and the certificate and route come down on the next sweep. Bindings already `removing` or `removed` are counted and not re-written. Returns {siteId, requested, alreadyRemoved, hostnames}.")
+builtin customDomainReleaseForSite {
+  siteId  string!  @description("The v1:platform:site whose bindings should come down.")
+}
+
 /// splitting them would put the state machine in two places that could disagree about a row.
 @executor("integration.customDomain.reconcile")
 @description("Run one custom-domain reconciliation pass (epic memql#4805). For each non-terminal v1:platform:customDomain row: verify the TXT ownership token and the pointing record, promote to `issuing` when both pass, dispatch the idempotent bind capability script for `issuing` rows and the unbind script for `removing` ones, and write back what was seen with a typed failureReason. Retries ride this schedule; there is no manual re-check. Returns {checked, verified, issued, removed, failed}.")
@@ -94,6 +109,24 @@ builtin siteArchive {
 @description("Bring one of the caller's archived sites back to DISABLED (epic memql#4794, D10). Deliberately not back to live: restoring returns a site to the state it was archived from, and publishing it again is a separate, visible decision. No typed confirmation, because leaving the archive destroys nothing. Returns {siteId, hostname, status}.")
 builtin siteRestore {
   siteId  string!  @description("The archived v1:platform:site row to restore.")
+}
+
+@sdk
+@executor("integration.packages.deleteSite")
+@args(profile="object")
+@description("Delete one of the caller's deployables and RELEASE ITS NAME (epic memql#4937). The fourth and last rung of the D10 lifecycle, below archive. Refuses unless the site is `archived` or `draft` -- the two states nothing is served from -- and unless confirmHostname matches the stored hostname exactly. A systemOwned site is refused outright. It walks every custom-domain binding on the site to `removing` so the certificate and route come down on the reconciliation sweep's own schedule, disarms the source's auto-deploy when this was its last live app, and stamps `deleted` LAST: the hostname is free at that instant, because `deleted` is the only field the cluster-wide uniqueness probe reads. Stamping the site last is deliberate -- a failure part-way leaves a deployable that is still findable and still says what state it is in, rather than an invisible row holding a name. Terminal: archive is the reversible step and it is one rung up. Returns {siteId, hostname, domainsReleased, autoDeployDisarmed}. Refusals carry stable codes.")
+builtin siteDelete {
+  siteId           string!  @description("The v1:platform:site row to delete.")
+  confirmHostname  string!  @description("The site's own hostname, typed by the person as confirmation. Compared against the stored value; a mismatch refuses and writes nothing.")
+}
+
+@sdk
+@executor("integration.packages.cancelDeployment")
+@args(profile="object")
+@description("Ask a running deployment to stop (epic memql#4937). It flags the row and ends nothing: the node running the attempt reads the flag at its next stage boundary and closes the run `cancelled`, which is what keeps the timeline from claiming a run stopped while its build is still running somewhere. Refuses a run that is already terminal, and refuses one at or past `staging_dsl` -- from the roll on there is no cancel, because a roll restarts the cluster onto staged MemQL and stopping half way through is the one outcome worse than either finishing or not starting. `cancelled` is its own terminal status and NOT a flavour of `failed`: nothing broke and nothing was published. Returns {deploymentId, status, cancelRequested}.")
+builtin packageCancelDeployment {
+  packageId     string!  @description("The v1:platform:package the run belongs to.")
+  deploymentId  string!  @description("The v1:platform:packageDeployment to stop.")
 }
 
 @sdk

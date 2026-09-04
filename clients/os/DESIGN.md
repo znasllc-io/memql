@@ -1,6 +1,8 @@
 # The MemQL OS interface language
 
-Ten rules, owner-set (epic memql#4848). They exist because the apps drifted
+Twelve rules. Ten are owner-set (epic memql#4848); 11 and 12 came out of
+epic memql#4937, and 11 is mostly a RATIFICATION -- Bin, Campaigns, Users,
+Accounts and Training already complied, and Deployables was the violation. They exist because the apps drifted
 into four section languages while every control came from one kit -- the
 drift was in the LAYOUT GRAMMAR, not the vocabulary. Each rule names the kit
 piece that encodes it; when a rule and a surface disagree, the surface is
@@ -64,6 +66,26 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
     preference (rule 4) -- never chrome that sits in front of content
     forever. Checkboxes belong to forms and settings, where they state a
     choice, not to browsing surfaces, where they would be furniture.
+
+11. **A list and its detail never share a scroll column.** Beside the list
+    with its own scroller (`.os-bin-list`), or replacing it with a quiet
+    `<- <list name>` in the Head (`ComposePage`, `DeployablePage`) -- both are
+    right, and which one depends on how tall the detail is. **Two `Head`s in
+    one scroller is the tell that neither happened.** Deployables appended a
+    whole page beneath the list it was selected from: 5,069px over 5.9
+    viewports, two Heads, thirteen rails. A picture is not an exception --
+    the Deploy map points at a deployable and links to its page rather than
+    holding one.
+
+12. **Acts follow the state, in one place.** A surface with a lifecycle
+    carries one action bar on the window's bottom edge (`kit` `ActionBar`):
+    the state in words, then the acts legal from that state, at most three,
+    primary last. **An act that is not legal is ABSENT, never disabled** --
+    a draft used to render an enabled Archive the server refuses, with no
+    control anywhere that could reach the state that guard demands. Nothing
+    that changes the thing's state lives anywhere else on the page: Pause at
+    y=2412, Archive at 2499 and a cascade that archives a SIBLING at 885 were
+    one surface, and the person had to know which was which.
 
 ## Applying them
 

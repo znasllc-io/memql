@@ -1110,6 +1110,31 @@ QueryClient.prototype.packageArchive = function (this: QueryClient, args: Packag
   return this.executeNamed("packageArchive", buildPackageArchive(args), opts);
 };
 
+/** Ask a running deployment to stop (epic memql#4937). It flags the row and ends nothing: the node running the attempt reads the flag at its next stage boundary and closes the run `cancelled`, which is what keeps the timeline from claiming a run stopped while its build is still running somewhere. Refuses a run that is already terminal, and refuses one at or past `staging_dsl` -- from the roll on there is no cancel, because a roll restarts the cluster onto staged MemQL and stopping half way through is the one outcome worse than either finishing or not starting. `cancelled` is its own terminal status and NOT a flavour of `failed`: nothing broke and nothing was published. Returns {deploymentId, status, cancelRequested}. */
+export interface PackageCancelDeploymentArgs {
+  /** The v1:platform:package the run belongs to. */
+  packageId: string;
+  /** The v1:platform:packageDeployment to stop. */
+  deploymentId: string;
+}
+
+export function buildPackageCancelDeployment(args: PackageCancelDeploymentArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  parts.push("deploymentId: " + renderMemQLValue(args.deploymentId));
+  return "builtin packageCancelDeployment(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packageCancelDeployment(args: PackageCancelDeploymentArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packageCancelDeployment = function (this: QueryClient, args: PackageCancelDeploymentArgs = {} as PackageCancelDeploymentArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packageCancelDeployment", buildPackageCancelDeployment(args), opts);
+};
+
 /** Run one deployment attempt for a package (epic memql#4794). WITHOUT confirm the run parks at awaiting_confirm with the analysis report on a new deployment row and nothing else happens -- that gate is always present (D12), and a redeploy passes it in one click. WITH confirm the run builds, stages, rolls and publishes in the D6 order: a failure anywhere before publish leaves every site serving exactly what it was serving, and a package with no DSL (or unchanged DSL) skips stage and roll entirely so nothing restarts. A package carrying DSL requires the cluster-owner actor and is refused with dsl_requires_cluster_owner at the START, before any build. placements is read only for a deployable's FIRST deploy (epic memql#4885, D8); later deploys find the site through (packageId, packageDeployableName) and never re-ask. Returns {deploymentId, status, awaitingConfirm, deployables, report}; each deployables entry carries {name, siteId, hostname, bundleRef, version, created} on success, {name, refusal} for a half that was refused or skipped, plus accountId / ownDomain for the placement halves that landed and accountRefusal / domainRefusal for the ones the guards refused. */
 export interface PackageDeployArgs {
   /** The v1:platform:package row to deploy. */
@@ -1596,6 +1621,31 @@ declare module "./query.js" {
 
 QueryClient.prototype.siteArchive = function (this: QueryClient, args: SiteArchiveArgs = {} as SiteArchiveArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("siteArchive", buildSiteArchive(args), opts);
+};
+
+/** Delete one of the caller's deployables and RELEASE ITS NAME (epic memql#4937). The fourth and last rung of the D10 lifecycle, below archive. Refuses unless the site is `archived` or `draft` -- the two states nothing is served from -- and unless confirmHostname matches the stored hostname exactly. A systemOwned site is refused outright. It walks every custom-domain binding on the site to `removing` so the certificate and route come down on the reconciliation sweep's own schedule, disarms the source's auto-deploy when this was its last live app, and stamps `deleted` LAST: the hostname is free at that instant, because `deleted` is the only field the cluster-wide uniqueness probe reads. Stamping the site last is deliberate -- a failure part-way leaves a deployable that is still findable and still says what state it is in, rather than an invisible row holding a name. Terminal: archive is the reversible step and it is one rung up. Returns {siteId, hostname, domainsReleased, autoDeployDisarmed}. Refusals carry stable codes. */
+export interface SiteDeleteArgs {
+  /** The v1:platform:site row to delete. */
+  siteId: string;
+  /** The site's own hostname, typed by the person as confirmation. Compared against the stored value; a mismatch refuses and writes nothing. */
+  confirmHostname: string;
+}
+
+export function buildSiteDelete(args: SiteDeleteArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("confirmHostname: " + renderMemQLValue(args.confirmHostname));
+  return "builtin siteDelete(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    siteDelete(args: SiteDeleteArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.siteDelete = function (this: QueryClient, args: SiteDeleteArgs = {} as SiteDeleteArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("siteDelete", buildSiteDelete(args), opts);
 };
 
 /** Deploy a Library zip artifact to one of the caller's hosted sites (memql#4345). The caller must own the site (or be a cluster owner) AND own the artifact, which must be a Library file whose MIME type is a zip. The bundle is read from object storage and validated -- index.html at the ROOT for spa and shopify_storefront, plus the same per-file (25 MB), whole-bundle (500 MB) and file-count (20000) limits POST /sites/{id}/bundles enforces -- then written under a new content-addressed version prefix before bundleRef is flipped, so a failed publish leaves the site serving exactly what it was serving. artifactId is stamped on the site row as provenance and the attempt is recorded on the security audit log. Returns {siteId, artifactId, fileId, version, bundleRef, fileCount, totalBytes}. Rollback is unchanged: updateSiteBundle pointed back at an earlier version's bundleRef. */

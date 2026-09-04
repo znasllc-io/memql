@@ -12,6 +12,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/packages/githubapp"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // Engine is the ONLY engine surface the pipeline needs -- one method, the same
@@ -530,6 +531,67 @@ func (s *store) addCustomDomain(ctx context.Context, siteId, hostname string) er
 		langparser.QuoteString(siteId), langparser.QuoteString(hostname)))
 }
 
+// deleteSite stamps the soft-delete flag, which is what RELEASES THE HOSTNAME
+// (epic memql#4937).
+//
+// UNDER THE CALLER'S ACTOR, not internal, and that is the whole authorization:
+// `deleteSite` is an owned, client-reachable mutation, so guardRowAuthzWrite
+// resolves the prior row and admits its owner with the cluster-owner path as
+// the separate escape -- and validateSiteSystemOwnedDelete refuses the
+// platform's own rows beside executeWrite whoever asks. Stamping internal
+// origin here would turn the capability into a way for anyone who can reach it
+// to delete somebody else's deployable.
+//
+// `deleted` is the ONLY field liveSiteIdsForHostname excludes on
+// (platform_site_hostname_policy.go) -- it never reads `status` -- so this
+// write, and nothing before it in the cascade, is what makes the name
+// reusable.
+func (s *store) deleteSite(ctx context.Context, siteId string) error {
+	return s.writeAsCaller(ctx, fmt.Sprintf(
+		"mutation deleteSite(siteId: %s)", langparser.QuoteString(siteId)))
+}
+
+// releaseDomainsForSite walks every live binding on a site to `removing` and
+// answers how many it asked for.
+//
+// A BUILTIN CALL rather than a direct write, for the reason addCustomDomain
+// above is one: the rows and their state machine belong to the custom-domain
+// integration, and reaching into them from here would put the walk in two
+// places that could disagree about what terminal means. @serverOnly, so it is
+// stamped internal -- the caller was already authorized against the SITE,
+// which is the row this cascade is about.
+func (s *store) releaseDomainsForSite(ctx context.Context, siteId string) (int, error) {
+	rows, err := s.executeInternal(ctx, fmt.Sprintf(
+		"builtin customDomainReleaseForSite(siteId: %s)", langparser.QuoteString(siteId)))
+	if err != nil {
+		return 0, err
+	}
+	if len(rows) == 0 {
+		return 0, nil
+	}
+	return rowInt(rows[0], "requested"), nil
+}
+
+// requestDeploymentCancel flags a run as cancel-requested. Internal, because
+// the mutation is @serverOnly: the capability resolved the deployment under
+// the caller's own actor first, which is where the authorization happened.
+func (s *store) requestDeploymentCancel(ctx context.Context, deploymentId string) error {
+	return s.writeInternal(ctx, fmt.Sprintf(
+		"mutation requestPackageDeploymentCancel(deploymentId: %s)",
+		langparser.QuoteString(deploymentId)))
+}
+
+// cancelRequestedFor re-reads the flag the running pipeline checks at each
+// stage boundary. Internal: the pipeline is not a person and has no actor of
+// its own on a stage advance.
+func (s *store) cancelRequestedFor(ctx context.Context, deploymentId string) (bool, error) {
+	row, err := s.deploymentById(ctx, deploymentId)
+	if err != nil || row == nil {
+		return false, err
+	}
+	return rowBool(row, "cancelRequested"), nil
+}
+
 // ---------------------------------------------------------------------------
 // Row payloads
 // ---------------------------------------------------------------------------
@@ -696,6 +758,31 @@ func rfc3339OrEmpty(t time.Time) string {
 		return ""
 	}
 	return t.UTC().Format(time.RFC3339)
+}
+
+// rowInt narrows a decoded payload number to a count.
+//
+// THROUGH core/num WITH A NAMED ANSWER, never a bare `int(v)`: an out-of-range
+// conversion in a float64 or int64 arm is implementation-defined and answers
+// with the integer indefinite value, which is why
+// TestEveryPayloadNarrowingCarriesAnAnswer refuses one that declares none. The
+// answer here is SATURATE, because every caller is a count of rows this
+// process just wrote -- a value past the int range is not a real count, and
+// the largest representable one is the honest reading of "more than you can
+// hold" where zero would read as "none, and nothing happened".
+func rowInt(row map[string]any, key string) int {
+	if row == nil {
+		return 0
+	}
+	switch v := row[key].(type) {
+	case int:
+		return v
+	case int64:
+		return num.ClampInt64(v)
+	case float64:
+		return num.ClampFloat64(v)
+	}
+	return 0
 }
 
 func rowBool(row map[string]any, key string) bool {

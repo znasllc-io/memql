@@ -19,6 +19,9 @@ export function Rail({
   compact = false,
   label,
   stopBody,
+  openStop,
+  onOpenStop,
+  answerFor,
 }: {
   input: RailInput;
   /** Read bottom-up: a rollback. The DOM order never changes. */
@@ -33,7 +36,29 @@ export function Rail({
    * rather than drawing a second rail around it. Full rail only.
    */
   stopBody?: (stage: RailStage) => ReactNode;
+  /**
+   * COLLAPSED BY DEFAULT, ONE OPEN (epic memql#4937, design section C).
+   *
+   * When set, only this stop renders its body; every other is one line --
+   * mark, label, its answer, a chevron -- and reopens on click. That is what
+   * takes a deployable page from 5,069px to one screen, and what takes
+   * thirteen rails on a page down to one.
+   *
+   * ABSENT means every stop renders its body, which is what the compose
+   * reading wants: there the rail IS the form, and a stop the flow has not
+   * reached yet already draws nothing.
+   */
+  openStop?: string;
+  onOpenStop?: (stopId: string) => void;
+  /**
+   * A settled stop's one-line answer, shown on the collapsed line. Without
+   * one, a collapsed stop reads as a label with nothing behind it -- which is
+   * exactly the "is this broken or just closed" question a disclosure must
+   * not raise.
+   */
+  answerFor?: (stage: RailStage) => string;
 }) {
+  const collapsible = openStop !== undefined && onOpenStop !== undefined;
   const { stages } = railFor(input);
   const ordered = reversed ? [...stages].reverse() : stages;
   const name = label ?? (input.mode === "deploy" ? "Deploy stages" : "Deployable stops");
@@ -54,19 +79,53 @@ export function Rail({
 
   return (
     <ol className="os-rail" data-reversed={reversed ? "true" : "false"} aria-label={name}>
-      {ordered.map((stage) => (
-        <li key={stage.id} className="os-rail-stage" data-state={stage.state}>
-          <span className="os-rail-mark" aria-hidden>
-            <StopGlyph state={stage.state} size={11} />
-          </span>
-          <span className="os-rail-body">
-            <span className="os-rail-label">{stage.label}</span>
-            <span className="os-rail-note">{stage.reason === "" ? stage.blurb : stage.reason}</span>
-            {stopBody ? stopBody(stage) : null}
-          </span>
-          <span className="os-visually-hidden">{stateSentence(stage.state)}</span>
-        </li>
-      ))}
+      {ordered.map((stage) => {
+        // A stop nobody can reach yet is never a disclosure: there is nothing
+        // behind it, and a chevron would promise otherwise.
+        const reachable = stage.state !== "pending" && stage.state !== "ahead";
+        const open = !collapsible || (openStop === stage.id && reachable);
+        const answer = answerFor ? answerFor(stage) : "";
+        const note = stage.reason === "" ? stage.blurb : stage.reason;
+
+        return (
+          <li key={stage.id} className="os-rail-stage" data-state={stage.state} data-open={open ? "true" : undefined}>
+            <span className="os-rail-mark" aria-hidden>
+              <StopGlyph state={stage.state} size={11} />
+            </span>
+            <span className="os-rail-body">
+              {collapsible && reachable ? (
+                <button
+                  type="button"
+                  className="os-rail-line"
+                  aria-expanded={open}
+                  onClick={() => onOpenStop?.(open ? "" : stage.id)}
+                >
+                  <span className="os-rail-label">{stage.label}</span>
+                  <span className="os-rail-answer">{answer === "" ? note : answer}</span>
+                  <span className="os-rail-chev" aria-hidden>
+                    &#9656;
+                  </span>
+                </button>
+              ) : (
+                <>
+                  <span className="os-rail-label">{stage.label}</span>
+                  <span className="os-rail-note">{note}</span>
+                </>
+              )}
+              {/* The note stays visible under an OPEN collapsed stop -- but
+                  ONLY when it says something the line above does not. The
+                  answer and the note are frequently the SAME string (a
+                  settled stop's answer IS its note), and rendering both put
+                  the sentence on screen twice. */}
+              {collapsible && reachable && open && answer !== "" && note !== answer ? (
+                <span className="os-rail-note">{note}</span>
+              ) : null}
+              {open && stopBody ? stopBody(stage) : null}
+            </span>
+            <span className="os-visually-hidden">{stateSentence(stage.state)}</span>
+          </li>
+        );
+      })}
     </ol>
   );
 }

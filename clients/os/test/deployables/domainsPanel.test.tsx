@@ -70,6 +70,23 @@ async function openShop(connection: FakeConnection, opts: { role?: string } = {}
     if (flip !== null) await click(flip);
   }
   await click(await screen.findByText("shop.memql.example.com"));
+  await openWhereItLives();
+}
+
+/**
+ * Opens the Where-it-lives stop.
+ *
+ * DOMAINS ARE THAT STOP (epic memql#4937, design section C), and a settled
+ * stop is one line now -- mark, label, its answer, a chevron. The address, the
+ * client and the client's own domain are one question asked in one place, so
+ * opening it is what a person does too.
+ */
+async function openWhereItLives(): Promise<void> {
+  const page = await screen.findByRole("region", { name: /^Deployable / });
+  const line = within(page)
+    .getAllByRole("button")
+    .find((b) => b.classList.contains("os-rail-line") && (b.textContent ?? "").startsWith("Where it lives"));
+  if (line !== undefined && line.getAttribute("aria-expanded") !== "true") await click(line);
 }
 
 /**
@@ -363,6 +380,7 @@ describe("live", () => {
     const { container } = mount(connection);
     await screen.findByText("shop.memql.example.com");
     await click(screen.getByText("shop.memql.example.com"));
+    await openWhereItLives();
     await findCard("www.acme.com");
 
     await emit(

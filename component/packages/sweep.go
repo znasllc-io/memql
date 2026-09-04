@@ -96,12 +96,39 @@ func AbandonedAfter() time.Duration {
 // A failed write is logged and the loop continues. The alternative -- failing
 // the deploy because a bookkeeping write did not land -- would make a database
 // hiccup destroy a build that was going fine.
-func (d *Deps) heartbeat(ctx context.Context, deploymentId string) func() {
+// # It also carries the cancel signal (epic memql#4937, D3)
+//
+// `onCancelRequested` fires the first time the row's cancelRequested flag is
+// seen set. RIDING THE HEARTBEAT rather than polling separately is what lets a
+// long SINGLE stage learn about a cancel: the build is one call that can run
+// for minutes, so a check that only ran at stage boundaries would leave
+// somebody watching a Cancel they had already pressed. One read per beat, on a
+// loop that already exists, costs nothing extra.
+//
+// A FAILED READ IS SILENCE, NOT A CANCEL. "We could not ask" and "nobody asked
+// to stop" are different facts, and treating a database hiccup as a stop
+// request would kill a build that was going fine -- the same reasoning the
+// failed WRITE above already follows.
+func (d *Deps) heartbeat(ctx context.Context, deploymentId string, onCancelRequested func()) func() {
 	interval := HeartbeatInterval()
+	fired := false
 	beat := func() {
 		if err := d.Store.heartbeatDeployment(ctx, deploymentId, d.now()); err != nil {
 			d.log().Debug("packages: the deployment heartbeat could not be written",
 				"component", "packages.pipeline", "deployment", deploymentId, "err", err)
+		}
+		if fired || onCancelRequested == nil {
+			return
+		}
+		asked, err := d.Store.cancelRequestedFor(ctx, deploymentId)
+		if err != nil {
+			d.log().Debug("packages: could not read the cancel flag",
+				"component", "packages.pipeline", "deployment", deploymentId, "err", err)
+			return
+		}
+		if asked {
+			fired = true
+			onCancelRequested()
 		}
 	}
 	beat()

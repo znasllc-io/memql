@@ -1472,6 +1472,34 @@ func PackageArchiveBuild(args PackageArchiveArgs) string {
 	return b.String()
 }
 
+// PackageCancelDeployment -- Ask a running deployment to stop (epic memql#4937). It flags the row and ends nothing: the node running the attempt reads the flag at its next stage boundary and closes the run `cancelled`, which is what keeps the timeline from claiming a run stopped while its build is still running somewhere. Refuses a run that is already terminal, and refuses one at or past `staging_dsl` -- from the roll on there is no cancel, because a roll restarts the cluster onto staged MemQL and stopping half way through is the one outcome worse than either finishing or not starting. `cancelled` is its own terminal status and NOT a flavour of `failed`: nothing broke and nothing was published. Returns {deploymentId, status, cancelRequested}.
+type PackageCancelDeploymentArgs struct {
+	// The v1:platform:package the run belongs to.
+	PackageId string
+	// The v1:platform:packageDeployment to stop.
+	DeploymentId string
+}
+
+// PackageCancelDeployment calls the engine builtin packageCancelDeployment.
+func (qc *QueryClient) PackageCancelDeployment(ctx context.Context, args PackageCancelDeploymentArgs) (*Result, error) {
+	call := PackageCancelDeploymentBuild(args)
+	return qc.executeNamed(ctx, "packageCancelDeployment", call)
+}
+
+func PackageCancelDeploymentBuild(args PackageCancelDeploymentArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin packageCancelDeployment(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("deploymentId: ")
+	b.WriteString(quoteMemQL(args.DeploymentId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PackageDeploy -- Run one deployment attempt for a package (epic memql#4794). WITHOUT confirm the run parks at awaiting_confirm with the analysis report on a new deployment row and nothing else happens -- that gate is always present (D12), and a redeploy passes it in one click. WITH confirm the run builds, stages, rolls and publishes in the D6 order: a failure anywhere before publish leaves every site serving exactly what it was serving, and a package with no DSL (or unchanged DSL) skips stage and roll entirely so nothing restarts. A package carrying DSL requires the cluster-owner actor and is refused with dsl_requires_cluster_owner at the START, before any build. placements is read only for a deployable's FIRST deploy (epic memql#4885, D8); later deploys find the site through (packageId, packageDeployableName) and never re-ask. Returns {deploymentId, status, awaitingConfirm, deployables, report}; each deployables entry carries {name, siteId, hostname, bundleRef, version, created} on success, {name, refusal} for a half that was refused or skipped, plus accountId / ownDomain for the placement halves that landed and accountRefusal / domainRefusal for the ones the guards refused.
 type PackageDeployArgs struct {
 	// The v1:platform:package row to deploy.
@@ -2070,6 +2098,34 @@ func SiteArchiveBuild(args SiteArchiveArgs) string {
 	b.WriteString("siteId: ")
 	b.WriteString(quoteMemQL(args.SiteId))
 	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("confirmHostname: ")
+	b.WriteString(quoteMemQL(args.ConfirmHostname))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SiteDelete -- Delete one of the caller's deployables and RELEASE ITS NAME (epic memql#4937). The fourth and last rung of the D10 lifecycle, below archive. Refuses unless the site is `archived` or `draft` -- the two states nothing is served from -- and unless confirmHostname matches the stored hostname exactly. A systemOwned site is refused outright. It walks every custom-domain binding on the site to `removing` so the certificate and route come down on the reconciliation sweep's own schedule, disarms the source's auto-deploy when this was its last live app, and stamps `deleted` LAST: the hostname is free at that instant, because `deleted` is the only field the cluster-wide uniqueness probe reads. Stamping the site last is deliberate -- a failure part-way leaves a deployable that is still findable and still says what state it is in, rather than an invisible row holding a name. Terminal: archive is the reversible step and it is one rung up. Returns {siteId, hostname, domainsReleased, autoDeployDisarmed}. Refusals carry stable codes.
+type SiteDeleteArgs struct {
+	// The v1:platform:site row to delete.
+	SiteId string
+	// The site's own hostname, typed by the person as confirmation. Compared against the stored value; a mismatch refuses and writes nothing.
+	ConfirmHostname string
+}
+
+// SiteDelete calls the engine builtin siteDelete.
+func (qc *QueryClient) SiteDelete(ctx context.Context, args SiteDeleteArgs) (*Result, error) {
+	call := SiteDeleteBuild(args)
+	return qc.executeNamed(ctx, "siteDelete", call)
+}
+
+func SiteDeleteBuild(args SiteDeleteArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin siteDelete(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 19 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confirmHostname: ")

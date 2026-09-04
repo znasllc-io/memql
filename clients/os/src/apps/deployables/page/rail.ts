@@ -723,3 +723,43 @@ export function headActionFor(state: HeadState): HeadAction | null {
       return { label: "Retry", disabled: false, tone: "primary" };
   }
 }
+
+// ---------------------------------------------------------------------------
+// openStopFor -- which stop is open (epic memql#4937, design section C)
+// ---------------------------------------------------------------------------
+
+/**
+ * The one stop a settled deployable opens, chosen by WHAT IS A QUESTION.
+ *
+ * Every stop used to render its body at once, which is what put thirteen rails
+ * and 5,069px on one page. Four of the five are settled facts and read as one
+ * line each -- mark, label, its answer, a chevron -- and exactly one is open.
+ *
+ * The order of the checks is the design:
+ *
+ *  1. A RUN IN FLIGHT opens the stop the run is at. The moving thing is the
+ *     question, and nothing else on the page competes with it.
+ *  2. A REFUSED RUN opens the stop it stopped at, WITH the refusal. Sending
+ *     somebody to Live to read "the build failed" would be sending them to
+ *     repair the wrong thing.
+ *  3. EVERYTHING ELSE opens Live, because for a settled deployable the live
+ *     question is the only one: is it serving, since when, and who is using it.
+ *
+ * PURE, and the assertion is case 2 -- a test that only covered the happy path
+ * would pass against a rail that always opened Live.
+ */
+export function openStopFor(input: StandingInput): StopId | "" {
+  const run = input.run;
+
+  // 1. Moving.
+  if (run !== null && run.status !== "" && RUN_STOP[run.status] !== undefined) {
+    return RUN_STOP[run.status] ?? "live";
+  }
+
+  // 2. Stopped, at the stop it stopped at.
+  const stopped = refusalStopFor(run);
+  if (stopped !== null) return stopped;
+
+  // 3. Settled.
+  return "live";
+}

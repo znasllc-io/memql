@@ -281,13 +281,15 @@ export function DeployablesApp({
       selection={selection}
       onSelectNode={selectNode}
       onSelectSite={selectSite}
-      viewerUserId={viewerUserId}
-      canWrite={canWrite}
-      isClusterOwner={isClusterOwner}
-      clusterDomain={config.domain}
+      // THE MAP POINTS, THE SECTION OWNS THE PAGE (rule 11). Choosing a
+      // deployable on the map selects it -- the two surfaces share ONE
+      // selection -- and navigates to the section that owns its page, which
+      // opens on that selection.
+      onOpenDeployable={(siteId) => {
+        selectSite(siteId);
+        navigate("deployables");
+      }}
       packages={packageSnapshot.rows}
-      credentials={credentialRows}
-      onAsk={askContext}
       onReseed={reseed}
     />
   );

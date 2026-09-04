@@ -218,6 +218,23 @@ func (s *Store) RecordIssuingProgress(ctx context.Context, domainID, note string
 		langparser.QuoteString(stamp(at))))
 }
 
+// RequestRemoval walks a binding to `removing`, which is what the deployable
+// delete cascade asks for (epic memql#4937).
+//
+// The SAME mutation the Domains panel's Remove issues, deliberately: a domain
+// coming down because its deployable was deleted and one coming down because
+// somebody clicked Remove are the same journey, and giving the cascade a
+// second write would be a second path the sweep would have to agree with.
+//
+// THE HOSTNAME STOPS RESOLVING AT THIS WRITE rather than at the Ingress
+// deletion -- `liveCustomDomainByHostname` filters `status=="live"` -- so a
+// deleted deployable stops answering on its client's domain immediately, and
+// the certificate and route come down on the sweep's own schedule.
+func (s *Store) RequestRemoval(ctx context.Context, domainID string) error {
+	return s.exec(ctx, fmt.Sprintf(
+		"mutation removeCustomDomain(domainId: %s)", langparser.QuoteString(domainID)))
+}
+
 // MarkRemoved closes the walk at `removed`. The row stays.
 func (s *Store) MarkRemoved(ctx context.Context, domainID string, at time.Time) error {
 	return s.exec(ctx, fmt.Sprintf(

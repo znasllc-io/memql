@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Archive, History, Pause, Play, RotateCcw, Undo2 } from "lucide-react";
+import { History, Undo2 } from "lucide-react";
 
-import { Button, Caption, Chip, Fact, Facts, Input } from "../../../../kit";
+import { Button, Caption, Chip, Fact, Facts } from "../../../../kit";
 import { formatMoment } from "../../../../kit/format";
 import { useOsConnection } from "../../../../live/connection";
 import type { SiteLifecycleActions } from "../../packages/actions";
@@ -85,8 +85,6 @@ export function LiveStop({
   const connection = useOsConnection();
   const [versions, setVersions] = useState<SiteVersion[] | null>(null);
   const [loadingVersions, setLoadingVersions] = useState(false);
-  const [archiving, setArchiving] = useState(false);
-  const [confirmHostname, setConfirmHostname] = useState("");
 
   const loadVersions = useCallback(async () => {
     if (connection === null) return;
@@ -107,8 +105,6 @@ export function LiveStop({
   // deployable is never shown under another.
   useEffect(() => {
     setVersions(null);
-    setArchiving(false);
-    setConfirmHostname("");
   }, [site.id]);
 
   if (site.systemOwned) {
@@ -121,7 +117,6 @@ export function LiveStop({
 
   const live = site.status === "live";
   const paused = site.status === "disabled";
-  const archived = site.status === "archived";
   const serving = live || paused;
 
   // THE READINGS ARE A READ, so they are not behind the write gate. Somebody
@@ -191,98 +186,25 @@ export function LiveStop({
           is a smaller act than pausing. */}
       <RuntimeSettingsPanel site={site} canWrite={canWrite} />
 
-      {canWrite && archived ? (
-        <section className="os-report-part">
-          <h4 className="os-report-heading">Availability</h4>
-          <Caption>
-            Archived deployables answer nothing. Restoring brings this one back paused, so publishing it again is its
-            own decision.
-          </Caption>
-          <Button onClick={() => void lifecycle.restore(site.id)} busy={lifecycle.busy}>
-            <RotateCcw size={12} aria-hidden /> Restore, paused
-          </Button>
-        </section>
-      ) : null}
+      {/* THE LIFECYCLE ACTS ARE NOT HERE ANY MORE (epic memql#4937, DESIGN.md
+          rule 12). Pause, Resume, Archive and Restore moved to the ACTION BAR,
+          which carries the state in words and only the acts legal from it.
+          They lived here at y=2412 and y=2499 on a 5,069px page, under five
+          other sections, while the Head's own action sat at y=354 -- so the
+          act somebody came for was the one they had to go looking for.
 
-      {canWrite && serving ? (
-        <section className="os-report-part">
-          <h4 className="os-report-heading">Availability</h4>
-          <Caption>
-            {live
-              ? "Live. Pausing answers 503 rather than 404, so a deliberately paused site stays distinguishable from a typo."
-              : "Paused. Resuming points the address back at what it was serving."}
-          </Caption>
-          <Button
-            onClick={() => void lifecycle.setStatus(site.id, live ? "disabled" : "live")}
-            busy={lifecycle.busy}
-            ariaLabel={live ? `Pause ${site.hostname}` : `Resume ${site.hostname}`}
-          >
-            {live ? (
-              <>
-                <Pause size={12} aria-hidden /> Pause
-              </>
-            ) : (
-              <>
-                <Play size={12} aria-hidden /> Resume
-              </>
-            )}
-          </Button>
-        </section>
-      ) : null}
-
-      {canWrite && !archived ? (
-        <section className="os-report-part os-danger-part">
-          <h4 className="os-report-heading">
-            <Archive size={12} aria-hidden /> Archive
-          </h4>
-          {archiving ? (
-            <>
-              <Caption>
-                Archiving keeps the deployable and its whole history. It has to be paused first. Type{" "}
-                <strong>{site.hostname}</strong> to confirm.
-              </Caption>
-              <div className="os-confirm-row">
-                <Input
-                  id={`os-archive-site-${site.id}`}
-                  label={`Type ${site.hostname} to confirm`}
-                  value={confirmHostname}
-                  onChange={setConfirmHostname}
-                  placeholder={site.hostname}
-                />
-                <Button tone="quiet" onClick={() => setArchiving(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  tone="danger"
-                  disabled={confirmHostname !== site.hostname}
-                  busy={lifecycle.busy}
-                  onClick={() => void lifecycle.archive(site.id, confirmHostname)}
-                >
-                  Archive
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <Caption>
-                {live
-                  ? "Pause it first. Archiving is the end of a deployable's life, and pausing is what gives anyone still using it a chance to notice."
-                  : "An archived deployable stays listed under the Archived filter and can be restored. Nothing is deleted."}
-              </Caption>
-              <Button onClick={() => setArchiving(true)} disabled={live}>
-                <Archive size={12} aria-hidden /> Archive this deployable
-              </Button>
-            </>
-          )}
-        </section>
-      ) : null}
-
-      {/* The server is the law, and it says so here: a refusal renders in
-          place, in the server's own words. The flow never suppresses one --
-          the disable-first rule and the systemOwned exemption are checked
-          again beside the engine's write path, so a refusal that arrives
-          despite this UI having allowed the click is the interesting case. */}
-      {lifecycle.refusal ? <ProblemNotice problem={{ ...lifecycle.refusal, fatal: true }} tone="error" /> : null}
+          What this stop keeps is the READINGS: is anybody using it, what has
+          it served, and what it is configured with. Those are things to look
+          at rather than things to press, and a reader who cannot write still
+          sees every one of them. */}
+      {/* THE REFUSAL IS THE PAGE'S NOW, NOT THIS STOP'S (epic memql#4937).
+          Every act that can be refused -- publish, unpublish, archive,
+          restore, delete -- moved to the bar, so the server's sentence
+          belongs once, beside the rail, where whoever pressed the bar is
+          looking. Rendering it here as well put the same sentence on screen
+          twice. The rollback below is this stop's own act and shares the
+          hook, which is exactly why the render had to move rather than the
+          hook. */}
     </div>
   );
 }
