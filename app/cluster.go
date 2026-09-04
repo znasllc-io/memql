@@ -466,10 +466,10 @@ func (a *App) cluster() {
 				}
 			}
 
-			// Workbench forwarding (cluster-mode optional). Mirrors the
-			// cognition/planner -> agent pattern but for workbench peers:
+			// Workbench forwarding (cluster-mode optional) is wired below, after
+			// this split, for every node type at once. What it does per type:
 			//
-			//   * On agent binaries when MEMQL_WORKBENCH_REMOTE is set:
+			//   * On bff and agent binaries when MEMQL_WORKBENCH_REMOTE is set:
 			//     create a workbench.ForwardRouter, install it as the
 			//     response sink on every inbound channel, install the
 			//     dialer narrowed to NodeTypeWorkbench peers, and wire
@@ -493,9 +493,23 @@ func (a *App) cluster() {
 			// wiring failures above therefore log at ERROR -- the node boots,
 			// but its workbench surface will refuse everything until the
 			// wiring is fixed.
-			a.wireWorkbenchForwarding(nodeIdentity, peerMgr, nodeServer, parentConnector)
 			a.wireWorkerForwarding(nodeIdentity, peerMgr, nodeServer, parentConnector)
 		}
+
+		// Workbench forwarding is wired OUTSIDE the bff/worker split, on purpose.
+		// wireWorkbenchForwarding has carried a NodeTypeBFF case since epic
+		// memql#4900 -- the bff serves packageDeploy, which builds, and a build
+		// forwards to a workbench peer -- but the call lived inside the worker
+		// else branch above, so on the bff it never ran. The bff then had a
+		// workbench integration with no router, and with MEMQL_WORKBENCH_REMOTE
+		// set every package build refused with "no healthy workbench peer is
+		// reachable" while two workbench pods sat healthy in its own peer table.
+		// The function switches on the node type itself, and every type it does
+		// not name is a no-op, so one call here is right for all of them. It
+		// comes AFTER the bff branch so existingWorkerDialer finds the dialer
+		// that branch installed and the bff keeps one dialer, not two.
+		// TestTheClusterPhaseWiresWorkbenchForwardingOnTheBff pins the placement.
+		a.wireWorkbenchForwarding(nodeIdentity, peerMgr, nodeServer, parentConnector)
 	}
 
 	// Deploy-control receiving side (memql#3380). Installed on whichever node
