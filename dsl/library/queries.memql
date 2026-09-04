@@ -129,6 +129,15 @@ query artifact libraryArtifactById {
 /// to at most one row without needing to re-derive that id in Go -- the coupling a Go-side
 /// re-implementation of createArtifact's hash expression would otherwise create.
 @unbounded("library artifact by source ref (guarded), gated to the owner -- bounded to a single row by the idempotency-key uniqueness createArtifact enforces")
+// NEVER CACHED. This read is a PROBE: waitForPromotion on the bff, the chunked
+// /complete resolver and the analysis pass poll it every 50ms to observe a row
+// that indexFileOnCreate writes on ANOTHER node a few milliseconds later. With
+// the default TTL an EMPTY answer is cached like any other, so the first miss
+// was replayed for the whole 3s wait, the upload answered 201 with no
+// artifactId, and the OS said "Upload landed but named no artifact" and invited
+// a retry that uploaded the file twice (aks-memql, 2026-09-04: the workbench had
+// committed the artifact 2.98s before the bff gave up).
+@cache(0)
 @actor
 query artifact libraryArtifactBySourceConceptRef {
   args {
