@@ -124,6 +124,16 @@ func captureStore(t *testing.T) []string {
 		Error:        &Problem{Code: "deployable_build_failed", Message: awkwardText, Scope: "docs", Fatal: true},
 		FinishedAt:   at,
 	})
+	// The SUCCESS shape of the same close -- no error, and a run that stopped
+	// before publish carries no outcomes -- so both absent-field renders are
+	// parsed by the real front end, not only asserted as text
+	// (TestCloseDeploymentRendersNoNullForAbsentFields).
+	_ = s.closeDeployment(ctx, deploymentClose{
+		DeploymentId: "v1:platform:packageDeployment:def",
+		Status:       StatusSucceeded,
+		DslVersion:   "packages/acme/0123456789abcdef/",
+		FinishedAt:   at,
+	})
 	_ = s.recordDeployedVersion(ctx, "v1:platform:package:abc", "abcdef1234567890", false)
 	_ = s.recordPackageName(ctx, "v1:platform:package:abc", "acme")
 	_ = s.recordUpstreamVersion(ctx, "v1:platform:package:abc", "fedcba0987654321", true)
