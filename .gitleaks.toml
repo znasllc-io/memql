@@ -182,7 +182,7 @@ regexes = [
 ]
 
 [[allowlists]]
-description = "Placeholder key-encryption-key in the custom-local-domain PLAN document. NOT a credential: `0123456789abcdef0123` is a counting sequence in a Go snippet inside `docs/superpowers/plans/2026-08-12-custom-local-domain.md`, illustrating the branch of an identity guard -- and the line above it in the same snippet says `SigningKeyB64 unset -- the branch the guard lives in`. It is documentation of a code path, not configuration of one. Same value-keyed reasoning as the dummy KEK entry above it, which is the same class of literal in the test that plan describes."
+description = "Placeholder key-encryption-key from the custom-local-domain PLAN document. NOT a credential: `0123456789abcdef0123` is a counting sequence in a Go snippet illustrating the branch of an identity guard -- the line above it in the same snippet says `SigningKeyB64 unset -- the branch the guard lives in`. It is documentation of a code path, not configuration of one. Same value-keyed reasoning as the dummy KEK entry above it, which is the same class of literal in the test that plan describes. THE PLAN ITSELF IS GONE -- deleted 2026-09-04 with every other spent implementation plan, per docs/CLAUDE.md's plan-vs-record rule -- AND THIS ENTRY MUST STAY: `gitleaks git .` scans COMMITS, so the literal stays reachable in history for as long as this repo has one. An entry whose named file no longer exists at HEAD reads as dead and is not; deleting it reds the local scan, which walks every ref, while the PR lane's narrower range stays green."
 regexTarget = "match"
 regexes = [
   '''0123456789abcdef0123''',
