@@ -80,6 +80,12 @@ const (
 	// BuildCodeSourceUnreadable: the snapshot bytes could not be read or
 	// expanded, or the deployable's path is not a directory in them.
 	BuildCodeSourceUnreadable = "build_source_unreadable"
+	// BuildCodeSourceTooLarge: the packed source is over the inline cap a
+	// forward carries and this cluster has no object storage to stage it in,
+	// so it cannot travel to the workbench at all. Refused BEFORE anything is
+	// sent: the alternative was a message past the mesh cap, which killed the
+	// stream and left the run at "building" until the hop timed out.
+	BuildCodeSourceTooLarge = "build_source_too_large"
 	// BuildCodeFailed: the command exited non-zero. The tail says why.
 	BuildCodeFailed = "build_failed"
 	// BuildCodeTimeout: the command outlived its timeout and was killed,
@@ -293,12 +299,21 @@ func (i *Integration) RunBuild(ctx context.Context, req BuildRequest, pinnedNode
 	}
 	if i.remote {
 		if fwd := i.forwarder(); fwd != nil {
-			res, err := i.forwardBuild(ctx, fwd, req, pinnedNodeId)
+			// A source past the inline cap travels by blob reference or not at
+			// all. Decided here, before the hop, because the hop cannot tell a
+			// refused oversized message from a slow build: the stream dies and
+			// the caller waits out the whole timeout for a reply that was
+			// never going to come.
+			staged, serr := i.stageSourceForForward(ctx, req)
+			if serr != nil {
+				return buildRefusal(BuildCodeSourceTooLarge, "workbench build: "+serr.Error())
+			}
+			res, err := i.forwardBuild(ctx, fwd, staged, pinnedNodeId)
 			if !errors.Is(err, ErrNoWorkbenchPeer) {
 				if err != nil {
 					return buildRefusal(BuildCodeForwardFailed, "workbench build: the hop to the workbench node failed: "+err.Error())
 				}
-				return res
+				return i.inlineOutput(ctx, res)
 			}
 		}
 		if !i.localFallback {
@@ -309,7 +324,48 @@ func (i *Integration) RunBuild(ctx context.Context, req BuildRequest, pinnedNode
 				slog.String("deployment", req.DeploymentId), slog.String("deployable", req.DeployableName))
 		}
 	}
-	return i.runBuildLocal(ctx, req)
+	return i.inlineOutput(ctx, i.runBuildLocal(ctx, req))
+}
+
+// stageSourceForForward puts a source past the inline cap into object storage
+// and hands back the request carrying its reference instead of its bytes. A
+// source within the cap is returned untouched. The error is the refusal's
+// sentence: it names the size, the cap and the knob, because the two repairs
+// are different -- trim the tree, or give the cluster somewhere to stage it.
+func (i *Integration) stageSourceForForward(ctx context.Context, req BuildRequest) (BuildRequest, error) {
+	limits := req.Limits.normalized()
+	size := int64(len(req.Source.Inline))
+	if size <= limits.MaxInlineBytes {
+		return req, nil
+	}
+	ref, err := i.buildBlobPut(ctx, buildSourceObject(req), req.Source.Inline)
+	if err != nil {
+		return req, fmt.Errorf("the packed source for %q is %d bytes, over the %d-byte cap a forward carries inline, "+
+			"and this cluster could not stage it in object storage (%v). Trim the tree the build needs -- large media "+
+			"under the deployable's path is the usual cause -- or configure object storage (MEMQL_AZURE_BLOB_CONTAINER) "+
+			"so an oversized source travels by reference.", req.DeployableName, size, limits.MaxInlineBytes, err)
+	}
+	req.Source = BuildBytes{Ref: ref}
+	return req, nil
+}
+
+// inlineOutput reads an output that came back by reference so every caller
+// sees the built bytes in one place. The packages pack reads Output.Inline and
+// nothing else, and a result it cannot read is a failed build, not a success
+// with an empty bundle.
+func (i *Integration) inlineOutput(ctx context.Context, res BuildResult) BuildResult {
+	if !res.OK || len(res.Output.Inline) > 0 || strings.TrimSpace(res.Output.Ref) == "" {
+		return res
+	}
+	data, err := i.buildBytes(ctx, res.Output)
+	if err != nil {
+		res.OK = false
+		res.ErrorCode = BuildCodeForwardFailed
+		res.ErrorMessage = "the built output was stored by reference and could not be read back: " + err.Error()
+		return res
+	}
+	res.Output.Inline = data
+	return res
 }
 
 func (i *Integration) refuseNoWorkbenchPeerForBuild(ctx context.Context, req BuildRequest) BuildResult {
@@ -710,6 +766,12 @@ func (i *Integration) runBuildLocal(ctx context.Context, req BuildRequest) Build
 // another run's bytes.
 func buildOutputObject(req BuildRequest) string {
 	return "packages/builds/" + shortId(req.DeploymentId) + "/" + safeName(req.DeployableName) + "/output.tar.gz"
+}
+
+// buildSourceObject is where an oversized SOURCE is staged for the hop, beside
+// the output of the same build.
+func buildSourceObject(req BuildRequest) string {
+	return "packages/builds/" + shortId(req.DeploymentId) + "/" + safeName(req.DeployableName) + "/source.tar.gz"
 }
 
 // treeRelative composes one root-RELATIVE name from a prefix and a manifest

@@ -141,6 +141,11 @@ func buildRefusalFor(dep DeployableReport, res workbench.BuildResult) error {
 		return refuseScoped(CodeNoWorkbenchPeer, dep.Name, "%s", msg)
 	case workbench.BuildCodeTimeout:
 		return refuseScoped(CodeDeployableBuildTimeout, dep.Name, "%s", msg)
+	case workbench.BuildCodeSourceTooLarge:
+		// The source could not travel to the build surface. Same code the
+		// fetch uses for a tree over the caps, scoped to the app, because the
+		// repair is the same: a smaller tree, or a cluster that can hold it.
+		return refuseScoped(CodeSourceTooLarge, dep.Name, "%s", msg)
 	default:
 		return refuseScoped(CodeDeployableBuildFailed, dep.Name, "%s", msg)
 	}
