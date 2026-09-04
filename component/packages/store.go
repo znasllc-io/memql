@@ -281,16 +281,36 @@ func (s *store) recordReport(ctx context.Context, deploymentId string, rep *Repo
 		langparser.QuoteString(rep.SourceVersion), langparser.QuoteString(snapshotArtifactId)))
 }
 
+// closeDeployment writes the terminal row.
+//
+// ABSENT FIELDS ARE RENDERED AS WHAT THE SCHEMA ACCEPTS, never as null. The
+// success path closes with no error, and a run that stops before publish
+// closes with no outcomes; jsonLiteral sees an interface holding a typed nil
+// (*Problem, []DeployableOutcome) as non-nil, marshals it, and writes the word
+// null -- which v1:platform:packageDeployment refuses for both `deployables`
+// (an array) and `error` (an object). A close that fails leaves the row
+// non-terminal with its heartbeat gone, and the sweep closes it "abandoned":
+// on aks-memql a deploy that had built, rolled and published reported "this
+// cluster lost the node that was running it" while the site served. So
+// deployables is always an array, and error is named only when there is one.
 func (s *store) closeDeployment(ctx context.Context, c deploymentClose) error {
+	deployables := c.Deployables
+	if deployables == nil {
+		deployables = []DeployableOutcome{}
+	}
+	errorArg := ""
+	if c.Error != nil {
+		errorArg = ", error: " + jsonLiteral(c.Error)
+	}
 	return s.writeInternal(ctx, fmt.Sprintf(
-		"mutation closePackageDeployment(deploymentId: %s, status: %s, deployables: %s, dslVersion: %s, buildLogTail: %s, builtOn: %s, error: %s, finishedAt: %s)",
+		"mutation closePackageDeployment(deploymentId: %s, status: %s, deployables: %s, dslVersion: %s, buildLogTail: %s, builtOn: %s%s, finishedAt: %s)",
 		langparser.QuoteString(c.DeploymentId),
 		langparser.QuoteString(c.Status),
-		jsonLiteral(c.Deployables),
+		jsonLiteral(deployables),
 		langparser.QuoteString(c.DslVersion),
 		langparser.QuoteString(c.BuildLogTail),
 		jsonLiteral(c.BuiltOn),
-		jsonLiteral(c.Error),
+		errorArg,
 		langparser.QuoteString(c.FinishedAt.UTC().Format(time.RFC3339)),
 	))
 }
