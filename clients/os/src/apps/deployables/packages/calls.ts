@@ -60,12 +60,23 @@ export async function createPackage(query: QueryClient, input: NewPackageInput):
  * lands on the outcome without failing the publish.
  */
 export interface Placement {
-  /** The site's own hostname under the cluster domain. Required for a never-deployed app. */
+  /** The site's own hostname under the cluster domain. Required for a never-deployed app UNLESS it is skipped. */
   hostname: string;
   /** The client it is for. "" ties it to nobody. */
   accountId: string;
   /** The client's own domain. "" binds none. */
   ownDomain: string;
+  /**
+   * Leave this app out of the run (memql#4930).
+   *
+   * A PLACEMENT-TIME CHOICE, never a manifest one: a repository that ships a
+   * storefront and a starter SPA should not have to change to let somebody
+   * host only the storefront. The pipeline records the skip on the run rather
+   * than omitting the app, and a skipped app that has never been deployed is
+   * deliberately allowed to have no hostname -- which is exactly the case that
+   * used to refuse the whole run for a missing binding.
+   */
+  skip?: boolean;
 }
 
 /**
@@ -188,6 +199,36 @@ export async function archiveSite(query: QueryClient, siteId: string, confirmHos
 
 export async function restoreSite(query: QueryClient, siteId: string): Promise<void> {
   await query.siteRestore({ siteId });
+}
+
+/**
+ * Delete a deployable and release its name (epic memql#4937, D1).
+ *
+ * THE CAPABILITY, never the `deleteSite` mutation underneath it. The mutation
+ * stamps one field; the capability is the whole cascade -- the custom domains
+ * walked to `removing`, auto-deploy disarmed when this was the source's last
+ * app, and the site stamped LAST. A client that reached the mutation directly
+ * would free the name while the Ingress and Certificate stayed applied, which
+ * is the half-deleted state this whole epic exists to remove.
+ *
+ * The typed hostname is verified SERVER-side. Checking it here as well would
+ * be a courtesy, not a check.
+ */
+export async function deleteSite(query: QueryClient, siteId: string, confirmHostname: string): Promise<void> {
+  await query.siteDelete({ siteId, confirmHostname });
+}
+
+/**
+ * Ask a running deployment to stop (epic memql#4937, D3).
+ *
+ * It flags the row and ends nothing: the node running the attempt closes it
+ * `cancelled` at its next stage boundary. The engine refuses the ask from
+ * `staging_dsl` on, and the bar stops offering it at the same point -- so the
+ * gate here is presentation over a server-side law, exactly like every other
+ * one in this app.
+ */
+export async function cancelDeployment(query: QueryClient, packageId: string, deploymentId: string): Promise<void> {
+  await query.packageCancelDeployment({ packageId, deploymentId });
 }
 
 export async function setSiteLive(query: QueryClient, siteId: string, status: "live" | "disabled" | "draft"): Promise<void> {

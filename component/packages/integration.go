@@ -104,7 +104,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{
 				"packageId":  "string (required) -- the package to deploy",
 				"confirm":    "boolean -- pass true to proceed past the always-present confirm gate",
-				"placements": "object -- deployable name -> {hostname, accountId, ownDomain}; hostname is required on a deployable's FIRST deploy, the other two are optional and applied after the site exists",
+				"placements": "object -- deployable name -> {hostname, accountId, ownDomain, skip}; hostname is required on a deployable's FIRST deploy unless skip is true, accountId and ownDomain are optional and applied after the site exists, and skip:true leaves that deployable out of the run entirely (memql#4930) -- recorded as skipped, with nothing built and nothing it already serves touched",
 			},
 		},
 		{
@@ -130,6 +130,24 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Bring an archived site back to disabled (epic memql#4794, D10).",
 			Handler:     i.handleRestoreSite,
 			ArgsSchema:  map[string]string{"siteId": "string (required)"},
+		},
+		{
+			Name:        "deleteSite",
+			Description: "Delete a deployable and RELEASE ITS NAME (epic memql#4937, D1). The fourth rung of the D10 lifecycle: refuses unless the site is archived or draft, verifies the typed hostname, walks every custom-domain binding to `removing`, disarms auto-deploy when this was the source's last live app, and stamps `deleted` LAST -- the field the cluster-wide uniqueness probe actually reads. Returns {siteId, hostname, domainsReleased, autoDeployDisarmed}.",
+			Handler:     i.handleDeleteSite,
+			ArgsSchema: map[string]string{
+				"siteId":          "string (required)",
+				"confirmHostname": "string (required) -- the site's own hostname, typed as confirmation",
+			},
+		},
+		{
+			Name:        "cancelDeployment",
+			Description: "Ask a running deployment to stop (epic memql#4937, D3). Flags the row and ends nothing -- the node running the attempt closes it `cancelled` at its next stage boundary. Refuses a terminal run, and refuses one at or past staging_dsl. Returns {deploymentId, status, cancelRequested}.",
+			Handler:     i.handleCancelDeployment,
+			ArgsSchema: map[string]string{
+				"packageId":    "string (required)",
+				"deploymentId": "string (required) -- the run to stop",
+			},
 		},
 		{
 			Name:        "archivePackage",
@@ -332,6 +350,213 @@ func (i *Integration) handleRestoreSite(ctx context.Context, args map[string]any
 	return resultNode(map[string]any{"siteId": siteId, "status": siteStatusDisabled}), nil
 }
 
+// handleDeleteSite is the fourth and last rung of the D10 lifecycle (epic
+// memql#4937, D1): the one act that RELEASES A HOSTNAME.
+//
+// # Why a capability rather than the deleteSite mutation
+//
+// `deleteSite` has existed since memql#3717 and stamps one field. What it does
+// not do is any of the cascade below -- and a client that reached the mutation
+// directly would free the name while the site's custom domains stayed `live`,
+// with the Ingress and Certificate still applied and the hostname still
+// claimed against v1:platform:customDomain. That is the exact half-deleted
+// state this epic exists to remove, so the cascade has to be ONE decision made
+// in ONE place.
+//
+// # The order is the design, not an implementation detail
+//
+// The site row is stamped LAST. A failure part-way therefore leaves a
+// deployable that is still findable and still says what state it is in, rather
+// than an invisible row holding a name nobody can reclaim and nobody can see.
+// The reverse order fails the other way, and fails silently.
+//
+// # What each refusal is protecting
+//
+//   - Not archived or draft: delete runs only from the two states nothing is
+//     served from. The sentence names the next step, because "pause it first"
+//     is the whole answer rather than a scolding.
+//   - Typed hostname mismatch: verified here, server-side, for the reason
+//     siteArchive's is -- a confirmation a client could skip is not one.
+//   - systemOwned: refused here so the sentence names the reason. The write
+//     guard beside executeWrite refuses it again whoever asks, which is what
+//     makes it true rather than presentational.
+func (i *Integration) handleDeleteSite(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	deps, err := i.resolve()
+	if err != nil {
+		return nil, err
+	}
+	siteId := strings.TrimSpace(stringArg(args, "siteId"))
+
+	// UNDER THE CALLER'S OWN ACTOR. siteById carries v1:platform:site's
+	// composite tier, so somebody who cannot read the deployable resolves zero
+	// rows and is refused by name here -- before a domain comes down.
+	site, err := deps.Store.siteById(ctx, siteId)
+	if err != nil {
+		return nil, err
+	}
+	if site == nil {
+		return nil, refuse(CodeSourceUnreadable, "no deployable %q is readable by this caller", siteId)
+	}
+
+	hostname := rowString(site, "hostname")
+	status := rowString(site, "status")
+
+	if rowBool(site, "systemOwned") {
+		return nil, refuse(CodeSiteSystemOwned,
+			"%q is one of this cluster's own surfaces. It is re-seeded at every boot, so deleting it would leave nobody a way in until the next restart.",
+			hostname)
+	}
+	if status != siteStatusArchived && status != siteStatusDraft {
+		return nil, refuse(CodeSiteNotDeletable,
+			"this deployable is %q, and deleting is only possible from %q or %q -- the two states nothing is served from. Pause it, then archive it, then delete it.",
+			status, siteStatusArchived, siteStatusDraft)
+	}
+	if strings.TrimSpace(stringArg(args, "confirmHostname")) != hostname {
+		return nil, refuse(CodeDeleteConfirmationMismatch,
+			"that is not this deployable's hostname. Type %q exactly to delete it.", hostname)
+	}
+
+	// 1. The domains, so the hostname stops resolving at this write rather
+	//    than at the Ingress deletion, and the client's own names come free.
+	domainsReleased, err := deps.Store.releaseDomainsForSite(ctx, siteId)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Auto-deploy, when this was the source's last app that could serve. A
+	//    source whose apps are all gone should stop fetching on a timer.
+	autoDeployDisarmed := false
+	if packageId := rowString(site, "packageId"); packageId != "" {
+		last, lerr := i.wasLastServableApp(ctx, deps, packageId, siteId)
+		if lerr != nil {
+			return nil, lerr
+		}
+		if last {
+			if aerr := deps.Store.setAutoDeploy(ctx, packageId, false); aerr != nil {
+				return nil, aerr
+			}
+			autoDeployDisarmed = true
+		}
+	}
+
+	// 3. The site, LAST. The hostname is free at this instant.
+	if derr := deps.Store.deleteSite(ctx, siteId); derr != nil {
+		return nil, derr
+	}
+
+	return resultNode(map[string]any{
+		"siteId":             siteId,
+		"hostname":           hostname,
+		"domainsReleased":    domainsReleased,
+		"autoDeployDisarmed": autoDeployDisarmed,
+	}), nil
+}
+
+// wasLastServableApp reports whether siteId is the only app of its package
+// that is not already archived or deleted.
+//
+// It reads the package's sites under the CALLER's actor, which is the honest
+// scope: a caller who cannot see a sibling cannot conclude anything about it,
+// and the conservative answer -- leaving auto-deploy armed -- costs a poll
+// rather than a wrong write to somebody else's source.
+func (i *Integration) wasLastServableApp(ctx context.Context, deps *Deps, packageId, siteId string) (bool, error) {
+	sites, err := deps.Store.sitesForPackage(ctx, packageId)
+	if err != nil {
+		return false, err
+	}
+	for _, s := range sites {
+		if rowString(s, "id") == siteId {
+			continue
+		}
+		if rowBool(s, "deleted") {
+			continue
+		}
+		if rowString(s, "status") != siteStatusArchived {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// handleCancelDeployment records that somebody asked a run to stop (epic
+// memql#4937, D3).
+//
+// IT FLAGS THE ROW AND ENDS NOTHING, which is the whole shape. The node
+// running the attempt is the only writer that closes it, so the timeline can
+// never claim a run stopped while its build is still running on a workbench
+// somewhere -- and the two statements would be indistinguishable afterwards.
+//
+// THE LAST CANCELLABLE POINT IS IMMEDIATELY BEFORE THE ROLL. From
+// `staging_dsl` on, a roll restarts the cluster onto staged MemQL, and
+// stopping half way through is the one outcome worse than either finishing or
+// not starting. That is refused HERE, so a person is told rather than handed a
+// flag nothing will ever read.
+func (i *Integration) handleCancelDeployment(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	deps, err := i.resolve()
+	if err != nil {
+		return nil, err
+	}
+	deploymentId := strings.TrimSpace(stringArg(args, "deploymentId"))
+
+	run, err := deps.Store.deploymentById(ctx, deploymentId)
+	if err != nil {
+		return nil, err
+	}
+	if run == nil {
+		return nil, refuse(CodeSourceUnreadable, "no deployment %q is readable by this caller", deploymentId)
+	}
+
+	status := rowString(run, "status")
+	if IsTerminal(status) {
+		return nil, refuse(CodeDeploymentNotCancellable,
+			"this run already finished (%s), so there is nothing to stop.", status)
+	}
+	if !CancellableStage(status) {
+		return nil, refuse(CodeDeploymentNotCancellable,
+			"this run is %q and is past the point where stopping is safe: the roll restarts this cluster onto the staged MemQL, and stopping half way through would leave it half-rolled. It will finish on its own.",
+			status)
+	}
+
+	// A PARKED RUN HAS NO PROCESS, so nothing would ever read the flag.
+	//
+	// This is the one place the "only the running node closes the row" rule
+	// does not apply, and it does not apply because its premise is false: a
+	// run at awaiting_confirm returned from the pipeline and is sitting on the
+	// row waiting for somebody's answer. Flagging it would leave it
+	// non-terminal until the abandoned sweep eventually closed it as a LOST
+	// run -- which would blame the cluster for a person's decision. So the
+	// capability closes it here, and `cancelled` is the honest word for it.
+	if status == StatusAwaitingConfirm {
+		if cerr := deps.Store.closeDeployment(ctx, deploymentClose{
+			DeploymentId: deploymentId,
+			Status:       StatusCancelled,
+			Deployables:  nil,
+			Error: &Problem{
+				Code:    CodeDeploymentCancelled,
+				Message: "This deploy was waiting for you and you stopped it. Nothing was built and nothing was published.",
+				Fatal:   true,
+			},
+			FinishedAt: deps.now(),
+		}); cerr != nil {
+			return nil, cerr
+		}
+		return resultNode(map[string]any{
+			"deploymentId":    deploymentId,
+			"status":          StatusCancelled,
+			"cancelRequested": true,
+		}), nil
+	}
+
+	if cerr := deps.Store.requestDeploymentCancel(ctx, deploymentId); cerr != nil {
+		return nil, cerr
+	}
+	return resultNode(map[string]any{
+		"deploymentId":    deploymentId,
+		"status":          status,
+		"cancelRequested": true,
+	}), nil
+}
+
 func (i *Integration) handleArchivePackage(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	deps, err := i.resolve()
 	if err != nil {
@@ -528,6 +753,7 @@ func placementsArg(args map[string]any, key string) map[string]Placement {
 			Hostname:  strings.TrimSpace(stringArg(fields, "hostname")),
 			AccountId: strings.TrimSpace(stringArg(fields, "accountId")),
 			OwnDomain: strings.TrimSpace(stringArg(fields, "ownDomain")),
+			Skip:      boolArg(fields, "skip"),
 		}
 	}
 	return out

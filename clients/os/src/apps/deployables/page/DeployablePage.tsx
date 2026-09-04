@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
-import { ArrowLeft, ExternalLink, Sparkles } from "lucide-react";
+import { ArrowLeft, ExternalLink, History, Sparkles } from "lucide-react";
 
-import { Button, Chip, Chips, Head, Panel, useLiveView } from "../../../kit";
+import { Button, Chip, Chips, Head, Input, Panel, useLiveView } from "../../../kit";
+import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { OpenLogsButton } from "../../../logs/OpenLogs";
 import { useAccountOptions } from "../../accounts/tie";
 import { usePackageActions, useSiteLifecycle } from "../packages/actions";
@@ -11,10 +12,9 @@ import { deploymentFromRow, type DeploymentRow, type PackageRow } from "../packa
 import { usePackageDeployments } from "../packages/usePackages";
 import { liveUrlFor, ownerLabel, siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
-import { EveryAttempt } from "./EveryAttempt";
-import { headStateFor } from "./head";
+import { actsFor, type ActName } from "./acts";
 import { Rail } from "./Rail";
-import { headActionFor, refusalStopFor, type RailStage, type StandingInput } from "./rail";
+import { openStopFor, refusalStopFor, type RailStage, type StandingInput } from "./rail";
 import { BuildStop } from "./stops/Build";
 import { LiveStop } from "./stops/Live";
 import { SourceStop } from "./stops/Source";
@@ -22,20 +22,28 @@ import { WhatItIsStop } from "./stops/WhatItIs";
 import { WhereItLivesStop } from "./stops/WhereItLives";
 import { useBundleFlip } from "./useBundleFlip";
 
-// The deployable page (epic memql#4885, design section A): one page for
-// every deployable that has a site row, in its standing and deploy readings.
+// The deployable page (epic memql#4937, design sections C and D): ONE head,
+// ONE rail, ONE bar.
 //
 // ===========================================================================
-// THE RAIL IS THE FORM, AND THE HEAD HAS ONE ACTION
+// WHAT THIS PAGE USED TO BE
 // ===========================================================================
-// Below the Head the rail reads the deployable's five stops off the rows --
-// the package, the newest run, the site -- and each stop's BODY is mounted
-// beneath its note through the rail's `stopBody` slot rather than drawn as a
-// second panel beside it. The Head carries the deployable's name and ONE
-// action that follows the state (`headStateFor` -> `headActionFor`), with
-// the quiet Ask and Open beside it; nothing else stands. A refusal renders at
-// the stop it belongs to, the OS headline above and the server's sentence
-// beneath, never as a toast.
+// Measured on a live cluster: 5,069px over 5.9 viewports, TWO stacked heads
+// (the list's and this one's), THIRTEEN rails at three different meanings, 36
+// controls -- with Pause at y=2412, Archive at 2499, and "archive this source
+// AND EVERY APP IT PRODUCED" at 885, three sections higher than either. Six
+// controls read "Retry", carrying two different promises.
+//
+// Three moves fix all of it, and each is a rule rather than a tidy-up:
+//
+//   1. THE PAGE REPLACES THE LIST (DESIGN.md rule 11). One head.
+//   2. A SETTLED STOP IS ONE LINE, and exactly one stop is open -- chosen by
+//      what is actually a question (`openStopFor`). One rail.
+//   3. ACTS FOLLOW THE STATE, IN ONE PLACE (rule 12). The bar is pinned to
+//      the bottom edge, so nothing is ever scrolled to.
+//
+// The history is one line at the foot of the rail and belongs to the SOURCE,
+// which is also what stops it being drawn twice for a two-app package.
 //
 // ===========================================================================
 // THE TIMELINE IS RETAINED HERE, NEVER AT THE ROOT
@@ -44,48 +52,35 @@ import { useBundleFlip } from "./useBundleFlip";
 // concept, for the life of the window. A package's deployment TIMELINE is
 // retained by this page (clients/os/README.md): keeping every package's
 // timeline live would subscribe the window to every deploy in the cluster to
-// render one. A hand-made deployable has no source and reads no timeline.
-//
-// ===========================================================================
-// THE MODE IS A SEAM
-// ===========================================================================
-// `mode` names which reading the page is in. Today there is exactly one --
-// `standing`, which also covers a deploy in flight, because during a run the
-// same stops report progress (rail.ts) -- and the compose reading arrives
-// with memql#4891 as a second arm of the same union. The page passes the
-// mode's kind straight to the rail, so adding the arm is adding a reading,
-// not a second page.
-
-export type DeployablePageMode = { kind: "standing" };
-
-const STANDING: DeployablePageMode = { kind: "standing" };
+// render one.
 
 export interface DeployablePageProps {
-  /** The deployable. */
   site: SiteRow;
-  /** Its source when package-produced (joined by `site.packageId`), else null: hand-made. */
+  /** Its source when package-produced, else null: hand-made. */
   pkg: PackageRow | null;
-  /** The other sites the same package produced, for "archive this source and every app it produced". */
-  siblings: readonly SiteRow[];
   /** The caller's credential cards, from the root feed. */
   credentials: readonly CredentialRow[];
   viewerUserId: string;
   /** Rank >= 200; the app computes it once. */
   canWrite: boolean;
-  /** The client's own domain and the Domains content render only for one. */
   isClusterOwner: boolean;
   clusterDomain: string;
   onAsk?: (tag: string) => void;
-  /** The quiet Back the section supplies when the page replaces the list; nothing renders for it when absent. */
-  onBack?: () => void;
-  /** Which reading the page is in. Standing when absent. */
-  mode?: DeployablePageMode;
+  /** The quiet Back to the list. */
+  onBack: () => void;
+  /** Opens the source's own view. */
+  onOpenSource: (packageId: string) => void;
+  /** Opens the source's history view. */
+  onOpenHistory: (packageId: string) => void;
+  /** True while this deployable's delete is still tearing its domains down. */
+  deleting?: boolean;
+  /** Told when a delete was accepted, so the section can start the teardown reading. */
+  onDeleted?: (siteId: string) => void;
 }
 
 export function DeployablePage({
   site,
   pkg,
-  siblings,
   credentials,
   viewerUserId,
   canWrite,
@@ -93,7 +88,10 @@ export function DeployablePage({
   clusterDomain,
   onAsk,
   onBack,
-  mode = STANDING,
+  onOpenSource,
+  onOpenHistory,
+  deleting = false,
+  onDeleted,
 }: DeployablePageProps) {
   const { source: timeline, reseed } = usePackageDeployments(pkg?.id ?? "");
   const deployments = useLiveView(timeline, `deployments:${pkg?.id ?? ""}`, (rows) =>
@@ -103,45 +101,69 @@ export function DeployablePage({
 
   const accounts = useAccountOptions();
   const flipped = useBundleFlip(site);
-  // TWO WRITE HOOKS, because their refusals render in two places: a deploy
-  // refused from the Head renders beneath it, and a status write refused
-  // from the Head's Make it live renders on the Live stop, beside the other
-  // status controls, which is where somebody looks for what happened to it.
   const headActions = usePackageActions();
   const lifecycle = useSiteLifecycle();
-  // The hand-made Redeploy opens the Source stop's zip picker rather than
-  // starting a run: a hand-made deployable's next version IS a zip.
   const [zipOpen, setZipOpen] = useState(false);
 
-  const state = headStateFor({ site, pkg, run, canWrite });
-  const action = state === null ? null : headActionFor(state);
+  // THE OPEN STOP IS A READING, WITH AN OVERRIDE. `openStopFor` decides which
+  // stop is the question; clicking another opens it instead, and clicking the
+  // open one closes it. Cleared when the deployable changes, so a stop opened
+  // on one is never carried onto another.
+  const [openOverride, setOpenOverride] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [typed, setTyped] = useState("");
+  useEffect(() => {
+    setOpenOverride(null);
+    setConfirming(false);
+    setTyped("");
+  }, [site.id]);
+
+  const rail: StandingInput = { mode: "standing", pkg, app: site.packageDeployableName, run, site };
+  const openStop = openOverride ?? openStopFor(rail);
   const refusalStop = refusalStopFor(run);
   const name = siteName(site);
   const url = liveUrlFor(site.hostname);
 
-  const rail: StandingInput = { mode: mode.kind, pkg, app: site.packageDeployableName, run, site };
+  const reading = actsFor({ site, pkg, run, canWrite, deleting, releasing: site.hostname });
 
-  function act() {
-    if (state === null) return;
-    switch (state.at) {
-      case "awaiting_confirm":
-        // Every app of an existing deployable already has an address, so the
-        // confirm sends no placements: the pipeline republishes through the
-        // (packageId, deployable name) key it recorded on the first deploy.
-        if (pkg !== null) void headActions.deploy(pkg.id, true).then(reseed);
+  function act(named: ActName) {
+    switch (named) {
+      case "Discard":
+      case "Delete":
+      case "Archive":
+        setConfirming(true);
         return;
-      case "draft_with_bundle":
+      case "Publish":
         void lifecycle.setStatus(site.id, "live");
         return;
-      case "live":
-      case "refused_or_failed":
+      case "Unpublish":
+        void lifecycle.setStatus(site.id, "disabled");
+        return;
+      case "Restore":
+        void lifecycle.restore(site.id);
+        return;
+      case "Cancel":
+        if (pkg !== null && run !== null) void headActions.cancel(pkg.id, run.id).then(reseed);
+        return;
+      case "Deploy":
+      case "Deploy the update":
+      case "Redeploy":
+      case "Retry the deploy":
+        // A PARKED RUN'S DEPLOY IS THE CONFIRMATION, not a new run. The
+        // pipeline republishes through the (packageId, deployable name) key it
+        // recorded on the first deploy, so it needs no placements -- every app
+        // of an existing deployable already has its address.
+        if (pkg !== null && run !== null && run.status === "awaiting_confirm") {
+          void headActions.deploy(pkg.id, true).then(reseed);
+          return;
+        }
         if (pkg === null) {
+          // A hand-made deployable's next version IS a zip, so the act opens
+          // the picker rather than starting a run there is no source for.
+          setOpenOverride("source");
           setZipOpen(true);
           return;
         }
-        // Deploy the update, Redeploy and Retry are one call: a fresh run
-        // that parks with its report, so the state flips to awaiting_confirm
-        // and the Head reads Deploy.
         void headActions.deploy(pkg.id, false).then(reseed);
         return;
       default:
@@ -149,10 +171,35 @@ export function DeployablePage({
     }
   }
 
-  const busy = state?.at === "draft_with_bundle" ? lifecycle.busy : headActions.busy;
+  // Which destructive act the confirmation is for. Delete and Discard are one
+  // capability under two names; Archive is its own.
+  const confirmAct: ActName | null = confirming
+    ? (reading.acts.find((a) => a.name === "Delete" || a.name === "Discard" || a.name === "Archive")?.name ?? null)
+    : null;
+
+  async function runConfirm() {
+    if (confirmAct === "Archive") {
+      await lifecycle.archive(site.id, typed);
+      setConfirming(false);
+      return;
+    }
+    const done = await lifecycle.remove(site.id, typed);
+    if (done) {
+      setConfirming(false);
+      onDeleted?.(site.id);
+    }
+  }
+
+  const busy = lifecycle.busy || headActions.busy;
+  const acts: Act[] = reading.acts.map((spec) => ({
+    label: spec.name,
+    tone: spec.tone,
+    busy,
+    onAct: () => act(spec.name),
+    ariaLabel: `${spec.name} ${name}`,
+  }));
 
   const stopBody = (stage: RailStage) => {
-    // The newest run's refusal, at the stop it belongs to and nowhere else.
     const refusal = refusalStop === stage.id && run?.error ? run.error : null;
     switch (stage.id) {
       case "source":
@@ -160,13 +207,13 @@ export function DeployablePage({
           <SourceStop
             site={site}
             pkg={pkg}
-            siblings={siblings}
             credentials={credentials}
             canWrite={canWrite}
             flipped={flipped}
             zipOpen={zipOpen}
             onZipOpenChange={setZipOpen}
             refusal={refusal}
+            onOpenSource={pkg === null ? undefined : () => onOpenSource(pkg.id)}
           />
         );
       case "whatItIs":
@@ -190,72 +237,178 @@ export function DeployablePage({
   };
 
   return (
-    <Panel label={`Deployable ${name}`}>
-      <Head title={name}>
-        {onBack ? (
-          <Button tone="quiet" onClick={onBack}>
-            <ArrowLeft size={13} aria-hidden /> Back
-          </Button>
-        ) : null}
-        {url === "" ? null : (
-          /* The single most useful link on this surface: where the thing
-             actually is. `rel` is not decoration -- a new tab handed a live
-             `window.opener` can navigate the shell it came from. */
-          <a className="os-button" data-tone="quiet" href={url} target="_blank" rel="noreferrer noopener">
-            <ExternalLink size={13} aria-hidden /> Open
-          </a>
-        )}
-        {/* Every line about this deployable (epic memql#4895): the Logs app on
-            Search, narrowed to this site. Admin and above, because every read
-            on the log store is; below that the control is ABSENT rather than a
-            refusal waiting to be clicked. It moved here from SiteDetail, which
-            this page replaced. */}
-        <OpenLogsButton
-          subject={site.id}
-          subjectConcept={Concepts.PLATFORM_SITE}
-          ariaLabel={`Logs for ${name}`}
-        />
-        {onAsk ? (
-          <Button onClick={() => onAsk(`app:deployables site:${site.hostname || site.id}`)} ariaLabel={`Ask about ${name}`}>
-            <Sparkles size={13} aria-hidden /> Ask
-          </Button>
-        ) : null}
-        {action === null ? null : (
-          <Button tone={action.tone} disabled={action.disabled} busy={busy} onClick={act}>
-            {action.label}
-          </Button>
-        )}
-      </Head>
+    <div className="os-deploy-pane">
+      <div className="os-deploy-scroll">
+        <Panel label={`Deployable ${name}`}>
+          {/* ONE HEAD, and no primary action in it: every act is on the bar
+              (rule 12). What stays is the quiet three -- where the thing is,
+              its lines, and Ask -- none of which changes its state. */}
+          <Head title={name}>
+            <Button tone="quiet" onClick={onBack}>
+              <ArrowLeft size={13} aria-hidden /> Deployables
+            </Button>
+            {url === "" ? null : (
+              <a className="os-button" data-tone="quiet" href={url} target="_blank" rel="noreferrer noopener">
+                <ExternalLink size={13} aria-hidden /> Open
+              </a>
+            )}
+            <OpenLogsButton subject={site.id} subjectConcept={Concepts.PLATFORM_SITE} ariaLabel={`Logs for ${name}`} />
+            {onAsk ? (
+              <Button
+                tone="quiet"
+                onClick={() => onAsk(`app:deployables site:${site.hostname || site.id}`)}
+                ariaLabel={`Ask about ${name}`}
+              >
+                <Sparkles size={13} aria-hidden /> Ask
+              </Button>
+            ) : null}
+          </Head>
 
-      {/* WHOSE IT IS, and the two facts about a row that no stop carries. An
-          empty ownerUserId is the meaningful CLUSTER-OWNED state -- the
-          seeded portal row is the one the platform ships that way -- rather
-          than a row that failed to record an owner. */}
-      <Chips label="Deployable facts">
-        <Chip tone={ownerLabel(site, viewerUserId) === "yours" ? "accent" : "muted"}>
-          {ownerLabel(site, viewerUserId)}
-        </Chip>
-        {site.apiProxy ? (
-          <Chip title="/_memql/* is mounted on this origin and forwarded to the bff, so the site is same-origin with its own API.">
-            api proxy
-          </Chip>
+          <Chips label="Deployable facts">
+            <Chip tone={ownerLabel(site, viewerUserId) === "yours" ? "accent" : "muted"}>
+              {ownerLabel(site, viewerUserId)}
+            </Chip>
+            {site.apiProxy ? (
+              <Chip title="/_memql/* is mounted on this origin and forwarded to the bff, so the site is same-origin with its own API.">
+                api proxy
+              </Chip>
+            ) : null}
+            {site.systemOwned ? (
+              <Chip title="Re-seeded at boot and refused at the delete path, so cluster management cannot be bricked by deleting it.">
+                system-owned
+              </Chip>
+            ) : null}
+          </Chips>
+
+          {headActions.refusal ? (
+            <ProblemNotice problem={{ ...headActions.refusal, fatal: true }} tone="error" />
+          ) : null}
+
+          <Rail
+            input={rail}
+            stopBody={stopBody}
+            openStop={openStop}
+            onOpenStop={(id) => setOpenOverride(id)}
+            answerFor={(stage) => (stage.reason === "" ? "" : stage.reason)}
+          />
+
+          {/* THE HISTORY IS ONE LINE, AND IT IS THE SOURCE'S. Six attempts,
+              each a full six-stop rail with its own refusal block, is 2,600px
+              -- and `usePackageDeployments` reads the PACKAGE's timeline, so
+              two apps of one source rendered the identical wall twice. */}
+          {pkg === null ? null : (
+            <button type="button" className="os-deploy-history-line" onClick={() => onOpenHistory(pkg.id)}>
+              <History size={12} aria-hidden />
+              <span>History &middot; {historySummary(deployments?.snapshot.rows ?? [])}</span>
+              <span aria-hidden>&#9656;</span>
+            </button>
+          )}
+
+          {/* A refusal renders IN SURFACE, beside the rail -- never a toast,
+              and never inside a dialog that then closes, because a refusal
+              nobody can re-read is a refusal nobody can act on. */}
+          {lifecycle.refusal ? (
+            <ProblemNotice problem={{ ...lifecycle.refusal, fatal: true }} tone="error" />
+          ) : null}
+        </Panel>
+      </div>
+
+      <ActionBar state={reading.state} detail={reading.detail} tone={reading.tone} acts={confirming ? [] : acts}>
+        {confirming && confirmAct ? (
+          <ConfirmRow
+            site={site}
+            act={confirmAct}
+            typed={typed}
+            onTyped={setTyped}
+            busy={lifecycle.busy}
+            onCancel={() => {
+              setConfirming(false);
+              setTyped("");
+            }}
+            onConfirm={() => void runConfirm()}
+          />
         ) : null}
-        {site.systemOwned ? (
-          <Chip title="Re-seeded at boot and refused at the delete path, so cluster management cannot be bricked by deleting it.">
-            system-owned
-          </Chip>
-        ) : null}
-      </Chips>
-
-      {/* A deploy the engine refused before it opened a run has no row to
-          carry it, so it renders here, beneath the action that asked. */}
-      {headActions.refusal ? <ProblemNotice problem={{ ...headActions.refusal, fatal: true }} tone="error" /> : null}
-
-      <Rail input={rail} stopBody={stopBody} />
-
-      <EveryAttempt pkg={pkg} deployments={deployments} canWrite={canWrite} reseed={reseed} />
-    </Panel>
+      </ActionBar>
+    </div>
   );
+}
+
+/**
+ * The typed confirmation, in the bar.
+ *
+ * IT SAYS WHAT IT COSTS BEFORE IT ASKS. A delete releases the hostname and
+ * takes the deployable's domains down, and it is terminal -- archive is the
+ * reversible step, one rung up. Saying that where the person is about to type
+ * is the difference between a confirmation and a speed bump.
+ */
+function ConfirmRow({
+  site,
+  act,
+  typed,
+  onTyped,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  site: SiteRow;
+  act: ActName;
+  typed: string;
+  onTyped: (v: string) => void;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const removing = act === "Delete" || act === "Discard";
+  return (
+    <>
+      <span className="os-actbar-confirm">
+        {removing ? (
+          <>
+            Deleting releases <strong className="os-mono">{site.hostname}</strong> and takes its domains down. The
+            record stays in this cluster&rsquo;s history, but the deployable cannot be brought back &mdash; restore it
+            from Archived instead if you are not sure.
+          </>
+        ) : (
+          <>Archiving keeps this deployable and its whole history, and it can be restored. Nothing is deleted.</>
+        )}
+      </span>
+      <Input
+        id={`os-confirm-${site.id}`}
+        label={`Type ${site.hostname} to confirm`}
+        value={typed}
+        onChange={onTyped}
+        placeholder={site.hostname}
+      />
+      <Button tone="quiet" onClick={onCancel}>
+        Keep it
+      </Button>
+      <Button tone="danger" disabled={typed !== site.hostname} busy={busy} onClick={onConfirm}>
+        {act}
+      </Button>
+    </>
+  );
+}
+
+/** The history line's own summary: how many, and how the last one went. */
+function historySummary(rows: readonly DeploymentRow[]): string {
+  if (rows.length === 0) return "no attempts yet";
+  const attempts = `${rows.length} attempt${rows.length === 1 ? "" : "s"}`;
+  const last = rows[0];
+  if (last === undefined) return attempts;
+  return `${attempts}, last ${statusWord(last.status)}`;
+}
+
+function statusWord(status: string): string {
+  switch (status) {
+    case "succeeded":
+      return "live";
+    case "abandoned":
+      return "lost";
+    case "awaiting_confirm":
+      return "waiting for you";
+    default:
+      return status.replace(/_/g, " ");
+  }
 }
 
 /**
@@ -263,8 +416,7 @@ export function DeployablePage({
  *
  * The collection folds events in the order the cluster sent them, so a page
  * that read `rows[0]` as the newest run would read a STALE one the moment a
- * new run arrived by event -- exactly when somebody is watching. Sorted here,
- * once, the way the map's layout sorts its own input.
+ * new run arrived by event -- exactly when somebody is watching.
  */
 function newestFirst(rows: DeploymentRow[]): DeploymentRow[] {
   const at = (d: DeploymentRow): string => d.startedAt || d.createdAt;

@@ -238,6 +238,48 @@ const (
 	// source, nothing was published, and the repair is Retry.
 	CodeDeploymentAbandoned = "deployment_abandoned"
 
+	// CodeDeployableSkipped: an app a person chose to leave out of this run
+	// (memql#4930). Recorded on the row rather than omitted, because
+	// `deployables` promises one entry per manifest deployable and a missing
+	// entry reads as "nothing happened". NOT fatal and NOT a failure: a
+	// partial deploy is a complete run, and rollback and update detection
+	// read it as "not this run" rather than as removed.
+	CodeDeployableSkipped = "deployable_skipped"
+
+	// The delete and cancel refusals (epic memql#4937).
+
+	// CodeSiteNotDeletable: a delete asked of a deployable that is still
+	// serving, or could. Delete is the fourth rung of the D10 lifecycle and
+	// only ever runs from `archived` or `draft` -- the two states nothing is
+	// served from. Its sentence names the next step, because "pause it first"
+	// is the whole answer.
+	CodeSiteNotDeletable = "site_not_deletable"
+
+	// CodeDeleteConfirmationMismatch: the typed hostname did not match the
+	// stored one. Verified SERVER-side for the reason siteArchive's is -- a
+	// confirmation a client could skip is not one.
+	CodeDeleteConfirmationMismatch = "delete_confirmation_mismatch"
+
+	// CodeSiteSystemOwned: a lifecycle write asked of one of the cluster's own
+	// surfaces. The write guard beside executeWrite refuses these whoever
+	// asks; this refuses earlier so the sentence names the reason rather than
+	// the guard.
+	CodeSiteSystemOwned = "site_system_owned"
+
+	// CodeDeploymentNotCancellable: a cancel asked of a run with nothing left
+	// to stop -- already terminal, or at or past `staging_dsl`. From the roll
+	// on there is no cancel, because a roll restarts the cluster onto staged
+	// MemQL and stopping half way through is the one outcome worse than either
+	// finishing or not starting.
+	CodeDeploymentNotCancellable = "deployment_not_cancellable"
+
+	// CodeDeploymentCancelled: the run a person stopped. Its own code and its
+	// own terminal status, NOT a flavour of failed -- the same distinction
+	// CodeDeploymentAbandoned draws, and for a sharper reason: this one names
+	// a choice somebody made, and reporting it as a fault would tell them
+	// their own click broke something.
+	CodeDeploymentCancelled = "deployment_cancelled"
+
 	// CodeSnapshotUnavailable: a retry named an earlier run whose stored
 	// snapshot this cluster cannot read -- most often a run from before
 	// snapshots were kept. The repair is an ordinary deploy, which fetches

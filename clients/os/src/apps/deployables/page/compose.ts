@@ -67,8 +67,18 @@ export interface AddressDraft {
   accountId: string;
   /** The client's own domain, bound after the site exists. Cluster owners only. */
   ownDomain: string;
+  /**
+   * Leave this app out of this deploy (memql#4930). A skipped app needs no
+   * address, which is the whole point: it is what makes "deploy only the
+   * storefront" possible on a FIRST deploy, when neither app has one yet.
+   */
+  skip?: boolean;
 }
 
+// `skip` is ABSENT rather than false: absent means deploy, which is what
+// every address written before this field existed means, and what somebody
+// who never touches the control means. Writing an explicit false would be a
+// value where there was none.
 export const EMPTY_ADDRESS: AddressDraft = { slug: "", accountId: "", ownDomain: "" };
 
 /** The one entry a hand-made deployable's address is held under: it has no manifest app name. */
@@ -158,7 +168,12 @@ export function placementsComplete(
   clusterDomain: string,
 ): boolean {
   if (apps.length === 0) return false;
-  return apps.every((app) => addressReady(addresses[app] ?? EMPTY_ADDRESS, clusterDomain));
+  // A SKIPPED APP NEEDS NO ADDRESS, and at least one app has to be going out:
+  // a run that would deploy nothing is not a run, and the control says so by
+  // being absent rather than by refusing after the click.
+  const going = apps.filter((app) => (addresses[app] ?? EMPTY_ADDRESS).skip !== true);
+  if (going.length === 0) return false;
+  return going.every((app) => addressReady(addresses[app] ?? EMPTY_ADDRESS, clusterDomain));
 }
 
 /**
@@ -181,6 +196,7 @@ export function placementsFrom(
       hostname: hostnameFor(held.slug, clusterDomain),
       accountId: held.accountId.trim(),
       ownDomain: normalizeHostname(held.ownDomain),
+      ...(held.skip === true ? { skip: true } : {}),
     };
   }
   return out;

@@ -3,7 +3,9 @@ import { useCallback, useState } from "react";
 import { useOsConnection } from "../../../live/connection";
 import {
   archivePackage,
+  cancelDeployment,
   archiveSite,
+  deleteSite,
   createPackage,
   createSourceCredential,
   deployPackage,
@@ -126,6 +128,11 @@ export interface PackageActions extends WriteState {
   restore: (packageId: string) => Promise<void>;
   /** Switch which of the caller's credentials this source fetches under. */
   setCredential: (packageId: string, credentialId: string) => Promise<void>;
+  /**
+   * Ask a run in flight to stop (epic memql#4937, D3). It flags the row; the
+   * node running the attempt closes it `cancelled` at its next stage boundary.
+   */
+  cancel: (packageId: string, deploymentId: string) => Promise<void>;
 }
 
 export function usePackageActions(): PackageActions {
@@ -154,6 +161,9 @@ export function usePackageActions(): PackageActions {
     },
     setCredential: async (packageId, credentialId) => {
       await run((query) => setPackageCredential(query, packageId, credentialId));
+    },
+    cancel: async (packageId, deploymentId) => {
+      await run((query) => cancelDeployment(query, packageId, deploymentId));
     },
   };
 }
@@ -213,6 +223,12 @@ export interface SiteLifecycleActions extends WriteState {
   archive: (siteId: string, confirmHostname: string) => Promise<void>;
   restore: (siteId: string) => Promise<void>;
   rollTo: (siteId: string, bundleRef: string) => Promise<void>;
+  /**
+   * The fourth rung (epic memql#4937). Answers whether the delete was
+   * ACCEPTED, because the caller has to know whether to show the teardown --
+   * a refusal renders on the bar and the deployable stays exactly as it was.
+   */
+  remove: (siteId: string, confirmHostname: string) => Promise<boolean>;
 }
 
 export function useSiteLifecycle(): SiteLifecycleActions {
@@ -232,6 +248,15 @@ export function useSiteLifecycle(): SiteLifecycleActions {
     },
     rollTo: async (siteId, bundleRef) => {
       await run((query) => repointSite(query, siteId, bundleRef));
+    },
+    remove: async (siteId, confirmHostname) => {
+      // `run` answers null on a refusal, which is what separates "the cluster
+      // said no" from "it worked and returned nothing".
+      const done = await run(async (query) => {
+        await deleteSite(query, siteId, confirmHostname);
+        return true;
+      });
+      return done === true;
     },
   };
 }

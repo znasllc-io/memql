@@ -104,6 +104,14 @@ func (d *Deps) build(ctx context.Context, req DeployRequest, pkg map[string]any,
 		if dep.Problem != nil {
 			continue // already refused by the analysis; the run is failing anyway
 		}
+		// SKIPPED BEFORE ANY WORK (memql#4930). The choice is honoured at the
+		// BUILD stage as well as at publish, so skipping the app somebody did
+		// not want also saves the minutes of building it -- which is most of
+		// what they were avoiding. Publish records the outcome; there is
+		// nothing to record here, because nothing ran.
+		if req.Placements[dep.Name].Skip {
+			continue
+		}
 		if dep.Prebuilt {
 			// Read the built tree straight out of the snapshot. No build, no
 			// workbench, no restart -- and no network, which is what makes a
@@ -455,6 +463,31 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 
 	outcomes := make([]DeployableOutcome, 0, len(rep.Deployables))
 	for _, dep := range rep.Deployables {
+		// A DELIBERATE SKIP IS AN OUTCOME, NOT AN ABSENCE (memql#4930).
+		//
+		// It is recorded before the bundle lookup, because the build stage
+		// produced no bundle for it and the branch below would otherwise read
+		// it as an app that quietly did not happen. The refusal shape is the
+		// one a not-offered target already uses -- one answer shape for "there
+		// is no site for this, and here is why" -- with its own sentence, and
+		// NOT Fatal: a partial deploy is a complete run.
+		//
+		// It also short-circuits deployable_binding_missing below, which is
+		// the case memql#4930 calls out: an app that has never been deployed
+		// and is being skipped has no hostname, and refusing the run for that
+		// would make "deploy only the storefront" impossible on a first
+		// deploy -- the exact situation the feature is for.
+		if req.Placements[dep.Name].Skip {
+			outcomes = append(outcomes, DeployableOutcome{
+				Name: dep.Name,
+				Refusal: &Problem{
+					Code:    CodeDeployableSkipped,
+					Message: "You chose not to deploy this one. Nothing was built for it, and anything it already serves is untouched.",
+					Scope:   dep.Name,
+				},
+			})
+			continue
+		}
 		bundle, ok := bundles[dep.Name]
 		if !ok {
 			// An app the build stage skipped over a NON-fatal problem -- a

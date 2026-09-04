@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { Archive, ArrowUpCircle, KeyRound, RotateCcw, Zap } from "lucide-react";
+import { Archive, ArrowUpCircle, GitBranch, KeyRound, RotateCcw, Zap } from "lucide-react";
 
 import { Button, Caption, Check, Chip, Chips, Fact, Facts, FormRow, Input } from "../../../../kit";
 import { formatMoment } from "../../../../kit/format";
 import { usePackageActions } from "../../packages/actions";
 import { ProblemNotice } from "../../packages/ReportView";
-import { shortVersion, type PackageRow } from "../../packages/rows";
+import { shortVersion, sourceLabel, type PackageRow } from "../../packages/rows";
 import { bundleForm, bundleFormNote, siteName, type SiteRow } from "../../rows";
 import { CredentialField } from "../../sources/CredentialField";
 import { credentialIsRevoked, isGithubAppGrant, type CredentialRow } from "../../sources/rows";
@@ -26,17 +26,16 @@ import { ZipPicker } from "./ZipPicker";
 export function SourceStop({
   site,
   pkg,
-  siblings,
   credentials,
   canWrite,
   flipped,
   zipOpen,
   onZipOpenChange,
   refusal,
+  onOpenSource,
 }: {
   site: SiteRow;
   pkg: PackageRow | null;
-  siblings: readonly SiteRow[];
   credentials: readonly CredentialRow[];
   canWrite: boolean;
   /** The bundle reference changed while the page was open. */
@@ -45,6 +44,8 @@ export function SourceStop({
   onZipOpenChange: (open: boolean) => void;
   /** The newest run's refusal, when it stopped here. */
   refusal: RailProblem | null;
+  /** Opens the source's own view. Absent for a hand-made deployable, which has no source. */
+  onOpenSource?: () => void;
 }) {
   return (
     <div className="os-stop-body">
@@ -52,9 +53,20 @@ export function SourceStop({
       {pkg === null ? (
         <HandMadeSource site={site} flipped={flipped} />
       ) : (
-        <PackageSource pkg={pkg} site={site} credentials={credentials} flipped={flipped} canWrite={canWrite} />
+        <PackageSource pkg={pkg} site={site} credentials={credentials} flipped={flipped} />
       )}
-      {pkg !== null && canWrite ? <PackageLifecycle pkg={pkg} site={site} siblings={siblings} /> : null}
+      {/* THE SOURCE'S OWN CONTROLS ARE NOT HERE ANY MORE (epic memql#4937,
+          D4). The credential, the auto-deploy switch, the run history and
+          "archive this source and every app it produced" are facts about the
+          SOURCE, and rendering them inside each app's Source stop drew the
+          same 2,600px of history twice and put a control that archives a
+          SIBLING 1,614px above this page's own archive. They live on the
+          source's own view; this is the way in. */}
+      {pkg !== null && onOpenSource ? (
+        <Button onClick={onOpenSource}>
+          <GitBranch size={12} aria-hidden /> Open {sourceLabel(pkg)}
+        </Button>
+      ) : null}
       {/* A system-owned row is baked into the image and takes no zip: it
           renders no lifecycle control anywhere, this one included. */}
       {pkg === null && canWrite && !site.systemOwned ? (
@@ -73,13 +85,11 @@ function PackageSource({
   site,
   credentials,
   flipped,
-  canWrite,
 }: {
   pkg: PackageRow;
   site: SiteRow;
   credentials: readonly CredentialRow[];
   flipped: boolean;
-  canWrite: boolean;
 }) {
   return (
     <>
@@ -115,8 +125,6 @@ function PackageSource({
         <BundleFact site={site} flipped={flipped} />
         <Fact label="Added" value={formatMoment(pkg.createdAt)} />
       </Facts>
-      {pkg.sourceKind === "repo" && canWrite ? <SwitchCredential pkg={pkg} credentials={credentials} /> : null}
-      {canWrite && pkg.status !== "archived" ? <AutoDeploySwitch pkg={pkg} /> : null}
     </>
   );
 }
@@ -139,7 +147,7 @@ function PackageSource({
  * believing something untrue. It writes immediately rather than behind a
  * Save: there is one bit to change and no second field to keep it company.
  */
-function AutoDeploySwitch({ pkg }: { pkg: PackageRow }) {
+export function AutoDeploySwitch({ pkg }: { pkg: PackageRow }) {
   const actions = usePackageActions();
   return (
     <section className="os-report-part">
@@ -178,7 +186,7 @@ function AutoDeploySwitch({ pkg }: { pkg: PackageRow }) {
  * somebody else's source gets the guard's own sentence here rather than a
  * silent no-op.
  */
-function SwitchCredential({ pkg, credentials }: { pkg: PackageRow; credentials: readonly CredentialRow[] }) {
+export function SwitchCredential({ pkg, credentials }: { pkg: PackageRow; credentials: readonly CredentialRow[] }) {
   const actions = usePackageActions();
   const [chosen, setChosen] = useState(pkg.credentialId);
   const changed = chosen.trim() !== pkg.credentialId.trim();
@@ -358,11 +366,15 @@ function BundleFact({ site, flipped }: { site: SiteRow; flipped: boolean }) {
  * `package_has_active_deployables` names the apps still serving, and that
  * sentence belongs next to the button somebody just pressed.
  */
-function PackageLifecycle({ pkg, site, siblings }: { pkg: PackageRow; site: SiteRow; siblings: readonly SiteRow[] }) {
+// `apps` is every deployable this source produced, as ONE list. It used to
+// arrive split into a "site" and its "siblings" -- a shape that only made
+// sense while this rendered inside one app's page, and which is exactly what
+// let a control that archives every one of them sit on a single app's page.
+export function PackageLifecycle({ pkg, apps }: { pkg: PackageRow; apps: readonly SiteRow[] }) {
   const actions = usePackageActions();
   const [archiving, setArchiving] = useState(false);
   const [confirmName, setConfirmName] = useState("");
-  const produced = [site, ...siblings].map(siteName).join(", ");
+  const produced = apps.length === 0 ? "nothing yet" : apps.map(siteName).join(", ");
 
   if (pkg.status === "archived") {
     return (

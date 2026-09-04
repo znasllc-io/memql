@@ -139,12 +139,58 @@ function AppAddress({
   const key = app === "" ? "one" : app;
   const heading = app === "" ? sourceName : app;
 
+  const skipped = address.skip === true;
+
   return (
-    <section className="os-report-part" aria-label={`Where ${heading || "it"} lives`}>
+    <section className="os-report-part" aria-label={`Where ${heading || "it"} lives`} data-skipped={skipped || undefined}>
       {/* A SINGLE APP NEEDS NO HEADING: the Head already names what is being
           composed, and a subhead repeating it says the scope twice (rule 7). */}
-      {many ? <Subhead>{heading}</Subhead> : null}
+      {many ? (
+        <div className="os-place-head">
+          <Subhead>{heading}</Subhead>
+          {/* DEPLOY OR SKIP, PER APP (memql#4930). Offered only when the
+              source declares more than one -- a choice between deploying the
+              only app and deploying nothing is not a choice, it is a
+              differently-spelled Cancel.
 
+              A two-way pill rather than a checkbox: this is a CHOICE between
+              two named outcomes, and each of them is a thing that happens.
+              "Skip" as an unchecked box would read as the absence of a
+              decision rather than as one. */}
+          <div className="os-choice-row" role="radiogroup" aria-label={`Deploy or skip ${heading}`}>
+            <button
+              type="button"
+              role="radio"
+              className="os-choice"
+              aria-checked={!skipped}
+              onClick={() => onAddress({ skip: false })}
+            >
+              Deploy
+            </button>
+            <button
+              type="button"
+              role="radio"
+              className="os-choice"
+              aria-checked={skipped}
+              onClick={() => onAddress({ skip: true })}
+            >
+              Skip
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* A SKIPPED APP ASKS FOR NOTHING. A disabled address field would be a
+          control somebody has to read past to learn it is not for them, and
+          the sentence says what skipping actually costs -- which is nothing
+          it already serves. */}
+      {skipped ? (
+        <Caption>
+          Skipped. Nothing is built for {heading}, and anything it already serves is untouched. The run records it as
+          skipped, so this reads as a deliberate partial deploy rather than a step that went missing.
+        </Caption>
+      ) : (
+      <>
       <Field label="Address">
         <Input
           id={`os-compose-slug-${key}`}
@@ -200,6 +246,8 @@ function AppAddress({
           </Caption>
         </>
       ) : null}
+      </>
+      )}
     </section>
   );
 }

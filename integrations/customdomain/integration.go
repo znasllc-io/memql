@@ -15,10 +15,11 @@ import (
 	"github.com/znasllc-io/memql/core/id"
 )
 
-// integration.go -- the two DSL-callable capabilities:
+// integration.go -- the three DSL-callable capabilities:
 //
-//	integration.customDomain.add        the reachable create (dsl builtin customDomainAdd)
-//	integration.customDomain.reconcile  one sweep pass (dsl builtin customDomainReconcile)
+//	integration.customDomain.add             the reachable create (dsl builtin customDomainAdd)
+//	integration.customDomain.releaseForSite  the delete cascade's domain half (dsl builtin customDomainReleaseForSite)
+//	integration.customDomain.reconcile       one sweep pass (dsl builtin customDomainReconcile)
 
 // resultConcept is the synthetic MemoryNode concept these capabilities return.
 // An in-flight integration result, never persisted -- the same shape
@@ -61,6 +62,15 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{
 				"siteId":   "string (required) -- the v1:platform:site row this domain should serve.",
 				"hostname": "string (required) -- the client's own fully qualified host.",
+			},
+		},
+		{
+			Name: "releaseForSite",
+			Description: "Walk every live binding on one deployable to `removing`, so a deleted " +
+				"deployable stops answering on its client's domains and frees their hostnames.",
+			Handler: i.handleReleaseForSite,
+			ArgsSchema: map[string]string{
+				"siteId": "string (required) -- the v1:platform:site row whose bindings should come down.",
 			},
 		},
 		{
@@ -156,6 +166,65 @@ func (i *Integration) handleAdd(ctx context.Context, args map[string]any, _ int)
 		"pointsToTarget":   pointing.Target,
 	}
 	return i.node("add:"+binding.ID, payload)
+}
+
+// handleReleaseForSite walks every live binding on one deployable to
+// `removing`, which is the domain half of the delete cascade (epic
+// memql#4937).
+//
+// IT LIVES HERE RATHER THAN IN component/packages, and the reason is module
+// direction: the cascade runs from the packages integration, and having that
+// package import this one would make a component depend on an integration.
+// The seam it uses instead is the one it already uses to ADD a domain during a
+// placement -- a builtin call through the engine -- so the actor, the rows and
+// the state machine all stay owned by exactly one package.
+//
+// THE ROWS ARE READ UNDER THIS INTEGRATION'S OWN SYSTEM ACTOR, not the
+// caller's, and that is load-bearing. `v1:platform:customDomain` is
+// clusterOwner-tier, so an ordinary owner deleting their own deployable reads
+// ZERO bindings under their actor -- and would tear down nothing while the
+// Ingress and Certificate stayed applied and the hostname stayed claimed.
+// That is the exact failure this epic exists to remove, so it must not be
+// reintroduced by reading as the caller. Authorization is already settled
+// upstream: `siteDelete` resolves the site under the caller's own actor and
+// refuses before it reaches this.
+//
+// ALREADY-TERMINAL BINDINGS ARE COUNTED, NOT RE-WRITTEN. A row at `removed`
+// is done and a row at `removing` is already on the sweep's list; asking again
+// would rewrite `lastCheckedAt` and put a second identical entry in the audit
+// history for a person to wonder about.
+func (i *Integration) handleReleaseForSite(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	siteID := strings.TrimSpace(asString(args["siteId"]))
+	if siteID == "" {
+		return nil, fmt.Errorf("customdomain: releaseForSite needs a siteId")
+	}
+	bindings, err := i.store.ForSite(SystemActorContext(ctx), siteID)
+	if err != nil {
+		return nil, err
+	}
+	requested, alreadyDown := 0, 0
+	hostnames := make([]string, 0, len(bindings))
+	for _, b := range bindings {
+		if b.Status == StatusRemoved || b.Status == StatusRemoving {
+			alreadyDown++
+			continue
+		}
+		if rerr := i.store.RequestRemoval(SystemActorContext(ctx), b.ID); rerr != nil {
+			// SURFACED, NOT SWALLOWED. The caller stamps the site row LAST,
+			// so a failure here leaves a deployable that is still findable
+			// and still says what state it is in -- which is the whole
+			// reason for that ordering.
+			return nil, fmt.Errorf("customdomain: could not start removing %q: %w", b.Hostname, rerr)
+		}
+		requested++
+		hostnames = append(hostnames, b.Hostname)
+	}
+	return i.node("release:"+siteID, map[string]any{
+		"siteId":         siteID,
+		"requested":      requested,
+		"alreadyRemoved": alreadyDown,
+		"hostnames":      hostnames,
+	})
 }
 
 // handleReconcile runs one sweep.

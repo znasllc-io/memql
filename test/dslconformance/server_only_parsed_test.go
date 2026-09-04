@@ -385,9 +385,21 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// abandonPackageDeployment is the sweep's own close, running on a
 		// schedule with nobody attached and across every owner, so a
 		// self-scoped filter would refuse every row it exists to close.
-		{Path: "platform/mutations.memql", Name: "heartbeatPackageDeployment"}:    true,
-		{Path: "platform/mutations.memql", Name: "abandonPackageDeployment"}:      true,
-		{Path: "platform/mutations.memql", Name: "recordSitePackageOrigin"}:       true,
+		{Path: "platform/mutations.memql", Name: "heartbeatPackageDeployment"}: true,
+		{Path: "platform/mutations.memql", Name: "abandonPackageDeployment"}:   true,
+		// epic memql#4937. requestPackageDeploymentCancel FLAGS a run and ends
+		// nothing -- the node running it closes the row at its next stage
+		// boundary. Caller-scoping is not the fix, and for a sharper reason
+		// than the two above: the capability packageCancelDeployment resolves
+		// the deployment through the OWNER-SCOPED read first, so a caller who
+		// cannot see the run is already refused by name before this is
+		// reached. What @serverOnly adds over that is the WIRE -- the two
+		// refusals a person can actually hit (the run is terminal, or it has
+		// started rolling) are decisions about OTHER fields that a mutation
+		// body cannot make, so a client-reachable form would let somebody flag
+		// a run whose stage nothing had checked.
+		{Path: "platform/mutations.memql", Name: "requestPackageDeploymentCancel"}: true,
+		{Path: "platform/mutations.memql", Name: "recordSitePackageOrigin"}:        true,
 		// epic memql#4885 (D10). Personal source credentials: the two engine
 		// writes and the ONE read that returns ciphertext. None is a case of
 		// "caller-scoping was inconvenient" -- all three are already

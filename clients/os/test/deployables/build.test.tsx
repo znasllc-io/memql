@@ -115,6 +115,35 @@ async function openPackage(connection: FakeConnection) {
   return screen.findByRole("region", { name: "Deployable acme.memql.example.com" });
 }
 
+/**
+ * Walks from a deployable to its SOURCE's own view (epic memql#4937, D4).
+ *
+ * The auto-deploy switch and the credential picker answer "when this source
+ * moves, then what" -- questions about the SOURCE, not about any one app it
+ * produced. They used to render inside every app's Source stop.
+ */
+async function openSourceView(page: HTMLElement): Promise<HTMLElement> {
+  const line = within(page)
+    .getAllByRole("button")
+    .find((b) => b.classList.contains("os-rail-line") && (b.textContent ?? "").startsWith("Source"));
+  if (line !== undefined && line.getAttribute("aria-expanded") !== "true") await click(line);
+  await click(within(page).getByRole("button", { name: /^Open / }));
+  return screen.findByRole("region", { name: /^Source / });
+}
+
+/**
+ * ...and from there to its History.
+ *
+ * The attempts moved with it: six runs, each a full six-stop rail with its own
+ * refusal block, is 2,600px -- and it is the SOURCE's timeline, so a two-app
+ * source drew the identical wall on both of its apps' pages.
+ */
+async function openHistoryView(page: HTMLElement): Promise<HTMLElement> {
+  const source = await openSourceView(page);
+  await click(within(source).getByRole("button", { name: /^History/ }));
+  return screen.findByRole("region", { name: /^History of / });
+}
+
 beforeEach(() => {
   h.connection = null;
 });
@@ -263,7 +292,8 @@ describe("a lost FIRST deploy", () => {
     for (const label of [/^Redeploy$/, /^Deploy$/, /^Make it live$/]) {
       expect(within(page).queryByRole("button", { name: label })).toBeNull();
     }
-    await click(within(page).getByRole("button", { name: /Retry/ }));
+    const history = await openHistoryView(page);
+    await click(within(history).getByRole("button", { name: /Retry/ }));
 
     const deploys = connection.callsNamed("packageDeploy");
     expect(deploys.length, `no packageDeploy reached the wire: ${connection.calls.join(" | ")}`).toBe(1);
@@ -280,7 +310,8 @@ describe("the seams the surface calls", () => {
     });
     const page = await openPackage(connection);
 
-    await click(within(page).getByRole("button", { name: /Retry/ }));
+    const history = await openHistoryView(page);
+    await click(within(history).getByRole("button", { name: /Retry/ }));
 
     const deploys = connection.callsNamed("packageDeploy");
     expect(deploys.length, `no packageDeploy reached the wire: ${connection.calls.join(" | ")}`).toBeGreaterThan(0);
@@ -296,7 +327,8 @@ describe("the seams the surface calls", () => {
     const connection = fakeConnection({ sites: [STOREFRONT], packages: [ACME], deployments: { "pkg-acme": [] } });
     const page = await openPackage(connection);
 
-    await click(within(page).getByRole("checkbox", { name: /Deploy the update by itself/ }));
+    const source = await openSourceView(page);
+    await click(within(source).getByRole("checkbox", { name: /Deploy the update by itself/ }));
 
     const calls = connection.callsNamed("packageSetAutoDeploy");
     expect(calls.length, `no switch call reached the wire: ${connection.calls.join(" | ")}`).toBe(1);
@@ -309,7 +341,8 @@ describe("the seams the surface calls", () => {
     const page = await openPackage(connection);
     // The promise is the whole value of the control: without it somebody
     // either will not arm it or will arm it believing something untrue.
-    expect(within(page).getByText(/deploys itself/)).toBeTruthy();
+    const source = await openSourceView(page);
+    expect(within(source).getByText(/deploys itself/)).toBeTruthy();
   });
 
   it("marks a run nobody clicked", async () => {
@@ -319,7 +352,8 @@ describe("the seams the surface calls", () => {
       deployments: { "pkg-acme": [deploymentRow({ id: "dep-auto", automatic: true })] },
     });
     const page = await openPackage(connection);
-    expect(within(page).getByText("automatic")).toBeTruthy();
+    const history = await openHistoryView(page);
+    expect(within(history).getByText("automatic")).toBeTruthy();
   });
 
   it("does not mark a run somebody did click", async () => {
@@ -329,7 +363,8 @@ describe("the seams the surface calls", () => {
       deployments: { "pkg-acme": [deploymentRow({ id: "dep-manual" })] },
     });
     const page = await openPackage(connection);
-    expect(within(page).queryByText("automatic")).toBeNull();
+    const history = await openHistoryView(page);
+    expect(within(history).queryByText("automatic")).toBeNull();
   });
 });
 

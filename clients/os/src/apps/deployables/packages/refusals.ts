@@ -239,6 +239,46 @@ const COPY: Record<string, RefusalCopy> = {
     title: "That sign-in link is no longer valid",
     next: "Start again from Connect GitHub.",
   },
+
+  // -- the lifecycle's fourth rung, and the stop button (epic memql#4937) --
+
+  site_not_deletable: {
+    // NAMES THE NEXT STEP, because "pause it first" is the whole answer. A
+    // refusal that only said no would leave somebody looking for a control
+    // that is deliberately not there yet.
+    title: "This deployable is still serving",
+    next: "Unpublish it, then archive it, and delete becomes available. Deleting is the end of the line, so it only runs from a state nothing is served from.",
+  },
+  delete_confirmation_mismatch: {
+    title: "That is not this deployable's hostname",
+    next: "Type it exactly as it appears above. The check is the server's, so nothing was written.",
+  },
+  site_system_owned: {
+    // The person did nothing wrong and cannot fix this, so the copy explains
+    // the rule rather than suggesting a repair that does not exist.
+    title: "This is one of the cluster's own surfaces",
+    next: "The portal and MemQL OS are re-seeded at every boot and are exempt from the lifecycle -- there is nothing to change here.",
+  },
+  deployment_not_cancellable: {
+    // Two situations, one code, and the server's sentence says which: a run
+    // that already finished, or one past the roll. Both mean "there is
+    // nothing left to stop", which is what the headline says.
+    title: "There is nothing left to stop",
+    next: "A run past the roll is restarting this cluster onto its staged MemQL, and stopping half way through is worse than letting it finish. It will close on its own.",
+  },
+  deployment_cancelled: {
+    // NOT A FAULT, and the copy leads with that. `cancelled` is somebody's own
+    // decision, and reporting it back to them as a failure is the exact thing
+    // the separate terminal status exists to prevent.
+    title: "You stopped this deploy",
+    next: "Nothing was published, and every deployable is still serving what it was serving. Deploy again whenever you are ready.",
+  },
+  deployable_skipped: {
+    // Also not a fault: it is the record of a choice, and the whole point of
+    // recording it is that a reader can tell it from a step that went missing.
+    title: "You left this one out",
+    next: "Nothing was built for it, and anything it already serves is untouched. Deploy it on its own whenever you want it.",
+  },
 };
 
 /**

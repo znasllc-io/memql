@@ -121,7 +121,19 @@ describe("the deployment's Logs action", () => {
   it("opens the Logs app on Search carrying the deployment as the subject", async () => {
     mount(fakeConnection({ sites: [SHOP_FROM_PACKAGE], packages: [ACME], deployments: { "pkg-acme": [DONE] } }), "deployables", "admin");
     await click((await screen.findByText("shop.memql.example.com")).closest("button"));
-    const attempts = await screen.findByRole("list", { name: "Deployments of acme" });
+    // THE ATTEMPTS ARE THE SOURCE'S, ON ITS OWN HISTORY VIEW (epic
+    // memql#4937): they are read by packageId, so a two-app source used to
+    // draw the identical 2,600px wall on both of its apps' pages.
+    const page = await screen.findByRole("region", { name: /^Deployable / });
+    const line = within(page)
+      .getAllByRole("button")
+      .find((b) => b.classList.contains("os-rail-line") && (b.textContent ?? "").startsWith("Source"));
+    if (line !== undefined && line.getAttribute("aria-expanded") !== "true") await click(line);
+    await click(within(page).getByRole("button", { name: /^Open / }));
+    const source = await screen.findByRole("region", { name: /^Source / });
+    await click(within(source).getByRole("button", { name: /^History/ }));
+    const history = await screen.findByRole("region", { name: /^History of / });
+    const attempts = await within(history).findByRole("list", { name: "Deployments of acme" });
     await click(within(attempts).getByRole("button", { name: /^Logs of the .* deploy$/ }));
 
     const opened = windows();

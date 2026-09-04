@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Sparkles } from "lucide-react";
 
 import { Button, Caption, Head, Notice, Panel, useLiveView } from "../../../kit";
+import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { useAccountOptions } from "../../accounts/tie";
 import { useCreateSite, usePublish, useSiteAccount } from "../actions";
 import { useAddDomain } from "../domainActions";
@@ -360,14 +361,26 @@ export function ComposePage(props: ComposePageProps) {
     }
   };
 
+  // THE FORWARD ACT LIVES ON THE BAR, NOT IN THE HEAD (rule 12, epic
+  // memql#4937). It was at the top, so answering a long Source stop meant
+  // scrolling back UP to continue -- the complaint that started this epic.
+  // Cancel sits beside it, so leaving is as reachable as continuing.
+  const barActs: Act[] =
+    action === null || action.disabled
+      ? []
+      : [{ label: action.label, tone: action.tone, busy, onAct: act }];
+
   return (
+    <div className="os-deploy-pane">
+      <div className="os-deploy-scroll">
     <Panel label="New deployable">
       <Head title="New deployable">
         <Button tone="quiet" onClick={onBack}>
-          <ArrowLeft size={13} aria-hidden /> Back
+          <ArrowLeft size={13} aria-hidden /> Deployables
         </Button>
         {onAsk ? (
           <Button
+            tone="quiet"
             onClick={() =>
               onAsk(parked ? `app:deployables package:${parked.pkg.name || parked.pkg.id}` : "app:deployables compose")
             }
@@ -376,11 +389,6 @@ export function ComposePage(props: ComposePageProps) {
             <Sparkles size={13} aria-hidden /> Ask
           </Button>
         ) : null}
-        {action === null ? null : (
-          <Button tone={action.tone} disabled={action.disabled} busy={busy} onClick={act}>
-            {action.label}
-          </Button>
-        )}
       </Head>
 
       {/* A refusal the engine gave BEFORE any row exists has no stop to belong
@@ -438,7 +446,73 @@ export function ComposePage(props: ComposePageProps) {
         <Caption>Composing a deployable is a deploy-tier act, and this cluster has not given you that rank.</Caption>
       )}
     </Panel>
+      </div>
+
+      <ActionBar
+        state={composePhaseWord(phase)}
+        detail={composePhaseDetail(phase, action, apps, addresses)}
+        tone={phase === "analyzing" || phase === "deploying" ? "busy" : "none"}
+        acts={barActs}
+      >
+        {/* CANCEL IS ALWAYS REACHABLE, on the left of the forward act. Nothing
+            has been written until Analyze, so leaving costs nothing -- and a
+            flow somebody cannot leave without hunting for the way out is one
+            they abandon by closing the window. */}
+        <Button tone="quiet" onClick={onBack}>
+          Cancel
+        </Button>
+      </ActionBar>
+    </div>
   );
+}
+
+/** Where the flow is, in words -- the bar's left half. */
+function composePhaseWord(phase: ComposePhase): string {
+  switch (phase) {
+    case "analyzing":
+      return "Reading the source";
+    case "awaiting_confirm":
+      return "Ready to deploy";
+    case "deploying":
+      return "Deploying";
+    case "published":
+      return "Deployed";
+    case "stopped":
+      return "Stopped";
+    default:
+      return "New deployable";
+  }
+}
+
+/**
+ * What the bar says beside the phase.
+ *
+ * On the placement step it counts what is actually going out, because that is
+ * the number the forward act is about -- and because "0 of 2" is the honest
+ * reading of a state where the act is absent (memql#4930).
+ */
+function composePhaseDetail(
+  phase: ComposePhase,
+  action: HeadAction | null,
+  apps: readonly string[],
+  addresses: Readonly<Record<string, AddressDraft>>,
+): string {
+  if (phase === "awaiting_confirm" && apps.length > 1) {
+    const going = apps.filter((app) => addresses[app]?.skip !== true).length;
+    if (going === 0) return "pick at least one app to deploy";
+    return `${going} of ${apps.length} apps, each at its own address`;
+  }
+  if (action !== null && action.disabled) return "there is more to answer above";
+  switch (phase) {
+    case "analyzing":
+      return "reading the tree and running the gates a node runs at boot";
+    case "deploying":
+      return "building, then publishing -- nothing is live until the last step";
+    case "published":
+      return "it is on the Deployables list now";
+    default:
+      return "nothing is written until you deploy";
+  }
 }
 
 // ---------------------------------------------------------------------------

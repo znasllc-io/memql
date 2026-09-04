@@ -215,6 +215,26 @@ function mintedPackageId(connection: FakeConnection): string {
 // A repository, probed
 // ---------------------------------------------------------------------------
 
+
+/**
+ * The compose flow's forward act, on the BAR (epic memql#4937, rule 12).
+ *
+ * It was in the Head, at the top of the flow, so answering a long Source stop
+ * meant scrolling back UP to continue -- which is the complaint this epic
+ * started from. Cancel sits beside it, so leaving is as reachable as
+ * continuing.
+ *
+ * AND IT IS ABSENT RATHER THAN DISABLED when there is more to answer: a
+ * disabled control is one somebody has to read past to learn it is not for
+ * them yet, and the bar says what is still needed instead.
+ */
+function forwardAct(name: string): HTMLButtonElement | null {
+  const acts = document.querySelector(".os-actbar-acts");
+  if (acts === null) return null;
+  const hit = [...acts.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === name);
+  return (hit as HTMLButtonElement | undefined) ?? null;
+}
+
 describe("the compose flow: the Source stop's probe", () => {
   it("says a public repository is public, and names the branch it will follow", async () => {
     const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
@@ -229,7 +249,7 @@ describe("the compose flow: the Source stop's probe", () => {
     expect(connection.callsNamed("sourceProbe")).toEqual([`builtin sourceProbe(repoUrl: "${REPO}")`]);
     // Nothing is parked: Analyze is reachable once it has a name.
     await fill(NAME_FIELD, "storefront");
-    expect((within(region).getByRole("button", { name: "Analyze" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(forwardAct("Analyze")).toBeTruthy();
   });
 
   it("says 'private, or not there' and reveals the credential field", async () => {
@@ -248,7 +268,7 @@ describe("the compose flow: the Source stop's probe", () => {
     // at Source and Analyze is out of reach.
     expect(railStates(region)[0]).toBe("stopped");
     await fill(NAME_FIELD, "storefront");
-    expect((within(region).getByRole("button", { name: "Analyze" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(forwardAct("Analyze")).toBeNull();
   });
 
   it("says 'this token cannot see it' when a chosen credential still cannot", async () => {
@@ -300,7 +320,7 @@ describe("the compose flow: the Source stop's probe", () => {
 
     expect(await within(region).findByText("only github.com today, or upload a zip")).toBeTruthy();
     await fill(NAME_FIELD, "storefront");
-    expect((within(region).getByRole("button", { name: "Analyze" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(forwardAct("Analyze")).toBeNull();
     // ...and no credential field: no token makes github.com out of a gitlab URL.
     expect(within(region).queryByLabelText(CREDENTIAL_FIELD)).toBeNull();
   });
@@ -318,7 +338,7 @@ describe("the compose flow: the Source stop's probe", () => {
     await fill(NAME_FIELD, "storefront");
     // An answer about the PROBE, not about the repository: nothing parks.
     expect(railStates(region)[0]).toBe("complete");
-    expect((within(region).getByRole("button", { name: "Analyze" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(forwardAct("Analyze")).toBeTruthy();
   });
 
   it("NEVER blocks Analyze on a probe that could not run, and shows the server's sentence", async () => {
@@ -332,7 +352,7 @@ describe("the compose flow: the Source stop's probe", () => {
 
     expect(await within(region).findByText("source_unreadable: api.github.com is unreachable")).toBeTruthy();
     await fill(NAME_FIELD, "storefront");
-    expect((within(region).getByRole("button", { name: "Analyze" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(forwardAct("Analyze")).toBeTruthy();
     // The field is still editable -- nothing is wrong with what was typed.
     expect((screen.getByLabelText(URL_FIELD) as HTMLInputElement).disabled).toBe(false);
   });
@@ -451,7 +471,7 @@ describe("the compose flow: a zip in Files", () => {
     expect(within(region).getByText("its built output is in the source")).toBeTruthy();
 
     await fill("The name Landing page answers at", "landing");
-    await click(within(region).getByRole("button", { name: "Analyze" }));
+    await click(forwardAct("Analyze"));
 
     const create = connection.callsNamed("createSite")[0] ?? "";
     expect(create).toContain('hostname: "landing.memql.example.com"');
@@ -460,7 +480,8 @@ describe("the compose flow: a zip in Files", () => {
     // Nothing has been published yet: the zip is deployed by the next click.
     expect(connection.callsNamed("sitePublishFromArtifact")).toHaveLength(0);
 
-    await click(await within(region).findByRole("button", { name: "Deploy" }));
+    await waitFor(() => expect(forwardAct("Deploy")).toBeTruthy());
+    await click(forwardAct("Deploy"));
     expect(connection.callsNamed("sitePublishFromArtifact")[0]).toContain('artifactId: "artifact-zip"');
     expect(await within(region).findByText("Published. It is not serving yet.")).toBeTruthy();
   });
@@ -475,7 +496,7 @@ describe("the compose flow: a zip in Files", () => {
     await click(await within(region).findByText("storefront-build.zip"));
 
     expect(await within(region).findByText(/This zip holds 3 files/)).toBeTruthy();
-    expect((within(region).getByRole("button", { name: "Analyze" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(forwardAct("Analyze")).toBeNull();
   });
 });
 
@@ -503,7 +524,7 @@ describe("the compose flow: pushed by your CI", () => {
     await fill(NAME_FIELD, "Marketing site");
     await choose("What kind of deployable this is", "Website");
     await fill("The name Marketing site answers at", "marketing");
-    await click(within(region).getByRole("button", { name: "Analyze" }));
+    await click(forwardAct("Analyze"));
 
     // The draft was created at the address chosen on the Where-it-lives stop,
     // with the placeholder bundle the convention records.
@@ -521,7 +542,7 @@ describe("the compose flow: pushed by your CI", () => {
     expect(within(region).queryByLabelText("The name Marketing site answers at")).toBeNull();
     expect(within(region).getByText("marketing.memql.example.com")).toBeTruthy();
     // Nothing is deployed from here: the Live stop is what waits.
-    expect(within(region).queryByRole("button", { name: "Deploy" })).toBeNull();
+    expect(forwardAct("Deploy")).toBeNull();
     expect(within(region).getByText(/Waiting for the first push from your CI/)).toBeTruthy();
   });
 });
@@ -541,7 +562,7 @@ async function analyzed(
   await fill(URL_FIELD, REPO);
   await blur(URL_FIELD);
   await fill(NAME_FIELD, "acme");
-  await click(within(region).getByRole("button", { name: "Analyze" }));
+  await click(forwardAct("Analyze"));
   await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(mintedPackageId(connection)), "NODE_CREATED");
   await within(region).findByText("clients/web");
   return { connection, region, view };
@@ -568,23 +589,23 @@ describe("the compose flow: where each app will live", () => {
     await fill("The name storefront answers at", "api");
     expect(within(region).getByText(/"api" is reserved/)).toBeTruthy();
     // Deploy is out of reach while any app has no address the server could take.
-    expect((within(region).getByRole("button", { name: "Deploy" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(forwardAct("Deploy")).toBeNull();
 
     await fill("The name storefront answers at", "shop");
     await waitFor(() =>
-      expect((within(region).getByRole("button", { name: "Deploy" }) as HTMLButtonElement).disabled).toBe(false),
+      expect(forwardAct("Deploy")).toBeTruthy(),
     );
   });
 
   it("blocks the deploy until it is confirmed, and shows the report first", async () => {
-    const { connection, region } = await analyzed();
+    const { connection } = await analyzed();
 
     // ANALYZE PARKED THE RUN AND BUILT NOTHING: the gate is always present.
     expect(connection.callsNamed("packageDeploy")).toHaveLength(1);
     expect(connection.callsNamed("packageDeploy")[0]).toContain("confirm: false");
 
     await fill("The name storefront answers at", "shop");
-    await click(within(region).getByRole("button", { name: "Deploy" }));
+    await click(forwardAct("Deploy"));
 
     const confirmed = connection.callsNamed("packageDeploy")[1] ?? "";
     expect(confirmed).toContain("confirm: true");
@@ -603,11 +624,11 @@ describe("the compose flow: where each app will live", () => {
   });
 
   it("carries every placement half that was answered, and omits every one that was not", async () => {
-    const { connection, region } = await analyzed();
+    const { connection } = await analyzed();
 
     await fill("The name storefront answers at", "shop");
     await fill("A domain of the client's own for storefront", "Shop.Acme.COM.");
-    await click(within(region).getByRole("button", { name: "Deploy" }));
+    await click(forwardAct("Deploy"));
 
     const confirmed = connection.callsNamed("packageDeploy")[1] ?? "";
     // The own domain is normalized on the way out; the client half is ABSENT
@@ -697,7 +718,7 @@ describe("the compose flow: what the run answers", () => {
     await fill(URL_FIELD, REPO);
     await blur(URL_FIELD);
     await fill(NAME_FIELD, "acme");
-    await click(within(region).getByRole("button", { name: "Analyze" }));
+    await click(forwardAct("Analyze"));
 
     await emit(
       connection,
@@ -714,8 +735,9 @@ describe("the compose flow: what the run answers", () => {
     // What it is is where a manifest refusal belongs, and every stop after it
     // is unreached.
     expect(railStates(region)).toEqual(["complete", "stopped", "pending", "pending", "pending"]);
-    // ...and the one action is Retry.
-    expect(within(region).getByRole("button", { name: "Retry" })).toBeTruthy();
+    // ...and the one forward act is Retry, on the bar beside Cancel -- so
+    // leaving a stopped flow is as reachable as trying it again.
+    expect(forwardAct("Retry")).toBeTruthy();
   });
 });
 
@@ -750,7 +772,7 @@ describe("the compose flow: leaving and coming back", () => {
     expect(within(region).getByText("acme/storefront at main")).toBeTruthy();
     expect(within(region).getByText("clients/web")).toBeTruthy();
     expect(railStates(region)).toEqual(["complete", "complete", "open", "skipped", "pending"]);
-    expect(within(region).getByRole("button", { name: "Deploy" })).toBeTruthy();
+    expect(forwardAct("Deploy")).toBeTruthy();
   });
 });
 
@@ -816,14 +838,14 @@ describe("a private repository whose build output is committed", () => {
 
     // Analyze.
     await fill(NAME_FIELD, "acme");
-    await click(within(region).getByRole("button", { name: "Analyze" }));
+    await click(forwardAct("Analyze"));
     expect(connection.callsNamed("createPackage")[0]).toContain('credentialId: "cred-new"');
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(mintedPackageId(connection)), "NODE_CREATED");
     await within(region).findByText("clients/web");
 
     // Where it lives, then Deploy.
     await fill("The name storefront answers at", "shop");
-    await click(within(region).getByRole("button", { name: "Deploy" }));
+    await click(forwardAct("Deploy"));
 
     await emit(
       connection,
