@@ -705,9 +705,15 @@ describe("the Source stop", () => {
       // NAMED, not merely refused: the person has to know what to pause. Read
       // inside the archive section, since the hostnames also appear in the
       // apps list above it.
-      const danger = archive.closest(".os-danger-part") as HTMLElement;
-      expect(within(danger).getByText(/store\.memql\.example\.com/)).toBeTruthy();
-      expect(within(danger).getByText(/admin\.memql\.example\.com/)).toBeTruthy();
+      // A SUBSTRING CHECK, NOT A REGEX. An unanchored pattern that looks like
+      // a hostname is what `js/regex/missing-regexp-anchor` exists to catch --
+      // the shape matches anywhere, so in production code it admits
+      // `evil.example/store.memql.example.com`. The scanner does not know this
+      // one is a test assertion, and it should not have to: the sentence is
+      // being read out of rendered text, which is what `toContain` is for.
+      const shown = (archive.closest(".os-danger-part") as HTMLElement).textContent ?? "";
+      expect(shown).toContain("store.memql.example.com");
+      expect(shown).toContain("admin.memql.example.com");
     });
 
     it("enables Archive once nothing is serving", async () => {
