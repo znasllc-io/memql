@@ -178,6 +178,16 @@ func canonicalPackageStorageId(rowId string) string {
 // Read WITHOUT row-authz narrowing, as the hostname probe is: a source another
 // person tracks must still collide even though the caller may not read that
 // row, which is why the refusal names the package and nothing else about it.
+//
+// staged-data: MUST-NOT-GATE -- the gate CREATES the violation it would then be
+// unable to detect (epic memql#3974, task memql#3984). This is a uniqueness
+// probe of exactly liveSiteIdsForHostname's shape: it looks for an existing
+// active package tracking the source so the write can be refused. Withhold a
+// staged row and the probe finds nothing, the write is admitted, and the
+// cluster now holds two packages on one source -- one of them the very row the
+// probe could not see, so the duplicate is invisible to the next probe as
+// well. The read discloses nothing but the holder's id; it is the thing
+// keeping a second row out.
 func (e *MemQLEngine) activePackagesTrackingSource(ctx context.Context, url, ref string) ([]sourceHolder, error) {
 	db := e.database()
 	if db == nil {
