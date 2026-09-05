@@ -1,5 +1,5 @@
 import type { ActionBarTone } from "../../../kit/ActionBar";
-import { runCoversApp, type DeploymentRow, type PackageRow } from "../packages/rows";
+import { runCoversApp, runIsScopedToApp, type DeploymentRow, type PackageRow } from "../packages/rows";
 import type { SiteRow } from "../rows";
 import { TERMINAL_RUN_STATUSES } from "./rail";
 
@@ -185,9 +185,47 @@ function busyClause(sibling: DeploymentRow): string {
   return `waiting for ${other}'s deploy to finish`;
 }
 
+/**
+ * Whether this deployable has a state of its own to be described BY.
+ *
+ * `live` and `disabled` both mean it has been published and the internet has
+ * an answer for it -- serving, or deliberately paused. A draft has no answer
+ * yet, so a run at the gate is the most relevant thing about it.
+ */
+function hasServed(site: SiteRow): boolean {
+  return site.status === "live" || site.status === "disabled";
+}
+
+/**
+ * Whether a parked run was started FOR this deployable.
+ *
+ * `scopedTo` names the apps a run is for and is EMPTY for a whole-source run
+ * (and absent on every row written before the field existed). A gate about
+ * this app is this page's business and speaks for it even when the app is
+ * serving -- it is a redeploy somebody is being asked to confirm. A
+ * whole-source gate is the SOURCE's business: it says nothing about whether
+ * this app is live, and it is answered from the source's own page.
+ */
+function gateIsAboutThisApp(run: DeploymentRow, site: SiteRow): boolean {
+  return runIsScopedToApp(run, site.packageDeployableName);
+}
+
+/** The gate, mentioned beside a state word that stays true. */
+function gateClause(read: BarReading): BarReading {
+  return { ...read, detail: `${read.detail} -- a deploy for this source is waiting for you` };
+}
+
 /** What the bar reads and offers. The whole of DESIGN.md rule 12 for this app. */
 export function actsFor(input: ActsInput): BarReading {
-  return holdWhileTheSourceIsBusy(reading(input), input.siblingRun ?? null);
+  const read = holdWhileTheSourceIsBusy(reading(input), input.siblingRun ?? null);
+  // The gate did not get to be the state; it still gets to be mentioned, or a
+  // person on this page would have no sign that one is waiting at all.
+  const parked =
+    input.run !== null &&
+    input.run.status === "awaiting_confirm" &&
+    hasServed(input.site) &&
+    !gateIsAboutThisApp(input.run, input.site);
+  return parked ? gateClause(read) : read;
 }
 
 /**
@@ -241,7 +279,22 @@ function reading(input: ActsInput): BarReading {
   // Cancel is FIRST and Deploy is the primary, because the gate exists to be
   // passed -- somebody who opened it meant to deploy. The report itself is on
   // the What-it-is stop, which `openStopFor` opens for exactly this status.
-  if (run !== null && run.status === "awaiting_confirm") {
+  // A GATE SPEAKS ONLY FOR A DEPLOYABLE THAT HAS NOTHING TO SAY FOR ITSELF.
+  //
+  // A run parked at the confirm gate is waiting for a PERSON: nothing is
+  // executing, and it decides nothing about an app that is already serving.
+  // This branch used to run before `site.status`, so a deployable live at its
+  // address since 01:10 -- five green marks on its rail -- read "Ready to
+  // deploy, this deploy is waiting for you" and offered Cancel and Deploy.
+  //
+  // It is the same rule `holdWhileTheSourceIsBusy` already states for a
+  // sibling that is genuinely deploying: the state word stays true, and the
+  // run is reported beside it. The gate stays reachable where it belongs --
+  // the SOURCE's own row in the list says "a deploy is waiting for you".
+  //
+  // For a deployable that has never served there is no truer word, so the gate
+  // is the reading.
+  if (run !== null && run.status === "awaiting_confirm" && (!hasServed(site) || gateIsAboutThisApp(run, site))) {
     return {
       state: "Ready to deploy",
       detail: "this deploy is waiting for you -- the report above is what it would do",
@@ -253,7 +306,12 @@ function reading(input: ActsInput): BarReading {
   // A RUN IN FLIGHT OWNS THE BAR. Cancel is the only act, and from the roll on
   // there is not even that -- a roll restarts the cluster onto staged MemQL,
   // and the bar says so rather than offering a control the engine refuses.
-  if (runIsMoving(run) && run !== null) {
+  // ...and it is not MOVING either, so it must not fall through to the branch
+  // below: `runIsMoving` answers "not terminal", which a parked run satisfies,
+  // and that branch would hand a serving deployable "Waiting for you" and a
+  // lone Cancel. Nothing is executing at a gate. Either the branch above spoke
+  // for it, or the deployable's own state does.
+  if (runIsMoving(run) && run !== null && run.status !== "awaiting_confirm") {
     const cancellable = runIsCancellable(run);
     return {
       state: stageWord(run.status),

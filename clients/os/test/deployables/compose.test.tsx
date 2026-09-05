@@ -13,6 +13,7 @@ vi.mock("../../src/live/connection", () => ({
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
+import { everyOtherAppSkipped } from "../../src/apps/deployables/packages/calls";
 import { DEPLOYMENT_CONCEPT } from "../../src/apps/deployables/packages/rows";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import {
@@ -220,6 +221,23 @@ const REPORT_TWO = {
     { name: "web", kind: "spa", path: "clients/marketing", buildPlan: "already built: dist", output: "dist", prebuilt: true },
   ],
 };
+
+/** A source added days ago, already on the list. */
+const ACME: Row = {
+  id: "pkg-acme",
+  ownerUserId: "u-me",
+  name: "acme",
+  sourceKind: "repo",
+  repoUrl: REPO,
+  repoRef: "main",
+  credentialId: "",
+  artifactId: "",
+  deployedVersion: "",
+  latestKnownVersion: "",
+  updateAvailable: false,
+  status: "active",
+  createdAt: "2026-09-01T10:00:00Z",
+} as unknown as Row;
 
 const ZIP = artifactRow({ id: "artifact-zip", title: "storefront-build.zip" });
 
@@ -919,28 +937,15 @@ describe("the compose flow: what the run answers", () => {
 
 describe("the compose flow: leaving and coming back", () => {
   it("lands on the same rail, with the report in place", async () => {
-    const ACME: Row = {
-      id: "pkg-acme",
-      ownerUserId: "u-me",
-      name: "acme",
-      sourceKind: "repo",
-      repoUrl: REPO,
-      repoRef: "main",
-      credentialId: "",
-      artifactId: "",
-      deployedVersion: "",
-      latestKnownVersion: "",
-      updateAvailable: false,
-      status: "active",
-      createdAt: "2026-09-01T10:00:00Z",
-    } as unknown as Row;
-
-    // A window that was closed mid-compose: the run is parked, and the list's
+        // A window that was closed mid-compose: the run is parked, and the list's
     // "will serve" row is how somebody finds it again.
     mount(fakeConnection({ packages: [ACME], awaitingConfirm: [parkedRun("pkg-acme")], sites: [] }));
     await click(await screen.findByText("storefront"));
 
-    const region = await screen.findByRole("region", { name: "New deployable" });
+    // THE TITLE NAMES THE SOURCE. Reopening a gate for a source added days ago
+    // is not adding a new deployable, and calling it one is what made the
+    // whole-manifest report beside it read as the source being added again.
+    const region = await screen.findByRole("region", { name: "Deploy acme" });
     expect(within(region).getByText("acme/storefront at main")).toBeTruthy();
     expect(within(region).getByText("clients/web")).toBeTruthy();
     expect(railStates(region)).toEqual(["complete", "complete", "open", "skipped", "pending"]);
@@ -1053,5 +1058,63 @@ describe("a private repository whose build output is committed", () => {
     const carrying = connection.calls.filter((call) => call.includes(secret));
     expect(carrying).toHaveLength(1);
     expect(carrying[0]).toContain("sourceCredentialCreate");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A GATE FOR ONE APP IS ABOUT ONE APP
+// ---------------------------------------------------------------------------
+//
+// Reported with a screenshot: deploying the `web` app that had been skipped
+// opened a page titled "New deployable" whose What-it-is read "2 apps, 1 MemQL
+// domain" and listed `storefront` beside `web`. The source had been added days
+// earlier and storefront was serving; the page read as though the whole source
+// were being added again.
+//
+// The analysis reads the whole tree, so its report names every app the
+// manifest declares. That is right for a whole-source deploy and wrong here.
+describe("a gate opened for one app", () => {
+  it("names that app and lists it alone, not every app in the manifest", async () => {
+    // The real chain: a source declaring two apps, one already serving and
+    // one the owner turned back on. Clicking it runs the analysis that parks
+    // its gate.
+    const connection = fakeConnection({
+      packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
+      sites: [],
+    });
+    mount(connection);
+    await click((await screen.findByText("web")).closest("button"));
+    await waitFor(() => expect(connection.callsNamed("packageDeploy").length).toBeGreaterThan(0));
+
+    // NAMED BEFORE THE GATE PARKS. Both facts are known from the click -- the
+    // app from the row, the source from the row's package -- and neither waits
+    // on the analysis. Composing the title from the RUN is what called this
+    // "New deployable" for as long as the analysis took.
+    expect(await screen.findByRole("region", { name: "Deploy web from acme" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "New deployable" })).toBeNull();
+
+    await emit(connection, DEPLOYMENT_CONCEPT, parkedRun("pkg-acme", { report: REPORT_TWO }), "NODE_CREATED");
+
+    const region = await screen.findByRole("region", { name: "Deploy web from acme" });
+    // What it is lists the ONE app the gate is about. `storefront` is in the
+    // same manifest and is not what anybody is being asked about.
+    expect(within(region).getByText("clients/marketing")).toBeTruthy();
+    expect(within(region).queryByText("clients/web")).toBeNull();
+  });
+
+  it("is scoped ON THE WIRE, and stays scoped through a retry", () => {
+    // The display is downstream of this. The engine derives `scopedTo` from
+    // the placements' SKIPS, so an unscoped call parks a gate about the whole
+    // source -- read by every sibling as its own, and rebuilding all of them
+    // when confirmed.
+    const declared = [{ name: "storefront" }, { name: "web" }];
+    expect(everyOtherAppSkipped(declared, "web")).toEqual({
+      storefront: { hostname: "", accountId: "", ownDomain: "", skip: true },
+    });
+    // Scope is the COMPLEMENT of the skips: the app being deployed is absent.
+    expect(everyOtherAppSkipped(declared, "web").web).toBeUndefined();
+    // A source with one app scoped to it skips nothing, which the engine
+    // reads as the whole source -- correct, and the same statement.
+    expect(everyOtherAppSkipped([{ name: "web" }], "web")).toEqual({});
   });
 });

@@ -39,6 +39,7 @@ import {
   type ComposePhase,
 } from "./compose";
 import { runForApp } from "./acts";
+import { everyOtherAppSkipped } from "../packages/calls";
 import { Rail } from "./Rail";
 import { headActionFor, type ComposeInput, type HeadAction, type RailProblem, type RailStage } from "./rail";
 import { ManifestPreview } from "./stops/compose/ManifestPreview";
@@ -100,6 +101,16 @@ export interface ComposePageProps {
   /** A parked run and its source, when a "will serve" row reopened the reading. */
   parked?: { pkg: PackageRow; run: DeploymentRow };
   /**
+   * The SOURCE this flow is about, independent of whether a run has parked.
+   *
+   * `parked` is null until the analysis parks its gate, and stays null when
+   * the analysis FAILS -- so a flow entered for a declared app derived no
+   * package id at all in either window, which made its own Retry a no-op on
+   * the one screen that offers it. The id and the manifest's app names both
+   * come from here; `parked` remains the RUN.
+   */
+  source?: PackageRow;
+  /**
    * Deploy ONLY this app, leaving every other one the source declares alone.
    *
    * Set when the flow was entered from an app the source merely DECLARES -- it
@@ -118,7 +129,7 @@ export interface ComposePageProps {
 }
 
 export function ComposePage(props: ComposePageProps) {
-  const { clusterDomain, canWrite, isClusterOwner, credentials, onBack, onAsk, parked, placed, only } = props;
+  const { clusterDomain, canWrite, isClusterOwner, credentials, onBack, onAsk, parked, placed, only, source } = props;
 
   const [draft, setDraft] = useState<ComposeDraft>(EMPTY_DRAFT);
   const [addresses, setAddresses] = useState<Record<string, AddressDraft>>({});
@@ -145,7 +156,7 @@ export function ComposePage(props: ComposePageProps) {
   const tie = useSiteAccount();
   const addDomain = useAddDomain();
 
-  const packageId = created.packageId || parked?.pkg.id || "";
+  const packageId = created.packageId || parked?.pkg.id || source?.id || "";
   const { source: timeline, reseed } = usePackageDeployments(packageId);
   const deployments = useLiveView(timeline, `compose-deployments:${packageId}`, (rows) =>
     newestFirst(rows.map(deploymentFromRow).filter((d) => d.id !== "")),
@@ -322,7 +333,14 @@ export function ComposePage(props: ComposePageProps) {
 
   async function retry(): Promise<void> {
     if (packageId === "") return;
-    await pkgActions.deploy(packageId, { confirm: false });
+    // A RETRY KEEPS THE SCOPE. Retrying a gate opened for one app used to
+    // park an unscoped run -- the flow stayed titled and narrowed for that
+    // app while the run underneath it was about the whole source, which is
+    // the same fan-out the scoped analysis exists to prevent.
+    await pkgActions.deploy(packageId, {
+      confirm: false,
+      ...(scoped ? { placements: everyOtherAppSkipped(source?.declares ?? parked?.pkg.declares ?? [], only ?? "") } : {}),
+    });
     reseed();
   }
 
@@ -348,6 +366,7 @@ export function ComposePage(props: ComposePageProps) {
 
   const input: ComposeInput = {
     mode: "compose",
+    only,
     ...stopsFor(phase, path, sourceDone, report !== null),
     probeReason: probeParked && probe.reply !== null ? probeNote(probe.reply) : "",
     report,
@@ -404,7 +423,7 @@ export function ComposePage(props: ComposePageProps) {
         }
         return (
           <div className="os-stop-body">
-            <ReportView report={report} />
+            <ReportView report={report} only={only} />
           </div>
         );
       case "whereItLives":
@@ -448,8 +467,12 @@ export function ComposePage(props: ComposePageProps) {
   return (
     <div className="os-deploy-pane">
       <div className="os-deploy-scroll">
-    <Panel label="New deployable">
-      <Head title="New deployable">
+    {/* THE TITLE SAYS WHAT THIS IS. "New deployable" is true only when there
+        is no source yet: opened for one app of a source added days ago, it
+        read as though the whole source were being added again -- which is
+        exactly what the report beside it appeared to confirm. */}
+    <Panel label={composeTitle(parked?.pkg ?? source, only)}>
+      <Head title={composeTitle(parked?.pkg ?? source, only)}>
         <Button tone="quiet" onClick={onBack}>
           <ArrowLeft size={13} aria-hidden /> Deployables
         </Button>
@@ -546,6 +569,24 @@ export function ComposePage(props: ComposePageProps) {
       </ActionBar>
     </div>
   );
+}
+
+/**
+ * What this flow is about, for the Head and the Panel's label.
+ *
+ * "New deployable" is the ONLY-when-nothing-is-known answer, and both other
+ * facts arrive independently: `only` is known from the click, while `parked`
+ * lands when the analysis parks its gate seconds later. Reading the title off
+ * `parked` alone meant an app-scoped flow was called "New deployable" for as
+ * long as the analysis ran -- which is the frame the report was read in.
+ */
+function composeTitle(pkg: PackageRow | undefined, only: string | undefined): string {
+  const app = only !== undefined && only !== "" ? only : "";
+  const source = pkg === undefined ? "" : pkg.name || pkg.id;
+  if (app !== "" && source !== "") return `Deploy ${app} from ${source}`;
+  if (app !== "") return `Deploy ${app}`;
+  if (source !== "") return `Deploy ${source}`;
+  return "New deployable";
 }
 
 /** Where the flow is, in words -- the bar's left half. */

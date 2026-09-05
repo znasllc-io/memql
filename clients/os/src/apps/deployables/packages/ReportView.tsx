@@ -23,12 +23,26 @@ import type { AnalysisReport, ReportProblem } from "./rows";
 //     somebody concludes the platform ran their Go. It is reported, in place,
 //     as a thing that was left out on purpose.
 
-export function ReportView({ report }: { report: AnalysisReport | null }) {
+export function ReportView({ report, only }: { report: AnalysisReport | null; only?: string }) {
   if (report === null) {
     return <p className="os-caption">No analysis has run for this deployment yet.</p>;
   }
 
-  const deployables = report.deployables ?? [];
+  // WHEN THE FLOW IS ABOUT ONE APP, THE REPORT IS TOO.
+  //
+  // The analysis reads the whole tree, so its report names every app the
+  // manifest declares -- correct for a whole-source deploy, and wrong for a
+  // gate opened to deploy ONE app somebody had skipped: it listed the app they
+  // were not deploying beside the one they were, under a heading counting
+  // both, which reads as though the source were being added again.
+  //
+  // Only the app list narrows. What the source's MemQL adds is a fact about
+  // the DEPLOY, not about one app: it is staged and rolled once for the run,
+  // whichever apps it carries, and hiding it would be hiding something that
+  // happens.
+  const allDeployables = report.deployables ?? [];
+  const deployables =
+    only === undefined || only === "" ? allDeployables : allDeployables.filter((d) => d.name === only);
   const domains = (report.dslDomains ?? []).filter((d) => d.reserved !== true);
   const goPacks = report.goPacks ?? [];
   const problems = report.problems ?? [];
@@ -71,7 +85,14 @@ export function ReportView({ report }: { report: AnalysisReport | null }) {
           <Box size={12} aria-hidden /> Web apps
         </h4>
         {deployables.length === 0 ? (
-          <p className="os-caption">This package declares no web apps.</p>
+          /* Scoped to an app the report does not name, the old sentence was
+             false in both directions: the package declares apps, and the one
+             asked about is not among them. Say which. */
+          <p className="os-caption">
+            {only !== undefined && only !== "" && allDeployables.length > 0
+              ? `This source no longer declares an app called ${only}.`
+              : "This package declares no web apps."}
+          </p>
         ) : (
           <ul className="os-report-list">
             {deployables.map((d) => (

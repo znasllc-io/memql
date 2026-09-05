@@ -387,7 +387,12 @@ describe("the Head's action, by state", () => {
   });
 
   it("a parked run: Cancel and Deploy, and Deploy CONFIRMS THAT RUN", async () => {
-    const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, deployments: { "pkg-acme": [PARKED, SUCCEEDED] } }, "store.memql.example.com");
+    // SCOPED TO THIS APP, which is what makes the gate this page's business.
+    // A WHOLE-SOURCE gate says nothing about whether this app is live and no
+    // longer speaks for it -- see "a source's gate" in acts.test.ts, where a
+    // deployable serving since 01:10 was reading "Ready to deploy".
+    const mine = { ...PARKED, scopedTo: ["storefront"] };
+    const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, deployments: { "pkg-acme": [mine, SUCCEEDED] } }, "store.memql.example.com");
     // A PARKED RUN IS WAITING FOR THE PERSON, so the bar offers the two
     // answers it is waiting for -- Cancel, then Deploy as the primary.
     expect(barState(page)).toBe("Ready to deploy");

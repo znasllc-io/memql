@@ -210,6 +210,27 @@ export function runCoversApp(run: DeploymentRow | null, app: string): boolean {
   return run.scopedTo.length === 0 || run.scopedTo.includes(app);
 }
 
+/**
+ * Whether a run was started FOR this app -- the STRICT reading of `scopedTo`,
+ * and the deliberate opposite of `runCoversApp` on the empty case.
+ *
+ * The two answer different questions and disagree on exactly one input:
+ *
+ *   runCoversApp    -- "will this run's work include this app?" A whole-source
+ *                      run will, so an empty `scopedTo` is YES.
+ *   runIsScopedToApp -- "is this run ABOUT this app?" A whole-source run is
+ *                      about the source, so an empty `scopedTo` is NO.
+ *
+ * The second is what lets a page decide whether somebody else's pending
+ * question gets to speak for this deployable. Both live here, next to each
+ * other, because two copies of a predicate that differ on one input is how
+ * they end up differing on two.
+ */
+export function runIsScopedToApp(run: DeploymentRow | null, app: string): boolean {
+  if (run === null || app === "") return false;
+  return run.scopedTo.includes(app);
+}
+
 /** Where a run built. `surface` is one of the three the engine declares. */
 export interface BuiltOn {
   surface: string;

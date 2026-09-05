@@ -41,8 +41,8 @@ function pkg(over: Record<string, unknown> = {}) {
   });
 }
 
-function run(status: string) {
-  return deploymentFromRow({ id: "dep-1", packageId: "pkg-1", status });
+function run(status: string, over: Record<string, unknown> = {}) {
+  return deploymentFromRow({ id: "dep-1", packageId: "pkg-1", status, ...over });
 }
 
 const BASE: ActsInput = { site: site(), pkg: null, run: null, canWrite: true };
@@ -116,8 +116,12 @@ describe("actsFor -- acts follow the state, in one place", () => {
 
   // ---- the run in flight ---------------------------------------------------
 
-  it("a parked run offers Cancel and Deploy -- it is waiting for the person", () => {
-    const reading = actsFor({ ...BASE, pkg: pkg(), run: run("awaiting_confirm") });
+  it("a parked run offers Cancel and Deploy -- on a deployable that has not served", () => {
+    // The gate is the reading only where there is no truer one. On a LIVE
+    // deployable it is not: see "a source's gate, on a deployable that has its
+    // own state" below, which is the bug this qualification fixes.
+    const fresh = site({ status: "draft", bundleRef: "" });
+    const reading = actsFor({ ...BASE, site: fresh, pkg: pkg(), run: run("awaiting_confirm") });
     expect(reading.acts.map((a) => a.name)).toEqual(["Cancel", "Deploy"]);
     expect(reading.state).toBe("Ready to deploy");
   });
@@ -186,7 +190,12 @@ describe("openStopFor -- exactly one stop, chosen by what is a question", () => 
   it("opens the stop a RUNNING run is at -- the moving thing is the question", () => {
     expect(openStopFor(standing({ run: run("analyzing") }))).toBe("whatItIs");
     expect(openStopFor(standing({ run: run("building") }))).toBe("build");
-    expect(openStopFor(standing({ run: run("awaiting_confirm") }))).toBe("whatItIs");
+    // A PARKED run is not running, so it chooses the stop only for a
+    // deployable with nothing of its own to show. The BASE site here is live.
+    expect(openStopFor(standing({ run: run("awaiting_confirm") }))).toBe("live");
+    expect(openStopFor(standing({ site: site({ status: "draft", bundleRef: "" }), run: run("awaiting_confirm") }))).toBe(
+      "whatItIs",
+    );
   });
 
   // THE CASE THAT CARRIES THE DESIGN. A test that only covered the happy path
@@ -202,5 +211,81 @@ describe("openStopFor -- exactly one stop, chosen by what is a question", () => 
       error: { code: "deployable_build_failed", message: "the build did not finish" },
     });
     expect(openStopFor(standing({ pkg: pkg(), run: stopped }))).toBe("build");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A GATE ON THE SOURCE IS NOT THIS DEPLOYABLE'S STATE
+// ---------------------------------------------------------------------------
+//
+// Reported with screenshots: `storefront` was live and serving at
+// meadow-grotto since 01:10, its rail read five green marks, and its bar said
+// "Ready to deploy -- this deploy is waiting for you" with Cancel and Deploy.
+// The page also opened on What-it-is rather than Live.
+//
+// Both came from the SOURCE's parked run. `reading()` tested
+// `run.status === "awaiting_confirm"` BEFORE `site.status`, and `openStopFor`
+// read RUN_STOP, which maps that status to `whatItIs`. A run at the gate is
+// waiting for a PERSON: nothing is executing, and it decides nothing about an
+// app that is already serving.
+//
+// This is the principle `holdWhileTheSourceIsBusy` already states for a
+// sibling that is genuinely deploying -- "a published deployable is still
+// published while another app of its source deploys, and saying otherwise is
+// the defect this is part of fixing". It just was not applied to the gate.
+describe("a source's gate, on a deployable that has its own state", () => {
+  const gate = run("awaiting_confirm");
+
+  it("leaves a live deployable published, with its own acts", () => {
+    const reading = actsFor({ ...BASE, pkg: pkg(), run: gate });
+    expect(reading.state).toBe("Published");
+    expect(reading.acts.map((a) => a.name)).toEqual(["Unpublish", "Redeploy"]);
+  });
+
+  it("says the gate is there without claiming it is the state", () => {
+    // Discoverable, not authoritative: the source's own row in the list says
+    // "a deploy is waiting for you", and this says the same thing beside a
+    // state word that stays true.
+    expect(actsFor({ ...BASE, pkg: pkg(), run: gate }).detail).toContain("waiting for you");
+  });
+
+  it("leaves a paused deployable paused", () => {
+    const reading = actsFor({ ...BASE, site: site({ status: "disabled" }), pkg: pkg(), run: gate });
+    expect(reading.state).toBe("Unpublished");
+  });
+
+  it("opens on Live, not on the stop the gate parked at", () => {
+    expect(openStopFor({ mode: "standing", pkg: pkg(), app: "storefront", run: gate, site: site() })).toBe("live");
+  });
+
+  it("STILL speaks for a deployable that has never served", () => {
+    // The negative control. Nothing is serving, so the gate IS the most
+    // relevant thing on the page and the state word is its own.
+    const fresh = site({ status: "draft", bundleRef: "" });
+    expect(actsFor({ ...BASE, site: fresh, pkg: pkg(), run: gate }).state).toBe("Ready to deploy");
+    expect(openStopFor({ mode: "standing", pkg: pkg(), app: "storefront", run: gate, site: fresh })).toBe("whatItIs");
+  });
+
+  it("STILL yields to a run that is actually running", () => {
+    // The other control: something IS happening to this app, so the bar says
+    // so even though it is live.
+    expect(actsFor({ ...BASE, pkg: pkg(), run: run("building") }).state).toBe("Building");
+  });
+
+  it("STILL speaks when the gate is scoped to THIS app", () => {
+    // The branch that makes this scoping rather than a blanket rule: a gate
+    // naming this deployable is its own redeploy awaiting a yes, and it is
+    // the question on this page even though the app is serving. Without a
+    // case where `scopedTo` matches, the whole distinction is untested and
+    // "ignore a parked run on a live app" would pass just as well.
+    const mine = site({ packageDeployableName: "storefront" });
+    const scoped = run("awaiting_confirm", { scopedTo: ["storefront"] });
+    const reading = actsFor({ ...BASE, site: mine, pkg: pkg(), run: scoped });
+    expect(reading.state).toBe("Ready to deploy");
+    // Its OWN sentence, not the appended clause -- the gate IS the state
+    // here, so nothing is mentioned beside it.
+    expect(reading.detail).toContain("the report above is what it would do");
+    expect(reading.detail).not.toContain("a deploy for this source");
+    expect(openStopFor({ mode: "standing", pkg: pkg(), app: "storefront", run: scoped, site: mine })).toBe("whatItIs");
   });
 });

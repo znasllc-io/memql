@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Archive, ArrowUpCircle, ChevronRight, GitBranch, Globe, Plus } from "lucide-react";
 
+import { everyOtherAppSkipped } from "./packages/calls";
 import { usePackageActions } from "./packages/actions";
 import { useDeployablesSettings } from "./settingsContext";
 import {
@@ -224,7 +225,13 @@ export function DeployablesSection({
   // button off the source page.
   async function openDeclared(packageId: string, app: string) {
     setView({ kind: "compose", parkedPackageId: packageId, only: app });
-    await packageActions.deploy(packageId, { confirm: false });
+    // SCOPED ON THE ANALYSIS, not only on the confirm. The engine derives a
+    // run's `scopedTo` from its placements' skips, so this call used to park a
+    // gate about the WHOLE SOURCE -- which every sibling's row and page then
+    // read as their own, repainting live apps as though they were mid-deploy
+    // and offering a Deploy that was somebody else's question.
+    const declared = packageRows.find((p) => p.id === packageId)?.declares ?? [];
+    await packageActions.deploy(packageId, { confirm: false, placements: everyOtherAppSkipped(declared, app) });
     onReseed();
   }
 
@@ -241,6 +248,11 @@ export function DeployablesSection({
         onBack={backToList}
         onAsk={onAsk}
         parked={parkedFor ?? undefined}
+        source={
+          view.parkedPackageId === undefined
+            ? undefined
+            : (packageRows.find((p) => p.id === view.parkedPackageId) ?? undefined)
+        }
         only={view.only}
         placed={
           parkedFor === null
