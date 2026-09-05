@@ -13,6 +13,7 @@ vi.mock("../../src/live/connection", () => ({
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
+import { everyOtherAppSkipped } from "../../src/apps/deployables/packages/calls";
 import { DEPLOYMENT_CONCEPT } from "../../src/apps/deployables/packages/rows";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import {
@@ -1098,5 +1099,21 @@ describe("a gate opened for one app", () => {
     // same manifest and is not what anybody is being asked about.
     expect(within(region).getByText("clients/marketing")).toBeTruthy();
     expect(within(region).queryByText("clients/web")).toBeNull();
+  });
+
+  it("is scoped ON THE WIRE, and stays scoped through a retry", () => {
+    // The display is downstream of this. The engine derives `scopedTo` from
+    // the placements' SKIPS, so an unscoped call parks a gate about the whole
+    // source -- read by every sibling as its own, and rebuilding all of them
+    // when confirmed.
+    const declared = [{ name: "storefront" }, { name: "web" }];
+    expect(everyOtherAppSkipped(declared, "web")).toEqual({
+      storefront: { hostname: "", accountId: "", ownDomain: "", skip: true },
+    });
+    // Scope is the COMPLEMENT of the skips: the app being deployed is absent.
+    expect(everyOtherAppSkipped(declared, "web").web).toBeUndefined();
+    // A source with one app scoped to it skips nothing, which the engine
+    // reads as the whole source -- correct, and the same statement.
+    expect(everyOtherAppSkipped([{ name: "web" }], "web")).toEqual({});
   });
 });

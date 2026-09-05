@@ -39,6 +39,7 @@ import {
   type ComposePhase,
 } from "./compose";
 import { runForApp } from "./acts";
+import { everyOtherAppSkipped } from "../packages/calls";
 import { Rail } from "./Rail";
 import { headActionFor, type ComposeInput, type HeadAction, type RailProblem, type RailStage } from "./rail";
 import { ManifestPreview } from "./stops/compose/ManifestPreview";
@@ -322,7 +323,14 @@ export function ComposePage(props: ComposePageProps) {
 
   async function retry(): Promise<void> {
     if (packageId === "") return;
-    await pkgActions.deploy(packageId, { confirm: false });
+    // A RETRY KEEPS THE SCOPE. Retrying a gate opened for one app used to
+    // park an unscoped run -- the flow stayed titled and narrowed for that
+    // app while the run underneath it was about the whole source, which is
+    // the same fan-out the scoped analysis exists to prevent.
+    await pkgActions.deploy(packageId, {
+      confirm: false,
+      ...(scoped ? { placements: everyOtherAppSkipped(parked?.pkg.declares ?? [], only ?? "") } : {}),
+    });
     reseed();
   }
 
