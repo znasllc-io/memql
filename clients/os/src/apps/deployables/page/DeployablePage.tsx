@@ -185,6 +185,20 @@ export function DeployablePage({
     }
     const done = await lifecycle.remove(site.id, typed);
     if (done) {
+      // DISCARDING A SOURCE-BACKED APP TURNS IT OFF, or it comes straight
+      // back. The site row is gone, but the source still DECLARES the app --
+      // so the list would show it again as "not deployed" and offer to deploy
+      // the very thing somebody just discarded, which is what they saw.
+      //
+      // The site is deleted first and this second: the deletion is the act,
+      // and a failure to record the preference must not leave a deployable
+      // nobody asked to keep.
+      if (pkg !== null && site.packageDeployableName !== "") {
+        await headActions.setDeployableList(
+          pkg.id,
+          [...new Set([...pkg.disabledDeployables, site.packageDeployableName])],
+        );
+      }
       setConfirming(false);
       onDeleted?.(site.id);
     }

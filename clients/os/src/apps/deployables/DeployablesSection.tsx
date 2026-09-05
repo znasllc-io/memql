@@ -196,6 +196,21 @@ export function DeployablesSection({
 
   // ---- the views -----------------------------------------------------------
 
+  /**
+   * Turn a declared app back on.
+   *
+   * ONLY that -- it does not deploy. Somebody clicking an app they had
+   * declined is asking to reconsider it, not to ship it; the row becomes an
+   * ordinary "not deployed" one and deploying it is the NEXT click. Making
+   * this deploy would be the same mistake the off-list exists to fix.
+   */
+  async function enableDeclared(packageId: string, app: string) {
+    const pkg = packageRows.find((p) => p.id === packageId);
+    if (pkg === undefined) return;
+    await packageActions.setDeployableEnabled(packageId, pkg.disabledDeployables, app, true);
+    onReseed();
+  }
+
   // DEPLOYING AN APP THE SOURCE ONLY DECLARES.
   //
   // It has no site and no run of its own, so there is nothing to open: the
@@ -429,6 +444,7 @@ export function DeployablesSection({
               onOpenSource={(packageId) => setView({ kind: "source", packageId })}
               onOpenParked={(packageId) => setView({ kind: "compose", parkedPackageId: packageId })}
               onDeployDeclared={(packageId, app) => void openDeclared(packageId, app)}
+              onEnableDeclared={(packageId, app) => void enableDeclared(packageId, app)}
             />
           )}
         />
@@ -489,6 +505,7 @@ function GroupLine({
   onOpenSource,
   onOpenParked,
   onDeployDeclared,
+  onEnableDeclared,
   figures,
 }: {
   group: DeployableListGroup;
@@ -500,6 +517,8 @@ function GroupLine({
   onOpenParked: (packageId: string) => void;
   /** A declared app with no site: deploying it is what asks for its address. */
   onDeployDeclared: (packageId: string, app: string) => void;
+  /** A declared app the owner turned off: the only act it offers is back on. */
+  onEnableDeclared: (packageId: string, app: string) => void;
   figures: Map<string, TrafficSummary>;
 }) {
   // COLLAPSED IS THE DEFAULT, and which groups are open is remembered. The
@@ -520,12 +539,17 @@ function GroupLine({
       onOpen={() =>
         row.site !== null
           ? onOpenSite(row.site.id)
-          : // NO SITE, and the two reasons are different. A row a PARKED run
-            // put here has a gate to reopen; one the source merely DECLARES
-            // has nothing yet, and deploying it is what makes the gate.
+          : // NO SITE, and the three reasons are different. A row a PARKED run
+            // put here has a gate to reopen. One the owner TURNED OFF is
+            // inert: clicking it offers to turn it back on and nothing else,
+            // because clicking a thing somebody declined must not deploy it.
+            // One the source merely DECLARES has nothing yet, and deploying it
+            // is what makes the gate.
             row.parked !== null
             ? onOpenParked(row.pkg?.id ?? "")
-            : onDeployDeclared(row.pkg?.id ?? "", row.app)
+            : row.disabled === true
+              ? onEnableDeclared(row.pkg?.id ?? "", row.app)
+              : onDeployDeclared(row.pkg?.id ?? "", row.app)
       }
       traffic={row.site === null ? null : (figures.get(row.site.id) ?? null)}
     />
@@ -649,12 +673,15 @@ function DeployableLine({
       icon={<Globe size={16} aria-hidden />}
       name={row.name}
       current={site?.status === "live"}
-      dim={site?.status === "disabled" || archived}
+      dim={site?.status === "disabled" || archived || row.disabled === true}
       open={open}
       onOpen={onOpen}
       state={
         <>
           {waiting ? <span className="os-deploy-waiting">a deploy is waiting for you</span> : null}
+          {/* THE OWNER TURNED IT OFF, said on the row rather than only by
+              dimming it: a greyed row with no word reads as broken. */}
+          {row.disabled === true ? <Chip tone="muted">off</Chip> : null}
           <AccountChip name={accountNameFrom(accounts, site?.accountId ?? "")} />
           {traffic === null || traffic.lastServedAt === "" ? null : (
             <Chip title={`${traffic.requests.toLocaleString()} requests over the last week`}>

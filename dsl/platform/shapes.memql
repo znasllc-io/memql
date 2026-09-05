@@ -242,6 +242,7 @@ shape package packageFull {
   updateAvailable
   autoDeploy
   declares
+  disabledDeployables
   status
   row.createdAt
 }

@@ -375,3 +375,43 @@ describe("what a source declares but has not deployed", () => {
     expect(fold([STORE], [{ ...ACME, declares: [] }])[0]!.rows.map((r) => r.name)).toEqual(["storefront"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A DISABLED APP IS LISTED AND INERT
+// ---------------------------------------------------------------------------
+//
+// Skipping an app at the confirm gate used to leave it merely "declared with
+// no site" -- indistinguishable from one nobody had got to yet -- so the
+// console offered to deploy it, and discarding the result brought it straight
+// back as another offer. The owner's choice had nowhere to live. It does now,
+// and the row it produces can be found and cannot be deployed.
+describe("a declared app its owner turned off", () => {
+  const SRC = {
+    ...ACME,
+    declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }],
+    disabledDeployables: ["web"],
+  };
+
+  it("is still listed under its source, so it can be found and turned back on", () => {
+    expect(fold([STORE], [SRC])[0]!.rows.map((r) => r.name)).toEqual(["storefront", "web"]);
+  });
+
+  it("is marked disabled, which is what makes it inert rather than an offer", () => {
+    const web = fold([STORE], [SRC])[0]!.rows.find((r) => r.name === "web")!;
+    expect(web.disabled).toBe(true);
+    expect(web.site).toBeNull();
+  });
+
+  it("leaves an app nobody turned off alone", () => {
+    // The negative control: `declares` on its own must not mark anything.
+    const web = fold([STORE], [{ ...SRC, disabledDeployables: [] }])[0]!.rows.find((r) => r.name === "web")!;
+    expect(web.disabled).toBe(false);
+  });
+
+  it("does not mark a DEPLOYED app disabled, whatever the list says", () => {
+    // A name can linger after the app was deployed again. The site is the
+    // fact; the list is a preference about one that has none.
+    const rows = fold([STORE], [{ ...SRC, disabledDeployables: ["storefront", "web"] }])[0]!.rows;
+    expect(rows.find((r) => r.name === "storefront")!.disabled).toBe(false);
+  });
+});

@@ -209,6 +209,24 @@ export async function setPackageAutoDeploy(query: QueryClient, packageId: string
   await query.packageSetAutoDeploy({ packageId, autoDeploy });
 }
 
+/**
+ * Set which of a source's deployables its owner has turned off.
+ *
+ * THE WHOLE LIST, because `update{}` read-merges a field and the DSL has no
+ * form for removing one member of an array -- `@appendFields` adds and has no
+ * counterpart (memql#4951). The caller holds the current list on the package
+ * row it already reads live, so this is a read-modify-write over a value it
+ * owns rather than a guess; the residual is that two windows toggling two
+ * different apps at the same instant clobber, which that issue tracks.
+ */
+export async function setPackageDisabled(
+  query: QueryClient,
+  packageId: string,
+  disabledDeployables: readonly string[],
+): Promise<void> {
+  await query.setPackageDisabledDeployables({ packageId, disabledDeployables: [...disabledDeployables] });
+}
+
 export async function archiveSite(query: QueryClient, siteId: string, confirmHostname: string): Promise<void> {
   await query.siteArchive({ siteId, confirmHostname });
 }

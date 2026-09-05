@@ -212,6 +212,15 @@ function parkedRun(packageId: string, over: Record<string, unknown> = {}): Row {
   } as unknown as Row;
 }
 
+/** A source declaring TWO apps, so "skip one" is expressible. */
+const REPORT_TWO = {
+  ...REPORT,
+  deployables: [
+    ...REPORT.deployables,
+    { name: "web", kind: "spa", path: "clients/marketing", buildPlan: "already built: dist", output: "dist", prebuilt: true },
+  ],
+};
+
 const ZIP = artifactRow({ id: "artifact-zip", title: "storefront-build.zip" });
 
 /** The id `createPackage` minted, read back off the wire. */
@@ -626,6 +635,67 @@ describe("the compose flow: where each app will live", () => {
     const confirmed = connection.callsNamed("packageDeploy")[1] ?? "";
     expect(confirmed).toContain("confirm: true");
     expect(confirmed).toContain('placements: {storefront: {hostname: "shop.memql.example.com"}}');
+  });
+
+  it("carries a SKIP all the way to packageDeploy", async () => {
+    // THE GAP THAT LET SKIP SHIP BROKEN TWICE. `placementsFrom` and
+    // `placementsPayload` were each tested alone and each was right; nothing
+    // asserted the wizard's own click produced a call carrying the flag. The
+    // engine skips at BUILD and at publish, so a lost flag is minutes of
+    // building an app somebody said they did not want, and a site at draft.
+    const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
+    const { region } = await compose(connection);
+    await chooseRepository(region);
+    await fill(URL_FIELD, REPO);
+    await blur(URL_FIELD);
+    await fill(NAME_FIELD, "acme");
+    await click(forwardAct("Analyze"));
+    await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(mintedPackageId(connection), { report: REPORT_TWO }), "NODE_CREATED");
+    await within(region).findByText("clients/marketing");
+
+    await fill("The name storefront answers at", "shop");
+    await click(within(region).getByRole("radiogroup", { name: "Deploy or skip web" }).querySelectorAll("[role=radio]")[1]);
+    await click(forwardAct("Deploy"));
+
+    const confirmed = connection.callsNamed("packageDeploy").at(-1) ?? "";
+    expect(confirmed).toContain("confirm: true");
+    expect(confirmed).toContain("skip: true");
+    // ...and the skipped app is not given an address it was never asked for.
+    expect(confirmed).toContain('storefront: {hostname: "shop.memql.example.com"}');
+    expect(confirmed).not.toContain('web: {hostname');
+  });
+
+  it("records a skip as a STANDING choice, not just a fact about this run", async () => {
+    // Reported from production: skipping `web` deployed nothing (correct), and
+    // then `web` came back on the list as an ordinary "not deployed" row --
+    // indistinguishable from one nobody had got to. Clicking it deployed the
+    // very app that had just been declined.
+    const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
+    const { region } = await compose(connection);
+    await chooseRepository(region);
+    await fill(URL_FIELD, REPO);
+    await blur(URL_FIELD);
+    await fill(NAME_FIELD, "acme");
+    await click(forwardAct("Analyze"));
+    await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(mintedPackageId(connection), { report: REPORT_TWO }), "NODE_CREATED");
+    await within(region).findByText("clients/marketing");
+
+    await fill("The name storefront answers at", "shop");
+    await click(within(region).getByRole("radiogroup", { name: "Deploy or skip web" }).querySelectorAll("[role=radio]")[1]);
+    await click(forwardAct("Deploy"));
+
+    const off = connection.callsNamed("setPackageDisabledDeployables").at(-1) ?? "";
+    expect(off).toContain('disabledDeployables: ["web"]');
+    // ...and the app that was NOT skipped is not turned off with it.
+    expect(off).not.toContain("storefront");
+  });
+
+  it("turns nothing off when nothing was skipped", async () => {
+    // The negative control: an ordinary deploy must not write an off-list.
+    const { connection } = await analyzed();
+    await fill("The name storefront answers at", "shop");
+    await click(forwardAct("Deploy"));
+    expect(connection.callsNamed("setPackageDisabledDeployables")).toHaveLength(0);
   });
 
   it("offers a cluster owner the client AND their own domain; an admin only the client", async () => {

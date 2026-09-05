@@ -8075,8 +8075,7 @@ QueryClient.prototype.setPackEnabled = function (this: QueryClient, args: SetPac
   return this.executeNamed("setPackEnabled", buildSetPackEnabled(args), opts);
 };
 
-/** Turn a source's auto-deploy switch on or off (epic memql#4900).
-The PERSON's write, and an owned one: the write guard resolves the target row and admits its owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's decision, which is what makes an auto-run's provenance honest. */
+/** setPackageAutoDeploy wraps the mutation named "setPackageAutoDeploy". */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["setPackageAutoDeploy"] in generated_concepts.ts).
 export interface SetPackageAutoDeployArgs {
   packageId: string;
@@ -8098,6 +8097,31 @@ declare module "./query.js" {
 
 QueryClient.prototype.setPackageAutoDeploy = function (this: QueryClient, args: SetPackageAutoDeployArgs = {} as SetPackageAutoDeployArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("setPackageAutoDeploy", buildSetPackageAutoDeploy(args), opts);
+};
+
+/** Turn a source's auto-deploy switch on or off (epic memql#4900).
+The PERSON's write, and an owned one: the write guard resolves the target row and admits its owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's decision, which is what makes an auto-run's provenance honest. */
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["setPackageDisabledDeployables"] in generated_concepts.ts).
+export interface SetPackageDisabledDeployablesArgs {
+  packageId: string;
+  disabledDeployables: string[];
+}
+
+export function buildSetPackageDisabledDeployables(args: SetPackageDisabledDeployablesArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  parts.push("disabledDeployables: " + renderMemQLValue(args.disabledDeployables));
+  return "mutation setPackageDisabledDeployables(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setPackageDisabledDeployables(args: SetPackageDisabledDeployablesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setPackageDisabledDeployables = function (this: QueryClient, args: SetPackageDisabledDeployablesArgs = {} as SetPackageDisabledDeployablesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setPackageDisabledDeployables", buildSetPackageDisabledDeployables(args), opts);
 };
 
 /** Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. */

@@ -366,6 +366,46 @@ describe("the list", () => {
     expect(connection.callsNamed("packageDeploy")[0]).toContain("confirm: false");
   });
 
+  it("does not offer to deploy an app the owner turned off", async () => {
+    // Reported from production: skipping `web`, then discarding the result,
+    // left it on the list looking exactly like an app nobody had got to -- so
+    // clicking it started the whole build again. A declined app is listed and
+    // INERT.
+    const connection = fakeConnection({
+      ...WITH_PACKAGE,
+      packages: [{
+        ...ACME,
+        declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }],
+        disabledDeployables: ["web"],
+      }],
+    });
+    mount(connection);
+    const web = await screen.findByText("web");
+    // It is there to be found, and says it is off.
+    expect(web.closest(".os-row")?.textContent).toContain("off");
+
+    await click(web.closest("button"));
+    // CLICKING IT TURNS IT BACK ON -- and does NOT deploy it. Deploying is the
+    // next click, deliberately.
+    await waitFor(() => expect(connection.callsNamed("setPackageDisabledDeployables").length).toBe(1));
+    expect(connection.callsNamed("setPackageDisabledDeployables")[0]).toContain("disabledDeployables: []");
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
+  });
+
+  it("does offer to deploy one nobody turned off", async () => {
+    // The negative control: without the off-list the same row deploys, which
+    // is what makes the assertion above about the preference and not about
+    // declared rows in general.
+    const connection = fakeConnection({
+      ...WITH_PACKAGE,
+      packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
+    });
+    mount(connection);
+    await click((await screen.findByText("web")).closest("button"));
+    await waitFor(() => expect(connection.callsNamed("packageDeploy").length).toBeGreaterThan(0));
+    expect(connection.callsNamed("setPackageDisabledDeployables")).toHaveLength(0);
+  });
+
   it("says what to do when there is nothing yet", async () => {
     mount(fakeConnection({ sites: [], packages: [] }));
     expect(await screen.findByText("No deployables yet. New deployable is where one starts.")).toBeTruthy();

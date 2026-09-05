@@ -276,6 +276,28 @@ export function ComposePage(props: ComposePageProps) {
       if (ok) setPublishedZip(true);
       return;
     }
+    // SKIPPING IS A STANDING CHOICE, not a fact about this run. Before this,
+    // a skipped app came back on the next screen as an ordinary "not deployed"
+    // row -- indistinguishable from one nobody had got to -- so the console
+    // offered to deploy the very app somebody had just declined, and
+    // discarding the result offered it again.
+    //
+    // ONLY WHAT THE PERSON TICKED. `placementAddresses` also carries the apps
+    // that `only` skipped to scope a single-app deploy, and those are a
+    // MECHANISM rather than a choice -- disabling them would turn "deploy just
+    // this one" into "turn the others off".
+    const declined = Object.entries(addresses)
+      .filter(([, a]) => a.skip === true)
+      .map(([app]) => app);
+    if (declined.length > 0) {
+      // A package created moments ago in this very flow has no off-list yet,
+      // and `parked` is absent on that path -- so an empty one is the honest
+      // default rather than a reason to skip the write. Requiring `parked`
+      // here meant the FIRST deploy, which is exactly where somebody skips an
+      // app, recorded nothing.
+      const held = parked?.pkg.disabledDeployables ?? [];
+      await pkgActions.setDeployableList(packageId, [...new Set([...held, ...declined])]);
+    }
     await pkgActions.deploy(packageId, true, placementsFrom(placementApps, placementAddresses, clusterDomain));
     reseed();
   }
