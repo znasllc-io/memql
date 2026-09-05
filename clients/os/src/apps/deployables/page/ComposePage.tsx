@@ -289,15 +289,12 @@ export function ComposePage(props: ComposePageProps) {
     const declined = Object.entries(addresses)
       .filter(([, a]) => a.skip === true)
       .map(([app]) => app);
-    if (declined.length > 0) {
-      // A package created moments ago in this very flow has no off-list yet,
-      // and `parked` is absent on that path -- so an empty one is the honest
-      // default rather than a reason to skip the write. Requiring `parked`
-      // here meant the FIRST deploy, which is exactly where somebody skips an
-      // app, recorded nothing.
-      const held = parked?.pkg.disabledDeployables ?? [];
-      await pkgActions.setDeployableList(packageId, [...new Set([...held, ...declined])]);
-    }
+    // The names, not the resulting list. Composing the result needed the
+    // package's current off-list, and `parked` is absent on the first-deploy
+    // path -- which is exactly where somebody skips an app -- so that read had
+    // to fall back to an empty list and hope nothing else was already off. A
+    // membership change has nothing to read (memql#4951).
+    await pkgActions.disableDeployables(packageId, declined);
     await pkgActions.deploy(packageId, true, placementsFrom(placementApps, placementAddresses, clusterDomain));
     reseed();
   }

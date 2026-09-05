@@ -626,6 +626,14 @@ type MutationNode struct {
 	// annotation; always empty otherwise. See memql#2240.
 	AppendFields []string
 
+	// AddToSet and RemoveFromSet name array-typed payload fields
+	// executeWrite treats as SET MEMBERSHIP: the written elements are
+	// unioned into, or removed from, the stored array rather than
+	// replacing it. Populated from a mutation's @addToSet /
+	// @removeFromSet annotations; always empty otherwise. See memql#4951.
+	AddToSet      []string
+	RemoveFromSet []string
+
 	// CreateOnlyFields names payload fields an insert-kind (create-or-upsert)
 	// mutation writes ONLY on create. When the target id already exists,
 	// executeWrite drops them from the delta before the read-merge so the

@@ -15,7 +15,8 @@ import {
   revokeSourceCredential,
   rollbackPackage,
   setPackageAutoDeploy,
-  setPackageDisabled,
+  disableDeployables,
+  enableDeployables,
   setPackageCredential,
   setSiteLive,
   type NewCredential,
@@ -125,20 +126,16 @@ export interface PackageActions extends WriteState {
   /** Arm or disarm auto-deploy for this source. */
   setAutoDeploy: (packageId: string, autoDeploy: boolean) => Promise<void>;
   /**
-   * Turn one declared deployable off or on.
+   * Turn declared deployables off, by name.
    *
-   * The CURRENT list is passed in because this action holds no row: the caller
-   * reads it off the package it is already rendering. See memql#4951 for why
-   * the whole list travels rather than the one name.
+   * NO CURRENT LIST. It used to take one, because the DSL had no way to remove
+   * a member of an array and the caller had to compose the whole result
+   * (memql#4951). The caller now says what CHANGED, which is what makes two
+   * windows toggling two different apps both land.
    */
-  /** Write the whole off-list, for a caller that has already composed it. */
-  setDeployableList: (packageId: string, disabled: readonly string[]) => Promise<void>;
-  setDeployableEnabled: (
-    packageId: string,
-    current: readonly string[],
-    name: string,
-    enabled: boolean,
-  ) => Promise<void>;
+  disableDeployables: (packageId: string, names: readonly string[]) => Promise<void>;
+  /** Turn declared deployables back on, by name. The exact inverse. */
+  enableDeployables: (packageId: string, names: readonly string[]) => Promise<void>;
   rollback: (packageId: string, deploymentId: string) => Promise<void>;
   archive: (packageId: string, confirmName: string) => Promise<void>;
   restore: (packageId: string) => Promise<void>;
@@ -166,12 +163,11 @@ export function usePackageActions(): PackageActions {
     setAutoDeploy: async (packageId, autoDeploy) => {
       await run((query) => setPackageAutoDeploy(query, packageId, autoDeploy));
     },
-    setDeployableList: async (packageId, disabled) => {
-      await run((query) => setPackageDisabled(query, packageId, disabled));
+    disableDeployables: async (packageId, names) => {
+      await run((query) => disableDeployables(query, packageId, names));
     },
-    setDeployableEnabled: async (packageId, current, name, enabled) => {
-      const next = enabled ? current.filter((n) => n !== name) : [...new Set([...current, name])];
-      await run((query) => setPackageDisabled(query, packageId, next));
+    enableDeployables: async (packageId, names) => {
+      await run((query) => enableDeployables(query, packageId, names));
     },
     rollback: async (packageId, deploymentId) => {
       await run((query) => rollbackPackage(query, packageId, deploymentId));

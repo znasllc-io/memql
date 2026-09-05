@@ -210,21 +210,36 @@ export async function setPackageAutoDeploy(query: QueryClient, packageId: string
 }
 
 /**
- * Set which of a source's deployables its owner has turned off.
+ * Turn deployables of a source off, or back on, BY NAME.
  *
- * THE WHOLE LIST, because `update{}` read-merges a field and the DSL has no
- * form for removing one member of an array -- `@appendFields` adds and has no
- * counterpart (memql#4951). The caller holds the current list on the package
- * row it already reads live, so this is a read-modify-write over a value it
- * owns rather than a guess; the residual is that two windows toggling two
- * different apps at the same instant clobber, which that issue tracks.
+ * Two verbs and no list. This used to send the whole array, because
+ * `update{}` read-merges a field and the DSL had no form for removing one
+ * member -- `@appendFields` added and had no counterpart. So every caller read
+ * the current list off the package row, changed one name, and wrote it all
+ * back, which is correct for one console and carries a race nothing declared:
+ * two windows toggling two different apps at the same instant clobbered, and
+ * the loser was never told. memql#4951 closed that with `@addToSet` /
+ * `@removeFromSet`, and the argument is now the change rather than the result.
+ *
+ * `disable` is deduped and `enable` ignores a name that is not there, so both
+ * are safe to repeat and a retry after a lost response costs nothing.
  */
-export async function setPackageDisabled(
+export async function disableDeployables(
   query: QueryClient,
   packageId: string,
-  disabledDeployables: readonly string[],
+  deployableNames: readonly string[],
 ): Promise<void> {
-  await query.setPackageDisabledDeployables({ packageId, disabledDeployables: [...disabledDeployables] });
+  if (deployableNames.length === 0) return;
+  await query.disablePackageDeployables({ packageId, deployableNames: [...deployableNames] });
+}
+
+export async function enableDeployables(
+  query: QueryClient,
+  packageId: string,
+  deployableNames: readonly string[],
+): Promise<void> {
+  if (deployableNames.length === 0) return;
+  await query.enablePackageDeployables({ packageId, deployableNames: [...deployableNames] });
 }
 
 export async function archiveSite(query: QueryClient, siteId: string, confirmHostname: string): Promise<void> {

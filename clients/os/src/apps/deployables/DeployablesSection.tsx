@@ -205,9 +205,7 @@ export function DeployablesSection({
    * this deploy would be the same mistake the off-list exists to fix.
    */
   async function enableDeclared(packageId: string, app: string) {
-    const pkg = packageRows.find((p) => p.id === packageId);
-    if (pkg === undefined) return;
-    await packageActions.setDeployableEnabled(packageId, pkg.disabledDeployables, app, true);
+    await packageActions.enableDeployables(packageId, [app]);
     onReseed();
   }
 

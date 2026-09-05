@@ -580,6 +580,20 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				return nil, fmt.Errorf("function %q: %w", expectedName, err)
 			}
 
+			addToSetFields, err := mutationSetFields(funcDef, languageParser.AttrAddToSet, stmt.Kind)
+			if err != nil {
+				return nil, fmt.Errorf("function %q: %w", expectedName, err)
+			}
+
+			removeFromSetFields, err := mutationSetFields(funcDef, languageParser.AttrRemoveFromSet, stmt.Kind)
+			if err != nil {
+				return nil, fmt.Errorf("function %q: %w", expectedName, err)
+			}
+
+			if err := validateSetMembershipFields(appendFields, addToSetFields, removeFromSetFields); err != nil {
+				return nil, fmt.Errorf("function %q: %w", expectedName, err)
+			}
+
 			createOnlyFields, err := mutationCreateOnlyFields(funcDef, stmt.Kind)
 			if err != nil {
 				return nil, fmt.Errorf("function %q: %w", expectedName, err)
@@ -652,6 +666,8 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				AliasOfTemplate:        aliasOfTemplate,
 				MergeFields:            mergeFields,
 				AppendFields:           appendFields,
+				AddToSetFields:         addToSetFields,
+				RemoveFromSetFields:    removeFromSetFields,
 				CreateOnlyFields:       createOnlyFields,
 				NoUnsetFields:          noUnsetFields,
 				ScrubPii:               scrubPii,

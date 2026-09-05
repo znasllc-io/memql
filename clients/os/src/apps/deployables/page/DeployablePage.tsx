@@ -194,10 +194,7 @@ export function DeployablePage({
       // and a failure to record the preference must not leave a deployable
       // nobody asked to keep.
       if (pkg !== null && site.packageDeployableName !== "") {
-        await headActions.setDeployableList(
-          pkg.id,
-          [...new Set([...pkg.disabledDeployables, site.packageDeployableName])],
-        );
+        await headActions.disableDeployables(pkg.id, [site.packageDeployableName]);
       }
       setConfirming(false);
       onDeleted?.(site.id);

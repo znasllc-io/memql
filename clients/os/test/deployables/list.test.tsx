@@ -387,8 +387,12 @@ describe("the list", () => {
     await click(web.closest("button"));
     // CLICKING IT TURNS IT BACK ON -- and does NOT deploy it. Deploying is the
     // next click, deliberately.
-    await waitFor(() => expect(connection.callsNamed("setPackageDisabledDeployables").length).toBe(1));
-    expect(connection.callsNamed("setPackageDisabledDeployables")[0]).toContain("disabledDeployables: []");
+    // ENABLE IS ITS OWN VERB, and it names what changed (memql#4951). It used
+    // to send `disabledDeployables: []` -- the whole list with the name
+    // filtered out -- which erased every other app's off state whenever the
+    // window's copy of the row was stale.
+    await waitFor(() => expect(connection.callsNamed("enablePackageDeployables").length).toBe(1));
+    expect(connection.callsNamed("enablePackageDeployables")[0]).toContain('deployableNames: ["web"]');
     expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
   });
 
@@ -403,7 +407,7 @@ describe("the list", () => {
     mount(connection);
     await click((await screen.findByText("web")).closest("button"));
     await waitFor(() => expect(connection.callsNamed("packageDeploy").length).toBeGreaterThan(0));
-    expect(connection.callsNamed("setPackageDisabledDeployables")).toHaveLength(0);
+    expect(connection.callsNamed("enablePackageDeployables")).toHaveLength(0);
   });
 
   it("says what to do when there is nothing yet", async () => {

@@ -162,6 +162,8 @@ var (
 	AttrIdempotent           = ast.AttrIdempotent
 	AttrMergeFields          = ast.AttrMergeFields
 	AttrAppendFields         = ast.AttrAppendFields
+	AttrAddToSet             = ast.AttrAddToSet
+	AttrRemoveFromSet        = ast.AttrRemoveFromSet
 	AttrCreateOnly           = ast.AttrCreateOnly
 	AttrNoUnset              = ast.AttrNoUnset
 	AttrNocache              = ast.AttrNocache

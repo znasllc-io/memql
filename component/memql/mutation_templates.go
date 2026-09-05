@@ -64,6 +64,13 @@ type FunctionMutationTemplate struct {
 	// (memql#2240).
 	AppendFields []string
 
+	// AddToSetFields and RemoveFromSetFields carry the mutation's
+	// @addToSet / @removeFromSet annotations: array-typed payload fields
+	// the update executor treats as SET MEMBERSHIP rather than as a value
+	// to replace. Only valid on update-kind mutations (memql#4951).
+	AddToSetFields      []string
+	RemoveFromSetFields []string
+
 	// MergeFields carries the mutation's @mergeFields("a", "b")
 	// annotation: object-typed payload fields that the update executor
 	// deep-merges into the stored object instead of replacing it
@@ -238,6 +245,8 @@ func (e *MemQLEngine) renderMutationTemplate(ctx context.Context, tmpl *Function
 		AliasOfRef:       aliasRef,
 		MergeFields:      tmpl.MergeFields,
 		AppendFields:     tmpl.AppendFields,
+		AddToSet:         tmpl.AddToSetFields,
+		RemoveFromSet:    tmpl.RemoveFromSetFields,
 		CreateOnlyFields: tmpl.CreateOnlyFields,
 		NoUnsetFields:    tmpl.NoUnsetFields,
 		ScrubPii:         tmpl.ScrubPii,
@@ -1463,6 +1472,75 @@ func mutationAppendFields(funcDef *languageParser.FunctionDef, kind ast.Mutation
 		return nil, fmt.Errorf("@appendFields is only valid on update mutations (insert writes the full payload; there is nothing stored to append to)")
 	}
 	return fields, nil
+}
+
+// mutationSetFields extracts @addToSet("a", "b") / @removeFromSet("a", "b")
+// into the field-name list the update executor treats as SET MEMBERSHIP
+// (memql#4951).
+//
+// One extractor for both because the two annotations differ only in
+// direction, and the update executor serves them from one routine for the
+// same reason: what the engine sees is a membership change, what an author
+// writes is a verb.
+//
+// Like @appendFields, only meaningful on an update -- an insert writes the
+// full payload, so there is no stored set to change -- and its presence on an
+// insert is a load-time error rather than a silent no-op.
+func mutationSetFields(funcDef *languageParser.FunctionDef, attrName string, kind ast.MutationKind) ([]string, error) {
+	var fields []string
+	for _, attr := range funcDef.Attributes {
+		if attr == nil || attr.Name != attrName {
+			continue
+		}
+		switch v := attr.Value.(type) {
+		case string:
+			if s := strings.TrimSpace(v); s != "" {
+				fields = append(fields, s)
+			}
+		case []string:
+			for _, raw := range v {
+				if s := strings.TrimSpace(raw); s != "" {
+					fields = append(fields, s)
+				}
+			}
+		}
+		if len(fields) == 0 {
+			return nil, fmt.Errorf(`@%s requires at least one field name, e.g. @%s("disabledDeployables")`, attrName, attrName)
+		}
+	}
+	if len(fields) > 0 && kind != ast.MutationKindUpdate {
+		return nil, fmt.Errorf("@%s is only valid on update mutations (insert writes the full payload; there is no stored set to change)", attrName)
+	}
+	return fields, nil
+}
+
+// validateSetMembershipFields refuses a field claimed by two of the
+// array-rewriting annotations at once.
+//
+// Each of them rewrites the same key of the delta, and the executor applies
+// them in a fixed order, so a field named by two is silently decided by that
+// order -- which is an implementation detail nobody authoring the mutation can
+// see. Refusing it at load costs nothing and removes the question.
+func validateSetMembershipFields(appendFields, addToSet, removeFromSet []string) error {
+	seen := map[string]string{}
+	for _, group := range []struct {
+		attr   string
+		fields []string
+	}{
+		{"appendFields", appendFields},
+		{"addToSet", addToSet},
+		{"removeFromSet", removeFromSet},
+	} {
+		for _, f := range group.fields {
+			if prior, dup := seen[f]; dup {
+				return fmt.Errorf("field %q is named by both @%s and @%s; each rewrites the same "+
+					"key of the write, so which one wins would be decided by the executor's "+
+					"order rather than by anything written here", f, prior, group.attr)
+			}
+			seen[f] = group.attr
+		}
+	}
+	return nil
 }
 
 // mutationCreateOnlyFields extracts the @createOnly("a", "b") annotation

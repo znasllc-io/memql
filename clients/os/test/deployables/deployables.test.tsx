@@ -1336,8 +1336,11 @@ describe("discarding a source-backed deployable", () => {
     await waitFor(() => expect(connection.callsNamed("siteDelete").length).toBe(1));
     // THE DELETION IS THE ACT and the preference follows it, so a failure to
     // record the second cannot leave a deployable nobody asked to keep.
-    await waitFor(() => expect(connection.callsNamed("setPackageDisabledDeployables").length).toBe(1));
-    expect(connection.callsNamed("setPackageDisabledDeployables")[0]).toContain('disabledDeployables: ["storefront"]');
+    await waitFor(() => expect(connection.callsNamed("disablePackageDeployables").length).toBe(1));
+    // THE NAME, not the resulting list (memql#4951). Composing the result took
+    // the package's current off-list and wrote it back whole, so two windows
+    // discarding two different apps clobbered.
+    expect(connection.callsNamed("disablePackageDeployables")[0]).toContain('deployableNames: ["storefront"]');
   });
 });
 

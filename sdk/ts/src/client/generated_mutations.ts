@@ -4519,6 +4519,31 @@ QueryClient.prototype.deprecateAction = function (this: QueryClient, args: Depre
   return this.executeNamed("deprecateAction", buildDeprecateAction(args), opts);
 };
 
+/** Turn a source's auto-deploy switch on or off (epic memql#4900).
+The PERSON's write, and an owned one: the write guard resolves the target row and admits its owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's decision, which is what makes an auto-run's provenance honest. */
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["disablePackageDeployables"] in generated_concepts.ts).
+export interface DisablePackageDeployablesArgs {
+  packageId: string;
+  deployableNames: string[];
+}
+
+export function buildDisablePackageDeployables(args: DisablePackageDeployablesArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  parts.push("deployableNames: " + renderMemQLValue(args.deployableNames));
+  return "mutation disablePackageDeployables(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    disablePackageDeployables(args: DisablePackageDeployablesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.disablePackageDeployables = function (this: QueryClient, args: DisablePackageDeployablesArgs = {} as DisablePackageDeployablesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("disablePackageDeployables", buildDisablePackageDeployables(args), opts);
+};
+
 /** Emit a client-tool request envelope for cross-node relay to a browser stream. */
 // Bound concept: v1:cognition:client:tool:request (machine-readable: BoundConcepts["emitClientToolRequest"] in generated_concepts.ts).
 export interface EmitClientToolRequestArgs {
@@ -4619,6 +4644,31 @@ declare module "./query.js" {
 
 QueryClient.prototype.emitTextChunk = function (this: QueryClient, args: EmitTextChunkArgs = {} as EmitTextChunkArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("emitTextChunk", buildEmitTextChunk(args), opts);
+};
+
+/** Turn one or more of a source's deployables back ON.
+The exact inverse of disablePackageDeployables above, and the reason that one is a membership change rather than a whole-list write: removing a member had no form at all. Removing a name that is not there is a no-op rather than an error, so two people enabling the same app both succeed and a retry is safe. */
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["enablePackageDeployables"] in generated_concepts.ts).
+export interface EnablePackageDeployablesArgs {
+  packageId: string;
+  deployableNames: string[];
+}
+
+export function buildEnablePackageDeployables(args: EnablePackageDeployablesArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  parts.push("deployableNames: " + renderMemQLValue(args.deployableNames));
+  return "mutation enablePackageDeployables(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    enablePackageDeployables(args: EnablePackageDeployablesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.enablePackageDeployables = function (this: QueryClient, args: EnablePackageDeployablesArgs = {} as EnablePackageDeployablesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("enablePackageDeployables", buildEnablePackageDeployables(args), opts);
 };
 
 /** ENGINE: enqueue a send run. One row per campaign, id = the campaign's bare short id, so a restart lands on the same timeline rather than accumulating runs.
@@ -8097,31 +8147,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.setPackageAutoDeploy = function (this: QueryClient, args: SetPackageAutoDeployArgs = {} as SetPackageAutoDeployArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("setPackageAutoDeploy", buildSetPackageAutoDeploy(args), opts);
-};
-
-/** Turn a source's auto-deploy switch on or off (epic memql#4900).
-The PERSON's write, and an owned one: the write guard resolves the target row and admits its owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's decision, which is what makes an auto-run's provenance honest. */
-// Bound concept: v1:platform:package (machine-readable: BoundConcepts["setPackageDisabledDeployables"] in generated_concepts.ts).
-export interface SetPackageDisabledDeployablesArgs {
-  packageId: string;
-  disabledDeployables: string[];
-}
-
-export function buildSetPackageDisabledDeployables(args: SetPackageDisabledDeployablesArgs): string {
-  const parts: string[] = [];
-  parts.push("packageId: " + renderMemQLValue(args.packageId));
-  parts.push("disabledDeployables: " + renderMemQLValue(args.disabledDeployables));
-  return "mutation setPackageDisabledDeployables(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    setPackageDisabledDeployables(args: SetPackageDisabledDeployablesArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.setPackageDisabledDeployables = function (this: QueryClient, args: SetPackageDisabledDeployablesArgs = {} as SetPackageDisabledDeployablesArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("setPackageDisabledDeployables", buildSetPackageDisabledDeployables(args), opts);
 };
 
 /** Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. */
