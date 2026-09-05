@@ -384,15 +384,22 @@ func setMembershipFields(prior, partial map[string]any, fields []string, dir mem
 			continue
 		}
 
-		out := make([]any, 0, len(stored)+len(changing))
-		seen := make(map[string]struct{}, len(stored)+len(changing))
-		for _, m := range append(append([]any{}, stored...), changing...) {
-			k := memberKey(m)
-			if _, dup := seen[k]; dup {
-				continue
+		// Walked in sequence rather than concatenated, and sized from ONE
+		// slice rather than from the sum of two. The sum is a length derived
+		// from a decoded payload and is flagged as an allocation-size overflow
+		// (go/allocation-size-overflow); the concatenation was also a whole
+		// extra copy of the stored set to iterate it once.
+		out := make([]any, 0, len(stored))
+		seen := make(map[string]struct{}, len(stored))
+		for _, group := range [][]any{stored, changing} {
+			for _, m := range group {
+				k := memberKey(m)
+				if _, dup := seen[k]; dup {
+					continue
+				}
+				seen[k] = struct{}{}
+				out = append(out, m)
 			}
-			seen[k] = struct{}{}
-			out = append(out, m)
 		}
 		partial[f] = out
 	}

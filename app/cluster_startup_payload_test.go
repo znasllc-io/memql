@@ -130,7 +130,7 @@ const (
 )
 
 func TestStartupPayloadValuesSatisfyTheirMutationArgTypes(t *testing.T) {
-	t.Setenv("MEMQL_DATABASE_DSN", "postgres://memql:pw@db.internal:15432/memql?sslmode=require")
+	t.Setenv("MEMQL_DATABASE_DSN", "postgres://fixture:pw@db.invalid:15432/parsefixture?sslmode=require")
 	t.Setenv("MEMQL_IDENTITY_VERIFIER_BASE_URL", "https://identity.example.com")
 	t.Setenv("MEMQL_IDENTITY_VERIFIER_AUDIENCE", "memql")
 	t.Setenv("MEMQL_IDENTITY_VERIFIER_JWKS_URL", "https://identity.example.com/.well-known/jwks.json")
@@ -178,15 +178,21 @@ func TestStartupPayloadValuesSatisfyTheirMutationArgTypes(t *testing.T) {
 }
 
 // The direct regression: a DSN's port reaches the payload as a NUMBER.
+// The DSNs below name `parsefixture` rather than this project's shared test
+// database, and nothing here connects to anything: `parseDatabaseInfo` only
+// PARSES, and what these vary is the port, which is the whole subject. Naming
+// the shared database in a fixture that never dials it is the confusion
+// TestNoHardcodedSharedDSNInTests exists to prevent -- and routing through
+// dbtest.DSN() would supply one port, which is the one thing these cannot use.
 func TestDatabasePortFromDSNIsANumber(t *testing.T) {
 	cases := []struct {
 		name string
 		dsn  string
 		want any
 	}{
-		{"the default port, named", "postgres://u:p@h:5432/memql", 5432},
-		{"a port that is not the default", "postgres://u:p@h:15432/memql", 15432},
-		{"no port at all", "postgres://u:p@h/memql", 5432},
+		{"the default port, named", "postgres://u:p@h:5432/parsefixture", 5432},
+		{"a port that is not the default", "postgres://u:p@h:15432/parsefixture", 15432},
+		{"no port at all", "postgres://u:p@h/parsefixture", 5432},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -211,7 +217,7 @@ func TestDatabasePortFromDSNIsANumber(t *testing.T) {
 // rather than with a fabricated 5432: an absent key leaves the mutation to
 // stamp its own default, and the payload never claims a reading nobody took.
 func TestAnUnreadablePortIsOmittedRatherThanGuessed(t *testing.T) {
-	t.Setenv("MEMQL_DATABASE_DSN", "postgres://u:p@h:99999999999999999999/memql")
+	t.Setenv("MEMQL_DATABASE_DSN", "postgres://u:p@h:99999999999999999999/parsefixture")
 	info := parseDatabaseInfo()
 	if info == nil {
 		t.Skip("net/url refused the DSN outright, which is a stricter answer to the same question")
