@@ -178,7 +178,9 @@ export function SourceView({
       </div>
 
       <ActionBar
-        state="Tracked"
+        // ARCHIVED IS NOT TRACKED. The word was hard-coded, so an archived
+        // source said "Tracked" with its own Restore control directly above.
+        state={pkg.status === "archived" ? "Archived" : "Tracked"}
         // COUNTED THE WAY THE LIST COUNTS, which is everything this source
         // declares -- deployed or not. The two surfaces sat side by side
         // saying "2 apps" and "1 app" about the same source, because this one
@@ -188,7 +190,7 @@ export function SourceView({
         }${
           pkg.autoDeploy ? " -- deploys itself when the plan is unchanged" : ""
         }`}
-        tone={live > 0 ? "live" : "none"}
+        tone={pkg.status === "archived" ? "none" : live > 0 ? "live" : "none"}
         acts={acts}
       />
     </div>

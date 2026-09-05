@@ -1,5 +1,5 @@
 ---
-title: Signing in with the organisation's directory (Entra ID / OIDC)
+title: Signing in with the organization's directory (Entra ID / OIDC)
 audience: public
 status: stable
 area: operate
@@ -9,7 +9,7 @@ owner: platform
 
 # Entra ID / OIDC sign-in
 
-**Audience:** an operator whose organisation already has an identity provider
+**Audience:** an operator whose organization already has an identity provider
 and who would rather not run a second one.
 **Issue:** [memql#4611](https://github.com/znasllc-io/memql/issues/4611).
 
@@ -22,14 +22,14 @@ Related: [access-model.md](access-model.md) ·
 MemQL is an OAuth 2.1 **authorization server**: claude.ai, the VS Code
 extension and the portal authorize against it. Until this, a person always
 proved themselves to MemQL directly — magic link, passkey, device code,
-recovery key. For an organisation already on Microsoft 365 that is the wrong
+recovery key. For an organization already on Microsoft 365 that is the wrong
 shape:
 
 - **Directory membership becomes the invitation.** No invitation emails for
   internal staff, which removes the entire class of defect
   [memql#4601](https://github.com/znasllc-io/memql/issues/4601) exists to fix.
 - **No new credential** for the user to hold, lose, or be phished out of.
-- **The organisation's MFA and conditional access apply**, rather than being
+- **The organization's MFA and conditional access apply**, rather than being
   approximated per-cluster.
 - **Deprovisioning follows the directory.** Removing somebody from the company
   stops them signing in here. Nothing email-based can do that.
@@ -93,7 +93,7 @@ admitted, and an address typed into the sign-in box is refused with
 
 That reason is why it is its own mode rather than a flag on `invite_only`: there
 the answer is "ask an admin for an invitation", and here it is "sign in with your
-organisation account", which is a different instruction to somebody who has one
+organization account", which is a different instruction to somebody who has one
 and does not know it applies.
 
 **Invitations still work under it**, deliberately: a federated cluster still has

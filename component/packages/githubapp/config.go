@@ -62,7 +62,7 @@ type Config struct {
 	// AppId is the app's numeric id, the `iss` of every app JWT.
 	AppId string
 	// Slug is the app's URL slug, and the only reason it is here is the
-	// installation LINK: "install on another organisation" is a URL a person
+	// installation LINK: "install on another organization" is a URL a person
 	// follows, and a cluster that could mint tokens but not name where to
 	// install would answer repository_not_installed with no repair attached.
 	Slug string

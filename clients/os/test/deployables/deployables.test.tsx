@@ -1250,7 +1250,7 @@ describe("the credential card", () => {
       }
     });
 
-    it("fires when a grant reaches a new organisation, or is remade as somebody else", () => {
+    it("fires when a grant reaches a new organization, or is remade as somebody else", () => {
       // The grant half (epic memql#4915). An installation webhook moving
       // `installationIds` IS what the connected-account card exists to show,
       // and a reconnect under a different GitHub account is a different

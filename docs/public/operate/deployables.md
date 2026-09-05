@@ -398,7 +398,7 @@ derivation the portal host uses).
 `mail`. Deriving it means a new role can never become claimable by forgetting
 to add it here. The last three are different in kind: nothing serves them
 today, and that is precisely why they are held -- they are the labels a person
-reads as the organisation's rather than a tenant's, and `mail` is where a mail
+reads as the organization's rather than a tenant's, and `mail` is where a mail
 host would land if one is ever added.
 
 Any other hostname -- a custom apex, a different domain -- stays

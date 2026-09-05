@@ -60,7 +60,7 @@ import {
 // the real LiveCollection, the real projections and the real generated
 // builders all run and the assertions are on the STRING that reaches the
 // wire. The pure half is asserted directly, because "beta-corp sorts after
-// acme and a pending organisation sorts after both" is a statement about a
+// acme and a pending organization sorts after both" is a statement about a
 // function and not about a DOM.
 //
 // Everything a person is asked to believe is asserted as something they
@@ -163,7 +163,7 @@ describe("the picker's list", () => {
     expect(groups[0]!.repositories.map((r) => r.name)).toEqual(["Docs", "widget"]);
   });
 
-  it("puts a pending organisation last, whatever its name would sort as", () => {
+  it("puts a pending organization last, whatever its name would sort as", () => {
     // beta-corp sorts between acme and octocat by name, and comes after both
     // anyway: a group with nothing in it is not a choice, and interleaving it
     // would put a line nobody can act on among the ones they can.
@@ -180,9 +180,9 @@ describe("the picker's list", () => {
     expect(groupRepositories(PAGE, "nothing-like-this")).toEqual([]);
   });
 
-  it("finds a pending organisation by the name somebody is waiting on", () => {
+  it("finds a pending organization by the name somebody is waiting on", () => {
     // Hiding it would take away the one sentence that explains why that
-    // organisation has no repositories.
+    // organization has no repositories.
     const groups = groupRepositories(PAGE, "beta");
     expect(groups.map((g) => g.owner)).toEqual(["beta-corp"]);
   });
@@ -372,11 +372,11 @@ describe("the repository picker", () => {
     expect(screen.getByRole("button", { name: /docs/ }).getAttribute("data-current")).toBeNull();
   });
 
-  it("renders a pending organisation BY NAME, as a sentence and not an error", () => {
+  it("renders a pending organization BY NAME, as a sentence and not an error", () => {
     renderPicker();
     const group = screen.getByRole("group", { name: "beta-corp" });
     expect(within(group).getByText("Waiting for an owner of beta-corp to approve the app.")).toBeTruthy();
-    // `--os-warn`, never `--os-error`: an organisation owner has not clicked
+    // `--os-warn`, never `--os-error`: an organization owner has not clicked
     // yet, which is somebody's next step rather than a fault.
     expect(within(group).getByText("pending").getAttribute("data-tone")).toBe("warn");
     expect(group.querySelector("[role='alert']")).toBeNull();
@@ -420,7 +420,7 @@ describe("the repository picker", () => {
       page: repositoryPageFrom(repositoriesReply({})),
       installUrl: "https://github.com/apps/memql/installations/new",
     });
-    const link = screen.getByRole("link", { name: "Install on another organisation" });
+    const link = screen.getByRole("link", { name: "Install on another organization" });
     expect(link.getAttribute("href")).toBe("https://github.com/apps/memql/installations/new");
     expect(link.getAttribute("target")).toBe("_blank");
     // LOAD-BEARING: a new tab handed a live `window.opener` can navigate the
@@ -430,7 +430,7 @@ describe("the repository picker", () => {
 
   it("offers no link at all on a cluster with no GitHub App", () => {
     renderPicker({ page: repositoryPageFrom(repositoriesReply({})), installUrl: "" });
-    expect(screen.queryByRole("link", { name: "Install on another organisation" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Install on another organization" })).toBeNull();
   });
 
   it("keeps the last good list when a read is refused, because a refusal is not a zero", () => {
@@ -697,7 +697,7 @@ describe("Settings > Sources", () => {
     // carries -- which is the honest resolution of a fact this cluster holds
     // installation ids for and no logins.
     expect(within(card).getByText("2 installations")).toBeTruthy();
-    const link = await within(card).findByRole("link", { name: "Install on another organisation" });
+    const link = await within(card).findByRole("link", { name: "Install on another organization" });
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noreferrer noopener");
     // The install URL is only learnable from a begin call, asked once.
@@ -706,7 +706,7 @@ describe("Settings > Sources", () => {
     ]);
   });
 
-  it("asks GitHub which organisations only when somebody presses, and says when it looked", async () => {
+  it("asks GitHub which organizations only when somebody presses, and says when it looked", async () => {
     const { connection } = mountSources({
       credentials: [GRANT],
       repositories: repositoriesReply({
@@ -722,13 +722,13 @@ describe("Settings > Sources", () => {
     // says whose answer the rest would be.
     expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
     expect(within(card).getByText("2 installations")).toBeTruthy();
-    expect(within(group).getByText(/Which organisations, and any waiting for an owner/)).toBeTruthy();
+    expect(within(group).getByText(/Which organizations, and any waiting for an owner/)).toBeTruthy();
 
     await click(within(group).getByRole("button", { name: "Check what it reaches" }));
     expect(connection.callsNamed("sourceRepositories")).toEqual([
       'builtin sourceRepositories(credentialId: "cred-grant", page: 1)',
     ]);
-    // The logins replace the count, and the organisation still waiting for
+    // The logins replace the count, and the organization still waiting for
     // its owner becomes reachable on the surface built to show it -- in the
     // warn tone, because nobody has done anything wrong.
     expect(await within(card).findByText("acme")).toBeTruthy();
@@ -743,7 +743,7 @@ describe("Settings > Sources", () => {
     const { connection } = mountSources({ credentials: [GRANT] });
     const card = await screen.findByRole("region", { name: "GitHub" });
     expect(within(card).getByText("2 installations")).toBeTruthy();
-    // Somebody installed the app on a third organisation. That IS the change
+    // Somebody installed the app on a third organization. That IS the change
     // this card exists to show, so it arrives on the credential broadcast.
     await emit(
       connection,

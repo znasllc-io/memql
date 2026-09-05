@@ -9,13 +9,13 @@
 // themselves to MemQL directly -- magic link, passkey, device code, recovery
 // key -- so the cluster was an authorization server with no upstream.
 //
-// For an organisation already on Microsoft 365 that is the wrong shape, and the
+// For an organization already on Microsoft 365 that is the wrong shape, and the
 // reason is not convenience:
 //
 //   - Directory membership IS the invitation, which removes the entire class of
 //     defect memql#4601 exists to fix. No invitation emails for internal staff.
 //   - No new credential for the user to hold, lose, or be phished out of.
-//   - The organisation's existing MFA and conditional access apply, rather than
+//   - The organization's existing MFA and conditional access apply, rather than
 //     being approximated per-cluster.
 //   - DEPROVISIONING FOLLOWS THE DIRECTORY. Today, removing somebody from the
 //     company does not remove them from a MemQL cluster. That one is not a

@@ -21,10 +21,10 @@ import (
 
 func TestSharedMailboxListIsPinned(t *testing.T) {
 	want := []string{
-		// RFC 2142: the mailboxes an organisation is expected to run.
+		// RFC 2142: the mailboxes an organization is expected to run.
 		"abuse", "hostmaster", "info", "marketing", "noc", "postmaster",
 		"sales", "security", "support", "webmaster", "www",
-		// The names organisations actually pick for a shared inbox.
+		// The names organizations actually pick for a shared inbox.
 		"admin", "billing", "contact", "dev", "finance", "hello", "hr",
 		"it", "legal", "no-reply", "noreply", "office", "ops", "team",
 	}

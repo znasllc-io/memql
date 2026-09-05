@@ -393,9 +393,14 @@ export function DeployablesSection({
               ))}
             </Select>
           </Refine>
+          {/* "New", not "New deployable": the Head directly beside it reads
+              Deployables, so the noun was said twice on one line. The
+              ACCESSIBLE name keeps the full phrase, because a screen reader
+              reaching this button out of context has no Head to read it
+              against. */}
           {canWrite ? (
-            <Button tone="primary" onClick={() => setView({ kind: "compose" })}>
-              <Plus size={13} aria-hidden /> New deployable
+            <Button tone="primary" ariaLabel="New deployable" onClick={() => setView({ kind: "compose" })}>
+              <Plus size={13} aria-hidden /> New
             </Button>
           ) : null}
         </Head>

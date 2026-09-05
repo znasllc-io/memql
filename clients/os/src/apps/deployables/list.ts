@@ -275,6 +275,36 @@ export function foldDeployables(
     push(pkg === null ? `site:${site.id}` : `pkg:${pkg.id}`, pkg, siteRowFor(site, pkg, parked));
   }
 
+  // THE ROWS THAT WILL SERVE: every app a parked run's report names that has
+  // no site yet, and -- when the report names none -- the source itself, so
+  // a parked run is never invisible. Somebody who closed the window
+  // mid-compose finds their run on its row (design section A).
+  for (const [packageId, run] of parkedByPackage) {
+    const pkg = packageById.get(packageId);
+    if (pkg === undefined || run === null) continue;
+    const apps = run.report?.deployables ?? [];
+    const pending = apps.length === 0 ? [{ name: "", kind: "" }] : apps.filter((a) => !served.has(`${packageId}/${a.name}`));
+    for (const app of pending) {
+      // CLAIM THE KEY, or the declared pass below adds the same app a second
+      // time -- it reads the same catalogue and has no other way to know this
+      // row already exists.
+      served.add(`${packageId}/${app.name}`);
+      push(`pkg:${packageId}`, pkg, {
+        key: `${packageId}/${app.name}`,
+        site: null,
+        pkg,
+        app: app.name,
+        name: app.name === "" ? pkg.name || packageId : app.name,
+        hostname: "",
+        kind: app.kind,
+        parked: run,
+        // A run is IN FLIGHT for this app; whatever the off-list says, this is
+        // happening and the row must not read as inert.
+        disabled: false,
+      });
+    }
+  }
+
   // WHAT THE SOURCE DECLARES BUT HAS NOT DEPLOYED.
   //
   // A site row is written only for an app that actually deployed, so an app
@@ -285,9 +315,16 @@ export function foldDeployables(
   // the difference between it and the sites is exactly the set a person can
   // still deploy.
   //
-  // BEFORE the parked pass below, so that when a parked run names the same app
-  // the run's row wins: a run in flight is the more specific fact, and `served`
+  // AFTER the parked pass above, so that when a parked run names the same app
+  // THE RUN'S ROW WINS: a run in flight is the more specific fact, and `served`
   // is what keeps the two from both landing.
+  //
+  // THIS BLOCK USED TO RUN FIRST, and the comment claimed this outcome while
+  // the code produced its opposite -- the declared pass claimed the key, so no
+  // row ever carried a run. The reopen path was dead code, and clicking the
+  // row started ANOTHER analyze run every time: somebody who closed the window
+  // mid-compose could not get back to their own gate and silently accumulated
+  // runs, each of which parked.
   for (const pkg of packages) {
     for (const declared of pkg.declares) {
       const key = `${pkg.id}/${declared.name}`;
@@ -308,32 +345,6 @@ export function foldDeployables(
         // among the apps that have no site. One that HAS a site was deployed,
         // and the site is the fact.
         disabled: pkg.disabledDeployables.includes(declared.name),
-      });
-    }
-  }
-
-  // THE ROWS THAT WILL SERVE: every app a parked run's report names that has
-  // no site yet, and -- when the report names none -- the source itself, so
-  // a parked run is never invisible. Somebody who closed the window
-  // mid-compose finds their run on its row (design section A).
-  for (const [packageId, run] of parkedByPackage) {
-    const pkg = packageById.get(packageId);
-    if (pkg === undefined || run === null) continue;
-    const apps = run.report?.deployables ?? [];
-    const pending = apps.length === 0 ? [{ name: "", kind: "" }] : apps.filter((a) => !served.has(`${packageId}/${a.name}`));
-    for (const app of pending) {
-      push(`pkg:${packageId}`, pkg, {
-        key: `${packageId}/${app.name}`,
-        site: null,
-        pkg,
-        app: app.name,
-        name: app.name === "" ? pkg.name || packageId : app.name,
-        hostname: "",
-        kind: app.kind,
-        parked: run,
-        // A run is IN FLIGHT for this app; whatever the off-list says, this is
-        // happening and the row must not read as inert.
-        disabled: false,
       });
     }
   }

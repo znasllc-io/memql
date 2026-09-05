@@ -385,6 +385,33 @@ describe("what a source declares but has not deployed", () => {
 // console offered to deploy it, and discarding the result brought it straight
 // back as another offer. The owner's choice had nowhere to live. It does now,
 // and the row it produces can be found and cannot be deployed.
+describe("a declared app that a parked run is about", () => {
+  const SRC = { ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "admin", kind: "spa" }] };
+
+  it("carries the RUN, so the gate somebody left open can be reopened", () => {
+    // The declared pass claimed the key before the parked pass could, so no
+    // row ever carried `parked`: the reopen path was dead, and clicking the
+    // row started ANOTHER analyze run every time. Somebody who closed the
+    // window mid-compose could not get back to their own gate and silently
+    // accumulated runs.
+    const run = parkedRun({ id: "dep-parked", packageId: "pkg-acme" });
+    const rows = fold([], [SRC], [run])[0]!.rows;
+    const storefront = rows.find((r) => r.name === "storefront")!;
+    expect(storefront.parked).not.toBeNull();
+    expect(storefront.parked?.id).toBe("dep-parked");
+  });
+
+  it("still lists a declared app the run does NOT name", () => {
+    // The negative control: the parked pass must not swallow the catalogue.
+    // This run's report names storefront and admin, so a THIRD declared app
+    // is still the declared pass's to add.
+    const three = { ...SRC, declares: [...SRC.declares, { name: "docs", kind: "spa" }] };
+    const rows = fold([], [three], [parkedRun({ id: "dep-parked", packageId: "pkg-acme" })])[0]!.rows;
+    expect(rows.map((r) => r.name).sort()).toEqual(["admin", "docs", "storefront"]);
+    expect(rows.find((r) => r.name === "docs")!.parked).toBeNull();
+  });
+});
+
 describe("a declared app its owner turned off", () => {
   const SRC = {
     ...ACME,

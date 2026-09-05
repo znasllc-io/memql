@@ -118,7 +118,7 @@ This means iteration on the recipe is cheap: improve the prompt, bump `recipeVer
 
 Existing 96 domains get tiered (most are A; finance/legal/health basics are B; clinical medicine and surgical technique are C).
 
-New ~150 domains added in this commit, organised:
+New ~150 domains added in this commit, organized:
 
 - **Science & engineering** (~50): physics, chemistry, biology, earth science, math, CS, engineering disciplines
 - **Medicine & health** (~20): mostly tier C — clinical specialties don't auto-seed; foundational ones (anatomy, pharmacology basics) are tier B

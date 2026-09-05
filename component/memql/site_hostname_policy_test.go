@@ -376,8 +376,8 @@ func TestUserSiteHostnamePolicy(t *testing.T) {
 		{"mcp.example.com", false, "reserved: the MCP protocol head"},
 		{"portal.example.com", false, "reserved: the platform's own console, site #1"},
 		{"os.example.com", false, "reserved: the platform's OS shell"},
-		{"www.example.com", false, "reserved: reads as the organisation's"},
-		{"admin.example.com", false, "reserved: reads as the organisation's"},
+		{"www.example.com", false, "reserved: reads as the organization's"},
+		{"admin.example.com", false, "reserved: reads as the organization's"},
 		{"mail.example.com", false, "reserved: where a mail host would land"},
 	}
 	for _, tc := range cases {

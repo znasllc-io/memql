@@ -9,7 +9,7 @@ import type { PageManifest } from "../pages/manifest";
 // Every concept in the tree already renders, generically, in the concept
 // browser -- that is memql#3316 + #3317 + #3318, and it is the property the
 // whole epic protects. These five are the ones an OPERATOR LIVES IN: the
-// users in their organisation, the agents doing work, the accounts they
+// users in their organization, the agents doing work, the accounts they
 // serve, what is deployed, and what happened. A generic rendering is the
 // correct answer for a concept nobody has thought about; it is the wrong
 // answer for the five screens that decide what the product feels like.

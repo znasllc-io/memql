@@ -27,7 +27,7 @@ import {
 
 // The Data origins page (epic memql#4378).
 //
-// Two questions, and the page is organised around the fact that they are
+// Two questions, and the page is organized around the fact that they are
 // different questions:
 //
 //   WHAT IS DECLARED -- every concept's data state and the connectors it

@@ -28,7 +28,7 @@
 #     ssh path was simply unavailable and the repoURL had to become https with
 #     a fine-grained token. A lifecycle step must therefore treat the transport
 #     as an INPUT; a script that hardcodes one is a script that cannot run at
-#     half the organisations that will run it.
+#     half the organizations that will run it.
 #
 # THE APP-OF-APPS IS REFUSED HERE, DELIBERATELY. deploy/argocd/apps/root.yaml
 # carries `automated: {prune: true, selfHeal: true}` and an include glob
@@ -58,7 +58,7 @@ cap_init "deploy.registerGitOpsRepo" \
     "Register an instance's git repository with ArgoCD: credential Secret plus the AppProject sourceRepos entry."
 
 cap_spec_param_required "repoUrl"   "the instance repository, exactly as the Application's repoURL names it"
-cap_spec_param_required "transport" "https or ssh. An ORG-POLICY question, not a preference: deploy keys are disabled org-wide at some organisations, which makes ssh unavailable rather than unattractive"
+cap_spec_param_required "transport" "https or ssh. An ORG-POLICY question, not a preference: deploy keys are disabled org-wide at some organizations, which makes ssh unavailable rather than unattractive"
 cap_spec_param "project"      "ArgoCD AppProject that must permit the repo (default memql)"
 cap_spec_param "argoNamespace" "namespace ArgoCD runs in (default argocd)"
 cap_spec_param "username"     "git username for https (default: a placeholder accepted by GitHub token auth)"

@@ -62,7 +62,7 @@ export function modeStatement(mode: string, domains: string): string {
       // control is for the people the directory does NOT cover -- and saying
       // so is the difference between an operator who understands why the
       // invite panel still exists and one who thinks it is now redundant.
-      return "This cluster admits people through your organisation's directory. An invitation is for somebody the directory does not cover -- a contractor, an auditor.";
+      return "This cluster admits people through your organization's directory. An invitation is for somebody the directory does not cover -- a contractor, an auditor.";
     default:
       return "";
   }

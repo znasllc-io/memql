@@ -227,7 +227,7 @@ const STOP_FOR_CODE: Readonly<Record<string, StopId>> = {
   credential_revoked: "source",
   // The GitHub App grant codes (epic memql#4912) all park the SOURCE stop,
   // because every repair they name is a choice about where this deployable
-  // comes from: reconnect, install the app, ask an organisation owner, or use
+  // comes from: reconnect, install the app, ask an organization owner, or use
   // a token instead. Without an entry here a grant refusal would park
   // whichever stop happened to be open, which is the one place a person would
   // not look for it.
@@ -241,6 +241,9 @@ const STOP_FOR_CODE: Readonly<Record<string, StopId>> = {
   deployable_path_missing: "whatItIs",
   deployable_kind_unknown: "whatItIs",
   deployable_binding_missing: "whatItIs",
+  // ...but a MISSING ADDRESS belongs where addresses are chosen. The two were
+  // one code, so one of them always sent a person to the wrong stop.
+  deployable_hostname_unchosen: "whereItLives",
   dsl_domain_reserved: "whatItIs",
   dsl_refuses_boot: "whatItIs",
   dsl_requires_cluster_owner: "whatItIs",
@@ -520,6 +523,15 @@ function liveStop(stop: StopDef, site: StandingSite | null): RailStage {
  * refusal to place, and a page that guessed a stop for one would send the
  * person to repair the wrong thing.
  */
+/**
+ * Which stop a refusal CODE belongs to, exposed so a test can hold the map to
+ * the copy: a headline that names the right thing while the rail sends the
+ * person to the wrong stop is only half a repair.
+ */
+export function refusalStopForCode(code: string): StopId | undefined {
+  return STOP_FOR_CODE[code];
+}
+
 export function refusalStopFor(run: DeploymentRow | null): StopId | null {
   if (run === null) return null;
   const terminal = TERMINAL[run.status];

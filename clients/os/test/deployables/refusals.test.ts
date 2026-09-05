@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { refusalStopForCode } from "../../src/apps/deployables/page/rail";
 import { SERVER_SENTENCE_ONLY, copyFor, knownCodes } from "../../src/apps/deployables/packages/refusals";
 
 // Every refusal code the engine can emit has a home in this build: copy in
@@ -130,6 +131,99 @@ describe("refusal copy coverage", () => {
     }
   });
 
+  it("names what actually happened, now that the engine tells the two apart", () => {
+    // THE BUG THIS PINS, and its proper end state. component/packages used to
+    // raise ONE code twice: for a storefront declared with no binding
+    // (analyze.go) and for an app that had never been deployed and was given
+    // no hostname (stages.go). The headline read "A storefront has no store to
+    // talk to", written for the first -- so the owner, who had simply not
+    // chosen a hostname, was sent to look at a Shopify binding that was never
+    // the problem.
+    //
+    // A single headline could only ever describe neither. The engine splits
+    // them now (`deployable_hostname_unchosen`), so each names its own thing
+    // and each carries the next step that actually repairs it.
+    const binding = copyFor("deployable_binding_missing");
+    expect(binding?.title).toBe("A storefront has no store to talk to");
+    expect(binding?.next).toContain("manifest");
+
+    const hostname = copyFor("deployable_hostname_unchosen");
+    expect(hostname?.title).toBe("A declared app has no address yet");
+    // The regression stated as the words that must not come back: the hostname
+    // half must never name a storefront, a store or Shopify again.
+    expect(`${hostname?.title} ${hostname?.next}`.toLowerCase()).not.toMatch(/storefront|store|shopify/);
+    // ...and it names the stop that repairs it, which is not the one the
+    // binding's repair lives on.
+    expect(hostname?.next).toContain("Where it lives");
+  });
+
+  it("sends each of the two to the stop where ITS repair lives", () => {
+    // The headline no longer misdirects; the rail must not either. A binding
+    // is edited in the manifest (What it is); an address is chosen at Where it
+    // lives. One code could only ever send half of them to the wrong place.
+    expect(refusalStopForCode("deployable_binding_missing")).toBe("whatItIs");
+    expect(refusalStopForCode("deployable_hostname_unchosen")).toBe("whereItLives");
+  });
+
+  it("keeps each audited code on ITS OWN headline", () => {
+    // A TABLE, NOT A LOOKUP. The failure this catches is a headline written
+    // for one code sitting on another -- which is exactly what shipped for
+    // deployable_binding_missing -- and a test that only asked "does copyFor
+    // answer something" cannot see it. So the pairs are asserted by name, and
+    // a headline moved to the wrong code fails here rather than in a browser.
+    const pairs: [string, string][] = [
+      ["package_manifest_missing", "This source has no package manifest"],
+      ["package_manifest_invalid", "The package manifest is not valid"],
+      ["deployable_path_missing", "A declared app is not in the source"],
+      ["deployable_kind_unknown", "A declared app has a kind this cluster does not serve"],
+      ["deployable_binding_missing", "A storefront has no store to talk to"],
+      ["deployable_hostname_unchosen", "A declared app has no address yet"],
+      ["source_too_large", "This is over the limits this cluster accepts"],
+      ["bundle_path_invalid", "This archive is not a plain tree"],
+      ["no_worker_available", "None of your machines took this build"],
+      ["no_workbench_peer", "This cluster has no build surface running"],
+      ["site_not_deletable", "This deployable has not been archived yet"],
+      ["delete_confirmation_mismatch", "That is not this deployable's hostname"],
+      ["archive_confirmation_mismatch", "What you typed does not match"],
+      ["deployment_cancelled", "You stopped this deploy"],
+      ["deployable_skipped", "You left this one out"],
+    ];
+    for (const [code, title] of pairs) {
+      expect(copyFor(code)?.title, `${code} does not carry its own headline`).toBe(title);
+    }
+  });
+
+  it("gives no two codes the same headline", () => {
+    // The other half of a mis-mapping: a headline copied onto a second code
+    // answers a question that code was never asked. Every entry describes a
+    // different condition, so every headline is different too.
+    const seen = new Map<string, string>();
+    for (const code of knownCodes()) {
+      const title = copyFor(code)?.title ?? "";
+      const first = seen.get(title);
+      expect(first, `${code} and ${first} share the headline ${JSON.stringify(title)}`).toBeUndefined();
+      seen.set(title, code);
+    }
+  });
+
+  it("keeps the engine's catch-all on the reading it is documented for", () => {
+    // `source_unreadable` is spelled for roughly two dozen conditions across
+    // component/packages, and only about half are about a source: the rest
+    // are "no package %q is readable by this caller", "deployment %q finished
+    // as %q rather than succeeded", "this cluster has no rollout surface
+    // configured". No headline is true of all of them.
+    //
+    // It keeps one anyway, because this build must supply one: the second
+    // coverage gate (build.test.tsx) asserts over `knownCodes()` alone, so
+    // the honest home -- SERVER_SENTENCE_ONLY, "the sentence is the whole
+    // copy" -- fails it. The headline stays with the reading refusal.go
+    // DOCUMENTS for the code, which is also the one the rail commits to by
+    // parking it on the Source stop. Pinned so the next person to widen this
+    // code engine-side meets the decision rather than rediscovering it.
+    expect(copyFor("source_unreadable")?.title).toBe("This cluster could not read the source");
+    expect(SERVER_SENTENCE_ONLY).toHaveLength(0);
+  });
+
   it("carries the GitHub Connect epic's five new codes", () => {
     // Pinned by name for the same reason the compose block above is: these
     // five are what a person sees when a GRANT fails, and every one of them
@@ -140,7 +234,7 @@ describe("refusal copy coverage", () => {
     expect(copyFor("reconnect_required")?.next).toContain("Settings > Sources");
     expect(copyFor("repository_not_installed")?.title).toBe("The app is not installed on that repository");
     expect(copyFor("repository_not_installed")?.next).toContain("Install it");
-    expect(copyFor("installation_pending")?.title).toBe("Waiting for an organisation owner to approve");
+    expect(copyFor("installation_pending")?.title).toBe("Waiting for an organization owner to approve");
     // The server's sentence names the ORGANISATION, which is the only fact
     // that helps; anything composed here would be a worse copy of it.
     expect(copyFor("installation_pending")?.next).toBe("");

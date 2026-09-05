@@ -206,7 +206,7 @@ func TestImportsVSCodeRecognisesEveryForm(t *testing.T) {
 
 // TestVSCodeImportGuardCoversTheLogicModules asserts the guard is actually
 // looking at the modules it exists to protect. The scan above walks whatever
-// it finds, so a tree reorganisation that emptied src/state/ or src/async/
+// it finds, so a tree reorganization that emptied src/state/ or src/async/
 // would leave every assertion vacuously green.
 func TestVSCodeImportGuardCoversTheLogicModules(t *testing.T) {
 	sources := vscodeExtensionSources(t)

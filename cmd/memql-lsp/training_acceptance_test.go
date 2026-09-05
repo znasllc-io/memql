@@ -146,7 +146,7 @@ func without(t *testing.T, catalog []catalogConstruct, kind, name string) []cata
 
 // firstQueryName returns the name of the first `query` the document declares, so
 // the assertions below name a construct the file actually has rather than one
-// pinned by a constant that rots the next time the tree is reorganised.
+// pinned by a constant that rots the next time the tree is reorganized.
 func firstQueryName(t *testing.T, doc string) string {
 	t.Helper()
 	for _, c := range sense.ConstructHashes(doc) {

@@ -134,7 +134,7 @@ var standardDomains = []StandardDomain{
 	// --- Original pre-existing domains ------------------------------------
 	{ID: "inventory-supply-chain", Name: "Inventory & Supply Chain", Description: "Stock levels, supplier management, procurement, logistics."},
 	{ID: "financial-data", Name: "Financial Data", Description: "Financial statements, ledgers, transactions, accounts."},
-	{ID: "employee-records", Name: "Employee Records", Description: "HR files, roles, compensation, organisational directory."},
+	{ID: "employee-records", Name: "Employee Records", Description: "HR files, roles, compensation, organizational directory."},
 	{ID: "customer-relations", Name: "Customer Relations", Description: "Customer accounts, contact history, engagement records."},
 	{ID: "product-catalog", Name: "Product Catalog", Description: "Product SKUs, specifications, lifecycle, pricing tiers."},
 	{ID: "quality-metrics", Name: "Quality Metrics", Description: "Quality KPIs, defect tracking, inspection data, compliance audits."},

@@ -18,7 +18,7 @@ Deployables ask me for a token".
 A person connects GitHub once, anywhere in the product, and from then on picks a
 repository from a list instead of typing a URL and pasting a token. The pasted
 token stays, behind "Use a token instead", for a host this is not, or an
-organisation that will not install an app.
+organization that will not install an app.
 
 **It is a connection, not a sign-in.** Nothing here changes who a person IS in
 this cluster. Connecting writes one `v1:platform:sourceCredential` row that the
@@ -39,7 +39,7 @@ works, because a GitHub App accepts several callback URLs. See
 [Sharing one app across clusters](#sharing-one-app-across-clusters) before you
 decide.
 
-At <https://github.com/settings/apps/new> (or your organisation's equivalent
+At <https://github.com/settings/apps/new> (or your organization's equivalent
 under Settings -> Developer settings -> GitHub Apps):
 
 | Field | Value |
@@ -76,7 +76,7 @@ Then, on the app's page:
    **client secret**.
 3. **Note the app's slug** -- the last path segment of its public page,
    `https://github.com/apps/<slug>`. It is how the product builds the "Install
-   on another organisation" link.
+   on another organization" link.
 
 ---
 
@@ -141,19 +141,19 @@ deployable. It deliberately does not drive anything else; see
 
 ---
 
-## Organisation approval
+## Organization approval
 
-A person who installs the app on an organisation they do not own does not get an
+A person who installs the app on an organization they do not own does not get an
 installation -- they get an installation REQUEST, and an owner of that
-organisation has to approve it. Until then:
+organization has to approve it. Until then:
 
-- the repository picker shows that organisation as a group with one sentence
+- the repository picker shows that organization as a group with one sentence
   naming who has to act, rather than as an empty group or an error;
 - a source pointed at one of its repositories refuses with
-  `installation_pending`, naming the organisation.
+  `installation_pending`, naming the organization.
 
 There is nothing an operator can do about it from this side, which is exactly
-why the surface names the organisation rather than apologising.
+why the surface names the organization rather than apologising.
 
 ---
 
@@ -161,7 +161,7 @@ why the surface names the organisation rather than apologising.
 
 **Settings -> Sources**, connected: "Connected to GitHub as @login", the
 installations the grant reaches as chips, any pending ones marked, a link to
-install on another organisation, and Disconnect.
+install on another organization, and Disconnect.
 
 **The Source stop of a new deployable**, connected: a searchable list of the
 repositories that grant can reach, grouped by owner, each with its visibility,
@@ -182,7 +182,7 @@ server's own sentence beneath:
 |---|---|
 | `reconnect_required` | GitHub refused the grant itself -- the tokens are spent, or the person revoked the authorization at GitHub. One click to repair, and never read as "private, or not there" |
 | `repository_not_installed` | The grant is good and the app is not installed on that repository. An installation link, not another credential |
-| `installation_pending` | An organisation owner has not approved the installation yet, named by organisation |
+| `installation_pending` | An organization owner has not approved the installation yet, named by organization |
 | `github_app_not_configured` | The six values are absent. An operator's condition, and the surface says so rather than implying somebody mistyped something |
 | `connect_state_invalid` | The connect link was expired, replayed, or never issued |
 
@@ -215,7 +215,7 @@ which when something looks stale.
 |---|---|
 | Which installation covers a repository, at fetch time | Asked live, per fetch, with the app's own JWT. Never cached on a row |
 | Which repositories the picker offers | Asked live, per open, with the person's token |
-| Which installations the card shows | Stored on the grant, refreshed whenever the owner's own actor is present: connecting, reconnecting, returning from "Install on another organisation", opening the picker, or probing a repository |
+| Which installations the card shows | Stored on the grant, refreshed whenever the owner's own actor is present: connecting, reconnecting, returning from "Install on another organization", opening the picker, or probing a repository |
 
 The third is the only stored one, and it is deliberately not driven by the
 `installation` webhook. A delivery names a GitHub identity and never a MemQL

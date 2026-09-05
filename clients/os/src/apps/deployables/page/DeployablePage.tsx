@@ -446,7 +446,11 @@ function historySummary(rows: readonly DeploymentRow[]): string {
 function statusWord(status: string): string {
   switch (status) {
     case "succeeded":
-      return "live";
+      // NOT "live". A run that succeeded PUBLISHED; whether the deployable is
+      // serving is the site's business, and a first deploy leaves it `draft`.
+      // The old word put "last live" on a page whose own bar read "Draft --
+      // not served to anyone yet", two lines apart and contradicting.
+      return "published";
     case "abandoned":
       return "lost";
     case "awaiting_confirm":

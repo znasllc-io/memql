@@ -280,7 +280,7 @@ function EmptyPicker({
 }
 
 /**
- * Where one installs the app on another account or organisation.
+ * Where one installs the app on another account or organization.
  *
  * A REAL ANCHOR IN A NEW TAB, and `rel` is not decoration: a new tab handed
  * a live `window.opener` can navigate the shell it came from. Rendered only
@@ -291,7 +291,7 @@ export function InstallLink({ installUrl }: { installUrl: string }) {
   if (installUrl === "") return null;
   return (
     <a className="os-button" data-tone="quiet" href={installUrl} target="_blank" rel="noreferrer noopener">
-      Install on another organisation
+      Install on another organization
     </a>
   );
 }

@@ -200,7 +200,7 @@ type installationsPage struct {
 // only ever compared and put in a URL path, never added up, and a []string
 // keeps the DSL list type honest without a conversion at every read.
 //
-// An installation still awaiting an organisation owner's approval is NOT in
+// An installation still awaiting an organization owner's approval is NOT in
 // this list -- GitHub does not return it -- and that is the correct answer: a
 // pending installation is not a reachable one, and the concept's own
 // documentation says so.

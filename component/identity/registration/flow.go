@@ -163,7 +163,7 @@ func Decide(cfg identity.Config, email string, invite *Invitation) (Decision, er
 		// That is a refusal, and the reason it is a distinct mode rather than
 		// a flag on invite_only is what the refusal has to SAY: under
 		// invite_only the answer is "ask an admin for an invitation", and here
-		// it is "sign in with your organisation account", which is a different
+		// it is "sign in with your organization account", which is a different
 		// instruction to a person who has one and does not know it applies.
 		//
 		// The IdP path does not come through Decide at all: a verified

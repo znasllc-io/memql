@@ -512,7 +512,7 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 			placement := req.Placements[dep.Name]
 			requested := strings.TrimSpace(placement.Hostname)
 			if requested == "" {
-				return outcomes, refuseScoped(CodeDeployableBindingMissing, dep.Name,
+				return outcomes, refuseScoped(CodeDeployableHostnameUnchosen, dep.Name,
 					"deployable %q has never been deployed and no hostname was chosen for it. The first deploy picks a hostname; later ones remember it.",
 					dep.Name)
 			}

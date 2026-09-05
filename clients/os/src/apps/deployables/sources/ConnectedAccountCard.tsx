@@ -48,7 +48,7 @@ export function ConnectedAccountCard({
   grant: CredentialRow;
   /** The installations the grant reaches, by login, when a caller knows them. */
   installations?: readonly InstallationRow[] | null;
-  /** Organisations awaiting an owner's approval, when a caller knows them. */
+  /** Organizations awaiting an owner's approval, when a caller knows them. */
   pending?: readonly PendingInstallation[] | null;
   installUrl?: string;
   /**
@@ -90,7 +90,7 @@ export function ConnectedAccountCard({
         </Chip>
         {installations === null ? (
           reachCount === 0 ? null : (
-            <Chip tone="muted" title="How many accounts or organisations this connection can reach.">
+            <Chip tone="muted" title="How many accounts or organizations this connection can reach.">
               {reachCount} installation{reachCount === 1 ? "" : "s"}
             </Chip>
           )
@@ -102,7 +102,7 @@ export function ConnectedAccountCard({
           ))
         )}
         {(pending ?? []).map((p) => (
-          /* `--os-warn` and never `--os-error`: an organisation owner has
+          /* `--os-warn` and never `--os-error`: an organization owner has
              not clicked yet, which is somebody's next step and not a fault.
              The existing warn word (`.os-deploy-status`) rather than a new
              chip tone, because the kit's chips are neutral / accent / muted
@@ -120,7 +120,7 @@ export function ConnectedAccountCard({
       </Chips>
 
       {(pending ?? []).length > 0 ? (
-        /* NAMED, not "that organisation". The whole content of this state is
+        /* NAMED, not "that organization". The whole content of this state is
            whom to ask, and with two pending chips above it "that" points at
            neither. */
         <Caption>
@@ -143,7 +143,7 @@ export function ConnectedAccountCard({
       {reaches}
 
       {reachCount === 0 && installations === null ? (
-        <Caption>This connection reaches no organisations yet.</Caption>
+        <Caption>This connection reaches no organizations yet.</Caption>
       ) : null}
 
       {installUrl === "" ? null : (

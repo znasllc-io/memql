@@ -58,7 +58,7 @@ type SourceRepositoriesResult struct {
 	// selected repositories, or suspended, is a different answer from one that
 	// simply has none.
 	Installations []PickerInstallation `json:"installations"`
-	// Pending names the organisations whose installation is still waiting for
+	// Pending names the organizations whose installation is still waiting for
 	// an owner's approval. By NAME, because the repair belongs to somebody
 	// else and knowing whom to ask is the person's only useful next step.
 	Pending []string `json:"pending"`
@@ -264,7 +264,7 @@ func pickerFailure(res SourceRepositoriesResult, err error) (SourceRepositoriesR
 		"this cluster could not read the repositories this GitHub connection reaches: %v", err)
 }
 
-// pendingInstallations names the organisations whose installation this person
+// pendingInstallations names the organizations whose installation this person
 // requested and an owner has not yet approved.
 //
 // GitHub surfaces these to the APP rather than to the person, so the call runs

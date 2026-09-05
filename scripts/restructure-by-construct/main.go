@@ -1,4 +1,4 @@
-// scripts/restructure-by-construct/main.go reorganises dsl/<domain>/*.memql
+// scripts/restructure-by-construct/main.go reorganizes dsl/<domain>/*.memql
 // so that each construct kind lives in its own file:
 //
 //	dsl/<domain>/concepts.memql

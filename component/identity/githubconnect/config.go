@@ -208,7 +208,7 @@ func (c Config) AuthorizeURL(redirectURI, state string) string {
 }
 
 // InstallURL is the app's installation page -- "Install on another
-// organisation". Distinct from AuthorizeURL: that one asks the person for
+// organization". Distinct from AuthorizeURL: that one asks the person for
 // their own authority, this one puts the app on an account's repositories.
 func (c Config) InstallURL() string {
 	if !c.Configured() {

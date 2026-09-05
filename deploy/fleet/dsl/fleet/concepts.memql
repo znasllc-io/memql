@@ -67,7 +67,7 @@ use identity.concepts.{ user }
 //   subscriber -- WHO
 // =============================================================================
 
-/// A paying account on MemQL Cloud: one customer organisation, one Stripe customer, one billing
+/// A paying account on MemQL Cloud: one customer organization, one Stripe customer, one billing
 /// relationship. Created at signup, before any money moves and before any instance exists, so that
 /// a checkout that never completes leaves a subscriber with no subscription rather than a dangling
 /// half-record. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write.

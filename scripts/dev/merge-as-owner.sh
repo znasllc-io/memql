@@ -10,7 +10,7 @@
 # reason the script is not a settings change:
 #
 #   GitHub does not allow a pull request's AUTHOR to approve it. There is no
-#   toggle for this at repository, ruleset, organisation or enterprise level --
+#   toggle for this at repository, ruleset, organization or enterprise level --
 #   on your own pull request the Approve control is simply not rendered.
 #
 # So "require the owner's approval, and let the owner approve their own work"
