@@ -39,7 +39,7 @@ const ADJECTIVES = [
   "restless", "rustic", "sable", "sandy", "scarlet", "silent", "silken", "silver",
   "sleek", "snowy", "solar", "spirited", "spry", "steady", "stellar", "sunny",
   "supple", "swift", "tawny", "tender", "tidal", "timber", "topaz", "tranquil",
-  "twilight", "velvet", "vivid", "wandering",
+  "twilight", "velvet", "vivid", "wistful",
 ];
 
 const NOUNS = [
@@ -61,6 +61,10 @@ const NOUNS = [
 /** How many distinct names this can produce. Exported so a test asserts the
  *  space rather than trusting the lists' length by eye. */
 export const NICKNAME_SPACE = ADJECTIVES.length * NOUNS.length;
+
+/** Every word, so a test can hold the LISTS to the rule stated above rather
+ *  than sampling the output and hoping a violation is drawn. */
+export const NICKNAME_WORDS: readonly string[] = [...ADJECTIVES, ...NOUNS];
 
 /**
  * A memorable, address-safe nickname: `<adjective>-<noun>`.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { NICKNAME_SPACE, generateNickname } from "../../src/apps/deployables/packages/nickname";
+import { NICKNAME_SPACE, NICKNAME_WORDS as WORDS, generateNickname } from "../../src/apps/deployables/packages/nickname";
 
 // A generated address is one somebody may have to read off a screen or say to
 // a colleague, so the shape is the contract.
@@ -21,7 +21,16 @@ describe("a generated address", () => {
     }
   });
 
-  it("stays short enough to be memorable", () => {
+  it("stays short enough to be memorable, because every word obeys the rule", () => {
+    // ASSERT THE RULE ON THE WORDS, not on samples of the output. Sampling
+    // found `wandering` (nine letters) only because one draw in a few hundred
+    // happened to pair it with an eight-letter noun -- a real inconsistency
+    // between the stated rule and the data, discovered by luck. Four to eight
+    // letters each bounds every pair at 17 without needing a draw at all.
+    for (const word of WORDS) {
+      expect(word.length).toBeGreaterThanOrEqual(4);
+      expect(word.length).toBeLessThanOrEqual(8);
+    }
     for (let i = 0; i < 400; i++) expect(generateNickname().length).toBeLessThanOrEqual(17);
   });
 

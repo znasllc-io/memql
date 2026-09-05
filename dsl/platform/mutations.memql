@@ -1113,6 +1113,32 @@ mutate package updatePackageSource {
 /// is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's
 /// decision, which is what makes an auto-run's provenance honest.
 @description("Turn auto-deploy on or off for a tracked source")
+/// Set which of a source's deployables its owner has chosen not to deploy.
+///
+/// NOT @serverOnly, and it is the same shape as setPackageAutoDeploy directly below: a person's
+/// standing choice about their own source, so the composite tier's write guard -- the owner, or a
+/// cluster owner -- is exactly the right gate and there is no engine writer at all. The pipeline
+/// must never touch this field: it writes `declares`, which is what the MANIFEST says, and it
+/// rewrites that wholesale on every analysis. Intent kept in the same place would be erased by the
+/// next run.
+///
+/// THE WHOLE LIST, not one name. `update{}` read-merges a field, so a targeted "remove this one"
+/// has no form in the DSL today -- @appendFields (memql#2240) adds to an array and has no
+/// counterpart that removes. The caller holds the current list on the package row it already reads
+/// live, so a read-modify-write is honest here rather than a workaround; the residual is that two
+/// windows toggling different apps at the same instant would clobber, which is memql#4951.
+@description("Set which deployables of a source its owner has chosen not to deploy")
+mutate package setPackageDisabledDeployables {
+  args {
+    packageId           string!
+    disabledDeployables []string!
+  }
+  update {
+    id:                  args.packageId
+    disabledDeployables: args.disabledDeployables
+  }
+}
+
 mutate package setPackageAutoDeploy {
   args {
     packageId   string!

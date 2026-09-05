@@ -116,6 +116,15 @@ export interface DeployableListRow {
   kind: string;
   /** The newest parked run of its source, or null: the waiting mark's fact. */
   parked: DeploymentRow | null;
+  /**
+   * The owner turned this one off.
+   *
+   * TRUE only for a DECLARED app with no site: the site is the fact and the
+   * list is a preference about an app that has none, so a name lingering after
+   * the app was deployed again marks nothing. A disabled row is listed and
+   * inert -- findable, never offered for deploy, built by no run.
+   */
+  disabled?: boolean;
 }
 
 /**
@@ -190,7 +199,9 @@ function siteRowFor(site: SiteRow, pkg: PackageRow | null, parked: DeploymentRow
   // deployable IS. Never blank -- a nameless row is indistinguishable from a
   // row that failed to render.
   const name = app || site.title.trim() || siteName(site);
-  return { key: site.id, site, pkg, app, name, hostname: site.hostname, kind: site.kind, parked };
+  // NEVER disabled: a site row means the app was deployed, and the owner's
+  // off-list is a preference about apps that have none.
+  return { key: site.id, site, pkg, app, name, hostname: site.hostname, kind: site.kind, parked, disabled: false };
 }
 
 function isArchived(row: DeployableListRow): boolean {
@@ -293,6 +304,10 @@ export function foldDeployables(
         hostname: "",
         kind: declared.kind,
         parked: null,
+        // The owner's standing choice, and it only means anything here --
+        // among the apps that have no site. One that HAS a site was deployed,
+        // and the site is the fact.
+        disabled: pkg.disabledDeployables.includes(declared.name),
       });
     }
   }
@@ -316,6 +331,9 @@ export function foldDeployables(
         hostname: "",
         kind: app.kind,
         parked: run,
+        // A run is IN FLIGHT for this app; whatever the off-list says, this is
+        // happening and the row must not read as inert.
+        disabled: false,
       });
     }
   }

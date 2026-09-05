@@ -46,6 +46,19 @@ export interface PackageRow {
    * has read the tree yet.
    */
   declares: DeclaredDeployable[];
+  /**
+   * The declared apps this source's OWNER has chosen not to deploy.
+   *
+   * A name here means the app is listed and INERT: findable under its source,
+   * not offered for deploy, and built by no run. Skipping at the confirm gate
+   * and discarding a source-backed deployable both add to it; enabling is the
+   * deliberate act that removes it.
+   *
+   * SEPARATE FROM `declares` because there are two authors. `declares` is what
+   * the manifest says and the pipeline rewrites it wholesale on every
+   * analysis, so intent kept there would be erased by the next run.
+   */
+  disabledDeployables: string[];
   status: string;
   createdAt: string;
 }
@@ -73,6 +86,7 @@ export function packageFromRow(row: Row): PackageRow {
     updateAvailable: boolOr(flat, "updateAvailable", false),
     autoDeploy: boolOr(flat, "autoDeploy", false),
     declares: listOf<DeclaredDeployable>(flat, "declares").filter((d) => (d?.name ?? "") !== ""),
+    disabledDeployables: listOf<string>(flat, "disabledDeployables").filter((n) => typeof n === "string" && n !== ""),
     status: rowString(flat, "status"),
     createdAt: rowString(flat, "createdAt"),
   };

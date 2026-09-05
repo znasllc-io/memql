@@ -1277,6 +1277,47 @@ describe("the credential card", () => {
 // ---------------------------------------------------------------------------
 // A SOURCE LISTS WHAT IT DECLARES, NOT ONLY WHAT IT DEPLOYED
 // ---------------------------------------------------------------------------
+describe("discarding a source-backed deployable", () => {
+  it("turns the app off, so it does not come straight back as an offer", async () => {
+    // Reported from production: discard removed the site, but the source still
+    // DECLARED the app -- so the list showed it again as "not deployed" and
+    // clicking it rebuilt the very thing that had just been discarded.
+    const { connection } = await mountAndOpen(
+      {
+        ...WITH_PACKAGE,
+        sites: [{ ...STORE, status: "draft" }],
+        packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }] }],
+      },
+      "store.memql.example.com",
+    );
+    // THE ACTS ARE ON THE BAR, which is a sibling of the panel rather than
+    // inside it (DESIGN.md rule 12).
+    // THE ACTS ARE ON THE BAR, a sibling of the panel rather than inside it
+    // (DESIGN.md rule 12). Matched on TEXT: an act carries its own ariaLabel
+    // naming the deployable, so the accessible name is not the word.
+    const barButton = (text: string) => {
+      const bar = document.querySelector(".os-actbar") as HTMLElement;
+      const found = [...bar.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === text);
+      if (found === undefined) throw new Error(`no "${text}" on the bar; it offers ${JSON.stringify(barActs())}`);
+      return found;
+    };
+    await click(barButton("Discard"));
+    await typeInto(
+      within(document.querySelector(".os-actbar") as HTMLElement).getByLabelText(
+        "Type store.memql.example.com to confirm",
+      ) as HTMLInputElement,
+      "store.memql.example.com",
+    );
+    await click(barButton("Discard"));
+
+    await waitFor(() => expect(connection.callsNamed("siteDelete").length).toBe(1));
+    // THE DELETION IS THE ACT and the preference follows it, so a failure to
+    // record the second cannot leave a deployable nobody asked to keep.
+    await waitFor(() => expect(connection.callsNamed("setPackageDisabledDeployables").length).toBe(1));
+    expect(connection.callsNamed("setPackageDisabledDeployables")[0]).toContain('disabledDeployables: ["storefront"]');
+  });
+});
+
 describe("apps it produces", () => {
   it("shows a declared app that has never been deployed, and says so", async () => {
     // The reported case: skipping an app at the confirm gate writes no site,

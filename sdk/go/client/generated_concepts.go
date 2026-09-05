@@ -791,6 +791,7 @@ var BoundConcepts = map[string]string{
 	"setNumberE911":                                    "v1:telephony:number",
 	"setPackEnabled":                                   "v1:platform:packState",
 	"setPackageAutoDeploy":                             "v1:platform:package",
+	"setPackageDisabledDeployables":                    "v1:platform:package",
 	"setPartitionSecret":                               "v1:platform:partitionSecret",
 	"setPartitionVariable":                             "v1:platform:partitionVariable",
 	"setPolicy":                                        "v1:data:policy",

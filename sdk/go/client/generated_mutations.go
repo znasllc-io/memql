@@ -14192,8 +14192,7 @@ func SetPackEnabledBuild(args SetPackEnabledArgs) string {
 	return b.String()
 }
 
-// SetPackageAutoDeploy -- Turn a source's auto-deploy switch on or off (epic memql#4900).
-// The PERSON's write, and an owned one: the write guard resolves the target row and admits its owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's decision, which is what makes an auto-run's provenance honest.
+// SetPackageAutoDeploy wraps the mutation named "setPackageAutoDeploy".
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["setPackageAutoDeploy"] in generated_concepts.go).
 type SetPackageAutoDeployArgs struct {
@@ -14217,6 +14216,35 @@ func SetPackageAutoDeployBuild(args SetPackageAutoDeployArgs) string {
 	}
 	b.WriteString("autoDeploy: ")
 	b.WriteString(fmt.Sprintf("%v", args.AutoDeploy))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SetPackageDisabledDeployables -- Turn a source's auto-deploy switch on or off (epic memql#4900).
+// The PERSON's write, and an owned one: the write guard resolves the target row and admits its owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's decision, which is what makes an auto-run's provenance honest.
+//
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["setPackageDisabledDeployables"] in generated_concepts.go).
+type SetPackageDisabledDeployablesArgs struct {
+	PackageId           string
+	DisabledDeployables []string
+}
+
+// SetPackageDisabledDeployables calls the engine mutation setPackageDisabledDeployables.
+func (qc *QueryClient) SetPackageDisabledDeployables(ctx context.Context, args SetPackageDisabledDeployablesArgs) (*Result, error) {
+	call := SetPackageDisabledDeployablesBuild(args)
+	return qc.executeNamed(ctx, "setPackageDisabledDeployables", call)
+}
+
+func SetPackageDisabledDeployablesBuild(args SetPackageDisabledDeployablesArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setPackageDisabledDeployables(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("disabledDeployables: ")
+	b.WriteString(renderMemQLValue(args.DisabledDeployables))
 	b.WriteString(")")
 	return b.String()
 }
