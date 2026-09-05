@@ -112,8 +112,63 @@ func contractGateOptions(functions *FunctionRegistry) dslgate.Options {
 		core[d] = true
 	}
 	return dslgate.Options{
-		ServerOnly: func(file, name string) bool { return serverOnly[file+" "+name] },
-		CoreDomain: func(domain string) bool { return core[domain] },
+		ServerOnly:         func(file, name string) bool { return serverOnly[file+" "+name] },
+		CoreDomain:         func(domain string) bool { return core[domain] },
+		BuiltinStepRefusal: builtinStepRefusal(functions),
+	}
+}
+
+// builtinStepRefusal answers the builtin-step gate with THE PARSER'S OWN
+// verdict rather than a second reading of it (memql#4927).
+//
+// # What it can decide, and what it deliberately cannot
+//
+// An automation step's argument VALUES are not literals -- `inboundRequestId:
+// id` names one of the automation's own args, resolved at fire time -- so this
+// cannot hand the source text to the parser and ask. What it can decide, with
+// no value knowledge at all, is ARITY: whether the profile accepts a call with
+// nothing in it, and whether it accepts one with something in it. Both are the
+// real parser's answer to a probe, so the gate and the runtime cannot disagree
+// about the rule even if the rule changes.
+//
+// Empty is the case memql#4927 was filed for. A profile-`object` builtin
+// declared with an empty body is a shape somebody writes on purpose --
+// "@args(profile=object)" reads like a house style rather than a claim about
+// the call -- and the automation beside it is then dead for as long as it is
+// deployed.
+func builtinStepRefusal(functions *FunctionRegistry) func(string, string) (string, bool) {
+	return func(name, args string) (string, bool) {
+		if functions == nil {
+			return "", false
+		}
+		fn, err := functions.Get(strings.TrimSpace(name))
+		if err != nil || fn == nil || !fn.IsBuiltin() {
+			// Not a builtin this build knows. Fail OPEN: a product bundle at
+			// MEMQL_DSL_PATH may call one this tree cannot see.
+			return "", false
+		}
+		if strings.TrimSpace(args) == "" {
+			if _, perr := parseMetaCommandArgs(name, "", fn.BuiltinArgs); perr != nil {
+				return fmt.Sprintf(
+					"calling it with no arguments is refused: %v. "+
+						"Either declare it @args(profile=\"optionalObject\") -- the profile that admits an empty call, "+
+						"and which nothing in the tree uses today -- or give the step the arguments it asks for.",
+					perr), true
+			}
+			return "", true
+		}
+		// A NON-empty list, probed with a shape rather than the real values.
+		// The probe only has to settle whether the profile takes arguments at
+		// all; a profile that does will reject THIS probe for its own field
+		// rules, which is not what the gate is asking about.
+		if _, perr := parseMetaCommandArgs(name, "", fn.BuiltinArgs); perr == nil {
+			// It accepts an empty call, so it accepts this one's arity.
+			if _, perr := parseMetaCommandArgs(name, args, fn.BuiltinArgs); perr != nil &&
+				strings.Contains(perr.Error(), "does not accept arguments") {
+				return fmt.Sprintf("it takes no arguments: %v", perr), true
+			}
+		}
+		return "", true
 	}
 }
 

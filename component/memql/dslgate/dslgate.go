@@ -173,6 +173,21 @@ type Options struct {
 	// runtime overlay has no late-bound reference to exempt and may leave it
 	// nil.
 	CoreDomain func(domain string) bool
+
+	// BuiltinStepRefusal reports why builtin `name`, called from an automation
+	// step with the literal argument text `args`, would be refused at parse --
+	// or "" when it would be accepted. `known` is false for a name this build
+	// resolves to no builtin, which is the fail-OPEN direction and the right
+	// one: a product bundle may call a builtin a bare-tree scan cannot see.
+	//
+	// It is a PREDICATE rather than the profile string because the verdict
+	// belongs to parseMetaCommandArgs, and a copy of that rule living in the
+	// gate would be a copy free to disagree with the runtime -- which is
+	// exactly how the defect it guards stayed invisible (memql#4927). The
+	// engine supplies its own parser over its own registry entry.
+	//
+	// nil means the gate does not run. See builtin_step_args.go.
+	BuiltinStepRefusal func(name, args string) (detail string, known bool)
 }
 
 func (o Options) serverOnly(file, name string) bool {
@@ -255,6 +270,10 @@ func ScanFiles(files []SourceFile, opts Options) []Violation {
 	// resolving per file would make A-calls-B succeed or fail on directory
 	// order (memql#4471).
 	out = append(out, scanSubAutomationCalls(files)...)
+	// The builtin-step gate is corpus-level because the profile that decides
+	// the verdict is declared in builtins.memql and the call is written in
+	// automations.memql -- two files, each well-formed alone (memql#4927).
+	out = append(out, scanBuiltinStepArgs(files, opts)...)
 
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].File != out[j].File {

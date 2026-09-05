@@ -137,6 +137,69 @@ func TestParseMetaCommandArgs_Profiles(t *testing.T) {
 			contract: &BuiltinArgContract{Profile: BuiltinArgProfileStringOrObject, StringKey: "name", Required: []string{"name"}},
 			wantErr:  true,
 		},
+		// THE NAMED-ARGS FORM, which is the only spelling the language still
+		// emits (memql#4927). memql#2335 retired the `name({...})` wrapper --
+		// the rewriter lowers every call to `name(k: v)` and the parser
+		// rejects the braces -- while this profile went on requiring them, so
+		// every automation step that passed arguments to an `object` builtin
+		// was refused at parse with its arguments plainly in the message.
+		{
+			name:     "object-named-args-body",
+			argsSrc:  `concept: "v1:x", payload: {}`,
+			contract: &BuiltinArgContract{Profile: BuiltinArgProfileObject, Required: []string{"concept", "payload"}},
+			wantArgs: map[string]any{"concept": "v1:x", "payload": map[string]any{}},
+		},
+		{
+			name:     "object-named-args-single",
+			argsSrc:  `inboundRequestId: "req-1"`,
+			contract: &BuiltinArgContract{Profile: BuiltinArgProfileObject, Required: []string{"inboundRequestId"}},
+			wantArgs: map[string]any{"inboundRequestId": "req-1"},
+		},
+		// ...and the shapes that must STAY refused, or "accepts the named-args
+		// body" would have quietly become "accepts anything".
+		{
+			name:     "object-empty-errors",
+			argsSrc:  "",
+			contract: &BuiltinArgContract{Profile: BuiltinArgProfileObject, Required: []string{"concept"}},
+			wantErr:  true,
+		},
+		{
+			name:     "object-bare-string-errors",
+			argsSrc:  `"just a string"`,
+			contract: &BuiltinArgContract{Profile: BuiltinArgProfileObject, Required: []string{"concept"}},
+			wantErr:  true,
+		},
+		{
+			name:     "object-bare-number-errors",
+			argsSrc:  `42`,
+			contract: &BuiltinArgContract{Profile: BuiltinArgProfileObject, Required: []string{"concept"}},
+			wantErr:  true,
+		},
+		// optionalObject had no coverage at all, which is part of why nothing
+		// noticed it was the profile the three scheduled builtins wanted.
+		{
+			name:     "optional-object-empty-ok",
+			argsSrc:  "",
+			contract: &BuiltinArgContract{Profile: BuiltinArgProfileOptionalObject},
+		},
+		{
+			name:     "optional-object-named-args-body",
+			argsSrc:  `since: "2026-01-01"`,
+			contract: &BuiltinArgContract{Profile: BuiltinArgProfileOptionalObject},
+			wantArgs: map[string]any{"since": "2026-01-01"},
+		},
+		{
+			name:     "optional-object-braced",
+			argsSrc:  `{since: "2026-01-01"}`,
+			contract: &BuiltinArgContract{Profile: BuiltinArgProfileOptionalObject},
+			wantArgs: map[string]any{"since": "2026-01-01"},
+		},
+		{
+			name:     "optional-object-bare-string-errors",
+			argsSrc:  `"nope"`,
+			contract: &BuiltinArgContract{Profile: BuiltinArgProfileOptionalObject},
+			wantErr:  true,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
