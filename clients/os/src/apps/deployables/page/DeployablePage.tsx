@@ -8,7 +8,7 @@ import { OpenLogsButton } from "../../../logs/OpenLogs";
 import { useAccountOptions } from "../../accounts/tie";
 import { usePackageActions, useSiteLifecycle } from "../packages/actions";
 import { ProblemNotice } from "../packages/ReportView";
-import type { Placement } from "../packages/calls";
+import { everyOtherAppSkipped, type Placement } from "../packages/calls";
 import { deploymentFromRow, type DeploymentRow, type PackageRow } from "../packages/rows";
 import { usePackageDeployments } from "../packages/usePackages";
 import { liveUrlFor, ownerLabel, siteName, type SiteRow } from "../rows";
@@ -443,13 +443,7 @@ function ConfirmRow({
  * no other way to know about.
  */
 function onlyThisApp(pkg: PackageRow, site: SiteRow): Record<string, Placement> {
-  const mine = site.packageDeployableName;
-  const out: Record<string, Placement> = {};
-  for (const declared of pkg.declares) {
-    if (declared.name === "" || declared.name === mine) continue;
-    out[declared.name] = { hostname: "", accountId: "", ownDomain: "", skip: true };
-  }
-  return out;
+  return everyOtherAppSkipped(pkg.declares, site.packageDeployableName);
 }
 
 /** The history line's own summary: how many, and how the last one went. */

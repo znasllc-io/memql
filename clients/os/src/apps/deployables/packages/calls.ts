@@ -80,6 +80,29 @@ export interface Placement {
 }
 
 /**
+ * Every app of a source EXCEPT one, skipped -- the placements that make a run
+ * about a single app.
+ *
+ * The engine derives a run's `scopedTo` from the SKIPS in its placements
+ * (`scopeFrom`, memql#4953), so a call that sends none produces a run about
+ * the whole source. That is right when it is, and wrong twice over when it is
+ * not: every reader treats the gate as belonging to every sibling, and
+ * confirming it rebuilds and republishes apps nobody asked about.
+ *
+ * It is needed on the ANALYSIS call, not only on the confirm: the gate parks
+ * as soon as the analysis finishes, and everything a person reads while it
+ * sits there is read off that run.
+ */
+export function everyOtherAppSkipped(declared: readonly { name: string }[], app: string): Record<string, Placement> {
+  const out: Record<string, Placement> = {};
+  for (const d of declared) {
+    if (d.name === "" || d.name === app) continue;
+    out[d.name] = { hostname: "", accountId: "", ownDomain: "", skip: true };
+  }
+  return out;
+}
+
+/**
  * The wire form of a placement set: blank halves are OMITTED rather than sent.
  *
  * An explicit "" is a VALUE the pipeline reads -- an empty accountId asks for

@@ -363,7 +363,17 @@ describe("the list", () => {
     await click(web.closest("button"));
     await waitFor(() => expect(connection.callsNamed("packageDeploy").length).toBeGreaterThan(0));
     // The analysis first -- confirm: false -- which is what parks the gate.
-    expect(connection.callsNamed("packageDeploy")[0]).toContain("confirm: false");
+    const call = connection.callsNamed("packageDeploy")[0] ?? "";
+    expect(call).toContain("confirm: false");
+    // ...AND SCOPED, which is what this test has always been named for and
+    // never asserted. The engine derives `scopedTo` from the skips, so an
+    // analysis sent without them parks a gate about the whole source: every
+    // sibling's row and page read it as their own, and confirming it rebuilds
+    // apps nobody asked about.
+    expect(call).toContain("placements: {storefront: {skip: true}}");
+    // The app being deployed is NOT in the map: scope is the COMPLEMENT of
+    // the skips, so naming it here would scope the run to nothing.
+    expect(call).not.toContain("web: {skip");
   });
 
   it("does not offer to deploy an app the owner turned off", async () => {
