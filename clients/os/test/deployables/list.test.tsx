@@ -686,7 +686,9 @@ describe("New deployable", () => {
     mount(fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] }));
     await click(await screen.findByText("reports"));
 
-    const compose = await screen.findByRole("region", { name: "New deployable" });
+    // NAMED AFTER THE SOURCE, because this is not a new deployable: the source
+    // was added already and this reopens its gate.
+    const compose = await screen.findByRole("region", { name: "Deploy acme" });
     const rail = within(compose).getByRole("list", { name: "Deployable stops" });
     // A run parked at the confirm gate has ANSWERED What it is -- its report
     // is what parked it -- so the open stop is Where it lives, which is what

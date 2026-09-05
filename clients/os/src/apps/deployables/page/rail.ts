@@ -103,7 +103,10 @@ export interface DeployInput {
 export type StandingSource = Pick<PackageRow, "sourceKind" | "repoUrl" | "repoRef">;
 
 /** What the Where-it-lives and Live stops read off the site row. */
-export type StandingSite = Pick<SiteRow, "hostname" | "kind" | "status" | "bundleRef">;
+/** `packageDeployableName` is here so the rail can tell a gate about THIS app
+ *  from one about the whole source -- the two mean different things for a
+ *  deployable that is already serving. */
+export type StandingSite = Pick<SiteRow, "hostname" | "kind" | "status" | "bundleRef" | "packageDeployableName">;
 
 export interface StandingInput {
   mode: "standing";
@@ -137,6 +140,17 @@ export interface ComposeInput {
   report: AnalysisReport | null;
   /** The refusal that parked the flow, if any: the run's error, or the report's first fatal problem. */
   problem: RailProblem | null;
+  /**
+   * The ONE app this flow is deploying, when it was opened for one.
+   *
+   * The analysis reads the whole tree, so its report names every app the
+   * manifest declares. That is the right summary for a whole-source deploy and
+   * the wrong one for a gate opened to deploy a single app somebody had
+   * skipped: "2 apps, 1 MemQL domain" reads as though the source were being
+   * added again, when the person asked about one app of a source they added
+   * days ago.
+   */
+  only?: string;
   /** A settled stop's one-line answer ("acme/shop at main", the hostname), when the caller has one. */
   answers?: Partial<Record<StopId, string>>;
   /**
@@ -682,7 +696,11 @@ function composeRail(input: ComposeInput): RailStage[] {
     if (answered.has(stop.id)) {
       const answer = input.answers?.[stop.id] ?? "";
       if (answer !== "") return stage(stop, "complete", answer);
-      if (stop.id === "whatItIs") return stage(stop, "complete", whatItIsNote(input.report, "", input.problem));
+      if (stop.id === "whatItIs") {
+        // Named when the flow is about one app, so the note is that app's own
+        // verdict rather than a count of the whole manifest.
+        return stage(stop, "complete", whatItIsNote(input.report, input.only ?? "", input.problem));
+      }
       return stage(stop, "complete");
     }
     if (input.open === stop.id) return stage(stop, "open");
@@ -839,8 +857,19 @@ export function headActionFor(state: HeadState): HeadAction | null {
 export function openStopFor(input: StandingInput): StopId | "" {
   const run = input.run;
 
-  // 1. Moving.
-  if (run !== null && run.status !== "" && RUN_STOP[run.status] !== undefined) {
+  // 1. Moving -- but a run PARKED at the gate is not moving, and does not
+  //    choose the stop for a deployable that already has an answer. RUN_STOP
+  //    maps `awaiting_confirm` to `whatItIs`, so a live deployable opened on
+  //    "What it is" while its own Live stop sat collapsed below. A deployable
+  //    that has never served opens there still: the report IS what there is
+  //    to read about it.
+  const served = input.site !== null && (input.site.status === "live" || input.site.status === "disabled");
+  // A gate scoped TO THIS APP is this page's business even when it is serving:
+  // it is a redeploy waiting to be confirmed. A whole-source gate is not.
+  const mine = input.site?.packageDeployableName ?? "";
+  const aboutThisApp = run !== null && mine !== "" && run.scopedTo.includes(mine);
+  const parked = run !== null && run.status === "awaiting_confirm" && !aboutThisApp;
+  if (run !== null && run.status !== "" && RUN_STOP[run.status] !== undefined && !(parked && served)) {
     return RUN_STOP[run.status] ?? "live";
   }
 

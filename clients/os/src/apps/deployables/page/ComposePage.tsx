@@ -348,6 +348,7 @@ export function ComposePage(props: ComposePageProps) {
 
   const input: ComposeInput = {
     mode: "compose",
+    only,
     ...stopsFor(phase, path, sourceDone, report !== null),
     probeReason: probeParked && probe.reply !== null ? probeNote(probe.reply) : "",
     report,
@@ -404,7 +405,7 @@ export function ComposePage(props: ComposePageProps) {
         }
         return (
           <div className="os-stop-body">
-            <ReportView report={report} />
+            <ReportView report={report} only={only} />
           </div>
         );
       case "whereItLives":
@@ -448,8 +449,12 @@ export function ComposePage(props: ComposePageProps) {
   return (
     <div className="os-deploy-pane">
       <div className="os-deploy-scroll">
-    <Panel label="New deployable">
-      <Head title="New deployable">
+    {/* THE TITLE SAYS WHAT THIS IS. "New deployable" is true only when there
+        is no source yet: opened for one app of a source added days ago, it
+        read as though the whole source were being added again -- which is
+        exactly what the report beside it appeared to confirm. */}
+    <Panel label={composeTitle(parked, only)}>
+      <Head title={composeTitle(parked, only)}>
         <Button tone="quiet" onClick={onBack}>
           <ArrowLeft size={13} aria-hidden /> Deployables
         </Button>
@@ -546,6 +551,24 @@ export function ComposePage(props: ComposePageProps) {
       </ActionBar>
     </div>
   );
+}
+
+/**
+ * What this flow is about, for the Head and the Panel's label.
+ *
+ * "New deployable" is the ONLY-when-nothing-is-known answer, and both other
+ * facts arrive independently: `only` is known from the click, while `parked`
+ * lands when the analysis parks its gate seconds later. Reading the title off
+ * `parked` alone meant an app-scoped flow was called "New deployable" for as
+ * long as the analysis ran -- which is the frame the report was read in.
+ */
+function composeTitle(parked: { pkg: PackageRow; run: DeploymentRow } | undefined, only: string | undefined): string {
+  const app = only !== undefined && only !== "" ? only : "";
+  const source = parked === undefined ? "" : parked.pkg.name || parked.pkg.id;
+  if (app !== "" && source !== "") return `Deploy ${app} from ${source}`;
+  if (app !== "") return `Deploy ${app}`;
+  if (source !== "") return `Deploy ${source}`;
+  return "New deployable";
 }
 
 /** Where the flow is, in words -- the bar's left half. */

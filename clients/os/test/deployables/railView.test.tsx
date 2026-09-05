@@ -46,7 +46,13 @@ const STANDING: StandingInput = {
   pkg: REPO,
   app: "shop",
   run: deployment(),
-  site: { hostname: "shop.memql.example.com", kind: "spa", status: "draft", bundleRef: "blob://sites/site-1/v1/" },
+  site: {
+    hostname: "shop.memql.example.com",
+    kind: "spa",
+    status: "draft",
+    bundleRef: "blob://sites/site-1/v1/",
+    packageDeployableName: "shop",
+  },
 };
 
 function statesIn(list: HTMLElement): string[] {

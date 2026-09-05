@@ -184,7 +184,14 @@ function reportWithUnofferedApp(): AnalysisReport {
 }
 
 function site(over: Partial<StandingSite> = {}): StandingSite {
-  return { hostname: "shop.memql.example.com", kind: "spa", status: "live", bundleRef: "blob://sites/site-1/v1/", ...over };
+  return {
+    hostname: "shop.memql.example.com",
+    kind: "spa",
+    status: "live",
+    bundleRef: "blob://sites/site-1/v1/",
+    packageDeployableName: "shop",
+    ...over,
+  };
 }
 
 const REPO = { sourceKind: "repo", repoUrl: "https://github.com/acme/shop", repoRef: "main" };
