@@ -88,13 +88,29 @@ export interface Placement {
  * whole, so a package whose apps all already have addresses sends no
  * `placements` argument at all.
  */
-export function placementsPayload(placements: Record<string, Placement>): Record<string, Record<string, string>> {
-  const out: Record<string, Record<string, string>> = {};
+export function placementsPayload(
+  placements: Record<string, Placement>,
+): Record<string, Record<string, string | boolean>> {
+  const out: Record<string, Record<string, string | boolean>> = {};
   for (const [app, placement] of Object.entries(placements)) {
-    const entry: Record<string, string> = {};
+    const entry: Record<string, string | boolean> = {};
     if (placement.hostname.trim() !== "") entry["hostname"] = placement.hostname.trim();
     if (placement.accountId.trim() !== "") entry["accountId"] = placement.accountId.trim();
     if (placement.ownDomain.trim() !== "") entry["ownDomain"] = placement.ownDomain.trim();
+    // THE VALUE TYPE IS WHY THIS WAS DROPPED. The map was `string` only, so
+    // `skip` -- declared on Placement above and read by the engine's
+    // `placementsArg` -- had nowhere to go and was silently left behind. The
+    // engine defaulted Skip to false and built and published the app somebody
+    // had just chosen to leave out; a fresh site starts at `draft`, so it
+    // presented as "skip creates a draft" rather than as a lost argument.
+    //
+    // Sent only when true, the same rule the blank halves keep: an explicit
+    // `false` is a value the pipeline reads, and nobody asked for one.
+    if (placement.skip === true) entry["skip"] = true;
+    // A SKIPPED APP MAY LEGITIMATELY HAVE NOTHING ELSE (memql#4930): one that
+    // has never been deployed has no hostname to send, and dropping the entry
+    // for emptiness would drop the skip with it -- which is the whole of what
+    // the entry was for.
     if (Object.keys(entry).length > 0) out[app] = entry;
   }
   return out;

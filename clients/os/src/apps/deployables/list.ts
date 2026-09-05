@@ -118,11 +118,41 @@ export interface DeployableListRow {
   parked: DeploymentRow | null;
 }
 
+/**
+ * Which half of the list a group belongs to.
+ *
+ * The distinction a person actually makes is "did this come from somewhere I
+ * can redeploy from" -- a repository or an upload -- or is it a thing that
+ * stands on its own. Sorting the two together by address produced a list where
+ * a two-app source sat between two hand-made sites, which is the shape that
+ * read as a jumble.
+ */
+export type ListSection = "source" | "standalone";
+
+const SECTION_ORDER: Readonly<Record<ListSection, number>> = { source: 0, standalone: 1 };
+
+/** What each section is called, where a person reads it. */
+export const SECTION_LABELS: Readonly<Record<ListSection, string>> = {
+  source: "From a source",
+  standalone: "Standalone",
+};
+
 export interface DeployableListGroup {
   /** `pkg:<id>` for a source and its rows; `site:<id>` for a hand-made site on its own. */
   id: string;
   pkg: PackageRow | null;
   rows: DeployableListRow[];
+  section: ListSection;
+  /**
+   * Whether this group renders its section's heading.
+   *
+   * Computed here rather than in the view because it is a fact about the
+   * ORDER, and the view renders one group at a time with no sight of its
+   * neighbours. Always true for the first group of a section, including when
+   * that section is the only one -- a list of hand-made sites still says what
+   * it is.
+   */
+  startsSection: boolean;
 }
 
 /** Which of the three sources a row came through, or "" for none of them. */
@@ -264,12 +294,26 @@ export function foldDeployables(
       .filter((row) => matches(row, filter))
       .sort(compareRows);
     if (kept.length === 0) continue;
-    groups.push({ id, pkg: groupPackage.get(id) ?? null, rows: kept });
+    const pkg = groupPackage.get(id) ?? null;
+    // `startsSection` is filled in after the sort, which is the only place the
+    // neighbours are known.
+    groups.push({ id, pkg, rows: kept, section: pkg === null ? "standalone" : "source", startsSection: false });
   }
-  // BY FIRST ADDRESS, the order the list always had. The feeds fold events in
-  // arrival order, and a list that depended on it would reshuffle on an
-  // update -- exactly when somebody is watching.
-  return groups.sort((a, b) => compareRows(a.rows[0]!, b.rows[0]!) || a.id.localeCompare(b.id));
+  // BY SECTION, THEN BY FIRST ADDRESS. The address order is the one the list
+  // always had, and it is kept WITHIN a section: the feeds fold events in
+  // arrival order, and a list that depended on it would reshuffle on an update
+  // -- exactly when somebody is watching. The section term is what stops a
+  // source group and a hand-made site interleaving.
+  const ordered = groups.sort(
+    (a, b) =>
+      SECTION_ORDER[a.section] - SECTION_ORDER[b.section] ||
+      compareRows(a.rows[0]!, b.rows[0]!) ||
+      a.id.localeCompare(b.id),
+  );
+  return ordered.map((group, i) => ({
+    ...group,
+    startsSection: i === 0 || ordered[i - 1]!.section !== group.section,
+  }));
 }
 
 /**

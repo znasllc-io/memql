@@ -29,6 +29,15 @@
   --os-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   --os-font-display: "Squada One", "InterVariable", "Inter", ui-sans-serif, sans-serif;
 
+  /* THE COMPACT RAIL'S GEOMETRY, shared with the column that reserves room
+     for it. These were two independent numbers -- a 12px mark with a 4px gap
+     in the rail, and a 58px fixed column in the list row -- and five marks
+     plus four gaps is 76px, so the rail overflowed its column by 18px and,
+     being right-aligned, spilled LEFT onto the "N apps" label beside it.
+     One definition, two readers, and the arithmetic below is the contract. */
+  --os-rail-compact-mark: 12px;
+  --os-rail-compact-gap: 4px;
+
   --os-text-xs: 0.6875rem;   /* 11px -- provenance lines, ticks */
   --os-text-sm: 0.75rem;     /* 12px -- captions, dock labels */
   --os-text-base: 0.8125rem; /* 13px -- chrome UI */

@@ -87,7 +87,10 @@ describe("the manifest", () => {
 describe("sanitizing a stored document", () => {
   it("keeps a good one", () => {
     const doc = { version: 1, defaultSection: "deployables", density: "compact" };
-    expect(sanitizeDeployablesSettings(doc)).toEqual(doc);
+    // The two reading choices added later take their defaults here: this
+    // document predates them, and repairing a field it never carried is the
+    // sanitiser doing its job rather than changing the person's mind.
+    expect(sanitizeDeployablesSettings(doc)).toEqual({ ...doc, trafficWindow: "hour", expandedSources: [] });
   });
 
   it("maps a retired default -- sites, packages, actions -- to Deployables", () => {
@@ -96,7 +99,7 @@ describe("sanitizing a stored document", () => {
     // asked for the list is still asking for the list.
     for (const retired of ["sites", "packages", "actions"]) {
       expect(sanitizeDeployablesSettings({ version: 1, defaultSection: retired, density: "compact" }))
-        .toEqual({ version: 1, defaultSection: "deployables", density: "compact" });
+        .toEqual({ version: 1, defaultSection: "deployables", density: "compact", trafficWindow: "hour", expandedSources: [] });
     }
     // The map is exhaustive over the three, and names nothing that still exists.
     expect(Object.keys(RETIRED_SECTIONS).sort()).toEqual(["actions", "packages", "sites"]);
@@ -107,9 +110,9 @@ describe("sanitizing a stored document", () => {
   it("repairs each field INDEPENDENTLY", () => {
     // A garbage section must not cost somebody their density choice.
     expect(sanitizeDeployablesSettings({ version: 1, defaultSection: "nope", density: "compact" }))
-      .toEqual({ version: 1, defaultSection: "map", density: "compact" });
+      .toEqual({ version: 1, defaultSection: "map", density: "compact", trafficWindow: "hour", expandedSources: [] });
     expect(sanitizeDeployablesSettings({ version: 1, defaultSection: "deployables", density: "huge" }))
-      .toEqual({ version: 1, defaultSection: "deployables", density: "comfortable" });
+      .toEqual({ version: 1, defaultSection: "deployables", density: "comfortable", trafficWindow: "hour", expandedSources: [] });
   });
 
   it("rejects a wrong version WHOLESALE -- the field names cannot be trusted", () => {
@@ -128,11 +131,13 @@ describe("the store", () => {
   it("round-trips", () => {
     const storage = memStorage();
     const store = new LocalDeployablesSettingsStore(storage);
-    store.save({ version: 1, defaultSection: "deployables", density: "compact" });
+    store.save({ version: 1, defaultSection: "deployables", density: "compact", trafficWindow: "week", expandedSources: ["pkg:a"] });
     expect(new LocalDeployablesSettingsStore(storage).load()).toEqual({
       version: 1,
       defaultSection: "deployables",
       density: "compact",
+      trafficWindow: "week",
+      expandedSources: ["pkg:a"],
     });
   });
 
@@ -148,6 +153,8 @@ describe("the store", () => {
       version: 1,
       defaultSection: "deployables",
       density: "compact",
+      trafficWindow: "hour",
+      expandedSources: [],
     });
   });
 
@@ -172,5 +179,72 @@ describe("the store", () => {
       },
     });
     expect(() => store.save(DEFAULT_DEPLOYABLES_SETTINGS)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE TWO REMEMBERED READING CHOICES
+// ---------------------------------------------------------------------------
+//
+// Both are VIEW settings, like density: they change nothing about which rows
+// are read, so they cost no round trip and are safe to be instant. Both are
+// added to a version-1 document WITHOUT a version bump, which the sanitiser
+// already allows by repairing each field independently -- a document written
+// before these existed keeps its section and density and takes the defaults
+// for these.
+describe("the traffic window a person last chose", () => {
+  it("defaults to the hour, which is the window that answers 'is it up'", () => {
+    // The day was the old default and it is the wrong first question: somebody
+    // opening a deployable is usually checking on it, not measuring it.
+    expect(DEFAULT_DEPLOYABLES_SETTINGS.trafficWindow).toBe("hour");
+  });
+
+  it("keeps a window the person picked, so troubleshooting does not re-click it", () => {
+    expect(sanitizeDeployablesSettings({ version: 1, trafficWindow: "week" }).trafficWindow).toBe("week");
+  });
+
+  it("repairs a window that is not one of the three, rather than dropping the document", () => {
+    const doc = sanitizeDeployablesSettings({ version: 1, density: "compact", trafficWindow: "fortnight" });
+    expect(doc.trafficWindow).toBe("hour");
+    expect(doc.density).toBe("compact");
+  });
+});
+
+describe("which source groups are open", () => {
+  it("starts with none open, so the list is one line per source", () => {
+    expect(DEFAULT_DEPLOYABLES_SETTINGS.expandedSources).toEqual([]);
+  });
+
+  it("remembers the ones a person opened", () => {
+    expect(sanitizeDeployablesSettings({ version: 1, expandedSources: ["pkg:a", "pkg:b"] }).expandedSources).toEqual([
+      "pkg:a",
+      "pkg:b",
+    ]);
+  });
+
+  it("drops non-string entries rather than trusting the list wholesale", () => {
+    // A stored id is a key this list looks groups up by; a number or null in
+    // there would silently never match, which reads as "expanding does not
+    // stick" rather than as a corrupt document.
+    expect(sanitizeDeployablesSettings({ version: 1, expandedSources: ["pkg:a", 7, null, "pkg:b"] }).expandedSources).toEqual(
+      ["pkg:a", "pkg:b"],
+    );
+  });
+
+  it("repairs a non-array to empty", () => {
+    expect(sanitizeDeployablesSettings({ version: 1, expandedSources: "pkg:a" }).expandedSources).toEqual([]);
+  });
+});
+
+describe("a document written before these fields existed", () => {
+  it("keeps what it had and takes the defaults for what it did not", () => {
+    const doc = sanitizeDeployablesSettings({ version: 1, defaultSection: "deployables", density: "compact" });
+    expect(doc).toEqual({
+      version: 1,
+      defaultSection: "deployables",
+      density: "compact",
+      trafficWindow: "hour",
+      expandedSources: [],
+    });
   });
 });

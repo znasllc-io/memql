@@ -423,3 +423,43 @@ describe("reading the branches and the manifest a probe answered", () => {
     expect(manifestIsEmpty(manifestFrom({ name: "acme" }))).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// THE SKIP MUST SURVIVE THE WIRE
+// ---------------------------------------------------------------------------
+//
+// `skip` was declared on Placement, documented at length, set correctly by
+// `placementsFrom` and parsed correctly by the engine's `placementsArg` -- and
+// dropped in between, because this function's return type was
+// `Record<string, Record<string, string>>` and a boolean has nowhere to go in
+// a string map. The engine then defaulted Skip to false and BUILT AND
+// PUBLISHED the app the person had just chosen to leave out; because a fresh
+// site starts at `draft`, the visible symptom was "skip creates a draft".
+//
+// Measured in production: a run whose `web` app was skipped recorded
+// `"created": true` and a published bundleRef for it, with no skip refusal.
+describe("a skipped placement on the wire", () => {
+  it("carries skip through, so the engine's Skip guard can fire", () => {
+    expect(
+      placementsPayload({ web: { hostname: "web.example.com", accountId: "", ownDomain: "", skip: true } }),
+    ).toEqual({ web: { hostname: "web.example.com", skip: true } });
+  });
+
+  it("survives even when the app has never been deployed and has no hostname", () => {
+    // The memql#4930 case the engine's guard is written for: skipping an app
+    // with no address must not send an entry with nothing in it, because an
+    // entry dropped whole is an entry whose skip is dropped with it.
+    expect(placementsPayload({ web: { hostname: "", accountId: "", ownDomain: "", skip: true } })).toEqual({
+      web: { skip: true },
+    });
+  });
+
+  it("omits skip entirely when it is not set, rather than sending false", () => {
+    // The negative control, and the same rule the blank halves keep: an
+    // explicit value is one the pipeline reads, so an unanswered half is
+    // absent rather than defaulted.
+    expect(placementsPayload({ web: { hostname: "web.example.com", accountId: "", ownDomain: "" } })).toEqual({
+      web: { hostname: "web.example.com" },
+    });
+  });
+});

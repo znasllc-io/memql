@@ -535,3 +535,45 @@ describe("no DOM in the readings", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// THE SETTLED ROW, WHICH IS WHAT THE LIST ACTUALLY DRAWS
+// ---------------------------------------------------------------------------
+//
+// `standingInputFor` (list.ts) passes `run: row.parked` -- the PARKED run --
+// and a run that finished is not parked, so every settled row reaches the rail
+// with `run: null` and therefore `report: null`. Every other test in this file
+// passes a run carrying a report, which is exactly why this went out: the
+// helper's default hid the one input the list produces.
+//
+// Measured on the live cluster after the v0.20.22 deploy: zero parked runs
+// existed, both storefront apps had deployed successfully, and the list drew
+// check / EMPTY / check / EMPTY / check -- reporting "not reached" for a build
+// whose bundle it was serving on the same row.
+describe("a settled deployable, drawn from its standing facts alone", () => {
+  const settled = { ...standing(), run: null };
+
+  it("does not report What-it-is and Build as unreached when the site is live and published", () => {
+    const states = statesOf(settled);
+    expect(states["whatItIs"]).not.toBe("ahead");
+    expect(states["build"]).not.toBe("ahead");
+  });
+
+  it("reads every stop from the row, so a live published app is done end to end", () => {
+    expect(statesOf(settled)).toEqual({
+      source: "done",
+      whatItIs: "done",
+      whereItLives: "done",
+      build: "done",
+      live: "done",
+    });
+  });
+
+  it("still says Build has not happened when nothing has been published", () => {
+    // The negative control. If Build went `done` for any site with a row, the
+    // mark would be decoration rather than a reading -- so a draft that has
+    // never published must still read as not built.
+    const never = { ...standing(), run: null, site: site({ status: "draft", bundleRef: "blob://sites/site-1/pending/" }) };
+    expect(statesOf(never)["build"]).toBe("ahead");
+  });
+});

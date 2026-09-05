@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { Archive, ArrowUpCircle, GitBranch, Globe, Plus } from "lucide-react";
+import { Archive, ArrowUpCircle, ChevronRight, GitBranch, Globe, Plus } from "lucide-react";
 
+import { useDeployablesSettings } from "./settingsContext";
 import {
   Button,
   Caption,
@@ -31,6 +32,7 @@ import {
   groupFingerprint,
   listViewKey,
   newestParkedRun,
+  SECTION_LABELS,
   standingInputFor,
   type DeployableListGroup,
   type DeployableListRow,
@@ -474,6 +476,13 @@ function GroupLine({
   onOpenParked: (packageId: string) => void;
   figures: Map<string, TrafficSummary>;
 }) {
+  // COLLAPSED IS THE DEFAULT, and which groups are open is remembered. The
+  // OPEN set is stored rather than the closed one: closed is the default, so a
+  // list of what is shut would have to name every source that ever existed and
+  // a source added tomorrow would arrive open.
+  const { settings, toggleSource } = useDeployablesSettings();
+  const expanded = settings.expandedSources.includes(group.id);
+
   const line = (row: DeployableListRow, rowTick: ArrivalKind | null, waiting: boolean) => (
     <DeployableLine
       key={row.key}
@@ -487,10 +496,25 @@ function GroupLine({
     />
   );
 
-  if (group.pkg === null) return line(group.rows[0]!, tick, group.rows[0]!.parked !== null);
+  // THE SECTION'S NAME, carried by the first group in it. The list renders one
+  // group at a time with no sight of its neighbours, so which group starts a
+  // section is decided in the fold (`startsSection`) where the order is known.
+  const heading = group.startsSection ? (
+    <h3 className="os-deploy-sectionhead">{SECTION_LABELS[group.section]}</h3>
+  ) : null;
+
+  if (group.pkg === null) {
+    return (
+      <>
+        {heading}
+        {line(group.rows[0]!, tick, group.rows[0]!.parked !== null)}
+      </>
+    );
+  }
 
   const pkg = group.pkg;
   const waiting = group.rows.some((row) => row.parked !== null);
+  const appsId = `os-deploy-apps-${group.id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 
   // THE SOURCE IS A REAL ROW. It was a `div` of caption text with two chips,
   // wedged between clickable rows -- not focusable, not announced, and not
@@ -498,35 +522,63 @@ function GroupLine({
   // the source's own view now, which is where its credential, its auto-deploy
   // switch, its history and its archive live.
   return (
-    <div className="os-deploy-group" data-archived={pkg.status === "archived" || undefined}>
-      <ListRow
-        icon={<GitBranch size={15} aria-hidden />}
-        name={sourceLabel(pkg)}
-        current
-        onOpen={() => onOpenSource(pkg.id)}
-        state={
-          <>
-            {pkg.updateAvailable ? (
-              <Chip tone="accent" title={`Newer upstream: ${pkg.latestKnownVersion}`}>
-                <ArrowUpCircle size={11} aria-hidden /> update
-              </Chip>
-            ) : null}
-            {pkg.status === "archived" ? (
-              <Chip tone="muted">
-                <Archive size={11} aria-hidden /> archived
-              </Chip>
-            ) : null}
-            {waiting ? <span className="os-deploy-waiting">a deploy is waiting for you</span> : null}
-            <Chip>
-              {group.rows.length} app{group.rows.length === 1 ? "" : "s"}
-            </Chip>
-            {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-            <span className="os-deploy-railcol" />
-          </>
-        }
-      />
-      <div className="os-deploy-group-apps">{group.rows.map((row) => line(row, null, false))}</div>
-    </div>
+    <>
+      {heading}
+      <div className="os-deploy-group" data-archived={pkg.status === "archived" || undefined}>
+        <div className="os-deploy-grouphead">
+          {/* TWO CONTROLS, TWO JOBS. The chevron opens and shuts the group; the
+              row itself opens the SOURCE's own view, where its credential,
+              auto-deploy switch, history and archive live. Folding both onto
+              the row would mean either losing the source view or making a
+              click ambiguous. */}
+          <button
+            type="button"
+            className="os-deploy-disclose"
+            aria-expanded={expanded}
+            aria-controls={appsId}
+            aria-label={`${expanded ? "Collapse" : "Expand"} ${sourceLabel(pkg)}`}
+            onClick={() => toggleSource(group.id)}
+          >
+            <ChevronRight size={13} aria-hidden />
+          </button>
+          <ListRow
+            icon={<GitBranch size={15} aria-hidden />}
+            name={sourceLabel(pkg)}
+            current
+            onOpen={() => onOpenSource(pkg.id)}
+            state={
+              <>
+                {pkg.updateAvailable ? (
+                  <Chip tone="accent" title={`Newer upstream: ${pkg.latestKnownVersion}`}>
+                    <ArrowUpCircle size={11} aria-hidden /> update
+                  </Chip>
+                ) : null}
+                {pkg.status === "archived" ? (
+                  <Chip tone="muted">
+                    <Archive size={11} aria-hidden /> archived
+                  </Chip>
+                ) : null}
+                {waiting ? <span className="os-deploy-waiting">a deploy is waiting for you</span> : null}
+                <Chip>
+                  {group.rows.length} app{group.rows.length === 1 ? "" : "s"}
+                </Chip>
+                {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
+                <span className="os-deploy-railcol" />
+              </>
+            }
+          />
+        </div>
+        {/* A SHUT GROUP RENDERS NO APPS AT ALL rather than hiding them with
+            CSS: they are not read, not focusable, and not found by a search of
+            the page -- which is what "collapsed" has to mean for the count on
+            the row to be the honest summary of what is inside. */}
+        {expanded ? (
+          <div id={appsId} className="os-deploy-group-apps">
+            {group.rows.map((row) => line(row, null, false))}
+          </div>
+        ) : null}
+      </div>
+    </>
   );
 }
 
