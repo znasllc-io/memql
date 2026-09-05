@@ -154,7 +154,7 @@ export function useSourceRepositories(): SourceRepositoriesActions {
               ...answered,
               repositories: [...held.repositories, ...answered.repositories],
               // The walk's page 1 is the one that named the installations
-              // and the pending organisations; a later page repeats them,
+              // and the pending organizations; a later page repeats them,
               // and taking the newer answer keeps one reading rather than
               // merging two.
             }

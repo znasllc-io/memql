@@ -21,7 +21,7 @@ import { useWorkbenches } from "./useWorkbenches";
 // directories on them.
 //
 // A workspace is a FILESYSTEM on ONE replica's disk (memql#4354), which is
-// why the replica is the organising fact rather than a column. When a replica
+// why the replica is the organizing fact rather than a column. When a replica
 // leaves the mesh its directories go with it -- they are not migrated -- and
 // the plan is given a fresh workspace elsewhere. That is a design decision
 // rather than a recovery failure, and this screen is where an operator finds

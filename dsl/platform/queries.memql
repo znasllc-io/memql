@@ -576,12 +576,28 @@ query packageDeployment packageDeploymentById {
 /// tier decides who may see it. The same query read by an ordinary caller answers their own
 /// stranded runs, which is correct and is not a second code path.
 ///
+/// TWO EXCLUSIONS THAT ARE NOT TERMINAL STATUSES, and both were bugs.
+///
+/// `awaiting_confirm` is a run PARKED WAITING FOR A PERSON. Nothing is running, so nothing
+/// heartbeats, so the sweep closed every parked run ninety seconds after it parked -- the confirm
+/// gate had a fuse, and the run died saying "this cluster lost the node that was running this
+/// deploy", which was not true of any of them. Measured on a live instance: five runs abandoned in
+/// one afternoon, every one of them stopped at `awaiting_confirm`. A parked run rests until the
+/// person answers or cancels it; that is the whole point of the gate.
+///
+/// `cancelled` IS terminal (epic memql#4937, D3) and was simply missed here when it was added --
+/// so a person's own stop was swept and overwritten with "this cluster lost the node", which tells
+/// somebody their deliberate click was a fault. The authority on which statuses are terminal is
+/// `packageDeploymentTerminalStatuses` in component/packages/pipeline.go, and
+/// TestInFlightQueryExcludesEveryTerminalStatus holds this filter to it so the two cannot drift
+/// again.
+///
 /// The AGE comparison is deliberately NOT here. "older than the threshold" is arithmetic against a
 /// window the sweep is already holding (it comes from the env registry), so comparing in Go over a
 /// bounded page keeps ONE answer to "how old is too old" rather than two that can disagree.
 @actor
 query packageDeployment packageDeploymentsInFlight {
-  filter    status!="succeeded" && status!="refused" && status!="failed" && status!="abandoned" && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter    status!="succeeded" && status!="refused" && status!="failed" && status!="abandoned" && status!="cancelled" && status!="awaiting_confirm" && (ownerUserId==actor.userId || actor.isClusterOwner==true)
   sort      "row.createdAt", "asc"
   paginate  500
   shape     packageDeploymentFull

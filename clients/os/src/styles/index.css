@@ -2328,6 +2328,11 @@ button:not(:disabled):active {
   margin: 0;
   font-size: var(--os-text-xs);
   color: var(--os-muted);
+  /* ANYWHERE, not `break-word`: this is the server's own sentence, and it
+   * routinely carries one unbreakable run -- a hostname, a bundleRef, an id.
+   * Only `anywhere` lowers the element's MIN-CONTENT, so only `anywhere`
+   * stops that run from becoming a width the notice's container has to find;
+   * `break-word` wraps the glyphs and leaves the container just as wide. */
   overflow-wrap: anywhere;
 }
 .os-notice .os-caption {
@@ -5200,7 +5205,7 @@ a.os-button {
   gap: 6px;
   /* AIR ABOVE THE HAIRLINE, because the hairline is the block's first pixel.
    * With none, the warm rule drew itself immediately under the "Install on
-   * another organisation" link and read as that link's underline -- so the
+   * another organization" link and read as that link's underline -- so the
    * destructive corner appeared to be headed by the one control on the card
    * that opens a new tab. */
   margin-top: 12px;
@@ -7419,6 +7424,19 @@ a.os-button {
   padding: 1px 4px 1px 0;
   cursor: pointer;
   color: inherit;
+  /* THE LINE MAY SHRINK BELOW THE ANSWER IT CARRIES. `.os-rail-answer` is
+   * `nowrap` so a settled stop reads as one line, and its own `min-width: 0`
+   * lets it ellipsize INSIDE this button. But the button is a grid item of
+   * `.os-rail-body`, where `min-width` defaults to `auto` -- the automatic
+   * minimum size -- so it still claimed its min-content, and the answer of a
+   * STOPPED stop is the engine's whole refusal sentence. That pinned the
+   * stage's `1fr` track at ~900px: the pane scrolled sideways, and everything
+   * stretched to that track came with it. The refusal Notice under the stop
+   * was where it showed -- its detail sat on one unwrapped monospace line
+   * running 440px past the panel's right edge, while the prose beside it
+   * wrapped normally, because that notice was the widest thing in the track.
+   * Ellipsizing a child never shrinks the parent that is holding the width. */
+  min-width: 0;
 }
 .os-rail-line:hover .os-rail-answer {
   color: var(--os-ink);
@@ -7497,18 +7515,18 @@ a.os-button {
   min-width: 0;
 }
 
+/* A LABEL, NOT A BAND. This was sticky, which needs an opaque background so
+   rows cannot scroll under the text -- and a filled strip the full width of the
+   panel reads as a table header stripped of its borders, which is a far heavier
+   object than a two-word label should be. The heading scrolls with the rows it
+   names now: nothing to paint, and nothing to explain. */
 .os-deploy-sectionhead {
-  position: sticky;
-  top: 0;
-  z-index: 2;
   margin: 14px 0 2px;
-  padding: 3px 0;
   font-size: var(--os-text-xs);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--os-muted);
-  background: var(--os-plate);
 }
 .os-livelist-row:first-child .os-deploy-sectionhead {
   margin-top: 0;

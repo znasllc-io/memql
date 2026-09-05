@@ -135,7 +135,7 @@ func TestAnEmptyEmailIsRefusedWhateverIsPresented(t *testing.T) {
 
 // DIRECTORY MODE (memql#4611). Directory membership is the invitation, so the
 // EMAIL path -- which is what Decide serves -- has nothing to admit: arriving
-// here means somebody typed an address instead of using their organisation
+// here means somebody typed an address instead of using their organization
 // account.
 func TestDirectoryModeRefusesTheEmailPath(t *testing.T) {
 	d, err := Decide(cfg(identity.RegistrationModeDirectory), "staff@example.com", nil)
@@ -147,7 +147,7 @@ func TestDirectoryModeRefusesTheEmailPath(t *testing.T) {
 	}
 	// The REASON is why this is its own mode rather than a flag on invite_only:
 	// there the answer is "ask an admin for an invitation", and here it is
-	// "sign in with your organisation account". Those are different
+	// "sign in with your organization account". Those are different
 	// instructions to a person who has one and does not know it applies.
 	if d.Reason != "directory_sign_in_required" {
 		t.Errorf("reason = %q, want directory_sign_in_required", d.Reason)

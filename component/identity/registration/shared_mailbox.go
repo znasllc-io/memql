@@ -31,7 +31,7 @@ import "strings"
 // but because a silent edit changes what the product tells people about
 // their own security posture, and that deserves to be a visible diff.
 
-// rfc2142RoleNames is the RFC 2142 mailbox set: addresses an organisation is
+// rfc2142RoleNames is the RFC 2142 mailbox set: addresses an organization is
 // EXPECTED to run, and which are therefore almost never one person's.
 var rfc2142RoleNames = []string{
 	"abuse",
@@ -48,7 +48,7 @@ var rfc2142RoleNames = []string{
 }
 
 // commonTeamNames is the part RFC 2142 does not cover: the names
-// organisations actually pick for a shared inbox.
+// organizations actually pick for a shared inbox.
 var commonTeamNames = []string{
 	"admin",
 	"billing",

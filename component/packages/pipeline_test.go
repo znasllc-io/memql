@@ -706,8 +706,8 @@ func TestAPlacementWithNeitherIsExactlyAFirstDeploy(t *testing.T) {
 		Confirmed:  true,
 		Placements: map[string]Placement{"storefront": {AccountId: "v1:accounts:account:acme"}},
 	})
-	if got := RefusalCode(err); got != CodeDeployableBindingMissing {
-		t.Fatalf("want %s, got %s (%v)", CodeDeployableBindingMissing, got, err)
+	if got := RefusalCode(err); got != CodeDeployableHostnameUnchosen {
+		t.Fatalf("want %s, got %s (%v)", CodeDeployableHostnameUnchosen, got, err)
 	}
 	if len(h.publisher.published) != 0 || h.engine.sawStatement("updateSiteAccount") {
 		t.Fatal("nothing may be published or placed for a deployable with no hostname")

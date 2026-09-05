@@ -227,7 +227,7 @@ const STOP_FOR_CODE: Readonly<Record<string, StopId>> = {
   credential_revoked: "source",
   // The GitHub App grant codes (epic memql#4912) all park the SOURCE stop,
   // because every repair they name is a choice about where this deployable
-  // comes from: reconnect, install the app, ask an organisation owner, or use
+  // comes from: reconnect, install the app, ask an organization owner, or use
   // a token instead. Without an entry here a grant refusal would park
   // whichever stop happened to be open, which is the one place a person would
   // not look for it.
@@ -241,6 +241,9 @@ const STOP_FOR_CODE: Readonly<Record<string, StopId>> = {
   deployable_path_missing: "whatItIs",
   deployable_kind_unknown: "whatItIs",
   deployable_binding_missing: "whatItIs",
+  // ...but a MISSING ADDRESS belongs where addresses are chosen. The two were
+  // one code, so one of them always sent a person to the wrong stop.
+  deployable_hostname_unchosen: "whereItLives",
   dsl_domain_reserved: "whatItIs",
   dsl_refuses_boot: "whatItIs",
   dsl_requires_cluster_owner: "whatItIs",
@@ -319,6 +322,33 @@ const TERMINAL: Record<string, "done" | "refused" | "failed" | "abandoned" | "ca
  * question reads this.
  */
 export const TERMINAL_RUN_STATUSES: readonly string[] = Object.keys(TERMINAL);
+
+/**
+ * Whether a terminal run DECIDED anything about the deployable.
+ *
+ * `abandoned` and `cancelled` are the two where the engine guarantees it did
+ * not: one is a loss this cluster observed, the other a person's own stop, and
+ * both close with "nothing was published, and every site is still serving what
+ * it was serving". A run that published nothing and failed at nothing has no
+ * standing to mark a stop that describes the deployable.
+ *
+ * It showed as an ERROR on a live, serving deployable's What-it-is stop --
+ * the run had died PARKED, so `stoppedAt` was `awaiting_confirm`, and RUN_STOP
+ * maps that to `whatItIs`: the death of a gate painted onto the stop that says
+ * what the app IS. The sentence it rendered refuted the mark it rendered as.
+ *
+ * `refused` and `failed` are decisions about this deployable -- a manifest it
+ * cannot read, a path that is not there -- and keep their marks, which is what
+ * stops this from being "the rail went quiet about failures".
+ *
+ * Where an abandoned run belongs instead: its own timeline under Every
+ * attempt, and the action bar, which already reads "serving the version before
+ * the last attempt, which did not finish".
+ */
+function decidedSomething(status: string): boolean {
+  const terminal = TERMINAL[status];
+  return terminal !== undefined && terminal !== "done" && terminal !== "abandoned" && terminal !== "cancelled";
+}
 
 function deployRail(deployment: DeploymentRow): RailStage[] {
   const terminal = TERMINAL[deployment.status];
@@ -406,7 +436,10 @@ function standingRail(input: StandingInput): RailStage[] {
   const { pkg, app, run, site } = input;
   const terminal = run === null ? undefined : TERMINAL[run.status];
   const inFlightAt = run !== null && terminal === undefined ? (RUN_STOP[run.status] ?? null) : null;
-  const stoppedAt = run !== null && terminal !== undefined && terminal !== "done" ? stoppedStopFor(run) : null;
+  // A run that decided nothing marks nothing -- see `decidedSomething`. The
+  // DEPLOY rail keeps drawing where an abandoned run stopped, because there
+  // the subject IS the run.
+  const stoppedAt = run !== null && decidedSomething(run.status) ? stoppedStopFor(run) : null;
   const report = run?.report ?? null;
   const appReport = findApp(report, app);
 
@@ -520,13 +553,24 @@ function liveStop(stop: StopDef, site: StandingSite | null): RailStage {
  * refusal to place, and a page that guessed a stop for one would send the
  * person to repair the wrong thing.
  */
+/**
+ * Which stop a refusal CODE belongs to, exposed so a test can hold the map to
+ * the copy: a headline that names the right thing while the rail sends the
+ * person to the wrong stop is only half a repair.
+ */
+export function refusalStopForCode(code: string): StopId | undefined {
+  return STOP_FOR_CODE[code];
+}
+
 export function refusalStopFor(run: DeploymentRow | null): StopId | null {
   if (run === null) return null;
-  const terminal = TERMINAL[run.status];
-  // `abandoned` is placed here too (memql#4900): the sweep writes a typed
-  // error naming the node, so there IS a sentence to put at a stop, and the
-  // stop it belongs at is where the run got to.
-  if (terminal === undefined || terminal === "done") return null;
+  // `abandoned` USED to be placed here (memql#4900), on the reasoning that the
+  // sweep writes a typed error and so there is a sentence to put somewhere.
+  // There is -- but not on a stop describing the deployable, and not as an
+  // error: the sentence says nothing was published and every site still serves
+  // what it served. A serving deployable was showing it as its own failure.
+  // Same for `cancelled`. Both are the run's story, and the run has a page.
+  if (!decidedSomething(run.status)) return null;
   return stoppedStopFor(run);
 }
 

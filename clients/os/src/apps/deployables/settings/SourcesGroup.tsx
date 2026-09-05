@@ -34,7 +34,7 @@ import {
 // TWO WAYS TO REACH A PRIVATE REPOSITORY, AND NEITHER IS HIDDEN
 // ===========================================================================
 // A GitHub connection is the recommended one and a pasted token is the
-// fallback -- for a self-hosted host, an organisation that will not install
+// fallback -- for a self-hosted host, an organization that will not install
 // an app, or somebody who simply prefers it. So the token half is not behind
 // "Advanced": calling it that would be a judgement about the person rather
 // than a fact about the choice.
@@ -104,7 +104,7 @@ export function SourcesGroup({
   const disconnect = useCredentialRevoke();
   // THE CARD'S ORGANISATIONS, ON DEMAND. The credential row projects
   // installation IDS and nothing else -- only `sourceRepositories` answers
-  // LOGINS and which organisations are still waiting for an owner -- so
+  // LOGINS and which organizations are still waiting for an owner -- so
   // without this the card can only ever say "2 installations" and the pending
   // state is unreachable on the surface built to show it. See `LookedUp`.
   const lookup = useSourceRepositories();
@@ -132,7 +132,7 @@ export function SourcesGroup({
 
   // THE INSTALL LINK'S URL, ASKED FOR ONCE PER GRANT.
   //
-  // "Install on another organisation" has to be a real anchor with a real
+  // "Install on another organization" has to be a real anchor with a real
   // href, and `githubConnectBegin` is the only call that answers where that
   // is -- the credential row projects installation IDS, never the app's
   // installation page. So it is asked for exactly once, keyed on the grant's
@@ -173,7 +173,7 @@ export function SourcesGroup({
       <legend>Sources</legend>
       <Caption>
         Where your deployables fetch their code. A GitHub connection lets you pick a repository from a list; a
-        pasted token is the fallback for a host or an organisation that will not take the app.
+        pasted token is the fallback for a host or an organization that will not take the app.
       </Caption>
 
       {/* THE ANSWER FROM GITHUB, ON THE SURFACE THAT ASKED. A successful
@@ -286,7 +286,7 @@ export function SourcesGroup({
 }
 
 /**
- * The one control that fills in WHICH organisations this connection reaches.
+ * The one control that fills in WHICH organizations this connection reaches.
  *
  * ===========================================================================
  * AN ACTION, NEVER SOMETHING A RENDER DOES
@@ -301,7 +301,7 @@ export function SourcesGroup({
  *
  * IT SAYS WHEN IT LOOKED, which is what keeps the card honest. Before anybody
  * asks, the chips are the count off the row and the caption says the logins
- * have not been read; after, they are logins and a pending organisation can
+ * have not been read; after, they are logins and a pending organization can
  * appear -- the `--os-warn` state this design exists to make reachable. The
  * picker's own footer says the same two things in the same words for the same
  * reason: this is a READING, and a reading that does not date itself gets read
@@ -319,7 +319,7 @@ function LookedUp({ lookup, grantId, now }: { lookup: SourceRepositoriesActions;
       </Button>
       <Caption>
         {lookup.readAt === ""
-          ? "The count above is off this cluster's own row. Which organisations, and any waiting for an owner to approve, are GitHub's to answer."
+          ? "The count above is off this cluster's own row. Which organizations, and any waiting for an owner to approve, are GitHub's to answer."
           : `Asked GitHub ${formatFreshness(lookup.readAt, now)}.`}
       </Caption>
       {lookup.refusal ? <ProblemNotice problem={lookup.refusal} tone={toneFor(lookup.refusal.code)} /> : null}

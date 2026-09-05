@@ -44,7 +44,7 @@ local k3d and in a cloud cluster; only the numbers and endpoints differ.
 
 > **This replaced "Tiger Cloud is the only supported provider today."** It was
 > true, and it was the source of the constraint the rest of this page used to
-> be organised around: a per-tier `max_connections` ceiling of ~59 usable
+> be organized around: a per-tier `max_connections` ceiling of ~59 usable
 > slots, a control-plane pool that could not be terminated, and $0.883/GB-month
 > storage against a schema that never evicts. Self-hosting removed all three.
 >

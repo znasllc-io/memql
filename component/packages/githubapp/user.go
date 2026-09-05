@@ -70,7 +70,7 @@ type Repository struct {
 	InstallationId int64 `json:"-"`
 }
 
-// InstallationRequest is an installation waiting for an organisation owner's
+// InstallationRequest is an installation waiting for an organization owner's
 // approval. GitHub surfaces these to the APP rather than to the person, which
 // is why reading them needs the app JWT and why they are a separate call.
 type InstallationRequest struct {
@@ -107,7 +107,7 @@ func (c *Client) User(ctx context.Context, userToken string) (User, error) {
 // UserInstallations lists the installations this person can reach.
 //
 // Read LIVE on every call rather than from the grant's stored ids, and that is
-// the design: somebody adding the app to another organisation changes this
+// the design: somebody adding the app to another organization changes this
 // answer with nothing to tell the cluster, so a picker driven by a stored list
 // would keep offering yesterday's -- the one failure a picker cannot survive.
 // The stored ids are a display cache the caller refreshes FROM this.
@@ -148,7 +148,7 @@ func (c *Client) InstallationRepositories(ctx context.Context, userToken string,
 	return payload.Repositories, payload.TotalCount, nil
 }
 
-// PendingInstallationRequests lists installations awaiting an organisation
+// PendingInstallationRequests lists installations awaiting an organization
 // owner's approval, as the APP sees them.
 //
 // It is asked under the app JWT because that is the only credential GitHub

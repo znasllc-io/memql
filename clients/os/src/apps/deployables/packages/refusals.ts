@@ -28,7 +28,12 @@ const COPY: Record<string, RefusalCopy> = {
     next: "A package is a tree with memql-package.yaml at its root, describing what to deploy. Add one and try again.",
   },
   package_manifest_invalid: {
-    title: "The package manifest could not be read",
+    // NOT "could not be read". Five of this code's six sentences are about a
+    // manifest that read perfectly and says something this cluster will not
+    // accept -- no formatVersion, a formatVersion it does not know, no name,
+    // a deployable with no name, two deployables sharing one name. Only the
+    // YAML error is a reading failure, and "not valid" covers that one too.
+    title: "The package manifest is not valid",
     next: "",
   },
   deployable_path_missing: {
@@ -40,8 +45,26 @@ const COPY: Record<string, RefusalCopy> = {
     next: "",
   },
   deployable_binding_missing: {
+    // THE MANIFEST'S problem again, and only that. This code carried TWO
+    // conditions until the engine split them: a storefront declared with no
+    // binding, and an app with no hostname. One headline could describe
+    // neither, so somebody who had simply not chosen an address was sent to
+    // look at a Shopify binding that was never the problem. The second
+    // condition is `deployable_hostname_unchosen` now, so this can name its
+    // own again.
     title: "A storefront has no store to talk to",
-    next: "",
+    next: "The binding lives in the manifest, beside the deployable it belongs to.",
+  },
+  deployable_hostname_unchosen: {
+    // THE OTHER HALF, and a placement problem rather than a manifest one: the
+    // app is fine, nobody has said where it should live. The repair is on the
+    // Where-it-lives stop, which is where the rail sends it.
+    //
+    // A person meets this by redeploying a source that declares an app they
+    // have never deployed -- so the second sentence names the other way out,
+    // which is usually the one they want.
+    title: "A declared app has no address yet",
+    next: "Choose one at Where it lives, or leave the app out and deploy the rest.",
   },
   dsl_domain_reserved: {
     title: "This package ships MemQL under a name the engine owns",
@@ -52,16 +75,47 @@ const COPY: Record<string, RefusalCopy> = {
     next: "These are the same checks a node runs at boot, so nothing was deployed. Fix them in the source and deploy again.",
   },
   source_too_large: {
-    title: "This source is over the size this cluster accepts",
+    // The code covers the SOURCE and the BUILT OUTPUT, and COUNTS as well as
+    // sizes: stages.go raises it for a built tree over the byte cap and for
+    // one over the file-COUNT cap, and the build surface raises it for a
+    // source too big to travel there at all. So the headline names neither
+    // the object nor a byte size; the sentence names the limit that was hit
+    // and, where there is one, the variable that raises it.
+    title: "This is over the limits this cluster accepts",
     next: "",
   },
   source_unreadable: {
+    // THE ENGINE'S CATCH-ALL, and this headline is the best of a bad set --
+    // recorded here so the next reader knows it was examined rather than
+    // overlooked. component/packages spells `source_unreadable` for roughly
+    // two dozen conditions across seven files, and only about half are about
+    // a source. The rest: "no package/site/deployment %q is readable by this
+    // caller", "deployment %q belongs to a different package", "deployment %q
+    // finished as %q rather than succeeded", "this cluster has no build
+    // surface configured", "... no DSL staging surface ...", "... no rollout
+    // surface ...".
+    //
+    // No single headline is true of all of those, and this build must supply
+    // one: `SERVER_SENTENCE_ONLY` would be the honest home, and the coverage
+    // gate in test/deployables/build.test.tsx requires COPY membership for
+    // every engine code. So the headline stays with the reading the code is
+    // DOCUMENTED for (refusal.go: "the fetched snapshot is not an archive
+    // this engine can open at all"), which is also the reading the rail
+    // commits to by parking this code on the Source stop. The durable repair
+    // is engine-side: codes of their own for the conditions that are not
+    // about a source.
     title: "This cluster could not read the source",
     next: "",
   },
   bundle_path_invalid: {
+    // THE NEXT STEP, NOT A CAUSE. Five conditions share this code -- an entry
+    // with an empty name, an absolute path, a NUL byte in the name, a path
+    // escaping the package root, and a path this cluster will not read -- and
+    // the line here used to assert the fourth for all five. The sentence
+    // names the entry and what is wrong with it; the repair is the same
+    // whichever it was.
     title: "This archive is not a plain tree",
-    next: "One of its entries points outside the package root, so it was not built from a directory this cluster will read.",
+    next: "Repack the tree as a plain directory and try again.",
   },
   go_pack_not_deployable: {
     title: "The Go pack was not deployed",
@@ -76,7 +130,10 @@ const COPY: Record<string, RefusalCopy> = {
     next: "",
   },
   archive_confirmation_mismatch: {
-    title: "That name does not match",
+    // TWO CONFIRMATIONS SHARE THIS CODE: archiving a deployable types its
+    // HOSTNAME, archiving a package types its NAME. The headline used to say
+    // "name" for both. The server's sentence quotes the exact string to type.
+    title: "What you typed does not match",
     next: "",
   },
   deployable_build_failed: {
@@ -97,7 +154,13 @@ const COPY: Record<string, RefusalCopy> = {
     next: "Nothing was built and nothing was published. This is a cluster problem rather than one with your source -- an operator needs to look at the workbench.",
   },
   no_worker_available: {
-    title: "None of your machines can build this",
+    // NOT "cannot build this". Of the three sentences behind this code, one
+    // is that no machine matched, one is that this cluster could not READ the
+    // machines you have paired, and one is that the route exists and cannot
+    // yet ask you for the per-run approval a computer-use act needs. In two
+    // of the three the machines are perfectly capable. What is true in all
+    // three is that none of them took the build.
+    title: "None of your machines took this build",
     next: "",
   },
   deployment_abandoned: {
@@ -222,7 +285,7 @@ const COPY: Record<string, RefusalCopy> = {
     // whole useful content: the repair belongs to somebody else, and the
     // person's one next step is knowing whom to ask. A next step composed
     // here could only be a worse copy of it.
-    title: "Waiting for an organisation owner to approve",
+    title: "Waiting for an organization owner to approve",
     next: "",
   },
   github_app_not_configured: {
@@ -243,11 +306,17 @@ const COPY: Record<string, RefusalCopy> = {
   // -- the lifecycle's fourth rung, and the stop button (epic memql#4937) --
 
   site_not_deletable: {
-    // NAMES THE NEXT STEP, because "pause it first" is the whole answer. A
+    // NAMES THE NEXT STEP, because "archive it first" is the whole answer. A
     // refusal that only said no would leave somebody looking for a control
     // that is deliberately not there yet.
-    title: "This deployable is still serving",
-    next: "Unpublish it, then archive it, and delete becomes available. Deleting is the end of the line, so it only runs from a state nothing is served from.",
+    //
+    // The headline says ARCHIVED rather than "still serving": delete runs
+    // from `archived` or `draft`, so this refusal also meets somebody who has
+    // ALREADY unpublished -- and telling them the deployable is still serving
+    // when they just paused it reads as a fault in the cluster. The next step
+    // makes the unpublish conditional for the same reason.
+    title: "This deployable has not been archived yet",
+    next: "Archive it first -- unpublish it if it is still serving -- and delete becomes available. Deleting is the end of the line, so it only runs from a state nothing is served from.",
   },
   delete_confirmation_mismatch: {
     title: "That is not this deployable's hostname",
@@ -264,7 +333,11 @@ const COPY: Record<string, RefusalCopy> = {
     // that already finished, or one past the roll. Both mean "there is
     // nothing left to stop", which is what the headline says.
     title: "There is nothing left to stop",
-    next: "A run past the roll is restarting this cluster onto its staged MemQL, and stopping half way through is worse than letting it finish. It will close on its own.",
+    // CONDITIONAL, because only one of the two arms is about the roll: a run
+    // that already finished is not restarting anything, and explaining the
+    // roll to somebody who stopped a finished run describes a thing that did
+    // not happen. The server's sentence says which arm this is.
+    next: "If it is past the roll, this cluster is restarting onto its staged MemQL and stopping half way through is worse than letting it finish -- it will close on its own.",
   },
   deployment_cancelled: {
     // NOT A FAULT, and the copy leads with that. `cancelled` is somebody's own
@@ -290,6 +363,12 @@ const COPY: Record<string, RefusalCopy> = {
  * must be in COPY or here, and a code in neither renders under the neutral
  * heading -- the designed fallback for a fault nobody anticipated, not a
  * place to leave a known one.
+ *
+ * NOTE the second gate. test/deployables/build.test.tsx runs its own coverage
+ * assertion over `knownCodes()` ALONE, so a code moved here to say "the
+ * sentence is the whole copy" fails that one. `source_unreadable` -- the
+ * engine's catch-all, and the strongest candidate this table has -- is in
+ * COPY for that reason, with the finding recorded on its entry.
  */
 export const SERVER_SENTENCE_ONLY: readonly string[] = [];
 

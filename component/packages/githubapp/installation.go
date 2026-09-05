@@ -57,7 +57,7 @@ func (c *Client) InstallationForRepo(ctx context.Context, owner, repo string) (i
 //
 // The cache is keyed on the installation and is PER PROCESS, which is the
 // right grain for both reasons it exists: every package fetching from one
-// organisation shares an installation, and a token is a bearer for that whole
+// organization shares an installation, and a token is a bearer for that whole
 // installation, so keeping it anywhere a second process could read it would
 // widen its blast radius without shortening its life.
 func (c *Client) InstallationToken(ctx context.Context, installationId int64) (string, error) {

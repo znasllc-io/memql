@@ -119,7 +119,7 @@ export function credentialFromRow(raw: Row): CredentialRow {
  * memql#4915, the three a GRANT adds:
  *
  *   * `installationIds` MOVING IS NEWS, and it is the one an installation
- *     webhook produces: somebody installed the app on another organisation,
+ *     webhook produces: somebody installed the app on another organization,
  *     or removed it from one, and the connected-account card exists to show
  *     exactly that. It is the SET that counts, so the members are sorted
  *     before they are joined -- GitHub answers no ordering guarantee, and a

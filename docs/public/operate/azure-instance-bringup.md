@@ -228,7 +228,7 @@ Two things worth knowing before you start:
   -- the site **loads**, with a browser warning, which is why this one is easy
   to miss.
 - **The credential transport is an input, not a preference.** Deploy keys are
-  disabled org-wide at some organisations, which makes the ssh path unavailable
+  disabled org-wide at some organizations, which makes the ssh path unavailable
   rather than unattractive.
 - **The alert rules are installed here, and that is the point.**
   `deploy/k8s/monitoring` holds every alert this platform ships -- WAL

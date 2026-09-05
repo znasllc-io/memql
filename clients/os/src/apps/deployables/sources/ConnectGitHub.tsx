@@ -18,7 +18,7 @@ import { ProblemNotice } from "../packages/ReportView";
 //
 // It is `quiet` for the same reason. `primary` means "the one thing this
 // surface is for" (kit/controls.tsx), and pasting a token remains a
-// legitimate first choice for a self-hosted host or an organisation that
+// legitimate first choice for a self-hosted host or an organization that
 // will not install an app -- so this is the recommended path, not the only
 // one, and the tone says so.
 //

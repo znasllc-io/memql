@@ -871,7 +871,7 @@ func TestSourceRepositoriesListsWhatTheGrantReaches(t *testing.T) {
 	// repair belongs to somebody else, and knowing whom to ask is the only
 	// useful next step. Another person's request must not appear.
 	if strings.Join(res.Pending, ",") != "other-org" {
-		t.Fatalf("pending %v -- must be this person's requests, named by organisation", res.Pending)
+		t.Fatalf("pending %v -- must be this person's requests, named by organization", res.Pending)
 	}
 	// One page of one repository has no next page.
 	if res.NextPage != 0 {

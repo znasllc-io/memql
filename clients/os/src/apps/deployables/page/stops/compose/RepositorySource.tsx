@@ -195,7 +195,7 @@ export function RepositorySource({
  * "Use a token instead": the disclosure, in `ZipPicker`'s shape.
  *
  * NOT "ADVANCED". A pasted URL and a personal token are a legitimate first
- * choice -- a host the app does not cover, an organisation that will not
+ * choice -- a host the app does not cover, an organization that will not
  * install one, or a preference -- and calling that advanced would be a
  * judgement about the person rather than a fact about the choice. It is
  * always present, never inside a menu, and closed by default because the

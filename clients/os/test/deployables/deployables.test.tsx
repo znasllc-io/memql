@@ -401,6 +401,29 @@ describe("the Head's action, by state", () => {
     expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(packageId: "pkg-acme", confirm: false)']);
   });
 
+  it("redeploys THIS app and leaves every sibling the source declares alone", async () => {
+    // Reported from production with a screenshot: Redeploy on `storefront`
+    // refused with `deployable "web" has never been deployed and no hostname
+    // was chosen for it` -- a page about one app, failing because of another.
+    // A deploy call with no placements is a whole-PACKAGE run, and the engine
+    // defaults every deployable to not-skipped.
+    const { connection, page } = await mountAndOpen(
+      {
+        ...WITH_PACKAGE,
+        packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
+      },
+      "store.memql.example.com",
+    );
+    await click(headAction(page));
+    const call = connection.callsNamed("packageDeploy")[0] ?? "";
+    // The sibling is skipped BY NAME...
+    expect(call).toContain("web: {skip: true}");
+    // ...and this page's own app is absent, which is what "not skipped" means.
+    // Naming it would also mean naming an address, and the engine already
+    // remembers this one's from its first deploy.
+    expect(call).not.toContain("storefront:");
+  });
+
   it("live with nothing newer: Redeploy, primary", async () => {
     const { connection, page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
     // "Redeploy" rather than "Deploy the update": there IS no update, and
@@ -1227,7 +1250,7 @@ describe("the credential card", () => {
       }
     });
 
-    it("fires when a grant reaches a new organisation, or is remade as somebody else", () => {
+    it("fires when a grant reaches a new organization, or is remade as somebody else", () => {
       // The grant half (epic memql#4915). An installation webhook moving
       // `installationIds` IS what the connected-account card exists to show,
       // and a reconnect under a different GitHub account is a different

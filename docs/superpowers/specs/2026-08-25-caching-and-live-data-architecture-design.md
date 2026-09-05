@@ -103,7 +103,7 @@ verified count over `dsl/**/queries.memql` is eleven, and the epic's own list
 enumerates eleven -- the prose number was wrong.) Everything else rides the
 60s default.
 
-The sweep's organising question is **not** "is this read hot". It is:
+The sweep's organizing question is **not** "is this read hot". It is:
 
 > Can this read's answer change without a write to a concept it depends on?
 

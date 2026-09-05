@@ -13,7 +13,7 @@ import (
 // ruling).
 //
 // Phase 2 computed the predicate a declared tier WOULD inject and threw
-// it away. This phase ANDs it in. The tests here are organised around
+// it away. This phase ANDs it in. The tests here are organized around
 // the four findings that got the first attempt refused at review, and
 // each one names its finding.
 

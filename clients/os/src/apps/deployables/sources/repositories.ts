@@ -17,7 +17,7 @@ import { flatten } from "../../../kit/rows";
 //
 // Everything here is pure -- a reply in, groups out -- so the picker's
 // behaviour (what is grouped under whom, what a search matches, where a
-// pending organisation lands) is provable without rendering anything.
+// pending organization lands) is provable without rendering anything.
 
 /** One repository the grant can reach. */
 export interface RepositoryRow {
@@ -36,7 +36,7 @@ export interface RepositoryRow {
   installationId: string;
 }
 
-/** One installation the grant reaches: an account or an organisation. */
+/** One installation the grant reaches: an account or an organization. */
 export interface InstallationRow {
   id: string;
   login: string;
@@ -47,7 +47,7 @@ export interface InstallationRow {
   suspended: boolean;
 }
 
-/** An organisation whose installation an owner has not approved yet. */
+/** An organization whose installation an owner has not approved yet. */
 export interface PendingInstallation {
   login: string;
 }
@@ -220,7 +220,7 @@ export function repositoryPageFrom(raw: Row | undefined | null): RepositoryPage 
 export interface RepositoryGroup {
   owner: string;
   repositories: RepositoryRow[];
-  /** Waiting for an owner of this organisation to approve the app. */
+  /** Waiting for an owner of this organization to approve the app. */
   pending: boolean;
 }
 
@@ -246,8 +246,8 @@ function byName(a: string, b: string): number {
  * approval lands the group moves up into the pickable half, which is exactly
  * the news somebody pressed Look again for.
  *
- * A pending organisation is matched against the SEARCH by its login, so
- * typing the name of the organisation you are waiting on finds the sentence
+ * A pending organization is matched against the SEARCH by its login, so
+ * typing the name of the organization you are waiting on finds the sentence
  * explaining why it has no repositories rather than hiding it.
  */
 export function groupRepositories(
@@ -273,7 +273,7 @@ export function groupRepositories(
   const needle = search.trim().toLowerCase();
   const pending = page.pending
     .filter((p) => needle === "" || p.login.toLowerCase().includes(needle))
-    // An organisation that already answered with repositories is not
+    // An organization that already answered with repositories is not
     // pending: the same login must never render twice, once as rows and
     // once as a sentence saying it has none.
     .filter((p) => !byOwner.has(p.login))

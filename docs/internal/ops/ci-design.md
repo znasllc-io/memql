@@ -453,7 +453,7 @@ required check reduces the never-reported surface from three workflows to
 one, but if no workflow dispatches, one required name is as unsatisfiable as
 three. This was demonstrated live: the gate was restored at 21:32Z and
 control PR #3154 sat BLOCKED with no `ci-required` check in existence. The
-mitigation is organisational, not technical — the bypass actor in O5, which
+mitigation is organizational, not technical — the bypass actor in O5, which
 is why that item is not optional.
 
 ### Alternatives considered

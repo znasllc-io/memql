@@ -356,7 +356,7 @@ func TestASkippedAppIsRecordedAndDoesNotTripBindingMissing(t *testing.T) {
 	if len(pub.published) != 1 {
 		t.Fatalf("exactly one app should have been published, got %v", pub.published)
 	}
-	if CodeDeployableSkipped == CodeDeployableBindingMissing {
+	if CodeDeployableSkipped == CodeDeployableHostnameUnchosen {
 		t.Fatal("a deliberate skip and a missing binding are different answers")
 	}
 }
@@ -379,8 +379,8 @@ func TestWithoutTheSkipTheSameRunIsRefusedForTheMissingBinding(t *testing.T) {
 	bundles := map[string]edge.Bundle{"storefront": {}, "web": {}}
 
 	_, err := d.publish(callerCtx("v1:identity:user:someone"), req, map[string]any{}, rep, bundles)
-	if RefusalCode(err) != CodeDeployableBindingMissing {
-		t.Fatalf("want %s so the skip test is measuring something, got %v", CodeDeployableBindingMissing, err)
+	if RefusalCode(err) != CodeDeployableHostnameUnchosen {
+		t.Fatalf("want %s so the skip test is measuring something, got %v", CodeDeployableHostnameUnchosen, err)
 	}
 }
 

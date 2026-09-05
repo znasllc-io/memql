@@ -13,7 +13,7 @@ import (
 // MemQL is company-agnostic, and this is the sweep that keeps it that way.
 //
 // The names are in core/vendorname, not here. That package's doc comment says
-// what qualifies as one, why the GitHub organisation and the product's own
+// what qualifies as one, why the GitHub organization and the product's own
 // container registry deliberately do not, and carries the caveat this sweep
 // inherits: it is a banned-NAMES list, so it catches these names and not the
 // next one. Do not read a passing run as proof that no operator's hostname or

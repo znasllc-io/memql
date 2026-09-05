@@ -58,7 +58,21 @@ const (
 	// CodeDeployableKindUnknown: kind is not one of the three live values.
 	CodeDeployableKindUnknown = "deployable_kind_unknown"
 	// CodeDeployableBindingMissing: a shopify_storefront without its binding.
+	//
+	// THE MANIFEST'S problem, and only that. This code used to be raised from
+	// the publish stage as well, for an app with no hostname -- two conditions
+	// with different repairs under one name, so the OS could neither name the
+	// failure nor send a person to the right stop. It said "A storefront has no
+	// store to talk to" for an app that simply had no address yet.
 	CodeDeployableBindingMissing = "deployable_binding_missing"
+	// CodeDeployableHostnameUnchosen: an app the manifest declares that has
+	// never been deployed and was given no hostname in this run's placements.
+	//
+	// A PLACEMENT problem rather than a manifest one, which is why it is its
+	// own code: the repair is to choose an address (or to skip the app), and
+	// the surface that does that is Where-it-lives. Split out of
+	// CodeDeployableBindingMissing, whose repair is editing the tree.
+	CodeDeployableHostnameUnchosen = "deployable_hostname_unchosen"
 	// -- discovered DSL (section B) --
 
 	// CodeDslDomainReserved: a discovered dsl/<domain>/ collides with a core
@@ -142,7 +156,7 @@ const (
 	// that does not exist.
 	CodeRepositoryNotInstalled = "repository_not_installed"
 	// CodeInstallationPending: an installation is waiting for an
-	// organisation owner's approval. Named BY ORGANISATION, because the
+	// organization owner's approval. Named BY ORGANISATION, because the
 	// repair belongs to somebody else and the person's only useful next
 	// step is knowing whom to ask. Distinct from
 	// repository_not_installed: there the person can act, here they

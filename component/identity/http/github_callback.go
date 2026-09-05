@@ -219,7 +219,7 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A grant with NO reachable installation is still a grant worth storing:
-	// the person authorized, and "Install on another organisation" is exactly
+	// the person authorized, and "Install on another organization" is exactly
 	// the repair the OS offers next. So a failure here is logged and the list
 	// is left empty rather than aborting a connect that otherwise succeeded.
 	installations, instErr := client.Installations(r.Context(), tokens.AccessToken)

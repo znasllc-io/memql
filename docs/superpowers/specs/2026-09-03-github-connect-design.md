@@ -22,7 +22,7 @@ credential the person owns. The owner asked for a better default: a person
 signs in to GitHub once, anywhere in the product, and from then on picks a
 repository from a list instead of typing a URL, with the flow prefilled from
 what the repository already says about itself. The pasted token stays as the
-fallback for a self-hosted GitHub or an organisation that will not install
+fallback for a self-hosted GitHub or an organization that will not install
 an app.
 
 **It is a connection, not a sign-in.** What the flow needs is authority to
@@ -45,7 +45,7 @@ the engine, and its hostname is where a redirect URI is registered.
 | C4 | Starting the flow | **Over the stream, not over HTTP.** `githubConnectBegin` answers the authorize URL with a server-held state bound to the signed-in user; the browser navigates to it. The callback is the only HTTP surface |
 | C5 | Who the grant belongs to | **The MemQL user, as an owned `sourceCredential` of kind `github_app`.** The Compose rules hold unchanged: the engine fetches under the package owner's grant and nothing else; a cluster owner deploying somebody's package fetches under that package's grant. There is no cluster-wide GitHub grant for sources |
 | C6 | Background work | **Installation tokens**, minted by the engine from the app's private key, cached per installation until expiry. A poll, an auto-deploy or a webhook-driven fetch never depends on the person's user token being alive. The user token is refreshed server-side on use and never leaves the node |
-| C7 | The fallback | **The pasted token stays**, behind "Use a token instead" on the Source stop, for a host that is not github.com, an organisation that refuses the app, or a person who prefers it. It is the same credential concept with `kind: token` |
+| C7 | The fallback | **The pasted token stays**, behind "Use a token instead" on the Source stop, for a host that is not github.com, an organization that refuses the app, or a person who prefers it. It is the same credential concept with `kind: token` |
 | C8 | What is asked of GitHub | **Contents read and metadata read**, nothing else. A later capability that needs more (an agent opening a pull request) requests it as its own permission change, which GitHub surfaces to every installation for re-approval |
 
 ## A. The flow
@@ -55,7 +55,7 @@ the engine, and its hostname is where a redirect URI is registered.
    the caller's user id with a short TTL and answers the authorize URL for
    the app (`https://github.com/login/oauth/authorize` with the client id,
    the state and the redirect URI). The browser navigates there; the person
-   authorizes, and installs the app on the account or organisation they
+   authorizes, and installs the app on the account or organization they
    choose, selecting all or some repositories.
 2. **Callback.** GitHub redirects to `GET /auth/github/callback` with `code`
    and `state` (or `installation_id` and `setup_action`, the same route
@@ -69,8 +69,8 @@ the engine, and its hostname is where a redirect URI is registered.
 3. **Pick.** The Source stop lists the repositories the grant can see
    (`GET /user/installations/{id}/repositories`, every installation,
    paginated), grouped by owner, with search, visibility, default branch and
-   last push. An installation pending an organisation admin's approval is
-   shown as pending, by name; "Install on another organisation" links to
+   last push. An installation pending an organization admin's approval is
+   shown as pending, by name; "Install on another organization" links to
    the app's installation page and returns through the same callback.
 4. **Prefill.** Choosing a repository runs `sourceProbe` under the grant,
    which now also reads `memql-package.yaml` through the contents API and
@@ -140,7 +140,7 @@ replayed.
 
 Every outcome is a typed reason rendered in place: `reconnect_required` (a
 401 from GitHub under a grant, never read as "private, or not there"),
-`installation_pending` (named by organisation), `repository_not_installed`
+`installation_pending` (named by organization), `repository_not_installed`
 (the grant exists but the app is not installed on that repository, with the
 installation link), `github_app_not_configured` (the six values are absent,
 so only the token path is offered), `connect_state_invalid` (an expired or
@@ -210,7 +210,7 @@ What it would buy is small, because **no hot path reads `installationIds`**:
 
 Only the card reads the stored value, and the three paths where the owner's own
 actor IS present cover it: the connect callback (which is also where "Install on
-another organisation" returns, so a new installation is recorded the moment it
+another organization" returns, so a new installation is recorded the moment it
 is made), `sourceRepositories` (which lists installations live and writes back
 what it read), and a probe under the grant. What is lost is noticing an
 UNINSTALL performed elsewhere, between one visit and the next -- and the
@@ -228,6 +228,6 @@ owner.
 Sign-in with GitHub as an identity route; permissions beyond contents and
 metadata read; GitHub Enterprise Server hosts (the token path covers a
 self-hosted GitHub only if its API is github.com-compatible, and today it is
-refused as `source_host_unsupported`); organisation-level policy management;
+refused as `source_host_unsupported`); organization-level policy management;
 using the grant for the owner-only release cut, which keeps its cluster
 token because it is a cluster act.
