@@ -264,7 +264,13 @@ describe("the standing reading", () => {
     const at = (status: string) => statesOf(standing({ run: deployment({ status, report: report(), finishedAt: "" }) }));
 
     expect(at("analyzing")).toEqual({ source: "done", whatItIs: "current", whereItLives: "ahead", build: "ahead", live: "ahead" });
-    expect(at("awaiting_confirm").whatItIs).toBe("current");
+    // ...but NOT `awaiting_confirm`. That is a run parked waiting for a
+    // person: nothing is executing, so no stop is "running now". It used to
+    // read `current` here, and because the list hands every app row of a
+    // source that source's parked run, one unanswered gate redrew every app of
+    // the package -- serving ones included -- as unreached. See "a run parked
+    // at the confirm gate" below.
+    expect(at("awaiting_confirm").whatItIs).not.toBe("current");
     expect(at("building")).toEqual({ source: "done", whatItIs: "done", whereItLives: "done", build: "current", live: "ahead" });
     for (const status of ["staging_dsl", "rolling", "publishing"]) {
       expect(at(status).build).toBe("skipped");
@@ -669,5 +675,48 @@ describe("a run that published nothing", () => {
   it("still counts both as terminal, so nothing reads as running", () => {
     expect(runIsMoving(deployment({ status: "abandoned" }))).toBe(false);
     expect(runIsMoving(deployment({ status: "cancelled" }))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A PARKED RUN IS NOT IN FLIGHT
+// ---------------------------------------------------------------------------
+//
+// Reported from production: a deployable that was built and published, needing
+// only to be made live, drew as stopped at the SECOND stop in the list.
+//
+// `awaiting_confirm` was in RUN_STOP, mapped to `whatItIs`, so the standing
+// rail marked that stop `current` -- "running now" -- and every stop after it
+// `ahead`. Nothing was running: the run was parked, waiting for a person. And
+// because the list hands every app row of a source that source's parked run,
+// ONE unanswered gate redrew every app of the package as unreached.
+//
+// The list already says a parked run exists, in the one place it is true of:
+// "a deploy is waiting for you", on the SOURCE row.
+describe("a run parked at the confirm gate", () => {
+  const built = site({ status: "draft", bundleRef: "blob://sites/site-1/v1/" });
+  const parked = deployment({ status: "awaiting_confirm" });
+
+  it("does not draw a built, published deployable as unreached", () => {
+    const states = statesOf({ ...standing(), site: built, run: parked });
+    expect(states["whatItIs"]).not.toBe("current");
+    expect(states["build"]).not.toBe("ahead");
+    // Built and published, waiting only to be made live -- which is the Live
+    // stop's own "open", not an unreached rail.
+    expect(states["build"]).toBe("done");
+    expect(states["live"]).toBe("open");
+  });
+
+  it("leaves a live deployable entirely alone", () => {
+    const states = statesOf({ ...standing(), site: site({ status: "live" }), run: parked });
+    expect(Object.values(states)).toEqual(["done", "done", "done", "done", "done"]);
+  });
+
+  it("STILL draws a run that is actually running", () => {
+    // The negative control. `building` IS in flight, and the rail must go on
+    // saying so or it would have stopped reporting progress altogether.
+    const states = statesOf({ ...standing(), site: built, run: deployment({ status: "building" }) });
+    expect(states["build"]).toBe("current");
+    expect(states["live"]).toBe("ahead");
   });
 });

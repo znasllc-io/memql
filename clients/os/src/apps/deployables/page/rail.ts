@@ -435,7 +435,20 @@ function indexOf(id: string): number {
 function standingRail(input: StandingInput): RailStage[] {
   const { pkg, app, run, site } = input;
   const terminal = run === null ? undefined : TERMINAL[run.status];
-  const inFlightAt = run !== null && terminal === undefined ? (RUN_STOP[run.status] ?? null) : null;
+  // A PARKED RUN IS NOT IN FLIGHT. `awaiting_confirm` is a run WAITING FOR A
+  // PERSON -- nothing is executing -- so drawing a stop as "running now" for
+  // it was wrong on its own terms. It cost more than a wrong mark: the list
+  // hands every app row of a source that source's parked run, so ONE
+  // unanswered gate redrew every app of the package as unreached, including
+  // ones that were built, published and serving.
+  //
+  // The list already reports a parked run where it is true -- "a deploy is
+  // waiting for you", on the SOURCE row -- and the page's action bar offers
+  // the gate's own acts. Neither needs this rail to claim work is happening.
+  const inFlightAt =
+    run !== null && terminal === undefined && run.status !== "awaiting_confirm"
+      ? (RUN_STOP[run.status] ?? null)
+      : null;
   // A run that decided nothing marks nothing -- see `decidedSomething`. The
   // DEPLOY rail keeps drawing where an abandoned run stopped, because there
   // the subject IS the run.

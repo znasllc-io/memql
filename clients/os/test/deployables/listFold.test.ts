@@ -173,9 +173,18 @@ describe("the parked run: the waiting mark and the rows that will serve", () => 
       ["storefront", "store.memql.example.com", false],
       ["admin", "", true],
     ]);
-    // The rail reads the run: Source done, What it is running, the rest ahead.
+    // The rail reads the ROW, not the parked run's stage: a run waiting at the
+    // confirm gate is not executing, so nothing is "running now". This app has
+    // a source and a kind and nothing else yet, which is what it draws. (It
+    // read `current` at What-it-is before, and since every app row of a source
+    // carries that source's parked run, one unanswered gate redrew the whole
+    // package -- serving apps included -- as unreached.)
     const states = railFor(standingInputFor(acme.rows[1]!)).stages.map((s) => s.state);
-    expect(states).toEqual(["done", "current", "ahead", "ahead", "ahead"]);
+    // Build reads `skipped`, not `ahead`: this app is prebuilt, so there is no
+    // build to run and saying so is more than the parked run was letting
+    // through. That is the whole gain -- the row's own facts, instead of one
+    // unanswered gate flattening every stop after the second.
+    expect(states).toEqual(["done", "done", "ahead", "skipped", "ahead"]);
     expect(acme.rows[1]?.kind).toBe("spa");
   });
 

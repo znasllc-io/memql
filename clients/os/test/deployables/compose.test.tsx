@@ -508,7 +508,12 @@ describe("the compose flow: a zip in Files", () => {
     await waitFor(() => expect(forwardAct("Deploy")).toBeTruthy());
     await click(forwardAct("Deploy"));
     expect(connection.callsNamed("sitePublishFromArtifact")[0]).toContain('artifactId: "artifact-zip"');
-    expect(await within(region).findByText("Published. It is not serving yet.")).toBeTruthy();
+    // THE OUTCOME IS THE BAR'S NOW, not a notice in the panel: it used to be
+    // said in both places, and the act sat on the notice while the bar offered
+    // Cancel (DESIGN.md rule 12).
+    await waitFor(() =>
+      expect((document.querySelector(".os-actbar")?.textContent ?? "")).toContain("Published. It is not serving yet."),
+    );
   });
 
   it("says what a zip that is NEITHER is, and does not continue", async () => {
@@ -696,6 +701,87 @@ describe("the compose flow: where each app will live", () => {
     await fill("The name storefront answers at", "shop");
     await click(forwardAct("Deploy"));
     expect(connection.callsNamed("disablePackageDeployables")).toHaveLength(0);
+  });
+
+  it("counts only the apps that actually published, not the ones skipped", async () => {
+    // Reported from production: skipping one app and deploying said "Published
+    // 2 apps. None of them is serving yet."
+    //
+    // The engine writes a skipped outcome as {name, refusal} with NO hostname
+    // key at all, and `listOf<DeployableOutcome>` casts the raw array without
+    // normalising -- so `hostname` is `undefined` at runtime while the type
+    // says `string`, and `o.hostname !== ""` counts it as published.
+    const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
+    const { region } = await compose(connection);
+    await chooseRepository(region);
+    await fill(URL_FIELD, REPO);
+    await blur(URL_FIELD);
+    await fill(NAME_FIELD, "acme");
+    await click(forwardAct("Analyze"));
+    const pkgId = mintedPackageId(connection);
+    await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(pkgId, { report: REPORT_TWO }), "NODE_CREATED");
+    await within(region).findByText("clients/marketing");
+
+    // The run finishes: one app published, one skipped exactly as the engine
+    // records it -- no hostname key on the skipped entry.
+    await emit(
+      connection,
+      DEPLOYMENT_CONCEPT,
+      parkedRun(pkgId, {
+        status: "succeeded",
+        report: REPORT_TWO,
+        finishedAt: "2026-09-01T13:05:00Z",
+        deployables: [
+          { name: "storefront", siteId: "site-a", hostname: "shop.memql.example.com", bundleRef: "blob://a/v1/", version: "v1", created: true },
+          { name: "web", refusal: { code: "deployable_skipped", message: "You chose not to deploy this one.", scope: "web" } },
+        ],
+      }),
+      "NODE_UPDATED",
+    );
+
+    const bar = () => document.querySelector(".os-actbar") as HTMLElement;
+    await waitFor(() => expect((bar().textContent ?? "")).toContain("Deployed"));
+    const said = bar().textContent ?? "";
+    expect(said).toContain("Published 1 app");
+    expect(said).not.toContain("2 apps");
+  });
+
+  it("says Done rather than Cancel once there is nothing left to cancel", async () => {
+    // The summary was a Notice in the PANEL with its own Done button, while
+    // the bar underneath said the same thing and offered Cancel -- the same
+    // state in two places, and the act in the wrong one (DESIGN.md rule 12).
+    // Nothing can be cancelled after a deploy has published.
+    const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
+    const { region } = await compose(connection);
+    await chooseRepository(region);
+    await fill(URL_FIELD, REPO);
+    await blur(URL_FIELD);
+    await fill(NAME_FIELD, "acme");
+    await click(forwardAct("Analyze"));
+    const pkgId = mintedPackageId(connection);
+    await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(pkgId, { report: REPORT_TWO }), "NODE_CREATED");
+    await within(region).findByText("clients/marketing");
+    await emit(
+      connection,
+      DEPLOYMENT_CONCEPT,
+      parkedRun(pkgId, {
+        status: "succeeded",
+        report: REPORT_TWO,
+        finishedAt: "2026-09-01T13:05:00Z",
+        deployables: [
+          { name: "storefront", siteId: "site-a", hostname: "shop.memql.example.com", bundleRef: "blob://a/v1/", version: "v1", created: true },
+        ],
+      }),
+      "NODE_UPDATED",
+    );
+
+    const bar = () => document.querySelector(".os-actbar") as HTMLElement;
+    await waitFor(() => expect(bar().textContent ?? "").toContain("Deployed"));
+    const buttons = [...bar().querySelectorAll("button")].map((b) => (b.textContent ?? "").trim());
+    expect(buttons).toContain("Done");
+    expect(buttons).not.toContain("Cancel");
+    // ...and the summary is not ALSO in the panel.
+    expect(within(region).queryByText(/None of them is serving yet|It is not serving yet/)).toBeNull();
   });
 
   it("offers a cluster owner the client AND their own domain; an admin only the client", async () => {
@@ -952,7 +1038,12 @@ describe("a private repository whose build output is committed", () => {
       }),
     );
 
-    expect(await within(region).findByText("Published. It is not serving yet.")).toBeTruthy();
+    // THE OUTCOME IS THE BAR'S NOW, not a notice in the panel: it used to be
+    // said in both places, and the act sat on the notice while the bar offered
+    // Cancel (DESIGN.md rule 12).
+    await waitFor(() =>
+      expect((document.querySelector(".os-actbar")?.textContent ?? "")).toContain("Published 1 app"),
+    );
     expect(railStates(region)).toEqual(["complete", "complete", "complete", "skipped", "complete"]);
     // The addresses are facts now, and the one that landed is the run's own.
     expect(within(region).queryByLabelText("The name storefront answers at")).toBeNull();
