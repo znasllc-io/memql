@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -898,9 +899,11 @@ func parseDatabaseInfo() map[string]any {
 
 	info := map[string]any{
 		"host":   u.Hostname(),
-		"port":   firstNonEmptyStr(u.Port(), "5432"),
 		"dbName": strings.TrimPrefix(u.Path, "/"),
 		"engine": "postgresql",
+	}
+	if port, ok := databasePortFromDSN(u); ok {
+		info["port"] = port
 	}
 
 	// Extract sslmode from query params.
@@ -909,6 +912,40 @@ func parseDatabaseInfo() map[string]any {
 	}
 
 	return info
+}
+
+// defaultPostgresPort is what a DSN naming no port connects to, so it is what
+// the row should record for one.
+const defaultPostgresPort = 5432
+
+// databasePortFromDSN reads the DSN's port as a NUMBER.
+//
+// It is a number here rather than at any later layer because there is no later
+// layer that could make it one (memql#4926). `createDatabase` declares
+// `port int`; an automation step renders its resolved arguments back into
+// MemQL source text, and a Go string is rendered QUOTED -- so a string here
+// arrives at argument validation as `port: "5432"` and is refused. The
+// automation's own `port: database.port ?? 5432` cannot rescue it either: `??`
+// falls through on absent or blank, and `"5432"` is neither, so the int
+// literal on the right is never reached. The refusal stops the whole
+// `bootstrapCluster` run, taking `idpRecord` and the cluster cross-link with
+// it, on every bff start.
+//
+// `net/url` has already refused a port that is not all digits, so the only
+// value that fails to parse here is one too large to be a port. That is a DSN
+// no node connected through, and it answers `false` rather than a fabricated
+// 5432 -- an absent key leaves the mutation to stamp its own default, and
+// nothing on the payload claims a reading that was never taken.
+func databasePortFromDSN(u *url.URL) (int, bool) {
+	raw := strings.TrimSpace(u.Port())
+	if raw == "" {
+		return defaultPostgresPort, true
+	}
+	port, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false
+	}
+	return port, true
 }
 
 // addDatabaseServerFacts fills the fields only the live connection knows:
