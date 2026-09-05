@@ -229,12 +229,12 @@ describe("the standing reading", () => {
     expect(stageOf(standing({ run: deployment({ report: built }) }), "build").state).toBe("done");
   });
 
-  it("a first deploy ends on 'not serving yet', waiting on the person", () => {
+  it("a first deploy ends on Built, not live yet, waiting on the person", () => {
     const first = standing({ site: site({ status: "draft" }) });
     const live = stageOf(first, "live");
-    expect(live.reason).toBe("Published to shop.memql.example.com. Not serving yet.");
+    expect(live.reason).toBe("Built. In place at shop.memql.example.com, not live yet.");
     // Nothing is moving: the stop holds a still ring, because the next thing
-    // that happens is Make it live, and that is the person's.
+    // that happens is Go live, and that is the person's.
     expect(live.state).toBe("open");
     expect(stageOf(first, "source").state).toBe("done");
     expect(stageOf(first, "source").reason).toBe("acme/shop at main");
@@ -333,8 +333,11 @@ describe("the standing reading", () => {
 
     const paused = stageOf(standing({ site: site({ status: "disabled" }) }), "live");
     expect(paused.state).toBe("stopped");
-    // The 503-versus-404 sentence the lifecycle carries today.
-    expect(paused.reason).toBe("Paused. It answers 503 rather than 404, so a deliberately paused site stays distinguishable from a typo.");
+    // The 503-versus-404 sentence the lifecycle carries today, in the one
+    // vocabulary: Offline, never Paused.
+    expect(paused.reason).toBe(
+      'Offline. Visitors get "temporarily unavailable" rather than "no such site", so a deployable taken offline on purpose stays distinguishable from a typo.',
+    );
 
     const archived = stageOf(standing({ site: site({ status: "archived" }) }), "live");
     expect(archived.state).toBe("skipped");
@@ -345,9 +348,9 @@ describe("the standing reading", () => {
     // when nothing has.
     const pending = stageOf(standing({ site: site({ status: "draft", bundleRef: "blob://sites/site-1/pending/" }) }), "live");
     expect(pending.state).toBe("ahead");
-    expect(pending.reason).toBe("Nothing published yet.");
+    expect(pending.reason).toBe("Nothing deployed here yet.");
 
-    expect(stageOf(standing({ site: null }), "live")).toMatchObject({ state: "ahead", reason: "Nothing published yet." });
+    expect(stageOf(standing({ site: null }), "live")).toMatchObject({ state: "ahead", reason: "Nothing deployed here yet." });
   });
 
   it("a hand-made site reads its bundle form as its source", () => {
@@ -514,7 +517,7 @@ describe("the Head's action", () => {
     expect(headActionFor({ at: "awaiting_confirm", placementsComplete: true })).toEqual({ label: "Deploy", disabled: false, tone: "primary" });
     // A run at a non-terminal stage has NO action: the rail is moving.
     expect(headActionFor({ at: "running" })).toBeNull();
-    expect(headActionFor({ at: "draft_with_bundle" })).toEqual({ label: "Make it live", disabled: false, tone: "primary" });
+    expect(headActionFor({ at: "draft_with_bundle" })).toEqual({ label: "Go live", disabled: false, tone: "primary" });
     expect(headActionFor({ at: "live", updateAvailable: true })).toEqual({ label: "Deploy the update", disabled: false, tone: "primary" });
     expect(headActionFor({ at: "refused_or_failed" })).toEqual({ label: "Retry", disabled: false, tone: "primary" });
     expect(headActionFor({ at: "live", updateAvailable: false })).toEqual({ label: "Redeploy", disabled: false, tone: "quiet" });

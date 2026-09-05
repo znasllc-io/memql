@@ -346,11 +346,12 @@ describe("the list", () => {
     expect(screen.getByText("widgets")).toBeTruthy();
   });
 
-  it("deploys a DECLARED app on its own, skipping every other one", async () => {
-    // The whole chain: an app the source declares has no site and no run, so
-    // clicking it starts the analysis that produces its confirm gate -- and
-    // every OTHER app is sent explicitly skipped, or this first deploy would
-    // rebuild and republish the ones already serving.
+  it("opens a DECLARED app's flow from its row, and Analyze is what deploys it -- scoped", async () => {
+    // A CLICK NEVER ACTS (2026-09-05, D6). This row used to start the analysis
+    // from the list; it opens the compose flow for that app now, and the
+    // analysis is the bar's Analyze -- sent with every OTHER app explicitly
+    // skipped, or this first deploy would rebuild and republish the ones
+    // already serving.
     const connection = fakeConnection({
       ...WITH_PACKAGE,
       packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
@@ -361,12 +362,20 @@ describe("the list", () => {
     const web = await screen.findByText("web");
     expect(web).toBeTruthy();
     await click(web.closest("button"));
+    // NAMED FROM THE CLICK, and nothing on the wire yet.
+    const region = await screen.findByRole("region", { name: "Deploy web from acme" });
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
+    expect(connection.callsNamed("enablePackageDeployables")).toHaveLength(0);
+    // The bar reads what it is and offers the first step.
+    expect((document.querySelector(".os-actbar-word")?.textContent ?? "").trim()).toBe("Not deployed");
+    expect(within(region).getByText(/declared as Single-page app by this source/)).toBeTruthy();
+    const bar = document.querySelector(".os-actbar") as HTMLElement;
+    await click(within(bar).getByRole("button", { name: "Analyze" }));
     await waitFor(() => expect(connection.callsNamed("packageDeploy").length).toBeGreaterThan(0));
     // The analysis first -- confirm: false -- which is what parks the gate.
     const call = connection.callsNamed("packageDeploy")[0] ?? "";
     expect(call).toContain("confirm: false");
-    // ...AND SCOPED, which is what this test has always been named for and
-    // never asserted. The engine derives `scopedTo` from the skips, so an
+    // ...AND SCOPED. The engine derives `scopedTo` from the skips, so an
     // analysis sent without them parks a gate about the whole source: every
     // sibling's row and page read it as their own, and confirming it rebuilds
     // apps nobody asked about.
@@ -376,11 +385,13 @@ describe("the list", () => {
     expect(call).not.toContain("web: {skip");
   });
 
-  it("does not offer to deploy an app the owner turned off", async () => {
-    // Reported from production: skipping `web`, then discarding the result,
-    // left it on the list looking exactly like an app nobody had got to -- so
-    // clicking it started the whole build again. A declined app is listed and
-    // INERT.
+  it("opens an INACTIVE app with a notice and Activate, and writes nothing until it is pressed", async () => {
+    // Reported from production, twice. First: skipping `web` then discarding
+    // the result left it on the list looking like an app nobody had got to,
+    // so clicking it started the whole build again. Then: the row read "off",
+    // and clicking it turned it back ON with no page and no confirmation.
+    // A click never acts (2026-09-05, D5/D6): it opens the flow, which says
+    // the app is inactive, and Activate on the bar is the act.
     const connection = fakeConnection({
       ...WITH_PACKAGE,
       packages: [{
@@ -391,32 +402,45 @@ describe("the list", () => {
     });
     mount(connection);
     const web = await screen.findByText("web");
-    // It is there to be found, and says it is off.
-    expect(web.closest(".os-row")?.textContent).toContain("off");
+    // It is there to be found, and says it is inactive -- the one word every
+    // surface uses for it.
+    expect(web.closest(".os-row")?.textContent).toContain("inactive");
 
     await click(web.closest("button"));
-    // CLICKING IT TURNS IT BACK ON -- and does NOT deploy it. Deploying is the
-    // next click, deliberately.
-    // ENABLE IS ITS OWN VERB, and it names what changed (memql#4951). It used
-    // to send `disabledDeployables: []` -- the whole list with the name
-    // filtered out -- which erased every other app's off state whenever the
-    // window's copy of the row was stale.
-    await waitFor(() => expect(connection.callsNamed("enablePackageDeployables").length).toBe(1));
-    expect(connection.callsNamed("enablePackageDeployables")[0]).toContain('deployableNames: ["web"]');
+    const region = await screen.findByRole("region", { name: "Deploy web from acme" });
+    expect(within(region).getByText("web is inactive.")).toBeTruthy();
+    expect((document.querySelector(".os-actbar-word")?.textContent ?? "").trim()).toBe("Inactive");
+    // NOTHING WRITTEN BY THE CLICK.
+    expect(connection.callsNamed("enablePackageDeployables")).toHaveLength(0);
     expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
+    const bar = document.querySelector(".os-actbar") as HTMLElement;
+    expect(within(bar).queryByRole("button", { name: "Analyze" })).toBeNull();
+
+    // ACTIVATE IS ITS OWN VERB, naming what changed (memql#4951), and it goes
+    // on to the ordinary first step: the scoped analysis.
+    await click(within(bar).getByRole("button", { name: "Activate" }));
+    await waitFor(() => expect(connection.callsNamed("enablePackageDeployables")).toHaveLength(1));
+    expect(connection.callsNamed("enablePackageDeployables")[0]).toContain('deployableNames: ["web"]');
+    await waitFor(() => expect(connection.callsNamed("packageDeploy")).toHaveLength(1));
+    expect(connection.callsNamed("packageDeploy")[0]).toContain("placements: {storefront: {skip: true}}");
   });
 
-  it("does offer to deploy one nobody turned off", async () => {
-    // The negative control: without the off-list the same row deploys, which
-    // is what makes the assertion above about the preference and not about
-    // declared rows in general.
+  it("offers Analyze, not Activate, to one nobody turned off", async () => {
+    // The negative control: without the off-list the same row opens a flow
+    // whose first act is Analyze and which says nothing about activation --
+    // which is what makes the assertion above about the preference and not
+    // about declared rows in general.
     const connection = fakeConnection({
       ...WITH_PACKAGE,
       packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
     });
     mount(connection);
     await click((await screen.findByText("web")).closest("button"));
-    await waitFor(() => expect(connection.callsNamed("packageDeploy").length).toBeGreaterThan(0));
+    await screen.findByRole("region", { name: "Deploy web from acme" });
+    const bar = document.querySelector(".os-actbar") as HTMLElement;
+    expect(within(bar).getByRole("button", { name: "Analyze" })).toBeTruthy();
+    expect(within(bar).queryByRole("button", { name: "Activate" })).toBeNull();
+    expect(screen.queryByText(/is inactive\./)).toBeNull();
     expect(connection.callsNamed("enablePackageDeployables")).toHaveLength(0);
   });
 
@@ -554,7 +578,7 @@ describe("Refine", () => {
     mount(fakeConnection(WITH_PACKAGE));
     await screen.findByText("storefront");
 
-    await refine("Status", "Unpublished");
+    await refine("Status", "Offline");
     expect(rowNames()).toEqual(["admin"]);
     await click(screen.getByRole("button", { name: "Remove disabled" }));
 
@@ -716,12 +740,14 @@ describe("New deployable", () => {
     // path, as the report names them.
     expect(within(compose).getByText("clients/reports")).toBeTruthy();
     // Deploy, on the BAR and REACHABLE (rule 12): the one app with no site yet
-    // arrived with a suggested address, so there is nothing left to answer.
+    // arrived with a GENERATED address (2026-09-05) that the cluster then
+    // checked, so there is nothing left to answer -- once the check answers.
     // "storefront" already serves, so it is not re-asked -- the pipeline reads
     // a placement on a first deploy only.
     const bar = document.querySelector(".os-actbar") as HTMLElement;
-    expect(within(bar).getByRole("button", { name: /^Deploy/ })).toBeTruthy();
-    expect(within(compose).getByText("reports.memql.example.com")).toBeTruthy();
+    await waitFor(() => expect(within(bar).getByRole("button", { name: /^Deploy/ })).toBeTruthy());
+    expect(within(compose).getByText(/^[a-z]+-[a-z]+\.memql\.example\.com$/)).toBeTruthy();
+    expect(within(compose).getByText(/-- free$/)).toBeTruthy();
     expect(within(compose).queryByLabelText("The name storefront answers at")).toBeNull();
   });
 });

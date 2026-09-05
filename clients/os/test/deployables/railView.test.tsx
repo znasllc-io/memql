@@ -70,7 +70,7 @@ describe("the rail, drawn", () => {
     expect(screen.getByText("acme/shop at main")).toBeTruthy();
     expect(screen.getByText("shop.memql.example.com")).toBeTruthy();
     expect(screen.getByText("its built output is in the source")).toBeTruthy();
-    expect(screen.getByText("Published to shop.memql.example.com. Not serving yet.")).toBeTruthy();
+    expect(screen.getByText("Built. In place at shop.memql.example.com, not live yet.")).toBeTruthy();
     // The state is also a sentence for a screen reader, per stop.
     expect(screen.getByText("waiting on you")).toBeTruthy();
     expect(screen.getAllByText("finished")).toHaveLength(3);
@@ -105,7 +105,7 @@ describe("the rail, drawn", () => {
     // Reversed is a READING direction: the array comes back reversed so the
     // picture runs bottom-up, and that is the one thing that changes.
     expect([...list.querySelectorAll(".os-rail-label")].map((el) => el.textContent)).toEqual([
-      "Publish",
+      "Place",
       "Roll",
       "Stage DSL",
       "Build",
@@ -116,7 +116,7 @@ describe("the rail, drawn", () => {
   });
 
   it("mounts a stop's body beneath its note when the page hands one in", () => {
-    render(<Rail input={STANDING} stopBody={(stage) => (stage.id === "live" ? <button type="button">Make it live</button> : null)} />);
-    expect(screen.getByRole("button", { name: "Make it live" })).toBeTruthy();
+    render(<Rail input={STANDING} stopBody={(stage) => (stage.id === "live" ? <button type="button">Go live</button> : null)} />);
+    expect(screen.getByRole("button", { name: "Go live" })).toBeTruthy();
   });
 });

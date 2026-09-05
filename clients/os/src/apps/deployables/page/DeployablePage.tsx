@@ -13,6 +13,7 @@ import { deploymentFromRow, type DeploymentRow, type PackageRow } from "../packa
 import { usePackageDeployments } from "../packages/usePackages";
 import { liveUrlFor, ownerLabel, siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
+import { confirmationWordFor } from "../words";
 import { actsFor, runForApp, siblingRunInFlight, type ActName } from "./acts";
 import { Rail } from "./Rail";
 import { openStopFor, refusalStopFor, type RailStage, type StandingInput } from "./rail";
@@ -75,8 +76,12 @@ export interface DeployablePageProps {
   onOpenHistory: (packageId: string) => void;
   /** True while this deployable's delete is still tearing its domains down. */
   deleting?: boolean;
-  /** Told when a delete was accepted, so the section can start the teardown reading. */
-  onDeleted?: (siteId: string) => void;
+  /**
+   * Told when a delete or a deactivation was accepted, so the section can say
+   * what happened to the row that is no longer here. `what` is the verb the
+   * person used, because the two free a name for different reasons.
+   */
+  onDeleted?: (siteId: string, what: "deleted" | "deactivated") => void;
 }
 
 export function DeployablePage({
@@ -144,12 +149,13 @@ export function DeployablePage({
       case "Discard":
       case "Delete":
       case "Archive":
+      case "Deactivate":
         setConfirming(true);
         return;
-      case "Publish":
+      case "Go live":
         void lifecycle.setStatus(site.id, "live");
         return;
-      case "Unpublish":
+      case "Take offline":
         void lifecycle.setStatus(site.id, "disabled");
         return;
       case "Restore":
@@ -193,9 +199,12 @@ export function DeployablePage({
   }
 
   // Which destructive act the confirmation is for. Delete and Discard are one
-  // capability under two names; Archive is its own.
+  // capability under two names; Archive is its own; Deactivate is the source
+  // app's one destructive act (2026-09-05 design, D2).
   const confirmAct: ActName | null = confirming
-    ? (reading.acts.find((a) => a.name === "Delete" || a.name === "Discard" || a.name === "Archive")?.name ?? null)
+    ? (reading.acts.find(
+        (a) => a.name === "Delete" || a.name === "Discard" || a.name === "Archive" || a.name === "Deactivate",
+      )?.name ?? null)
     : null;
 
   async function runConfirm() {
@@ -204,21 +213,22 @@ export function DeployablePage({
       setConfirming(false);
       return;
     }
+    if (confirmAct === "Deactivate") {
+      // ONE CAPABILITY, on the SOURCE the row names rather than on `pkg`: an
+      // archived source is not in the active feed, so `pkg` is null for an
+      // app the old cascade left archived -- and that is exactly the row
+      // whose name still needs freeing.
+      const done = await headActions.deactivate(site.packageId, site.packageDeployableName, typed);
+      if (done) {
+        setConfirming(false);
+        onDeleted?.(site.id, "deactivated");
+      }
+      return;
+    }
     const done = await lifecycle.remove(site.id, typed);
     if (done) {
-      // DISCARDING A SOURCE-BACKED APP TURNS IT OFF, or it comes straight
-      // back. The site row is gone, but the source still DECLARES the app --
-      // so the list would show it again as "not deployed" and offer to deploy
-      // the very thing somebody just discarded, which is what they saw.
-      //
-      // The site is deleted first and this second: the deletion is the act,
-      // and a failure to record the preference must not leave a deployable
-      // nobody asked to keep.
-      if (pkg !== null && site.packageDeployableName !== "") {
-        await headActions.disableDeployables(pkg.id, [site.packageDeployableName]);
-      }
       setConfirming(false);
-      onDeleted?.(site.id);
+      onDeleted?.(site.id, "deleted");
     }
   }
 
@@ -352,7 +362,7 @@ export function DeployablePage({
             act={confirmAct}
             typed={typed}
             onTyped={setTyped}
-            busy={lifecycle.busy}
+            busy={lifecycle.busy || headActions.busy}
             onCancel={() => {
               setConfirming(false);
               setTyped("");
@@ -368,10 +378,17 @@ export function DeployablePage({
 /**
  * The typed confirmation, in the bar.
  *
- * IT SAYS WHAT IT COSTS BEFORE IT ASKS. A delete releases the hostname and
+ * IT SAYS WHAT IT COSTS BEFORE IT ASKS. A delete releases the address and
  * takes the deployable's domains down, and it is terminal -- archive is the
- * reversible step, one rung up. Saying that where the person is about to type
- * is the difference between a confirmation and a speed bump.
+ * reversible step, one rung up. A deactivation releases the address too, and
+ * is NOT terminal: the source still declares the app. Saying that where the
+ * person is about to type is the difference between a confirmation and a
+ * speed bump.
+ *
+ * THE WORD TO TYPE IS THE THING'S NAME (2026-09-05 design, D9): the address
+ * label for a standalone, the app's manifest name for a source's app. Typing
+ * `storefront.memql.example.com` for every archive and delete was the owner's
+ * complaint, and the server accepts the label.
  */
 function ConfirmRow({
   site,
@@ -391,30 +408,41 @@ function ConfirmRow({
   onConfirm: () => void;
 }) {
   const removing = act === "Delete" || act === "Discard";
+  const deactivating = act === "Deactivate";
+  const word = deactivating ? site.packageDeployableName : confirmationWordFor(site.hostname);
   return (
     <>
       <span className="os-actbar-confirm">
-        {removing ? (
+        {deactivating ? (
+          <>
+            Deactivating takes <strong>{site.packageDeployableName}</strong> off the internet and releases{" "}
+            <strong className="os-mono">{site.hostname}</strong> and any client domain bound to it. Its source still
+            declares it, so it can be activated again and deployed at a fresh address.
+          </>
+        ) : removing ? (
           <>
             Deleting releases <strong className="os-mono">{site.hostname}</strong> and takes its domains down. The
             record stays in this cluster&rsquo;s history, but the deployable cannot be brought back &mdash; restore it
             from Archived instead if you are not sure.
           </>
         ) : (
-          <>Archiving keeps this deployable and its whole history, and it can be restored. Nothing is deleted.</>
+          <>
+            Archiving keeps this deployable and its whole history, and it can be restored. The name stays yours;
+            Delete is what releases it.
+          </>
         )}
       </span>
       <Input
         id={`os-confirm-${site.id}`}
-        label={`Type ${site.hostname} to confirm`}
+        label={`Type ${word} to confirm`}
         value={typed}
         onChange={onTyped}
-        placeholder={site.hostname}
+        placeholder={word}
       />
       <Button tone="quiet" onClick={onCancel}>
         Keep it
       </Button>
-      <Button tone="danger" disabled={typed !== site.hostname} busy={busy} onClick={onConfirm}>
+      <Button tone="danger" disabled={typed.trim() !== word} busy={busy} onClick={onConfirm}>
         {act}
       </Button>
     </>
@@ -458,11 +486,11 @@ function historySummary(rows: readonly DeploymentRow[]): string {
 function statusWord(status: string): string {
   switch (status) {
     case "succeeded":
-      // NOT "live". A run that succeeded PUBLISHED; whether the deployable is
-      // serving is the site's business, and a first deploy leaves it `draft`.
-      // The old word put "last live" on a page whose own bar read "Draft --
-      // not served to anyone yet", two lines apart and contradicting.
-      return "published";
+      // NOT "live". A run that succeeded put files in place; whether the
+      // deployable is serving is the site's business, and a first deploy
+      // leaves it Built. The old word put "last live" on a page whose own bar
+      // read "not served to anyone yet", two lines apart and contradicting.
+      return "finished";
     case "abandoned":
       return "lost";
     case "awaiting_confirm":

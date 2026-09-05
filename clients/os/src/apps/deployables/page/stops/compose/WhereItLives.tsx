@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Shuffle } from "lucide-react";
 
 import { Button, Caption, Field, Input, Subhead } from "../../../../../kit";
@@ -8,10 +9,11 @@ import { normalizeHostname } from "../../../domains";
 import { hostnameFor, validateSlug } from "../../../hostname";
 import { ProblemNotice } from "../../../packages/ReportView";
 import type { DeployableOutcome } from "../../../packages/rows";
-import { EMPTY_ADDRESS, type AddressDraft } from "../../compose";
+import type { AddressCheckHandle } from "../../../sources/useProbes";
+import { EMPTY_ADDRESS, addressKeyFor, type AddressDraft, type AddressVerdict, type AddressVerdicts } from "../../compose";
 
 // The compose Where-it-lives stop: the address each app answers at, chosen
-// once (epic memql#4885, design section C).
+// once (epic memql#4885, design section C; the checks of 2026-09-05, D7).
 //
 // ===========================================================================
 // CHOSEN ONCE, AND THE CAPTION SAYS SO
@@ -23,22 +25,31 @@ import { EMPTY_ADDRESS, type AddressDraft } from "../../compose";
 // where they are typing rather than in a doc.
 //
 // ===========================================================================
-// THE SLUG IS ANSWERED AT KEYSTROKE RATE. THE SERVER STILL DECIDES
+// THE NAME IS CHECKED WHILE IT IS TYPED, AND A GENERATED ONE BEFORE IT LANDS
 // ===========================================================================
-// `validateSlug` is the mirrored half of the Go hostname policy and states
-// its own limits (hostname.ts): cluster-wide uniqueness and the cluster-owner
-// exemption are deliberately NOT mirrored, because a browser cannot answer
-// either. A taken slug passes here and is refused on Deploy, and the server's
-// sentence -- which names the colliding site -- renders verbatim.
+// `validateSlug` still answers the SHAPE at keystroke rate. What the cluster
+// alone can answer -- is this name taken -- used to arrive on Deploy, at the
+// end of the flow, as a refusal naming the colliding site. It arrives here
+// now: a short pause after typing asks `siteHostnameCheck`, the line beneath
+// the field says "checking", then the answer, and Deploy is out of reach
+// until every address has checked out. Generate draws again on its own
+// until a free name comes back, so a person never sees a generated name
+// they cannot have. The write guard is unchanged and still decides.
 //
 // ===========================================================================
 // A REFUSED HALF IS NOT A FAILED DEPLOY
 // ===========================================================================
-// The pipeline applies the client tie and the own domain AFTER the publish,
-// under the caller's own actor, so the guards that already run decide. Either
-// can be refused while the app is live at its cluster address, and the
-// refusal lands on the outcome. It renders HERE, at the stop the two halves
-// belong to, with copy that says the deployable is serving.
+// The pipeline applies the client tie and the own domain AFTER the files are
+// in place, under the caller's own actor, so the guards that already run
+// decide. Either can be refused while the app is in place at its cluster
+// address, and the refusal lands on the outcome. It renders HERE, at the
+// stop the two halves belong to.
+
+/** How long typing pauses before the cluster is asked. */
+export const CHECK_DEBOUNCE_MS = 350;
+
+/** How many times Generate draws again on a taken name before giving up. */
+const GENERATE_TRIES = 6;
 
 export function ComposeWhereItLivesStop({
   apps,
@@ -50,10 +61,12 @@ export function ComposeWhereItLivesStop({
   clusterDomain,
   outcomes,
   locked,
+  checks,
+  verdicts,
 }: {
   /** Every app that needs an address. One entry, named "", for a hand-made deployable. */
   apps: readonly string[];
-  /** The source's own name, for the slug suggestion. */
+  /** The source's own name, for the headings. */
   sourceName: string;
   addresses: Readonly<Record<string, AddressDraft>>;
   onAddress: (app: string, patch: Partial<AddressDraft>) => void;
@@ -65,6 +78,10 @@ export function ComposeWhereItLivesStop({
   outcomes: readonly DeployableOutcome[];
   /** After Deploy the stop is facts, not fields. */
   locked: boolean;
+  /** The cluster's answers about names, asked from here. */
+  checks: AddressCheckHandle;
+  /** The same answers, per app, as the page folds them. */
+  verdicts: Readonly<Record<string, AddressVerdicts>>;
 }) {
   if (locked) {
     // THE RUN'S OWN ANSWER WHERE THERE IS ONE. A hand-made deployable never
@@ -110,6 +127,8 @@ export function ComposeWhereItLivesStop({
           isClusterOwner={isClusterOwner}
           clusterDomain={clusterDomain}
           many={apps.length > 1}
+          checks={checks}
+          verdicts={verdicts[app] ?? {}}
         />
       ))}
       <Caption>Chosen once. A later deploy of this source keeps the same addresses.</Caption>
@@ -126,6 +145,8 @@ function AppAddress({
   isClusterOwner,
   clusterDomain,
   many,
+  checks,
+  verdicts,
 }: {
   app: string;
   sourceName: string;
@@ -135,14 +156,64 @@ function AppAddress({
   isClusterOwner: boolean;
   clusterDomain: string;
   many: boolean;
+  checks: AddressCheckHandle;
+  verdicts: AddressVerdicts;
 }) {
   const slug = address.slug.trim();
   const complaint = validateSlug(address.slug, clusterDomain);
   const preview = hostnameFor(address.slug, clusterDomain);
-  const key = app === "" ? "one" : app;
+  const key = addressKeyFor(app);
   const heading = app === "" ? sourceName : app;
-
   const skipped = address.skip === true;
+  const slugKey = `${key}:slug`;
+  const domainKey = `${key}:domain`;
+  const ownDomain = normalizeHostname(address.ownDomain);
+
+  // THE SLUG, ASKED ABOUT AFTER A PAUSE. A shape complaint is answered at
+  // keystroke rate and asks the cluster nothing; a blank clears the verdict.
+  // Keyed on the composed hostname, so a domain that arrives late re-asks.
+  const check = checks.check;
+  const clear = checks.clear;
+  useEffect(() => {
+    if (skipped || slug === "" || complaint !== "" || preview === "") {
+      clear(slugKey);
+      return;
+    }
+    const timer = setTimeout(() => void check(slugKey, preview, "site"), CHECK_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [slugKey, preview, slug, complaint, skipped, check, clear]);
+
+  // THE CLIENT'S OWN DOMAIN, the same way, only where the field exists.
+  useEffect(() => {
+    if (!isClusterOwner || skipped || ownDomain === "") {
+      clear(domainKey);
+      return;
+    }
+    const timer = setTimeout(() => void check(domainKey, ownDomain, "domain"), CHECK_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [domainKey, ownDomain, isClusterOwner, skipped, check, clear]);
+
+  // GENERATE DRAWS AGAIN UNTIL A FREE NAME COMES BACK. Each draw asks the
+  // cluster under the slug's own key, so the field reads "checking" while it
+  // runs and lands on a verdict for the name it finally fills. The last draw
+  // is filled even when taken -- a person who saw six tries fail should see
+  // the taken name and its sentence, not an empty field.
+  const generating = useRef(false);
+  async function generate() {
+    if (generating.current) return;
+    generating.current = true;
+    try {
+      let candidate = "";
+      for (let i = 0; i < GENERATE_TRIES; i += 1) {
+        candidate = generateNickname();
+        const verdict = await check(slugKey, hostnameFor(candidate, clusterDomain), "site");
+        if (verdict.state === "ok") break;
+      }
+      onAddress({ slug: candidate });
+    } finally {
+      generating.current = false;
+    }
+  }
 
   return (
     <section className="os-report-part" aria-label={`Where ${heading || "it"} lives`} data-skipped={skipped || undefined}>
@@ -183,98 +254,158 @@ function AppAddress({
         </div>
       ) : null}
 
-      {/* A SKIPPED APP ASKS FOR NOTHING. A disabled address field would be a
-          control somebody has to read past to learn it is not for them, and
-          the sentence says what skipping actually costs -- which is nothing
-          it already serves. */}
+      {/* A SKIPPED APP ASKS FOR NOTHING, and the sentence says what skipping
+          IS (2026-09-05, D5): the app becomes inactive, and activating it
+          later is what asks where it should live. */}
       {skipped ? (
         <Caption>
-          Skipped. Nothing is built for {heading}, and anything it already serves is untouched. The run records it as
-          skipped, so this reads as a deliberate partial deploy rather than a step that went missing.
+          Skipped. Nothing is built for {heading} and it gets no address -- it stays inactive under its source
+          until you activate it from its row. Anything it already serves is untouched.
         </Caption>
       ) : (
-      <>
-      <Field label="Address">
-        <div className="os-compose-slug">
-          <Input
-            id={`os-compose-slug-${key}`}
-            label={`The name ${heading || "this deployable"} answers at`}
-            value={address.slug}
-            onChange={(next) => onAddress({ slug: next })}
-            placeholder="shop"
-          />
-          {/* A NAME THAT SAYS NOTHING, on purpose. Sometimes an address should
-              not describe what it serves -- a demo, a preview, a thing not
-              ready to be found. A random string does that and is unusable:
-              nobody can read one over a desk. Two ordinary words are the
-              Docker-container shape and memorable for the same reason a phrase
-              is. It fills the field rather than replacing it, so it is a
-              starting point like the suggestion, not a decision. */}
-          <Button
-            tone="quiet"
-            ariaLabel={`Generate an address for ${heading || "this deployable"}`}
-            onClick={() => onAddress({ slug: generateNickname() })}
-          >
-            <Shuffle size={12} aria-hidden /> Generate
-          </Button>
-        </div>
-      </Field>
-      {/* THE PREVIEW IS THE ANSWER, at keystroke rate: what a person is
-          choosing is a hostname, not a label, and the label alone does not
-          show them the thing they will type into a browser. */}
-      {slug === "" ? (
-        <Caption>One label under {clusterDomain || "this cluster's domain"}.</Caption>
-      ) : complaint === "" ? (
-        <p className="os-stop-verdict" data-tone="ok">
-          <span className="os-mono">{preview}</span>
-        </p>
-      ) : (
-        <p className="os-stop-verdict" data-tone="warn" role="status">
-          {complaint}
-        </p>
-      )}
-
-      <Field label="Client">
-        <AccountPicker
-          id={`os-compose-account-${key}`}
-          label={`The client ${heading || "this deployable"} is for`}
-          value={address.accountId}
-          accounts={accounts}
-          onChange={(accountId) => onAddress({ accountId, ...prefillDomain(accounts, accountId, address) })}
-        />
-      </Field>
-
-      {/* Binding a client's own domain is cluster-owner territory (design D1),
-          enforced by the concept's clusterOwner tier and the three Go guards;
-          rendering the field for one is the presentation half. */}
-      {isClusterOwner ? (
         <>
-          <Field label="Their own domain">
-            <Input
-              id={`os-compose-domain-${key}`}
-              label={`A domain of the client's own for ${heading || "this deployable"}`}
-              value={address.ownDomain}
-              onChange={(ownDomain) => onAddress({ ownDomain })}
-              placeholder="shop.acme.com"
+          <Field label="Address">
+            <div className="os-compose-slug">
+              <Input
+                id={`os-compose-slug-${key}`}
+                label={`The name ${heading || "this deployable"} answers at`}
+                value={address.slug}
+                onChange={(next) => onAddress({ slug: next })}
+                placeholder="shop"
+              />
+              {/* A NAME THAT SAYS NOTHING, on purpose. Sometimes an address
+                  should not describe what it serves -- a demo, a preview, a
+                  thing not ready to be found. A random string does that and is
+                  unusable: nobody can read one over a desk. Two ordinary
+                  words are the Docker-container shape and memorable for the
+                  same reason a phrase is. It fills the field rather than
+                  replacing it, so it is a starting point like the seed, not a
+                  decision -- and it is checked before it lands. */}
+              <Button
+                tone="quiet"
+                ariaLabel={`Generate an address for ${heading || "this deployable"}`}
+                onClick={() => void generate()}
+              >
+                <Shuffle size={12} aria-hidden /> Generate
+              </Button>
+            </div>
+          </Field>
+          {/* THE PREVIEW IS THE ANSWER, at keystroke rate, and the cluster's
+              verdict follows a beat behind it: what a person is choosing is a
+              hostname, and the one fact only the cluster holds is whether it
+              is free. */}
+          <VerdictLine slug={slug} complaint={complaint} preview={preview} verdict={verdicts.slug} clusterDomain={clusterDomain} />
+
+          <Field label="Client">
+            <AccountPicker
+              id={`os-compose-account-${key}`}
+              label={`The client ${heading || "this deployable"} is for`}
+              value={address.accountId}
+              accounts={accounts}
+              onChange={(accountId) => onAddress({ accountId, ...prefillDomain(accounts, accountId, address) })}
             />
           </Field>
-          <Caption>
-            Optional, and the deploy never waits on it: the deployable goes live at its cluster address, and the domain
-            stays waiting on your DNS records until both check out. The two records to create are on this stop once it
-            exists.
-          </Caption>
+
+          {/* Binding a client's own domain is cluster-owner territory (design
+              D1), enforced by the concept's clusterOwner tier and the three Go
+              guards; rendering the field for one is the presentation half. */}
+          {isClusterOwner ? (
+            <>
+              <Field label="Their own domain">
+                <Input
+                  id={`os-compose-domain-${key}`}
+                  label={`A domain of the client's own for ${heading || "this deployable"}`}
+                  value={address.ownDomain}
+                  onChange={(next) => onAddress({ ownDomain: next })}
+                  placeholder="shop.acme.com"
+                />
+              </Field>
+              {ownDomain === "" ? null : <DomainVerdictLine hostname={ownDomain} verdict={verdicts.ownDomain} />}
+              <Caption>
+                Optional, and the deploy never waits on it: the deployable goes live at its cluster address, and the
+                domain stays waiting on your DNS records until both check out. The two records to create are on this
+                stop once it exists.
+              </Caption>
+            </>
+          ) : null}
         </>
-      ) : null}
-      </>
       )}
     </section>
   );
 }
 
 /**
+ * The address line: the shape complaint first (it needs no cluster), then
+ * the composed hostname with the cluster's verdict beside it.
+ */
+function VerdictLine({
+  slug,
+  complaint,
+  preview,
+  verdict,
+  clusterDomain,
+}: {
+  slug: string;
+  complaint: string;
+  preview: string;
+  verdict: AddressVerdict | undefined;
+  clusterDomain: string;
+}) {
+  if (slug === "") return <Caption>One label under {clusterDomain || "this cluster's domain"}.</Caption>;
+  if (complaint !== "") {
+    return (
+      <p className="os-stop-verdict" data-tone="warn" role="status">
+        {complaint}
+      </p>
+    );
+  }
+  if (verdict === undefined || verdict.state === "checking") {
+    return (
+      <p className="os-stop-verdict" data-tone="busy" role="status">
+        <span className="os-mono">{preview}</span> -- checking whether it is free
+      </p>
+    );
+  }
+  if (verdict.state === "ok") {
+    return (
+      <p className="os-stop-verdict" data-tone="ok" role="status">
+        <span className="os-mono">{preview}</span> -- free
+      </p>
+    );
+  }
+  return (
+    <p className="os-stop-verdict" data-tone="warn" role="status">
+      {verdict.problem || `${preview} cannot be used.`}
+    </p>
+  );
+}
+
+function DomainVerdictLine({ hostname, verdict }: { hostname: string; verdict: AddressVerdict | undefined }) {
+  if (verdict === undefined || verdict.state === "checking") {
+    return (
+      <p className="os-stop-verdict" data-tone="busy" role="status">
+        <span className="os-mono">{hostname}</span> -- checking whether it can be bound
+      </p>
+    );
+  }
+  if (verdict.state === "ok") {
+    return (
+      <p className="os-stop-verdict" data-tone="ok" role="status">
+        <span className="os-mono">{hostname}</span> -- can be bound
+      </p>
+    );
+  }
+  return (
+    <p className="os-stop-verdict" data-tone="warn" role="status">
+      {verdict.problem || `${hostname} cannot be bound.`}
+    </p>
+  );
+}
+
+/**
  * The address as it LANDED, plus either placement half that did not.
  *
- * The two refusals read as what they are -- the app is serving and one thing
+ * The two refusals read as what they are -- the app is in place and one thing
  * asked for beside the address was refused -- because that is what the copy
  * table says for those two codes, and the guard's own sentence names which
  * guard refused.

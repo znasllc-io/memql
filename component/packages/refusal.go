@@ -25,11 +25,10 @@ import "fmt"
 // message rather than its own copy; that is the designed fallback for a fault
 // nobody anticipated, not a place to land a rename.
 //
-// This package owns the whole catalogue, INCLUDING the two codes it does not
-// itself raise (dsl_requires_cluster_owner, package_has_active_deployables).
-// The pipeline and the lifecycle law raise those, and they are declared here
-// because a catalogue split across three packages is a catalogue that grows a
-// fourth ad-hoc string the first time somebody cannot find it.
+// This package owns the whole catalogue, INCLUDING the code it does not
+// itself raise (dsl_requires_cluster_owner). The pipeline raises that one, and
+// it is declared here because a catalogue split across packages is a catalogue
+// that grows a fourth ad-hoc string the first time somebody cannot find it.
 const (
 	// -- manifest (section B) --
 
@@ -269,10 +268,19 @@ const (
 	// is the whole answer.
 	CodeSiteNotDeletable = "site_not_deletable"
 
-	// CodeDeleteConfirmationMismatch: the typed hostname did not match the
-	// stored one. Verified SERVER-side for the reason siteArchive's is -- a
-	// confirmation a client could skip is not one.
+	// CodeDeleteConfirmationMismatch: the typed name did not match the site's.
+	// The label under the cluster's domain or the whole hostname both confirm
+	// (confirmationMatches); anything else is this. Verified SERVER-side for
+	// the reason siteArchive's is -- a confirmation a client could skip is not
+	// one.
 	CodeDeleteConfirmationMismatch = "delete_confirmation_mismatch"
+
+	// CodeDeactivateConfirmationMismatch: the typed name did not match the
+	// app's manifest name. Deactivating a source's app asks for the APP'S
+	// name rather than its hostname -- the hostname is generated and is not
+	// what a person calls the thing -- and it is verified here for the same
+	// reason the two above are.
+	CodeDeactivateConfirmationMismatch = "deactivate_confirmation_mismatch"
 
 	// CodeSiteSystemOwned: a lifecycle write asked of one of the cluster's own
 	// surfaces. The write guard beside executeWrite refuses these whoever
@@ -305,9 +313,6 @@ const (
 	// CodeDslRequiresClusterOwner (D9): raised by the pipeline at deploy
 	// start, before any build or stage.
 	CodeDslRequiresClusterOwner = "dsl_requires_cluster_owner"
-	// CodePackageHasActiveDeployables (D10): raised by the lifecycle law when
-	// archiving a package whose sites are not all archived.
-	CodePackageHasActiveDeployables = "package_has_active_deployables"
 )
 
 // Refusal is an analysis or pipeline failure carrying a stable Code.

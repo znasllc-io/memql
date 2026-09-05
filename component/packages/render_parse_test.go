@@ -179,6 +179,10 @@ func captureStore(t *testing.T) []string {
 	_ = s.setSiteAccount(ctx, "v1:platform:site:ghi", "v1:accounts:account:acme")
 	_ = s.addCustomDomain(ctx, "v1:platform:site:ghi", awkwardText)
 
+	// The off-list (2026-09-05): a LIST literal of manifest names, the shape
+	// the deactivate cascade renders and the OS also sends by hand.
+	_ = s.disableDeployables(ctx, "v1:platform:package:abc", []string{"storefront", awkwardText})
+
 	if len(rec.queries) == 0 {
 		t.Fatal("no statements captured; this test would pass vacuously")
 	}

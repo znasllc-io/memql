@@ -55,6 +55,12 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		BuiltinExecutorDataOrigins: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateDataOriginsExpression(ctx)
 		},
+		BuiltinExecutorSiteHostnameCheck: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateSiteHostnameCheckExpression(ctx, args)
+		},
+		BuiltinExecutorCustomDomainCheck: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateCustomDomainCheckExpression(ctx, args)
+		},
 		BuiltinExecutorProviderAuthStatus: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateProviderAuthStatusExpression(ctx)
 		},

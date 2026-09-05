@@ -15,6 +15,8 @@ import { zipUnusableNote, type ZipVerdict } from "../../../sources/probe";
 import type { ArtifactProbeHandle, SourceProbeHandle } from "../../../sources/useProbes";
 import { PICKER_PAGE_SIZE, useZipArtifacts } from "../../../sources/useZipArtifacts";
 import type { CredentialRow } from "../../../sources/rows";
+import type { PackageRow } from "../../../packages/rows";
+import { sourceLabel } from "../../../packages/rows";
 import { suggestName, type ComposeDraft } from "../../compose";
 import { CiHandoff } from "./CiHandoff";
 import { KindField, NameField } from "./fields";
@@ -67,6 +69,7 @@ export function ComposeSourceStop({
   locked,
   tokenFormOpen,
   onTokenFormOpenChange,
+  duplicateOf = null,
 }: {
   draft: ComposeDraft;
   onDraft: (patch: Partial<ComposeDraft>) => void;
@@ -85,6 +88,12 @@ export function ComposeSourceStop({
   /** "Use a token instead", held by the page for `ZipPicker`'s reason. */
   tokenFormOpen: boolean;
   onTokenFormOpenChange: (open: boolean) => void;
+  /**
+   * The ACTIVE source that already tracks this repository at this ref
+   * (2026-09-05 design, D8), when there is one. The engine refuses the second
+   * registration; this says so before Analyze, and names the source.
+   */
+  duplicateOf?: PackageRow | null;
 }) {
   if (locked) return <ChosenSource draft={draft} zip={zip} siteId={siteId} clusterDomain={clusterDomain} />;
 
@@ -127,14 +136,28 @@ export function ComposeSourceStop({
       />
 
       {draft.choice === "repo" ? (
-        <RepositorySource
-          draft={draft}
-          onDraft={onDraft}
-          credentials={credentials}
-          probe={probe}
-          tokenFormOpen={tokenFormOpen}
-          onTokenFormOpenChange={onTokenFormOpenChange}
-        />
+        <>
+          <RepositorySource
+            draft={draft}
+            onDraft={onDraft}
+            credentials={credentials}
+            probe={probe}
+            tokenFormOpen={tokenFormOpen}
+            onTokenFormOpenChange={onTokenFormOpenChange}
+          />
+          {/* ONE SOURCE, ONCE (2026-09-05, D8). The engine refuses a second
+              registration of a repository at a ref; this says so here, while
+              the URL is still being chosen, and names the source that has it
+              -- the same posture the probe's "private, or not there" takes,
+              parking the stop rather than letting Analyze fail one round trip
+              later. */}
+          {duplicateOf === null ? null : (
+            <p className="os-stop-verdict" data-tone="warn" role="status">
+              This repository at this ref is already tracked by <strong>{duplicateOf.name || sourceLabel(duplicateOf)}</strong>.
+              A source is added once -- open that one instead, or archive it first to start over.
+            </p>
+          )}
+        </>
       ) : null}
       {draft.choice === "zip" ? (
         <ZipBranch draft={draft} onDraft={onDraft} zipProbe={zipProbe} zip={zip} />

@@ -142,16 +142,16 @@ export function MapSection({
   );
 }
 
-/** The map's own status word, matching the bar's vocabulary (D6). */
+/** The map's own status word, in the bar's vocabulary (2026-09-05, D1). */
 function mapStatusWord(status: string): string {
   switch (status) {
     case "live":
-      return "published";
+      return "live";
     case "disabled":
-      return "unpublished";
+      return "offline";
     case "archived":
       return "archived";
     default:
-      return "draft";
+      return "not live yet";
   }
 }

@@ -588,6 +588,21 @@ func (s *store) deleteSite(ctx context.Context, siteId string) error {
 		"mutation deleteSite(siteId: %s)", langparser.QuoteString(siteId)))
 }
 
+// disableDeployables puts names on the source's off-list -- the same
+// disablePackageDeployables the OS issues when somebody skips an app at the
+// gate, under the CALLER's actor, so the composite write guard admits the
+// source's owner (or a cluster owner) and nobody else. A membership change,
+// never the whole list (memql#4951): two callers turning off two different
+// apps at once both land.
+func (s *store) disableDeployables(ctx context.Context, packageId string, names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+	return s.writeAsCaller(ctx, fmt.Sprintf(
+		"mutation disablePackageDeployables(packageId: %s, deployableNames: %s)",
+		langparser.QuoteString(packageId), jsonLiteral(names)))
+}
+
 // releaseDomainsForSite walks every live binding on a site to `removing` and
 // answers how many it asked for.
 //

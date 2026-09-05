@@ -110,7 +110,7 @@ describe("selection", () => {
 
     // The card answers what the map raised -- which host, what state -- and
     // offers the way to the page rather than being one.
-    expect(await screen.findByText("published")).toBeTruthy();
+    expect(await screen.findByText("live")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Open this deployable" })).toBeTruthy();
   });
 

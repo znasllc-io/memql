@@ -2,6 +2,13 @@ import type { AnalysisReport, DeploymentRow, PackageRow, ReportDeployable } from
 import { runIsScopedToApp, sourceLabel } from "../packages/rows";
 import { bundleForm, bundleFormLabel, type SiteRow } from "../rows";
 import { WEB_TARGET, kindLabel, type StopDef, type StopId } from "../targets";
+import { isPlaceholderBundle, liveStopNote, siteIsBuilt } from "../words";
+
+// The two bundle readings live in `words.ts` now, with the vocabulary they
+// decide (Built versus Not deployed); they are re-exported here because every
+// stop and the list already import them from the rail.
+export { isPlaceholderBundle };
+export const isPublished = siteIsBuilt;
 
 // THE RAIL -- this surface's one signature element, read three ways.
 //
@@ -187,10 +194,8 @@ export const PROBE_REASONS = {
 } as const;
 
 const PREBUILT_REASON = "its built output is in the source";
-const NOTHING_PUBLISHED = "Nothing published yet.";
+const NOTHING_DEPLOYED = "Nothing deployed here yet.";
 const WAITING_FOR_PUSH = "waiting for the first push";
-const PAUSED = "Paused. It answers 503 rather than 404, so a deliberately paused site stays distinguishable from a typo.";
-const ARCHIVED = "Archived. It answers nothing, like a site that never existed.";
 
 /**
  * Scoped to one app, fatal to that app and NOT to the package (design section
@@ -302,7 +307,10 @@ const STAGES: readonly { id: string; label: string; blurb: string }[] = [
   { id: "building", label: "Build", blurb: "Turn each app's source into the files that get served" },
   { id: "staging_dsl", label: "Stage DSL", blurb: "Write the package's MemQL into storage, by content" },
   { id: "rolling", label: "Roll", blurb: "Restart the cluster onto the staged MemQL" },
-  { id: "publishing", label: "Publish", blurb: "Point each site at its new files" },
+  // "Place", not "Publish" (2026-09-05 design, D1): the stage points each site
+  // at its new files and decides nothing about whether the site is live, and
+  // a person read "Publish" as "now on the internet".
+  { id: "publishing", label: "Place", blurb: "Put each app's files in place at its address" },
 ];
 
 const TERMINAL: Record<string, "done" | "refused" | "failed" | "abandoned" | "cancelled"> = {
@@ -550,23 +558,24 @@ function buildStop(
 }
 
 function liveStop(stop: StopDef, site: StandingSite | null): RailStage {
-  if (site === null) return stage(stop, "ahead", NOTHING_PUBLISHED);
+  if (site === null) return stage(stop, "ahead", NOTHING_DEPLOYED);
+  const note = liveStopNote(site);
   switch (site.status) {
     case "live":
-      return stage(stop, "done", `Live at ${site.hostname}.`);
+      return stage(stop, "done", note);
     case "disabled":
-      // Amber is what the shell says "not reachable" with; a paused site is
-      // exactly that, and the sentence says it was chosen.
-      return stage(stop, "stopped", PAUSED);
+      // Amber is what the shell says "not reachable" with; a deployable taken
+      // offline is exactly that, and the sentence says it was chosen.
+      return stage(stop, "stopped", note);
     case "archived":
       // Neither warn nor error -- nothing is wrong with it, it is filed -- so
       // the muted "did not happen" mark, with the reason.
-      return stage(stop, "skipped", ARCHIVED);
+      return stage(stop, "skipped", note);
     case "draft":
-      // Published and not yet made live is the stop WAITING ON THE PERSON:
-      // a held ring, because the next thing that happens is theirs.
-      if (isPublished(site)) return stage(stop, "open", `Published to ${site.hostname}. Not serving yet.`);
-      return stage(stop, "ahead", NOTHING_PUBLISHED);
+      // Built and not yet live is the stop WAITING ON THE PERSON: a held
+      // ring, because the next thing that happens is theirs.
+      if (siteIsBuilt(site)) return stage(stop, "open", note);
+      return stage(stop, "ahead", note);
     default:
       return stage(stop, "ahead");
   }
@@ -634,21 +643,6 @@ function refusalOf(run: DeploymentRow | null): string {
   if (run.error !== null && run.error.message.trim() !== "") return run.error.message;
   const fatal = (run.report?.problems ?? []).find((p) => p.fatal);
   return fatal?.message ?? "";
-}
-
-/**
- * The placeholder a new deployable starts with -- `blob://sites/<id>/pending/`
- * (deployables.md). It is written so the row can exist before any bytes do,
- * and reading it as a publish would tell a person their CI had pushed when
- * nothing has.
- */
-export function isPlaceholderBundle(bundleRef: string): boolean {
-  return /\/pending\/?$/.test(bundleRef.trim());
-}
-
-/** Whether the site holds a bundle somebody actually published. */
-export function isPublished(site: Pick<StandingSite, "bundleRef">): boolean {
-  return bundleForm(site.bundleRef) !== "none" && !isPlaceholderBundle(site.bundleRef);
 }
 
 // ---------------------------------------------------------------------------
@@ -797,7 +791,7 @@ export const HEAD_STATES: readonly HeadState[] = [
   { at: "live", updateAvailable: false },
 ];
 
-export type HeadActionLabel = "Analyze" | "Deploy" | "Make it live" | "Deploy the update" | "Retry" | "Redeploy";
+export type HeadActionLabel = "Analyze" | "Deploy" | "Go live" | "Deploy the update" | "Retry" | "Redeploy";
 
 export interface HeadAction {
   label: HeadActionLabel;
@@ -820,7 +814,7 @@ export function headActionFor(state: HeadState): HeadAction | null {
     case "running":
       return null;
     case "draft_with_bundle":
-      return { label: "Make it live", disabled: false, tone: "primary" };
+      return { label: "Go live", disabled: false, tone: "primary" };
     case "live":
       return state.updateAvailable
         ? { label: "Deploy the update", disabled: false, tone: "primary" }

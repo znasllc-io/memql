@@ -21,8 +21,9 @@ import { isPublished } from "../rail";
 // EVERY OUTCOME RENDERS HERE. The success summary and the refusal both land
 // beside the button that produced them -- never a toast, because a refusal is
 // usually the server's own reasoning and somebody who looked away has lost the
-// only account of what happened. "Published" is the word the finished publish
-// uses, because Deploy is the button that produced it.
+// only account of what happened. "Deployed" is the word the finished deploy
+// uses, because Deploy is the button that produced it -- and the next line
+// says whether the site is live, because a deploy never decides that.
 
 interface ZipRow {
   id: string;
@@ -128,8 +129,12 @@ export function ZipPicker({
       {outcome ? (
         <Notice
           tone="info"
-          sentence={`Published version ${outcome.version || "(unnamed)"} -- ${outcome.fileCount} files, ${formatBytes(outcome.totalBytes)}.`}
-          next="The deployable is serving it now. The bundle reference above updates from the cluster's own event."
+          sentence={`Deployed version ${outcome.version || "(unnamed)"} -- ${outcome.fileCount} files, ${formatBytes(outcome.totalBytes)}.`}
+          next={
+            site.status === "live"
+              ? "It is live now. The bundle reference above updates from the cluster's own event."
+              : "Its files are in place and it is not live yet -- Go live is on the bar."
+          }
           detail={outcome.bundleRef}
         />
       ) : null}

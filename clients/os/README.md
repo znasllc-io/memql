@@ -465,29 +465,83 @@ does not respond. And the bar is a **grid row, never `position: fixed`**: the
 desk plate is CSS-transformed and becomes the containing block for any fixed
 descendant, which is the same trap the Logs jump pill records.
 
-### The lifecycle grew a fourth rung, and it is the one that frees a name
+### One vocabulary, activation, and a source archive that frees its names
 
-`Draft -> Published <-> Unpublished -> Archived -> Deleted`, with `Discard`
-skipping straight from Draft.
+Design record:
+[2026-09-05-deployables-states-activation-and-source-archive-design.md](../../docs/superpowers/specs/2026-09-05-deployables-states-activation-and-source-archive-design.md),
+written from the owner's walkthrough of the app on a live cluster.
 
-**ARCHIVING NEVER FREED THE HOSTNAME**, and nothing in the OS could.
-`liveSiteIdsForHostname` -- the cluster-wide uniqueness probe -- excludes rows
-carrying `deleted: true` and **never reads `status`**. So an archived
-`shop.example.com` refused a new deployable at that name permanently. And no
-automation reacts to a site status change, so an archived site kept its
-`v1:platform:customDomain` rows at `live`: Ingress and Certificate still
-applied, hostname still claimed against both concepts.
+**EVERY STATE WORD COMES FROM `words.ts`**, and there are seven: Inactive,
+Not deployed, Built, Live, Offline, Archived, Deleting. The bar, the list's
+chip, the source page's app list, the rail's Live stop and the compose flow's
+end all read it. The enum did not move (`live` reads Live, `disabled` reads
+Offline, a `draft` with real files reads Built and one with the placeholder
+reads Not deployed). `Published`, `Unpublished`, `Publish`, `Unpublish`,
+`Make it live`, `Paused` and `off` are gone from every surface: after Deploy
+the bar read "Deployed", then "Published 1 app", then "It is not serving yet",
+and Deploy sounded final while Published sounded live. The verbs are **Go
+live** / **Take offline**, **Activate** / **Deactivate**, **Archive** /
+**Restore**, **Delete** (and *Discard* for a draft) -- one name, one promise.
 
-`siteDelete` is the cascade, as ONE decision: the domains walk to `removing`,
-auto-deploy is disarmed when this was the source's last app, and the site row
-is stamped **LAST** -- so a failure part-way leaves a deployable that is still
-findable and still says what state it is in, rather than an invisible row
-holding a name nobody can reclaim and nobody can see.
+**A SOURCE'S APP IS NEVER ARCHIVED; IT IS DEACTIVATED.** A standalone
+deployable climbs the D10 ladder (`Offline -> Archived`, the name kept, then
+`Delete`, the name released), because its bundle is its only copy. A source's
+app is reproducible from the source, so it has ONE destructive act from every
+state, live included: `packageDeactivateDeployable` releases its custom
+domains, deletes its site (the write the uniqueness probe reads, so the address
+is free at that instant), disarms auto-deploy when it was the source's last
+app, and puts the name on the source's off-list. The confirmation is the APP'S
+NAME, not its hostname -- the address is generated now and is not what a
+person calls the thing. `acts.ts` decides which ladder a row is on from
+`packageId`, not from `pkg`: an app of an ARCHIVED source has no package in the
+active feed and is exactly the row whose name still needs freeing.
 
-**The surface's words changed; the enum did not** (no migration, no new member
-on `v1:platform:site.status`). `live` reads Published and `disabled` reads
-Unpublished, and what the engine's distinction bought -- 503 for a deliberate
-pause, 404 for an archive -- moved into the sentence beneath the state.
+**ARCHIVING A SOURCE DEACTIVATES EVERY APP IT PRODUCED, THEN ARCHIVES THE
+SOURCE.** The cascade used to archive each site, and an archived site holds
+its hostname, so a re-added source could not take its addresses back. It no
+longer refuses while an app is live: the confirmation on the source page names
+the live addresses and says they go offline the moment it is confirmed.
+`packageRestore` still does not cascade; the apps come back inactive.
+`package_has_active_deployables` is retired.
+
+**SKIP IS DEACTIVATE, AND A CLICK NEVER ACTS.** An app skipped at the gate
+lands on the off-list as before; what changed is the click. It used to turn the
+app back ON with no page and no confirmation, and the next click started a
+deploy. Every declared row -- inactive or not, in the list or on the source's
+page -- now opens the compose flow scoped to that app: an inactive one with a
+notice at the top and **Activate** on the bar, a merely-declared one with
+Analyze. Nothing is written until the bar's act is pressed. The scope reaches
+the FORM now (`appsToPlace(..., only)`), not only the wire: opened for `web`,
+Where it lives used to ask about `storefront` too, with a Deploy/Skip pill on
+each and "2 of 2 apps" on the bar.
+
+**THE ADDRESS IS GENERATED, AND CHECKED WHILE IT IS TYPED.** The seed is the
+Generate button's own draw (`seedAddress`), because every source declares
+`storefront` and `web` and the second person on a cluster found them taken at
+the end of the flow. Two engine-native reads, `siteHostnameCheck` and
+`customDomainCheck`, run the write guards' own shape and uniqueness rules
+without reserving anything; `useAddressChecks` asks after a 350ms pause, the
+line under the field reads "checking", then "free" or the policy's own
+sentence, Generate draws again until a free name comes back, and Deploy is out
+of reach until every address going out has checked out
+(`placementsComplete(..., verdicts)`). The guard still decides on the write.
+
+**ONE SOURCE, ONCE.** A write guard beside the hostname policy
+(`platform_package_source_policy.go`) refuses a `v1:platform:package` create
+naming a repository and ref another ACTIVE package already tracks, normalised
+(scheme, `.git`, trailing slash, case, the SSH form); archived packages do not
+count. The Source stop asks the same question off the packages feed
+(`duplicateSource`) and, knowing the probe's default branch, reads "" and
+`main` as one ref there, which the engine cannot.
+
+**THE FLOW ENDS ON BUILT, WITH GO LIVE BESIDE DONE.** A first deploy leaves
+the site `draft` with real files, deliberately; the bar says Built in the one
+vocabulary and offers Go live right there, so the two-step is one screen.
+
+**A CONFIRMATION IS THE THING'S NAME.** A standalone types its address label
+(`storefront`, not `storefront.memql.<domain>`), and the server's
+`confirmationMatches` accepts the label or the whole hostname. A source's app
+types its manifest name; a source types its own.
 
 ### A run can be stopped, up to the roll
 

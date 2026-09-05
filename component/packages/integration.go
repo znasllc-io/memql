@@ -120,11 +120,11 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "archiveSite",
-			Description: "Archive a site after verifying the typed hostname (epic memql#4794, D10).",
+			Description: "Archive a site after verifying the typed confirmation (epic memql#4794, D10). The label under the cluster's domain or the whole hostname both confirm.",
 			Handler:     i.handleArchiveSite,
 			ArgsSchema: map[string]string{
 				"siteId":          "string (required)",
-				"confirmHostname": "string (required) -- the site's own hostname, typed as confirmation",
+				"confirmHostname": "string (required) -- the site's address label (or its whole hostname), typed as confirmation",
 			},
 		},
 		{
@@ -139,7 +139,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Handler:     i.handleDeleteSite,
 			ArgsSchema: map[string]string{
 				"siteId":          "string (required)",
-				"confirmHostname": "string (required) -- the site's own hostname, typed as confirmation",
+				"confirmHostname": "string (required) -- the site's address label (or its whole hostname), typed as confirmation",
 			},
 		},
 		{
@@ -153,11 +153,21 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "archivePackage",
-			Description: "Archive a package and every app it produced (epic memql#4794 D10, epic memql#4885). Verifies the typed name, refuses with package_has_active_deployables naming the LIVE hostnames while any app is still serving -- pausing stays the person's decision -- and otherwise archives each paused or never-published app through the same guarded status write the site archive uses (a draft is walked through disabled first), sites first and the package last. Apps already archived are left alone. Returns {packageId, name, status, archivedSites}.",
+			Description: "Archive a source and DEACTIVATE every app it produced (2026-09-05 design, D3). Verifies the typed name, then for each app the source deployed -- live ones included -- walks its custom domains to `removing` and stamps its site deleted, so every address comes free; puts every declared app on the source's off-list; disarms auto-deploy when it was armed; and archives the package LAST, so a failure part-way leaves a source that is still active and still says what happened. Returns {packageId, name, status, releasedSites, deactivated}.",
 			Handler:     i.handleArchivePackage,
 			ArgsSchema: map[string]string{
 				"packageId":   "string (required)",
 				"confirmName": "string (required) -- the package's own name, typed as confirmation",
+			},
+		},
+		{
+			Name:        "deactivateDeployable",
+			Description: "Deactivate ONE app of a source (2026-09-05 design, D2): release its custom domains, delete its site so its address comes free, disarm the source's auto-deploy when this was its last app, and put the name on the source's off-list so it is listed inactive and built by no run. Offered from any state the app is in, live included -- the typed confirmation is what stands between a person and an app going offline. An app the source declares and never deployed only lands on the off-list. Returns {packageId, deployableName, siteId, hostname, domainsReleased, autoDeployDisarmed}.",
+			Handler:     i.handleDeactivateDeployable,
+			ArgsSchema: map[string]string{
+				"packageId":      "string (required)",
+				"deployableName": "string (required) -- the manifest name of the app to deactivate",
+				"confirmName":    "string (required) -- that same name, typed as confirmation",
 			},
 		},
 		{
@@ -332,9 +342,9 @@ func (i *Integration) handleArchiveSite(ctx context.Context, args map[string]any
 		return nil, refuse(CodeSourceUnreadable, "no site %q is readable by this caller", siteId)
 	}
 	hostname := rowString(site, "hostname")
-	if strings.TrimSpace(stringArg(args, "confirmHostname")) != hostname {
+	if !confirmationMatches(stringArg(args, "confirmHostname"), hostname) {
 		return nil, refuse("archive_confirmation_mismatch",
-			"that is not this site's hostname. Type %q exactly to archive it.", hostname)
+			"that is not this deployable's name. Type %q exactly to archive it.", confirmationWord(hostname))
 	}
 	// The disable-first rule and the systemOwned exemption are NOT checked
 	// here. They are the write guard's, beside executeWrite, so they hold for
@@ -418,9 +428,9 @@ func (i *Integration) handleDeleteSite(ctx context.Context, args map[string]any,
 			"this deployable is %q, and deleting is only possible from %q or %q -- the two states nothing is served from. Pause it, then archive it, then delete it.",
 			status, siteStatusArchived, siteStatusDraft)
 	}
-	if strings.TrimSpace(stringArg(args, "confirmHostname")) != hostname {
+	if !confirmationMatches(stringArg(args, "confirmHostname"), hostname) {
 		return nil, refuse(CodeDeleteConfirmationMismatch,
-			"that is not this deployable's hostname. Type %q exactly to delete it.", hostname)
+			"that is not this deployable's name. Type %q exactly to delete it.", confirmationWord(hostname))
 	}
 
 	// 1. The domains, so the hostname stops resolving at this write rather
@@ -601,66 +611,217 @@ func (i *Integration) handleArchivePackage(ctx context.Context, args map[string]
 			"that is not this package's name. Type %q exactly to archive it.", name)
 	}
 
-	// THE D10 CROSS-ROW RULE. A package is the source its deployables came
-	// from, and filing it away while one is still serving the internet would
-	// put the record and the reality in different states. So a LIVE app
-	// refuses the whole call, naming only the live hostnames, before any
-	// site is touched: pausing is the step that gives anyone still using it
-	// a chance to notice, and it stays the person's decision.
+	// ARCHIVING A SOURCE DEACTIVATES EVERY APP IT PRODUCED (design D3 of
+	// 2026-09-05-deployables-states-activation-and-source-archive-design.md).
 	//
-	// EVERYTHING ELSE CASCADES (epic memql#4885, design sections A and F --
-	// "archive this source and every app it produced"). A disabled app is
-	// archived; a draft one -- a first deploy never made live, the commonest
-	// state a composed source is abandoned in -- is walked through disabled
-	// first, because the status guard admits `archived` from `disabled`
-	// alone and a draft resolves for nobody, so the pause it insists on is
-	// the law's own path with nobody to notice. An app already archived is
-	// left alone. Each write is the same stamped setSiteStatus the site
-	// archive uses, and the guard beside executeWrite still decides every
-	// one: a refusal surfaces and the cascade STOPS there, sites first and
-	// the package last, so the record never claims more than the reality.
+	// The cascade used to ARCHIVE each site, and an archived site holds its
+	// hostname: the cluster-wide uniqueness probe reads `deleted` alone
+	// (platform_site_hostname_policy.go). So an archived source went on
+	// claiming every address it had ever been given, and a source added again
+	// could not take them back -- the defect the owner reported.
+	//
+	// A source's apps are REPRODUCIBLE from the source, which is what makes
+	// tearing them down the right archive for a source and the wrong one for
+	// a standalone deployable (whose bundle is its only copy; its archive
+	// keeps the name and Delete releases it). Each app here is deactivated
+	// exactly as its own Deactivate would: domains released first, so the
+	// hostname stops resolving at that write; the site stamped deleted, which
+	// is the write that frees the name; and every declared name on the
+	// off-list, so a restored source comes back with nothing deploying itself.
+	//
+	// A LIVE app is torn down like any other. The refusal that used to stand
+	// here (package_has_active_deployables) is retired: the owner decided the
+	// warning belongs in the confirmation, which names the live addresses.
+	//
+	// The package flips LAST, so a failure part-way leaves a source that is
+	// still active and whose page still says what happened.
 	sites, err := deps.Store.sitesForPackage(ctx, packageId)
 	if err != nil {
 		return nil, err
 	}
-	var live []string
+	var released []string
 	for _, s := range sites {
-		if rowString(s, "status") == siteStatusLive {
-			live = append(live, rowString(s, "hostname"))
+		if rowBool(s, "systemOwned") {
+			return nil, refuse(CodeSiteSystemOwned,
+				"%q is one of this cluster's own surfaces and cannot be torn down by archiving a source.",
+				rowString(s, "hostname"))
 		}
 	}
-	if len(live) > 0 {
-		return nil, refuse(CodePackageHasActiveDeployables,
-			"this package still has %d deployable(s) still serving (%s). Pause them first -- archiving is the end of a deployable's life, and pausing is the step that gives anyone still using it a chance to notice. Every paused or never-published app is archived with the package.",
-			len(live), strings.Join(live, ", "))
-	}
-
-	var archivedSites []string
 	for _, s := range sites {
 		siteId := rowString(s, "id")
-		switch rowString(s, "status") {
-		case siteStatusArchived:
-			continue
-		case siteStatusDraft:
-			if err := deps.Store.setSiteStatus(ctx, siteId, siteStatusDisabled); err != nil {
-				return nil, err
-			}
+		if _, rerr := deps.Store.releaseDomainsForSite(ctx, siteId); rerr != nil {
+			return nil, rerr
 		}
-		if err := deps.Store.setSiteStatus(ctx, siteId, siteStatusArchived); err != nil {
-			return nil, err
+		if derr := deps.Store.deleteSite(ctx, siteId); derr != nil {
+			return nil, derr
 		}
-		archivedSites = append(archivedSites, rowString(s, "hostname"))
+		released = append(released, rowString(s, "hostname"))
 	}
 
+	deactivated := declaredNames(pkg)
+	if err := deps.Store.disableDeployables(ctx, packageId, deactivated); err != nil {
+		return nil, err
+	}
+	if rowBool(pkg, "autoDeploy") {
+		if err := deps.Store.setAutoDeploy(ctx, packageId, false); err != nil {
+			return nil, err
+		}
+	}
 	if err := deps.Store.setPackageStatus(ctx, packageId, "archived"); err != nil {
 		return nil, err
+	}
+	if released == nil {
+		released = []string{}
 	}
 	return resultNode(map[string]any{
 		"packageId":     packageId,
 		"name":          name,
 		"status":        "archived",
-		"archivedSites": archivedSites,
+		"releasedSites": released,
+		"deactivated":   deactivated,
 	}), nil
+}
+
+// handleDeactivateDeployable turns ONE app of a source off (design D2).
+//
+// # What deactivating is
+//
+// A source's app is never archived: it is reproducible from the source, so
+// what "turn it off" means is to give its address back and stop offering it.
+// That is the delete cascade for its site -- domains to `removing`, the row
+// stamped deleted, auto-deploy disarmed when this was the last app -- plus the
+// name on the source's off-list, which is what skipping at the gate writes and
+// what makes the row read `inactive` rather than `not deployed`.
+//
+// # Offered from every state, live included
+//
+// A standalone's delete refuses a live row and names the pause as the next
+// step. Here the typed confirmation IS the step: the OS says what goes offline
+// before it asks, and the owner decided that a source's app should be one
+// decision rather than three.
+//
+// # The order
+//
+// Site first, off-list second. The deletion is the act; a failure to record
+// the preference must not leave a deployable nobody asked to keep.
+func (i *Integration) handleDeactivateDeployable(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	deps, err := i.resolve()
+	if err != nil {
+		return nil, err
+	}
+	packageId := strings.TrimSpace(stringArg(args, "packageId"))
+	name := strings.TrimSpace(stringArg(args, "deployableName"))
+	pkg, err := deps.Store.packageById(ctx, packageId)
+	if err != nil {
+		return nil, err
+	}
+	if pkg == nil {
+		return nil, refuse(CodeSourceUnreadable, "no package %q is readable by this caller", packageId)
+	}
+	if name == "" || !containsString(declaredNames(pkg), name) {
+		return nil, refuse(CodeSourceUnreadable,
+			"this source does not declare an app called %q, so there is nothing to deactivate by that name", name)
+	}
+	if strings.TrimSpace(stringArg(args, "confirmName")) != name {
+		return nil, refuse(CodeDeactivateConfirmationMismatch,
+			"that is not this app's name. Type %q exactly to deactivate it.", name)
+	}
+
+	sites, err := deps.Store.sitesForPackage(ctx, packageId)
+	if err != nil {
+		return nil, err
+	}
+	var site map[string]any
+	for _, s := range sites {
+		if rowString(s, "packageDeployableName") == name {
+			site = s
+			break
+		}
+	}
+
+	siteId, hostname := "", ""
+	domainsReleased := 0
+	autoDeployDisarmed := false
+	if site != nil {
+		siteId, hostname = rowString(site, "id"), rowString(site, "hostname")
+		if rowBool(site, "systemOwned") {
+			return nil, refuse(CodeSiteSystemOwned,
+				"%q is one of this cluster's own surfaces. It is re-seeded at every boot, so deactivating it would leave nobody a way in until the next restart.",
+				hostname)
+		}
+		if domainsReleased, err = deps.Store.releaseDomainsForSite(ctx, siteId); err != nil {
+			return nil, err
+		}
+		last, lerr := i.wasLastServableApp(ctx, deps, packageId, siteId)
+		if lerr != nil {
+			return nil, lerr
+		}
+		if derr := deps.Store.deleteSite(ctx, siteId); derr != nil {
+			return nil, derr
+		}
+		if last {
+			if aerr := deps.Store.setAutoDeploy(ctx, packageId, false); aerr != nil {
+				return nil, aerr
+			}
+			autoDeployDisarmed = true
+		}
+	}
+	if err := deps.Store.disableDeployables(ctx, packageId, []string{name}); err != nil {
+		return nil, err
+	}
+	return resultNode(map[string]any{
+		"packageId":          packageId,
+		"deployableName":     name,
+		"siteId":             siteId,
+		"hostname":           hostname,
+		"domainsReleased":    domainsReleased,
+		"autoDeployDisarmed": autoDeployDisarmed,
+	}), nil
+}
+
+func containsString(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+// confirmationMatches decides whether what a person typed confirms a site
+// (design D9): the site's NAME -- its label under the cluster's domain -- or
+// the whole hostname. Typing `storefront.memql.example.com` for every archive
+// and delete was the owner's complaint; the label is what a person calls the
+// thing, and the site id the call already carries is what makes the label
+// unambiguous.
+//
+// A bare apex has no label apart from itself: `example` does not confirm
+// `example.com`.
+func confirmationMatches(typed, hostname string) bool {
+	typed = strings.ToLower(strings.TrimSpace(typed))
+	host := strings.ToLower(strings.TrimSpace(hostname))
+	if typed == "" || host == "" {
+		return false
+	}
+	if typed == host {
+		return true
+	}
+	label, rest, found := strings.Cut(host, ".")
+	if !found || !strings.Contains(rest, ".") {
+		return false
+	}
+	return typed == label
+}
+
+// confirmationWord is the name a refusal tells a person to type: the label
+// when the hostname has one, else the hostname itself.
+func confirmationWord(hostname string) string {
+	host := strings.ToLower(strings.TrimSpace(hostname))
+	label, rest, found := strings.Cut(host, ".")
+	if !found || !strings.Contains(rest, ".") {
+		return host
+	}
+	return label
 }
 
 // handleSetAutoDeploy flips the switch. Under the CALLER's actor, unstamped:

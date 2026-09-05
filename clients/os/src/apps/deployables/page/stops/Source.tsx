@@ -301,11 +301,11 @@ function HandMadeSource({ site, flipped }: { site: SiteRow; flipped: boolean }) 
       {fromLibrary ? (
         <>
           <Fact
-            label="Published from"
+            label="Deployed from"
             value={<code className="os-mono">{site.artifactId}</code>}
             title="Provenance only. The edge reads bundleRef and never this field."
           />
-          <Fact label="Provenance" value="Published from the Library." />
+          <Fact label="Provenance" value="Deployed from the Library." />
         </>
       ) : null}
       {pushed ? (
@@ -360,39 +360,25 @@ function BundleFact({ site, flipped }: { site: SiteRow; flipped: boolean }) {
 // ---------------------------------------------------------------------------
 
 /**
- * Package-level acts, on the Source stop because they belong to the SOURCE
- * and not to any one app it produced. Its own write hook, so a refusal
- * renders beside the control that produced it -- the server's
- * `package_has_active_deployables` names the apps still serving, and that
- * sentence belongs next to the button somebody just pressed.
+ * The source's own lifecycle: archive it, or bring it back.
+ *
+ * ARCHIVING A SOURCE DEACTIVATES EVERY APP IT PRODUCED (2026-09-05 design,
+ * D3), live ones included, and the confirmation is where that is said: which
+ * apps, which addresses, and that the addresses come free. There is no longer
+ * a refusal for a live app and no disabled button naming the ones to pause
+ * first -- the owner decided the warning belongs in the confirmation, and a
+ * person who reads it and types the name has decided.
+ *
+ * A restored source comes back with its apps INACTIVE, to be activated and
+ * deployed at fresh addresses; the caption says so, because "restore" would
+ * otherwise read as "everything comes back".
  */
-// `apps` is every deployable this source produced, as ONE list. It used to
-// arrive split into a "site" and its "siblings" -- a shape that only made
-// sense while this rendered inside one app's page, and which is exactly what
-// let a control that archives every one of them sit on a single app's page.
 export function PackageLifecycle({ pkg, apps }: { pkg: PackageRow; apps: readonly SiteRow[] }) {
   const actions = usePackageActions();
   const [archiving, setArchiving] = useState(false);
   const [confirmName, setConfirmName] = useState("");
-  const produced = apps.length === 0 ? "nothing yet" : apps.map(siteName).join(", ");
-
-  // ===========================================================================
-  // A CONTROL THAT CAN ONLY FAIL IS NOT OFFERED
-  // ===========================================================================
-  // The engine refuses `packageArchive` with package_has_active_deployables
-  // while ANY app is still serving, naming the live hostnames -- pausing is
-  // the step that gives anyone still using it a chance to notice, and it stays
-  // the person's decision. The predicate here is that predicate exactly:
-  // `status === "live"`, not "live or paused".
-  //
-  // So the button is disabled and says WHICH apps, rather than opening a typed
-  // confirmation that ends in a refusal. Naming them is the whole courtesy --
-  // "pause them first" is not actionable without knowing which.
-  //
-  // THE CLIENT GATE IS PRESENTATION; THE SERVER GATE IS THE GATE. This page
-  // can be stale -- an app can go live between the read and the click -- so
-  // the refusal render below stays exactly where it was.
-  const serving = apps.filter((a) => a.status === "live");
+  const live = apps.filter((a) => a.status === "live");
+  const declared = pkg.declares.map((d) => d.name).filter((n) => n !== "");
 
   if (pkg.status === "archived") {
     return (
@@ -400,7 +386,10 @@ export function PackageLifecycle({ pkg, apps }: { pkg: PackageRow; apps: readonl
         <h4 className="os-report-heading">
           <RotateCcw size={12} aria-hidden /> Restore
         </h4>
-        <Caption>Puts this source back on the active list. The apps it produced keep whatever state they have.</Caption>
+        <Caption>
+          Puts this source back on the list. Its apps come back inactive -- activate one from its row to choose an
+          address and deploy it again.
+        </Caption>
         <Button onClick={() => void actions.restore(pkg.id)} busy={actions.busy}>
           <RotateCcw size={12} aria-hidden /> Restore this source
         </Button>
@@ -417,8 +406,25 @@ export function PackageLifecycle({ pkg, apps }: { pkg: PackageRow; apps: readonl
       {archiving ? (
         <>
           <Caption>
-            Archiving keeps the source and everything it recorded, and files the apps it produced -- {produced} -- with
-            it. An app still serving is refused by name. Type <strong>{pkg.name}</strong> to confirm.
+            Archiving deactivates every app this source produced
+            {apps.length > 0 ? (
+              <> -- {apps.map((a) => a.packageDeployableName || siteName(a)).join(", ")} -- </>
+            ) : declared.length > 0 ? (
+              <> -- {declared.join(", ")} -- </>
+            ) : (
+              " "
+            )}
+            releasing each address and any client domain bound to it, then files the source.
+            {live.length > 0 ? (
+              <>
+                {" "}
+                <strong>
+                  {live.length === 1 ? "One app is live right now" : `${live.length} apps are live right now`} (
+                  {live.map((a) => a.hostname).join(", ")}) and goes offline the moment you confirm.
+                </strong>
+              </>
+            ) : null}{" "}
+            The source can be restored; its apps come back inactive. Type <strong>{pkg.name}</strong> to confirm.
           </Caption>
           <div className="os-confirm-row">
             <Input
@@ -429,7 +435,7 @@ export function PackageLifecycle({ pkg, apps }: { pkg: PackageRow; apps: readonl
               placeholder={pkg.name}
             />
             <Button tone="quiet" onClick={() => setArchiving(false)}>
-              Cancel
+              Keep it
             </Button>
             <Button
               tone="danger"
@@ -444,20 +450,14 @@ export function PackageLifecycle({ pkg, apps }: { pkg: PackageRow; apps: readonl
       ) : (
         <>
           <Caption>
-            {serving.length === 0 ? (
-              "An archived source stays listed and can be restored. Nothing is deleted."
-            ) : (
-              <>
-                {serving.length === 1 ? "One app from this source is still serving" : `${serving.length} apps from this source are still serving`}
-                {" -- "}
-                {serving.map((a) => a.hostname).join(", ")}. Pause {serving.length === 1 ? "it" : "them"} first: archiving is
-                the end of a deployable&rsquo;s life, and pausing is the step that gives anyone still using it a chance to
-                notice.
-              </>
-            )}
+            {live.length === 0
+              ? "Deactivates every app this source produced -- each address comes free -- and files the source. It can be restored."
+              : `${live.length === 1 ? "One app from this source is live" : `${live.length} apps from this source are live`} -- ${live
+                  .map((a) => a.hostname)
+                  .join(", ")}. Archiving takes ${live.length === 1 ? "it" : "them"} offline, releases every address, and files the source. It can be restored.`}
           </Caption>
-          <Button disabled={serving.length > 0} onClick={() => setArchiving(true)}>
-            <Archive size={12} aria-hidden /> Archive this source and every app it produced
+          <Button onClick={() => setArchiving(true)}>
+            <Archive size={12} aria-hidden /> Archive this source
           </Button>
         </>
       )}

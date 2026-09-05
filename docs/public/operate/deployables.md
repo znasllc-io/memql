@@ -41,7 +41,7 @@ five stops, in this order:
 | **What it is** | what the analysis found: each app with its kind, path and build plan, each DSL domain, any Go pack, and every problem |
 | **Where it lives** | the address: a hostname under this cluster's domain, the client it is for, and -- for a cluster owner -- the client's own domain |
 | **Build** | prebuilt output found and skipped, or the typed refusal saying what would have run |
-| **Live** | draft, live, paused or archived, with the version history behind it |
+| **Live** | not deployed, built, live, offline or archived, with the version history behind it |
 
 The same five stops report progress while a deploy runs and standing status
 afterwards, so there is no separate "progress screen" to learn. Beneath them
@@ -201,8 +201,20 @@ placements: {
 ```
 
 Read on a **first** deploy only. A never-deployed app with no `hostname` is
-refused with `deployable_binding_missing`; later deploys find the site through
+refused with `deployable_hostname_unchosen`; later deploys find the site through
 `(packageId, packageDeployableName)` and never re-ask.
+
+**The address starts as a generated name and is checked while it is typed.**
+The Where-it-lives stop seeds each app with a two-word name rather than the
+app's own -- every source declares `storefront` and `web`, so the first person
+on a cluster took those and the second found them taken at the end of the flow
+-- and asks `siteHostnameCheck` (and `customDomainCheck` for a client's own
+domain) a beat after each pause. Both answer `{hostname, available, reason,
+problem}` from the write guards' own shape and uniqueness rules and reserve
+nothing: the line under the field reads "checking", then "free" or the
+policy's own sentence, Generate draws again until a free name comes back, and
+Deploy stays out of reach until every address going out has checked out. A
+name free a moment ago can still be refused on the write, by the same guard.
 
 The two optional halves are applied by the pipeline **after the site exists**,
 as the same `updateSiteAccount` and `customDomainAdd` calls the page makes, run
@@ -221,6 +233,62 @@ is recorded beside it as `accountId` and `ownDomain`.
 a bound domain stays "waiting on your DNS records" until both records check
 out. The verification, the two records and the certificate are the custom-domain
 flow ([front-door.md](front-door.md)).
+
+---
+
+## What a deployable is called, and what you can do to it
+
+One vocabulary, on every surface (the record is
+`docs/superpowers/specs/2026-09-05-deployables-states-activation-and-source-archive-design.md`).
+The enum values on `v1:platform:site.status` are unchanged; these are the
+words a person reads:
+
+| Word | Engine | Meaning |
+|---|---|---|
+| **Inactive** | declared, on the source's `disabledDeployables`, no site | skipped when the source was deployed; nothing built, no address |
+| **Not deployed** | declared and never deployed, or `draft` with the placeholder bundle | nothing has landed here yet |
+| **Built** | `draft` with real files | its files are in place at the address; not live until you say |
+| **Live** | `live` | serving at the address |
+| **Offline** | `disabled` | taken offline on purpose; visitors get "temporarily unavailable" rather than "no such site" |
+| **Archived** | `archived` | filed away; answers nothing; the name is still held |
+| **Deleting** | `deleted` with domains still coming down | releasing the address |
+
+The verbs: **Analyze**; **Deploy** (and *Deploy the update*, *Redeploy*,
+*Retry the deploy*), which builds the source and puts its files in place and
+never changes whether the app is live; **Go live** / **Take offline**;
+**Activate** / **Deactivate** for a source's app; **Archive** / **Restore**
+for a source or a standalone; **Delete** (and *Discard* for a draft) for a
+standalone; **Cancel** for a run; **Skip** at the gate.
+
+**A source's app and a standalone are two ladders.** A standalone's bundle is
+its only copy, so it climbs `Offline -> Archived -> Deleted`: Archive keeps the
+name and is reversible, Delete releases it. A source's app is reproducible from
+the source, so it has one destructive act from every state, live included:
+**Deactivate** (`packageDeactivateDeployable`) releases its custom domains,
+deletes its site so the address comes free, disarms the source's auto-deploy
+when this was its last app, and puts the name on the source's off-list. The
+confirmation is the app's manifest name. **Activate** is the inverse's first
+half: the app comes off the off-list and the compose flow opens for it, scoped
+to it, asking only where it should live.
+
+**Skip is deactivate.** An app skipped at the gate lands on the off-list and
+reads *inactive*. Clicking it -- in the list or on its source's page -- opens
+the compose flow for that app with a notice saying it is inactive and Activate
+on the bar; nothing is written until Activate is pressed.
+
+**Archiving a source deactivates every app it produced, then archives the
+source.** Live apps included: the confirmation names the live addresses and
+says they go offline the moment it is confirmed. Restoring the source brings
+its apps back inactive. See [packages.md](packages.md).
+
+**A confirmation is the thing's name.** A standalone types its address label
+(`storefront`, not the whole hostname; the server accepts either), a source's
+app types its manifest name, a source types its own.
+
+**A first deploy ends on Built**, with the files in place and the site not
+live, deliberately -- a stranger's code should not go live the moment it
+builds. The compose flow offers Go live beside Done, so the two-step is one
+screen.
 
 ---
 

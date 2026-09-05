@@ -147,9 +147,10 @@ async function mountAndOpen(seed: FakeSeed, hostname: string, opts: { role?: str
 // was one they scrolled UP to reach -- while Pause sat at y=2412 and Archive
 // at 2499. Every act is on the bar now, and this helper reads it there.
 //
-// The vocabulary moved with it (D6): "Make it live" is "Publish", "Retry" is
-// "Retry the deploy" -- one word, one promise, and never the same word for two
-// different promises on one page.
+// The vocabulary moved with it, and moved again on 2026-09-05 (D1): "Make it
+// live" is "Go live", "Unpublish" is "Take offline", "Retry" is "Retry the
+// deploy" -- one word, one promise, and never the same word for two different
+// promises on one page.
 // THE BAR IS A SIBLING OF THE PANEL, not inside it, and that is the point: it
 // is pinned to the window's bottom edge while the panel scrolls under it. So
 // these three read the DOCUMENT rather than the page region -- exactly one
@@ -360,12 +361,12 @@ describe("the Head's action, by state", () => {
       "store.memql.example.com",
     );
 
-    expect(barState(page)).toBe("Published");
+    expect(barState(page)).toBe("Live");
     // NO CANCEL. It would have killed the other app's run from this page.
     expect(barActs(page)).not.toContain("Cancel");
     // ...and no act that would start a second run of one source either, with
     // the line saying what it is waiting for.
-    expect(barActs(page)).toEqual(["Unpublish"]);
+    expect(barActs(page)).toEqual(["Take offline"]);
     expect(document.querySelector(".os-actbar-detail")?.textContent).toBe(
       "waiting for admin's deploy to finish",
     );
@@ -430,14 +431,14 @@ describe("the Head's action, by state", () => {
     expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(packageId: "pkg-acme", confirm: false)']);
   });
 
-  it("a draft with a bundle: Publish, which flips the status", async () => {
+  it("a draft with a bundle: Built, and Go live flips the status", async () => {
     const draft = siteRow({ ...STORE, id: "site-store", status: "draft" });
     const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, sites: [draft, ADMIN] }, "store.memql.example.com");
-    // "Make it live" reads Publish now (D6): the state words are the
-    // person's, and an act keeps its name through the whole flow.
-    expect(barState(page)).toBe("Draft");
+    // BUILT, in the one vocabulary (2026-09-05, D1): the files are in place
+    // and nothing is live, and an act keeps its name through the whole flow.
+    expect(barState(page)).toBe("Built");
     const live = headAction(page);
-    expect(live?.textContent).toBe("Publish");
+    expect(live?.textContent).toBe("Go live");
     await click(live);
     expect(connection.callsNamed("updateSiteStatus")).toEqual(['mutation updateSiteStatus(siteId: "site-store", status: "live")']);
   });
@@ -512,15 +513,16 @@ describe("the Head's action, by state", () => {
     expect(within(page).getByText(/one of the cluster's own surfaces/)).toBeTruthy();
   });
 
-  it("an archived deployable: Delete and Restore -- the fourth rung", async () => {
+  it("an archived deployable: the rung that frees its name, and Restore", async () => {
+    // A SOURCE'S app deactivates (2026-09-05, D2); a STANDALONE deletes (the
+    // fourth rung, epic memql#4937 D1). Both keep Restore, which brings the
+    // row back offline.
     const archived = siteRow({ ...STORE, id: "site-store", status: "archived" });
-    const { page } = await mountAndOpen({ ...WITH_PACKAGE, sites: [archived, ADMIN] }, "store.memql.example.com");
-    // THE FOURTH RUNG (epic memql#4937, D1). An archived deployable used to
-    // offer nothing at all -- and its hostname stayed held forever, because
-    // the uniqueness probe reads `deleted` and never `status`. Delete is what
-    // releases it; Restore is the way back.
+    const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, sites: [archived, ADMIN] }, "store.memql.example.com");
     expect(barState(page)).toBe("Archived");
-    expect(barActs(page)).toEqual(["Delete", "Restore"]);
+    expect(barActs(page)).toEqual(["Deactivate", "Restore"]);
+    await click(headAction(page));
+    expect(connection.callsNamed("siteRestore")).toEqual(['builtin siteRestore(siteId: "site-store")']);
   });
 
   it("a reader: no action, and no controls", async () => {
@@ -559,14 +561,14 @@ describe("the Head's action, by state", () => {
 // ---------------------------------------------------------------------------
 
 describe("a first publish", () => {
-  it("ends on 'Published to ... Not serving yet.' with Publish on the bar, and the stop offers no second one", async () => {
+  it("ends on 'Built ... not live yet.' with Go live on the bar, and the stop offers no second one", async () => {
     const draft = siteRow({ id: "site-docs", hostname: "docs.memql.example.com", kind: "static", status: "draft", bundleRef: "blob://sites/site-docs/v1/" });
     const { page } = await mountAndOpen({ sites: [draft] }, "docs.memql.example.com");
     await openStop(page, "Source");
-    expect(within(page).getByText("Published to docs.memql.example.com. Not serving yet.")).toBeTruthy();
-    // EXACTLY ONE, on the bar, reading Publish (D6). The stop offers no second
-    // one -- which is the assertion that survived the rename.
-    expect(screen.getAllByRole("button", { name: /^Publish/ })).toHaveLength(1);
+    expect(within(page).getByText("Built. In place at docs.memql.example.com, not live yet.")).toBeTruthy();
+    // EXACTLY ONE, on the bar, reading Go live. The stop offers no second one
+    // -- which is the assertion that survived two renames.
+    expect(screen.getAllByRole("button", { name: /^Go live/ })).toHaveLength(1);
     // ...and exactly one stop is open (design section C).
     const rail = within(page).getByRole("list", { name: "Deployable stops" });
     expect(rail.querySelectorAll('li[data-open="true"]')).toHaveLength(1);
@@ -582,7 +584,7 @@ describe("a first publish", () => {
     expect(barActs(page)).toEqual(["Discard", "Deploy"]);
     await openStop(page, "Source");
     expect(within(page).getByText("waiting for the first push")).toBeTruthy();
-    expect(within(page).getByText("Nothing published yet.")).toBeTruthy();
+    expect(within(page).getByText("Nothing deployed here yet.")).toBeTruthy();
     expect(within(page).getByText(/POST \/sites\/site-ci\/bundles/)).toBeTruthy();
   });
 });
@@ -598,7 +600,7 @@ describe("the Source stop", () => {
     expect(within(page).getByText("blob://sites/site-shop/v1/")).toBeTruthy();
     expect(within(page).getByText("uploaded bundle")).toBeTruthy();
     expect(within(page).getByText("artifact-zip")).toBeTruthy();
-    expect(within(page).getByText("Published from the Library.")).toBeTruthy();
+    expect(within(page).getByText("Deployed from the Library.")).toBeTruthy();
     // The storefront's binding is What-it-is, not Source -- and exactly one
     // stop is open at a time, so reading the other means opening it.
     await openStop(page, "What it is");
@@ -613,7 +615,7 @@ describe("the Source stop", () => {
     const { page } = await mountAndOpen({ sites: [pushed] }, "ci.memql.example.com");
     await openStop(page, "Source");
     expect(within(page).getByText(/Pushed by your CI/)).toBeTruthy();
-    expect(within(page).queryByText("Published from the Library.")).toBeNull();
+    expect(within(page).queryByText("Deployed from the Library.")).toBeNull();
   });
 
   it("shows a package-produced site's source as facts", async () => {
@@ -720,14 +722,27 @@ describe("the Source stop", () => {
   // first. The only honest home for it is the page whose subject is the
   // source, which is what these now walk to.
   describe("the source's own lifecycle", () => {
-    it("archives the source and every app it produced, after the typed name, and names the apps", async () => {
-      const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, sites: [{ ...STORE, status: "disabled" }, { ...ADMIN, status: "disabled" }] }, "store.memql.example.com");
+    it("archives the source, deactivating every app it produced, after the typed name -- and names the live ones", async () => {
+      // ARCHIVING A SOURCE DEACTIVATES EVERY APP (2026-09-05, D3), live ones
+      // included: there is no refusal for a live app any more and no disabled
+      // button naming the ones to pause first. The confirmation is where the
+      // warning lives, and it names what goes offline.
+      const { connection, page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
       const source = await openSourceView(page);
-      await click(within(source).getByRole("button", { name: "Archive this source and every app it produced" }));
-      // The confirmation names what "every app" means.
-      // The source view lists its apps AND the confirmation names them, so
-      // this scopes to the confirmation rather than counting both.
-      expect(within(source).getByText(/files the apps it produced/, { exact: false })).toBeTruthy();
+      const open = within(source).getByRole("button", { name: "Archive this source" }) as HTMLButtonElement;
+      expect(open.disabled).toBe(false);
+      // The section already says what is live, before the confirmation opens.
+      const part = open.closest(".os-danger-part") as HTMLElement;
+      expect(part.textContent).toContain("2 apps from this source are live");
+      expect(part.textContent).toContain("store.memql.example.com");
+      expect(part.textContent).toContain("admin.memql.example.com");
+
+      await click(open);
+      // The confirmation names the apps, says the addresses come free, and
+      // says the live ones go offline the moment it is confirmed.
+      expect(within(source).getByText(/2 apps are live right now/)).toBeTruthy();
+      expect(within(source).getByText(/goes offline the moment you confirm/)).toBeTruthy();
+      expect(within(source).getByText(/come back inactive/)).toBeTruthy();
       const archive = within(source).getByRole("button", { name: "Archive" }) as HTMLButtonElement;
       expect(archive.disabled).toBe(true);
       await typeInto(within(source).getByLabelText("Type acme to confirm") as HTMLInputElement, "acme");
@@ -736,26 +751,22 @@ describe("the Source stop", () => {
       expect(connection.callsNamed("packageArchive")).toEqual(['builtin packageArchive(packageId: "pkg-acme", confirmName: "acme")']);
     });
 
-    it("still renders the server's refusal when the client's view was stale", async () => {
-      // THE CLIENT GATE IS PRESENTATION; THE SERVER GATE IS THE GATE. The
-      // control is disabled while this page can SEE a live app, but an app can
-      // go live between the read and the click -- so the refusal path stays,
-      // and this fixture is that race: nothing live on screen, and a server
-      // that refuses anyway.
+    it("still renders the server's refusal, in its own words", async () => {
+      // THE SERVER GATE IS THE GATE. A refusal renders under the OS's headline
+      // with the server's sentence intact.
       const { page } = await mountAndOpen(
         {
           ...WITH_PACKAGE,
-          sites: [{ ...STORE, status: "disabled" }, { ...ADMIN, status: "disabled" }],
-          archiveError: "package_has_active_deployables: storefront (store.memql.example.com) and admin (admin.memql.example.com) are still serving; archive them first",
+          archiveError: "archive_confirmation_mismatch: that is not this package's name. Type \"acme\" exactly to archive it.",
         },
         "store.memql.example.com",
       );
       const source = await openSourceView(page);
-      await click(within(source).getByRole("button", { name: "Archive this source and every app it produced" }));
+      await click(within(source).getByRole("button", { name: "Archive this source" }));
       await typeInto(within(source).getByLabelText("Type acme to confirm") as HTMLInputElement, "acme");
       await click(within(source).getByRole("button", { name: "Archive" }));
-      expect(await within(source).findByText("This package still has sites that are serving")).toBeTruthy();
-      expect(within(source).getByText(/archive them first/)).toBeTruthy();
+      expect(await within(source).findByText("What you typed does not match")).toBeTruthy();
+      expect(within(source).getByText(/Type "acme" exactly/)).toBeTruthy();
     });
 
     it("offers NO deploy on the source, because a source is not a deployable", async () => {
@@ -772,46 +783,22 @@ describe("the Source stop", () => {
       expect(bar === null ? [] : [...bar.querySelectorAll("button")].map((b) => b.textContent)).toEqual([]);
     });
 
-    it("disables Archive while an app is still serving, and says which", async () => {
-      // The engine refuses with package_has_active_deployables naming the LIVE
-      // hostnames, and pausing stays the person's decision -- so a control that
-      // can only fail is a control that should not be pressable. Both fixtures
-      // are live.
-      const { page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
-      const source = await openSourceView(page);
-      const archive = within(source).getByRole("button", {
-        name: "Archive this source and every app it produced",
-      }) as HTMLButtonElement;
-      expect(archive.disabled).toBe(true);
-      // NAMED, not merely refused: the person has to know what to pause. Read
-      // inside the archive section, since the hostnames also appear in the
-      // apps list above it.
-      // A SUBSTRING CHECK, NOT A REGEX. An unanchored pattern that looks like
-      // a hostname is what `js/regex/missing-regexp-anchor` exists to catch --
-      // the shape matches anywhere, so in production code it admits
-      // `evil.example/store.memql.example.com`. The scanner does not know this
-      // one is a test assertion, and it should not have to: the sentence is
-      // being read out of rendered text, which is what `toContain` is for.
-      const shown = (archive.closest(".os-danger-part") as HTMLElement).textContent ?? "";
-      expect(shown).toContain("store.memql.example.com");
-      expect(shown).toContain("admin.memql.example.com");
-    });
-
-    it("enables Archive once nothing is serving", async () => {
+    it("says, before the confirmation, that nothing is live when nothing is", async () => {
       const { page } = await mountAndOpen(
         { ...WITH_PACKAGE, sites: [{ ...STORE, status: "disabled" }, { ...ADMIN, status: "draft" }] },
         "store.memql.example.com",
       );
       const source = await openSourceView(page);
-      const archive = within(source).getByRole("button", {
-        name: "Archive this source and every app it produced",
-      }) as HTMLButtonElement;
-      expect(archive.disabled).toBe(false);
+      const open = within(source).getByRole("button", { name: "Archive this source" });
+      const part = open.closest(".os-danger-part") as HTMLElement;
+      expect(part.textContent).toContain("Deactivates every app this source produced");
+      expect(part.textContent).not.toContain("live right now");
     });
 
-    it("restores an archived source", async () => {
+    it("restores an archived source, and says its apps come back inactive", async () => {
       const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, packages: [{ ...ACME, status: "archived" }] }, "store.memql.example.com");
       const source = await openSourceView(page);
+      expect(within(source).getByText(/apps come back inactive/)).toBeTruthy();
       await click(within(source).getByRole("button", { name: "Restore this source" }));
       expect(connection.callsNamed("packageRestore")).toEqual(['builtin packageRestore(packageId: "pkg-acme")']);
     });
@@ -929,27 +916,29 @@ describe("the Live stop", () => {
     ]);
   });
 
-  it("unpublishes from the BAR, and offers no Archive until it is unpublished", async () => {
+  it("takes a live deployable offline from the BAR, and offers no Archive until it is offline", async () => {
     // THE ACTS MOVED TO THE BAR (rule 12). They used to sit in this stop at
     // y=2412 and y=2499, under five other sections, with the Head's own
     // action at y=354 -- so the act somebody came for was the one they had to
     // go looking for.
     const { connection, page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
-    expect(barActs(page)).toEqual(["Unpublish", "Redeploy"]);
-    // ARCHIVE IS ABSENT, not disabled: it is not legal from Published, and a
+    expect(barActs(page)).toEqual(["Take offline", "Redeploy"]);
+    // ARCHIVE IS ABSENT, not disabled: it is not legal from Live, and a
     // greyed-out control is one somebody has to read past to learn that.
     expect(barActs(page)).not.toContain("Archive");
     // The 503-versus-404 distinction the state word stopped carrying is on
     // the bar's own detail line.
-    await click(within(document.body).getByRole("button", { name: /^Unpublish/ }));
+    await click(within(document.body).getByRole("button", { name: /^Take offline/ }));
     expect(connection.callsNamed("updateSiteStatus")).toEqual(['mutation updateSiteStatus(siteId: "site-store", status: "disabled")']);
   });
 
-  it("an unpublished deployable offers Archive and Publish, and says what 503 means", async () => {
+  it("an offline SOURCE app offers Deactivate and Go live, and says what 503 means", async () => {
     const paused = siteRow({ ...STORE, id: "site-store", status: "disabled" });
     const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, sites: [paused, ADMIN] }, "store.memql.example.com");
-    expect(barState(page)).toBe("Unpublished");
-    expect(barActs(page)).toEqual(["Archive", "Publish"]);
+    expect(barState(page)).toBe("Offline");
+    // A SOURCE'S APP IS NEVER ARCHIVED (2026-09-05, D2): its one destructive
+    // act is Deactivate, which releases the address.
+    expect(barActs(page)).toEqual(["Deactivate", "Go live"]);
     // The engine's own distinction, kept where the state word no longer
     // carries it: a deliberate pause answers 503, an archive answers 404.
     expect(document.querySelector(".os-actbar-detail")?.textContent).toContain("temporarily unavailable");
@@ -957,28 +946,40 @@ describe("the Live stop", () => {
     expect(connection.callsNamed("updateSiteStatus")).toEqual(['mutation updateSiteStatus(siteId: "site-store", status: "live")']);
   });
 
-  it("archives an unpublished deployable after the typed hostname, in the bar", async () => {
-    const paused = siteRow({ ...STORE, id: "site-store", status: "disabled" });
-    const { connection } = await mountAndOpen({ ...WITH_PACKAGE, sites: [paused, ADMIN] }, "store.memql.example.com");
+  it("an offline STANDALONE offers Archive and Go live", async () => {
+    // The other ladder (D4): a standalone's bundle is its only copy, so it
+    // climbs Offline -> Archived -> Deleted and is never deactivated.
+    const paused = siteRow({ ...SHOP, id: "site-shop", status: "disabled" });
+    const { page } = await mountAndOpen({ sites: [paused] }, "shop.memql.example.com");
+    expect(barState(page)).toBe("Offline");
+    expect(barActs(page)).toEqual(["Archive", "Go live"]);
+  });
+
+  it("archives an offline standalone after its NAME is typed -- the label, not the hostname", async () => {
+    const paused = siteRow({ ...SHOP, id: "site-shop", status: "disabled" });
+    const { connection } = await mountAndOpen({ sites: [paused] }, "shop.memql.example.com");
     const bar = document.querySelector(".os-actbar") as HTMLElement;
     await click(within(bar).getByRole("button", { name: /^Archive/ }));
     // THE CONFIRMATION TAKES THE BAR OVER, so the sentence, the field and the
-    // act are the one thing on screen that is being decided.
+    // act are the one thing on screen that is being decided -- and it asks
+    // for the label (2026-09-05, D9), because typing
+    // `shop.memql.example.com` for every archive was the owner's complaint.
     const archive = within(bar).getByRole("button", { name: "Archive" }) as HTMLButtonElement;
     expect(archive.disabled).toBe(true);
-    await typeInto(within(bar).getByLabelText("Type store.memql.example.com to confirm") as HTMLInputElement, "store.memql.example.com");
+    expect(within(bar).getByText(/name stays yours/)).toBeTruthy();
+    await typeInto(within(bar).getByLabelText("Type shop to confirm") as HTMLInputElement, "shop");
     expect(archive.disabled).toBe(false);
     await click(archive);
-    expect(connection.callsNamed("siteArchive")).toEqual(['builtin siteArchive(siteId: "site-store", confirmHostname: "store.memql.example.com")']);
+    expect(connection.callsNamed("siteArchive")).toEqual(['builtin siteArchive(siteId: "site-shop", confirmHostname: "shop")']);
   });
 
-  it("DELETES an archived deployable, which is what releases its name", async () => {
+  it("DELETES an archived standalone, which is what releases its name", async () => {
     // THE FOURTH RUNG (epic memql#4937, D1). Archiving never freed the
     // hostname: liveSiteIdsForHostname excludes `deleted` and never reads
     // `status`, so an archived name was held forever with nothing in the OS
     // able to release it.
-    const archived = siteRow({ ...STORE, id: "site-store", status: "archived" });
-    const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, sites: [archived, ADMIN] }, "store.memql.example.com");
+    const archived = siteRow({ ...SHOP, id: "site-shop", status: "archived" });
+    const { connection, page } = await mountAndOpen({ sites: [archived] }, "shop.memql.example.com");
     expect(barActs(page)).toEqual(["Delete", "Restore"]);
     const bar = document.querySelector(".os-actbar") as HTMLElement;
     await click(within(bar).getByRole("button", { name: /^Delete/ }));
@@ -988,9 +989,30 @@ describe("the Live stop", () => {
     expect(within(bar).getByText(/takes its domains down/)).toBeTruthy();
     const del = within(bar).getByRole("button", { name: "Delete" }) as HTMLButtonElement;
     expect(del.disabled).toBe(true);
-    await typeInto(within(bar).getByLabelText("Type store.memql.example.com to confirm") as HTMLInputElement, "store.memql.example.com");
+    await typeInto(within(bar).getByLabelText("Type shop to confirm") as HTMLInputElement, "shop");
     await click(del);
-    expect(connection.callsNamed("siteDelete")).toEqual(['builtin siteDelete(siteId: "site-store", confirmHostname: "store.memql.example.com")']);
+    expect(connection.callsNamed("siteDelete")).toEqual(['builtin siteDelete(siteId: "site-shop", confirmHostname: "shop")']);
+  });
+
+  it("an archived SOURCE app offers Deactivate, which frees the name the old cascade left held", async () => {
+    // A row the cascade archived before 2026-09-05 still holds its hostname.
+    // Deactivate deletes the site and puts the app on the off-list; Restore
+    // stays, because bringing it back offline is still a legitimate answer.
+    const archived = siteRow({ ...STORE, id: "site-store", status: "archived" });
+    const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, sites: [archived, ADMIN] }, "store.memql.example.com");
+    expect(barActs(page)).toEqual(["Deactivate", "Restore"]);
+    const bar = document.querySelector(".os-actbar") as HTMLElement;
+    await click(within(bar).getByRole("button", { name: /^Deactivate/ }));
+    expect(within(bar).getByText(/can be activated again/)).toBeTruthy();
+    // THE APP'S NAME, never its hostname.
+    await typeInto(within(bar).getByLabelText("Type storefront to confirm") as HTMLInputElement, "storefront");
+    await click(within(bar).getByRole("button", { name: "Deactivate" }));
+    await waitFor(() =>
+      expect(connection.callsNamed("packageDeactivateDeployable")).toEqual([
+        'builtin packageDeactivateDeployable(packageId: "pkg-acme", deployableName: "storefront", confirmName: "storefront")',
+      ]),
+    );
+    expect(connection.callsNamed("siteDelete")).toHaveLength(0);
   });
 
   it("restores an archived deployable, unpublished", async () => {
@@ -1006,7 +1028,7 @@ describe("the Live stop", () => {
     // A REFUSAL RENDERS IN SURFACE, ONCE -- beside the rail, where whoever
     // pressed the bar is looking. It used to render on the Live stop as well,
     // which put the server's sentence on screen twice.
-    await click(within(document.body).getByRole("button", { name: /^Unpublish/ }));
+    await click(within(document.body).getByRole("button", { name: /^Take offline/ }));
     expect(await within(page).findByText(/cannot be paused/)).toBeTruthy();
     expect(within(page).getByText("This cluster refused")).toBeTruthy();
   });
@@ -1150,7 +1172,7 @@ describe("redeploying from a zip", () => {
     expect(connection.callsNamed("sitePublishFromArtifact")).toEqual([
       'builtin sitePublishFromArtifact(siteId: "site-shop", artifactId: "artifact-zip")',
     ]);
-    expect(await screen.findByText(/Published version v7f3c19a2bb01 -- 12 files, 2\.0 MB\./)).toBeTruthy();
+    expect(await screen.findByText(/Deployed version v7f3c19a2bb01 -- 12 files, 2\.0 MB\./)).toBeTruthy();
     expect(screen.getByText("blob://sites/site-shop/v7f3c19a2bb01/")).toBeTruthy();
   });
 
@@ -1358,11 +1380,15 @@ describe("the credential card", () => {
 // ---------------------------------------------------------------------------
 // A SOURCE LISTS WHAT IT DECLARES, NOT ONLY WHAT IT DEPLOYED
 // ---------------------------------------------------------------------------
-describe("discarding a source-backed deployable", () => {
-  it("turns the app off, so it does not come straight back as an offer", async () => {
-    // Reported from production: discard removed the site, but the source still
-    // DECLARED the app -- so the list showed it again as "not deployed" and
-    // clicking it rebuilt the very thing that had just been discarded.
+describe("deactivating a source-backed deployable", () => {
+  it("is ONE capability, confirmed with the app's NAME, and puts it on the off-list", async () => {
+    // Reported from production, in two halves. Discard removed the site but
+    // the source still DECLARED the app, so the list showed it again as "not
+    // deployed" and clicking it rebuilt the very thing that had just been
+    // discarded; and every confirmation asked for the whole hostname. A
+    // source's app has one destructive act now (2026-09-05, D2):
+    // `packageDeactivateDeployable`, which releases the address and records
+    // the preference in the same engine call.
     const { connection } = await mountAndOpen(
       {
         ...WITH_PACKAGE,
@@ -1371,8 +1397,6 @@ describe("discarding a source-backed deployable", () => {
       },
       "store.memql.example.com",
     );
-    // THE ACTS ARE ON THE BAR, which is a sibling of the panel rather than
-    // inside it (DESIGN.md rule 12).
     // THE ACTS ARE ON THE BAR, a sibling of the panel rather than inside it
     // (DESIGN.md rule 12). Matched on TEXT: an act carries its own ariaLabel
     // naming the deployable, so the accessible name is not the word.
@@ -1382,23 +1406,26 @@ describe("discarding a source-backed deployable", () => {
       if (found === undefined) throw new Error(`no "${text}" on the bar; it offers ${JSON.stringify(barActs())}`);
       return found;
     };
-    await click(barButton("Discard"));
-    await typeInto(
-      within(document.querySelector(".os-actbar") as HTMLElement).getByLabelText(
-        "Type store.memql.example.com to confirm",
-      ) as HTMLInputElement,
-      "store.memql.example.com",
-    );
-    await click(barButton("Discard"));
+    expect(barActs()).toEqual(["Deactivate", "Go live"]);
+    await click(barButton("Deactivate"));
+    const bar = document.querySelector(".os-actbar") as HTMLElement;
+    // It says what it costs and what stays: the source still declares it.
+    expect(within(bar).getByText(/releases/)).toBeTruthy();
+    expect(within(bar).getByText(/can be activated again/)).toBeTruthy();
+    await typeInto(within(bar).getByLabelText("Type storefront to confirm") as HTMLInputElement, "storefront");
+    await click(barButton("Deactivate"));
 
-    await waitFor(() => expect(connection.callsNamed("siteDelete").length).toBe(1));
-    // THE DELETION IS THE ACT and the preference follows it, so a failure to
-    // record the second cannot leave a deployable nobody asked to keep.
-    await waitFor(() => expect(connection.callsNamed("disablePackageDeployables").length).toBe(1));
-    // THE NAME, not the resulting list (memql#4951). Composing the result took
-    // the package's current off-list and wrote it back whole, so two windows
-    // discarding two different apps clobbered.
-    expect(connection.callsNamed("disablePackageDeployables")[0]).toContain('deployableNames: ["storefront"]');
+    await waitFor(() =>
+      expect(connection.callsNamed("packageDeactivateDeployable")).toEqual([
+        'builtin packageDeactivateDeployable(packageId: "pkg-acme", deployableName: "storefront", confirmName: "storefront")',
+      ]),
+    );
+    // NOT the two-call shape it used to be: no delete from here, and no
+    // separate off-list write -- the capability does both, site first.
+    expect(connection.callsNamed("siteDelete")).toHaveLength(0);
+    expect(connection.callsNamed("disablePackageDeployables")).toHaveLength(0);
+    // ...and the list says what happened to the row that is no longer here.
+    expect(await screen.findByText(/store\.memql\.example\.com is released/)).toBeTruthy();
   });
 });
 
@@ -1422,14 +1449,23 @@ describe("apps it produces", () => {
     expect(within(list).getByText("not deployed")).toBeTruthy();
   });
 
-  it("does not make an undeployed app look like a page it can open", async () => {
-    // It has no deployable to open. A button would promise one.
+  it("opens the compose flow for an undeployed app, from the source's own page", async () => {
+    // The owner asked to activate an app from its source (2026-09-05, D5):
+    // the row opens the flow for THAT app, which is the page it did not have.
     const { page } = await mountAndOpen(
-      { ...WITH_PACKAGE, sites: [STORE], packages: [{ ...ACME, declares: [{ name: "web", kind: "spa" }] }] },
+      {
+        ...WITH_PACKAGE,
+        sites: [STORE],
+        packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }], disabledDeployables: ["web"] }],
+      },
       "store.memql.example.com",
     );
     const source = await openSourceView(page);
     const list = within(source).getByText("Apps it produces").closest("section") as HTMLElement;
-    expect(within(list).queryByRole("button", { name: /web/ })).toBeNull();
+    expect(within(list).getByText("inactive")).toBeTruthy();
+    await click(within(list).getByRole("button", { name: /web/ }));
+    const region = await screen.findByRole("region", { name: "Deploy web from acme" });
+    expect(within(region).getByText("web is inactive.")).toBeTruthy();
+    expect(within(document.querySelector(".os-actbar") as HTMLElement).getByRole("button", { name: "Activate" })).toBeTruthy();
   });
 });

@@ -5,6 +5,7 @@ import {
   archivePackage,
   cancelDeployment,
   archiveSite,
+  deactivateDeployable,
   deleteSite,
   createPackage,
   createSourceCredential,
@@ -162,8 +163,15 @@ export interface PackageActions extends WriteState {
   /** Turn declared deployables back on, by name. The exact inverse. */
   enableDeployables: (packageId: string, names: readonly string[]) => Promise<void>;
   rollback: (packageId: string, deploymentId: string) => Promise<void>;
+  /** Archive the source and deactivate every app it produced (D3). */
   archive: (packageId: string, confirmName: string) => Promise<void>;
   restore: (packageId: string) => Promise<void>;
+  /**
+   * Deactivate one app of a source (D2). Answers whether the cluster ACCEPTED
+   * it, because the caller has to know whether the page it is on still
+   * exists -- a refusal renders on the bar and the app stays as it was.
+   */
+  deactivate: (packageId: string, deployableName: string, confirmName: string) => Promise<boolean>;
   /** Switch which of the caller's credentials this source fetches under. */
   setCredential: (packageId: string, credentialId: string) => Promise<void>;
   /**
@@ -209,6 +217,13 @@ export function usePackageActions(): PackageActions {
     },
     restore: async (packageId) => {
       await run((query) => restorePackage(query, packageId));
+    },
+    deactivate: async (packageId, deployableName, confirmName) => {
+      const done = await run(async (query) => {
+        await deactivateDeployable(query, packageId, deployableName, confirmName);
+        return true;
+      });
+      return done === true;
     },
     setCredential: async (packageId, credentialId) => {
       await run((query) => setPackageCredential(query, packageId, credentialId));

@@ -91,6 +91,12 @@ type writeMeta struct {
 	// those inherits the stored hostname through the read-merge, and the
 	// user policy would refuse a value the user never supplied.
 	priorHostname string
+	// priorRepoUrl / priorRepoRef are the prior row's v1:platform:package
+	// source pair (empty when absent), so the source-uniqueness guard can
+	// tell "this write is choosing a source" from "this write inherited one
+	// through the read-merge" (2026-09-05 design, D8).
+	priorRepoUrl string
+	priorRepoRef string
 }
 
 // executeUpdate runs the update() form: read the latest existing row by
@@ -809,6 +815,10 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			// policy can tell "this write is choosing a hostname" from "this
 			// write inherited one through the read-merge".
 			meta.priorHostname = stringFromAny(priorPayload["hostname"])
+			// Capture the PRIOR source pair (2026-09-05, D8) so the package
+			// source-uniqueness guard judges only a write that changes it.
+			meta.priorRepoUrl = stringFromAny(priorPayload["repoUrl"])
+			meta.priorRepoRef = stringFromAny(priorPayload["repoRef"])
 			// @createOnly fields are written on create only (fylo#63): drop
 			// them from the delta BEFORE the merge so the stored value wins.
 			// A deterministic-id re-stage of a row another writer owns after
@@ -1226,6 +1236,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		// are not predicates a mutation body can state, and the systemOwned
 		// exemption reads the PRIOR row. See platform_site_settings_guard.go.
 		if err := e.validateSiteSettings(ctx, payload, meta.priorSystemOwned, actor); err != nil {
+			return nil, meta, err
+		}
+	}
+
+	// v1:platform:package tracks ONE source ONCE (2026-09-05 design, D8):
+	// a second active package for the same repository at the same ref would
+	// deploy the same apps and the same MemQL from two records. A cross-row
+	// read no mutation body can make, so it lives here beside the hostname
+	// policy. See platform_package_source_policy.go.
+	if conceptMeta.Name == conceptPlatformPackage {
+		if err := e.validatePackageSourceUnique(ctx, payload, mutation.ID, actor, meta.priorExisted, meta.priorRepoUrl, meta.priorRepoRef); err != nil {
 			return nil, meta, err
 		}
 	}

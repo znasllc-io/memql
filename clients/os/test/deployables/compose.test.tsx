@@ -270,6 +270,25 @@ function forwardAct(name: string): HTMLButtonElement | null {
   return (hit as HTMLButtonElement | undefined) ?? null;
 }
 
+/**
+ * The forward act, once it is offered.
+ *
+ * Deploy (and, on the hand-made path, Analyze) waits on the cluster's answer
+ * about the address (2026-09-05, D7): the check runs a beat after typing and
+ * the act is absent until it comes back, which is the whole point of the
+ * check. A test that clicks in the same tick as it types is clicking the
+ * state the design exists to prevent.
+ */
+async function forward(name: string): Promise<HTMLButtonElement> {
+  await waitFor(() => expect(forwardAct(name)).toBeTruthy());
+  return forwardAct(name)!;
+}
+
+/** The address line's verdict, as the person reads it. */
+function verdict(region: HTMLElement): string {
+  return [...region.querySelectorAll(".os-stop-verdict")].map((el) => el.textContent ?? "").join(" | ");
+}
+
 describe("the compose flow: the Source stop's probe", () => {
   it("says a public repository is public, and names the branch it will follow", async () => {
     const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
@@ -530,8 +549,9 @@ describe("the compose flow: a zip in Files", () => {
     // said in both places, and the act sat on the notice while the bar offered
     // Cancel (DESIGN.md rule 12).
     await waitFor(() =>
-      expect((document.querySelector(".os-actbar")?.textContent ?? "")).toContain("Published. It is not serving yet."),
+      expect((document.querySelector(".os-actbar")?.textContent ?? "")).toContain("in place at landing.memql.example.com, not live yet"),
     );
+    expect((document.querySelector(".os-actbar-word")?.textContent ?? "").trim()).toBe("Built");
   });
 
   it("says what a zip that is NEITHER is, and does not continue", async () => {
@@ -572,7 +592,7 @@ describe("the compose flow: pushed by your CI", () => {
     await fill(NAME_FIELD, "Marketing site");
     await choose("What kind of deployable this is", "Website");
     await fill("The name Marketing site answers at", "marketing");
-    await click(forwardAct("Analyze"));
+    await click(await forward("Analyze"));
 
     // The draft was created at the address chosen on the Where-it-lives stop,
     // with the placeholder bundle the convention records.
@@ -653,7 +673,7 @@ describe("the compose flow: where each app will live", () => {
     expect(connection.callsNamed("packageDeploy")[0]).toContain("confirm: false");
 
     await fill("The name storefront answers at", "shop");
-    await click(forwardAct("Deploy"));
+    await click(await forward("Deploy"));
 
     const confirmed = connection.callsNamed("packageDeploy")[1] ?? "";
     expect(confirmed).toContain("confirm: true");
@@ -678,7 +698,7 @@ describe("the compose flow: where each app will live", () => {
 
     await fill("The name storefront answers at", "shop");
     await click(within(region).getByRole("radiogroup", { name: "Deploy or skip web" }).querySelectorAll("[role=radio]")[1]);
-    await click(forwardAct("Deploy"));
+    await click(await forward("Deploy"));
 
     const confirmed = connection.callsNamed("packageDeploy").at(-1) ?? "";
     expect(confirmed).toContain("confirm: true");
@@ -705,7 +725,7 @@ describe("the compose flow: where each app will live", () => {
 
     await fill("The name storefront answers at", "shop");
     await click(within(region).getByRole("radiogroup", { name: "Deploy or skip web" }).querySelectorAll("[role=radio]")[1]);
-    await click(forwardAct("Deploy"));
+    await click(await forward("Deploy"));
 
     const off = connection.callsNamed("disablePackageDeployables").at(-1) ?? "";
     expect(off).toContain('deployableNames: ["web"]');
@@ -717,7 +737,7 @@ describe("the compose flow: where each app will live", () => {
     // The negative control: an ordinary deploy must not write an off-list.
     const { connection } = await analyzed();
     await fill("The name storefront answers at", "shop");
-    await click(forwardAct("Deploy"));
+    await click(await forward("Deploy"));
     expect(connection.callsNamed("disablePackageDeployables")).toHaveLength(0);
   });
 
@@ -758,10 +778,14 @@ describe("the compose flow: where each app will live", () => {
     );
 
     const bar = () => document.querySelector(".os-actbar") as HTMLElement;
-    await waitFor(() => expect((bar().textContent ?? "")).toContain("Deployed"));
+    // BUILT, in the one vocabulary (2026-09-05, D1/D10): the files are in
+    // place and nothing is live, and the bar says exactly that -- one app.
+    await waitFor(() => expect((bar().textContent ?? "")).toContain("Built"));
     const said = bar().textContent ?? "";
-    expect(said).toContain("Published 1 app");
+    expect(said).toContain("in place at shop.memql.example.com, not live yet");
     expect(said).not.toContain("2 apps");
+    expect(said).not.toContain("Published");
+    expect(said).not.toContain("Deployed");
   });
 
   it("says Done rather than Cancel once there is nothing left to cancel", async () => {
@@ -794,12 +818,23 @@ describe("the compose flow: where each app will live", () => {
     );
 
     const bar = () => document.querySelector(".os-actbar") as HTMLElement;
-    await waitFor(() => expect(bar().textContent ?? "").toContain("Deployed"));
+    await waitFor(() => expect(bar().textContent ?? "").toContain("Built"));
     const buttons = [...bar().querySelectorAll("button")].map((b) => (b.textContent ?? "").trim());
     expect(buttons).toContain("Done");
+    // GO LIVE IS RIGHT HERE (D10), so the two-step is one screen.
+    expect(buttons).toContain("Go live");
     expect(buttons).not.toContain("Cancel");
     // ...and the summary is not ALSO in the panel.
-    expect(within(region).queryByText(/None of them is serving yet|It is not serving yet/)).toBeNull();
+    expect(within(region).queryByText(/Go live starts serving/)).toBeNull();
+
+    // Going live flips the app this run put in place, and the bar says so.
+    await click(within(bar()).getByRole("button", { name: "Go live" }));
+    await waitFor(() =>
+      expect(connection.callsNamed("updateSiteStatus")).toEqual(['mutation updateSiteStatus(siteId: "site-a", status: "live")']),
+    );
+    await waitFor(() => expect((document.querySelector(".os-actbar-word")?.textContent ?? "").trim()).toBe("Live"));
+    expect(within(region).getByText("Live at shop.memql.example.com.")).toBeTruthy();
+    expect([...bar().querySelectorAll("button")].map((b) => (b.textContent ?? "").trim())).toEqual(["Done"]);
   });
 
   it("offers a cluster owner the client AND their own domain; an admin only the client", async () => {
@@ -818,7 +853,7 @@ describe("the compose flow: where each app will live", () => {
 
     await fill("The name storefront answers at", "shop");
     await fill("A domain of the client's own for storefront", "Shop.Acme.COM.");
-    await click(forwardAct("Deploy"));
+    await click(await forward("Deploy"));
 
     const confirmed = connection.callsNamed("packageDeploy")[1] ?? "";
     // The own domain is normalized on the way out; the client half is ABSENT
@@ -866,7 +901,7 @@ describe("the compose flow: what the run answers", () => {
       await within(region).findByText("It is live at its cluster address, but the domain was not bound"),
     ).toBeTruthy();
     expect(within(region).getByText("custom_domain_reserved: acme.com is this cluster's own domain")).toBeTruthy();
-    expect(within(region).getByText("Published to shop.memql.example.com", { exact: false })).toBeTruthy();
+    expect(within(region).getByText("Built. In place at shop.memql.example.com", { exact: false })).toBeTruthy();
   });
 
   it("renders a refused CLIENT tie the same way, and says the deployable is live", async () => {
@@ -949,7 +984,7 @@ describe("the compose flow: leaving and coming back", () => {
     expect(within(region).getByText("acme/storefront at main")).toBeTruthy();
     expect(within(region).getByText("clients/web")).toBeTruthy();
     expect(railStates(region)).toEqual(["complete", "complete", "open", "skipped", "pending"]);
-    expect(forwardAct("Deploy")).toBeTruthy();
+    expect(await forward("Deploy")).toBeTruthy();
   });
 });
 
@@ -1022,7 +1057,7 @@ describe("a private repository whose build output is committed", () => {
 
     // Where it lives, then Deploy.
     await fill("The name storefront answers at", "shop");
-    await click(forwardAct("Deploy"));
+    await click(await forward("Deploy"));
 
     await emit(
       connection,
@@ -1047,7 +1082,7 @@ describe("a private repository whose build output is committed", () => {
     // said in both places, and the act sat on the notice while the bar offered
     // Cancel (DESIGN.md rule 12).
     await waitFor(() =>
-      expect((document.querySelector(".os-actbar")?.textContent ?? "")).toContain("Published 1 app"),
+      expect((document.querySelector(".os-actbar")?.textContent ?? "")).toContain("in place at shop.memql.example.com"),
     );
     expect(railStates(region)).toEqual(["complete", "complete", "complete", "skipped", "complete"]);
     // The addresses are facts now, and the one that landed is the run's own.
@@ -1075,24 +1110,26 @@ describe("a private repository whose build output is committed", () => {
 // manifest declares. That is right for a whole-source deploy and wrong here.
 describe("a gate opened for one app", () => {
   it("names that app and lists it alone, not every app in the manifest", async () => {
-    // The real chain: a source declaring two apps, one already serving and
-    // one the owner turned back on. Clicking it runs the analysis that parks
-    // its gate.
+    // The real chain: a source declaring two apps, one of them never
+    // deployed. Clicking it opens the flow for THAT app (a click never acts,
+    // 2026-09-05 D6), and Analyze runs the analysis that parks its gate.
     const connection = fakeConnection({
       packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
       sites: [],
     });
     mount(connection);
     await click((await screen.findByText("web")).closest("button"));
-    await waitFor(() => expect(connection.callsNamed("packageDeploy").length).toBeGreaterThan(0));
 
-    // NAMED BEFORE THE GATE PARKS. Both facts are known from the click -- the
-    // app from the row, the source from the row's package -- and neither waits
-    // on the analysis. Composing the title from the RUN is what called this
-    // "New deployable" for as long as the analysis took.
+    // NAMED FROM THE CLICK. Both facts are known before anything runs -- the
+    // app from the row, the source from the row's package. Composing the
+    // title from the RUN is what called this "New deployable" for as long as
+    // the analysis took.
     expect(await screen.findByRole("region", { name: "Deploy web from acme" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "New deployable" })).toBeNull();
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
 
+    await click(await forward("Analyze"));
+    await waitFor(() => expect(connection.callsNamed("packageDeploy").length).toBeGreaterThan(0));
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun("pkg-acme", { report: REPORT_TWO }), "NODE_CREATED");
 
     const region = await screen.findByRole("region", { name: "Deploy web from acme" });
@@ -1100,6 +1137,14 @@ describe("a gate opened for one app", () => {
     // same manifest and is not what anybody is being asked about.
     expect(within(region).getByText("clients/marketing")).toBeTruthy();
     expect(within(region).queryByText("clients/web")).toBeNull();
+    // ...AND SO DOES WHERE IT LIVES (D6). The scope used to reach the wire and
+    // never the form: with neither app placed, the stop asked about
+    // `storefront` too, with a Deploy/Skip pill on each, and the bar counted
+    // "2 of 2 apps".
+    expect(within(region).getByLabelText("The name web answers at")).toBeTruthy();
+    expect(within(region).queryByLabelText("The name storefront answers at")).toBeNull();
+    expect(within(region).queryByRole("radiogroup", { name: /Deploy or skip/ })).toBeNull();
+    expect(document.querySelector(".os-actbar")?.textContent ?? "").not.toContain("of 2 apps");
   });
 
   it("is scoped ON THE WIRE, and stays scoped through a retry", () => {
@@ -1116,5 +1161,96 @@ describe("a gate opened for one app", () => {
     // A source with one app scoped to it skips nothing, which the engine
     // reads as the whole source -- correct, and the same statement.
     expect(everyOtherAppSkipped([{ name: "web" }], "web")).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE ADDRESS IS CHECKED WHILE IT IS TYPED (2026-09-05, D7)
+// ---------------------------------------------------------------------------
+
+describe("the address, checked as it is typed", () => {
+  it("starts as a GENERATED name that the cluster has checked, not the app's own", async () => {
+    const { region } = await analyzed();
+    const field = within(region).getByLabelText("The name storefront answers at") as HTMLInputElement;
+    // Two ordinary words, never `storefront`: every source declares that
+    // name, so the first person on a cluster took it and the second found it
+    // taken at the end of the flow.
+    expect(field.value).toMatch(/^[a-z]+-[a-z]+$/);
+    expect(field.value).not.toBe("storefront");
+    // ...and the cluster was asked about it before anybody typed anything.
+    await waitFor(() => expect(verdict(region)).toContain("free"));
+    expect(await forward("Deploy")).toBeTruthy();
+  });
+
+  it("says a taken name is taken, in the cluster's words, and holds Deploy back", async () => {
+    const { region } = await analyzed({ takenHostnames: ["shop.memql.example.com"] });
+    await fill("The name storefront answers at", "shop");
+    // While the question is out, the line says so rather than nothing.
+    await waitFor(() => expect(verdict(region)).toMatch(/checking|already taken/));
+    await waitFor(() => expect(verdict(region)).toContain("shop.memql.example.com is already taken"));
+    expect(forwardAct("Deploy")).toBeNull();
+    // A free name, and Deploy comes back.
+    await fill("The name storefront answers at", "shop-two");
+    await waitFor(() => expect(verdict(region)).toContain("shop-two.memql.example.com -- free"));
+    expect(await forward("Deploy")).toBeTruthy();
+  });
+
+  it("asks the cluster about a client's own domain too", async () => {
+    const { region, connection } = await analyzed({ takenHostnames: ["www.acme.com"] });
+    await fill("The name storefront answers at", "shop");
+    await fill("A domain of the client's own for storefront", "www.acme.com");
+    await waitFor(() => expect(connection.callsNamed("customDomainCheck").length).toBeGreaterThan(0));
+    await waitFor(() => expect(verdict(region)).toContain("www.acme.com is already taken"));
+    expect(forwardAct("Deploy")).toBeNull();
+  });
+
+  it("Generate draws again until the cluster says a name is free", async () => {
+    // The fake calls every name free, so one draw lands -- and the draw that
+    // lands was checked, which is the assertion: the field never shows a
+    // generated name the person cannot have.
+    const { region, connection } = await analyzed();
+    const before = connection.callsNamed("siteHostnameCheck").length;
+    await click(within(region).getByRole("button", { name: "Generate an address for storefront" }));
+    await waitFor(() => expect(connection.callsNamed("siteHostnameCheck").length).toBeGreaterThan(before));
+    const field = within(region).getByLabelText("The name storefront answers at") as HTMLInputElement;
+    await waitFor(() => expect(field.value).toMatch(/^[a-z]+-[a-z]+$/));
+    await waitFor(() => expect(verdict(region)).toContain(`${field.value}.memql.example.com -- free`));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ONE SOURCE, ONCE (2026-09-05, D8)
+// ---------------------------------------------------------------------------
+
+describe("a source this cluster already tracks", () => {
+  it("is named on the Source stop, and Analyze stays out of reach", async () => {
+    const connection = fakeConnection({ packages: [ACME], sourceProbe: { "": probeReply({ defaultBranch: "main" }) } });
+    const { region } = await compose(connection);
+    await chooseRepository(region);
+    // The same repository under a different spelling, at the default branch
+    // ACME tracks by name -- which the probe's answer is what lets the stop
+    // read as one ref.
+    await fill(URL_FIELD, "https://github.com/ACME/storefront.git");
+    await blur(URL_FIELD);
+    await fill(NAME_FIELD, "acme again");
+    expect(await within(region).findByText(/already tracked by/)).toBeTruthy();
+    expect(within(region).getByText("acme")).toBeTruthy();
+    expect(forwardAct("Analyze")).toBeNull();
+    expect(connection.callsNamed("createPackage")).toHaveLength(0);
+  });
+
+  it("does not count an ARCHIVED source, which is how a source is added again", async () => {
+    const connection = fakeConnection({
+      packages: [{ ...ACME, status: "archived" }],
+      sourceProbe: { "": probeReply({ defaultBranch: "main" }) },
+    });
+    const { region } = await compose(connection);
+    await chooseRepository(region);
+    await fill(URL_FIELD, REPO);
+    await blur(URL_FIELD);
+    await fill(NAME_FIELD, "acme again");
+    await within(region).findByText(/public, default branch main/);
+    expect(within(region).queryByText(/already tracked by/)).toBeNull();
+    expect(await forward("Analyze")).toBeTruthy();
   });
 });

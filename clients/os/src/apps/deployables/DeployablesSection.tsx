@@ -1,9 +1,8 @@
 import { useMemo, useState } from "react";
 import { Archive, ArrowUpCircle, ChevronRight, GitBranch, Globe, Plus } from "lucide-react";
 
-import { everyOtherAppSkipped } from "./packages/calls";
-import { usePackageActions } from "./packages/actions";
 import { useDeployablesSettings } from "./settingsContext";
+import { siteStateWord, stateChip, statusFacetLabel } from "./words";
 import {
   Button,
   Caption,
@@ -40,7 +39,7 @@ import {
   type DeployableListRow,
   type ListFilter,
 } from "./list";
-import { sourceLabel, type DeploymentRow, type PackageRow } from "./packages/rows";
+import { runIsScopedToApp, sourceLabel, type DeploymentRow, type PackageRow } from "./packages/rows";
 import { ComposePage } from "./page/ComposePage";
 import { DeployablePage } from "./page/DeployablePage";
 import { HistoryView } from "./page/HistoryView";
@@ -98,6 +97,9 @@ type DeployablesView =
   | { kind: "history"; packageId: string }
   | { kind: "compose"; parkedPackageId?: string; only?: string };
 
+/** What the list says about the row that just left it. */
+type Gone = { name: string; what: "deleted" | "deactivated" } | null;
+
 export function DeployablesSection({
   sites,
   packages,
@@ -141,14 +143,13 @@ export function DeployablesSection({
   // is free the instant the row is stamped; the domains come down on the
   // reconciliation sweep's own schedule, and this says so rather than implying
   // the whole thing is finished.
-  const [justDeleted, setJustDeleted] = useState("");
+  const [justGone, setJustGone] = useState<Gone>(null);
   const accounts = useAccountOptions();
 
   const siteRows = sites?.snapshot.rows ?? [];
   const packageRows = packages?.snapshot.rows ?? [];
   const parkedRows = parked?.snapshot.rows ?? [];
 
-  const packageActions = usePackageActions();
   const viewKey = listViewKey(filter, showArchived);
   const list = useThreeFeedView<SiteRow, PackageRow, DeploymentRow, DeployableListGroup>(
     sites,
@@ -187,7 +188,7 @@ export function DeployablesSection({
 
   function openSite(siteId: string) {
     onSelectSite(siteId);
-    setJustDeleted("");
+    setJustGone(null);
     setView({ kind: "deployable", siteId });
   }
 
@@ -197,42 +198,17 @@ export function DeployablesSection({
 
   // ---- the views -----------------------------------------------------------
 
-  /**
-   * Turn a declared app back on.
-   *
-   * ONLY that -- it does not deploy. Somebody clicking an app they had
-   * declined is asking to reconsider it, not to ship it; the row becomes an
-   * ordinary "not deployed" one and deploying it is the NEXT click. Making
-   * this deploy would be the same mistake the off-list exists to fix.
-   */
-  async function enableDeclared(packageId: string, app: string) {
-    await packageActions.enableDeployables(packageId, [app]);
-    onReseed();
-  }
-
-  // DEPLOYING AN APP THE SOURCE ONLY DECLARES.
+  // OPENING AN APP THE SOURCE ONLY DECLARES (2026-09-05 design, D5 and D6).
   //
-  // It has no site and no run of its own, so there is nothing to open: the
-  // analysis that reads the tree is what produces the confirm gate where an
-  // address is asked for. That is why this is an ACT and not navigation -- and
-  // why the row that calls it says "not deployed" rather than looking like a
-  // page.
-  //
-  // `only` is what keeps it to ONE app. Without it the gate would send no
-  // placement for the apps that already have sites, the engine would default
-  // them to not-skipped, and deploying one app would rebuild and republish
-  // every one of them -- which is exactly the complaint that took the Deploy
-  // button off the source page.
-  async function openDeclared(packageId: string, app: string) {
+  // A CLICK NEVER ACTS. It used to: a row the owner had turned off was turned
+  // back ON by the click that looked like opening it, and a row nobody had
+  // turned off started an analysis run from the list. Both now open the
+  // compose flow scoped to that app -- an inactive one with a notice saying
+  // so and Activate on the bar, a merely-declared one with Analyze -- and
+  // nothing is written until the bar's act is pressed. The flow reads the
+  // source and the off-list off the root feeds, so it knows which it is.
+  function openDeclared(packageId: string, app: string) {
     setView({ kind: "compose", parkedPackageId: packageId, only: app });
-    // SCOPED ON THE ANALYSIS, not only on the confirm. The engine derives a
-    // run's `scopedTo` from its placements' skips, so this call used to park a
-    // gate about the WHOLE SOURCE -- which every sibling's row and page then
-    // read as their own, repainting live apps as though they were mid-deploy
-    // and offering a Deploy that was somebody else's question.
-    const declared = packageRows.find((p) => p.id === packageId)?.declares ?? [];
-    await packageActions.deploy(packageId, { confirm: false, placements: everyOtherAppSkipped(declared, app) });
-    onReseed();
   }
 
   if (view.kind === "compose") {
@@ -254,6 +230,7 @@ export function DeployablesSection({
             : (packageRows.find((p) => p.id === view.parkedPackageId) ?? undefined)
         }
         only={view.only}
+        packages={packageRows}
         placed={
           parkedFor === null
             ? []
@@ -282,6 +259,7 @@ export function DeployablesSection({
         onBack={backToList}
         onOpenHistory={() => setView({ kind: "history", packageId: pkg.id })}
         onOpenApp={openSite}
+        onOpenDeclared={(app) => openDeclared(pkg.id, app)}
         onAsk={onAsk}
         attempts={parkedRows.filter((d) => d.packageId === pkg.id).length}
       />
@@ -306,9 +284,9 @@ export function DeployablesSection({
         onBack={backToList}
         onOpenSource={(packageId) => setView({ kind: "source", packageId })}
         onOpenHistory={(packageId) => setView({ kind: "history", packageId })}
-        onDeleted={(deletedId) => {
-          const gone = siteRows.find((s) => s.id === deletedId);
-          setJustDeleted(gone?.hostname ?? "");
+        onDeleted={(goneId, what) => {
+          const gone = siteRows.find((s) => s.id === goneId);
+          setJustGone(gone === undefined ? null : { name: gone.hostname, what });
           onSelectSite("");
           setView({ kind: "list" });
         }}
@@ -420,13 +398,21 @@ export function DeployablesSection({
             on the reconciliation sweep's own schedule, and saying both is the
             difference between "it worked" and "it worked, and here is the part
             that is still happening". */}
-        {justDeleted === "" ? null : (
+        {justGone === null ? null : (
           <Notice
             tone="info"
-            sentence={`${justDeleted} is deleted, and its name is free to use again.`}
-            next="Any domains it served come down on the next reconciliation sweep, within about two minutes. Its record stays in this cluster's history."
+            sentence={
+              justGone.what === "deactivated"
+                ? `${justGone.name} is released, and its app is inactive under its source.`
+                : `${justGone.name} is deleted, and its name is free to use again.`
+            }
+            next={
+              justGone.what === "deactivated"
+                ? "Any client domain it served comes down on the next reconciliation sweep, within about two minutes. Activate the app from its row to deploy it again at a fresh address."
+                : "Any domains it served come down on the next reconciliation sweep, within about two minutes. Its record stays in this cluster's history."
+            }
           >
-            <Button tone="quiet" onClick={() => setJustDeleted("")}>
+            <Button tone="quiet" onClick={() => setJustGone(null)}>
               Got it
             </Button>
           </Notice>
@@ -457,9 +443,10 @@ export function DeployablesSection({
               selectedSiteId={selectedSiteId}
               onOpenSite={openSite}
               onOpenSource={(packageId) => setView({ kind: "source", packageId })}
-              onOpenParked={(packageId) => setView({ kind: "compose", parkedPackageId: packageId })}
-              onDeployDeclared={(packageId, app) => void openDeclared(packageId, app)}
-              onEnableDeclared={(packageId, app) => void enableDeclared(packageId, app)}
+              onOpenParked={(packageId, only) =>
+                setView({ kind: "compose", parkedPackageId: packageId, ...(only === "" ? {} : { only }) })
+              }
+              onOpenDeclared={openDeclared}
             />
           )}
         />
@@ -472,27 +459,13 @@ export function DeployablesSection({
             </button>
             <Caption>
               {showArchived
-                ? "Archived deployables are kept, not deleted -- restoring one puts it back unpublished. Deleting one from here releases its name."
+                ? "Archived deployables are kept, not deleted -- restoring one brings it back offline. Deleting a standalone one releases its name; deactivating a source's app does the same."
                 : "An archive is a place, not a void."}
             </Caption>
           </div>
         ) : null}
       </div>
     );
-  }
-}
-
-/** The status facet's words, matching the bar's (D6). */
-function statusFacetLabel(status: string): string {
-  switch (status) {
-    case "live":
-      return "Published";
-    case "disabled":
-      return "Unpublished";
-    case "draft":
-      return "Draft";
-    default:
-      return status;
   }
 }
 
@@ -519,8 +492,7 @@ function GroupLine({
   onOpenSite,
   onOpenSource,
   onOpenParked,
-  onDeployDeclared,
-  onEnableDeclared,
+  onOpenDeclared,
   figures,
 }: {
   group: DeployableListGroup;
@@ -529,11 +501,10 @@ function GroupLine({
   selectedSiteId: string;
   onOpenSite: (siteId: string) => void;
   onOpenSource: (packageId: string) => void;
-  onOpenParked: (packageId: string) => void;
-  /** A declared app with no site: deploying it is what asks for its address. */
-  onDeployDeclared: (packageId: string, app: string) => void;
-  /** A declared app the owner turned off: the only act it offers is back on. */
-  onEnableDeclared: (packageId: string, app: string) => void;
+  /** A parked run's row: reopen its gate, scoped to the app when the run is. */
+  onOpenParked: (packageId: string, only: string) => void;
+  /** A declared app with no site, inactive or not: open the compose flow for it. */
+  onOpenDeclared: (packageId: string, app: string) => void;
   figures: Map<string, TrafficSummary>;
 }) {
   // COLLAPSED IS THE DEFAULT, and which groups are open is remembered. The
@@ -554,17 +525,14 @@ function GroupLine({
       onOpen={() =>
         row.site !== null
           ? onOpenSite(row.site.id)
-          : // NO SITE, and the three reasons are different. A row a PARKED run
-            // put here has a gate to reopen. One the owner TURNED OFF is
-            // inert: clicking it offers to turn it back on and nothing else,
-            // because clicking a thing somebody declined must not deploy it.
-            // One the source merely DECLARES has nothing yet, and deploying it
-            // is what makes the gate.
+          : // NO SITE, and two reasons. A row a PARKED run put here has a gate
+            // to reopen -- scoped to this app when the run is, so the flow
+            // asks about this app alone. Anything else the source declares,
+            // inactive or not, opens the compose flow for that app, which is
+            // where Activate and Analyze live. A click never acts (D6).
             row.parked !== null
-            ? onOpenParked(row.pkg?.id ?? "")
-            : row.disabled === true
-              ? onEnableDeclared(row.pkg?.id ?? "", row.app)
-              : onDeployDeclared(row.pkg?.id ?? "", row.app)
+            ? onOpenParked(row.pkg?.id ?? "", runIsScopedToApp(row.parked, row.app) ? row.app : "")
+            : onOpenDeclared(row.pkg?.id ?? "", row.app)
       }
       traffic={row.site === null ? null : (figures.get(row.site.id) ?? null)}
     />
@@ -683,6 +651,9 @@ function DeployableLine({
   const now = useNow();
   const site = row.site;
   const archived = site?.status === "archived" || row.pkg?.status === "archived";
+  // THE STATE WORD, on the row (2026-09-05, D1): the same word the bar reads,
+  // lowercase, and absent for a live row -- the row's own accent says live.
+  const chip = row.disabled === true ? "inactive" : site === null ? "" : stateChip(siteStateWord(site));
   return (
     <ListRow
       icon={<Globe size={16} aria-hidden />}
@@ -694,9 +665,9 @@ function DeployableLine({
       state={
         <>
           {waiting ? <span className="os-deploy-waiting">a deploy is waiting for you</span> : null}
-          {/* THE OWNER TURNED IT OFF, said on the row rather than only by
-              dimming it: a greyed row with no word reads as broken. */}
-          {row.disabled === true ? <Chip tone="muted">off</Chip> : null}
+          {/* SAID ON THE ROW rather than only by dimming it: a greyed row with
+              no word reads as broken. */}
+          {chip === "" ? null : <Chip tone="muted">{chip}</Chip>}
           <AccountChip name={accountNameFrom(accounts, site?.accountId ?? "")} />
           {traffic === null || traffic.lastServedAt === "" ? null : (
             <Chip title={`${traffic.requests.toLocaleString()} requests over the last week`}>
