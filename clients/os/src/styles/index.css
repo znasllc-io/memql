@@ -4858,6 +4858,28 @@ a.os-button {
 .os-stop-verdict[data-tone="warn"] {
   color: var(--os-warn);
 }
+/* A check in flight (2026-09-05, D7): the muted tone, said quietly, and it
+ * breathes rather than spins -- the same settling pulse the arrival cue uses,
+ * because "asking" is the same kind of small event as "answered". */
+.os-stop-verdict[data-tone="busy"] {
+  color: var(--os-muted);
+  animation: os-verdict-breathe 1.2s ease-in-out infinite;
+}
+@keyframes os-verdict-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .os-stop-verdict[data-tone="busy"] {
+    animation: none;
+    opacity: 0.8;
+  }
+}
 
 /* The form a stop holds while it is being answered. Same grid as the stop's
  * own body -- a form inside a stop is not a second container language (rule
@@ -7500,6 +7522,16 @@ a.os-button {
 }
 .os-source-app[data-undeployed="true"]:hover {
   background: none;
+}
+/* An app the source declares and nobody has deployed, or one on the off-list:
+   pressable now (2026-09-05, D6) -- it opens the compose flow for that app --
+   and dimmed so the list still reads as "these exist, these are live". */
+.os-source-app[data-declared="true"] {
+  opacity: 0.78;
+}
+.os-source-app[data-declared="true"]:hover,
+.os-source-app[data-declared="true"]:focus-visible {
+  opacity: 1;
 }
 
 /* The address field and its Generate control, on one line: the button is an

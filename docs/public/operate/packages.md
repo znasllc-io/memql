@@ -108,8 +108,8 @@ somebody's mistake.
 | `source_unreadable` | Not an archive this cluster can open, or a repository or a GitHub it cannot reach |
 | `bundle_path_invalid` | An archive entry escaping the package root |
 | `dsl_requires_cluster_owner` | A DSL-carrying deploy by a non-cluster-owner. Raised at the START of the run, before any build |
-| `package_has_active_deployables` | Archiving a source while one of its apps is still `live`. Names the live hostnames, and writes nothing |
-| `archive_confirmation_mismatch` | The typed confirmation does not match the package's stored name. Verified by the server, not just the form |
+| `archive_confirmation_mismatch` | The typed confirmation does not match the package's stored name (or, for a standalone deployable, its address label or hostname). Verified by the server, not just the form |
+| `deactivate_confirmation_mismatch` | The typed confirmation does not match the app's manifest name. Deactivating asks for the app's NAME, never its hostname |
 
 ### The source and its credential
 
@@ -350,41 +350,66 @@ Two feeds, one effect. Both write exactly `latestKnownVersion` and
 An upstream that has NOT moved is not written, so the OS cue does not flicker
 and the mesh does not carry an event per package per poll.
 
-## The lifecycle, and the archive
+## The lifecycle, the archive, and deactivation
+
+A standalone deployable's ladder (D10, plus the delete rung of epic
+memql#4937):
 
 ```
-draft -> live <-> disabled -> archived
+draft -> live <-> disabled -> archived -> deleted
 ```
 
 - **Archive requires disabled first.** Archiving is the end of a deployable's
-  life, and pausing is the step that gives anyone still using it a chance to
-  notice.
-- **Archived restores to disabled**, never straight to live: publishing again
+  life, and taking it offline is the step that gives anyone still using it a
+  chance to notice.
+- **Archived restores to disabled**, never straight to live: going live again
   is its own decision.
-- **An archived site answers 404.** To the internet it is gone, not paused. A
-  PAUSED one answers 503, which is what keeps a deliberately paused site
-  distinguishable from a typo.
+- **An archived site answers 404 and still holds its name.** To the internet it
+  is gone, not paused (an OFFLINE one answers 503). `siteDelete` is the rung
+  that releases the name.
 - **An archived row stays listed** behind the Archived filter. An archive is a
   place, not a void -- which is exactly what the older soft-delete was not.
 - **The cluster's own portal and OS sites are exempt from all of it.** They are
   re-seeded live at every boot; a status write on one is refused whoever asks,
   including a cluster owner, and the OS renders no controls on them at all.
 
-**Archiving a source archives every app it produced.** `packageArchive` refuses
-with `package_has_active_deployables` -- naming only the LIVE hostnames, and
-before any site is touched -- while any app is still serving; pausing first
-stays the person's decision. Otherwise every paused app is archived, a
-never-published (draft) app is walked through `disabled` first, and each write
-goes through the same guarded status write `siteArchive` uses: sites first, the
-package last, and a write the guard refuses surfaces and stops the cascade
-there. Apps already archived are left alone, and the reply names the hostnames
-that were archived. `packageRestore` does **not** cascade back: restoring a
-source is not a decision to redeploy it.
+**A source's app is never archived; it is deactivated**
+(2026-09-05 design, D2). It is reproducible from the source, so turning it
+off means giving its address back. `packageDeactivateDeployable(packageId,
+deployableName, confirmName)` walks the app's custom-domain bindings to
+`removing`, stamps its site `deleted` (the write the cluster-wide uniqueness
+probe reads, so the address is free at that instant), disarms the source's
+auto-deploy when this was its last app, and puts the name on the source's
+`disabledDeployables` -- in that order, the site before the preference. It is
+offered from ANY state the app is in, live included; the typed confirmation is
+the app's manifest name, verified server-side. An app the source declares and
+never deployed only lands on the off-list. `enablePackageDeployables` is the
+inverse's first half; the compose flow, scoped to that app, is the second.
 
-Archiving asks you to type a confirmation -- the site's hostname for
-`siteArchive`, the package's own name for `packageArchive`. The **server
-verifies it**, not just the form (`archive_confirmation_mismatch`), and a
-mismatch writes nothing.
+**Archiving a source deactivates every app it produced, then archives the
+source** (D3). `packageArchive` verifies the typed name, then for each site the
+source deployed -- live ones included; the OS names them before it asks --
+releases its domains and deletes it, puts every declared app on the off-list,
+disarms auto-deploy when it was armed, and archives the package LAST, so a
+failure part-way leaves a source that is still active and whose page still
+says what happened. The reply names the addresses released. `packageRestore`
+does **not** cascade back: a restored source's apps come back inactive, to be
+activated and deployed at fresh addresses. There is no
+`package_has_active_deployables` refusal any more.
+
+**One source, once** (D8). A write guard beside the hostname policy refuses a
+`v1:platform:package` create -- or a source edit -- naming a repository and ref
+another ACTIVE package already tracks, cluster-wide and normalised (scheme,
+`www.`, `.git`, a trailing slash, case, the SSH form). An empty ref is its own
+value there, because the guard cannot resolve what the default branch is
+called; the OS's Source stop, which knows it from the probe, reads `""` and
+`main` as one. Archived packages do not count, so a source can be archived and
+added again.
+
+Archiving asks you to type a confirmation -- a standalone deployable's address
+label (or whole hostname) for `siteArchive`, the package's own name for
+`packageArchive`. The **server verifies it**, not just the form
+(`archive_confirmation_mismatch`), and a mismatch writes nothing.
 
 ## Configuration
 

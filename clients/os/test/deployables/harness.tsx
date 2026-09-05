@@ -134,6 +134,16 @@ export interface FakeSeed {
   deployError?: string;
   /** Fails the next `packageArchive` with this server message. */
   archiveError?: string;
+  /** Fails the next `packageDeactivateDeployable` with this server message. */
+  deactivateError?: string;
+  /**
+   * Hostnames `siteHostnameCheck` / `customDomainCheck` answer TAKEN for
+   * (2026-09-05, D7). Everything else answers available -- the fake mirrors
+   * the engine's shape: one row, {hostname, available, reason, problem}.
+   */
+  takenHostnames?: string[];
+  /** Fails the next address check with this server message. */
+  hostnameCheckError?: string;
   /** What `packageDeploy` answers with when it succeeds. */
   deployResult?: Row;
   /** Rows a by-id re-read answers with, keyed by row id. */
@@ -316,6 +326,27 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("builtin packageArchive(")) {
         if (seed.archiveError !== undefined) throw new Error(seed.archiveError);
         return builtinReply("packageArchive", []);
+      }
+
+      if (call.startsWith("builtin packageDeactivateDeployable(")) {
+        if (seed.deactivateError !== undefined) throw new Error(seed.deactivateError);
+        return builtinReply("packageDeactivateDeployable", []);
+      }
+
+      if (call.startsWith("builtin siteHostnameCheck(") || call.startsWith("builtin customDomainCheck(")) {
+        if (seed.hostnameCheckError !== undefined) throw new Error(seed.hostnameCheckError);
+        const hostname = /hostname: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const taken = (seed.takenHostnames ?? []).includes(hostname);
+        const name = call.startsWith("builtin siteHostnameCheck(") ? "siteHostnameCheck" : "customDomainCheck";
+        return builtinReply(name, [
+          {
+            id: hostname,
+            hostname,
+            available: !taken,
+            reason: taken ? "taken" : "ok",
+            problem: taken ? `${hostname} is already taken by another deployable in this cluster. Pick another name.` : "",
+          } as unknown as Row,
+        ]);
       }
 
       if (call.startsWith("builtin packageRollback(")) {

@@ -85,6 +85,9 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	// Placements (epic memql#4885, D8): two more caller-actor writes.
 	_ = s.setSiteAccount(ctx, "s", "a")
 	_ = s.addCustomDomain(ctx, "s", "www.example.com")
+	// The off-list (deactivation, 2026-09-05): the same owned mutation the OS
+	// issues at the gate, so the guard decides it for the caller.
+	_ = s.disableDeployables(ctx, "p", []string{"web"})
 
 	reads := []string{"packageById", "packageDeploymentById", "sitesForPackage", "siteById", "packagesByRepoUrl", "packagesTrackingRepos", "libraryArtifactById"}
 	writes := []string{"advancePackageDeployment", "recordPackageDeployedVersion", "recordPackageName",
@@ -112,7 +115,7 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	// actor so the account write's guard and the three custom-domain guards
 	// decide exactly as they do from the page. Stamped, the pipeline would be
 	// a bypass of both, which is what the design says it must not gain.
-	callerWrites := []string{"revokeSourceCredential", "updateSiteAccount", "customDomainAdd"}
+	callerWrites := []string{"revokeSourceCredential", "updateSiteAccount", "customDomainAdd", "disablePackageDeployables"}
 
 	for _, name := range reads {
 		got, ok := e.origins[name]

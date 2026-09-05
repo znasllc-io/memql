@@ -1,10 +1,11 @@
 import type { ActionBarTone } from "../../../kit/ActionBar";
 import { runCoversApp, runIsScopedToApp, type DeploymentRow, type PackageRow } from "../packages/rows";
 import type { SiteRow } from "../rows";
+import { siteIsBuilt, siteStateDetail, siteStateWord } from "../words";
 import { TERMINAL_RUN_STATUSES } from "./rail";
 
 // acts.ts -- WHAT A DEPLOYABLE OFFERS, given what it is (epic memql#4937,
-// design section D; DESIGN.md rule 12).
+// design section D; DESIGN.md rule 12; the vocabulary of 2026-09-05 D1).
 //
 // ===========================================================================
 // PURE, BECAUSE THE TABLE IS THE FEATURE
@@ -25,22 +26,24 @@ import { TERMINAL_RUN_STATUSES } from "./rail";
 // what makes that unrepresentable.
 //
 // ===========================================================================
-// THE WORDS ARE THE PERSON'S, THE VALUES ARE THE ENGINE'S
+// A SOURCE'S APP AND A STANDALONE ARE TWO LADDERS (2026-09-05, D2 and D4)
 // ===========================================================================
-// `live` reads Published and `disabled` reads Unpublished (D6). The enum does
-// not move: no migration, no new member on v1:platform:site.status. What the
-// engine's own distinction bought -- 503 for a deliberate pause, 404 for an
-// archive -- is preserved in `detail`, which is where a meaning goes once the
-// state word stops carrying it.
+// A standalone deployable's bundle is its only copy, so it climbs the D10
+// ladder: Offline -> Archived (the name is kept) -> Delete (the name is
+// released). A source's app is reproducible from its source, so it has ONE
+// destructive act from every state, Deactivate, which releases the address
+// and puts the app back on the source's off-list -- and it is never archived.
+// The state words are the same on both; the acts beside them differ.
 
 /** The act names, as a closed set. One name, one promise, everywhere. */
 export type ActName =
   | "Discard"
-  | "Publish"
-  | "Unpublish"
+  | "Go live"
+  | "Take offline"
   | "Archive"
   | "Restore"
   | "Delete"
+  | "Deactivate"
   | "Deploy"
   | "Deploy the update"
   | "Redeploy"
@@ -166,9 +169,9 @@ export function siblingRunInFlight(
  * The acts that would start a new run, as a closed set.
  *
  * Withheld while a sibling's run is in flight. Every other act on the bar
- * changes THIS site's own state -- publishing, pausing, archiving, discarding
- * -- and none of them touches the source's pointer, so none of them has to
- * wait for a deploy of a different app to finish.
+ * changes THIS site's own state -- going live, going offline, archiving,
+ * deactivating, discarding -- and none of them touches the source's pointer,
+ * so none of them has to wait for a deploy of a different app to finish.
  */
 const STARTS_A_RUN = new Set<ActName>(["Deploy", "Deploy the update", "Redeploy", "Retry the deploy"]);
 
@@ -178,7 +181,7 @@ const STARTS_A_RUN = new Set<ActName>(["Deploy", "Deploy the update", "Redeploy"
  * It replaces rather than appends, and it is short, because `.os-actbar-detail`
  * ellipsizes: a clause explaining why a button is missing, cut off half way,
  * is worse than no clause. The state word and its dot already say the app is
- * published, so this says the one thing they do not -- what it is waiting for.
+ * live, so this says the one thing they do not -- what it is waiting for.
  */
 function busyClause(sibling: DeploymentRow): string {
   const other = sibling.scopedTo.length === 1 ? sibling.scopedTo[0] : "another app from this source";
@@ -188,9 +191,9 @@ function busyClause(sibling: DeploymentRow): string {
 /**
  * Whether this deployable has a state of its own to be described BY.
  *
- * `live` and `disabled` both mean it has been published and the internet has
- * an answer for it -- serving, or deliberately paused. A draft has no answer
- * yet, so a run at the gate is the most relevant thing about it.
+ * `live` and `disabled` both mean it has been on the internet -- serving, or
+ * deliberately taken offline. A draft has no such answer yet, so a run at the
+ * gate is the most relevant thing about it.
  */
 function hasServed(site: SiteRow): boolean {
   return site.status === "live" || site.status === "disabled";
@@ -232,15 +235,20 @@ export function actsFor(input: ActsInput): BarReading {
  * Withhold the run-starting acts while a sibling's deploy is in flight, and
  * say so in the line that already explains the state.
  *
- * The state word and the tone are UNCHANGED: a published deployable is still
- * published while another app of its source deploys, and saying otherwise is
- * the defect this is part of fixing.
+ * The state word and the tone are UNCHANGED: a live deployable is still live
+ * while another app of its source deploys, and saying otherwise is the defect
+ * this is part of fixing.
  */
 function holdWhileTheSourceIsBusy(read: BarReading, sibling: DeploymentRow | null): BarReading {
   if (sibling === null) return read;
   const acts = read.acts.filter((act) => !STARTS_A_RUN.has(act.name));
   if (acts.length === read.acts.length) return read;
   return { ...read, acts, detail: busyClause(sibling) };
+}
+
+/** Whether this deployable came from a source, and so climbs the app ladder rather than the standalone one. */
+function fromSource(site: SiteRow, pkg: PackageRow | null): boolean {
+  return pkg !== null || site.packageId !== "";
 }
 
 function reading(input: ActsInput): BarReading {
@@ -252,7 +260,7 @@ function reading(input: ActsInput): BarReading {
   // nothing, which is the courtesy on top of the guard.
   if (site.systemOwned) {
     return {
-      state: "Published",
+      state: "Live",
       detail: "a cluster surface -- re-seeded live at every boot, so it has no lifecycle to change",
       tone: "live",
       acts: [],
@@ -266,7 +274,7 @@ function reading(input: ActsInput): BarReading {
   if (input.deleting) {
     return {
       state: "Deleting",
-      detail: input.releasing ? `releasing ${input.releasing}` : "releasing the name",
+      detail: siteStateDetail("Deleting", input.releasing ?? ""),
       tone: "busy",
       acts: [],
     };
@@ -279,21 +287,13 @@ function reading(input: ActsInput): BarReading {
   // Cancel is FIRST and Deploy is the primary, because the gate exists to be
   // passed -- somebody who opened it meant to deploy. The report itself is on
   // the What-it-is stop, which `openStopFor` opens for exactly this status.
-  // A GATE SPEAKS ONLY FOR A DEPLOYABLE THAT HAS NOTHING TO SAY FOR ITSELF.
   //
-  // A run parked at the confirm gate is waiting for a PERSON: nothing is
-  // executing, and it decides nothing about an app that is already serving.
-  // This branch used to run before `site.status`, so a deployable live at its
-  // address since 01:10 -- five green marks on its rail -- read "Ready to
-  // deploy, this deploy is waiting for you" and offered Cancel and Deploy.
-  //
-  // It is the same rule `holdWhileTheSourceIsBusy` already states for a
-  // sibling that is genuinely deploying: the state word stays true, and the
-  // run is reported beside it. The gate stays reachable where it belongs --
-  // the SOURCE's own row in the list says "a deploy is waiting for you".
-  //
-  // For a deployable that has never served there is no truer word, so the gate
-  // is the reading.
+  // A GATE SPEAKS ONLY FOR A DEPLOYABLE THAT HAS NOTHING TO SAY FOR ITSELF, or
+  // one the gate was opened FOR. A run parked at the confirm gate is waiting
+  // for a PERSON: nothing is executing, and it decides nothing about an app
+  // that is already on the internet. This branch used to run before
+  // `site.status`, so a deployable live at its address -- five green marks on
+  // its rail -- read "Ready to deploy" and offered Cancel and Deploy.
   if (run !== null && run.status === "awaiting_confirm" && (!hasServed(site) || gateIsAboutThisApp(run, site))) {
     return {
       state: "Ready to deploy",
@@ -308,9 +308,9 @@ function reading(input: ActsInput): BarReading {
   // and the bar says so rather than offering a control the engine refuses.
   // ...and it is not MOVING either, so it must not fall through to the branch
   // below: `runIsMoving` answers "not terminal", which a parked run satisfies,
-  // and that branch would hand a serving deployable "Waiting for you" and a
-  // lone Cancel. Nothing is executing at a gate. Either the branch above spoke
-  // for it, or the deployable's own state does.
+  // and that branch would hand a live deployable "Waiting for you" and a lone
+  // Cancel. Nothing is executing at a gate. Either the branch above spoke for
+  // it, or the deployable's own state does.
   if (runIsMoving(run) && run !== null && run.status !== "awaiting_confirm") {
     const cancellable = runIsCancellable(run);
     return {
@@ -332,59 +332,74 @@ function reading(input: ActsInput): BarReading {
   // before it -- so the honest word is Retry, not "Deploy the update": there
   // is no update, there is an attempt that did not land.
   const lastRunBroke = run !== null && (run.status === "refused" || run.status === "failed");
+  const app = fromSource(site, pkg);
+  const word = siteStateWord(site);
+  // THE DESTRUCTIVE ACT, by ladder. A source's app deactivates from every
+  // state; a standalone climbs Offline -> Archive -> Delete, with Discard for
+  // a draft that never served (D5: nobody is using a draft, so the pause that
+  // lets people notice has nobody to notify).
+  const off: ActSpec = app ? { name: "Deactivate", tone: "danger" } : { name: "Discard", tone: "danger" };
 
   switch (site.status) {
     case "live":
       return {
-        state: "Published",
-        detail: lastRunBroke ? "serving the version before the last attempt, which did not finish" : "serving now",
+        state: word,
+        detail: lastRunBroke
+          ? "serving the version before the last attempt, which did not finish"
+          : siteStateDetail(word, site.hostname),
         tone: "live",
         acts: write
-          ? [{ name: "Unpublish" }, { name: lastRunBroke ? "Retry the deploy" : nextDeployName(pkg), tone: "primary" }]
+          ? [{ name: "Take offline" }, { name: lastRunBroke ? "Retry the deploy" : nextDeployName(pkg), tone: "primary" }]
           : [],
       };
     case "disabled":
       return {
-        state: "Unpublished",
+        state: word,
         // The engine's own distinction, kept where the state word no longer
-        // carries it: a deliberately paused site answers 503, so a visitor is
-        // told it is temporarily away rather than that it never existed.
-        detail: 'visitors get "temporarily unavailable", not "no such site"',
+        // carries it: a deployable taken offline on purpose answers 503, so a
+        // visitor is told it is temporarily away rather than that it never
+        // existed.
+        detail: siteStateDetail(word, site.hostname),
         tone: "paused",
-        acts: write ? [{ name: "Archive" }, { name: "Publish", tone: "primary" }] : [],
+        acts: write ? [app ? { name: "Deactivate", tone: "danger" } : { name: "Archive" }, { name: "Go live", tone: "primary" }] : [],
       };
     case "archived":
+      // A source's app is never archived any more (D2); a row that IS -- one
+      // the old cascade left behind -- offers Deactivate, which is what frees
+      // the name it is still holding. A standalone offers the fourth rung.
       return {
-        state: "Archived",
-        detail: "answers nothing, and the name is still held",
+        state: word,
+        detail: siteStateDetail(word, site.hostname),
         tone: "none",
-        acts: write ? [{ name: "Delete", tone: "danger" }, { name: "Restore", tone: "primary" }] : [],
+        acts: write ? [app ? { name: "Deactivate", tone: "danger" } : { name: "Delete", tone: "danger" }, { name: "Restore", tone: "primary" }] : [],
       };
     default: {
-      // DRAFT. The dead end this epic was reported for: no primary action, no
-      // way to reach `disabled`, and an Archive the server refuses. It offers
-      // Discard -- a delete that skips the ceremony, because a draft resolves
-      // for nobody and the pause exists to let people notice.
-      const refused = run !== null && (run.status === "refused" || run.status === "failed");
+      // DRAFT: Not deployed, or Built. Neither serves, and the forward act is
+      // the one thing each is waiting for -- files, or the word.
+      if (siteIsBuilt(site)) {
+        return {
+          state: "Built",
+          detail: lastRunBroke
+            ? "the last deploy did not finish; the version before it is in place, not live"
+            : siteStateDetail("Built", site.hostname),
+          tone: "none",
+          acts: write ? [off, { name: lastRunBroke ? "Retry the deploy" : "Go live", tone: "primary" }] : [],
+        };
+      }
       return {
-        state: "Draft",
-        detail: refused
-          ? "the last deploy did not finish, and nothing is served"
-          : "not served to anyone yet",
+        state: "Not deployed",
+        detail: lastRunBroke
+          ? "the last deploy did not finish, and nothing is in place"
+          : siteStateDetail("Not deployed", site.hostname),
         tone: "none",
-        acts: write
-          ? [
-              { name: "Discard", tone: "danger" },
-              { name: refused ? "Retry the deploy" : nextPublishName(site, pkg), tone: "primary" },
-            ]
-          : [],
+        acts: write ? [off, { name: lastRunBroke ? "Retry the deploy" : "Deploy", tone: "primary" }] : [],
       };
     }
   }
 }
 
 /**
- * What the forward act is called on a published deployable.
+ * What the forward act is called on a live deployable.
  *
  * THREE DIFFERENT PROMISES, THREE DIFFERENT WORDS -- which is the whole reason
  * there is one Retry in this app now instead of six:
@@ -402,25 +417,6 @@ function nextDeployName(pkg: PackageRow | null): ActName {
   return pkg.updateAvailable ? "Deploy the update" : "Redeploy";
 }
 
-/**
- * What the forward act is called on a draft.
- *
- * A draft that already HAS a bundle is one flip away from serving, so the act
- * is Publish. One that has never been published has to deploy something first.
- */
-function nextPublishName(site: SiteRow, _pkg: PackageRow | null): ActName {
-  // THE BUNDLE DECIDES, NOT WHAT PRODUCED IT. A draft already holding real
-  // bytes is one status write away from serving -- that is Publish. One
-  // holding the placeholder has nothing to serve yet, so the act is the thing
-  // that gets it some: Deploy.
-  const ref = site.bundleRef.trim();
-  return ref === "" || isPlaceholder(ref) ? "Deploy" : "Publish";
-}
-
-function isPlaceholder(bundleRef: string): boolean {
-  return bundleRef.trim().endsWith("/pending/");
-}
-
 /** A run's stage, in the reader's terms rather than the state machine's. */
 export function stageWord(status: string): string {
   switch (status) {
@@ -435,7 +431,7 @@ export function stageWord(status: string): string {
     case "rolling":
       return "Rolling";
     case "publishing":
-      return "Publishing";
+      return "Putting files in place";
     default:
       return "Deploying";
   }

@@ -49,18 +49,18 @@ const BASE: ActsInput = { site: site(), pkg: null, run: null, canWrite: true };
 const names = (input: Partial<ActsInput>) => actsFor({ ...BASE, ...input }).acts.map((a) => a.name);
 
 describe("actsFor -- acts follow the state, in one place", () => {
-  it("published offers Unpublish and the forward act", () => {
-    expect(names({})).toEqual(["Unpublish", "Deploy"]);
+  it("live offers Take offline and the forward act", () => {
+    expect(names({})).toEqual(["Take offline", "Deploy"]);
     // A SOURCE-BACKED deployable with nothing newer REDEPLOYS. Naming an
     // update that does not exist would be a claim about the upstream.
-    expect(names({ pkg: pkg() })).toEqual(["Unpublish", "Redeploy"]);
-    expect(names({ pkg: pkg({ updateAvailable: true }) })).toEqual(["Unpublish", "Deploy the update"]);
+    expect(names({ pkg: pkg() })).toEqual(["Take offline", "Redeploy"]);
+    expect(names({ pkg: pkg({ updateAvailable: true }) })).toEqual(["Take offline", "Deploy the update"]);
   });
 
-  it("unpublished offers Archive and Publish, and says what 503 means", () => {
+  it("offline offers Archive and Go live, and says what 503 means", () => {
     const reading = actsFor({ ...BASE, site: site({ status: "disabled" }) });
-    expect(reading.acts.map((a) => a.name)).toEqual(["Archive", "Publish"]);
-    expect(reading.state).toBe("Unpublished");
+    expect(reading.acts.map((a) => a.name)).toEqual(["Archive", "Go live"]);
+    expect(reading.state).toBe("Offline");
     // The engine's own distinction, kept where the state word stopped
     // carrying it: a deliberate pause answers 503, an archive answers 404.
     expect(reading.detail).toContain("temporarily unavailable");
@@ -88,7 +88,7 @@ describe("actsFor -- acts follow the state, in one place", () => {
     expect(acts).toContain("Discard");
   });
 
-  it("a draft holding a placeholder deploys; one holding real bytes publishes", () => {
+  it("a draft holding a placeholder deploys; one holding real bytes goes live", () => {
     // The BUNDLE decides, not what produced it. A draft already holding bytes
     // is one status write from serving; one holding the placeholder has
     // nothing to serve yet.
@@ -96,7 +96,7 @@ describe("actsFor -- acts follow the state, in one place", () => {
       "Discard",
       "Deploy",
     ]);
-    expect(names({ site: site({ status: "draft" }) })).toEqual(["Discard", "Publish"]);
+    expect(names({ site: site({ status: "draft" }) })).toEqual(["Discard", "Go live"]);
   });
 
   it("A SYSTEM-OWNED ROW OFFERS NOTHING AT ALL -- not disabled controls", () => {
@@ -111,7 +111,7 @@ describe("actsFor -- acts follow the state, in one place", () => {
     for (const status of ["live", "disabled", "archived", "draft"]) {
       expect(names({ site: site({ status }), canWrite: false })).toEqual([]);
     }
-    expect(actsFor({ ...BASE, canWrite: false }).state).toBe("Published");
+    expect(actsFor({ ...BASE, canWrite: false }).state).toBe("Live");
   });
 
   // ---- the run in flight ---------------------------------------------------
@@ -146,7 +146,7 @@ describe("actsFor -- acts follow the state, in one place", () => {
     // deployable is still serving the version before it.
     for (const status of ["refused", "failed"]) {
       const reading = actsFor({ ...BASE, pkg: pkg(), run: run(status) });
-      expect(reading.acts.map((a) => a.name)).toEqual(["Unpublish", "Retry the deploy"]);
+      expect(reading.acts.map((a) => a.name)).toEqual(["Take offline", "Retry the deploy"]);
       expect(reading.detail).toContain("did not finish");
     }
   });
@@ -164,7 +164,46 @@ describe("actsFor -- acts follow the state, in one place", () => {
     // than the run.
     expect(runIsMoving(run("cancelled"))).toBe(false);
     expect(runIsCancellable(run("cancelled"))).toBe(false);
-    expect(names({ pkg: pkg(), run: run("cancelled") })).toEqual(["Unpublish", "Redeploy"]);
+    expect(names({ pkg: pkg(), run: run("cancelled") })).toEqual(["Take offline", "Redeploy"]);
+  });
+
+  // ---- two ladders (2026-09-05 design, D2 and D4) ------------------------
+
+  it("A SOURCE'S APP IS NEVER ARCHIVED: it deactivates, from every state", () => {
+    // A standalone's bundle is its only copy, so it climbs Offline ->
+    // Archived -> Deleted. A source's app is reproducible from its source, so
+    // its one destructive act is Deactivate -- and it is offered from every
+    // state, live included, because the typed confirmation is the step.
+    const app = site({ packageId: "pkg-1", packageDeployableName: "storefront" });
+    expect(names({ site: app, pkg: pkg() })).toEqual(["Take offline", "Redeploy"]);
+    expect(names({ site: { ...app, status: "disabled" }, pkg: pkg() })).toEqual(["Deactivate", "Go live"]);
+    expect(names({ site: { ...app, status: "draft" }, pkg: pkg() })).toEqual(["Deactivate", "Go live"]);
+    expect(names({ site: { ...app, status: "draft", bundleRef: "" }, pkg: pkg() })).toEqual(["Deactivate", "Deploy"]);
+    // An app the OLD cascade left archived still holds its name; Deactivate
+    // is what frees it.
+    expect(names({ site: { ...app, status: "archived" }, pkg: pkg() })).toEqual(["Deactivate", "Restore"]);
+    for (const status of ["live", "disabled", "draft", "archived"] as const) {
+      const offered = names({ site: { ...app, status }, pkg: pkg() });
+      for (const never of ["Archive", "Delete", "Discard"]) expect(offered).not.toContain(never);
+    }
+  });
+
+  it("decides the ladder from the ROW, so an app of an archived source still deactivates", () => {
+    // An archived source is not in the active feed, so `pkg` is null for its
+    // apps -- and those are exactly the rows whose names still need freeing.
+    const orphan = site({ status: "archived", packageId: "pkg-gone", packageDeployableName: "storefront" });
+    expect(names({ site: orphan, pkg: null })).toEqual(["Deactivate", "Restore"]);
+  });
+
+  it("reads the state word and its clause from the one vocabulary", () => {
+    expect(actsFor({ ...BASE }).detail).toBe("serving at shop.example.com");
+    const built = actsFor({ ...BASE, site: site({ status: "draft" }) });
+    expect(built.state).toBe("Built");
+    expect(built.detail).toContain("not live yet");
+    const empty = actsFor({ ...BASE, site: site({ status: "draft", bundleRef: "" }) });
+    expect(empty.state).toBe("Not deployed");
+    expect(actsFor({ ...BASE, site: site({ status: "disabled" }) }).detail).toContain("temporarily unavailable");
+    expect(actsFor({ ...BASE, site: site({ status: "archived" }) }).detail).toContain("name is still held");
   });
 
   it("never offers more than three acts, on any state", () => {
@@ -236,10 +275,10 @@ describe("openStopFor -- exactly one stop, chosen by what is a question", () => 
 describe("a source's gate, on a deployable that has its own state", () => {
   const gate = run("awaiting_confirm");
 
-  it("leaves a live deployable published, with its own acts", () => {
+  it("leaves a live deployable live, with its own acts", () => {
     const reading = actsFor({ ...BASE, pkg: pkg(), run: gate });
-    expect(reading.state).toBe("Published");
-    expect(reading.acts.map((a) => a.name)).toEqual(["Unpublish", "Redeploy"]);
+    expect(reading.state).toBe("Live");
+    expect(reading.acts.map((a) => a.name)).toEqual(["Take offline", "Redeploy"]);
   });
 
   it("says the gate is there without claiming it is the state", () => {
@@ -249,9 +288,9 @@ describe("a source's gate, on a deployable that has its own state", () => {
     expect(actsFor({ ...BASE, pkg: pkg(), run: gate }).detail).toContain("waiting for you");
   });
 
-  it("leaves a paused deployable paused", () => {
+  it("leaves an offline deployable offline", () => {
     const reading = actsFor({ ...BASE, site: site({ status: "disabled" }), pkg: pkg(), run: gate });
-    expect(reading.state).toBe("Unpublished");
+    expect(reading.state).toBe("Offline");
   });
 
   it("opens on Live, not on the stop the gate parked at", () => {

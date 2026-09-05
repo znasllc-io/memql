@@ -366,6 +366,28 @@ QueryClient.prototype.customDomainAdd = function (this: QueryClient, args: Custo
   return this.executeNamed("customDomainAdd", buildCustomDomainAdd(args), opts);
 };
 
+/** The same question for a client's own domain (epic memql#4805): the custom-domain shape rules -- not under this cluster's own domain, not a front-door host, not a wildcard, a fully qualified name -- and uniqueness against every live site AND every live binding. Returns one row {hostname, available, reason, problem}. Cluster-owner only, as the concept it speaks for is; a check, never a gate. */
+export interface CustomDomainCheckArgs {
+  /** The client's own fully qualified host, e.g. www.acme.com. */
+  hostname: string;
+}
+
+export function buildCustomDomainCheck(args: CustomDomainCheckArgs): string {
+  const parts: string[] = [];
+  parts.push("hostname: " + renderMemQLValue(args.hostname));
+  return "builtin customDomainCheck(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    customDomainCheck(args: CustomDomainCheckArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.customDomainCheck = function (this: QueryClient, args: CustomDomainCheckArgs = {} as CustomDomainCheckArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("customDomainCheck", buildCustomDomainCheck(args), opts);
+};
+
 /** List every registered concept with its data state (mirror | origin | native), the system where its changes are made, and the connectors it depends on. Produced from the live concept registry, never persisted. Feeds the portal's Data origins page. */
 export interface DataOriginsArgs {
 }
@@ -1085,7 +1107,7 @@ QueryClient.prototype.packageAnalyze = function (this: QueryClient, args: Packag
   return this.executeNamed("packageAnalyze", buildPackageAnalyze(args), opts);
 };
 
-/** Archive one of the caller's packages AND every app it produced (epic memql#4794 D10; the cascade is epic memql#4885, 'archive this source and every app it produced'). Refuses with package_has_active_deployables, naming only the LIVE hostnames and before any site is touched, while any app this package deployed is still serving -- a package is the source its deployables came from, and filing it away while one is still serving the internet would put the record and the reality in different states; pausing first is the step that gives anyone still using it a chance to notice, and it stays the person's decision. Every paused app is archived, and a never-published (draft) app is walked through disabled first, each through the same guarded status write siteArchive uses, sites first and the package last; a write the guard refuses surfaces and stops the cascade there. Apps already archived are left alone. Also refuses unless confirmName matches the package's stored name exactly. packageRestore does NOT cascade back. Archived packages stay listed behind the Archived filter. Returns {packageId, name, status, archivedSites}. */
+/** Archive one of the caller's sources AND DEACTIVATE every app it produced (2026-09-05 design, D3). Verifies confirmName against the package's stored name, then for each app the source deployed -- live ones included; the OS names them before it asks -- walks its custom-domain bindings to `removing` and stamps its site `deleted`, so every address it held comes free at that write (the cluster-wide uniqueness probe reads `deleted` alone, which is why the cascade no longer archives sites: an archived site still holds its name). Every declared app then goes on the source's off-list, auto-deploy is disarmed when it was armed, and the package is archived LAST, so a failure part-way leaves a source that is still active and whose page still says what happened. packageRestore does NOT cascade back: a restored source's apps come back inactive, to be activated and deployed at fresh addresses. Archived packages stay listed behind the Archived filter. Returns {packageId, name, status, releasedSites, deactivated}. */
 export interface PackageArchiveArgs {
   /** The v1:platform:package row to archive. */
   packageId: string;
@@ -1133,6 +1155,34 @@ declare module "./query.js" {
 
 QueryClient.prototype.packageCancelDeployment = function (this: QueryClient, args: PackageCancelDeploymentArgs = {} as PackageCancelDeploymentArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("packageCancelDeployment", buildPackageCancelDeployment(args), opts);
+};
+
+/** Deactivate ONE app of a source (2026-09-05 design, D2). A source's app is never archived -- it is reproducible from the source -- so turning it off means giving its address back: its custom-domain bindings walk to `removing`, its site is stamped `deleted` (the address is free at that write), the source's auto-deploy is disarmed when this was its last app, and the name goes on the source's off-list, which is what lists it `inactive` and lets no run build it. Offered from ANY state the app is in, live included: confirmName -- the app's manifest name, not its hostname -- is what stands between a person and an app going offline, and it is verified here. An app the source declares and never deployed only lands on the off-list. Activating it again is enablePackageDeployables followed by a scoped deploy that asks where it should live. Returns {packageId, deployableName, siteId, hostname, domainsReleased, autoDeployDisarmed}. */
+export interface PackageDeactivateDeployableArgs {
+  /** The v1:platform:package the app belongs to. */
+  packageId: string;
+  /** The app's name in the source's manifest. */
+  deployableName: string;
+  /** That same name, typed by the person as confirmation. A mismatch refuses and writes nothing. */
+  confirmName: string;
+}
+
+export function buildPackageDeactivateDeployable(args: PackageDeactivateDeployableArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  parts.push("deployableName: " + renderMemQLValue(args.deployableName));
+  parts.push("confirmName: " + renderMemQLValue(args.confirmName));
+  return "builtin packageDeactivateDeployable(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packageDeactivateDeployable(args: PackageDeactivateDeployableArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packageDeactivateDeployable = function (this: QueryClient, args: PackageDeactivateDeployableArgs = {} as PackageDeactivateDeployableArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packageDeactivateDeployable", buildPackageDeactivateDeployable(args), opts);
 };
 
 /** Run one deployment attempt for a package (epic memql#4794). WITHOUT confirm the run parks at awaiting_confirm with the analysis report on a new deployment row and nothing else happens -- that gate is always present (D12), and a redeploy passes it in one click. WITH confirm the run builds, stages, rolls and publishes in the D6 order: a failure anywhere before publish leaves every site serving exactly what it was serving, and a package with no DSL (or unchanged DSL) skips stage and roll entirely so nothing restarts. A package carrying DSL requires the cluster-owner actor and is refused with dsl_requires_cluster_owner at the START, before any build. placements is read only for a deployable's FIRST deploy (epic memql#4885, D8); later deploys find the site through (packageId, packageDeployableName) and never re-ask. Returns {deploymentId, status, awaitingConfirm, deployables, report}; each deployables entry carries {name, siteId, hostname, bundleRef, version, created} on success, {name, refusal} for a half that was refused or skipped, plus accountId / ownDomain for the placement halves that landed and accountRefusal / domainRefusal for the ones the guards refused. */
@@ -1601,11 +1651,11 @@ QueryClient.prototype.shopifyql = function (this: QueryClient, args: ShopifyqlAr
   return this.executeNamed("shopifyql", buildShopifyql(args), opts);
 };
 
-/** Archive one of the caller's sites (epic memql#4794, D10). Refuses unless the site is already DISABLED -- archiving is the end of a lifecycle, not a shortcut past pausing -- and unless confirmHostname matches the site's stored hostname exactly, which is the typed confirmation the OS renders and this server verifies. A systemOwned site (the cluster's own portal and OS) is refused outright: those rows are exempt from the lifecycle entirely. An archived site stops serving (404) but stays listed behind the Archived filter, because an archive is a place and not a void. Returns {siteId, hostname, status}. Refusals carry stable codes. */
+/** Archive one of the caller's standalone deployables (epic memql#4794, D10). Refuses unless the site is already OFFLINE (disabled) -- archiving is the end of a lifecycle, not a shortcut past taking it offline -- and unless confirmHostname matches the site's NAME: its address label under the cluster's domain, or the whole hostname (2026-09-05 design, D9). A systemOwned site (the cluster's own portal and OS) is refused outright: those rows are exempt from the lifecycle entirely. An archived site stops serving (404), stays listed behind the Archived filter, and STILL HOLDS ITS NAME -- siteDelete is the rung that releases it. A source's app is never archived; it is deactivated (packageDeactivateDeployable). Returns {siteId, hostname, status}. Refusals carry stable codes. */
 export interface SiteArchiveArgs {
   /** The v1:platform:site row to archive. */
   siteId: string;
-  /** The site's own hostname, typed by the person as confirmation. Compared against the stored value; a mismatch refuses and writes nothing. */
+  /** The deployable's name, typed by the person as confirmation: the address label under the cluster's domain (`storefront` for storefront.<domain>) or the whole hostname. A mismatch refuses and writes nothing. */
   confirmHostname: string;
 }
 
@@ -1626,11 +1676,11 @@ QueryClient.prototype.siteArchive = function (this: QueryClient, args: SiteArchi
   return this.executeNamed("siteArchive", buildSiteArchive(args), opts);
 };
 
-/** Delete one of the caller's deployables and RELEASE ITS NAME (epic memql#4937). The fourth and last rung of the D10 lifecycle, below archive. Refuses unless the site is `archived` or `draft` -- the two states nothing is served from -- and unless confirmHostname matches the stored hostname exactly. A systemOwned site is refused outright. It walks every custom-domain binding on the site to `removing` so the certificate and route come down on the reconciliation sweep's own schedule, disarms the source's auto-deploy when this was its last live app, and stamps `deleted` LAST: the hostname is free at that instant, because `deleted` is the only field the cluster-wide uniqueness probe reads. Stamping the site last is deliberate -- a failure part-way leaves a deployable that is still findable and still says what state it is in, rather than an invisible row holding a name. Terminal: archive is the reversible step and it is one rung up. Returns {siteId, hostname, domainsReleased, autoDeployDisarmed}. Refusals carry stable codes. */
+/** Delete one of the caller's standalone deployables and RELEASE ITS NAME (epic memql#4937). The fourth and last rung of the D10 lifecycle, below archive. Refuses unless the site is `archived` or `draft` -- the two states nothing is served from -- and unless confirmHostname matches the site's name: its address label under the cluster's domain, or the whole hostname (2026-09-05 design, D9). A systemOwned site is refused outright. It walks every custom-domain binding on the site to `removing` so the certificate and route come down on the reconciliation sweep's own schedule, disarms the source's auto-deploy when this was its last live app, and stamps `deleted` LAST: the hostname is free at that instant, because `deleted` is the only field the cluster-wide uniqueness probe reads. Stamping the site last is deliberate -- a failure part-way leaves a deployable that is still findable and still says what state it is in, rather than an invisible row holding a name. Terminal: archive is the reversible step and it is one rung up. Returns {siteId, hostname, domainsReleased, autoDeployDisarmed}. Refusals carry stable codes. */
 export interface SiteDeleteArgs {
   /** The v1:platform:site row to delete. */
   siteId: string;
-  /** The site's own hostname, typed by the person as confirmation. Compared against the stored value; a mismatch refuses and writes nothing. */
+  /** The deployable's name, typed by the person as confirmation: the address label under the cluster's domain, or the whole hostname. A mismatch refuses and writes nothing. */
   confirmHostname: string;
 }
 
@@ -1649,6 +1699,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.siteDelete = function (this: QueryClient, args: SiteDeleteArgs = {} as SiteDeleteArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("siteDelete", buildSiteDelete(args), opts);
+};
+
+/** Answer whether THIS caller could create a deployable at a hostname right now: the user-claimable shape (<slug>.<domain>, the slug bounds, the reserved labels -- waived for a cluster owner exactly as the write guard waives it) and cluster-wide uniqueness against every live site. Returns one row {hostname, available, reason, problem}: reason is `ok`, `invalid` (problem carries the policy's own sentence) or `taken` (problem says so and names NOBODY -- the write guard's refusal names the holder, because whoever is refused has to know what to look at; a check asked on every keystroke does not). A check, never a gate: it reserves nothing. */
+export interface SiteHostnameCheckArgs {
+  /** The hostname to check, as it would be created -- `<slug>.<domain>` composed, not the slug alone. */
+  hostname: string;
+}
+
+export function buildSiteHostnameCheck(args: SiteHostnameCheckArgs): string {
+  const parts: string[] = [];
+  parts.push("hostname: " + renderMemQLValue(args.hostname));
+  return "builtin siteHostnameCheck(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    siteHostnameCheck(args: SiteHostnameCheckArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.siteHostnameCheck = function (this: QueryClient, args: SiteHostnameCheckArgs = {} as SiteHostnameCheckArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("siteHostnameCheck", buildSiteHostnameCheck(args), opts);
 };
 
 /** Deploy a Library zip artifact to one of the caller's hosted sites (memql#4345). The caller must own the site (or be a cluster owner) AND own the artifact, which must be a Library file whose MIME type is a zip. The bundle is read from object storage and validated -- index.html at the ROOT for spa and shopify_storefront, plus the same per-file (25 MB), whole-bundle (500 MB) and file-count (20000) limits POST /sites/{id}/bundles enforces -- then written under a new content-addressed version prefix before bundleRef is flipped, so a failed publish leaves the site serving exactly what it was serving. artifactId is stamped on the site row as provenance and the attempt is recorded on the security audit log. Returns {siteId, artifactId, fileId, version, bundleRef, fileCount, totalBytes}. Rollback is unchanged: updateSiteBundle pointed back at an earlier version's bundleRef. */

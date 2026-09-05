@@ -224,8 +224,70 @@ export async function rollbackPackage(query: QueryClient, packageId: string, dep
   await query.packageRollback({ packageId, deploymentId });
 }
 
+/**
+ * Archive a source and DEACTIVATE every app it produced (2026-09-05 design,
+ * D3). The cascade is the engine's: each app's domains come down, its site is
+ * deleted so its address comes free, every declared name goes on the off-list,
+ * and the source is archived last. The typed name is verified server-side.
+ */
 export async function archivePackage(query: QueryClient, packageId: string, confirmName: string): Promise<void> {
   await query.packageArchive({ packageId, confirmName });
+}
+
+/**
+ * Deactivate ONE app of a source (2026-09-05 design, D2): its address comes
+ * free and the name goes on the source's off-list. Offered from any state,
+ * live included -- the typed APP NAME, verified server-side, is what stands
+ * between a person and an app going offline.
+ */
+export async function deactivateDeployable(
+  query: QueryClient,
+  packageId: string,
+  deployableName: string,
+  confirmName: string,
+): Promise<void> {
+  await query.packageDeactivateDeployable({ packageId, deployableName, confirmName });
+}
+
+/** What an address check answers: whether it could be claimed right now, and why not. */
+export interface HostnameCheck {
+  available: boolean;
+  /** ok | invalid | taken, as the engine names them. */
+  reason: string;
+  /** The policy's own sentence when not available; "" otherwise. */
+  problem: string;
+}
+
+/**
+ * Ask whether a site hostname could be claimed right now (2026-09-05 design,
+ * D7). The engine runs the write guard's own shape and uniqueness rules and
+ * reserves nothing: a name free here can be taken a second later, and the
+ * guard still decides on the write.
+ */
+export async function checkSiteHostname(query: QueryClient, hostname: string): Promise<HostnameCheck> {
+  const result = await query.siteHostnameCheck({ hostname });
+  return hostnameCheckFrom(result.rows()[0]);
+}
+
+/** The same question for a client's own domain. Cluster-owner only. */
+export async function checkCustomDomain(query: QueryClient, hostname: string): Promise<HostnameCheck> {
+  const result = await query.customDomainCheck({ hostname });
+  return hostnameCheckFrom(result.rows()[0]);
+}
+
+function hostnameCheckFrom(row: Row | undefined): HostnameCheck {
+  if (row === undefined) {
+    // No row is not an answer; treat it as unavailable with no sentence, so
+    // the stop says "could not check" rather than letting a deploy through
+    // on silence.
+    return { available: false, reason: "", problem: "This cluster did not answer the check." };
+  }
+  const reason = rowString(row, "reason");
+  return {
+    available: row["available"] === true || rowString(row, "available") === "true",
+    reason,
+    problem: rowString(row, "problem"),
+  };
 }
 
 export async function restorePackage(query: QueryClient, packageId: string): Promise<void> {

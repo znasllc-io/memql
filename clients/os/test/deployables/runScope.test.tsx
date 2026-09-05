@@ -138,9 +138,9 @@ describe("the bar while a sibling deploys", () => {
 
   it("keeps this app's own state and words", () => {
     const reading = actsFor({ site, pkg, run: null, siblingRun: siblingBuilding, canWrite: true });
-    // NOT "Building". A published deployable is still published while another
-    // app of its source deploys, and saying otherwise was the defect.
-    expect(reading.state).toBe("Published");
+    // NOT "Building". A live deployable is still live while another app of
+    // its source deploys, and saying otherwise was the defect.
+    expect(reading.state).toBe("Live");
     expect(reading.tone).toBe("live");
   });
 
@@ -164,9 +164,9 @@ describe("the bar while a sibling deploys", () => {
 
   it("keeps the acts that only change THIS site", () => {
     const reading = actsFor({ site, pkg, run: null, siblingRun: siblingBuilding, canWrite: true });
-    // Unpublish touches this site's own status and no source pointer, so it
-    // has no reason to wait for a deploy of a different app.
-    expect(reading.acts.map((a) => a.name)).toContain("Unpublish");
+    // Take offline touches this site's own status and no source pointer, so
+    // it has no reason to wait for a deploy of a different app.
+    expect(reading.acts.map((a) => a.name)).toContain("Take offline");
   });
 
   it("offers everything again once the sibling's run ends", () => {

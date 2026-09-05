@@ -3,6 +3,8 @@ import { rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/clien
 
 import { boolOr, flatten } from "../../../kit/rows";
 import { useOsConnection } from "../../../live/connection";
+import { checkCustomDomain, checkSiteHostname } from "../packages/calls";
+import type { AddressVerdict } from "../page/compose";
 import { EMPTY_MANIFEST, branchNamesFrom, manifestFrom, type ArtifactProbeReply, type SourceProbeReply } from "./probe";
 
 // The two compose probes, as hooks (epic memql#4885, task memql#4891).
@@ -164,4 +166,76 @@ function artifactProbeFromRow(raw: Row | null): ArtifactProbeReply {
 
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+// ---------------------------------------------------------------------------
+// The address checks (2026-09-05 design, D7)
+// ---------------------------------------------------------------------------
+
+export interface AddressCheckHandle {
+  /** The latest verdict per key -- an app's slug, an app's own domain. */
+  verdicts: Readonly<Record<string, AddressVerdict>>;
+  /**
+   * Ask the cluster about one hostname under a key, and answer the verdict.
+   *
+   * THE LAST ANSWER WINS, PER KEY. A person typing gets a check per pause,
+   * and a Generate that draws again on a taken name asks several times in a
+   * row; a sequence number per key is compared on return, so a slow early
+   * answer cannot land on top of a fast later one. The verdict is ALSO
+   * returned, so a caller looping on Generate can read it without waiting
+   * for a render.
+   */
+  check: (key: string, hostname: string, kind: "site" | "domain") => Promise<AddressVerdict>;
+  /** Forget a key's verdict -- the field was cleared, or the app was skipped. */
+  clear: (key: string) => void;
+}
+
+export function useAddressChecks(): AddressCheckHandle {
+  const connection = useOsConnection();
+  const [verdicts, setVerdicts] = useState<Record<string, AddressVerdict>>({});
+  const seq = useRef(new Map<string, number>());
+
+  const clear = useCallback((key: string) => {
+    seq.current.set(key, (seq.current.get(key) ?? 0) + 1);
+    setVerdicts((held) => {
+      if (!(key in held)) return held;
+      const next = { ...held };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
+  const check = useCallback(
+    async (key: string, hostname: string, kind: "site" | "domain"): Promise<AddressVerdict> => {
+      const host = hostname.trim();
+      if (host === "") {
+        clear(key);
+        return { state: "no", problem: "" };
+      }
+      const query = connection?.query ?? null;
+      const mine = (seq.current.get(key) ?? 0) + 1;
+      seq.current.set(key, mine);
+      if (query === null) {
+        const verdict: AddressVerdict = { state: "no", problem: "Not connected to the cluster, so the name was not checked." };
+        setVerdicts((held) => ({ ...held, [key]: verdict }));
+        return verdict;
+      }
+      setVerdicts((held) => ({ ...held, [key]: { state: "checking", problem: "" } }));
+      let verdict: AddressVerdict;
+      try {
+        const reply = kind === "site" ? await checkSiteHostname(query, host) : await checkCustomDomain(query, host);
+        verdict = reply.available ? { state: "ok", problem: "" } : { state: "no", problem: reply.problem };
+      } catch (err) {
+        // A check that could not RUN is not a verdict about the name. It is
+        // said in place and the name stays unchecked, which keeps Deploy out
+        // of reach -- the honest reading of "the cluster did not answer".
+        verdict = { state: "no", problem: messageOf(err) };
+      }
+      if (seq.current.get(key) === mine) setVerdicts((held) => ({ ...held, [key]: verdict }));
+      return verdict;
+    },
+    [connection, clear],
+  );
+
+  return { verdicts, check, clear };
 }

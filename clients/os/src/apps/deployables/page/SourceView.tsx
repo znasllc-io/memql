@@ -6,6 +6,7 @@ import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { shortVersion, sourceLabel, type PackageRow } from "../packages/rows";
 import { siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
+import { siteStateWord, stateChip } from "../words";
 import { AutoDeploySwitch, PackageLifecycle, SwitchCredential } from "./stops/Source";
 
 // SourceView -- a source is a THING, with its own page (epic memql#4937, D4).
@@ -30,6 +31,15 @@ import { AutoDeploySwitch, PackageLifecycle, SwitchCredential } from "./stops/So
 // to put source-level acts where the source is.
 //
 // The app's Source stop keeps one line and a link here.
+//
+// ===========================================================================
+// EVERY APP IT DECLARES IS A ROW, AND EVERY ROW OPENS (2026-09-05, D5/D6)
+// ===========================================================================
+// A deployed app opens its page. A declared one -- inactive, or never
+// deployed -- opens the compose flow for THAT app: the owner asked for a way
+// to activate an app from its source, and "click the app, read that it is
+// inactive, press Activate" is that way. The rows read the same state words
+// the list and the bar do.
 
 export function SourceView({
   pkg,
@@ -39,6 +49,7 @@ export function SourceView({
   onBack,
   onOpenHistory,
   onOpenApp,
+  onOpenDeclared,
   onAsk,
   attempts,
 }: {
@@ -50,6 +61,8 @@ export function SourceView({
   onBack: () => void;
   onOpenHistory: () => void;
   onOpenApp: (siteId: string) => void;
+  /** Opens the compose flow for an app the source declares and has not deployed. */
+  onOpenDeclared: (app: string) => void;
   onAsk?: (tag: string) => void;
   /** How many runs this source has, for the history line. */
   attempts: number;
@@ -60,6 +73,7 @@ export function SourceView({
   // the source SAYS it contains and what it has actually put on the internet.
   const deployedNames = new Set(apps.map((a) => a.packageDeployableName));
   const undeployed = pkg.declares.filter((d) => !deployedNames.has(d.name));
+  const inactive = undeployed.filter((d) => pkg.disabledDeployables.includes(d.name)).length;
   const total = apps.length + undeployed.length;
 
   // ===========================================================================
@@ -75,12 +89,11 @@ export function SourceView({
   // A source is the thing apps came FROM. Its page is where its credential,
   // its auto-deploy switch, its history and its archive live, and every one of
   // those is a fact about the source itself. Deploying is an act on ONE
-  // deployable, done on that deployable's page, reached by opening the group
-  // in the list -- which is also the only place a person can say which apps
-  // they mean.
+  // deployable, done on that deployable's page -- or, for one the source only
+  // declares, on the compose flow its row opens.
   //
   // The bar stays, with no acts: it still reads what this source IS and how
-  // many of its apps are serving, which is what somebody who opened it came to
+  // many of its apps are live, which is what somebody who opened it came to
   // find out.
   const acts: Act[] = [];
 
@@ -120,8 +133,7 @@ export function SourceView({
               an app skipped at the confirm gate had no row and was missing
               from this list -- on the very page whose subject is the source
               that declares it. The two are shown together and told apart by
-              their state: a deployed app says published or paused, a declared
-              one says "not deployed yet". */}
+              their state word. */}
           <section className="os-report-part">
             <h4 className="os-report-heading">
               <GitBranch size={12} aria-hidden /> Apps it produces
@@ -132,31 +144,48 @@ export function SourceView({
               </Caption>
             ) : (
               <ul className="os-source-apps">
-                {apps.map((app) => (
-                  <li key={app.id}>
-                    <button type="button" className="os-source-app" onClick={() => onOpenApp(app.id)}>
-                      <span className="os-source-app-name">{app.packageDeployableName || siteName(app)}</span>
-                      <span className="os-mono os-source-app-host">{app.hostname}</span>
-                      <Chip tone={app.status === "live" ? "accent" : "muted"}>{statusWord(app.status)}</Chip>
-                    </button>
-                  </li>
-                ))}
-                {undeployed.map((d) => (
-                  <li key={`declared:${d.name}`}>
-                    {/* NOT A BUTTON. Everything else in this list opens a
-                        deployable's page, and this app has none to open -- it
-                        has never been deployed. Making it look pressable would
-                        promise a page that does not exist; deploying it is
-                        done from its row in the list, where the act belongs. */}
-                    <div className="os-source-app" data-undeployed="true">
-                      <span className="os-source-app-name">{d.name}</span>
-                      <span className="os-source-app-host">no address yet</span>
-                      <Chip tone="muted">not deployed</Chip>
-                    </div>
-                  </li>
-                ))}
+                {apps.map((app) => {
+                  const word = siteStateWord(app);
+                  return (
+                    <li key={app.id}>
+                      <button type="button" className="os-source-app" onClick={() => onOpenApp(app.id)}>
+                        <span className="os-source-app-name">{app.packageDeployableName || siteName(app)}</span>
+                        <span className="os-mono os-source-app-host">{app.hostname}</span>
+                        <Chip tone={word === "Live" ? "accent" : "muted"}>{word === "Live" ? "live" : stateChip(word)}</Chip>
+                      </button>
+                    </li>
+                  );
+                })}
+                {undeployed.map((d) => {
+                  const off = pkg.disabledDeployables.includes(d.name);
+                  return (
+                    <li key={`declared:${d.name}`}>
+                      {/* A BUTTON, which opens the compose flow for this app.
+                          It used to be inert, on the reasoning that the app
+                          had no page to open -- but the flow that gives it one
+                          is the page, and the owner asked to reach it from
+                          here. */}
+                      <button
+                        type="button"
+                        className="os-source-app"
+                        data-declared="true"
+                        onClick={() => onOpenDeclared(d.name)}
+                      >
+                        <span className="os-source-app-name">{d.name}</span>
+                        <span className="os-source-app-host">no address yet</span>
+                        <Chip tone="muted">{off ? "inactive" : "not deployed"}</Chip>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
+            {inactive > 0 ? (
+              <Caption>
+                An inactive app was skipped when this source was deployed. Open it to activate it -- that asks where
+                it should live and deploys it.
+              </Caption>
+            ) : null}
           </section>
 
           {pkg.sourceKind === "repo" && canWrite ? <SwitchCredential pkg={pkg} credentials={credentials} /> : null}
@@ -170,9 +199,9 @@ export function SourceView({
             <span aria-hidden>&#9656;</span>
           </button>
 
-          {/* THE CASCADE LIVES HERE AND NOWHERE ELSE. It archives this source
-              and every app it produced, so the only honest place for it is the
-              page whose subject is the source. */}
+          {/* THE CASCADE LIVES HERE AND NOWHERE ELSE. It deactivates every app
+              the source produced, so the only honest place for it is the page
+              whose subject is the source. */}
           {canWrite ? <PackageLifecycle pkg={pkg} apps={apps} /> : null}
         </Panel>
       </div>
@@ -182,12 +211,10 @@ export function SourceView({
         // source said "Tracked" with its own Restore control directly above.
         state={pkg.status === "archived" ? "Archived" : "Tracked"}
         // COUNTED THE WAY THE LIST COUNTS, which is everything this source
-        // declares -- deployed or not. The two surfaces sat side by side
-        // saying "2 apps" and "1 app" about the same source, because this one
-        // counted site rows and the list counts the catalogue.
-        detail={`${total} app${total === 1 ? "" : "s"}${live > 0 ? `, ${live} serving` : ""}${
-          undeployed.length > 0 ? `, ${undeployed.length} not deployed` : ""
-        }${
+        // declares -- deployed or not.
+        detail={`${total} app${total === 1 ? "" : "s"}${live > 0 ? `, ${live} live` : ""}${
+          inactive > 0 ? `, ${inactive} inactive` : ""
+        }${undeployed.length - inactive > 0 ? `, ${undeployed.length - inactive} not deployed` : ""}${
           pkg.autoDeploy ? " -- deploys itself when the plan is unchanged" : ""
         }`}
         tone={pkg.status === "archived" ? "none" : live > 0 ? "live" : "none"}
@@ -195,19 +222,4 @@ export function SourceView({
       />
     </div>
   );
-}
-
-function statusWord(status: string): string {
-  switch (status) {
-    case "live":
-      return "published";
-    case "disabled":
-      return "unpublished";
-    case "draft":
-      return "draft";
-    case "archived":
-      return "archived";
-    default:
-      return status;
-  }
 }

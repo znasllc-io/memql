@@ -125,16 +125,18 @@ const COPY: Record<string, RefusalCopy> = {
     title: "Deploying MemQL is a cluster owner's decision",
     next: "",
   },
-  package_has_active_deployables: {
-    title: "This package still has sites that are serving",
-    next: "",
-  },
   archive_confirmation_mismatch: {
     // TWO CONFIRMATIONS SHARE THIS CODE: archiving a deployable types its
-    // HOSTNAME, archiving a package types its NAME. The headline used to say
-    // "name" for both. The server's sentence quotes the exact string to type.
+    // address LABEL, archiving a source types the source's NAME. The
+    // server's sentence quotes the exact string to type.
     title: "What you typed does not match",
     next: "",
+  },
+  deactivate_confirmation_mismatch: {
+    // The APP'S NAME, never its hostname: the address is generated and is not
+    // what a person calls the thing. The server's sentence quotes it.
+    title: "That is not this app's name",
+    next: "Type it exactly as it appears above. The check is the server's, so nothing was written.",
   },
   deployable_build_failed: {
     title: "The build did not finish",
@@ -316,10 +318,10 @@ const COPY: Record<string, RefusalCopy> = {
     // when they just paused it reads as a fault in the cluster. The next step
     // makes the unpublish conditional for the same reason.
     title: "This deployable has not been archived yet",
-    next: "Archive it first -- unpublish it if it is still serving -- and delete becomes available. Deleting is the end of the line, so it only runs from a state nothing is served from.",
+    next: "Archive it first -- take it offline if it is still live -- and delete becomes available. Deleting is the end of the line, so it only runs from a state nothing is served from.",
   },
   delete_confirmation_mismatch: {
-    title: "That is not this deployable's hostname",
+    title: "That is not this deployable's name",
     next: "Type it exactly as it appears above. The check is the server's, so nothing was written.",
   },
   site_system_owned: {

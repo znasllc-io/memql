@@ -428,6 +428,14 @@ const (
 	// declaration from the live registry (epic memql#4378). Virtual: no
 	// row is persisted. See data_origins_read.go.
 	BuiltinExecutorDataOrigins = "dataOrigins"
+	// BuiltinExecutorSiteHostnameCheck answers whether the caller could
+	// create a site at a hostname right now -- the write guard's own shape
+	// and uniqueness rules, asked before the write (2026-09-05 design, D7).
+	// Virtual; reserves nothing. See site_hostname_check_read.go.
+	BuiltinExecutorSiteHostnameCheck = "siteHostnameCheck"
+	// BuiltinExecutorCustomDomainCheck is the same question for a client's
+	// own domain. Cluster-owner only, as the concept it speaks for is.
+	BuiltinExecutorCustomDomainCheck = "customDomainCheck"
 	// BuiltinExecutorProviderAuthStatus projects every registered AI
 	// provider's availability and credential SOURCE from the live registry
 	// (epic memql#4440). Virtual: no row is persisted, and no credential is

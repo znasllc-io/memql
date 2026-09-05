@@ -3,19 +3,26 @@ import { describe, expect, it } from "vitest";
 import {
   EMPTY_ADDRESS,
   EMPTY_DRAFT,
+  addressChecked,
   addressReady,
   appsToPlace,
+  duplicateSource,
   movingStopFor,
+  normalizeRepoSource,
   pathOf,
   phaseOf,
   placementsComplete,
   placementsFrom,
+  runForScopedFlow,
   seedAddress,
   sourceReady,
   suggestName,
   type AddressDraft,
+  type AddressVerdicts,
   type ComposeDraft,
 } from "../../src/apps/deployables/page/compose";
+import { NICKNAME_WORDS } from "../../src/apps/deployables/packages/nickname";
+import type { DeploymentRow, PackageRow } from "../../src/apps/deployables/packages/rows";
 import { placementsPayload } from "../../src/apps/deployables/packages/calls";
 import {
   EMPTY_MANIFEST,
@@ -365,10 +372,131 @@ describe("the suggestions", () => {
     expect(suggestName(draft({ choice: "ci" }), "")).toBe("");
   });
 
-  it("seeds an address from the app's own name", () => {
-    expect(seedAddress("acme", "storefront")).toEqual({ slug: "storefront", accountId: "", ownDomain: "" });
-    // ...and falls back to the source when the app has no usable name.
-    expect(seedAddress("acme", "").slug).toBe("acme");
+  it("seeds an address with a GENERATED name, never the app's own", () => {
+    // Every source declares `storefront` and `web`, so the first person on a
+    // cluster took those names and the second found them taken at the end of
+    // the flow (2026-09-05). The seed is the Generate button's own draw.
+    const seeded = seedAddress(() => 0);
+    expect(seeded.accountId).toBe("");
+    expect(seeded.ownDomain).toBe("");
+    const [adjective, noun] = seeded.slug.split("-");
+    expect(NICKNAME_WORDS).toContain(adjective);
+    expect(NICKNAME_WORDS).toContain(noun);
+    expect(seeded.slug).not.toBe("storefront");
+  });
+});
+
+describe("the flow opened for ONE app (2026-09-05, D6)", () => {
+  const report = {
+    deployables: [
+      { name: "storefront", kind: "spa", path: "a", buildPlan: "", output: "", prebuilt: true },
+      { name: "web", kind: "spa", path: "b", buildPlan: "", output: "", prebuilt: true },
+    ],
+  };
+
+  it("asks about that app alone, even when its sibling has no address either", () => {
+    // The owner's case: `storefront`'s first deploy was refused, so neither
+    // app had a site, and opening the flow for `web` asked about both.
+    expect(appsToPlace("package", report, [], "web")).toEqual(["web"]);
+  });
+
+  it("asks about nothing when that app already has a site", () => {
+    expect(appsToPlace("package", report, ["web"], "web")).toEqual([]);
+  });
+
+  it("asks about every unplaced app when the flow is not scoped", () => {
+    expect(appsToPlace("package", report, [], "")).toEqual(["storefront", "web"]);
+  });
+});
+
+describe("the cluster's verdict on an address (2026-09-05, D7)", () => {
+  const ok = { state: "ok" as const, problem: "" };
+  const taken = { state: "no" as const, problem: "taken" };
+  const checking = { state: "checking" as const, problem: "" };
+
+  it("is required before Deploy is reachable, when verdicts are supplied", () => {
+    const held = { storefront: address({ slug: "shop" }) };
+    const verdicts: Record<string, AddressVerdicts> = { storefront: { slug: ok } };
+    expect(placementsComplete(["storefront"], held, DOMAIN, verdicts)).toBe(true);
+    expect(placementsComplete(["storefront"], held, DOMAIN, { storefront: { slug: taken } })).toBe(false);
+    expect(placementsComplete(["storefront"], held, DOMAIN, { storefront: { slug: checking } })).toBe(false);
+    // Not asked yet is not an answer.
+    expect(placementsComplete(["storefront"], held, DOMAIN, {})).toBe(false);
+  });
+
+  it("covers the client's own domain too, only when one is given", () => {
+    const plain = address({ slug: "shop" });
+    expect(addressChecked(plain, { slug: ok })).toBe(true);
+    const withDomain = address({ slug: "shop", ownDomain: "www.acme.com" });
+    expect(addressChecked(withDomain, { slug: ok })).toBe(false);
+    expect(addressChecked(withDomain, { slug: ok, ownDomain: taken })).toBe(false);
+    expect(addressChecked(withDomain, { slug: ok, ownDomain: ok })).toBe(true);
+  });
+
+  it("does not gate a skipped app on a verdict it never asked for", () => {
+    const held = { storefront: address({ slug: "shop" }), web: address({ skip: true }) };
+    expect(placementsComplete(["storefront", "web"], held, DOMAIN, { storefront: { slug: ok } })).toBe(true);
+  });
+
+  it("changes nothing when no verdicts are supplied at all", () => {
+    const held = { storefront: address({ slug: "shop" }) };
+    expect(placementsComplete(["storefront"], held, DOMAIN)).toBe(true);
+  });
+});
+
+describe("one source, once (2026-09-05, D8)", () => {
+  const pkg = (over: Partial<PackageRow>): PackageRow => ({
+    id: "pkg-1",
+    ownerUserId: "u-me",
+    name: "acme",
+    sourceKind: "repo",
+    repoUrl: "https://github.com/acme/widget",
+    repoRef: "",
+    credentialId: "",
+    artifactId: "",
+    deployedVersion: "",
+    latestKnownVersion: "",
+    updateAvailable: false,
+    autoDeploy: false,
+    declares: [],
+    disabledDeployables: [],
+    status: "active",
+    createdAt: "2026-09-01T00:00:00Z",
+    ...over,
+  });
+
+  it("reads every spelling of one repository as one", () => {
+    for (const url of [
+      "https://github.com/Acme/Widget",
+      "https://github.com/acme/widget/",
+      "https://github.com/acme/widget.git",
+      "github.com/acme/widget",
+      "git@github.com:acme/widget.git",
+      "https://www.github.com/acme/widget",
+    ]) {
+      expect(normalizeRepoSource(url)).toBe("github.com/acme/widget");
+    }
+    expect(normalizeRepoSource("https://github.com/acme/widgets")).not.toBe("github.com/acme/widget");
+  });
+
+  it("finds the active source tracking the same repository at the same ref", () => {
+    const existing = pkg({});
+    expect(duplicateSource([existing], "https://github.com/ACME/widget.git", "", "main")).toBe(existing);
+    // An EMPTY ref is the default branch, which the probe names -- so "" and
+    // `main` are one ref here, which the engine's own guard cannot know.
+    expect(duplicateSource([existing], "https://github.com/acme/widget", "main", "main")).toBe(existing);
+    // ...and a different ref is a different source.
+    expect(duplicateSource([existing], "https://github.com/acme/widget", "v2", "main")).toBeNull();
+  });
+
+  it("ignores an archived source: archiving is how a source is added again", () => {
+    expect(duplicateSource([pkg({ status: "archived" })], "https://github.com/acme/widget", "", "main")).toBeNull();
+  });
+
+  it("holds Analyze back while a duplicate stands", () => {
+    const d = draft({ choice: "repo", repoUrl: "https://github.com/acme/widget", name: "acme" });
+    expect(sourceReady(d, null, false, null)).toBe(true);
+    expect(sourceReady(d, null, false, pkg({}))).toBe(false);
   });
 });
 
@@ -476,5 +604,57 @@ describe("a skipped placement on the wire", () => {
     expect(placementsPayload({ web: { hostname: "web.example.com", accountId: "", ownDomain: "" } })).toEqual({
       web: { hostname: "web.example.com" },
     });
+  });
+});
+
+describe("the run a flow opened for ONE app reads as its own", () => {
+  const run = (over: Partial<DeploymentRow>): DeploymentRow =>
+    ({
+      id: "dep",
+      packageId: "pkg-1",
+      sourceVersion: "",
+      status: "succeeded",
+      report: null,
+      dslVersion: "",
+      deployables: [],
+      snapshotArtifactId: "",
+      buildLogTail: "",
+      builtOn: null,
+      error: null,
+      requestedBy: "",
+      automatic: false,
+      nodeId: "",
+      stoppedAt: "",
+      startedAt: "",
+      finishedAt: "",
+      heartbeatAt: "",
+      scopedTo: [],
+      fromDeploymentId: "",
+      createdAt: "",
+      ...over,
+    }) as DeploymentRow;
+
+  it("skips a whole-source run that succeeded without ever placing this app", () => {
+    // The defect: an inactive `web` opened its flow already FINISHED, reading
+    // the source's old storefront-only success as its own.
+    const old = run({ id: "old", deployables: [{ name: "storefront", siteId: "s", hostname: "shop.example.com", bundleRef: "", version: "", created: true }] });
+    expect(runForScopedFlow([old], "web")).toBeNull();
+    // ...and counts one that DID place it.
+    expect(runForScopedFlow([old], "storefront")).toBe(old);
+  });
+
+  it("counts a run that is still a question about this app, scoped or not", () => {
+    const parked = run({ id: "gate", status: "awaiting_confirm" });
+    expect(runForScopedFlow([parked], "web")).toBe(parked);
+    const refused = run({ id: "no", status: "refused", scopedTo: ["web"] });
+    expect(runForScopedFlow([refused], "web")).toBe(refused);
+    // A run scoped to a SIBLING is not this app's, whatever its status.
+    expect(runForScopedFlow([run({ id: "sib", status: "building", scopedTo: ["storefront"] })], "web")).toBeNull();
+  });
+
+  it("takes the newest run that qualifies", () => {
+    const newer = run({ id: "new", status: "analyzing", scopedTo: ["web"] });
+    const older = run({ id: "old", deployables: [{ name: "web", siteId: "s", hostname: "web.example.com", bundleRef: "", version: "", created: true }] });
+    expect(runForScopedFlow([newer, older], "web")).toBe(newer);
   });
 });
