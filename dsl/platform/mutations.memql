@@ -1198,6 +1198,35 @@ mutate package recordPackageName {
   }
 }
 
+/// Record what a source's manifest declares, from the analysis that read it.
+///
+/// @serverOnly because it is the PIPELINE's reading of the tree, not a claim a client may make:
+/// this list is what the OS offers as "apps you can still deploy", so a caller able to write it
+/// could invent deployables that no manifest contains and have the console offer to deploy them.
+///
+/// actor.userId scoping is not the fix, for both of the reasons the other pipeline writers give.
+/// It runs during a deploy, where stages hand off across nodes and actor.userId is EMPTY on the
+/// very path that has to write -- a caller-scoped form could never write at all. And the thing
+/// worth refusing here is not cross-user reach: it is somebody asserting that a package THEY OWN
+/// contains an app its manifest does not name. Scoping bounds whose rows are touched, never what
+/// may be claimed about them.
+///
+/// Rewritten whole on every analysis rather than merged, because the manifest is the authority on
+/// what the source contains -- an app removed upstream must LEAVE this list, and a merge would
+/// keep it forever.
+@serverOnly
+@description("Record the deployables a package's manifest declares")
+mutate package recordPackageDeployables {
+  args {
+    packageId  string!
+    declares   []object!
+  }
+  update {
+    id:       args.packageId
+    declares: args.declares
+  }
+}
+
 /// The D11 feeds' ONLY write. Both feeds -- the webhook and the poll -- converge here, and this
 /// mutation touches exactly the two fields section C marks as feed-owned. That narrowness is the
 /// design: a feed that could write anything else would be deciding to deploy, and deploying an

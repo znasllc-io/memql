@@ -478,6 +478,14 @@ describe("the compose flow: a zip in Files", () => {
     expect(railStates(region)[3]).toBe("skipped");
     expect(within(region).getByText("its built output is in the source")).toBeTruthy();
 
+    // A GENERATED ADDRESS, for when it should say nothing about what it
+    // serves. It fills the same field rather than replacing it, so it is a
+    // starting point like the suggestion and not a decision.
+    const generate = within(region).getByRole("button", { name: /Generate an address for Landing page/ });
+    await click(generate);
+    const field = within(region).getByLabelText("The name Landing page answers at") as HTMLInputElement;
+    expect(field.value).toMatch(/^[a-z]+-[a-z]+$/);
+
     await fill("The name Landing page answers at", "landing");
     await click(forwardAct("Analyze"));
 

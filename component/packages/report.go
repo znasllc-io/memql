@@ -1,6 +1,9 @@
 package packages
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // The analysis report (design section E).
 //
@@ -45,6 +48,45 @@ type Report struct {
 }
 
 // DeployableReport is one declared surface's analysis.
+// DeclaredDeployable is the CATALOGUE entry for one manifest deployable, as
+// recorded on the package row (`v1:platform:package.declares`).
+//
+// Deliberately two fields where DeployableReport has eight. This answers one
+// question -- "what can still be deployed from this source" -- and every other
+// field on the report is about a particular RUN: its build plan, its output
+// path, the problem that analysis found. Copying those here would put a
+// run-shaped fact on a row that outlives every run, where nothing would ever
+// correct it.
+//
+// NO ADDRESS. A skipped app is not asked where it should live until somebody
+// deploys it, so there is no placement to keep; a site row is what carries a
+// hostname, and a site row means deployed.
+type DeclaredDeployable struct {
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+}
+
+// declaredFrom projects the analysis report onto the catalogue.
+//
+// A nil report yields an EMPTY list rather than nil: "this source declares
+// nothing we could read" is a true statement, and the store's writer refuses
+// to render nil as null. An entry with no name is dropped -- it could never be
+// matched against a site's packageDeployableName, so it would be a row nobody
+// could act on.
+func declaredFrom(rep *Report) []DeclaredDeployable {
+	out := []DeclaredDeployable{}
+	if rep == nil {
+		return out
+	}
+	for _, d := range rep.Deployables {
+		if strings.TrimSpace(d.Name) == "" {
+			continue
+		}
+		out = append(out, DeclaredDeployable{Name: d.Name, Kind: d.Kind})
+	}
+	return out
+}
+
 type DeployableReport struct {
 	Name string `json:"name"`
 	Kind string `json:"kind"`

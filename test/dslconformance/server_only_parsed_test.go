@@ -373,6 +373,16 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "recordPackageDeployedVersion"}:  true,
 		{Path: "platform/mutations.memql", Name: "recordPackageName"}:             true,
 		{Path: "platform/mutations.memql", Name: "recordPackageUpstreamVersion"}:  true,
+		// recordPackageDeployables is the PIPELINE's reading of the tree, and
+		// it is a pipeline writer for the reason the ones above are: it runs
+		// during a deploy, where actor.userId is empty on the path that has to
+		// write. What it records is what the manifest DECLARES, and the OS
+		// offers that list as "apps you can still deploy" -- so a
+		// client-reachable form would let somebody invent deployables no
+		// manifest contains and have the console offer to deploy them.
+		// Caller-scoping does not address that either: the claim worth
+		// refusing is about the CONTENTS of a package the caller already owns.
+		{Path: "platform/mutations.memql", Name: "recordPackageDeployables"}:      true,
 		{Path: "platform/mutations.memql", Name: "openPackageDeployment"}:         true,
 		{Path: "platform/mutations.memql", Name: "advancePackageDeployment"}:      true,
 		{Path: "platform/mutations.memql", Name: "recordPackageDeploymentReport"}: true,

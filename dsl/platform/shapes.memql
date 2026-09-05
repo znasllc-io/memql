@@ -241,6 +241,7 @@ shape package packageFull {
   latestKnownVersion
   updateAvailable
   autoDeploy
+  declares
   status
   row.createdAt
 }

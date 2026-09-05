@@ -1,4 +1,7 @@
-import { Caption, Field, Input, Subhead } from "../../../../../kit";
+import { Shuffle } from "lucide-react";
+
+import { Button, Caption, Field, Input, Subhead } from "../../../../../kit";
+import { generateNickname } from "../../../packages/nickname";
 import { AccountPicker } from "../../../../accounts/AccountPicker";
 import { accountNameFrom, type AccountRow } from "../../../../accounts/rows";
 import { normalizeHostname } from "../../../domains";
@@ -192,13 +195,29 @@ function AppAddress({
       ) : (
       <>
       <Field label="Address">
-        <Input
-          id={`os-compose-slug-${key}`}
-          label={`The name ${heading || "this deployable"} answers at`}
-          value={address.slug}
-          onChange={(next) => onAddress({ slug: next })}
-          placeholder="shop"
-        />
+        <div className="os-compose-slug">
+          <Input
+            id={`os-compose-slug-${key}`}
+            label={`The name ${heading || "this deployable"} answers at`}
+            value={address.slug}
+            onChange={(next) => onAddress({ slug: next })}
+            placeholder="shop"
+          />
+          {/* A NAME THAT SAYS NOTHING, on purpose. Sometimes an address should
+              not describe what it serves -- a demo, a preview, a thing not
+              ready to be found. A random string does that and is unusable:
+              nobody can read one over a desk. Two ordinary words are the
+              Docker-container shape and memorable for the same reason a phrase
+              is. It fills the field rather than replacing it, so it is a
+              starting point like the suggestion, not a decision. */}
+          <Button
+            tone="quiet"
+            ariaLabel={`Generate an address for ${heading || "this deployable"}`}
+            onClick={() => onAddress({ slug: generateNickname() })}
+          >
+            <Shuffle size={12} aria-hidden /> Generate
+          </Button>
+        </div>
       </Field>
       {/* THE PREVIEW IS THE ANSWER, at keystroke rate: what a person is
           choosing is a hostname, not a label, and the label alone does not

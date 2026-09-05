@@ -376,6 +376,24 @@ export function PackageLifecycle({ pkg, apps }: { pkg: PackageRow; apps: readonl
   const [confirmName, setConfirmName] = useState("");
   const produced = apps.length === 0 ? "nothing yet" : apps.map(siteName).join(", ");
 
+  // ===========================================================================
+  // A CONTROL THAT CAN ONLY FAIL IS NOT OFFERED
+  // ===========================================================================
+  // The engine refuses `packageArchive` with package_has_active_deployables
+  // while ANY app is still serving, naming the live hostnames -- pausing is
+  // the step that gives anyone still using it a chance to notice, and it stays
+  // the person's decision. The predicate here is that predicate exactly:
+  // `status === "live"`, not "live or paused".
+  //
+  // So the button is disabled and says WHICH apps, rather than opening a typed
+  // confirmation that ends in a refusal. Naming them is the whole courtesy --
+  // "pause them first" is not actionable without knowing which.
+  //
+  // THE CLIENT GATE IS PRESENTATION; THE SERVER GATE IS THE GATE. This page
+  // can be stale -- an app can go live between the read and the click -- so
+  // the refusal render below stays exactly where it was.
+  const serving = apps.filter((a) => a.status === "live");
+
   if (pkg.status === "archived") {
     return (
       <section className="os-report-part">
@@ -425,8 +443,20 @@ export function PackageLifecycle({ pkg, apps }: { pkg: PackageRow; apps: readonl
         </>
       ) : (
         <>
-          <Caption>An archived source stays listed and can be restored. Nothing is deleted.</Caption>
-          <Button onClick={() => setArchiving(true)}>
+          <Caption>
+            {serving.length === 0 ? (
+              "An archived source stays listed and can be restored. Nothing is deleted."
+            ) : (
+              <>
+                {serving.length === 1 ? "One app from this source is still serving" : `${serving.length} apps from this source are still serving`}
+                {" -- "}
+                {serving.map((a) => a.hostname).join(", ")}. Pause {serving.length === 1 ? "it" : "them"} first: archiving is
+                the end of a deployable&rsquo;s life, and pausing is the step that gives anyone still using it a chance to
+                notice.
+              </>
+            )}
+          </Caption>
+          <Button disabled={serving.length > 0} onClick={() => setArchiving(true)}>
             <Archive size={12} aria-hidden /> Archive this source and every app it produced
           </Button>
         </>

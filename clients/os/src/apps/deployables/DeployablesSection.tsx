@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Archive, ArrowUpCircle, ChevronRight, GitBranch, Globe, Plus } from "lucide-react";
 
+import { usePackageActions } from "./packages/actions";
 import { useDeployablesSettings } from "./settingsContext";
 import {
   Button,
@@ -94,7 +95,7 @@ type DeployablesView =
   | { kind: "deployable"; siteId: string }
   | { kind: "source"; packageId: string }
   | { kind: "history"; packageId: string }
-  | { kind: "compose"; parkedPackageId?: string };
+  | { kind: "compose"; parkedPackageId?: string; only?: string };
 
 export function DeployablesSection({
   sites,
@@ -146,6 +147,7 @@ export function DeployablesSection({
   const packageRows = packages?.snapshot.rows ?? [];
   const parkedRows = parked?.snapshot.rows ?? [];
 
+  const packageActions = usePackageActions();
   const viewKey = listViewKey(filter, showArchived);
   const list = useThreeFeedView<SiteRow, PackageRow, DeploymentRow, DeployableListGroup>(
     sites,
@@ -194,6 +196,25 @@ export function DeployablesSection({
 
   // ---- the views -----------------------------------------------------------
 
+  // DEPLOYING AN APP THE SOURCE ONLY DECLARES.
+  //
+  // It has no site and no run of its own, so there is nothing to open: the
+  // analysis that reads the tree is what produces the confirm gate where an
+  // address is asked for. That is why this is an ACT and not navigation -- and
+  // why the row that calls it says "not deployed" rather than looking like a
+  // page.
+  //
+  // `only` is what keeps it to ONE app. Without it the gate would send no
+  // placement for the apps that already have sites, the engine would default
+  // them to not-skipped, and deploying one app would rebuild and republish
+  // every one of them -- which is exactly the complaint that took the Deploy
+  // button off the source page.
+  async function openDeclared(packageId: string, app: string) {
+    setView({ kind: "compose", parkedPackageId: packageId, only: app });
+    await packageActions.deploy(packageId, false);
+    onReseed();
+  }
+
   if (view.kind === "compose") {
     const parkedFor =
       view.parkedPackageId === undefined ? null : newestParked(packageRows, parkedRows, view.parkedPackageId);
@@ -207,6 +228,7 @@ export function DeployablesSection({
         onBack={backToList}
         onAsk={onAsk}
         parked={parkedFor ?? undefined}
+        only={view.only}
         placed={
           parkedFor === null
             ? []
@@ -406,6 +428,7 @@ export function DeployablesSection({
               onOpenSite={openSite}
               onOpenSource={(packageId) => setView({ kind: "source", packageId })}
               onOpenParked={(packageId) => setView({ kind: "compose", parkedPackageId: packageId })}
+              onDeployDeclared={(packageId, app) => void openDeclared(packageId, app)}
             />
           )}
         />
@@ -465,6 +488,7 @@ function GroupLine({
   onOpenSite,
   onOpenSource,
   onOpenParked,
+  onDeployDeclared,
   figures,
 }: {
   group: DeployableListGroup;
@@ -474,6 +498,8 @@ function GroupLine({
   onOpenSite: (siteId: string) => void;
   onOpenSource: (packageId: string) => void;
   onOpenParked: (packageId: string) => void;
+  /** A declared app with no site: deploying it is what asks for its address. */
+  onDeployDeclared: (packageId: string, app: string) => void;
   figures: Map<string, TrafficSummary>;
 }) {
   // COLLAPSED IS THE DEFAULT, and which groups are open is remembered. The
@@ -491,7 +517,16 @@ function GroupLine({
       waiting={waiting}
       accounts={accounts}
       open={row.site !== null && row.site.id === selectedSiteId}
-      onOpen={() => (row.site === null ? onOpenParked(row.pkg?.id ?? "") : onOpenSite(row.site.id))}
+      onOpen={() =>
+        row.site !== null
+          ? onOpenSite(row.site.id)
+          : // NO SITE, and the two reasons are different. A row a PARKED run
+            // put here has a gate to reopen; one the source merely DECLARES
+            // has nothing yet, and deploying it is what makes the gate.
+            row.parked !== null
+            ? onOpenParked(row.pkg?.id ?? "")
+            : onDeployDeclared(row.pkg?.id ?? "", row.app)
+      }
       traffic={row.site === null ? null : (figures.get(row.site.id) ?? null)}
     />
   );
@@ -526,11 +561,17 @@ function GroupLine({
       {heading}
       <div className="os-deploy-group" data-archived={pkg.status === "archived" || undefined}>
         <div className="os-deploy-grouphead">
-          {/* TWO CONTROLS, TWO JOBS. The chevron opens and shuts the group; the
-              row itself opens the SOURCE's own view, where its credential,
-              auto-deploy switch, history and archive live. Folding both onto
-              the row would mean either losing the source view or making a
-              click ambiguous. */}
+          {/* THE COUNT IS THE CONTROL, and a bare chevron was not: a lone arrow
+              said nothing about what it would do. The count was already on this
+              row and is exactly what opening the group reveals, so the two are
+              one control -- "2 apps" with a chevron that turns.
+
+              IT SITS OUTSIDE THE ROW, not in its trailing cluster, because an
+              openable ListRow IS a button and a button cannot contain another
+              one: nested, this rendered but never fired.
+
+              TWO CONTROLS, TWO JOBS: this opens the group, the row opens the
+              SOURCE's own view. Folding them together would cost one. */}
           <button
             type="button"
             className="os-deploy-disclose"
@@ -539,7 +580,10 @@ function GroupLine({
             aria-label={`${expanded ? "Collapse" : "Expand"} ${sourceLabel(pkg)}`}
             onClick={() => toggleSource(group.id)}
           >
-            <ChevronRight size={13} aria-hidden />
+            <ChevronRight size={12} aria-hidden />
+            <span>
+              {group.rows.length} app{group.rows.length === 1 ? "" : "s"}
+            </span>
           </button>
           <ListRow
             icon={<GitBranch size={15} aria-hidden />}
@@ -559,9 +603,7 @@ function GroupLine({
                   </Chip>
                 ) : null}
                 {waiting ? <span className="os-deploy-waiting">a deploy is waiting for you</span> : null}
-                <Chip>
-                  {group.rows.length} app{group.rows.length === 1 ? "" : "s"}
-                </Chip>
+
                 {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
                 <span className="os-deploy-railcol" />
               </>

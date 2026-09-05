@@ -438,6 +438,21 @@ describe("reading the branches and the manifest a probe answered", () => {
 //
 // Measured in production: a run whose `web` app was skipped recorded
 // `"created": true` and a published bundleRef for it, with no skip refusal.
+describe("a skipped app's address", () => {
+  it("is not sent, because nobody was asked for one", () => {
+    // The field is not rendered once an app is skipped, so the slug still in
+    // `addresses` is the seeded SUGGESTION -- a value the person never saw.
+    // Sending it would record a placement they did not choose.
+    const out = placementsFrom(["web"], { web: { slug: "web", accountId: "", ownDomain: "", skip: true } }, "memql.example.com");
+    expect(out["web"]).toEqual({ hostname: "", accountId: "", ownDomain: "", skip: true });
+  });
+
+  it("is still sent for an app that is NOT skipped", () => {
+    const out = placementsFrom(["web"], { web: { slug: "web", accountId: "", ownDomain: "" } }, "memql.example.com");
+    expect(out["web"]!.hostname).toBe("web.memql.example.com");
+  });
+});
+
 describe("a skipped placement on the wire", () => {
   it("carries skip through, so the engine's Skip guard can fire", () => {
     expect(
