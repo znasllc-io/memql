@@ -90,6 +90,14 @@ describe("whose run is this", () => {
     const finished = [deployment({ id: "dep-web", status: "succeeded", scopedTo: ["web"] })];
     expect(siblingRunInFlight(finished, "storefront")).toBeNull();
   });
+
+  it("a sibling PARKED at the gate is not in flight", () => {
+    // It is waiting for a person: nothing is executing and nothing holds the
+    // source. Counting it would mean one unanswered gate froze every other app
+    // of the source until somebody went looking for it.
+    const parked = [deployment({ id: "dep-web", status: "awaiting_confirm", scopedTo: ["web"] })];
+    expect(siblingRunInFlight(parked, "storefront")).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

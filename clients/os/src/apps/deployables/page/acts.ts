@@ -139,12 +139,27 @@ export function runForApp(runs: readonly DeploymentRow[], app: string): Deployme
   return runs.find((run) => runCoversApp(run, app)) ?? null;
 }
 
-/** A run of the same source, in flight, that this app's page is not about. */
+/**
+ * A run of the same source, ACTUALLY RUNNING, that this app's page is not
+ * about.
+ *
+ * A PARKED RUN IS NOT IN FLIGHT and does not hold the source. `runIsMoving`
+ * answers "not terminal", which `awaiting_confirm` satisfies -- but a run at
+ * the gate is waiting for a PERSON: nothing is executing, nothing is holding
+ * the pointer, and withholding a sibling's Redeploy over it would mean one
+ * unanswered gate froze every other app of the source until somebody found it.
+ * The hazard this guards is two runs racing at the ROLL, which a parked run
+ * has not reached and may never reach.
+ */
 export function siblingRunInFlight(
   runs: readonly DeploymentRow[],
   app: string,
 ): DeploymentRow | null {
-  return runs.find((run) => !runCoversApp(run, app) && runIsMoving(run)) ?? null;
+  return (
+    runs.find(
+      (run) => !runCoversApp(run, app) && runIsMoving(run) && run.status !== "awaiting_confirm",
+    ) ?? null
+  );
 }
 
 /**
