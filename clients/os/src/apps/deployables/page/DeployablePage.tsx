@@ -8,6 +8,7 @@ import { OpenLogsButton } from "../../../logs/OpenLogs";
 import { useAccountOptions } from "../../accounts/tie";
 import { usePackageActions, useSiteLifecycle } from "../packages/actions";
 import { ProblemNotice } from "../packages/ReportView";
+import type { Placement } from "../packages/calls";
 import { deploymentFromRow, type DeploymentRow, type PackageRow } from "../packages/rows";
 import { usePackageDeployments } from "../packages/usePackages";
 import { liveUrlFor, ownerLabel, siteName, type SiteRow } from "../rows";
@@ -149,12 +150,11 @@ export function DeployablePage({
       case "Deploy the update":
       case "Redeploy":
       case "Retry the deploy":
-        // A PARKED RUN'S DEPLOY IS THE CONFIRMATION, not a new run. The
-        // pipeline republishes through the (packageId, deployable name) key it
-        // recorded on the first deploy, so it needs no placements -- every app
-        // of an existing deployable already has its address.
+        // A PARKED RUN'S DEPLOY IS THE CONFIRMATION, not a new run -- but it
+        // is still scoped to this page's app, or confirming from here would
+        // deploy every sibling the source declares.
         if (pkg !== null && run !== null && run.status === "awaiting_confirm") {
-          void headActions.deploy(pkg.id, true).then(reseed);
+          void headActions.deploy(pkg.id, true, onlyThisApp(pkg, site)).then(reseed);
           return;
         }
         if (pkg === null) {
@@ -164,7 +164,7 @@ export function DeployablePage({
           setZipOpen(true);
           return;
         }
-        void headActions.deploy(pkg.id, false).then(reseed);
+        void headActions.deploy(pkg.id, false, onlyThisApp(pkg, site)).then(reseed);
         return;
       default:
         return;
@@ -401,6 +401,37 @@ function ConfirmRow({
       </Button>
     </>
   );
+}
+
+/**
+ * Placements that redeploy THIS deployable and leave its siblings alone.
+ *
+ * THE SUBJECT OF THIS PAGE IS ONE APP. A deploy call with no placements is a
+ * whole-PACKAGE run: the engine defaults every deployable to not-skipped, so
+ * Redeploy on one app rebuilt and republished all of them. Worse, it FAILED
+ * outright once a source declared an app that had never been deployed -- the
+ * run refused with `deployable "web" has never been deployed and no hostname
+ * was chosen for it`, on a page about a different app entirely, while the
+ * site this page is about was serving perfectly.
+ *
+ * This used to be justified with "it needs no placements -- every app of an
+ * existing deployable already has its address", which stopped being true the
+ * moment a source recorded what it DECLARES as well as what it deployed.
+ *
+ * THIS app gets no entry: absent means not-skipped, and the engine republishes
+ * through the (packageId, deployable name) key it recorded on the first
+ * deploy, so its address is already remembered. Every OTHER declared app is
+ * skipped BY NAME -- including ones the owner turned off, which the engine has
+ * no other way to know about.
+ */
+function onlyThisApp(pkg: PackageRow, site: SiteRow): Record<string, Placement> {
+  const mine = site.packageDeployableName;
+  const out: Record<string, Placement> = {};
+  for (const declared of pkg.declares) {
+    if (declared.name === "" || declared.name === mine) continue;
+    out[declared.name] = { hostname: "", accountId: "", ownDomain: "", skip: true };
+  }
+  return out;
 }
 
 /** The history line's own summary: how many, and how the last one went. */
