@@ -358,8 +358,8 @@ export function ComposePage(props: ComposePageProps) {
       source: sourceAnswer(parked?.pkg ?? null, draft),
       ...(path === "handmade" ? { whatItIs: handMadeVerdict(draft) } : {}),
       ...(siteHostname === "" ? {} : { whereItLives: siteHostname }),
-      ...(phase === "published" && outcomes.length > 0
-        ? { whereItLives: outcomes.map((o) => o.hostname).filter((h) => h !== "").join(", ") }
+      ...(phase === "published" && publishedHosts(outcomes).length > 0
+        ? { whereItLives: publishedHosts(outcomes).join(", ") }
         : {}),
       ...liveAnswer(phase, path, draft, siteHostname, outcomes),
     },
@@ -506,17 +506,11 @@ export function ComposePage(props: ComposePageProps) {
 
       <Rail input={input} stopBody={stopBody} />
 
-      {phase === "published" ? (
-        <Notice
-          tone="info"
-          sentence={publishedSentence(path, draft, outcomes)}
-          next="It is on the Deployables list now. Open it there to make it live."
-        >
-          <Button tone="primary" onClick={onBack}>
-            Done
-          </Button>
-        </Notice>
-      ) : null}
+      {/* THE OUTCOME IS THE BAR'S, not a notice in the panel (DESIGN.md rule
+          12). This said the same thing the bar said, two inches apart, and
+          carried the act while the bar offered Cancel -- so the finished flow
+          had two summaries and its only real control was in the half a person
+          does not read for controls. */}
       {canWrite ? null : (
         <Caption>Composing a deployable is a deploy-tier act, and this cluster has not given you that rank.</Caption>
       )}
@@ -525,17 +519,30 @@ export function ComposePage(props: ComposePageProps) {
 
       <ActionBar
         state={composePhaseWord(phase)}
-        detail={composePhaseDetail(phase, action, apps, addresses)}
+        detail={
+          phase === "published"
+            ? `${publishedSentence(path, draft, outcomes)} It is on the Deployables list now.`
+            : composePhaseDetail(phase, action, apps, addresses)
+        }
         tone={phase === "analyzing" || phase === "deploying" ? "busy" : "none"}
-        acts={barActs}
+        acts={
+          phase === "published"
+            ? [{ label: "Done", tone: "primary" as const, onAct: onBack }]
+            : barActs
+        }
       >
-        {/* CANCEL IS ALWAYS REACHABLE, on the left of the forward act. Nothing
-            has been written until Analyze, so leaving costs nothing -- and a
-            flow somebody cannot leave without hunting for the way out is one
-            they abandon by closing the window. */}
-        <Button tone="quiet" onClick={onBack}>
-          Cancel
-        </Button>
+        {/* CANCEL IS ALWAYS REACHABLE WHILE THERE IS SOMETHING TO CANCEL, on
+            the left of the forward act: nothing is written until Analyze, so
+            leaving costs nothing, and a flow somebody cannot leave without
+            hunting for the way out is one they abandon by closing the window.
+            ONCE IT HAS PUBLISHED there is nothing to cancel -- the apps are
+            deployed -- so the act is Done and the word Cancel would be a lie
+            about what leaving now would undo. */}
+        {phase === "published" ? null : (
+          <Button tone="quiet" onClick={onBack}>
+            Cancel
+          </Button>
+        )}
       </ActionBar>
     </div>
   );
@@ -687,17 +694,43 @@ function liveAnswer(
           : `Waiting for the first push from your CI. ${siteHostname} starts serving when it lands.`,
     };
   }
-  const hosts =
-    outcomes.length > 0 ? outcomes.map((o) => o.hostname).filter((h) => h !== "").join(", ") : siteHostname;
+  const published = publishedHosts(outcomes);
+  const hosts = published.length > 0 ? published.join(", ") : siteHostname;
   return hosts === "" ? {} : { live: `Published to ${hosts}. Not serving yet.` };
+}
+
+/**
+ * The hostnames a run actually published, from its outcomes.
+ *
+ * `?? ""` IS THE WHOLE FIX. The engine writes a skipped outcome as
+ * `{name, refusal}` with NO hostname key, and `listOf<DeployableOutcome>`
+ * casts the raw array without normalising -- so `hostname` is `undefined` at
+ * runtime while the type says `string`, and the obvious `o.hostname !== ""`
+ * is TRUE for it. Skipping one app of two and deploying reported "Published 2
+ * apps", and the hostname list it joined carried an empty slot.
+ *
+ * A REFUSAL IS NOT THE TEST. `deployable_account_refused` and
+ * `deployable_domain_refused` publish the app and then fail the tie, so they
+ * carry both a hostname and a refusal -- and they did publish. The hostname is
+ * the fact; the refusal is about something else.
+ */
+function publishedHosts(outcomes: readonly DeployableOutcome[]): string[] {
+  return outcomes.map((o) => (o.hostname ?? "").trim()).filter((h) => h !== "");
 }
 
 function publishedSentence(path: ComposePath, draft: ComposeDraft, outcomes: readonly DeployableOutcome[]): string {
   if (path === "handmade" && draft.choice === "ci") {
     return "The deployable is ready and its door is open. Nothing serves until your CI pushes.";
   }
-  const made = outcomes.filter((o) => o.hostname !== "").length;
-  return made > 1 ? `Published ${made} apps. None of them is serving yet.` : "Published. It is not serving yet.";
+  // NO OUTCOMES AT ALL is the hand-made path: a zip is published through
+  // `sitePublishFromArtifact` rather than through a run, so there is no
+  // per-deployable list to count and one site was published. "Nothing was
+  // published" is reserved for a run that REPORTED outcomes and published
+  // none -- which is a real state, and a different one.
+  if (outcomes.length === 0) return "Published. It is not serving yet.";
+  const made = publishedHosts(outcomes).length;
+  if (made > 1) return `Published ${made} apps. None of them is serving yet.`;
+  return made === 1 ? "Published 1 app. It is not serving yet." : "Nothing was published.";
 }
 
 /** The refusal that stopped the flow: the run's error, or the report's first fatal problem. */
