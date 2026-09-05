@@ -1,0 +1,39 @@
+# The mesh nodes that load product DSL, LABELLED -- a layer of its own, and
+# that is the whole point.
+#
+# TWO THINGS THIS LAYER EXISTS FOR (memql#4933), both of which the components'
+# own USAGE blocks used to get wrong:
+#
+#  1. ORDER. `memql/product-dsl: "true"` is what the DSL components' patches
+#     select on, and a kustomization's label transformer runs AFTER its
+#     `components:`. So `components:` and `labels:` side by side in one
+#     kustomization -- the shape the headers prescribed -- selects nothing,
+#     silently: kustomize renders, kubectl applies, every pod comes up healthy,
+#     and not one of them has an init container or MEMQL_DSL_PATH. Labelling in
+#     an inner layer the outer one consumes as a RESOURCE puts the label on
+#     before the selector reads it.
+#
+#  2. WHICH DEPLOYMENTS. A blanket `labels:` marks every resource in the base,
+#     `redis` included -- and redis has no `volumes:` key at all, so the very
+#     first JSON6902 op fails the whole render with `doc is missing path`. The
+#     nodes that load DSL are the five mesh node types, named here, and naming
+#     them is what an instance does anyway.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../../../base
+
+components:
+  # Before the patch, because engine-bff ADDS the bff Deployment and it has to
+  # exist to be labelled.
+  - ../../../engine-bff
+
+patches:
+  - target:
+      kind: Deployment
+      name: "^(bff|agent|cognition|planner|workbench)$"
+    patch: |
+      - op: add
+        path: /metadata/labels/memql~1product-dsl
+        value: "true"

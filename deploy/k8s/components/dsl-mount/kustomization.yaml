@@ -1,0 +1,73 @@
+# Reusable kustomize Component: the SHARED DSL mount every deliverer writes into.
+#
+# memql#4933. This is the substrate `dsl-bundle` and `dsl-packages` used to
+# each build for themselves, which is why they could not be applied together:
+# both appended a volume named `dsl-bundle`, both appended the same
+# `/var/lib/memql/dsl` mount to container 0, and both appended
+# `MEMQL_DSL_PATH`. Kustomize does not dedupe an `add ... /-`, so an instance
+# that ships its own product as a bundle image AND wants staged packages
+# rendered a Deployment the API server refuses: `spec.template.spec.volumes[1]
+# .name: Duplicate value: "dsl-bundle"`.
+#
+# WORSE, AND SILENT: `dsl-bundle` added its init container with `op: add` at
+# the BARE path `/spec/template/spec/initContainers`, which REPLACES the whole
+# list, while `dsl-packages` appended at `/-`. So the outcome depended on the
+# order the overlay happened to list them in, and one of the two orders
+# silently deleted the package fetcher -- a node that boots healthy serving
+# none of its packages' DSL. Neither component said which order it needed.
+#
+# The two deliverers now add ONE init container each and nothing else, and the
+# ORDER OF THE `components:` LIST IS THE ORDER THEY RUN IN -- which is the
+# thing an overlay author can see and reason about.
+#
+# It also makes `dsl-packages` applicable ALONE. No Deployment in this repo
+# ships an `initContainers` key, and a JSON6902 `add` to `/initContainers/-`
+# against a missing key is a "missing path" error -- so the packages component,
+# whose whole documented use is standalone, could only ever render if
+# `dsl-bundle` had run first and created the list. That dependency was real,
+# undocumented, and inverted: the component that needs no product image
+# depended on the one that does.
+#
+# USAGE (in an instance overlay) -- this one FIRST, then the deliverers in the
+# order their init containers should run:
+#   components:
+#     - ../../components/dsl-mount
+#     - ../../components/dsl-bundle      # optional: a product's own DSL image
+#     - ../../components/dsl-packages    # optional: DSL staged by deploys
+#   labels:                              # or a per-Deployment label patch
+#     - pairs: { memql/product-dsl: "true" }
+#       includeSelectors: false
+#
+# Apply it exactly ONCE. Listing it twice reproduces the duplicate-volume
+# failure it exists to remove; there is no dedupe to fall back on.
+#
+# The engine container is index 0 on every mesh node Deployment (bff /
+# cognition / agent / planner / workbench), so the patch is name-agnostic.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - target:
+      kind: Deployment
+      labelSelector: memql/product-dsl=true
+    patch: |
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: dsl-tree
+          emptyDir: {}
+      # An EMPTY list, created here so the deliverers can append to it. `add`
+      # at the bare path creates the key; `add` at `/-` needs it to exist.
+      - op: add
+        path: /spec/template/spec/initContainers
+        value: []
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value:
+          name: dsl-tree
+          mountPath: /var/lib/memql/dsl
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: MEMQL_DSL_PATH
+          value: /var/lib/memql/dsl

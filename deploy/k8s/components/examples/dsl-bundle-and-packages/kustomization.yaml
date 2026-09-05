@@ -1,0 +1,33 @@
+# Composition example: a product's own DSL bundle AND staged package DSL on the
+# same nodes (memql#4933).
+#
+# THIS IS THE COMBINATION THAT DID NOT RENDER. Both components used to build
+# the shared substrate for themselves -- the same emptyDir named `dsl-bundle`,
+# the same `/var/lib/memql/dsl` mount on container 0, the same MEMQL_DSL_PATH
+# -- and kustomize does not dedupe an `add ... /-`, so applying both produced
+# `spec.template.spec.volumes[1].name: Duplicate value` and the API server
+# refused the Deployment. Worse and quieter: `dsl-bundle` added its init
+# container at the BARE path, replacing the whole list, so in one of the two
+# listing orders the package fetcher was silently deleted and the node booted
+# healthy with none of its packages' DSL.
+#
+# THE `components:` ORDER IS THE INIT-CONTAINER ORDER, and that is the whole
+# point of the split: the product's bundle lands first, packages add domains
+# beside it. Reversing the last two lines reverses the copy order, which is now
+# a thing an overlay author can see and decide rather than a consequence of
+# which patch happened to replace the other's list.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: dsl-bundle-and-packages-example
+
+resources:
+  # The same labelled mesh the sibling example builds; the label layer is what
+  # makes the selector match at all, and its own header says why.
+  - ../dsl-packages-only/labelled
+  - configmap.yaml
+
+components:
+  - ../../dsl-mount
+  - ../../dsl-bundle
+  - ../../dsl-packages

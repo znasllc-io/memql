@@ -28,7 +28,8 @@ import (
 // decides whether the pod starts:
 //
 //	0  the trees are in place, OR there is no pointer at all
-//	1  a pointer exists and could not be honoured
+//	1  a pointer exists and could not be honoured, OR this container was
+//	   never told where to look
 //
 // The asymmetry is deliberate. A cluster that has never deployed a package has
 // no pointer, and that is the ordinary state -- refusing to boot over it would
@@ -37,6 +38,15 @@ import (
 // brings the node up with silently-missing product DSL, which presents as a
 // healthy cluster answering "function not found" to every call it used to
 // serve.
+//
+// AN UNCONFIGURED CONTAINER IS THE SECOND CASE, NOT THE FIRST (memql#4933).
+// It reads like the first -- nothing was found, nothing is wrong -- and for a
+// long-running engine process that reading is right. Here it is not: this
+// process exists only to fetch, so a fetcher that cannot say where to look has
+// not found an empty cluster, it has failed to look at all. It exited 0 on
+// every instance that applied the component as shipped, because the container
+// name is not in the Secret the component envFroms, and each of those nodes
+// booted healthy and served none of its packages' DSL.
 func runDslFetchSubcommand(args []string) int {
 	for _, a := range args {
 		if a == "-h" || a == "--help" || a == "help" {

@@ -1,0 +1,47 @@
+# Reusable kustomize Component: permission to ROLL a DSL-carrying package.
+#
+# memql#4933. The last stage of a package deploy that carries DSL is the roll:
+# `deploycontrol.RestartDeployment` patches each workload named by
+# MEMQL_PACKAGES_ROLL_TARGETS so the nodes pick up the newly-staged tree. It
+# does that as the pod's own ServiceAccount, `memql-engine`, and nothing in
+# this repo grants that account any Kubernetes API privilege beyond the
+# custom-domain Role. So on a fresh instance the first DSL-carrying deploy
+# fetched, analyzed, built and staged, and then failed on a 403 at the last
+# stage -- with the documentation naming the env var and nothing naming the
+# permission.
+#
+# WHY IT IS A COMPONENT AND NOT A BASE RESOURCE. The grant is pinned by
+# `resourceNames` to the workloads this instance actually rolls, and that set
+# is MEMQL_PACKAGES_ROLL_TARGETS, which is an instance's own value. A base Role
+# would have to either name a set no instance agrees with or drop
+# `resourceNames` and grant patch over every Deployment in the namespace --
+# which is exactly the blast radius the env var exists to make somebody choose.
+#
+# THE TWO LISTS MUST AGREE, and nothing can check that for you. The names below
+# are the mesh node types the base ships; an instance that rolls a different
+# set patches this component AND sets MEMQL_PACKAGES_ROLL_TARGETS to match. A
+# name in the env var and not in the Role is a 403 at the roll; a name in the
+# Role and not in the env var is a permission nobody uses.
+#
+# USAGE (in an instance overlay):
+#   components:
+#     - ../../components/packages-roll-rbac
+#
+# and, to roll a different set, a patch beside it:
+#   patches:
+#     - target: { kind: Role, name: memql-packages-roll }
+#       patch: |
+#         - op: replace
+#           path: /rules/0/resourceNames
+#           value: ["agent", "cognition", "planner", "bff-acme"]
+#
+# It is deliberately NOT bundled into `dsl-packages`: fetching staged DSL and
+# being allowed to restart pods are different permissions, an instance may
+# legitimately want the first without the second (a single-replica instance
+# rolled by hand), and a component that quietly grants API access because you
+# asked for a file copy is the kind of thing nobody reads.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - role.yaml

@@ -477,6 +477,18 @@ runs it as an init-container that copies the `.memql` tree into a shared volume
 the node reads at `MEMQL_DSL_PATH`. A "bff" is just a plain engine `bff` node
 fronting a product's bundle -- a deploy concern.
 
+`dsl-bundle` and its sibling `dsl-packages` (staged package DSL) each add ONE
+init container and nothing else; **`dsl-mount` owns the shared volume, the
+mount and `MEMQL_DSL_PATH`, and is applied exactly once** (memql#4933). The
+`components:` order is the init-container order. Two things about applying them
+are traps a render shows and a diff does not: the `memql/product-dsl` label has
+to be applied in a layer the components CONSUME (a `labels:` block beside them
+runs after them and selects nothing, silently), and it must name only the mesh
+nodes (`redis` has no `volumes:` key and fails the first patch). The working
+shapes are committed as `deploy/k8s/components/examples/dsl-packages-only` and
+`dsl-bundle-and-packages`, rendered by
+`deploy/k8s/components/dsl-mount/component_test.go`.
+
 **What "never product code" is actually enforced by** -- two narrow guards, not
 a general one, so know their edges (memql#3326):
 

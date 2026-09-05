@@ -3,7 +3,9 @@ package deploycontrol
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -101,7 +103,37 @@ func RestartDeployment(ctx context.Context, namespace, name string) error {
 
 	path := fmt.Sprintf("/apis/apps/v1/namespaces/%s/deployments/%s", ns, dep)
 	if _, err := exec.do(ctx, "PATCH", path, "application/strategic-merge-patch+json", patch); err != nil {
+		// A 403 HERE HAS ONE REPAIR, AND IT IS NOT IN THIS REPOSITORY'S CODE
+		// (memql#4933). The engine runs as `memql-engine`, which by design
+		// holds no Kubernetes API privilege, so a fresh instance reaches this
+		// call with no permission to make it. The API server's own sentence
+		// names the account and the verb and is kept; what it cannot know is
+		// that the fix is a Role, that the Role must name this Deployment in
+		// `resourceNames`, and that the list has to agree with a value set
+		// somewhere else entirely.
+		var status *StatusError
+		if errors.As(err, &status) && status.Code == http.StatusForbidden {
+			return fmt.Errorf("restarting %s/%s: %w\n\nThe node's ServiceAccount may not patch this "+
+				"Deployment. A DSL roll needs a Role granting apps/deployments `patch`, with %q in its "+
+				"resourceNames, bound to the account this pod runs as -- "+
+				"deploy/k8s/components/packages-roll-rbac ships one. Its resourceNames and "+
+				"%s must name the same workloads: a name in one and not the other is either this 403 "+
+				"or a permission nothing uses", ns, dep, err, dep, rollTargetsEnvName)
+		}
 		return fmt.Errorf("restarting %s/%s: %w", ns, dep, err)
 	}
 	return nil
 }
+
+// rollTargetsEnvName is named here rather than imported: component/packages
+// owns the variable and depends on this package, so reading the constant back
+// would close a cycle. The two are held together by
+// TestRollTargetsEnvNameMatchesTheOwner, which lives on the packages side
+// because that is the only side that can see both.
+const rollTargetsEnvName = "MEMQL_PACKAGES_ROLL_TARGETS"
+
+// RollTargetsEnvNameForHint exposes that literal to the test that pins it.
+// Exported for one caller and named so that reading it as a general accessor
+// is uncomfortable -- the value an operator should read is
+// packages.RollTargetsEnv.
+func RollTargetsEnvNameForHint() string { return rollTargetsEnvName }

@@ -2,7 +2,7 @@
 #
 # Epic memql#4794, D5 -- "DSL is data, not an image". The sibling `dsl-bundle`
 # component delivers ONE product's DSL by baking it into an image and copying
-# it out of an init-container; this one delivers N packages' DSL by reading a
+# it out of an init container; this one delivers N packages' DSL by reading a
 # pointer document out of the cluster's own object storage. Both land the same
 # tree in the same shared volume, and the node reads MEMQL_DSL_PATH exactly as
 # it does today -- no hot-mount, no new boot path, no engine change.
@@ -20,31 +20,52 @@
 # idempotent and the rollback safe: an old prefix's bytes are still there, so
 # pointing back at one never has to restore anything.
 #
-# ORDER MATTERS AND IT IS ENCODED HERE. `dsl-packages-fetch` runs AFTER
-# `dsl-bundle-copy` when both components are applied, because init containers
-# run in list order and this one appends. A product's own bundle therefore
-# lands first and a package can add domains beside it -- never over it, since
-# the engine's own mount skips a domain that collides with a core namespace and
-# the ANALYSIS refuses one outright (dsl_domain_reserved), so a collision is
-# caught long before a pod boots.
+# THE VOLUME, THE MOUNT AND MEMQL_DSL_PATH ARE NOT HERE -- they belong to
+# `dsl-mount`, which must be listed before this one (memql#4933). This
+# component used to build them itself, identically to `dsl-bundle`, which made
+# the two mutually exclusive AND made this one silently dependent on that one:
+# no Deployment in the repo ships an `initContainers` key, and appending to a
+# key that does not exist is a "missing path" error, so the component whose
+# whole documented use is standalone could only render if the other had run
+# first. Read dsl-mount's header for the full account.
 #
-# FAIL-OPEN ON AN ABSENT POINTER, FAIL-CLOSED ON A BROKEN ONE. A cluster that
-# has never deployed a package has no active.json, and that is the ordinary
-# state rather than a fault -- the fetch exits 0 and the node boots with
-# whatever DSL it already had. A pointer that EXISTS and cannot be read is a
-# hard failure: booting a node with silently-missing product DSL is how a
-# cluster comes up looking healthy and answering "function not found" to every
-# call.
+# FAIL-OPEN ON AN ABSENT POINTER, FAIL-CLOSED ON A BROKEN ONE, AND FAIL-CLOSED
+# ON AN UNCONFIGURED FETCHER. A cluster that has never deployed a package has
+# no active.json, and that is the ordinary state rather than a fault -- the
+# fetch exits 0 and the node boots with whatever DSL it already had. A pointer
+# that EXISTS and cannot be read is a hard failure: booting a node with
+# silently-missing product DSL is how a cluster comes up looking healthy and
+# answering "function not found" to every call. A fetcher that was never told
+# WHERE to look is the second case and not the first, which it used to read as
+# (memql#4933) -- see MEMQL_AZURE_BLOB_CONTAINER below.
+#
+# WHERE THE CONTAINER NAME COMES FROM. `FetchActiveSet` reads
+# MEMQL_AZURE_BLOB_CONTAINER, and that value is not a secret and is not in
+# `memql-secrets`; it is the one storage fact only an instance knows. This
+# component takes it from a ConfigMap named `memql-storage`, marked optional so
+# a missing ConfigMap produces the fetcher's own sentence naming the variable
+# rather than a pod stuck on a mount error. It shipped with `envFrom` on the
+# Secret alone, so the fetcher saw an empty container name on every instance
+# that applied it as written, took the fail-open branch, and the node booted
+# healthy with none of its packages' DSL.
 #
 # USAGE (in an instance overlay):
 #   components:
+#     - ../../components/dsl-mount
 #     - ../../components/dsl-packages
 #   labels:
 #     - pairs: { memql/product-dsl: "true" }
 #       includeSelectors: false
 #
-# The engine container is index 0 on every mesh node Deployment, so the patch
-# is name-agnostic -- the same assumption dsl-bundle makes.
+# and the storage ConfigMap, wherever this instance keeps its values:
+#   apiVersion: v1
+#   kind: ConfigMap
+#   metadata: { name: memql-storage, namespace: memql }
+#   data: { MEMQL_AZURE_BLOB_CONTAINER: "memql" }
+#
+# A DSL-carrying package also needs the ROLL to be permitted: see
+# ../packages-roll-rbac, and MEMQL_PACKAGES_ROLL_TARGETS in
+# docs/public/operate/packages.md.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
@@ -53,11 +74,6 @@ patches:
       kind: Deployment
       labelSelector: memql/product-dsl=true
     patch: |
-      - op: add
-        path: /spec/template/spec/volumes/-
-        value:
-          name: dsl-bundle
-          emptyDir: {}
       - op: add
         path: /spec/template/spec/initContainers/-
         value:
@@ -71,16 +87,9 @@ patches:
           envFrom:
             - secretRef:
                 name: memql-secrets
+            - configMapRef:
+                name: memql-storage
+                optional: true
           volumeMounts:
-            - name: dsl-bundle
+            - name: dsl-tree
               mountPath: /var/lib/memql/dsl
-      - op: add
-        path: /spec/template/spec/containers/0/volumeMounts/-
-        value:
-          name: dsl-bundle
-          mountPath: /var/lib/memql/dsl
-      - op: add
-        path: /spec/template/spec/containers/0/env/-
-        value:
-          name: MEMQL_DSL_PATH
-          value: /var/lib/memql/dsl
