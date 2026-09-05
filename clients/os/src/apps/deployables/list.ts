@@ -264,6 +264,39 @@ export function foldDeployables(
     push(pkg === null ? `site:${site.id}` : `pkg:${pkg.id}`, pkg, siteRowFor(site, pkg, parked));
   }
 
+  // WHAT THE SOURCE DECLARES BUT HAS NOT DEPLOYED.
+  //
+  // A site row is written only for an app that actually deployed, so an app
+  // SKIPPED at the confirm gate had no row and was invisible -- absent from
+  // this list and absent from its own source's page, which is how somebody
+  // could decline one app of a source and then be unable to find it again.
+  // `declares` is the source's own catalogue, rewritten by every analysis, and
+  // the difference between it and the sites is exactly the set a person can
+  // still deploy.
+  //
+  // BEFORE the parked pass below, so that when a parked run names the same app
+  // the run's row wins: a run in flight is the more specific fact, and `served`
+  // is what keeps the two from both landing.
+  for (const pkg of packages) {
+    for (const declared of pkg.declares) {
+      const key = `${pkg.id}/${declared.name}`;
+      if (served.has(key)) continue;
+      served.add(key);
+      push(`pkg:${pkg.id}`, pkg, {
+        key,
+        site: null,
+        pkg,
+        app: declared.name,
+        name: declared.name,
+        // NO ADDRESS, because it has none: nobody was asked where this should
+        // live. Deploying it is what asks.
+        hostname: "",
+        kind: declared.kind,
+        parked: null,
+      });
+    }
+  }
+
   // THE ROWS THAT WILL SERVE: every app a parked run's report names that has
   // no site yet, and -- when the report names none -- the source itself, so
   // a parked run is never invisible. Somebody who closed the window

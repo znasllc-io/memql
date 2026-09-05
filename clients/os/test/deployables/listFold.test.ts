@@ -332,3 +332,46 @@ describe("the two sections", () => {
     expect(groups.map((g) => [g.section, g.startsSection])).toEqual([["source", true]]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A DECLARED APP THAT WAS NEVER DEPLOYED IS STILL ONE OF THE SOURCE'S APPS
+// ---------------------------------------------------------------------------
+//
+// A site row is written only for an app that actually deployed, so an app
+// SKIPPED at the confirm gate had no row and was invisible: absent from this
+// list and absent from its own source's page. A person could therefore choose
+// not to deploy one app of a source and then be unable to find it again --
+// which is what `v1:platform:package.declares` exists to answer.
+describe("what a source declares but has not deployed", () => {
+  const DECLARES = { ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] };
+
+  it("lists the declared app that has no site, under its source", () => {
+    const groups = fold([STORE], [DECLARES]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.rows.map((r) => r.name)).toEqual(["storefront", "web"]);
+  });
+
+  it("gives it no site and no address, because it has neither", () => {
+    const web = fold([STORE], [DECLARES])[0]!.rows.find((r) => r.name === "web")!;
+    expect(web.site).toBeNull();
+    expect(web.hostname).toBe("");
+    expect(web.kind).toBe("spa");
+  });
+
+  it("does NOT duplicate an app that has been deployed", () => {
+    // `storefront` is both declared and live. One row, the site's.
+    const rows = fold([STORE], [DECLARES])[0]!.rows.filter((r) => r.name === "storefront");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.site).not.toBeNull();
+  });
+
+  it("adds nothing when every declared app has a site", () => {
+    const both = { ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "admin", kind: "spa" }] };
+    expect(fold([STORE, ADMIN], [both])[0]!.rows).toHaveLength(2);
+  });
+
+  it("adds nothing for a source that has never been analyzed", () => {
+    // The negative control: no catalogue, no invented rows.
+    expect(fold([STORE], [{ ...ACME, declares: [] }])[0]!.rows.map((r) => r.name)).toEqual(["storefront"]);
+  });
+});

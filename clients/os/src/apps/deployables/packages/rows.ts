@@ -34,8 +34,27 @@ export interface PackageRow {
   updateAvailable: boolean;
   /** Whether a push deploys itself when the plan has not changed (memql#4900). */
   autoDeploy: boolean;
+  /**
+   * What the SOURCE says it contains, from the last analysis that read it.
+   *
+   * A SITE row means DEPLOYED; this means DECLARED, and the difference between
+   * the two lists is the set of apps a person can still deploy. An app skipped
+   * at the confirm gate is exactly that difference, and before this field
+   * existed it had no row anywhere and was invisible in every surface.
+   *
+   * Empty for a source that has never been analyzed, which is honest: nothing
+   * has read the tree yet.
+   */
+  declares: DeclaredDeployable[];
   status: string;
   createdAt: string;
+}
+
+/** One manifest deployable, as the package records it. No address: a skipped
+ *  app is not asked where it lives until somebody deploys it. */
+export interface DeclaredDeployable {
+  name: string;
+  kind: string;
 }
 
 export function packageFromRow(row: Row): PackageRow {
@@ -53,6 +72,7 @@ export function packageFromRow(row: Row): PackageRow {
     latestKnownVersion: rowString(flat, "latestKnownVersion"),
     updateAvailable: boolOr(flat, "updateAvailable", false),
     autoDeploy: boolOr(flat, "autoDeploy", false),
+    declares: listOf<DeclaredDeployable>(flat, "declares").filter((d) => (d?.name ?? "") !== ""),
     status: rowString(flat, "status"),
     createdAt: rowString(flat, "createdAt"),
   };

@@ -640,7 +640,7 @@ describe("the Source stop", () => {
   // source, which is what these now walk to.
   describe("the source's own lifecycle", () => {
     it("archives the source and every app it produced, after the typed name, and names the apps", async () => {
-      const { connection, page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
+      const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, sites: [{ ...STORE, status: "disabled" }, { ...ADMIN, status: "disabled" }] }, "store.memql.example.com");
       const source = await openSourceView(page);
       await click(within(source).getByRole("button", { name: "Archive this source and every app it produced" }));
       // The confirmation names what "every app" means.
@@ -655,9 +655,18 @@ describe("the Source stop", () => {
       expect(connection.callsNamed("packageArchive")).toEqual(['builtin packageArchive(packageId: "pkg-acme", confirmName: "acme")']);
     });
 
-    it("renders the server's refusal in place when apps are still serving", async () => {
+    it("still renders the server's refusal when the client's view was stale", async () => {
+      // THE CLIENT GATE IS PRESENTATION; THE SERVER GATE IS THE GATE. The
+      // control is disabled while this page can SEE a live app, but an app can
+      // go live between the read and the click -- so the refusal path stays,
+      // and this fixture is that race: nothing live on screen, and a server
+      // that refuses anyway.
       const { page } = await mountAndOpen(
-        { ...WITH_PACKAGE, archiveError: "package_has_active_deployables: storefront (store.memql.example.com) and admin (admin.memql.example.com) are still serving; archive them first" },
+        {
+          ...WITH_PACKAGE,
+          sites: [{ ...STORE, status: "disabled" }, { ...ADMIN, status: "disabled" }],
+          archiveError: "package_has_active_deployables: storefront (store.memql.example.com) and admin (admin.memql.example.com) are still serving; archive them first",
+        },
         "store.memql.example.com",
       );
       const source = await openSourceView(page);
@@ -666,6 +675,57 @@ describe("the Source stop", () => {
       await click(within(source).getByRole("button", { name: "Archive" }));
       expect(await within(source).findByText("This package still has sites that are serving")).toBeTruthy();
       expect(within(source).getByText(/archive them first/)).toBeTruthy();
+    });
+
+    it("offers NO deploy on the source, because a source is not a deployable", async () => {
+      // The bar carried a Deploy that started an analyze run for the WHOLE
+      // package with no placements -- so confirming it deployed every app in
+      // the manifest, including ones somebody had deliberately skipped. A
+      // source is the thing apps came FROM; deploying one of them is done on
+      // that app, reached by opening the group in the list.
+      const { page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
+      const source = await openSourceView(page);
+      // NOT /^Deploy/ -- the back button reads "Deployables" and matches it.
+      expect(within(source).queryByRole("button", { name: /^Deploy (the|this)|^Deploy$/ })).toBeNull();
+      const bar = document.querySelector(".os-actbar");
+      expect(bar === null ? [] : [...bar.querySelectorAll("button")].map((b) => b.textContent)).toEqual([]);
+    });
+
+    it("disables Archive while an app is still serving, and says which", async () => {
+      // The engine refuses with package_has_active_deployables naming the LIVE
+      // hostnames, and pausing stays the person's decision -- so a control that
+      // can only fail is a control that should not be pressable. Both fixtures
+      // are live.
+      const { page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
+      const source = await openSourceView(page);
+      const archive = within(source).getByRole("button", {
+        name: "Archive this source and every app it produced",
+      }) as HTMLButtonElement;
+      expect(archive.disabled).toBe(true);
+      // NAMED, not merely refused: the person has to know what to pause. Read
+      // inside the archive section, since the hostnames also appear in the
+      // apps list above it.
+      // A SUBSTRING CHECK, NOT A REGEX. An unanchored pattern that looks like
+      // a hostname is what `js/regex/missing-regexp-anchor` exists to catch --
+      // the shape matches anywhere, so in production code it admits
+      // `evil.example/store.memql.example.com`. The scanner does not know this
+      // one is a test assertion, and it should not have to: the sentence is
+      // being read out of rendered text, which is what `toContain` is for.
+      const shown = (archive.closest(".os-danger-part") as HTMLElement).textContent ?? "";
+      expect(shown).toContain("store.memql.example.com");
+      expect(shown).toContain("admin.memql.example.com");
+    });
+
+    it("enables Archive once nothing is serving", async () => {
+      const { page } = await mountAndOpen(
+        { ...WITH_PACKAGE, sites: [{ ...STORE, status: "disabled" }, { ...ADMIN, status: "draft" }] },
+        "store.memql.example.com",
+      );
+      const source = await openSourceView(page);
+      const archive = within(source).getByRole("button", {
+        name: "Archive this source and every app it produced",
+      }) as HTMLButtonElement;
+      expect(archive.disabled).toBe(false);
     });
 
     it("restores an archived source", async () => {
@@ -1211,5 +1271,40 @@ describe("the credential card", () => {
         credentialFingerprint(base),
       );
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A SOURCE LISTS WHAT IT DECLARES, NOT ONLY WHAT IT DEPLOYED
+// ---------------------------------------------------------------------------
+describe("apps it produces", () => {
+  it("shows a declared app that has never been deployed, and says so", async () => {
+    // The reported case: skipping an app at the confirm gate writes no site,
+    // so this page -- the one whose whole subject is the source that declares
+    // it -- was the last place it should have been missing from, and was.
+    const { page } = await mountAndOpen(
+      {
+        ...WITH_PACKAGE,
+        sites: [STORE],
+        packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
+      },
+      "store.memql.example.com",
+    );
+    const source = await openSourceView(page);
+    const list = within(source).getByText("Apps it produces").closest("section") as HTMLElement;
+    expect(within(list).getByText("storefront")).toBeTruthy();
+    expect(within(list).getByText("web")).toBeTruthy();
+    expect(within(list).getByText("not deployed")).toBeTruthy();
+  });
+
+  it("does not make an undeployed app look like a page it can open", async () => {
+    // It has no deployable to open. A button would promise one.
+    const { page } = await mountAndOpen(
+      { ...WITH_PACKAGE, sites: [STORE], packages: [{ ...ACME, declares: [{ name: "web", kind: "spa" }] }] },
+      "store.memql.example.com",
+    );
+    const source = await openSourceView(page);
+    const list = within(source).getByText("Apps it produces").closest("section") as HTMLElement;
+    expect(within(list).queryByRole("button", { name: /web/ })).toBeNull();
   });
 });

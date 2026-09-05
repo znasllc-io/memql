@@ -7474,6 +7474,29 @@ a.os-button {
    stands on its own" -- and a rule between them would say they are the same
    kind of thing with a gap. Sticky so the heading survives a long source list
    scrolling under it. */
+/* A declared app with no deployable behind it: same row shape, not pressable,
+   and dimmed so the list reads as "these exist, these are live". */
+.os-source-app[data-undeployed="true"] {
+  cursor: default;
+  opacity: 0.72;
+}
+.os-source-app[data-undeployed="true"]:hover {
+  background: none;
+}
+
+/* The address field and its Generate control, on one line: the button is an
+   alternative way to fill the same field, so it belongs beside it rather than
+   under it. */
+.os-compose-slug {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.os-compose-slug > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
 .os-deploy-sectionhead {
   position: sticky;
   top: 0;
@@ -7501,22 +7524,35 @@ a.os-button {
   flex: 1;
   min-width: 0;
 }
+/* The group's disclosure: a LABELLED control, not a bare arrow. It reads
+   "2 apps" with a chevron that turns, so what it does and what it will reveal
+   are both on the control itself. Sized and bordered like a chip, because that
+   is what it replaced and the row's rhythm should not move. */
 .os-deploy-disclose {
   flex: none;
-  display: grid;
-  place-items: center;
-  width: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   height: 20px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: none;
+  padding: 0 7px 0 4px;
+  border: 1px solid var(--os-line);
+  border-radius: 999px;
+  background: var(--os-plate);
   color: var(--os-muted);
+  font: inherit;
+  font-size: var(--os-text-xs);
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
 }
 .os-deploy-disclose:hover {
+  border-color: var(--os-line-strong, var(--os-line));
   background: var(--os-hover);
   color: var(--os-text);
+}
+.os-deploy-disclose:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
 }
 .os-deploy-disclose svg {
   transition: transform 120ms ease;

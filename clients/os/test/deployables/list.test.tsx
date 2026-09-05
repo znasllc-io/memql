@@ -305,6 +305,18 @@ describe("the list", () => {
     expect(await screen.findByText("storefront")).toBeTruthy();
   });
 
+  it("keeps the disclosure OUT of the row's own button", async () => {
+    // An openable ListRow IS a button, and a button cannot contain another
+    // one. Nested, the disclosure rendered perfectly and never fired -- caught
+    // only because a different test tried to click two of them.
+    mount(fakeConnection(WITH_PACKAGE));
+    await screen.findByText("acme/storefront at main");
+    const disclose = screen.getByRole("button", { name: /^(Expand|Collapse) acme\/storefront/ });
+    expect(disclose.parentElement?.closest("button")).toBeNull();
+    // And it says what it will show, rather than being a bare arrow.
+    expect(disclose.textContent).toContain("2 apps");
+  });
+
   it("opens TWO sources without one closing the other", async () => {
     // Found in a browser, not here: `update` applied its patch to the document
     // the RENDER closed over, so two toggles in one tick wrote the second id
@@ -332,6 +344,26 @@ describe("the list", () => {
     // Both sources' apps, not just the last one clicked.
     expect(await screen.findByText("storefront")).toBeTruthy();
     expect(screen.getByText("widgets")).toBeTruthy();
+  });
+
+  it("deploys a DECLARED app on its own, skipping every other one", async () => {
+    // The whole chain: an app the source declares has no site and no run, so
+    // clicking it starts the analysis that produces its confirm gate -- and
+    // every OTHER app is sent explicitly skipped, or this first deploy would
+    // rebuild and republish the ones already serving.
+    const connection = fakeConnection({
+      ...WITH_PACKAGE,
+      packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
+    });
+    mount(connection);
+    await screen.findByText("storefront");
+    // It is listed under its source, with no address of its own.
+    const web = await screen.findByText("web");
+    expect(web).toBeTruthy();
+    await click(web.closest("button"));
+    await waitFor(() => expect(connection.callsNamed("packageDeploy").length).toBeGreaterThan(0));
+    // The analysis first -- confirm: false -- which is what parks the gate.
+    expect(connection.callsNamed("packageDeploy")[0]).toContain("confirm: false");
   });
 
   it("says what to do when there is nothing yet", async () => {

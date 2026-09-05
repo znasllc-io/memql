@@ -99,6 +99,16 @@ export interface ComposePageProps {
   /** A parked run and its source, when a "will serve" row reopened the reading. */
   parked?: { pkg: PackageRow; run: DeploymentRow };
   /**
+   * Deploy ONLY this app, leaving every other one the source declares alone.
+   *
+   * Set when the flow was entered from an app the source merely DECLARES -- it
+   * has no site and no run, so the analysis this opens is what produces its
+   * confirm gate. Every other app is sent explicitly skipped; without that the
+   * engine defaults them to not-skipped and one app's first deploy rebuilds
+   * and republishes all of them.
+   */
+  only?: string;
+  /**
    * The manifest apps of that source that ALREADY have a site, from the app
    * root's site feed. Their addresses were chosen on their first deploy and
    * the pipeline never re-reads them, so this stop does not re-ask.
@@ -107,7 +117,7 @@ export interface ComposePageProps {
 }
 
 export function ComposePage(props: ComposePageProps) {
-  const { clusterDomain, canWrite, isClusterOwner, credentials, onBack, onAsk, parked, placed } = props;
+  const { clusterDomain, canWrite, isClusterOwner, credentials, onBack, onAsk, parked, placed, only } = props;
 
   const [draft, setDraft] = useState<ComposeDraft>(EMPTY_DRAFT);
   const [addresses, setAddresses] = useState<Record<string, AddressDraft>>({});
@@ -185,6 +195,31 @@ export function ComposePage(props: ComposePageProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appsKey, sourceName]);
 
+  // DEPLOYING ONE DECLARED APP, and nothing else.
+  //
+  // `apps` is already just the unplaced ones, so the gate ASKS about the right
+  // app on its own. The problem is the others: an app with a site gets no
+  // placement, the engine defaults it to not-skipped, and deploying one app
+  // rebuilds and republishes every one of them -- the complaint that took the
+  // Deploy button off the source page, in a new place.
+  //
+  // So when the flow is scoped to one app, every OTHER app the report names is
+  // sent explicitly skipped. That is the same `skip` a person ticks by hand,
+  // and it is why this could not be built until skip actually reached the
+  // engine.
+  const everyApp = useMemo(() => (report?.deployables ?? []).map((d) => d.name).filter((n) => n !== ""), [report]);
+  const scoped = only !== undefined && only !== "";
+  const placementApps = scoped ? everyApp : apps;
+  const placementAddresses = useMemo(() => {
+    if (!scoped) return addresses;
+    const out: Record<string, AddressDraft> = { ...addresses };
+    for (const app of everyApp) {
+      if (app === only) continue;
+      out[app] = { ...(out[app] ?? EMPTY_ADDRESS), skip: true };
+    }
+    return out;
+  }, [scoped, addresses, everyApp, only]);
+
   const placementsDone = placementsComplete(apps, addresses, clusterDomain);
   const readyToAnalyze = canWrite && path !== "unknown" && sourceDone && (path !== "handmade" || placementsDone);
   const readyToDeploy = path === "handmade" ? draft.artifactId !== "" : placementsDone;
@@ -241,7 +276,7 @@ export function ComposePage(props: ComposePageProps) {
       if (ok) setPublishedZip(true);
       return;
     }
-    await pkgActions.deploy(packageId, true, placementsFrom(apps, addresses, clusterDomain));
+    await pkgActions.deploy(packageId, true, placementsFrom(placementApps, placementAddresses, clusterDomain));
     reseed();
   }
 

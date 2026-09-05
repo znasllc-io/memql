@@ -491,6 +491,26 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 		}
 	}
 
+	// WHAT THE SOURCE DECLARES, recorded on the SOURCE.
+	//
+	// Written here, beside the manifest name and for the same reason: this is
+	// the moment the tree was read, and both are facts about the tree rather
+	// than about this run. Rewritten WHOLE on every analysis, because the
+	// manifest is the authority on what the package contains -- an app deleted
+	// upstream has to leave the list, and a merge would keep it forever.
+	//
+	// Before this, the only record of a declared deployable lived inside a
+	// run's report, and a site row is written only for an app that actually
+	// deployed. So an app somebody skipped at the confirm gate existed nowhere
+	// a client could see it: absent from the list, and absent from its own
+	// source's "apps it produces". A warning rather than a failure -- the
+	// deploy is not less correct because a catalogue write did not land.
+	if nerr := d.Store.recordPackageDeployables(ctx, req.PackageId, declaredFrom(rep)); nerr != nil {
+		d.log().Warn("packages: could not record what the manifest declares",
+			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
+			"deployment", out.DeploymentId, "err", nerr)
+	}
+
 	// ---- the D9 contents gate, at deploy START ----
 	//
 	// Before any build and before any stage, which is the whole point: a

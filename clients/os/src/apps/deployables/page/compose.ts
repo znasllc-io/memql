@@ -192,8 +192,13 @@ export function placementsFrom(
   const out: Record<string, Placement> = {};
   for (const app of apps) {
     const held = addresses[app] ?? EMPTY_ADDRESS;
+    // A SKIPPED APP SENDS NO ADDRESS. Nobody was asked where it should live --
+    // the field is not even rendered once it is skipped -- so sending the
+    // suggestion that was seeded behind the scenes would record a placement
+    // the person never saw, let alone chose. Deploying it later is what asks.
+    const skipped = held.skip === true;
     out[app] = {
-      hostname: hostnameFor(held.slug, clusterDomain),
+      hostname: skipped ? "" : hostnameFor(held.slug, clusterDomain),
       accountId: held.accountId.trim(),
       ownDomain: normalizeHostname(held.ownDomain),
       ...(held.skip === true ? { skip: true } : {}),

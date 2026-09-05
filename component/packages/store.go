@@ -328,6 +328,23 @@ func (s *store) recordPackageName(ctx context.Context, packageId, name string) e
 		langparser.QuoteString(packageId), langparser.QuoteString(name)))
 }
 
+// recordPackageDeployables writes what the manifest declares onto the package.
+//
+// ALWAYS AN ARRAY, never null -- the same trap closeDeployment documents above:
+// jsonLiteral sees an interface holding a typed nil slice as non-nil, marshals
+// it and writes the word `null`, which the concept's []object refuses. A source
+// whose manifest declares nothing is an empty list, which is a true statement;
+// a refused write would leave the package claiming whatever the LAST analysis
+// found, which is worse than saying nothing.
+func (s *store) recordPackageDeployables(ctx context.Context, packageId string, declares []DeclaredDeployable) error {
+	if declares == nil {
+		declares = []DeclaredDeployable{}
+	}
+	return s.writeInternal(ctx, fmt.Sprintf(
+		"mutation recordPackageDeployables(packageId: %s, declares: %s)",
+		langparser.QuoteString(packageId), jsonLiteral(declares)))
+}
+
 func (s *store) recordUpstreamVersion(ctx context.Context, packageId, version string, updateAvailable bool) error {
 	return s.writeInternal(ctx, fmt.Sprintf(
 		"mutation recordPackageUpstreamVersion(packageId: %s, latestKnownVersion: %s, updateAvailable: %t)",
