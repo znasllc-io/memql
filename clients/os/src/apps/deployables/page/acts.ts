@@ -1,5 +1,5 @@
 import type { ActionBarTone } from "../../../kit/ActionBar";
-import { runCoversApp, type DeploymentRow, type PackageRow } from "../packages/rows";
+import { runCoversApp, runIsScopedToApp, type DeploymentRow, type PackageRow } from "../packages/rows";
 import type { SiteRow } from "../rows";
 import { TERMINAL_RUN_STATUSES } from "./rail";
 
@@ -207,8 +207,7 @@ function hasServed(site: SiteRow): boolean {
  * this app is live, and it is answered from the source's own page.
  */
 function gateIsAboutThisApp(run: DeploymentRow, site: SiteRow): boolean {
-  const mine = site.packageDeployableName;
-  return mine !== "" && run.scopedTo.includes(mine);
+  return runIsScopedToApp(run, site.packageDeployableName);
 }
 
 /** The gate, mentioned beside a state word that stays true. */

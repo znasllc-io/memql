@@ -1,5 +1,5 @@
 import type { AnalysisReport, DeploymentRow, PackageRow, ReportDeployable } from "../packages/rows";
-import { sourceLabel } from "../packages/rows";
+import { runIsScopedToApp, sourceLabel } from "../packages/rows";
 import { bundleForm, bundleFormLabel, type SiteRow } from "../rows";
 import { WEB_TARGET, kindLabel, type StopDef, type StopId } from "../targets";
 
@@ -866,8 +866,7 @@ export function openStopFor(input: StandingInput): StopId | "" {
   const served = input.site !== null && (input.site.status === "live" || input.site.status === "disabled");
   // A gate scoped TO THIS APP is this page's business even when it is serving:
   // it is a redeploy waiting to be confirmed. A whole-source gate is not.
-  const mine = input.site?.packageDeployableName ?? "";
-  const aboutThisApp = run !== null && mine !== "" && run.scopedTo.includes(mine);
+  const aboutThisApp = runIsScopedToApp(run, input.site?.packageDeployableName ?? "");
   const parked = run !== null && run.status === "awaiting_confirm" && !aboutThisApp;
   if (run !== null && run.status !== "" && RUN_STOP[run.status] !== undefined && !(parked && served)) {
     return RUN_STOP[run.status] ?? "live";
