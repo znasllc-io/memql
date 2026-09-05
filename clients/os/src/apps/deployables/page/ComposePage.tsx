@@ -38,6 +38,7 @@ import {
   type ComposePath,
   type ComposePhase,
 } from "./compose";
+import { runForApp } from "./acts";
 import { Rail } from "./Rail";
 import { headActionFor, type ComposeInput, type HeadAction, type RailProblem, type RailStage } from "./rail";
 import { ManifestPreview } from "./stops/compose/ManifestPreview";
@@ -149,7 +150,19 @@ export function ComposePage(props: ComposePageProps) {
   const deployments = useLiveView(timeline, `compose-deployments:${packageId}`, (rows) =>
     newestFirst(rows.map(deploymentFromRow).filter((d) => d.id !== "")),
   );
-  const run = deployments?.snapshot.rows[0] ?? parked?.run ?? null;
+  // THE RUN THIS COMPOSE IS ABOUT (memql#4953). `rows[0]` is the source's
+  // newest run whatever app it names, and this flow is entered FOR one when
+  // `only` is set -- so composing `web` while `storefront` deploys used to
+  // read the sibling's run as the gate it was waiting on. Unscoped compose (a
+  // brand-new source) still takes the newest, which is right: there is one app
+  // and one run.
+  const timelineRows = deployments?.snapshot.rows ?? [];
+  const run =
+    (only !== undefined && only !== ""
+      ? runForApp(timelineRows, only)
+      : (timelineRows[0] ?? null)) ??
+    parked?.run ??
+    null;
   const report = run?.report ?? null;
 
   const zip = zipProbe.reply === null ? null : zipVerdict(zipProbe.reply);
@@ -250,7 +263,7 @@ export function ComposePage(props: ComposePageProps) {
       setCreated((held) => ({ ...held, packageId: id }));
       // WITHOUT confirm: the run parks with its report and nothing is built.
       // The gate is always present (design D12), and this is it.
-      await pkgActions.deploy(id, false);
+      await pkgActions.deploy(id, { confirm: false });
       reseed();
       return;
     }
@@ -289,22 +302,27 @@ export function ComposePage(props: ComposePageProps) {
     const declined = Object.entries(addresses)
       .filter(([, a]) => a.skip === true)
       .map(([app]) => app);
-    if (declined.length > 0) {
-      // A package created moments ago in this very flow has no off-list yet,
-      // and `parked` is absent on that path -- so an empty one is the honest
-      // default rather than a reason to skip the write. Requiring `parked`
-      // here meant the FIRST deploy, which is exactly where somebody skips an
-      // app, recorded nothing.
-      const held = parked?.pkg.disabledDeployables ?? [];
-      await pkgActions.setDeployableList(packageId, [...new Set([...held, ...declined])]);
-    }
-    await pkgActions.deploy(packageId, true, placementsFrom(placementApps, placementAddresses, clusterDomain));
+    // The names, not the resulting list. Composing the result needed the
+    // package's current off-list, and `parked` is absent on the first-deploy
+    // path -- which is exactly where somebody skips an app -- so that read had
+    // to fall back to an empty list and hope nothing else was already off. A
+    // membership change has nothing to read (memql#4951).
+    await pkgActions.disableDeployables(packageId, declined);
+    // THE PARKED RUN IS WHAT THIS CONFIRMS (memql#4954). Compose is where a
+    // person reads the report and answers it, so the answer has to land on the
+    // run that asked -- otherwise the gate they just passed stays open and the
+    // bytes their report described are fetched again.
+    await pkgActions.deploy(packageId, {
+      confirm: true,
+      placements: placementsFrom(placementApps, placementAddresses, clusterDomain),
+      ...(run !== null && run.status === "awaiting_confirm" ? { deploymentId: run.id } : {}),
+    });
     reseed();
   }
 
   async function retry(): Promise<void> {
     if (packageId === "") return;
-    await pkgActions.deploy(packageId, false);
+    await pkgActions.deploy(packageId, { confirm: false });
     reseed();
   }
 

@@ -1,0 +1,59 @@
+# The roll's permission, pinned to the workloads it rolls (memql#4933).
+#
+# `deploycontrol.RestartDeployment` issues exactly one call:
+#
+#   PATCH /apis/apps/v1/namespaces/<ns>/deployments/<name>
+#   Content-Type: application/strategic-merge-patch+json
+#
+# writing the `kubectl.kubernetes.io/restartedAt` annotation onto the pod
+# template. So `patch` on `apps/deployments` is the whole grant, and `get` is
+# here only because a patch against a name the account cannot read reports as a
+# 404 rather than as a permission problem, which sends an operator to look for
+# a missing Deployment that is right there.
+#
+# NO `list`, NO `watch`, and that is what makes `resourceNames` mean something:
+# RBAC ignores resourceNames for collection verbs, so a Role granting `list`
+# alongside them silently grants it over everything.
+#
+# It is bound to `memql-engine` in its own file rather than beside the
+# ServiceAccount, which states plainly that no grant may be added there --
+# every engine node shares that account, so a Role attached at the definition
+# is inherited by all of them at once. This is the same shape the custom-domain
+# Role uses (../../base/custom-domain-rbac.yaml), and for the same reason.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: memql-packages-roll
+  namespace: memql
+  labels:
+    app.kubernetes.io/part-of: memql
+    app.kubernetes.io/name: packages-roll
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+    # KEEP THIS EQUAL TO MEMQL_PACKAGES_ROLL_TARGETS. Nothing checks it: the
+    # env var is read by the engine and this list by the API server, and they
+    # meet only when a real deploy reaches the roll stage.
+    resourceNames:
+      - agent
+      - bff
+      - cognition
+      - planner
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memql-packages-roll
+  namespace: memql
+  labels:
+    app.kubernetes.io/part-of: memql
+    app.kubernetes.io/name: packages-roll
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: memql-packages-roll
+subjects:
+  - kind: ServiceAccount
+    name: memql-engine
+    namespace: memql

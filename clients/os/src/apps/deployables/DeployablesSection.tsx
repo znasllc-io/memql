@@ -205,9 +205,7 @@ export function DeployablesSection({
    * this deploy would be the same mistake the off-list exists to fix.
    */
   async function enableDeclared(packageId: string, app: string) {
-    const pkg = packageRows.find((p) => p.id === packageId);
-    if (pkg === undefined) return;
-    await packageActions.setDeployableEnabled(packageId, pkg.disabledDeployables, app, true);
+    await packageActions.enableDeployables(packageId, [app]);
     onReseed();
   }
 
@@ -226,7 +224,7 @@ export function DeployablesSection({
   // button off the source page.
   async function openDeclared(packageId: string, app: string) {
     setView({ kind: "compose", parkedPackageId: packageId, only: app });
-    await packageActions.deploy(packageId, false);
+    await packageActions.deploy(packageId, { confirm: false });
     onReseed();
   }
 

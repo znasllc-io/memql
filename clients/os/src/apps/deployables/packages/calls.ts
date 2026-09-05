@@ -128,13 +128,24 @@ export function placementsPayload(
 export async function deployPackage(
   query: QueryClient,
   packageId: string,
-  opts: { confirm: boolean; placements?: Record<string, Placement>; fromDeploymentId?: string },
+  opts: {
+    confirm: boolean;
+    placements?: Record<string, Placement>;
+    deploymentId?: string;
+    fromDeploymentId?: string;
+  },
 ): Promise<DeployOutcome> {
   const placements = opts.placements === undefined ? {} : placementsPayload(opts.placements);
   const result = await query.packageDeploy({
     packageId,
     confirm: opts.confirm,
     ...(Object.keys(placements).length > 0 ? { placements } : {}),
+    // CONFIRMING A PARKED RUN NAMES IT (memql#4954). Without this every call
+    // minted a run -- the confirmation included -- so the answered gate stayed
+    // open, the list went on saying a deploy was waiting for it, and the bytes
+    // a Retry's report described were replaced by a fresh fetch. Sent only
+    // when there is a run to advance.
+    ...(opts.deploymentId ? { deploymentId: opts.deploymentId } : {}),
     // Retrying a run that was lost deploys the bytes IT fetched (memql#4900),
     // not whatever the branch has moved to since. Sent only when there is a
     // run to retry, because an empty value would ask the engine to look up
@@ -210,21 +221,36 @@ export async function setPackageAutoDeploy(query: QueryClient, packageId: string
 }
 
 /**
- * Set which of a source's deployables its owner has turned off.
+ * Turn deployables of a source off, or back on, BY NAME.
  *
- * THE WHOLE LIST, because `update{}` read-merges a field and the DSL has no
- * form for removing one member of an array -- `@appendFields` adds and has no
- * counterpart (memql#4951). The caller holds the current list on the package
- * row it already reads live, so this is a read-modify-write over a value it
- * owns rather than a guess; the residual is that two windows toggling two
- * different apps at the same instant clobber, which that issue tracks.
+ * Two verbs and no list. This used to send the whole array, because
+ * `update{}` read-merges a field and the DSL had no form for removing one
+ * member -- `@appendFields` added and had no counterpart. So every caller read
+ * the current list off the package row, changed one name, and wrote it all
+ * back, which is correct for one console and carries a race nothing declared:
+ * two windows toggling two different apps at the same instant clobbered, and
+ * the loser was never told. memql#4951 closed that with `@addToSet` /
+ * `@removeFromSet`, and the argument is now the change rather than the result.
+ *
+ * `disable` is deduped and `enable` ignores a name that is not there, so both
+ * are safe to repeat and a retry after a lost response costs nothing.
  */
-export async function setPackageDisabled(
+export async function disableDeployables(
   query: QueryClient,
   packageId: string,
-  disabledDeployables: readonly string[],
+  deployableNames: readonly string[],
 ): Promise<void> {
-  await query.setPackageDisabledDeployables({ packageId, disabledDeployables: [...disabledDeployables] });
+  if (deployableNames.length === 0) return;
+  await query.disablePackageDeployables({ packageId, deployableNames: [...deployableNames] });
+}
+
+export async function enableDeployables(
+  query: QueryClient,
+  packageId: string,
+  deployableNames: readonly string[],
+): Promise<void> {
+  if (deployableNames.length === 0) return;
+  await query.enablePackageDeployables({ packageId, deployableNames: [...deployableNames] });
 }
 
 export async function archiveSite(query: QueryClient, siteId: string, confirmHostname: string): Promise<void> {

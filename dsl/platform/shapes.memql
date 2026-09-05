@@ -263,6 +263,8 @@ shape packageDeployment packageDeploymentFull {
   dslVersion
   deployables
   snapshotArtifactId
+  scopedTo
+  fromDeploymentId
   buildLogTail
   builtOn
   error

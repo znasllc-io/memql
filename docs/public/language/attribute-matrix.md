@@ -48,6 +48,8 @@ pins this table to the allow-lists so the two cannot drift.
 | `@idempotent` | No | No | No | Not accepted -- removed from the mutation allow-list (#989); rejected at load |
 | `@mergeFields("a", "b")` | No | Yes | No | Deep-merge the named object payload fields on update instead of replacing them |
 | `@appendFields("a", "b")` | No | Yes | No | Append the named array payload fields' elements to the stored array on update instead of replacing them |
+| `@addToSet("a", "b")` | No | Yes | No | Treat the named array payload fields as sets and union the written elements into the stored array, deduped |
+| `@removeFromSet("a", "b")` | No | Yes | No | Treat the named array payload fields as sets and remove the written elements from the stored array |
 | `@createOnly("a", "b")` | No | Yes | No | Write the named payload fields only on create; preserve the stored value on an insert (upsert) onto an existing id |
 | `@noUnset("a", "b")` | No | Yes | No | Declare the named payload fields one-way: a write may set them, never blank them. An empty incoming value is dropped when the stored value is non-empty |
 | **Auditing** |
@@ -475,6 +477,52 @@ element yields a duplicate).
 @appendFields("attachmentIds")
 mutate request attachToRequest { ... }
 ```
+
+#### `@addToSet("...")` / `@removeFromSet("...")`
+
+Make an update-kind mutation a **membership change** on the named array-typed
+payload fields: the written elements are unioned into, or removed from, the
+stored array rather than replacing it (memql#4951).
+
+```memql fragment
+@addToSet("disabledDeployables")
+mutate package disablePackageDeployables { ... }
+
+@removeFromSet("disabledDeployables")
+mutate package enablePackageDeployables { ... }
+```
+
+**They are the pair `@appendFields` is not.** Append has no counterpart that
+removes, and it is deliberately not deduped -- which is right for a list and
+wrong for a set. Without a removal primitive, an owner-editable set had exactly
+one expressible form: the caller reads the current list, changes one member,
+and writes the whole thing back. That is correct for one console and silently
+lossy for two, where two windows changing two different members clobber and the
+loser is never told. The pair is deduped on the way in, which is what makes
+`add` and `remove` inverses.
+
+The rules:
+
+- **Order is preserved.** Existing members keep their positions, new ones land
+  at the end -- a set rendered as a list does not reshuffle under a reader on
+  an unrelated edit.
+- **Removing an absent member is a no-op**, not an error, so the mutation is
+  idempotent and two callers removing the same member both succeed.
+- **A field absent from the write is untouched**, exactly as with
+  `@appendFields`.
+- **Members compare by their rendered form**, so `1` and `"1"` are one member.
+  A JSON round-trip turns a stored number into a float64 and its string
+  spelling into a string; keeping both would be a set that quietly grew.
+- Only valid on update-kind mutations, and a field named by two of
+  `@appendFields` / `@addToSet` / `@removeFromSet` is **refused at load** --
+  each rewrites the same key, so which one won would be decided by the
+  executor's order rather than by anything written in the mutation.
+
+Two annotations rather than one with a direction argument, because the
+direction is a fact about the mutation and not about the call: a caller able to
+say "remove" to a mutation named `disable` is a caller deciding what the verb
+means. One executor serves both, so what the engine sees is a membership change
+with a direction and what an author writes is a verb.
 
 #### `@createOnly("...")`
 Opts an insert-kind (create-or-upsert) mutation into per-field create-only

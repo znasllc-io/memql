@@ -184,6 +184,12 @@ a browser. Somebody who closed the window finds their run exactly where they
 left it, and the list marks the deployable "a deploy is waiting for you" from
 `packageDeploymentsAwaitingConfirm`.
 
+**Confirming ADVANCES that run** -- `packageDeploy(confirm: true, deploymentId:
+<the parked run>)` -- rather than starting a second one, and the resumed run
+re-reads the snapshot it already stored (memql#4954, memql#4955). One row per
+attempt is what makes the timeline readable, and it is what makes a Retry's
+promise survive the click that acts on it.
+
 ## Private sources
 
 A source fetches under a personal credential its **owner** holds:
@@ -224,15 +230,75 @@ Rollback of the DSL half is *pointing the document back and rolling again* --
 the same shape as a site rollback, and safe because an old prefix's bytes are
 still there.
 
-Apply the component in an instance overlay:
+### Applying the components
+
+Three components, and the order is load-bearing:
 
 ```yaml
-components:
-  - ../../components/dsl-packages
-labels:
-  - pairs: { memql/product-dsl: "true" }
-    includeSelectors: false
+# The layer that LABELS -- its own kustomization, consumed as a resource.
+# labels/patches run AFTER components, so a `labels:` block beside the
+# `components:` block below would be applied too late and every patch would
+# match nothing (memql#4933). It renders, it applies, every pod is healthy,
+# and not one of them has an init container or MEMQL_DSL_PATH.
+patches:
+  - target: { kind: Deployment, name: "^(bff|agent|cognition|planner|workbench)$" }
+    patch: |
+      - op: add
+        path: /metadata/labels/memql~1product-dsl
+        value: "true"
 ```
+
+```yaml
+# ...and the layer that consumes it.
+components:
+  - ../../components/dsl-mount         # the shared volume, mount and MEMQL_DSL_PATH
+  - ../../components/dsl-bundle        # optional: a product's own DSL image
+  - ../../components/dsl-packages      # the fetcher for staged package DSL
+  - ../../components/packages-roll-rbac # permission to restart the roll targets
+```
+
+`dsl-mount` owns the shared substrate and is applied **exactly once**;
+`dsl-bundle` and `dsl-packages` each add one init container, and their order in
+the list is the order those containers run. Both used to build the substrate
+for themselves, which made them mutually exclusive -- two volumes of one name
+is a Deployment the API server refuses -- and made `dsl-packages` silently
+dependent on `dsl-bundle` having created the `initContainers` list first.
+
+Two committed examples render the working shapes and are gated by
+`deploy/k8s/components/dsl-mount/component_test.go`:
+`components/examples/dsl-packages-only` and
+`components/examples/dsl-bundle-and-packages`.
+
+**Label only the nodes that load DSL.** A blanket label reaches `redis`, which
+has no `volumes:` key, and the first patch fails the whole render.
+
+### Two things the fetcher and the roll each need
+
+**The fetcher needs to know which blob container to read.** It reads
+`MEMQL_AZURE_BLOB_CONTAINER`, which is not a secret and is not in
+`memql-secrets`; the component takes it from an **optional ConfigMap named
+`memql-storage`**:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: memql-storage, namespace: memql }
+data: { MEMQL_AZURE_BLOB_CONTAINER: "memql" }
+```
+
+Without it the fetcher has nowhere to look, and says so and refuses -- it used
+to answer "no package pointer" instead, which is the ordinary state of a
+cluster with no packages, so the node booted healthy serving none of its
+packages' DSL.
+
+**The roll needs permission to restart pods.** It patches each workload named
+by `MEMQL_PACKAGES_ROLL_TARGETS` as the node's own ServiceAccount
+(`memql-engine`), which by design holds no Kubernetes API privilege. The
+`packages-roll-rbac` component ships a Role pinned by `resourceNames` plus its
+binding. **Its names and `MEMQL_PACKAGES_ROLL_TARGETS` must agree** -- nothing
+can check that for you, and a name in one and not the other is either a 403 at
+the last stage of a deploy that otherwise succeeded, or a permission nothing
+uses.
 
 ### The fetcher's exit codes are the contract
 
@@ -243,10 +309,16 @@ the pod starts.
   that has never deployed a package has no `active.json`, and that is the
   ordinary state rather than a fault; refusing to boot over it would mean the
   component could never be applied before the first deploy.
-- **1** -- a pointer EXISTS and could not be honoured. Booting anyway would
-  bring the node up with silently-missing product DSL, which presents as a
-  healthy cluster answering "function not found" to every call it used to
-  serve.
+- **1** -- a pointer EXISTS and could not be honoured, **or this container was
+  never told where to look**. Booting anyway would bring the node up with
+  silently-missing product DSL, which presents as a healthy cluster answering
+  "function not found" to every call it used to serve.
+
+An unconfigured fetcher is the second case and not the first, and it used to be
+read as the first (memql#4933). "Nothing found, nothing wrong" is the right
+reading for a long-running engine process; for a container whose only job is to
+fetch, it is not -- a fetcher that cannot say where to look has not found an
+empty cluster, it has failed to look.
 
 ### Break-glass
 
@@ -334,6 +406,10 @@ rather than to "no limit".
 `MEMQL_PACKAGES_ROLL_TARGETS` is deliberately not defaulted: a roll restarts
 pods, so its blast radius is a decision somebody made rather than whatever
 happens to be running. Only clusters hosting DSL-carrying packages need it.
+**Every name in it must also appear in the roll Role's `resourceNames`** --
+setting the variable alone leaves the roll failing on a 403, with fetch,
+analyze, build and stage all green behind it. See
+`deploy/k8s/components/packages-roll-rbac`.
 
 Sealing and unsealing a source credential uses `MEMQL_MASTER_KEY`, which every
 node already has; a ciphertext this node cannot unseal is refused as
@@ -449,6 +525,12 @@ terminal status **`abandoned`**.
   quietly deploy whatever the branch has moved to since. A run that kept no
   snapshot (every run from before this epic) is refused with
   `snapshot_unavailable`, and the sentence says to deploy again instead.
+- **And it survives the confirm.** The retry parks with its report, and the
+  click that answers the gate used to be a fresh call carrying no
+  `fromDeploymentId` at all -- so a person retrying a lost deploy of commit A,
+  after commit B had landed, got B while reading a report describing A
+  (memql#4955). The retry's own row records both what it was retried FROM and
+  the snapshot it ran against, and the confirmation resumes that row.
 
 The sweep runs on the **cron leader only**, so each stranded row is closed once,
 and under the maintenance actor, because it reads every owner's runs.

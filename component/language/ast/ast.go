@@ -883,6 +883,33 @@ const (
 	// @mergeFields, only valid on update-kind mutations.
 	AttrAppendFields = "appendFields"
 
+	// @addToSet("a", "b") and @removeFromSet("a", "b") make an update-kind
+	// mutation a MEMBERSHIP change on the named array-typed payload
+	// fields: the partial array's elements are unioned into, or removed
+	// from, the stored array (memql#4951).
+	//
+	// They are the pair @appendFields is not. Append has no counterpart
+	// that removes, and it is deliberately NOT deduped, so a toggle built
+	// on it yields ["web", "web"] on a double click and then reads as
+	// still-a-member after one removal. Without a removal primitive the
+	// only expressible form for an owner-editable set was for the caller
+	// to read the current list, change one member and write the whole
+	// thing back -- correct for one console and silently lossy for two,
+	// where two windows toggling two different members clobber and the
+	// loser is never told.
+	//
+	// Two annotations rather than one with a direction argument, because
+	// the direction is a fact about the MUTATION and not about the call: a
+	// caller able to say "remove" to a mutation named disable is a caller
+	// deciding what the verb means. One executor serves both, so what the
+	// engine sees is a membership change with a direction; what an author
+	// writes is a verb.
+	//
+	// Like @mergeFields and @appendFields, only valid on update-kind
+	// mutations.
+	AttrAddToSet      = "addToSet"
+	AttrRemoveFromSet = "removeFromSet"
+
 	// @scrubPii opts an update-kind mutation into engine-side generic
 	// PII scrubbing: after the partial payload merges onto the stored
 	// row, the engine enumerates EVERY field the bound concept declares

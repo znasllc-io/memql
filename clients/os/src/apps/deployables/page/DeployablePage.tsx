@@ -13,7 +13,7 @@ import { deploymentFromRow, type DeploymentRow, type PackageRow } from "../packa
 import { usePackageDeployments } from "../packages/usePackages";
 import { liveUrlFor, ownerLabel, siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
-import { actsFor, type ActName } from "./acts";
+import { actsFor, runForApp, siblingRunInFlight, type ActName } from "./acts";
 import { Rail } from "./Rail";
 import { openStopFor, refusalStopFor, type RailStage, type StandingInput } from "./rail";
 import { BuildStop } from "./stops/Build";
@@ -98,7 +98,19 @@ export function DeployablePage({
   const deployments = useLiveView(timeline, `deployments:${pkg?.id ?? ""}`, (rows) =>
     newestFirst(rows.map(deploymentFromRow).filter((d) => d.id !== "")),
   );
-  const run = deployments?.snapshot.rows[0] ?? null;
+  // THIS APP'S RUN, not the source's newest (memql#4953). `rows[0]` was the
+  // newest run of the whole package, whatever deployable it was about, and
+  // everything on this page derived from it: while a run for `web` analyzed,
+  // `storefront`'s page read "Building", hid Unpublish and Redeploy, and
+  // offered a Cancel that killed `web`'s deploy from a page about
+  // `storefront`. A run records its scope now, so this can ask.
+  const app = site.packageDeployableName;
+  const timelineRows = deployments?.snapshot.rows ?? [];
+  const run = runForApp(timelineRows, app);
+  // ...and a run of the same source that is NOT this app's, while it is in
+  // flight. The bar keeps this app's own state and withholds only the acts
+  // that would start a second run of one source. See ActsInput.siblingRun.
+  const siblingRun = siblingRunInFlight(timelineRows, app);
 
   const accounts = useAccountOptions();
   const flipped = useBundleFlip(site);
@@ -119,13 +131,13 @@ export function DeployablePage({
     setTyped("");
   }, [site.id]);
 
-  const rail: StandingInput = { mode: "standing", pkg, app: site.packageDeployableName, run, site };
+  const rail: StandingInput = { mode: "standing", pkg, app, run, site };
   const openStop = openOverride ?? openStopFor(rail);
   const refusalStop = refusalStopFor(run);
   const name = siteName(site);
   const url = liveUrlFor(site.hostname);
 
-  const reading = actsFor({ site, pkg, run, canWrite, deleting, releasing: site.hostname });
+  const reading = actsFor({ site, pkg, run, siblingRun, canWrite, deleting, releasing: site.hostname });
 
   function act(named: ActName) {
     switch (named) {
@@ -150,11 +162,18 @@ export function DeployablePage({
       case "Deploy the update":
       case "Redeploy":
       case "Retry the deploy":
-        // A PARKED RUN'S DEPLOY IS THE CONFIRMATION, not a new run -- but it
-        // is still scoped to this page's app, or confirming from here would
-        // deploy every sibling the source declares.
+        // A PARKED RUN'S DEPLOY IS THE CONFIRMATION, not a new run -- and it
+        // says so on the wire now (memql#4954). The comment was here and the
+        // id was not, so `packageDeploy` minted a fresh run for the
+        // confirmation and left the parked one at the gate forever: the list
+        // went on saying a deploy was waiting for an answer somebody had
+        // already given, and a Retry's report described bytes the click did
+        // not ship. Still scoped to this page's app, or confirming from here
+        // would deploy every sibling the source declares.
         if (pkg !== null && run !== null && run.status === "awaiting_confirm") {
-          void headActions.deploy(pkg.id, true, onlyThisApp(pkg, site)).then(reseed);
+          void headActions
+            .deploy(pkg.id, { confirm: true, placements: onlyThisApp(pkg, site), deploymentId: run.id })
+            .then(reseed);
           return;
         }
         if (pkg === null) {
@@ -164,7 +183,9 @@ export function DeployablePage({
           setZipOpen(true);
           return;
         }
-        void headActions.deploy(pkg.id, false, onlyThisApp(pkg, site)).then(reseed);
+        void headActions
+          .deploy(pkg.id, { confirm: false, placements: onlyThisApp(pkg, site) })
+          .then(reseed);
         return;
       default:
         return;
@@ -194,10 +215,7 @@ export function DeployablePage({
       // and a failure to record the preference must not leave a deployable
       // nobody asked to keep.
       if (pkg !== null && site.packageDeployableName !== "") {
-        await headActions.setDeployableList(
-          pkg.id,
-          [...new Set([...pkg.disabledDeployables, site.packageDeployableName])],
-        );
+        await headActions.disableDeployables(pkg.id, [site.packageDeployableName]);
       }
       setConfirming(false);
       onDeleted?.(site.id);

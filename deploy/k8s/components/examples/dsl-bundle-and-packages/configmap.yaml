@@ -1,0 +1,16 @@
+# The one storage fact only an instance knows (memql#4933).
+#
+# The blob CONNECTION STRING is a secret and rides `memql-secrets`; the
+# container NAME is not, and lives here so both the engine container and the
+# `dsl-packages-fetch` init container read it from one place. The fetcher used
+# to get `memql-secrets` alone, which does not carry it, and answered "no
+# package pointer" to a question it had never asked.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memql-storage
+  namespace: memql
+  labels:
+    app.kubernetes.io/part-of: memql
+data:
+  MEMQL_AZURE_BLOB_CONTAINER: "memql"

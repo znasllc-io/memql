@@ -3,6 +3,7 @@ package packages
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,6 +23,28 @@ type FetchResult struct {
 	Files         int
 }
 
+// ErrNoBlobContainer is what an unconfigured fetcher answers, and it is an
+// ERROR rather than a third state of FetchResult (memql#4933).
+//
+// It used to answer PointerAbsent -- "this cluster cannot be hosting packages,
+// so there is nothing to fetch and nothing wrong" -- which is a reasonable
+// reading of an engine process and the wrong one for an init container. The
+// component that runs this ships `envFrom: memql-secrets` and
+// MEMQL_AZURE_BLOB_CONTAINER is not in that Secret anywhere in this repo, so
+// the fetcher saw an empty container name on every instance that applied the
+// component as shipped, exited 0, and the node booted healthy with no package
+// DSL. That is exactly the outcome the exit-code contract's `1` exists to
+// prevent, reached through its `0`.
+//
+// "Not configured" and "configured, and nothing is deployed" are different
+// answers and only one of them is ordinary.
+var ErrNoBlobContainer = errors.New(
+	"no object storage container is configured (MEMQL_AZURE_BLOB_CONTAINER is unset), " +
+		"so the package pointer cannot be read. A node that boots without it serves none of " +
+		"the DSL its packages deployed, and answers \"function not found\" to every call that " +
+		"used to work. Set it on this container -- the dsl-packages component reads it from " +
+		"the memql-storage ConfigMap")
+
 // FetchActiveSet copies every package DSL tree named by the active-set pointer
 // into root, which is the node's MEMQL_DSL_PATH.
 //
@@ -32,9 +55,7 @@ type FetchResult struct {
 func FetchActiveSet(ctx context.Context, root string) (FetchResult, error) {
 	container := azureblob.ContainerFromEnv()
 	if strings.TrimSpace(container) == "" {
-		// No object storage configured at all: this cluster cannot be hosting
-		// packages, so there is nothing to fetch and nothing wrong.
-		return FetchResult{PointerAbsent: true}, nil
+		return FetchResult{}, ErrNoBlobContainer
 	}
 	client, err := azureblob.New(ctx)
 	if err != nil {

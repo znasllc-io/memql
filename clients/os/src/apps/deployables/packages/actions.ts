@@ -15,7 +15,8 @@ import {
   revokeSourceCredential,
   rollbackPackage,
   setPackageAutoDeploy,
-  setPackageDisabled,
+  disableDeployables,
+  enableDeployables,
   setPackageCredential,
   setSiteLive,
   type NewCredential,
@@ -112,9 +113,34 @@ export function useWrite(): WriteState & { run: <T>(fn: (query: NonNullable<Retu
 // Packages
 // ---------------------------------------------------------------------------
 
+/**
+ * What one `packageDeploy` call is about.
+ *
+ * AN OBJECT RATHER THAN POSITIONALS, because the two ids are the whole of
+ * memql#4954 and memql#4955 and neither had a parameter to travel in. The hook
+ * took `(packageId, confirm, placements?)`, so a caller holding a parked run's
+ * id or a lost run's id had nowhere to put it -- and the wire function beneath
+ * accepted both all along.
+ */
+export interface DeployOptions {
+  /** `false` parks the run at the gate with its report. */
+  confirm: boolean;
+  placements?: Record<string, Placement>;
+  /**
+   * Confirm the PARKED run of this id rather than starting a new one
+   * (memql#4954). Every call used to mint a run, the confirmation included,
+   * which left the answered gate open forever.
+   */
+  deploymentId?: string;
+  /**
+   * Retry from the bytes an earlier run already fetched (memql#4900).
+   */
+  fromDeploymentId?: string;
+}
+
 export interface PackageActions extends WriteState {
-  /** Start a run. `confirm: false` parks it at the gate with its report. */
-  deploy: (packageId: string, confirm: boolean, placements?: Record<string, Placement>) => Promise<void>;
+  /** Start a run, or confirm one already parked. */
+  deploy: (packageId: string, opts: DeployOptions) => Promise<void>;
   /**
    * Retry a run that was lost, from the bytes it already fetched (memql#4900).
    * A separate verb from `deploy` because it is a different promise: deploy
@@ -125,20 +151,16 @@ export interface PackageActions extends WriteState {
   /** Arm or disarm auto-deploy for this source. */
   setAutoDeploy: (packageId: string, autoDeploy: boolean) => Promise<void>;
   /**
-   * Turn one declared deployable off or on.
+   * Turn declared deployables off, by name.
    *
-   * The CURRENT list is passed in because this action holds no row: the caller
-   * reads it off the package it is already rendering. See memql#4951 for why
-   * the whole list travels rather than the one name.
+   * NO CURRENT LIST. It used to take one, because the DSL had no way to remove
+   * a member of an array and the caller had to compose the whole result
+   * (memql#4951). The caller now says what CHANGED, which is what makes two
+   * windows toggling two different apps both land.
    */
-  /** Write the whole off-list, for a caller that has already composed it. */
-  setDeployableList: (packageId: string, disabled: readonly string[]) => Promise<void>;
-  setDeployableEnabled: (
-    packageId: string,
-    current: readonly string[],
-    name: string,
-    enabled: boolean,
-  ) => Promise<void>;
+  disableDeployables: (packageId: string, names: readonly string[]) => Promise<void>;
+  /** Turn declared deployables back on, by name. The exact inverse. */
+  enableDeployables: (packageId: string, names: readonly string[]) => Promise<void>;
   rollback: (packageId: string, deploymentId: string) => Promise<void>;
   archive: (packageId: string, confirmName: string) => Promise<void>;
   restore: (packageId: string) => Promise<void>;
@@ -157,8 +179,15 @@ export function usePackageActions(): PackageActions {
     busy,
     refusal,
     clear,
-    deploy: async (packageId, confirm, placements) => {
-      await run((query) => deployPackage(query, packageId, { confirm, ...(placements ? { placements } : {}) }));
+    deploy: async (packageId, opts) => {
+      await run((query) =>
+        deployPackage(query, packageId, {
+          confirm: opts.confirm,
+          ...(opts.placements ? { placements: opts.placements } : {}),
+          ...(opts.deploymentId ? { deploymentId: opts.deploymentId } : {}),
+          ...(opts.fromDeploymentId ? { fromDeploymentId: opts.fromDeploymentId } : {}),
+        }),
+      );
     },
     retry: async (packageId, fromDeploymentId) => {
       await run((query) => deployPackage(query, packageId, { confirm: false, fromDeploymentId }));
@@ -166,12 +195,11 @@ export function usePackageActions(): PackageActions {
     setAutoDeploy: async (packageId, autoDeploy) => {
       await run((query) => setPackageAutoDeploy(query, packageId, autoDeploy));
     },
-    setDeployableList: async (packageId, disabled) => {
-      await run((query) => setPackageDisabled(query, packageId, disabled));
+    disableDeployables: async (packageId, names) => {
+      await run((query) => disableDeployables(query, packageId, names));
     },
-    setDeployableEnabled: async (packageId, current, name, enabled) => {
-      const next = enabled ? current.filter((n) => n !== name) : [...new Set([...current, name])];
-      await run((query) => setPackageDisabled(query, packageId, next));
+    enableDeployables: async (packageId, names) => {
+      await run((query) => enableDeployables(query, packageId, names));
     },
     rollback: async (packageId, deploymentId) => {
       await run((query) => rollbackPackage(query, packageId, deploymentId));

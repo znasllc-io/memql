@@ -24,6 +24,7 @@ package memql
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -229,19 +230,21 @@ func parseMetaCommandArgs(name, argsSrc string, contract *BuiltinArgContract) (m
 			return nil, fmt.Errorf("%s() does not accept arguments", name)
 		}
 	case BuiltinArgProfileObject:
-		if trimmed == "" || trimmed[0] != '{' {
+		body, ok := objectArgBody(trimmed)
+		if !ok {
 			return nil, fmt.Errorf("%w: %s() requires a JSON object argument", ErrInvalidArgument, name)
 		}
-		args, err = decodeMetaObjectArg(trimmed)
+		args, err = decodeMetaObjectArg(body)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s() argument: %v", ErrInvalidArgument, name, err)
 		}
 	case BuiltinArgProfileOptionalObject:
 		if trimmed != "" {
-			if trimmed[0] != '{' {
+			body, ok := objectArgBody(trimmed)
+			if !ok {
 				return nil, fmt.Errorf("%w: %s() argument must be an object", ErrInvalidArgument, name)
 			}
-			args, err = decodeMetaObjectArg(trimmed)
+			args, err = decodeMetaObjectArg(body)
 			if err != nil {
 				return nil, fmt.Errorf("%w: %s() argument: %v", ErrInvalidArgument, name, err)
 			}
@@ -311,6 +314,62 @@ func stringKeyOrDefault(key string) string {
 // source. Number values decode to float64; that matches what
 // parser.go's parseFunctionArgValue emits for tokNumber, so #255 is
 // the right place to standardise on int when both parsers converge.
+// namedArgsBody matches the leading key of the named-args call form, in BOTH
+// spellings the renderer produces: a bare identifier and a quoted one.
+//
+// The quoted alternative requires the CLOSING quote before the colon, which is
+// what keeps a plain string argument out. `"v1:x"` looks like a quoted key
+// followed by a colon to any looser pattern, and admitting it would turn a
+// clean "requires a JSON object argument" into a JSON decoder error about a
+// body this never should have built.
+//
+// Anchored, and it deliberately does not validate the rest --
+// decodeMetaObjectArg is what decides whether the body is really an object, so
+// a near-miss still fails with the decoder's own message rather than with a
+// guess from a regex.
+var namedArgsBody = regexp.MustCompile(`^(?:"[A-Za-z_][A-Za-z0-9_]*"|[A-Za-z_][A-Za-z0-9_]*)\s*:`)
+
+// objectArgBody normalises what an `object`-profile builtin was called with
+// into a JSON object body, and answers false when there is nothing there to
+// read as one.
+//
+// IT ACCEPTS TWO SPELLINGS BECAUSE THE LANGUAGE ONLY EMITS ONE OF THEM
+// (memql#4927). The profile was written against `name({a: 1})` and checked
+// `trimmed[0] == '{'`; memql#2335 then RETIRED that wrapper -- the rewriter
+// lowers every call to `name(a: 1)` and "the parser now rejects the wrapper".
+// So an `object` builtin could only be called in a spelling the DSL refuses,
+// and every automation step reaching one was refused at parse:
+//
+//	packageNoteUpstreamFromWebhook() requires a JSON object argument
+//
+// with the args plainly there in the message. Both automations that pass
+// named arguments to a builtin were dead in exactly this way -- the inbound
+// webhook that notes a package's upstream moving, and campaign bounce and
+// complaint ingestion -- and both fail only when the automation FIRES, which
+// is why a green suite said nothing. It is the same disagreement memql#4927
+// reported from its other side, where an empty argument list met the same
+// check.
+//
+// The braced form stays accepted: it is what an HTTP or SDK caller sends, and
+// it is still what `previewInsert({...})` and its neighbours are written as.
+//
+// Both key spellings are accepted because the step renderer emits the QUOTED
+// one (`renderFunctionArgs` strips the braces off renderMemQLValue's object)
+// while a hand-written call reads bare. Matching only the bare form would fix
+// the shape nobody sends.
+func objectArgBody(trimmed string) (string, bool) {
+	if trimmed == "" {
+		return "", false
+	}
+	if trimmed[0] == '{' {
+		return trimmed, true
+	}
+	if namedArgsBody.MatchString(trimmed) {
+		return "{" + trimmed + "}", true
+	}
+	return "", false
+}
+
 func decodeMetaObjectArg(src string) (map[string]any, error) {
 	quoted, err := quoteBareIdentifierKeys(src)
 	if err != nil {

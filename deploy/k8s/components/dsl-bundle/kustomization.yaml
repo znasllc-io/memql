@@ -2,19 +2,28 @@
 #
 # Platform consolidation (#2472 Step 2 / #2484). A product-agnostic engine node
 # runs a product's DSL by mounting it at boot from MEMQL_DSL_PATH. This
-# component adds, to every Deployment labelled `memql/product-dsl: "true"`:
+# component adds ONE init container, `dsl-bundle-copy`, which copies the
+# product's `.memql` tree out of the DSL-bundle image into the shared DSL
+# volume -- so the plain engine image loads the product DSL with zero
+# compiled-in product code (dsl.MountRuntimeDomainsFromEnv).
 #
-#   - an emptyDir volume `dsl-bundle`,
-#   - an init-container `dsl-bundle-copy` that copies the product's `.memql`
-#     tree out of the DSL-bundle image into that volume, and
-#   - a `MEMQL_DSL_PATH=/var/lib/memql/dsl` env + volumeMount on the engine
-#     container (index 0),
+# THE VOLUME, THE MOUNT AND MEMQL_DSL_PATH ARE NOT HERE. They belong to
+# `dsl-mount`, which must be listed before this one. They used to be here, and
+# `dsl-packages` carried an identical copy, which made the two components
+# mutually exclusive: applying both appended a second volume of the same name
+# and the Deployment was invalid (memql#4933). Read dsl-mount's header for the
+# whole reasoning; the short version is that a shared substrate belongs to one
+# component and the deliverers add only what is theirs.
 #
-# so the plain engine image loads the product DSL with zero compiled-in
-# product code (dsl.MountRuntimeDomainsFromEnv).
+# ORDER IS THE `components:` LIST. Init containers run in list order and each
+# deliverer appends, so a product's own bundle lands first and a package can
+# add domains beside it -- never over it, since the engine's mount skips a
+# domain colliding with a core namespace and the ANALYSIS refuses one outright
+# (dsl_domain_reserved), so a collision is caught long before a pod boots.
 #
 # USAGE (in a product overlay):
 #   components:
+#     - ../../<engine>/deploy/k8s/components/dsl-mount
 #     - ../../<engine>/deploy/k8s/components/dsl-bundle
 #   labels:                       # or a per-Deployment label patch
 #     - pairs: { memql/product-dsl: "true" }
@@ -23,9 +32,6 @@
 #     - name: memql-dsl-bundle
 #       newName: acrmemql.azurecr.io/<product>-dsl-bundle
 #       digest: sha256:...
-#
-# The engine container is index 0 on every mesh node Deployment (bff /
-# cognition / agent / planner / workbench), so the patch is name-agnostic.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
@@ -35,27 +41,12 @@ patches:
       labelSelector: memql/product-dsl=true
     patch: |
       - op: add
-        path: /spec/template/spec/volumes/-
+        path: /spec/template/spec/initContainers/-
         value:
-          name: dsl-bundle
-          emptyDir: {}
-      - op: add
-        path: /spec/template/spec/initContainers
-        value:
-          - name: dsl-bundle-copy
-            image: memql-dsl-bundle:latest
-            imagePullPolicy: IfNotPresent
-            command: ["sh", "-c", "cp -a /bundle/. /var/lib/memql/dsl/"]
-            volumeMounts:
-              - name: dsl-bundle
-                mountPath: /var/lib/memql/dsl
-      - op: add
-        path: /spec/template/spec/containers/0/volumeMounts/-
-        value:
-          name: dsl-bundle
-          mountPath: /var/lib/memql/dsl
-      - op: add
-        path: /spec/template/spec/containers/0/env/-
-        value:
-          name: MEMQL_DSL_PATH
-          value: /var/lib/memql/dsl
+          name: dsl-bundle-copy
+          image: memql-dsl-bundle:latest
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "cp -a /bundle/. /var/lib/memql/dsl/"]
+          volumeMounts:
+            - name: dsl-tree
+              mountPath: /var/lib/memql/dsl

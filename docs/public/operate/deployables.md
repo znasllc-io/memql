@@ -128,13 +128,26 @@ On the package path:
 | Click | Call |
 |---|---|
 | Analyze | `createPackage`, then `packageDeploy(confirm: false)` |
-| Deploy | `packageDeploy(confirm: true, placements)` |
+| Deploy | `packageDeploy(confirm: true, placements, deploymentId)` |
 
 `packageDeploy` without `confirm` opens the deployment row, fetches, analyzes
 and parks at `awaiting_confirm` with the report on the row. Nothing is built,
 staged, rolled or published. That gate is always present -- a redeploy passes
 it in one click, and it is on the ROW rather than in a browser, so somebody who
 closed the window finds their run exactly where they left it.
+
+**The second click ADVANCES the first click's run**, which is what
+`deploymentId` names (memql#4954). Without it every call minted a run, the
+confirmation included: the source kept a row at `awaiting_confirm` nobody would
+ever answer, the list went on saying a deploy was waiting for a gate that had
+been answered, and a Retry's report described bytes the click did not ship. A
+resumed run also **re-reads the snapshot it already stored** rather than
+fetching the source again, so the report a person read at the gate describes
+what the click deploys.
+
+Only a PARKED run of the same source resumes. A deployment id naming a run in
+flight falls through to opening a new one, which is what leaves the append-only
+rule refusing it -- the dedup two auto-deploy feeds noticing one push rely on.
 
 On the hand-made path, Analyze is `createSite` (a draft holding the placeholder
 bundle) plus, for a zip, `artifactProbe`; Deploy is `sitePublishFromArtifact`
@@ -144,6 +157,32 @@ for a zip and nothing at all for a CI-pushed source.
 source has a run at `awaiting_confirm` is marked in the list -- "a deploy is
 waiting for you" -- from a feed over parked runs alone
 (`packageDeploymentsAwaitingConfirm`, owner or cluster owner, newest first).
+
+### A run says which deployables it is for
+
+`scopedTo` on the run row names them; **empty means the whole source**, which
+is what a run that skips nothing is and what every run written before the field
+existed was.
+
+Runs are routinely scoped to one app -- a redeploy from a deployable's page
+sends every sibling `skip: true`, and the compose gate does the same when
+entered for one declared app -- and the row used to keep no trace of it
+(memql#4953). So every reader assumed the source's newest run was about
+whatever it was looking at: a serving `storefront` read itself as "Building"
+while `web` deployed, drew its own Where-it-lives, Build and Live stops as
+unreached, rendered the sibling's report and build failure as its own, and
+offered a Cancel that stopped the other app's deploy.
+
+Two things follow from a run knowing its own scope, and the second is not
+merely cosmetic:
+
+- **A deployable's page shows a run only when that run names its app**, and the
+  list's compact rail stops repainting live siblings as unreached.
+- **While any run of a source is in flight, that source's other apps offer no
+  act that would start a second one**, and say why. The wrong reading was
+  accidentally providing this -- every app of a busy source read "Building" and
+  offered only Cancel -- and there is no per-source concurrency gate in the
+  engine, while the roll rewrites one pointer and restarts the cluster onto it.
 
 ---
 

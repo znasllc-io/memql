@@ -23,6 +23,8 @@ function deployment(over: Partial<DeploymentRow> = {}): DeploymentRow {
     report: { deployables: [{ name: "shop", kind: "spa", path: "apps/shop", buildPlan: "prebuilt", output: "dist", prebuilt: true }], dslDomains: [], problems: [], ok: true },
     dslVersion: "",
     deployables: [],
+    scopedTo: [],
+    fromDeploymentId: "",
     snapshotArtifactId: "",
     buildLogTail: "",
     error: null,

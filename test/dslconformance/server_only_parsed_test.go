@@ -368,11 +368,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// attached and the inbound webhook receiver, where the "caller" is
 		// GitHub -- scoping refuses both and still permits the claim worth
 		// refusing.
-		{Path: "platform/mutations.memql", Name: "setPackageStatus"}:              true,
-		{Path: "platform/mutations.memql", Name: "setSiteStatus"}:                 true,
-		{Path: "platform/mutations.memql", Name: "recordPackageDeployedVersion"}:  true,
-		{Path: "platform/mutations.memql", Name: "recordPackageName"}:             true,
-		{Path: "platform/mutations.memql", Name: "recordPackageUpstreamVersion"}:  true,
+		{Path: "platform/mutations.memql", Name: "setPackageStatus"}:             true,
+		{Path: "platform/mutations.memql", Name: "setSiteStatus"}:                true,
+		{Path: "platform/mutations.memql", Name: "recordPackageDeployedVersion"}: true,
+		{Path: "platform/mutations.memql", Name: "recordPackageName"}:            true,
+		{Path: "platform/mutations.memql", Name: "recordPackageUpstreamVersion"}: true,
 		// recordPackageDeployables is the PIPELINE's reading of the tree, and
 		// it is a pipeline writer for the reason the ones above are: it runs
 		// during a deploy, where actor.userId is empty on the path that has to
@@ -386,6 +386,7 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "openPackageDeployment"}:         true,
 		{Path: "platform/mutations.memql", Name: "advancePackageDeployment"}:      true,
 		{Path: "platform/mutations.memql", Name: "recordPackageDeploymentReport"}: true,
+		{Path: "platform/mutations.memql", Name: "recordPackageDeploymentScope"}:  true,
 		{Path: "platform/mutations.memql", Name: "closePackageDeployment"}:        true,
 		// epic memql#4900. Two more writes about a RUN rather than about a
 		// person, and neither is caller-scopable for the reason the four

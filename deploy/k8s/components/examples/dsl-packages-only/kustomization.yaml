@@ -1,0 +1,28 @@
+# Composition example: staged PACKAGE DSL, with no product bundle image
+# (memql#4933).
+#
+# This is the shape `dsl-packages`' own header documents, and the shape that
+# could not render before this epic. Two things stopped it, and both were
+# silent:
+#
+#  1. The component appended its init container to an `initContainers` key no
+#     Deployment ships, which is a JSON6902 "missing path" error. It rendered
+#     only when `dsl-bundle` happened to be listed first and had created the
+#     list -- so the component that needs no product image depended on the one
+#     that does. `dsl-mount` owns that substrate now.
+#
+#  2. The documented usage put `labels:` and `components:` in ONE
+#     kustomization, and the label transformer runs last. See labelled/.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: dsl-packages-only-example
+
+resources:
+  - labelled
+  - configmap.yaml
+
+components:
+  - ../../dsl-mount
+  - ../../dsl-packages
+  - ../../packages-roll-rbac

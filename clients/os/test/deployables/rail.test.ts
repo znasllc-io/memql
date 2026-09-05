@@ -35,6 +35,8 @@ function deployment(over: Partial<DeploymentRow> = {}): DeploymentRow {
     report: { deployables: [], dslDomains: [], problems: [], ok: true },
     dslVersion: "",
     deployables: [],
+    scopedTo: [],
+    fromDeploymentId: "",
     snapshotArtifactId: "",
     buildLogTail: "",
     builtOn: null,

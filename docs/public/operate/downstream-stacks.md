@@ -93,9 +93,15 @@ variables on the make targets. Environment-variable defaults exist for
 A product does not build node images. Its DSL reaches the cluster as a
 **data-only bundle image**: build it from the product's `.memql` tree
 (`FROM scratch` + the files), import it into k3d like any other local image,
-and let the product overlay's `deploy/k8s/components/dsl-bundle` component
-mount it onto the mesh nodes (those labelled `memql/product-dsl: "true"`) at
-`MEMQL_DSL_PATH`. The overlay pins the `{engine, bundle, client}` digests;
+and let the product overlay's `deploy/k8s/components/dsl-mount` +
+`dsl-bundle` components mount it onto the mesh nodes (those labelled
+`memql/product-dsl: "true"`) at `MEMQL_DSL_PATH`. **The label has to be applied
+in a layer the components consume**, not by a `labels:` block beside them: a
+kustomization's label transformer runs after its components, so the selector
+would match nothing and the overlay would render, apply and come up healthy
+with none of this on it (memql#4933 -- the working shape is in
+[packages.md](packages.md#applying-the-components)). The overlay pins the
+`{engine, bundle, client}` digests;
 the engine node images are the plain `memql-<type>:local` images this repo
 already builds, so swapping a product in is invisible to the manifests.
 
@@ -121,8 +127,8 @@ up:
 	docker build -f dsl.Dockerfile -t <product>-dsl-bundle:local .
 	bash $(ENGINE)/scripts/k3d/import-image.sh --image=<product>-dsl-bundle:local --dryRun=false
 	# 3. Register the product Application (idempotent on the running cluster).
-	#    Its overlay adds the dsl-bundle component (mounting the bundle at
-	#    MEMQL_DSL_PATH) and pins the {engine, bundle, client} digests.
+	#    Its overlay adds the dsl-mount + dsl-bundle components (mounting the
+	#    bundle at MEMQL_DSL_PATH) and pins the {engine, bundle, client} digests.
 	MEMQL_K3D_REPO_TOKEN=$$(gh auth token) bash $(ENGINE)/scripts/k3d/up.sh \
 	    --app-name=<product>-local \
 	    --app-project=<product> \

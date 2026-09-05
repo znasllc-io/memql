@@ -684,8 +684,8 @@ describe("the compose flow: where each app will live", () => {
     await click(within(region).getByRole("radiogroup", { name: "Deploy or skip web" }).querySelectorAll("[role=radio]")[1]);
     await click(forwardAct("Deploy"));
 
-    const off = connection.callsNamed("setPackageDisabledDeployables").at(-1) ?? "";
-    expect(off).toContain('disabledDeployables: ["web"]');
+    const off = connection.callsNamed("disablePackageDeployables").at(-1) ?? "";
+    expect(off).toContain('deployableNames: ["web"]');
     // ...and the app that was NOT skipped is not turned off with it.
     expect(off).not.toContain("storefront");
   });
@@ -695,7 +695,7 @@ describe("the compose flow: where each app will live", () => {
     const { connection } = await analyzed();
     await fill("The name storefront answers at", "shop");
     await click(forwardAct("Deploy"));
-    expect(connection.callsNamed("setPackageDisabledDeployables")).toHaveLength(0);
+    expect(connection.callsNamed("disablePackageDeployables")).toHaveLength(0);
   });
 
   it("offers a cluster owner the client AND their own domain; an admin only the client", async () => {

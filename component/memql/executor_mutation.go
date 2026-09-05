@@ -306,6 +306,114 @@ func appendPayloadFields(prior, partial map[string]any, appendFields []string) {
 	}
 }
 
+// membershipDirection is what @addToSet and @removeFromSet differ by, and the
+// only thing they differ by.
+type membershipDirection int
+
+const (
+	membershipAdd membershipDirection = iota
+	membershipRemove
+)
+
+// setMembershipFields applies a SET MEMBERSHIP change to the named array-typed
+// payload fields (memql#4951).
+//
+// # What this is for
+//
+// `update { field: value }` read-merges, and `@appendFields` adds to an array
+// without clobbering it. Nothing removed from one, and nothing expressed
+// membership at all -- so an owner-editable set had exactly one expressible
+// form: the caller reads the current list, changes one member, and writes the
+// whole list back. That is correct for a single owner editing from one console
+// and it carries a race nothing in the DSL declares: two windows toggling two
+// different members at the same instant clobber, and the loser is never told.
+//
+// # Why it is not @appendFields plus a mirror image
+//
+// Append is documented as NOT deduped, which is right for a list (attaching
+// the same file twice is two attachments) and wrong for a set. A membership
+// toggle built on it yields ["web", "web"] after a double click, and a single
+// removal then leaves the name still present -- the app reads "still disabled"
+// and the person has clicked enable. So the pair is deduped on the way in,
+// which is what makes `add` and `remove` inverses of each other.
+//
+// # The rules, each with a reason
+//
+//   - Order is preserved. Existing members keep their positions and new ones
+//     land at the end, so a set rendered as a list does not reshuffle under a
+//     reader on an unrelated edit.
+//   - Removing a member that is not there is a NO-OP, not an error. Two
+//     callers removing the same member both succeed, which is what makes the
+//     mutation idempotent and a retry safe.
+//   - A field ABSENT from the write is untouched, exactly as with append: the
+//     stored array survives through the read-merge's omitted-field inherit.
+//   - A prior value that is not an array is treated as empty, and a scalar
+//     written where an array is expected is one element. Both match
+//     @appendFields, so the two annotations do not disagree about what an
+//     array is.
+//   - Members are compared by their RENDERED form, so "1" and 1 are one
+//     member. A set whose members are strings is the only shape this has a
+//     caller for, and treating a JSON number and its string spelling as
+//     different members would make a set silently keep both.
+func setMembershipFields(prior, partial map[string]any, fields []string, dir membershipDirection) {
+	for _, f := range fields {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		written, present := partial[f]
+		if !present {
+			continue
+		}
+		stored := toAppendSlice(prior[f])
+		changing := toAppendSlice(written)
+
+		if dir == membershipRemove {
+			drop := make(map[string]struct{}, len(changing))
+			for _, m := range changing {
+				drop[memberKey(m)] = struct{}{}
+			}
+			kept := make([]any, 0, len(stored))
+			for _, m := range stored {
+				if _, gone := drop[memberKey(m)]; gone {
+					continue
+				}
+				kept = append(kept, m)
+			}
+			partial[f] = kept
+			continue
+		}
+
+		// Walked in sequence rather than concatenated, and sized from ONE
+		// slice rather than from the sum of two. The sum is a length derived
+		// from a decoded payload and is flagged as an allocation-size overflow
+		// (go/allocation-size-overflow); the concatenation was also a whole
+		// extra copy of the stored set to iterate it once.
+		out := make([]any, 0, len(stored))
+		seen := make(map[string]struct{}, len(stored))
+		for _, group := range [][]any{stored, changing} {
+			for _, m := range group {
+				k := memberKey(m)
+				if _, dup := seen[k]; dup {
+					continue
+				}
+				seen[k] = struct{}{}
+				out = append(out, m)
+			}
+		}
+		partial[f] = out
+	}
+}
+
+// memberKey is set identity: the member's rendered form.
+//
+// A stored array arrives through a JSON round-trip, so a number is a float64
+// and its string spelling is a string; comparing the Go values would make
+// those two different members of one set and keep both. Rendering is what a
+// caller means by "the same member" for the only member type this has a user
+// for, which is a name.
+func memberKey(v any) string { return fmt.Sprintf("%v", v) }
+
 // toAppendSlice normalises an array-ish payload value to []any for appending.
 // nil / absent -> empty; []any and []string pass through; any other scalar is
 // wrapped as a single element (so @appendFields tolerates a scalar partial).
@@ -717,6 +825,13 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			// delta. Empty for every unannotated mutation.
 			dropNoUnsetFields(priorPayload, payload, mutation.NoUnsetFields)
 			appendPayloadFields(priorPayload, payload, mutation.AppendFields)
+			// @addToSet / @removeFromSet: the written elements are a
+			// MEMBERSHIP change against the stored array rather than a value
+			// to put in its place (memql#4951). After append, because both
+			// rewrite the delta's key and a field claimed by two of them is
+			// refused at load rather than decided by this order.
+			setMembershipFields(priorPayload, payload, mutation.AddToSet, membershipAdd)
+			setMembershipFields(priorPayload, payload, mutation.RemoveFromSet, membershipRemove)
 			mergePayloadFields(priorPayload, payload, mutation.MergeFields)
 			payload = priorPayload
 		}

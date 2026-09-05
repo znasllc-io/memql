@@ -656,7 +656,15 @@ func annotationTakesArgs(name string) bool {
 		"rateLimit", "relationship",
 		"handler", "executionTime", "executor", "args",
 		"defaultProvider", "templateFile", "type", "model", "extends",
-		"cache", "defaultFilter", "concepts", "default":
+		"cache", "defaultFilter", "concepts", "default",
+		// The whole field-list family was missing here (memql#4951): every
+		// one takes `("a", "b")` and completion offered them bare. The
+		// in-sync test only fires for annotations declared in
+		// annotations.KeywordArgs, and these take POSITIONAL strings, so it
+		// could not see them. Added together rather than one at a time,
+		// because the next one added would inherit the same gap.
+		"mergeFields", "appendFields", "addToSet", "removeFromSet",
+		"createOnly", "noUnset", "requiresRank", "visibility", "alias":
 		return true
 	default:
 		return false

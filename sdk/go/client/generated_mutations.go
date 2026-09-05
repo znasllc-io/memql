@@ -8388,6 +8388,35 @@ func DeprecateActionBuild(args DeprecateActionArgs) string {
 	return b.String()
 }
 
+// DisablePackageDeployables -- Turn a source's auto-deploy switch on or off (epic memql#4900).
+// The PERSON's write, and an owned one: the write guard resolves the target row and admits its owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's decision, which is what makes an auto-run's provenance honest.
+//
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["disablePackageDeployables"] in generated_concepts.go).
+type DisablePackageDeployablesArgs struct {
+	PackageId       string
+	DeployableNames []string
+}
+
+// DisablePackageDeployables calls the engine mutation disablePackageDeployables.
+func (qc *QueryClient) DisablePackageDeployables(ctx context.Context, args DisablePackageDeployablesArgs) (*Result, error) {
+	call := DisablePackageDeployablesBuild(args)
+	return qc.executeNamed(ctx, "disablePackageDeployables", call)
+}
+
+func DisablePackageDeployablesBuild(args DisablePackageDeployablesArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation disablePackageDeployables(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("deployableNames: ")
+	b.WriteString(renderMemQLValue(args.DeployableNames))
+	b.WriteString(")")
+	return b.String()
+}
+
 // EmitClientToolRequest -- Emit a client-tool request envelope for cross-node relay to a browser stream.
 //
 // Bound concept: v1:cognition:client:tool:request (machine-readable: BoundConcepts["emitClientToolRequest"] in generated_concepts.go).
@@ -8577,6 +8606,35 @@ func EmitTextChunkBuild(args EmitTextChunkArgs) string {
 	}
 	b.WriteString("done: ")
 	b.WriteString(fmt.Sprintf("%v", args.Done))
+	b.WriteString(")")
+	return b.String()
+}
+
+// EnablePackageDeployables -- Turn one or more of a source's deployables back ON.
+// The exact inverse of disablePackageDeployables above, and the reason that one is a membership change rather than a whole-list write: removing a member had no form at all. Removing a name that is not there is a no-op rather than an error, so two people enabling the same app both succeed and a retry is safe.
+//
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["enablePackageDeployables"] in generated_concepts.go).
+type EnablePackageDeployablesArgs struct {
+	PackageId       string
+	DeployableNames []string
+}
+
+// EnablePackageDeployables calls the engine mutation enablePackageDeployables.
+func (qc *QueryClient) EnablePackageDeployables(ctx context.Context, args EnablePackageDeployablesArgs) (*Result, error) {
+	call := EnablePackageDeployablesBuild(args)
+	return qc.executeNamed(ctx, "enablePackageDeployables", call)
+}
+
+func EnablePackageDeployablesBuild(args EnablePackageDeployablesArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation enablePackageDeployables(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("deployableNames: ")
+	b.WriteString(renderMemQLValue(args.DeployableNames))
 	b.WriteString(")")
 	return b.String()
 }
@@ -14216,35 +14274,6 @@ func SetPackageAutoDeployBuild(args SetPackageAutoDeployArgs) string {
 	}
 	b.WriteString("autoDeploy: ")
 	b.WriteString(fmt.Sprintf("%v", args.AutoDeploy))
-	b.WriteString(")")
-	return b.String()
-}
-
-// SetPackageDisabledDeployables -- Turn a source's auto-deploy switch on or off (epic memql#4900).
-// The PERSON's write, and an owned one: the write guard resolves the target row and admits its owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's decision, which is what makes an auto-run's provenance honest.
-//
-// Bound concept: v1:platform:package (machine-readable: BoundConcepts["setPackageDisabledDeployables"] in generated_concepts.go).
-type SetPackageDisabledDeployablesArgs struct {
-	PackageId           string
-	DisabledDeployables []string
-}
-
-// SetPackageDisabledDeployables calls the engine mutation setPackageDisabledDeployables.
-func (qc *QueryClient) SetPackageDisabledDeployables(ctx context.Context, args SetPackageDisabledDeployablesArgs) (*Result, error) {
-	call := SetPackageDisabledDeployablesBuild(args)
-	return qc.executeNamed(ctx, "setPackageDisabledDeployables", call)
-}
-
-func SetPackageDisabledDeployablesBuild(args SetPackageDisabledDeployablesArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation setPackageDisabledDeployables(")
-	b.WriteString("packageId: ")
-	b.WriteString(quoteMemQL(args.PackageId))
-	if b.Len() > 39 {
-		b.WriteString(", ")
-	}
-	b.WriteString("disabledDeployables: ")
-	b.WriteString(renderMemQLValue(args.DisabledDeployables))
 	b.WriteString(")")
 	return b.String()
 }
