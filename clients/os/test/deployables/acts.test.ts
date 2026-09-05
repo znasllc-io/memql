@@ -41,8 +41,8 @@ function pkg(over: Record<string, unknown> = {}) {
   });
 }
 
-function run(status: string) {
-  return deploymentFromRow({ id: "dep-1", packageId: "pkg-1", status });
+function run(status: string, over: Record<string, unknown> = {}) {
+  return deploymentFromRow({ id: "dep-1", packageId: "pkg-1", status, ...over });
 }
 
 const BASE: ActsInput = { site: site(), pkg: null, run: null, canWrite: true };
@@ -270,5 +270,22 @@ describe("a source's gate, on a deployable that has its own state", () => {
     // The other control: something IS happening to this app, so the bar says
     // so even though it is live.
     expect(actsFor({ ...BASE, pkg: pkg(), run: run("building") }).state).toBe("Building");
+  });
+
+  it("STILL speaks when the gate is scoped to THIS app", () => {
+    // The branch that makes this scoping rather than a blanket rule: a gate
+    // naming this deployable is its own redeploy awaiting a yes, and it is
+    // the question on this page even though the app is serving. Without a
+    // case where `scopedTo` matches, the whole distinction is untested and
+    // "ignore a parked run on a live app" would pass just as well.
+    const mine = site({ packageDeployableName: "storefront" });
+    const scoped = run("awaiting_confirm", { scopedTo: ["storefront"] });
+    const reading = actsFor({ ...BASE, site: mine, pkg: pkg(), run: scoped });
+    expect(reading.state).toBe("Ready to deploy");
+    // Its OWN sentence, not the appended clause -- the gate IS the state
+    // here, so nothing is mentioned beside it.
+    expect(reading.detail).toContain("the report above is what it would do");
+    expect(reading.detail).not.toContain("a deploy for this source");
+    expect(openStopFor({ mode: "standing", pkg: pkg(), app: "storefront", run: scoped, site: mine })).toBe("whatItIs");
   });
 });
