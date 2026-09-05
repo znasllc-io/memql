@@ -1086,14 +1086,15 @@ describe("a gate opened for one app", () => {
     await click((await screen.findByText("web")).closest("button"));
     await waitFor(() => expect(connection.callsNamed("packageDeploy").length).toBeGreaterThan(0));
 
-    // NAMED BEFORE THE GATE PARKS. The app is known from the click; the
-    // source only arrives with the run. Reading the title off the run alone
-    // is what called this "New deployable" while the analysis was running.
-    expect(await screen.findByRole("region", { name: "Deploy web" })).toBeTruthy();
+    // NAMED BEFORE THE GATE PARKS. Both facts are known from the click -- the
+    // app from the row, the source from the row's package -- and neither waits
+    // on the analysis. Composing the title from the RUN is what called this
+    // "New deployable" for as long as the analysis took.
+    expect(await screen.findByRole("region", { name: "Deploy web from acme" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "New deployable" })).toBeNull();
 
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun("pkg-acme", { report: REPORT_TWO }), "NODE_CREATED");
 
-    // ...and once it parks, named for the app AND its source.
     const region = await screen.findByRole("region", { name: "Deploy web from acme" });
     // What it is lists the ONE app the gate is about. `storefront` is in the
     // same manifest and is not what anybody is being asked about.

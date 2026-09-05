@@ -248,6 +248,11 @@ export function DeployablesSection({
         onBack={backToList}
         onAsk={onAsk}
         parked={parkedFor ?? undefined}
+        source={
+          view.parkedPackageId === undefined
+            ? undefined
+            : (packageRows.find((p) => p.id === view.parkedPackageId) ?? undefined)
+        }
         only={view.only}
         placed={
           parkedFor === null
