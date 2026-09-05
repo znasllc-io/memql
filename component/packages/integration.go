@@ -102,9 +102,11 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Run one deployment attempt for a package (epic memql#4794). Without confirm, the run parks at awaiting_confirm with the analysis report on the deployment row and nothing else happens; with confirm, it builds, stages, rolls and publishes in the D6 order. placements (epic memql#4885, D8) is per deployable name -- {hostname, accountId, ownDomain} -- read on a deployable's FIRST deploy only: the site is created at hostname, then the account write and the domain binding run under the caller's actor as the same two calls the page makes, and a refused one lands on the outcome (accountRefusal / domainRefusal) without failing the publish. Returns {deploymentId, status, awaitingConfirm, deployables, report}.",
 			Handler:     i.handleDeploy,
 			ArgsSchema: map[string]string{
-				"packageId":  "string (required) -- the package to deploy",
-				"confirm":    "boolean -- pass true to proceed past the always-present confirm gate",
-				"placements": "object -- deployable name -> {hostname, accountId, ownDomain, skip}; hostname is required on a deployable's FIRST deploy unless skip is true, accountId and ownDomain are optional and applied after the site exists, and skip:true leaves that deployable out of the run entirely (memql#4930) -- recorded as skipped, with nothing built and nothing it already serves touched",
+				"packageId":        "string (required) -- the package to deploy",
+				"confirm":          "boolean -- pass true to proceed past the always-present confirm gate",
+				"placements":       "object -- deployable name -> {hostname, accountId, ownDomain, skip}; hostname is required on a deployable's FIRST deploy unless skip is true, accountId and ownDomain are optional and applied after the site exists, and skip:true leaves that deployable out of the run entirely (memql#4930) -- recorded as skipped, with nothing built and nothing it already serves touched",
+				"deploymentId":     "string -- confirm the PARKED run of this id rather than starting a new one (memql#4954). Ignored unless it names a run of this package waiting at the gate; anything else opens a new run",
+				"fromDeploymentId": "string -- retry an earlier run from the bytes it already fetched (task memql#4902) rather than fetching the source again",
 			},
 		},
 		{
@@ -276,10 +278,15 @@ func (i *Integration) handleDeploy(ctx context.Context, args map[string]any, _ i
 		return nil, err
 	}
 	out, derr := Deploy(ctx, deps, DeployRequest{
-		PackageId:  strings.TrimSpace(stringArg(args, "packageId")),
-		Actor:      actorFromContext(ctx),
-		Confirmed:  boolArg(args, "confirm"),
-		Placements: placementsArg(args, "placements"),
+		PackageId: strings.TrimSpace(stringArg(args, "packageId")),
+		Actor:     actorFromContext(ctx),
+		Confirmed: boolArg(args, "confirm"),
+		// THE RUN THIS CALL IS ABOUT, when it is about one already open
+		// (memql#4954). It was never read, and Deploy mints an id whenever
+		// this is empty, so every call was a new run -- the confirm of a
+		// parked run included, which left that run parked forever.
+		DeploymentId: strings.TrimSpace(stringArg(args, "deploymentId")),
+		Placements:   placementsArg(args, "placements"),
 		// `automatic` is NOT read from the args and there is no argument for
 		// it. "A person did this" is what a call over the wire means, and a
 		// caller able to claim otherwise could put a run in the timeline
@@ -504,6 +511,24 @@ func (i *Integration) handleCancelDeployment(ctx context.Context, args map[strin
 	}
 	if run == nil {
 		return nil, refuse(CodeSourceUnreadable, "no deployment %q is readable by this caller", deploymentId)
+	}
+	// THE PACKAGE WAS DECLARED AND NEVER READ. Its ArgsSchema has named
+	// `packageId` since this capability shipped and nothing looked at it, so a
+	// caller could stop any run of any source it can read by naming its id
+	// alone. That is exactly how a Cancel on one deployable's page came to
+	// kill a sibling's deploy (memql#4953): the page took `run` from the
+	// SOURCE's newest run and passed that id here, and nothing on either side
+	// could tell that the run and the page were about different apps.
+	//
+	// The client's reading is fixed at its source -- a run now records its own
+	// scope -- and this is the second half rather than a substitute for it: a
+	// declared argument that decides nothing is worse than no argument,
+	// because it reads as a check.
+	if want := strings.TrimSpace(stringArg(args, "packageId")); want != "" {
+		if got := rowString(run, "packageId"); got != want {
+			return nil, refuse(CodeSourceUnreadable,
+				"deployment %q belongs to a different source, so it is not this one's to stop", deploymentId)
+		}
 	}
 
 	status := rowString(run, "status")

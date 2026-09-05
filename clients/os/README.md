@@ -439,6 +439,25 @@ produced**" at y=885, three sections higher than either. Six controls read
   stopped at, which is the case that carries the reading: opening Live to say
   "the build failed" sends somebody to repair the wrong thing.
 
+- **A RUN BELONGS TO THE APPS IT NAMES** (memql#4953, `runCoversApp` /
+  `runForApp` / `siblingRunInFlight`). `usePackageDeployments` reads the
+  SOURCE's timeline, and the page used to take `rows[0]` off it -- the newest
+  run of the whole package, whatever deployable it was about. Everything then
+  derived from the wrong run: a serving `storefront` read "Building" while
+  `web` deployed, drew its own later stops as `ahead`, rendered the sibling's
+  report and refusal as its own, and offered a Cancel that killed `web`'s
+  deploy from a page about `storefront`. A run records `scopedTo` now -- EMPTY
+  meaning the whole source, which is what every row written before it was --
+  and the page, the list's compact rail and the parked-run mark all ask.
+
+  **The half that is easy to lose while fixing it**: the wrong reading was the
+  only thing stopping two concurrent runs of one source. There is no gate for
+  that in the engine, and a roll rewrites one pointer and restarts the cluster
+  onto it. So the page keeps its own state and its own words, and the acts that
+  would START a run are absent -- not disabled -- until the source is free,
+  with the line that already explains the state explaining that too. Removing a
+  wrong reading can remove a right behaviour that was leaning on it.
+
 Two smaller ones worth knowing. **`transform` does nothing to a non-replaced
 INLINE element**, so a disclosure chevron needs `display: inline-block` or it
 silently never turns -- jsdom cannot see it, and it reads as a control that

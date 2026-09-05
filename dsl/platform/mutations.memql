@@ -1332,10 +1332,14 @@ mutate packageDeployment openPackageDeployment {
     requestedBy    string
     automatic      boolean
     nodeId         string
+    /// The deployables this run was started for. Empty is the whole source.
+    scopedTo       []string
+    /// The run this one was started from, when it is a retry.
+    fromDeploymentId string
     startedAt      datetime!
   }
   insert {
-    accept { sourceVersion, requestedBy, nodeId }
+    accept { sourceVersion, requestedBy, nodeId, scopedTo, fromDeploymentId }
     stamp {
       id:           args.deploymentId
       packageId:    args.packageId
@@ -1464,6 +1468,37 @@ mutate packageDeployment requestPackageDeploymentCancel {
 }
 
 
+/// Re-stamp which deployables a run is for. Pipeline writer.
+///
+/// Scope is stamped at open from the placements the first call carried, and re-stamped HERE when a
+/// parked run is confirmed -- because the gate is the moment a person answers which apps they
+/// meant. A compose gate opens with no placements at all (the analyze is about the whole source)
+/// and closes with the skips somebody ticked, so a run whose scope were fixed at open would report
+/// progress on apps it had been told not to build.
+///
+/// Its own mutation rather than an argument on advancePackageDeployment: advancing is a stage
+/// change and this is not, and a caller able to move a run's stage while rewriting what it is about
+/// could relabel a run mid-flight.
+///
+/// actor.userId scoping is not the fix, for the reason every pipeline writer on this row carries:
+/// scope is DERIVED from the placements the pipeline read, and it is what the console then trusts
+/// to decide which run a page is about. A caller-scoped version would let somebody rewrite the
+/// scope of their own run -- their own row, their own package -- and thereby point a Cancel, a
+/// refusal notice and a rail at an app the run has nothing to do with. The write is the pipeline's
+/// conclusion, not a preference, and there is no person in scope at the moment it is made.
+@serverOnly
+@description("Record which deployables a package deployment is for")
+mutate packageDeployment recordPackageDeploymentScope {
+  args {
+    deploymentId  string!
+    scopedTo      []string!
+  }
+  update {
+    id:       args.deploymentId
+    scopedTo: args.scopedTo
+  }
+}
+
 /// Land the analysis report, and the snapshot it was read from. Pipeline writer.
 ///
 /// actor.userId scoping is not the fix: the report is the output of the offline analysis gates
@@ -1471,7 +1506,13 @@ mutate packageDeployment requestPackageDeploymentCancel {
 /// let a person write a clean report onto their own deployment and walk it past the confirm gate --
 /// their own row, their own package, and a complete fabrication of the one artifact the gate exists
 /// to show them.
+/// @noUnset("snapshotArtifactId") because a run's snapshot is written ONCE and re-reported many
+/// times. A resumed run re-analyses the bytes it already stored, so its second report carries no
+/// artifact to store -- and without this the empty value would blank the id, leaving the row
+/// pointing at nothing and a later retry refused `snapshot_unavailable` for a snapshot that is
+/// sitting in blob storage (memql#4955).
 @serverOnly
+@noUnset("snapshotArtifactId")
 @description("Record a package deployment's analysis report")
 mutate packageDeployment recordPackageDeploymentReport {
   args {

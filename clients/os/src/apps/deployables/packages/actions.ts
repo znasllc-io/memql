@@ -113,9 +113,34 @@ export function useWrite(): WriteState & { run: <T>(fn: (query: NonNullable<Retu
 // Packages
 // ---------------------------------------------------------------------------
 
+/**
+ * What one `packageDeploy` call is about.
+ *
+ * AN OBJECT RATHER THAN POSITIONALS, because the two ids are the whole of
+ * memql#4954 and memql#4955 and neither had a parameter to travel in. The hook
+ * took `(packageId, confirm, placements?)`, so a caller holding a parked run's
+ * id or a lost run's id had nowhere to put it -- and the wire function beneath
+ * accepted both all along.
+ */
+export interface DeployOptions {
+  /** `false` parks the run at the gate with its report. */
+  confirm: boolean;
+  placements?: Record<string, Placement>;
+  /**
+   * Confirm the PARKED run of this id rather than starting a new one
+   * (memql#4954). Every call used to mint a run, the confirmation included,
+   * which left the answered gate open forever.
+   */
+  deploymentId?: string;
+  /**
+   * Retry from the bytes an earlier run already fetched (memql#4900).
+   */
+  fromDeploymentId?: string;
+}
+
 export interface PackageActions extends WriteState {
-  /** Start a run. `confirm: false` parks it at the gate with its report. */
-  deploy: (packageId: string, confirm: boolean, placements?: Record<string, Placement>) => Promise<void>;
+  /** Start a run, or confirm one already parked. */
+  deploy: (packageId: string, opts: DeployOptions) => Promise<void>;
   /**
    * Retry a run that was lost, from the bytes it already fetched (memql#4900).
    * A separate verb from `deploy` because it is a different promise: deploy
@@ -154,8 +179,15 @@ export function usePackageActions(): PackageActions {
     busy,
     refusal,
     clear,
-    deploy: async (packageId, confirm, placements) => {
-      await run((query) => deployPackage(query, packageId, { confirm, ...(placements ? { placements } : {}) }));
+    deploy: async (packageId, opts) => {
+      await run((query) =>
+        deployPackage(query, packageId, {
+          confirm: opts.confirm,
+          ...(opts.placements ? { placements: opts.placements } : {}),
+          ...(opts.deploymentId ? { deploymentId: opts.deploymentId } : {}),
+          ...(opts.fromDeploymentId ? { fromDeploymentId: opts.fromDeploymentId } : {}),
+        }),
+      );
     },
     retry: async (packageId, fromDeploymentId) => {
       await run((query) => deployPackage(query, packageId, { confirm: false, fromDeploymentId }));

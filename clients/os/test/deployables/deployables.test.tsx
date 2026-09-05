@@ -303,6 +303,8 @@ describe("the Head's action, by state", () => {
         nodeId: "bff-1",
         stoppedAt: "",
         heartbeatAt: "",
+        scopedTo: [],
+        fromDeploymentId: "",
         startedAt: "",
         finishedAt: "",
         createdAt: "",
@@ -335,6 +337,44 @@ describe("the Head's action, by state", () => {
     for (const state of HEAD_STATES) expect(() => headActionFor(state)).not.toThrow();
   });
 
+  it("a SIBLING's run leaves this app alone", async () => {
+    // memql#4953, rendered. The pure table is asserted in runScope.test.tsx;
+    // this is the wiring -- that the page picks its own run out of the
+    // source's timeline rather than taking rows[0].
+    //
+    // `admin` is building; `store.memql.example.com` is `storefront` and is
+    // live. Before the run recorded its scope, this page read "Building",
+    // drew its own later stops as unreached, and offered a Cancel that would
+    // have stopped `admin`'s deploy.
+    const siblingBuilding = run({
+      id: "dep-admin",
+      status: "building",
+      scopedTo: ["admin"],
+      deployables: [],
+      finishedAt: "",
+      startedAt: "2026-09-01T13:00:00Z",
+      createdAt: "2026-09-01T13:00:00Z",
+    });
+    const { page } = await mountAndOpen(
+      { ...WITH_PACKAGE, deployments: { "pkg-acme": [siblingBuilding, SUCCEEDED] } },
+      "store.memql.example.com",
+    );
+
+    expect(barState(page)).toBe("Published");
+    // NO CANCEL. It would have killed the other app's run from this page.
+    expect(barActs(page)).not.toContain("Cancel");
+    // ...and no act that would start a second run of one source either, with
+    // the line saying what it is waiting for.
+    expect(barActs(page)).toEqual(["Unpublish"]);
+    expect(document.querySelector(".os-actbar-detail")?.textContent).toBe(
+      "waiting for admin's deploy to finish",
+    );
+    // The rail draws THIS app's own state: serving, not "ahead".
+    const rail = within(page).getByRole("list", { name: "Deployable stops" });
+    const states = [...rail.querySelectorAll(":scope > li")].map((li) => li.getAttribute("data-state"));
+    expect(states).not.toContain("ahead");
+  });
+
   it("a running run: the bar offers Cancel, and the rail is moving", async () => {
     const { page } = await mountAndOpen({ ...WITH_PACKAGE, deployments: { "pkg-acme": [BUILDING, SUCCEEDED] } }, "store.memql.example.com");
     // A RUN IN FLIGHT OWNS THE BAR (epic memql#4937, D3). There used to be no
@@ -346,7 +386,7 @@ describe("the Head's action, by state", () => {
     expect(states).toEqual(["done", "done", "done", "current", "ahead"]);
   });
 
-  it("a parked run: Cancel and Deploy, and Deploy sends confirm: true with no placements", async () => {
+  it("a parked run: Cancel and Deploy, and Deploy CONFIRMS THAT RUN", async () => {
     const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, deployments: { "pkg-acme": [PARKED, SUCCEEDED] } }, "store.memql.example.com");
     // A PARKED RUN IS WAITING FOR THE PERSON, so the bar offers the two
     // answers it is waiting for -- Cancel, then Deploy as the primary.
@@ -357,10 +397,17 @@ describe("the Head's action, by state", () => {
     expect(deploy?.disabled).toBe(false);
     expect(deploy?.getAttribute("data-tone")).toBe("primary");
     await click(deploy);
-    expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(packageId: "pkg-acme", confirm: true)']);
+    // IT NAMES THE RUN IT IS CONFIRMING (memql#4954). This test used to assert
+    // the call WITHOUT it -- written from what the button did rather than from
+    // what the code beside it claimed, which is why nothing failed while every
+    // confirmation minted a second run and left the answered gate open for a
+    // sweep to mislabel 90 seconds later.
+    expect(connection.callsNamed("packageDeploy")).toEqual([
+      'builtin packageDeploy(packageId: "pkg-acme", confirm: true, deploymentId: "dep-parked")',
+    ]);
   });
 
-  it("a refused run: Retry the deploy, which starts a fresh unconfirmed run", async () => {
+  it("a refused run: Retry the deploy, which deliberately starts a FRESH run", async () => {
     const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, deployments: { "pkg-acme": [REFUSED, SUCCEEDED] } }, "store.memql.example.com");
     // ONE WORD, ONE PROMISE (epic memql#4937). This is "Retry the deploy" --
     // it deploys the SOURCE again. An attempt's own "Retry from these bytes"
@@ -369,6 +416,12 @@ describe("the Head's action, by state", () => {
     const retry = headAction(page);
     expect(retry?.textContent).toBe("Retry the deploy");
     await click(retry);
+    // NO deploymentId AND NO fromDeploymentId, and both absences are the
+    // promise (memql#4955). This word means "deploy the source again": the
+    // last attempt was REFUSED, so its bytes are the ones that did not work.
+    // The other Retry -- on a LOST run, in Every attempt -- is the one that
+    // carries fromDeploymentId, and the two are deliberately never on screen
+    // together.
     expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(packageId: "pkg-acme", confirm: false)']);
   });
 

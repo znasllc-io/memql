@@ -1,5 +1,5 @@
 import type { ActionBarTone } from "../../../kit/ActionBar";
-import type { DeploymentRow, PackageRow } from "../packages/rows";
+import { runCoversApp, type DeploymentRow, type PackageRow } from "../packages/rows";
 import type { SiteRow } from "../rows";
 import { TERMINAL_RUN_STATUSES } from "./rail";
 
@@ -66,8 +66,31 @@ export interface ActsInput {
   site: SiteRow;
   /** The source, when the deployable came from one. */
   pkg: PackageRow | null;
-  /** The newest run of that source, whatever its status. */
+  /**
+   * THIS APP'S newest run, whatever its status -- not the source's
+   * (memql#4953). It used to be the source's, and every branch below then
+   * answered about the wrong thing: a serving deployable read Building while a
+   * sibling deployed, hid its own acts, and offered a Cancel that killed the
+   * other app's run. `runForApp` is what selects it.
+   */
   run: DeploymentRow | null;
+  /**
+   * A run of the SAME SOURCE, in flight, that is not this app's.
+   *
+   * Present so that fixing the reading above does not lose what its being
+   * wrong was accidentally providing. While any run of a source is in flight,
+   * every app of that source used to read "Building" and offer no way to start
+   * another -- which was a false statement AND the only thing stopping two
+   * concurrent runs of one source. There is no gate for that in the engine,
+   * and the roll is per-source: it rewrites one pointer and restarts the
+   * cluster onto it, so two runs racing there is not a thing to let somebody
+   * discover.
+   *
+   * So the app keeps its own state and its own words, and the acts that would
+   * START a run are absent until the source is free -- absent rather than
+   * disabled, which is rule 12.
+   */
+  siblingRun?: DeploymentRow | null;
   /** Rank >= 200. Presentation over a server-side law. */
   canWrite: boolean;
   /** True while this deployable's own delete is still tearing its domains down. */
@@ -106,8 +129,68 @@ export function runIsCancellable(run: DeploymentRow | null): boolean {
   return run !== null && CANCELLABLE.has(run.status);
 }
 
+/**
+ * This app's newest run out of a source's timeline, newest first.
+ *
+ * The whole of memql#4953's client half is choosing correctly here rather than
+ * taking `rows[0]`.
+ */
+export function runForApp(runs: readonly DeploymentRow[], app: string): DeploymentRow | null {
+  return runs.find((run) => runCoversApp(run, app)) ?? null;
+}
+
+/** A run of the same source, in flight, that this app's page is not about. */
+export function siblingRunInFlight(
+  runs: readonly DeploymentRow[],
+  app: string,
+): DeploymentRow | null {
+  return runs.find((run) => !runCoversApp(run, app) && runIsMoving(run)) ?? null;
+}
+
+/**
+ * The acts that would start a new run, as a closed set.
+ *
+ * Withheld while a sibling's run is in flight. Every other act on the bar
+ * changes THIS site's own state -- publishing, pausing, archiving, discarding
+ * -- and none of them touches the source's pointer, so none of them has to
+ * wait for a deploy of a different app to finish.
+ */
+const STARTS_A_RUN = new Set<ActName>(["Deploy", "Deploy the update", "Redeploy", "Retry the deploy"]);
+
+/**
+ * The line a busy source's other apps show INSTEAD of their own detail.
+ *
+ * It replaces rather than appends, and it is short, because `.os-actbar-detail`
+ * ellipsizes: a clause explaining why a button is missing, cut off half way,
+ * is worse than no clause. The state word and its dot already say the app is
+ * published, so this says the one thing they do not -- what it is waiting for.
+ */
+function busyClause(sibling: DeploymentRow): string {
+  const other = sibling.scopedTo.length === 1 ? sibling.scopedTo[0] : "another app from this source";
+  return `waiting for ${other}'s deploy to finish`;
+}
+
 /** What the bar reads and offers. The whole of DESIGN.md rule 12 for this app. */
 export function actsFor(input: ActsInput): BarReading {
+  return holdWhileTheSourceIsBusy(reading(input), input.siblingRun ?? null);
+}
+
+/**
+ * Withhold the run-starting acts while a sibling's deploy is in flight, and
+ * say so in the line that already explains the state.
+ *
+ * The state word and the tone are UNCHANGED: a published deployable is still
+ * published while another app of its source deploys, and saying otherwise is
+ * the defect this is part of fixing.
+ */
+function holdWhileTheSourceIsBusy(read: BarReading, sibling: DeploymentRow | null): BarReading {
+  if (sibling === null) return read;
+  const acts = read.acts.filter((act) => !STARTS_A_RUN.has(act.name));
+  if (acts.length === read.acts.length) return read;
+  return { ...read, acts, detail: busyClause(sibling) };
+}
+
+function reading(input: ActsInput): BarReading {
   const { site, pkg, run, canWrite } = input;
 
   // A SYSTEM-OWNED ROW GETS NO ACTS AT ALL -- not disabled ones. The seeded

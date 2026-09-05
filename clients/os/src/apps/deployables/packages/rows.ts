@@ -177,7 +177,37 @@ export interface DeploymentRow {
   finishedAt: string;
   /** When the running node last said it was alive. A HEARTBEAT: never in a fingerprint. */
   heartbeatAt: string;
+  /**
+   * The deployables this run was STARTED FOR. Empty means the whole source
+   * (memql#4953).
+   */
+  scopedTo: string[];
+  /** The run this one was started from, when it is a retry (memql#4955). */
+  fromDeploymentId: string;
   createdAt: string;
+}
+
+/**
+ * Is this run about that app?
+ *
+ * EMPTY MEANS EVERY APP, which is what makes the field safe to read off a
+ * timeline that predates it: a run written before scope existed answers yes,
+ * and yes is what those runs were.
+ *
+ * Before the field, nothing could answer this at all, so every reader assumed
+ * the source's newest run was about whatever it was looking at. It routinely
+ * was not -- a redeploy from a deployable's page skips every sibling by name,
+ * and the compose gate does the same for one declared app -- so a serving
+ * `storefront` read itself as Building while `web` deployed, hid its own acts,
+ * and offered a Cancel that killed the other app's run.
+ *
+ * Filtering on the run's `deployables` OUTCOMES is not a substitute: those are
+ * written when the run CLOSES, and the window where the reading is wrong is
+ * exactly the window where the run is still in flight.
+ */
+export function runCoversApp(run: DeploymentRow | null, app: string): boolean {
+  if (run === null) return false;
+  return run.scopedTo.length === 0 || run.scopedTo.includes(app);
 }
 
 /** Where a run built. `surface` is one of the three the engine declares. */
@@ -250,6 +280,8 @@ export function deploymentFromRow(row: Row): DeploymentRow {
     startedAt: rowString(flat, "startedAt"),
     finishedAt: rowString(flat, "finishedAt"),
     heartbeatAt: rowString(flat, "heartbeatAt"),
+    scopedTo: listOf<string>(flat, "scopedTo"),
+    fromDeploymentId: rowString(flat, "fromDeploymentId"),
     createdAt: rowString(flat, "createdAt"),
   };
 }

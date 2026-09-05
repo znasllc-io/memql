@@ -30,6 +30,13 @@ type SourceSnapshot struct {
 	// re-storing bytes the Library already holds would give one snapshot two
 	// identities.
 	Bytes []byte
+	// ArtifactId is the snapshot this tree ALREADY has in the Library, set
+	// when the bytes came from an earlier run rather than from the source.
+	// It is what lets the retry's own row point at the same content-addressed
+	// artifact instead of recording none (memql#4955): a row with no snapshot
+	// cannot be resumed at its confirm and cannot be retried again, so a
+	// retry-of-a-retry was refused for bytes sitting in blob storage.
+	ArtifactId string
 	// Root is the on-disk directory when the fetch expanded to disk, empty
 	// when the tree is read straight out of an archive. The build stage needs
 	// real files; analysis does not.

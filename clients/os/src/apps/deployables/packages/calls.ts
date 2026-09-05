@@ -128,13 +128,24 @@ export function placementsPayload(
 export async function deployPackage(
   query: QueryClient,
   packageId: string,
-  opts: { confirm: boolean; placements?: Record<string, Placement>; fromDeploymentId?: string },
+  opts: {
+    confirm: boolean;
+    placements?: Record<string, Placement>;
+    deploymentId?: string;
+    fromDeploymentId?: string;
+  },
 ): Promise<DeployOutcome> {
   const placements = opts.placements === undefined ? {} : placementsPayload(opts.placements);
   const result = await query.packageDeploy({
     packageId,
     confirm: opts.confirm,
     ...(Object.keys(placements).length > 0 ? { placements } : {}),
+    // CONFIRMING A PARKED RUN NAMES IT (memql#4954). Without this every call
+    // minted a run -- the confirmation included -- so the answered gate stayed
+    // open, the list went on saying a deploy was waiting for it, and the bytes
+    // a Retry's report described were replaced by a fresh fetch. Sent only
+    // when there is a run to advance.
+    ...(opts.deploymentId ? { deploymentId: opts.deploymentId } : {}),
     // Retrying a run that was lost deploys the bytes IT fetched (memql#4900),
     // not whatever the branch has moved to since. Sent only when there is a
     // run to retry, because an empty value would ask the engine to look up

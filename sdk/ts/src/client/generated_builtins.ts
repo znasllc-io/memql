@@ -1143,6 +1143,8 @@ export interface PackageDeployArgs {
   confirm?: boolean;
   /** Where each deployable goes on its FIRST deploy: an object keyed by deployable name, each value {hostname, accountId, ownDomain}. hostname is the site's own hostname under the cluster domain and is required for a never-deployed app (deployable_binding_missing otherwise); accountId ties the site to the client it is for; ownDomain binds the client's own domain. The pipeline applies the two optional halves itself after the site exists, as the same updateSiteAccount and customDomainAdd calls the page makes, under the caller's actor -- so the existing guards decide, and a refused one lands on the outcome without failing the publish. Chosen once and remembered on the site row. */
   placements?: Record<string, unknown>;
+  /** CONFIRM AN EXISTING RUN rather than starting a new one (memql#4954). A parked run is the one waiting for the person's answer, so the confirm that follows must ADVANCE it: pass the parked run's id with confirm:true and the pipeline resumes that row, re-reading the snapshot it already stored. Without it every call minted a fresh run -- including the confirm -- so confirming left the source with a row at awaiting_confirm nobody would ever answer, the list went on saying a deploy was waiting for a gate already answered, and the retry the person had just read the report for was replaced by a run that fetched the branch again. Ignored unless the named run belongs to this package and is parked; anything else opens a new run, which is what keeps a re-request of a run already in flight refused by the append-only rule rather than quietly resumed. */
+  deploymentId?: string;
   /** Retry an earlier run from the bytes it already fetched (epic memql#4900, task memql#4902), rather than fetching the source again. The run re-analyses the SAME snapshot, so a Retry after a node was lost deploys exactly what the lost run was deploying -- not whatever the branch has moved to since. Refused with snapshot_unavailable when that run kept no snapshot, which is every run from before snapshots were stored; deploy without it to fetch fresh. Ignored for a zip-sourced package, whose Library artifact IS its snapshot. */
   fromDeploymentId?: string;
 }
@@ -1152,6 +1154,7 @@ export function buildPackageDeploy(args: PackageDeployArgs): string {
   parts.push("packageId: " + renderMemQLValue(args.packageId));
   if (args.confirm !== undefined) parts.push("confirm: " + renderMemQLValue(args.confirm));
   if (args.placements !== undefined) parts.push("placements: " + renderMemQLValue(args.placements));
+  if (args.deploymentId !== undefined) parts.push("deploymentId: " + renderMemQLValue(args.deploymentId));
   if (args.fromDeploymentId !== undefined) parts.push("fromDeploymentId: " + renderMemQLValue(args.fromDeploymentId));
   return "builtin packageDeploy(" + parts.join(", ") + ")";
 }

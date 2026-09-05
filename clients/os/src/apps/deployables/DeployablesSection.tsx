@@ -224,7 +224,7 @@ export function DeployablesSection({
   // button off the source page.
   async function openDeclared(packageId: string, app: string) {
     setView({ kind: "compose", parkedPackageId: packageId, only: app });
-    await packageActions.deploy(packageId, false);
+    await packageActions.deploy(packageId, { confirm: false });
     onReseed();
   }
 

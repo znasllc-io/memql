@@ -184,6 +184,12 @@ a browser. Somebody who closed the window finds their run exactly where they
 left it, and the list marks the deployable "a deploy is waiting for you" from
 `packageDeploymentsAwaitingConfirm`.
 
+**Confirming ADVANCES that run** -- `packageDeploy(confirm: true, deploymentId:
+<the parked run>)` -- rather than starting a second one, and the resumed run
+re-reads the snapshot it already stored (memql#4954, memql#4955). One row per
+attempt is what makes the timeline readable, and it is what makes a Retry's
+promise survive the click that acts on it.
+
 ## Private sources
 
 A source fetches under a personal credential its **owner** holds:
@@ -519,6 +525,12 @@ terminal status **`abandoned`**.
   quietly deploy whatever the branch has moved to since. A run that kept no
   snapshot (every run from before this epic) is refused with
   `snapshot_unavailable`, and the sentence says to deploy again instead.
+- **And it survives the confirm.** The retry parks with its report, and the
+  click that answers the gate used to be a fresh call carrying no
+  `fromDeploymentId` at all -- so a person retrying a lost deploy of commit A,
+  after commit B had landed, got B while reading a report describing A
+  (memql#4955). The retry's own row records both what it was retried FROM and
+  the snapshot it ran against, and the confirmation resumes that row.
 
 The sweep runs on the **cron leader only**, so each stranded row is closed once,
 and under the maintenance actor, because it reads every owner's runs.

@@ -1,4 +1,4 @@
-import { packageFingerprint, sourceLabel, type DeploymentRow, type PackageRow } from "./packages/rows";
+import { packageFingerprint, runCoversApp, sourceLabel, type DeploymentRow, type PackageRow } from "./packages/rows";
 import { isPlaceholderBundle, type StandingInput } from "./page/rail";
 import { bundleForm, siteFingerprint, siteName, type SiteRow } from "./rows";
 
@@ -270,7 +270,13 @@ export function foldDeployables(
   const served = new Set<string>();
   for (const site of sites) {
     const pkg = site.packageId === "" ? null : (packageById.get(site.packageId) ?? null);
-    const parked = pkg === null ? null : (parkedByPackage.get(pkg.id) ?? null);
+    // A PARKED RUN BELONGS TO THE APPS IT NAMES (memql#4953). Every row of a
+    // source used to carry the same run, so one app's gate marked every
+    // sibling "a deploy is waiting for you" and repainted their compact rails
+    // as unreached -- a live app drawn as not-yet-there because a DIFFERENT
+    // app was waiting for an answer.
+    const sourceParked = pkg === null ? null : (parkedByPackage.get(pkg.id) ?? null);
+    const parked = runCoversApp(sourceParked, site.packageDeployableName) ? sourceParked : null;
     if (pkg !== null) served.add(`${pkg.id}/${site.packageDeployableName}`);
     push(pkg === null ? `site:${site.id}` : `pkg:${pkg.id}`, pkg, siteRowFor(site, pkg, parked));
   }
@@ -282,7 +288,9 @@ export function foldDeployables(
   for (const [packageId, run] of parkedByPackage) {
     const pkg = packageById.get(packageId);
     if (pkg === undefined || run === null) continue;
-    const apps = run.report?.deployables ?? [];
+    // The apps the run is FOR, out of the ones its report names. A scoped run
+    // must not raise a row for a sibling it was told to skip.
+    const apps = (run.report?.deployables ?? []).filter((a) => runCoversApp(run, a.name));
     const pending = apps.length === 0 ? [{ name: "", kind: "" }] : apps.filter((a) => !served.has(`${packageId}/${a.name}`));
     for (const app of pending) {
       // CLAIM THE KEY, or the declared pass below adds the same app a second

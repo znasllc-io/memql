@@ -314,19 +314,64 @@ func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, er
 	}
 
 	deploymentId := strings.TrimSpace(req.DeploymentId)
+	resumed, rerr := d.resumeParked(ctx, deploymentId, req.PackageId)
+	if rerr != nil {
+		return nil, rerr
+	}
 	if deploymentId == "" {
 		deploymentId = d.newId(packageDeploymentConcept)
 	}
 	ownerUserId := rowString(pkg, "ownerUserId")
 
-	if err := d.Store.openDeployment(ctx, deploymentSeed{
-		DeploymentId: deploymentId,
-		PackageId:    req.PackageId,
-		OwnerUserId:  ownerUserId,
-		RequestedBy:  req.Actor.UserId,
-		Automatic:    req.Automatic,
-		NodeId:       selfNodeId(),
-		StartedAt:    d.now(),
+	scope := scopeFrom(declaredNames(pkg), req.Placements)
+
+	if resumed != nil {
+		// A PARKED RUN'S CONFIRMATION IS THAT RUN, NOT A NEW ONE (memql#4954).
+		// Re-stamp the scope, because the gate is where a person answers which
+		// apps they meant: a compose gate opens with no placements at all and
+		// closes with the skips somebody ticked, so a scope fixed at open
+		// would have the run report progress on apps it was told not to build.
+		if len(scope) > 0 {
+			if serr := d.Store.recordScope(ctx, deploymentId, scope); serr != nil {
+				return nil, serr
+			}
+		}
+		// AND IT DEPLOYS ITS OWN BYTES. The parked run analysed a snapshot and
+		// stored it; resuming re-reads that rather than fetching the source
+		// again, which is what makes the report a person read at the gate a
+		// description of what the click ships (memql#4955). An explicit
+		// FromDeploymentId still wins -- it names a different run on purpose.
+		if strings.TrimSpace(req.FromDeploymentId) == "" {
+			switch {
+			case rowString(resumed, "snapshotArtifactId") != "":
+				req.FromDeploymentId = deploymentId
+			case rowString(resumed, "fromDeploymentId") != "":
+				// A RETRY THAT KEPT NO SNAPSHOT OF ITS OWN. Runs opened before
+				// this change recorded none, so follow the chain to the run
+				// they were retrying: the promise is about those bytes, and it
+				// is better to refuse than to keep it silently wrong.
+				req.FromDeploymentId = rowString(resumed, "fromDeploymentId")
+			default:
+				// NO SNAPSHOT ANYWHERE, so fetch. This is a parked run from
+				// before snapshots were stored, or one whose store failed --
+				// and its analysis was of the source as it then was, so
+				// fetching is the nearest true thing. Refusing instead would
+				// leave the run unconfirmable with no way forward but to
+				// cancel it, which is a worse answer to a rarer problem. A
+				// RETRY does not reach here: it takes the branch above and is
+				// refused rather than quietly shipping other bytes.
+			}
+		}
+	} else if err := d.Store.openDeployment(ctx, deploymentSeed{
+		DeploymentId:     deploymentId,
+		PackageId:        req.PackageId,
+		OwnerUserId:      ownerUserId,
+		RequestedBy:      req.Actor.UserId,
+		Automatic:        req.Automatic,
+		NodeId:           selfNodeId(),
+		ScopedTo:         scope,
+		FromDeploymentId: strings.TrimSpace(req.FromDeploymentId),
+		StartedAt:        d.now(),
 	}); err != nil {
 		return nil, err
 	}
@@ -620,6 +665,127 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	return nil
 }
 
+// resumeParked answers whether this call is the CONFIRMATION of a run already
+// waiting at the gate (memql#4954).
+//
+// # The defect
+//
+// `handleDeploy` never passed a deployment id and `Deploy` minted one whenever
+// it was empty, so EVERY call was a new run -- including `confirm: true`,
+// which is supposed to answer the run already parked. After confirming, the
+// source kept a row at `awaiting_confirm` nobody would ever answer: the list
+// went on saying "a deploy is waiting for you" for a gate that had been
+// answered, and the history showed a run that never resolved. The client said
+// otherwise in as many words -- `DeployablePage.tsx` carried the comment "A
+// PARKED RUN'S DEPLOY IS THE CONFIRMATION, not a new run", which was false.
+//
+// It was masked until memql#4956: the abandoned sweep closed the stale row 90
+// seconds later, with `abandoned` and "this cluster lost the node that was
+// running this deploy", which was untrue of it. Correcting the sweep made the
+// leak visible.
+//
+// # Why only a PARKED row resumes
+//
+// A row at any other non-terminal status is a run in flight, and falling
+// through to openDeployment is what keeps the append-only guard refusing it --
+// which is the dedup two auto-deploy feeds noticing one push rely on
+// (autodeploy.go composes a deterministic id for exactly that). Resuming there
+// would turn "this run is already happening" into a second pipeline writing
+// the same row. A terminal row is refused by the same guard, and should be.
+//
+// So: parked, and belonging to this package. Anything else opens a new run,
+// exactly as before.
+func (d *Deps) resumeParked(ctx context.Context, deploymentId, packageId string) (map[string]any, error) {
+	if strings.TrimSpace(deploymentId) == "" {
+		return nil, nil
+	}
+	row, err := d.Store.deploymentById(ctx, deploymentId)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		// Not readable, or not there. Either way this is not a resume, and
+		// openDeployment's own answer is the right one.
+		return nil, nil
+	}
+	if rowString(row, "packageId") != packageId {
+		return nil, refuse(CodeSourceUnreadable,
+			"deployment %q belongs to a different package", deploymentId)
+	}
+	if rowString(row, "status") != StatusAwaitingConfirm {
+		return nil, nil
+	}
+	return row, nil
+}
+
+// declaredNames is what the package's last analysis said the source declares.
+func declaredNames(pkg map[string]any) []string {
+	raw, _ := pkg["declares"].([]any)
+	out := make([]string, 0, len(raw))
+	for _, entry := range raw {
+		obj, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := obj["name"].(string)
+		if name = strings.TrimSpace(name); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// scopeFrom answers which deployables a run is FOR (memql#4953).
+//
+// The client already expresses scope -- a redeploy from a deployable's page
+// sends every sibling `skip: true`, and the compose gate does the same when
+// entered for one declared app -- and the answer was thrown away the moment
+// the call returned. Nothing on the run recorded it, so every reader had to
+// assume the source's newest run was about whatever it was looking at.
+//
+// SCOPE IS THE COMPLEMENT OF THE SKIPS, not the placements' own keys. A
+// single-app redeploy names only the SIBLINGS it is skipping, so reading the
+// map's keys would answer with everything this run is NOT for.
+//
+// EMPTY MEANS THE WHOLE SOURCE, and that is what makes the field safe to add
+// to a live timeline: every row written before it has none, and a reader
+// asking "is this run about my app" gets yes -- which is what those runs were.
+// A run with nothing skipped is the same statement and is left empty rather
+// than listing every declared name, so there is one spelling of it.
+func scopeFrom(declared []string, placements map[string]Placement) []string {
+	if len(placements) == 0 {
+		return nil
+	}
+	var skipped int
+	for _, p := range placements {
+		if p.Skip {
+			skipped++
+		}
+	}
+	if skipped == 0 {
+		return nil
+	}
+	// Prefer the manifest's own names and order, so the scope reads like the
+	// report beside it. A package with no analysis yet declares nothing, and
+	// the placements are then the only names there are.
+	names := declared
+	if len(names) == 0 {
+		names = make([]string, 0, len(placements))
+		for name := range placements {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+	}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if placements[name].Skip {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
 // fetchFor gets the bytes this run deploys.
 //
 // A RETRY REUSES WHAT THE EARLIER RUN FETCHED (epic memql#4900, task
@@ -673,9 +839,11 @@ func (d *Deps) fetchFor(ctx context.Context, req DeployRequest, pkg map[string]a
 		// deriving it again would risk two spellings of one commit.
 		Version: rowString(prior, "sourceVersion"),
 		// Bytes deliberately nil: the snapshot is already stored, and storing
-		// it again would give one set of bytes two references.
-		Root:    root,
-		cleanup: cleanup,
+		// it again would give one set of bytes two references. The reference
+		// travels instead, so this run's row points at the same artifact.
+		ArtifactId: ref,
+		Root:       root,
+		cleanup:    cleanup,
 	}, nil
 }
 
@@ -709,7 +877,19 @@ func (d *Deps) fetch(ctx context.Context, pkg map[string]any) (*SourceSnapshot, 
 // that works is more valuable, so the absence of a snapshot artifact costs the
 // "re-analyse without refetching" shortcut and nothing else.
 func (d *Deps) storeSnapshot(ctx context.Context, req DeployRequest, deploymentId string, s *SourceSnapshot) string {
-	if s == nil || len(s.Bytes) == 0 || d.Publisher == nil {
+	if s == nil {
+		return ""
+	}
+	// ALREADY STORED. A retry and a resume both run against bytes the Library
+	// holds, so this run's row points at the same content-addressed artifact
+	// rather than at nothing (memql#4955). Storing them again would give one
+	// snapshot two identities; recording none left the row unable to be
+	// resumed or retried, which is how a retry-of-a-retry came to be refused
+	// `snapshot_unavailable` for a snapshot that exists.
+	if s.ArtifactId != "" {
+		return s.ArtifactId
+	}
+	if len(s.Bytes) == 0 || d.Publisher == nil {
 		return ""
 	}
 	id, err := d.Publisher.StoreSnapshot(ctx, req.PackageId, s.Version, s.Bytes)

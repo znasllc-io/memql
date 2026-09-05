@@ -220,14 +220,20 @@ func (s *store) openDeployment(ctx context.Context, d deploymentSeed) error {
 	if owner := strings.TrimSpace(d.OwnerUserId); owner != "" {
 		writeCtx = auth.ContextWithUserActor(ctx, owner)
 	}
+	scoped := d.ScopedTo
+	if scoped == nil {
+		scoped = []string{}
+	}
 	return s.writeInternal(writeCtx, fmt.Sprintf(
-		"mutation openPackageDeployment(deploymentId: %s, packageId: %s, sourceVersion: %s, requestedBy: %s, automatic: %t, nodeId: %s, startedAt: %s)",
+		"mutation openPackageDeployment(deploymentId: %s, packageId: %s, sourceVersion: %s, requestedBy: %s, automatic: %t, nodeId: %s, scopedTo: %s, fromDeploymentId: %s, startedAt: %s)",
 		langparser.QuoteString(d.DeploymentId),
 		langparser.QuoteString(d.PackageId),
 		langparser.QuoteString(d.SourceVersion),
 		langparser.QuoteString(d.RequestedBy),
 		d.Automatic,
 		langparser.QuoteString(d.NodeId),
+		jsonLiteral(scoped),
+		langparser.QuoteString(d.FromDeploymentId),
 		langparser.QuoteString(d.StartedAt.UTC().Format(time.RFC3339)),
 	))
 }
@@ -280,6 +286,20 @@ func (s *store) recordReport(ctx context.Context, deploymentId string, rep *Repo
 		"mutation recordPackageDeploymentReport(deploymentId: %s, report: %s, sourceVersion: %s, snapshotArtifactId: %s)",
 		langparser.QuoteString(deploymentId), jsonLiteral(rep),
 		langparser.QuoteString(rep.SourceVersion), langparser.QuoteString(snapshotArtifactId)))
+}
+
+// recordScope re-stamps which deployables a run is for (memql#4953).
+//
+// Called when a PARKED run is confirmed, because the gate is where a person
+// answers which apps they meant: the compose gate opens with no placements at
+// all and closes with the skips somebody ticked.
+func (s *store) recordScope(ctx context.Context, deploymentId string, scopedTo []string) error {
+	if scopedTo == nil {
+		scopedTo = []string{}
+	}
+	return s.writeInternal(ctx, fmt.Sprintf(
+		"mutation recordPackageDeploymentScope(deploymentId: %s, scopedTo: %s)",
+		langparser.QuoteString(deploymentId), jsonLiteral(scopedTo)))
 }
 
 // closeDeployment writes the terminal row.
@@ -653,8 +673,14 @@ type deploymentSeed struct {
 	Automatic bool
 	// NodeId is the replica opening the run -- the node the abandoned sweep
 	// names when it closes it.
-	NodeId    string
-	StartedAt time.Time
+	NodeId string
+	// ScopedTo names the deployables this run is FOR; empty is the whole
+	// source (memql#4953).
+	ScopedTo []string
+	// FromDeploymentId is the run this one was started from, when it is a
+	// retry (memql#4955).
+	FromDeploymentId string
+	StartedAt        time.Time
 }
 
 type deploymentClose struct {
