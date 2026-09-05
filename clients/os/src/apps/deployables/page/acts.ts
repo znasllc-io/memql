@@ -1,6 +1,7 @@
 import type { ActionBarTone } from "../../../kit/ActionBar";
 import type { DeploymentRow, PackageRow } from "../packages/rows";
 import type { SiteRow } from "../rows";
+import { TERMINAL_RUN_STATUSES } from "./rail";
 
 // acts.ts -- WHAT A DEPLOYABLE OFFERS, given what it is (epic memql#4937,
 // design section D; DESIGN.md rule 12).
@@ -86,8 +87,16 @@ export interface ActsInput {
  */
 const CANCELLABLE = new Set(["analyzing", "awaiting_confirm", "building"]);
 
-/** Terminal deployment statuses. A run at one of these is not running. */
-const TERMINAL = new Set(["succeeded", "refused", "failed", "abandoned", "cancelled"]);
+/**
+ * Terminal deployment statuses. A run at one of these is not running.
+ *
+ * READ FROM THE RAIL, never listed again here. This was a second copy, and
+ * when `cancelled` arrived only this one learned about it -- so the bar called
+ * a cancelled run finished while the rail beside it drew the same run as still
+ * moving, at the same moment on the same row. Two answers to one question is
+ * the bug; the list is not.
+ */
+const TERMINAL = new Set(TERMINAL_RUN_STATUSES);
 
 export function runIsMoving(run: DeploymentRow | null): boolean {
   return run !== null && run.status !== "" && !TERMINAL.has(run.status);

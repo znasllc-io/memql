@@ -288,10 +288,17 @@ const STAGES: readonly { id: string; label: string; blurb: string }[] = [
   { id: "publishing", label: "Publish", blurb: "Point each site at its new files" },
 ];
 
-const TERMINAL: Record<string, "done" | "refused" | "failed" | "abandoned"> = {
+const TERMINAL: Record<string, "done" | "refused" | "failed" | "abandoned" | "cancelled"> = {
   succeeded: "done",
   refused: "refused",
   failed: "failed",
+  // epic memql#4937: a person's own stop. Terminal, and NOT a flavour of
+  // `failed` for the reason `abandoned` is not -- nothing broke, nothing was
+  // published, and every site is still serving what it was serving. The
+  // distinction is who decided: `abandoned` is a loss this cluster OBSERVED,
+  // `cancelled` is a choice somebody MADE, and a surface that collapsed the
+  // two would tell a person their own click was a fault.
+  cancelled: "cancelled",
   // memql#4900: a run whose node stopped saying it was alive. Terminal, and
   // deliberately NOT a flavour of `failed` -- nothing failed that this
   // cluster can name, and the D6 order guarantees every site is still
@@ -300,6 +307,18 @@ const TERMINAL: Record<string, "done" | "refused" | "failed" | "abandoned"> = {
   // the row's own error naming the node and when it was last heard.
   abandoned: "abandoned",
 };
+
+/**
+ * The statuses at which a run is OVER.
+ *
+ * EXPORTED, AND THE ONLY ONE. There were two -- this map and a set in
+ * `acts.ts` -- and when `cancelled` was added only the set learned about it,
+ * so the action bar treated a cancelled run as finished while the rail drew it
+ * as still running, on the same row at the same moment. A person's own stop
+ * then read as a deploy that never ends. Anything that needs to ask the
+ * question reads this.
+ */
+export const TERMINAL_RUN_STATUSES: readonly string[] = Object.keys(TERMINAL);
 
 function deployRail(deployment: DeploymentRow): RailStage[] {
   const terminal = TERMINAL[deployment.status];

@@ -7,11 +7,13 @@ import {
   headActionFor,
   railFor,
   refusalStopFor,
+  TERMINAL_RUN_STATUSES,
   type ComposeInput,
   type RailInput,
   type StandingInput,
   type StandingSite,
 } from "../../src/apps/deployables/page/rail";
+import { runIsMoving } from "../../src/apps/deployables/page/acts";
 import type { AnalysisReport, DeploymentRow, ReportDeployable } from "../../src/apps/deployables/packages/rows";
 import { STOP_IDS } from "../../src/apps/deployables/targets";
 
@@ -575,5 +577,37 @@ describe("a settled deployable, drawn from its standing facts alone", () => {
     // never published must still read as not built.
     const never = { ...standing(), run: null, site: site({ status: "draft", bundleRef: "blob://sites/site-1/pending/" }) };
     expect(statesOf(never)["build"]).toBe("ahead");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ONE ANSWER TO "IS THIS RUN FINISHED"
+// ---------------------------------------------------------------------------
+//
+// There were two. `rail.ts` kept a TERMINAL map and `acts.ts` kept a TERMINAL
+// set, and when `cancelled` was added to the engine (epic memql#4937) only the
+// set learned about it -- so the action bar treated a cancelled run as over
+// while the rail treated it as still running, on the same row at the same
+// moment. A person's own click reads as a deploy that never ends.
+describe("terminal statuses", () => {
+  it("agree between the rail and the acts bar", () => {
+    // Both read the same set now; this fails the moment a second copy appears.
+    for (const status of TERMINAL_RUN_STATUSES) {
+      expect(runIsMoving(deployment({ status }))).toBe(false);
+    }
+  });
+
+  it("include cancelled -- a person's own stop is over, not still running", () => {
+    expect([...TERMINAL_RUN_STATUSES]).toContain("cancelled");
+    const states = statesOf({ ...standing(), run: deployment({ status: "cancelled" }) });
+    // Not `current` anywhere: nothing is moving.
+    expect(Object.values(states)).not.toContain("current");
+  });
+
+  it("still treats a running status as running", () => {
+    // The negative control: if everything were terminal the assertions above
+    // would pass on a rail that never moves.
+    expect(runIsMoving(deployment({ status: "building" }))).toBe(true);
+    expect(statesOf({ ...standing(), run: deployment({ status: "building" }) })["build"]).toBe("current");
   });
 });
