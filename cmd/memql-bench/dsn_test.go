@@ -87,6 +87,15 @@ func TestTheEnvironmentIsUsedWhenNoDsnFlagIsGiven(t *testing.T) {
 
 // A DSN carries a password, and openEngine's unreachable-database failure puts
 // it in the JSON envelope on stdout -- which CI publishes into a job summary.
+//
+// The fixtures below are deliberately NOT shaped like the shared test DSN.
+// scripts/cidb's dsnliteral gate matches the memql-user/memql-database/5432
+// shape anywhere in the tree, and it is right to: a literal of that shape is
+// indistinguishable from a hand-rolled copy of dbtest.DSN() that can drift
+// from it. These strings are parsed and never dialled, but "it is only a
+// fixture" is exactly the argument that puts a stale DSN in the tree, so they
+// name a host and database that cannot be mistaken for the real one instead of
+// taking the gate's exemption.
 func TestRedactDSNRemovesThePassword(t *testing.T) {
 	for _, tc := range []struct {
 		name, in string
@@ -95,25 +104,25 @@ func TestRedactDSNRemovesThePassword(t *testing.T) {
 	}{
 		{
 			name:    "password is replaced",
-			in:      "postgres://memql:hunter2@db.internal:5432/memql?sslmode=disable",
+			in:      "postgres://parsefixture:hunter2@fixture.invalid:6543/parsefixture?sslmode=disable",
 			wantNot: "hunter2",
-			want:    "postgres://memql:xxxxx@db.internal:5432/memql",
+			want:    "postgres://parsefixture:xxxxx@fixture.invalid:6543/parsefixture",
 		},
 		{
 			name: "no password, nothing invented",
-			in:   "postgres://memql@db.internal:5432/memql",
-			want: "postgres://memql@db.internal:5432/memql",
+			in:   "postgres://parsefixture@fixture.invalid:6543/parsefixture",
+			want: "postgres://parsefixture@fixture.invalid:6543/parsefixture",
 		},
 		{
 			name: "no user at all",
-			in:   "postgres://db.internal:5432/memql",
-			want: "postgres://db.internal:5432/memql",
+			in:   "postgres://fixture.invalid:6543/parsefixture",
+			want: "postgres://fixture.invalid:6543/parsefixture",
 		},
 		{
 			// A shape it cannot parse is the one whose password it would fail
 			// to find, so it must not echo the input back.
 			name:    "unparseable becomes a fixed string",
-			in:      "host=db.internal user=memql password=hunter2",
+			in:      "host=fixture.invalid user=parsefixture password=hunter2",
 			wantNot: "hunter2",
 			want:    "the configured DSN",
 		},
