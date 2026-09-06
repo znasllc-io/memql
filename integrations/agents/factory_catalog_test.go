@@ -62,7 +62,7 @@ func TestRoleCatalogReadsWhatExecuteReturns(t *testing.T) {
 func TestSkillCatalogReadsWhatExecuteReturns(t *testing.T) {
 	eng := &catalogEngine{rows: []any{
 		map[string]any{
-			"id":      "v1:agents:skill:research",
+			"id":      "v1:skills:skill:research",
 			"payload": map[string]any{"slug": "research", "name": "Research"},
 		},
 	}}

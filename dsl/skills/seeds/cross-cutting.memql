@@ -6,7 +6,6 @@
 // running customer-support operations end-to-end. Not tied to any one
 // product surface.
 
-use agents.concepts.{ skill }
 
 @description("Ingest external documents (PDFs, spreadsheets, web pages, images) into the v1:knowledge:document + chunk family. Pairs with workbench-baseline for the actual extraction + transformation runs; the skill itself bundles the knowledge of the validation lifecycle (proposed -> validated -> rejected), the supersession model, the per-format item concepts (spreadsheetRow / imageRegion). Phase 2 ships a dedicated knowledge-pipeline domain; the current bundle leans on research-methodology in the interim.")
 seed skill knowledge-ingestion {

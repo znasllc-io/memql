@@ -3,11 +3,10 @@
 // Foundational skills shipped with every MemQL installation. These
 // are NOT product-specific; every cluster gets them so the agent
 // factory + the Planner Agent always have a known-good baseline to
-// bundle. One v1:agents:skill catalog row per `seed`. Materialized by
+// bundle. One v1:skills:skill catalog row per `seed`. Materialized by
 // the SeedMaterializer at engine startup; idempotent. predefined=true
 // marks each row as locked in the cockpit's Skills admin view.
 
-use agents.concepts.{ skill }
 
 @description("Universal headless capability surface: workbench filesystem + shell + http_fetch on the per-Plan sandbox. Every agent ends up with this -- the role-factory injects it as a locked skill on creation (mirrors the existing universal workbench_use baseline). No agent authorization wall: the blast radius is contained to the per-Plan workspace.")
 seed skill workbench-baseline {

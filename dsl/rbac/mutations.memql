@@ -3,7 +3,7 @@
 // Authz tier: PRIVILEGED catalog write (not per-user-owned). Writing the
 // RBAC grant catalog is a cluster-administration action; the capability
 // rows are global (_system slot) reference data exactly like the
-// v1:agents:agentRole / v1:agents:skill catalogs. In E1.1 the only writer
+// v1:agents:agentRole / v1:skills:skill catalogs. In E1.1 the only writer
 // is the SeedMaterializer (running as the `system:seedMaterializer`
 // actor), which walks the `seed capability ...` declarations under
 // dsl/rbac/*.memql and stamps each body's `id` (the seed name) into

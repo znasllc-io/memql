@@ -41,11 +41,11 @@ func TestMintApprovedTrainingPlan_MintsAndSucceeds(t *testing.T) {
 	agent := map[string]any{
 		"id": "v1:agents:agent:spec-1",
 		"capabilities": map[string]any{
-			"skillIds": []any{"v1:agents:skill:law-1"},
+			"skillIds": []any{"v1:skills:skill:law-1"},
 		},
 	}
 	skills := []map[string]any{
-		{"id": "v1:agents:skill:law-1", "domainIds": []any{"v1:knowledge:knowledgeDomain:fr-law"}},
+		{"id": "v1:skills:skill:law-1", "domainIds": []any{"v1:knowledge:knowledgeDomain:fr-law"}},
 	}
 	fe := trainingFakeEngine(parent, agent, skills)
 	l := newTestLoop(fe)
@@ -82,10 +82,10 @@ func TestMintApprovedTrainingPlan_NoDomainEscalates(t *testing.T) {
 	}
 	agent := map[string]any{
 		"id":           "v1:agents:agent:spec-2",
-		"capabilities": map[string]any{"skillIds": []any{"v1:agents:skill:bare"}},
+		"capabilities": map[string]any{"skillIds": []any{"v1:skills:skill:bare"}},
 	}
 	// skill exists but bundles no domains
-	skills := []map[string]any{{"id": "v1:agents:skill:bare", "domainIds": []any{}}}
+	skills := []map[string]any{{"id": "v1:skills:skill:bare", "domainIds": []any{}}}
 	fe := trainingFakeEngine(parent, agent, skills)
 	l := newTestLoop(fe)
 
@@ -128,12 +128,12 @@ func TestResolveSpecialistPrimaryDomain(t *testing.T) {
 	agent := map[string]any{
 		"id": "v1:agents:agent:spec-1",
 		"capabilities": map[string]any{
-			"skillIds": []any{"v1:agents:skill:empty", "v1:agents:skill:has-dom"},
+			"skillIds": []any{"v1:skills:skill:empty", "v1:skills:skill:has-dom"},
 		},
 	}
 	skills := []map[string]any{
-		{"id": "v1:agents:skill:empty", "domainIds": []any{}},
-		{"id": "v1:agents:skill:has-dom", "domainIds": []any{"v1:knowledge:knowledgeDomain:d2", "v1:knowledge:knowledgeDomain:d3"}},
+		{"id": "v1:skills:skill:empty", "domainIds": []any{}},
+		{"id": "v1:skills:skill:has-dom", "domainIds": []any{"v1:knowledge:knowledgeDomain:d2", "v1:knowledge:knowledgeDomain:d3"}},
 	}
 	fe := trainingFakeEngine(map[string]any{}, agent, skills)
 	l := newTestLoop(fe)

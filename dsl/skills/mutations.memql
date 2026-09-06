@@ -1,0 +1,129 @@
+// mutations.memql
+//
+// Writes over the skill catalog and its edges, moved out of the agents
+// namespace in epic A1. mintSkill and createSkill keep their names and
+// their gates; the two edge mutations are new.
+
+/// Mint a new v1:skills:skill catalog row from a Planner Agent mintSkill action (Phase 3 /
+/// memql#159). The caller is the planner integration; it has already run the authority gate
+/// (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the
+/// catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking
+/// this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created
+/// rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId +
+/// mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation
+/// rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it
+/// rejects with the same error path as the load-time check.
+mutate skill mintSkill {
+  args {
+    skillId            string
+    slug               string!
+    name               string!
+    description        string
+    category           string
+    tags               array
+    domainIds          array
+    toolSlugs          array
+    liveSourceIds      array
+    tier               string!
+    originatingPlanId  string
+    mintedByAgentId    string
+  }
+  insert {
+    id: args.skillId ?? args.slug
+    args.slug
+    args.name
+    args.description
+    category: args.category ?? "specialized"
+    tags: args.tags ?? []
+    domainIds: args.domainIds ?? []
+    toolSlugs: args.toolSlugs ?? []
+    liveSourceIds: args.liveSourceIds ?? []
+    args.tier
+    predefined: false
+    active: true
+    args.originatingPlanId
+    args.mintedByAgentId
+  }
+}
+
+/// Materialize a v1:skills:skill catalog row from a `seed skill ...` declaration under
+/// dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming
+/// convention -- the materializer stamps the seed body's id into `skillId` and forwards every other
+/// seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed
+/// body 1:1. Sibling to `mintSkill`: same row shape, but the seed path is for the predefined
+/// catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance
+/// triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to
+/// materialize with `function "createSkill" not found`. The materializer convention itself lives in
+/// component/memql/seed_materializer.go.
+mutate skill createSkill {
+  args {
+    skillId        string
+    slug           string!
+    name           string!
+    description    string
+    category       string
+    tags           array
+    domainIds      array
+    toolSlugs      array
+    liveSourceIds  array
+    tier           string!
+    predefined     bool
+    active         bool
+  }
+  insert {
+    id: args.skillId ?? args.slug
+    args.slug
+    args.name
+    args.description
+    category: args.category ?? "specialized"
+    tags: args.tags ?? []
+    domainIds: args.domainIds ?? []
+    toolSlugs: args.toolSlugs ?? []
+    liveSourceIds: args.liveSourceIds ?? []
+    args.tier
+    predefined: args.predefined ?? true
+    active: args.active ?? true
+  }
+}
+
+/// Propose an edge. @serverOnly: an edge is EVIDENCE that two skills relate, gathered from runs the
+/// engine executed, so a caller-written one is a claim about executions the caller did not observe.
+/// actor.userId scoping does not help -- the concept is public-tier by design, so there is no owner
+/// conjunct to narrow by, and narrowing it would hide the catalog it exists to describe.
+@serverOnly
+@actor
+mutate skillEdge createSkillEdge {
+  args {
+    edgeId       string!
+    fromSkillId  string!
+    toSkillId    string!
+    edgeType     string!
+    evidence     []object
+    proposedBy   string!
+  }
+  insert {
+    accept { fromSkillId, toSkillId, edgeType, evidence, proposedBy }
+    stamp {
+      id: args.edgeId
+      ownerUserId: actor.userId
+      status: "proposed"
+    }
+  }
+}
+
+/// Commit a proposed edge after a successful run. @serverOnly for createSkillEdge's reason: only the
+/// run knows it succeeded, and a public-tier concept has no actor.userId conjunct to scope by.
+@serverOnly
+mutate skillEdge commitSkillEdge {
+  args {
+    edgeId    string!
+    evidence  []object
+  }
+  update {
+    accept { evidence }
+    stamp {
+      id: args.edgeId
+      status: "committed"
+    }
+  }
+}

@@ -16,7 +16,7 @@ import (
 // conceptAgentsSkill is the canonical concept id the resolver queries
 // against. Local to this file for the same reason as
 // conceptAgentsAgent / conceptAgentsAgentRole in agent_lock_validation.go.
-const conceptAgentsSkill = "v1:agents:skill"
+const conceptAgentsSkill = "v1:skills:skill"
 
 // SkillBundle is the resolved effective surface for a list of skill
 // ids. domains / toolSlugs / liveSourceIds are deduped + lexically
@@ -66,7 +66,7 @@ func (e *MemQLEngine) ResolveSkills(ctx context.Context, skillIds []string) (Ski
 	// defaultSkillIds / availableSkillIds / forbiddenSkillIds and what
 	// the agent seeds write into capabilities.skillIds. The catalog
 	// rows themselves are keyed on the canonical id form
-	// (`v1:agents:skill:<slug>`), so we prepend the concept
+	// (`v1:skills:skill:<slug>`), so we prepend the concept
 	// prefix here when an input doesn't already carry one. Without this
 	// normalization the `id IN (?)` query never matches and every
 	// resolver call returns an empty bundle. memql#376.
@@ -104,7 +104,7 @@ func (e *MemQLEngine) ResolveSkills(ctx context.Context, skillIds []string) (Ski
 		Scan(ctx)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
-			return SkillBundle{}, fmt.Errorf("scan v1:agents:skill: %w", err)
+			return SkillBundle{}, fmt.Errorf("scan v1:skills:skill: %w", err)
 		}
 	}
 

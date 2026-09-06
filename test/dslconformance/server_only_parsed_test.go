@@ -925,6 +925,23 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "work/mutations.memql", Name: "createWorkObservation"}: true,
 		{Path: "work/mutations.memql", Name: "createWorkApproval"}:    true,
 		{Path: "work/mutations.memql", Name: "decideWorkApproval"}:    true,
+
+		// THE CAPABILITY GRAPH'S EDGES (work spine A1, spec section C). An
+		// edge is EVIDENCE that two skills relate, gathered from runs the
+		// engine executed and committed only by a run that succeeded -- so a
+		// client-reachable write is a claim about executions the caller did
+		// not observe, and selection would then read it as structural fact
+		// beside its vector matches.
+		//
+		// Caller-scoping is not available even in principle here, and that is
+		// the unusual part worth stating: v1:skills:skillEdge is
+		// @rowAuthz(public, requiresIdentity), because the predefined catalog
+		// is read by every signed-in person's agents. There is no owner
+		// conjunct to narrow by, and adding one would hide the catalog the
+		// concept exists to describe. `ownerUserId` on these rows is
+		// provenance, never a scope.
+		{Path: "skills/mutations.memql", Name: "createSkillEdge"}: true,
+		{Path: "skills/mutations.memql", Name: "commitSkillEdge"}: true,
 	}
 	for k := range want {
 		if !set[k] {

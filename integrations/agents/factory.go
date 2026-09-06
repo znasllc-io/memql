@@ -223,7 +223,7 @@ type roleSnapshot struct {
 	ID string
 }
 
-// skillSnapshot is the compact view of a v1:agents:skill catalog row --
+// skillSnapshot is the compact view of a v1:skills:skill catalog row --
 // the summary projection (activeSkills), not the full bundle. The factory
 // needs only enough for the model to choose ids: what the skill is called,
 // what it covers, and which tier it sits in. The bundle composition
@@ -233,7 +233,7 @@ type skillSnapshot struct {
 	// Slug is the identity the model must emit. Role catalog rows store
 	// bare slugs in lockedSkillIds / defaultSkillIds / availableSkillIds /
 	// forbiddenSkillIds, and buildCreateAgentArgs unions the decision's
-	// skillIds straight onto those -- so a canonical `v1:agents:skill:<slug>`
+	// skillIds straight onto those -- so a canonical `v1:skills:skill:<slug>`
 	// id here would silently break every subset + forbidden check.
 	Slug        string
 	Name        string
@@ -293,7 +293,7 @@ func (i *Integration) loadRoleCatalog(ctx context.Context) []roleSnapshot {
 	return out
 }
 
-// loadSkillCatalog walks the v1:agents:skill catalog. Same
+// loadSkillCatalog walks the v1:skills:skill catalog. Same
 // best-effort tolerance as loadRoleCatalog.
 //
 // The catalog is the SECOND half of the prompt's decision surface: the
@@ -800,7 +800,7 @@ func roleSnapshotFromRow(row map[string]any) (roleSnapshot, bool) {
 	}, true
 }
 
-// skillSnapshotFromRow decodes one v1:agents:skill summary row. A row with
+// skillSnapshotFromRow decodes one v1:skills:skill summary row. A row with
 // no slug is dropped: the slug IS the identity the factory decision has to
 // name, so a row without one is unusable rather than partially usable.
 func skillSnapshotFromRow(row map[string]any) (skillSnapshot, bool) {

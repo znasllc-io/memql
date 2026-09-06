@@ -599,7 +599,7 @@ func ActiveRolesBuild(args ActiveRolesArgs) string {
 
 // ActiveSkills -- List every active skill catalog row -- summary projection. Backs the Skills picker on the role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows are fully editable.
 //
-// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["activeSkills"] in generated_concepts.go).
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["activeSkills"] in generated_concepts.go).
 type ActiveSkillsArgs struct {
 }
 
@@ -616,7 +616,7 @@ func ActiveSkillsBuild(args ActiveSkillsArgs) string {
 
 // ActiveSkillsFull -- List every active skill catalog row with its full bundle composition (domainIds + toolSlugs + liveSourceIds). Heavier projection than activeSkills; use this when a caller needs to resolve agent capabilities by unioning skill bundles in-process (cockpit#124's Agents view does this on every detail render). The catalog is small (25 rows in Phase 2; growth tracked via the Phase 3 mintSkill roadmap) so the single-shot full-list query is cheaper than N skillBySlug round-trips.
 //
-// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["activeSkillsFull"] in generated_concepts.go).
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["activeSkillsFull"] in generated_concepts.go).
 type ActiveSkillsFullArgs struct {
 }
 
@@ -10474,7 +10474,7 @@ func SitesForPackageBuild(args SitesForPackageArgs) string {
 
 // SkillBySlug -- Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it.
 //
-// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["skillBySlug"] in generated_concepts.go).
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillBySlug"] in generated_concepts.go).
 type SkillBySlugArgs struct {
 	Slug string
 }
@@ -10516,9 +10516,31 @@ func SkillChangeEventsForAgentBuild(args SkillChangeEventsForAgentArgs) string {
 	return b.String()
 }
 
+// SkillEdgesForSkill -- Every committed edge touching one skill, in either direction. Bounded by the skill: the capability graph is a small admin-and-planner-shaped registry, not a per-user table.
+//
+// Bound concept: v1:skills:skillEdge (machine-readable: BoundConcepts["skillEdgesForSkill"] in generated_concepts.go).
+type SkillEdgesForSkillArgs struct {
+	SkillId string
+}
+
+// SkillEdgesForSkill calls the engine query skillEdgesForSkill.
+func (qc *QueryClient) SkillEdgesForSkill(ctx context.Context, args SkillEdgesForSkillArgs) (*Result, error) {
+	call := SkillEdgesForSkillBuild(args)
+	return qc.executeNamed(ctx, "skillEdgesForSkill", call)
+}
+
+func SkillEdgesForSkillBuild(args SkillEdgesForSkillArgs) string {
+	var b strings.Builder
+	b.WriteString("query skillEdgesForSkill(")
+	b.WriteString("skillId: ")
+	b.WriteString(quoteMemQL(args.SkillId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SkillNeedsRefresh -- Per #157 (Phase 1 of the skills rollout): list active skills that bundle a caller-supplied knowledge domain id. The Planner Agent's Phase 2 refresh loop calls queryDueRefreshDomains first (already shipping), then fans out one call per stale domain id to discover 'which skills are downstream of this domain and want a re-attach run after the underlying knowledge refreshes complete'. Pure derivation -- no new state. Argument-as-scalar (rather than list intersection) mirrors activeAgents's per-group fanout pattern so the existing DSL push-down operator surface stays sufficient.
 //
-// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["skillNeedsRefresh"] in generated_concepts.go).
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillNeedsRefresh"] in generated_concepts.go).
 type SkillNeedsRefreshArgs struct {
 	StaleDomainId string
 }

@@ -1,0 +1,65 @@
+// concepts.memql
+//
+// The skills namespace -- the capability graph of the execution model
+// (design record docs/superpowers/specs/2026-09-05-work-spine-design.md,
+// section C). Moved out of the agents namespace in epic A1 so the
+// catalog survives the retirement of that namespace (sub-project F).
+// Epic A3 grows skill with instructions, scripts, resources, effects and
+// the trust ladder; this file is the move plus the edge concept.
+//
+// TIER: public, requiresIdentity (the A1 plan's second amendment). The
+// predefined catalog is read by every signed-in person's agents, so
+// narrowing it to an owner would hide the thirteen seeded rows from
+// everybody. Minted skills carry an owner for provenance and visibility
+// is NOT narrowed by it.
+
+use agents.concepts.{ agent }
+use identity.concepts.{ user }
+use planner.concepts.{ plan }
+
+/// First-class capability bundle: a named unit of (knowledgeDomains + toolSlugs + liveSources) that
+/// the Planner Agent attaches to agents in createSpecialist / extendSpecialist. After the full
+/// skills rollout (#157 -> #158 -> #159) the agent factory pulls skills off the catalog rather than
+/// threading parallel flat lists; this concept is the spine of that surface. Phase 1 (this PR)
+/// lands the schema + a 13-row predefined catalog; consumers don't read skills yet. Phase 2
+/// migrates roles + agents to skillIds[]; Phase 3 lands the mintSkill authority + approval card.
+@rowAuthz(public, requiresIdentity)
+@displayCard(primary="name", secondary="category", tertiary="tier", status="active")
+concept skill {
+  ownerUserId    string  @serverSet  @description("v1:identity:user.id of the person whose planner minted this skill; present-and-empty for a predefined catalog row. PROVENANCE ONLY -- the tier is public, so this narrows nothing.")
+  slug           string!  @description("Canonical slug -- stable, kebab-case identifier. Examples: workbench-baseline, web-research, go-backend-engineering. Never renamed (rename = new row + migration).")
+  name           string!  @description("Display name shown in the role manager and the agent edit modal. Example: 'Web Research'.")
+  description    string  @description("One- or two-line description of what an agent with this skill can do. Surfaced in tooltips + the skill picker's expanded view.")
+  category       enum("professional", "personal", "creative", "scientific", "medical", "legal", "trades", "education", "civic", "hospitality", "agriculture", "transportation", "energy", "financial", "specialized", "hobby", "foundational", "engineering", "product")  @description("Coarse grouping mirroring agentRole.category, with three additional buckets for cross-cutting platform skills (foundational, engineering, product) that don't fit the user-domain taxonomy. The role manager groups skills by this field in the picker.")
+  tags           []string  @description("UI grouping labels for cross-cutting product surfaces (e.g. ['voice', 'category-baseline']). Purely cosmetic; no behavioral effect. Lets a single skill appear in multiple curated lists without forcing a category change.")
+  domainIds      []string  @description("v1:knowledge:knowledgeDomain.id references the skill bundles. Resolved into the agent's effective domain union at retrieval / scoring / prompt-rendering time by traversing capabilities.skillIds[] (Phase 2 cut: #158 -- the agent row no longer stores a flat domains list). Load-time validation: every id ideally resolves to a known knowledgeDomain seed; the Phase 1 carve-out documented in skill_tier_validation.go warns-not-fails for unseeded ids.")
+  toolSlugs      []string  @description("Tool / integration slugs the skill grants. Phase 2 cut (#158): resolved into the agent's effective tool union by traversing capabilities.skillIds[]; the agent row no longer stores a flat tools list. Composes through the existing tool-slug expansion (e.g. operator-computer-use expands to workerHost + workerComputer + cross-cutting trio).")
+  liveSourceIds  []string  @description("v1:knowledge:liveSource.id references for live-knowledge bindings. Empty for most skills; populated for skills that need a current-state feed (e.g. inventory, weather, market data). Phase 2 cut (#158): resolved into the agent's effective live-source union by traversing capabilities.skillIds[]; the agent row no longer stores a flat liveSources list.")
+  tier           enum("A", "B", "C")!  @default("A")  @description("Safety tier mirroring v1:knowledge:knowledgeDomain.tier. The materializer enforces skill.tier >= max(tier across domainIds[]) at load time: a skill cannot bundle a Tier-C medical domain while declaring itself Tier-A. A = general; B = safety-relevant; C = high-stakes regulated. The disclaimer effect flows from the skill's DOMAINS, not from this field or from agentRole.tier: a Tier-B domain carries disclaimerChunkText as chunk 0 (integrations/knowledge/seed_domain_content.go), and an agent inherits that by carrying the domain. There is no 'effective tier' propagation and no system-prompt disclaimer injection keyed on a tier field -- this description claimed both, which is the same defect memql#3068 corrected one field up.")
+  predefined     bool    @default("false")  @description("True for catalog rows seeded by dsl/agents/skills/*.memql on every startup. Predefined rows are LOCKED in the cockpit's Skills admin view: slug / category / tier / domain+tool composition are read-only; only tags / description edits are accepted. User-created skills default to predefined=false and stay fully editable.")
+  active         bool    @default("true")  @description("Soft-deactivate flag. Inactive skills disappear from the picker but agents that already carry the skill keep functioning. Lets us retire a poorly-shaped catalog row without churning every agent that bound to it.")
+  originatingPlanId string @description("Phase 3 (#159) provenance: the v1:planner:plan.id whose dispatch surfaced the need for this skill. Empty for predefined catalog rows. Stamped by mintSkill at attach time. Pairs with mintedByAgentId for the 'who/when/why' triad the Skills admin view + the trace viewer (cockpit#125) surface as 'Created by planner from Plan X'.")
+  mintedByAgentId   string @description("Phase 3 (#159) provenance: the v1:agents:agent.id of the planner agent whose mintSkill action produced this row. Empty for predefined catalog rows. The trace viewer renders this alongside the planner trace tree so an operator can correlate a skill mint with the upstream LLM decision that triggered it.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", field="originatingPlanId", target=plan, direction="outgoing")
+  @relationship(type="references", field="mintedByAgentId", target=agent, direction="outgoing")
+}
+
+/// A typed relationship between two skills. Compile may propose an edge; a run that succeeds commits
+/// it (the propose-then-commit protocol, spec section C). Selection reads committed edges beside
+/// vector matches.
+@rowAuthz(public, requiresIdentity)
+@displayCard(primary="edgeType", secondary="fromSkillId", tertiary="toSkillId", status="status")
+concept skillEdge {
+  ownerUserId  string  @serverSet  @description("Who proposed it, when a person's run did; present-and-empty for a system-proposed edge. Provenance only -- the tier is public.")
+  fromSkillId  string!  @description("The skill the edge starts at.")
+  toSkillId    string!  @description("The skill the edge points to.")
+  edgeType     enum("dependsOn", "conflictsWith", "specializes", "duplicates")!  @description("What the edge means. Named edgeType, not type: `type` is a reserved row intrinsic and a concept that declares it is DROPPED whole at load, with an error that blames the file-top imports instead.")
+  evidence     []object  @description("[{runId, stepKey}] -- the executions that established it.")
+  proposedBy   enum("system", "user")!  @default("system")  @description("Who proposed it.")
+  status       enum("proposed", "committed")!  @default("proposed")  @description("proposed until a successful run commits it.")
+
+  @relationship(type="references", as="edgeFrom", field="fromSkillId", target=skill, direction="outgoing")
+  @relationship(type="references", as="edgeTo", field="toSkillId", target=skill, direction="outgoing")
+}

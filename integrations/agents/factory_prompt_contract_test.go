@@ -139,7 +139,7 @@ func TestAnalyzeGoalPayloadCarriesNoUndeclaredKeys(t *testing.T) {
 // TestSkillCatalogForPromptKeysOnSlug pins the identity the model is asked
 // to emit. Role rows store BARE slugs in lockedSkillIds / availableSkillIds
 // / forbiddenSkillIds and buildCreateAgentArgs unions the decision straight
-// onto those, so handing the model canonical `v1:agents:skill:<slug>` ids
+// onto those, so handing the model canonical `v1:skills:skill:<slug>` ids
 // would silently break every subset + forbidden check.
 func TestSkillCatalogForPromptKeysOnSlug(t *testing.T) {
 	out := skillCatalogForPrompt([]skillSnapshot{{Slug: "bookkeeping", Name: "Bookkeeping"}})
@@ -163,7 +163,7 @@ func TestSkillSnapshotFromRowRequiresSlug(t *testing.T) {
 		t.Error("a skill row with no slug must be dropped, not surfaced with an empty identity")
 	}
 	got, ok := skillSnapshotFromRow(map[string]any{
-		"id":      "v1:agents:skill:bookkeeping",
+		"id":      "v1:skills:skill:bookkeeping",
 		"payload": map[string]any{"slug": "bookkeeping", "name": "Bookkeeping", "tags": []any{"finance"}},
 	})
 	if !ok {

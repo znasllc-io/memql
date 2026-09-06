@@ -57,7 +57,7 @@ prompt askSpecialist {
 /// Structured-output prompt invoked by the Assistant's ensureAgent tool to analyze a goal + decide
 /// whether to match, extend, or create an agent. Phase 2 cut (#158): the output contract collapses
 /// the separate domainIds / liveSourceIds / toolSlugs lists into a single skillIds[] -- the
-/// v1:agents:skill catalog is the bundling unit. Output JSON contract: { action:
+/// v1:skills:skill catalog is the bundling unit. Output JSON contract: { action:
 /// 'match'|'extend'|'create', targetAgentId?: string, roleSlug: string, skillIds: []string,
 /// reasoning: string }. The ensureAgent executor reads the structured output, validates against the
 /// role catalog (the role's maxSkills cap + forbiddenSkillIds + lockedSkillIds) + the skill
@@ -71,7 +71,7 @@ prompt agentFactoryAnalyze {
   goal              string! @description("The user-stated goal driving the agent-provisioning decision. Forwarded verbatim from the ensureAgent tool call.")
   existingAgents    []object! @description("Compact snapshot of the user's existing agents -- [{id, name, roleSlug, capabilities: {skillIds}}]. The factory uses this to decide whether an existing agent already fits (match) or could fit with additions (extend).")
   roleCatalog       []object! @description("Compact snapshot of the v1:agents:agentRole catalog -- [{slug, name, category, lockedSkillIds, defaultSkillIds, availableSkillIds, forbiddenSkillIds, maxSkills, tier}]. The factory must pick roleSlug from this set; user-created roles are also valid but predefined ones cover almost every common case.")
-  skillCatalog      []object! @description("Compact snapshot of the v1:agents:skill catalog -- [{slug, name, category, description, tier, tags}]. The factory must pick every skillId from this set; Phase 3 mintSkill closes the gap when no catalog row covers the goal, but in Phase 2 the planner is restricted to catalog skills.")
+  skillCatalog      []object! @description("Compact snapshot of the v1:skills:skill catalog -- [{slug, name, category, description, tier, tags}]. The factory must pick every skillId from this set; Phase 3 mintSkill closes the gap when no catalog row covers the goal, but in Phase 2 the planner is restricted to catalog skills.")
   now               string! @description("RFC3339 wall-clock.")
   priorError        string @description("The validation error a PREVIOUS attempt's decision was rejected with, verbatim, when this call is a retry (memql#4690). Empty on the first attempt. The template renders it as a correction block naming what was wrong and what the valid choices are; a model handed the reason it failed picks a real catalog slug on the next try, where one that is simply re-asked repeats itself.")
 }

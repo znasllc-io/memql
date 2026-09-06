@@ -8,7 +8,6 @@
 // professional roles -- these skills are scoped to the MemQL platform
 // surface.
 
-use agents.concepts.{ skill }
 
 @description("Go service development against the MemQL platform: idiomatic Go, the project's bus + integration patterns, build-tag-gated node binaries, the testing surface. Pairs with workbench-baseline -- the skill bundles the knowledge; the workbench provides the execution surface.")
 seed skill go-backend-engineering {

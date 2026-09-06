@@ -93,7 +93,7 @@ func defaultRoutingRules() []RoutingRule {
 		// subscribes to it (no automations, no other consumers), so
 		// forwarding it everywhere has ZERO side effects. This SUPERSEDES the
 		// per-concept graph-write cache rules 5.5 added (the
-		// v1:agents:agentRole / v1:agents:skill / v1:router:budget
+		// v1:agents:agentRole / v1:skills:skill / v1:router:budget
 		// create/update/delete rules and the v1:cognition:utterance delete
 		// rule), which are now retired: they coupled cache eviction to
 		// per-concept graph-write forwarding and carried an automation-

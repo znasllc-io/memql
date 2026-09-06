@@ -16,7 +16,6 @@
 // regulated). Tier B legal + personal-finance corner + electrician
 // (covered under trades). Tier A for the rest.
 
-use agents.concepts.{ skill }
 
 @description("Knowledge baseline for every white-collar professional role -- accounting / HR / IT support / operations / project management / sales+marketing / executive assistant / data + software roles / security. Bundles the union of locked domains across professional.memql so a role's lockedSkillIds = [workbench-baseline, professional-baseline] reproduces the pre-Phase-2 domain reach. Phase 3 mintSkill carves narrower specializations off this when a planner-minted specialist needs them.")
 seed skill professional-baseline {
