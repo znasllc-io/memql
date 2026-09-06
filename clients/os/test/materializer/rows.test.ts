@@ -196,9 +196,15 @@ describe("acts follow the state", () => {
     }
   });
 
-  it("offers the file, a recipe and archive once it is ready", () => {
+  // PRIMARY LAST, because that is where the eye lands (rule 12) -- and the
+  // primary act on a finished materialization is opening the thing it
+  // made. A rendered pass put Archive there instead, which is the act
+  // somebody reaches for least.
+  it("offers archive, a recipe and the file once it is ready, primary last", () => {
     const acts = actsFor(compositionFromRow(compositionRow()), ready);
-    expect(acts.map((a) => a.id)).toEqual(["openFile", "saveRecipe", "archive"]);
+    expect(acts.map((a) => a.id)).toEqual(["archive", "saveRecipe", "openFile"]);
+    expect(acts[acts.length - 1]?.tone).toBe("primary");
+    expect(acts.filter((a) => a.tone === "primary")).toHaveLength(1);
   });
 
   it("does not offer Save as recipe on a composition that came from one", () => {

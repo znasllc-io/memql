@@ -49,6 +49,16 @@ type Result struct {
 }
 
 // SHA256 is the lowercase hex digest of the produced bytes.
+//
+// A CONTENT DIGEST, NEVER A CREDENTIAL DIGEST, and the distinction is
+// worth stating because a scanner cannot tell them apart. It answers
+// "are these the same bytes" -- it is what makes a re-run's output
+// comparable to the last one's, and it is copied onto
+// `v1:library:file.sha256`, which the Library's own header calls a dedup
+// hint and an integrity check and explicitly NOT an access key. Nothing
+// secret is ever hashed here: the input is a document this cluster
+// composed and is about to store. SHA-256 is the right function for
+// that, and a password hash would be the wrong one.
 func (r Result) SHA256() string {
 	sum := sha256.Sum256(r.Bytes)
 	return hex.EncodeToString(sum[:])
@@ -144,13 +154,42 @@ func writeYAML(b *bytes.Buffer, key, value string) {
 	b.WriteString("\n")
 }
 
+// quoteYAML renders a value as a double-quoted YAML scalar.
+//
+// THE BACKSLASH IS ESCAPED FIRST AND THE ORDER IS THE WHOLE CORRECTNESS
+// ARGUMENT. Escaping the quote first would turn `"` into `\"` and then
+// the second pass would turn that backslash into `\\`, giving `\\"` --
+// a closed scalar followed by junk. Every function of this shape is
+// right or wrong on that one line.
+//
+// EVERY REMAINING C0 CONTROL IS DROPPED, and that half is not
+// belt-and-braces. YAML 1.2 forbids unescaped C0 controls in a
+// double-quoted scalar exactly as XML 1.0 forbids them in an element,
+// and this quoter feeds `memql-package.yaml` -- a document ANOTHER
+// component parses and validates. A composition's name is free text
+// somebody typed, so one stray 0x0B would produce a package the
+// Deployables pipeline refuses with a parse error naming nothing. It is
+// the same defect docx.go's escapeXML fixes one format along, and it was
+// found by reading this function rather than by a test failing.
 func quoteYAML(v string) string {
 	v = strings.ReplaceAll(v, "\\", "\\\\")
 	v = strings.ReplaceAll(v, "\"", "\\\"")
 	v = strings.ReplaceAll(v, "\n", "\\n")
-	v = strings.ReplaceAll(v, "\r", "")
 	v = strings.ReplaceAll(v, "\t", "\\t")
-	return "\"" + v + "\""
+
+	var b strings.Builder
+	b.Grow(len(v) + 2)
+	b.WriteByte('"')
+	for _, r := range v {
+		// \n and \t are already the two-character escapes above, so
+		// anything still in the C0 range here arrived as a raw byte.
+		if r < 0x20 || (r >= 0x7F && r <= 0x9F) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 // ---- html: a meta block ----

@@ -441,7 +441,7 @@ QueryClient.prototype.archiveComposeRecipe = function (this: QueryClient, args: 
 };
 
 /** Archive a template binding. Owned. It does NOT archive the file it points at: the file is an ordinary Library row, and retiring a binding is not asking to throw away a document. */
-// Bound concept: v1:compose:template (machine-readable: BoundConcepts["archiveComposeTemplate"] in generated_concepts.ts).
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["archiveComposeTemplate"] in generated_concepts.ts).
 export interface ArchiveComposeTemplateArgs {
   templateId: string;
 }
@@ -2119,7 +2119,7 @@ QueryClient.prototype.createComposeRecipe = function (this: QueryClient, args: C
 };
 
 /** Bind a Library file as a template. Owned. The BYTES are not written here and never are: a template is a binding to a v1:library:file (design D7), so uploading one is an ordinary Library upload through the one pinned path, and this row is what makes it selectable afterwards. */
-// Bound concept: v1:compose:template (machine-readable: BoundConcepts["createComposeTemplate"] in generated_concepts.ts).
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["createComposeTemplate"] in generated_concepts.ts).
 export interface CreateComposeTemplateArgs {
   templateId: string;
   name: string;
@@ -6669,7 +6669,7 @@ QueryClient.prototype.restoreComposeRecipe = function (this: QueryClient, args: 
 };
 
 /** Restore an archived template binding. Owned. */
-// Bound concept: v1:compose:template (machine-readable: BoundConcepts["restoreComposeTemplate"] in generated_concepts.ts).
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["restoreComposeTemplate"] in generated_concepts.ts).
 export interface RestoreComposeTemplateArgs {
   templateId: string;
 }
@@ -9011,7 +9011,7 @@ QueryClient.prototype.updateComposeRecipe = function (this: QueryClient, args: U
 };
 
 /** Rename a template, re-describe it, re-tag it, or repoint it at a different file. Owned. Repointing is deliberately allowed and is how a template is revised -- the alternative, a new template per revision, would leave every recipe naming the old one. */
-// Bound concept: v1:compose:template (machine-readable: BoundConcepts["updateComposeTemplate"] in generated_concepts.ts).
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["updateComposeTemplate"] in generated_concepts.ts).
 export interface UpdateComposeTemplateArgs {
   templateId: string;
   name?: string;

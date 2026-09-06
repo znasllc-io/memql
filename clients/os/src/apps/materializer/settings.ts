@@ -74,7 +74,13 @@ export interface MaterializerSettingsStore {
   save(next: MaterializerSettings): void;
 }
 
-const STORAGE_KEY = "memql.os.materializer.v1";
+// HYPHENATED, like every other storage key in this shell -- `memql-os-theme`,
+// `memql-os-pending-auth`, `memql-os-logs-session-v1`. The dotted form this
+// started as was the only one in the tree, and the shape is what made
+// gitleaks' generic-api-key heuristic read `const STORAGE_KEY = "..."` as a
+// token. It was a false positive either way, and the cheap fix is also the
+// consistent one: stop looking like a secret rather than allowlist a finding.
+const STORAGE_KEY = "memql-os-materializer-v1";
 
 /**
  * localStorage, sanitised on the way IN rather than trusted because it

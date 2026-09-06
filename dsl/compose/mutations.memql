@@ -143,7 +143,7 @@ mutate composition restoreComposition {
 /// template is a binding to a v1:library:file (design D7), so uploading one is an ordinary Library
 /// upload through the one pinned path, and this row is what makes it selectable afterwards.
 @actor
-mutate template createComposeTemplate {
+mutate composeTemplate createComposeTemplate {
   args {
     templateId    string!
     name          string!
@@ -167,7 +167,7 @@ mutate template createComposeTemplate {
 /// Repointing is deliberately allowed and is how a template is revised -- the alternative, a new
 /// template per revision, would leave every recipe naming the old one.
 @actor
-mutate template updateComposeTemplate {
+mutate composeTemplate updateComposeTemplate {
   args {
     templateId    string!
     name          string
@@ -189,7 +189,7 @@ mutate template updateComposeTemplate {
 /// Archive a template binding. Owned. It does NOT archive the file it points at: the file is an
 /// ordinary Library row, and retiring a binding is not asking to throw away a document.
 @actor
-mutate template archiveComposeTemplate {
+mutate composeTemplate archiveComposeTemplate {
   args {
     templateId  string!
   }
@@ -204,7 +204,7 @@ mutate template archiveComposeTemplate {
 
 /// Restore an archived template binding. Owned.
 @actor
-mutate template restoreComposeTemplate {
+mutate composeTemplate restoreComposeTemplate {
   args {
     templateId  string!
   }

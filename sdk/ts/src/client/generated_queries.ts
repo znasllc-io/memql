@@ -2344,7 +2344,7 @@ QueryClient.prototype.composeRecipes = function (this: QueryClient, args: Compos
 };
 
 /** One template by id, gated to its owner. Backs the template editor and the render step's own resolution -- which runs under the caller's actor, so a composition naming somebody else's template resolves zero rows and is refused rather than rendering through it. */
-// Bound concept: v1:compose:template (machine-readable: BoundConcepts["composeTemplateById"] in generated_concepts.ts).
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["composeTemplateById"] in generated_concepts.ts).
 export interface ComposeTemplateByIdArgs {
   templateId: string;
 }
@@ -2366,7 +2366,7 @@ QueryClient.prototype.composeTemplateById = function (this: QueryClient, args: C
 };
 
 /** The caller's templates, newest first: the Templates section and the Target column's picker. */
-// Bound concept: v1:compose:template (machine-readable: BoundConcepts["composeTemplates"] in generated_concepts.ts).
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["composeTemplates"] in generated_concepts.ts).
 export interface ComposeTemplatesArgs {
   format?: string;
 }

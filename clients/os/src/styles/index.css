@@ -9095,6 +9095,21 @@ a.os-button {
   padding-right: 4px;
 }
 
+/* A SETTLED COMPOSITION IS A RECORD, NOT A FORM (DESIGN.md rule 9).
+ * Composing, the three columns fill the window because the draft is the
+ * page and real estate belongs to it. Finished, they are three short
+ * readings of one row -- and stretching them drew 500px of dead space
+ * beneath three paragraphs, which is exactly what rule 9 names. Found in
+ * a browser; jsdom lays nothing out, so the suite was green over it. */
+.os-mz-columns[data-settled="true"] {
+  align-content: start;
+  overflow-y: auto;
+}
+
+.os-mz-columns[data-settled="true"] .os-mz-col {
+  overflow-y: visible;
+}
+
 /* A FLEX ITEM'S DEFAULT min-width: auto REFUSES TO SHRINK BELOW ITS
  * CONTENT, which is how the Work app's goal list came to scroll sideways
  * on a sentence. Every column here is min-width: 0 for that reason. */
@@ -9247,8 +9262,12 @@ a.os-button {
 
 /* ---- the target's absent options ---- */
 
+/* IT SITS WITH THE CONTROL IT IS ABOUT, not at the bottom of the column.
+ * `margin-top: auto` put it 400px below the format select whose options it
+ * explains, where it read as detached chrome rather than as the rest of
+ * that control's answer. */
 .os-mz-unoffered {
-  margin-top: auto;
+  margin-top: 4px;
   padding-top: 10px;
   border-top: 1px solid var(--os-line);
   color: var(--os-muted);
@@ -9437,11 +9456,23 @@ a.os-button {
     overflow-y: auto;
   }
 
-  .os-mz-col {
+  .os-mz-col,
+  .os-mz-columns[data-settled="true"] .os-mz-col {
     overflow-y: visible;
   }
 
   .os-mz-unoffered {
     margin-top: 10px;
+  }
+
+  /* THE MARK SURVIVES AND ITS TEXT DOES NOT. Narrow, the row's name wraps
+   * to two lines -- which is the right priority, the identifier outliving
+   * the context, and the inverse of the Work app's own defect -- but the
+   * count then truncated to "2…", which says nothing at all. The mark
+   * carries the whole sentence in its accessible name, so dropping the
+   * text loses a sighted reader a figure and loses a screen reader
+   * nothing, while an ellipsis loses both. */
+  .os-mz-rowmark-text {
+    display: none;
   }
 }

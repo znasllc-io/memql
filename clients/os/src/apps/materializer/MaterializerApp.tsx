@@ -192,6 +192,7 @@ export function MaterializerApp({
           });
         }}
         onArchiveRecipe={(id) => void recipeActs.archive(id)}
+        onRestoreRecipe={(id) => void recipeActs.restore(id)}
       />
     );
   }

@@ -74,7 +74,7 @@ query composition compositionForOutputFile {
 
 /// The caller's templates, newest first: the Templates section and the Target column's picker.
 @actor
-query template composeTemplates {
+query composeTemplate composeTemplates {
   args {
     format  string
   }
@@ -88,7 +88,7 @@ query template composeTemplates {
 /// resolution -- which runs under the caller's actor, so a composition naming somebody else's
 /// template resolves zero rows and is refused rather than rendering through it.
 @actor
-query template composeTemplateById {
+query composeTemplate composeTemplateById {
   args {
     templateId  string!
   }

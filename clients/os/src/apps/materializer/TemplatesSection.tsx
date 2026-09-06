@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { Button, Caption, Chip, Fact, Facts, Field, Head, Input, Notice, Panel, Row, Select, Subhead } from "../../kit";
+import { Button, Caption, Chip, Field, Head, Input, Notice, Panel, Row, Select, Subhead, formatMoment } from "../../kit";
 import type { NewTemplateFacts } from "./actions";
 import type { RecipeRow, TemplateRow } from "./rows";
 import { FORMATS, RECIPES_EMPTY, TEMPLATES_EMPTY, formatWord } from "./words";
@@ -37,6 +37,7 @@ export interface TemplatesSectionProps {
   onRestoreTemplate: (templateId: string) => void;
   onRunRecipe: (recipeId: string) => void;
   onArchiveRecipe: (recipeId: string) => void;
+  onRestoreRecipe: (recipeId: string) => void;
   showArchived: boolean;
 }
 
@@ -50,6 +51,7 @@ export function TemplatesSection({
   onRestoreTemplate,
   onRunRecipe,
   onArchiveRecipe,
+  onRestoreRecipe,
   showArchived,
 }: TemplatesSectionProps) {
   const [adding, setAdding] = useState(false);
@@ -82,27 +84,34 @@ export function TemplatesSection({
         <ul className="os-mz-rows" aria-label="Templates">
           {visibleTemplates.map((t) => (
             <li key={t.id}>
+              {/* THE ACTS GO IN THE `state` SLOT, which is the row's
+                  right-aligned end. Put in `children` they flowed inline
+                  after the description and read as part of the sentence --
+                  "The branded report we send Acme  Archive" -- which a
+                  rendered pass caught and jsdom cannot see. */}
               <Row
                 name={t.name}
                 dim={t.archived}
-                state={<Chip tone="neutral">{formatWord(t.format)}</Chip>}
+                state={
+                  <>
+                    <Chip tone="neutral">{formatWord(t.format)}</Chip>
+                    {t.archived ? (
+                      <Button tone="quiet" onClick={() => onRestoreTemplate(t.id)}>
+                        Restore
+                      </Button>
+                    ) : (
+                      <Button tone="quiet" onClick={() => onArchiveTemplate(t.id)}>
+                        Archive
+                      </Button>
+                    )}
+                  </>
+                }
               >
-                <span className="os-mz-template-desc">{t.description || "No description"}</span>
-                <span className="os-mz-template-acts">
-                  {t.placeholders.length > 0 ? (
-                    <span className="os-caption">
-                      asks for {t.placeholders.map((p) => p.name).join(", ")}
-                    </span>
-                  ) : null}
-                  {t.archived ? (
-                    <Button tone="quiet" onClick={() => onRestoreTemplate(t.id)}>
-                      Restore
-                    </Button>
-                  ) : (
-                    <Button tone="quiet" onClick={() => onArchiveTemplate(t.id)}>
-                      Archive
-                    </Button>
-                  )}
+                <span className="os-mz-template-desc">
+                  {t.description || "No description"}
+                  {t.placeholders.length > 0
+                    ? ` — asks for ${t.placeholders.map((p) => p.name).join(", ")}`
+                    : ""}
                 </span>
               </Row>
             </li>
@@ -126,38 +135,48 @@ export function TemplatesSection({
               <Row
                 name={r.name}
                 dim={r.archived}
-                state={<Chip tone="neutral">{formatWord(r.format)}</Chip>}
+                state={
+                  <>
+                    <Chip tone="neutral">{formatWord(r.format)}</Chip>
+                    {r.archived ? (
+                      <Button tone="quiet" onClick={() => onRestoreRecipe(r.id)}>
+                        Restore
+                      </Button>
+                    ) : (
+                      <>
+                        <Button tone="quiet" onClick={() => onArchiveRecipe(r.id)}>
+                          Archive
+                        </Button>
+                        {/* DEFAULT, NOT PRIMARY. A primary tone on every row
+                            of a list is a column of green, and the accent
+                            stops meaning "this is the thing to do" when
+                            every row claims it. The one primary act on this
+                            section is the Head's Bind a file. */}
+                        <Button busy={busy} onClick={() => onRunRecipe(r.id)}>
+                          Run it again
+                        </Button>
+                      </>
+                    )}
+                  </>
+                }
               >
-                <Facts>
-                  <Fact
-                    label="Made"
-                    value={
-                      // ABSENT IS NOT ZERO for a run count that was never
-                      // written, but here it genuinely is: nothing wrote
-                      // this field before the concept existed, because the
-                      // concept is new. So a zero is honest.
-                      r.runCount === 0
-                        ? "not yet"
-                        : `${r.runCount} ${r.runCount === 1 ? "time" : "times"}`
-                    }
-                  />
-                  {/* `lastRunAt` is rendered CONTINUOUSLY and is absent
+                <span className="os-mz-template-desc">
+                  {/* ABSENT IS NOT ZERO for most fields in this shell, and
+                      here it genuinely IS zero: nothing wrote runCount
+                      before the concept existed, because the concept is
+                      new. So "not yet" is honest rather than a guess.
+
+                      `lastRunAt` is rendered CONTINUOUSLY and is absent
                       from the arrival-cue fingerprint: a recipe on a
-                      schedule would touch it forever, and naming it as
-                      news would strobe this list on that cycle. */}
-                  <Fact label="Last run" value={r.lastRunAt || "—"} />
-                </Facts>
-                <span className="os-mz-template-acts">
-                  {r.archived ? null : (
-                    <Button tone="primary" busy={busy} onClick={() => onRunRecipe(r.id)}>
-                      Run it again
-                    </Button>
-                  )}
-                  {r.archived ? null : (
-                    <Button tone="quiet" onClick={() => onArchiveRecipe(r.id)}>
-                      Archive
-                    </Button>
-                  )}
+                      schedule would touch it forever, and naming it as news
+                      would strobe this list on that cycle. It goes through
+                      the kit's own formatter -- a raw RFC3339 string is the
+                      data voice, and "when did this last run" is a question
+                      a person asks in months. */}
+                  {r.runCount === 0
+                    ? "Not run yet"
+                    : `Made ${r.runCount} ${r.runCount === 1 ? "time" : "times"}, last on ${formatMoment(r.lastRunAt)}`}
+                  {r.description ? ` — ${r.description}` : ""}
                 </span>
               </Row>
             </li>

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import { Button, Chip, Fact, Facts, Field, Head, Input, Notice, Select, Subhead } from "../../kit";
+import { Button, Chip, Fact, Facts, Field, FormRow, Head, Input, Notice, Select, Subhead } from "../../kit";
 import { ActionBar } from "../../kit/ActionBar";
 import { actsFor, stateLine, type ActId } from "./acts";
 import { ProvenanceChain } from "./Provenance";
@@ -140,13 +140,24 @@ export function ComposerSection({
         ) : null}
       </Head>
 
-      <div className="os-mz-columns">
+      {/* A SETTLED COMPOSITION IS A RECORD, NOT A FORM, and the layout says
+          so: the three columns stop stretching and sit at the top. Rendered,
+          a finished composition drew three short columns over 500px of dead
+          space -- rule 9's "nothing paints half a window of dead space",
+          which no jsdom test can see because jsdom lays nothing out. */}
+      <div className="os-mz-columns" data-settled={open !== null ? "true" : undefined}>
         <SourcesColumn
           composables={composables.concepts}
           registryAvailable={composables.registryAvailable}
           loading={composables.loading}
           conceptsError={composables.error}
-          picked={picked}
+          // A SETTLED COLUMN READS THE COMPOSITION, NOT THE FORM. `picked`
+          // is this window's own local state, and a composition opened from
+          // the list -- or from another app's intent -- has none of it. The
+          // first rendered pass caught this as "Made from: the record holds
+          // what this was composed from" over an empty column, on a
+          // composition whose record holds two rows.
+          picked={open ? chainSources.map((s) => ({ kind: s.kind, ref: s.ref, label: s.label })) : picked}
           resolved={resolved.sources}
           resolveError={resolved.error}
           settled={open !== null}
@@ -195,6 +206,7 @@ export function ComposerSection({
         acts={acts.map((a) => ({
           label: a.label,
           tone: a.tone === "primary" ? "primary" : a.tone === "danger" ? "danger" : "quiet",
+          ariaLabel: a.id === "openFile" ? `Open ${open?.name ?? "the file"} in Files` : undefined,
           busy: busy && a.id === "materialize",
           onAct: () => {
             if (a.id === "materialize") {
@@ -299,13 +311,21 @@ function SourcesColumn({
         </p>
       ) : (
         <>
-          <Input
-            id="mz-source-search"
-            value={query}
-            onChange={setQuery}
-            label="Search what you can compose from"
-            placeholder="Search"
-          />
+          {/* IN A ROW, because the kit's `Input` carries `flex: 1` -- right
+              where it belongs, inside a `FormRow`, and wrong as a bare child
+              of a flex COLUMN, where growing means growing TALL. Rendered,
+              this search box was 458px high with its placeholder floating in
+              the middle of it; jsdom lays nothing out, so the whole suite was
+              green over it. */}
+          <FormRow>
+            <Input
+              id="mz-source-search"
+              value={query}
+              onChange={setQuery}
+              label="Search what you can compose from"
+              placeholder="Search"
+            />
+          </FormRow>
           <ul className="os-mz-concepts" aria-label="What you can compose from">
             {composables
               .filter((c) => matches(c, query))

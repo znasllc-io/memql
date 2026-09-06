@@ -74,7 +74,7 @@ shape composition compositionFull {
 /// is what a picker needs in order to say what a template will ask for BEFORE it is chosen, so
 /// there is no reading of a template that wants less than this.
 @row
-shape template composeTemplateFull {
+shape composeTemplate composeTemplateFull {
   row.id
   row.createdAt
   ownerUserId

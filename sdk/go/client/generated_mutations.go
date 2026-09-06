@@ -657,7 +657,7 @@ func ArchiveComposeRecipeBuild(args ArchiveComposeRecipeArgs) string {
 
 // ArchiveComposeTemplate -- Archive a template binding. Owned. It does NOT archive the file it points at: the file is an ordinary Library row, and retiring a binding is not asking to throw away a document.
 //
-// Bound concept: v1:compose:template (machine-readable: BoundConcepts["archiveComposeTemplate"] in generated_concepts.go).
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["archiveComposeTemplate"] in generated_concepts.go).
 type ArchiveComposeTemplateArgs struct {
 	TemplateId string
 }
@@ -3695,7 +3695,7 @@ func CreateComposeRecipeBuild(args CreateComposeRecipeArgs) string {
 
 // CreateComposeTemplate -- Bind a Library file as a template. Owned. The BYTES are not written here and never are: a template is a binding to a v1:library:file (design D7), so uploading one is an ordinary Library upload through the one pinned path, and this row is what makes it selectable afterwards.
 //
-// Bound concept: v1:compose:template (machine-readable: BoundConcepts["createComposeTemplate"] in generated_concepts.go).
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["createComposeTemplate"] in generated_concepts.go).
 type CreateComposeTemplateArgs struct {
 	TemplateId   string
 	Name         string
@@ -12109,7 +12109,7 @@ func RestoreComposeRecipeBuild(args RestoreComposeRecipeArgs) string {
 
 // RestoreComposeTemplate -- Restore an archived template binding. Owned.
 //
-// Bound concept: v1:compose:template (machine-readable: BoundConcepts["restoreComposeTemplate"] in generated_concepts.go).
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["restoreComposeTemplate"] in generated_concepts.go).
 type RestoreComposeTemplateArgs struct {
 	TemplateId string
 }
@@ -15664,7 +15664,7 @@ func UpdateComposeRecipeBuild(args UpdateComposeRecipeArgs) string {
 
 // UpdateComposeTemplate -- Rename a template, re-describe it, re-tag it, or repoint it at a different file. Owned. Repointing is deliberately allowed and is how a template is revised -- the alternative, a new template per revision, would leave every recipe naming the old one.
 //
-// Bound concept: v1:compose:template (machine-readable: BoundConcepts["updateComposeTemplate"] in generated_concepts.go).
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["updateComposeTemplate"] in generated_concepts.go).
 type UpdateComposeTemplateArgs struct {
 	TemplateId   string
 	Name         string

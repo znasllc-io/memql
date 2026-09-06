@@ -74,9 +74,13 @@ export function actsFor(c: CompositionRow | null, draft: DraftState): ActSpec[] 
 
   switch (c.status) {
     case "ready":
-      if (c.outputFileId) acts.push({ id: "openFile", label: "Open the file", tone: "quiet" });
+      // PRIMARY LAST, because that is where the eye lands -- and the primary
+      // act on a finished materialization is opening the thing it made.
+      // Archive is the quiet one: filing a record away is housekeeping, and
+      // it is the act somebody reaches for least often from this state.
+      acts.push({ id: "archive", label: "Archive", tone: "quiet" });
       if (!c.recipeId) acts.push({ id: "saveRecipe", label: "Save as recipe", tone: "default" });
-      acts.push({ id: "archive", label: "Archive", tone: "default" });
+      if (c.outputFileId) acts.push({ id: "openFile", label: "Open the file", tone: "primary" });
       break;
     case "failed":
     case "cancelled":

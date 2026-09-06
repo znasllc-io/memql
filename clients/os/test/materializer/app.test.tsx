@@ -227,6 +227,20 @@ describe("the provenance chain", () => {
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("composer"));
   });
 
+  // FOUND IN A BROWSER, PINNED HERE. The settled Sources column used to
+  // render `picked` -- this window's own form state -- so a composition
+  // opened from the list or from another app's intent showed an EMPTY
+  // "Made from" over a record holding two sources. jsdom renders the same
+  // DOM, so nothing but a rendered pass would have found it; this is what
+  // stops it coming back.
+  it("a settled composition's sources come from the record, not the form", async () => {
+    const conn = fakeConnection({ compositions: [compositionRow({ id: `${COMPOSITION}:c1` })] });
+    mountOn(conn, `${COMPOSITION}:c1`);
+    expect(await screen.findByText("Made from")).toBeTruthy();
+    expect(screen.getByText("INV-1001")).toBeTruthy();
+    expect(screen.getByText("INV-1002")).toBeTruthy();
+  });
+
   // THE PRODUCT'S HEADLINE CLAIM, ON SCREEN: a composition that reached no
   // model says so, in words, rather than rendering a blank where the
   // models would be.
@@ -313,11 +327,24 @@ describe("templates and recipes", () => {
     expect(await screen.findByText(/Upload the file in Files first/)).toBeTruthy();
   });
 
-  it("renders a recipe's run count and last run without ringing on either", async () => {
+  it("renders a recipe's run count and its last run as a moment, not a raw timestamp", async () => {
     const conn = fakeConnection({ recipes: [recipeRow({ id: "v1:compose:recipe:r1" })] });
     mount(conn, "templates");
     expect(await screen.findByText("Acme quarterly report")).toBeTruthy();
-    expect(screen.getByText("2 times")).toBeTruthy();
+    // A raw RFC3339 string is the data voice, and "when did this last run"
+    // is a question a person asks in months -- so it goes through the kit's
+    // own formatter. The rendered pass caught 2026-06-30T09:00:00Z on the
+    // page; jsdom renders the same DOM and asserts nothing about either.
+    expect(screen.getByText(/Made 2 times, last on/)).toBeTruthy();
+    expect(screen.queryByText(/2026-06-30T09:00:00Z/)).toBeNull();
+  });
+
+  it("says 'not run yet' rather than a zero and a dash", async () => {
+    const conn = fakeConnection({
+      recipes: [recipeRow({ id: "v1:compose:recipe:r2", name: "Fresh", runCount: 0, lastRunAt: "" })],
+    });
+    mount(conn, "templates");
+    expect(await screen.findByText(/Not run yet/)).toBeTruthy();
   });
 
   it("says a recipe re-runs the selection rather than copying the rows", async () => {

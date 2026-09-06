@@ -21,6 +21,7 @@ require (
 	github.com/uptrace/bun/driver/pgdriver v1.2.18
 	github.com/znasllc-io/memql/component/auth v0.0.0
 	github.com/znasllc-io/memql/component/automations v0.0.0
+	github.com/znasllc-io/memql/component/compose v0.0.0
 	github.com/znasllc-io/memql/component/database v0.0.0
 	github.com/znasllc-io/memql/component/deploycontrol v0.0.0
 	github.com/znasllc-io/memql/component/events v0.0.0
@@ -75,6 +76,7 @@ require (
 	github.com/gammazero/deque v1.2.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/go-pdf/fpdf v0.9.0 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/cel-go v0.29.0 // indirect
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
@@ -175,6 +177,8 @@ replace github.com/znasllc-io/memql/component/bus => ../component/bus
 
 replace github.com/znasllc-io/memql/component/bus/gen => ../component/bus/gen
 
+replace github.com/znasllc-io/memql/component/compose => ../component/compose
+
 replace github.com/znasllc-io/memql/component/config => ../component/config
 
 replace github.com/znasllc-io/memql/component/database => ../component/database
@@ -186,7 +190,6 @@ replace github.com/znasllc-io/memql/component/fileprocessor => ../component/file
 replace github.com/znasllc-io/memql/component/envregistry => ../component/envregistry
 
 replace github.com/znasllc-io/memql/component/grpc/gen => ../component/grpc/gen
-
 
 replace github.com/znasllc-io/memql/component/identity => ../component/identity
 

@@ -19,7 +19,7 @@ import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 export const MATERIALIZER_APP_ID = "materializer";
 
 export const COMPOSITION_CONCEPT: string = Concepts.COMPOSE_COMPOSITION;
-export const TEMPLATE_CONCEPT: string = Concepts.COMPOSE_TEMPLATE;
+export const TEMPLATE_CONCEPT: string = Concepts.COMPOSE_COMPOSE_TEMPLATE;
 export const RECIPE_CONCEPT: string = Concepts.COMPOSE_RECIPE;
 
 /** Everything this app owns, for its Logs section's subject scope. */

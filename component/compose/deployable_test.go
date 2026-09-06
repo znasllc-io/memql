@@ -246,6 +246,49 @@ func TestParseDeployableKindNamesTheDistributionTargetsSeparately(t *testing.T) 
 	}
 }
 
+// TestPackageManifestSurvivesAControlByteInAName is docx.go's escapeXML
+// defect one format along, and it is the same class: a composition's name
+// is free text somebody typed, YAML 1.2 forbids unescaped C0 controls in a
+// double-quoted scalar, and this manifest is a document ANOTHER component
+// parses. One stray 0x0B produced a package the Deployables pipeline
+// refuses with a parse error naming nothing.
+func TestPackageManifestSurvivesAControlByteInAName(t *testing.T) {
+	pkg := fixturePackage()
+	pkg.Name = "Acme\x0bstorefront"
+	res, err := BuildPackageSource(pkg, fixtureProvenance())
+	if err != nil {
+		t.Fatalf("BuildPackageSource: %v", err)
+	}
+	manifest := readZip(t, res.Bytes)[manifestName]
+	for _, b := range []byte(manifest) {
+		if b < 0x20 && b != '\n' && b != '\t' {
+			t.Fatalf("the manifest carries raw control byte %#x; the pipeline's YAML parser refuses it:\n%s", b, manifest)
+		}
+	}
+	// And the surrounding name survives -- the byte is dropped, the words
+	// are not.
+	if !strings.Contains(manifest, "Acmestorefront") {
+		t.Fatalf("dropping the control byte took the name with it:\n%s", manifest)
+	}
+}
+
+// TestPackageManifestQuotingEscapesTheBackslashFirst pins the one line
+// every function of this shape is right or wrong on. Escaping the QUOTE
+// first turns `"` into `\"` and then the backslash pass turns that into
+// `\\"` -- a closed scalar followed by junk.
+func TestPackageManifestQuotingEscapesTheBackslashFirst(t *testing.T) {
+	pkg := fixturePackage()
+	pkg.Name = `a"b\c`
+	res, err := BuildPackageSource(pkg, fixtureProvenance())
+	if err != nil {
+		t.Fatalf("BuildPackageSource: %v", err)
+	}
+	manifest := readZip(t, res.Bytes)[manifestName]
+	if !strings.Contains(manifest, `name: "a\"b\\c"`) {
+		t.Fatalf("quoting is wrong; a backslash-then-quote ordering produces this:\n%s", manifest)
+	}
+}
+
 func TestPackageSourceRefusesAnEmptyPackage(t *testing.T) {
 	if _, err := BuildPackageSource(PackageSource{Name: "x"}, fixtureProvenance()); err == nil {
 		t.Fatal("a package with no deployables must be refused here rather than by the pipeline; the person is in the Materializer, not in Deployables")

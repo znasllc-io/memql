@@ -28,6 +28,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.68.0 // indirect
 	github.com/dgraph-io/ristretto v0.2.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.3 // indirect
+	github.com/go-pdf/fpdf v0.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/go-webauthn/webauthn v0.18.0 // indirect
 	github.com/go-webauthn/x v0.3.0 // indirect
@@ -153,6 +154,7 @@ require (
 	github.com/znasllc-io/memql/component/automations v0.0.0
 	github.com/znasllc-io/memql/component/bus v0.0.0
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/compose v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/config v0.0.0
 	github.com/znasllc-io/memql/component/database v0.0.0
 	github.com/znasllc-io/memql/component/deploycontrol v0.0.0
@@ -248,6 +250,8 @@ replace github.com/znasllc-io/memql/component/healing => ./component/healing
 
 replace github.com/znasllc-io/memql/component/bus => ./component/bus
 
+replace github.com/znasllc-io/memql/component/compose => ./component/compose
+
 replace github.com/znasllc-io/memql/component/config => ./component/config
 
 replace github.com/znasllc-io/memql/component/metadata => ./component/metadata
@@ -265,7 +269,6 @@ replace github.com/znasllc-io/memql/component/language/dslclause => ./component/
 replace github.com/znasllc-io/memql/component/language => ./component/language
 
 replace github.com/znasllc-io/memql/component/database => ./component/database
-
 
 replace github.com/znasllc-io/memql/docs => ./docs
 

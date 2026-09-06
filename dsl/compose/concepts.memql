@@ -90,14 +90,14 @@ concept composition {
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="producedFile", field="outputFileId", target=file, direction="outgoing")
   @relationship(type="references", as="filedIn", field="folderId", target=folder, direction="outgoing")
-  @relationship(type="references", as="renderedThrough", field="templateId", target=template, direction="outgoing")
+  @relationship(type="references", as="renderedThrough", field="templateId", target=composeTemplate, direction="outgoing")
   @relationship(type="references", as="ranAs", field="goalId", target=goal, direction="outgoing")
   @relationship(type="references", as="carriedBy", field="runId", target=run, direction="outgoing")
   @relationship(type="references", as="runFrom", field="recipeId", target=recipe, direction="outgoing")
   @relationship(type="references", as="forAccount", field="accountIds", target=account, direction="outgoing")
 }
 
-// ---- template: the repeatable part ----
+// ---- composeTemplate: the repeatable part ----
 //
 // A TEMPLATE IS AN ORDINARY LIBRARY FILE (design D7), pointed at by
 // fileId. It gets uploads, chunked transfers, versions, archive-to-Bin
@@ -106,13 +106,31 @@ concept composition {
 //
 // So this row is the BINDING rather than the bytes: which file, what it
 // produces, who it is for, and what it will ask for.
+//
+// IT IS `composeTemplate` RATHER THAN `template`, AND THE PREFIX IS LOAD-
+// BEARING. `v1:campaigns:template` already exists, and a spec binds its
+// concept by BARE NAME -- `spec template isReadyTemplate` in
+// dsl/campaigns/specs.memql resolves through the flat registry, where the
+// first `template` wins. A second one made that binding ambiguous and it
+// failed SILENTLY: the spec loaded with an unresolved kind, and the spec
+// in question is what keeps half-written copy out of the campaign
+// editor's picker. Nothing in `compose` was wrong and an unrelated
+// namespace broke.
+//
+// So the concept carries the namespace in its name, exactly as every
+// query, shape and mutation in this file's siblings already does
+// (`composeTemplates`, `composeTemplateFull`, `createComposeTemplate`) --
+// leaving the concept unprefixed was the inconsistency, not the fix.
+// `composition` and `recipe` stay bare because no other namespace
+// declares either. The PERSON still sees "template" everywhere: the app
+// section, the field name and the picker are all unchanged.
 
 /// A file that makes an output repeatable for a customer: a .docx with a branded header, an HTML
 /// shell, a Markdown skeleton, or a zip of files for a deployable. The row binds one Library file
 /// to the format it produces and the placeholders it expects.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="name", secondary="format", tertiary="description", status="archived")
-concept template {
+concept composeTemplate {
   ownerUserId  string!  @serverSet  @description("v1:identity:user.id that owns this template. Stamped from actor.userId, never a caller arg.")
 
   name         string!  @description("What the person calls it in the Templates section and the Target column's picker.")
@@ -176,7 +194,7 @@ concept recipe {
   archived     bool  @default("false")  @description("Soft delete. The compositions a recipe produced are untouched -- they are the evidence it worked.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
-  @relationship(type="references", as="renderedThrough", field="templateId", target=template, direction="outgoing")
+  @relationship(type="references", as="renderedThrough", field="templateId", target=composeTemplate, direction="outgoing")
   @relationship(type="references", as="filesInto", field="folderId", target=folder, direction="outgoing")
   @relationship(type="references", as="forAccount", field="accountIds", target=account, direction="outgoing")
 }
