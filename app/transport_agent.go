@@ -82,7 +82,7 @@ func (a *App) transportAgent() {
 	// both integrations have to be registered first. The blob fetcher is the
 	// same Azure client, which is why this needs the transport phase rather
 	// than integrationsAgent.
-	a.setupSkillsIntegration(blobFetcherOrNil(uploader))
+	a.setupSkillsIntegration(blobFetcherOrNil(uploader), uploader, blobContainer)
 
 	// AI endpoints live on MemqlService.Stream: AiChatMsg, AiSuggestMsg,
 	// AiSpeechMsg, AiTranscribeMsg. The legacy /si/* HTTP endpoints are

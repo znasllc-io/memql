@@ -56,7 +56,9 @@ COPY component/safety/go.* ./component/safety/
 COPY component/secret/go.* ./component/secret/
 COPY component/server/go.* ./component/server/
 COPY component/service/go.* ./component/service/
+COPY component/skills/go.* ./component/skills/
 COPY component/worker/go.* ./component/worker/
+COPY component/workjournal/go.* ./component/workjournal/
 COPY core/go.* ./core/
 COPY docs/go.* ./docs/
 COPY dsl/go.* ./dsl/

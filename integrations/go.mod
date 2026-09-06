@@ -39,7 +39,9 @@ require (
 	github.com/znasllc-io/memql/component/router v0.0.0
 	github.com/znasllc-io/memql/component/safety v0.0.0
 	github.com/znasllc-io/memql/component/secret v0.0.0
+	github.com/znasllc-io/memql/component/skills v0.0.0
 	github.com/znasllc-io/memql/component/worker v0.0.0
+	github.com/znasllc-io/memql/component/workjournal v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
 	github.com/znasllc-io/memql/dsl v0.0.0
 	github.com/znasllc-io/memql/integrations/openai v0.0.0
@@ -213,6 +215,10 @@ replace github.com/znasllc-io/memql/component/provenance => ../component/provena
 replace github.com/znasllc-io/memql/component/router => ../component/router
 
 replace github.com/znasllc-io/memql/component/safety => ../component/safety
+
+replace github.com/znasllc-io/memql/component/skills => ../component/skills
+
+replace github.com/znasllc-io/memql/component/workjournal => ../component/workjournal
 
 replace github.com/znasllc-io/memql/component/secret => ../component/secret
 

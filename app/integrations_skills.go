@@ -5,8 +5,10 @@ package app
 import (
 	"context"
 	"runtime"
+	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/integrations/skills"
 )
 
@@ -29,7 +31,7 @@ import (
 // by name (`no_script_surface`) rather than silently falling back to the
 // other one -- falling back would run a step on the workbench that the
 // caller's labels said needs a machine.
-func (a *App) setupSkillsIntegration(fetcher skills.BlobFetcher) {
+func (a *App) setupSkillsIntegration(fetcher skills.BlobFetcher, uploader server.FileUploader, bucket string) {
 	if a == nil || a.engine == nil {
 		return
 	}
@@ -63,11 +65,22 @@ func (a *App) setupSkillsIntegration(fetcher skills.BlobFetcher) {
 		surfaceOrNil(fleet, skills.NewFleetSurface),
 	)
 
+	// The capture half. Absent -- a cluster with no object storage -- capture
+	// refuses by name rather than filing nothing, which is what keeps a skill
+	// from pointing at a machine path forever.
+	if uploader != nil && strings.TrimSpace(bucket) != "" {
+		runner = runner.WithLibrary(
+			libraryArtifactWriter{store: server.NewEngineLibraryStore(&AttachmentEngineAdapter{Engine: a.engine}), uploader: uploader, bucket: bucket},
+			store,
+		)
+	}
+
 	if err := a.engine.RegisterIntegration(skills.NewIntegration(runner, a.Logger)); err != nil {
 		a.fatal("skills integration: register failed", "error", err)
 	}
 	a.Logger.Info("skills integration registered",
-		"workbench", workbench != nil, "fleet", fleet != nil)
+		"workbench", workbench != nil, "fleet", fleet != nil,
+		"capture", uploader != nil && strings.TrimSpace(bucket) != "")
 }
 
 // dispatchHostHandler plucks one integration's `dispatchHost` capability off

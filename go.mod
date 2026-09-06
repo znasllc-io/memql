@@ -180,7 +180,9 @@ require (
 	github.com/znasllc-io/memql/component/secret v0.0.0
 	github.com/znasllc-io/memql/component/server v0.0.0
 	github.com/znasllc-io/memql/component/service v0.0.0
+	github.com/znasllc-io/memql/component/skills v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/worker v0.0.0
+	github.com/znasllc-io/memql/component/workjournal v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
 	github.com/znasllc-io/memql/docs v0.0.0 // indirect
 	github.com/znasllc-io/memql/dsl v0.0.0
@@ -234,6 +236,10 @@ replace github.com/znasllc-io/memql/component/secret => ./component/secret
 replace github.com/znasllc-io/memql/component/auth => ./component/auth
 
 replace github.com/znasllc-io/memql/component/safety => ./component/safety
+
+replace github.com/znasllc-io/memql/component/skills => ./component/skills
+
+replace github.com/znasllc-io/memql/component/workjournal => ./component/workjournal
 
 replace github.com/znasllc-io/memql/component/fileprocessor => ./component/fileprocessor
 
