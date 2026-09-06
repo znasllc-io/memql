@@ -208,92 +208,6 @@ QueryClient.prototype.actionByIdAndVersion = function (this: QueryClient, args: 
   return this.executeNamed("actionByIdAndVersion", buildActionByIdAndVersion(args), opts);
 };
 
-/** Resolve an active v1:actions:action by inputFingerprint for the calling owner -- the literal-replay lookup (Phase 1 #1736). */
-// Bound concept: v1:actions:action (machine-readable: BoundConcepts["actionByInputFingerprint"] in generated_concepts.ts).
-export interface ActionByInputFingerprintArgs {
-  inputFingerprint: string;
-}
-
-export function buildActionByInputFingerprint(args: ActionByInputFingerprintArgs): string {
-  const parts: string[] = [];
-  parts.push("inputFingerprint: " + renderMemQLValue(args.inputFingerprint));
-  return "query actionByInputFingerprint(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    actionByInputFingerprint(args: ActionByInputFingerprintArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.actionByInputFingerprint = function (this: QueryClient, args: ActionByInputFingerprintArgs = {} as ActionByInputFingerprintArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("actionByInputFingerprint", buildActionByInputFingerprint(args), opts);
-};
-
-/** Resolve an active v1:actions:action by templateFingerprint (input structure) for the calling owner -- the parameterized-replay lookup (Phase 3 #1738). Owned tier. */
-// Bound concept: v1:actions:action (machine-readable: BoundConcepts["actionByTemplateFingerprint"] in generated_concepts.ts).
-export interface ActionByTemplateFingerprintArgs {
-  templateFingerprint: string;
-}
-
-export function buildActionByTemplateFingerprint(args: ActionByTemplateFingerprintArgs): string {
-  const parts: string[] = [];
-  parts.push("templateFingerprint: " + renderMemQLValue(args.templateFingerprint));
-  return "query actionByTemplateFingerprint(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    actionByTemplateFingerprint(args: ActionByTemplateFingerprintArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.actionByTemplateFingerprint = function (this: QueryClient, args: ActionByTemplateFingerprintArgs = {} as ActionByTemplateFingerprintArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("actionByTemplateFingerprint", buildActionByTemplateFingerprint(args), opts);
-};
-
-/** List v1:actions:candidate traces captured for a plan, newest-first by createdAt (owned tier). #1735. */
-// Bound concept: v1:actions:candidate (machine-readable: BoundConcepts["actionCandidatesForPlan"] in generated_concepts.ts).
-export interface ActionCandidatesForPlanArgs {
-  planId: string;
-}
-
-export function buildActionCandidatesForPlan(args: ActionCandidatesForPlanArgs): string {
-  const parts: string[] = [];
-  parts.push("planId: " + renderMemQLValue(args.planId));
-  return "query actionCandidatesForPlan(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    actionCandidatesForPlan(args: ActionCandidatesForPlanArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.actionCandidatesForPlan = function (this: QueryClient, args: ActionCandidatesForPlanArgs = {} as ActionCandidatesForPlanArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("actionCandidatesForPlan", buildActionCandidatesForPlan(args), opts);
-};
-
-/** List the calling owner's candidate v1:actions:action rows awaiting confirmation (real-machine side effects gate on a human, Phase 4 #1739). Owned tier. */
-// Bound concept: v1:actions:action (machine-readable: BoundConcepts["actionsPendingConfirm"] in generated_concepts.ts).
-export interface ActionsPendingConfirmArgs {
-}
-
-export function buildActionsPendingConfirm(args: ActionsPendingConfirmArgs): string {
-  void args;
-  return "query actionsPendingConfirm()";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    actionsPendingConfirm(args?: ActionsPendingConfirmArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.actionsPendingConfirm = function (this: QueryClient, args: ActionsPendingConfirmArgs = {} as ActionsPendingConfirmArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("actionsPendingConfirm", buildActionsPendingConfirm(args), opts);
-};
-
 /** List the calling owner's active v1:actions:action rows for the consolidation decay/deprecate sweep (Phase 4 #1739). Owned tier. */
 // Bound concept: v1:actions:action (machine-readable: BoundConcepts["activeActionsForOwner"] in generated_concepts.ts).
 export interface ActiveActionsForOwnerArgs {
@@ -607,7 +521,7 @@ QueryClient.prototype.activeRoles = function (this: QueryClient, args: ActiveRol
 };
 
 /** List every active skill catalog row -- summary projection. Backs the Skills picker on the role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows are fully editable. */
-// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["activeSkills"] in generated_concepts.ts).
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["activeSkills"] in generated_concepts.ts).
 export interface ActiveSkillsArgs {
 }
 
@@ -627,7 +541,7 @@ QueryClient.prototype.activeSkills = function (this: QueryClient, args: ActiveSk
 };
 
 /** List every active skill catalog row with its full bundle composition (domainIds + toolSlugs + liveSourceIds). Heavier projection than activeSkills; use this when a caller needs to resolve agent capabilities by unioning skill bundles in-process (cockpit#124's Agents view does this on every detail render). The catalog is small (25 rows in Phase 2; growth tracked via the Phase 3 mintSkill roadmap) so the single-shot full-list query is cheaper than N skillBySlug round-trips. */
-// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["activeSkillsFull"] in generated_concepts.ts).
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["activeSkillsFull"] in generated_concepts.ts).
 export interface ActiveSkillsFullArgs {
 }
 
@@ -9885,7 +9799,7 @@ QueryClient.prototype.sitesForPackage = function (this: QueryClient, args: Sites
 };
 
 /** Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it. */
-// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["skillBySlug"] in generated_concepts.ts).
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillBySlug"] in generated_concepts.ts).
 export interface SkillBySlugArgs {
   slug: string;
 }
@@ -9928,8 +9842,30 @@ QueryClient.prototype.skillChangeEventsForAgent = function (this: QueryClient, a
   return this.executeNamed("skillChangeEventsForAgent", buildSkillChangeEventsForAgent(args), opts);
 };
 
+/** Every committed edge touching one skill, in either direction. Bounded by the skill: the capability graph is a small admin-and-planner-shaped registry, not a per-user table. */
+// Bound concept: v1:skills:skillEdge (machine-readable: BoundConcepts["skillEdgesForSkill"] in generated_concepts.ts).
+export interface SkillEdgesForSkillArgs {
+  skillId: string;
+}
+
+export function buildSkillEdgesForSkill(args: SkillEdgesForSkillArgs): string {
+  const parts: string[] = [];
+  parts.push("skillId: " + renderMemQLValue(args.skillId));
+  return "query skillEdgesForSkill(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    skillEdgesForSkill(args: SkillEdgesForSkillArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.skillEdgesForSkill = function (this: QueryClient, args: SkillEdgesForSkillArgs = {} as SkillEdgesForSkillArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("skillEdgesForSkill", buildSkillEdgesForSkill(args), opts);
+};
+
 /** Per #157 (Phase 1 of the skills rollout): list active skills that bundle a caller-supplied knowledge domain id. The Planner Agent's Phase 2 refresh loop calls queryDueRefreshDomains first (already shipping), then fans out one call per stale domain id to discover 'which skills are downstream of this domain and want a re-attach run after the underlying knowledge refreshes complete'. Pure derivation -- no new state. Argument-as-scalar (rather than list intersection) mirrors activeAgents's per-group fanout pattern so the existing DSL push-down operator surface stays sufficient. */
-// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["skillNeedsRefresh"] in generated_concepts.ts).
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillNeedsRefresh"] in generated_concepts.ts).
 export interface SkillNeedsRefreshArgs {
   staleDomainId: string;
 }
@@ -10889,6 +10825,46 @@ declare module "./query.js" {
 
 QueryClient.prototype.warmupStateForIdentity = function (this: QueryClient, args: WarmupStateForIdentityArgs = {} as WarmupStateForIdentityArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("warmupStateForIdentity", buildWarmupStateForIdentity(args), opts);
+};
+
+/** The caller's pending approvals, newest first. Owned. decision=="" is the pending state, and it matches because createWorkApproval STAMPS the empty string rather than leaving the key absent. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwner"] in generated_concepts.ts).
+export interface WorkApprovalsForOwnerArgs {
+}
+
+export function buildWorkApprovalsForOwner(args: WorkApprovalsForOwnerArgs): string {
+  void args;
+  return "query workApprovalsForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workApprovalsForOwner(args?: WorkApprovalsForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workApprovalsForOwner = function (this: QueryClient, args: WorkApprovalsForOwnerArgs = {} as WorkApprovalsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workApprovalsForOwner", buildWorkApprovalsForOwner(args), opts);
+};
+
+/** The caller's goals, newest first. Owned: ownerUserId==actor.userId binds server-side. */
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalsForOwner"] in generated_concepts.ts).
+export interface WorkGoalsForOwnerArgs {
+}
+
+export function buildWorkGoalsForOwner(args: WorkGoalsForOwnerArgs): string {
+  void args;
+  return "query workGoalsForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workGoalsForOwner(args?: WorkGoalsForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workGoalsForOwner = function (this: QueryClient, args: WorkGoalsForOwnerArgs = {} as WorkGoalsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workGoalsForOwner", buildWorkGoalsForOwner(args), opts);
 };
 
 /** Look up the worker registration owned by an identity row.

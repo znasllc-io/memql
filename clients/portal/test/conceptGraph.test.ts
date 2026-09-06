@@ -1,8 +1,8 @@
 // The conceptGraph scene's arithmetic (epic memql#4661, task memql#4672).
 //
 // Everything the graph can be wrong about that does not need a GPU is here,
-// which is the same split the goal map already makes between nexus/scene/ and
-// nexus/map/NexusCanvas.tsx -- and for the same reason: a scene that renders
+// which is the same split the scene registry makes between scenes/ and
+// scenes/ConceptGraphCanvas.tsx -- and for the same reason: a scene that renders
 // nothing at all does so SILENTLY, with a live WebGL context and a full scene
 // graph behind it, so the parts that can be asserted have to be assertable.
 
@@ -13,7 +13,7 @@ import {
   GRAPH_NODE_CAP,
   buildConceptGraph,
   spherePoint,
-} from "../src/nexus/scene/conceptGraph";
+} from "../src/scenes/conceptGraph";
 
 const AGENT: Concept = {
   id: "v1:agents:agent",

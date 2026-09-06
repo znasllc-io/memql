@@ -3,7 +3,7 @@ package actions
 import (
 	"testing"
 
-	"github.com/znasllc-io/memql/component/harness/surfaceresolver"
+	"github.com/znasllc-io/memql/component/actions/surfaceresolver"
 )
 
 // surfaceBySlug is a tiny test helper.

@@ -132,7 +132,6 @@ app/
   integrations_workbench.go     # Workbench integrations (workbench)
   integrations_worker_agent.go  # Worker gateway (agent)
   integrations_deploy_control.go # DeployControlService (identity)
-  integrations_harness_*.go     # Harness init / replay / trace
   integrations_stt.go           # STT provider selection (cognition + agent)
   transport.go                  # transportBase() + createHTTPServer() (all nodes)
   transport_bff.go              # BFF transport (base + HTTP)

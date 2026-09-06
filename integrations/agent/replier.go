@@ -1040,7 +1040,7 @@ func (r *Replier) fillActingAgentIfEmpty(ctx context.Context, msg *memqlv1.Agent
 	// capabilities is a nested map. Phase 2 cut (#158): the
 	// canonical capability surface is capabilities.skillIds[];
 	// effective domains + tools are resolved by unioning across
-	// the referenced v1:agents:skill rows. keywords[] stays
+	// the referenced v1:skills:skill rows. keywords[] stays
 	// per-agent (turn-shaping hints, not capability declarations).
 	if caps, ok := row["capabilities"].(map[string]any); ok {
 		if v := stringSlice(caps["keywords"]); len(v) > 0 {

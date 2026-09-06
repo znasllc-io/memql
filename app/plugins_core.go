@@ -28,7 +28,6 @@ import (
 	// `training` (per-agent train pipeline) is still pack-registered pending its
 	// own absorption PR (#2485) -- it references a product concept that must be
 	// de-coupled first. avatarvendor STAYS here (shared vendor-REST core).
-	_ "github.com/znasllc-io/memql/integrations/actionsearch"
 	_ "github.com/znasllc-io/memql/integrations/avatardirect"
 	_ "github.com/znasllc-io/memql/integrations/chat"
 	// Custom domains (epic memql#4805). Registered on every node type, like
@@ -46,7 +45,7 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/embedding"
 	_ "github.com/znasllc-io/memql/integrations/fileprocessor"
 	_ "github.com/znasllc-io/memql/integrations/harnessrecall"
-	_ "github.com/znasllc-io/memql/integrations/harnesstrace"
+	_ "github.com/znasllc-io/memql/integrations/worktrace"
 	_ "github.com/znasllc-io/memql/integrations/identity"
 	_ "github.com/znasllc-io/memql/integrations/knowledge"
 	// sitePublish lives in the ROOT module, not integrations/, because it uses

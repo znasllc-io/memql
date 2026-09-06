@@ -21,7 +21,6 @@ import { FleetRoutes } from "../fleet/FleetRoutes";
 import { IntegrationsRoutes } from "../integrations/IntegrationsRoutes";
 import { MeRoutes } from "../me/MeRoutes";
 import { ModulesRoutes } from "../modules/ModulesRoutes";
-import { NexusRoutes } from "../nexus/NexusRoutes";
 import { HomePage } from "../home/HomePage";
 import {
   CONCEPTS_ROUTE_PATTERN,
@@ -109,8 +108,6 @@ import { DATA_ORIGINS_ROUTE_PATTERN } from "../dataorigins/urls";
 //   /data-origins/*   what MemQL owns, mirrors and pushes out (memql#4378)
 //   /stores/*         the Shopify stores a connector mirrors (memql#4389)
 //   /artifacts/*      the Library, browsed and labelled
-//   /nexus/*          Nexus: a goal's world in 3D, its constructs, its
-//                     replay (memql#4369)
 //   /me/*             the signed-in person: account, sessions, security
 //
 // Each owns a `<name>Routes` module that declares its own sub-routes. Three
@@ -171,7 +168,6 @@ export function AppRoutes(): ReactNode {
           <Route path="modules/*" element={<ModulesRoutes />} />
           <Route path={`${DATA_ORIGINS_ROUTE_PATTERN}/*`} element={<DataOriginsRoutes />} />
           <Route path="artifacts/*" element={<ArtifactsRoutes />} />
-          <Route path="nexus/*" element={<NexusRoutes />} />
           {/* The person, rather than the cluster: the account this
               connection resolved, its live sessions, and how it can be
               entered. Reached from the rail's profile row. Identity's own

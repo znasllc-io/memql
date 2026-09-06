@@ -72,7 +72,7 @@ export interface WidgetDefinition {
 // dependency by a wide margin, no other page uses them, and the registry that
 // names every scene is reachable from every arranged page. A static import
 // there would put the entire WebGL stack in the main bundle. That cost is
-// large, measurable, and guarded by a test (nexusMap.test.tsx).
+// large, measurable, and guarded by a test (scenes.test.ts).
 //
 // A widget is a form. Its cost is a few kilobytes of code the portal's main
 // bundle already carries, since routes are not code-split either. Lazy-loading

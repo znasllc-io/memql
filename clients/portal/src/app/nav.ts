@@ -7,7 +7,7 @@ import { CONCEPTS_ROOT } from "../concepts/urls";
 import { DATA_ORIGINS_ROOT } from "../dataorigins/urls";
 import { FLEET_ROOT, fleetPath } from "../fleet/urls";
 import { INTEGRATIONS_ROOT } from "../integrations/urls";
-import { Archive, Boxes, Cpu, Gauge, LayoutGrid, Network, Orbit } from "../ui/icons";
+import { Archive, Boxes, Cpu, Gauge, LayoutGrid, Network } from "../ui/icons";
 import { VIEWS_ROOT } from "../views/urls";
 
 // THE NAVIGATION, AS DATA. One definition; the rail, the tab strips, the
@@ -90,16 +90,6 @@ export const DESTINATIONS: readonly NavDestination[] = [
     icon: Gauge,
     to: "/",
     match: ["/"],
-  },
-  {
-    // Nexus keeps its own per-goal tabs (Map / Constructs / Replay) INSIDE a
-    // goal, which is a different altitude from an area's facets -- so it has
-    // no tab strip here, and Goals is simply the landing.
-    id: "nexus",
-    label: "Nexus",
-    icon: Orbit,
-    to: "/nexus",
-    match: ["/nexus"],
   },
   {
     // ONE Views destination, and the gallery is the index. The five built-in

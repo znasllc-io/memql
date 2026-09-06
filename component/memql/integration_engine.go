@@ -76,7 +76,7 @@ type IntegrationEngineAccess interface {
 	ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error)
 
 	// ResolveSkills returns the unioned (domain, tool, liveSource)
-	// surface for a list of v1:agents:skill ids -- the canonical
+	// surface for a list of v1:skills:skill ids -- the canonical
 	// helper every consumer of the new agent shape calls before
 	// reading capabilities (Phase 2 cut: #158). Unknown ids are
 	// warn-logged and skipped; empty input yields an empty bundle.

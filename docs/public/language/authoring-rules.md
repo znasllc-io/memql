@@ -2290,21 +2290,22 @@ time. The rule is "if the tree can see it in another domain, name it" --
 never "every reference must resolve here".
 
 ```memql fragment
-// dsl/planner/queries.memql -- `plan` is ambient (v1:planner:plan),
-// even though v1:harness:plan shares the trailing segment.
-query plan plansForSpace {
+// dsl/worker/queries.memql -- `invocation` is ambient
+// (v1:worker:invocation), even though v1:observability:invocation
+// shares the trailing segment.
+query invocation invocationsForUser {
   ...
 }
 
 // Cross-domain names still need the import:
-use cognition.concepts.{ space }
+use planner.concepts.{ plan }
 ```
 
 **Constraints.**
 
 - **Explicit wins.** A file-top import of a name always beats the
-  ambient resolution -- importing `harness.concepts.{ plan }` from
-  inside `dsl/planner/` binds the harness concept.
+  ambient resolution -- importing `observability.concepts.{ invocation }`
+  from inside `dsl/worker/` binds the observability concept.
 - **Ambiguity stays an error.** When the domain hint cannot single
   out one concept (colon-scoped sub-namespaces can still collide),
   the loader reports the ambiguity by name -- exactly as it always
@@ -2611,7 +2612,7 @@ namespace and its constructs reference each other freely. A **subdirectory is a
 different namespace** — `dsl/agents/roles/` is `agents/roles`, not `agents`.
 Anything from another namespace must be imported with `use`, whatever kind it
 is. Name collisions across namespaces are resolved by **aliasing**
-(`use harness.concepts.{ plan as harnessPlan }`, memql#3802).
+(`use observability.concepts.{ invocation as codeInvocation }`, memql#3802).
 
 That is the model. memql#3803 closed the enforcement half and memql#3897 the
 registry half, so it now holds for every construct kind rather than for

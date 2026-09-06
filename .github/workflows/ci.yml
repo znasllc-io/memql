@@ -32,7 +32,7 @@ permissions:
 # -----------------------------------------------------------------------------
 # `changes` classifies the PR diff into coarse buckets (go / dsl / sdkts /
 # voice / ci). The CGO-free Go work that used to live in six separate jobs --
-# build, vet, test, harness-eval, dsl-lint, engine-load-check, sdk-gen-check --
+# build, vet, test, dsl-lint, engine-load-check, sdk-gen-check --
 # is now ONE `go-checks` job so a single warm GOCACHE serves the whole
 # sequence (build populates the compiled-package cache; vet/test/run/lint
 # reuse it) instead of six runners each cold-compiling the module.
@@ -587,7 +587,6 @@ jobs:
               - 'component/language/**'
               - 'component/database/**'
               - 'component/actions/**'
-              - 'component/harness/**'
               - 'dsl/**'
             platform:
               - 'component/node/**'
@@ -689,7 +688,7 @@ jobs:
   # changed (or on push / a CI-config change); within it each step keeps
   # its original path gate so DSL-only PRs skip the pure-Go steps.
   #
-  #   RUN_GO  -> build / vet / test / harness-eval         (go bucket)
+  #   RUN_GO  -> build / vet / test                        (go bucket)
   #   RUN_DSL -> dsl-lint / engine-load / sdk-gen-check     (go OR dsl bucket)
   #
   # Step order matters: `go build ./...` runs first so the compiled-package
@@ -836,12 +835,6 @@ jobs:
       - name: go vet
         if: ${{ env.RUN_GO == 'true' }}
         run: go vet github.com/znasllc-io/memql/...
-      # Harness eval gate (#589). Fixture-driven regression tripwire over an
-      # in-memory graph (NO Postgres, NO LLM) -- catches a harness change
-      # that reorders dispatch, mis-fails a plan, or makes the loop chattier.
-      - name: harness eval (regression gate)
-        if: ${{ env.RUN_GO == 'true' }}
-        run: go run ./cmd/harness-eval
       # Env-var registry drift gate (7.2 / memql#2105). Fails on drift in
       # either direction: a var read in code but not registered in
       # scripts/secrets/manifest.yaml, or a registry entry that appears

@@ -213,9 +213,10 @@ func (r *ConceptResolver) resolveBareConceptName(name string) (string, error) {
 // the importing `use` path (e.g. "planner" from
 // `use planner.concepts.{ plan }`). This is what lets two concepts
 // that share a trailing segment across namespaces coexist:
-// v1:planner:plan and v1:harness:plan both end in ":plan", and a
-// `query plan ...` in dsl/planner/ binds to the planner one because
-// its file imports `planner.concepts.{ plan }`. An empty nsHint keeps
+// v1:worker:invocation and v1:observability:invocation both end in
+// ":invocation", and a `query invocation ...` in dsl/worker/ binds to the
+// worker one because its file imports `worker.concepts.{ invocation }`
+// (or, same-domain, ambiently). An empty nsHint keeps
 // the strict behaviour: an ambiguous trailing segment is an error.
 func (r *ConceptResolver) resolveBareConceptNameWithNamespace(name, nsHint string) (string, error) {
 	if r.registry == nil {
@@ -294,10 +295,10 @@ func (r *ConceptResolver) resolveBareConceptNameWithNamespace(name, nsHint strin
 // reference is authorized. Together those mean an unaliased foreign import
 // CAPTURES every bare use of that short name in the file:
 //
-//	use harness.concepts.{ plan }
+//	use observability.concepts.{ invocation }
 //
-//	query plan probeWantsHarness  -> v1:harness:plan   wanted
-//	query plan probeWantsPlanner  -> v1:harness:plan   WANTED v1:planner:plan
+//	query invocation probeWantsObservability -> v1:observability:invocation   wanted
+//	query invocation probeWantsWorker        -> v1:observability:invocation   WANTED v1:worker:invocation
 //
 // Both compiled. OK=true. No diagnostic. That is worse than #3800's refusal:
 // this one binds the WRONG concept and reports success, on the path that
@@ -409,9 +410,10 @@ func (r *ConceptResolver) resolveUseDeclarations(uses []*languageParser.UseDecla
 		if len(u.Names) > 0 {
 			// Form B: resolve each Name via trailing-segment match.
 			// The path is a module hint -- not a concept id -- but its
-			// leading segment (e.g. "planner" in "planner.concepts")
+			// leading segment (e.g. "worker" in "worker.concepts")
 			// disambiguates a trailing segment that collides across
-			// namespaces (v1:planner:plan vs v1:harness:plan).
+			// namespaces (v1:worker:invocation vs
+			// v1:observability:invocation).
 			nsHint := ""
 			if len(u.Parts) > 0 {
 				nsHint = u.Parts[0]

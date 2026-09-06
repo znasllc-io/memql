@@ -1169,17 +1169,6 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 	}
-	// Harness step guard: enforces the v1:harness:step status state
-	// machine (pending -> ready -> running -> done/failed/blocked,
-	// blocked -> ready, failed -> ready retry). The append-only DSL
-	// cannot reject an invalid transition (e.g. done -> running) on its
-	// own, so the rule lives in Go. Runs on inserts and on update()
-	// (which read-merges then routes here). See harness_step_validation.go.
-	if conceptMeta.Name == memorynodes.ConceptHarnessStep {
-		if err := e.validateHarnessStepTransition(ctx, payload, mutation.ID); err != nil {
-			return nil, meta, err
-		}
-	}
 	// Generic feedback-intake guard (epic memql#1404 / memql#1405): the
 	// resume produced by attachPlanFeedback (a feedbackResponse with
 	// a respondedBy + status=running) is only legal when the Plan is
@@ -1367,7 +1356,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	}
 
 	// Observation embedding write-path (#585): when a
-	// v1:harness:observation lands, embed its `content` into
+	// v1:work:observation lands, embed its `content` into
 	// node_vectors keyed by the observation id (vector_field='content',
 	// the documentChunk pattern) so the observation becomes recallable
 	// by recall()'s hybrid recency x relevance query. Best-effort: a
@@ -1375,16 +1364,8 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// regardless and a later re-embed can backfill. Dispatched through
 	// the already-registered integration.embedding.store capability so
 	// there is no second write-path to keep in sync.
-	if conceptMeta.Name == memorynodes.ConceptHarnessObservation {
-		e.embedHarnessObservation(ctx, result.ID, result.Payload)
-	}
-
-	// Embed a freshly-minted action-library action's `intent` into
-	// node_vectors (vectorField='intent') so the planner can cosine-search
-	// the library (#1758). Same best-effort contract as observations -- the
-	// action row is durable regardless of embed success.
-	if conceptMeta.Name == memorynodes.ConceptActionsAction {
-		e.embedActionIntent(ctx, result.ID, result.Payload)
+	if conceptMeta.Name == memorynodes.ConceptWorkObservation {
+		e.embedWorkObservation(ctx, result.ID, result.Payload)
 	}
 
 	// STAGED DATA (memql#3985): a write to a STAGED concept publishes NO
@@ -1780,8 +1761,8 @@ func (e *MemQLEngine) checkNodeExists(ctx context.Context, conceptName, id strin
 	return err == nil && count > 0
 }
 
-// embedHarnessObservation embeds a freshly-inserted
-// v1:harness:observation's `content` field into node_vectors so the
+// embedWorkObservation embeds a freshly-inserted
+// v1:work:observation's `content` field into node_vectors so the
 // observation is recallable by recall() (#585). It dispatches the
 // already-registered integration.embedding.store capability (the same
 // write-path knowledge/documentChunk use) rather than reaching into
@@ -1792,7 +1773,7 @@ func (e *MemQLEngine) checkNodeExists(ctx context.Context, conceptName, id strin
 // swallowed. The observation row is already durable; recall simply
 // won't surface this row until a vector exists, and a re-embed can
 // backfill.
-func (e *MemQLEngine) embedHarnessObservation(ctx context.Context, id string, payload []byte) {
+func (e *MemQLEngine) embedWorkObservation(ctx context.Context, id string, payload []byte) {
 	if e.integrations == nil || strings.TrimSpace(id) == "" || len(payload) == 0 {
 		return
 	}
@@ -1813,58 +1794,17 @@ func (e *MemQLEngine) embedHarnessObservation(ctx context.Context, id string, pa
 	args := map[string]any{
 		"nodeId":      id,
 		"text":        content,
-		"concept":     memorynodes.ConceptHarnessObservation,
+		"concept":     memorynodes.ConceptWorkObservation,
 		"vectorField": "content",
 	}
 	if _, err := handler(ctx, args, 1); err != nil {
 		if e.Component != nil && e.Logger != nil {
-			e.Logger.Warn("harness observation embed failed (recall will skip this row until backfilled)",
+			e.Logger.Warn("work observation embed failed (recall will skip this row until backfilled)",
 				"id", id, "error", err)
 		}
 		return
 	}
 	if e.Component != nil && e.Logger != nil {
-		e.Logger.Debug("harness observation embedded for recall", "id", id, "content_len", len(content))
-	}
-}
-
-// embedActionIntent embeds a freshly-inserted v1:actions:action's `intent`
-// into node_vectors (vectorField='intent') so the action library is
-// cosine-searchable by the planner (#1758). Mirrors embedHarnessObservation:
-// it dispatches the already-registered integration.embedding.store capability
-// (one embedding write-path), and is best-effort -- any failure (no embedding
-// integration on this binary, empty intent, embed error) is logged and
-// swallowed; the action row is already durable and a re-embed can backfill.
-func (e *MemQLEngine) embedActionIntent(ctx context.Context, id string, payload []byte) {
-	if e.integrations == nil || strings.TrimSpace(id) == "" || len(payload) == 0 {
-		return
-	}
-	handler, ok := e.integrations.Get("integration.embedding.store")
-	if !ok {
-		return
-	}
-	var p map[string]any
-	if err := json.Unmarshal(payload, &p); err != nil {
-		return
-	}
-	intent, _ := p["intent"].(string)
-	if strings.TrimSpace(intent) == "" {
-		return
-	}
-	args := map[string]any{
-		"nodeId":      id,
-		"text":        intent,
-		"concept":     memorynodes.ConceptActionsAction,
-		"vectorField": "intent",
-	}
-	if _, err := handler(ctx, args, 1); err != nil {
-		if e.Component != nil && e.Logger != nil {
-			e.Logger.Warn("action intent embed failed (planner search will skip this action until backfilled)",
-				"id", id, "error", err)
-		}
-		return
-	}
-	if e.Component != nil && e.Logger != nil {
-		e.Logger.Debug("action intent embedded for planner search", "id", id, "intent_len", len(intent))
+		e.Logger.Debug("work observation embedded for recall", "id", id, "content_len", len(content))
 	}
 }

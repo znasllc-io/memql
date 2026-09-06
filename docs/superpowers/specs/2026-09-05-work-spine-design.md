@@ -561,11 +561,17 @@ Retired:
   reconciler now. `harnesstrace` reads work rows. `observation` moves to
   work; `semanticMemory` and `consolidationCursor` move to `v1:memory:belief`
   and `v1:memory:consolidationCursor`; `harnessrecall` is unchanged.
-- **The action library**: `dsl/actions/`, the three harness sub-packages
-  (`actionpin`, `actionplan`, `parambind`) and
-  `integrations/planner/action_substitution.go`. The idea survives as skill
-  scripts and captured deterministic steps; the trust ladder moves onto the
-  construct.
+- **The action CAPTURE library** (amended by the A1 plan): the `candidate`
+  concept, `mintAction` and its ladder mutations, the fingerprint queries,
+  `searchActions`, the `actionplan`, `actiontrace` and `actiontrust`
+  packages, `integrations/planner/action_substitution.go`, and the app
+  wiring behind `MEMQL_ACTION_REPLAY_ENABLED`. The AUTHORED action
+  primitive stays: `component/actions`, the `action("name@1")` step, the
+  capability catalog, and `v1:actions:surface`, with its four pure helper
+  packages (`actionpin`, `parambind`, `actionreplay`'s fingerprint,
+  `surfaceresolver`) moved out of the harness module into
+  `component/actions`. The idea the design describes survives there, and
+  the trust ladder moves onto the construct in epic A3.
 - **`v1:memql:checkpoint`, `checkpoint.go`, `resume.go`**, replaced by step
   versions and resume from the journal; the retryable-step logic becomes the
   idempotency rule of section D.
@@ -618,8 +624,11 @@ sweeps; the agent node runs steps.
 
 ## I. Tiers, routing, generated artifacts
 
-Every work, skills and memory concept declares
-`@rowAuthz(owner="ownerUserId", clusterOwner)`. That settles the old question
+Every work and memory concept declares
+`@rowAuthz(owner="ownerUserId", clusterOwner)`; `v1:skills:skill` and
+`v1:skills:skillEdge` declare `@rowAuthz(public, requiresIdentity)`, because
+the predefined catalog is read by every signed-in person's agents (amended by
+the A1 plan). That settles the old question
 of plans needing a granted tier through space participation (memql#4366):
 a goal is owned. Declaring a tier narrows every existing read, so the
 executor, the sweeps and compile run under the maintenance actor or the goal

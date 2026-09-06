@@ -62,7 +62,6 @@ require (
 	github.com/znasllc-io/memql/component/database v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/envregistry v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/frontdoor v0.0.0 // indirect
-	github.com/znasllc-io/memql/component/harness v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/annotations v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/ast v0.0.0 // indirect
@@ -104,7 +103,6 @@ replace github.com/znasllc-io/memql/component/envregistry => ../envregistry
 
 replace github.com/znasllc-io/memql/component/grpc/gen => ../grpc/gen
 
-replace github.com/znasllc-io/memql/component/harness => ../harness
 
 replace github.com/znasllc-io/memql/component/identity => ../identity
 

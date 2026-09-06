@@ -1,0 +1,159 @@
+// shapes.memql
+//
+// Full projections, one per work concept. Explicit rather than the
+// default projection so a later credential-adjacent field cannot leak
+// by being added to the concept (the Users app lesson, clients/os/README.md).
+
+/// Every goal field the OS and the SDK read.
+@row
+shape goal workGoalFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  statement
+  origin
+  responsibilityId
+  accountIds
+  input
+  ceilings
+  status
+  requestedVia
+  closedAt
+  closeReason
+}
+
+/// Every run field, including the trust and chain fields resume restores.
+@row
+shape run workRunFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  goalId
+  automationName
+  templateConstructId
+  templateVersion
+  templateFingerprint
+  variables
+  input
+  inputFingerprint
+  triggeredBy
+  triggerEvent
+  callerSuppliedPayload
+  mode
+  forkedFromRunId
+  forkAtStepKey
+  replayPolicy
+  status
+  waitingOn
+  spent
+  nodeId
+  heartbeatAt
+  cancelRequested
+  cancelledBy
+  expectedFootprint
+  actualFootprint
+  outcome
+  errorCode
+  errorMessage
+  chainHead
+  initialChainHead
+  stepOrder
+  startedAt
+  finishedAt
+  summary
+}
+
+/// Every step field.
+@row
+shape step workStepFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  runId
+  key
+  seq
+  stepType
+  kind
+  call
+  dependsOn
+  input
+  result
+  resultFingerprint
+  binding
+  expectedFootprint
+  actualFootprint
+  postcondition
+  status
+  symptom
+  attempt
+  idempotencyKey
+  childRunId
+  approvalId
+  resumeAt
+  externalKey
+  startedAt
+  finishedAt
+  durationMs
+  tokens
+  cost
+  errorCode
+  errorMessage
+}
+
+/// Every modelCall field.
+@row
+shape modelCall workModelCallFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  runId
+  stepKey
+  requestHash
+  provider
+  model
+  settings
+  promptRef
+  promptVersion
+  inputTokens
+  outputTokens
+  cost
+  latencyMs
+  served
+  response
+  error
+}
+
+/// Every approval field.
+@row
+shape approval workApprovalFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  runId
+  stepKey
+  kind
+  subject
+  artifactHash
+  question
+  options
+  evidence
+  requestedAt
+  decidedBy
+  decidedAt
+  decision
+  answer
+  expiresAt
+}
+
+/// Every observation field except the embedding vector, which no client reads.
+@row
+shape observation workObservationFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  runId
+  stepKey
+  kind
+  data
+  content
+}

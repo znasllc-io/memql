@@ -43,10 +43,17 @@ Because the state lives in the shared graph rather than per-node
 environment, every node resolves the same answer -- there is no way to
 configure half a mesh.
 
-The platform proves this on itself: the **harness**
-([why it exists](../overview/why-memql-harness.md)) is a pack --
-`dsl/harness` plus its `harnessRecall`/`harnessTrace` integrations --
-enabled by default and disableable per instance like any other.
+The worked pack in this repository is **`examples/referencepack`**: a
+`dsl/` tree of its own, a Go half that self-registers through
+`memql.RegisterPlugin`, and a state row that decides whether the engine
+loads it. Disabling it takes its constructs out of the tree at boot --
+its queries stop resolving and its automations stop firing -- while every
+other domain is untouched, which is what "a coherent off" means.
+
+The harness used to be that proof, and is no longer a pack at all: it is
+the platform's work spine ([why it exists](../overview/why-memql-harness.md)),
+its state is ordinary `v1:work:*` rows, and there is nothing to switch
+off.
 
 ## Where you manage modules
 

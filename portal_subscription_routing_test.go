@@ -179,10 +179,6 @@ func TestPortalSubscriptionExtractorFindsTheKnownSites(t *testing.T) {
 		{"clients/portal/src/compose/useSavedViews.ts", "v1:portalviews:view"},
 		// A constant imported from another file, in a useLive spec.
 		{"clients/portal/src/fleet/useMachines.ts", "v1:worker:registration"},
-		// A local const read out of a Record -- the Nexus feed's slot map,
-		// which is still a direct subscribeGraph (see unboundSubscriptions'
-		// sibling reasoning in clients/portal/test/liveAdoption.test.tsx).
-		{"clients/portal/src/nexus/feed/useGoalWorld.ts", "v1:authoring:construct"},
 		// A hook parameter, resolved at the hook's call sites.
 		{"clients/portal/src/home/useHomeTiles.ts", "v1:identity:auditEvent"},
 		// A second useLive spec, in a different tree -- the extractor is not

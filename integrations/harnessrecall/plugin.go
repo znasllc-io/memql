@@ -17,11 +17,6 @@ import (
 // provider (recall needs to embed the query text); the recall builtin
 // then resolves to "no handler" rather than failing startup.
 func init() {
-	// The harness is a PACK since memql#4190: this integration is its Go
-	// half, and the binding is what lets a disabled harness skip the
-	// factory (app/plugins.go) and the module inventory fold recall under
-	// the harness row.
-	memql.BindPluginToPack("harnessRecall", "harness")
 	memql.RegisterPlugin("harnessRecall", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
 		if pctx.EmbeddingProviderByName == nil {
 			// No embedding provider on this node-type binary; recall

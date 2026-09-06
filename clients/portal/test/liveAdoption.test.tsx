@@ -40,12 +40,6 @@ const HAND_ROLLED_ALLOWLIST: Record<string, string> = {
     "walk rather than into it: the keyset cursor orders ascending, so folding " +
     "a row created now guarantees a duplicate when paging reaches it. It takes " +
     "its continuity from the store via useLiveContinuity.",
-  "src/nexus/feed/useGoalWorld.ts":
-    "the Nexus feed: a seven-concept join whose membership depends on a bundle " +
-    "id that arrives mid-session, with an always-re-read policy (design D6) and " +
-    "a per-slot watermark. Converting it changes the page's loading model, which " +
-    "the Replay scrubber's position depends on -- its own piece of work, not a " +
-    "line item in this sweep.",
 };
 
 // stripComments removes // line comments and /* */ blocks. Crude -- it does

@@ -1,0 +1,31 @@
+// builtins.memql
+//
+// Go-backed reads over the memory namespace, moved from the harness pack
+// in epic A1 of the work spine. `recall` keeps its NAME and its executor
+// (integration.harnessRecall.recall); only its default concept moved, to
+// the work journal's v1:work:observation -- the journal IS the episodic
+// memory now.
+
+@sdk
+@executor("integration.harnessRecall.recall")
+@args(profile="object", additionalProperties="true")
+@description("Recall top-k memories of a concept (default v1:work:observation) by a SINGLE hybrid recency x relevance score: pgvector cosine similarity + exponential time-decay over createdAt, scored and ordered server-side in one SQL statement against the MemoryNodes hypertable (no app-side merge). Owner-scoped (partition isolation); window prunes hypertable chunks; halfLife + wSem/wRec are tunable. Numeric tuning args ride additionalProperties.")
+builtin recall {
+  text      string!
+  concept   string
+  k         int
+  provider  string
+}
+
+/// Fetch one run's full execution timeline: every run and step version and every observation,
+/// ordered by createdAt. The OS Nexus (sub-project B) reads the rows live; this is the one-call
+/// form the VS Code panel and the cockpit use. Replaces harnessTrace, which read the retired
+/// v1:harness:plan / step / observation stream -- same envelope, same @sdk surface, and `planId`
+/// becomes `runId`.
+@sdk
+@executor("integration.workTrace.trace")
+@args(profile="object")
+@description("Fetch a run's full execution timeline (every run/step version transition plus all observations, ordered by createdAt) reconstructed from the append-only graph event stream. Returns one synthetic node carrying the rendered timeline string, a completion flag, and the step count. The history-over-gRPC contract for the cockpit's trace CLI (memql-cockpit#142).")
+builtin workTrace {
+  runId  string!
+}

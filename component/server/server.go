@@ -202,10 +202,10 @@ func (s *Server) PostAutomationTrigger(ctx context.Context, request PostAutomati
 	}, nil
 }
 
-// PostAutomationResume resumes a failed automation from a checkpoint.
+// PostAutomationResume resumes a failed automation from its work journal.
 func (s *Server) PostAutomationResume(ctx context.Context, request PostAutomationResumeRequestObject) (PostAutomationResumeResponseObject, error) {
 
-	// AUTHORIZATION (memql#2908). Resuming re-executes a checkpoint's
+	// AUTHORIZATION (memql#2908). Resuming re-executes a run's
 	// remaining steps through the PRODUCTION step registry, under the
 	// automation's system actor -- ResumeFrom calls contextWithSystemActor,
 	// which REPLACES whatever caller identity reached this handler. So the
@@ -222,11 +222,12 @@ func (s *Server) PostAutomationResume(ctx context.Context, request PostAutomatio
 	// false, and this fails closed on every tier.
 	//
 	// Per-execution ownership ("you may resume what YOU triggered") is not
-	// expressible today: the checkpoint records triggerContext.triggeredBy as
-	// a KIND ("schedule" / "event" / "manual" / "http-trigger" /
-	// "sub-automation"), and the row's createdBy is the automation's own system
-	// actor, not the human. Narrowing this to the triggering principal needs a
-	// field first -- noted on memql#2908.
+	// expressible today: the run row records triggeredBy as a KIND
+	// ("schedule" / "event" / "manual" / "http-trigger" / "sub-automation"),
+	// and a system run's ownerUserId is present-and-empty by construction --
+	// the journal writes as a synthetic cluster actor. Narrowing this to the
+	// triggering principal needs a field first -- noted on memql#2908, and it
+	// is what v1:work:goal.ownerUserId becomes in epic A2.
 	if !callerIsOwnerOrAdmin(ctx) {
 		return PostAutomationResume403JSONResponse{
 			Error: "resuming an automation execution requires the owner or admin role",
@@ -261,24 +262,33 @@ func (s *Server) PostAutomationResume(ctx context.Context, request PostAutomatio
 		// Map specific errors to HTTP status codes
 		errMsg := err.Error()
 
-		// Check for checkpoint not found
-		if containsError(errMsg, "checkpoint not found") {
+		// No such run. The match is on TEXT, so it moved with the record:
+		// LoadRunJournal returns ErrRunNotFound ("work run not found") where
+		// LoadCheckpoint returned "checkpoint not found". Both spellings are
+		// accepted rather than only the new one -- a 500 here reads to a
+		// caller as "the cluster is broken" rather than "no such run", and
+		// that is the failure this line exists to prevent.
+		if containsError(errMsg, "work run not found") || containsError(errMsg, "checkpoint not found") {
 			return PostAutomationResume404JSONResponse{
-				Error: fmt.Sprintf("checkpoint for execution %q not found", executionId),
+				Error: fmt.Sprintf("no work run found for execution %q", executionId),
 			}, nil
 		}
 
-		// Check for checkpoint expired
+		// Expired. UNREACHABLE IN EPIC A1 and deliberately kept: the journal
+		// rows have no TTL where the checkpoint had a 24-hour one, so nothing
+		// produces this today. The retention window that will produce it again
+		// is epic A2 (spec section D, "Retention"), and deleting the branch
+		// would take the documented 410 off the contract in between.
 		if containsError(errMsg, "expired") {
 			return PostAutomationResume410JSONResponse{
-				Error: fmt.Sprintf("checkpoint for execution %q has expired", executionId),
+				Error: fmt.Sprintf("the work journal for execution %q has expired", executionId),
 			}, nil
 		}
 
 		// Check for automation definition changed
 		if containsError(errMsg, "definition changed") || containsError(errMsg, "automation changed") {
 			return PostAutomationResume409JSONResponse{
-				Error: "automation definition has changed since checkpoint was saved",
+				Error: "automation definition has changed since the run started",
 			}, nil
 		}
 

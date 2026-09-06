@@ -118,7 +118,7 @@ func TestPlanReferencesActor(t *testing.T) {
 	// actor-dependent (shared cache key across callers).
 	plain := &LogicalExpression{
 		Op:   LogicalAnd,
-		Left: conceptCmp("v1:agents:skill"),
+		Left: conceptCmp("v1:skills:skill"),
 		Right: &ComparisonExpression{
 			Field:    FieldReference{Raw: "payload.active", Parts: []string{"payload", "active"}},
 			Operator: OpEq,

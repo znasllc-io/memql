@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/harness/actionpin"
+	"github.com/znasllc-io/memql/component/actions/pin"
 )
 
 func TestBindChildArgs(t *testing.T) {
@@ -59,7 +59,7 @@ func TestCompositeChildRef(t *testing.T) {
 // Sanity: Format round-trips the refs compositeChildRef produces.
 func TestCompositeChildRef_FormatRoundTrip(t *testing.T) {
 	r, _ := compositeChildRef(map[string]any{"actionId": "act_x", "version": float64(3)})
-	if actionpin.Format(r) != "act_x@3" {
-		t.Fatalf("format: want act_x@3, got %s", actionpin.Format(r))
+	if pin.Format(r) != "act_x@3" {
+		t.Fatalf("format: want act_x@3, got %s", pin.Format(r))
 	}
 }

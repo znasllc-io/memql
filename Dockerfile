@@ -119,7 +119,6 @@ COPY component/frontdoor/go.* ./component/frontdoor/
 COPY component/envregistry/go.* ./component/envregistry/
 COPY component/grpc/go.* ./component/grpc/
 COPY component/grpc/gen/go.* ./component/grpc/gen/
-COPY component/harness/go.* ./component/harness/
 COPY component/healing/go.* ./component/healing/
 COPY component/identity/go.* ./component/identity/
 COPY component/identity/admin/go.* ./component/identity/admin/

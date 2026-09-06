@@ -55,38 +55,6 @@ QueryClient.prototype.addAgentToSpace = function (this: QueryClient, args: AddAg
   return this.executeNamed("addAgentToSpace", buildAddAgentToSpace(args), opts);
 };
 
-/** Add a v1:harness:step to a plan, status='pending', attempt=0. ownerUserId is stamped from actor.userId (owned tier). Creating the step emits graph.node.created.*.v1:harness:step automatically on insert. */
-// Bound concept: v1:harness:step (machine-readable: BoundConcepts["addHarnessStep"] in generated_concepts.ts).
-export interface AddHarnessStepArgs {
-  stepId?: string;
-  planId: string;
-  title: string;
-  idempotencyKey: string;
-  dependsOn?: string[];
-  input?: Record<string, unknown>;
-}
-
-export function buildAddHarnessStep(args: AddHarnessStepArgs): string {
-  const parts: string[] = [];
-  if (args.stepId !== undefined) parts.push("stepId: " + renderMemQLValue(args.stepId));
-  parts.push("planId: " + renderMemQLValue(args.planId));
-  parts.push("title: " + renderMemQLValue(args.title));
-  parts.push("idempotencyKey: " + renderMemQLValue(args.idempotencyKey));
-  if (args.dependsOn !== undefined) parts.push("dependsOn: " + renderMemQLValue(args.dependsOn));
-  if (args.input !== undefined) parts.push("input: " + renderMemQLValue(args.input));
-  return "mutation addHarnessStep(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    addHarnessStep(args: AddHarnessStepArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.addHarnessStep = function (this: QueryClient, args: AddHarnessStepArgs = {} as AddHarnessStepArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("addHarnessStep", buildAddHarnessStep(args), opts);
-};
-
 /** Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert. */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.ts).
 export interface AddRecipientArgs {
@@ -119,30 +87,30 @@ QueryClient.prototype.addRecipient = function (this: QueryClient, args: AddRecip
   return this.executeNamed("addRecipient", buildAddRecipient(args), opts);
 };
 
-/** Advance the per-owner v1:harness:consolidationCursor watermark to the engine-computed max(createdAt) of the batch just consolidated -- the incremental-cost mechanism (next run reads only episodes newer than this). Upserts on a stable per-owner id so it creates the cursor on first run and advances it thereafter. episodesSeen takes the engine-computed running total. ownerUserId stamped from actor.userId (owned tier). */
-// Bound concept: v1:harness:consolidationCursor (machine-readable: BoundConcepts["advanceHarnessConsolidationCursor"] in generated_concepts.ts).
-export interface AdvanceHarnessConsolidationCursorArgs {
+/** Advance the per-owner v1:memory:consolidationCursor watermark to the engine-computed max(createdAt) of the batch just consolidated -- the incremental-cost mechanism (next run reads only episodes newer than this). Upserts on a stable per-owner id so it creates the cursor on first run and advances it thereafter. episodesSeen takes the engine-computed running total. ownerUserId stamped from actor.userId (owned tier). */
+// Bound concept: v1:memory:consolidationCursor (machine-readable: BoundConcepts["advanceMemoryConsolidationCursor"] in generated_concepts.ts).
+export interface AdvanceMemoryConsolidationCursorArgs {
   cursorId?: string;
   watermark: string;
   episodesSeen?: number;
 }
 
-export function buildAdvanceHarnessConsolidationCursor(args: AdvanceHarnessConsolidationCursorArgs): string {
+export function buildAdvanceMemoryConsolidationCursor(args: AdvanceMemoryConsolidationCursorArgs): string {
   const parts: string[] = [];
   if (args.cursorId !== undefined) parts.push("cursorId: " + renderMemQLValue(args.cursorId));
   parts.push("watermark: " + renderMemQLValue(args.watermark));
   if (args.episodesSeen !== undefined) parts.push("episodesSeen: " + renderMemQLValue(args.episodesSeen));
-  return "mutation advanceHarnessConsolidationCursor(" + parts.join(", ") + ")";
+  return "mutation advanceMemoryConsolidationCursor(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    advanceHarnessConsolidationCursor(args: AdvanceHarnessConsolidationCursorArgs, opts?: QueryCallOptions): Promise<Result>;
+    advanceMemoryConsolidationCursor(args: AdvanceMemoryConsolidationCursorArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
-QueryClient.prototype.advanceHarnessConsolidationCursor = function (this: QueryClient, args: AdvanceHarnessConsolidationCursorArgs = {} as AdvanceHarnessConsolidationCursorArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("advanceHarnessConsolidationCursor", buildAdvanceHarnessConsolidationCursor(args), opts);
+QueryClient.prototype.advanceMemoryConsolidationCursor = function (this: QueryClient, args: AdvanceMemoryConsolidationCursorArgs = {} as AdvanceMemoryConsolidationCursorArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("advanceMemoryConsolidationCursor", buildAdvanceMemoryConsolidationCursor(args), opts);
 };
 
 /** Transition a v1:forge:request to a new status (the approval pipeline edges). update read-merges the prior row. The role guard belongs in an engine pre-insert hook (follow-up). */
@@ -908,30 +876,6 @@ QueryClient.prototype.closeCall = function (this: QueryClient, args: CloseCallAr
   return this.executeNamed("closeCall", buildCloseCall(args), opts);
 };
 
-/** Record a running step's result (running -> done). done is terminal. The engine step guard rejects the transition when the prior status is not 'running'. */
-// Bound concept: v1:harness:step (machine-readable: BoundConcepts["completeHarnessStep"] in generated_concepts.ts).
-export interface CompleteHarnessStepArgs {
-  stepId: string;
-  result?: Record<string, unknown>;
-}
-
-export function buildCompleteHarnessStep(args: CompleteHarnessStepArgs): string {
-  const parts: string[] = [];
-  parts.push("stepId: " + renderMemQLValue(args.stepId));
-  if (args.result !== undefined) parts.push("result: " + renderMemQLValue(args.result));
-  return "mutation completeHarnessStep(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    completeHarnessStep(args: CompleteHarnessStepArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.completeHarnessStep = function (this: QueryClient, args: CompleteHarnessStepArgs = {} as CompleteHarnessStepArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("completeHarnessStep", buildCompleteHarnessStep(args), opts);
-};
-
 /** Mark a to-do complete (or re-open it) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so the operation re-enforces ownership and can never transfer the row. The caller threads the full updated payload (with done flipped); the complete tool builds it from the current row + done=true. */
 // Bound concept: v1:todos:todo (machine-readable: BoundConcepts["completeTodo"] in generated_concepts.ts).
 export interface CompleteTodoArgs {
@@ -984,28 +928,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.completeToolInvocation = function (this: QueryClient, args: CompleteToolInvocationArgs = {} as CompleteToolInvocationArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("completeToolInvocation", buildCompleteToolInvocation(args), opts);
-};
-
-/** Confirm a candidate v1:actions:action, promoting it to active so it is offered for replay (Phase 4 #1739, the human gate for real-machine side effects). */
-// Bound concept: v1:actions:action (machine-readable: BoundConcepts["confirmAction"] in generated_concepts.ts).
-export interface ConfirmActionArgs {
-  actionId: string;
-}
-
-export function buildConfirmAction(args: ConfirmActionArgs): string {
-  const parts: string[] = [];
-  parts.push("actionId: " + renderMemQLValue(args.actionId));
-  return "mutation confirmAction(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    confirmAction(args: ConfirmActionArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.confirmAction = function (this: QueryClient, args: ConfirmActionArgs = {} as ConfirmActionArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("confirmAction", buildConfirmAction(args), opts);
 };
 
 /** Human confirm a data record, updating confirm count and validation state */
@@ -2528,65 +2450,6 @@ QueryClient.prototype.createGreetingUtterance = function (this: QueryClient, arg
   return this.executeNamed("createGreetingUtterance", buildCreateGreetingUtterance(args), opts);
 };
 
-/** Create a v1:harness:plan in status='open'. ownerUserId is stamped from actor.userId (owned tier). Single write path for plan creation. */
-// Bound concept: v1:harness:plan (machine-readable: BoundConcepts["createHarnessPlan"] in generated_concepts.ts).
-export interface CreateHarnessPlanArgs {
-  planId?: string;
-  goal: string;
-  input?: Record<string, unknown>;
-}
-
-export function buildCreateHarnessPlan(args: CreateHarnessPlanArgs): string {
-  const parts: string[] = [];
-  if (args.planId !== undefined) parts.push("planId: " + renderMemQLValue(args.planId));
-  parts.push("goal: " + renderMemQLValue(args.goal));
-  if (args.input !== undefined) parts.push("input: " + renderMemQLValue(args.input));
-  return "mutation createHarnessPlan(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createHarnessPlan(args: CreateHarnessPlanArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createHarnessPlan = function (this: QueryClient, args: CreateHarnessPlanArgs = {} as CreateHarnessPlanArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createHarnessPlan", buildCreateHarnessPlan(args), opts);
-};
-
-/** Create a v1:harness:semanticMemory -- a new distilled belief. ownerUserId stamped from actor.userId (owned tier). sourceEpisodes records provenance back to the episodic nodes it was distilled from. confidence/reinforceCount/lastReinforced seed the decay clock. content is the embedding source for similarTo dedup + recall (#585). */
-// Bound concept: v1:harness:semanticMemory (machine-readable: BoundConcepts["createHarnessSemanticMemory"] in generated_concepts.ts).
-export interface CreateHarnessSemanticMemoryArgs {
-  memoryId?: string;
-  // Enum: fact | preference | outcome
-  kind: string;
-  content: string;
-  sourceEpisodes: string[];
-  confidence?: number;
-  lastReinforced?: string;
-}
-
-export function buildCreateHarnessSemanticMemory(args: CreateHarnessSemanticMemoryArgs): string {
-  const parts: string[] = [];
-  if (args.memoryId !== undefined) parts.push("memoryId: " + renderMemQLValue(args.memoryId));
-  parts.push("kind: " + renderMemQLValue(args.kind));
-  parts.push("content: " + renderMemQLValue(args.content));
-  parts.push("sourceEpisodes: " + renderMemQLValue(args.sourceEpisodes));
-  if (args.confidence !== undefined) parts.push("confidence: " + renderMemQLValue(args.confidence));
-  if (args.lastReinforced !== undefined) parts.push("lastReinforced: " + renderMemQLValue(args.lastReinforced));
-  return "mutation createHarnessSemanticMemory(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createHarnessSemanticMemory(args: CreateHarnessSemanticMemoryArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createHarnessSemanticMemory = function (this: QueryClient, args: CreateHarnessSemanticMemoryArgs = {} as CreateHarnessSemanticMemoryArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createHarnessSemanticMemory", buildCreateHarnessSemanticMemory(args), opts);
-};
-
 /** Create a new identity (credential set owned by a user). */
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createIdentity"] in generated_concepts.ts).
 export interface CreateIdentityArgs {
@@ -2870,6 +2733,39 @@ declare module "./query.js" {
 
 QueryClient.prototype.createMemory = function (this: QueryClient, args: CreateMemoryArgs = {} as CreateMemoryArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createMemory", buildCreateMemory(args), opts);
+};
+
+/** Create a v1:memory:belief -- a new distilled belief. ownerUserId stamped from actor.userId (owned tier). sourceEpisodes records provenance back to the episodic nodes it was distilled from. confidence/reinforceCount/lastReinforced seed the decay clock. content is the embedding source for similarTo dedup + recall (#585). */
+// Bound concept: v1:memory:belief (machine-readable: BoundConcepts["createMemoryBelief"] in generated_concepts.ts).
+export interface CreateMemoryBeliefArgs {
+  memoryId?: string;
+  // Enum: fact | preference | outcome
+  kind: string;
+  content: string;
+  sourceEpisodes: string[];
+  confidence?: number;
+  lastReinforced?: string;
+}
+
+export function buildCreateMemoryBelief(args: CreateMemoryBeliefArgs): string {
+  const parts: string[] = [];
+  if (args.memoryId !== undefined) parts.push("memoryId: " + renderMemQLValue(args.memoryId));
+  parts.push("kind: " + renderMemQLValue(args.kind));
+  parts.push("content: " + renderMemQLValue(args.content));
+  parts.push("sourceEpisodes: " + renderMemQLValue(args.sourceEpisodes));
+  if (args.confidence !== undefined) parts.push("confidence: " + renderMemQLValue(args.confidence));
+  if (args.lastReinforced !== undefined) parts.push("lastReinforced: " + renderMemQLValue(args.lastReinforced));
+  return "mutation createMemoryBelief(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createMemoryBelief(args: CreateMemoryBeliefArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createMemoryBelief = function (this: QueryClient, args: CreateMemoryBeliefArgs = {} as CreateMemoryBeliefArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createMemoryBelief", buildCreateMemoryBelief(args), opts);
 };
 
 /** Register a node in the cluster */
@@ -3677,8 +3573,8 @@ QueryClient.prototype.createSite = function (this: QueryClient, args: CreateSite
   return this.executeNamed("createSite", buildCreateSite(args), opts);
 };
 
-/** Materialize a v1:agents:skill catalog row from a `seed skill ...` declaration under dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming convention -- the materializer stamps the seed body's id into `skillId` and forwards every other seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed body 1:1. Sibling to `mintSkill`: same row shape, but the seed path is for the predefined catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to materialize with `function "createSkill" not found`. The materializer convention itself lives in component/memql/seed_materializer.go. */
-// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["createSkill"] in generated_concepts.ts).
+/** Materialize a v1:skills:skill catalog row from a `seed skill ...` declaration under dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming convention -- the materializer stamps the seed body's id into `skillId` and forwards every other seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed body 1:1. Sibling to `mintSkill`: same row shape, but the seed path is for the predefined catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to materialize with `function "createSkill" not found`. The materializer convention itself lives in component/memql/seed_materializer.go. */
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["createSkill"] in generated_concepts.ts).
 export interface CreateSkillArgs {
   skillId?: string;
   slug: string;
@@ -4292,52 +4188,28 @@ QueryClient.prototype.deactivateRoutingPolicy = function (this: QueryClient, arg
   return this.executeNamed("deactivateRoutingPolicy", buildDeactivateRoutingPolicy(args), opts);
 };
 
-/** Set a v1:actions:action decayed reliability from the consolidation sweep (Phase 4 #1739; value computed engine-side). */
-// Bound concept: v1:actions:action (machine-readable: BoundConcepts["decayAction"] in generated_concepts.ts).
-export interface DecayActionArgs {
-  actionId: string;
-  reliability: number;
-}
-
-export function buildDecayAction(args: DecayActionArgs): string {
-  const parts: string[] = [];
-  parts.push("actionId: " + renderMemQLValue(args.actionId));
-  parts.push("reliability: " + renderMemQLValue(args.reliability));
-  return "mutation decayAction(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    decayAction(args: DecayActionArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.decayAction = function (this: QueryClient, args: DecayActionArgs = {} as DecayActionArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("decayAction", buildDecayAction(args), opts);
-};
-
-/** Decay an unreinforced v1:harness:semanticMemory: lower confidence to the engine-computed decayed value. lastReinforced is intentionally NOT reset (decay keeps measuring age from the last real reinforcement). ownerUserId re-stamped from actor.userId (owned tier). A belief that decays below the prune floor is then retired via pruneHarnessSemanticMemory. */
-// Bound concept: v1:harness:semanticMemory (machine-readable: BoundConcepts["decayHarnessSemanticMemory"] in generated_concepts.ts).
-export interface DecayHarnessSemanticMemoryArgs {
+/** Decay an unreinforced v1:memory:belief: lower confidence to the engine-computed decayed value. lastReinforced is intentionally NOT reset (decay keeps measuring age from the last real reinforcement). ownerUserId re-stamped from actor.userId (owned tier). A belief that decays below the prune floor is then retired via pruneMemoryBelief. */
+// Bound concept: v1:memory:belief (machine-readable: BoundConcepts["decayMemoryBelief"] in generated_concepts.ts).
+export interface DecayMemoryBeliefArgs {
   memoryId: string;
   confidence: number;
 }
 
-export function buildDecayHarnessSemanticMemory(args: DecayHarnessSemanticMemoryArgs): string {
+export function buildDecayMemoryBelief(args: DecayMemoryBeliefArgs): string {
   const parts: string[] = [];
   parts.push("memoryId: " + renderMemQLValue(args.memoryId));
   parts.push("confidence: " + renderMemQLValue(args.confidence));
-  return "mutation decayHarnessSemanticMemory(" + parts.join(", ") + ")";
+  return "mutation decayMemoryBelief(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    decayHarnessSemanticMemory(args: DecayHarnessSemanticMemoryArgs, opts?: QueryCallOptions): Promise<Result>;
+    decayMemoryBelief(args: DecayMemoryBeliefArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
-QueryClient.prototype.decayHarnessSemanticMemory = function (this: QueryClient, args: DecayHarnessSemanticMemoryArgs = {} as DecayHarnessSemanticMemoryArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("decayHarnessSemanticMemory", buildDecayHarnessSemanticMemory(args), opts);
+QueryClient.prototype.decayMemoryBelief = function (this: QueryClient, args: DecayMemoryBeliefArgs = {} as DecayMemoryBeliefArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("decayMemoryBelief", buildDecayMemoryBelief(args), opts);
 };
 
 /** Soft-delete an agent (active:false, deleted:true). Read-merges the existing row so the caller only passes the agent id; every other required field (kind, name, ...) inherits from the persisted row instead of being re-supplied (memql#1628). */
@@ -4495,28 +4367,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.denyDeviceCode = function (this: QueryClient, args: DenyDeviceCodeArgs = {} as DenyDeviceCodeArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("denyDeviceCode", buildDenyDeviceCode(args), opts);
-};
-
-/** Deprecate a v1:actions:action (reliability below floor or superseded), removing it from replay (Phase 4 #1739). */
-// Bound concept: v1:actions:action (machine-readable: BoundConcepts["deprecateAction"] in generated_concepts.ts).
-export interface DeprecateActionArgs {
-  actionId: string;
-}
-
-export function buildDeprecateAction(args: DeprecateActionArgs): string {
-  const parts: string[] = [];
-  parts.push("actionId: " + renderMemQLValue(args.actionId));
-  return "mutation deprecateAction(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    deprecateAction(args: DeprecateActionArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.deprecateAction = function (this: QueryClient, args: DeprecateActionArgs = {} as DeprecateActionArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("deprecateAction", buildDeprecateAction(args), opts);
 };
 
 /** Turn a source's auto-deploy switch on or off (epic memql#4900).
@@ -4726,30 +4576,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.expireAccessRequest = function (this: QueryClient, args: ExpireAccessRequestArgs = {} as ExpireAccessRequestArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("expireAccessRequest", buildExpireAccessRequest(args), opts);
-};
-
-/** Mark a running step failed (running -> failed). Stamps errorMessage + completedAt. The engine step guard rejects the transition when the prior status is not 'running'. Retry (failed -> ready, attempt++) is a separate write. */
-// Bound concept: v1:harness:step (machine-readable: BoundConcepts["failHarnessStep"] in generated_concepts.ts).
-export interface FailHarnessStepArgs {
-  stepId: string;
-  errorMessage?: string;
-}
-
-export function buildFailHarnessStep(args: FailHarnessStepArgs): string {
-  const parts: string[] = [];
-  parts.push("stepId: " + renderMemQLValue(args.stepId));
-  if (args.errorMessage !== undefined) parts.push("errorMessage: " + renderMemQLValue(args.errorMessage));
-  return "mutation failHarnessStep(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    failHarnessStep(args: FailHarnessStepArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.failHarnessStep = function (this: QueryClient, args: FailHarnessStepArgs = {} as FailHarnessStepArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("failHarnessStep", buildFailHarnessStep(args), opts);
 };
 
 /** Fold the user's answers to the intake clarifying questions back into a v1:planner:responsibility and re-stamp the re-inferred field set (issue #637). Called after the user answers the intakeRequest questions: the dispatcher re-runs responsibilityIntake with the answers folded in, then writes the final trigger / schedule / condition / targetKind / assignedRoleSlug / successCriteria / notifyHow, records intakeResponse for audit, sets intakeStatus='applied', and flips status='active'. System write -- no ownerUserId re-stamp. */
@@ -5148,60 +4974,8 @@ QueryClient.prototype.markStoreRedacted = function (this: QueryClient, args: Mar
   return this.executeNamed("markStoreRedacted", buildMarkStoreRedacted(args), opts);
 };
 
-/** Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1, #1736). ownerUserId stamped from actor.userId (owned tier). Stores the replayable capability calls keyed by inputFingerprint. */
-// Bound concept: v1:actions:action (machine-readable: BoundConcepts["mintAction"] in generated_concepts.ts).
-export interface MintActionArgs {
-  actionId?: string;
-  slug: string;
-  intent: string;
-  capability?: string;
-  sideEffectClass?: string;
-  status?: string;
-  inputFingerprint: string;
-  calls: Record<string, unknown>[];
-  resourceEdges?: Record<string, unknown>[];
-  paramBindings?: Record<string, unknown>[];
-  templateFingerprint?: string;
-  recordedResult?: Record<string, unknown>;
-  resultFingerprint?: string;
-  recordedSurface?: string;
-  provenancePlanId?: string;
-  provenanceStepId?: string;
-}
-
-export function buildMintAction(args: MintActionArgs): string {
-  const parts: string[] = [];
-  if (args.actionId !== undefined) parts.push("actionId: " + renderMemQLValue(args.actionId));
-  parts.push("slug: " + renderMemQLValue(args.slug));
-  parts.push("intent: " + renderMemQLValue(args.intent));
-  if (args.capability !== undefined) parts.push("capability: " + renderMemQLValue(args.capability));
-  if (args.sideEffectClass !== undefined) parts.push("sideEffectClass: " + renderMemQLValue(args.sideEffectClass));
-  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
-  parts.push("inputFingerprint: " + renderMemQLValue(args.inputFingerprint));
-  parts.push("calls: " + renderMemQLValue(args.calls));
-  if (args.resourceEdges !== undefined) parts.push("resourceEdges: " + renderMemQLValue(args.resourceEdges));
-  if (args.paramBindings !== undefined) parts.push("paramBindings: " + renderMemQLValue(args.paramBindings));
-  if (args.templateFingerprint !== undefined) parts.push("templateFingerprint: " + renderMemQLValue(args.templateFingerprint));
-  if (args.recordedResult !== undefined) parts.push("recordedResult: " + renderMemQLValue(args.recordedResult));
-  if (args.resultFingerprint !== undefined) parts.push("resultFingerprint: " + renderMemQLValue(args.resultFingerprint));
-  if (args.recordedSurface !== undefined) parts.push("recordedSurface: " + renderMemQLValue(args.recordedSurface));
-  if (args.provenancePlanId !== undefined) parts.push("provenancePlanId: " + renderMemQLValue(args.provenancePlanId));
-  if (args.provenanceStepId !== undefined) parts.push("provenanceStepId: " + renderMemQLValue(args.provenanceStepId));
-  return "mutation mintAction(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    mintAction(args: MintActionArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.mintAction = function (this: QueryClient, args: MintActionArgs = {} as MintActionArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("mintAction", buildMintAction(args), opts);
-};
-
-/** Mint a new v1:agents:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check. */
-// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["mintSkill"] in generated_concepts.ts).
+/** Mint a new v1:skills:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check. */
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["mintSkill"] in generated_concepts.ts).
 export interface MintSkillArgs {
   skillId?: string;
   slug: string;
@@ -5389,80 +5163,26 @@ QueryClient.prototype.provisionWorkspace = function (this: QueryClient, args: Pr
   return this.executeNamed("provisionWorkspace", buildProvisionWorkspace(args), opts);
 };
 
-/** Prune a decayed v1:harness:semanticMemory: status -> 'pruned' (soft-delete; the append-only model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from actor.userId (owned tier). */
-// Bound concept: v1:harness:semanticMemory (machine-readable: BoundConcepts["pruneHarnessSemanticMemory"] in generated_concepts.ts).
-export interface PruneHarnessSemanticMemoryArgs {
+/** Prune a decayed v1:memory:belief: status -> 'pruned' (soft-delete; the append-only model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from actor.userId (owned tier). */
+// Bound concept: v1:memory:belief (machine-readable: BoundConcepts["pruneMemoryBelief"] in generated_concepts.ts).
+export interface PruneMemoryBeliefArgs {
   memoryId: string;
 }
 
-export function buildPruneHarnessSemanticMemory(args: PruneHarnessSemanticMemoryArgs): string {
+export function buildPruneMemoryBelief(args: PruneMemoryBeliefArgs): string {
   const parts: string[] = [];
   parts.push("memoryId: " + renderMemQLValue(args.memoryId));
-  return "mutation pruneHarnessSemanticMemory(" + parts.join(", ") + ")";
+  return "mutation pruneMemoryBelief(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    pruneHarnessSemanticMemory(args: PruneHarnessSemanticMemoryArgs, opts?: QueryCallOptions): Promise<Result>;
+    pruneMemoryBelief(args: PruneMemoryBeliefArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
-QueryClient.prototype.pruneHarnessSemanticMemory = function (this: QueryClient, args: PruneHarnessSemanticMemoryArgs = {} as PruneHarnessSemanticMemoryArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("pruneHarnessSemanticMemory", buildPruneHarnessSemanticMemory(args), opts);
-};
-
-/** Promote a step to ready (pending -> ready when dependsOn is satisfied, or blocked -> ready when the blocker finishes). Read-merges the prior row so owned-tier fields are preserved. The engine step guard validates the transition and rejects an illegal source status. Without this mutation the state machine is stuck at 'pending' (#1635). */
-// Bound concept: v1:harness:step (machine-readable: BoundConcepts["readyHarnessStep"] in generated_concepts.ts).
-export interface ReadyHarnessStepArgs {
-  stepId: string;
-}
-
-export function buildReadyHarnessStep(args: ReadyHarnessStepArgs): string {
-  const parts: string[] = [];
-  parts.push("stepId: " + renderMemQLValue(args.stepId));
-  return "mutation readyHarnessStep(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    readyHarnessStep(args: ReadyHarnessStepArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.readyHarnessStep = function (this: QueryClient, args: ReadyHarnessStepArgs = {} as ReadyHarnessStepArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("readyHarnessStep", buildReadyHarnessStep(args), opts);
-};
-
-/** Record a v1:actions:candidate trace (the captured capability sequence + value/resource provenance for one LLM step, #1735). ownerUserId is stamped from actor.userId (owned tier). status is always 'candidate' on insert. */
-// Bound concept: v1:actions:candidate (machine-readable: BoundConcepts["recordActionCandidate"] in generated_concepts.ts).
-export interface RecordActionCandidateArgs {
-  candidateId?: string;
-  planId: string;
-  stepId: string;
-  calls: Record<string, unknown>[];
-  resourceEdges?: Record<string, unknown>[];
-  callCount?: number;
-}
-
-export function buildRecordActionCandidate(args: RecordActionCandidateArgs): string {
-  const parts: string[] = [];
-  if (args.candidateId !== undefined) parts.push("candidateId: " + renderMemQLValue(args.candidateId));
-  parts.push("planId: " + renderMemQLValue(args.planId));
-  parts.push("stepId: " + renderMemQLValue(args.stepId));
-  parts.push("calls: " + renderMemQLValue(args.calls));
-  if (args.resourceEdges !== undefined) parts.push("resourceEdges: " + renderMemQLValue(args.resourceEdges));
-  if (args.callCount !== undefined) parts.push("callCount: " + renderMemQLValue(args.callCount));
-  return "mutation recordActionCandidate(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    recordActionCandidate(args: RecordActionCandidateArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.recordActionCandidate = function (this: QueryClient, args: RecordActionCandidateArgs = {} as RecordActionCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("recordActionCandidate", buildRecordActionCandidate(args), opts);
+QueryClient.prototype.pruneMemoryBelief = function (this: QueryClient, args: PruneMemoryBeliefArgs = {} as PruneMemoryBeliefArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pruneMemoryBelief", buildPruneMemoryBelief(args), opts);
 };
 
 /** Record one approver's decision and, when the chain is finished, its outcome. */
@@ -5790,39 +5510,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.recordDependencyEdge = function (this: QueryClient, args: RecordDependencyEdgeArgs = {} as RecordDependencyEdgeArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("recordDependencyEdge", buildRecordDependencyEdge(args), opts);
-};
-
-/** Append a v1:harness:observation for a step (tool_result / error / note / decision). ownerUserId stamped from actor.userId (owned tier). content is the embedding source for semantic recall (#585). */
-// Bound concept: v1:harness:observation (machine-readable: BoundConcepts["recordHarnessObservation"] in generated_concepts.ts).
-export interface RecordHarnessObservationArgs {
-  observationId?: string;
-  stepId: string;
-  planId?: string;
-  // Enum: tool_result | error | note | decision
-  kind: string;
-  content: string;
-  data?: Record<string, unknown>;
-}
-
-export function buildRecordHarnessObservation(args: RecordHarnessObservationArgs): string {
-  const parts: string[] = [];
-  if (args.observationId !== undefined) parts.push("observationId: " + renderMemQLValue(args.observationId));
-  parts.push("stepId: " + renderMemQLValue(args.stepId));
-  if (args.planId !== undefined) parts.push("planId: " + renderMemQLValue(args.planId));
-  parts.push("kind: " + renderMemQLValue(args.kind));
-  parts.push("content: " + renderMemQLValue(args.content));
-  if (args.data !== undefined) parts.push("data: " + renderMemQLValue(args.data));
-  return "mutation recordHarnessObservation(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    recordHarnessObservation(args: RecordHarnessObservationArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.recordHarnessObservation = function (this: QueryClient, args: RecordHarnessObservationArgs = {} as RecordHarnessObservationArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("recordHarnessObservation", buildRecordHarnessObservation(args), opts);
 };
 
 /** Replace a user's legalAcceptance array (caller must read-modify-write to append). */
@@ -6421,58 +6108,32 @@ QueryClient.prototype.registerSurface = function (this: QueryClient, args: Regis
   return this.executeNamed("registerSurface", buildRegisterSurface(args), opts);
 };
 
-/** Reinforce a v1:actions:action after a verified replay: set the engine-computed reliability + reinforceCount and reset the decay clock (Phase 1 #1736; surface-aware decay lands in Phase 4 #1739). */
-// Bound concept: v1:actions:action (machine-readable: BoundConcepts["reinforceAction"] in generated_concepts.ts).
-export interface ReinforceActionArgs {
-  actionId: string;
-  reliability: number;
-  reinforceCount: number;
-}
-
-export function buildReinforceAction(args: ReinforceActionArgs): string {
-  const parts: string[] = [];
-  parts.push("actionId: " + renderMemQLValue(args.actionId));
-  parts.push("reliability: " + renderMemQLValue(args.reliability));
-  parts.push("reinforceCount: " + renderMemQLValue(args.reinforceCount));
-  return "mutation reinforceAction(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    reinforceAction(args: ReinforceActionArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.reinforceAction = function (this: QueryClient, args: ReinforceActionArgs = {} as ReinforceActionArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("reinforceAction", buildReinforceAction(args), opts);
-};
-
-/** Reinforce an existing v1:harness:semanticMemory (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now, and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier). */
-// Bound concept: v1:harness:semanticMemory (machine-readable: BoundConcepts["reinforceHarnessSemanticMemory"] in generated_concepts.ts).
-export interface ReinforceHarnessSemanticMemoryArgs {
+/** Reinforce an existing v1:memory:belief (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now, and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier). */
+// Bound concept: v1:memory:belief (machine-readable: BoundConcepts["reinforceMemoryBelief"] in generated_concepts.ts).
+export interface ReinforceMemoryBeliefArgs {
   memoryId: string;
   confidence: number;
   reinforceCount: number;
   sourceEpisodes: string[];
 }
 
-export function buildReinforceHarnessSemanticMemory(args: ReinforceHarnessSemanticMemoryArgs): string {
+export function buildReinforceMemoryBelief(args: ReinforceMemoryBeliefArgs): string {
   const parts: string[] = [];
   parts.push("memoryId: " + renderMemQLValue(args.memoryId));
   parts.push("confidence: " + renderMemQLValue(args.confidence));
   parts.push("reinforceCount: " + renderMemQLValue(args.reinforceCount));
   parts.push("sourceEpisodes: " + renderMemQLValue(args.sourceEpisodes));
-  return "mutation reinforceHarnessSemanticMemory(" + parts.join(", ") + ")";
+  return "mutation reinforceMemoryBelief(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    reinforceHarnessSemanticMemory(args: ReinforceHarnessSemanticMemoryArgs, opts?: QueryCallOptions): Promise<Result>;
+    reinforceMemoryBelief(args: ReinforceMemoryBeliefArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
-QueryClient.prototype.reinforceHarnessSemanticMemory = function (this: QueryClient, args: ReinforceHarnessSemanticMemoryArgs = {} as ReinforceHarnessSemanticMemoryArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("reinforceHarnessSemanticMemory", buildReinforceHarnessSemanticMemory(args), opts);
+QueryClient.prototype.reinforceMemoryBelief = function (this: QueryClient, args: ReinforceMemoryBeliefArgs = {} as ReinforceMemoryBeliefArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("reinforceMemoryBelief", buildReinforceMemoryBelief(args), opts);
 };
 
 /** Reject an access request (status=rejected, stamps reviewer + note). */
@@ -8588,30 +8249,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.stampNodeTokenBootstrap = function (this: QueryClient, args: StampNodeTokenBootstrapArgs = {} as StampNodeTokenBootstrapArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("stampNodeTokenBootstrap", buildStampNodeTokenBootstrap(args), opts);
-};
-
-/** Claim a ready step (ready -> running). Stamps assignedAgent + startedAt. The engine step guard rejects the transition when the prior status is not 'ready'. */
-// Bound concept: v1:harness:step (machine-readable: BoundConcepts["startHarnessStep"] in generated_concepts.ts).
-export interface StartHarnessStepArgs {
-  stepId: string;
-  assignedAgent?: string;
-}
-
-export function buildStartHarnessStep(args: StartHarnessStepArgs): string {
-  const parts: string[] = [];
-  parts.push("stepId: " + renderMemQLValue(args.stepId));
-  if (args.assignedAgent !== undefined) parts.push("assignedAgent: " + renderMemQLValue(args.assignedAgent));
-  return "mutation startHarnessStep(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    startHarnessStep(args: StartHarnessStepArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.startHarnessStep = function (this: QueryClient, args: StartHarnessStepArgs = {} as StartHarnessStepArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("startHarnessStep", buildStartHarnessStep(args), opts);
 };
 
 /** Promote a Plan from queued (planning complete, tasks emitted) to running. Triggered by the user clicking Run in the cockpit Planner tab, or by an automation that auto-runs plans on the user's behalf. */

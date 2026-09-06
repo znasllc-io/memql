@@ -227,89 +227,6 @@ func ActionByIdAndVersionBuild(args ActionByIdAndVersionArgs) string {
 	return b.String()
 }
 
-// ActionByInputFingerprint -- Resolve an active v1:actions:action by inputFingerprint for the calling owner -- the literal-replay lookup (Phase 1 #1736).
-//
-// Bound concept: v1:actions:action (machine-readable: BoundConcepts["actionByInputFingerprint"] in generated_concepts.go).
-type ActionByInputFingerprintArgs struct {
-	InputFingerprint string
-}
-
-// ActionByInputFingerprint calls the engine query actionByInputFingerprint.
-func (qc *QueryClient) ActionByInputFingerprint(ctx context.Context, args ActionByInputFingerprintArgs) (*Result, error) {
-	call := ActionByInputFingerprintBuild(args)
-	return qc.executeNamed(ctx, "actionByInputFingerprint", call)
-}
-
-func ActionByInputFingerprintBuild(args ActionByInputFingerprintArgs) string {
-	var b strings.Builder
-	b.WriteString("query actionByInputFingerprint(")
-	b.WriteString("inputFingerprint: ")
-	b.WriteString(quoteMemQL(args.InputFingerprint))
-	b.WriteString(")")
-	return b.String()
-}
-
-// ActionByTemplateFingerprint -- Resolve an active v1:actions:action by templateFingerprint (input structure) for the calling owner -- the parameterized-replay lookup (Phase 3 #1738). Owned tier.
-//
-// Bound concept: v1:actions:action (machine-readable: BoundConcepts["actionByTemplateFingerprint"] in generated_concepts.go).
-type ActionByTemplateFingerprintArgs struct {
-	TemplateFingerprint string
-}
-
-// ActionByTemplateFingerprint calls the engine query actionByTemplateFingerprint.
-func (qc *QueryClient) ActionByTemplateFingerprint(ctx context.Context, args ActionByTemplateFingerprintArgs) (*Result, error) {
-	call := ActionByTemplateFingerprintBuild(args)
-	return qc.executeNamed(ctx, "actionByTemplateFingerprint", call)
-}
-
-func ActionByTemplateFingerprintBuild(args ActionByTemplateFingerprintArgs) string {
-	var b strings.Builder
-	b.WriteString("query actionByTemplateFingerprint(")
-	b.WriteString("templateFingerprint: ")
-	b.WriteString(quoteMemQL(args.TemplateFingerprint))
-	b.WriteString(")")
-	return b.String()
-}
-
-// ActionCandidatesForPlan -- List v1:actions:candidate traces captured for a plan, newest-first by createdAt (owned tier). #1735.
-//
-// Bound concept: v1:actions:candidate (machine-readable: BoundConcepts["actionCandidatesForPlan"] in generated_concepts.go).
-type ActionCandidatesForPlanArgs struct {
-	PlanId string
-}
-
-// ActionCandidatesForPlan calls the engine query actionCandidatesForPlan.
-func (qc *QueryClient) ActionCandidatesForPlan(ctx context.Context, args ActionCandidatesForPlanArgs) (*Result, error) {
-	call := ActionCandidatesForPlanBuild(args)
-	return qc.executeNamed(ctx, "actionCandidatesForPlan", call)
-}
-
-func ActionCandidatesForPlanBuild(args ActionCandidatesForPlanArgs) string {
-	var b strings.Builder
-	b.WriteString("query actionCandidatesForPlan(")
-	b.WriteString("planId: ")
-	b.WriteString(quoteMemQL(args.PlanId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// ActionsPendingConfirm -- List the calling owner's candidate v1:actions:action rows awaiting confirmation (real-machine side effects gate on a human, Phase 4 #1739). Owned tier.
-//
-// Bound concept: v1:actions:action (machine-readable: BoundConcepts["actionsPendingConfirm"] in generated_concepts.go).
-type ActionsPendingConfirmArgs struct {
-}
-
-// ActionsPendingConfirm calls the engine query actionsPendingConfirm.
-func (qc *QueryClient) ActionsPendingConfirm(ctx context.Context, args ActionsPendingConfirmArgs) (*Result, error) {
-	call := ActionsPendingConfirmBuild(args)
-	return qc.executeNamed(ctx, "actionsPendingConfirm", call)
-}
-
-func ActionsPendingConfirmBuild(args ActionsPendingConfirmArgs) string {
-	_ = args
-	return "query actionsPendingConfirm()"
-}
-
 // ActiveActionsForOwner -- List the calling owner's active v1:actions:action rows for the consolidation decay/deprecate sweep (Phase 4 #1739). Owned tier.
 //
 // Bound concept: v1:actions:action (machine-readable: BoundConcepts["activeActionsForOwner"] in generated_concepts.go).
@@ -599,7 +516,7 @@ func ActiveRolesBuild(args ActiveRolesArgs) string {
 
 // ActiveSkills -- List every active skill catalog row -- summary projection. Backs the Skills picker on the role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows are fully editable.
 //
-// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["activeSkills"] in generated_concepts.go).
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["activeSkills"] in generated_concepts.go).
 type ActiveSkillsArgs struct {
 }
 
@@ -616,7 +533,7 @@ func ActiveSkillsBuild(args ActiveSkillsArgs) string {
 
 // ActiveSkillsFull -- List every active skill catalog row with its full bundle composition (domainIds + toolSlugs + liveSourceIds). Heavier projection than activeSkills; use this when a caller needs to resolve agent capabilities by unioning skill bundles in-process (cockpit#124's Agents view does this on every detail render). The catalog is small (25 rows in Phase 2; growth tracked via the Phase 3 mintSkill roadmap) so the single-shot full-list query is cheaper than N skillBySlug round-trips.
 //
-// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["activeSkillsFull"] in generated_concepts.go).
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["activeSkillsFull"] in generated_concepts.go).
 type ActiveSkillsFullArgs struct {
 }
 
@@ -10474,7 +10391,7 @@ func SitesForPackageBuild(args SitesForPackageArgs) string {
 
 // SkillBySlug -- Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it.
 //
-// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["skillBySlug"] in generated_concepts.go).
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillBySlug"] in generated_concepts.go).
 type SkillBySlugArgs struct {
 	Slug string
 }
@@ -10516,9 +10433,31 @@ func SkillChangeEventsForAgentBuild(args SkillChangeEventsForAgentArgs) string {
 	return b.String()
 }
 
+// SkillEdgesForSkill -- Every committed edge touching one skill, in either direction. Bounded by the skill: the capability graph is a small admin-and-planner-shaped registry, not a per-user table.
+//
+// Bound concept: v1:skills:skillEdge (machine-readable: BoundConcepts["skillEdgesForSkill"] in generated_concepts.go).
+type SkillEdgesForSkillArgs struct {
+	SkillId string
+}
+
+// SkillEdgesForSkill calls the engine query skillEdgesForSkill.
+func (qc *QueryClient) SkillEdgesForSkill(ctx context.Context, args SkillEdgesForSkillArgs) (*Result, error) {
+	call := SkillEdgesForSkillBuild(args)
+	return qc.executeNamed(ctx, "skillEdgesForSkill", call)
+}
+
+func SkillEdgesForSkillBuild(args SkillEdgesForSkillArgs) string {
+	var b strings.Builder
+	b.WriteString("query skillEdgesForSkill(")
+	b.WriteString("skillId: ")
+	b.WriteString(quoteMemQL(args.SkillId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SkillNeedsRefresh -- Per #157 (Phase 1 of the skills rollout): list active skills that bundle a caller-supplied knowledge domain id. The Planner Agent's Phase 2 refresh loop calls queryDueRefreshDomains first (already shipping), then fans out one call per stale domain id to discover 'which skills are downstream of this domain and want a re-attach run after the underlying knowledge refreshes complete'. Pure derivation -- no new state. Argument-as-scalar (rather than list intersection) mirrors activeAgents's per-group fanout pattern so the existing DSL push-down operator surface stays sufficient.
 //
-// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["skillNeedsRefresh"] in generated_concepts.go).
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillNeedsRefresh"] in generated_concepts.go).
 type SkillNeedsRefreshArgs struct {
 	StaleDomainId string
 }
@@ -11537,6 +11476,40 @@ func WarmupStateForIdentityBuild(args WarmupStateForIdentityArgs) string {
 	b.WriteString(quoteMemQL(args.SendingIdentity))
 	b.WriteString(")")
 	return b.String()
+}
+
+// WorkApprovalsForOwner -- The caller's pending approvals, newest first. Owned. decision=="" is the pending state, and it matches because createWorkApproval STAMPS the empty string rather than leaving the key absent.
+//
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwner"] in generated_concepts.go).
+type WorkApprovalsForOwnerArgs struct {
+}
+
+// WorkApprovalsForOwner calls the engine query workApprovalsForOwner.
+func (qc *QueryClient) WorkApprovalsForOwner(ctx context.Context, args WorkApprovalsForOwnerArgs) (*Result, error) {
+	call := WorkApprovalsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workApprovalsForOwner", call)
+}
+
+func WorkApprovalsForOwnerBuild(args WorkApprovalsForOwnerArgs) string {
+	_ = args
+	return "query workApprovalsForOwner()"
+}
+
+// WorkGoalsForOwner -- The caller's goals, newest first. Owned: ownerUserId==actor.userId binds server-side.
+//
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalsForOwner"] in generated_concepts.go).
+type WorkGoalsForOwnerArgs struct {
+}
+
+// WorkGoalsForOwner calls the engine query workGoalsForOwner.
+func (qc *QueryClient) WorkGoalsForOwner(ctx context.Context, args WorkGoalsForOwnerArgs) (*Result, error) {
+	call := WorkGoalsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workGoalsForOwner", call)
+}
+
+func WorkGoalsForOwnerBuild(args WorkGoalsForOwnerArgs) string {
+	_ = args
+	return "query workGoalsForOwner()"
 }
 
 // WorkerByIdentityId -- Look up the worker registration owned by an identity row.

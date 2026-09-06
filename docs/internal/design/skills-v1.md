@@ -38,7 +38,7 @@ a user-approval canvas card before the row lands.
 
 ## Phase 1 -- the concept + the catalog (this PR)
 
-Concepts: `v1:agents:skill`, `v1:agents:skillChangeEvent`.
+Concepts: `v1:skills:skill`, `v1:agents:skillChangeEvent`.
 Validation: load-time `skill.tier >= max(tier across domainIds[])`.
 13 predefined seed rows organized in four sections.
 
@@ -123,7 +123,7 @@ ids for the real ones once the knowledge seeder ships them.
   composition (domains + tools + a name).
 - The proposal lands as a canvas card carrying the bundle preview.
   The user clicks Approve / Reject / Edit-then-approve.
-- On approval, a new `v1:agents:skill` row materializes (predefined
+- On approval, a new `v1:skills:skill` row materializes (predefined
   = false) plus a `skillChangeEvent` row attributing it to the
   planner + the originating Plan. The planner then attaches it
   to the relevant specialist via the same path as Phase 2's

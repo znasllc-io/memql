@@ -11,7 +11,7 @@ import (
 
 // skill_catalog_reconcile.go -- boot-time, system-managed reconcile that
 // guarantees every registered `seed skill` declaration has a materialized
-// v1:agents:skill catalog row (memql#1459).
+// v1:skills:skill catalog row (memql#1459).
 //
 // Why this exists on top of the global materialization pass:
 //
@@ -27,7 +27,7 @@ import (
 // The staging gap #1459 documents is a DATA gap, not a code-path gap: the
 // per-agent voice scope read (resolveAgentToolSlugsVia -> ResolveSkills)
 // resolves the Assistant's capabilities.skillIds (which include the
-// pack-declared skills) against v1:agents:skill ROWS -- and on staging those
+// pack-declared skills) against v1:skills:skill ROWS -- and on staging those
 // rows were absent, so ResolveSkills silently dropped them
 // ("unknown skill id (skipped)") and the realtime model got zero operator
 // primitives (uiClick/uiType/...). The assistant-skillId reconcile (#1443)
@@ -50,7 +50,7 @@ type SkillCatalogReconcileReport struct {
 	// Registered is the number of global `seed skill` defs in the
 	// registry (the universe we reconcile against).
 	Registered int
-	// AlreadyOK is the number whose v1:agents:skill row already existed
+	// AlreadyOK is the number whose v1:skills:skill row already existed
 	// AND whose persisted capability lists (toolSlugs / domainIds /
 	// liveSourceIds) already match the registered seed.
 	AlreadyOK int
@@ -65,7 +65,7 @@ type SkillCatalogReconcileReport struct {
 }
 
 // reconcileSkillCatalog ensures every registered global `seed skill`
-// declaration has a materialized v1:agents:skill row WHOSE capability
+// declaration has a materialized v1:skills:skill row WHOSE capability
 // lists match the registered seed. It scans the existing skill rows
 // once (id + payload), then re-materializes the skills whose row is
 // absent OR whose persisted toolSlugs / domainIds / liveSourceIds
@@ -113,7 +113,7 @@ func (m *SeedMaterializer) reconcileSkillCatalog(ctx context.Context) (SkillCata
 	// UseConcept=="skill": the canonical authoring form
 	// `use agents.concepts.{ skill }` binds UseConcept but leaves
 	// UseNamespace empty (the concept registry resolves "skill" ->
-	// "v1:agents:skill" without the bare namespace being threaded onto
+	// "v1:skills:skill" without the bare namespace being threaded onto
 	// the SeedDefinition), so filtering on UseNamespace would match
 	// nothing. perUser skills don't exist today, but the scope guard
 	// keeps the contract explicit.
@@ -181,7 +181,7 @@ func (m *SeedMaterializer) reconcileSkillCatalog(ctx context.Context) (SkillCata
 	var healed []string
 	for _, def := range skillSeeds {
 		// The global skill seed's row id is the canonical
-		// v1:agents:skill:<seedName> (compileSeedDecl auto-derives the
+		// v1:skills:skill:<seedName> (compileSeedDecl auto-derives the
 		// body `id` from the seed name; materializeGlobal stamps it into
 		// skillId, and the row lands at the canonical concept-prefixed id).
 		rowId := conceptAgentsSkill + ":" + def.Name

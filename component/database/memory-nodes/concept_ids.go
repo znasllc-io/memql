@@ -27,20 +27,26 @@ const (
 	ConceptDataLog    = "v1:data:log"
 )
 
-// Harness domain concepts (v1:harness:*) -- the MemQL-native agent
-// harness working-state spine (epic #590, foundational issue #582).
-const (
-	ConceptHarnessPlan        = "v1:harness:plan"
-	ConceptHarnessStep        = "v1:harness:step"
-	ConceptHarnessObservation = "v1:harness:observation"
-)
-
 // Action-library concepts (v1:actions:*) -- the reusable, replayable
 // action library (epic #1734). `action.intent` is embedded into
 // node_vectors (vectorField='intent') so the planner can cosine-search
 // the library (#1758).
 const (
 	ConceptActionsAction = "v1:actions:action"
+)
+
+// Work-spine concepts (v1:work:*) -- the execution model's spine
+// (docs/superpowers/specs/2026-09-05-work-spine-design.md). Constants
+// rather than literals because the journal (component/automations),
+// the routing rules and the resume path all have to agree on the
+// spelling.
+const (
+	ConceptWorkGoal        = "v1:work:goal"
+	ConceptWorkRun         = "v1:work:run"
+	ConceptWorkStep        = "v1:work:step"
+	ConceptWorkModelCall   = "v1:work:modelCall"
+	ConceptWorkApproval    = "v1:work:approval"
+	ConceptWorkObservation = "v1:work:observation"
 )
 
 // Authoring domain concepts (v1:authoring:*) -- the graph-stored
@@ -78,10 +84,6 @@ const (
 // MemQL internal concepts (v1:memql:*) -- engine-internal state, not
 // user-facing config. User-facing secrets / variables live under
 // v1:platform:* (see Platform domain above).
-const (
-	ConceptMemQLCheckpoint = "v1:memql:checkpoint"
-)
-
 // MemQL runtime concepts -- used in Go code but registered dynamically
 // (no concept directory on disk).
 const (
@@ -120,8 +122,6 @@ func AllFilesystemConcepts() []string {
 		ConceptClusterNode,
 		ConceptClusterNodeType,
 		ConceptClusterSpawnEvent,
-		// memql (filesystem-backed only)
-		ConceptMemQLCheckpoint,
 	}
 }
 

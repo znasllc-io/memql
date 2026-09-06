@@ -101,7 +101,6 @@ require (
 	github.com/znasllc-io/memql/component/events v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/frontdoor v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0 // indirect
-	github.com/znasllc-io/memql/component/harness v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/annotations v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/ast v0.0.0 // indirect
@@ -154,7 +153,6 @@ replace github.com/znasllc-io/memql/component/envregistry => ../../component/env
 
 replace github.com/znasllc-io/memql/component/grpc/gen => ../../component/grpc/gen
 
-replace github.com/znasllc-io/memql/component/harness => ../../component/harness
 
 replace github.com/znasllc-io/memql/component/language => ../../component/language
 

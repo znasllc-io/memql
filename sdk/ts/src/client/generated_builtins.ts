@@ -582,27 +582,6 @@ QueryClient.prototype.githubConnectBegin = function (this: QueryClient, args: Gi
   return this.executeNamed("githubConnectBegin", buildGithubConnectBegin(args), opts);
 };
 
-/** Fetch a harness plan's full execution timeline (every plan/step version transition + all observations, ordered by createdAt) reconstructed from the append-only graph event stream. Returns one synthetic node carrying the rendered timeline string, a completion flag, and the step count. Owner-scoped to the caller's own plan. The history-over-gRPC contract for the cockpit `harness trace` CLI (memql-cockpit#142). */
-export interface HarnessTraceArgs {
-  planId: string;
-}
-
-export function buildHarnessTrace(args: HarnessTraceArgs): string {
-  const parts: string[] = [];
-  parts.push("planId: " + renderMemQLValue(args.planId));
-  return "builtin harnessTrace(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    harnessTrace(args: HarnessTraceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.harnessTrace = function (this: QueryClient, args: HarnessTraceArgs = {} as HarnessTraceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("harnessTrace", buildHarnessTrace(args), opts);
-};
-
 /** Answer, in one row, whether this caller can get inference at all and through which of the three doors: a local model on their fleet, the Anthropic workload-identity federation, or a configured API key. Read from the SAME catalog and provider registry the router reads, so eligibility has exactly one implementation -- a second one drifts, and the drift lets a user through to a console whose features all refuse. Backs the portal's first-run gate. */
 export interface InferenceStatusArgs {
 }
@@ -1413,7 +1392,7 @@ QueryClient.prototype.providersReload = function (this: QueryClient, args: Provi
   return this.executeNamed("providersReload", buildProvidersReload(args), opts);
 };
 
-/** Recall top-k memories of a concept (default v1:harness:observation) by a SINGLE hybrid recency x relevance score: pgvector cosine similarity + exponential time-decay over createdAt, scored and ordered server-side in one SQL statement against the MemoryNodes hypertable (no app-side merge). Owner-scoped (partition isolation); window prunes hypertable chunks; halfLife + wSem/wRec are tunable. Numeric tuning args ride additionalProperties. */
+/** Recall top-k memories of a concept (default v1:work:observation) by a SINGLE hybrid recency x relevance score: pgvector cosine similarity + exponential time-decay over createdAt, scored and ordered server-side in one SQL statement against the MemoryNodes hypertable (no app-side merge). Owner-scoped (partition isolation); window prunes hypertable chunks; halfLife + wSem/wRec are tunable. Numeric tuning args ride additionalProperties. */
 export interface RecallArgs {
   text: string;
   concept?: string;
@@ -1517,31 +1496,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.restoreDocumentVersion = function (this: QueryClient, args: RestoreDocumentVersionArgs = {} as RestoreDocumentVersionArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("restoreDocumentVersion", buildRestoreDocumentVersion(args), opts);
-};
-
-/** searchActions wraps the builtin named "searchActions". */
-export interface SearchActionsArgs {
-  text: string;
-  k?: number;
-  provider?: string;
-}
-
-export function buildSearchActions(args: SearchActionsArgs): string {
-  const parts: string[] = [];
-  parts.push("text: " + renderMemQLValue(args.text));
-  if (args.k !== undefined) parts.push("k: " + renderMemQLValue(args.k));
-  if (args.provider !== undefined) parts.push("provider: " + renderMemQLValue(args.provider));
-  return "builtin searchActions(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    searchActions(args: SearchActionsArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.searchActions = function (this: QueryClient, args: SearchActionsArgs = {} as SearchActionsArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("searchActions", buildSearchActions(args), opts);
 };
 
 /** Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health. */
@@ -1902,5 +1856,26 @@ declare module "./query.js" {
 
 QueryClient.prototype.sourceRepositories = function (this: QueryClient, args: SourceRepositoriesArgs = {} as SourceRepositoriesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("sourceRepositories", buildSourceRepositories(args), opts);
+};
+
+/** Fetch one run's full execution timeline: every run and step version and every observation, ordered by createdAt. The OS Nexus (sub-project B) reads the rows live; this is the one-call form the VS Code panel and the cockpit use. Replaces harnessTrace, which read the retired v1:harness:plan / step / observation stream -- same envelope, same @sdk surface, and `planId` becomes `runId`. */
+export interface WorkTraceArgs {
+  runId: string;
+}
+
+export function buildWorkTrace(args: WorkTraceArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "builtin workTrace(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workTrace(args: WorkTraceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workTrace = function (this: QueryClient, args: WorkTraceArgs = {} as WorkTraceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workTrace", buildWorkTrace(args), opts);
 };
 

@@ -9,38 +9,10 @@
 
 use common.traits.{ statusIsActive }
 
-/// List v1:actions:candidate traces captured for a plan, newest-first by createdAt (owned tier).
-/// #1735.
-@actor
-query candidate actionCandidatesForPlan {
-  args {
-    planId  string!
-  }
-  filter  planId == args.planId && ownerUserId == actor.userId
-  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
-  // (createdAt, id) instead of a full-table pull. Literal page size -- the
-  // struct-query paginate directive only accepts an integer literal.
-  sort     "row.createdAt", "desc"
-  paginate 50
-  shape   candidateFull
-}
-
 // actionByInputFingerprint -- the literal-replay lookup (Phase 1 #1736).
 // The harness computes a stable hash of the dispatched step input and asks
 // for an active action minted under the same fingerprint; a hit is replayed
 // token-free, a miss falls through to the LLM. Owned tier.
-/// Resolve an active v1:actions:action by inputFingerprint for the calling owner -- the
-/// literal-replay lookup (Phase 1 #1736).
-@unbounded("unique inputFingerprint dedupe probe scoped to the owner -- must see all matches")
-@actor
-query action actionByInputFingerprint {
-  args {
-    inputFingerprint  string!
-  }
-  filter  inputFingerprint == args.inputFingerprint && statusIsActive && ownerUserId == actor.userId
-  shape   actionFull
-}
-
 // surfacesForOwner -- the resolver's registry read (Phase 2 #1737).
 // Returns the owner's active execution surfaces; the surfaceresolver filters
 // by capability + availability in Go and applies the precedence/world-group
@@ -63,31 +35,6 @@ query surface surfacesForOwner {
 // so an action minted for one input can replay on a different input with the
 // same shape via parameter re-binding. Owned tier; superseded by the planner's
 // semantic search once wired.
-/// Resolve an active v1:actions:action by templateFingerprint (input structure) for the calling
-/// owner -- the parameterized-replay lookup (Phase 3 #1738). Owned tier.
-@unbounded("unique templateFingerprint dedupe probe scoped to the owner -- must see all matches")
-@actor
-query action actionByTemplateFingerprint {
-  args {
-    templateFingerprint  string!
-  }
-  filter  templateFingerprint == args.templateFingerprint && statusIsActive && ownerUserId == actor.userId
-  shape   actionFull
-}
-
-/// List the calling owner's candidate v1:actions:action rows awaiting confirmation (real-machine
-/// side effects gate on a human, Phase 4 #1739). Owned tier.
-@actor
-query action actionsPendingConfirm {
-  filter  status == "candidate" && ownerUserId == actor.userId
-  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
-  // (createdAt, id) instead of a full-table pull. Literal page size -- the
-  // struct-query paginate directive only accepts an integer literal.
-  sort     "row.createdAt", "desc"
-  paginate 50
-  shape   actionFull
-}
-
 // activeActionsForOwner -- the consolidation sweep's input (Phase 4
 // #1739): the owner's active actions, to decay unused ones + deprecate those
 // below the reliability floor. Owned tier.
@@ -139,11 +86,3 @@ query action actionById {
 // owner-scope in Go, like recall) -- the per-row-authz conformance classifier
 // scans struct query/mutation headers, not builtins, so this is documented
 // here for the audit trail.
-@sdk
-@executor("integration.actionSearch.searchActions")
-@args(profile="object")
-builtin searchActions {
-  text      string!
-  k         integer
-  provider  string
-}

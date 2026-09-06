@@ -58,7 +58,6 @@ readonly WIRE_MODULES=(
 readonly ENGINE_MODULES=(
 	"component/language"
 	"component/database"
-	"component/harness"
 	"component/actions"
 	"component/memql"
 	"dsl"

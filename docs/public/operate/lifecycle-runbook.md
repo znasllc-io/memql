@@ -180,7 +180,8 @@ The contract (epic #1259's whole point):
 The parity-CI workflow boots the 2-replica **cloud-parity** cluster from
 product-agnostic engine images and runs the cross-replica delivery gate; the
 product DSL is delivered at runtime via the dsl-bundle component, not
-carrier-built from a sibling Go repo. The harness itself is engine-side:
+carrier-built from a sibling Go repo. The harness itself is engine-side --
+the work spine, not a module:
 `make cluster-e2e` → `scripts/test/cluster-e2e.sh` → `test/clustere2e`,
 build-tagged `clustere2e`, #1261. The gate asserts the #1259 invariant on two
 shapes:

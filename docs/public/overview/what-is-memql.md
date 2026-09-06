@@ -44,7 +44,7 @@ on it.
   not position itself as one -- the graph is the substrate the platform
   runs on, embedded and managed for you.)
 - **Modules** are the platform's own capabilities. The
-  [harness](why-memql-harness.md) -- the runtime that executes agent
+  [harness](why-memql-harness.md) -- the work spine that executes agent
   turns, enforces budgets, and consolidates memory -- is one module.
   Voice is another. Product features ship as packs, and an operator can
   enable or disable a pack per instance. See
@@ -73,6 +73,6 @@ production product runs on MemQL today -- the platform is extracted from
 real operation, not designed on a whiteboard -- but you should expect
 breaking changes between releases until 1.0.
 
-> Next: [Why MemQL ships a harness module](why-memql-harness.md) -- the
+> Next: [Why MemQL ships a harness](why-memql-harness.md) -- the
 > proof-driven tour of the module that runs agents, or the
 > [Quickstart](quickstart.md) if you would rather run it first.

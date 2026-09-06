@@ -1,0 +1,201 @@
+// concepts.memql
+//
+// The work namespace -- the spine of the execution model (design record
+// docs/superpowers/specs/2026-09-05-work-spine-design.md, sub-project A).
+// A goal is the intent, a run is one execution against it, a step is a
+// node of a run; modelCall, approval and observation are the journal.
+//
+// Epic A1 writes run and step rows from the automation executor for
+// every automation execution. goal, modelCall and approval gain their
+// writers in epic A2. observation gains the executor as its writer in
+// A2 as well; in A1 it is the destination the harness observation
+// concept moves to.
+//
+// TIER. Every concept here declares the composite owner tier. A row
+// written by a synthetic cluster actor (the journal in A1, the seed
+// materializer, a maintenance sweep) has its owner blanked to
+// present-and-empty by rowauthz_nonprincipal_owner.go and is the
+// deployment's row, readable through the cluster-owner escape. A row
+// written under a person's borrowed authority (epic A2) is theirs. That
+// is why ownerUserId is @serverSet and NOT required.
+
+use authoring.concepts.{ construct }
+use identity.concepts.{ user }
+use planner.concepts.{ responsibility }
+
+/// The intent, owned by a person. Execution state does not live here: it lives on the run, so a
+/// goal that has been re-run, forked or repaired still reads as one thing.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="statement", secondary="origin", tertiary="requestedVia", status="status")
+concept goal {
+  ownerUserId       string  @serverSet  @description("v1:identity:user.id of the person this goal belongs to, stamped from the actor; present-and-empty for a cluster-owned goal.")
+  statement         string!  @description("The goal in the person's own words.")
+  origin            enum("user", "responsibility", "system")!  @description("Who asked: a person, a standing responsibility, or the platform itself (the Library analysis pass).")
+  responsibilityId  string  @description("v1:planner:responsibility.id this goal was created for, when origin is responsibility.")
+  accountIds        []string  @description("Optional v1:accounts:account tags -- a record of who the work is for, never a visibility scope.")
+  input             object  @description("The typed input object, the shape the chosen template's args declare.")
+  ceilings          object  @description("{tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents} -- inherited by every run of this goal.")
+  status            enum("open", "active", "closed")!  @default("open")  @description("Coarse lifecycle. open = accepted, no run finished; active = a run is in flight; closed = the person or the system closed it.")
+  requestedVia      enum("", "api", "ask", "nexus", "responsibility", "library", "materializer")  @default("")  @description("The surface the goal arrived through. Empty when unknown.")
+  closedAt          datetime  @description("When status reached closed.")
+  closeReason       string  @description("Why it closed, in words a person can read.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forResponsibility", field="responsibilityId", target=responsibility, direction="outgoing")
+}
+
+/// One execution against a goal, or -- in epic A1 -- one automation execution with no goal.
+/// Created the moment the run starts so every later write has a home. The node and heartbeat
+/// fields follow the deployment-run pattern (exactly-once per replica, the abandoned sweep in A2).
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="automationName", secondary="status", tertiary="goalId", status="status")
+concept run {
+  ownerUserId            string  @serverSet  @description("Copied from the goal's owner when there is one; present-and-empty for a system run.")
+  goalId                 string  @description("v1:work:goal.id this run executes, or EMPTY for an automation run that no goal asked for.")
+  automationName         string!  @description("The automation this run executes -- the template's name in the registry.")
+  templateConstructId    string  @description("v1:authoring:construct.id when the template is an authored construct (epic A2).")
+  templateVersion        string  @description("The construct version compiled to (epic A2).")
+  templateFingerprint    string!  @description("Automation.DefinitionFingerprint at start. Resume refuses a run whose automation changed under it.")
+  variables              object  @description("The bound args (epic A2).")
+  input                  object  @description("The automation's input envelope, restored on resume.")
+  inputFingerprint       string  @description("Hash of input, for verification on resume.")
+  triggeredBy            string  @description("How the run was triggered: schedule, event, manual, a sub-automation, or resumed:<runId>.")
+  triggerEvent           object  @description("{topic, kind, payload} of the triggering event, when there was one. Restored on resume.")
+  callerSuppliedPayload  bool  @default("false")  @description("The trigger payload came from a caller (MCP, a dry-run), so a resume must NOT restore internal origin to it (memql#2888, memql#2890).")
+  mode                   enum("live", "replay", "fork")!  @default("live")  @description("live serves nothing from the journal; replay serves every model call from it; fork serves the shared prefix.")
+  forkedFromRunId        string  @description("The run this one was forked from, when mode is fork.")
+  forkAtStepKey          string  @description("The step key the fork diverged at.")
+  replayPolicy           enum("strict", "permissive")  @default("strict")  @description("strict raises a divergence on a journal miss during replay; permissive makes a fresh call and journals it.")
+  status                 enum("compiling", "running", "waiting", "succeeded", "failed", "cancelled", "abandoned")!  @description("Where the run is.")
+  waitingOn              object  @description("{kind: approval|feedback|timer|external|subrun, subject, since} while status is waiting.")
+  spent                  object  @description("{tokens, tokensSubscription, tokensLocal, cost, modelCalls, retries, events, wallClockMs} so far.")
+  nodeId                 string  @description("MEMQL_NODE_ID of the replica running this run. Stamped at open, never rewritten.")
+  heartbeatAt            datetime  @description("When the running node last wrote a step boundary.")
+  cancelRequested        bool  @default("false")  @description("Somebody asked for this run to stop.")
+  cancelledBy            string  @description("v1:identity:user.id when a person cancelled, or a system sentinel.")
+  expectedFootprint      object  @description("The union of the declared effects of the steps (epic A2).")
+  actualFootprint        object  @description("What the run observed itself touching (epic A2).")
+  outcome                object  @description("The terminal result, structured.")
+  errorCode              string  @description("A catalogued code when the run failed.")
+  errorMessage           string  @description("The failure in words.")
+  chainHead              string  @description("Chain-tracking head after the last recorded step.")
+  initialChainHead       string  @description("Chain-tracking head before the first step.")
+  stepOrder              []string  @description("Step keys in execution order.")
+  startedAt              datetime!  @description("When the run started.")
+  finishedAt             datetime  @description("When status reached a terminal value.")
+  summary                object  @description("Folded from the journal before its retention window closes (epic A2).")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="goalId", target=goal, direction="outgoing")
+  @relationship(type="references", as="compiledFrom", field="templateConstructId", target=construct, direction="outgoing")
+}
+
+/// A node of a run. A retry is a NEW VERSION of the same row with attempt incremented; the intent is
+/// the `running` version written before the body executes and the receipt is the `done` or `failed`
+/// version written after. Resolved step arguments are deliberately NOT recorded here (they may carry
+/// resolved secrets); `call` names what ran, `result` is the trimmed result shape.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="key", secondary="stepType", tertiary="runId", status="status")
+concept step {
+  ownerUserId        string  @serverSet  @description("Copied from the run's owner; present-and-empty for a system run.")
+  runId              string!  @description("v1:work:run.id this step belongs to.")
+  key                string!  @description("The stable step key from the template (the automation step id).")
+  seq                int!  @description("Position in the run's step order, 0-based.")
+  stepType           string!  @description("The automation step type: query, mutation, shape, webhook, event, function, action, automation, forEach, parallel, switch, detectLeadSignal, emitConceptCard.")
+  kind               enum("", "deterministic", "reasoning", "decision", "human", "loop", "subrun")  @default("")  @description("Derived kind (spec section B). Epic A1 derives it for every type except function, which stays empty until the A2 loader rule.")
+  call               object  @description("{construct, name} -- what the step invoked, by name only.")
+  dependsOn          []string  @description("Step keys this step depends on.")
+  input              object  @description("The bound input, when it is safe to record (epic A2 decides redaction). Empty in A1.")
+  result             object  @description("The trimmed result: {status, result, error, metadata, contentId} -- the MinimalStepResult shape resume rehydrates from.")
+  resultFingerprint  string  @description("StepDeterministicFingerprint of the result.")
+  binding            object  @description("{skillIds, providerPolicy, provider, model, surface, machineLabels, workerId, nodeId} recorded at dispatch (epic A3).")
+  expectedFootprint  object  @description("Declared effects of what the step calls (epic A2).")
+  actualFootprint    object  @description("Observed effects (epic A2).")
+  postcondition      object  @description("{kind: spec|schema|check, ref, passed, message} (epic A2).")
+  status             enum("pending", "ready", "running", "waiting", "done", "failed", "skipped", "cancelled")!  @description("Where the step is.")
+  symptom            enum("", "transient", "environment", "contract", "plan", "human")  @default("")  @description("What the classifier decided on failure (epic A2).")
+  attempt            int!  @default("1")  @description("1 on first execution; incremented on each retry of the same key.")
+  idempotencyKey     string  @description("runId:key:attempt -- the key a side effect runs under (epic A2 wires the receipts).")
+  childRunId         string  @description("The child run a subrun step opened (epic A2).")
+  approvalId         string  @description("The approval a human step waits on (epic A2).")
+  resumeAt           datetime  @description("When a timer wait resumes (epic A2).")
+  externalKey        string  @description("The inbound key an external wait resumes on (epic A2).")
+  startedAt          datetime  @description("When the body started.")
+  finishedAt         datetime  @description("When the receipt was written.")
+  durationMs         int  @description("Body duration in milliseconds.")
+  tokens             int  @description("Tokens spent inside this step (epic A2).")
+  cost               float  @description("Cost attributed to this step (epic A2).")
+  errorCode          string  @description("A catalogued code when the step failed.")
+  errorMessage       string  @description("The failure in words.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="runId", target=run, direction="outgoing")
+}
+
+/// One model request, journaled so a replay can serve it without a provider. Owner tier, a
+/// hypertable with retention (epic A2), never broadcast.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="model", secondary="served", tertiary="runId")
+concept modelCall {
+  ownerUserId   string  @serverSet  @description("Copied from the run's owner.")
+  runId         string!  @description("v1:work:run.id the call was made for.")
+  stepKey       string  @description("The step that made the call.")
+  requestHash   string!  @description("Hash over provider, model, settings, messages, tools and output schema -- the replay key.")
+  provider      string!  @description("Provider name as the router resolved it.")
+  model         string!  @description("Model id as the router resolved it.")
+  settings      object  @description("Temperature, max tokens and the rest of the request settings.")
+  promptRef     string  @description("The prompt construct name.")
+  promptVersion string  @description("The prompt construct version at call time.")
+  inputTokens   int  @description("Tokens in.")
+  outputTokens  int  @description("Tokens out.")
+  cost          float  @description("Cost attributed to this call.")
+  latencyMs     int  @description("Wall-clock latency of the call.")
+  served        enum("live", "journal", "local")!  @description("live = a provider answered; journal = served from a recorded response; local = a fleet model answered.")
+  response      object  @description("The response, structured output or text.")
+  error         string  @description("The provider's error, when there was one.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="runId", target=run, direction="outgoing")
+}
+
+/// One human gate. Every kind of gate is this concept; an approval never carries to a modified
+/// artifact, because resume compares artifactHash. It broadcasts.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="kind", secondary="decision", tertiary="runId", status="decision")
+concept approval {
+  ownerUserId   string  @serverSet  @description("Copied from the run's owner: the person whose decision this is.")
+  runId         string!  @description("v1:work:run.id parked on this approval.")
+  stepKey       string  @description("The step that raised it.")
+  kind          enum("sideEffect", "scopeElevation", "budget", "skillMint", "feedback", "planReview")!  @description("Which gate.")
+  subject       object  @description("What is being approved, structured.")
+  artifactHash  string!  @description("Hash of the exact artifact approved: the command, the patch, the message, the draft template.")
+  question      string  @description("The question put to the person, for kind feedback.")
+  options       []object  @description("[{label, value}] for a choice question.")
+  evidence      object  @description("{tier, reason, ruleId, source} from the classifier.")
+  requestedAt   datetime!  @description("When the run parked.")
+  decidedBy     string  @description("v1:identity:user.id of the decider.")
+  decidedAt     datetime  @description("When the decision landed.")
+  decision      enum("", "approved", "rejected", "answered")  @default("")  @description("Empty while pending.")
+  answer        object  @description("The person's answer, for kind feedback.")
+  expiresAt     datetime  @description("When a pending approval lapses.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="runId", target=run, direction="outgoing")
+}
+
+/// What a step observed beyond its result: a tool result, an error, a note, a decision. The
+/// embedding source for recall, so the journal is the episodic memory. Never broadcast.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="kind", secondary="stepKey", tertiary="runId")
+concept observation {
+  ownerUserId  string  @serverSet  @description("Copied from the run's owner.")
+  runId        string!  @description("v1:work:run.id the observation belongs to.")
+  stepKey      string  @description("The step that produced it.")
+  kind         enum("tool_result", "error", "note", "decision")!  @description("What kind of event this records.")
+  data         object  @description("Structured per-kind data. Named data, not payload, because payload is a reserved row intrinsic.")
+  content      string!  @description("The text rendering -- the embedding source, so observations are recall-able.")
+  embedding    []float  @description("The embedding vector for content, populated lazily by the embed hook.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="runId", target=run, direction="outgoing")
+}

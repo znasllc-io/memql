@@ -15,7 +15,7 @@
 // modules would import each other, and the toolchain rejects that.
 //
 // The audit found one 6-area strongly-connected component:
-// component/{database,harness,actions,language,memql} + dsl -- an artifact of
+// component/{database,actions,language,memql} + dsl -- an artifact of
 // five L0 leaves (baseparser, baseregistry, dslfs, literalparity,
 // liveknowledge) being misfiled inside the engine directory, plus
 // component/memql importing integrations/audio, an mp3/wav codec that is a
@@ -164,12 +164,10 @@ func areaOf(importPath string) (string, bool) {
 // its line and say so in the commit. Do not delete the check.
 var requiredAreas = []string{
 	"app",
-	"cmd/action-upgrade",
 	"cmd/admin-preview",
 	"cmd/deploy-gate-check",
 	"cmd/docs-gen",
 	"cmd/envscan",
-	"cmd/harness-eval",
 	"cmd/healthcheck",
 	"cmd/memql-arch",
 	"cmd/memql-lsp",
@@ -188,7 +186,6 @@ var requiredAreas = []string{
 	"component/fileprocessor",
 	"component/envregistry",
 	"component/grpc",
-	"component/harness",
 	"component/healing",
 	"component/identity",
 	"component/inbound",
@@ -227,7 +224,6 @@ var requiredAreas = []string{
 	"examples/deploypack",
 	"examples/referencepack",
 	"integrations",
-	"integrations/actionsearch",
 	"integrations/agent",
 	"integrations/agentdef",
 	"integrations/agents",
@@ -244,7 +240,7 @@ var requiredAreas = []string{
 	"integrations/embedding",
 	"integrations/fileprocessor",
 	"integrations/harnessrecall",
-	"integrations/harnesstrace",
+	"integrations/worktrace",
 	"integrations/identity",
 	"integrations/knowledge",
 	"integrations/library",

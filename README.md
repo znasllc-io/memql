@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>The open-source AI platform: agents, automations, voice, campaigns, and hosted sites on a time-series memory graph.</strong><br>
-  Declare behavior in one DSL; a mesh of specialized nodes runs it. The harness is one module of the platform, and clients are what you build on it.
+  Declare behavior in one DSL; a mesh of specialized nodes runs it. The harness is the platform's work spine, and clients are what you build on it.
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@
 
 ## What is MemQL?
 
-MemQL is an open-source AI platform built on a time-series memory graph, with its own DSL — a single language for declaring concepts (schemas), queries, mutations, tools, and event-driven automations side-by-side, then executing them across specialized nodes. What the platform runs are its [modules](docs/public/concepts/modules.md) — components, integrations, packs (per-instance enable/disable), and node-type modules like voice; the agent harness is one of them. What you build on it are [clients](docs/public/concepts/clients.md) — SPAs, websites, and apps, one repo per client stamped from the `memql-project` template, with the engine staying product-agnostic.
+MemQL is an open-source AI platform built on a time-series memory graph, with its own DSL — a single language for declaring concepts (schemas), queries, mutations, tools, and event-driven automations side-by-side, then executing them across specialized nodes. What the platform runs are its [modules](docs/public/concepts/modules.md) — components, integrations, packs (per-instance enable/disable), and node-type modules like voice. The agent harness is not one of them: it is the work spine, and every goal, run, step, model call, approval, skill and belief it produces is a typed, authorized, replayable row in the memory graph. What you build on it are [clients](docs/public/concepts/clients.md) — SPAs, websites, and apps, one repo per client stamped from the `memql-project` template, with the engine staying product-agnostic.
 
 It replaces the integration glue AI-native teams typically hand-write — vector store + workflow engine + AI gateway + voice stack — with one deployable primitive. A team that would otherwise stitch together four systems can declare an agent's memory, behavior, and triggers in one DSL file and run them on a MemQL cluster.
 

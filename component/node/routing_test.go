@@ -141,7 +141,7 @@ func TestEvaluateRouting_CacheInvalidateBroadcast(t *testing.T) {
 	// single cache.invalidate.* broadcast rule.
 	concepts := []string{
 		"v1:agents:agentRole",
-		"v1:agents:skill",
+		"v1:skills:skill",
 		"v1:router:budget",
 		"v1:cognition:utterance",
 		"v1:cognition:space",        // default-cached, never had a per-concept cache rule

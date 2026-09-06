@@ -145,45 +145,46 @@ func TestRealEngineCuratedToolSurface(t *testing.T) {
 	}
 }
 
-// TestHarnessStepChainReachableOverMCP asserts that the full harness
-// add→ready→start→complete/fail mutation chain is promoted onto the MCP
-// surface via @mcp (memql#1679). These are the @mcp-promoted query/mutation
-// tools that expose the step state machine over the connector; without
-// readyHarnessStep the chain was stuck at 'pending' forever.
-func TestHarnessStepChainReachableOverMCP(t *testing.T) {
+// TestWorkJournalIsNotReachableOverMCP is what became of
+// TestHarnessStepChainReachableOverMCP when the work spine retired the harness
+// (epic memql#4962).
+//
+// THE ORIGINAL PROPERTY (memql#1679) WAS: a mutation chain an agent must call
+// IN SEQUENCE has to be promoted WHOLE, because a half-promoted chain is worse
+// than none -- the agent gets to `pending` and stops. Its subject was the seven
+// harness step-chain mutations, and all seven are deleted. There is no promoted
+// mutation chain left in the tree to re-point it at: every @mcp-promoted
+// function today is a READ.
+//
+// SO THE TEST IS INVERTED RATHER THAN DELETED, because the work spine gives the
+// same question a new and sharper answer. The journal's writes are the engine's
+// testimony about its own execution: a caller who can insert a run or a step row
+// can claim an execution that never happened, and resume, replay and recall will
+// serve that forgery back as fact. Every one of them is @serverOnly for exactly
+// that reason -- so the property worth guarding is that NONE of them is
+// reachable over the connector, which is the opposite of what #1679 asked and
+// the same kind of claim.
+//
+// The promoted set is asserted NON-EMPTY first. Without that, a build in which
+// promotion is broken outright would satisfy every absence check below while
+// measuring nothing.
+func TestWorkJournalIsNotReachableOverMCP(t *testing.T) {
 	eng := loadedEngine(t)
 
-	// @mcp-promoted mutations surface via MCPPromotedFunctionTools, not the
-	// tool registry (tool{} constructs). Collect promoted function names.
 	promoted := map[string]bool{}
 	for _, m := range eng.MCPPromotedFunctionTools() {
 		if n, _ := m["name"].(string); n != "" {
 			promoted[n] = true
 		}
 	}
-
-	chain := []string{
-		"createHarnessPlan",
-		"addHarnessStep",
-		"readyHarnessStep", // the critical missing link (#1679)
-		"startHarnessStep",
-		"completeHarnessStep",
-		"failHarnessStep",
-		"recordHarnessObservation",
-	}
-	for _, name := range chain {
-		if !promoted[name] {
-			t.Errorf("harness mutation %q is not @mcp-promoted; the step chain is unreachable over the connector (promoted: %v)", name, promoted)
-		}
+	if len(promoted) == 0 {
+		t.Fatal("no functions are @mcp-promoted at all, so the absence checks below prove nothing " +
+			"-- promotion itself is broken, or loadedEngine did not load the tree")
 	}
 
-	// Sanity: the MCP server surface (tools/list) must also include these
-	// as first-class tool entries (via MCPPromotedFunctionTools appended
-	// in listMCPTools).
 	s := NewServer(slog.Default(), "memql-mcp", "test", eng, Config{})
-	toolList := rpcList(t, s, "tools/list", "tools")
 	toolNames := map[string]bool{}
-	for _, raw := range toolList {
+	for _, raw := range rpcList(t, s, "tools/list", "tools") {
 		m, _ := raw.(map[string]any)
 		if m == nil {
 			continue
@@ -192,10 +193,39 @@ func TestHarnessStepChainReachableOverMCP(t *testing.T) {
 			toolNames[n] = true
 		}
 	}
-	for _, name := range chain {
-		if !toolNames[name] {
-			t.Errorf("harness mutation %q is missing from tools/list over the MCP server (chain must be fully reachable, #1679)", name)
+	if len(toolNames) == 0 {
+		t.Fatal("tools/list came back empty, so the absence checks below prove nothing")
+	}
+
+	// The journal's writers, plus the two reads resume makes under the
+	// synthetic cluster actor. A caller reaching any of these is either
+	// forging an execution record or reading another tenant's run.
+	sealed := []string{
+		"createWorkRun",
+		"updateWorkRun",
+		"createWorkStep",
+		"updateWorkStep",
+		"createWorkGoal",
+		"createWorkModelCall",
+		"createWorkObservation",
+		"createWorkApproval",
+		"decideWorkApproval",
+		"workRunById",
+		"workStepsForRun",
+	}
+	for _, name := range sealed {
+		if promoted[name] {
+			t.Errorf("%q is @mcp-promoted. It is @serverOnly: a client-reachable write here forges an "+
+				"execution record that resume and replay then serve back as fact (work spine, epic memql#4962)", name)
+		}
+		if toolNames[name] {
+			t.Errorf("%q appears in tools/list over the MCP server, so it is callable by a connected agent", name)
 		}
 	}
-	t.Logf("harness step-chain MCP surface: all %d mutations present in tools/list", len(chain))
+
+	// The owner-facing reads are @actor and caller-scoped rather than
+	// @serverOnly, so they are ALLOWED to be promoted -- this test must not
+	// grow into "nothing in the work namespace may ever be reachable".
+	t.Logf("work journal MCP surface: %d sealed constructs absent from a %d-tool surface",
+		len(sealed), len(toolNames))
 }
