@@ -69,6 +69,17 @@ describe("the section list", () => {
 
   it("opens on Goals, and names that default rather than reading it off the array", () => {
     expect(NEXUS_SECTIONS[0]?.id).toBe("goals");
+    // RUNS STAYS, and it is a decision (design record D3): `v1:work:run.goalId`
+    // is EMPTY for an automation run no goal asked for, and in a goal-only app
+    // those runs would have no home at all.
+    expect(NEXUS_SECTIONS.map((section) => section.id)).toEqual([
+      "goals",
+      "runs",
+      "automations",
+      "approvals",
+      "logs",
+      "settings",
+    ]);
     expect(DEFAULT_NEXUS_SETTINGS.defaultSection).toBe("goals");
   });
 

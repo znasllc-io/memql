@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowUp, Mic } from "lucide-react";
 
 import type { AskHandle, AskTransport } from "./askController";
+import type { MakeGoalState } from "./useMakeGoal";
 import { useReducedMotion, useVoice } from "./useVoice";
 import type { VoicePorts, VoiceProblem, VoiceState } from "./voiceSession";
 import { DEFAULT_ASK_SETTINGS, type AskSettings } from "../apps/settings/askSettings";
@@ -82,6 +83,7 @@ export function AskSurface({
   context = null,
   variant,
   autoFocus = false,
+  makeGoal = null,
 }: {
   transport: AskTransport;
   /** Absent = this window has no voice wiring; the control says so. */
@@ -90,6 +92,15 @@ export function AskSurface({
   context?: string | null;
   variant: "sheet" | "widget";
   autoFocus?: boolean;
+  /**
+   * Ask-to-goal (epic memql#4785). ABSENT means this surface cannot hand a
+   * prompt off, and the act is then not rendered at all rather than rendered
+   * disabled -- a harness with no cluster behind it should show the Ask it
+   * actually has. The act appears per EXCHANGE rather than beside the input,
+   * because the decision to have something done is one somebody makes after
+   * reading the answer, not before typing.
+   */
+  makeGoal?: MakeGoalState | null;
 }) {
   const [draft, setDraft] = useState("");
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
@@ -242,9 +253,31 @@ export function AskSurface({
                 </button>
               </p>
             ) : null}
+            {/* OFFERED ONCE THE ANSWER HAS LANDED, and not while it is
+                streaming: half an answer is not enough to decide whether you
+                want the thing done, and an act that appears mid-stream moves
+                under the cursor. */}
+            {makeGoal !== null && e.state === "done" ? (
+              <p className="os-ask-handoff">
+                <button
+                  type="button"
+                  className="os-link"
+                  disabled={makeGoal.busy}
+                  onClick={() => void makeGoal.make(e.prompt)}
+                >
+                  {makeGoal.busy ? "Making it a goal" : "Make this a goal"}
+                </button>
+                <span className="os-caption"> — the system works out how, once.</span>
+              </p>
+            ) : null}
           </div>
         ))}
       </div>
+      {makeGoal !== null && makeGoal.error !== "" ? (
+        <p className="os-ask-error" role="alert">
+          {makeGoal.error}
+        </p>
+      ) : null}
       <form className="os-ask-input" onSubmit={onSubmit}>
         <button
           ref={micRef}

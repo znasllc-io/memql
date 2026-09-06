@@ -7835,10 +7835,10 @@ a.os-button {
  * plate rather than to the window. Same arrangement as `.os-deploy-pane`; the
  * negative margin cancels the window's own padding so the bar meets its edges
  * and the scrolling half gives it back. */
-.os-work-goals,
-.os-work-list,
-.os-work-approvals,
-.os-work-run {
+.os-nexus-goals,
+.os-nexus-list,
+.os-nexus-approvals,
+.os-nexus-run {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -7847,27 +7847,27 @@ a.os-button {
   margin: -18px -20px;
   padding: 18px 20px 0;
 }
-.os-work-goals > .os-actbar,
-.os-work-approvals > .os-actbar,
-.os-work-run > .os-actbar {
+.os-nexus-goals > .os-actbar,
+.os-nexus-approvals > .os-actbar,
+.os-nexus-run > .os-actbar {
   margin: 0 -20px;
 }
 
 /* The quiet scope line: sort, or a sentence about the order (rule 3). */
-.os-work-scope {
+.os-nexus-scope {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: 0 0 auto;
 }
-.os-work-scope .os-caption {
+.os-nexus-scope .os-caption {
   margin: 0;
 }
 
 /* A LIST AND ITS DETAIL NEVER SHARE A SCROLL COLUMN (rule 11). Two columns,
  * each its own scroller; the Head above them does not scroll away from the
  * list somebody is scrolling. */
-.os-work-split {
+.os-nexus-split {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -7875,7 +7875,7 @@ a.os-button {
   gap: 14px;
   align-items: stretch;
 }
-.os-work-column {
+.os-nexus-column {
   flex: 1 1 340px;
   min-width: 0;
   overflow-y: auto;
@@ -7883,7 +7883,7 @@ a.os-button {
   flex-direction: column;
   gap: 8px;
 }
-.os-work-aside {
+.os-nexus-aside {
   flex: 1 1 320px;
   max-width: 460px;
   align-self: flex-start;
@@ -7907,15 +7907,15 @@ a.os-button {
  * Scoped to this app rather than added to `.os-row-name` in the kit: every
  * other list in the shell names a THING, and a rule that let those names
  * start truncating would change eight apps to fix one. */
-.os-work-goals .os-row-name,
-.os-work-approvals .os-row-name {
+.os-nexus-goals .os-row-name,
+.os-nexus-approvals .os-row-name {
   min-width: 0;
 }
 /* TWO LINES, NOT ONE. A goal is a sentence somebody wrote, and sixty
  * characters of it plus an ellipsis is a worse answer than the whole first
  * clause. Two lines is where it stops being a list row. */
-.os-work-goal-statement,
-.os-work-approval-subject {
+.os-nexus-goal-statement,
+.os-nexus-approval-subject {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -7923,7 +7923,7 @@ a.os-button {
   overflow: hidden;
   overflow-wrap: anywhere;
 }
-.os-work-goal-origin {
+.os-nexus-goal-origin {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -7934,34 +7934,34 @@ a.os-button {
 }
 /* A chip in a squeezed state cluster wrapped onto two lines and doubled the
  * row's height. Nothing in the cluster is prose. */
-.os-work-goals .os-chip,
-.os-work-list .os-chip,
-.os-work-approvals .os-chip {
+.os-nexus-goals .os-chip,
+.os-nexus-list .os-chip,
+.os-nexus-approvals .os-chip {
   white-space: nowrap;
 }
 
-.os-work-goal-status,
-.os-work-run-status {
+.os-nexus-goal-status,
+.os-nexus-run-status {
   font-size: var(--os-text-xs);
   color: var(--os-muted);
   white-space: nowrap;
 }
 /* Failure and loss are the two the eye must find; everything else stays
  * quiet. `abandoned` is WARN and never ERROR: nothing failed. */
-.os-work-goal-status[data-status="active"],
-.os-work-run-status[data-status="running"],
-.os-work-run-status[data-status="compiling"] {
+.os-nexus-goal-status[data-status="active"],
+.os-nexus-run-status[data-status="running"],
+.os-nexus-run-status[data-status="compiling"] {
   color: var(--os-ink);
 }
-.os-work-run-status[data-status="failed"] {
+.os-nexus-run-status[data-status="failed"] {
   color: var(--os-error);
 }
-.os-work-run-status[data-status="abandoned"],
-.os-work-run-status[data-status="waiting"] {
+.os-nexus-run-status[data-status="abandoned"],
+.os-nexus-run-status[data-status="waiting"] {
   color: var(--os-warn);
 }
 
-.os-work-goal-full {
+.os-nexus-goal-full {
   margin: 0;
   font-size: var(--os-text-md);
   line-height: 1.5;
@@ -7970,7 +7970,7 @@ a.os-button {
   max-width: 56ch;
 }
 
-.os-work-runlist {
+.os-nexus-runlist {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -7983,7 +7983,7 @@ a.os-button {
  * "re..." beside the whole of the goal it belongs to -- the identifier gone
  * and the context intact, which is backwards. `flex-basis: 0` makes this the
  * item that gives way. */
-.os-work-run-for {
+.os-nexus-run-for {
   flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
@@ -7996,34 +7996,34 @@ a.os-button {
 /* A goal's runs, as marks. Each carries its own accessible name, so the strip
  * reads as "run 1, done; run 2, waiting for you" rather than as decoration --
  * the same contract the Deployables list row's compact rail has. */
-.os-work-marks {
+.os-nexus-marks {
   display: inline-flex;
   align-items: center;
   gap: 3px;
   flex: none;
 }
-.os-work-mark {
+.os-nexus-mark {
   width: 8px;
   height: 8px;
   border-radius: 2px;
   background: var(--os-rail);
   flex: none;
 }
-.os-work-mark[data-status="succeeded"] {
+.os-nexus-mark[data-status="succeeded"] {
   background: var(--os-rail-hover);
 }
-.os-work-mark[data-status="running"],
-.os-work-mark[data-status="compiling"] {
+.os-nexus-mark[data-status="running"],
+.os-nexus-mark[data-status="compiling"] {
   background: var(--os-ink);
 }
-.os-work-mark[data-status="failed"] {
+.os-nexus-mark[data-status="failed"] {
   background: var(--os-error);
 }
-.os-work-mark[data-status="abandoned"] {
+.os-nexus-mark[data-status="abandoned"] {
   background: var(--os-warn);
 }
 /* The one place the accent appears on a mark: something is stuck on YOU. */
-.os-work-mark[data-parked] {
+.os-nexus-mark[data-parked] {
   background: var(--os-accent);
   box-shadow: 0 0 0 2px var(--os-accent-soft);
 }
@@ -8033,7 +8033,7 @@ a.os-button {
  * PROSE, NOT MONO. The campaigns template editor's box is mono because it
  * holds markup somebody will paste elsewhere; this holds a sentence somebody
  * wrote, and setting it in the code face would tell them it is a value. */
-.os-work-statement {
+.os-nexus-statement {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid var(--os-line);
@@ -8045,14 +8045,14 @@ a.os-button {
   line-height: 1.5;
   resize: vertical;
 }
-.os-work-form-acts {
+.os-nexus-form-acts {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
 }
 
 /* ---- the run page -----------------------------------------------------*/
-.os-work-run-body {
+.os-nexus-run-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -8064,7 +8064,7 @@ a.os-button {
 /* WHAT THIS RUN IS FOR, FIRST. A run's own name is an automation name; the
  * reason it exists is the goal's statement, and that is what somebody
  * arriving from a notification needs before anything else. */
-.os-work-run-lede {
+.os-nexus-run-lede {
   margin: 0;
   max-width: 62ch;
   font-size: var(--os-text-md);
@@ -8072,7 +8072,7 @@ a.os-button {
   color: var(--os-ink);
 }
 
-.os-work-back {
+.os-nexus-back {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -8083,12 +8083,12 @@ a.os-button {
   font-size: var(--os-text-sm);
   color: var(--os-muted);
 }
-.os-work-back:hover {
+.os-nexus-back:hover {
   color: var(--os-ink);
 }
 /* A link inside prose: the accent carries it, and the underline carries it
  * for anyone who cannot see the accent. */
-.os-work-link {
+.os-nexus-link {
   padding: 0;
   border: 0;
   background: none;
@@ -8110,13 +8110,13 @@ a.os-button {
  * (flex-grow segments, a floored minimum share, a spoken label) applied to a
  * different partition -- and the WEIGHT axis rather than the hue one, for the
  * reason stated at the top of this section. */
-.os-work-band {
+.os-nexus-band {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin: 2px 0 8px;
 }
-.os-work-band-bar {
+.os-nexus-band-bar {
   display: flex;
   width: 100%;
   height: 14px;
@@ -8125,10 +8125,10 @@ a.os-button {
   background: var(--os-rail);
   border: 1px solid var(--os-line);
 }
-.os-work-band-bar[data-empty] {
+.os-nexus-band-bar[data-empty] {
   background: transparent;
 }
-.os-work-band-seg {
+.os-nexus-band-seg {
   display: block;
   min-width: 2px;
   flex-basis: 0;
@@ -8145,30 +8145,30 @@ a.os-button {
  * bar's own `--os-rail` ground it looked like the bar started with a gap,
  * which reads as a rendering fault rather than as "most of this run was
  * free". It stays the quietest step on the ladder, one rung up. */
-.os-work-band-seg[data-kind="deterministic"],
-.os-work-band-swatch[data-kind="deterministic"] {
+.os-nexus-band-seg[data-kind="deterministic"],
+.os-nexus-band-swatch[data-kind="deterministic"] {
   background: color-mix(in oklab, var(--os-ink) 28%, transparent);
 }
-.os-work-band-seg[data-kind="decision"],
-.os-work-band-swatch[data-kind="decision"] {
+.os-nexus-band-seg[data-kind="decision"],
+.os-nexus-band-swatch[data-kind="decision"] {
   background: color-mix(in oklab, var(--os-ink) 45%, transparent);
 }
-.os-work-band-seg[data-kind="subrun"],
-.os-work-band-swatch[data-kind="subrun"] {
+.os-nexus-band-seg[data-kind="subrun"],
+.os-nexus-band-swatch[data-kind="subrun"] {
   background: color-mix(in oklab, var(--os-ink) 65%, transparent);
 }
-.os-work-band-seg[data-kind="loop"],
-.os-work-band-swatch[data-kind="loop"],
-.os-work-band-seg[data-kind="reasoning"],
-.os-work-band-swatch[data-kind="reasoning"] {
+.os-nexus-band-seg[data-kind="loop"],
+.os-nexus-band-swatch[data-kind="loop"],
+.os-nexus-band-seg[data-kind="reasoning"],
+.os-nexus-band-swatch[data-kind="reasoning"] {
   background: var(--os-ink);
 }
-.os-work-band-seg[data-kind="human"],
-.os-work-band-swatch[data-kind="human"] {
+.os-nexus-band-seg[data-kind="human"],
+.os-nexus-band-swatch[data-kind="human"] {
   background: var(--os-accent);
 }
-.os-work-band-seg[data-kind="unclassified"],
-.os-work-band-swatch[data-kind="unclassified"] {
+.os-nexus-band-seg[data-kind="unclassified"],
+.os-nexus-band-swatch[data-kind="unclassified"] {
   background: repeating-linear-gradient(
     45deg,
     var(--os-rail) 0 3px,
@@ -8176,7 +8176,7 @@ a.os-button {
   );
 }
 
-.os-work-band-legend {
+.os-nexus-band-legend {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
@@ -8184,13 +8184,13 @@ a.os-button {
   padding: 0;
   list-style: none;
 }
-.os-work-band-item {
+.os-nexus-band-item {
   display: flex;
   align-items: baseline;
   gap: 6px;
   font-size: var(--os-text-sm);
 }
-.os-work-band-swatch {
+.os-nexus-band-swatch {
   display: inline-block;
   width: 8px;
   height: 8px;
@@ -8198,17 +8198,17 @@ a.os-button {
   transform: translateY(1px);
   border: 1px solid var(--os-line);
 }
-.os-work-band-label {
+.os-nexus-band-label {
   color: var(--os-muted);
 }
-.os-work-band-count {
+.os-nexus-band-count {
   font-family: var(--os-font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 /* The spend line: the band's legend in figures, not four stat cards beside
  * it. Every value can be ABSENT and renders as an em dash. */
-.os-work-spend {
+.os-nexus-spend {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 20px;
@@ -8217,37 +8217,37 @@ a.os-button {
   border-top: 1px solid var(--os-line);
   list-style: none;
 }
-.os-work-spend-item {
+.os-nexus-spend-item {
   display: flex;
   flex-direction: column;
   gap: 1px;
   min-width: 0;
 }
-.os-work-spend-value {
+.os-nexus-spend-value {
   font-size: var(--os-text-md);
   font-variant-numeric: tabular-nums;
 }
-.os-work-spend-label {
+.os-nexus-spend-label {
   font-size: var(--os-text-xs);
   color: var(--os-muted);
 }
 
 /* ---- the spine --------------------------------------------------------*/
-.os-work-timeline {
+.os-nexus-timeline {
   display: flex;
   flex-direction: column;
 }
-.os-work-steps {
+.os-nexus-steps {
   list-style: none;
   margin: 0;
   padding: 0;
 }
-.os-work-step-item {
+.os-nexus-step-item {
   display: flex;
   flex-direction: column;
 }
 
-.os-work-step {
+.os-nexus-step {
   display: flex;
   align-items: stretch;
   gap: 10px;
@@ -8260,15 +8260,15 @@ a.os-button {
   color: var(--os-ink);
   font: inherit;
 }
-.os-work-step:hover .os-work-step-body,
-.os-work-step[data-open] .os-work-step-body {
+.os-nexus-step:hover .os-nexus-step-body,
+.os-nexus-step[data-open] .os-nexus-step-body {
   background: var(--os-raised);
 }
 
 /* THE GUTTER. Fixed width so every node in a run sits on one vertical line --
  * a spine that wandered by a pixel per row would read as a list of unrelated
  * marks rather than as one thread. */
-.os-work-step-spine {
+.os-nexus-step-spine {
   position: relative;
   flex: none;
   width: 18px;
@@ -8282,13 +8282,13 @@ a.os-button {
  * four unrelated marks rather than as one thread thickening. `--os-rail-hover`
  * is the shell's own "this rail is present" tint and 1.5px carries it in both
  * modes. Found in a browser; jsdom lays nothing out. */
-.os-work-step-line {
+.os-nexus-step-line {
   flex: 1 1 auto;
   width: 1.5px;
   min-height: 6px;
   background: var(--os-rail-hover);
 }
-.os-work-step-node {
+.os-nexus-step-node {
   flex: none;
   width: 8px;
   height: 8px;
@@ -8302,11 +8302,11 @@ a.os-button {
  * larger node -- the three together are what makes a reasoning step findable
  * at a glance in a run of fifty. Nothing here is a hue, so it reads the same
  * under every theme pack and in greyscale. */
-.os-work-step[data-thought] .os-work-step-line {
+.os-nexus-step[data-thought] .os-nexus-step-line {
   width: 3px;
   background: var(--os-ink);
 }
-.os-work-step[data-thought] .os-work-step-node {
+.os-nexus-step[data-thought] .os-nexus-step-node {
   width: 11px;
   height: 11px;
   border-color: var(--os-ink);
@@ -8315,24 +8315,24 @@ a.os-button {
 /* A step that stops and asks somebody is the other one worth finding, and it
  * is the accent for the reason the run mark is: it is the only thing on this
  * page a reader can act on. */
-.os-work-step[data-kind="human"] .os-work-step-node {
+.os-nexus-step[data-kind="human"] .os-nexus-step-node {
   border-color: var(--os-accent);
   background: var(--os-accent);
 }
-.os-work-step[data-status="failed"] .os-work-step-node {
+.os-nexus-step[data-status="failed"] .os-nexus-step-node {
   border-color: var(--os-error);
   background: var(--os-error);
 }
 /* A step that has not run yet draws nothing: pending rows are the shape of
  * the plan rather than a record of anything, and drawing them at full weight
  * would make a run that has done nothing look busy. */
-.os-work-step[data-status="pending"] .os-work-step-node,
-.os-work-step[data-status="ready"] .os-work-step-node {
+.os-nexus-step[data-status="pending"] .os-nexus-step-node,
+.os-nexus-step[data-status="ready"] .os-nexus-step-node {
   border-color: var(--os-rail);
   background: transparent;
 }
 
-.os-work-step-seq {
+.os-nexus-step-seq {
   flex: none;
   width: 2.2ch;
   padding-top: 7px;
@@ -8343,7 +8343,7 @@ a.os-button {
   text-align: right;
 }
 
-.os-work-step-body {
+.os-nexus-step-body {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
@@ -8352,36 +8352,36 @@ a.os-button {
   padding: 6px 8px;
   border-radius: var(--os-radius-xs);
 }
-.os-work-step-name {
+.os-nexus-step-name {
   display: flex;
   align-items: baseline;
   gap: 8px;
   min-width: 0;
 }
-.os-work-step-key {
+.os-nexus-step-key {
   font-size: var(--os-text-base);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.os-work-step-call {
+.os-nexus-step-call {
   font-size: var(--os-text-xs);
   color: var(--os-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.os-work-step-symptom {
+.os-nexus-step-symptom {
   font-size: var(--os-text-xs);
   color: var(--os-warn);
 }
-.os-work-step-error {
+.os-nexus-step-error {
   font-size: var(--os-text-xs);
   color: var(--os-error);
   overflow-wrap: anywhere;
 }
 
-.os-work-step-state {
+.os-nexus-step-state {
   flex: none;
   display: flex;
   align-items: center;
@@ -8392,46 +8392,46 @@ a.os-button {
 }
 /* THE COST SITS ONLY ON THE STEPS THAT COST SOMETHING, so the visual weight
  * and the bill are in the same places. */
-.os-work-step-spend {
+.os-nexus-step-spend {
   display: flex;
   gap: 8px;
   color: var(--os-ink);
   font-variant-numeric: tabular-nums;
 }
-.os-work-step-kind,
-.os-work-step-duration {
+.os-nexus-step-kind,
+.os-nexus-step-duration {
   white-space: nowrap;
 }
-.os-work-step-kind {
+.os-nexus-step-kind {
   min-width: 8ch;
   text-align: right;
 }
-.os-work-step-duration {
+.os-nexus-step-duration {
   min-width: 6ch;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.os-work-step-status {
+.os-nexus-step-status {
   min-width: 6ch;
   white-space: nowrap;
 }
-.os-work-step-status[data-status="failed"] {
+.os-nexus-step-status[data-status="failed"] {
   color: var(--os-error);
 }
-.os-work-step-status[data-status="waiting"] {
+.os-nexus-step-status[data-status="waiting"] {
   color: var(--os-warn);
 }
-.os-work-step-status[data-status="running"] {
+.os-nexus-step-status[data-status="running"] {
   color: var(--os-ink);
 }
 /* `transform` does nothing to a non-replaced INLINE element, so a chevron
  * that is not inline-block silently never turns -- and jsdom cannot see it. */
-.os-work-step-chevron {
+.os-nexus-step-chevron {
   display: inline-block;
   color: var(--os-muted);
   transition: transform var(--os-duration-fast) var(--os-ease);
 }
-.os-work-step[data-open] .os-work-step-chevron {
+.os-nexus-step[data-open] .os-nexus-step-chevron {
   transform: rotate(90deg);
 }
 
@@ -8439,7 +8439,7 @@ a.os-button {
  * It carries no Head and no acts, so it is the row saying more about itself
  * -- which is what keeps rule 11 satisfied. The inset aligns it under the
  * body rather than under the spine, so the thread stays unbroken. */
-.os-work-step-detail {
+.os-nexus-step-detail {
   margin: 2px 0 10px 30px;
   padding: 10px 12px;
   /* The disclosure has to read as ATTACHED to the spine. At `--os-rail` the
@@ -8452,7 +8452,7 @@ a.os-button {
   flex-direction: column;
   gap: 8px;
 }
-.os-work-step-meaning {
+.os-nexus-step-meaning {
   margin: 0;
   font-size: var(--os-text-sm);
   color: var(--os-ink);
@@ -8465,7 +8465,7 @@ a.os-button {
  * tool result -- so this reads when asked and prints when it looked. A live
  * list here would render "Loading from the cluster" and then a list that
  * silently never moved, which is worse than a plain read. */
-.os-work-journal {
+.os-nexus-journal {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -8474,31 +8474,31 @@ a.os-button {
   border-radius: var(--os-radius-sm);
   background: var(--os-plate);
 }
-.os-work-journal-head {
+.os-nexus-journal-head {
   display: flex;
   align-items: center;
   gap: 10px;
 }
-.os-work-journal-head .os-subhead {
+.os-nexus-journal-head .os-subhead {
   margin: 0;
 }
-.os-work-journal-when {
+.os-nexus-journal-when {
   margin-right: auto;
 }
-.os-work-journal-when .os-caption {
+.os-nexus-journal-when .os-caption {
   margin: 0;
 }
-.os-work-journal-group {
+.os-nexus-journal-group {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-.os-work-journal-count {
+.os-nexus-journal-count {
   margin: 0;
   font-size: var(--os-text-xs);
   color: var(--os-muted);
 }
-.os-work-journal-list {
+.os-nexus-journal-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -8506,7 +8506,7 @@ a.os-button {
   flex-direction: column;
   gap: 4px;
 }
-.os-work-journal-row {
+.os-nexus-journal-row {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
@@ -8518,18 +8518,18 @@ a.os-button {
 }
 /* A call SERVED FROM THE JOURNAL is the headline of the whole product, so it
  * is the one row state drawn in the accent: it is the call that cost nothing. */
-.os-work-journal-row[data-served="journal"] {
+.os-nexus-journal-row[data-served="journal"] {
   box-shadow: inset 2px 0 0 var(--os-accent);
 }
-.os-work-journal-model {
+.os-nexus-journal-model {
   color: var(--os-ink);
 }
-.os-work-journal-served,
-.os-work-journal-obs-kind {
+.os-nexus-journal-served,
+.os-nexus-journal-obs-kind {
   color: var(--os-muted);
   font-size: var(--os-text-xs);
 }
-.os-work-journal-figures {
+.os-nexus-journal-figures {
   margin-left: auto;
   display: flex;
   gap: 10px;
@@ -8537,13 +8537,13 @@ a.os-button {
   color: var(--os-muted);
   font-size: var(--os-text-xs);
 }
-.os-work-journal-error {
+.os-nexus-journal-error {
   flex: 1 1 100%;
   color: var(--os-error);
   font-size: var(--os-text-xs);
   overflow-wrap: anywhere;
 }
-.os-work-journal-content {
+.os-nexus-journal-content {
   flex: 1 1 100%;
   min-width: 0;
   color: var(--os-ink);
@@ -8552,7 +8552,7 @@ a.os-button {
 }
 
 /* ---- approvals --------------------------------------------------------*/
-.os-work-approval-run {
+.os-nexus-approval-run {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -8564,7 +8564,7 @@ a.os-button {
 /* THE QUESTION IS THE LOUDEST THING IN THE PANEL. A person opens an approval
  * to answer it, not to read metadata about it, so it is set at content size
  * with a readable measure and everything else is quiet beneath. */
-.os-work-approval-ask {
+.os-nexus-approval-ask {
   margin: 0;
   max-width: 56ch;
   font-size: var(--os-text-md);
@@ -8577,7 +8577,7 @@ a.os-button {
  * field grow until the danger button wrapped onto a second line, which reads
  * as two unrelated controls -- and put the button under a field somebody has
  * not filled in yet. */
-.os-work-confirm {
+.os-nexus-confirm {
   flex: 0 0 auto;
   width: 24ch;
 }
@@ -8586,7 +8586,7 @@ a.os-button {
  * statement, which is a sentence and clamps to two. Without the
  * `overflow: hidden` the shrunken flex item simply SPILLS, drawing the name
  * on top of the line beside it. */
-.os-work-run-name {
+.os-nexus-run-name {
   display: block;
   /* A floor, so a long automation name shrinks but never vanishes. */
   min-width: 10ch;
@@ -8594,26 +8594,421 @@ a.os-button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.os-work-goals .os-row-name,
-.os-work-list .os-row-name,
-.os-work-approvals .os-row-name {
+.os-nexus-goals .os-row-name,
+.os-nexus-list .os-row-name,
+.os-nexus-approvals .os-row-name {
   min-width: 0;
   overflow: hidden;
 }
 
 /* Elapsed time never wraps: "16h" over "ago" reads as two facts. */
-.os-work-goals .os-row-state .os-caption,
-.os-work-list .os-row-state .os-caption,
-.os-work-approvals .os-row-state .os-caption {
+.os-nexus-goals .os-row-state .os-caption,
+.os-nexus-list .os-row-state .os-caption,
+.os-nexus-approvals .os-row-state .os-caption {
   white-space: nowrap;
 }
 /* A REFUSAL RENDERS BESIDE THE CONTROL THAT PRODUCED IT, never as a toast.
  * It takes its own line on the bar so the acts do not shuffle sideways when
  * one arrives. */
-.os-work-act-error {
+.os-nexus-act-error {
   flex: 1 1 100%;
   order: 1;
   color: var(--os-error);
   font-size: var(--os-text-xs);
   overflow-wrap: anywhere;
+}
+
+/* ---- Nexus: the goal view, the beacon map and the automations catalog ------
+ *
+ * Epic memql#4785, sub-project B of the work spine. The app's own surfaces
+ * follow the shell's language everywhere except one place: the map. That is
+ * where this app's whole design lives, and the rule it obeys is the rail's --
+ * thin ink where the machine did not have to think, thick where it did, so a
+ * person learns the vocabulary once and reads both surfaces with it.
+ *
+ * Every colour is a token. A theme restyles the map with no code, and the
+ * light mode is not a second drawing.
+ */
+
+.os-nexus-goalview {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.os-nexus-goalview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 16px;
+}
+
+/* Which attempt the map draws. Present only when there is more than one, so
+ * the ordinary case carries no chrome at all. */
+.os-nexus-runpicker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ---- the map ------------------------------------------------------------ */
+
+.os-nexus-map {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 240px;
+}
+.os-nexus-map[data-empty] {
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.os-nexus-map-canvas {
+  width: 100%;
+  height: clamp(240px, 42vh, 520px);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  /* A GROUND RATHER THAN A PLATE. The map is a place, not a card: the darker
+   * of the two surfaces reads as depth behind the road, and the beacon's glow
+   * has something to sit against. */
+  background: var(--os-ground);
+  /* The canvas is dragged, so the browser's own touch panning has to get out
+   * of the way -- without this a finger scrolls the window instead of the map
+   * and the gesture simply does not exist on a phone. */
+  touch-action: none;
+  cursor: grab;
+}
+.os-nexus-map-canvas:active {
+  cursor: grabbing;
+}
+.os-nexus-map-canvas:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 2px;
+}
+
+/* A FEED THAT IS BEHIND IS DIMMED, and the caption underneath says why. A
+ * frozen map that still looks crisp is a picture claiming to be current. */
+.os-nexus-map[data-behind] .os-nexus-map-canvas {
+  opacity: 0.55;
+  filter: saturate(0.5);
+}
+
+.os-nexus-map-caption {
+  margin: 0;
+}
+
+/* THE ROAD. Its WEIGHT is set inline from the layout, because weight carries
+ * the one fact this picture is for; its COLOUR is here, because colour is a
+ * theme's to own. Unfinished road is the shell's own hairline; road the work
+ * has passed is accent, and the transition is on a token so reduced motion
+ * stills it with everything else. */
+.os-nexus-road {
+  stroke: var(--os-rail);
+  stroke-linecap: round;
+  transition: stroke var(--os-duration-med) var(--os-ease);
+}
+.os-nexus-road[data-done] {
+  stroke: var(--os-accent);
+}
+/* A THOUGHT STRETCH THAT HAS NOT LANDED is still drawn thick -- the thickness
+ * is about what the step IS, not about how it went -- but it is muted, so a
+ * run in flight does not read as further along than it is. */
+.os-nexus-road[data-thought]:not([data-done]) {
+  stroke: var(--os-line);
+}
+
+/* Real dependency edges, under the nodes and quieter than the road: they say
+ * what waits on what, which is structure rather than progress. */
+.os-nexus-edge {
+  fill: none;
+  stroke: var(--os-line);
+  stroke-width: 1;
+}
+.os-nexus-edge[data-kind="ranBy"],
+.os-nexus-edge[data-kind="asked"] {
+  stroke-dasharray: 2 3;
+}
+
+.os-nexus-node {
+  cursor: pointer;
+}
+.os-nexus-node:focus-visible {
+  outline: none;
+}
+.os-nexus-node:focus-visible circle,
+.os-nexus-node:focus-visible rect,
+.os-nexus-node:focus-visible path {
+  stroke: var(--os-accent);
+  stroke-width: 2.5;
+}
+
+/* You: an open ring, because it is a position rather than a thing. */
+.os-nexus-you {
+  fill: none;
+  stroke: var(--os-muted);
+  stroke-width: 1.5;
+}
+
+/* The template: a rounded square, the shape the shell uses for a thing that
+ * can be run. */
+.os-nexus-template {
+  fill: var(--os-raised);
+  stroke: var(--os-line);
+  stroke-width: 1;
+}
+
+/* A STEP. Hollow on a hairline until it has run, filled once it has -- the
+ * rail's language, on the map. The status decides the ink; the fill decides
+ * whether it happened. */
+.os-nexus-step {
+  fill: var(--os-ground);
+  stroke: var(--os-rail);
+  stroke-width: 1.5;
+  transition:
+    fill var(--os-duration-med) var(--os-ease),
+    stroke var(--os-duration-med) var(--os-ease);
+}
+.os-nexus-node[data-status="done"] .os-nexus-step,
+.os-nexus-node[data-status="skipped"] .os-nexus-step {
+  fill: var(--os-accent);
+  stroke: var(--os-accent);
+}
+.os-nexus-node[data-status="running"] .os-nexus-step {
+  fill: var(--os-accent-soft);
+  stroke: var(--os-accent);
+  stroke-width: 2.5;
+}
+.os-nexus-node[data-status="waiting"] .os-nexus-step {
+  fill: var(--os-ground);
+  stroke: var(--os-warn);
+  stroke-width: 2.5;
+}
+.os-nexus-node[data-status="failed"] .os-nexus-step {
+  fill: var(--os-error);
+  stroke: var(--os-error);
+}
+.os-nexus-node[data-selected] .os-nexus-step {
+  stroke: var(--os-ink);
+  stroke-width: 2.5;
+}
+
+/* A CLUSTER stands in for a column, a FOLD for a stretch. Both are drawings
+ * rather than rows, so both are drawn in the muted register -- a reader should
+ * be able to tell at a glance that they are looking at a count. */
+.os-nexus-cluster {
+  fill: var(--os-raised);
+  stroke: var(--os-rail);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 2;
+}
+.os-nexus-fold {
+  fill: var(--os-raised);
+  stroke: var(--os-line);
+  stroke-width: 1;
+}
+
+/* What ran it, above the road; what it had to ask, below. Small marks, quiet
+ * until they matter -- an approval waiting on a person is the one thing on
+ * this map that should catch an eye that was not looking for it. */
+.os-nexus-binding {
+  fill: var(--os-plate);
+  stroke: var(--os-line);
+  stroke-width: 1;
+}
+.os-nexus-approval {
+  fill: var(--os-plate);
+  stroke: var(--os-muted);
+  stroke-width: 1.25;
+}
+.os-nexus-node[data-status="waiting"] .os-nexus-approval {
+  fill: var(--os-warn);
+  stroke: var(--os-warn);
+}
+.os-nexus-node[data-status="approved"] .os-nexus-approval {
+  fill: var(--os-accent-soft);
+  stroke: var(--os-accent);
+}
+
+.os-nexus-node-label {
+  fill: var(--os-muted);
+  font-size: var(--os-text-xs);
+  font-family: var(--os-font-mono);
+}
+.os-nexus-node[data-kind="step"][data-selected] .os-nexus-node-label {
+  fill: var(--os-ink);
+}
+.os-nexus-node[data-lane="binding"] .os-nexus-node-label,
+.os-nexus-node[data-lane="asked"] .os-nexus-node-label {
+  /* The lanes are labelled only on hover: a mark above every step with a model
+   * name beside it turns the road into a wall of text, and the name is a
+   * detail somebody goes looking for rather than one they read. */
+  opacity: 0;
+  transition: opacity var(--os-duration-fast) var(--os-ease);
+}
+.os-nexus-node[data-lane="binding"]:hover .os-nexus-node-label,
+.os-nexus-node[data-lane="binding"]:focus-visible .os-nexus-node-label,
+.os-nexus-node[data-lane="asked"]:hover .os-nexus-node-label,
+.os-nexus-node[data-lane="asked"]:focus-visible .os-nexus-node-label {
+  opacity: 1;
+}
+
+/* ---- the beacon ---------------------------------------------------------
+ *
+ * THE ONE PLACE THIS APP IS ALLOWED TO BE LOUD. The goal is what the work
+ * arrives at, and the ring filling as steps land is the whole emotional shape
+ * of the surface -- so it is bigger than everything else on the canvas, it is
+ * the only thing that glows, and nothing else competes with it.
+ */
+.os-nexus-beacon-ring {
+  fill: none;
+  stroke: var(--os-line);
+  stroke-width: 3;
+}
+.os-nexus-beacon-fill {
+  fill: none;
+  stroke: var(--os-accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dasharray var(--os-duration-med) var(--os-ease);
+}
+.os-nexus-beacon-core {
+  fill: var(--os-raised);
+  transition: fill var(--os-duration-med) var(--os-ease);
+}
+.os-nexus-beacon[data-lit] .os-nexus-beacon-core {
+  fill: var(--os-accent);
+}
+.os-nexus-beacon[data-lit] .os-nexus-beacon-ring {
+  stroke: var(--os-accent);
+}
+/* A COMPILING RUN DRAWS AN EMPTY RING, dashed, and the label says what it is
+ * doing. An arc at zero would read as a run that has failed to do anything. */
+.os-nexus-beacon[data-compiling] .os-nexus-beacon-ring {
+  stroke-dasharray: 4 5;
+}
+.os-nexus-beacon-label {
+  fill: var(--os-ink);
+  font-size: var(--os-text-md);
+}
+.os-nexus-beacon-count {
+  fill: var(--os-muted);
+  font-size: var(--os-text-xs);
+  font-family: var(--os-font-mono);
+}
+
+/* ---- rewind ------------------------------------------------------------- */
+
+.os-nexus-scrubber {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+}
+.os-nexus-scrubber-track {
+  width: 100%;
+  accent-color: var(--os-accent);
+}
+.os-nexus-scrubber-read {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.os-nexus-scrubber-label {
+  font-size: var(--os-text-base);
+  color: var(--os-ink);
+}
+.os-nexus-scrubber-when {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+/* ---- automations -------------------------------------------------------- */
+
+.os-nexus-automations {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.os-nexus-row-sub {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+.os-nexus-rung-line {
+  margin: 0 0 10px;
+  font-size: var(--os-text-base);
+  color: var(--os-muted);
+}
+.os-nexus-rung-line strong {
+  color: var(--os-ink);
+}
+.os-nexus-source {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: var(--os-radius-xs);
+  background: var(--os-ground);
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* THE LADDER, AS FOUR TICKS. A shape rather than a colour, so it survives
+ * greyscale and every theme pack; the accessible name carries the word, which
+ * is the whole reading. Never a percentage -- `reliability` is not odds. */
+.os-nexus-rung {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+}
+.os-nexus-rung-tick {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--os-rail);
+}
+.os-nexus-rung-tick:nth-child(1) {
+  height: 4px;
+}
+.os-nexus-rung-tick:nth-child(2) {
+  height: 6px;
+}
+.os-nexus-rung-tick:nth-child(3) {
+  height: 9px;
+}
+.os-nexus-rung-tick:nth-child(4) {
+  height: 12px;
+}
+.os-nexus-rung-tick[data-on] {
+  background: var(--os-accent);
+}
+.os-nexus-rung[data-rung="poor"] .os-nexus-rung-tick[data-on] {
+  background: var(--os-warn);
+}
+
+/* ---- Ask-to-goal -------------------------------------------------------- */
+
+.os-ask-handoff {
+  margin: 4px 0 0;
+  font-size: var(--os-text-sm);
+}
+
+/* MOTION IS DATA-DRIVEN HERE, never a timer -- the road changes when a step's
+ * status changes and the beacon when work lands, which is the only thing that
+ * should move a picture somebody is reading. Reduced motion stills the
+ * transitions and leaves both facts exactly as legible. */
+@media (prefers-reduced-motion: reduce) {
+  .os-nexus-road,
+  .os-nexus-step,
+  .os-nexus-beacon-fill,
+  .os-nexus-beacon-core,
+  .os-nexus-node-label {
+    transition: none;
+  }
 }

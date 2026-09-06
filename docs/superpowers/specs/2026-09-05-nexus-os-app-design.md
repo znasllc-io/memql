@@ -359,10 +359,20 @@ instead of now.
   library produces the moments; `scene(world, at)` produces the world as it
   stood. Neither invents anything: a row with no timestamp contributes no
   event, so the scrubber's ticks are evidence rather than interpolation.
-- **A moment is a URL.** `?at=<rfc3339>` on the goal view. Determinism is what
-  makes this work at all -- `layout(sameWorld)` must give the same answer
-  twice, or a deep link frames a different picture than the one that was
-  shared.
+- **A moment is addressable, and it is NOT a URL** -- memql#4975 asks for "a
+  moment as a URL" and the OS does not have one to give. This is a desktop
+  shell: a window's state is not in the address bar, no app writes to
+  `location`, and the one module that touches it
+  (`deployables/sources/connectReturn.ts`) exists to SCRUB an OAuth return out
+  of it. Inventing a query parameter here would be an app reaching into the
+  shell's address for something no other app addresses that way.
+
+  The shell's actual deep-link primitive is the **open intent** (epic
+  memql#4842), so the moment rides there: `openApp("nexus", { goalId, at })`
+  opens the goal rewound to that instant, from Ask, from the Materializer, from
+  a notification, from anywhere that can open an app. Determinism is what makes
+  it work at all -- `layout(sameWorld)` must give the same answer twice, or the
+  link frames a different picture than the one that was shared.
 - **The phase boundaries are marked on the scrubber from the layout**, not
   recomputed, so the two cannot disagree about where a phase started.
 - **It is not the `replayRun` builtin.** This is scrubbing a recorded run's

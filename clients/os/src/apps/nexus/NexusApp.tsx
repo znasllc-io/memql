@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ComponentProps } from "react";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Caption, Check, Head, Panel } from "../../kit";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { ApprovalsSection } from "./ApprovalsSection";
+import { AutomationsSection } from "./AutomationsSection";
 import { GoalsSection } from "./GoalsSection";
+import { GoalView } from "./GoalView";
 import { RunPage } from "./RunPage";
 import { RunsSection } from "./RunsSection";
+import { defaultRunId } from "./world";
 import { NEXUS_APP_ID, NEXUS_LOG_CONCEPTS } from "./concepts";
 import {
   useCancelGoal,
@@ -87,8 +92,15 @@ export function NexusApp({
   const decide = useDecideApproval();
 
   const [selectedGoalId, setSelectedGoalId] = useState("");
+  const [openGoalId, setOpenGoalId] = useState("");
   const [openRunId, setOpenRunId] = useState("");
   const [selectedApprovalId, setSelectedApprovalId] = useState("");
+  const [selectedAutomationId, setSelectedAutomationId] = useState("");
+  // Which run of the open goal the map draws, and the moment it is rewound to.
+  // Both are the GOAL VIEW's, held here so leaving the view for an approval and
+  // coming back lands somebody exactly where they were.
+  const [mapRunId, setMapRunId] = useState("");
+  const [openAt, setOpenAt] = useState("");
 
   // The two feeds every surface reads as PLAIN ROWS rather than as a live
   // source: the goal a run is for, and the approvals a run is parked on. They
@@ -121,6 +133,9 @@ export function NexusApp({
   function openGoal(goalId: string) {
     if (goalId.trim() === "") return;
     setSelectedGoalId(goalId);
+    setOpenGoalId(goalId);
+    setMapRunId(defaultRunId(runs.snapshot.rows, goalId));
+    askContext(`nexus goal:${idTail(goalId)}`);
     navigate("goals");
   }
 
@@ -141,11 +156,19 @@ export function NexusApp({
     const runId = typeof payload["runId"] === "string" ? payload["runId"] : "";
     const goalId = typeof payload["goalId"] === "string" ? payload["goalId"] : "";
     const approvalId = typeof payload["approvalId"] === "string" ? payload["approvalId"] : "";
+    // A MOMENT, so a rewound goal is shareable. The OS has no per-window URL --
+    // this is the shell's deep-link primitive, and an opener that hands one in
+    // gets the goal drawn as it stood. Ignored on a run or approval payload,
+    // because neither of those surfaces is rewindable.
+    const at = typeof payload["at"] === "string" ? payload["at"] : "";
     if (runId === "" && goalId === "" && approvalId === "") return;
     handled.current = intent.id;
     if (runId !== "") openRun(runId);
     else if (approvalId !== "") openApproval(approvalId);
-    else openGoal(goalId);
+    else {
+      setOpenAt(at);
+      openGoal(goalId);
+    }
     consumeIntent?.(intent.id);
   }, [intent]);
 
@@ -186,6 +209,11 @@ export function NexusApp({
       />
     );
   }
+  if (sectionId === "automations") {
+    return (
+      <AutomationsSection selectedId={selectedAutomationId} onSelect={setSelectedAutomationId} />
+    );
+  }
   if (sectionId === "approvals") {
     return (
       <ApprovalsSection
@@ -224,16 +252,70 @@ export function NexusApp({
     );
   }
 
+  // THE GOAL VIEW REPLACES THE LIST (rule 11's `<- Goals` form). It is a map, a
+  // rail and a detail -- taller than the run page, which already took this
+  // form -- and two Heads in one scroller is the tell that neither happened.
+  const openGoalRow =
+    openGoalId === ""
+      ? null
+      : (goals.snapshot.rows.find((row) => idTail(rowId(row)) === idTail(openGoalId)) ?? null);
+  const openGoalProjected = goalRows.find((goal) => idTail(goal.id) === idTail(openGoalId)) ?? null;
+  if (openGoalRow !== null && openGoalProjected !== null) {
+    return (
+      <GoalViewHost
+        goal={openGoalProjected}
+        goalRow={openGoalRow}
+        runRows={runs.snapshot.rows}
+        approvalRows={approvals.snapshot.rows}
+        openRunId={mapRunId === "" ? defaultRunId(runs.snapshot.rows, openGoalId) : mapRunId}
+        onPickRun={setMapRunId}
+        cancel={cancel}
+        derive={derive}
+        onBack={() => {
+          setOpenGoalId("");
+          setOpenAt("");
+        }}
+        onOpenRun={openRun}
+        onOpenApproval={openApproval}
+        openAt={openAt}
+      />
+    );
+  }
+
   return (
     <GoalsSection
       goals={goals.source}
       runs={runRows}
       create={create}
       cancel={cancel}
-      onOpenRun={openRun}
+      onOpenGoal={openGoal}
       selectedGoalId={selectedGoalId}
-      onSelectGoal={setSelectedGoalId}
     />
+  );
+}
+
+/** The row id, read the way `idTail` expects it. */
+function rowId(row: Row): string {
+  const value = row["id"];
+  return typeof value === "string" ? value : "";
+}
+
+/**
+ * The goal view, with the one feed that belongs to it and to nothing else.
+ *
+ * IT EXISTS ONLY WHILE A GOAL IS OPEN, which is the whole point: the steps
+ * subscription is the page's, so closing the page closes it and opening a
+ * different goal is a different collection with its own baseline -- the
+ * previous run's steps are not rows this one is missing. Same rule the run page
+ * takes, and the same reason: subscribing a window to every step of every run
+ * this person owns in order to draw one of them is what it forbids.
+ */
+function GoalViewHost(
+  props: Omit<ComponentProps<typeof GoalView>, "stepRows" | "stepsState">,
+) {
+  const steps = useRunSteps(props.openRunId);
+  return (
+    <GoalView {...props} stepRows={steps.snapshot.rows} stepsState={steps.snapshot.state} />
   );
 }
 

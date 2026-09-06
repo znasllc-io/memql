@@ -358,6 +358,12 @@ describe("a feed that is behind", () => {
 // The module-graph guard
 // ---------------------------------------------------------------------------
 
+// THE SHELL-WIDE WebGL GUARD, and it lives here because this was the first
+// map. It now covers TWO: the Deployables map and the Nexus beacon map (epic
+// memql#4785), which is the app the owner named WebGL-free -- the portal's
+// Nexus was the platform's one 3D surface and it was deleted with the portal's
+// pages. Both halves carry a reachable positive, so an empty offender list is
+// evidence about the tree rather than a statement about the regex.
 describe("no three.js under clients/os", () => {
   // Read through Vite's raw glob rather than the filesystem: it is what the
   // bundler itself sees, and it needs no Node types in a browser tsconfig.
@@ -415,9 +421,15 @@ describe("no three.js under clients/os", () => {
     }
   });
 
-  it("really did read the map's own source, so an empty result is about the tree", () => {
-    const map = Object.entries(sources).find(([p]) => p.endsWith("deployables/map/DeployMap.tsx"));
-    expect(map?.[1] ?? "").toContain("os-deploy-map-canvas");
+  it("really did read BOTH maps' own source, so an empty result is about the tree", () => {
+    const deploy = Object.entries(sources).find(([p]) =>
+      p.endsWith("deployables/map/DeployMap.tsx"),
+    );
+    expect(deploy?.[1] ?? "").toContain("os-deploy-map-canvas");
+    // The Nexus map is the one the owner named, so its absence from the scan
+    // would make this guard silent about exactly the surface it is for.
+    const beacon = Object.entries(sources).find(([p]) => p.endsWith("nexus/BeaconMap.tsx"));
+    expect(beacon?.[1] ?? "").toContain("os-nexus-map-canvas");
     expect(Object.keys(sources).length).toBeGreaterThan(30);
   });
 });

@@ -85,16 +85,33 @@ describe("goals, the landing surface", () => {
     expect(screen.getAllByText("waiting for you")).toHaveLength(1);
   });
 
-  it("opens a goal beside the list rather than under it", async () => {
+  // A goal now opens as a MAP, a rail and a receipt, which is taller than the
+  // run page -- so it REPLACES the list (rule 11's `<- Goals` form) rather than
+  // sitting beside it, and the list's own detail column went with the change.
+  it("opens a goal in place of the list, with a way back", async () => {
     const conn = fakeConnection({
       goals: [goalRow({ id: "g1", statement: "Reconcile the ledger" })],
       runs: [runRow({ id: "r1", goalId: "g1" })],
     });
     mount(conn);
     fireEvent.click(await screen.findByText("Reconcile the ledger"));
-    // The detail names the runs of THIS goal and the bar names its state.
     expect(await screen.findByRole("group", { name: "What you can do with this" })).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Runs of this goal" })).toBeTruthy();
+    // The list is gone rather than scrolled past: its one action is not here.
+    expect(screen.queryByText("New goal")).toBeNull();
+    expect(screen.getByRole("button", { name: "Goals" })).toBeTruthy();
+  });
+
+  it("draws the map, and says what it is a map OF", async () => {
+    const conn = fakeConnection({
+      goals: [goalRow({ id: "g1", statement: "Reconcile the ledger" })],
+      runs: [runRow({ id: "r1", goalId: "g1" })],
+    });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Reconcile the ledger"));
+    const map = await screen.findByRole("application");
+    // The accessible name carries the whole reading, because the picture
+    // itself is unreadable to a screen reader by construction.
+    expect(map.getAttribute("aria-label")).toContain("Reconcile the ledger");
   });
 
   it("asks for the goal's own words before it will close it", async () => {
