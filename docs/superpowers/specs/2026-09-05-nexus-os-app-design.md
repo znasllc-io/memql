@@ -274,12 +274,15 @@ opening the node wants to read.
 because a scrubber is read as evidence. That rule is carried over verbatim and
 it is what makes Replay defensible.
 
-**No WebGL, and it is enforced.** `test/nexus/map.test.tsx` scans the module
-graph for a three.js import AND checks the package manifest, because a static
-import is only one of the two ways one gets in. Both halves carry the
-reachable-positive that makes an empty offender list evidence about the tree
-rather than a statement about the regex. This is the Deployables map's guard,
-applied to the app the owner named WebGL-free.
+**No WebGL, and it is enforced -- by the guard that already existed rather than
+by a second one.** `test/deployables/map.test.tsx` scans `src/**` for a three.js
+import AND checks the package manifest, because a static import is only one of
+the two ways one gets in. It covers the whole shell, so it already covered this
+map; what it did NOT do was say so, and a guard that drops the surface it is
+for out of its scan is silent about exactly the thing it exists to protect. It
+now asserts that BOTH maps' sources were in the files it read. A second,
+identical scan under `test/nexus/` would be a copy of a rule whose whole value
+is that it is written once.
 
 ---
 
@@ -459,28 +462,38 @@ that goes wrong by default.
 ## J. Testing
 
 Pure-library tests carry the weight, which is the point of the library being
-pure:
+pure. Under `clients/os/test/nexus/`:
 
-- `test/nexus/scene.test.ts` -- `layout()` determinism over the 300-node
-  fixture, the minimum-separation guarantee inside a lane, phase collapse, and
-  `layout(sameWorld)` twice.
-- `test/nexus/events.test.ts` -- a row with no timestamp produces no event
-  (both directions: the reachable positive is a row WITH one that produces
-  exactly one).
-- `test/nexus/map.test.tsx` -- no three.js in the module graph and none in the
-  manifest, both halves with a reachable positive.
-- `test/nexus/goalView.test.tsx` -- the shared selection: clicking the rail
-  frames the map node and the reverse.
-- `test/nexus/automations.test.tsx` -- the section says when it looked; an act
-  re-reads.
-- `test/nexus/replay.test.tsx` -- a moment is a URL and the URL restores the
-  moment.
-- `test/nexus/app.test.tsx`, `approvals.test.tsx`, `rows.test.ts`,
-  `runPage.test.tsx`, `settings.test.ts` -- carried over from the Work app.
-- A **rendered pass on a live cluster**, both modes, empty and populated. The
-  README's own section records that the suite cannot see what the browser
-  found; jsdom has no layout, so a map is exactly the surface a green suite
-  says nothing about.
+- `world.test.ts` -- the readers over rows the wire could actually send (keys
+  missing, which is what they are for), node identity across a retry, depth
+  over `dependsOn` including a cycle and a dangling edge, and the total orders.
+- `layout.test.ts` -- `layout(sameWorld)` twice, independence from the order
+  rows arrived in, the minimum-separation guarantee, folds and clusters in both
+  directions, and every step drawn between you and the beacon.
+- `events.test.ts` -- a row with no timestamp produces no event, each case with
+  its reachable positive; a retry emits a pair per attempt all naming ONE node;
+  every event names a node the layout drew.
+- `replayScene.test.ts` -- the status a row HAD rather than the one it has,
+  an undated row present at every position, and the beacon counted per step key.
+- `receipt.test.ts` -- absent while the run is going, the same card on a
+  failure, and absent spend as null rather than zero.
+- `goalView.test.tsx` -- the shared selection in both directions, the acts legal
+  from the run's state, rewind (including that it does not call `replayRun`),
+  and that the rail follows the rewind.
+- `automations.test.tsx` -- the read dates itself, an act re-reads, no
+  percentage anywhere, and arm/retire through the catalog's own verb.
+- `askToGoal.test.tsx` -- the act appears once an answer has landed, hands over
+  the PROMPT, and is absent where the surface cannot hand anything off.
+- `app.test.tsx`, `approvals.test.tsx`, `rows.test.ts`, `runPage.test.tsx`,
+  `settings.test.ts` -- carried over from the Work app, plus the live-work-first
+  ordering.
+
+And a **rendered pass in a real browser**, both modes, empty and populated,
+over a temporary Vite harness that mounted the real app on the SUITE's own
+`fakeConnection` so it could not drift from what the tests assert. It found
+twelve things the green suite could not, four of them rules rather than pixels;
+`clients/os/README.md` records them and the harness is deleted. jsdom lays
+nothing out, so a map is exactly the surface a green suite says nothing about.
 
 ---
 
