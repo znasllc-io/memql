@@ -33,7 +33,7 @@ require (
 )
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.68.0 // indirect
+	github.com/anthropics/anthropic-sdk-go v1.69.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
@@ -110,7 +110,6 @@ replace github.com/znasllc-io/memql/component/events => ../events
 replace github.com/znasllc-io/memql/component/envregistry => ../envregistry
 
 replace github.com/znasllc-io/memql/component/grpc/gen => ../grpc/gen
-
 
 replace github.com/znasllc-io/memql/component/language => ../language
 

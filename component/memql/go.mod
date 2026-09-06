@@ -7,7 +7,7 @@ go 1.26.1
 toolchain go1.26.6
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.68.0
+	github.com/anthropics/anthropic-sdk-go v1.69.0
 	github.com/dgraph-io/ristretto v0.2.0
 	github.com/lib/pq v1.12.3
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
@@ -102,7 +102,6 @@ replace github.com/znasllc-io/memql/component/events => ../events
 replace github.com/znasllc-io/memql/component/envregistry => ../envregistry
 
 replace github.com/znasllc-io/memql/component/grpc/gen => ../grpc/gen
-
 
 replace github.com/znasllc-io/memql/component/language => ../language
 
