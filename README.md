@@ -324,12 +324,23 @@ against a model on its own". It runs the corpus in
 `test/proving/scenarios/` on both arms against a real Postgres.
 
 ```bash
+# ?sslmode=disable is required: the local Postgres has no SSL, and the driver
+# refuses rather than downgrading. This is the DSN the CI lane uses.
+export MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable'
+
 # what CI runs on every pull request
 go run ./cmd/memql-bench --do=gate --runner=local
 
 # run the corpus and publish the dated scorecard and its page
 go run ./cmd/memql-bench --do=run --tier=ci --write
+
+# what the binary takes, machine-readably
+go run ./cmd/memql-bench --print-spec
 ```
+
+The DSN is required and there is no default: a benchmark that silently picked a
+database is one whose numbers came from somewhere nobody chose. It migrates a
+fresh database itself, so an empty one with the four extensions is enough.
 
 Structural regressions block a merge -- a scenario that stops passing, a
 duplicated side effect, a governance property that fails, or a negative
