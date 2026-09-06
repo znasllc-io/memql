@@ -17,9 +17,11 @@
 // caller-scoped rather than ranked: a person acts on their own goals, and
 // the row tier is what decides which those are.
 
-@enabled
+/// Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first
+/// v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a
+/// gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog
+/// reaches no model at all.
 @sdk
-@description("Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all.")
 @executor("integration.work.createGoal")
 builtin createGoal {
   statement     string!  @description("The goal in the person's own words.")
@@ -29,18 +31,19 @@ builtin createGoal {
   requestedVia  string   @description("The surface the goal arrived through: api, ask, nexus, responsibility, library, materializer. Empty when unknown.")
 }
 
-@enabled
+/// Close one of the caller's goals and ask every run of it to stop. Cancellation is REQUESTED
+/// rather than done: a run notices at its next step boundary, so a step already in flight finishes
+/// and is journaled rather than being abandoned mid-effect.
 @sdk
-@description("Close one of the caller's goals and ask every run of it to stop. Cancellation is REQUESTED rather than done: a run notices at its next step boundary, so a step already in flight finishes and is journaled rather than being abandoned mid-effect.")
 @executor("integration.work.cancelGoal")
 builtin cancelGoal {
   goalId  string!  @description("The v1:work:goal to close.")
   reason  string   @description("Why it closed, in words a person can read.")
 }
 
-@enabled
+/// Fork one of the caller's runs at a step: a NEW run that serves the shared prefix from the
+/// journal and runs live from the fork step on. The source run is untouched. Returns {runId}.
 @sdk
-@description("Fork one of the caller's runs at a step: a NEW run that serves the shared prefix from the journal and runs live from the fork step on. The source run is untouched. Returns {runId}.")
 @executor("integration.work.forkRun")
 builtin forkRun {
   runId       string!  @description("The run to fork.")
@@ -48,18 +51,23 @@ builtin forkRun {
   variables   object   @description("Variables to override on the fork. Anything omitted is inherited from the source run.")
 }
 
-@enabled
+/// Replay one of the caller's runs: a NEW run that serves EVERY model call from the journal, so it
+/// reaches no provider. Under the default strict policy a request with no journaled match raises a
+/// divergence pinned to the first step that differs; permissive makes a fresh call and journals it.
+/// Returns {runId}.
 @sdk
-@description("Replay one of the caller's runs: a NEW run that serves EVERY model call from the journal, so it reaches no provider. Under the default strict policy a request with no journaled match raises a divergence pinned to the first step that differs; permissive makes a fresh call and journals it. Returns {runId}.")
 @executor("integration.work.replayRun")
 builtin replayRun {
   runId   string!  @description("The run to replay.")
   policy  string   @description("strict (default) raises a divergence on a journal miss; permissive makes a fresh call and journals it.")
 }
 
-@enabled
+/// Decide one of the caller's pending approvals and resume the run parked on it. The decision is
+/// refused if the artifact changed since it was approved -- an approval is a decision about a
+/// specific command, patch, message or draft, and it never carries to a modified one.
 @sdk
-@description("Decide one of the caller's pending approvals and resume the run parked on it. The decision is refused if the artifact changed since it was approved -- an approval is a decision about a specific command, patch, message or draft, and it never carries to a modified one.")
+/// Resume every run whose timer wait is due and every run whose node died mid-flight. Cron-leader
+/// gated through its scheduled automation, so it runs on one replica cluster-wide.
 @executor("integration.work.decideApproval")
 builtin decideApproval {
   approvalId  string!  @description("The v1:work:approval to decide.")
@@ -67,15 +75,15 @@ builtin decideApproval {
   answer      object   @description("The person's answer, for a feedback approval.")
 }
 
-@enabled
-@description("Resume every run whose timer wait is due and every run whose node died mid-flight. Cron-leader gated through its scheduled automation, so it runs on one replica cluster-wide.")
+/// Archive then delete journal rows past their retention window: v1:work:modelCall at
+/// MEMQL_WORK_MODELCALL_RETENTION_DAYS and v1:work:observation at
+/// MEMQL_WORK_OBSERVATION_RETENTION_DAYS. The run's summary is folded onto the run row BEFORE its
+/// detail goes, so a run stays readable after. No archive means no delete.
 @executor("integration.work.sweepWaiting")
 builtin workSweepWaiting {
   olderThanSeconds  int  @description("How long a run must have been silent before it counts as abandoned. Defaults to twice the heartbeat interval.")
 }
 
-@enabled
-@description("Archive then delete journal rows past their retention window: v1:work:modelCall at MEMQL_WORK_MODELCALL_RETENTION_DAYS and v1:work:observation at MEMQL_WORK_OBSERVATION_RETENTION_DAYS. The run's summary is folded onto the run row BEFORE its detail goes, so a run stays readable after. No archive means no delete.")
 @executor("integration.work.retentionSweep")
 builtin workRetentionSweep {
   dryRun  bool  @description("Report what would be archived and deleted without doing either.")

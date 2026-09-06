@@ -237,6 +237,31 @@ QueryClient.prototype.campaignTestSend = function (this: QueryClient, args: Camp
   return this.executeNamed("campaignTestSend", buildCampaignTestSend(args), opts);
 };
 
+/** Close one of the caller's goals and ask every run of it to stop. Cancellation is REQUESTED rather than done: a run notices at its next step boundary, so a step already in flight finishes and is journaled rather than being abandoned mid-effect. */
+export interface CancelGoalArgs {
+  /** The v1:work:goal to close. */
+  goalId: string;
+  /** Why it closed, in words a person can read. */
+  reason?: string;
+}
+
+export function buildCancelGoal(args: CancelGoalArgs): string {
+  const parts: string[] = [];
+  parts.push("goalId: " + renderMemQLValue(args.goalId));
+  if (args.reason !== undefined) parts.push("reason: " + renderMemQLValue(args.reason));
+  return "builtin cancelGoal(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    cancelGoal(args: CancelGoalArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.cancelGoal = function (this: QueryClient, args: CancelGoalArgs = {} as CancelGoalArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("cancelGoal", buildCancelGoal(args), opts);
+};
+
 /** One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both. */
 export interface CommerceCompanyArgs {
   storeId?: string;
@@ -339,6 +364,40 @@ declare module "./query.js" {
 
 QueryClient.prototype.commerceStock = function (this: QueryClient, args: CommerceStockArgs = {} as CommerceStockArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("commerceStock", buildCommerceStock(args), opts);
+};
+
+/** Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all. */
+export interface CreateGoalArgs {
+  /** The goal in the person's own words. */
+  statement: string;
+  /** The typed input object: the shape the chosen template's args declare. */
+  input?: Record<string, unknown>;
+  /** Optional account tags -- a record of who the work is for, never a visibility scope. */
+  accountIds?: string[];
+  /** {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents}. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'. */
+  ceilings?: Record<string, unknown>;
+  /** The surface the goal arrived through: api, ask, nexus, responsibility, library, materializer. Empty when unknown. */
+  requestedVia?: string;
+}
+
+export function buildCreateGoal(args: CreateGoalArgs): string {
+  const parts: string[] = [];
+  parts.push("statement: " + renderMemQLValue(args.statement));
+  if (args.input !== undefined) parts.push("input: " + renderMemQLValue(args.input));
+  if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
+  if (args.ceilings !== undefined) parts.push("ceilings: " + renderMemQLValue(args.ceilings));
+  if (args.requestedVia !== undefined) parts.push("requestedVia: " + renderMemQLValue(args.requestedVia));
+  return "builtin createGoal(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createGoal(args: CreateGoalArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createGoal = function (this: QueryClient, args: CreateGoalArgs = {} as CreateGoalArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createGoal", buildCreateGoal(args), opts);
 };
 
 /** The reachable half of creating a binding: mint the ownership token, prefill the account tie, and write the row. `createCustomDomain` itself is @serverOnly precisely so this is the only way in -- a caller who chooses their own verification token proves nothing by publishing it. */
@@ -499,6 +558,34 @@ QueryClient.prototype.datasyncStartBackfill = function (this: QueryClient, args:
   return this.executeNamed("datasyncStartBackfill", buildDatasyncStartBackfill(args), opts);
 };
 
+/** Decide one of the caller's pending approvals and resume the run parked on it. The decision is refused if the artifact changed since it was approved -- an approval is a decision about a specific command, patch, message or draft, and it never carries to a modified one. */
+export interface DecideApprovalArgs {
+  /** The v1:work:approval to decide. */
+  approvalId: string;
+  /** approved, rejected, or answered (for a feedback question). */
+  decision: string;
+  /** The person's answer, for a feedback approval. */
+  answer?: Record<string, unknown>;
+}
+
+export function buildDecideApproval(args: DecideApprovalArgs): string {
+  const parts: string[] = [];
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  parts.push("decision: " + renderMemQLValue(args.decision));
+  if (args.answer !== undefined) parts.push("answer: " + renderMemQLValue(args.answer));
+  return "builtin decideApproval(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    decideApproval(args: DecideApprovalArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.decideApproval = function (this: QueryClient, args: DecideApprovalArgs = {} as DecideApprovalArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("decideApproval", buildDecideApproval(args), opts);
+};
+
 /** Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. ownerUserId is threaded from the document row, never the caller. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231). */
 export interface EditDocumentArgs {
   documentId: string;
@@ -554,6 +641,34 @@ declare module "./query.js" {
 
 QueryClient.prototype.fleetModels = function (this: QueryClient, args: FleetModelsArgs = {} as FleetModelsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("fleetModels", buildFleetModels(args), opts);
+};
+
+/** Fork one of the caller's runs at a step: a NEW run that serves the shared prefix from the journal and runs live from the fork step on. The source run is untouched. Returns {runId}. */
+export interface ForkRunArgs {
+  /** The run to fork. */
+  runId: string;
+  /** The step key to diverge at. Steps before it are served from the journal; this step and everything after run live. */
+  atStepKey: string;
+  /** Variables to override on the fork. Anything omitted is inherited from the source run. */
+  variables?: Record<string, unknown>;
+}
+
+export function buildForkRun(args: ForkRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("atStepKey: " + renderMemQLValue(args.atStepKey));
+  if (args.variables !== undefined) parts.push("variables: " + renderMemQLValue(args.variables));
+  return "builtin forkRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    forkRun(args: ForkRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.forkRun = function (this: QueryClient, args: ForkRunArgs = {} as ForkRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("forkRun", buildForkRun(args), opts);
 };
 
 /** Begin GitHub Connect: answer the URL the browser navigates to, with a server-held state bound to the signed-in caller.
@@ -1471,6 +1586,31 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseCutStatus = function (this: QueryClient, args: ReleaseCutStatusArgs = {} as ReleaseCutStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseCutStatus", buildReleaseCutStatus(args), opts);
+};
+
+/** Replay one of the caller's runs: a NEW run that serves EVERY model call from the journal, so it reaches no provider. Under the default strict policy a request with no journaled match raises a divergence pinned to the first step that differs; permissive makes a fresh call and journals it. Returns {runId}. */
+export interface ReplayRunArgs {
+  /** The run to replay. */
+  runId: string;
+  /** strict (default) raises a divergence on a journal miss; permissive makes a fresh call and journals it. */
+  policy?: string;
+}
+
+export function buildReplayRun(args: ReplayRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  if (args.policy !== undefined) parts.push("policy: " + renderMemQLValue(args.policy));
+  return "builtin replayRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    replayRun(args: ReplayRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.replayRun = function (this: QueryClient, args: ReplayRunArgs = {} as ReplayRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("replayRun", buildReplayRun(args), opts);
 };
 
 /** Restore a Library document to an earlier version by APPENDING a new latest version equal to the chosen one (memql#1230). Forward-only and non-destructive: history is never deleted; the restore lands as a new version (authorKind=system) with note 'restored from vN'. ownerUserId is threaded from the document row. */

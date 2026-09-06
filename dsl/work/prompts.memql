@@ -12,8 +12,10 @@
 // authors, classifySymptom is deliberately the cheapest model in the
 // tree, and replanGap only ever sees the remainder of a plan.
 
-@enabled
-@description("Compile a goal into a run: emit the steps as an automation draft in the MemQL grammar. Reached ONLY when the catalog missed and triage said the goal is neither trivial nor sectionable, so it is the expensive path by construction and every cheaper tier runs first. The draft must pass Gate 1 (the isolated compile-and-bind) before the run proceeds.")
+/// Compile a goal into a run: emit the steps as an automation draft in the MemQL grammar. Reached
+/// ONLY when the catalog missed and triage said the goal is neither trivial nor sectionable, so it
+/// is the expensive path by construction and every cheaper tier runs first. The draft must pass
+/// Gate 1 (the isolated compile-and-bind) before the run proceeds.
 @defaultProvider("streamClaudeSonnet")
 @templateFile("prompts/compileGoal.tmpl")
 prompt compileGoal {
@@ -23,8 +25,10 @@ prompt compileGoal {
   now        string!   @description("RFC3339 wall-clock at invocation, so a time-relative goal needs no hardcoded clock.")
 }
 
-@enabled
-@description("Read a failed step's trace and name its symptom. Reached ONLY when the deterministic rules table had no opinion -- most failures never get here, which is the point. Deliberately the cheapest model in the tree: the answer is one of five words plus a reason, and the acts it selects are all bounded and reversible.")
+/// Read a failed step's trace and name its symptom. Reached ONLY when the deterministic rules table
+/// had no opinion -- most failures never get here, which is the point. Deliberately the cheapest
+/// model in the tree: the answer is one of five words plus a reason, and the acts it selects are
+/// all bounded and reversible.
 @defaultProvider("chat54Nano")
 @templateFile("prompts/classifySymptom.tmpl")
 prompt classifySymptom {
@@ -36,8 +40,10 @@ prompt classifySymptom {
   trace         []object  @description("The recent journal entries for this run, oldest first, so the model can see whether the run is going in circles.")
 }
 
-@enabled
-@description("Re-plan the gap from a failed step on: emit the REMAINING steps as a new template version. The prefix is kept and never re-emitted, because the steps that already succeeded are evidence rather than a draft -- re-planning from the start is the unguided rerun the debugging literature measured as three times worse than localized repair.")
+/// Re-plan the gap from a failed step on: emit the REMAINING steps as a new template version. The
+/// prefix is kept and never re-emitted, because the steps that already succeeded are evidence
+/// rather than a draft -- re-planning from the start is the unguided rerun the debugging literature
+/// measured as three times worse than localized repair.
 @defaultProvider("streamClaudeSonnet")
 @templateFile("prompts/replanGap.tmpl")
 prompt replanGap {

@@ -66,6 +66,10 @@ shape construct constructFull {
   catalogMatchText
   catalogedAt
   catalogedFromBundleId
+  goalSignature
+  reliability
+  reinforceCount
+  lastReinforced
   row.createdAt
   row.createdBy
 }

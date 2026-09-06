@@ -182,6 +182,22 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// reads the same row through clientAccountById.
 		{Path: "accounts/queries.memql", Name: "existingSelfAccount"}: true,
 
+		// epic memql#4966, the work spine's promotion path. Both of these
+		// write the engine's OWN EVIDENCE about a template -- the catalog key
+		// that decides whether a later goal is served without a model, and the
+		// reliability that decides how far a template has earned being replayed.
+		// Caller-scoping is not the missing piece: the rows are already
+		// owner-stamped and a caller can only reach their own constructs. What
+		// is missing is that a caller may not make these ASSERTIONS at all. A
+		// browser able to write goalSignature could point any goal at any
+		// template of theirs and have compile replay it as an exact match; one
+		// able to write reliability could promote an unproven template into the
+		// path that skips verification. Both are the engine's judgement about
+		// what has actually succeeded, and a tier cannot say "these are yours
+		// and still not yours to write".
+		{Path: "authoring/mutations.memql", Name: "recordConstructGoalSignature"}: true,
+		{Path: "authoring/mutations.memql", Name: "recordConstructReliability"}:   true,
+
 		// epic memql#4819 / memql#4820 D15. The six campaign-lifecycle and
 		// progress writers. Every one of them is reached ONLY through the
 		// `campaign*` builtins, which do the authorization first -- an owned-tier

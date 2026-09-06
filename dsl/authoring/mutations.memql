@@ -297,3 +297,48 @@ mutate dependencyEdge recordDependencyEdge {
     }
   }
 }
+
+/// Record the work spine's catalog key on a construct compiled from a goal (epic memql#4966), so
+/// compile's exact-match tier can find it again. Server-only: the signature is what decides whether
+/// a later goal is served from the catalog WITHOUT a model, so a caller able to write it could
+/// point any goal at any template of theirs and have the engine replay it as an exact match.
+/// Scoping to actor.userId is not the missing piece -- the row is already owner-stamped and a
+/// caller can only reach their own constructs; what is missing is that a caller may not assert this
+/// equivalence AT ALL, which is what @serverOnly says and a tier cannot. Written by
+/// integration.work's promotion path after a run has actually succeeded.
+@serverOnly
+mutate construct recordConstructGoalSignature {
+  args {
+    constructId    string!
+    goalSignature  string!
+  }
+  update {
+    accept { goalSignature }
+    stamp {
+      id: args.constructId
+    }
+  }
+}
+
+/// Move a construct along the trust ladder (epic memql#4966, spec section E `Promote`). The new
+/// values are computed by the caller rather than incremented here, because a MemQL update is a
+/// read-merge and carries no arithmetic. Server-only for the same reason as the signature above:
+/// reliability is the engine's own evidence about how far a template has earned being replayed
+/// without a model, and a caller who could write it could promote an unproven template into the
+/// cheap path. Scoping to actor.userId does not help -- these are already the caller's own rows,
+/// and the point is that the JUDGEMENT is not theirs to make.
+@serverOnly
+mutate construct recordConstructReliability {
+  args {
+    constructId     string!
+    reliability     float!
+    reinforceCount  int!
+    lastReinforced  string!
+  }
+  update {
+    accept { reliability, reinforceCount, lastReinforced }
+    stamp {
+      id: args.constructId
+    }
+  }
+}
