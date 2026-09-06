@@ -2,6 +2,8 @@ package planner
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/work"
@@ -17,6 +19,11 @@ type recordingRunWriter struct {
 	owners []string
 	fields []map[string]any
 	err    error
+	// ceilings is what RunBudget answers, and budgetErr makes it fail --
+	// which must leave the compile unbounded rather than refused.
+	ceilings  work.Ceilings
+	budgetErr error
+	budgetFor []string
 }
 
 func (r *recordingRunWriter) RecordCompileOutcome(_ context.Context, ownerUserId, runId string, fields map[string]any) error {
@@ -24,6 +31,11 @@ func (r *recordingRunWriter) RecordCompileOutcome(_ context.Context, ownerUserId
 	r.owners = append(r.owners, ownerUserId)
 	r.fields = append(r.fields, fields)
 	return r.err
+}
+
+func (r *recordingRunWriter) RunBudget(_ context.Context, _, runId string) (work.Ceilings, error) {
+	r.budgetFor = append(r.budgetFor, runId)
+	return r.ceilings, r.budgetErr
 }
 
 func adapterReq() workintegration.CompileRequest {
@@ -116,4 +128,86 @@ func TestNewWorkCompiler_RefusesWithoutALoopOrAWriter(t *testing.T) {
 	}
 	var c *WorkCompiler
 	c.Compile(context.Background(), adapterReq()) // must not panic
+}
+
+// memql#5000. The authoring repair loop's cumulative LLM ceiling was read off
+// a PLAN, and this path has none -- `emitAndRepairBundle` was handed an empty
+// plan id and the gate returned "not exhausted" on its first line. So on the
+// path the work spine actually uses, the loop was bounded by
+// `repairAttemptCap` and nothing else, whatever ceiling the goal declared.
+//
+// The gate is asked for BEFORE the compile, so the failure below is that the
+// adapter never asked.
+func TestWorkCompiler_ReadsTheRunsCeilingsBeforeCompiling(t *testing.T) {
+	w := &recordingRunWriter{ceilings: work.Ceilings{MaxModelCalls: 3}}
+	c := NewWorkCompiler(&PlannerAgentLoop{engine: &countingCompileEngine{}}, w)
+	c.Compile(context.Background(), adapterReq())
+
+	if len(w.budgetFor) == 0 {
+		t.Fatal("the adapter compiled without reading the run's ceilings, so the authoring repair loop " +
+			"is bounded by its attempt cap alone -- which is the defect")
+	}
+	if w.budgetFor[0] != adapterReq().RunId {
+		t.Errorf("the ceilings were read for run %q, want %q", w.budgetFor[0], adapterReq().RunId)
+	}
+}
+
+// A ceilings read that FAILS must leave the compile unbounded rather than
+// refuse it: a transient database blip is not a reason to make every goal
+// unrunnable, and the attempt cap still bounds the loop.
+func TestWorkCompiler_ACeilingsReadFailureDoesNotRefuseTheCompile(t *testing.T) {
+	sig := work.GoalSignature(adapterReq().Statement, []string{"day"})
+	eng := &countingCompileEngine{catalogue: []map[string]any{
+		{"id": "v1:authoring:construct:c1", "name": "summariseTickets", "goalSignature": sig, "reliability": 0.9},
+	}}
+	w := &recordingRunWriter{budgetErr: errors.New("database unreachable")}
+	c := NewWorkCompiler(&PlannerAgentLoop{engine: eng}, w)
+	c.Compile(context.Background(), adapterReq())
+
+	if len(w.fields) != 1 {
+		t.Fatalf("expected one write, got %d", len(w.fields))
+	}
+	if got := w.fields[0]["status"]; got != "running" {
+		t.Errorf("a ceilings read failure made the run %v; it must still compile", got)
+	}
+}
+
+// The gate itself, at the boundary. A ceiling of zero is UNSET, never
+// "nothing allowed" -- the reading that keeps a goal declaring no ceilings
+// runnable rather than dead on arrival.
+func TestCallCapGate(t *testing.T) {
+	unset := callCapGate(0, "x")
+	if blocked, _ := unset(context.Background(), 99); blocked {
+		t.Error("a ceiling of zero blocked; zero is UNSET, not a refusal")
+	}
+	if blocked, _ := callCapGate(-1, "x")(context.Background(), 1); blocked {
+		t.Error("a negative ceiling blocked")
+	}
+
+	gate := callCapGate(3, "this run's maxModelCalls ceiling")
+	for _, made := range []int{0, 1, 2} {
+		if blocked, _ := gate(context.Background(), made); blocked {
+			t.Errorf("blocked at %d calls against a ceiling of 3", made)
+		}
+	}
+	blocked, reason := gate(context.Background(), 3)
+	if !blocked {
+		t.Fatal("a job at its ceiling was allowed another call")
+	}
+	for _, want := range []string{"3", "maxModelCalls"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("the reason does not name %q, so nobody can tell which ceiling stopped it: %q", want, reason)
+		}
+	}
+}
+
+// planBudgetGate keeps the plan path exactly as it was, including its
+// deliberate fail-open on a plan-load error -- defensible where it is one of
+// two ceilings, and what was NOT defensible as the only ceiling on a path
+// with no plan at all.
+func TestPlanBudgetGateIsUnboundedWithoutAPlan(t *testing.T) {
+	l := &PlannerAgentLoop{engine: &countingCompileEngine{}}
+	if blocked, _ := l.planBudgetGate("")(context.Background(), 999); blocked {
+		t.Error("a gate with no plan blocked; there is no plan budget to be over")
+	}
 }

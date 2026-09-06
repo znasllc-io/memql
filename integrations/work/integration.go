@@ -33,6 +33,7 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/num"
 )
 
@@ -464,4 +465,59 @@ type ApprovalSeed struct {
 	Evidence     map[string]any
 	RequestedAt  time.Time
 	ExpiresAt    time.Time
+}
+
+// RunBudget reports the ceilings a run inherits from its goal.
+//
+// WHY THE CEILINGS AND NOT THE SPEND. v1:work:run.spent is written by exactly
+// one thing today -- component/workjournal stamps wallClockMs when a run
+// closes -- so its tokens, cost and modelCalls are absent on every live run.
+// A cumulative check against them would compare a real ceiling to a zero that
+// means "nobody measured", conclude there is budget left, and never block:
+// the same fail-open shape this method exists to close, moved one layer down.
+// So the caller supplies what it has actually spent, which for a compile is a
+// number it counted itself.
+//
+// Read under the OWNER's borrowed authority, like every other read here: the
+// goal is owner-tiered, and an unstamped read answers zero rows and no error,
+// which would present as "this goal has no ceilings" -- unbounded.
+func (i *Integration) RunBudget(ctx context.Context, ownerUserId, runId string) (work.Ceilings, error) {
+	var out work.Ceilings
+	if i == nil {
+		return out, fmt.Errorf("work: no integration")
+	}
+	if strings.TrimSpace(runId) == "" {
+		return out, fmt.Errorf("work: RunBudget needs a run id")
+	}
+	scoped := ownerActor(ctx, ownerUserId)
+	run, err := i.store().runForOwner(scoped, runId)
+	if err != nil {
+		return out, err
+	}
+	if run == nil {
+		return out, fmt.Errorf("work: run %s is not readable as %s", runId, ownerUserId)
+	}
+	goalId := rowString(run, "goalId")
+	if goalId == "" {
+		return out, nil
+	}
+	goal, err := i.store().goalForOwner(scoped, goalId)
+	if err != nil || goal == nil {
+		return out, err
+	}
+	raw := rowMap(goal, "ceilings")
+	if len(raw) == 0 {
+		// ABSENT, not zero. A goal with no ceilings declared is unbounded by
+		// this gate, which is the deployment's default -- and the caller's
+		// own attempt cap is what still bounds it.
+		return out, nil
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return out, fmt.Errorf("work: goal %s ceilings: %w", goalId, err)
+	}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return out, fmt.Errorf("work: goal %s ceilings: %w", goalId, err)
+	}
+	return out, nil
 }

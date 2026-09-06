@@ -24,6 +24,7 @@ import (
 	"time"
 
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/work"
 	workintegration "github.com/znasllc-io/memql/integrations/work"
 )
 
@@ -49,6 +50,8 @@ type compileEngine interface {
 // stamping site, and this delegates.
 type runWriter interface {
 	RecordCompileOutcome(ctx context.Context, ownerUserId, runId string, fields map[string]any) error
+	// RunBudget reports the ceilings this run inherits from its goal.
+	RunBudget(ctx context.Context, ownerUserId, runId string) (work.Ceilings, error)
 }
 
 // WorkCompiler satisfies workintegration.Compiler.
@@ -80,12 +83,28 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 	}
 	near, sandbox := c.seams()
 
+	// THE CEILING IS READ BEFORE THE COMPILE, not during it. A read failure
+	// leaves it UNSET -- unbounded by this gate -- rather than blocking the
+	// compile, which matches every other ceiling here and keeps a transient
+	// database blip from making goals unrunnable. The attempt cap still
+	// bounds the loop, and the failure is logged rather than swallowed.
+	var maxCalls int
+	if ceilings, cerr := c.writer.RunBudget(ctx, req.OwnerUserId, req.RunId); cerr != nil {
+		if c.loop.logger != nil {
+			c.loop.logger.Warn("work compile: could not read the run's ceilings; the authoring repair loop is bounded by its attempt cap alone",
+				"runId", req.RunId, "error", cerr)
+		}
+	} else {
+		maxCalls = ceilings.MaxModelCalls
+	}
+
 	out, err := c.loop.CompileGoalForRun(ctx, CompileRequest{
-		GoalId:      req.GoalId,
-		RunId:       req.RunId,
-		OwnerUserId: req.OwnerUserId,
-		Statement:   req.Statement,
-		Input:       req.Input,
+		GoalId:        req.GoalId,
+		RunId:         req.RunId,
+		OwnerUserId:   req.OwnerUserId,
+		Statement:     req.Statement,
+		Input:         req.Input,
+		MaxModelCalls: maxCalls,
 	}, near, sandbox)
 	if err != nil {
 		c.failRun(ctx, req, err)

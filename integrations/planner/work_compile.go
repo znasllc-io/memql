@@ -44,6 +44,12 @@ type CompileRequest struct {
 	OwnerUserId string
 	// Statement is the goal in the person's words.
 	Statement string
+	// MaxModelCalls is the run's ceiling on model calls, inherited from its
+	// goal. ZERO IS UNSET, never "nothing allowed" -- the same reading
+	// component/work.CheckCeilings gives every ceiling, and the one that
+	// keeps a goal with no ceilings declared runnable rather than dead on
+	// arrival.
+	MaxModelCalls int
 	// Input is the typed input object; its KEYS are what the signature
 	// is computed over, because two goals worded alike but taking
 	// different arguments want different templates.
@@ -186,7 +192,18 @@ func (l *PlannerAgentLoop) finishCompile(ctx context.Context, req CompileRequest
 			return out, fmt.Errorf("work compile: design pass for goal %s: %w", req.GoalId, err)
 		}
 		out.ModelCalls++
-		bundle, _, clean, err := l.emitAndRepairBundle(ctx, "", req.Statement, plan, sandbox)
+		// THE REPAIR LOOP IS BOUNDED HERE (memql#5000). It used to be handed
+		// an empty plan id, and the gate that read it returned "not
+		// exhausted" on its first line -- so this path, the one the work
+		// spine actually uses, was bounded by repairAttemptCap and nothing
+		// else. `out.ModelCalls` is what the compile has spent before the
+		// bundle; the gate adds the emit and each repair to it.
+		spent := out.ModelCalls
+		budget := callCapGate(req.MaxModelCalls, "this run's maxModelCalls ceiling")
+		bundle, _, clean, err := l.emitAndRepairBundle(ctx,
+			func(gctx context.Context, callsMade int) (bool, string) {
+				return budget(gctx, spent+callsMade)
+			}, req.Statement, plan, sandbox)
 		if err != nil {
 			return out, fmt.Errorf("work compile: emit for goal %s: %w", req.GoalId, err)
 		}
