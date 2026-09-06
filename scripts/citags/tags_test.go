@@ -6,8 +6,8 @@ package citags
 // tagged suite is CI-invisible unless some lane runs it with `-tags`. That fact
 // used to live in a hand-maintained audit comment in .github/workflows/ci.yml,
 // which had drifted on four tags at once: mcp was absent entirely (three files),
-// and identity, telnyx_live and voice were all covered by a closing "no other
-// build tag carries test files today" that was false of each. It bit memql#2888 concretely: that
+// and three more were covered by a closing "no other build tag carries test
+// files today" that was false of each. It bit memql#2888 concretely: that
 // vulnerability's seam is in an //go:build mcp file, so a regression test
 // placed beside it would never have run.
 //
@@ -80,8 +80,7 @@ import (
 // that would survive review. A tag that is merely inconvenient belongs in a
 // lane.
 var deliberatelyNotRunInCI = map[string]string{
-	"clustere2e":  "needs a provisioned 2-replica parity cluster to run (make cluster-e2e); ci.yml's build-clustere2e job compiles and vets it under the tag so the package cannot rot uncompiled (memql#4212), which is not a run",
-	"telnyx_live": "hits the live Telnyx API with real credentials; must not run on every PR",
+	"clustere2e": "needs a provisioned 2-replica parity cluster to run (make cluster-e2e); ci.yml's build-clustere2e job compiles and vets it under the tag so the package cannot rot uncompiled (memql#4212), which is not a run",
 }
 
 // prCriticalWorkflows are the workflow files whose lanes actually gate a pull

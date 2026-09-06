@@ -46,7 +46,7 @@ Events are organized into hierarchical topics using dot notation. Subscribers ca
 
 | Topic | Kind | Description |
 |-------|------|-------------|
-| `graph.node.created.{concept}` | `NODE_CREATED` | Concept-specific creation (e.g., `graph.node.created.v1:cognition:participant`) |
+| `graph.node.created.{concept}` | `NODE_CREATED` | Concept-specific creation (e.g., `graph.node.created.v1:library:artifact`) |
 | `graph.node.updated.{concept}` | `NODE_UPDATED` | Concept-specific update |
 | `graph.node.deleted.{concept}` | `NODE_DELETED` | Concept-specific deletion |
 
@@ -266,9 +266,9 @@ topic**. The client never writes a `graph.node.<action>.<concept>`
 string, so the topic grammar is not part of the client wire contract --
 a future grammar change is no longer a wire change.
 
-- `concept` -- canonical concept TYPE id (e.g. `v1:cognition:utterance`).
+- `concept` -- canonical concept TYPE id (e.g. `v1:library:artifact`).
   A concept type is legitimately client-visible; import it from the
-  generated SDK (`Concepts.COGNITION_UTTERANCE`). **Empty = all concepts.**
+  generated SDK (`Concepts.LIBRARY_ARTIFACT`). **Empty = all concepts.**
 - `actions` -- the CDC verbs to receive. **Empty = all actions.**
 
 The server composes one bus pattern per action (`graph.node.<verb>.<concept>`),

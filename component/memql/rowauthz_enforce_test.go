@@ -24,7 +24,7 @@ import (
 const declaredOwnedConcept = "v1:notes:note"
 
 // declaredClusterOwnerConcept declares `@rowAuthz(clusterOwner)`.
-const declaredClusterOwnerConcept = "v1:telephony:call"
+const declaredClusterOwnerConcept = "v1:campaigns:sendJob"
 
 // probeEngine builds a DB-free engine whose function registry contains
 // exactly the named probes, each a query construct BOUND to

@@ -52,8 +52,8 @@ DEPLOYER_IDLE_TIMEOUT_MS="${DEPLOYER_IDLE_TIMEOUT_MS:-300000}"
 # ReplicaSet that double-draws DB connections and drives 53300 (memql#1868).
 # See enforce_bff_rollout_invariant().
 NODE_REPLICAS=(
-  "cognition=2" "agent=2" "planner=2"
-  "voice=2" "workbench=2" "identity=2" "mcp=1"
+  "agent=2" "planner=2"
+  "workbench=2" "identity=2" "mcp=1"
 )
 
 #=============================================================================

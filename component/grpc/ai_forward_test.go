@@ -41,14 +41,14 @@ func TestAiForwardRouter_NoPeerAvailable(t *testing.T) {
 	peerMgr := node.NewPeerManager(identity, testLogger())
 	router := NewAiForwardRouter(peerMgr, testLogger())
 
-	_, err := router.Forward(context.Background(), "req-1", node.NodeTypeVoice,
+	_, err := router.Forward(context.Background(), "req-1", node.NodeTypeAgent,
 		testForwardedPrincipal(t),
 		&memqlv1.MemqlClientMessage{MessageId: "req-1"},
 	)
 	if err == nil {
 		t.Fatal("expected error when no voice peer is available, got nil")
 	}
-	want := "no voice node available"
+	want := "no agent node available"
 	if got := err.Error(); got != want {
 		t.Errorf("error message: want %q, got %q", want, got)
 	}

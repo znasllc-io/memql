@@ -24,21 +24,17 @@ import (
 // its CA. See seed_secrets_caroot_test.go for the full failure narrative.
 //
 // up.sh cannot be driven end-to-end from a test (it creates clusters and
-// installs ArgoCD), so it is sourced and the two seeding seams are exercised
+// installs ArgoCD), so it is sourced and the seeding seam is exercised
 // against a fake kubectl and a stub seed-secrets.sh -- the seam
-// up_voice_gate_budget_test.go and up_workloads_wait_test.go already use.
+// up_workloads_wait_test.go already uses.
 
 // carootSeedStub stands in for seed-secrets.sh and records the argv it was
 // handed, which is the entire question here.
 const carootSeedStub = "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$SEED_ARGV_LOG\"\n"
 
-// carootUpFakeKubectl answers everything the two seams ask: the namespace
-// probe, the apply, and `get deploy voice` (present immediately, so the voice
-// gate reaches seed-secrets on its first probe rather than waiting).
+// carootUpFakeKubectl answers everything the seam asks: the namespace probe
+// and the apply.
 const carootUpFakeKubectl = `#!/usr/bin/env bash
-case "$*" in
-  *"get deploy voice"*) printf 'deployment.apps/voice\n'; exit 0 ;;
-esac
 exit 0
 `
 
@@ -130,26 +126,5 @@ func TestUpForwardsTheCarootToSeedSecrets(t *testing.T) {
 	absent := runUpSeedSeam(t, "seed_secrets", "")
 	if strings.Contains(absent, "--caroot") {
 		t.Errorf("a --caroot was invented with none supplied, changing what `make up` resolves.\nargv:\n%s", absent)
-	}
-}
-
-// The SECOND call site. It re-runs only the voice-lane gate, which short-
-// circuits inside seed-secrets before any certificate work -- so the value is
-// inert there TODAY. It is passed anyway, and deliberately: the defect being
-// fixed IS a value that failed to travel, and a call site that omits it is
-// where the next one starts. --repo-root is passed at both sites on the same
-// reasoning.
-func TestUpForwardsTheCarootFromTheVoiceGateToo(t *testing.T) {
-	const caroot = "/home/op/.memql/mkcert"
-
-	given := runUpSeedSeam(t, "gate_voice_lane_post_sync", caroot)
-	if !strings.Contains(given, "--caroot="+caroot) {
-		t.Errorf("the post-sync voice gate dropped the CAROOT; every seed-secrets call site "+
-			"carries it or the next change re-opens memql#4069.\nargv:\n%s", given)
-	}
-
-	absent := runUpSeedSeam(t, "gate_voice_lane_post_sync", "")
-	if strings.Contains(absent, "--caroot") {
-		t.Errorf("a --caroot was invented with none supplied.\nargv:\n%s", absent)
 	}
 }

@@ -77,13 +77,13 @@ Additional containment:
 
 - **Restricted surface while live.** A badge session is pinned away from
   credential/session/cluster management (worker-token and badge mint/revoke,
-  session revocation, guest invites, bundle promotion, node maintenance) for
+  session revocation, bundle promotion, node maintenance) for
   the whole grant window -- rejected with `badge_grant_restricted`. Anything
   durable a walked-away kiosk could mint would outlive the TTL containment,
   so none of it is reachable under a grant.
 - Grants require a **user-class** terminal bearer -- a grant cannot mint from
-  another grant (no chaining), and machine classes (service_account,
-  voice_agent, node) are refused.
+  another grant (no chaining), and machine classes (service_account, node)
+  are refused.
 - Grant attempts are rate-limited per source IP and audited
   (`badge_grant_issued` / `badge_grant_denied` on `v1:identity:auditEvent`,
   with the terminal identity, badge row, and source IP).

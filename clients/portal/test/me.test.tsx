@@ -40,7 +40,7 @@ function userRow(overrides: Record<string, unknown> = {}) {
     sharedMailbox: false,
     signInPolicy: "any",
     // The preferences bag rides currentUser's `userFull` shape (memql#4523).
-    // Deliberately PARTIAL: `notifications`, `takeoverMode` and `voiceMode` are
+    // Deliberately PARTIAL: `notifications` and `takeoverMode` are
     // absent, so the tests below also cover the absent-reads-as-its-documented
     // default rule -- which matters because two of the defaults are TRUE and a
     // falsy read would render them as off.
@@ -561,14 +561,13 @@ describe("/me/settings -- the user settings surface (memql#4523)", () => {
 
     // Absent from the fixture bag. A concept @default is never applied on
     // write, so these keys genuinely are not on the row -- and the form must
-    // show what the cluster ACTS on, which is the documented default. Both of
-    // the first two default to TRUE, which is exactly where a falsy read would
+    // show what the cluster ACTS on, which is the documented default. The
+    // first defaults to TRUE, which is exactly where a falsy read would
     // render "off" and quietly lie.
     expect((screen.getByRole("checkbox", { name: /Send me notifications/ }) as HTMLInputElement).checked).toBe(
       true,
     );
     expect((screen.getByLabelText(/^During a takeover/) as HTMLSelectElement).value).toBe("clean");
-    expect((screen.getByLabelText(/^Microphone/) as HTMLSelectElement).value).toBe("toggle");
   });
 
   it("saves ONE group, and cannot spell either protected key", async () => {

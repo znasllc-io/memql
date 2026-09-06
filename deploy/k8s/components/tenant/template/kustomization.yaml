@@ -80,15 +80,11 @@ images:
     newTag: __ENGINE_TAG__
   - name: acrmemql.azurecr.io/memql-bff
     newTag: __ENGINE_TAG__
-  - name: acrmemql.azurecr.io/memql-cognition
-    newTag: __ENGINE_TAG__
   - name: acrmemql.azurecr.io/memql-agent
     newTag: __ENGINE_TAG__
   - name: acrmemql.azurecr.io/memql-planner
     newTag: __ENGINE_TAG__
   - name: acrmemql.azurecr.io/memql-workbench
-    newTag: __ENGINE_TAG__
-  - name: acrmemql.azurecr.io/memql-voice
     newTag: __ENGINE_TAG__
   - name: acrmemql.azurecr.io/memql-mcp
     newTag: __ENGINE_TAG__

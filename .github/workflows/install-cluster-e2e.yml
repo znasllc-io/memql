@@ -100,8 +100,6 @@ name: install-cluster-e2e
 #   * ONE PLATFORM, ONE TOPOLOGY. ubuntu-latest / linux-amd64, single k3d
 #     server, one replica per Deployment. It says nothing about the 2-replica
 #     mesh the cloud runs (`make up SERVERS=2` + `make scale N=2`).
-#   * LIVEKIT IS ABSENT, so seed-secrets.sh scales voice and voice-agent to 0
-#     and the readiness wait skips them. The voice lane is not covered.
 #
 # ===================== WHY A SEPARATE FILE, NOT MORE JOBS =================
 #

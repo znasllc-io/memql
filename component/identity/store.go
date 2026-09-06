@@ -1008,35 +1008,6 @@ func (s *Store) CreateIdentityMagicLink(ctx context.Context, identityId, userId,
 	return nil
 }
 
-// CreateIdentityVoiceAgentToken creates a v1:identity:identity row with
-// the voice_agent_token variant for the Go voice-agent process.
-// keyHash is the SHA-256 hex digest of an auxiliary random bearer; the
-// actual auth credential handed to the voice-agent is a
-// class="voice_agent" JWT signed via
-// JWTIssuer.IssueVoiceAgentAccessToken (the caller signs after this
-// row is persisted, since the JWT's `sub` claim is the identityId
-// stamped here). expiresAt is RFC3339Nano; empty string is allowed
-// for "no expiry stamped yet."
-func (s *Store) CreateIdentityVoiceAgentToken(
-	ctx context.Context,
-	identityId, userId, instanceId, keyHash, mintedBy, expiresAt, label string,
-) error {
-	var b strings.Builder
-	b.WriteString(`mutation createVoiceAgentTokenIdentity(`)
-	writeKVString(&b, "identityId", identityId, true)
-	writeKVString(&b, "userId", userId, false)
-	writeKVString(&b, "instanceId", instanceId, false)
-	writeKVString(&b, "keyHash", keyHash, false)
-	writeKVString(&b, "mintedBy", mintedBy, false)
-	writeKVString(&b, "expiresAt", expiresAt, false)
-	writeKVString(&b, "label", label, false)
-	b.WriteString(`)`)
-	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
-		return fmt.Errorf("identity.store: create voice_agent_token identity: %w", err)
-	}
-	return nil
-}
-
 // ---------------------------------------------------------------------------
 // Node-token identity rows (memql#338 / #343)
 // ---------------------------------------------------------------------------
@@ -1097,60 +1068,6 @@ func (s *Store) LookupNodeTokenIdentityByBinding(
 		// `active` is a bool; the proto-struct accessor returns false
 		// when the field is missing, which is the desired
 		// "treat-as-revoked" fallback.
-		out.Active = node.Payload.GetFields()["active"].GetBoolValue()
-	}
-	if out.IdentityId == "" {
-		return nil, nil
-	}
-	return out, nil
-}
-
-// VoiceAgentTokenLookup is what LookupVoiceAgentTokenIdentityById
-// returns when a row exists for the given identity id. Active is the
-// whole answer the verify path needs (memql#4111).
-type VoiceAgentTokenLookup struct {
-	IdentityId string
-	Active     bool
-}
-
-// LookupVoiceAgentTokenIdentityById returns the
-// v1:identity:identity[voice_agent_token] row whose id is the
-// class="voice_agent" JWT's subject, or (nil, nil) when no such row
-// exists.
-//
-// A nil result means "unknown", NOT "revoked" -- the caller
-// (component/grpc.VoiceAgentRevocationCheck) treats it as
-// not-revoked, matching the node-class convention in
-// component/node/node_token_revocation.go. Rows are returned even
-// when active=false; that is the state the caller is asking about.
-func (s *Store) LookupVoiceAgentTokenIdentityById(
-	ctx context.Context,
-	identityId string,
-) (*VoiceAgentTokenLookup, error) {
-	identityId = strings.TrimSpace(identityId)
-	if identityId == "" {
-		return nil, nil
-	}
-	var sb strings.Builder
-	sb.WriteString(`query voiceAgentTokenIdentityById(`)
-	writeKVString(&sb, "identityId", identityId, true)
-	sb.WriteString(`)`)
-	// Internal origin: the query is @serverOnly, and this runs inside an
-	// auth interceptor -- BEFORE any actor exists to scope to. Same
-	// reasoning as LookupNodeTokenIdentityByBinding above.
-	result, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), sb.String())
-	if err != nil {
-		return nil, fmt.Errorf("identity.store: lookup voice_agent_token identity: %w", err)
-	}
-	if result == nil || result.Bundle == nil || len(result.Bundle.Nodes) == 0 {
-		return nil, nil
-	}
-	node := result.Bundle.Nodes[0]
-	if node == nil {
-		return nil, nil
-	}
-	out := &VoiceAgentTokenLookup{IdentityId: strings.TrimSpace(node.GetId())}
-	if node.Payload != nil {
 		out.Active = node.Payload.GetFields()["active"].GetBoolValue()
 	}
 	if out.IdentityId == "" {

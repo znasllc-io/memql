@@ -59,14 +59,14 @@ Unified data record with validation state. Key fields:
 - `checkCount` / `confirmCount` — running tallies
 - `lastCheckedBy` / `lastCheckedAt` — last synthetic check metadata
 - `lastConfirmedBy` / `lastConfirmedAt` — last human confirm metadata
-- All original data fields: `data`, `label`, `recordType`, `spaceId`, `importSource`, etc.
+- All original data fields: `data`, `label`, `recordType`, `partitionId`, `importSource`, etc.
 
 ### v1:data:policy
 
 Per-recordType validation configuration:
 
 - `targetRecordType` — which record type this policy applies to
-- `spaceId` — optional space scope (null = global)
+- `partitionId` — optional partition scope (null = global)
 - `requiredChecks` — number of synthetic checks needed (default: 1)
 - `requiredConfirmations` — number of human confirmations needed (default: 1)
 - `checkedDataUsable` — whether checked records are usable live (default: false)
@@ -86,9 +86,9 @@ Audit trail for state transitions:
 
 | Query | Purpose |
 |-------|---------|
-| `recordsByState` | Filter records by validation state, space, type |
+| `recordsByState` | Filter records by validation state, partition, type |
 | `usableRecords` | Get records usable per policy (confirmed + optionally checked) |
-| `validationLog` | Audit trail for a record or space |
+| `validationLog` | Audit trail for a record or partition |
 | `detectConflicts` | Find confirmed records with matching natural keys |
 | `policy` | Get the validation policy for a record type |
 

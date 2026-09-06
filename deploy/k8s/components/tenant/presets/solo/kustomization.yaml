@@ -1,17 +1,8 @@
 # Instance profile: SOLO -- the condensed shape (epic memql#3852, task memql#3853).
 #
-# One replica of every mesh node, and the voice lane at zero. Used by the Trial
-# and Node tiers; see ../../README.md for the tier -> profile table and for why
-# the presets are keyed by profile rather than by tier.
-#
-# THE VOICE LANE AT ZERO IS A PRICING FACT, not a technical one. Voice is not in
-# Node's base price -- a voice minute costs roughly two orders of magnitude more
-# than a text turn -- so a Node tenant who has not bought the add-on should not
-# be paying for three idle voice pods. It is also the safe default: the voice
-# binaries fail-fast without LiveKit credentials by design, so running them
-# unconfigured is a guaranteed crash-loop rather than a harmless idle. Buying
-# the voice add-on raises these three counts; that is a values change on the
-# tenant's own overlay, which is what the fleet automation writes.
+# One replica of every mesh node. Used by the Trial and Node tiers; see
+# ../../README.md for the tier -> profile table and for why the presets are
+# keyed by profile rather than by tier.
 #
 # ONE REPLICA IS A DELIBERATE TIER PROPERTY, not an oversight. Node's price does
 # not include high availability, and rendering two replicas anyway would be
@@ -37,9 +28,6 @@ patches:
   - target: { kind: Deployment, name: bff }
     patch: |
       - { op: replace, path: /spec/replicas, value: 1 }
-  - target: { kind: Deployment, name: cognition }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 1 }
   - target: { kind: Deployment, name: agent }
     patch: |
       - { op: replace, path: /spec/replicas, value: 1 }
@@ -56,25 +44,3 @@ patches:
     patch: |
       - { op: replace, path: /spec/replicas, value: 1 }
 
-  # The voice lane: off. FIVE Deployments, not three -- the transport node, the
-  # room dispatcher, the LiveKit server, and LiveKit's own redis and SIP
-  # sidecars. The last two are the ones that get forgotten, and forgetting them
-  # is the expensive half of the mistake: they idle happily forever, they serve
-  # a LiveKit server that is scaled to zero, and nothing about the namespace
-  # says they are pointless. A "voice lane at zero" that leaves two pods running
-  # is not a saving, it is a smaller bill that reads as a correct one.
-  - target: { kind: Deployment, name: voice }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 0 }
-  - target: { kind: Deployment, name: voice-agent }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 0 }
-  - target: { kind: Deployment, name: livekit }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 0 }
-  - target: { kind: Deployment, name: livekit-redis }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 0 }
-  - target: { kind: Deployment, name: livekit-sip }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 0 }

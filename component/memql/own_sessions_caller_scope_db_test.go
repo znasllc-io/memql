@@ -141,7 +141,7 @@ func TestAuthSessionsForSelf_ScopeComesFromTheAccessContextNotClaims(t *testing.
 	// the shape contextWithSystemActor produces.
 	ctx := auth.ContextWithUserActor(nil, subject)
 	ctx = auth.ContextWithClaims(ctx, map[string]any{
-		"sub":  "polyphon-bridge-agent",
+		"sub":  "grpc-system-actor",
 		"role": "system",
 	})
 

@@ -10,11 +10,6 @@
 
 import { Dispatcher, type DispatcherOptions } from "./dispatcher.js";
 import { wsAuthSubprotocols } from "./wsauth.js";
-import {
-  uploadAttachment,
-  type AttachmentRef,
-  type UploadAttachmentParams,
-} from "./attachments.js";
 import { QueryClient } from "./query.js";
 import { SubscriptionManager } from "./subscriptions.js";
 import { newShortId } from "./id.js";
@@ -149,9 +144,7 @@ export class Connection {
   private socket: WebSocket;
   private readonly logger: DispatcherOptions["logger"];
   private readonly auth: ConnectionAuth | undefined;
-  // The endpoint this connection dialed. Retained so HTTP helpers
-  // (uploadAttachment, #2523) can derive the front-door origin the same way
-  // resolveEndpoint derives the WebSocket URL.
+  // The endpoint this connection dialed.
   private readonly endpoint: string;
   private closed = false;
   // Auto-rotation (#1110): the SDK decodes the bearer's exp and rotates
@@ -281,39 +274,10 @@ export class Connection {
     }
     const ok = payload.value.ok === true;
     // Advance the current bearer on success so any subsequent HTTP helper
-    // (uploadAttachment, #2523) sends the rotated token -- both the SDK's
-    // auto-rotation timer and a consumer's manual rotateAuth flow through here.
+    // sends the rotated token -- both the SDK's auto-rotation timer and a
+    // consumer's manual rotateAuth flow through here.
     if (ok) this.currentBearer = trimmed;
     return ok;
-  }
-
-  // uploadAttachment POSTs a file to the space's attachment endpoint on this
-  // connection's front door, authenticated with the connection's CURRENT
-  // bearer (post-rotation), and returns the created attachment reference
-  // (memql#2523). Only bearer-authenticated connections can upload; a
-  // guest/worker connection has no bearer and this rejects.
-  async uploadAttachment(params: UploadAttachmentParams): Promise<AttachmentRef> {
-    return uploadAttachment(
-      {
-        authToken: () => this.currentBearer,
-        attachmentBaseUrl: () => this.attachmentBaseUrl(),
-      },
-      params,
-    );
-  }
-
-  // attachmentBaseUrl derives the HTTP(S) base of the front door from the
-  // dialed WebSocket endpoint (wss -> https, ws -> http), resolving a relative
-  // endpoint against the document origin exactly like resolveEndpoint. The
-  // bridge's `/memql/ws` suffix is stripped so any deployment base-path prefix
-  // (sanitizeBaseURLFromEnv registers `/{prefix}/memql/ws` and
-  // `/{prefix}/spaces/...` together) is preserved for the attachments path;
-  // with no prefix this is just the origin.
-  private attachmentBaseUrl(): string {
-    const wsUrl = resolveWsUrl(this.endpoint);
-    const httpProto = wsUrl.protocol === "wss:" ? "https:" : "http:";
-    const prefix = wsUrl.pathname.replace(/\/memql\/ws\/?$/, "").replace(/\/+$/, "");
-    return `${httpProto}//${wsUrl.host}${prefix}`;
   }
 
   // startAutoRotate arms the in-place re-auth timer (#1110). No-op unless a

@@ -11,7 +11,7 @@ import (
 // importsDoc is the fixture the contract test drives. The block comment is the
 // point of it: a line-anchored regex reads the commented-out `use` as an
 // import, and the lexer -- which skips /* ... */ outright -- does not.
-const importsDoc = `use cognition.concepts.{ participant, space }
+const importsDoc = `use worker.concepts.{ participant, space }
 
 /*
 Retired -- fold these back in when the shapes land:
@@ -63,7 +63,7 @@ func TestImports_HandleProducesContractJSON(t *testing.T) {
 	// cognition.shapes is ABSENT: it is inside a block comment. That single
 	// omission is the whole reason this request exists.
 	const want = `{"imports":[` +
-		`{"path":"cognition.concepts","names":["participant","space"]},` +
+		`{"path":"worker.concepts","names":["participant","space"]},` +
 		`{"path":"common.traits","names":["isActiveRecord"]}` +
 		`]}`
 	if string(got) != want {

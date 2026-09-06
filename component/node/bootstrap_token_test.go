@@ -378,9 +378,9 @@ func TestIdentity_EnsureBearerToken_PopulatesViaBootstrap(t *testing.T) {
 	t.Setenv("MEMQL_IDENTITY_VERIFIER_BASE_URL", srv.URL)
 
 	id := &Identity{
-		ID:   "v1:cluster:node:cognition-test",
-		Type: NodeTypeCognition,
+		ID:   "v1:cluster:node:agent-test",
+		Type: NodeTypeAgent,
 	}
 	require.NoError(t, id.EnsureBearerToken(context.Background(), nil))
-	assert.Equal(t, "stub.jwt.token-for-cognition-v1:cluster:node:cognition-test", id.BearerToken)
+	assert.Equal(t, "stub.jwt.token-for-agent-v1:cluster:node:agent-test", id.BearerToken)
 }

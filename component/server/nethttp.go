@@ -838,20 +838,6 @@ func MemqlWebsocketPaths() []string {
 	return paths
 }
 
-// AudioWebsocketPaths returns all valid websocket endpoints for audio streaming.
-func AudioWebsocketPaths() []string {
-	base := sanitizeBaseURLFromEnv()
-	audioPath := "/memql/audio"
-	paths := []string{audioPath}
-	if base != "" {
-		p := base + audioPath
-		if p != audioPath {
-			paths = append(paths, p)
-		}
-	}
-	return paths
-}
-
 // pathsWithBase is a helper that returns paths with optional MEMQL_SERVER_PUBLIC_PATH prefix.
 func pathsWithBase(path string) []string {
 	base := sanitizeBaseURLFromEnv()
@@ -863,16 +849,6 @@ func pathsWithBase(path string) []string {
 		}
 	}
 	return paths
-}
-
-// PolyphonRoomTokenPaths returns paths for the Polyphon room token endpoint.
-func PolyphonRoomTokenPaths() []string {
-	return pathsWithBase("/polyphon/room-token")
-}
-
-// PolyphonStatusPaths returns paths for the Polyphon status endpoint.
-func PolyphonStatusPaths() []string {
-	return pathsWithBase("/polyphon/status")
 }
 
 // PolyphonUtterancePaths and PolyphonPreloadPaths used to live here, returning
@@ -899,12 +875,6 @@ func PolyphonStatusPaths() []string {
 // just gets an empty list now.
 func AIHTTPPaths() []string {
 	return nil
-}
-
-// SpaceAttachmentPaths returns the path prefix used to register the space
-// attachment upload handler (POST /spaces/{partitionId}/attachments).
-func SpaceAttachmentPaths() []string {
-	return pathsWithBase("/spaces/")
 }
 
 // EdgePaths returns the edge node's site-serving mount (memql#3710) -- "/"

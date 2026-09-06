@@ -155,21 +155,7 @@ spec:
                 name: bff-http
                 port:
                   number: 8085
-          - path: /polyphon/room-token
-            pathType: Prefix
-            backend:
-              service:
-                name: bff-http
-                port:
-                  number: 8085
           - path: /automations/resume
-            pathType: Prefix
-            backend:
-              service:
-                name: bff-http
-                port:
-                  number: 8085
-          - path: /polyphon/status
             pathType: Prefix
             backend:
               service:
@@ -254,13 +240,6 @@ spec:
                 port:
                   number: 8085
           - path: /healthz
-            pathType: Prefix
-            backend:
-              service:
-                name: bff-http
-                port:
-                  number: 8085
-          - path: /spaces/
             pathType: Prefix
             backend:
               service:

@@ -127,18 +127,17 @@ func TestReadMergeAudit_EveryMutationRoutesThroughReadMergePath(t *testing.T) {
 	t.Logf("  update-kind mutations: %v", updateKind)
 }
 
-// TestReadMergeAudit_Run4Regressions pins leaveSpace -- one of the two
-// mutations the issue called out as still-broken in Run 4. It is authored as
-// insert{} with an explicit id and a partial payload -- the exact shape that
-// used to reject with "” does not validate ... missing properties". The
-// engine-level read-merge (memql#1709) is the canonical fix: because it targets
-// an explicit id, executeWrite read-merges the partial onto the stored row.
-// This test asserts it retains that shape (insert-kind + explicit id) so the
-// audit documents that it depends on the engine fix rather than a per-mutation
-// DSL conversion. The behavioural preservation proof is TestReadMerge_LeaveSpace_*
-// in the DB-gated file.
+// TestReadMergeAudit_Run4Regressions pins revokeDelegation, the surviving one
+// of the two mutations the issue called out as still-broken in Run 4.
 //
-// revokeDelegation was the OTHER Run-4 mutation, but it has since been
+// leaveSpace was the other, and it was the insert-kind half of the pair: an
+// explicit id with a partial payload, relying on the engine-level read-merge
+// (memql#1709) rather than a per-mutation update{} conversion. It went with
+// the space concept (epic memql#4988), so what remains here is the inverse
+// assertion -- which is the one with teeth, because a regression back to
+// insert{} would let a caller payload leave a revoked row active.
+//
+// revokeDelegation has been
 // intentionally converted to an update{} (read-merge) form (memql#1729): a
 // revoke is a state transition, so the terminal state (active=false +
 // revokedAt) must be forced by the mutation itself rather than supplied by the
@@ -148,18 +147,6 @@ func TestReadMergeAudit_EveryMutationRoutesThroughReadMergePath(t *testing.T) {
 // now update-kind by design.
 func TestReadMergeAudit_Run4Regressions(t *testing.T) {
 	templates := loadAllMutationTemplates(t)
-
-	for _, name := range []string{"leaveSpace"} {
-		tmpl, ok := templates[name]
-		require.True(t, ok, "%s must be registered from the unified tree", name)
-		require.True(t, hasExplicitID(tmpl),
-			"%s must target an explicit id so the engine read-merge applies (memql#1709)", name)
-		// insert-kind ("" defaults to insert) -- i.e. NOT hand-converted to
-		// update{}; the engine merge covers it.
-		require.NotEqual(t, ast.MutationKindUpdate, tmpl.Kind,
-			"%s is intentionally left as insert{}; the engine-level read-merge (memql#1709) "+
-				"is the canonical fix, not a per-mutation update{} conversion", name)
-	}
 
 	// revokeDelegation must be update-kind (authoritative revoke,
 	// memql#1729) -- the inverse assertion, so a regression back to insert{}

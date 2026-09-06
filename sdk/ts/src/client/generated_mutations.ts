@@ -27,34 +27,6 @@ QueryClient.prototype.activateAuthoringBundle = function (this: QueryClient, arg
   return this.executeNamed("activateAuthoringBundle", buildActivateAuthoringBundle(args), opts);
 };
 
-/** Add the caller's agent to a space's roster. forUserId is server-stamped; per-user-per-space 3-cap and agent-ownership are enforced by the engine guard. */
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["addAgentToSpace"] in generated_concepts.ts).
-export interface AddAgentToSpaceArgs {
-  partitionId: string;
-  agentId: string;
-  displayName: string;
-  capabilityOverrides?: Record<string, unknown>;
-}
-
-export function buildAddAgentToSpace(args: AddAgentToSpaceArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("agentId: " + renderMemQLValue(args.agentId));
-  parts.push("displayName: " + renderMemQLValue(args.displayName));
-  if (args.capabilityOverrides !== undefined) parts.push("capabilityOverrides: " + renderMemQLValue(args.capabilityOverrides));
-  return "mutation addAgentToSpace(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    addAgentToSpace(args: AddAgentToSpaceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.addAgentToSpace = function (this: QueryClient, args: AddAgentToSpaceArgs = {} as AddAgentToSpaceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("addAgentToSpace", buildAddAgentToSpace(args), opts);
-};
-
 /** Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert. */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.ts).
 export interface AddRecipientArgs {
@@ -913,35 +885,6 @@ QueryClient.prototype.clearWorkerConnectedNode = function (this: QueryClient, ar
   return this.executeNamed("clearWorkerConnectedNode", buildClearWorkerConnectedNode(args), opts);
 };
 
-/** Close a call record on disconnect: stamp end time, duration, disposition, and cost estimate. */
-// Bound concept: v1:telephony:call (machine-readable: BoundConcepts["closeCall"] in generated_concepts.ts).
-export interface CloseCallArgs {
-  id: string;
-  durationSeconds: number;
-  // Enum: completed | no_answer | busy | failed | canceled
-  disposition: string;
-  costEstimate?: number;
-}
-
-export function buildCloseCall(args: CloseCallArgs): string {
-  const parts: string[] = [];
-  parts.push("id: " + renderMemQLValue(args.id));
-  parts.push("durationSeconds: " + renderMemQLValue(args.durationSeconds));
-  parts.push("disposition: " + renderMemQLValue(args.disposition));
-  if (args.costEstimate !== undefined) parts.push("costEstimate: " + renderMemQLValue(args.costEstimate));
-  return "mutation closeCall(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    closeCall(args: CloseCallArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.closeCall = function (this: QueryClient, args: CloseCallArgs = {} as CloseCallArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("closeCall", buildCloseCall(args), opts);
-};
-
 /** Mark a to-do complete (or re-open it) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so the operation re-enforces ownership and can never transfer the row. The caller threads the full updated payload (with done flipped); the complete tool builds it from the current row + done=true. */
 // Bound concept: v1:todos:todo (machine-readable: BoundConcepts["completeTodo"] in generated_concepts.ts).
 export interface CompleteTodoArgs {
@@ -1237,15 +1180,8 @@ export interface CreateAgentArgs {
   role?: string;
   roleSlug?: string;
   kind?: string;
-  gender?: string;
-  audioControl?: string;
-  videoControl?: string;
-  avatarPersonaId?: string;
-  avatarVendor?: string;
   capabilities?: Record<string, unknown>;
-  avatar?: Record<string, unknown>;
   providerConfig?: Record<string, unknown>;
-  triggerBehavior?: Record<string, unknown>;
   active?: boolean;
   deleted?: boolean;
 }
@@ -1260,15 +1196,8 @@ export function buildCreateAgent(args: CreateAgentArgs): string {
   if (args.role !== undefined) parts.push("role: " + renderMemQLValue(args.role));
   if (args.roleSlug !== undefined) parts.push("roleSlug: " + renderMemQLValue(args.roleSlug));
   if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));
-  if (args.gender !== undefined) parts.push("gender: " + renderMemQLValue(args.gender));
-  if (args.audioControl !== undefined) parts.push("audioControl: " + renderMemQLValue(args.audioControl));
-  if (args.videoControl !== undefined) parts.push("videoControl: " + renderMemQLValue(args.videoControl));
-  if (args.avatarPersonaId !== undefined) parts.push("avatarPersonaId: " + renderMemQLValue(args.avatarPersonaId));
-  if (args.avatarVendor !== undefined) parts.push("avatarVendor: " + renderMemQLValue(args.avatarVendor));
   if (args.capabilities !== undefined) parts.push("capabilities: " + renderMemQLValue(args.capabilities));
-  if (args.avatar !== undefined) parts.push("avatar: " + renderMemQLValue(args.avatar));
   if (args.providerConfig !== undefined) parts.push("providerConfig: " + renderMemQLValue(args.providerConfig));
-  if (args.triggerBehavior !== undefined) parts.push("triggerBehavior: " + renderMemQLValue(args.triggerBehavior));
   if (args.active !== undefined) parts.push("active: " + renderMemQLValue(args.active));
   if (args.deleted !== undefined) parts.push("deleted: " + renderMemQLValue(args.deleted));
   return "mutation createAgent(" + parts.join(", ") + ")";
@@ -1333,7 +1262,6 @@ export interface CreateAgentRoleArgs {
   forbiddenSkillIds?: unknown[];
   maxSkills?: number;
   recommendedPolicySlug?: string;
-  recommendedGender?: string;
   systemPromptHints?: string;
   active?: boolean;
   predefined?: boolean;
@@ -1353,7 +1281,6 @@ export function buildCreateAgentRole(args: CreateAgentRoleArgs): string {
   if (args.forbiddenSkillIds !== undefined) parts.push("forbiddenSkillIds: " + renderMemQLValue(args.forbiddenSkillIds));
   if (args.maxSkills !== undefined) parts.push("maxSkills: " + renderMemQLValue(args.maxSkills));
   if (args.recommendedPolicySlug !== undefined) parts.push("recommendedPolicySlug: " + renderMemQLValue(args.recommendedPolicySlug));
-  if (args.recommendedGender !== undefined) parts.push("recommendedGender: " + renderMemQLValue(args.recommendedGender));
   if (args.systemPromptHints !== undefined) parts.push("systemPromptHints: " + renderMemQLValue(args.systemPromptHints));
   if (args.active !== undefined) parts.push("active: " + renderMemQLValue(args.active));
   if (args.predefined !== undefined) parts.push("predefined: " + renderMemQLValue(args.predefined));
@@ -1713,42 +1640,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.createAuthoringConstruct = function (this: QueryClient, args: CreateAuthoringConstructArgs = {} as CreateAuthoringConstructArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createAuthoringConstruct", buildCreateAuthoringConstruct(args), opts);
-};
-
-/** Insert a v1:agents:avatarPersona catalog row (memql#609). Called by the SeedMaterializer when it walks the avatar-persona seed declarations under dsl/agents/avatarPersonas.memql -- the materializer stamps the seed body's `id` (the seed name) into `avatarPersonaId`. The seeds themselves are hand-curated in dsl/agents/avatarPersonas.memql (the vendor-issued faceId pasted in per persona). Global operator catalog: the engine stamps the insert into the _system slot regardless of the caller's partition, exactly like createAgentRole / createSkill. */
-// Bound concept: v1:agents:avatarPersona (machine-readable: BoundConcepts["createAvatarPersona"] in generated_concepts.ts).
-export interface CreateAvatarPersonaArgs {
-  avatarPersonaId?: string;
-  vendor: string;
-  personaId: string;
-  name: string;
-  gender: string;
-  imageRef?: string;
-  previewRef?: string;
-  active?: boolean;
-}
-
-export function buildCreateAvatarPersona(args: CreateAvatarPersonaArgs): string {
-  const parts: string[] = [];
-  if (args.avatarPersonaId !== undefined) parts.push("avatarPersonaId: " + renderMemQLValue(args.avatarPersonaId));
-  parts.push("vendor: " + renderMemQLValue(args.vendor));
-  parts.push("personaId: " + renderMemQLValue(args.personaId));
-  parts.push("name: " + renderMemQLValue(args.name));
-  parts.push("gender: " + renderMemQLValue(args.gender));
-  if (args.imageRef !== undefined) parts.push("imageRef: " + renderMemQLValue(args.imageRef));
-  if (args.previewRef !== undefined) parts.push("previewRef: " + renderMemQLValue(args.previewRef));
-  if (args.active !== undefined) parts.push("active: " + renderMemQLValue(args.active));
-  return "mutation createAvatarPersona(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createAvatarPersona(args: CreateAvatarPersonaArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createAvatarPersona = function (this: QueryClient, args: CreateAvatarPersonaArgs = {} as CreateAvatarPersonaArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createAvatarPersona", buildCreateAvatarPersona(args), opts);
 };
 
 /** Register a badge identity (shared-terminal operator credential). Stores only the SHA-256 hex hash of the badge/device id. */
@@ -2387,7 +2278,7 @@ QueryClient.prototype.createDeviceCode = function (this: QueryClient, args: Crea
   return this.executeNamed("createDeviceCode", buildCreateDeviceCode(args), opts);
 };
 
-/** Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers. */
+/** Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers. */
 // Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["createDocumentChunk"] in generated_concepts.ts).
 export interface CreateDocumentChunkArgs {
   chunkId: string;
@@ -2397,7 +2288,6 @@ export interface CreateDocumentChunkArgs {
   sourceRef?: string;
   seq?: number;
   tokenCount?: number;
-  sourceUtteranceId?: string;
   sourceAgentId?: string;
   sourceTopic?: string;
 }
@@ -2411,7 +2301,6 @@ export function buildCreateDocumentChunk(args: CreateDocumentChunkArgs): string 
   if (args.sourceRef !== undefined) parts.push("sourceRef: " + renderMemQLValue(args.sourceRef));
   if (args.seq !== undefined) parts.push("seq: " + renderMemQLValue(args.seq));
   if (args.tokenCount !== undefined) parts.push("tokenCount: " + renderMemQLValue(args.tokenCount));
-  if (args.sourceUtteranceId !== undefined) parts.push("sourceUtteranceId: " + renderMemQLValue(args.sourceUtteranceId));
   if (args.sourceAgentId !== undefined) parts.push("sourceAgentId: " + renderMemQLValue(args.sourceAgentId));
   if (args.sourceTopic !== undefined) parts.push("sourceTopic: " + renderMemQLValue(args.sourceTopic));
   return "mutation createDocumentChunk(" + parts.join(", ") + ")";
@@ -2554,36 +2443,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.createGeneratedOutput = function (this: QueryClient, args: CreateGeneratedOutputArgs = {} as CreateGeneratedOutputArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createGeneratedOutput", buildCreateGeneratedOutput(args), opts);
-};
-
-/** Create a greeting utterance for an AI participant joining a space */
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["createGreetingUtterance"] in generated_concepts.ts).
-export interface CreateGreetingUtteranceArgs {
-  partitionId: string;
-  participantId: string;
-  agentId: string;
-  text: string;
-  greetingKind: string;
-}
-
-export function buildCreateGreetingUtterance(args: CreateGreetingUtteranceArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("participantId: " + renderMemQLValue(args.participantId));
-  parts.push("agentId: " + renderMemQLValue(args.agentId));
-  parts.push("text: " + renderMemQLValue(args.text));
-  parts.push("greetingKind: " + renderMemQLValue(args.greetingKind));
-  return "mutation createGreetingUtterance(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createGreetingUtterance(args: CreateGreetingUtteranceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createGreetingUtterance = function (this: QueryClient, args: CreateGreetingUtteranceArgs = {} as CreateGreetingUtteranceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createGreetingUtterance", buildCreateGreetingUtterance(args), opts);
 };
 
 /** Create a new identity (credential set owned by a user). */
@@ -2845,7 +2704,6 @@ export interface CreateMemoryArgs {
   kind?: string;
   agentId?: string;
   partitionId?: string;
-  sourceUtteranceId?: string;
 }
 
 export function buildCreateMemory(args: CreateMemoryArgs): string {
@@ -2857,7 +2715,6 @@ export function buildCreateMemory(args: CreateMemoryArgs): string {
   if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));
   if (args.agentId !== undefined) parts.push("agentId: " + renderMemQLValue(args.agentId));
   if (args.partitionId !== undefined) parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  if (args.sourceUtteranceId !== undefined) parts.push("sourceUtteranceId: " + renderMemQLValue(args.sourceUtteranceId));
   return "mutation createMemory(" + parts.join(", ") + ")";
 }
 
@@ -3629,38 +3486,6 @@ QueryClient.prototype.createSenderIdentity = function (this: QueryClient, args: 
   return this.executeNamed("createSenderIdentity", buildCreateSenderIdentity(args), opts);
 };
 
-/** Create a session record for a participant in a space. */
-// Bound concept: v1:cognition:session (machine-readable: BoundConcepts["createSessionForParticipant"] in generated_concepts.ts).
-export interface CreateSessionForParticipantArgs {
-  sessionId?: string;
-  partitionId: string;
-  participantId: string;
-  humanInput?: Record<string, unknown>;
-  aiOutput?: Record<string, unknown>;
-  streams?: Record<string, unknown>;
-}
-
-export function buildCreateSessionForParticipant(args: CreateSessionForParticipantArgs): string {
-  const parts: string[] = [];
-  if (args.sessionId !== undefined) parts.push("sessionId: " + renderMemQLValue(args.sessionId));
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("participantId: " + renderMemQLValue(args.participantId));
-  if (args.humanInput !== undefined) parts.push("humanInput: " + renderMemQLValue(args.humanInput));
-  if (args.aiOutput !== undefined) parts.push("aiOutput: " + renderMemQLValue(args.aiOutput));
-  if (args.streams !== undefined) parts.push("streams: " + renderMemQLValue(args.streams));
-  return "mutation createSessionForParticipant(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createSessionForParticipant(args: CreateSessionForParticipantArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createSessionForParticipant = function (this: QueryClient, args: CreateSessionForParticipantArgs = {} as CreateSessionForParticipantArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createSessionForParticipant", buildCreateSessionForParticipant(args), opts);
-};
-
 /** Create a site. Defaults are applied with ?? because a concept-field @default is never applied on insert (memql#2960) -- writing the field without ?? leaves it empty and the edge refuses to serve a row whose status it cannot read.
 status and systemOwned are caller-settable (default "draft" / false, the ordinary operator-created site) so the SeedMaterializer can pass "live" / true for the portal seed (dsl/platform/seeds.memql, memql#3711) -- the platform's own console has to resolve the moment the cluster boots, and it must not be deletable by an operator who does not realize it is how sites get managed at all.
 `createdAt` / `createdBy` are NEVER authored here -- both are reserved payload fields (component/database/memory-nodes/constants.go) the engine stamps intrinsically from `now` / the caller's actor (component/database/memory-nodes/concept.go). An earlier version of this mutation stamped them explicitly in `stamp{}`, which every write refused at the reserved-field guard in executor_mutation.go with "mutation payload ... declares reserved field" -- silently, because nothing exercised this mutation against a live boot until memql#3714's edge verification found the portal's own seed failing with exactly that error on every fresh cluster (memql#3714b).
@@ -4098,40 +3923,6 @@ QueryClient.prototype.createUserOnFirstLogin = function (this: QueryClient, args
   return this.executeNamed("createUserOnFirstLogin", buildCreateUserOnFirstLogin(args), opts);
 };
 
-/** Create a voice_agent_token identity (credential row for the Go voice-agent process). Plain JWT is returned by JWTIssuer.IssueVoiceAgentAccessToken; this row stores only the SHA-256 of an auxiliary random bearer for schema completeness + audit fingerprinting. */
-// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createVoiceAgentTokenIdentity"] in generated_concepts.ts).
-export interface CreateVoiceAgentTokenIdentityArgs {
-  identityId: string;
-  userId: string;
-  instanceId: string;
-  keyHash: string;
-  mintedBy: string;
-  expiresAt?: string;
-  label?: string;
-}
-
-export function buildCreateVoiceAgentTokenIdentity(args: CreateVoiceAgentTokenIdentityArgs): string {
-  const parts: string[] = [];
-  parts.push("identityId: " + renderMemQLValue(args.identityId));
-  parts.push("userId: " + renderMemQLValue(args.userId));
-  parts.push("instanceId: " + renderMemQLValue(args.instanceId));
-  parts.push("keyHash: " + renderMemQLValue(args.keyHash));
-  parts.push("mintedBy: " + renderMemQLValue(args.mintedBy));
-  if (args.expiresAt !== undefined) parts.push("expiresAt: " + renderMemQLValue(args.expiresAt));
-  if (args.label !== undefined) parts.push("label: " + renderMemQLValue(args.label));
-  return "mutation createVoiceAgentTokenIdentity(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createVoiceAgentTokenIdentity(args: CreateVoiceAgentTokenIdentityArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createVoiceAgentTokenIdentity = function (this: QueryClient, args: CreateVoiceAgentTokenIdentityArgs = {} as CreateVoiceAgentTokenIdentityArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createVoiceAgentTokenIdentity", buildCreateVoiceAgentTokenIdentity(args), opts);
-};
-
 /** Insert a worker tool-invocation telemetry row.
 ownerUserId is NOT an argument: v1:worker:invocation declares the composite owner tier (memql#4406) and marks the field @serverSet, so the owner reaches the row from actor.userId and through nothing else. Both Go writers already resolve the owner before calling -- they need it to route the dispatch at all -- and now stamp it as the actor rather than passing it as data. */
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["createWorkerInvocation"] in generated_concepts.ts).
@@ -4544,108 +4335,6 @@ QueryClient.prototype.disablePackageDeployables = function (this: QueryClient, a
   return this.executeNamed("disablePackageDeployables", buildDisablePackageDeployables(args), opts);
 };
 
-/** Emit a client-tool request envelope for cross-node relay to a browser stream. */
-// Bound concept: v1:cognition:client:tool:request (machine-readable: BoundConcepts["emitClientToolRequest"] in generated_concepts.ts).
-export interface EmitClientToolRequestArgs {
-  requestId: string;
-  callId: string;
-  toolName: string;
-  argumentsJSON?: string;
-  partitionId?: string;
-  participantId?: string;
-  agentId?: string;
-  expiresAt?: string;
-}
-
-export function buildEmitClientToolRequest(args: EmitClientToolRequestArgs): string {
-  const parts: string[] = [];
-  parts.push("requestId: " + renderMemQLValue(args.requestId));
-  parts.push("callId: " + renderMemQLValue(args.callId));
-  parts.push("toolName: " + renderMemQLValue(args.toolName));
-  if (args.argumentsJSON !== undefined) parts.push("argumentsJSON: " + renderMemQLValue(args.argumentsJSON));
-  if (args.partitionId !== undefined) parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  if (args.participantId !== undefined) parts.push("participantId: " + renderMemQLValue(args.participantId));
-  if (args.agentId !== undefined) parts.push("agentId: " + renderMemQLValue(args.agentId));
-  if (args.expiresAt !== undefined) parts.push("expiresAt: " + renderMemQLValue(args.expiresAt));
-  return "mutation emitClientToolRequest(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    emitClientToolRequest(args: EmitClientToolRequestArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.emitClientToolRequest = function (this: QueryClient, args: EmitClientToolRequestArgs = {} as EmitClientToolRequestArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("emitClientToolRequest", buildEmitClientToolRequest(args), opts);
-};
-
-/** Emit a client-tool response envelope fulfilling a pending clientToolRequest. */
-// Bound concept: v1:cognition:client:tool:response (machine-readable: BoundConcepts["emitClientToolResponse"] in generated_concepts.ts).
-export interface EmitClientToolResponseArgs {
-  responseId: string;
-  callId: string;
-  contentJSON?: string;
-  isError?: boolean;
-  errorMessage?: string;
-  partitionId?: string;
-}
-
-export function buildEmitClientToolResponse(args: EmitClientToolResponseArgs): string {
-  const parts: string[] = [];
-  parts.push("responseId: " + renderMemQLValue(args.responseId));
-  parts.push("callId: " + renderMemQLValue(args.callId));
-  if (args.contentJSON !== undefined) parts.push("contentJSON: " + renderMemQLValue(args.contentJSON));
-  if (args.isError !== undefined) parts.push("isError: " + renderMemQLValue(args.isError));
-  if (args.errorMessage !== undefined) parts.push("errorMessage: " + renderMemQLValue(args.errorMessage));
-  if (args.partitionId !== undefined) parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  return "mutation emitClientToolResponse(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    emitClientToolResponse(args: EmitClientToolResponseArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.emitClientToolResponse = function (this: QueryClient, args: EmitClientToolResponseArgs = {} as EmitClientToolResponseArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("emitClientToolResponse", buildEmitClientToolResponse(args), opts);
-};
-
-/** Emit a streaming text chunk during AI response generation. */
-// Bound concept: v1:cognition:text:chunk (machine-readable: BoundConcepts["emitTextChunk"] in generated_concepts.ts).
-export interface EmitTextChunkArgs {
-  chunkId: string;
-  partitionId: string;
-  participantId: string;
-  replyId: string;
-  text: string;
-  index: number;
-  done: boolean;
-}
-
-export function buildEmitTextChunk(args: EmitTextChunkArgs): string {
-  const parts: string[] = [];
-  parts.push("chunkId: " + renderMemQLValue(args.chunkId));
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("participantId: " + renderMemQLValue(args.participantId));
-  parts.push("replyId: " + renderMemQLValue(args.replyId));
-  parts.push("text: " + renderMemQLValue(args.text));
-  parts.push("index: " + renderMemQLValue(args.index));
-  parts.push("done: " + renderMemQLValue(args.done));
-  return "mutation emitTextChunk(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    emitTextChunk(args: EmitTextChunkArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.emitTextChunk = function (this: QueryClient, args: EmitTextChunkArgs = {} as EmitTextChunkArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("emitTextChunk", buildEmitTextChunk(args), opts);
-};
-
 /** Turn one or more of a source's deployables back ON.
 The exact inverse of disablePackageDeployables above, and the reason that one is a membership change rather than a whole-list write: removing a member had no form at all. Removing a name that is not there is a no-op rather than an error, so two people enabling the same app both succeed and a retry is safe. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["enablePackageDeployables"] in generated_concepts.ts).
@@ -4870,100 +4559,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.insertSafetyClassification = function (this: QueryClient, args: InsertSafetyClassificationArgs = {} as InsertSafetyClassificationArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("insertSafetyClassification", buildInsertSafetyClassification(args), opts);
-};
-
-/** Join a space as an AI participant. Uses canonicalized deterministic ID. */
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["joinSpaceAsAI"] in generated_concepts.ts).
-export interface JoinSpaceAsAIArgs {
-  partitionId: string;
-  agentId: string;
-  displayName: string;
-  status?: string;
-  joinedAt?: string;
-  capabilityOverrides?: Record<string, unknown>;
-  hidden?: boolean;
-  forUserId?: string;
-  isGroupGA?: boolean;
-}
-
-export function buildJoinSpaceAsAI(args: JoinSpaceAsAIArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("agentId: " + renderMemQLValue(args.agentId));
-  parts.push("displayName: " + renderMemQLValue(args.displayName));
-  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
-  if (args.joinedAt !== undefined) parts.push("joinedAt: " + renderMemQLValue(args.joinedAt));
-  if (args.capabilityOverrides !== undefined) parts.push("capabilityOverrides: " + renderMemQLValue(args.capabilityOverrides));
-  if (args.hidden !== undefined) parts.push("hidden: " + renderMemQLValue(args.hidden));
-  if (args.forUserId !== undefined) parts.push("forUserId: " + renderMemQLValue(args.forUserId));
-  if (args.isGroupGA !== undefined) parts.push("isGroupGA: " + renderMemQLValue(args.isGroupGA));
-  return "mutation joinSpaceAsAI(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    joinSpaceAsAI(args: JoinSpaceAsAIArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.joinSpaceAsAI = function (this: QueryClient, args: JoinSpaceAsAIArgs = {} as JoinSpaceAsAIArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("joinSpaceAsAI", buildJoinSpaceAsAI(args), opts);
-};
-
-/** Join a space as a human participant. */
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["joinSpaceAsHuman"] in generated_concepts.ts).
-export interface JoinSpaceAsHumanArgs {
-  partitionId: string;
-  userId: string;
-  displayName: string;
-  status?: string;
-  joinedAt?: string;
-  capabilityOverrides?: Record<string, unknown>;
-}
-
-export function buildJoinSpaceAsHuman(args: JoinSpaceAsHumanArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("userId: " + renderMemQLValue(args.userId));
-  parts.push("displayName: " + renderMemQLValue(args.displayName));
-  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
-  if (args.joinedAt !== undefined) parts.push("joinedAt: " + renderMemQLValue(args.joinedAt));
-  if (args.capabilityOverrides !== undefined) parts.push("capabilityOverrides: " + renderMemQLValue(args.capabilityOverrides));
-  return "mutation joinSpaceAsHuman(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    joinSpaceAsHuman(args: JoinSpaceAsHumanArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.joinSpaceAsHuman = function (this: QueryClient, args: JoinSpaceAsHumanArgs = {} as JoinSpaceAsHumanArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("joinSpaceAsHuman", buildJoinSpaceAsHuman(args), opts);
-};
-
-/** Insert a new version of a participant record (typically used to mark the participant as left). */
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["leaveSpace"] in generated_concepts.ts).
-export interface LeaveSpaceArgs {
-  participantId: string;
-  payload: Record<string, unknown>;
-}
-
-export function buildLeaveSpace(args: LeaveSpaceArgs): string {
-  const parts: string[] = [];
-  parts.push("participantId: " + renderMemQLValue(args.participantId));
-  parts.push("payload: " + renderMemQLValue(args.payload));
-  return "mutation leaveSpace(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    leaveSpace(args: LeaveSpaceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.leaveSpace = function (this: QueryClient, args: LeaveSpaceArgs = {} as LeaveSpaceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("leaveSpace", buildLeaveSpace(args), opts);
 };
 
 /** Per Q7 missing-capability surface: log a new gap the Planner Agent identified during a Plan. First sighting creates the row; repeat sightings (same (kind, capability)) call bumpMissingCapabilitySighting instead so the row stays unique-by-capability and sightingCount climbs. Status defaults to 'open'. */
@@ -5429,50 +5024,6 @@ QueryClient.prototype.recordBundleValidation = function (this: QueryClient, args
   return this.executeNamed("recordBundleValidation", buildRecordBundleValidation(args), opts);
 };
 
-/** Write an append-only call record. A completed leg writes one row with the real duration + disposition; durationSeconds/disposition default to an in-progress row when omitted (Amendment A: bound to partition + partition-scoped room). */
-// Bound concept: v1:telephony:call (machine-readable: BoundConcepts["recordCall"] in generated_concepts.ts).
-export interface RecordCallArgs {
-  // Enum: inbound | outbound
-  direction: string;
-  fromE164: string;
-  toE164: string;
-  partitionId: string;
-  room: string;
-  carrier?: string;
-  providerCallId?: string;
-  agentId?: string;
-  durationSeconds?: number;
-  // Enum: in_progress | completed | no_answer | busy | failed | canceled
-  disposition?: string;
-  costEstimate?: number;
-}
-
-export function buildRecordCall(args: RecordCallArgs): string {
-  const parts: string[] = [];
-  parts.push("direction: " + renderMemQLValue(args.direction));
-  parts.push("fromE164: " + renderMemQLValue(args.fromE164));
-  parts.push("toE164: " + renderMemQLValue(args.toE164));
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("room: " + renderMemQLValue(args.room));
-  if (args.carrier !== undefined) parts.push("carrier: " + renderMemQLValue(args.carrier));
-  if (args.providerCallId !== undefined) parts.push("providerCallId: " + renderMemQLValue(args.providerCallId));
-  if (args.agentId !== undefined) parts.push("agentId: " + renderMemQLValue(args.agentId));
-  if (args.durationSeconds !== undefined) parts.push("durationSeconds: " + renderMemQLValue(args.durationSeconds));
-  if (args.disposition !== undefined) parts.push("disposition: " + renderMemQLValue(args.disposition));
-  if (args.costEstimate !== undefined) parts.push("costEstimate: " + renderMemQLValue(args.costEstimate));
-  return "mutation recordCall(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    recordCall(args: RecordCallArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.recordCall = function (this: QueryClient, args: RecordCallArgs = {} as RecordCallArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("recordCall", buildRecordCall(args), opts);
-};
-
 /** Append a provider bounce event. Append-only. */
 // Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["recordConsentBounce"] in generated_concepts.ts).
 export interface RecordConsentBounceArgs {
@@ -5720,42 +5271,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.recordMentoredEvent = function (this: QueryClient, args: RecordMentoredEventArgs = {} as RecordMentoredEventArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("recordMentoredEvent", buildRecordMentoredEvent(args), opts);
-};
-
-/** Persist a provisioned DID. Called after a carrier BuyNumber succeeds. */
-// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["recordNumber"] in generated_concepts.ts).
-export interface RecordNumberArgs {
-  e164: string;
-  carrier: string;
-  partitionId: string;
-  // Enum: inbound | outbound | both
-  purpose?: string;
-  providerId?: string;
-  // Enum: local | tollfree | mobile
-  numberType?: string;
-  monthlyCost?: number;
-}
-
-export function buildRecordNumber(args: RecordNumberArgs): string {
-  const parts: string[] = [];
-  parts.push("e164: " + renderMemQLValue(args.e164));
-  parts.push("carrier: " + renderMemQLValue(args.carrier));
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  if (args.purpose !== undefined) parts.push("purpose: " + renderMemQLValue(args.purpose));
-  if (args.providerId !== undefined) parts.push("providerId: " + renderMemQLValue(args.providerId));
-  if (args.numberType !== undefined) parts.push("numberType: " + renderMemQLValue(args.numberType));
-  if (args.monthlyCost !== undefined) parts.push("monthlyCost: " + renderMemQLValue(args.monthlyCost));
-  return "mutation recordNumber(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    recordNumber(args: RecordNumberArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.recordNumber = function (this: QueryClient, args: RecordNumberArgs = {} as RecordNumberArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("recordNumber", buildRecordNumber(args), opts);
 };
 
 /** Stamp the verifier state on a passkey identity after a successful assertion: signature counter, current backup state, and lastUsedAt. Best-effort; the login succeeds even when this write fails. */
@@ -6064,39 +5579,6 @@ QueryClient.prototype.recordSuppression = function (this: QueryClient, args: Rec
   return this.executeNamed("recordSuppression", buildRecordSuppression(args), opts);
 };
 
-/** Persist a LiveKit SIP trunk configuration. secretRef points at external-secrets, never a secret value. */
-// Bound concept: v1:telephony:trunk (machine-readable: BoundConcepts["recordTrunk"] in generated_concepts.ts).
-export interface RecordTrunkArgs {
-  carrier: string;
-  // Enum: inbound | outbound | both
-  direction: string;
-  name?: string;
-  livekitTrunkId?: string;
-  sipEdgeUri?: string;
-  secretRef?: string;
-}
-
-export function buildRecordTrunk(args: RecordTrunkArgs): string {
-  const parts: string[] = [];
-  parts.push("carrier: " + renderMemQLValue(args.carrier));
-  parts.push("direction: " + renderMemQLValue(args.direction));
-  if (args.name !== undefined) parts.push("name: " + renderMemQLValue(args.name));
-  if (args.livekitTrunkId !== undefined) parts.push("livekitTrunkId: " + renderMemQLValue(args.livekitTrunkId));
-  if (args.sipEdgeUri !== undefined) parts.push("sipEdgeUri: " + renderMemQLValue(args.sipEdgeUri));
-  if (args.secretRef !== undefined) parts.push("secretRef: " + renderMemQLValue(args.secretRef));
-  return "mutation recordTrunk(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    recordTrunk(args: RecordTrunkArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.recordTrunk = function (this: QueryClient, args: RecordTrunkArgs = {} as RecordTrunkArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("recordTrunk", buildRecordTrunk(args), opts);
-};
-
 /** ENGINE: record what the warming ramp just decided and why (memql#3462). One row per sending identity, id = the identity, so a restart or a second replica lands on the same timeline rather than starting a competing ramp.
 `reason` is written on every evaluation including the ones that change nothing, because "held" is the ramp's common state and an operator seeing a step that has not moved for two days needs to read why rather than guess.
 clusterOwner tier. */
@@ -6369,30 +5851,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseWorkspace = function (this: QueryClient, args: ReleaseWorkspaceArgs = {} as ReleaseWorkspaceArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseWorkspace", buildReleaseWorkspace(args), opts);
-};
-
-/** Remove the caller's agent from a space (status='left'). The engine guard enforces caller-owns-agent and rejects removal of the pinned owner GA. */
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["removeAgentFromSpace"] in generated_concepts.ts).
-export interface RemoveAgentFromSpaceArgs {
-  partitionId: string;
-  agentId: string;
-}
-
-export function buildRemoveAgentFromSpace(args: RemoveAgentFromSpaceArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("agentId: " + renderMemQLValue(args.agentId));
-  return "mutation removeAgentFromSpace(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    removeAgentFromSpace(args: RemoveAgentFromSpaceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.removeAgentFromSpace = function (this: QueryClient, args: RemoveAgentFromSpaceArgs = {} as RemoveAgentFromSpaceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("removeAgentFromSpace", buildRemoveAgentFromSpace(args), opts);
 };
 
 /** Ask for a binding to come down. The row walks to `removing`; the sweep dispatches the unbind script, and `markCustomDomainRemoved` closes the walk.
@@ -7213,163 +6671,6 @@ QueryClient.prototype.scheduleAccountDeletion = function (this: QueryClient, arg
   return this.executeNamed("scheduleAccountDeletion", buildScheduleAccountDeletion(args), opts);
 };
 
-/** Create an action utterance in a space. */
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["sendActionUtterance"] in generated_concepts.ts).
-export interface SendActionUtteranceArgs {
-  utteranceId?: string;
-  partitionId: string;
-  participantId: string;
-  participantType?: string;
-  replyToId?: string;
-  source?: Record<string, unknown>;
-  createdAt?: string;
-  action: Record<string, unknown>;
-}
-
-export function buildSendActionUtterance(args: SendActionUtteranceArgs): string {
-  const parts: string[] = [];
-  if (args.utteranceId !== undefined) parts.push("utteranceId: " + renderMemQLValue(args.utteranceId));
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("participantId: " + renderMemQLValue(args.participantId));
-  if (args.participantType !== undefined) parts.push("participantType: " + renderMemQLValue(args.participantType));
-  if (args.replyToId !== undefined) parts.push("replyToId: " + renderMemQLValue(args.replyToId));
-  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
-  if (args.createdAt !== undefined) parts.push("createdAt: " + renderMemQLValue(args.createdAt));
-  parts.push("action: " + renderMemQLValue(args.action));
-  return "mutation sendActionUtterance(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    sendActionUtterance(args: SendActionUtteranceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.sendActionUtterance = function (this: QueryClient, args: SendActionUtteranceArgs = {} as SendActionUtteranceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("sendActionUtterance", buildSendActionUtterance(args), opts);
-};
-
-/** Create a transcript-only realtime voice utterance in a space. */
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["sendRealtimeTranscriptUtterance"] in generated_concepts.ts).
-export interface SendRealtimeTranscriptUtteranceArgs {
-  utteranceId?: string;
-  idempotencyKey?: string;
-  createdAt?: string;
-  partitionId: string;
-  participantId: string;
-  // Enum: human | si | system
-  participantType?: string;
-  text?: string;
-  audioId?: string;
-  videoId?: string;
-  duration?: number;
-  timestamps?: Record<string, unknown>;
-  source?: Record<string, unknown>;
-}
-
-export function buildSendRealtimeTranscriptUtterance(args: SendRealtimeTranscriptUtteranceArgs): string {
-  const parts: string[] = [];
-  if (args.utteranceId !== undefined) parts.push("utteranceId: " + renderMemQLValue(args.utteranceId));
-  if (args.idempotencyKey !== undefined) parts.push("idempotencyKey: " + renderMemQLValue(args.idempotencyKey));
-  if (args.createdAt !== undefined) parts.push("createdAt: " + renderMemQLValue(args.createdAt));
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("participantId: " + renderMemQLValue(args.participantId));
-  if (args.participantType !== undefined) parts.push("participantType: " + renderMemQLValue(args.participantType));
-  if (args.text !== undefined) parts.push("text: " + renderMemQLValue(args.text));
-  if (args.audioId !== undefined) parts.push("audioId: " + renderMemQLValue(args.audioId));
-  if (args.videoId !== undefined) parts.push("videoId: " + renderMemQLValue(args.videoId));
-  if (args.duration !== undefined) parts.push("duration: " + renderMemQLValue(args.duration));
-  if (args.timestamps !== undefined) parts.push("timestamps: " + renderMemQLValue(args.timestamps));
-  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
-  return "mutation sendRealtimeTranscriptUtterance(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    sendRealtimeTranscriptUtterance(args: SendRealtimeTranscriptUtteranceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.sendRealtimeTranscriptUtterance = function (this: QueryClient, args: SendRealtimeTranscriptUtteranceArgs = {} as SendRealtimeTranscriptUtteranceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("sendRealtimeTranscriptUtterance", buildSendRealtimeTranscriptUtterance(args), opts);
-};
-
-/** Create a speech utterance in a space. */
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["sendSpeechUtterance"] in generated_concepts.ts).
-export interface SendSpeechUtteranceArgs {
-  utteranceId?: string;
-  partitionId: string;
-  participantId: string;
-  participantType?: string;
-  text?: string;
-  audioId?: string;
-  videoId?: string;
-  duration?: number;
-  timestamps?: Record<string, unknown>;
-  source?: Record<string, unknown>;
-}
-
-export function buildSendSpeechUtterance(args: SendSpeechUtteranceArgs): string {
-  const parts: string[] = [];
-  if (args.utteranceId !== undefined) parts.push("utteranceId: " + renderMemQLValue(args.utteranceId));
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("participantId: " + renderMemQLValue(args.participantId));
-  if (args.participantType !== undefined) parts.push("participantType: " + renderMemQLValue(args.participantType));
-  if (args.text !== undefined) parts.push("text: " + renderMemQLValue(args.text));
-  if (args.audioId !== undefined) parts.push("audioId: " + renderMemQLValue(args.audioId));
-  if (args.videoId !== undefined) parts.push("videoId: " + renderMemQLValue(args.videoId));
-  if (args.duration !== undefined) parts.push("duration: " + renderMemQLValue(args.duration));
-  if (args.timestamps !== undefined) parts.push("timestamps: " + renderMemQLValue(args.timestamps));
-  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
-  return "mutation sendSpeechUtterance(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    sendSpeechUtterance(args: SendSpeechUtteranceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.sendSpeechUtterance = function (this: QueryClient, args: SendSpeechUtteranceArgs = {} as SendSpeechUtteranceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("sendSpeechUtterance", buildSendSpeechUtterance(args), opts);
-};
-
-/** Create a text utterance in a space. */
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["sendTextUtterance"] in generated_concepts.ts).
-export interface SendTextUtteranceArgs {
-  utteranceId?: string;
-  partitionId: string;
-  participantId: string;
-  participantType?: string;
-  text: string;
-  replyToId?: string;
-  source?: Record<string, unknown>;
-  citations?: Record<string, unknown>[];
-}
-
-export function buildSendTextUtterance(args: SendTextUtteranceArgs): string {
-  const parts: string[] = [];
-  if (args.utteranceId !== undefined) parts.push("utteranceId: " + renderMemQLValue(args.utteranceId));
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("participantId: " + renderMemQLValue(args.participantId));
-  if (args.participantType !== undefined) parts.push("participantType: " + renderMemQLValue(args.participantType));
-  parts.push("text: " + renderMemQLValue(args.text));
-  if (args.replyToId !== undefined) parts.push("replyToId: " + renderMemQLValue(args.replyToId));
-  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
-  if (args.citations !== undefined) parts.push("citations: " + renderMemQLValue(args.citations));
-  return "mutation sendTextUtterance(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    sendTextUtterance(args: SendTextUtteranceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.sendTextUtterance = function (this: QueryClient, args: SendTextUtteranceArgs = {} as SendTextUtteranceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("sendTextUtterance", buildSendTextUtterance(args), opts);
-};
-
 /** Set (upsert) an account's task-concurrency entitlement (epic memql#902 / #903). Deterministic per-account id so each set appends a new version and the latest wins. Finite maxConcurrentTasks caps the account; <=0 or tier='enterprise' leaves it unlimited. */
 // Bound concept: v1:identity:accountEntitlement (machine-readable: BoundConcepts["setAccountEntitlement"] in generated_concepts.ts).
 export interface SetAccountEntitlementArgs {
@@ -7400,66 +6701,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.setAccountEntitlement = function (this: QueryClient, args: SetAccountEntitlementArgs = {} as SetAccountEntitlementArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("setAccountEntitlement", buildSetAccountEntitlement(args), opts);
-};
-
-/** Set the per-session audio control mode for an agent in a space. */
-// Bound concept: v1:cognition:audioOverride (machine-readable: BoundConcepts["setAgentAudioOverride"] in generated_concepts.ts).
-export interface SetAgentAudioOverrideArgs {
-  partitionId: string;
-  agentId: string;
-  mode: string;
-  setBy?: string;
-  active?: boolean;
-}
-
-export function buildSetAgentAudioOverride(args: SetAgentAudioOverrideArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("agentId: " + renderMemQLValue(args.agentId));
-  parts.push("mode: " + renderMemQLValue(args.mode));
-  if (args.setBy !== undefined) parts.push("setBy: " + renderMemQLValue(args.setBy));
-  if (args.active !== undefined) parts.push("active: " + renderMemQLValue(args.active));
-  return "mutation setAgentAudioOverride(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    setAgentAudioOverride(args: SetAgentAudioOverrideArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.setAgentAudioOverride = function (this: QueryClient, args: SetAgentAudioOverrideArgs = {} as SetAgentAudioOverrideArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("setAgentAudioOverride", buildSetAgentAudioOverride(args), opts);
-};
-
-/** Set the per-session video control mode for an agent in a space. */
-// Bound concept: v1:cognition:videoOverride (machine-readable: BoundConcepts["setAgentVideoOverride"] in generated_concepts.ts).
-export interface SetAgentVideoOverrideArgs {
-  partitionId: string;
-  agentId: string;
-  mode: string;
-  setBy?: string;
-  active?: boolean;
-}
-
-export function buildSetAgentVideoOverride(args: SetAgentVideoOverrideArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("agentId: " + renderMemQLValue(args.agentId));
-  parts.push("mode: " + renderMemQLValue(args.mode));
-  if (args.setBy !== undefined) parts.push("setBy: " + renderMemQLValue(args.setBy));
-  if (args.active !== undefined) parts.push("active: " + renderMemQLValue(args.active));
-  return "mutation setAgentVideoOverride(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    setAgentVideoOverride(args: SetAgentVideoOverrideArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.setAgentVideoOverride = function (this: QueryClient, args: SetAgentVideoOverrideArgs = {} as SetAgentVideoOverrideArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("setAgentVideoOverride", buildSetAgentVideoOverride(args), opts);
 };
 
 /** Label a Library item with the clients it is about (epic memql#4800, D5) -- the Files inspector's account picker, and its only caller.
@@ -7636,37 +6877,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.setChunkValidationStatus = function (this: QueryClient, args: SetChunkValidationStatusArgs = {} as SetChunkValidationStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("setChunkValidationStatus", buildSetChunkValidationStatus(args), opts);
-};
-
-/** Record TCPA consent / opt-out for an external number (append-only; newest wins). */
-// Bound concept: v1:telephony:consent (machine-readable: BoundConcepts["setConsent"] in generated_concepts.ts).
-export interface SetConsentArgs {
-  phoneNumber: string;
-  partitionId: string;
-  // Enum: opted_in | opted_out
-  status: string;
-  reason?: string;
-  source?: string;
-}
-
-export function buildSetConsent(args: SetConsentArgs): string {
-  const parts: string[] = [];
-  parts.push("phoneNumber: " + renderMemQLValue(args.phoneNumber));
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("status: " + renderMemQLValue(args.status));
-  if (args.reason !== undefined) parts.push("reason: " + renderMemQLValue(args.reason));
-  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
-  return "mutation setConsent(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    setConsent(args: SetConsentArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.setConsent = function (this: QueryClient, args: SetConsentArgs = {} as SetConsentArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("setConsent", buildSetConsent(args), opts);
 };
 
 /** Store the cached compiled form for a construct, produced by the Gate 1 compile+bind harness (#956), so activation doesn't re-parse. */
@@ -7954,34 +7164,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.setLibraryWatchedFolderStatus = function (this: QueryClient, args: SetLibraryWatchedFolderStatusArgs = {} as SetLibraryWatchedFolderStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("setLibraryWatchedFolderStatus", buildSetLibraryWatchedFolderStatus(args), opts);
-};
-
-/** Set E911 / caller-ID verification state on an owned DID (by row id). */
-// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["setNumberE911"] in generated_concepts.ts).
-export interface SetNumberE911Args {
-  id: string;
-  e911Registered: boolean;
-  e911AddressId?: string;
-  callerIdVerified?: boolean;
-}
-
-export function buildSetNumberE911(args: SetNumberE911Args): string {
-  const parts: string[] = [];
-  parts.push("id: " + renderMemQLValue(args.id));
-  parts.push("e911Registered: " + renderMemQLValue(args.e911Registered));
-  if (args.e911AddressId !== undefined) parts.push("e911AddressId: " + renderMemQLValue(args.e911AddressId));
-  if (args.callerIdVerified !== undefined) parts.push("callerIdVerified: " + renderMemQLValue(args.callerIdVerified));
-  return "mutation setNumberE911(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    setNumberE911(args: SetNumberE911Args, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.setNumberE911 = function (this: QueryClient, args: SetNumberE911Args = {} as SetNumberE911Args, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("setNumberE911", buildSetNumberE911(args), opts);
 };
 
 /** Flip a pack's per-instance enablement in v1:platform:packState. clusterOwner tier via the concept's @rowAuthz -- these rows are the deployment's, not any operator's, and the tier injects the actor gate. The caller (component/grpc's SetPackEnabledMsg handler) verifies the owner role and writes the audit event BEFORE invoking this; the tier here is the independent second layer. The id is the bare pack domain -- the engine canonicalizes it to v1:platform:packState:<packDomain>, so one row per pack with the version history as the flip audit trail. RESTART-REQUIRED lifecycle: the write changes what each node reads at its next boot, never what a running node has loaded. */
@@ -8285,32 +7467,6 @@ QueryClient.prototype.setSurfaceAvailability = function (this: QueryClient, args
   return this.executeNamed("setSurfaceAvailability", buildSetSurfaceAvailability(args), opts);
 };
 
-/** Set or clear the caller's activePartitionId. Empty partitionId clears the pointer. */
-// Bound concept: v1:identity:user (machine-readable: BoundConcepts["setUserActiveSpace"] in generated_concepts.ts).
-export interface SetUserActiveSpaceArgs {
-  userId: string;
-  partitionId?: string;
-  activePartitionId?: string;
-}
-
-export function buildSetUserActiveSpace(args: SetUserActiveSpaceArgs): string {
-  const parts: string[] = [];
-  parts.push("userId: " + renderMemQLValue(args.userId));
-  if (args.partitionId !== undefined) parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  if (args.activePartitionId !== undefined) parts.push("activePartitionId: " + renderMemQLValue(args.activePartitionId));
-  return "mutation setUserActiveSpace(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    setUserActiveSpace(args: SetUserActiveSpaceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.setUserActiveSpace = function (this: QueryClient, args: SetUserActiveSpaceArgs = {} as SetUserActiveSpaceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("setUserActiveSpace", buildSetUserActiveSpace(args), opts);
-};
-
 /** Replace the operator-set labels on one of the caller's machines. The whole map is replaced, not merged: the Fleet page edits the set as a set, and a merge would make removing a label impossible through this surface. */
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["setWorkerOperatorLabels"] in generated_concepts.ts).
 export interface SetWorkerOperatorLabelsArgs {
@@ -8603,30 +7759,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.touchDeviceCodePoll = function (this: QueryClient, args: TouchDeviceCodePollArgs = {} as TouchDeviceCodePollArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("touchDeviceCodePoll", buildTouchDeviceCodePoll(args), opts);
-};
-
-/** Update an auth-session record (typically a heartbeat to bump lastActivityAt). Read-merges the existing row (update()): only the fields in `payload` change; the @required discriminators (subject, tokenHash, source, expiresAt) and every other omitted field inherit from the persisted row instead of having to be re-supplied (memql#1628). The session row must already exist. */
-// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["touchSession"] in generated_concepts.ts).
-export interface TouchSessionArgs {
-  sessionId: string;
-  payload: Record<string, unknown>;
-}
-
-export function buildTouchSession(args: TouchSessionArgs): string {
-  const parts: string[] = [];
-  parts.push("sessionId: " + renderMemQLValue(args.sessionId));
-  parts.push("payload: " + renderMemQLValue(args.payload));
-  return "mutation touchSession(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    touchSession(args: TouchSessionArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.touchSession = function (this: QueryClient, args: TouchSessionArgs = {} as TouchSessionArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("touchSession", buildTouchSession(args), opts);
 };
 
 /** Stamp lastSelectedAt on the machine the router just picked. NOT @serverOnly, for the same reason clearWorkerConnectedNode is not: the concept's owner tier already refuses a write onto a row the caller does not own, and @serverOnly would add a third entry to the server-only inventory to buy nothing beyond it. The residue is that a person could stamp their OWN machine's lastSelectedAt and thereby nudge their own roundRobin rotation, which is a preference they already control from the Fleet page. */
@@ -9357,9 +8489,6 @@ export interface UpdateMyPreferencesArgs {
   /** Interactive Mode pace preset. */
   // Enum: quick | steady | deliberate
   interactivePace?: string;
-  /** Per-user mic mode preference for Polyphon rooms. */
-  // Enum: toggle | continuous
-  voiceMode?: string;
 }
 
 export function buildUpdateMyPreferences(args: UpdateMyPreferencesArgs): string {
@@ -9374,7 +8503,6 @@ export function buildUpdateMyPreferences(args: UpdateMyPreferencesArgs): string 
   if (args.cursorTweenMs !== undefined) parts.push("cursorTweenMs: " + renderMemQLValue(args.cursorTweenMs));
   if (args.takeoverMode !== undefined) parts.push("takeoverMode: " + renderMemQLValue(args.takeoverMode));
   if (args.interactivePace !== undefined) parts.push("interactivePace: " + renderMemQLValue(args.interactivePace));
-  if (args.voiceMode !== undefined) parts.push("voiceMode: " + renderMemQLValue(args.voiceMode));
   return "mutation updateMyPreferences(" + parts.join(", ") + ")";
 }
 
@@ -9438,31 +8566,6 @@ QueryClient.prototype.updateNote = function (this: QueryClient, args: UpdateNote
   return this.executeNamed("updateNote", buildUpdateNote(args), opts);
 };
 
-/** Update a DID's lifecycle status (e.g. on release). */
-// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["updateNumberStatus"] in generated_concepts.ts).
-export interface UpdateNumberStatusArgs {
-  id: string;
-  // Enum: active | releasing | released
-  status: string;
-}
-
-export function buildUpdateNumberStatus(args: UpdateNumberStatusArgs): string {
-  const parts: string[] = [];
-  parts.push("id: " + renderMemQLValue(args.id));
-  parts.push("status: " + renderMemQLValue(args.status));
-  return "mutation updateNumberStatus(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    updateNumberStatus(args: UpdateNumberStatusArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.updateNumberStatus = function (this: QueryClient, args: UpdateNumberStatusArgs = {} as UpdateNumberStatusArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("updateNumberStatus", buildUpdateNumberStatus(args), opts);
-};
-
 /** Stamp a delivery-state transition on a v1:platform:outboundRequest row (memql#2521). Called by the engine outbound worker (sending/sent/retrying/failed + attempt metadata); operators may set status='pending' to requeue a failed row. */
 // Bound concept: v1:platform:outboundRequest (machine-readable: BoundConcepts["updateOutboundRequestStatus"] in generated_concepts.ts).
 export interface UpdateOutboundRequestStatusArgs {
@@ -9519,73 +8622,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.updatePackageSource = function (this: QueryClient, args: UpdatePackageSourceArgs = {} as UpdatePackageSourceArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updatePackageSource", buildUpdatePackageSource(args), opts);
-};
-
-/** Upsert a participant presence snapshot for multi-client status consistency. */
-// Bound concept: v1:cognition:participant:presence (machine-readable: BoundConcepts["updateParticipantPresence"] in generated_concepts.ts).
-export interface UpdateParticipantPresenceArgs {
-  presenceId?: string;
-  participantId: string;
-  partitionId: string;
-  // Enum: idle | listening | thinking | typing | responding | working | waiting | needs_human | needs_clarification | paused | error | using_tool | researching | investigating
-  state: string;
-  label: string;
-  reason?: string;
-  sinceAt?: string;
-  lastUpdatedAt?: string;
-  lastUtteranceId?: string;
-  lastError?: string;
-  intent?: Record<string, unknown>;
-}
-
-export function buildUpdateParticipantPresence(args: UpdateParticipantPresenceArgs): string {
-  const parts: string[] = [];
-  if (args.presenceId !== undefined) parts.push("presenceId: " + renderMemQLValue(args.presenceId));
-  parts.push("participantId: " + renderMemQLValue(args.participantId));
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("state: " + renderMemQLValue(args.state));
-  parts.push("label: " + renderMemQLValue(args.label));
-  if (args.reason !== undefined) parts.push("reason: " + renderMemQLValue(args.reason));
-  if (args.sinceAt !== undefined) parts.push("sinceAt: " + renderMemQLValue(args.sinceAt));
-  if (args.lastUpdatedAt !== undefined) parts.push("lastUpdatedAt: " + renderMemQLValue(args.lastUpdatedAt));
-  if (args.lastUtteranceId !== undefined) parts.push("lastUtteranceId: " + renderMemQLValue(args.lastUtteranceId));
-  if (args.lastError !== undefined) parts.push("lastError: " + renderMemQLValue(args.lastError));
-  if (args.intent !== undefined) parts.push("intent: " + renderMemQLValue(args.intent));
-  return "mutation updateParticipantPresence(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    updateParticipantPresence(args: UpdateParticipantPresenceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.updateParticipantPresence = function (this: QueryClient, args: UpdateParticipantPresenceArgs = {} as UpdateParticipantPresenceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("updateParticipantPresence", buildUpdateParticipantPresence(args), opts);
-};
-
-/** Update a participant record (typically status). Read-merges the existing row (update()): only the fields in `payload` change; every omitted field inherits from the persisted row instead of being wiped (memql#1628 class). The participant row must already exist (created on join). */
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["updateParticipantStatus"] in generated_concepts.ts).
-export interface UpdateParticipantStatusArgs {
-  participantId: string;
-  payload: Record<string, unknown>;
-}
-
-export function buildUpdateParticipantStatus(args: UpdateParticipantStatusArgs): string {
-  const parts: string[] = [];
-  parts.push("participantId: " + renderMemQLValue(args.participantId));
-  parts.push("payload: " + renderMemQLValue(args.payload));
-  return "mutation updateParticipantStatus(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    updateParticipantStatus(args: UpdateParticipantStatusArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.updateParticipantStatus = function (this: QueryClient, args: UpdateParticipantStatusArgs = {} as UpdateParticipantStatusArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("updateParticipantStatus", buildUpdateParticipantStatus(args), opts);
 };
 
 /** Update a Plan's status with the full v1 lifecycle field set (paused/awaitingFeedback/needsAgent + metrics + estimate + token spend). Partial-update via update() -- only the fields you pass are changed; required fields inherit from the prior row. */
@@ -9868,54 +8904,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateSenderIdentity = function (this: QueryClient, args: UpdateSenderIdentityArgs = {} as UpdateSenderIdentityArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateSenderIdentity", buildUpdateSenderIdentity(args), opts);
-};
-
-/** Update a session record's device state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist. */
-// Bound concept: v1:cognition:session (machine-readable: BoundConcepts["updateSessionDevices"] in generated_concepts.ts).
-export interface UpdateSessionDevicesArgs {
-  sessionId: string;
-  payload: Record<string, unknown>;
-}
-
-export function buildUpdateSessionDevices(args: UpdateSessionDevicesArgs): string {
-  const parts: string[] = [];
-  parts.push("sessionId: " + renderMemQLValue(args.sessionId));
-  parts.push("payload: " + renderMemQLValue(args.payload));
-  return "mutation updateSessionDevices(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    updateSessionDevices(args: UpdateSessionDevicesArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.updateSessionDevices = function (this: QueryClient, args: UpdateSessionDevicesArgs = {} as UpdateSessionDevicesArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("updateSessionDevices", buildUpdateSessionDevices(args), opts);
-};
-
-/** Update a session record's stream state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist. */
-// Bound concept: v1:cognition:session (machine-readable: BoundConcepts["updateSessionStreams"] in generated_concepts.ts).
-export interface UpdateSessionStreamsArgs {
-  sessionId: string;
-  payload: Record<string, unknown>;
-}
-
-export function buildUpdateSessionStreams(args: UpdateSessionStreamsArgs): string {
-  const parts: string[] = [];
-  parts.push("sessionId: " + renderMemQLValue(args.sessionId));
-  parts.push("payload: " + renderMemQLValue(args.payload));
-  return "mutation updateSessionStreams(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    updateSessionStreams(args: UpdateSessionStreamsArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.updateSessionStreams = function (this: QueryClient, args: UpdateSessionStreamsArgs = {} as UpdateSessionStreamsArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("updateSessionStreams", buildUpdateSessionStreams(args), opts);
 };
 
 /** Point a deployable at the client it is FOR -- or at nobody (epic memql#4800, D5).

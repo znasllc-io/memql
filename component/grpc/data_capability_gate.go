@@ -71,47 +71,17 @@ type dataPlaneGateExemption struct {
 // appearing as an untracked `if` somewhere in a handler.
 var dataPlaneGateExemptions = []dataPlaneGateExemption{
 	{
-		Name:     "guest-stream",
-		Enforced: true,
-		Reason: "Guests carry their own authorization dimension -- the invitation's scope, " +
-			"including the space it names via its partitionId field (a product-scope hint, " +
-			"not the retired tenant-partition dimension) -- and THAT, not the cluster role, " +
-			"is the real gate for them. The reader-vs-writer distinction this gate exists to enforce is about " +
-			"ordinary authenticated users. Guests have dedicated message types only for " +
-			"the invite/join lifecycle (SendGuestInviteMsg, ResolveGuestInviteMsg, " +
-			"JoinSpaceAsGuestMsg, cancel/resend); there is no guest-specific message for " +
-			"posting into a space, so guest participation necessarily rides " +
-			"ExecuteQueryMsg and refusing it would break shipped guest chat. " +
-			"Owner ruling, memql#3179.",
-	},
-	{
 		Name:     "CallToolMsg",
 		Enforced: false,
 		Reason: "Not gated at all -- the gate is wired into handleExecuteQuery only. " +
 			"CallToolMsg reaches mutation-backed tools, but that surface is driven by " +
-			"machine credentials: class=\"voice_agent\" JWTs carry no role claim and " +
-			"resolve to the reader fallback, and proxied agent-node calls arrive as " +
-			"forwarded auth, so gating it on the caller's data-plane capability would " +
-			"refuse the live voice path. It is a curated, @allowedRoles-gated allowlist " +
+			"machine credentials that carry no role claim and resolve to the reader " +
+			"fallback, and proxied agent-node calls arrive as forwarded auth, so gating " +
+			"it on the caller's data-plane capability would refuse the live agent path. " +
+			"It is a curated, @allowedRoles-gated allowlist " +
 			"rather than the whole authored mutation surface, which is why the uncovered " +
 			"slice is the smaller one -- but it IS uncovered.",
 	},
-}
-
-// isGuestStream reports whether this call arrives on a guest-authenticated
-// stream, keyed off the claim the guest interceptor sets (GuestAuthClaimKey,
-// guest_stream_interceptor.go) and read the same way the guest handlers read it.
-//
-// Deliberately NOT keyed off role == "reader". The guest interceptor stamps
-// `role: "reader"` as a placeholder, so keying on the role would exempt every
-// ordinary reader and empty the gate of the exact thing it exists to enforce.
-func isGuestStream(ctx context.Context) bool {
-	claims, ok := auth.ClaimsFromContext(ctx)
-	if !ok || claims == nil {
-		return false
-	}
-	guest, ok := claims[GuestAuthClaimKey].(map[string]any)
-	return ok && guest != nil
 }
 
 // dataPlaneRole resolves the role the gate decides on. An absent or
@@ -149,13 +119,6 @@ func dataPlaneRole(access *auth.AccessContext) auth.Role {
 // there is nothing a classification could change -- which also means the extra
 // parse this costs is paid only by the roles that are actually constrained.
 func (s *streamSession) allowDataPlaneAccess(ctx context.Context, query string) (bool, string) {
-	// Enumerated exemption: guest streams. See dataPlaneGateExemptions
-	// ("guest-stream") for the ruling and the reason. Keyed off the guest
-	// CLAIM, never off the placeholder role.
-	if isGuestStream(ctx) {
-		return true, ""
-	}
-
 	access, _ := auth.AccessFromContext(ctx)
 	role := dataPlaneRole(access)
 

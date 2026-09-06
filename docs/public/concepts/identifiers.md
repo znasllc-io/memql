@@ -11,8 +11,7 @@ owner: znas
 
 **Status:** authoritative reference
 **Audience:** engineers writing Go code, MemQL DSL, or any client that
-consumes MemQL over the wire (browser / WS, the SDK, the LLM tool loop,
-the voice-agent).
+consumes MemQL over the wire (browser / WS, the SDK, the LLM tool loop).
 
 MemQL uses **one** id form internally and a **different** id form on the
 wire toward clients. Get this distinction and every "why is this id short
@@ -22,10 +21,10 @@ here but long there" question answers itself:
   boundary and across the node mesh: storage, the internal event bus,
   cross-node routing, automations, DSL bodies, Go integrations.
 - **Bare `{shortId}`** at every seam where data leaves toward a foreign
-  brain: query results, subscription events, tool results, voice-agent
-  acks. The engine strips the `{concept}:` prefix on the way out and
-  resolves a bare id back on the way in. **Clients never compose, parse,
-  or compare a canonical id.**
+  brain: query results, subscription events, tool results. The engine
+  strips the `{concept}:` prefix on the way out and resolves a bare id
+  back on the way in. **Clients never compose, parse, or compare a
+  canonical id.**
 
 The rest of this doc is the canonical form + the internal composition
 rules (unchanged), then the bare-ids client contract (new as of #2438).
@@ -44,14 +43,14 @@ Examples:
 
 | Full id | concept | shortId |
 |---|---|---|
-| `v1:cognition:utterance:474e57df-...` | `v1:cognition:utterance` | `474e57df-...` |
+| `v1:library:artifact:474e57df-...` | `v1:library:artifact` | `474e57df-...` |
 | `v1:cluster:node:bff-local` | `v1:cluster:node` | `bff-local` |
 | `v1:agents:agent:a9f3b7c2...` | `v1:agents:agent` | `a9f3b7c2...` |
 
 Where:
 
 - **concept** -- exactly three colon-delimited segments
-  (`{version}:{domain}:{entity}`, e.g. `v1:cognition:utterance`).
+  (`{version}:{domain}:{entity}`, e.g. `v1:library:artifact`).
   The engine assembles it from the concept declaration in
   `dsl/<namespace>/concepts.memql`: the `@version` major flows into
   the `v1:` prefix, `@namespace` supplies the domain, and the
@@ -89,11 +88,10 @@ The **engine owns both directions** at its wire seams.
 
 On the way out, the engine strips the leading `{concept}:` off any string
 shaped like a canonical node id, so the client receives a bare shortId.
-This is structural, not a per-field registry: one pass covers all 122
-outgoing `@relationship` FK payload fields, the pack-owned `*partitionId`
-space-id fields that `@relationship` cannot express engine-side (target
-`v1:cognition:space` is pack-owned), the `v1:cognition:chunk.replyId`
-forward-reference, and any pack-registered concept.
+This is structural, not a per-field registry: one pass covers every
+outgoing `@relationship` FK payload field, any unannotated forward
+reference a dispatch site stamps before the row it points at commits, and
+any pack-registered concept.
 
 The bare-ifier + its seams live in `component/memql/wire_bareids.go`
 (shipped in #2441 / A2). The egress seams:
@@ -104,7 +102,6 @@ The bare-ifier + its seams live in `component/memql/wire_bareids.go`
 | Graph bundles | `WireBareifyBundle` |
 | Subscription / graph.node events | `BareifyEventPayload` |
 | Tool results to the LLM loop | `WireBareifyData` / `executeResultToToolJSON` |
-| Point surfaces | `ClientToolCall` relay, voice-agent acks, guest reflections |
 
 All of these funnel to the single gRPC egress chokepoint
 (`sendServerMessage` in `component/grpc/server.go`); the browser reaches
@@ -123,10 +120,10 @@ The recogniser is one shared regex,
 The namespace class admits `/` because a namespace is a directory PATH: a
 concept declared in a subdirectory is `v1:agents/tools:widget` (memql#3898).
 The trailing `:.+` **requires** a 4th (shortId) segment, so a bare
-3-segment concept TYPE (`v1:cognition:space`) does NOT match and is
+3-segment concept TYPE (`v1:library:artifact`) does NOT match and is
 preserved -- concept ids and subscription topics stay canonical (see the
 keying rule below). The anchor means a topic string
-(`graph.node.created.v1:cognition:utterance`) does not match either.
+(`graph.node.created.v1:library:artifact`) does not match either.
 
 The egress bare-ifier and the wire-contract SCANNER
 (`component/grpc/wire_bare_ids_test.go`) share this pattern and one
@@ -187,9 +184,8 @@ they are not canonical-shaped, so the egress bare-ifier leaves them
 untouched and inbound resolution does not canonicalize them. Treat their
 bare form as the contract, not a producer bug:
 
-- `documentChunk.domainId`, `documentChunk.sourceUtteranceId`,
-  `documentChunk.sourceAgentId` -- bare by contract (A0 #2439; the
-  descriptions say "bare id of ...").
+- `documentChunk.domainId`, `documentChunk.sourceAgentId` -- bare by
+  contract (A0 #2439; the descriptions say "bare id of ...").
 - `forge.requestEvent.requestId` -- normalized to the short form via
   `shortId()` so the audit trail keys consistently (#1859).
 - correlation UUIDs (`callId`, `correlationId`, ...) -- not node ids.
@@ -215,8 +211,8 @@ id.BuildNodeId(concept, shortId)
 The inverse:
 
 ```go
-id.ParseNodeId("v1:cognition:utterance:abc")
-// → concept="v1:cognition:utterance", shortId="abc"
+id.ParseNodeId("v1:library:artifact:abc")
+// → concept="v1:library:artifact", shortId="abc"
 ```
 
 Use these in Go / internal code. Do **not** hand-roll
@@ -252,12 +248,12 @@ Most mutations pass a **bare shortId** in the `insert` block (the target
 concept comes from the `mutate <Concept> <name>` signature):
 
 ```memql
-mutate utterance createUtterance {
+mutate artifact createArtifact {
   args {
-    utteranceId  string  @required
+    artifactId  string  @required
   }
   insert {
-    id: args.utteranceId   // bare shortId; engine composes the full id
+    id: args.artifactId   // bare shortId; engine composes the full id
     // ... payload fields ...
   }
 }
@@ -270,35 +266,18 @@ almost every mutation takes.
 
 ### 2. The dispatch-site composer (when the id has to be known up-front)
 
-Some flows need the full id **before** insert, because earlier-arriving
-nodes reference it. The canonical example is the streaming reply:
+Some flows need the full id **before** insert, because rows that reach the
+client earlier already reference it. The recipe is always the same:
+compose the canonical id once at the dispatch site with `id.BuildNodeId`,
+stamp it everywhere it is referenced, and pass it to the eventual
+`insert()`. Egress bare-ification then keeps the client-visible
+forms consistent for free -- the forward reference and the committed row's
+own id are bare-ified in lockstep, so a client that keyed an in-flight row
+by the reference de-dups cleanly against the committed row.
 
-```
-agent turn starts
-  → cognition mints replyId
-  → emits N text:chunk nodes, each carrying replyId in its `replyId` field
-  → finally inserts a v1:cognition:utterance with id == replyId
-```
-
-The chunks reach the client before the utterance commits. The client keys
-its in-flight bubble by `replyId` and de-dups against the committed
-`utterance.id`. For that to work, the chunks' `replyId` and the committed
-`utterance.id` must be the same string -- and both are bare-ified in
-lockstep on egress (the bare-ifier's replyId lockstep is covered by
-`TestBareifyEventPayload_ReplyIdLockstep`). Internally the cognition
-handler composes the canonical string once:
-
-```go
-// integrations/cognition/cognition_handler.go
-func composeReplyId(ctx context.Context) string {
-    return id.BuildNodeId(memorynodes.ConceptCognitionUtterance, uuid.NewString())
-}
-```
-
-If you add a "stamp the id on auxiliary nodes" flow, follow the same
-recipe: compose the canonical id once at the dispatch site, stamp it
-everywhere it's referenced, pass it to the eventual `insert()`. Egress
-bare-ification keeps the client-visible forms consistent for free.
+The one thing that must not creep into such a flow is a **second**
+composition site. Two places composing "the same" id is how the two forms
+drift, and the drift is invisible until a client renders one row twice.
 
 ---
 
@@ -339,8 +318,7 @@ DSL -- the client surface has no id-composition to get wrong):
   format. Don't embed concept / kind names in the hash seed -- the input
   map keys namespace the hash. In DSL bodies the equivalents are
   `id.Slugify`-style slugs or a `hash(...)` / `canonicalId(...)`
-  expression on the `id:` field (see `suppressGreetOnJoin` in the pack's
-  mutations).
+  expression on the `id:` field.
 
 ---
 
@@ -356,10 +334,9 @@ DSL -- the client surface has no id-composition to get wrong):
 | Mint a fresh opaque shortId for an instance row | `id.NewShortId()` |
 | Build a deterministic shortId from a stable factor set (repeat calls collapse on the id-conflict path) | `id.New().MustFromMap(map[string]any{...})` |
 | Build a kebab-case shortId for a catalog row | `id.Slugify(name)` |
-| Cognition: mint a replyId for a streaming reply | `composeReplyId(ctx)` (`integrations/cognition/cognition_handler.go`) |
 | Resolve a client-supplied bare id in a filter | Nothing -- `resolveFullId` / relationship canonicalization does it |
 
-### Client / SDK (browser, tool loop, voice-agent, SDK consumer)
+### Client / SDK (browser, tool loop, SDK consumer)
 
 | You need... | Do |
 |---|---|

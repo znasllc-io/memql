@@ -123,7 +123,7 @@ func TestForwardToPeers_SendsConnectedSkipsUnconnected(t *testing.T) {
 	pm.Register(&nodev1.PeerInfo{NodeId: freshId, NodeType: "bff", Address: "bff-fresh:50052"})
 
 	decision := routingDecision{Forward: true, Broadcast: true}
-	forward := &nodev1.EventForward{EventId: "utt-1", Topic: "graph.node.created.v1:cognition:utterance", Ttl: 3}
+	forward := &nodev1.EventForward{EventId: "utt-1", Topic: "graph.node.created.v1:library:artifact", Ttl: 3}
 	eb.forwardToPeers(forward, decision)
 
 	// Live peer received exactly one message; the unconnected ones got nothing.
@@ -153,7 +153,7 @@ func TestForwardInboundToPeers_SkipsUnconnected(t *testing.T) {
 	pm.Register(&nodev1.PeerInfo{NodeId: gossipedId, NodeType: "bff", Address: "relay:50052"})
 
 	eb.ForwardInboundToPeers(&nodev1.EventForward{
-		EventId: "relay-1", Topic: "graph.node.created.v1:cognition:utterance", Ttl: 3,
+		EventId: "relay-1", Topic: "graph.node.created.v1:library:artifact", Ttl: 3,
 	}, "some-origin")
 
 	// The live peer received the relay; the gossiped peer was skipped (no buffer).

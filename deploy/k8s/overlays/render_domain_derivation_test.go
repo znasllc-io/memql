@@ -25,10 +25,10 @@
 // (MEMQL_IDENTITY_BOOTSTRAP_DOMAIN, MEMQL_IDENTITY_REGISTERED_CLIENTS) would
 // still be wrong if an overlay pinned them to a REAL domain -- pinning defeats
 // the derivation whatever the value is, which is the whole point of
-// set-if-absent. And a grep would fire on the LiveKit placeholders, which are a
-// different thing: a self-hosted media plane's address is not derived from
-// MEMQL_DOMAIN, is fail-closed on purpose, and is held at replicas 0 in the
-// entry overlay. Naming the six variables says what is actually forbidden.
+// set-if-absent. And a grep would fire on every unrelated fail-closed
+// placeholder an overlay carries, which is a different thing: an address that
+// is not derived from MEMQL_DOMAIN is not this gate's business. Naming the six
+// variables says what is actually forbidden.
 package overlays
 
 import (

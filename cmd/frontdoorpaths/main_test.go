@@ -68,7 +68,6 @@ func TestCollectIncludesTheThirdPartyPaths(t *testing.T) {
 }
 
 // The HTTP routes the three authentication aggregates do NOT enumerate.
-//
 // This test is the one that pins the derivation to routes rather than to
 // authentication tiers. Every path below is absent from a derivation built out
 // of PublicPaths() + HandlerAuthorizedPaths() + SelfAuthenticatedPaths() minus
@@ -83,20 +82,14 @@ func TestCollectIncludesTheThirdPartyPaths(t *testing.T) {
 //	                      and dials gRPC as a client internally; "rides the gRPC
 //	                      gateway" describes what happens after the request
 //	                      arrives, not which listener it arrives on.
-//	/spaces/              POST /spaces/{id}/attachments, mounted at
+//
 //	                      app/transport_attachments.go:65 under
 //	                      `//go:build bff || agent`. Authenticated, so it is in
 //	                      none of the three lists.
-//	/polyphon/room-token  mounted at app/transport_voice.go:49 under
-//	/polyphon/status      `//go:build !agent && !planner`, which a bff build
-//	                      satisfies. Authenticated, so likewise unlisted.
 func TestCollectIncludesTheAuthenticatedHTTPRoutes(t *testing.T) {
 	got := collected(t)
 	for _, want := range []string{
 		"/memql/query",
-		"/spaces/",
-		"/polyphon/room-token",
-		"/polyphon/status",
 	} {
 		if !got[want] {
 			t.Errorf("collect() omits %q; the bff serves it over HTTP, so routing it to "+
@@ -138,7 +131,7 @@ func TestWithheldPathsAreAbsentFromTheEmittedSet(t *testing.T) {
 
 	// Named individually as well, so the paths whose exposure this prevents are
 	// legible without resolving a map.
-	for _, p := range []string{"/metrics", "/api/concepts", "/api/concepts/subscribe", "/memql/audio"} {
+	for _, p := range []string{"/metrics", "/api/concepts", "/api/concepts/subscribe"} {
 		if emitted[p] {
 			t.Errorf("collect() emits %q; routing it makes an endpoint externally "+
 				"reachable that is deliberately not", p)
@@ -217,8 +210,8 @@ func TestSpliceReplacesOnlyTheMarkedRegion(t *testing.T) {
 // The four-path assertion above makes "a new entry in one of the three
 // aggregates reaches the front door" true. The failure actually measured on
 // this tree is different: a new `func …Paths() []string` DECLARATION that no
-// aggregate picks up -- which is how /spaces/, /polyphon/room-token and
-// /polyphon/status came to be served by the bff and routed by nothing. This
+// aggregate picks up -- which is how an authenticated HTTP route can come to be
+// served by the bff and routed by nothing. This
 // test makes "a new HTTP route declaration either reaches the front door or
 // breaks the build" true.
 //
@@ -350,7 +343,7 @@ func classifiedNames() []string {
 //     it is: the failure mode is a spurious demand a reader can resolve in
 //     seconds, whereas filtering risks skipping a real declaration that happens
 //     to live beside tests.
-//   - It is NON-RECURSIVE, so the subpackages (audiows, memqlws, polyphonws)
+//   - It is NON-RECURSIVE, so the subpackages (memqlws, ...)
 //     are not scanned. Correct rather than a gap: those are different packages,
 //     so nothing in them can be a `server.XPaths()` the generator could call.
 //     A route declaration moved down there would leave this scan -- and would

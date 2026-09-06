@@ -14,8 +14,8 @@
 # keep honest.
 #
 # SOME VALUES ARE STILL PLACEHOLDERS. Values that can only come from real cloud
-# infrastructure -- the livekit LB address, the database identity client id --
-# are documented fail-closed placeholders rather than plausible-looking guesses.
+# infrastructure -- the database identity client id -- are documented
+# fail-closed placeholders rather than plausible-looking guesses.
 # They are UNROUTABLE, so reconciling this overlay before they are real fails
 # loudly instead of half-working. Set them when the cluster is stood up.
 #
@@ -92,9 +92,6 @@ patches:
   - target: { kind: Deployment, name: bff }
     patch: |
       - { op: replace, path: /spec/replicas, value: 2 }
-  - target: { kind: Deployment, name: cognition }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 2 }
   - target: { kind: Deployment, name: agent }
     patch: |
       - { op: replace, path: /spec/replicas, value: 2 }
@@ -107,32 +104,9 @@ patches:
   - target: { kind: Deployment, name: mcp }
     patch: |
       - { op: replace, path: /spec/replicas, value: 2 }
-  - target: { kind: Deployment, name: voice }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 2 }
   - target: { kind: Deployment, name: edge }
     patch: |
       - { op: replace, path: /spec/replicas, value: 2 }
-  # voice-agent is a room DISPATCHER rather than a request-serving mesh node --
-  # one replica serves up to MEMQL_VOICE_MAX_ROOMS rooms concurrently -- so its
-  # count does not track the rest of the mesh. Two is supported (the dispatcher
-  # skips rooms that already hold a `-ga` participant), and raising it is a
-  # capacity decision, not part of standing this environment up.
-  - target: { kind: Deployment, name: voice-agent }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 1 }
-  # The self-hosted LiveKit server advertises this address to WebRTC clients.
-  # PLACEHOLDER: there is no livekit-rtc LoadBalancer yet, so there is no
-  # address to name. 0.0.0.0 is unroutable by design -- it makes a premature
-  # reconcile fail visibly, which a plausible-looking wrong IP would not.
-  - target: { kind: Deployment, name: livekit }
-    patch: |
-      - op: add
-        path: /spec/template/spec/containers/0/env/-
-        value:
-          name: NODE_IP
-          value: "0.0.0.0"
-
 
   # -------------------------------------------------------------------------
   # DATABASE -- cloud VALUES over the cnpg-db component (memql#3847 / #3850)
@@ -299,10 +273,6 @@ images:
     newTag: 16.15-timescaledb-2.29.1
   - name: acrmemql.azurecr.io/memql-identity
     digest: sha256:06cea2b58d662fee2c6b49bddbbd5c3cabda4de2234853cd6cb9233e6079d254
-  - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:17c596966cfeed1cab2e76af746b156f31dc743f4edac2e815dcd5d94ac1c0f6
-  - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:aff90e206e3e37facc0c0f5e9079a815cd08b6e06a3aefde495182e36a2d2b9a
   - name: acrmemql.azurecr.io/memql-agent
     digest: sha256:c2dfd072d99d008be35a52ad22569da3ecb48ed35d3ab52dbacfd29ea5e6313c
   - name: acrmemql.azurecr.io/memql-planner
@@ -315,18 +285,6 @@ images:
   # real digest when it ships.
   - name: acrmemql.azurecr.io/memql-mcp
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
-  # Self-hosted LiveKit server (memql#1043) -- upstream OSS image, digest-pinned.
-  - name: livekit/livekit-server
-    newName: livekit/livekit-server
-    digest: sha256:9e34703b97ceb9f622bcbb533107e4786c7aa65966f0494966a452ad41a0c0d4
-  # Telephony (memql#1910): livekit/sip PSTN edge + its Redis, upstream OSS,
-  # digest-pinned. livekit/sip:v1.5.0, redis:7.4-alpine.
-  - name: livekit/sip
-    newName: livekit/sip
-    digest: sha256:f8621da1f203ba46e567f08311771ee5f77b0f93aad3eb7f24aaf93067f253cc
-  - name: redis
-    newName: redis
-    digest: sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
 
 components:
   - ../../components/engine-bff

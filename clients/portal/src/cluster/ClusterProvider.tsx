@@ -32,11 +32,8 @@ import {
 } from "@znasllc-io/memql-sdk-core/client";
 import {
   aiSuggest,
-  aiTranscribe,
   type AiSuggestOptions,
   type AiSuggestResult,
-  type AiTranscribeOptions,
-  type AiTranscribeResult,
 } from "@znasllc-io/memql-sdk-core/ai";
 import { DeployControlClient } from "@znasllc-io/memql-sdk-core/deploy";
 import {
@@ -111,15 +108,14 @@ export interface ClusterClients {
   ) => Promise<AiSuggestResult>;
   // One-shot speech to text, for Synapse's press-and-hold (memql#4658).
   //
-  // BATCH, not the streaming surface. A held button produces one recording
-  // with a definite end, and the transcript is shown in the popover for the
-  // person to edit before it runs -- so partials would be a live rewrite of
-  // something they are reading. Streaming transcription is the upgrade path
-  // if a longer dictation surface ever wants it.
+  // The engine surface behind it went with the voice node (epic memql#4988),
+  // so the provider's implementation now rejects and the button falls to its
+  // own type-instead path. The signature stays so the component does not
+  // change shape for a portal that is itself being retired.
   transcribe: (
     audio: Uint8Array,
-    opts?: AiTranscribeOptions,
-  ) => Promise<AiTranscribeResult>;
+    opts?: { mimeType?: string },
+  ) => Promise<{ text: string }>;
 }
 
 export type ConnectionStatus =
@@ -316,7 +312,17 @@ export function ClusterProvider({
                 revokeAllSessions: (signal) => revokeAllSessions(transport, signal),
                 setSignInPolicy: (policy, signal) => setSignInPolicy(transport, policy, signal),
                 suggest: (domain, payload, opts) => aiSuggest(transport, domain, payload, opts),
-                transcribe: (audio, opts) => aiTranscribe(transport, audio, opts),
+                // One-shot transcription went with the voice node (epic
+                // memql#4988): AiTranscribeMsg had no consumer but this one,
+                // and the surviving streaming family expects PCM16 rather than
+                // the recorder's blob. Refusing here rather than removing the
+                // control puts the caller on the same path a transcription
+                // failure already took -- SynapseButton catches this and says
+                // "That could not be transcribed. Type it instead."
+                transcribe: () =>
+                  Promise.reject(
+                    new Error("speech to text is not available on this cluster"),
+                  ),
               },
         );
         // liveStoreFor is memoized on the connection inside the SDK, so this

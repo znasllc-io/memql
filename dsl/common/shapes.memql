@@ -5,18 +5,6 @@
 
 use knowledge.concepts.{ documentChunk }
 
-/// Attachment projection for the download endpoint (memql#804): the file's storage URL + the
-/// metadata needed to serve it back (name + MIME + owning space for the cross-space guard).
-@row
-shape attachment attachmentDownload {
-  row.id
-  fileName
-  mimeType
-  blobUrl
-  partitionId
-  status
-}
-
 // documentChunkDomainLite carries `validationStatus` as well as the domain id
 // (memql#4740), and the second field is what makes the rollup HONEST rather
 // than cheaper.
@@ -166,31 +154,4 @@ shape actorEnvelope {
   actor.identityId
   actor.isClusterOwner
   actor.now
-}
-
-// ---- shapes/v1/common/mediaFull.memql ----
-
-// Full projection of v1:common:media for the SPA's `useMedia(partitionId,
-// filters)` hook (frontend repo, src/hooks).
-// Surface mirrors the SPA's Media interface so the generated SDK
-// hands back rows with no client-side shape adapters needed.
-//
-// carrier#44 (audit) + memql#191.
-
-/// Full projection of a v1:common:media row -- every payload field used by the product SPA's Media
-/// interface, plus the row intrinsics the frontend reads for ordering and ids.
-@row
-shape media mediaFull {
-  row.id
-  partitionId
-  mediaType
-  mimeType
-  url
-  filename
-  size
-  duration
-  dimensions
-  transcription
-  metadata
-  row.createdAt
 }

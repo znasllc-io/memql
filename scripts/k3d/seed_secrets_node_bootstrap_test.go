@@ -28,7 +28,7 @@ import (
 //
 // Observed on a 2-replica k3d cluster in TWO distinct signatures, which is why
 // the reports looked contradictory. Nodes with genesis autoload off
-// (cognition, agent, ...) never attempted a mint at all -- maybeBootstrapNodeToken
+// (agent, planner, ...) never attempted a mint at all -- maybeBootstrapNodeToken
 // returns early on an empty secret -- and logged only "authorization header
 // missing". edge, which the local overlay's autoload-off patch omits, autoloaded
 // the operator's genesis envelope, found a token there, and DID attempt: its logs

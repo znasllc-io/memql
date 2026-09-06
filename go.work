@@ -65,7 +65,6 @@ use (
 	./component/observe
 	./component/outbound
 	./component/planner
-	./component/polyphon
 	./component/provenance
 	./component/router
 	./component/safety

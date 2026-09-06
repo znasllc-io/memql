@@ -142,18 +142,20 @@ func TestCreatePasskeyIdentity_LeafArgsAreRequired(t *testing.T) {
 // mutations the detector flags where a human has looked and judged wholesale
 // replace to be what the field means.
 //
-// sendRealtimeTranscriptUtterance's `source` is the one entry. Six of its eight
-// leaves are `args.source.<leaf>` -- it is projecting a caller-supplied
-// provenance blob with defaults, which is the category the memql#3617 sweep
+// The inventory is EMPTY today: its one entry was
+// sendRealtimeTranscriptUtterance's `source`, which went with the cognition
+// concepts (epic memql#4988). An empty map is the right state -- the detector
+// below still runs over the whole tree, and a new mutation that rebuilds a
+// nested object from optional args fails until somebody looks at it and either
+// fixes the mutation or adds it here. What the entry recorded was the category
+// the memql#3617 sweep
 // classified as "wholesale replace is correct" (16 mutations in the tree do the
 // same thing via a bare `args.source` splat and are not flagged at all, because
 // a splat is not an object literal). The single bare `args.idempotencyKey` leaf
 // rides along with the blob rather than being an independently-owned field, and
 // a second write that supplies a different `source` is MEANT to replace the
 // provenance rather than merge into it.
-var knownNestedObjectRebuilds = map[string][]string{
-	"sendRealtimeTranscriptUtterance": {"source"},
-}
+var knownNestedObjectRebuilds = map[string][]string{}
 
 // TestNestedObjectFromOptionalArgs_InventoryIsPinned enforces the general shape
 // across the whole loaded tree. A NEW mutation that rebuilds a nested object

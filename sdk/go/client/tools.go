@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -87,35 +86,6 @@ type CallToolResult struct {
 	IsError bool
 }
 
-// ClientToolCall is the inbound shape the SDK hands to a registered
-// ClientToolHandler when the server pushes a client-execution tool
-// invocation. The handler returns a *ClientToolResult; the SDK
-// auto-ships it back over the stream correlated by CallId.
-type ClientToolCall struct {
-	CallId        string
-	TurnId        string
-	AgentId       string
-	ToolName      string
-	ArgumentsJson string // raw JSON; the handler unmarshals per-tool.
-	TimeoutMs     int32
-}
-
-// ClientToolResult is what a ClientToolHandler returns. The SDK
-// stamps CallId from the inbound call when shipping.
-type ClientToolResult struct {
-	Content      []ToolResultContent
-	IsError      bool
-	ErrorMessage string
-}
-
-// ClientToolHandler is the inbound-dispatch contract. The SDK calls
-// the handler from a goroutine spawned for each incoming
-// ClientToolCall; handlers may block (up to the call's TimeoutMs
-// budget the server is willing to wait). A nil return is treated as
-// is_error=true with a generic message so the agent's parked tool
-// call always unblocks.
-type ClientToolHandler func(ctx context.Context, call *ClientToolCall) *ClientToolResult
-
 // -----------------------------------------------------------------
 // Outbound RPCs (ListTools / CallTool)
 // -----------------------------------------------------------------
@@ -191,148 +161,6 @@ func (qc *QueryClient) CallTool(ctx context.Context, args CallToolArgs) (*CallTo
 // Inbound dispatch (ClientToolCall -> handler -> ClientToolResult)
 // -----------------------------------------------------------------
 
-// clientToolHandlerRegistry holds the registered handler on the
-// Dispatcher. One handler at a time -- callers who need per-tool
-// fanout dispatch from the handler body (a switch on call.ToolName
-// is the standard pattern).
-//
-// Versioning: each Register bumps `version`; the returned unregister
-// captures the version at registration time. Calling that unregister
-// only clears the slot when the current version still matches --
-// so a stale unregister returned by a superseded Register is a
-// no-op, and a re-Register cleanly replaces without the prior
-// unregister being able to clobber the new handler.
-type clientToolHandlerRegistry struct {
-	mu      sync.RWMutex
-	handler ClientToolHandler
-	version uint64
-}
-
-// loadHandler returns the active handler under the read lock.
-func (r *clientToolHandlerRegistry) loadHandler() ClientToolHandler {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.handler
-}
-
-// setNew installs a new handler and returns the version stamp the
-// caller should use to bound its unregister.
-func (r *clientToolHandlerRegistry) setNew(h ClientToolHandler) uint64 {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.version++
-	r.handler = h
-	return r.version
-}
-
-// clearIfVersion clears the handler only when the current version
-// matches `v`. Returns true when the clear actually fired.
-func (r *clientToolHandlerRegistry) clearIfVersion(v uint64) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.version != v {
-		return false
-	}
-	r.handler = nil
-	return true
-}
-
-// RegisterClientToolHandler installs the handler the dispatcher
-// invokes for every inbound ClientToolCall. Returns an unregister
-// function that clears the handler when called.
-//
-// Re-register semantics: a second Register replaces the first; the
-// first call's returned unregister becomes a NO-OP (it can no longer
-// clear the slot it didn't install). The unregister is bound to the
-// specific handler it registered.
-//
-// The handler runs on a goroutine dedicated to each incoming call,
-// so a slow tool dispatch never blocks the dispatcher's read loop.
-// Returning nil from the handler is interpreted as
-// is_error=true + a generic error message so a malformed handler
-// always unblocks the agent's parked tool call.
-func (d *Dispatcher) RegisterClientToolHandler(handler ClientToolHandler) func() {
-	if d.clientTools == nil {
-		// Defensive: clientTools is initialised by NewDispatcher.
-		// Treat a missing registry as a no-op so a caller can't
-		// crash a stub dispatcher.
-		return func() {}
-	}
-	version := d.clientTools.setNew(handler)
-	once := sync.Once{}
-	return func() {
-		once.Do(func() {
-			d.clientTools.clearIfVersion(version)
-		})
-	}
-}
-
-// dispatchClientToolCall is the dispatcher-side hook called by Run()
-// when a ClientToolCall envelope arrives. It pulls the registered
-// handler, spawns a goroutine to invoke it, and ships the returned
-// ClientToolResult back over the stream correlated by call_id. When
-// no handler is registered the dispatcher logs + drops the call --
-// the server's agent loop will time out on its own per the
-// per-call deadline carried in the envelope.
-func (d *Dispatcher) dispatchClientToolCall(call *memqlv1.ClientToolCall) {
-	if d.clientTools == nil {
-		return
-	}
-	handler := d.clientTools.loadHandler()
-	if handler == nil {
-		if d.logger != nil {
-			d.logger.Warn("ClientToolCall received but no handler registered",
-				"call_id", call.GetCallId(),
-				"tool_name", call.GetToolName(),
-			)
-		}
-		return
-	}
-	go d.runClientToolHandler(handler, call)
-}
-
-func (d *Dispatcher) runClientToolHandler(handler ClientToolHandler, call *memqlv1.ClientToolCall) {
-	sdkCall := &ClientToolCall{
-		CallId:        call.GetCallId(),
-		TurnId:        call.GetTurnId(),
-		AgentId:       call.GetAgentId(),
-		ToolName:      call.GetToolName(),
-		ArgumentsJson: call.GetArgumentsJson(),
-		TimeoutMs:     call.GetTimeoutMs(),
-	}
-	ctx := context.Background()
-	res := handler(ctx, sdkCall)
-	if res == nil {
-		res = &ClientToolResult{
-			IsError:      true,
-			ErrorMessage: "client tool handler returned nil",
-		}
-	}
-	// Ship the result back. We don't fail the dispatcher on a send
-	// error -- the stream is best-effort post-handoff; a missed result
-	// surfaces as a server-side timeout, which is the same path as a
-	// silent client.
-	reply := &memqlv1.MemqlClientMessage{
-		Payload: &memqlv1.MemqlClientMessage_ClientToolResult{
-			ClientToolResult: &memqlv1.ClientToolResult{
-				CallId:       sdkCall.CallId,
-				Content:      contentToProto(res.Content),
-				IsError:      res.IsError,
-				ErrorMessage: res.ErrorMessage,
-			},
-		},
-	}
-	if _, err := d.Send(reply); err != nil {
-		if d.logger != nil {
-			d.logger.Warn("ClientToolResult send failed",
-				"call_id", sdkCall.CallId,
-				"tool_name", sdkCall.ToolName,
-				"error", err,
-			)
-		}
-	}
-}
-
 // -----------------------------------------------------------------
 // proto <-> SDK content conversion
 // -----------------------------------------------------------------
@@ -349,23 +177,6 @@ func contentFromProto(in []*memqlv1.ToolResultContent) []ToolResultContent {
 			MimeType: c.GetMimeType(),
 			Data:     c.GetData(),
 			URI:      c.GetUri(),
-		})
-	}
-	return out
-}
-
-func contentToProto(in []ToolResultContent) []*memqlv1.ToolResultContent {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]*memqlv1.ToolResultContent, 0, len(in))
-	for _, c := range in {
-		out = append(out, &memqlv1.ToolResultContent{
-			Type:     c.Type,
-			Text:     c.Text,
-			MimeType: c.MimeType,
-			Data:     c.Data,
-			Uri:      c.URI,
 		})
 	}
 	return out

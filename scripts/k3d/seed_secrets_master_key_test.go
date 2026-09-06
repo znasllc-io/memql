@@ -93,7 +93,7 @@ case "$args" in
   *"get secret memql-ca identity-tls"*) exit 0 ;;
 esac
 
-# No Deployments yet -> the voice-lane gate returns early.
+# No Deployments yet.
 case "$args" in
   *"get deploy"*) exit 1 ;;
 esac

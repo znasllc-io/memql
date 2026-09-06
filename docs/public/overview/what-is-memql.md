@@ -9,7 +9,7 @@ owner: znas
 
 # What Is MemQL
 
-MemQL is an **open-source AI platform**: agents, automations, voice,
+MemQL is an **open-source AI platform**: agents, automations,
 campaigns, and hosted sites, running as one deployable system on a
 **time-series memory graph**. You declare behavior in the MemQL DSL --
 concepts, queries, mutations, tools, prompts, automations -- and a mesh of
@@ -29,8 +29,8 @@ on it.
   modules          what the platform RUNS
                    components (engine internals) . integrations (talk to
                    other systems) . packs (product features, per-instance
-                   enable/disable) . node-type modules (bff, voice,
-                   cognition, agent, planner, workbench, mcp, edge)
+                   enable/disable) . node-type modules (identity, bff,
+                   agent, planner, workbench, mcp, edge)
   ------------------------------------------------------------------
   memory graph     what the platform REMEMBERS ON
                    PostgreSQL + TimescaleDB; append-only, versioned,
@@ -46,8 +46,8 @@ on it.
 - **Modules** are the platform's own capabilities. The
   [harness](why-memql-harness.md) -- the work spine that executes agent
   turns, enforces budgets, and consolidates memory -- is one module.
-  Voice is another. Product features ship as packs, and an operator can
-  enable or disable a pack per instance. See
+  Campaigns is another. Product features ship as packs, and an
+  operator can enable or disable a pack per instance. See
   [Modules](../concepts/modules.md) for the full mental model.
 - **Clients** are what you build: a SPA, a website, a mobile app
   (Android/iOS are planned, not shipped), a console. One repo per

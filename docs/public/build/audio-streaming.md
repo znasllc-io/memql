@@ -9,234 +9,109 @@ owner: znas
 
 # Audio Streaming Architecture
 
-> **Last Updated:** 2026-04-29
+> **Last Updated:** 2026-09-06
 
-This document describes the audio paths in MemQL: the **audio
-WebSocket** (browser-based STT/TTS for spaces), the **gRPC streaming
-transcription** flow on `MemqlService.Stream`, and the **Polyphon
-pipeline** (multi-agent real-time voice conversations).
+MemQL has one audio path: **streaming transcription over gRPC**, carried
+by the `AiTranscribeStream*` message family on `MemqlService.Stream`. A
+client opens a session, pumps audio bytes, reads partial transcripts as
+they arrive, and receives a final transcript when the session closes.
+That is the whole surface. There is no audio WebSocket, no separate
+media transport, and no text-to-speech path in the engine.
 
 ## Overview
 
-MemQL provides three audio paths, each for a different use case:
+The engine turns audio into text and hands the text back. What the
+caller does with the text -- open a goal, write a note, run a command --
+is the caller's business, which is why the SDK's transcription primitive
+deliberately writes no rows of its own.
 
-1. **Audio WebSocket** (`/memql/audio`) -- legacy browser path for
-   in-space STT and the "Read Aloud" TTS feature. Users speak into
-   their mic; audio is transcribed and committed as a
-   `v1:cognition:utterance`. Still in production use.
+One message family, two provider backends. The client sends
+`AiTranscribeStreamStart` / `Chunk` / `End`; the server answers with zero
+or more `AiTranscribeStreamDelta` frames and one
+`AiTranscribeStreamComplete`. Partial transcripts arrive while the
+speaker is still talking, which is what a hold-to-talk button renders.
 
-2. **gRPC streaming transcription** -- canonical path for new clients.
-   `AiTranscribeStreamStart` / `Chunk` / `End` (client -> server) plus
-   `AiTranscribeStreamDelta` / `Complete` (server -> client) on
-   `MemqlService.Stream`. The voice node owns the provider session;
-   the BFF proxies via `AiForwardRouter.ForwardContinuation`. See
-   `component/grpc/ai_transcribe_stream.go`.
+There is no one-request-one-response transcribe message. A caller that
+already has the whole recording still opens a session, sends it as
+chunks, and reads the final transcript -- one wire shape, so there is
+only one thing to implement and only one thing to authorize.
 
-3. **Polyphon Pipeline** -- multi-agent, multi-human real-time voice
-   conversations. LiveKit for audio transport, a Bridge Agent for
-   ASR/TTS, and the cognition pipeline for turn-taking decisions.
+The agent node owns the provider session. A client that reaches a bff is
+proxied there by `AiForwardRouter.ForwardContinuation`, so every chunk of
+a session lands on the same agent instance that opened it -- the session
+is in-memory state on exactly one replica, and a chunk routed anywhere
+else has nothing to attach to.
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                              MEMQL SERVER                                │
-│                                                                          │
-│  /memql/ws  (gRPC tunneled over WS)         /memql/audio (legacy WS)     │
-│   - All gRPC messages incl. AiTranscribe*    - In-space STT + TTS chunks │
-│   - Queries / mutations / subscriptions      - Single-user per stream    │
-│   - Streaming transcription                                              │
-│                                                                          │
-│  HTTP (browser-required exceptions only):                                │
-│    /auth/*        OAuth callbacks (HTTP-required)                        │
-│    /healthz       Health probe                                           │
-│    /spaces/{id}/attachments  multipart upload                            │
-│    /polyphon/room-token, /polyphon/status  Polyphon multi-agent voice    │
-│                                                                          │
-│  All paths share the same identity-service-validated context.            │
-└─────────────────────────────────────────────────────────────────────────┘
+client                            bff                        agent
+──────────────────────────        ────────────────────       ─────────────────
+AiTranscribeStreamStart  ───────> ForwardContinuation ──────> open ASR session
+AiTranscribeStreamChunk  ───────> ForwardContinuation ──────> send audio
+   ... more chunks ...
+                         <─────── AiTranscribeStreamDelta <── interim text
+AiTranscribeStreamEnd    ───────> ForwardContinuation ──────> finalize
+                         <─────── AiTranscribeStreamComplete <── transcript
 ```
 
-## When to use each path
+The flow is keyed by `request_id`. A browser reaches the same stream
+through the WebSocket bridge at `/memql/ws`, which tunnels
+`MemqlService.Stream` -- it is still gRPC underneath, and carries the
+transcription messages like any other.
 
-| Path | Purpose | Transport | Multi-party |
-|------|---------|-----------|-------------|
-| `AiTranscribeStream*` (gRPC) | Transcription for any client | gRPC stream | No |
-| `AiTranscribe` (gRPC, batch) | One-shot upload-and-transcribe | gRPC stream | No |
-| `/memql/audio` (WebSocket) | Legacy browser STT + Read Aloud TTS | WebSocket | No |
-| Polyphon pipeline | Real-time voice conversations | LiveKit (WebRTC SFU) | Yes (up to 3 agents + 5 humans) |
+## gRPC Streaming Transcription
 
-New clients should use the gRPC streaming path
-(`AiTranscribeStreamStart`/`Chunk`/`End`). The `/memql/audio` WebSocket
-exists for the older browser flow and the Read-Aloud TTS feature.
+### Message flow
 
----
-
-## Audio WebSocket Endpoint
-
-The audio WebSocket (`/memql/audio`) provides browser-based STT transcription and TTS synthesis for spaces. When users speak, their audio is streamed to the server, transcribed using a speech-to-text provider, and converted into utterances that appear in the chat.
-
-### Connection
-
-- **Endpoint**: `/memql/audio`
-- **Protocol**: WebSocket
-- **Auth**: Same JWT/cookie as `/memql/ws`
-
-### Why a Separate WebSocket?
-
-Audio, video, and query traffic have fundamentally different characteristics:
-
-| Traffic Type | Frequency | Message Size | Latency Sensitivity |
-|-------------|-----------|--------------|---------------------|
-| Queries | 1-10/minute | 100B - 10KB | Low |
-| Audio | 10-20/second | 2-4KB | High |
-| Video | 30-60/second | 10-100KB | Very High |
-
-Using separate connections provides:
-
-1. **No interference**: Audio flows independently from queries
-2. **Optimized for purpose**: Each connection is tuned for its traffic type
-3. **Independent scaling**: Audio processing can scale separately
-4. **Failure isolation**: STT provider issues don't affect chat
-5. **Future-proof**: Same pattern extends to video
-
-### Message Protocol
-
-All messages are JSON-encoded.
-
-#### Start Stream (Client to Server)
-
-Sent when the user begins recording:
-
-```json
-{
-  "type": "start",
-  "streamId": "550e8400-e29b-41d4-a716-446655440000",
-  "spaceId": "space-123",
-  "participantId": "participant-456",
-  "format": "pcm16",
-  "sampleRate": 16000,
-  "channels": 1,
-  "languageHint": "en"
-}
+```
+client -> server                        server -> client
+─────────────────────────────────       ─────────────────────────────────
+AiTranscribeStreamStart {               AiTranscribeStreamDelta {
+  request_id, sample_rate, ...           request_id, text, is_final
+}                                       }     (zero or more interim deltas)
+AiTranscribeStreamChunk {              AiTranscribeStreamComplete {
+  request_id, audio  (PCM16 bytes)       request_id, transcript, words
+}                                       }
+... more chunks ...
+AiTranscribeStreamEnd { request_id }
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `type` | string | Yes | Must be `"start"` |
-| `streamId` | string | Yes | Client-generated UUID for this audio stream |
-| `spaceId` | string | Yes | ID of the space |
-| `participantId` | string | Yes | ID of the participant speaking |
-| `format` | string | No | Audio format: `"pcm16"` (default), `"opus"`, `"webm"` |
-| `sampleRate` | number | No | Sample rate in Hz (default: 16000) |
-| `channels` | number | No | Number of channels (default: 1) |
-| `languageHint` | string | No | Language code hint (e.g., `"en"`, `"es"`) |
+A `Delta` carries the FULL accumulated transcript so far, not an
+incremental token, so a caller can render it directly rather than
+maintaining its own buffer.
 
-#### Audio Chunk (Client to Server)
+## Using it from an SDK
 
-Sent continuously while recording:
+Neither SDK asks the caller to speak the wire protocol. `pushToTalk` is
+the canonical entry point in both:
 
-```json
-{
-  "type": "chunk",
-  "streamId": "550e8400-e29b-41d4-a716-446655440000",
-  "audio": "SGVsbG8gV29ybGQ=",
-  "sequence": 1
-}
-```
+- `sdk/go/voice` -- `PushToTalk` takes an `io.Reader` of audio bytes,
+  fires a callback per partial transcript, and returns the final one.
+- `sdk/ts/src/voice` -- the same shape over a `ReadableStream`.
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `type` | string | Yes | Must be `"chunk"` |
-| `streamId` | string | Yes | Same UUID from start message |
-| `audio` | string | Yes | Base64-encoded audio data |
-| `sequence` | number | No | Sequence number for ordering |
+**The caller owns the audio source; the SDK owns the protocol.** A
+terminal app wires a microphone library, a browser wires a
+`MediaStream`. MemQL OS's Ask surface is the reference consumer: hold the
+button, `clients/os/src/ask/micCapture.ts` produces 16 kHz mono PCM16,
+and `clients/os/src/ask/sdkVoice.ts` hands it to the SDK's `pushToTalk`.
 
-#### End Stream (Client to Server)
+The SDK deliberately does NOT write a row when the transcript finalizes.
+The caller receives the text and decides what it means, which keeps
+transcription reusable for callers that are not conversational at all --
+dictation, note capture, a command line.
 
-Sent when the user stops recording:
+## Audio format
 
-```json
-{
-  "type": "end",
-  "streamId": "550e8400-e29b-41d4-a716-446655440000",
-  "cancelled": false
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `type` | string | Yes | Must be `"end"` |
-| `streamId` | string | Yes | Same UUID from start message |
-| `cancelled` | boolean | No | `true` to discard without creating utterance |
-
-#### Started Response (Server to Client)
-
-Sent after successful stream initialization:
-
-```json
-{
-  "type": "started",
-  "streamId": "550e8400-e29b-41d4-a716-446655440000"
-}
-```
-
-#### Transcription Event (Server to Client)
-
-Sent as transcription results arrive:
-
-```json
-{
-  "type": "transcription",
-  "streamId": "550e8400-e29b-41d4-a716-446655440000",
-  "text": "Hello, how are you?",
-  "isFinal": true,
-  "confidence": 0.95,
-  "words": [
-    { "word": "Hello", "start": 0, "end": 320, "confidence": 0.98 },
-    { "word": "how", "start": 350, "end": 480, "confidence": 0.94 },
-    { "word": "are", "start": 500, "end": 580, "confidence": 0.96 },
-    { "word": "you", "start": 600, "end": 750, "confidence": 0.93 }
-  ],
-  "utteranceId": "utt-voice-1702156800000000000",
-  "durationMs": 1500
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | string | Always `"transcription"` |
-| `streamId` | string | Stream this result belongs to |
-| `text` | string | Transcribed text |
-| `isFinal` | boolean | `false` for interim, `true` for final |
-| `confidence` | number | Confidence score (0.0 - 1.0) |
-| `words` | array | Word-level timestamps (final only) |
-| `utteranceId` | string | ID of created utterance (final only) |
-| `durationMs` | number | Audio duration in ms (final only) |
-
-#### Error Response (Server to Client)
-
-```json
-{
-  "type": "error",
-  "streamId": "550e8400-e29b-41d4-a716-446655440000",
-  "error": {
-    "code": "STREAM_NOT_FOUND",
-    "message": "No active stream with this ID"
-  }
-}
-```
-
-### Audio Format
-
-#### Recommended Settings
+### Recommended settings
 
 - **Sample Rate**: 16000 Hz (optimal for speech recognition)
 - **Channels**: 1 (mono)
 - **Format**: PCM16 (16-bit signed integer)
 - **Chunk Size**: ~100-200ms of audio per chunk
 
-#### PCM16 Format
+### PCM16 conversion
 
-Browser audio (Float32Array with values -1.0 to 1.0) must be converted to PCM16:
+Browser audio (a `Float32Array` with values -1.0 to 1.0) must be
+converted to PCM16 before it goes on the wire:
 
 ```javascript
 function float32ToPcm16(float32Array) {
@@ -249,107 +124,43 @@ function float32ToPcm16(float32Array) {
 }
 ```
 
-### STT Data Flow
+`opus`, `webm` and `wav` are accepted as well; PCM16 is the default and
+the one every provider takes without a transcode.
 
-```
-1. User presses mic button
-2. Client opens /memql/audio WebSocket (if not already open)
-3. Client sends "start" message with spaceId, participantId
-4. Client captures audio via getUserMedia + AudioWorklet
-5. Client converts Float32 to PCM16, base64 encodes, sends "chunk" messages
-6. Server forwards chunks to STT provider (OpenAI Realtime by default; OpenAI Whisper for batch)
-7. Server receives interim transcriptions, sends to client (isFinal: false)
-8. User releases mic button
-9. Client sends "end" message
-10. Server finalizes STT stream, gets complete transcription
-11. Server inserts v1:cognition:utterance with:
-    - utteranceType: "speech"
-    - source.inputMethod: "stt"
-    - source.sttProvider: configured provider name
-    - timestamps.words: word-level timing
-12. Server sends final transcription event (isFinal: true) with utteranceId
-13. Event bus emits graph.node.created.v1:cognition:utterance
-14. All participants receive utterance via /memql/ws subscription
-15. Chat UI displays the voice message
-```
-
-### Utterance Structure
-
-Voice messages create `v1:cognition:utterance` records with this structure:
-
-```json
-{
-  "concept": "v1:cognition:utterance",
-  "id": "utt-voice-1702156800000000000",
-  "payload": {
-    "spaceId": "space-123",
-    "participantId": "participant-456",
-    "utteranceType": "speech",
-    "text": "Hello, how are you?",
-    "duration": 1500,
-    "timestamps": {
-      "words": [
-        { "word": "Hello", "start": 0, "end": 320 },
-        { "word": "how", "start": 350, "end": 480 },
-        { "word": "are", "start": 500, "end": 580 },
-        { "word": "you", "start": 600, "end": 750 }
-      ]
-    },
-    "source": {
-      "inputMethod": "stt",
-      "sttProvider": "openai-whisper"
-    }
-  }
-}
-```
-
-### STT Configuration
-
-#### Environment Variables
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `MEMQL_STT_PROVIDER` | STT provider: `openai-realtime` (default) / `openai-whisper` | No |
-| `MEMQL_AI_OPENAI_API_KEY` | OpenAI API key (for Whisper / Realtime) | Yes |
-
-#### MemQL Variables (v1:platform:partitionVariable)
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `MEMQL_STT_PROVIDER` | STT provider name | `openai-realtime` |
-| `MEMQL_STT_LANGUAGE` | Default language hint | `en` |
-
-#### Provider Comparison
+## Providers
 
 | Feature | OpenAI Realtime | OpenAI Whisper |
 |---------|-----------------|----------------|
-| Real-time streaming | Yes | No (batch) |
+| Transcribes as audio arrives | Yes | No (buffers, then transcribes) |
 | Interim results | Yes | No |
 | Word timestamps | Yes | Yes |
 | Deploy | Cloud API | Cloud API |
-| Best for | Streaming default | Accuracy, offline |
+| Best for | Streaming default | Accuracy |
 
-**OpenAI Realtime** (default): Streaming transcription via the
-Realtime API in transcription-only mode.
+**OpenAI Realtime** (default): streaming transcription via the Realtime
+API in transcription-only mode.
 
-**OpenAI Whisper**: Batch transcription via the transcriptions API.
-Audio is buffered during the session and transcribed when the user
-stops speaking. Best for accuracy but no interim results.
+**OpenAI Whisper**: transcription via the transcriptions API, which takes
+a whole recording rather than a stream. The session buffers the audio and
+transcribes it when the speaker stops, so the wire shape is unchanged and
+only the timing differs. Best for accuracy, but there are no interim
+results -- a hold-to-talk button backed by Whisper shows nothing until
+the user lets go.
 
-### STT Component Structure
+### Configuration
 
-```
-component/server/audiows/
-├── handler.go      # WebSocket handler, session management
-└── messages.go     # Message type definitions
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MEMQL_STT_PROVIDER` | `openai-realtime` or `openai-whisper` | `openai-realtime` |
+| `MEMQL_STT_LANGUAGE` | Server-side language pin (ISO-639-1) | `en` |
+| `MEMQL_AI_OPENAI_API_KEY` | OpenAI key (Realtime / Whisper) | required for OpenAI |
 
-integrations/stt/
-├── stt.go              # Provider interface, common types
-├── openai_whisper.go   # OpenAI Whisper (batch)
-└── openai_realtime.go  # OpenAI Realtime (streaming)
-```
+`MEMQL_STT_LANGUAGE` **overrides any client-supplied language hint by
+design**, and pinning it is the fix for the classic multi-language
+hallucination: an unpinned model auto-detects and drifts to another
+language on short or noisy audio, whatever the browser asked for.
 
-### STT Provider Interface
+## Provider interface
 
 ```go
 // StreamingProvider provides real-time streaming transcription
@@ -377,286 +188,33 @@ type StreamingSession interface {
 }
 ```
 
-### Error Handling
-
-| Error Code | Description | Recovery |
-|------------|-------------|----------|
-| `STREAM_NOT_FOUND` | streamId doesn't exist | Start a new stream |
-| `STREAM_START_FAILED` | Failed to connect to STT | Retry or check config |
-| `INVALID_FORMAT` | Bad audio format | Check format settings |
-| `STT_ERROR` | STT provider error | Retry |
-
-### Limitations
-
-- Maximum audio duration: Limited by STT provider (typically 5+ minutes)
-- Chunk size: ~200ms recommended for balance of latency/overhead
-- Concurrent streams per connection: 1 (start new after previous ends)
-
----
-
-## Text-to-Speech (TTS) via Audio WebSocket
-
-The audio WebSocket also supports TTS synthesis for the "Read Aloud" feature in spaces. All TTS requests through this endpoint use the OpenAI TTS API provider configured in the engine's provider registry.
-
-### Read Aloud Feature
-
-The "Read Aloud" feature allows any chat message to be spoken by the AI agent.
-
-#### Synthesize Request (Client to Server)
-
-Sent when the user clicks "Read Aloud" on a message:
-
-```json
-{
-  "type": "synthesize",
-  "requestId": "req-550e8400-e29b-41d4-a716-446655440000",
-  "text": "Hello, how are you today?",
-  "voice": "nova",
-  "format": "wav",
-  "sampleRate": 24000
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `type` | string | Yes | Either `"synthesize"` or `"tts_synthesize"` (both accepted) |
-| `requestId` | string | Yes | Client-generated UUID for this request |
-| `text` | string | Yes | Text to synthesize |
-| `voice` | string | No | Voice ID (defaults to agent's configured voice) |
-| `format` | string | No | Audio format: `"wav"` (default) - each chunk is complete WAV file |
-| `sampleRate` | number | No | Sample rate in Hz (default: 24000) |
-
-#### TTS Started Response (Server to Client)
-
-Sent immediately when TTS synthesis begins:
-
-```json
-{
-  "type": "tts_started",
-  "requestId": "req-550e8400-e29b-41d4-a716-446655440000",
-  "format": "wav",
-  "sampleRate": 24000,
-  "spaceId": "space-123",
-  "participantId": "ai-participant-456",
-  "text": "Hello, how can I help you?"
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | string | Always `"tts_started"` |
-| `requestId` | string | Matches the synthesize request |
-| `format` | string | Audio format: `"wav"` (each chunk is complete WAV file) |
-| `sampleRate` | number | Sample rate in Hz |
-| `spaceId` | string | Space ID for context |
-| `participantId` | string | AI participant ID generating the audio |
-| `text` | string | The text being synthesized |
-
-#### TTS Chunk Response (Server to Client)
-
-Streamed back as TTS generates audio. **Each chunk is a complete WAV file** that browsers can decode independently:
-
-```json
-{
-  "type": "tts_chunk",
-  "requestId": "req-550e8400-e29b-41d4-a716-446655440000",
-  "audio": "UklGRiQAAABXQVZFZm10IBAAAA...",
-  "format": "wav",
-  "sampleRate": 24000,
-  "sequence": 0,
-  "done": false,
-  "spaceId": "space-123",
-  "participantId": "ai-participant-456",
-  "text": "Hello, how can I help you?"
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | string | Always `"tts_chunk"` |
-| `requestId` | string | Matches the synthesize request |
-| `audio` | string | Base64-encoded WAV file (complete file with header, ~10KB per 200ms) |
-| `format` | string | Audio format: `"wav"` |
-| `sampleRate` | number | Sample rate in Hz (24000) |
-| `sequence` | number | Chunk sequence number (starts at 0) |
-| `done` | boolean | `true` for last chunk |
-| `spaceId` | string | Space ID for context |
-| `participantId` | string | AI participant ID generating the audio |
-| `text` | string | The text being synthesized |
-
-#### TTS Ended Response (Server to Client)
-
-Sent when TTS synthesis completes or fails:
-
-```json
-{
-  "type": "tts_ended",
-  "requestId": "req-550e8400-e29b-41d4-a716-446655440000",
-  "spaceId": "space-123",
-  "participantId": "ai-participant-456"
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | string | Always `"tts_ended"` |
-| `requestId` | string | Matches the synthesize request |
-| `spaceId` | string | Space ID for context |
-| `participantId` | string | AI participant ID |
-| `cancelled` | boolean | `true` if TTS was cancelled (optional) |
-| `error` | string | Error message if TTS failed (optional) |
-
-### Audio Format Recommendation
-
-**WAV is the default format for reliable progressive playback:**
-
-| Format | Size per 200ms | Browser Decode | Recommendation |
-|--------|---------------|----------------|----------------|
-| `wav` | ~10KB | **Perfect - native support** | **Default - Most reliable** |
-| `mp3` | ~800 bytes | Requires frame parsing | Complex, error-prone |
-| `opus` | ~400 bytes | Needs Ogg container | Not supported raw |
-
-**Why WAV:**
-
-- **100% reliable**: Simple 44-byte header + raw PCM data
-- **Zero decoding issues**: Browser's `decodeAudioData()` handles WAV perfectly
-- **No frame boundaries**: Unlike MP3/Opus, no complex parsing required
-- **Immediate playback**: Each chunk plays immediately with no initialization
-
-**Frontend playback with WAV (progressive):**
-```javascript
-// Each chunk is a complete WAV file - decode and play immediately!
-for await (const chunk of ttsStream) {
-  const wavBuffer = base64ToArrayBuffer(chunk.audio);
-  const audioBuffer = await audioContext.decodeAudioData(wavBuffer);
-  // Queue immediately for playback - starts playing within ~200ms
-  queueAudioForPlayback(audioBuffer);
-}
-```
-
-**Chunk characteristics:**
-- Each chunk is ~200ms of audio
-- Each chunk is a complete WAV file (44-byte header + PCM data)
-- Each chunk is ~10KB (24kHz mono 16-bit)
-- Browser decodes each chunk instantly and perfectly
-
-### TTS Data Flow (Read Aloud)
+## Component structure
 
 ```
-1. User clicks "Read Aloud" on a message
-2. Client sends "synthesize" message with text and requestId
-3. Server sends "tts_started" message with format info
-4. Server calls OpenAI TTS API (from engine provider registry)
-5. Server streams "tts_chunk" messages (WAV audio)
-6. Client uses native decodeAudioData() for playback
-7. Server sends "tts_ended" on completion
+component/grpc/
+├── ai_transcribe_stream.go  # handler + per-stream state machine
+└── ai_forward.go            # bff -> agent forwarding
+
+integrations/stt/
+├── stt.go                # provider interface, common types
+├── asr_session.go        # session lifecycle shared by both providers
+├── filter.go             # transcript filtering
+├── openai_whisper.go     # OpenAI Whisper (buffer, then transcribe)
+└── openai_realtime.go    # OpenAI Realtime (streaming)
+
+sdk/go/voice/pushtotalk.go       # Go SDK entry point
+sdk/ts/src/voice/pushToTalk.ts   # TypeScript SDK entry point
 ```
 
-**Voice consistency:** The agent's `providerConfig.voice.voiceId` is used, ensuring the AI agent has a consistent voice identity.
+## Limitations
 
-### TTS Configuration
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `MEMQL_DEFAULT_TTS_PROVIDER` | TTS provider name from registry | `tts1` |
-
-TTS providers are configured in `dsl/providers/providers.memql` with `@type("OpenAITTS")`. The default voice, format, and speed are set per-provider in the MemQL configuration.
-
-### Chunk Sizing
-
-Chunk sizes are optimized per format for ~200-300ms of audio:
-
-| Format | Chunk Size | Duration |
-|--------|------------|----------|
-| `wav` | ~10 KB | ~200-300ms |
-| `opus` | 8 KB | ~200-300ms |
-| `mp3` | 8 KB | ~200-300ms |
-| `pcm` | 12 KB | ~250ms |
-
----
-
-## gRPC Streaming Transcription
-
-The canonical streaming-transcription path for new clients lives on
-`MemqlService.Stream` -- the same bidirectional gRPC stream that
-carries chat, suggest, and graph traffic.
-
-### Message flow
-
-```
-client -> server                        server -> client
-─────────────────────────────────       ─────────────────────────────────
-AiTranscribeStreamStart {               AiTranscribeStreamDelta {
-  request_id, sample_rate, ...           request_id, text, is_final
-}                                       }     (zero or more interim deltas)
-AiTranscribeStreamChunk {              AiTranscribeStreamComplete {
-  request_id, audio  (PCM16 bytes)       request_id, transcript, words
-}                                       }
-... more chunks ...
-AiTranscribeStreamEnd { request_id }
-```
-
-The flow is keyed by `request_id`. The voice node owns the provider
-session; the BFF proxies via `AiForwardRouter.ForwardContinuation`
-so chunks land on the same voice instance that owns the session.
-
-### Files
-
-- `component/grpc/ai_transcribe_stream.go` -- handler + per-stream
-  state machine
-- `component/grpc/ai_forward.go` -- BFF -> voice forwarding
-- `integrations/stt/` -- provider implementations (OpenAI Realtime, OpenAI Whisper)
-
-### Provider selection
-
-Same env vars as the legacy `/memql/audio` path:
-
-| Variable | Values | Default |
-|----------|--------|---------|
-| `MEMQL_STT_PROVIDER` | `openai-realtime`, `openai-whisper` | `openai-realtime` |
-| `MEMQL_AI_OPENAI_API_KEY` | OpenAI key (Realtime / Whisper) | required for OpenAI |
-
-The local k3d cluster (`deploy/k8s/overlays/local`) brings up voice pods
-alongside the BFF so streaming transcription works locally; the BFF forwards
-`/memql/audio` to the voice node (STT lives there, not the bff). Reach the BFF
-from the host via `kubectl port-forward -n memql svc/bff 50051:50051`.
-
-### Single-shot batch path
-
-`AiTranscribeMsg` (one request, one response) is still supported for
-clients that buffer the whole recording client-side. Same provider
-backends.
-
----
-
-## Polyphon Voice Pipeline
-
-Multi-agent real-time voice conversations route through the Polyphon
-pipeline -- LiveKit for audio transport, a Bridge Agent for ASR/TTS,
-and the cognition node for turn-taking.
-
-The audio flow, provider flavors, configuration, and component structure
-are covered in the Voice + Video Pipeline section of the root `CLAUDE.md`
-and in [docs/public/operate/](../operate/) (the standalone Polyphon
-architecture doc that used to live here was superseded by the Go
-voice-agent + those docs). Don't duplicate it here.
-
-### Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/polyphon/room-token` | POST | Generate a LiveKit room token for a participant |
-| `/polyphon/status` | GET | Session count and health status |
-
-These are HTTP endpoints (not gRPC) because the LiveKit JavaScript
-SDK expects an HTTP token endpoint. Available only when the LiveKit
-env vars are configured.
-
-### Provider selection
-
-`MEMQL_POLYPHON_VOICE_PROVIDER`:
-
-- `openai` (fallback) -- OpenAI Realtime transcription + `/v1/audio/speech` TTS.
+- Maximum audio duration is bounded by the provider (typically 5+
+  minutes).
+- One concurrent stream per `request_id`; start a new session after the
+  previous one completes.
+- A session is tied to the agent replica that opened it. If that replica
+  goes away mid-session the session is lost -- there is no resume, and
+  the caller starts a new one.
 
 ---
 

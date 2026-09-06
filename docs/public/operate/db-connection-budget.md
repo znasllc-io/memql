@@ -126,9 +126,9 @@ Ordering and ArgoCD facts that a deploy MUST respect:
    HPA). A manual scale-to-0 to drain connections **sticks** — ArgoCD will not
    restore it, and re-enabling auto-sync only reconciles the pod template. Any
    drain-based recovery must explicitly scale the fleet back up.
-2. **Bring identity up first.** The deploy-gate's authenticated query, the
-   voice-agent JWT bootstrap, and every JWT verifier need identity/JWKS. Draining
-   identity aborts the bff blue-green gate and CrashLoops voice-agent.
+2. **Bring identity up first.** The deploy-gate's authenticated query, the node
+   bootstrap, and every JWT verifier need identity/JWKS. Draining identity
+   aborts the bff blue-green gate.
 3. **Don't roll the whole DB-heavy fleet at once** if the budget is tight —
    sequence it, or rely on the per-pod cap + scaleDownDelay so peak stays under
    the ceiling.
@@ -200,11 +200,10 @@ the PgBouncer pod in the k3d cluster (`deploy/k8s/base`).
 
 The dangerous deploy-overlap term now applies only to the **direct** budget,
 which carries just the session-stateful set — a handful of leader-lock holders
-(cron leader, topology reconciler, cognition dispatch/greet/feedback gates,
-planner admission) plus the one-shot migrate Job — each a single held
-connection, not `replicas × MAX_OPEN_CONNS`. Bulk pods multiplex through the
-pooler, whose server-side pool to Postgres is capped (`default_pool_size`)
-regardless of client count. So:
+(cron leader, topology reconciler, planner admission) plus the one-shot migrate
+Job — each a single held connection, not `replicas × MAX_OPEN_CONNS`. Bulk pods
+multiplex through the pooler, whose server-side pool to Postgres is capped
+(`default_pool_size`) regardless of client count. So:
 
 ```
 direct_backends  ≈  Σ(session-stateful holders)  +  migrate (1, transient)

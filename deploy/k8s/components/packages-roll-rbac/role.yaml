@@ -38,7 +38,6 @@ rules:
     resourceNames:
       - agent
       - bff
-      - cognition
       - planner
 ---
 apiVersion: rbac.authorization.k8s.io/v1

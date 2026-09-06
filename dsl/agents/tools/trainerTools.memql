@@ -13,7 +13,7 @@
 // integrations/planner/train_specialist_dispatch.go. It passes these
 // tool names explicitly to the filtered tool loop, so the tools are
 // available to the Trainer regardless of the standing @allowedRoles
-// filter (which gates the cognition chat tool-list path).
+// filter (which gates the tool-list path).
 //
 // Tool -> handler wiring:
 //

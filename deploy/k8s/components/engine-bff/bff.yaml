@@ -12,7 +12,7 @@
 # the product's DSL bundle mounts at MEMQL_DSL_PATH, and (b) exposes its own
 # Service `bff-<product>` its client connects to. Every bff is the same
 # product-agnostic engine image; they coexist as peers in the one mesh and all
-# forward to the shared cognition/agent/... nodes. This base `bff` is the
+# forward to the shared agent/planner/... nodes. This base `bff` is the
 # neutral one (cockpit + default mesh entry); it does not mount a bundle.
 apiVersion: apps/v1
 kind: Deployment
@@ -75,8 +75,13 @@ spec:
           image: acrmemql.azurecr.io/memql-bff:0.9.9
           lifecycle:
             preStop:
-              exec:
-                command: ["/bin/sh", "-c", "sleep 5"]
+              # The NATIVE sleep action, not `exec: /bin/sh -c sleep 5`. The
+              # runtime image is distroless and has no shell, so the exec form
+              # fails on every drain -- silently, because a failed preStop is
+              # logged as an event and the pod is terminated anyway. Requires
+              # k8s >= 1.30 (GA 1.32); the local cluster pins v1.32.
+              sleep:
+                seconds: 5
           ports:
             - { name: http, containerPort: 8085 }
             - { name: grpc, containerPort: 50051 }
@@ -103,7 +108,7 @@ spec:
             - { name: MEMQL_DEPLOYMENT_ID, valueFrom: { fieldRef: { fieldPath: "metadata.labels['pod-template-hash']" } } }
             - { name: MEMQL_NODE_SERVICE_ADDRESS, value: ":50058" }
             # The bff is the mesh ROOT -- it does NOT dial a parent. Leaf nodes
-            # (cognition/agent/planner/workbench/voice) dial it at bff-active:50058.
+            # (agent/planner/workbench) dial it at bff-active:50058.
             #
             # One exception, outbound: the bff dials the IDENTITY node so the
             # portal's Deployments surface can reach DeployControlService, which
@@ -231,18 +236,17 @@ spec:
 # THE BFF'S PodDisruptionBudget (memql#4634).
 #
 # `deploy/k8s/base` ships one of these beside the Deployment for every
-# user-facing node -- identity, agent, cognition, edge, planner, workbench,
-# voice. The bff had none, because the bff does not live in `base`: it comes
-# from THIS component, and the component shipped the Deployment alone. So every
-# install that composes it ran six protected user-facing nodes and one
-# unprotected one, and the unprotected one is the node the portal and every SPA
-# actually talk to.
+# user-facing node -- identity, agent, edge, planner, workbench. The bff had
+# none, because the bff does not live in `base`: it comes from THIS component,
+# and the component shipped the Deployment alone. So every install that
+# composes it ran the protected user-facing nodes and one unprotected one, and
+# the unprotected one is the node the portal and every SPA actually talk to.
 #
 # WHY THE LIVE CHECK MISSED IT. The downstream verification enumerated what it
-# FOUND -- "PDBs already exist for agent, cognition, edge, identity, planner,
-# workbench (and voice)" -- which is a true statement and also a list with bff
-# missing from it. A check that reports what it found rather than what it was
-# looking for reads as complete whichever way it comes out.
+# FOUND -- "PDBs already exist for agent, edge, identity, planner, workbench"
+# -- which is a true statement and also a list with bff missing from it. A
+# check that reports what it found rather than what it was looking for reads as
+# complete whichever way it comes out.
 #
 # minAvailable: 1 matches every sibling. At the 2 replicas base declares it
 # leaves one disruption allowed, which is what lets a node drain proceed; at 1

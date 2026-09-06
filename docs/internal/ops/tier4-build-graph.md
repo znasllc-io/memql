@@ -67,17 +67,12 @@ These are the reasons this is a spike, not a drop-in:
    (`dsl/**`, read via `core/dslfs`) and the `prompts/*.tmpl`
    files are captured — a missed embed is a runtime "file not found", not
    a build error, so test the engine-load path under Bazel.
-3. **CGO voice path behind `//go:build voice`.** `integrations/voice/**`
-   pulls libopus/opusfile/soxr via cgo. Model this as a separate
-   `config_setting` + `go test` with `--define gotags=voice` and the C
-   deps provided via a toolchain or `cc_library`; keep it off the default
-   `//...` target so the CGO-free graph stays hermetic.
-4. **Generated SDK (`sdk/go`) + the `sdk-gen` / `dsl-lint` /
+3. **Generated SDK (`sdk/go`) + the `sdk-gen` / `dsl-lint` /
    `engine-load` checks.** These are `go_test` / `go_binary` runs today;
    they become Bazel test targets. The `sdk-gen-check` "no drift" check
    maps to a `bazel test` that runs the generator and diffs — or stays a
    non-Bazel lane initially.
-5. **`MEMQL_DSL_PATH` override + embedded-vs-disk FS.** Tests that read
+4. **`MEMQL_DSL_PATH` override + embedded-vs-disk FS.** Tests that read
    the on-disk tree need the runfiles path; default (embedded) tests are
    hermetic. Validate both.
 

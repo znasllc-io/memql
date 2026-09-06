@@ -115,8 +115,8 @@ logic deployRollbackTarget {
 // ---- engine mesh ----
 
 // engineNodeTypes is the canonical list of ENGINE node types the deploy
-// bundle builds + places. Engine mesh ONLY -- identity, cognition, voice,
-// agent, planner, workbench, mcp, voice-agent. There is deliberately NO bff
+// bundle builds + places. Engine mesh ONLY -- identity, bff,
+// agent, planner, workbench, mcp, edge. There is deliberately NO product-carrier
 // and NO product-carrier node here: those are the carrier/product layer, built
 // + shipped by their own repos, not by the engine deploy automation (I10
 // #2224). Pure: a list literal, no read, no write. This is the DEFAULT engine
@@ -128,12 +128,12 @@ logic deployRollbackTarget {
 // the per-node fan-out free of an inter-step dependency so the deploy phases
 // run in the authored order; see the automation header.) An emitter may pass a
 // SUBSET to redeploy a single node.
-/// Canonical ENGINE node-type list the deploy bundle builds + places: identity, cognition, voice,
-/// agent, planner, workbench, mcp, voice-agent. No bff or product-carrier nodes (carrier/product
+/// Canonical ENGINE node-type list the deploy bundle builds + places: identity, bff,
+/// agent, planner, workbench, mcp, edge. No product-carrier nodes (carrier/product
 /// layer, shipped by their own repos).
 logic engineNodeTypes {
   body {
-    return ["identity", "cognition", "voice", "agent", "planner", "workbench", "mcp", "voice-agent"]
+    return ["identity", "bff", "agent", "planner", "workbench", "mcp", "edge"]
   }
 }
 

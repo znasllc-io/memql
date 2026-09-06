@@ -1580,7 +1580,7 @@ mutate identity createWorkerTokenIdentity {
 // =======================
 //
 // Creates a v1:identity:identity row of identityType="node_token"
-// for a cluster-internal node binary (bff / voice / cognition /
+// for a cluster-internal node binary (bff / agent /
 // agent / planner / workbench). Two paths create rows here:
 //
 //   1. Operator CLI (`memql node-token mint --node-id ... --node-type ...`)
@@ -1706,57 +1706,6 @@ mutate identity revokeNodeTokenIdentity {
   update {
     id: args.identityId
     active: false
-  }
-}
-
-// ---- mutations/v1/identity/createVoiceAgentTokenIdentity.memql ----
-
-// createVoiceAgentTokenIdentity
-// =============================
-//
-// Creates a v1:identity:identity row of identityType="voice_agent_token"
-// for the Go voice-agent process. Stores only the SHA-256 hex hash
-// of the random bearer used as the credential's keyHash; the actual
-// auth token handed to the voice-agent is a class="voice_agent" JWT
-// signed by the identity service's Ed25519 key (see
-// JWTIssuer.IssueVoiceAgentAccessToken). The hash satisfies the
-// schema's @required contract and gives operators a stable
-// fingerprint to correlate the identity row with audit lines.
-//
-// Surface-pinned by the voice-agent stream interceptor to the
-// VoiceAgent* payload types; a leaked credential cannot drive other
-// RPCs. usableByAgents stays false -- voice-agent tokens identify a
-// process, not a delegated agent principal.
-//
-// Provisioned by the `voice-agent-token mint` subcommand on the
-// identity binary; see docs/public/operate/auth/voice-agent-jwt.md.
-
-/// Create a voice_agent_token identity (credential row for the Go voice-agent process). Plain JWT
-/// is returned by JWTIssuer.IssueVoiceAgentAccessToken; this row stores only the SHA-256 of an
-/// auxiliary random bearer for schema completeness + audit fingerprinting.
-mutate identity createVoiceAgentTokenIdentity {
-  args {
-    identityId  string!
-    userId      string!
-    instanceId  string!
-    keyHash     string!
-    mintedBy    string!
-    expiresAt   string
-    label       string
-  }
-  insert {
-    id: args.identityId
-    args.userId
-    identityType: "voice_agent_token"
-    credentials: {
-        instanceId: args.instanceId,
-        keyHash:    args.keyHash,
-        mintedBy:   args.mintedBy,
-        expiresAt:  args.expiresAt ?? ""
-      }
-    label: args.label ?? args.instanceId
-    usableByAgents: false
-    active: true
   }
 }
 
@@ -2441,50 +2390,6 @@ mutate user scheduleAccountDeletion {
   }
 }
 
-// ---- mutations/v1/identity/setUserActiveSpace.memql ----
-
-// setUserActiveSpace
-// ==================
-//
-// Switches the caller's activePartitionId pointer. Phase 4 of the chat-
-// architecture plan -- the activity model's only mutation: each human
-// is active in at most one space at a time. Camera, mic, voice
-// transport, video presence are all bound to this pointer.
-//
-// Caller passes partitionId="" (empty) to clear the pointer (closing the
-// app, leaving every space). Otherwise partitionId is the canonical id of
-// the space being activated.
-//
-// Server-stamping: the underlying engine update() reads the existing
-// user row by id and shallow-merges {activePartitionId: <new>} on top.
-// The frontend computes the user id from the JWT subject and passes it
-// here; abuse mitigation rests on the partition-ACL middleware
-// (cluster-wide owner check) and the engine's standard write
-// authorization (a user cannot mutate another user's row without
-// elevated role -- the bun update path keys on v1:identity:user.id and
-// access control would catch a cross-user write).
-//
-// Discussion mode (Phase 6) and voice migration (Phase 7) read
-// activePartitionId on every iteration, so a switch fires their state
-// transitions implicitly -- no separate notification needed.
-
-/// Set or clear the caller's activePartitionId. Empty partitionId clears the pointer.
-mutate user setUserActiveSpace {
-  args {
-    userId         string!
-    partitionId        string
-    activePartitionId  string
-  }
-  update {
-    id: args.userId
-    // Accept either `partitionId` (the param-style name; what the SPA and the
-    // 2-Spaces QA suite pass) or `activePartitionId` (the concept-field name; what
-    // the 1-Identity QA suite passed and silently lost). Both land on the
-    // concept's activePartitionId field; empty/missing clears the pointer. (#1633)
-    activePartitionId: args.partitionId ?? args.activePartitionId ?? ""
-  }
-}
-
 // ---- mutations/v1/identity/updateClusterSettings.memql ----
 
 // updateClusterSettings
@@ -2726,8 +2631,6 @@ mutate user updateMyPreferences {
     takeoverMode              enum("clean", "dim")
     /// Interactive Mode pace preset.
     interactivePace           enum("quick", "steady", "deliberate")
-    /// Per-user mic mode preference for Polyphon rooms.
-    voiceMode                 enum("toggle", "continuous")
   }
   update {
     id: actor.userId
@@ -2742,7 +2645,6 @@ mutate user updateMyPreferences {
         cursorTweenMs: args.cursorTweenMs,
         takeoverMode: args.takeoverMode,
         interactivePace: args.interactivePace,
-        voiceMode: args.voiceMode
       }
   }
 }
@@ -3044,7 +2946,7 @@ mutate identity deactivateRecoveryKey {
 /// THE HALF THAT WAS MISSING. v1:identity:invitation has carried kind="user"
 /// since it was written, and the identity login page has REDEEMED one the whole
 /// time (stage needs_invite, form=invite). Nothing ever issued one -- the only
-/// writer of invitation rows was the guest-space flow, so an owner could put a
+/// writer of invitation rows was the guest flow, so an owner could put a
 /// cluster into invite_only mode and then have no way to let anybody in.
 ///
 /// Only the token HASH is written. The plaintext is returned once by the
@@ -3169,8 +3071,8 @@ mutate invitation recordUserInvitationDelivery {
 /// @serverOnly, and here actor.userId scoping is not merely the wrong question
 /// -- it is answered "yes" by exactly the caller who must be refused. This
 /// writes a caller-supplied DIGEST that decides which browser may accept, which
-/// is the credential-forging shape createGuestInvitation and
-/// rotateGuestInvitationToken already carry: on the wire, any authenticated
+/// is the credential-forging shape the guest-invitation mutations carried
+/// before they were removed: on the wire, any authenticated
 /// caller could bind an invitation they merely know the id of to a cookie they
 /// hold, and then accept it. A self-scoped filter passes them, because they
 /// legitimately are an authenticated user. And the legitimate caller cannot be
@@ -3211,7 +3113,7 @@ mutate invitation bindUserInvitation {
 /// rather than "you already used this" -- the distinction revokeUserInvitation
 /// records just below.
 ///
-/// `inviteeId` is required rather than optional, for markGuestInvitationAccepted's
+/// `inviteeId` is required rather than optional, for the accept path's
 /// reason: `??` is blank-coalescing, so an optional one would let a caller that
 /// resolved no user id write the empty string and leave a row that says accepted
 /// without saying by whom. The sigil buys PRESENCE rather than content, though --
@@ -3221,7 +3123,7 @@ mutate invitation bindUserInvitation {
 /// the redemption path before the invitation is stamped, never after.
 ///
 /// @serverOnly, and actor.userId scoping is not the fix. The answer differs from
-/// the guest twin's by one step rather than in kind. The caller is the INVITEE,
+/// the user invitation's by one step rather than in kind. The caller is the INVITEE,
 /// mid-registration: this runs on the redemption path, which is unauthenticated
 /// by construction -- it IS the request that creates the account -- so
 /// actor.userId is empty for every legitimate caller and a self-scoped filter
@@ -3237,7 +3139,7 @@ mutate invitation bindUserInvitation {
 /// plaintext whose SHA-256 matches the row's tokenHash, and the resolve path
 /// checked kind, active, status, expiry and the invited ADDRESS before this
 /// runs. The boundary sits where that authorization already lives, which is the
-/// argument setOAuthClientCORSOrigins makes and the guest half repeats. On the
+/// argument setOAuthClientCORSOrigins makes. On the
 /// wire this would also be the denial-of-service primitive the write itself
 /// creates: burning an invitation is what makes it single-use, so any
 /// authenticated caller could name an arbitrary invitation id and burn it before
@@ -3290,196 +3192,6 @@ mutate invitation revokeUserInvitation {
       active: false
       status: "dismissed"
       respondedAt: now
-    }
-  }
-}
-
-// ---- mutations/v1/identity/guestInvitation.memql ----
-
-// The GUEST half of the invitation lifecycle (memql#4258)
-// =======================================================
-//
-// These four sat in `component/grpc/guest_handlers.go` as statement text
-// naming constructs that existed in no .memql file anywhere in this
-// repository. `git log -S` finds them nowhere in dsl/ in the tree's whole
-// history, so this is a gap rather than a move: the engine's parser could not
-// resolve them, and on a cluster running the embedded tree EVERY guest-invite
-// write failed at execute. What made the gap invisible is that two of the same
-// file's siblings -- createAuthSession / revokeAuthSession -- ARE engine
-// constructs, so the file looked like it was calling into the engine
-// throughout.
-//
-// WHY THE ENGINE OWNS THEM, rather than a product bundle at MEMQL_DSL_PATH.
-// The `invitation` concept, the `invitationFull` shape and both lookup queries
-// (invitationByTokenHash / invitationById) are already engine constructs; the
-// kind="user" siblings createUserInvitation / markUserInvitationAccepted /
-// revokeUserInvitation sit directly above; and the handlers are first-party
-// engine gRPC. A first-party handler calling a construct the engine does not
-// own -- with no declared dependency and no failure path saying so -- is the
-// shape the issue rejected. The product-specific part of a guest flow is the
-// SPACE, and that lives on the participant side in dsl/cognition.
-//
-// ALL FOUR ARE @serverOnly, and it is not a formality. Each writes a
-// `tokenHash`, which is the whole credential: the guest-auth interceptor
-// admits `Authorization: Guest <token>` by hashing the bearer and matching
-// this column. Client-reachable, createGuestInvitation is a
-// credential-FORGING primitive -- any authenticated caller could mint a row
-// carrying a hash they chose and then present its preimage. The authorization
-// that belongs in front of these is the inviter's relationship to the space,
-// which the handlers already hold; the boundary therefore sits where the
-// authorization already lives, exactly as setOAuthClientCORSOrigins argues.
-//
-// THE THREE UPDATES CARRY MINIMAL ARGS ON PURPOSE. Their call sites re-supply
-// the whole invitation -- spaceName, inviterId, inviterName, inviteeEmail,
-// tokenHash -- "so the latest-wins projection keeps the context". That was
-// true before memql#1628 and has not been since: `update{}` read-merges the
-// persisted row, so an omitted field inherits rather than blanking. Declaring
-// the discriminators here would invite callers to keep passing a row they read
-// a moment ago, which is a lost update waiting for two concurrent writers.
-// (revokeAuthSession in this same file has the same stale call sites; they are
-// corrected in the same change.)
-
-/// Create a guest invitation: an external email address, a token the recipient is sent, and only
-/// that token's SHA-256 hex digest on the row. The plaintext leaves the server in the email and is
-/// never persisted -- the same contract every other credential row in this file keeps.
-///
-/// The kind="guest" twin of createUserInvitation above. The two differ in what the recipient
-/// becomes: a user invitation authorizes registration as a cluster user and carries an inviteeRole,
-/// while a guest joins ONE space as a participant with no account of their own, which is why this
-/// one carries partitionId + spaceName and no role.
-///
-/// WHY actor.userId SCOPING IS NOT THE FIX. It would be satisfied by every authenticated caller,
-/// because the caller legitimately IS an authenticated user -- an insert stamped with their own
-/// inviterId passes any self-scoped filter while still minting a credential. What actually gates
-/// this write is the inviter's relationship to the SPACE, and a space is not a field this concept
-/// can be filtered on. On the wire it is a credential-FORGING primitive: the caller supplies
-/// tokenHash, so they could mint a row carrying a digest they chose and then present its preimage
-/// to the guest-auth interceptor. The handlers hold the real check; the boundary sits there.
-///
-/// `accountId` is the client tie (epic memql#4800, D5): which client's person this guest is.
-/// OPTIONAL, and in accept{} rather than stamp{}, so an omitted arg is dropped from the payload
-/// entirely and an inviter who never mentioned an account writes no key at all -- every existing
-/// caller's behaviour is byte-identical. It GRANTS NOTHING: an account is a record, never an
-/// authorization boundary (D1), so a guest invited "for" a client reaches exactly the one space
-/// this invitation already named and not a byte more. The field is what lets the Users app say
-/// who a guest is for, and what a future client-access feature would point at.
-@serverOnly
-mutate invitation createGuestInvitation {
-  args {
-    invitationId  string!
-    partitionId   string
-    spaceName     string
-    inviterId     string!
-    inviterName   string
-    inviteeEmail  string!
-    inviteeName   string
-    tokenHash     string!
-    expiresAt     datetime!
-    accountId     string
-  }
-  insert {
-    accept { tokenHash, expiresAt, inviterId, inviteeEmail, accountId }
-    stamp {
-      id: args.invitationId
-      kind: "guest"
-      partitionId: args.partitionId ?? ""
-      spaceName: args.spaceName ?? ""
-      inviterName: args.inviterName ?? ""
-      inviteeName: args.inviteeName ?? ""
-      status: "pending"
-      active: true
-    }
-  }
-}
-
-/// Stamp a guest invitation accepted, at the moment the guest redeems the link and lands in the
-/// space. Read-merges, so every discriminator on the row inherits.
-///
-/// `inviteeName` is accepted because acceptance is the first point at which the GUEST states their
-/// own name -- until then the row carries whatever the inviter typed. It is required rather than
-/// optional deliberately: `??` is blank-coalescing, so an optional one would let a guest who
-/// submits an empty name silently overwrite the inviter's suggestion with the empty string.
-///
-/// WHY actor.userId SCOPING IS NOT THE FIX. There is no actor to scope to. The caller here is the
-/// GUEST, who by definition has no v1:identity:user row -- that is what makes them a guest -- so
-/// the accept path runs under contextWithSystemActor and a self-scoped filter would match zero
-/// rows for the only caller that ever runs this. Scoping to inviterId instead would name the wrong
-/// person entirely: the inviter is not the one accepting.
-@serverOnly
-mutate invitation markGuestInvitationAccepted {
-  args {
-    invitationId  string!
-    inviteeName   string!
-  }
-  update {
-    accept { inviteeName }
-    stamp {
-      id: args.invitationId
-      status: "accepted"
-      respondedAt: now
-    }
-  }
-}
-
-/// Kick a guest -- which is also what CANCELLING a pending guest invitation does, since both end
-/// the same way: the link stops working and the row stays as audit history.
-///
-/// A SOFT cancel, for the reason revokeUserInvitation records: the tokenHash must remain taken,
-/// because revoking a row does not make the holder forget the token they were sent, and a hash
-/// that came free could be minted onto a second invitation.
-///
-/// Neither invitationByTokenHash nor invitationById filters on `active` today -- the resolve
-/// handler decides on `status` and `expiresAt` in Go. Setting it anyway keeps the field's meaning
-/// ("set false to soft-cancel") true of this row, so a future query that DOES filter on it is
-/// correct rather than surprising.
-///
-/// WHY actor.userId SCOPING IS NOT THE FIX -- the same finding revokeUserInvitation records twenty
-/// lines up, and it is a POLICY objection rather than an availability one. The only plausible
-/// filter is inviterId, which is on the row and perfectly expressible; it just encodes the wrong
-/// rule. It would mean only the ORIGINAL INVITER can cancel or kick, and the case cancellation
-/// exists for is precisely the one where that is wrong: somebody sends a link to the wrong address
-/// and an owner has to kill it. The right rule is the owner/admin gate applied where the caller's
-/// role is in hand.
-@serverOnly
-mutate invitation markGuestInvitationKicked {
-  args {
-    invitationId  string!
-  }
-  update {
-    stamp {
-      id: args.invitationId
-      status: "kicked"
-      active: false
-      respondedAt: now
-    }
-  }
-}
-
-/// Rotate a guest invitation's token on resend: the row takes the new hash and keeps the OLD one on
-/// previousTokenHash, so /join/<oldToken> can answer `superseded` rather than a bare `invalid`
-/// (memql#108).
-///
-/// Exactly ONE generation of history, by design -- the rotation before last drops off. Status is
-/// untouched: a resend does not un-expire or re-open anything, it replaces the credential.
-///
-/// WHY actor.userId SCOPING IS NOT THE FIX. This writes tokenHash from a caller-supplied value,
-/// which makes it the same credential-forging shape as the create above and immune to the same
-/// filter: a self-scoped caller passes it while still choosing the digest that will admit a
-/// bearer. inviterId is the only other candidate and carries revokeUserInvitation's policy
-/// objection -- an admin resending on the original inviter's behalf is the ordinary case, not the
-/// exception.
-@serverOnly
-mutate invitation rotateGuestInvitationToken {
-  args {
-    invitationId       string!
-    tokenHash          string!
-    previousTokenHash  string
-  }
-  update {
-    accept { tokenHash }
-    stamp {
-      id: args.invitationId
-      previousTokenHash: args.previousTokenHash ?? ""
     }
   }
 }

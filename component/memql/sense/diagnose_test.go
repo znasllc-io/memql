@@ -56,7 +56,7 @@ func TestDiagnose_ValidConstructKindFiles_NoErrors(t *testing.T) {
 		"deployment/shapes.memql",
 		"deployment/specs.memql",
 		"cluster/queries.memql",
-		"cognition/automations.memql",
+		"work/automations.memql",
 	}
 
 	for _, rel := range files {

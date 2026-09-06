@@ -180,7 +180,7 @@ func (s *streamSession) handleRevokeBadge(envelope *memqlv1.MemqlClientMessage, 
 
 	// The READ does NOT. badgesForSelf is self-scoped on
 	// `userId==actor.userId` (memql#3178), and the system actor's subject is
-	// "polyphon-bridge-agent", not the caller -- reading under it would
+	// "grpc-system-actor", not the caller -- reading under it would
 	// return zero rows and wrongly deny every non-admin revoking their OWN
 	// badge. The verifier interceptor stamps only CLAIMS onto the stream
 	// context; ensureAccess converts them to the AccessContext that

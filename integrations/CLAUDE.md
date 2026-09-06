@@ -545,6 +545,5 @@ logs through the logger its plug-in factory is handed.
 ## See Also
 
 - [Architecture](arch.md) - integration system architecture
-- [Audio Streaming](../docs/public/build/audio-streaming.md) - audio WebSocket + streaming-transcription gRPC path
-- [Polyphon Architecture](../docs/public/operate/voice-bringup-verification.md) - voice pipeline architecture
+- [Audio Streaming](../docs/public/build/audio-streaming.md) - the streaming-transcription gRPC path
 - [Authoring rules](../docs/public/language/authoring-rules.md) - MemQL gotchas (read before extending the DSL surface)

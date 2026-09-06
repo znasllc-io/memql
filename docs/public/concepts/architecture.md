@@ -821,7 +821,7 @@ MemQL supports running as a distributed cluster where each node type specializes
 a subset of functionality. See [component/node/CLAUDE.md](../../../component/node/CLAUDE.md)
 for full details.
 
-**Node types:** identity, bff (default), voice, cognition, agent, planner, workbench, mcp, edge
+**Node types:** identity, bff (default), agent, planner, workbench, mcp, edge
 
 Each node type compiles to a separate binary via Go build tags. See [build-tags.md](../build/build-tags.md).
 

@@ -51,11 +51,11 @@ database storage or operations product* -- that is, one whose value proposition
 is being a database. §3.10's own illustrative example of a qualifying value-added
 product is "an IoT platform or vertical-specific application."
 
-**Our reading.** MemQL is an AI platform: agents, automations, tool calling,
-voice, cognition routing, an identity service, and a DSL. The time-series memory
-graph is the substrate those run on, not the product. A customer buys the agent
-and voice platform; nobody buys MemQL to get a database. That places us on the
-"vertical-specific application" side of §3.10's own example.
+**Our reading.** MemQL is an AI platform: agents, automations, tool calling, an
+identity service, and a DSL. The time-series memory graph is the substrate those
+run on, not the product. A customer buys the agent platform; nobody buys MemQL
+to get a database. That places us on the "vertical-specific application" side of
+§3.10's own example.
 
 **This is our analysis, not counsel's.** Counsel review is a parallel,
 non-blocking track. §4 below is the written confirmation request to TigerData,
@@ -161,6 +161,14 @@ resting solely on our own analysis.
 >
 > Regards,
 > [name], MemQL
+
+**Note, 2026-09-06: the product no longer ships voice.** The message above is
+reproduced as written, and the voice capability its product description names
+was removed from the platform after it was drafted. Kept verbatim so the record
+reads the same in both directions -- if it has already gone out, this is what
+was said; if it has not, drop "and voice" before sending. The §2.1(b) reading is
+unaffected either way: it turns on MemQL not being primarily a database product,
+and agents, automations, tool calling and the DSL carry that on their own.
 
 **Status:** drafted here for the repository owner to send from a company address.
 Record the send date and any reply below.

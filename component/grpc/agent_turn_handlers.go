@@ -85,22 +85,6 @@ func (s *Server) SetAgentPauseHook(hook func(requestId string)) {
 	}
 }
 
-// SetClientToolResultServer installs the substrate-RPC server that delivers a
-// ClientToolResult back to this agent's parked waiter over the durable delivery
-// substrate (memql#1265). Wired on agent binaries during app bootstrap once the
-// substrate + PeerManager are resolved. Nil-safe: when unset the agent simply
-// does not serve the substrate return channel and the legacy ForwardContinuation
-// path is used.
-func (s *Server) SetClientToolResultServer(srv *node.ClientToolResultServer) {
-	if s == nil {
-		return
-	}
-	s.clientToolRPC = srv
-	if s.serviceRef != nil && s.serviceRef.svc != nil {
-		s.serviceRef.svc.clientToolResultServer = srv
-	}
-}
-
 // SetDeliverySubstrate installs the durable streaming substrate (memql#1266)
 // so the live token + audio streaming paths produce/consume ordered chunks over
 // it instead of the ad-hoc forwardedStream mesh push. Wired on every mesh node
@@ -193,12 +177,10 @@ func (s *streamSession) handleAgentGenerateTurn(envelope *memqlv1.MemqlClientMes
 	// loop writes (utterances, tool side-effects) stamps the caller's
 	// provenance instead of a fresh agent-side default.
 	ctx = contextWithEnvelopeProvenance(ctx, envelope)
-	// Attach this session as the ClientToolInvoker so the agent loop's
 	// engine.ExecuteTool can round-trip client_execution tools back to
 	// the originating browser. Also attach the acting agent's
 	// guardrail role so engine.ExecuteTool can enforce
 	// Tool.AllowedRoles without re-reading envelope metadata.
-	ctx = memqlengine.WithClientToolInvoker(ctx, s)
 	if acting := msg.GetActingAgent(); acting != nil {
 		if role := strings.TrimSpace(acting.GetRole()); role != "" {
 			ctx = memqlengine.WithActingAgentRole(ctx, role)
@@ -219,9 +201,6 @@ func (s *streamSession) handleAgentGenerateTurn(envelope *memqlv1.MemqlClientMes
 	// cognition publishes to agentturn:<requestId> fires the local waiter even
 	// if the cognition<->agent connection churns mid-turn. Torn down at turn end
 	// in runAgentTurn. Nil-safe: unset on single-node / non-substrate builds.
-	if s.service != nil && s.service.clientToolResultServer != nil {
-		s.service.clientToolResultServer.BeginTurn(ctx, requestId)
-	}
 
 	go s.runAgentTurn(ctx, correlate, requestId, msg, sink)
 	return nil
@@ -242,9 +221,6 @@ func (s *streamSession) runAgentTurn(
 	// Stop serving this turn's substrate-RPC client-tool return channel once the
 	// turn finishes (memql#1265). Deferred so it fires on every exit path,
 	// including the handler-failure early return below.
-	if s.service != nil && s.service.clientToolResultServer != nil {
-		defer s.service.clientToolResultServer.EndTurn(requestId)
-	}
 
 	result, err := s.service.agentReplier.Handle(ctx, msg, sink)
 	if err != nil {

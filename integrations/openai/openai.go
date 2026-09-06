@@ -1,5 +1,5 @@
 // Package openai implements OpenAI ASR and TTS clients for the Polyphon
-// multi-agent voice system. These clients implement the polyphon.ASRProvider
+// multi-agent voice system. These clients implement the audio.ASRProvider
 // and polyphon.TTSProvider interfaces, providing cloud-based speech processing
 // suitable for development and Cloud Run deployments (no GPU required).
 //

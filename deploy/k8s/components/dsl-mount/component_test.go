@@ -146,7 +146,7 @@ func deployments(t *testing.T, rendered string) map[string]deployment {
 }
 
 // The five mesh node types that load product DSL.
-var dslNodes = []string{"bff", "agent", "cognition", "planner", "workbench"}
+var dslNodes = []string{"bff", "agent", "planner", "workbench"}
 
 func mountedNodes(t *testing.T, rendered string) map[string]deployment {
 	t.Helper()
@@ -256,11 +256,21 @@ func TestTheExampleActuallySelectsSomething(t *testing.T) {
 			"It renders, it applies, and not one pod has any of this.")
 	}
 	// And it must NOT have been applied to a Deployment that is not a mesh
-	// node: `redis` has no volumes key, so a blanket label fails the render --
-	// which is the loud half of the same mistake.
-	if d, ok := deployments(t, rendered)["redis"]; ok {
+	// node. The example that made this concrete was `redis`, which had no
+	// volumes key at all, so a blanket label failed the render outright -- the
+	// loud half of the same mistake. It went with LiveKit (epic memql#4988);
+	// the assertion stays as a guard over whatever non-mesh Deployment base
+	// carries next.
+	isDSLNode := map[string]bool{}
+	for _, n := range dslNodes {
+		isDSLNode[n] = true
+	}
+	for name, d := range deployments(t, rendered) {
+		if isDSLNode[name] {
+			continue
+		}
 		if len(d.Spec.Template.Spec.InitContainers) != 0 {
-			t.Error("redis carries a DSL init container; it does not load product DSL")
+			t.Errorf("%s carries a DSL init container; it does not load product DSL", name)
 		}
 	}
 }

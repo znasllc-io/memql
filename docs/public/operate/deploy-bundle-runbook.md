@@ -40,9 +40,9 @@ Every phase -- authorize, record, clone, build, place, gate, outcome, finalize,
 rollback -- ran as automation steps, and the `v1:cluster:deployment` timeline
 in the target database was the record of evidence.
 
-Scope: engine mesh ONLY (identity / cognition / voice / agent / planner /
-workbench / mcp / voice-agent). A downstream product stack (carrier bff +
-SPA) deploys from its own repo's release track -- see
+Scope: engine mesh ONLY (identity / agent / planner / workbench / mcp /
+edge). A downstream product stack (carrier bff + SPA) deploys from its own
+repo's release track -- see
 [downstream-stacks.md](downstream-stacks.md).
 
 ## Prerequisites
@@ -153,9 +153,5 @@ The cockpit also emits an AUDIT line per invocation.
 - A mid-flight ACTION failure aborts the automation before finalize, so
   the timeline strands at `in_progress` (no terminal write). Re-running
   appends a fresh deploymentId.
-- voice / voice-agent are GATED on LiveKit Cloud credentials locally
-  (memql#2416): `make up` / `make secrets` scales them to 0 with a loud
-  warning when `LIVEKIT_*` is not exported, and enables them when it is
-  -- so a green gate never depends on an unprovisioned voice lane.
 - The `deploy` make target mangled JSON quoting on `ARGS='--input {...}'`; the
   workaround was to invoke the cockpit binary directly. Both are gone.

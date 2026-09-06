@@ -353,7 +353,7 @@ subscribes exactly as a hosted one does:
 ```ts
 const unsubscribe = conn.subscriptions.subscribeGraph(
   (event) => applyToUI(event),
-  { concept: "v1:cognition:utterance", actions: ["created", "updated"] },
+  { concept: "v1:library:artifact", actions: ["created", "updated"] },
 );
 ```
 

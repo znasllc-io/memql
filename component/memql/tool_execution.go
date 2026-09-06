@@ -614,23 +614,14 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 		return nil, fmt.Errorf("tool %q is not allowed for caller role %q", tool.Name, callerRole)
 	}
 
-	// Client-executed tools: the tool body lives in the connected
-	// client (browser / app). Delegate to the ClientToolInvoker
-	// carried on ctx -- typically the BFF streamSession that owns the
-	// originating request. The invoker handles the ClientToolCall <->
-	// ClientToolResult round-trip. Role gate already enforced above.
+	// Client-executed tools declared their body in the connected browser and
+	// reached it over the client-tool relay. That relay went with the
+	// conversational product (epic memql#4988), so the flag can no longer be
+	// honoured -- and a tool that cannot run must say so rather than fall
+	// through to the no-handler branch below, whose message would blame a
+	// missing handler the author never owed.
 	if tool.ClientExecution {
-		invoker := ClientToolInvokerFromContext(ctx)
-		if invoker == nil {
-			return nil, fmt.Errorf("tool %q requires client execution but no ClientToolInvoker is attached to the context", tool.Name)
-		}
-		argsJSON := "{}"
-		if len(args) > 0 {
-			if b, err := json.Marshal(args); err == nil {
-				argsJSON = string(b)
-			}
-		}
-		return invoker.InvokeClientTool(ctx, tool.Name, argsJSON, callerRole)
+		return nil, fmt.Errorf("tool %q declares client execution, which is no longer a supported handler: the browser client-tool relay was removed with the cognition node", tool.Name)
 	}
 
 	// No handler and not client-executed: the tool cannot run. ValidateTool

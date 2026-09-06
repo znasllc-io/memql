@@ -17,7 +17,6 @@ require (
 	github.com/znasllc-io/memql/component/events v0.0.0
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0
 	github.com/znasllc-io/memql/component/observe v0.0.0-00010101000000-000000000000
-	github.com/znasllc-io/memql/component/polyphon v0.0.0
 	golang.org/x/sync v0.22.0
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
@@ -230,7 +229,6 @@ replace github.com/znasllc-io/memql/component/metrics => ./component/metrics
 
 replace github.com/znasllc-io/memql/component/planner => ./component/planner
 
-replace github.com/znasllc-io/memql/component/polyphon => ./component/polyphon
 
 replace github.com/znasllc-io/memql/component/provenance => ./component/provenance
 

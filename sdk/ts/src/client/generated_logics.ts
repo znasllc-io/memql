@@ -131,27 +131,6 @@ QueryClient.prototype.bootstrapCluster = function (this: QueryClient, args: Boot
   return this.executeNamed("bootstrapCluster", buildBootstrapCluster(args), opts);
 };
 
-/** Decides whether a new v1:cognition:session must be created for a freshly-created participant: returns true when no session exists yet (idempotency via participantSession). The bootstrapSession automation performs the gated createSessionForParticipant insert + session.created emit. */
-export interface BootstrapSessionArgs {
-  event: Record<string, unknown>;
-}
-
-export function buildBootstrapSession(args: BootstrapSessionArgs): string {
-  const parts: string[] = [];
-  parts.push("event: " + renderMemQLValue(args.event));
-  return "logic bootstrapSession(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    bootstrapSession(args: BootstrapSessionArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.bootstrapSession = function (this: QueryClient, args: BootstrapSessionArgs = {} as BootstrapSessionArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("bootstrapSession", buildBootstrapSession(args), opts);
-};
-
 /** True on a bff node's startup, whether or not the cluster already exists.
 THE SECOND DECISION, SPLIT OUT OF THE FIRST (memql#4766). `bootstrapCluster` answers "should the cluster row be CREATED", which is a once-per-lifetime question and rightly gated on `existing.empty()`. The database and identity-provider rows ask something different: "what is true about this cluster's infrastructure right now".
 Those two were the same gate, and that is the whole defect the issue is named for -- the rows were written once, at first boot, and no later start could complete or correct them. An engine upgrade never moved `engineVersion`; a new extension never appeared; a cluster that predated a field kept the gap forever.
@@ -321,7 +300,7 @@ QueryClient.prototype.deploymentRollbackAllowed = function (this: QueryClient, a
   return this.executeNamed("deploymentRollbackAllowed", buildDeploymentRollbackAllowed(args), opts);
 };
 
-/** Canonical ENGINE node-type list the deploy bundle builds + places: identity, cognition, voice, agent, planner, workbench, mcp, voice-agent. No bff or product-carrier nodes (carrier/product layer, shipped by their own repos). */
+/** Canonical ENGINE node-type list the deploy bundle builds + places: identity, bff, agent, planner, workbench, mcp, edge. No product-carrier nodes (carrier/product layer, shipped by their own repos). */
 export interface EngineNodeTypesArgs {
 }
 
@@ -338,27 +317,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.engineNodeTypes = function (this: QueryClient, args: EngineNodeTypesArgs = {} as EngineNodeTypesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("engineNodeTypes", buildEngineNodeTypes(args), opts);
-};
-
-/** Decides + generates the AI reply for a cognition.response.requested event: returns the reply text (empty when a response already exists -- idempotency via hasAIResponseForReply). The generateResponse automation performs the gated sendTextUtterance insert + presence bump from this text. */
-export interface GenerateResponseArgs {
-  event: Record<string, unknown>;
-}
-
-export function buildGenerateResponse(args: GenerateResponseArgs): string {
-  const parts: string[] = [];
-  parts.push("event: " + renderMemQLValue(args.event));
-  return "logic generateResponse(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    generateResponse(args: GenerateResponseArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.generateResponse = function (this: QueryClient, args: GenerateResponseArgs = {} as GenerateResponseArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("generateResponse", buildGenerateResponse(args), opts);
 };
 
 /** Relational governance entry point for the create != edit split: may the actor CREATE a principal carrying newRoleSlug? Resolves the actor + new-role ranks (roleBySlug) and hands them to the Go core (component/auth/rbac_governance.go:CanCreatePrincipal), which permits minting a principal STRICTLY BELOW the actor's own rank (an owner at any sub-owner rank). Independent of update -- a role can hold create-on-principal without update-on-principal. */
@@ -688,7 +646,7 @@ QueryClient.prototype.revokeExpiredDelegations = function (this: QueryClient, ar
 /** True when the owner's own company has not been materialized yet, on a bff.
 =========================================================================== THE DELIBERATE INVERSION OF THE CLUSTER SINGLETONS (D3) =========================================================================== `clusterInfraRefresh` (dsl/cluster/logic.memql) answers "what is true about this cluster's infrastructure right now" and is therefore ungated: the SYSTEM is the writer of `v1:cluster:database:primary`, so a boot rewriting it is a boot telling the truth, and memql#4766 exists because those rows were once gated like a create and froze at first boot.
 This row is the opposite case and takes `bootstrapCluster`'s gate rather than its sibling's: the writer of `v1:accounts:account:self` is a HUMAN. The first-run card asks them what their company is called, and a boot that rewrote the row would undo that answer on a schedule nobody watches. So the question here is the once-per-lifetime one -- "should this row be CREATED" -- and `existing.empty()` is what asks it.
-The `bff` term is `bootstrapCluster`'s too, and for the same reason: every node type receives system.startup, and without it a cognition, agent, planner and worker node would each race to create the same row on a fresh cluster. They would converge -- the id is literal, so the writes are versions of one logical row -- but converging on identical content is not a reason to write it five times. */
+The `bff` term is `bootstrapCluster`'s too, and for the same reason: every node type receives system.startup, and without it an agent, planner and worker node would each race to create the same row on a fresh cluster. They would converge -- the id is literal, so the writes are versions of one logical row -- but converging on identical content is not a reason to write it five times. */
 export interface SelfAccountAbsentArgs {
   event: Record<string, unknown>;
 }
@@ -730,27 +688,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.transitionEventKind = function (this: QueryClient, args: TransitionEventKindArgs = {} as TransitionEventKindArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("transitionEventKind", buildTransitionEventKind(args), opts);
-};
-
-/** Phase 7 of chat-architecture. Triggered when a user's activePartitionId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds. */
-export interface VoiceMigrationOnSecondHumanArgs {
-  event: Record<string, unknown>;
-}
-
-export function buildVoiceMigrationOnSecondHuman(args: VoiceMigrationOnSecondHumanArgs): string {
-  const parts: string[] = [];
-  parts.push("event: " + renderMemQLValue(args.event));
-  return "logic voiceMigrationOnSecondHuman(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    voiceMigrationOnSecondHuman(args: VoiceMigrationOnSecondHumanArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.voiceMigrationOnSecondHuman = function (this: QueryClient, args: VoiceMigrationOnSecondHumanArgs = {} as VoiceMigrationOnSecondHumanArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("voiceMigrationOnSecondHuman", buildVoiceMigrationOnSecondHuman(args), opts);
 };
 
 /** Pure decide for the worker-invocation retention sweep (#2369, cluster pruneStaleClusterNodes pattern): reads WORKER_INVOCATION_RETENTION_DAYS (default 90), computes cutoff = now - window via addDuration with a negative ISO duration, and returns expiredWorkerInvocations({createdBefore: cutoff}).nodes() -- rows past retention, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's forEach soft-deletes each unconditionally. */

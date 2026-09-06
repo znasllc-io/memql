@@ -14,10 +14,10 @@
 # not use this file.
 #
 # Contract: call engine_build_args_for_node <nodeType> <sourceDir>; it sets
-#   ENGINE_BUILD_ARGS  -- array of docker build args (BUILD_TAGS [+ CGO] +
+#   ENGINE_BUILD_ARGS  -- array of docker build args (BUILD_TAGS +
 #                         MEMQL_COMMIT)
 #   ENGINE_BUILD_TARGET -- Dockerfile target stage
-#                         (runtime | voice-runtime | workbench-runtime)
+#                         (runtime | workbench-runtime)
 #
 # <sourceDir> is the checkout the build context comes from, and it is REQUIRED
 # rather than optional on purpose: under `set -u` a caller that forgets it fails
@@ -25,9 +25,9 @@
 # provenance -- is the exact bug this argument was added to fix (memql#4574).
 #
 # BUILD_TAGS selects which node-type binary the builder stage compiles
-# (go build -tags <node>). The engine Dockerfile has two runtime stages:
-# the default distroless `runtime` for CGO-free nodes and `voice-runtime`
-# (debian + libopus) for voice, which needs CGO for LibOpus.
+# (go build -tags <node>). The engine Dockerfile has two runtime stages: the
+# default distroless `runtime`, and `workbench-runtime` for the one node that
+# runs somebody else's build command.
 #
 # PORTAL_DIST_STAGE selects where the runtime copies the MemQL Portal bundle
 # from (memql#3314). Only the edge serves the portal (memql#3711 -- the
@@ -85,10 +85,6 @@ function engine_build_args_for_node() {
     local node="$1" source_dir="$2"
     ENGINE_BUILD_ARGS=(--build-arg "BUILD_TAGS=${node}")
     ENGINE_BUILD_TARGET="runtime"
-    if [[ "$node" == "voice" ]]; then
-        ENGINE_BUILD_ARGS+=(--build-arg CGO_ENABLED=1)
-        ENGINE_BUILD_TARGET="voice-runtime"
-    fi
     # The workbench is the node that RUNS SOMEBODY ELSE'S BUILD (epic
     # memql#4900), so it takes a stage carrying a Node toolchain, git, and a
     # non-root uid to run the command as. Every other node type would gain

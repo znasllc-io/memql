@@ -40,7 +40,7 @@ patches:
   - path: patches/envfrom.yaml
     target:
       kind: Deployment
-      name: "^(identity|bff|cognition|agent|planner|workbench|mcp|voice|voice-agent|edge)$"
+      name: "^(identity|bff|agent|planner|workbench|mcp|edge)$"
 
   # --- Half two: remove the pins that would beat it. -----------------------
   #
@@ -75,9 +75,6 @@ patches:
   # The derived issuer on every other node. One block per node because the
   # container is matched by its strategic-merge key `name`, which differs --
   # a regex target selects the Deployment, not the container inside it.
-  #
-  # voice / voice-agent are included even though an entry install runs them at
-  # replicas 0: scaling voice up later must not re-arm a placeholder issuer.
   - target: { kind: Deployment, name: bff }
     patch: |
       apiVersion: apps/v1
@@ -89,20 +86,6 @@ patches:
           spec:
             containers:
               - name: bff
-                env:
-                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    $patch: delete
-  - target: { kind: Deployment, name: cognition }
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: cognition
-      spec:
-        template:
-          spec:
-            containers:
-              - name: cognition
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
                     $patch: delete
@@ -159,34 +142,6 @@ patches:
           spec:
             containers:
               - name: mcp
-                env:
-                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    $patch: delete
-  - target: { kind: Deployment, name: voice }
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: voice
-      spec:
-        template:
-          spec:
-            containers:
-              - name: voice
-                env:
-                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-                    $patch: delete
-  - target: { kind: Deployment, name: voice-agent }
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: voice-agent
-      spec:
-        template:
-          spec:
-            containers:
-              - name: voice-agent
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
                     $patch: delete

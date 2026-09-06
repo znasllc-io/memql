@@ -407,28 +407,6 @@ func ActiveDelegationsForAgentBuild(args ActiveDelegationsForAgentArgs) string {
 	return b.String()
 }
 
-// ActiveHumanParticipants -- Get active human participants in a space
-//
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["activeHumanParticipants"] in generated_concepts.go).
-type ActiveHumanParticipantsArgs struct {
-	PartitionId string
-}
-
-// ActiveHumanParticipants calls the engine query activeHumanParticipants.
-func (qc *QueryClient) ActiveHumanParticipants(ctx context.Context, args ActiveHumanParticipantsArgs) (*Result, error) {
-	call := ActiveHumanParticipantsBuild(args)
-	return qc.executeNamed(ctx, "activeHumanParticipants", call)
-}
-
-func ActiveHumanParticipantsBuild(args ActiveHumanParticipantsArgs) string {
-	var b strings.Builder
-	b.WriteString("query activeHumanParticipants(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	b.WriteString(")")
-	return b.String()
-}
-
 // ActivePlansForUser -- The caller's currently-RUNNING Plans -- the account's active tasks occupying concurrency slots (epic memql#902 / #909). Owned tier: payload.requestedBy==actor.userId binds server-side so a caller only sees their own. The active count is the result length; pair with accountEntitlement for the cap and waitingPlansForUser for the queue.
 //
 // Bound concept: v1:planner:plan (machine-readable: BoundConcepts["activePlansForUser"] in generated_concepts.go).
@@ -587,28 +565,6 @@ func AgentByIdBuild(args AgentByIdArgs) string {
 	return b.String()
 }
 
-// AgentInteractionCount -- Count utterances by an agent across ALL spaces in the current partition. Drives the agentIsKnownToUser signal.
-//
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["agentInteractionCount"] in generated_concepts.go).
-type AgentInteractionCountArgs struct {
-	AgentId string
-}
-
-// AgentInteractionCount calls the engine query agentInteractionCount.
-func (qc *QueryClient) AgentInteractionCount(ctx context.Context, args AgentInteractionCountArgs) (*Result, error) {
-	call := AgentInteractionCountBuild(args)
-	return qc.executeNamed(ctx, "agentInteractionCount", call)
-}
-
-func AgentInteractionCountBuild(args AgentInteractionCountArgs) string {
-	var b strings.Builder
-	b.WriteString("query agentInteractionCount(")
-	b.WriteString("agentId: ")
-	b.WriteString(quoteMemQL(args.AgentId))
-	b.WriteString(")")
-	return b.String()
-}
-
 // AgentOwner -- Resolve an agent's owning-user (ownerUserId / createdBy) by id.
 //
 // Bound concept: v1:agents:agent (machine-readable: BoundConcepts["agentOwner"] in generated_concepts.go).
@@ -724,23 +680,6 @@ func (qc *QueryClient) AllDocumentChunkDomains(ctx context.Context, args AllDocu
 func AllDocumentChunkDomainsBuild(args AllDocumentChunkDomainsArgs) string {
 	_ = args
 	return "query allDocumentChunkDomains()"
-}
-
-// AllNumbers -- ADMIN: every provisioned DID across all partitions, newest first. Cluster-owner gated. Backs the cockpit numbers view.
-//
-// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["allNumbers"] in generated_concepts.go).
-type AllNumbersArgs struct {
-}
-
-// AllNumbers calls the engine query allNumbers.
-func (qc *QueryClient) AllNumbers(ctx context.Context, args AllNumbersArgs) (*Result, error) {
-	call := AllNumbersBuild(args)
-	return qc.executeNamed(ctx, "allNumbers", call)
-}
-
-func AllNumbersBuild(args AllNumbersArgs) string {
-	_ = args
-	return "query allNumbers()"
 }
 
 // AllOutputScreenings -- Returns every v1:safety:outputScreening row. Used by the retention sweep (mirrors allSafetyClassifications); future cockpit prompt-injection dashboard will layer more targeted queries on top.
@@ -1039,34 +978,6 @@ func AssistantAgentForUserBuild(args AssistantAgentForUserArgs) string {
 	return b.String()
 }
 
-// AttachmentById -- Fetch a single v1:common:attachment row by id within a space. Backs the attachment download endpoint (GET /spaces/{partitionId}/attachments/{attachmentId}); the handler gates on space ownership first.
-//
-// Bound concept: v1:common:attachment (machine-readable: BoundConcepts["attachmentById"] in generated_concepts.go).
-type AttachmentByIdArgs struct {
-	AttachmentId string
-	PartitionId  string
-}
-
-// AttachmentById calls the engine query attachmentById.
-func (qc *QueryClient) AttachmentById(ctx context.Context, args AttachmentByIdArgs) (*Result, error) {
-	call := AttachmentByIdBuild(args)
-	return qc.executeNamed(ctx, "attachmentById", call)
-}
-
-func AttachmentByIdBuild(args AttachmentByIdArgs) string {
-	var b strings.Builder
-	b.WriteString("query attachmentById(")
-	b.WriteString("attachmentId: ")
-	b.WriteString(quoteMemQL(args.AttachmentId))
-	if b.Len() > 21 {
-		b.WriteString(", ")
-	}
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	b.WriteString(")")
-	return b.String()
-}
-
 // AudienceById -- One audience by id, gated to its owner. Owned.
 //
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["audienceById"] in generated_concepts.go).
@@ -1155,28 +1066,6 @@ func AudiencesBuild(args AudiencesArgs) string {
 		b.WriteString("status: ")
 		b.WriteString(quoteMemQL(args.Status))
 	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// AudioOverridesForSpace -- Active audio overrides for every agent in a space. Read by the cognition handler before TTS forwarding.
-//
-// Bound concept: v1:cognition:audioOverride (machine-readable: BoundConcepts["audioOverridesForSpace"] in generated_concepts.go).
-type AudioOverridesForSpaceArgs struct {
-	PartitionId string
-}
-
-// AudioOverridesForSpace calls the engine query audioOverridesForSpace.
-func (qc *QueryClient) AudioOverridesForSpace(ctx context.Context, args AudioOverridesForSpaceArgs) (*Result, error) {
-	call := AudioOverridesForSpaceBuild(args)
-	return qc.executeNamed(ctx, "audioOverridesForSpace", call)
-}
-
-func AudioOverridesForSpaceBuild(args AudioOverridesForSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("query audioOverridesForSpace(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -1477,53 +1366,6 @@ func AuthoringConstructsForBundleBuild(args AuthoringConstructsForBundleArgs) st
 	return b.String()
 }
 
-// AvatarPersonaById -- Resolve a single avatar persona by id. Hydrates an agent's stamped avatarPersonaId for display and resolves the vendor + vendor-issued personaId.
-//
-// Bound concept: v1:agents:avatarPersona (machine-readable: BoundConcepts["avatarPersonaById"] in generated_concepts.go).
-type AvatarPersonaByIdArgs struct {
-	AvatarPersonaId string
-}
-
-// AvatarPersonaById calls the engine query avatarPersonaById.
-func (qc *QueryClient) AvatarPersonaById(ctx context.Context, args AvatarPersonaByIdArgs) (*Result, error) {
-	call := AvatarPersonaByIdBuild(args)
-	return qc.executeNamed(ctx, "avatarPersonaById", call)
-}
-
-func AvatarPersonaByIdBuild(args AvatarPersonaByIdArgs) string {
-	var b strings.Builder
-	b.WriteString("query avatarPersonaById(")
-	b.WriteString("avatarPersonaId: ")
-	b.WriteString(quoteMemQL(args.AvatarPersonaId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// AvatarPersonas -- List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant persona picker (frontend#239); the SPA filters to the user's selected gender client-side over this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona across vendors; pass vendor="simli" to scope to custom Simli avatars (memql#1708: the predicate was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list, even though by-id reads returned them). Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql.
-//
-// Bound concept: v1:agents:avatarPersona (machine-readable: BoundConcepts["avatarPersonas"] in generated_concepts.go).
-type AvatarPersonasArgs struct {
-	// Enum: anam | simli
-	Vendor string
-}
-
-// AvatarPersonas calls the engine query avatarPersonas.
-func (qc *QueryClient) AvatarPersonas(ctx context.Context, args AvatarPersonasArgs) (*Result, error) {
-	call := AvatarPersonasBuild(args)
-	return qc.executeNamed(ctx, "avatarPersonas", call)
-}
-
-func AvatarPersonasBuild(args AvatarPersonasArgs) string {
-	var b strings.Builder
-	b.WriteString("query avatarPersonas(")
-	if args.Vendor != "" {
-		b.WriteString("vendor: ")
-		b.WriteString(quoteMemQL(args.Vendor))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // AwaitingFeedbackPlansPastTimeout -- Plans in awaitingFeedback whose feedbackRequest.timeoutAt is in the past. Backs feedbackTimeoutAutoPause.
 //
 // Bound concept: v1:planner:plan (machine-readable: BoundConcepts["awaitingFeedbackPlansPastTimeout"] in generated_concepts.go).
@@ -1736,50 +1578,6 @@ func CalendarEventByIdBuild(args CalendarEventByIdArgs) string {
 	b.WriteString("query calendarEventById(")
 	b.WriteString("eventId: ")
 	b.WriteString(quoteMemQL(args.EventId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// CallsByNumber -- ADMIN: call records that touched a specific DID (as caller or callee), newest first. Cluster-owner gated.
-//
-// Bound concept: v1:telephony:call (machine-readable: BoundConcepts["callsByNumber"] in generated_concepts.go).
-type CallsByNumberArgs struct {
-	E164 string
-}
-
-// CallsByNumber calls the engine query callsByNumber.
-func (qc *QueryClient) CallsByNumber(ctx context.Context, args CallsByNumberArgs) (*Result, error) {
-	call := CallsByNumberBuild(args)
-	return qc.executeNamed(ctx, "callsByNumber", call)
-}
-
-func CallsByNumberBuild(args CallsByNumberArgs) string {
-	var b strings.Builder
-	b.WriteString("query callsByNumber(")
-	b.WriteString("e164: ")
-	b.WriteString(quoteMemQL(args.E164))
-	b.WriteString(")")
-	return b.String()
-}
-
-// CallsByPartition -- ADMIN: call records for a partition, newest first. Cluster-owner gated. Powers billing + observability.
-//
-// Bound concept: v1:telephony:call (machine-readable: BoundConcepts["callsByPartition"] in generated_concepts.go).
-type CallsByPartitionArgs struct {
-	PartitionId string
-}
-
-// CallsByPartition calls the engine query callsByPartition.
-func (qc *QueryClient) CallsByPartition(ctx context.Context, args CallsByPartitionArgs) (*Result, error) {
-	call := CallsByPartitionBuild(args)
-	return qc.executeNamed(ctx, "callsByPartition", call)
-}
-
-func CallsByPartitionBuild(args CallsByPartitionArgs) string {
-	var b strings.Builder
-	b.WriteString("query callsByPartition(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2198,7 +1996,7 @@ func ClusterIdentityProviderBuild(args ClusterIdentityProviderArgs) string {
 	return "query clusterIdentityProvider()"
 }
 
-// ClusterNodeTypes -- Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)
+// ClusterNodeTypes -- Returns all registered cluster node types (bff, agent, planner, ...)
 //
 // Bound concept: v1:cluster:nodeType (machine-readable: BoundConcepts["clusterNodeTypes"] in generated_concepts.go).
 type ClusterNodeTypesArgs struct {
@@ -2648,28 +2446,6 @@ func ConsentEventsBySubscriberBuild(args ConsentEventsBySubscriberArgs) string {
 	b.WriteString("query consentEventsBySubscriber(")
 	b.WriteString("emailDigest: ")
 	b.WriteString(quoteMemQL(args.EmailDigest))
-	b.WriteString(")")
-	return b.String()
-}
-
-// ConsentOptOut -- Opt-out rows for an external number (newest first). Read in the outbound call path to block calls to opted-out numbers (TCPA). Not owner-gated: the enforcement check runs in the agent/call context, not an admin one.
-//
-// Bound concept: v1:telephony:consent (machine-readable: BoundConcepts["consentOptOut"] in generated_concepts.go).
-type ConsentOptOutArgs struct {
-	PhoneNumber string
-}
-
-// ConsentOptOut calls the engine query consentOptOut.
-func (qc *QueryClient) ConsentOptOut(ctx context.Context, args ConsentOptOutArgs) (*Result, error) {
-	call := ConsentOptOutBuild(args)
-	return qc.executeNamed(ctx, "consentOptOut", call)
-}
-
-func ConsentOptOutBuild(args ConsentOptOutArgs) string {
-	var b strings.Builder
-	b.WriteString("query consentOptOut(")
-	b.WriteString("phoneNumber: ")
-	b.WriteString(quoteMemQL(args.PhoneNumber))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3588,29 +3364,6 @@ func ExpiredWorkerInvocationsBuild(args ExpiredWorkerInvocationsArgs) string {
 	return b.String()
 }
 
-// FeedbackAnnouncementForPlan -- Check if the assistant already posted the awaitingFeedback announcement for a Plan (dedup behind the cross-replica announce gate, #1406).
-//
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["feedbackAnnouncementForPlan"] in generated_concepts.go).
-type FeedbackAnnouncementForPlanArgs struct {
-	// The Plan whose announcement to check.
-	PlanId string
-}
-
-// FeedbackAnnouncementForPlan calls the engine query feedbackAnnouncementForPlan.
-func (qc *QueryClient) FeedbackAnnouncementForPlan(ctx context.Context, args FeedbackAnnouncementForPlanArgs) (*Result, error) {
-	call := FeedbackAnnouncementForPlanBuild(args)
-	return qc.executeNamed(ctx, "feedbackAnnouncementForPlan", call)
-}
-
-func FeedbackAnnouncementForPlanBuild(args FeedbackAnnouncementForPlanArgs) string {
-	var b strings.Builder
-	b.WriteString("query feedbackAnnouncementForPlan(")
-	b.WriteString("planId: ")
-	b.WriteString(quoteMemQL(args.PlanId))
-	b.WriteString(")")
-	return b.String()
-}
-
 // FindEvents -- Find the caller's own events by exact title. Self-scoped via actor.userId. Backs the calendar tool's `find` action ('find my dentist appointment'); the agent passes the title it captured. Exact match keeps the predicate SQL-pushdownable -- substring / semantic search is a downstream concern (the agent can list a window via upcomingEvents and filter conversationally).
 //
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["findEvents"] in generated_concepts.go).
@@ -3717,84 +3470,6 @@ func GlobalVariablesBuild(args GlobalVariablesArgs) string {
 	b.WriteString("query globalVariables(")
 	b.WriteString("names: ")
 	b.WriteString(renderMemQLValue(args.Names))
-	b.WriteString(")")
-	return b.String()
-}
-
-// GreetingUtterance -- Check if a greeting utterance already exists for an agent in a space
-//
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["greetingUtterance"] in generated_concepts.go).
-type GreetingUtteranceArgs struct {
-	PartitionId string
-	AgentId     string
-}
-
-// GreetingUtterance calls the engine query greetingUtterance.
-func (qc *QueryClient) GreetingUtterance(ctx context.Context, args GreetingUtteranceArgs) (*Result, error) {
-	call := GreetingUtteranceBuild(args)
-	return qc.executeNamed(ctx, "greetingUtterance", call)
-}
-
-func GreetingUtteranceBuild(args GreetingUtteranceArgs) string {
-	var b strings.Builder
-	b.WriteString("query greetingUtterance(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 24 {
-		b.WriteString(", ")
-	}
-	b.WriteString("agentId: ")
-	b.WriteString(quoteMemQL(args.AgentId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// GroupGAForSpace -- Active AI (group GA) participant for a space. The partitionId arg is compared against the stored payload field, which holds the canonical v1:cognition:space id -- internal callers pass that form today; the arg flips to a bare space id with the #2441/#2443 cutover.
-//
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["groupGAForSpace"] in generated_concepts.go).
-type GroupGAForSpaceArgs struct {
-	PartitionId string
-}
-
-// GroupGAForSpace calls the engine query groupGAForSpace.
-func (qc *QueryClient) GroupGAForSpace(ctx context.Context, args GroupGAForSpaceArgs) (*Result, error) {
-	call := GroupGAForSpaceBuild(args)
-	return qc.executeNamed(ctx, "groupGAForSpace", call)
-}
-
-func GroupGAForSpaceBuild(args GroupGAForSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("query groupGAForSpace(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// HasAIResponseForReply -- Check if an AI response already exists for a given utterance (idempotency check).
-//
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["hasAIResponseForReply"] in generated_concepts.go).
-type HasAIResponseForReplyArgs struct {
-	ReplyToId     string
-	ParticipantId string
-}
-
-// HasAIResponseForReply calls the engine query hasAIResponseForReply.
-func (qc *QueryClient) HasAIResponseForReply(ctx context.Context, args HasAIResponseForReplyArgs) (*Result, error) {
-	call := HasAIResponseForReplyBuild(args)
-	return qc.executeNamed(ctx, "hasAIResponseForReply", call)
-}
-
-func HasAIResponseForReplyBuild(args HasAIResponseForReplyArgs) string {
-	var b strings.Builder
-	b.WriteString("query hasAIResponseForReply(")
-	b.WriteString("replyToId: ")
-	b.WriteString(quoteMemQL(args.ReplyToId))
-	if b.Len() > 28 {
-		b.WriteString(", ")
-	}
-	b.WriteString("participantId: ")
-	b.WriteString(quoteMemQL(args.ParticipantId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3935,50 +3610,6 @@ func InvitationByIdBuild(args InvitationByIdArgs) string {
 	b.WriteString("query invitationById(")
 	b.WriteString("invitationId: ")
 	b.WriteString(quoteMemQL(args.InvitationId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// InvitationByPreviousTokenHash -- Returns the invitation whose previousTokenHash matches the argument. Used by the resolve handler to label rotated-out links as `superseded` rather than `invalid`. See memql#108.
-//
-// Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["invitationByPreviousTokenHash"] in generated_concepts.go).
-type InvitationByPreviousTokenHashArgs struct {
-	TokenHash string
-}
-
-// InvitationByPreviousTokenHash calls the engine query invitationByPreviousTokenHash.
-func (qc *QueryClient) InvitationByPreviousTokenHash(ctx context.Context, args InvitationByPreviousTokenHashArgs) (*Result, error) {
-	call := InvitationByPreviousTokenHashBuild(args)
-	return qc.executeNamed(ctx, "invitationByPreviousTokenHash", call)
-}
-
-func InvitationByPreviousTokenHashBuild(args InvitationByPreviousTokenHashArgs) string {
-	var b strings.Builder
-	b.WriteString("query invitationByPreviousTokenHash(")
-	b.WriteString("tokenHash: ")
-	b.WriteString(quoteMemQL(args.TokenHash))
-	b.WriteString(")")
-	return b.String()
-}
-
-// InvitationByTokenHash -- Returns the invitation whose tokenHash matches the argument. Zero or one result.
-//
-// Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["invitationByTokenHash"] in generated_concepts.go).
-type InvitationByTokenHashArgs struct {
-	TokenHash string
-}
-
-// InvitationByTokenHash calls the engine query invitationByTokenHash.
-func (qc *QueryClient) InvitationByTokenHash(ctx context.Context, args InvitationByTokenHashArgs) (*Result, error) {
-	call := InvitationByTokenHashBuild(args)
-	return qc.executeNamed(ctx, "invitationByTokenHash", call)
-}
-
-func InvitationByTokenHashBuild(args InvitationByTokenHashArgs) string {
-	var b strings.Builder
-	b.WriteString("query invitationByTokenHash(")
-	b.WriteString("tokenHash: ")
-	b.WriteString(quoteMemQL(args.TokenHash))
 	b.WriteString(")")
 	return b.String()
 }
@@ -4981,50 +4612,6 @@ func NotesByTagBuild(args NotesByTagArgs) string {
 	return b.String()
 }
 
-// NumberByE164 -- Resolve an owned DID row by its E.164 (newest first). Used to set E911 / compliance state by number.
-//
-// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["numberByE164"] in generated_concepts.go).
-type NumberByE164Args struct {
-	E164 string
-}
-
-// NumberByE164 calls the engine query numberByE164.
-func (qc *QueryClient) NumberByE164(ctx context.Context, args NumberByE164Args) (*Result, error) {
-	call := NumberByE164Build(args)
-	return qc.executeNamed(ctx, "numberByE164", call)
-}
-
-func NumberByE164Build(args NumberByE164Args) string {
-	var b strings.Builder
-	b.WriteString("query numberByE164(")
-	b.WriteString("e164: ")
-	b.WriteString(quoteMemQL(args.E164))
-	b.WriteString(")")
-	return b.String()
-}
-
-// NumbersByPartition -- ADMIN: DIDs provisioned to a partition, newest first. Cluster-owner gated -- numbers are cluster infrastructure.
-//
-// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["numbersByPartition"] in generated_concepts.go).
-type NumbersByPartitionArgs struct {
-	PartitionId string
-}
-
-// NumbersByPartition calls the engine query numbersByPartition.
-func (qc *QueryClient) NumbersByPartition(ctx context.Context, args NumbersByPartitionArgs) (*Result, error) {
-	call := NumbersByPartitionBuild(args)
-	return qc.executeNamed(ctx, "numbersByPartition", call)
-}
-
-func NumbersByPartitionBuild(args NumbersByPartitionArgs) string {
-	var b strings.Builder
-	b.WriteString("query numbersByPartition(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	b.WriteString(")")
-	return b.String()
-}
-
 // OAuthClientByClientId -- Returns the dynamically-registered OAuth client whose clientId matches the argument. Zero or one result.
 //
 // Bound concept: v1:identity:oauthClient (machine-readable: BoundConcepts["oAuthClientByClientId"] in generated_concepts.go).
@@ -5515,66 +5102,6 @@ func PageOverrideBuild(args PageOverrideArgs) string {
 	b.WriteString("query pageOverride(")
 	b.WriteString("targetPageId: ")
 	b.WriteString(quoteMemQL(args.TargetPageId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// ParticipantByAgentSpace -- Check if an AI agent is already a participant in a space (excludes left status)
-//
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["participantByAgentSpace"] in generated_concepts.go).
-type ParticipantByAgentSpaceArgs struct {
-	PartitionId string
-	AgentId     string
-}
-
-// ParticipantByAgentSpace calls the engine query participantByAgentSpace.
-func (qc *QueryClient) ParticipantByAgentSpace(ctx context.Context, args ParticipantByAgentSpaceArgs) (*Result, error) {
-	call := ParticipantByAgentSpaceBuild(args)
-	return qc.executeNamed(ctx, "participantByAgentSpace", call)
-}
-
-func ParticipantByAgentSpaceBuild(args ParticipantByAgentSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("query participantByAgentSpace(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 30 {
-		b.WriteString(", ")
-	}
-	b.WriteString("agentId: ")
-	b.WriteString(quoteMemQL(args.AgentId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// ParticipantSession -- Returns session state for participants in spaces. Optional filters: partitionId, participantId
-//
-// Bound concept: v1:cognition:session (machine-readable: BoundConcepts["participantSession"] in generated_concepts.go).
-type ParticipantSessionArgs struct {
-	PartitionId   string
-	ParticipantId string
-}
-
-// ParticipantSession calls the engine query participantSession.
-func (qc *QueryClient) ParticipantSession(ctx context.Context, args ParticipantSessionArgs) (*Result, error) {
-	call := ParticipantSessionBuild(args)
-	return qc.executeNamed(ctx, "participantSession", call)
-}
-
-func ParticipantSessionBuild(args ParticipantSessionArgs) string {
-	var b strings.Builder
-	b.WriteString("query participantSession(")
-	if args.PartitionId != "" {
-		b.WriteString("partitionId: ")
-		b.WriteString(quoteMemQL(args.PartitionId))
-	}
-	if args.ParticipantId != "" {
-		if b.Len() > 25 {
-			b.WriteString(", ")
-		}
-		b.WriteString("participantId: ")
-		b.WriteString(quoteMemQL(args.ParticipantId))
-	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -10519,28 +10046,6 @@ func ShopifyUrlRedirectForStoreBuild(args ShopifyUrlRedirectForStoreArgs) string
 	return b.String()
 }
 
-// SiParticipantForSpace -- Find the active AI participant in a space.
-//
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["siParticipantForSpace"] in generated_concepts.go).
-type SiParticipantForSpaceArgs struct {
-	PartitionId string
-}
-
-// SiParticipantForSpace calls the engine query siParticipantForSpace.
-func (qc *QueryClient) SiParticipantForSpace(ctx context.Context, args SiParticipantForSpaceArgs) (*Result, error) {
-	call := SiParticipantForSpaceBuild(args)
-	return qc.executeNamed(ctx, "siParticipantForSpace", call)
-}
-
-func SiParticipantForSpaceBuild(args SiParticipantForSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("query siParticipantForSpace(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	b.WriteString(")")
-	return b.String()
-}
-
 // SignInIdentitiesForSelf -- List the CALLING user's own ACTIVE sign-in routes -- magic-link and passkey credentials only. Backs the last-credential warning before a passkey revoke; the projection is identitySummary, which carries the type and the label and no credential material at all.
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["signInIdentitiesForSelf"] in generated_concepts.go).
@@ -10890,134 +10395,6 @@ func (qc *QueryClient) SourceCredentialsMine(ctx context.Context, args SourceCre
 func SourceCredentialsMineBuild(args SourceCredentialsMineArgs) string {
 	_ = args
 	return "query sourceCredentialsMine()"
-}
-
-// SpaceMedia -- Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view.
-//
-// Bound concept: v1:common:media (machine-readable: BoundConcepts["spaceMedia"] in generated_concepts.go).
-type SpaceMediaArgs struct {
-	PartitionId string
-	MediaType   string
-}
-
-// SpaceMedia calls the engine query spaceMedia.
-func (qc *QueryClient) SpaceMedia(ctx context.Context, args SpaceMediaArgs) (*Result, error) {
-	call := SpaceMediaBuild(args)
-	return qc.executeNamed(ctx, "spaceMedia", call)
-}
-
-func SpaceMediaBuild(args SpaceMediaArgs) string {
-	var b strings.Builder
-	b.WriteString("query spaceMedia(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if args.MediaType != "" {
-		if b.Len() > 17 {
-			b.WriteString(", ")
-		}
-		b.WriteString("mediaType: ")
-		b.WriteString(quoteMemQL(args.MediaType))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// SpaceParticipantPresence -- Presence snapshots for every participant in a space (UI state: thinking / responding / waiting / ...). Space-scoped; the SPA dedupes latest-wins by participantId.
-//
-// Bound concept: v1:cognition:participant:presence (machine-readable: BoundConcepts["spaceParticipantPresence"] in generated_concepts.go).
-type SpaceParticipantPresenceArgs struct {
-	PartitionId string
-}
-
-// SpaceParticipantPresence calls the engine query spaceParticipantPresence.
-func (qc *QueryClient) SpaceParticipantPresence(ctx context.Context, args SpaceParticipantPresenceArgs) (*Result, error) {
-	call := SpaceParticipantPresenceBuild(args)
-	return qc.executeNamed(ctx, "spaceParticipantPresence", call)
-}
-
-func SpaceParticipantPresenceBuild(args SpaceParticipantPresenceArgs) string {
-	var b strings.Builder
-	b.WriteString("query spaceParticipantPresence(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// SpaceParticipants -- Participants for a space, optionally narrowed by status or participantType. Used by the cognition handler + space-context engine.
-//
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["spaceParticipants"] in generated_concepts.go).
-type SpaceParticipantsArgs struct {
-	PartitionId     string
-	Status          string
-	ParticipantType string
-}
-
-// SpaceParticipants calls the engine query spaceParticipants.
-func (qc *QueryClient) SpaceParticipants(ctx context.Context, args SpaceParticipantsArgs) (*Result, error) {
-	call := SpaceParticipantsBuild(args)
-	return qc.executeNamed(ctx, "spaceParticipants", call)
-}
-
-func SpaceParticipantsBuild(args SpaceParticipantsArgs) string {
-	var b strings.Builder
-	b.WriteString("query spaceParticipants(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if args.Status != "" {
-		if b.Len() > 24 {
-			b.WriteString(", ")
-		}
-		b.WriteString("status: ")
-		b.WriteString(quoteMemQL(args.Status))
-	}
-	if args.ParticipantType != "" {
-		if b.Len() > 24 {
-			b.WriteString(", ")
-		}
-		b.WriteString("participantType: ")
-		b.WriteString(quoteMemQL(args.ParticipantType))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// SpaceUtterances -- Returns utterances for the given space. Optional participantId / utteranceType args narrow the result further. Used by the cockpit Chat tab to populate the utterance pane and by the BFF for downstream consumers.
-//
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["spaceUtterances"] in generated_concepts.go).
-type SpaceUtterancesArgs struct {
-	PartitionId   string
-	ParticipantId string
-	UtteranceType string
-}
-
-// SpaceUtterances calls the engine query spaceUtterances.
-func (qc *QueryClient) SpaceUtterances(ctx context.Context, args SpaceUtterancesArgs) (*Result, error) {
-	call := SpaceUtterancesBuild(args)
-	return qc.executeNamed(ctx, "spaceUtterances", call)
-}
-
-func SpaceUtterancesBuild(args SpaceUtterancesArgs) string {
-	var b strings.Builder
-	b.WriteString("query spaceUtterances(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if args.ParticipantId != "" {
-		if b.Len() > 22 {
-			b.WriteString(", ")
-		}
-		b.WriteString("participantId: ")
-		b.WriteString(quoteMemQL(args.ParticipantId))
-	}
-	if args.UtteranceType != "" {
-		if b.Len() > 22 {
-			b.WriteString(", ")
-		}
-		b.WriteString("utteranceType: ")
-		b.WriteString(quoteMemQL(args.UtteranceType))
-	}
-	b.WriteString(")")
-	return b.String()
 }
 
 // StaleClusterNodes -- Latest-per-id cluster node rows whose health is not already 'stopped'. When olderThan is supplied, restricts to rows whose lastSeen is strictly before it (RFC3339 cutoff). Drives the stale-node prune cron.
@@ -11529,31 +10906,6 @@ func UsableRecordsBuild(args UsableRecordsArgs) string {
 	return b.String()
 }
 
-// UserActiveSpace -- Returns a user's current activePartitionId. Empty when the user is not focused on any space. memql#2800: deliberately cross-user, and acknowledged as such.
-// The frontend derives per-participant `isActive` from it (a participant is active iff User.activePartitionId == participant.partitionId), so resolving OTHER users is the entire purpose -- caller-scoping would break presence in every space. It is safe to leave open because the projection carries no PII: userActiveSpaceProjection is id + activePartitionId and nothing else.
-// The `when(args.userId)` guard was removed. userId is declared required, so the guard should be unreachable -- but it made "no argument" mean "no filter" rather than "no rows", i.e. an unfiltered dump of every user, on a query whose only predicate it was. That is the wrong failure direction to leave standing on the strength of a required-arg check elsewhere.
-// AUDIT 2026-08-04 (memql#2987): re-audited and KEPT @public. Re-verified that userActiveSpaceProjection still projects id + activePartitionId and nothing else -- the "shapes drift" risk that moved userByEmail to @serverOnly in memql#2881 has not materialised here. Cross-user resolution is load-bearing for presence, so this is the second kind of @public in this repo (documenting intent) rather than the first (acknowledging a flag).
-//
-// Bound concept: v1:identity:user (machine-readable: BoundConcepts["userActiveSpace"] in generated_concepts.go).
-type UserActiveSpaceArgs struct {
-	UserId string
-}
-
-// UserActiveSpace calls the engine query userActiveSpace.
-func (qc *QueryClient) UserActiveSpace(ctx context.Context, args UserActiveSpaceArgs) (*Result, error) {
-	call := UserActiveSpaceBuild(args)
-	return qc.executeNamed(ctx, "userActiveSpace", call)
-}
-
-func UserActiveSpaceBuild(args UserActiveSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("query userActiveSpace(")
-	b.WriteString("userId: ")
-	b.WriteString(quoteMemQL(args.UserId))
-	b.WriteString(")")
-	return b.String()
-}
-
 // UserById -- Get a user by id -- FULL row, owner-or-admin only.
 // memql#2800: the filter keys on a caller-supplied id, so it is not a caller check. Reading someone else's full row now requires being them or holding admin/owner.
 //
@@ -11657,28 +11009,6 @@ func UserInvitationByTokenHashBuild(args UserInvitationByTokenHashArgs) string {
 	return b.String()
 }
 
-// UsersActiveInSpace -- Returns users whose activePartitionId == arg(partitionId). Active-human roster per the activity model (Phase 4).
-//
-// Bound concept: v1:identity:user (machine-readable: BoundConcepts["usersActiveInSpace"] in generated_concepts.go).
-type UsersActiveInSpaceArgs struct {
-	PartitionId string
-}
-
-// UsersActiveInSpace calls the engine query usersActiveInSpace.
-func (qc *QueryClient) UsersActiveInSpace(ctx context.Context, args UsersActiveInSpaceArgs) (*Result, error) {
-	call := UsersActiveInSpaceBuild(args)
-	return qc.executeNamed(ctx, "usersActiveInSpace", call)
-}
-
-func UsersActiveInSpaceBuild(args UsersActiveInSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("query usersActiveInSpace(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	b.WriteString(")")
-	return b.String()
-}
-
 // ValidationLog -- Returns validation state change history. Optional filters: recordId, partitionId, action
 //
 // Bound concept: v1:data:log (machine-readable: BoundConcepts["validationLog"] in generated_concepts.go).
@@ -11734,28 +11064,6 @@ func (qc *QueryClient) ValidationQueue(ctx context.Context, args ValidationQueue
 func ValidationQueueBuild(args ValidationQueueArgs) string {
 	_ = args
 	return "query validationQueue()"
-}
-
-// VideoOverridesForSpace -- Active video overrides for every agent in a space. Read by the voice-agent process at session start.
-//
-// Bound concept: v1:cognition:videoOverride (machine-readable: BoundConcepts["videoOverridesForSpace"] in generated_concepts.go).
-type VideoOverridesForSpaceArgs struct {
-	PartitionId string
-}
-
-// VideoOverridesForSpace calls the engine query videoOverridesForSpace.
-func (qc *QueryClient) VideoOverridesForSpace(ctx context.Context, args VideoOverridesForSpaceArgs) (*Result, error) {
-	call := VideoOverridesForSpaceBuild(args)
-	return qc.executeNamed(ctx, "videoOverridesForSpace", call)
-}
-
-func VideoOverridesForSpaceBuild(args VideoOverridesForSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("query videoOverridesForSpace(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	b.WriteString(")")
-	return b.String()
 }
 
 // WaitingPlansForUser -- The caller's Plans parked in the per-account waiting queue (status=waitingForSlot) because the account is at its concurrency cap (epic memql#902 / #909). Owned tier (payload.requestedBy==actor.userId). FIFO order is by row.createdAt of the waitingForSlot version (carried in planFull); the frontend derives each Plan's queue position from that ascending order -- MemQL has no in-query window/rank function.

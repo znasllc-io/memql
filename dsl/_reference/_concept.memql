@@ -27,7 +27,7 @@
 // concept name resolved through one of these (memql#1067); the quoted
 // canonical-ID form is retired. A target in this file's own namespace needs no
 // import -- see section 6's collectionExample.
-use cognition.concepts.{ participant }
+use worker.concepts.{ registration }
 use identity.concepts.{ user }
 
 // =============================================================================
@@ -234,21 +234,21 @@ concept versionedV2 {
 // =============================================================================
 //
 //   - Pattern: ^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)*$
-//   - Single-segment ("cognition") and multi-segment ("cognition:client:tool")
+//   - Single-segment ("worker") and multi-segment ("worker:call:trace")
 //     are both valid.
-//   - Dotted form (cognition.client) is rejected -- the on-the-wire
+//   - Dotted form (worker.call) is rejected -- the on-the-wire
 //     concept ID uses `:` as the separator, and the author surface
 //     mirrors it.
 //   - Every segment must start with a lowercase letter.
 
-@namespace("cognition")
+@namespace("worker")
 @description("Single-segment namespace.")
 concept singleSegmentNs {
   field string!
 }
 
-@namespace("cognition:client:tool")
-@description("Multi-segment namespace. Assembles to v1:cognition:client:tool:nested.")
+@namespace("worker:call:trace")
+@description("Multi-segment namespace. Assembles to v1:worker:call:trace:nested.")
 concept nestedNs {
   field string!
 }
@@ -799,7 +799,7 @@ concept variantExample {
 //   block therefore lands beside the field it was meant to be. Closing it is
 //   memql#3623's unfinished half -- it waits on the writers that put
 //   undeclared keys into a nested block today (the perUser agent seeds,
-//   v1:cognition:utterance.source) and on the bundles and clients that splat
+//   v1:library:artifact.source) and on the bundles and clients that splat
 //   a caller-supplied object into one. Do not rely on the gap: write only
 //   declared keys.
 //
@@ -901,7 +901,7 @@ concept nestedExample {
 @description("A concept with two relationship decorators.")
 concept relationshipExample {
   // Parent: this row hangs off a participant. `participant` resolves through
-  // the file-top `use cognition.concepts.{ participant }`.
+  // the file-top `use worker.concepts.{ registration }`.
   @relationship(type="parent", field="participantId", target=participant, direction="outgoing")
   participantId    string!
 
@@ -941,7 +941,7 @@ concept relationshipExample {
 //   type        string    -- the concept's @type value
 //
 // Queries reference these intrinsics by their bare names (e.g.
-// `concept==v1:cognition:participant`). Insert mutations don't supply them.
+// `concept==v1:worker:registration`). Insert mutations don't supply them.
 
 // =============================================================================
 //   13. Infrastructure-metadata concepts (formerly @scope("global"))
@@ -964,7 +964,7 @@ concept relationshipExample {
 @description("Example of an infrastructure-metadata concept that every node loads.")
 concept globalInfraExample {
   hostname  string!
-  nodeType  enum("bff", "voice", "cognition", "agent", "planner")!
+  nodeType  enum("bff", "agent", "planner", "workbench")!
   startedAt datetime!
 }
 

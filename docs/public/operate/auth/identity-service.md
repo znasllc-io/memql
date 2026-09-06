@@ -43,14 +43,14 @@ A cluster runs:
 
 - **One** `identity` binary -- holds the signing key on disk,
   publishes JWKS, mints + verifies tokens.
-- **Many** other binaries (bff / voice / cognition / agent /
-  planner) -- pull the public JWKS and verify incoming JWTs
+- **Many** other binaries (bff / agent / planner / workbench /
+  mcp) -- pull the public JWKS and verify incoming JWTs
   locally. They never see the private key.
 
 CLI clients (`memql-cockpit`, custom tooling) authenticate against
 the identity binary directly using `mql_pat_<...>` PATs. Browser
 clients (the product SPA, the identity web app itself) authenticate
-via magic link, then carry the resulting access JWT to bff/voice/etc.
+via magic link, then carry the resulting access JWT to bff/agent/etc.
 
 ### Browser-side routing of identity XHR
 
@@ -141,7 +141,7 @@ Identity-tagged binary:
 | `MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE`   | recommended               | `owner` / `admin` / `developer` / `writer` / `reader`. Default `writer`.                |
 | `MEMQL_IDENTITY_BRAND_NAME`              | recommended               | Subject prefix on outbound emails + admin UI title.                                    |
 
-Other nodes (bff / voice / cognition / agent / planner / workbench / mcp):
+Other nodes (bff / agent / planner / workbench / mcp):
 The edge node is the one exception -- it is not an auth boundary
 (`verifierRequired=false`, `app/auth_mode_edge.go`) and installs no
 verifier at all.
@@ -499,8 +499,8 @@ Four layers changed, and each one closes a different way of not finding out:
 - **Boot** -- the plug-in factory returns an error, which
   `app.materializePlugins` fatals on. A misconfigured cloud install fails
   where the operator is watching instead of a week later.
-- **Send** -- a `LogSender` built anywhere else (the guest-invite fallbacks
-  build one directly) returns a permanent `SendError` rather than `nil`.
+- **Send** -- a `LogSender` built anywhere else returns a permanent
+  `SendError` rather than `nil`.
 - **The audit trail** -- `magic_link_issued` is stamped
   `outcome=failure`, `failureReason=delivery_failed` when the send failed.
   The row is still written and the HTTP response is unchanged: the link is a
@@ -777,8 +777,8 @@ evidence rather than taste:
 - **Writing a new seed back into the Secret is not available to the
   service.** The seed reaches the pod through `envFrom` on the `memql-secrets`
   Secret, which an operator creates out of band; identity secrets are not
-  ESO/Key-Vault-backed (only livekit and telephony are). For the service to
-  update it directly it would need `patch` on Secrets in its own namespace --
+  ESO/Key-Vault-backed. For the service to update it directly it would
+  need `patch` on Secrets in its own namespace --
   handing the cluster's most security-sensitive pod the ability to rewrite
   every other secret next to it, including the database password. And it
   would not even work: `envFrom` is snapshotted at pod start, so a patched
@@ -820,7 +820,6 @@ once. Anything holding an opaque token is unaffected.
 | Magic links, auth codes, device codes, invitations, PATs (`mql_pat_`), worker tokens (`mql_wkr_`), enrolment tokens (`mql_enr_`), account tokens, badge **ids** | Yes | Nothing -- all opaque, all verified by stored hash |
 | Mesh node token (JWT) | **No** | Usually nothing: on an auth rejection a node re-mints via `POST /node/bootstrap` immediately (memql#1521). **But only if `MEMQL_NODE_BOOTSTRAP_TOKEN` is configured.** A node given a pre-provisioned `MEMQL_NODE_TOKEN` cannot re-mint, and restarting does not help either -- you must re-issue that secret *and* restart |
 | `service_account` JWT | **No** | Re-mint each one by hand (`memql service-account-token mint`). There is no refresh path by design |
-| `voice_agent` JWT | **No** | Restart the voice-agent; the token is resolved once at boot |
 | `badge` grant token (10 min) | **No** | Worse than it looks: issuing a new grant requires a valid user JWT from the terminal, so the terminal has to sign in again first |
 | Identity web-UI cookie (`/me/*`, `/admin/*`) | **No** | Operators are bounced to `/login` and magic-link in again |
 
@@ -856,8 +855,8 @@ step 3.
    Cross-replica agreement is what `make status` checks locally and what
    `memql_jwks_keyset_fingerprint` (max == min) checks in the cluster.
 5. **Repair the credentials that cannot repair themselves**: re-mint every
-   `service_account` JWT, restart the voice-agent, and restart any node
-   pinned to a pre-provisioned `MEMQL_NODE_TOKEN` after re-issuing it.
+   `service_account` JWT and restart any node pinned to a pre-provisioned
+   `MEMQL_NODE_TOKEN` after re-issuing it.
 6. **Watch** `memql_auth_rejects_total{reason="unknown_kid"}` settle back to
    zero, and confirm `memql_identity_signing_key_age_known` is 1 with a fresh
    `..._created_timestamp_seconds`.

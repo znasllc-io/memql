@@ -85,7 +85,7 @@ DRY_RUN="$(cap_bool_str dryRun false)"
 # The mesh set: every node-type Deployment that carries request traffic. The
 # database is NOT here -- it is a CNPG Cluster, whose instance count is a
 # property of that resource and changing it is a failover, not a scale.
-readonly DEFAULT_DEPLOYMENTS="bff,identity,cognition,agent,planner,workbench,edge"
+readonly DEFAULT_DEPLOYMENTS="bff,identity,agent,planner,workbench,edge"
 
 SCALED_NODES="false"
 SCALED_REPLICAS="false"

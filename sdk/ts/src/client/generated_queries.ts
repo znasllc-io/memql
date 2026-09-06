@@ -398,28 +398,6 @@ QueryClient.prototype.activeDelegationsForAgent = function (this: QueryClient, a
   return this.executeNamed("activeDelegationsForAgent", buildActiveDelegationsForAgent(args), opts);
 };
 
-/** Get active human participants in a space */
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["activeHumanParticipants"] in generated_concepts.ts).
-export interface ActiveHumanParticipantsArgs {
-  partitionId: string;
-}
-
-export function buildActiveHumanParticipants(args: ActiveHumanParticipantsArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  return "query activeHumanParticipants(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    activeHumanParticipants(args: ActiveHumanParticipantsArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.activeHumanParticipants = function (this: QueryClient, args: ActiveHumanParticipantsArgs = {} as ActiveHumanParticipantsArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("activeHumanParticipants", buildActiveHumanParticipants(args), opts);
-};
-
 /** The caller's currently-RUNNING Plans -- the account's active tasks occupying concurrency slots (epic memql#902 / #909). Owned tier: payload.requestedBy==actor.userId binds server-side so a caller only sees their own. The active count is the result length; pair with accountEntitlement for the cap and waitingPlansForUser for the queue. */
 // Bound concept: v1:planner:plan (machine-readable: BoundConcepts["activePlansForUser"] in generated_concepts.ts).
 export interface ActivePlansForUserArgs {
@@ -602,28 +580,6 @@ QueryClient.prototype.agentById = function (this: QueryClient, args: AgentByIdAr
   return this.executeNamed("agentById", buildAgentById(args), opts);
 };
 
-/** Count utterances by an agent across ALL spaces in the current partition. Drives the agentIsKnownToUser signal. */
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["agentInteractionCount"] in generated_concepts.ts).
-export interface AgentInteractionCountArgs {
-  agentId: string;
-}
-
-export function buildAgentInteractionCount(args: AgentInteractionCountArgs): string {
-  const parts: string[] = [];
-  parts.push("agentId: " + renderMemQLValue(args.agentId));
-  return "query agentInteractionCount(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    agentInteractionCount(args: AgentInteractionCountArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.agentInteractionCount = function (this: QueryClient, args: AgentInteractionCountArgs = {} as AgentInteractionCountArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("agentInteractionCount", buildAgentInteractionCount(args), opts);
-};
-
 /** Resolve an agent's owning-user (ownerUserId / createdBy) by id. */
 // Bound concept: v1:agents:agent (machine-readable: BoundConcepts["agentOwner"] in generated_concepts.ts).
 export interface AgentOwnerArgs {
@@ -748,26 +704,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.allDocumentChunkDomains = function (this: QueryClient, args: AllDocumentChunkDomainsArgs = {} as AllDocumentChunkDomainsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("allDocumentChunkDomains", buildAllDocumentChunkDomains(args), opts);
-};
-
-/** ADMIN: every provisioned DID across all partitions, newest first. Cluster-owner gated. Backs the cockpit numbers view. */
-// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["allNumbers"] in generated_concepts.ts).
-export interface AllNumbersArgs {
-}
-
-export function buildAllNumbers(args: AllNumbersArgs): string {
-  void args;
-  return "query allNumbers()";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    allNumbers(args?: AllNumbersArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.allNumbers = function (this: QueryClient, args: AllNumbersArgs = {} as AllNumbersArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("allNumbers", buildAllNumbers(args), opts);
 };
 
 /** Returns every v1:safety:outputScreening row. Used by the retention sweep (mirrors allSafetyClassifications); future cockpit prompt-injection dashboard will layer more targeted queries on top. */
@@ -1071,30 +1007,6 @@ QueryClient.prototype.assistantAgentForUser = function (this: QueryClient, args:
   return this.executeNamed("assistantAgentForUser", buildAssistantAgentForUser(args), opts);
 };
 
-/** Fetch a single v1:common:attachment row by id within a space. Backs the attachment download endpoint (GET /spaces/{partitionId}/attachments/{attachmentId}); the handler gates on space ownership first. */
-// Bound concept: v1:common:attachment (machine-readable: BoundConcepts["attachmentById"] in generated_concepts.ts).
-export interface AttachmentByIdArgs {
-  attachmentId: string;
-  partitionId: string;
-}
-
-export function buildAttachmentById(args: AttachmentByIdArgs): string {
-  const parts: string[] = [];
-  parts.push("attachmentId: " + renderMemQLValue(args.attachmentId));
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  return "query attachmentById(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    attachmentById(args: AttachmentByIdArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.attachmentById = function (this: QueryClient, args: AttachmentByIdArgs = {} as AttachmentByIdArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("attachmentById", buildAttachmentById(args), opts);
-};
-
 /** One audience by id, gated to its owner. Owned. */
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["audienceById"] in generated_concepts.ts).
 export interface AudienceByIdArgs {
@@ -1183,28 +1095,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.audiences = function (this: QueryClient, args: AudiencesArgs = {} as AudiencesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("audiences", buildAudiences(args), opts);
-};
-
-/** Active audio overrides for every agent in a space. Read by the cognition handler before TTS forwarding. */
-// Bound concept: v1:cognition:audioOverride (machine-readable: BoundConcepts["audioOverridesForSpace"] in generated_concepts.ts).
-export interface AudioOverridesForSpaceArgs {
-  partitionId: string;
-}
-
-export function buildAudioOverridesForSpace(args: AudioOverridesForSpaceArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  return "query audioOverridesForSpace(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    audioOverridesForSpace(args: AudioOverridesForSpaceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.audioOverridesForSpace = function (this: QueryClient, args: AudioOverridesForSpaceArgs = {} as AudioOverridesForSpaceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("audioOverridesForSpace", buildAudioOverridesForSpace(args), opts);
 };
 
 /** Audit events where actorUserId equals the supplied userId. CLUSTER OWNER ONLY. Pair with auditEventsByTarget for full per-user history (no OR operator in the filter grammar yet).
@@ -1510,51 +1400,6 @@ QueryClient.prototype.authoringConstructsForBundle = function (this: QueryClient
   return this.executeNamed("authoringConstructsForBundle", buildAuthoringConstructsForBundle(args), opts);
 };
 
-/** Resolve a single avatar persona by id. Hydrates an agent's stamped avatarPersonaId for display and resolves the vendor + vendor-issued personaId. */
-// Bound concept: v1:agents:avatarPersona (machine-readable: BoundConcepts["avatarPersonaById"] in generated_concepts.ts).
-export interface AvatarPersonaByIdArgs {
-  avatarPersonaId: string;
-}
-
-export function buildAvatarPersonaById(args: AvatarPersonaByIdArgs): string {
-  const parts: string[] = [];
-  parts.push("avatarPersonaId: " + renderMemQLValue(args.avatarPersonaId));
-  return "query avatarPersonaById(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    avatarPersonaById(args: AvatarPersonaByIdArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.avatarPersonaById = function (this: QueryClient, args: AvatarPersonaByIdArgs = {} as AvatarPersonaByIdArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("avatarPersonaById", buildAvatarPersonaById(args), opts);
-};
-
-/** List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant persona picker (frontend#239); the SPA filters to the user's selected gender client-side over this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona across vendors; pass vendor="simli" to scope to custom Simli avatars (memql#1708: the predicate was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list, even though by-id reads returned them). Rows are hand-curated as seeds in dsl/agents/avatarPersonas.memql. */
-// Bound concept: v1:agents:avatarPersona (machine-readable: BoundConcepts["avatarPersonas"] in generated_concepts.ts).
-export interface AvatarPersonasArgs {
-  // Enum: anam | simli
-  vendor?: string;
-}
-
-export function buildAvatarPersonas(args: AvatarPersonasArgs): string {
-  const parts: string[] = [];
-  if (args.vendor !== undefined) parts.push("vendor: " + renderMemQLValue(args.vendor));
-  return "query avatarPersonas(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    avatarPersonas(args: AvatarPersonasArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.avatarPersonas = function (this: QueryClient, args: AvatarPersonasArgs = {} as AvatarPersonasArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("avatarPersonas", buildAvatarPersonas(args), opts);
-};
-
 /** Plans in awaitingFeedback whose feedbackRequest.timeoutAt is in the past. Backs feedbackTimeoutAutoPause. */
 // Bound concept: v1:planner:plan (machine-readable: BoundConcepts["awaitingFeedbackPlansPastTimeout"] in generated_concepts.ts).
 export interface AwaitingFeedbackPlansPastTimeoutArgs {
@@ -1769,50 +1614,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.calendarEventById = function (this: QueryClient, args: CalendarEventByIdArgs = {} as CalendarEventByIdArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("calendarEventById", buildCalendarEventById(args), opts);
-};
-
-/** ADMIN: call records that touched a specific DID (as caller or callee), newest first. Cluster-owner gated. */
-// Bound concept: v1:telephony:call (machine-readable: BoundConcepts["callsByNumber"] in generated_concepts.ts).
-export interface CallsByNumberArgs {
-  e164: string;
-}
-
-export function buildCallsByNumber(args: CallsByNumberArgs): string {
-  const parts: string[] = [];
-  parts.push("e164: " + renderMemQLValue(args.e164));
-  return "query callsByNumber(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    callsByNumber(args: CallsByNumberArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.callsByNumber = function (this: QueryClient, args: CallsByNumberArgs = {} as CallsByNumberArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("callsByNumber", buildCallsByNumber(args), opts);
-};
-
-/** ADMIN: call records for a partition, newest first. Cluster-owner gated. Powers billing + observability. */
-// Bound concept: v1:telephony:call (machine-readable: BoundConcepts["callsByPartition"] in generated_concepts.ts).
-export interface CallsByPartitionArgs {
-  partitionId: string;
-}
-
-export function buildCallsByPartition(args: CallsByPartitionArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  return "query callsByPartition(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    callsByPartition(args: CallsByPartitionArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.callsByPartition = function (this: QueryClient, args: CallsByPartitionArgs = {} as CallsByPartitionArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("callsByPartition", buildCallsByPartition(args), opts);
 };
 
 /** One campaign by id, gated to its owner. Backs the campaign editor. Owned: (ownerUserId==actor.userId || actor.isClusterOwner==true) is the load-bearing guard, so a caller cannot read another operator's campaign even with its id. */
@@ -2205,7 +2006,7 @@ QueryClient.prototype.clusterIdentityProvider = function (this: QueryClient, arg
   return this.executeNamed("clusterIdentityProvider", buildClusterIdentityProvider(args), opts);
 };
 
-/** Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...) */
+/** Returns all registered cluster node types (bff, agent, planner, ...) */
 // Bound concept: v1:cluster:nodeType (machine-readable: BoundConcepts["clusterNodeTypes"] in generated_concepts.ts).
 export interface ClusterNodeTypesArgs {
 }
@@ -2632,28 +2433,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.consentEventsBySubscriber = function (this: QueryClient, args: ConsentEventsBySubscriberArgs = {} as ConsentEventsBySubscriberArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("consentEventsBySubscriber", buildConsentEventsBySubscriber(args), opts);
-};
-
-/** Opt-out rows for an external number (newest first). Read in the outbound call path to block calls to opted-out numbers (TCPA). Not owner-gated: the enforcement check runs in the agent/call context, not an admin one. */
-// Bound concept: v1:telephony:consent (machine-readable: BoundConcepts["consentOptOut"] in generated_concepts.ts).
-export interface ConsentOptOutArgs {
-  phoneNumber: string;
-}
-
-export function buildConsentOptOut(args: ConsentOptOutArgs): string {
-  const parts: string[] = [];
-  parts.push("phoneNumber: " + renderMemQLValue(args.phoneNumber));
-  return "query consentOptOut(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    consentOptOut(args: ConsentOptOutArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.consentOptOut = function (this: QueryClient, args: ConsentOptOutArgs = {} as ConsentOptOutArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("consentOptOut", buildConsentOptOut(args), opts);
 };
 
 /** Latest consent event for one subscriber -- the derived current status. Owned. */
@@ -3552,29 +3331,6 @@ QueryClient.prototype.expiredWorkerInvocations = function (this: QueryClient, ar
   return this.executeNamed("expiredWorkerInvocations", buildExpiredWorkerInvocations(args), opts);
 };
 
-/** Check if the assistant already posted the awaitingFeedback announcement for a Plan (dedup behind the cross-replica announce gate, #1406). */
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["feedbackAnnouncementForPlan"] in generated_concepts.ts).
-export interface FeedbackAnnouncementForPlanArgs {
-  /** The Plan whose announcement to check. */
-  planId: string;
-}
-
-export function buildFeedbackAnnouncementForPlan(args: FeedbackAnnouncementForPlanArgs): string {
-  const parts: string[] = [];
-  parts.push("planId: " + renderMemQLValue(args.planId));
-  return "query feedbackAnnouncementForPlan(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    feedbackAnnouncementForPlan(args: FeedbackAnnouncementForPlanArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.feedbackAnnouncementForPlan = function (this: QueryClient, args: FeedbackAnnouncementForPlanArgs = {} as FeedbackAnnouncementForPlanArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("feedbackAnnouncementForPlan", buildFeedbackAnnouncementForPlan(args), opts);
-};
-
 /** Find the caller's own events by exact title. Self-scoped via actor.userId. Backs the calendar tool's `find` action ('find my dentist appointment'); the agent passes the title it captured. Exact match keeps the predicate SQL-pushdownable -- substring / semantic search is a downstream concern (the agent can list a window via upcomingEvents and filter conversationally). */
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["findEvents"] in generated_concepts.ts).
 export interface FindEventsArgs {
@@ -3683,76 +3439,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.globalVariables = function (this: QueryClient, args: GlobalVariablesArgs = {} as GlobalVariablesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("globalVariables", buildGlobalVariables(args), opts);
-};
-
-/** Check if a greeting utterance already exists for an agent in a space */
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["greetingUtterance"] in generated_concepts.ts).
-export interface GreetingUtteranceArgs {
-  partitionId: string;
-  agentId: string;
-}
-
-export function buildGreetingUtterance(args: GreetingUtteranceArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("agentId: " + renderMemQLValue(args.agentId));
-  return "query greetingUtterance(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    greetingUtterance(args: GreetingUtteranceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.greetingUtterance = function (this: QueryClient, args: GreetingUtteranceArgs = {} as GreetingUtteranceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("greetingUtterance", buildGreetingUtterance(args), opts);
-};
-
-/** Active AI (group GA) participant for a space. The partitionId arg is compared against the stored payload field, which holds the canonical v1:cognition:space id -- internal callers pass that form today; the arg flips to a bare space id with the #2441/#2443 cutover. */
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["groupGAForSpace"] in generated_concepts.ts).
-export interface GroupGAForSpaceArgs {
-  partitionId: string;
-}
-
-export function buildGroupGAForSpace(args: GroupGAForSpaceArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  return "query groupGAForSpace(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    groupGAForSpace(args: GroupGAForSpaceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.groupGAForSpace = function (this: QueryClient, args: GroupGAForSpaceArgs = {} as GroupGAForSpaceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("groupGAForSpace", buildGroupGAForSpace(args), opts);
-};
-
-/** Check if an AI response already exists for a given utterance (idempotency check). */
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["hasAIResponseForReply"] in generated_concepts.ts).
-export interface HasAIResponseForReplyArgs {
-  replyToId: string;
-  participantId: string;
-}
-
-export function buildHasAIResponseForReply(args: HasAIResponseForReplyArgs): string {
-  const parts: string[] = [];
-  parts.push("replyToId: " + renderMemQLValue(args.replyToId));
-  parts.push("participantId: " + renderMemQLValue(args.participantId));
-  return "query hasAIResponseForReply(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    hasAIResponseForReply(args: HasAIResponseForReplyArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.hasAIResponseForReply = function (this: QueryClient, args: HasAIResponseForReplyArgs = {} as HasAIResponseForReplyArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("hasAIResponseForReply", buildHasAIResponseForReply(args), opts);
 };
 
 /** Succeeded Plans of a kind, with metrics, for estimation bucket queries. */
@@ -3887,50 +3573,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.invitationById = function (this: QueryClient, args: InvitationByIdArgs = {} as InvitationByIdArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("invitationById", buildInvitationById(args), opts);
-};
-
-/** Returns the invitation whose previousTokenHash matches the argument. Used by the resolve handler to label rotated-out links as `superseded` rather than `invalid`. See memql#108. */
-// Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["invitationByPreviousTokenHash"] in generated_concepts.ts).
-export interface InvitationByPreviousTokenHashArgs {
-  tokenHash: string;
-}
-
-export function buildInvitationByPreviousTokenHash(args: InvitationByPreviousTokenHashArgs): string {
-  const parts: string[] = [];
-  parts.push("tokenHash: " + renderMemQLValue(args.tokenHash));
-  return "query invitationByPreviousTokenHash(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    invitationByPreviousTokenHash(args: InvitationByPreviousTokenHashArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.invitationByPreviousTokenHash = function (this: QueryClient, args: InvitationByPreviousTokenHashArgs = {} as InvitationByPreviousTokenHashArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("invitationByPreviousTokenHash", buildInvitationByPreviousTokenHash(args), opts);
-};
-
-/** Returns the invitation whose tokenHash matches the argument. Zero or one result. */
-// Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["invitationByTokenHash"] in generated_concepts.ts).
-export interface InvitationByTokenHashArgs {
-  tokenHash: string;
-}
-
-export function buildInvitationByTokenHash(args: InvitationByTokenHashArgs): string {
-  const parts: string[] = [];
-  parts.push("tokenHash: " + renderMemQLValue(args.tokenHash));
-  return "query invitationByTokenHash(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    invitationByTokenHash(args: InvitationByTokenHashArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.invitationByTokenHash = function (this: QueryClient, args: InvitationByTokenHashArgs = {} as InvitationByTokenHashArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("invitationByTokenHash", buildInvitationByTokenHash(args), opts);
 };
 
 /** The guest invitations sent on behalf of one account.
@@ -4967,50 +4609,6 @@ QueryClient.prototype.notesByTag = function (this: QueryClient, args: NotesByTag
   return this.executeNamed("notesByTag", buildNotesByTag(args), opts);
 };
 
-/** Resolve an owned DID row by its E.164 (newest first). Used to set E911 / compliance state by number. */
-// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["numberByE164"] in generated_concepts.ts).
-export interface NumberByE164Args {
-  e164: string;
-}
-
-export function buildNumberByE164(args: NumberByE164Args): string {
-  const parts: string[] = [];
-  parts.push("e164: " + renderMemQLValue(args.e164));
-  return "query numberByE164(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    numberByE164(args: NumberByE164Args, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.numberByE164 = function (this: QueryClient, args: NumberByE164Args = {} as NumberByE164Args, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("numberByE164", buildNumberByE164(args), opts);
-};
-
-/** ADMIN: DIDs provisioned to a partition, newest first. Cluster-owner gated -- numbers are cluster infrastructure. */
-// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["numbersByPartition"] in generated_concepts.ts).
-export interface NumbersByPartitionArgs {
-  partitionId: string;
-}
-
-export function buildNumbersByPartition(args: NumbersByPartitionArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  return "query numbersByPartition(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    numbersByPartition(args: NumbersByPartitionArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.numbersByPartition = function (this: QueryClient, args: NumbersByPartitionArgs = {} as NumbersByPartitionArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("numbersByPartition", buildNumbersByPartition(args), opts);
-};
-
 /** Returns the dynamically-registered OAuth client whose clientId matches the argument. Zero or one result. */
 // Bound concept: v1:identity:oauthClient (machine-readable: BoundConcepts["oAuthClientByClientId"] in generated_concepts.ts).
 export interface OAuthClientByClientIdArgs {
@@ -5500,54 +5098,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.pageOverride = function (this: QueryClient, args: PageOverrideArgs = {} as PageOverrideArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("pageOverride", buildPageOverride(args), opts);
-};
-
-/** Check if an AI agent is already a participant in a space (excludes left status) */
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["participantByAgentSpace"] in generated_concepts.ts).
-export interface ParticipantByAgentSpaceArgs {
-  partitionId: string;
-  agentId: string;
-}
-
-export function buildParticipantByAgentSpace(args: ParticipantByAgentSpaceArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("agentId: " + renderMemQLValue(args.agentId));
-  return "query participantByAgentSpace(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    participantByAgentSpace(args: ParticipantByAgentSpaceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.participantByAgentSpace = function (this: QueryClient, args: ParticipantByAgentSpaceArgs = {} as ParticipantByAgentSpaceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("participantByAgentSpace", buildParticipantByAgentSpace(args), opts);
-};
-
-/** Returns session state for participants in spaces. Optional filters: partitionId, participantId */
-// Bound concept: v1:cognition:session (machine-readable: BoundConcepts["participantSession"] in generated_concepts.ts).
-export interface ParticipantSessionArgs {
-  partitionId?: string;
-  participantId?: string;
-}
-
-export function buildParticipantSession(args: ParticipantSessionArgs): string {
-  const parts: string[] = [];
-  if (args.partitionId !== undefined) parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  if (args.participantId !== undefined) parts.push("participantId: " + renderMemQLValue(args.participantId));
-  return "query participantSession(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    participantSession(args: ParticipantSessionArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.participantSession = function (this: QueryClient, args: ParticipantSessionArgs = {} as ParticipantSessionArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("participantSession", buildParticipantSession(args), opts);
 };
 
 /** Look up a passkey identity by its base64url credential id. Returns active + inactive rows. */
@@ -9909,28 +9459,6 @@ QueryClient.prototype.shopifyUrlRedirectForStore = function (this: QueryClient, 
   return this.executeNamed("shopifyUrlRedirectForStore", buildShopifyUrlRedirectForStore(args), opts);
 };
 
-/** Find the active AI participant in a space. */
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["siParticipantForSpace"] in generated_concepts.ts).
-export interface SiParticipantForSpaceArgs {
-  partitionId: string;
-}
-
-export function buildSiParticipantForSpace(args: SiParticipantForSpaceArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  return "query siParticipantForSpace(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    siParticipantForSpace(args: SiParticipantForSpaceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.siParticipantForSpace = function (this: QueryClient, args: SiParticipantForSpaceArgs = {} as SiParticipantForSpaceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("siParticipantForSpace", buildSiParticipantForSpace(args), opts);
-};
-
 /** List the CALLING user's own ACTIVE sign-in routes -- magic-link and passkey credentials only. Backs the last-credential warning before a passkey revoke; the projection is identitySummary, which carries the type and the label and no credential material at all. */
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["signInIdentitiesForSelf"] in generated_concepts.ts).
 export interface SignInIdentitiesForSelfArgs {
@@ -10284,104 +9812,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.sourceCredentialsMine = function (this: QueryClient, args: SourceCredentialsMineArgs = {} as SourceCredentialsMineArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("sourceCredentialsMine", buildSourceCredentialsMine(args), opts);
-};
-
-/** Returns v1:common:media rows attached to a space. Optional mediaType filter narrows to audio / video / image / document. The frontend's useMedia hook calls this for the per-space attachments view. */
-// Bound concept: v1:common:media (machine-readable: BoundConcepts["spaceMedia"] in generated_concepts.ts).
-export interface SpaceMediaArgs {
-  partitionId: string;
-  mediaType?: string;
-}
-
-export function buildSpaceMedia(args: SpaceMediaArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  if (args.mediaType !== undefined) parts.push("mediaType: " + renderMemQLValue(args.mediaType));
-  return "query spaceMedia(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    spaceMedia(args: SpaceMediaArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.spaceMedia = function (this: QueryClient, args: SpaceMediaArgs = {} as SpaceMediaArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("spaceMedia", buildSpaceMedia(args), opts);
-};
-
-/** Presence snapshots for every participant in a space (UI state: thinking / responding / waiting / ...). Space-scoped; the SPA dedupes latest-wins by participantId. */
-// Bound concept: v1:cognition:participant:presence (machine-readable: BoundConcepts["spaceParticipantPresence"] in generated_concepts.ts).
-export interface SpaceParticipantPresenceArgs {
-  partitionId: string;
-}
-
-export function buildSpaceParticipantPresence(args: SpaceParticipantPresenceArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  return "query spaceParticipantPresence(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    spaceParticipantPresence(args: SpaceParticipantPresenceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.spaceParticipantPresence = function (this: QueryClient, args: SpaceParticipantPresenceArgs = {} as SpaceParticipantPresenceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("spaceParticipantPresence", buildSpaceParticipantPresence(args), opts);
-};
-
-/** Participants for a space, optionally narrowed by status or participantType. Used by the cognition handler + space-context engine. */
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["spaceParticipants"] in generated_concepts.ts).
-export interface SpaceParticipantsArgs {
-  partitionId: string;
-  status?: string;
-  participantType?: string;
-}
-
-export function buildSpaceParticipants(args: SpaceParticipantsArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
-  if (args.participantType !== undefined) parts.push("participantType: " + renderMemQLValue(args.participantType));
-  return "query spaceParticipants(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    spaceParticipants(args: SpaceParticipantsArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.spaceParticipants = function (this: QueryClient, args: SpaceParticipantsArgs = {} as SpaceParticipantsArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("spaceParticipants", buildSpaceParticipants(args), opts);
-};
-
-/** Returns utterances for the given space. Optional participantId / utteranceType args narrow the result further. Used by the cockpit Chat tab to populate the utterance pane and by the BFF for downstream consumers. */
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["spaceUtterances"] in generated_concepts.ts).
-export interface SpaceUtterancesArgs {
-  partitionId: string;
-  participantId?: string;
-  utteranceType?: string;
-}
-
-export function buildSpaceUtterances(args: SpaceUtterancesArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  if (args.participantId !== undefined) parts.push("participantId: " + renderMemQLValue(args.participantId));
-  if (args.utteranceType !== undefined) parts.push("utteranceType: " + renderMemQLValue(args.utteranceType));
-  return "query spaceUtterances(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    spaceUtterances(args: SpaceUtterancesArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.spaceUtterances = function (this: QueryClient, args: SpaceUtterancesArgs = {} as SpaceUtterancesArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("spaceUtterances", buildSpaceUtterances(args), opts);
 };
 
 /** Latest-per-id cluster node rows whose health is not already 'stopped'. When olderThan is supplied, restricts to rows whose lastSeen is strictly before it (RFC3339 cutoff). Drives the stale-node prune cron. */
@@ -10870,31 +10300,6 @@ QueryClient.prototype.usableRecords = function (this: QueryClient, args: UsableR
   return this.executeNamed("usableRecords", buildUsableRecords(args), opts);
 };
 
-/** Returns a user's current activePartitionId. Empty when the user is not focused on any space. memql#2800: deliberately cross-user, and acknowledged as such.
-The frontend derives per-participant `isActive` from it (a participant is active iff User.activePartitionId == participant.partitionId), so resolving OTHER users is the entire purpose -- caller-scoping would break presence in every space. It is safe to leave open because the projection carries no PII: userActiveSpaceProjection is id + activePartitionId and nothing else.
-The `when(args.userId)` guard was removed. userId is declared required, so the guard should be unreachable -- but it made "no argument" mean "no filter" rather than "no rows", i.e. an unfiltered dump of every user, on a query whose only predicate it was. That is the wrong failure direction to leave standing on the strength of a required-arg check elsewhere.
-AUDIT 2026-08-04 (memql#2987): re-audited and KEPT @public. Re-verified that userActiveSpaceProjection still projects id + activePartitionId and nothing else -- the "shapes drift" risk that moved userByEmail to @serverOnly in memql#2881 has not materialised here. Cross-user resolution is load-bearing for presence, so this is the second kind of @public in this repo (documenting intent) rather than the first (acknowledging a flag). */
-// Bound concept: v1:identity:user (machine-readable: BoundConcepts["userActiveSpace"] in generated_concepts.ts).
-export interface UserActiveSpaceArgs {
-  userId: string;
-}
-
-export function buildUserActiveSpace(args: UserActiveSpaceArgs): string {
-  const parts: string[] = [];
-  parts.push("userId: " + renderMemQLValue(args.userId));
-  return "query userActiveSpace(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    userActiveSpace(args: UserActiveSpaceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.userActiveSpace = function (this: QueryClient, args: UserActiveSpaceArgs = {} as UserActiveSpaceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("userActiveSpace", buildUserActiveSpace(args), opts);
-};
-
 /** Get a user by id -- FULL row, owner-or-admin only.
 memql#2800: the filter keys on a caller-supplied id, so it is not a caller check. Reading someone else's full row now requires being them or holding admin/owner. */
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["userById"] in generated_concepts.ts).
@@ -11004,28 +10409,6 @@ QueryClient.prototype.userInvitationByTokenHash = function (this: QueryClient, a
   return this.executeNamed("userInvitationByTokenHash", buildUserInvitationByTokenHash(args), opts);
 };
 
-/** Returns users whose activePartitionId == arg(partitionId). Active-human roster per the activity model (Phase 4). */
-// Bound concept: v1:identity:user (machine-readable: BoundConcepts["usersActiveInSpace"] in generated_concepts.ts).
-export interface UsersActiveInSpaceArgs {
-  partitionId: string;
-}
-
-export function buildUsersActiveInSpace(args: UsersActiveInSpaceArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  return "query usersActiveInSpace(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    usersActiveInSpace(args: UsersActiveInSpaceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.usersActiveInSpace = function (this: QueryClient, args: UsersActiveInSpaceArgs = {} as UsersActiveInSpaceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("usersActiveInSpace", buildUsersActiveInSpace(args), opts);
-};
-
 /** Returns validation state change history. Optional filters: recordId, partitionId, action */
 // Bound concept: v1:data:log (machine-readable: BoundConcepts["validationLog"] in generated_concepts.ts).
 export interface ValidationLogArgs {
@@ -11070,28 +10453,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.validationQueue = function (this: QueryClient, args: ValidationQueueArgs = {} as ValidationQueueArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("validationQueue", buildValidationQueue(args), opts);
-};
-
-/** Active video overrides for every agent in a space. Read by the voice-agent process at session start. */
-// Bound concept: v1:cognition:videoOverride (machine-readable: BoundConcepts["videoOverridesForSpace"] in generated_concepts.ts).
-export interface VideoOverridesForSpaceArgs {
-  partitionId: string;
-}
-
-export function buildVideoOverridesForSpace(args: VideoOverridesForSpaceArgs): string {
-  const parts: string[] = [];
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  return "query videoOverridesForSpace(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    videoOverridesForSpace(args: VideoOverridesForSpaceArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.videoOverridesForSpace = function (this: QueryClient, args: VideoOverridesForSpaceArgs = {} as VideoOverridesForSpaceArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("videoOverridesForSpace", buildVideoOverridesForSpace(args), opts);
 };
 
 /** The caller's Plans parked in the per-account waiting queue (status=waitingForSlot) because the account is at its concurrency cap (epic memql#902 / #909). Owned tier (payload.requestedBy==actor.userId). FIFO order is by row.createdAt of the waitingForSlot version (carried in planFull); the frontend derives each Plan's queue position from that ascending order -- MemQL has no in-query window/rank function. */

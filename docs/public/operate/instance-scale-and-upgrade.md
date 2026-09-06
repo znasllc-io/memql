@@ -40,7 +40,7 @@ one replica that arithmetic leaves nothing to spare:
 $ kubectl get pdb -n memql
 NAME        MIN AVAILABLE   ALLOWED DISRUPTIONS
 agent       1               0
-cognition   1               0
+bff         1               0
 identity    1               0
 ```
 
@@ -55,7 +55,7 @@ already paid for:
 
 ```
 mesh nodes:  2 x 1900m allocatable = 3800m CPU   in use ~1200m
-each mesh service requests 200m -- doubling seven of them adds ~1200m
+each mesh service requests 200m -- doubling seven of them adds ~1400m
 ```
 
 So the first thing to do on any instance you intend to keep is raise replicas,
@@ -229,7 +229,7 @@ If it exits 3, a restart alone is not enough -- reissue the leaf first:
 ```bash
 kubectl -n memql delete secret identity-tls     # cert-manager remints from the current CA
 kubectl -n memql rollout restart deploy/identity
-kubectl -n memql rollout restart deploy/bff deploy/cognition deploy/agent deploy/planner deploy/workbench deploy/edge
+kubectl -n memql rollout restart deploy/bff deploy/agent deploy/planner deploy/workbench deploy/mcp deploy/edge
 ```
 
 ## Verifying, and the trap in verifying

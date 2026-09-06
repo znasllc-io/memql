@@ -117,7 +117,7 @@ trait isInProgress {
 // Used to exclude archived items from active queries.
 //
 // Usage in queries:
-//   concept==v1:cognition:space;isNotArchived()
+//   concept==v1:library:artifact;isNotArchived()
 //
 /// Matches records that are not archived
 trait isNotArchived {
@@ -171,7 +171,7 @@ trait isOpen {
 //
 // Usage in queries:
 //   concept==v1:hr:checkin;isScheduled()
-//   concept==v1:cognition:space;isScheduled()
+//   concept==v1:calendar:event;isScheduled()
 //
 /// Matches records with scheduled status
 trait isScheduled {
@@ -240,7 +240,7 @@ trait statusIsActive {
 // tab in the SpacesListPanel.
 //
 // Usage in queries:
-//   concept==v1:cognition:space;statusIsArchived()
+//   concept==v1:library:artifact;statusIsArchived()
 //
 /// Matches records with payload.status == 'archived'.
 trait statusIsArchived {
@@ -258,7 +258,7 @@ trait statusIsArchived {
 // the Saved tab in the SpacesListPanel.
 //
 // Usage in queries:
-//   concept==v1:cognition:space;statusIsSaved()
+//   concept==v1:library:artifact;statusIsSaved()
 //
 /// Matches records with payload.status == 'saved'.
 trait statusIsSaved {
@@ -322,19 +322,6 @@ trait identityIsWorkerToken {
 /// Matches v1:identity:identity rows with identityType=='node_token'.
 trait identityIsNodeToken {
   return identityType=="node_token"
-}
-
-// ---- identityIsVoiceAgentToken ----
-//
-// Concept-targeted trait for v1:identity:identity rows whose
-// identityType field is "voice_agent_token". Voice-agent tokens
-// authenticate the Go voice-agent process on MemqlService.Stream
-// (#109); this trait scopes the row-state revocation lookup the
-// verify path consults (memql#4111).
-
-/// Matches v1:identity:identity rows with identityType=='voice_agent_token'.
-trait identityIsVoiceAgentToken {
-  return identityType=="voice_agent_token"
 }
 
 // ---- identityIsBadge ----

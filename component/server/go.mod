@@ -18,7 +18,6 @@ require (
 	github.com/znasllc-io/memql/component/identity v0.0.0
 	github.com/znasllc-io/memql/component/language v0.0.0
 	github.com/znasllc-io/memql/component/memql v0.0.0
-	github.com/znasllc-io/memql/component/polyphon v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
 	github.com/znasllc-io/memql/integrations/stt v0.0.0
 	google.golang.org/grpc v1.83.2
@@ -171,7 +170,6 @@ replace github.com/znasllc-io/memql/component/language/dslclause => ../language/
 
 replace github.com/znasllc-io/memql/component/memql => ../memql
 
-replace github.com/znasllc-io/memql/component/polyphon => ../polyphon
 
 replace github.com/znasllc-io/memql/component/provenance => ../provenance
 

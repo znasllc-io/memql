@@ -511,12 +511,16 @@ func pickPositiveInt(primary, fallback int) int {
 	return fallback
 }
 
-// init asserts the streaming handlers stay in sync with the
-// single-shot handler on where transcription is routed. If
-// nodeTargetForTranscribe ever stops returning NodeTypeVoice the BFF
-// proxy path here would silently stop working.
+// init pins where streaming transcription is routed.
+//
+// The BFF proxies the Start/Chunk/End trigger to this node type and consumes
+// the transcript frames back; if the target ever resolves to a node type that
+// wires no stt.StreamingProvider, the proxy path stops working SILENTLY --
+// the browser holds the mic open and no transcript ever arrives. The one
+// caller is MemQL OS's Ask hold-to-talk, so the failure would present as
+// "dictation is broken" with nothing in the logs naming a cause.
 func init() {
-	if nodeTargetForTranscribe() != node.NodeTypeVoice {
-		panic("nodeTargetForTranscribe must resolve to NodeTypeVoice; the streaming transcription handlers rely on it")
+	if nodeTargetForTranscribe() != node.NodeTypeAgent {
+		panic("nodeTargetForTranscribe must resolve to NodeTypeAgent; the streaming transcription handlers rely on it")
 	}
 }

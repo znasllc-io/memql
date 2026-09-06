@@ -133,16 +133,6 @@ INFO: Operator answer to "where did my file go" -- query the plan's workspace
 rows and look for `releasedReason=node_lost`. A released row with that reason
 IS the answer; without the row there is no record that anything moved.
 
-[ ] Not implemented: no notice reaches the user's canvas. The canvas-state
-    concept and `mutationCreateCanvasState` are **pack-only** constructs the
-    engine core does not load (see the note in
-    `integrations/planner/plan_execution.go`: a planner-side notifier for the
-    same reason failed at runtime with `function "mutationCreateCanvasState" not
-    found`, and the card now lands via a product-pack automation). A node-loss
-    card would have to arrive the same way -- an automation in the product
-    bundle fired off the `node_lost` release -- and nothing in this repository
-    can emit one.
-
 ### The operator surface for all of this
 
 `/fleet/workbenches` in the MemQL Portal (memql#4356) is where the above is
@@ -212,10 +202,8 @@ A successful upload returns a URL of the form:
 https://<account>.blob.core.windows.net/<container>/<objectName>
 ```
 
-This URL is stored on the `v1:common:attachment.blobUrl` field. The
-attachment download endpoint (`GET /spaces/{spaceId}/attachments/{attachmentId}`,
-shipped in #804) serves bytes back by calling
-`integrations/azureblob.DownloadURL()` against this stored URL.
+This URL is stored on the `v1:common:attachment.blobUrl` field. Bytes are read
+back by calling `integrations/azureblob.DownloadURL()` against this stored URL.
 
 ## 3. Storage topology, by deploy target (decisions locked #805)
 
@@ -339,7 +327,7 @@ kubectl exec -n memql deploy/workbench -- ls /var/lib/memql/workbenches/
 When the workbench node is promoted to a dedicated AKS Deployment:
 
 1. Build and push the `workbench` binary image (same pipeline that
-   produces `memql-agent` / `memql-cognition` / `memql-planner`):
+   produces `memql-agent` / `memql-planner`):
    ```bash
    make workbench
    # image build + push wired via the existing image-build pipeline

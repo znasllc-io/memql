@@ -4,7 +4,7 @@
 // files cover the other construct kinds.
 
 /// A MemQL cluster -- the top-level deployment unit consisting of a shared database and seed nodes
-/// (bff, cognition, planner). Partitions exist within a cluster for data isolation.
+/// (bff, agent, planner). Partitions exist within a cluster for data isolation.
 // NO `status=` SLOT, for the reason `database` above has none (memql#4766,
 // memql#4772): the field it named was written once at bootstrap and refreshed
 // by nothing, so a card rendering it showed a health verdict that was a
@@ -14,7 +14,7 @@
 concept cluster {
   name              string! @description("Cluster name (e.g., 'development', 'staging-us-central1').")
   region            string  @description("Cloud region (e.g., 'us-central1') or 'local' for development.")
-  seedNodeTypes     []string  @description("Required node types for this cluster (e.g., ['bff', 'cognition', 'planner']).")
+  seedNodeTypes     []string  @description("Required node types for this cluster (e.g., ['bff', 'agent', 'planner']).")
   // `status` IS GONE (memql#4772), and this note is here so it is not re-added.
   //
   // It was enum("bootstrapping","healthy","degraded","shutting_down") with one
@@ -117,13 +117,13 @@ concept identityProvider {
 /// source of truth.
 @displayCard(primary="id", secondary="nodeType", tertiary="address", status="health")
 concept node {
-  nodeType      string! @description("Node role: bff, voice, cognition, agent, planner.")
-  flavor        string  @description("Domain flavor within the node type. Empty for single-flavor types like cognition.")
+  nodeType      string! @description("Node role: bff, agent, planner, workbench.")
+  flavor        string  @description("Domain flavor within the node type. Empty for single-flavor types.")
   address       string! @description("Advertised NodeService gRPC address for peer connections.")
   parentId      string  @description("Node ID of the peer this node discovered via DB-based topology. Empty for the first node in a cluster.")
   health        enum("connecting", "healthy", "degraded", "draining", "offline", "stopped")  @default("connecting") @description("Last known health status. Mirrors NodeHealthStatus enum in node.proto.")
   lastSeen      datetime  @description("ISO 8601 timestamp of the most recent heartbeat (or registration if none received yet).")
-  capabilities  []string  @description("Fully qualified capability names this node offers (e.g. integration.cognition.scoreUtterance).")
+  capabilities  []string  @description("Fully qualified capability names this node offers (e.g. integration.workbench.dispatchHost).")
   labels        object  @description("Arbitrary metadata key-value pairs.")
   deploymentId  string  @description("Stable id of the deployment that created this node (#1873). Injected at registration from the rollout (MEMQL_DEPLOYMENT_ID; downward-API pod/rollout template hash in k8s, 'local' in dev). Plain string FK to v1:cluster:deployment.deploymentId -- a deployment's topology is every node with the same deploymentId, and a node whose deploymentId != the cluster's current deployment is an orphan from a previous deploy (feeds the reaper #1874 + cockpit orphan highlight).")
   provider      string  @description("Cloud provider / deploy target backing this node: 'docker-local' (local Docker) or 'azure' (AKS). Stamped at registration from the system.startup payload (#1873).")
@@ -133,9 +133,9 @@ concept node {
 /// Definition of a node type and its expected capabilities.
 @displayCard(primary="name", secondary="description", tertiary="image")
 concept nodeType {
-  name          string! @description("Node type identifier: bff, voice, cognition, agent, planner.")
+  name          string! @description("Node type identifier: bff, agent, planner, workbench.")
   description   string  @description("Human-readable description of this node type's purpose.")
-  image         string  @description("Container image reference for this node type (e.g. gcr.io/project/memql-cognition:latest).")
+  image         string  @description("Container image reference for this node type (e.g. gcr.io/project/memql-agent:latest).")
   capabilities  []string  @description("Expected capability FQNs that nodes of this type should expose.")
   defaultLabels object  @description("Default labels applied to spawned instances of this type.")
   codeReference string  @description("Optional architecture-model node id (model.Node.ID, e.g. 'service:memql') linking this node type to its code-side identity. Cockpit's Topology view uses this to bridge the live cluster grid and the architecture-model drill-down: selecting a live node finds the matching code-side service and jumps the navigator to that drill point.")
@@ -146,7 +146,7 @@ concept nodeType {
 @displayCard(primary="action", secondary="nodeId", tertiary="reason", status="action")
 concept spawnEvent {
   nodeId        string! @description("ID of the node this event pertains to.")
-  nodeType      string! @description("Type of the node: bff, cognition, agent, planner.")
+  nodeType      string! @description("Type of the node: bff, agent, planner, workbench.")
   action        enum("spawned", "stopped", "failed")! @description("What happened to the node.")
   initiatorId   string  @description("ID of the node that triggered this event.")
   reason        string  @description("Human-readable reason for the event (e.g. shutdown signal, health check failure).")

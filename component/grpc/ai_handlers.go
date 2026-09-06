@@ -3,7 +3,6 @@ package memql
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +15,6 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
-	"github.com/znasllc-io/memql/integrations/stt"
 )
 
 // generateErrorId creates a short unique error ID for tracing across logs.
@@ -212,146 +210,6 @@ func (s *streamSession) handleAiChatStream(requestId, correlate string, messages
 			})
 		}
 	}
-}
-
-// handleAiSpeech handles text-to-speech requests.
-func (s *streamSession) handleAiSpeech(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.AiSpeechMsg) error {
-	if msg == nil {
-		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "si_speech request missing")
-	}
-
-	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
-
-	if s.shouldProxyAI(nodeTargetForSpeech()) {
-		return s.proxyAI(envelope, requestId, nodeTargetForSpeech())
-	}
-
-	if s.service.engine == nil {
-		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Unavailable, "MemQL engine unavailable")
-	}
-
-	if strings.TrimSpace(msg.GetInput()) == "" {
-		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.InvalidArgument, "input field is required")
-	}
-
-	correlate := envelope.GetMessageId()
-
-	go func() {
-		var ttsProvider memqlengine.TTSAIProvider
-		if prov := msg.GetProvider(); prov != "" {
-			var ok bool
-			ttsProvider, ok = s.service.engine.TTSProviderByName(prov)
-			if !ok {
-				s.sendQueryError(requestId, correlate, codes.InvalidArgument, "TTS provider not found: "+prov)
-				return
-			}
-		} else {
-			ttsProvider = s.service.engine.TTSProvider()
-			if ttsProvider == nil {
-				s.sendQueryError(requestId, correlate, codes.Internal, "no TTS provider available")
-				return
-			}
-		}
-
-		ctx := s.stream.Context()
-		audioBytes, err := ttsProvider.Synthesize(ctx, msg.GetInput(), msg.GetVoice())
-		if err != nil {
-			s.sendAiError(requestId, correlate, "speech synthesis failed", err)
-			return
-		}
-
-		format := msg.GetFormat()
-		if format == "" {
-			format = "wav"
-		}
-
-		_ = s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
-			Payload: &memqlv1.MemqlServerMessage_AiSpeechResult{
-				AiSpeechResult: &memqlv1.AiSpeechResult{
-					RequestId: requestId,
-					Audio:     audioBytes,
-					Format:    format,
-				},
-			},
-		})
-	}()
-
-	return nil
-}
-
-// handleAiTranscribe handles speech-to-text requests.
-func (s *streamSession) handleAiTranscribe(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.AiTranscribeMsg) error {
-	if msg == nil {
-		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "si_transcribe request missing")
-	}
-
-	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
-
-	if s.shouldProxyAI(nodeTargetForTranscribe()) {
-		return s.proxyAI(envelope, requestId, nodeTargetForTranscribe())
-	}
-
-	if s.service.sttProvider == nil {
-		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Unavailable, "transcription is not configured")
-	}
-
-	if strings.TrimSpace(msg.GetAudio()) == "" {
-		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.InvalidArgument, "audio field is required")
-	}
-
-	correlate := envelope.GetMessageId()
-
-	go func() {
-		audioBytes, err := base64.StdEncoding.DecodeString(msg.GetAudio())
-		if err != nil {
-			s.sendQueryError(requestId, correlate, codes.InvalidArgument, "invalid base64 audio data")
-			return
-		}
-
-		mimeType := msg.GetMimeType()
-		if mimeType == "" {
-			mimeType = "audio/webm"
-		}
-
-		ctx := s.stream.Context()
-		session, err := s.service.sttProvider.StartStream(ctx, stt.StreamConfig{
-			Format:     sttFormatFromMIME(mimeType),
-			SampleRate: 16000,
-			Channels:   1,
-		})
-		if err != nil {
-			s.sendAiError(requestId, correlate, "failed to start transcription", err)
-			return
-		}
-
-		if err := session.SendAudio(audioBytes); err != nil {
-			session.Close()
-			s.sendAiError(requestId, correlate, "failed to process audio", err)
-			return
-		}
-
-		result, err := session.Finalize(ctx)
-		if err != nil {
-			s.sendAiError(requestId, correlate, "transcription failed", err)
-			return
-		}
-
-		text := ""
-		if result != nil {
-			text = result.Text
-		}
-
-		_ = s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{
-			Payload: &memqlv1.MemqlServerMessage_AiTranscribeResult{
-				AiTranscribeResult: &memqlv1.AiTranscribeResult{
-					RequestId: requestId,
-					Text:      text,
-				},
-			},
-		})
-	}()
-
-	return nil
 }
 
 // handleAiSuggest handles AI suggestion requests for spaces, agents, and groups.

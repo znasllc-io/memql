@@ -170,8 +170,8 @@ point on the path where the question can be answered at all.
 marked seen.** Filtering the slice first lets a denied *latest* version fall
 through to an admitted *older* one, so the caller gets a stale row instead of no
 row -- the same ordering hazard as the staged conjunct above, arriving from the
-authorization side. `foldActiveParticipants` in `integrations/chat/recent_chat.go`
-is the worked example.
+authorization side. `AdmitSourceRows` is the convenience form for a reader with
+no fold; a reader that folds calls `AdmitSourceRow` per row instead.
 
 Note what this does and does not buy: it makes a direct read **correct**, not
 **scoped**. The gate filters after the fetch and adds no caller predicate to the
@@ -195,7 +195,6 @@ The build tags decide which node-type binaries include the registration.
 | `RegisterReadinessCheck(name, check)` | `component/server` | a readiness probe contributing to `/readyz` |
 | `RegisterSeedDomain(reg)` | `integrations/knowledge` | a product knowledge domain + optional seed corpus folded into the startup catalog seeder |
 | `RegisterAppProfile(profile)` | `component/memql` | the product app profile injected on operator turns + its operator knowledge domains |
-| `RegisterChatReplyConcept(c)` | `component/node` | a product concept whose events ride the chat-reply delivery substrate (+ optional space-key payload field) |
 | `RegisterCapabilitySlug(slug, tools, tags...)` | `component/memql` | a capability slug -> concrete tool-name bundle for agent tool expansion (tag `operator` drives the replier's operator fence) |
 
 Minimal shape:

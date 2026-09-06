@@ -41,7 +41,7 @@ automatically.
 | 1. Loop breaker | identical-request repeats → 429 | per-fingerprint | yes (cooldown) | `ai_guard.go` |
 | 2. Automation budget | executions/window → skip; bounded fail-open | process, per-automation | yes (window) | `component/automations/budget.go`, `cluster_guard.go` |
 | 3. Loop terminal conditions | per-turn iteration / convergence / wallclock caps | per invocation | n/a | agent + planner loops |
-| 4. Per-scope budget | cumulative latch per space / plan-lineage | per conversation/plan | **No (latches)** | `ai_guard.go` via context (#1144) |
+| 4. Per-scope budget | cumulative latch per plan-lineage / work run | per plan/run | **No (latches)** | `ai_guard.go` via context (#1144) |
 
 Layer 0 is the backstop **behind** every other layer: even when a higher
 layer is generous or a loop's terminal condition is loose, the cumulative
@@ -156,12 +156,11 @@ residual gap is *cross-turn* cumulative spend, which Layers 0 and 4 close.
 | Agent tool loop | `integrations/agent/streaming.go`, `nonstreaming.go` | 120 iters (`MEMQL_TOOL_LOOP_MAX_ITERATIONS`), 180s wallclock (`MEMQL_TURN_WALLCLOCK_TIMEOUT_SECONDS`) | none → **Layer 0 / 4** | 3 repeat-failures (`MEMQL_TOOL_LOOP_MAX_REPEAT_FAILURES`), 3 all-errored rounds, 2 produceArtifact re-delegations |
 | Engine AI tool loop | `component/memql/ai_tool_loop.go` | 120 iters (`MEMQL_TOOL_LOOP_MAX_ITERATIONS`), 8 tool-calls/iter | none → **Layer 0 / 4** | all-errored guard, identical-call breaker |
 | Planner decompose loop | `integrations/planner/agent_loop.go` | 5 iters/cycle (`MEMQL_PLANNER_MAX_ITERATIONS_PER_CYCLE`) | 8 calls + 2M tokens/plan (`MEMQL_PLANNER_MAX_INVOCATIONS_PER_PLAN`, `MEMQL_PLANNER_DEFAULT_TOKEN_BUDGET`) | 2 identical decisions (`MEMQL_PLANNER_MAX_IDENTICAL_DECISIONS`) |
-| Cognition conductor | `integrations/cognition/conductor_consult.go` | single structured call (≤3 branch re-invokes) | n/a | n/a |
 | Suggest | `component/grpc/` AiSuggest | single call | n/a | n/a |
 
 Verdict: no loop lacks a per-turn terminal condition. The agent / engine tool
 loops have no native cross-turn cap and rely on Layer 0 (process) and Layer 4
-(per-space / plan-lineage) for cumulative bounding.
+(per plan-lineage / work run) for cumulative bounding.
 
 ## Layer 4 — subscription spend, counted but not charged (memql#4362)
 
@@ -238,14 +237,14 @@ defaults the empty string to `metered` rather than to `unknown`.
 ### Layer 4 — per-scope budget
 | env | default | meaning |
 |---|---|---|
-| `MEMQL_LLM_SCOPE_GUARD_ENABLED` | true | per-(space, plan-lineage) latch |
+| `MEMQL_LLM_SCOPE_GUARD_ENABLED` | true | per-(plan-lineage, work run) latch |
 | `MEMQL_LLM_SCOPE_MAX_CALLS` | 600 | cumulative calls per scope |
 | `MEMQL_LLM_SCOPE_MAX_COST_USD` | 20.0 | cumulative est-$ per scope |
 | `MEMQL_LLM_SCOPE_IDLE_TTL_SECONDS` | 3600 | prune scopes idle this long |
 
 The per-scope latch is **on by default** (unlike the process caps): a scope is
-one conversation/space or plan-lineage, so a runaway within one scope is
-unambiguous and latching it kills just that loop — other conversations are
+one plan-lineage or one work run, so a runaway within one scope is
+unambiguous and latching it kills just that loop — other plans are
 unaffected and no restart is needed. Caps sit above the 120-iteration per-turn
 cap so a single deep turn never trips them. Scopes are stamped via
 `ContextWithBudgetScope` at the streaming + non-streaming agent loops and the
@@ -300,7 +299,7 @@ answer: *"cancel the meeting"* and *"confirm the meeting"* are lexically and
 semantically close yet demand opposite answers. So the semantic cache is:
 
 - **opt-in per namespace.** A *classification namespace* is a stable
-  input→label call type (message intent, affirmation, domain-shape). The
+  input→label call type (failure symptom, complexity triage, domain-shape). The
   enablement registry (`ai_semantic_cache_registry.go`) is **empty by
   default** — shipping the layer changes no AI behaviour. NEVER enable it for
   free-form generation (agent prose replies): two prompts that "look similar"
@@ -322,12 +321,12 @@ semantically close yet demand opposite answers. So the semantic cache is:
    separated). Start above the eval-chosen threshold and tune down only with
    telemetry.
 
-The strongest first-enablement candidate is cognition's message-intent
-classification (`cognition.message_intent`, the `messageClassification` prompt)
-— structured output, stable input→label, high redundancy. It ships **not**
-enabled: turning it on changes a live cognition decision path and is a
-deliberate, eval-gated, owner-signed-off follow-up, not a risk taken to satisfy
-acceptance criteria.
+The strongest first-enablement candidate is the work spine's symptom
+classification (`work.classify_symptom`, the `classifySymptom` prompt)
+— structured output, one of five labels plus a reason, high redundancy across
+runs. It ships **not** enabled: turning it on changes a live healing decision
+path and is a deliberate, eval-gated, owner-signed-off follow-up, not a risk
+taken to satisfy acceptance criteria.
 
 | Env var | Default | Meaning |
 | --- | --- | --- |

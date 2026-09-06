@@ -20,7 +20,7 @@ owner: znas
 MemQL functions provide reusable, parameterized operations. Every
 construct is declared in **struct form** -- an annotated block with a
 keyword header -- and lives in a per-namespace, per-construct file
-(`dsl/<namespace>/<construct>s.memql`, e.g. `dsl/cognition/queries.memql`).
+(`dsl/<namespace>/<construct>s.memql`, e.g. `dsl/library/queries.memql`).
 
 | Construct | Purpose |
 |-----------|---------|
@@ -45,13 +45,13 @@ keyword header -- and lives in a per-namespace, per-construct file
 **Construct names carry no kind prefix** (memql#2853). Name a construct for
 what it does; the keyword already states what it is.
 
-- Query: what it returns (e.g. `activeSpaces`, `userById`)
-- Mutation: the verb (e.g. `createSpace`, `archiveUser`)
+- Query: what it returns (e.g. `activeFolders`, `userById`)
+- Mutation: the verb (e.g. `createFolder`, `archiveUser`)
 - Logic: the verb (e.g. `bootstrapSession`, `generateResponse`)
 - Spec / trait: the predicate (e.g. `isActiveRecord`, `requiresOwnerOrAdmin`)
-- Prompt: descriptive name (e.g. `agentReply`, `cognitionCompaction`)
+- Prompt: descriptive name (e.g. `agentReply`, `consolidateMemory`)
 - Provider: provider name (e.g. `chat54Mini`, `streamClaudeSonnet`)
-- Shape: `<concept><Projection>` (e.g. `spaceCard`, `participantFull`)
+- Shape: `<concept><Projection>` (e.g. `folderCard`, `artifactFull`)
 
 Gated by `TestNoKindPrefixInConstructNames` in `test/dslconformance/naming_conventions_test.go`.
 Full rationale and history: [naming-conventions.md](naming-conventions.md).
@@ -69,13 +69,13 @@ trip the gate on this very page.)
 ## Imports and Concept Binding
 
 Cross-file dependencies are declared with **file-top `use` imports**.
-The dotted path maps to a file on disk (`cognition.concepts` →
-`dsl/cognition/concepts.memql`); the brace list names the constructs
+The dotted path maps to a file on disk (`library.concepts` →
+`dsl/library/concepts.memql`); the brace list names the constructs
 pulled into local scope:
 
 ```memql fragment
-use cognition.concepts.{ participant, space }
-use cognition.shapes.{ participantFull }
+use library.concepts.{ artifact, folder }
+use library.shapes.{ artifactFull }
 use common.traits.{ isActiveRecord }
 ```
 
@@ -147,7 +147,7 @@ context:
 | `>` `>=` `<` `<=` | Comparisons | `count>=10` |
 | `in` | Membership | `kind in ["a", "b"]`, `args.x in list` |
 | `startsWith` | String prefix (ANY of a list); an empty list and a blank prefix match nothing ([authoring rules §32](authoring-rules.md)) | `codeReference startsWith "integration."`, `codeReference startsWith args.prefixes` |
-| `&&` | Logical AND | `spaceId==args.spaceId && isActiveRecord` |
+| `&&` | Logical AND | `folderId==args.folderId && isActiveRecord` |
 | `\|\|` | Logical OR | `actor.role=="admin" \|\| actor.role=="owner"` |
 | `( )` | Grouping (Go precedence: comparisons > `&&` > `\|\|`) | `(a \|\| b) && c` |
 | `when(args.x) { ... }` | Arg-conditional predicate: when `args.x` is absent, the guarded block and its connective are dropped | `when(args.role) { role==args.role }` |
@@ -198,15 +198,15 @@ directives, and a `shape` projection.
 ### Syntax
 
 ```memql
-use cognition.concepts.{ participant }
+use library.concepts.{ artifact }
 
-@description("Get active human participants in a space")
-query participant activeHumanParticipants {
+@description("Get live document artifacts filed under a folder")
+query artifact activeDocumentArtifacts {
   args {
-    spaceId  string  @required
+    folderId  string  @required
   }
-  filter  spaceId==args.spaceId && participantType=="human" && statusIsActive && isActiveRecord
-  shape   participantFull
+  filter  folderId==args.folderId && kind=="document" && statusIsActive && isActiveRecord
+  shape   artifactFull
 }
 ```
 
@@ -221,7 +221,7 @@ Filter rules (enforced by `test/dslconformance/conformance_test.go`):
   though the two compile to entirely different SQL:
 
   ```memql fragment
-  filter  row.id == args.spaceId   // the row envelope (a table column)
+  filter  row.id == args.folderId  // the row envelope (a table column)
   filter  status == args.status    // a payload property (a JSONB path)
   ```
 - Named trait / spec predicates are called bare
@@ -235,33 +235,33 @@ A `when(args.x) { ... }` guard applies its predicate only when the
 argument is provided:
 
 ```memql
-@description("Active spaces, optionally narrowed to a creator")
-query space activeSpaces {
+@description("Active folders, optionally narrowed to a creator")
+query folder activeFolders {
   args {
     userId  string
   }
   filter  isActiveRecord && statusIsActive && when(args.userId) { row.createdBy==args.userId }
-  shape   spaceFull
+  shape   folderFull
 }
 ```
 
 **Calling patterns:**
 ```memql fragment
-activeSpaces()                      -- No optional filter applied
-activeSpaces(userId: "u-1")         -- Creator filter applied
+activeFolders()                     -- No optional filter applied
+activeFolders(userId: "u-1")        -- Creator filter applied
 ```
 
 ### Sorting and Pagination
 
 ```memql
-query context latestSpaceContextForSpace {
+query run latestRunForGoal {
   args {
-    spaceId  string  @required
+    goalId  string  @required
   }
-  filter  spaceId==args.spaceId
+  filter  goalId==args.goalId
   sort    "row.createdAt", "desc"
   paginate 1
-  shape   spaceContextFull
+  shape   workRunFull
 }
 ```
 
@@ -312,16 +312,16 @@ Mutations write exactly one row of their signature-bound concept.
 ### Syntax
 
 ```memql
-use cognition.concepts.{ space }
+use library.concepts.{ folder }
 
-@description("Create a cognition space")
-mutate space createSpace {
+@description("Create a Library folder")
+mutate folder createFolder {
   args {
-    spaceId  string  @required
-    name     string  @required
+    folderId  string  @required
+    name      string  @required
   }
   insert {
-    id:          args.spaceId
+    id:          args.folderId
     name:        args.name
     status:      "active"
     ownerUserId: actor.userId
@@ -377,15 +377,15 @@ named statements ending in `return <expr>`.
 ### Single-statement form (the common case)
 
 ```memql
-use common.builtins.{ ensureDailySpaceForUser }
+use common.builtins.{ ensureKnowledgeBridge }
 
-@description("On user creation, ensure today's daily space exists.")
-logic provisionDailySpaceOnUserCreate {
+@description("On document creation, make sure its knowledge bridge exists.")
+logic provisionBridgeOnDocumentCreate {
   args {
     event object @required
   }
   body {
-    return ensureDailySpaceForUser(userId: args.event.payload.id)
+    return ensureKnowledgeBridge(documentId: args.event.payload.id)
   }
 }
 ```
@@ -433,13 +433,13 @@ the triggering event:
 ### Event-Triggered
 
 ```memql
-use cognition.logic.{ bootstrapSession }
+use library.logic.{ indexArtifact }
 
-@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
-@description("On participant creation, open the session that participant needs.")
-automation bootstrapSession {
+@trigger(event="node.created", concept="v1:library:file", partition="*")
+@description("On file creation, index it into the Library.")
+automation indexArtifact {
   step decide {
-    logic bootstrapSession ( event )
+    logic indexArtifact ( event )
   }
 }
 ```
@@ -544,7 +544,7 @@ Verified author-surface helpers (see `component/language/parser`):
 
 | Function | Description | Example |
 |----------|-------------|---------|
-| `args.name` | Caller-passed argument | `args.spaceId` |
+| `args.name` | Caller-passed argument | `args.folderId` |
 | `actor.X` | Auth context (`userId`, `role`, `identityId`, `isClusterOwner`) | `actor.userId` |
 | `now` | Eval-start timestamp (bare name) | `createdAt: now` |
 | `config.X` | Allow-listed config entry | `config.someKey` |
@@ -594,7 +594,7 @@ except two id-derivation branches, which are not gates.
 | `trim(str)` | Remove whitespace | `trim(args.input)` |
 | `contains(str, sub)` | Substring check | `contains(args.email, "@company.com")` |
 | `hash(str)` | SHA256 hash | `hash(args.email)` |
-| `canonicalId(shortId, concept)` | Expand a short id to the canonical row id of an imported concept | `canonicalId(args.spaceId, space)` |
+| `canonicalId(shortId, concept)` | Expand a short id to the canonical row id of an imported concept | `canonicalId(args.folderId, folder)` |
 | `toString(x)` | Stringify | `toString(args.count)` |
 
 ### Time
@@ -620,7 +620,7 @@ expression builtin.
 | Function | Description | Example |
 |----------|-------------|---------|
 | `si(promptName, data)` | Blocking LLM call through a named prompt | `si("consolidateMemory", {episodes: cluster})` |
-| `agent("name", "prompt", spaceId)` | Async agent invocation through the planner | see `dsl/agents/builtins.memql` |
+| `agent("name", "prompt", partitionId)` | Async agent invocation through the planner | see `dsl/agents/builtins.memql` |
 
 ---
 
@@ -635,9 +635,9 @@ rendered template is a Go text/template file named by `@templateFile`.
 
 ```memql
 @defaultProvider("chat54Mini")
-@templateFile("prompts/cognitionCompaction.tmpl")
+@templateFile("prompts/consolidateMemory.tmpl")
 @description("Summarize older conversation messages into a rolling summary.")
-prompt cognitionCompaction {
+prompt consolidateMemory {
   entries          []object  @required @description("Conversation messages, oldest first.")
   previousSummary  string              @description("Prior rolling summary; empty on first compaction.")
 }
@@ -720,7 +720,7 @@ provider anthropic {
 | Block | Description |
 |-------|-------------|
 | `auth` | Credentials via `env()` environment-variable references. Inherited from the base when using `@extends`. |
-| `params` | Provider-specific parameters (contextWindow, maxCompletionTokens, voice, etc.) |
+| `params` | Provider-specific parameters (contextWindow, maxCompletionTokens, cost, etc.) |
 
 ---
 
@@ -762,11 +762,11 @@ The bound concept is named by the signature `shape <Concept> <name>`
 (resolved through the file-top concept import):
 
 ```memql
-use cognition.concepts.{ space }
+use library.concepts.{ folder }
 
-@description("Space summary card")
+@description("Folder summary card")
 @row
-shape space spaceCard {
+shape folder folderCard {
   row.id
   name
   description
@@ -798,7 +798,7 @@ shape actorEnvelope {
 
 `include` is not a shape verb. It was documented here for a long time
 and never implemented (memql#3621): a shape body is a path list, so
-`include spaceCard` parsed as two payload properties and projected two
+`include folderCard` parsed as two payload properties and projected two
 always-null keys. It is rejected at load now. To share a projection,
 repeat the paths, or drop the body entirely and take the default
 projection over the bound concept (memql#2035).
@@ -825,12 +825,12 @@ Every shape is validated against the concept it binds (memql#3621):
 Struct queries reference a shape by name in their `shape` clause:
 
 ```memql
-query participant spaceParticipants {
+query artifact folderArtifacts {
   args {
-    spaceId  string  @required
+    folderId  string  @required
   }
-  filter  spaceId==args.spaceId && isActiveRecord
-  shape   participantFull
+  filter  folderId==args.folderId && isActiveRecord
+  shape   artifactFull
 }
 ```
 

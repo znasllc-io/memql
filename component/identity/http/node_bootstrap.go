@@ -75,27 +75,19 @@ const envAllowInsecureBootstrap = "MEMQL_IDENTITY_ALLOW_INSECURE_BOOTSTRAP"
 // NodeId + NodeType are required for the default class="node" path;
 // the minted JWT binds to them via the standard NodeIssueInput.
 //
-// memql#342 extends the endpoint with optional TokenClass +
-// InstanceId so the Go voice-agent can self-bootstrap its
-// class="voice_agent" JWT through the same surface + bootstrap
-// secret. Backward-compatible: an empty TokenClass falls back to
-// the original class="node" mint path.
+// memql#342 extended the endpoint with an optional TokenClass so a
+// second credential class could self-bootstrap through the same
+// surface + bootstrap secret. Backward-compatible: an empty
+// TokenClass falls back to the original class="node" mint path.
 type NodeBootstrapRequest struct {
-	// NodeId is required on the class="node" path. Ignored on the
-	// class="voice_agent" path (the instance id takes its place in
-	// the JWT claims).
+	// NodeId is required on the class="node" path.
 	NodeId string `json:"nodeId"`
-	// NodeType is required on the class="node" path. Ignored on the
-	// class="voice_agent" path.
+	// NodeType is required on the class="node" path.
 	NodeType string `json:"nodeType"`
 	// TokenClass selects the JWT class to mint. Empty or "node"
-	// preserves the pre-#342 behavior; "voice_agent" mints a
-	// class="voice_agent" JWT.
+	// preserves the pre-#342 behavior; "app_session" mints the
+	// local-apps back-channel credential.
 	TokenClass string `json:"tokenClass,omitempty"`
-	// InstanceId is the operator-chosen voice-agent instance label
-	// (e.g. "voice-agent-prod-us-east-1"). Required when
-	// TokenClass="voice_agent"; ignored otherwise.
-	InstanceId string `json:"instanceId,omitempty"`
 	// OwnerUserId is the v1:identity:user this app-session credential
 	// ACTS AS. Required when TokenClass="app_session"; ignored
 	// otherwise. It becomes the JWT `sub`, which is what makes row
@@ -193,14 +185,12 @@ func (s *Server) handleNodeBootstrap(w http.ResponseWriter, r *http.Request) {
 	switch tokenClass {
 	case "node":
 		s.mintNodeBootstrapToken(w, r, body)
-	case "voice_agent":
-		s.mintVoiceAgentBootstrapToken(w, r, body)
 	case "app_session":
 		s.mintAppSessionCredential(w, r, body)
 	default:
 		writeJSON(w, http.StatusBadRequest, NodeBootstrapResponse{
 			Success:   false,
-			Error:     "tokenClass must be \"node\", \"voice_agent\" or \"app_session\", got " + tokenClass,
+			Error:     "tokenClass must be \"node\" or \"app_session\", got " + tokenClass,
 			ErrorCode: "bad_request",
 		})
 	}
@@ -431,74 +421,6 @@ func (s *Server) mintNodeBootstrapToken(w http.ResponseWriter, r *http.Request, 
 		IdentityId: identityId,
 		NodeType:   nodeType,
 		NodeId:     nodeId,
-		ExpiresAt:  expiresAt.Format(time.RFC3339),
-	})
-}
-
-// mintVoiceAgentBootstrapToken is the class="voice_agent" mint path
-// added by memql#342. Lets the Go voice-agent process self-
-// bootstrap its JWT through the same endpoint + bootstrap secret
-// the node binaries use, eliminating the voice-agent crash-loop
-// when the out-of-band mint step was skipped.
-//
-// Verifier contract: the voice-agent gRPC interceptor reads the
-// JWT's class + identity_id + node_id (voice-agent reuses the
-// NodeId claim slot for InstanceId per JWTIssuer's design) without
-// per-class cross-checks against persisted identity rows. The same
-// synthetic-IdentityId pattern the node path uses works here too.
-func (s *Server) mintVoiceAgentBootstrapToken(w http.ResponseWriter, r *http.Request, body NodeBootstrapRequest) {
-	instanceId := strings.TrimSpace(body.InstanceId)
-	if instanceId == "" {
-		writeJSON(w, http.StatusBadRequest, NodeBootstrapResponse{
-			Success:   false,
-			Error:     "instanceId is required for tokenClass=voice_agent",
-			ErrorCode: "bad_request",
-		})
-		return
-	}
-
-	syntheticIdentityId := "v1:identity:identity:voice_agent:" + instanceId
-
-	token, expiresAt, err := s.Issuer.IssueVoiceAgentAccessToken(identity.VoiceAgentIssueInput{
-		IdentityId: syntheticIdentityId,
-		InstanceId: instanceId,
-	}, time.Now().UTC())
-	if err != nil {
-		errorId := generateErrorId()
-		if s.Logger != nil {
-			s.Logger.Error("node_bootstrap_mint_failed",
-				"error_id", errorId,
-				"error", err.Error(),
-				"token_class", "voice_agent",
-				"instance_id", instanceId,
-			)
-		}
-		writeJSON(w, http.StatusInternalServerError, NodeBootstrapResponse{
-			Success:   false,
-			Error:     "voice-agent token mint failed; see identity logs (errorId=" + errorId + ")",
-			ErrorCode: "mint_failed",
-		})
-		return
-	}
-
-	if s.Logger != nil {
-		s.Logger.Info("node_bootstrap_issued",
-			"token_class", "voice_agent",
-			"instance_id", instanceId,
-			"identity_id", syntheticIdentityId,
-			"expires_at", expiresAt.Format(time.RFC3339),
-			"remote", clientIP(r),
-		)
-	}
-
-	// NodeId echoes the instance id on the voice-agent path so a
-	// single response struct serves both classes; NodeType stays
-	// empty (the voice-agent JWT doesn't carry a node-type claim).
-	writeJSON(w, http.StatusOK, NodeBootstrapResponse{
-		Success:    true,
-		PlainToken: token,
-		IdentityId: syntheticIdentityId,
-		NodeId:     instanceId,
 		ExpiresAt:  expiresAt.Format(time.RFC3339),
 	})
 }

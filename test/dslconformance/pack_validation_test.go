@@ -14,7 +14,7 @@ import (
 // deterministic regardless of test ordering or what other tests have
 // registered.
 func TestValidatePackDomain(t *testing.T) {
-	core := []string{"cognition", "common", "providers"}
+	core := []string{"library", "common", "providers"}
 	existing := []string{"exampleapp", "acmepack"}
 
 	t.Run("fresh unique domain accepted", func(t *testing.T) {
@@ -22,10 +22,10 @@ func TestValidatePackDomain(t *testing.T) {
 	})
 
 	t.Run("core domain collision rejected", func(t *testing.T) {
-		err := dsl.ValidatePackDomain("cognition", core, existing)
+		err := dsl.ValidatePackDomain("library", core, existing)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "core embedded domain")
-		assert.Contains(t, err.Error(), "cognition")
+		assert.Contains(t, err.Error(), "library")
 	})
 
 	t.Run("duplicate plugin domain rejected", func(t *testing.T) {
@@ -50,9 +50,9 @@ func TestValidatePackDomain(t *testing.T) {
 	})
 
 	t.Run("surrounding whitespace trimmed before checks", func(t *testing.T) {
-		// "  cognition  " trims to a core domain and must be rejected as
+		// "  library  " trims to a core domain and must be rejected as
 		// a collision, not accepted as a distinct name.
-		err := dsl.ValidatePackDomain("  cognition  ", core, existing)
+		err := dsl.ValidatePackDomain("  library  ", core, existing)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "core embedded domain")
 	})

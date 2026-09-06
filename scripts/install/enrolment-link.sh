@@ -18,9 +18,9 @@
 # WHY IT EXECS THE POD. At this instant nothing can AUTHENTICATE to the
 # cluster -- that is the problem being solved -- so the owner/admin issuer on
 # IdentityAdminMsg is out of reach by construction. What is available is the
-# authority `make voice-agent-token` already uses: somebody who can exec inside
-# the identity pod holds the cluster's secrets already. Access to the process
-# is the authorization.
+# authority `make node-token` already uses: somebody who can exec inside the
+# identity pod holds the cluster's secrets already. Access to the process is
+# the authorization.
 #
 # --local IS MANDATORY (exit 3 without it), for the same reason magic-link.sh
 # demands it: kubectl points at whatever context was last used, possibly

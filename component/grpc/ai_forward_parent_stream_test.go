@@ -100,8 +100,8 @@ func TestARefusedContinuationWithABadAuthorityLeavesTheParentTurnAlive(t *testin
 
 	svc.HandleForwardedRequest(context.Background(), &nodev1.AiForwardRequest{
 		RequestId: "req-parent",
-		MemqlEnvelope: envelopeBytes(t, &memqlv1.MemqlClientMessage_ClientToolResult{
-			ClientToolResult: &memqlv1.ClientToolResult{CallId: "call-1"},
+		MemqlEnvelope: envelopeBytes(t, &memqlv1.MemqlClientMessage_AiTranscribeStreamChunk{
+			AiTranscribeStreamChunk: &memqlv1.AiTranscribeStreamChunk{RequestId: "req-parent"},
 		}),
 		Continuation: true,
 		Authority: &nodev1.ForwardedAuthority{

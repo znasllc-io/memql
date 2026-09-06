@@ -3,15 +3,11 @@
 # A SECOND INSTANCE overlay, not a staging/prod split. overlays/cloud stays
 # on cnpg-db/presets/top + mesh 2 and is what deploy/argocd/apps/memql.yaml
 # points at. This directory is what a ZNAS (or client) Argo in its OWN
-# cluster reconciles: same base, same cnpg-db shape, entry sizes, mesh 1,
-# voice-off. Do not apply overlays/cloud to an entry install's resource group.
+# cluster reconciles: same base, same cnpg-db shape, entry sizes, mesh 1.
+# Do not apply overlays/cloud to an entry install's resource group.
 #
-# Voice-off is first-class replicas 0 on voice / voice-agent / livekit /
-# livekit-sip / mcp (and livekit-redis, which exists only for the sip
-# plane), AND the LiveKit Services held at ClusterIP (memql#4225) so that
-# no public IP is allocated for a plane that is not running. It is not
-# LiveKit NODE_IP=0.0.0.0 and not an all-zeros MCP digest -- those were
-# fail-closed placeholders for a running pin.
+# mcp is first-class replicas 0 -- not an all-zeros digest, which was a
+# fail-closed placeholder for a running pin.
 #
 # The generated front door lives in THIS directory (memql#4204).
 # cmd/frontdoorhosts writes front-door.generated.yaml here with the
@@ -69,14 +65,11 @@ patches:
           secretName: memql-wildcard-tls
 
   # Replica counts, STATED rather than inherited. Request-serving mesh
-  # nodes are 1. Voice-off is 0, not a leftover placeholder.
+  # nodes are 1; mcp is 0, not a leftover placeholder.
   - target: { kind: Deployment, name: identity }
     patch: |
       - { op: replace, path: /spec/replicas, value: 1 }
   - target: { kind: Deployment, name: bff }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 1 }
-  - target: { kind: Deployment, name: cognition }
     patch: |
       - { op: replace, path: /spec/replicas, value: 1 }
   - target: { kind: Deployment, name: agent }
@@ -92,21 +85,6 @@ patches:
     patch: |
       - { op: replace, path: /spec/replicas, value: 1 }
   - target: { kind: Deployment, name: mcp }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 0 }
-  - target: { kind: Deployment, name: voice }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 0 }
-  - target: { kind: Deployment, name: voice-agent }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 0 }
-  - target: { kind: Deployment, name: livekit }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 0 }
-  - target: { kind: Deployment, name: livekit-sip }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 0 }
-  - target: { kind: Deployment, name: livekit-redis }
     patch: |
       - { op: replace, path: /spec/replicas, value: 0 }
 
@@ -133,8 +111,8 @@ patches:
   # is not approached.
   #
   # bff is deliberately absent: components/engine-bff already declares
-  # maxUnavailable 0 / maxSurge 1, and the voice-off deployments are absent
-  # because a rollout of zero replicas rolls nothing.
+  # maxUnavailable 0 / maxSurge 1, and mcp is absent because a rollout of zero
+  # replicas rolls nothing.
   #
   # THE SECOND HALF IS NOT OPTIONAL. `maxUnavailable: 0` is only honest if a
   # surge pod can actually be placed, and at 200m x 6 on a two-node 2-vCPU pool
@@ -143,7 +121,7 @@ patches:
   # right-sizing below is what makes room for it. One defect, two patches.
   - target:
       kind: Deployment
-      name: (identity|cognition|agent|planner|workbench|edge)
+      name: (identity|agent|planner|workbench|edge)
     patch: |
       - { op: replace, path: /spec/strategy/rollingUpdate/maxUnavailable, value: 0 }
       - { op: replace, path: /spec/strategy/rollingUpdate/maxSurge, value: 1 }
@@ -157,8 +135,8 @@ patches:
   #   pool total     72-78%     3-4%
   #
   # 50m is still ~4x the busiest node's CPU and 128Mi ~2.3x its memory, so this
-  # is headroom, not a squeeze. It reserves 300m/768Mi across the six instead of
-  # 1200m/1536Mi, which is what leaves a 2-vCPU pool able to place the surge
+  # is headroom, not a squeeze. It reserves 250m/640Mi across the five instead
+  # of 1000m/1280Mi, which is what leaves a 2-vCPU pool able to place the surge
   # replica the strategy above now asks for.
   #
   # REQUESTS ONLY -- no limits. A CPU limit throttles rather than fails, which
@@ -167,92 +145,13 @@ patches:
   # overlays/cloud, whose pool is not the constraint.
   - target:
       kind: Deployment
-      name: (identity|cognition|agent|planner|workbench|edge)
+      name: (identity|agent|planner|workbench|edge)
     patch: |
       - op: replace
         path: /spec/template/spec/containers/0/resources/requests
         value:
           cpu: 50m
           memory: 128Mi
-
-  # VOICE-OFF, PART TWO: NO PUBLIC IPs (memql#4225). Replicas 0 above stops
-  # the pods; it does not stop Azure allocating a public IP for every
-  # LoadBalancer Service base declares for the media plane (livekit-rtc)
-  # and the SIP plane (livekit-sip). The first entry install converted both
-  # to ClusterIP by hand, and the next Argo sync of this overlay was refused:
-  #
-  #   Service "livekit-rtc" is invalid: spec.externalTrafficPolicy: Invalid
-  #   value: "Local": may only be set for externally-accessible services
-  #
-  # because the overlay still wanted LoadBalancer + externalTrafficPolicy
-  # Local, and a ClusterIP Service cannot carry that field (nor
-  # loadBalancerSourceRanges, nor the Azure mixed-protocol annotation). The
-  # Application stayed OutOfSync/Failed with every pin inside it correct.
-  # So voice-off is ONE decision, stated here for the Services as it is
-  # above for the replicas: type ClusterIP, every LoadBalancer-only field
-  # removed. `remove`, not `replace`-to-empty, so a base that stops
-  # declaring a field fails this render loudly instead of leaving a silent
-  # no-op behind. overlays/cloud keeps voice on and is untouched; the
-  # `livekit` signaling Service is ClusterIP in base already.
-  # Gated by ../livekit_entry_voice_off_test.go (text, cannot skip) and
-  # ../render_cloud_entry_test.go (rendered).
-  - target: { kind: Service, name: livekit-rtc }
-    patch: |
-      - { op: replace, path: /spec/type, value: ClusterIP }
-      - { op: remove, path: /spec/externalTrafficPolicy }
-      - { op: remove, path: /metadata/annotations/service.beta.kubernetes.io~1azure-load-balancer-mixed-protocols }
-  - target: { kind: Service, name: livekit-sip }
-    patch: |
-      - { op: replace, path: /spec/type, value: ClusterIP }
-      - { op: remove, path: /spec/externalTrafficPolicy }
-      - { op: remove, path: /spec/loadBalancerSourceRanges }
-      - { op: remove, path: /metadata/annotations/service.beta.kubernetes.io~1azure-load-balancer-mixed-protocols }
-
-  # VOICE-OFF, PART THREE: THE VOICE KEY VAULT ENTRIES ARE NOT THERE EITHER
-  # (memql#4487). base ships externalsecret-livekit.yaml and
-  # externalsecret-telephony.yaml, which resolve `livekit-keys`,
-  # `polyphon-livekit-api-key`, `polyphon-livekit-api-secret`,
-  # `telnyx-api-key` and `telnyx-connection-id` out of kv-<install>. On a
-  # voice-off install those entries DELIBERATELY do not exist, so ESO reports
-  # SecretSyncedError on both objects and the Application is `Degraded`
-  # forever -- on a correctly installed cluster, by design.
-  #
-  # THE COST IS NOT THE RED STATUS. azure-entry-install.md used to write this
-  # down as expected noise, which is the actual defect: an operator who learns
-  # that Degraded is normal will not see a real degradation. Health that is
-  # always red carries no information.
-  #
-  # So enablement is a fact about the DESIRED state rather than a tolerated
-  # failure of the live state: the render includes a module's infrastructure
-  # objects IFF the module is enabled. Voice-off already means replicas 0 and
-  # ClusterIP Services; it means these two objects are not rendered either.
-  # Turning voice ON for an entry install is the reverse, in one order: seed
-  # the five Key Vault entries, THEN drop these two patches. Doing it the
-  # other way round reproduces exactly the Degraded this removes.
-  #
-  # A strategic-merge `$patch: delete`, the same shape overlays/local uses for
-  # the same two objects (there because ESO and Key Vault do not exist
-  # locally, here because the entries deliberately do not). Gated by
-  # ../externalsecrets_test.go (text-level, cannot skip) and
-  # ../render_cloud_entry_test.go (rendered).
-  - target:
-      kind: ExternalSecret
-      name: livekit-secrets
-    patch: |
-      $patch: delete
-      apiVersion: external-secrets.io/v1
-      kind: ExternalSecret
-      metadata:
-        name: livekit-secrets
-  - target:
-      kind: ExternalSecret
-      name: telephony-secrets
-    patch: |
-      $patch: delete
-      apiVersion: external-secrets.io/v1
-      kind: ExternalSecret
-      metadata:
-        name: telephony-secrets
 
   # The domain is delivered by the components/domain-derive component at the
   # bottom of this file (memql#4281), not by a patch here. It used to be a
@@ -382,10 +281,6 @@ images:
     digest: sha256:3a888674e20440f54ee7f25b9ed9cb739bb478e45d662df0a94a53bf10ee15c5
   - name: acrmemql.azurecr.io/memql-bff
     digest: sha256:b89d84d5d5426f70e130709401a3857636c4ecadfe398c3174c069e34fd8c4cf
-  - name: acrmemql.azurecr.io/memql-cognition
-    digest: sha256:1ef3dcf46aa5a9eb72e3a240493da5393bea35b477bcce822cf5ef36cd5536b2
-  - name: acrmemql.azurecr.io/memql-voice
-    digest: sha256:be300fd9634f180ee39394fe81055789386d29272d63dc7916df6dbcef2c90dd
   - name: acrmemql.azurecr.io/memql-agent
     digest: sha256:a7ee07986339bab2aa5ad2d62a97402d002491e1015dfba366db20658bec0905
   - name: acrmemql.azurecr.io/memql-planner
@@ -394,15 +289,6 @@ images:
     digest: sha256:53b93f05d82052e1a30039c7f0c48f443d7f78b6f80b47d938eb635fe843827e
   - name: acrmemql.azurecr.io/memql-edge
     digest: sha256:62774e4a756446cb930f9f1cec912ef0806c86d724820a17bbf9f8bdbbef3e8c
-  - name: livekit/livekit-server
-    newName: livekit/livekit-server
-    digest: sha256:9e34703b97ceb9f622bcbb533107e4786c7aa65966f0494966a452ad41a0c0d4
-  - name: livekit/sip
-    newName: livekit/sip
-    digest: sha256:f8621da1f203ba46e567f08311771ee5f77b0f93aad3eb7f24aaf93067f253cc
-  - name: redis
-    newName: redis
-    digest: sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
 
 components:
   - ../../components/engine-bff

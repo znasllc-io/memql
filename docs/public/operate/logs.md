@@ -23,7 +23,7 @@ of [the Deployables program](../../superpowers/specs/2026-09-02-deployables-prog
 
 | Source | How it gets there | What it carries |
 |---|---|---|
-| Every node type (identity, bff, cognition, agent, planner, voice, workbench, mcp, edge) | An `slog.Handler` installed beside the console handler by `core/logger`, forwarding to a bounded, non-blocking sink in `component/logstore` that batches into the `log_line` hypertable | time, node type, node id, level, component, message, every other attribute (already through the console redactor), and `subject` |
+| Every node type (identity, bff, agent, planner, workbench, mcp, edge) | An `slog.Handler` installed beside the console handler by `core/logger`, forwarding to a bounded, non-blocking sink in `component/logstore` that batches into the `log_line` hypertable | time, node type, node id, level, component, message, every other attribute (already through the console redactor), and `subject` |
 | The MemQL OS front end | The shell's capture module: window errors, unhandled rejections, `console.error` and `console.warn`, batched and sent over the connection the OS already holds through `logsRecordClient` | the app id and section of the focused window, the page, a per-tab session id, and the user, stamped server-side |
 | The pipelines that name a subject | `logger.Subject(concept, id)` on the line | `subject` and `subjectConcept`: the deployment, site, plan or user the line is about |
 

@@ -15,7 +15,7 @@ MemQL is the query and mutation language that powers the memory engine. It provi
 
 ## When to Use MemQL
 
-- Retrieving concept instances (agents, spaces, participants, etc.) with filterable JSON payloads.
+- Retrieving concept instances (agents, artifacts, plans, etc.) with filterable JSON payloads.
 - Traversing graph-like relationships — parent/child hierarchies, containment, aliasing, ownership, and provenance edges (see [Relationships](#relationships)).
 - Inserting new immutable records via mutations.
 
@@ -36,8 +36,8 @@ The DSL tree is flattened per construct: every namespace gets one directory unde
 
 ```
 dsl/
-├── cognition/
-│   ├── concepts.memql      → v1:cognition:* concept schemas
+├── library/
+│   ├── concepts.memql      → v1:library:* concept schemas
 │   ├── queries.memql       → named queries
 │   ├── mutations.memql     → named mutations
 │   ├── shapes.memql        → projections
@@ -148,7 +148,7 @@ Consumers should check for the presence of `errors` before operating on the resu
 
 ## Concepts
 
-Concepts are schemas for nodes (like tables in SQL). Each concept is declared in struct form in `dsl/<namespace>/concepts.memql`. The full concept id is derived from the `@namespace` annotation plus the construct name: `@namespace("cognition")` + `concept space` → `v1:cognition:space`. Nested namespaces are colon-delimited (`@namespace("cognition:text")` + `concept chunk` → `v1:cognition:text:chunk`). Each segment must be a single lowercase alphanumeric word; invalid names cause the loader to reject the concept.
+Concepts are schemas for nodes (like tables in SQL). Each concept is declared in struct form in `dsl/<namespace>/concepts.memql`. The full concept id is derived from the `@namespace` annotation plus the construct name: `@namespace("library")` + `concept folder` → `v1:library:folder`. Nested namespaces are colon-delimited (`@namespace("library:text")` + `concept chunk` → `v1:library:text:chunk`). Each segment must be a single lowercase alphanumeric word; invalid names cause the loader to reject the concept.
 
 Cross-domain references are imported with a file-top
 `use <domain>.<construct>.{ names }` line. Constructs of the file's
@@ -158,15 +158,15 @@ gate keeps redundant same-domain imports out of the corpus.
 ```memql
 use agents.concepts.{ agent }
 
-@namespace("cognition")
-/// Per-(spaceId, agentId) audio control override.
-concept audioOverride {
-  spaceId  string  @required @description("v1:cognition:space.id this override is scoped to.")
-  agentId  string  @required @description("v1:agents:agent.id this override targets.")
-  mode     enum("always_on", "always_off", "mirror_user")  @required
-  active   bool    @default("true") @description("Soft-revoke flag.")
+@namespace("library")
+/// Per-(folderId, agentId) retention override.
+concept retentionOverride {
+  folderId  string  @required @description("v1:library:folder.id this override is scoped to.")
+  agentId   string  @required @description("v1:agents:agent.id this override targets.")
+  mode      enum("keep_forever", "keep_one_year", "inherit")  @required
+  active    bool    @default("true") @description("Soft-revoke flag.")
 
-  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
+  @relationship(type="parent", field="folderId", target=folder, direction="outgoing")
   @relationship(type="references", field="agentId", target=agent, direction="outgoing")
 }
 ```
@@ -249,7 +249,7 @@ So `blocks []object @variant(discriminator="kind") { … }` validates every bloc
 
 > `@minLength` / `@maxLength` remain a **character** count on the element, not an element count. There is still no way to bound the length of an array itself.
 
-**Cross-concept references** are plain string fields holding the target's id (e.g. `spaceId string`), optionally paired with an `@relationship` annotation so the engine can traverse the edge.
+**Cross-concept references** are plain string fields holding the target's id (e.g. `folderId string`), optionally paired with an `@relationship` annotation so the engine can traverse the edge.
 
 > **Retired.** The per-concept `concept.json` metadata file (with `type`, `skipDeleted`, `defaultFilter`, `cacheTTLSeconds`, `relationships` keys) is gone — concept schema, description, and relationships are all declared in the `.memql` construct shown above.
 
@@ -258,7 +258,7 @@ So `blocks []object @variant(discriminator="kind") { … }` validates every bloc
 The `@relationship` annotation inside a concept body declares a graph edge:
 
 ```memql fragment
-@relationship(type="parent", field="spaceId", target=space, direction="outgoing")
+@relationship(type="parent", field="folderId", target=folder, direction="outgoing")
 ```
 
 - `type` — how MemQL interprets the edge (see table below).
@@ -291,7 +291,7 @@ identifier is valid, it is validated for *form* only and never checked against a
 list, and it is optional.
 
 ```memql
-concept participant {
+concept assignment {
   agentId    string
   forUserId  string
 
@@ -320,7 +320,7 @@ type="references", as="assignedTo"
 ```
 
 `as` is optional everywhere, including on structural types
-(`type="parent" as="belongsToSpace"` is legal). Two edges may share a label; a
+(`type="parent" as="filedUnder"` is legal). Two edges may share a label; a
 label-scoped traversal returns their union.
 
 A label is not write-only metadata: it is readable from a query (see
@@ -329,7 +329,7 @@ A label is not write-only metadata: it is readable from a query (see
 
 **Common Mistake: Confusing `parent` vs `child`**
 
-When a concept has a field that points TO another concept (like `spaceId` pointing to a space), use `type="parent"`. The relationship type describes the direction from the current node's perspective.
+When a concept has a field that points TO another concept (like `folderId` pointing to a folder), use `type="parent"`. The relationship type describes the direction from the current node's perspective.
 
 **Rule of thumb:**
 - If concept A has a field storing concept B's ID → A declares `type="parent"` pointing to B
@@ -397,7 +397,7 @@ tree, err := memEngine.Execute(ctx, `
 
 ### WebSocket Stream
 
-Browser clients connect to `/memql/ws`, which upgrades to a long-lived WebSocket and forwards frames to the `MemqlService.Stream` gRPC method. Bearer and guest credentials travel as WebSocket subprotocols (`new WebSocket(url, ["bearer", jwt])` -- the `Sec-WebSocket-Protocol` header, which stays out of request-line access logs); the `memql_auth` cookie is honored automatically, and the older `?bearer_token=` / `?token=` / `?guest_token=` query params remain accepted but are deprecated.
+Browser clients connect to `/memql/ws`, which upgrades to a long-lived WebSocket and forwards frames to the `MemqlService.Stream` gRPC method. The bearer credential travels as a WebSocket subprotocol (`new WebSocket(url, ["bearer", jwt])` -- the `Sec-WebSocket-Protocol` header, which stays out of request-line access logs); the `memql_auth` cookie is honored automatically, and the older `?bearer_token=` / `?token=` query params remain accepted but are deprecated.
 
 Frames are JSON encodings of the existing protobuf envelopes. A typical request/response pair looks like:
 
@@ -575,7 +575,7 @@ Relationship expressions wrap another MemQL query and expand results through con
 | `owns(expr)`    | Resolves ownership links in both directions.                                                             |
 | `aliasOf(expr)` | Collects nodes sharing alias groups.                                                                     |
 | `equals(expr)`  | Follows equality relationships similar to alias.                                                         |
-| `references(expr)` | Traverses recorded interaction edges (e.g., conversation participants).                            |
+| `references(expr)` | Traverses recorded interaction edges (e.g., the agent a run was assigned to).                      |
 | `createdBy(expr)` | Resolves creator nodes using payload or table-backed metadata.                                         |
 | `ids(expr)`     | Returns lightweight nodes (no payload/schema) useful for identifier lists.                               |
 
@@ -588,7 +588,7 @@ traversal to.
 ```
 references(expr)                    # every references edge
 references("respondsAs", expr)      # only the edges labelled respondsAs
-parentOf("belongsToSpace", expr)       # structural types take it too
+parentOf("filedUnder", expr)           # structural types take it too
 ```
 
 - The one-argument form is unchanged: it follows every edge of that type.
@@ -709,13 +709,13 @@ Each shape declares its **kind** (where its fields come from) via `@row` and/or 
 **Row shapes** project a concept's payload + row intrinsics. The bound concept is named by the **signature** `shape <Concept> <name>` (the short name resolves through the file-top `use ...concepts.{ ... }` import):
 
 ```memql
-use cognition.concepts.{ audioOverride }
+use library.concepts.{ retentionOverride }
 
 @row
-/// Per-(space, agent) audio override projection
-shape audioOverride audioOverrideFull {
+/// Per-(folder, agent) retention override projection
+shape retentionOverride retentionOverrideFull {
   row.id
-  spaceId
+  folderId
   agentId
   mode
   active
@@ -791,7 +791,7 @@ The legacy `func (Provider) name { ... }` form is retired; the parser rejects it
 
 ### Policies
 
-The live `policy` construct is an **AI provider-selection record**: empty-bodied, annotated with `@primary` / `@fallback` / `@maxLatencyMs` / `@preferredRole`, consolidated in `dsl/policies/policies.memql` and consumed by the AI Router to pick chat/voice/embedding providers:
+The live `policy` construct is an **AI provider-selection record**: empty-bodied, annotated with `@primary` / `@fallback` / `@maxLatencyMs` / `@preferredRole`, consolidated in `dsl/policies/policies.memql` and consumed by the AI Router to pick chat and embedding providers:
 
 ```memql
 @primary("streamClaudeSonnet")
@@ -810,12 +810,12 @@ AI prompt templates with input schemas and default providers live in `dsl/<names
 
 ```memql
 @defaultProvider("chat54Mini")
-@templateFile("prompts/cognitionPrediction.tmpl")
-/// Predict conversation trajectory for proactive cognition behavior
-prompt cognitionPrediction {
-  transcript  []object! @description("Recent transcript entries with speakerName, speakerType, text")
-  agents      []object! @description("Available AI agents with name, role, and domains")
-  phase       string    @description("Conversation phase off the session state machine.")
+@templateFile("prompts/planStep.tmpl")
+/// Choose the next step for an in-flight run
+prompt planStep {
+  run       object!   @description("The run row being advanced.")
+  steps     []object! @description("Steps already recorded, newest first.")
+  phase     string    @description("Phase off the run's own state machine.")
   // ... one entry per variable the template renders; see the file for the full list
 }
 ```
@@ -946,16 +946,16 @@ concept==v1:lead && classification==nil
 Named mutations live in `dsl/<namespace>/mutations.memql`. The concept binding lives in the signature (`mutate <Concept> <name>`); the body carries an `args { ... }` block plus exactly one `insert { ... }` **or** `update { ... }` block (one write per body):
 
 ```memql
-use cognition.concepts.{ space }
+use library.concepts.{ folder }
 
-/// Insert a new version of a space record (typically used to archive a space).
-mutate space archiveSpace {
+/// Insert a new version of a folder record (typically used to archive a folder).
+mutate folder archiveFolder {
   args {
-    spaceId  string  @required
-    payload  object  @required
+    folderId  string  @required
+    payload   object  @required
   }
   insert {
-    id: args.spaceId
+    id: args.folderId
     ownerUserId: actor.userId
     args.payload
   }
@@ -978,11 +978,11 @@ Specs are atomic boolean predicates, declared in struct form in `dsl/<namespace>
 A spec body never reads `actor.*` / `row.*` directly — bind a shape that projects it and read the projected key bare. The `@shape("name")` annotation is **removed**; the binding moved to the signature.
 
 ```memql fragment
-use cognition.concepts.{ participant }
+use library.concepts.{ artifact }
 
-/// Matches guest participants
-spec participant isGuestParticipant {
-  return isGuest == true
+/// Matches archived artifacts
+spec artifact isArchivedArtifact {
+  return archived == true
 }
 
 use common.shapes.{ actorEnvelope }
@@ -1011,7 +1011,7 @@ When a trait covers a predicate (e.g. `isActiveRecord` for `active==true`), **us
 Specs and traits are referenced by bare name inside DSL query filter clauses:
 
 ```memql fragment
-filter  spaceId==args.spaceId && isHumanParticipant && isActiveRecord
+filter  folderId==args.folderId && isGeneratedOutput && isActiveRecord
 ```
 
 During load the engine resolves every spec reference into the underlying expression tree, so the resulting query plan behaves exactly as if the spec contents were written inline. Spec dependencies are resolved at load; cycles and duplicates are rejected.
@@ -1023,19 +1023,19 @@ During load the engine resolves every spec reference into the underlying express
 Named queries are reusable, parameterized reads, declared in struct form in `dsl/<namespace>/queries.memql`. The signature `query <Concept> <name>` binds the concept; cross-file dependencies (concepts, shapes, traits, specs) come in via file-top `use` imports:
 
 ```memql
-use cognition.concepts.{ participant }
-use cognition.shapes.{ participantFull }
+use library.concepts.{ artifact }
+use library.shapes.{ artifactFull }
 use common.traits.{ isActiveRecord }
 
-/// Get space participants
-query participant spaceParticipants {
+/// Get artifacts filed under a folder
+query artifact folderArtifacts {
   args {
-    spaceId          string
-    status           string  @enum("active", "idle", "left")
-    participantType  string  @enum("human", "si")
+    folderId  string
+    lens      string  @enum("artifact", "record")
+    kind      string  @enum("document", "note", "file")
   }
-  filter  when(args.spaceId) { spaceId==args.spaceId } && when(args.status) { status==args.status } && when(args.participantType) { participantType==args.participantType } && isActiveRecord
-  shape   participantFull
+  filter  when(args.folderId) { folderId==args.folderId } && when(args.lens) { lens==args.lens } && when(args.kind) { kind==args.kind } && isActiveRecord
+  shape   artifactFull
 }
 ```
 
@@ -1049,15 +1049,15 @@ editor level, not the source level.
 Body directives: `filter` (the predicate), `shape` (named projection), and optional `sort "field", "dir"` / `paginate N` lines:
 
 ```memql
-/// Returns the latest space-context row for a given spaceId
-query context latestSpaceContextForSpace {
+/// Returns the latest run recorded against a given goal
+query run latestRunForGoal {
   args {
-    spaceId  string  @required
+    goalId  string  @required
   }
-  filter  spaceId==args.spaceId
+  filter  goalId==args.goalId
   sort    "row.createdAt", "desc"
   paginate 1
-  shape   spaceContextFull
+  shape   workRunFull
 }
 ```
 
@@ -1096,12 +1096,12 @@ query node nodesAt {        // asOf <ts> -> deterministic, no marker
 Every construct another file pulls into local scope is declared via a dotted-path import at file top:
 
 ```memql fragment
-use cognition.concepts.{ participant, space }
-use cognition.shapes.{ participantFull }
+use library.concepts.{ artifact, folder }
+use library.shapes.{ artifactFull }
 use common.traits.{ isActiveRecord, isNotDeleted }
 ```
 
-The dotted path maps to a file on disk (`cognition.concepts` → `dsl/cognition/concepts.memql`); the brace list names the constructs imported into local scope.
+The dotted path maps to a file on disk (`library.concepts` → `dsl/library/concepts.memql`); the brace list names the constructs imported into local scope.
 
 #### Aliasing an import (`as`)
 
@@ -1145,8 +1145,8 @@ coexist and there is nothing to alias between.
 
 > **Retired.** The `@use*` annotation family (`@useConcept`, `@useShape`, `@useQuery`, `@useMutation`, `@useLogic`, `@useBuiltin`, ...) is retired and rejected at parse time with a migration-pointing error. The concept binding lives in the construct signature; everything else comes in through `use` imports.
 >
-> The old **Form A** alias (`use cognition.space as s`) is also retired: the
-> alias goes inside the brace list now, `use cognition.concepts.{ space as s }`.
+> The old **Form A** alias (`use library.folder as f`) is also retired: the
+> alias goes inside the brace list now, `use library.concepts.{ folder as f }`.
 
 ### Doc Comments (`///`) -- the preferred description spelling
 
@@ -1210,17 +1210,17 @@ Named queries and mutations are invoked from runtime query strings as function c
 
 ```memql fragment
 -- No args (returns all matching records)
-queryActiveSpaces()
+activeFolders()
 
 -- With filters
-spaceParticipants(spaceId: "space-456", status: "active")
+folderArtifacts(folderId: "folder-456", lens: "artifact")
 
 -- Combine with directives
-sort(spaceUtterances(spaceId: "s-1"), "createdAt", "desc")
-paginate(queryActiveSpaces(userId: "u-1"), 10)
+sort(folderArtifacts(folderId: "f-1"), "createdAt", "desc")
+paginate(activeFolders(ownerId: "u-1"), 10)
 ```
 
-The parentheses make functions immediately recognizable: `isActiveRecord` (no parens) is a spec/trait reference inside a DSL filter; `queryActiveSpaces()` (parens) is a function call.
+The parentheses make functions immediately recognizable: `isActiveRecord` (no parens) is a spec/trait reference inside a DSL filter; `activeFolders()` (parens) is a function call.
 
 ### Argument Validation
 
@@ -1235,19 +1235,19 @@ Example validation errors:
 
 ```json
 {
-  "error": "function 'queryActiveSpaces': argument validation failed: status: expected string"
+  "error": "function 'activeFolders': argument validation failed: status: expected string"
 }
 ```
 
 ```json
 {
-  "error": "function 'spaceParticipants': argument validation failed: participantType: value must be one of \"human\", \"si\""
+  "error": "function 'folderArtifacts': argument validation failed: lens: value must be one of \"artifact\", \"record\""
 }
 ```
 
 ### Function Rules
 
-- One consolidated `queries.memql` / `mutations.memql` file per namespace. The declaration name carries **no kind prefix** (memql#2853) -- name it for what it does (`activeSpaces`, `createSpace`); the `query` / `mutate` keyword already marks the kind. See [naming-conventions.md](naming-conventions.md).
+- One consolidated `queries.memql` / `mutations.memql` file per namespace. The declaration name carries **no kind prefix** (memql#2853) -- name it for what it does (`activeFolders`, `createFolder`); the `query` / `mutate` keyword already marks the kind. See [naming-conventions.md](naming-conventions.md).
 - Functions can reference specs and traits (loaded after specs) and call other functions; circular dependencies are detected and rejected at load time.
 - Comments use `//`; construct descriptions come from `@description("...")`.
 
@@ -1260,15 +1260,15 @@ The struct-form rewriter expands every author-side construct to a `func (Receive
 Logic constructs are imperative procedures called from automation steps (or other logic). `args { ... }` declares inputs; `body { ... }` is a sequence of named statements ending in `return <expr>`:
 
 ```memql
-use common.builtins.{ ensureDailySpaceForUser }
+use common.builtins.{ ensureKnowledgeBridge }
 
-/// On user creation, ensure today's daily space exists.
-logic provisionDailySpaceOnUserCreate {
+/// On document creation, make sure its knowledge bridge exists.
+logic provisionBridgeOnDocumentCreate {
   args {
     event object @required
   }
   body {
-    return ensureDailySpaceForUser(userId: args.event.payload.id)
+    return ensureKnowledgeBridge(documentId: args.event.payload.id)
   }
 }
 ```
@@ -1276,17 +1276,17 @@ logic provisionDailySpaceOnUserCreate {
 Multi-statement bodies use `name := <call>` steps followed by a trailing `return <expr>`. Step results support iteration and result accessors, and steps can be gated with `if`:
 
 ```memql
-/// Daily sweep that hard-deletes archived spaces whose retention window has elapsed.
-logic purgeExpiredArchivedSpaces {
+/// Daily sweep that hard-deletes archived folders whose retention window has elapsed.
+logic purgeExpiredArchivedFolders {
   args {
     event object @required
   }
   body {
-    expired := queryExpiredArchivedSpaces(asOf: now)
+    expired := expiredArchivedFolders(asOf: now)
 
     for item := range expired.nodes() {
-      deleteStep := mutationDeleteSpaceNow(
-        spaceId: item.id,
+      deleteStep := deleteFolderNow(
+        folderId: item.id,
         payload: {
           name: item.payload.name,
           status: "archived",
@@ -1385,13 +1385,13 @@ The tool loop binds tool-call args to handler args and forwards. The legacy `fun
 Automations are event- or schedule-triggered workflows declared in `dsl/<namespace>/automations.memql`. The body is a list of `step` blocks; steps call logic, named mutations/queries, or builtins:
 
 ```memql
-use cognition.logic.{ bootstrapSession }
+use library.logic.{ indexArtifact }
 
-@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
-/// Auto-creates a session when a participant joins a space
-automation bootstrapSession {
+@trigger(event="node.created", concept="v1:library:file", partition="*")
+/// Indexes a file into the Library the moment its row lands
+automation indexArtifact {
   step run {
-    logic bootstrapSession { event: event }
+    logic indexArtifact { event: event }
   }
 }
 ```
@@ -1400,8 +1400,8 @@ automation bootstrapSession {
 
 | Form | Example | Fires |
 |------|---------|-------|
-| Node event | `@trigger(event="node.created", concept="v1:cognition:space", partition="*")` | When a node of the concept is created (`node.updated` / `node.deleted` likewise) |
-| Custom topic | `@trigger(event="cognition.response.requested")` | When the named application event is published |
+| Node event | `@trigger(event="node.created", concept="v1:library:folder", partition="*")` | When a node of the concept is created (`node.updated` / `node.deleted` likewise) |
+| Custom topic | `@trigger(event="library.artifact.indexed")` | When the named application event is published |
 | Lifecycle | `@trigger(event="system.startup")` / `@trigger(event="system.shutdown")` | At engine start/stop |
 | Schedule | `@trigger(schedule="0 0 2 * * *")` | On a 6-field cron schedule (seconds first) |
 
@@ -1591,7 +1591,7 @@ Returns a minimal list of every enabled registered function -- queries, mutation
   "payload": {
     "functions": [
       {"name": "queryActiveSpaces", "description": "Returns active spaces", "kind": "query"},
-      {"name": "mutationCreateSpace", "description": "Creates a space", "kind": "mutation"},
+      {"name": "createLibraryFolder", "description": "Creates a folder", "kind": "mutation"},
       {"name": "similarTo", "description": "Semantic similarity search", "kind": "builtin"}
     ],
     "count": 3
@@ -1643,8 +1643,8 @@ Lists available shape templates for result projection. Optionally filter by conc
 
 ```
 shapeTemplates()                                   -- All shapes
-shapeTemplates("v1:cognition:participant")         -- Filter by concept (string shortcut)
-shapeTemplates({"concept": "v1:cognition:participant"})  -- Filter by concept (object)
+shapeTemplates("v1:library:artifact")             -- Filter by concept (string shortcut)
+shapeTemplates({"concept": "v1:library:artifact"})   -- Filter by concept (object)
 ```
 
 Each entry includes only `name` and `description`. Use `shapeHelp(name)` to get full template details.
@@ -1654,8 +1654,8 @@ Each entry includes only `name` and `description`. Use `shapeHelp(name)` to get 
 Returns full details for a shape template by name, including the projected field structure and input schema:
 
 ```
-shapeHelp("participantFull")
-shapeHelp({"name": "participantFull"})
+shapeHelp("artifactFull")
+shapeHelp({"name": "artifactFull"})
 ```
 
 Agents can use `shapeHelp()` to understand the exact projection before calling a query that uses the shape.
@@ -2051,23 +2051,23 @@ insert("concept", id="id", payload={...})
 ### DSL Construct Cheat Sheet
 
 ```memql
-use cognition.concepts.{ participant }
-use cognition.shapes.{ participantFull }
+use library.concepts.{ artifact }
+use library.shapes.{ artifactFull }
 use common.traits.{ isActiveRecord }
 
-query participant x {
-  args { spaceId string @required }
-  filter spaceId==args.spaceId && isActiveRecord
-  shape participantFull
+query artifact x {
+  args { folderId string @required }
+  filter folderId==args.folderId && isActiveRecord
+  shape artifactFull
 }
 
-mutate space createSpace {
+mutate folder createFolder {
   args {
-    spaceId string @required
+    folderId string @required
     name string @required
   }
   insert {
-    id: args.spaceId
+    id: args.folderId
     name: args.name
     status: "active"
     createdAt: now
@@ -2075,13 +2075,13 @@ mutate space createSpace {
   }
 }
 
-spec participant isGuestParticipant { return isGuest == true }
+spec artifact isArchivedArtifact { return archived == true }
 
 @row
-shape participant participantCard { row.id  displayName }
+shape artifact artifactCard { row.id  title }
 
-@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
-automation bootstrapSession { step run { logic bootstrapSession ( event ) } }
+@trigger(event="node.created", concept="v1:library:file", partition="*")
+automation indexArtifact { step run { logic indexArtifact ( event ) } }
 ```
 
 ### Example Patterns
@@ -2094,10 +2094,10 @@ concept==v1:user && active==true
 concept==v1:user && createdAt>"2025-01-01T00:00:00Z"
 
 // Call a DSL-defined query with args
-spaceParticipants(spaceId: "space-123", status: "active")
+folderArtifacts(folderId: "folder-123", lens: "artifact")
 
 // Sorted, paginated function call
-sort(paginate(queryActiveSpaces(), 10), "createdAt", "desc")
+sort(paginate(activeFolders(), 10), "createdAt", "desc")
 ```
 
 Use this reference when constructing MemQL queries. Always validate syntax and concept paths against the engine's response.

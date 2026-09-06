@@ -19,7 +19,7 @@ Resolves [#691](https://github.com/znasllc-io/memql/issues/691); part of epic
 ## Why this exists (the #691 problem)
 
 The deep-smoke gate needs to run a **real authenticated query** against the BFF
-(`/memql/ws` → `MemqlService.Stream` → cognition/agent) to prove the
+(`/memql/ws` → `MemqlService.Stream` → agent) to prove the
 authenticated app path actually works. The obvious credential — a PAT
 (`mql_pat_…`) — **does not work there**:
 
@@ -33,7 +33,7 @@ authenticated app path actually works. The obvious credential — a PAT
                                                      the hot path.
 
   So:  PAT ──► identity node      = OK (DB lookup of the PAT hash)
-       PAT ──► BFF / cognition…   = 401  "PAT path not wired on this node"
+       PAT ──► BFF / agent…       = 401  "PAT path not wired on this node"
 ```
 
 A JWT, by contrast, is verified by the **JWKS path** that *every* node already
@@ -47,18 +47,18 @@ JWTs are the **machine** credential.
 
 MemQL stamps a `class` claim on identity-issued JWTs; each class is admitted by
 a dedicated interceptor that **pins the surface** it may use. Service-account
-joins `node` (#105) and `voice_agent` (#109) as a machine class.
+joins `node` (#105) as a machine class.
 
 ```
                          identity service (Ed25519 signing key, JWKS published)
                                           │ mints
-   ┌───────────────┬───────────────┬──────┴────────────┬────────────────────┐
-   │ class=user    │ class=node    │ class=voice_agent │ class=service_account│
-   │ (humans)      │ (#105)        │ (#109)            │ (#691, THIS doc)     │
-   ▼               ▼               ▼                   ▼
- full app        NodeService.    MemqlService.Stream  MemqlService.Stream
- surface         Stream only     pinned to            pinned to the
- (per-row authz) (mesh)          VoiceAgent* msgs     read/query surface
+   ┌───────────────┬───────────────┬──────┴───────────────┐
+   │ class=user    │ class=node    │ class=service_account│
+   │ (humans)      │ (#105)        │ (#691, THIS doc)     │
+   ▼               ▼               ▼
+ full app        NodeService.    MemqlService.Stream
+ surface         Stream only     pinned to the
+ (per-row authz) (mesh)          read/query surface
 
    PAT (mql_pat_) ─ NOT a JWT ─► verifies ONLY on the identity node (DB lookup)
 
@@ -79,7 +79,7 @@ A service-account JWT is a regular identity-issued EdDSA JWT with:
 
 Signed with the same EdDSA key as user JWTs, so the per-node verifier validates
 it through the same JWKS endpoint. **No `v1:identity:identity` row is persisted**
-(unlike `voice_agent`): the verify path is DB-free and the token is short-lived,
+(unlike `node`): the verify path is DB-free and the token is short-lived,
 so *revoke = expiry / signing-key rotation*.
 
 ## Minting
@@ -127,8 +127,8 @@ Flags:
 On every API-serving node the interceptor chain (`app/transport.go`) now ends:
 
 ```
-  base (JWKS verifier) → sessionRevocation → guestAware → operatorAware
-       → voiceAgent → serviceAccount → panicRecovery → handler
+  base (JWKS verifier) → sessionRevocation → operatorAware
+       → serviceAccount → panicRecovery → handler
 ```
 
 The service-account interceptor
@@ -147,7 +147,7 @@ The service-account interceptor
                  v.VerifyBearer(token)   (JWKS — NO DB)
                                    │
               class == "service_account" && Source == JWT ?
-                  │ no ──► base (user/voice-agent JWT for another surface)
+                  │ no ──► base (user JWT for another surface)
                   │ yes
                   ▼
         admit + stamp system actor (role=system, class, sub, label)
@@ -160,8 +160,8 @@ The service-account interceptor
         │          ConceptsSubscribe, MyAccess, AgentGenerateTurn   │
         │   DENY (PermissionDenied): IdentityCreate/Update,         │
         │          CreateWorkerToken, DelegationCreate, RotateAuth, │
-        │          SendGuestInvite, Revoke*, … every credential/    │
-        │          admin mutation + other classes' message types    │
+        │          Revoke*, … every credential/ admin mutation +    │
+        │          other classes' message types                     │
         └─────────────────────────────────────────────────────────┘
 ```
 
@@ -184,7 +184,7 @@ runs. The allowlist — not the actor role — is the primary blast-radius bound
    bff:50058 (MemqlService.Stream)
         │  serviceAccount interceptor admits class=service_account, pins surface
         ▼
-   ExecuteQuery / AgentGenerateTurn ──► cognition / agent   (proves the app path)
+   ExecuteQuery / AgentGenerateTurn ──► agent   (proves the app path)
         │
         ▼  assert result + SLO metrics → pass/FAIL → Rollout promote/auto-abort
 ```
@@ -239,29 +239,29 @@ run. The token never lives in git and never leaves the cluster.
 - There is **no per-token revoke list** (no DB row by design). If you need
   individual revoke semantics, prefer a PAT on the identity surface instead.
 
-> **Why this class did NOT get the row-state kill switch memql#4111 added
-> to `voice_agent`.** That gate works by reading the credential's
+> **Why this class did NOT get the row-state kill switch memql#349 added
+> to `node`.** That gate works by reading the credential's
 > `v1:identity:identity` row, and a service-account subject is explicitly
 > not required to name one — the verify path is JWKS-only by design. There
 > is no row whose state could be read, so the same gate would fail open on
 > every call. What stands in for it is the TTL: **1 hour**
-> (`DefaultServiceAccountTokenTTLSeconds`) against the voice-agent class's
-> **90 days**. That three-order-of-magnitude difference is the whole reason
+> (`DefaultServiceAccountTokenTTLSeconds`) against the node class's
+> **30 days**. That two-order-of-magnitude difference is the whole reason
 > one class needed a kill switch and this one does not — a leaked
-> service-account token is dead by lunchtime; a leaked voice-agent token was
-> live for a quarter.
+> service-account token is dead by lunchtime; a leaked node token was live
+> for a month.
 
 ## Class comparison
 
-| | `user` | `node` (#105) | `voice_agent` (#109) | `service_account` (#691) | PAT |
-| --- | --- | --- | --- | --- | --- |
-| Shape | JWT | JWT | JWT | JWT | `mql_pat_…` opaque |
-| Verifies on | all nodes (JWKS) | all nodes | all nodes | **all nodes** | **identity only** (DB) |
-| Surface | full app | NodeService only | VoiceAgent* msgs | read/query + 1 agent turn | identity APIs |
-| Persisted row | session | identity row | identity row | **none** | identity row |
-| Default TTL | 15 min | 30 d | 90 d | **1 h** | long-lived |
-| Revoke | session revoke | row + key (#349) | row + key (#4111) | **expiry / key** | row |
-| Use | humans | mesh nodes | voice-agent proc | **automation / deploy gate** | human CLI |
+| | `user` | `node` (#105) | `service_account` (#691) | PAT |
+| --- | --- | --- | --- | --- |
+| Shape | JWT | JWT | JWT | `mql_pat_…` opaque |
+| Verifies on | all nodes (JWKS) | all nodes | **all nodes** | **identity only** (DB) |
+| Surface | full app | NodeService only | read/query + 1 agent turn | identity APIs |
+| Persisted row | session | identity row | **none** | identity row |
+| Default TTL | 15 min | 30 d | **1 h** | long-lived |
+| Revoke | session revoke | row + key (#349) | **expiry / key** | row |
+| Use | humans | mesh nodes | **automation / deploy gate** | human CLI |
 
 ## Code map
 
@@ -275,6 +275,6 @@ run. The token never lives in git and never leaves the cluster.
 | Mint subcommand | `subcommand_service_account_token.go` (build tag `identity`) |
 | Tests | `component/identity/jwt_node_test.go`, `component/grpc/service_account_stream_interceptor_test.go` |
 
-See also [voice-agent-jwt.md](voice-agent-jwt.md) and [node-jwt.md](node-jwt.md)
-(the sibling machine classes), [identity-service.md](identity-service.md)
+See also [node-jwt.md](node-jwt.md)
+(the sibling machine class), [identity-service.md](identity-service.md)
 (signing-key rotation), and [threat-model.md](../../../internal/design/auth-threat-model.md).

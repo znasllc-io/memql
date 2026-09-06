@@ -272,12 +272,6 @@ var credentialReadInventory = map[string]struct {
 	"nodeTokenIdentityById": {classMachine,
 		"@serverOnly single node credential by id, for the revoke/inspect path. Same " +
 			"audience as nodeTokenIdentities."},
-	"voiceAgentTokenIdentityById": {classMachine,
-		"@serverOnly single voice-agent credential by id, read by the revocation gate on the " +
-			"AUTH path (memql#4111). The strongest form of this class: it runs before an " +
-			"AccessContext exists, because the question it answers is whether this bearer may " +
-			"become a caller at all. The row's userId is the synthetic minting user, so " +
-			"userId==actor.userId would match nothing and fail every credential open."},
 	"nodeTokenIdentitiesAdmin": {classMachine,
 		"memql#3324. The same cluster-wide node-credential listing as nodeTokenIdentities, " +
 			"but client-reachable and gated on requiresOwnerOrAdmin -- the portal SPA " +

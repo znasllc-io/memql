@@ -64,7 +64,7 @@ Key fields:
 - `internal` -- true when registration matched
   `MEMQL_IDENTITY_INTERNAL_DOMAINS`
 - `preferences` -- theme, language, notifications, archive
-  retention, voice mode, and product-specific control settings
+  retention, and product-specific control settings
 - `active`, `suspendedAt`, `suspendedReason`, `lastSeenAt`
 - `legalAcceptance[]` -- append-only history of ToS / Privacy
   acceptances
@@ -122,8 +122,8 @@ identity for a bounded role / scope / lifetime. Also global-scoped.
 
 ### `v1:identity:invitation`
 
-Token-hashed invitation credential for guest invites and
-admin-issued user invitations.
+Token-hashed invitation credential for admin-issued user
+invitations.
 
 ## Role spectrum
 
@@ -171,7 +171,7 @@ Every node binary other than `identity` runs the per-node verifier
 middleware (`component/identity/verifier`). On each gRPC stream open:
 
 1. Bearer token is extracted from `Authorization`.
-2. **PAT path** (`mql_pat_<...>`): rejected on bff/voice/etc.
+2. **PAT path** (`mql_pat_<...>`): rejected on bff/agent/etc.
    PAT verification is the identity binary's responsibility; CLI
    clients hit the identity binary directly.
 3. **JWT path**: parsed for the `kid` header, validated against the
@@ -187,10 +187,9 @@ middleware (`component/identity/verifier`). On each gRPC stream open:
 ### The unauthenticated HTTP surface is declared, not inherited
 
 The verifier middleware is installed with `server.PublicPaths()`, an
-explicit allowlist (health probes, JWKS, auth endpoints, metrics,
-Polyphon service-to-service, the concept API). On a verifier-consuming
-node **public is opt-in**: a route is unauthenticated only because
-someone put it on that list.
+explicit allowlist (health probes, JWKS, auth endpoints, metrics, the
+concept API). On a verifier-consuming node **public is opt-in**: a
+route is unauthenticated only because someone put it on that list.
 
 Two binaries install no HTTP auth middleware at all -- the `identity`
 binary (it is the JWKS authority and must not verify against itself)
@@ -300,9 +299,8 @@ covered -- see memql#3004. A node running
 That mode disables authentication outright, and the details matter if you
 are tempted to rely on it: "everything is the cluster owner" is true of
 gRPC and not of HTTP (the local-dev admit path is a *stream*
-interceptor); attachments and audio return 401 on the missing actor, but
-the Polyphon room-token and status handlers check nothing at all; and the
-gateway middleware sits *ahead* of the mux and admits
+interceptor); the Library's byte routes return 401 on the missing actor;
+and the gateway middleware sits *ahead* of the mux and admits
 `POST /memql/query` as the synthetic cluster owner. That is the toggle's
 documented meaning, which is why it is loudly warned and must never be
 set in staging or production.
@@ -510,22 +508,10 @@ setting the role is the whole of it.
   handler layer, so it covers `ExecuteQueryMsg` and nothing else, and
   its complete residual-bypass set is enumerated with reasons in
   `dataPlaneGateExemptions` (same file):
-  - **Guest streams are explicitly exempt.** A guest's real
-    authorization dimension is the invitation itself, not the cluster
-    role -- the `reader` on a guest stream is a placeholder. (The
-    gate's own source comment in `data_capability_gate.go` still
-    describes this as "invitation scope plus the partition grant";
-    there is no partition grant any more -- #56 retired it, and the
-    `partitionId` field the comment is echoing is now just a product
-    routing hint on the invitation row, not an access grant.) Guest
-    participation necessarily rides
-    `ExecuteQueryMsg` (the dedicated guest message types cover only the
-    invite/join lifecycle), so gating it would break guest chat. The
-    exemption keys off the guest claim, never off the role.
   - **`CallToolMsg` is not gated at all.** It can reach mutation-backed
-    tools, but that surface is also driven by machine credentials
-    (`class="voice_agent"` JWTs carry no role claim and resolve to the
-    reader fallback), so gating it would refuse the live voice path.
+    tools, but the gate is wired into `handleExecuteQuery` only, and
+    proxied agent-node calls arrive as forwarded auth, so gating it on
+    the caller's own data-plane capability would refuse that path.
 
   Constructs reached in-process -- automations, the logic runner, the
   planner loop, node bootstrap -- are likewise not covered, by design.

@@ -16,8 +16,8 @@ first-choice headless surface).
 
 ## Problem
 
-Capabilities (operator UI control, Computer Use, future skills like
-voice-pipeline orchestration, claw, etc.) all carry sizeable
+Capabilities (operator UI control, Computer Use, the sandboxed
+Workbench, and whatever ships next) all carry sizeable
 operational knowledge: which tool surfaces exist, when to reach for
 each, how the per-task approval gate works, how to recover from
 failure modes, what to never do.
@@ -212,8 +212,8 @@ training, where they can be tuned per agent and per workspace.
 ## When NOT to use this pattern
 
 - **Truly per-turn data** — current cluster topology, current
-  user's preferences, the active spaceId. Those are template
-  data fields, not knowledge.
+  user's preferences, the plan this turn belongs to. Those are
+  template data fields, not knowledge.
 - **Capabilities that have no operational knowledge worth
   retrieving** — a one-line tool whose description in the tool
   registry suffices. The pattern earns its keep when the capability

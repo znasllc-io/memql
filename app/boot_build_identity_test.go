@@ -146,7 +146,7 @@ func TestEveryNodeTypeBuildRoutesThroughNewApp(t *testing.T) {
 
 	// A count assertion, because the loop above passes vacuously if the glob
 	// stops matching -- an empty scan reads exactly like a clean one.
-	if checked < 10 {
+	if checked < 8 {
 		t.Errorf("scanned only %d Build() constructors across app/build_*.go, expected the ten node types "+
 			"(identity, bff, cognition, agent, planner, voice, workbench, mcp, edge, default). "+
 			"A gate that examines nothing reports success about nothing.", checked)

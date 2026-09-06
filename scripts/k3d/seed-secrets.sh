@@ -12,7 +12,6 @@
 #   memql-secrets          -- THE config delivery path (MEMQL_MASTER_KEY,
 #                             MEMQL_IDENTITY_SIGNING_KEY_B64,
 #                             MEMQL_NODE_BOOTSTRAP_TOKEN, DATABASE_DSN, ...)
-#   livekit-secrets        -- LiveKit API key + secret for local livekit
 #   memql-db-app-creds   -- Postgres credentials for the in-cluster DB
 #
 # Called by `make secrets` and by `make up` on first boot.
@@ -67,7 +66,6 @@ source "${SCRIPT_DIR}/../lib/capability.sh"
 source "${SCRIPT_DIR}/../lib/localtls.sh"
 
 cap_init "k3d.seedSecrets" "Seed the k8s Secrets that the local k3d overlay requires."
-cap_spec_param "gate-voice-lane-only" "only re-run the voice-lane gate (scale voice/voice-agent per LiveKit config)"
 cap_spec_param "namespace" "k8s namespace to seed into"
 cap_spec_param "domain"    "front-door apex; seeded as the memql-domain ConfigMap and derives the certificate SANs (default: the domain this cluster already serves, else memql.localhost)"
 cap_spec_param "tls-cert"  "front-door TLS certificate path (issued with mkcert when absent)"
@@ -937,7 +935,8 @@ RESOLVED_GITHUB_APP_PRIVATE_KEY_B64=""
 RESOLVED_GITHUB_APP_WEBHOOK_SECRET=""
 
 # resolve_github_app reads the cluster's GitHub App out of the environment, on
-# the tolerated-absence template seed_livekit_secrets uses (memql#4912).
+# a tolerated-absence template: a partial configuration is blanked and
+# reported rather than seeded (memql#4912).
 #
 # THE ALL-OR-NONE RULE IS ENFORCED HERE, NOT ONLY AT BOOT. The identity node
 # refuses to start on a HALF-configured app -- one to five values set -- which
@@ -1080,113 +1079,6 @@ function seed_memql_secrets() {
 }
 
 #=============================================================================
-# LIVEKIT SECRETS
-#=============================================================================
-
-# gate_voice_lane scales the voice lane to match the LiveKit configuration
-# (memql#2416): the local dev loop uses a LiveKit Cloud project (Epic #2184;
-# no self-hosted livekit locally), and the voice / voice-agent binaries
-# FAIL-FAST on the missing env (Epic 7 -- by design). Running them without
-# credentials is therefore a guaranteed crash-loop, which read as a broken
-# deploy at the D4 first live deploy. Without creds the lane is disabled
-# LOUDLY (replicas=0 + a warn naming the re-enable path); with creds it is
-# enabled. ArgoCD ignores /spec/replicas, so the scale sticks.
-function gate_voice_lane() {
-    local lk_url="${LIVEKIT_URL:-${MEMQL_POLYPHON_LIVEKIT_URL:-}}"
-    local lk_key="${LIVEKIT_API_KEY:-${MEMQL_POLYPHON_LIVEKIT_API_KEY:-}}"
-    local lk_secret="${LIVEKIT_API_SECRET:-${MEMQL_POLYPHON_LIVEKIT_API_SECRET:-}}"
-    local replicas=1
-    if [ -z "$lk_url" ] || [ -z "$lk_key" ] || [ -z "$lk_secret" ]; then
-        replicas=0
-    fi
-    local scaled_any=""
-    for d in voice voice-agent; do
-        if kubectl get deploy "$d" -n "$NAMESPACE" &>/dev/null; then
-            kubectl scale deploy "$d" -n "$NAMESPACE" --replicas="$replicas" >&2 || true
-            scaled_any=1
-        fi
-    done
-    if [ -z "$scaled_any" ]; then
-        info "voice lane: deployments not present yet; gating happens on the next 'make secrets' (or scale manually)."
-        return 0
-    fi
-    if [ "$replicas" -eq 0 ]; then
-        warn "voice lane DISABLED (replicas=0): no LiveKit Cloud credentials in the environment."
-        warn "  To enable: export LIVEKIT_URL/LIVEKIT_API_KEY/LIVEKIT_API_SECRET, then 'make secrets'."
-    else
-        info "voice lane enabled (LiveKit Cloud credentials present)."
-    fi
-}
-
-function seed_livekit_secrets() {
-    # LOCAL DEV -> LIVEKIT CLOUD (Epic #2184 / #2186).
-    #
-    # The local dev loop uses a LiveKit Cloud project as the SIP + WebRTC
-    # media plane (no self-hosted livekit-server / livekit/sip locally; the
-    # local overlay removes those workloads). So the API key/secret AND the
-    # URL must point at the operator's LiveKit Cloud project, sourced from the
-    # environment -- NEVER hard-coded. A cloud install stays self-hosted and
-    # pulls these from ESO/Key Vault instead; the no-cloud-leak guard,
-    # deploy/k8s/overlays/livekit_cloud_guard_test.go, keeps *.livekit.cloud
-    # out of deploy/k8s/overlays/cloud and deploy/k8s/base.
-    #
-    # Both credential pairs must point at the SAME cloud project (verified on
-    # main): the voice-agent reads the bare LIVEKIT_* names; telephony + the
-    # voice/bff token-minters read the MEMQL_POLYPHON_LIVEKIT_* names.
-    local lk_url="${LIVEKIT_URL:-${MEMQL_POLYPHON_LIVEKIT_URL:-}}"
-    local lk_public_url="${MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL:-$lk_url}"
-    local lk_key="${LIVEKIT_API_KEY:-${MEMQL_POLYPHON_LIVEKIT_API_KEY:-}}"
-    local lk_secret="${LIVEKIT_API_SECRET:-${MEMQL_POLYPHON_LIVEKIT_API_SECRET:-}}"
-
-    if [ -z "$lk_url" ] || [ -z "$lk_key" ] || [ -z "$lk_secret" ]; then
-        warn "LiveKit Cloud project not fully configured for local dev."
-        warn "  voice + telephony need a LiveKit Cloud project. Set before 'make up':"
-        warn "    export LIVEKIT_URL=wss://<your-project>.livekit.cloud"
-        warn "    export LIVEKIT_API_KEY=<cloud-api-key>"
-        warn "    export LIVEKIT_API_SECRET=<cloud-api-secret>"
-        warn "  Seeding livekit-secrets with whatever is set; voice/telephony"
-        warn "  pods stay degraded (LiveKit not configured) until provided."
-    fi
-
-    info "seeding livekit-secrets (LiveKit Cloud credentials for local dev)..."
-    kubectl create secret generic livekit-secrets \
-        --namespace="$NAMESPACE" \
-        --from-literal="MEMQL_POLYPHON_LIVEKIT_URL=$lk_url" \
-        --from-literal="MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL=$lk_public_url" \
-        --from-literal="MEMQL_POLYPHON_LIVEKIT_API_KEY=$lk_key" \
-        --from-literal="MEMQL_POLYPHON_LIVEKIT_API_SECRET=$lk_secret" \
-        --from-literal="LIVEKIT_URL=$lk_url" \
-        --from-literal="LIVEKIT_API_KEY=$lk_key" \
-        --from-literal="LIVEKIT_API_SECRET=$lk_secret" \
-        --dry-run=client -o yaml \
-        | kubectl apply -f - >&2
-    SEEDED_COUNT=$((SEEDED_COUNT + 1))
-    info "livekit-secrets seeded."
-}
-
-#=============================================================================
-# TELEPHONY SECRETS (local stub -- telephony disabled locally)
-#=============================================================================
-
-function seed_telephony_secrets() {
-    # Telephony (Telnyx) is not used locally. Create a stub secret so pods
-    # that mount telephony-secrets (livekit-sip via externalsecret ref) don't
-    # crash on missing secret -- even though the ExternalSecret itself is
-    # deleted in the local overlay (#2064), the livekit-sip Deployment
-    # references the Secret directly.
-    info "seeding telephony-secrets (stub -- telephony disabled locally)..."
-    kubectl create secret generic telephony-secrets \
-        --namespace="$NAMESPACE" \
-        --from-literal="TELNYX_API_KEY=disabled" \
-        --from-literal="TELNYX_CONNECTION_ID=disabled" \
-        --from-literal="TELNYX_OUTBOUND_PROFILE_ID=disabled" \
-        --dry-run=client -o yaml \
-        | kubectl apply -f - >&2
-    SEEDED_COUNT=$((SEEDED_COUNT + 1))
-    info "telephony-secrets seeded (stub)."
-}
-
-#=============================================================================
 # ENTRY POINT
 #=============================================================================
 
@@ -1235,15 +1127,6 @@ function main() {
     cap_require tls-cert "$TLS_CERT"
     cap_require tls-key  "$TLS_KEY"
 
-    # --gate-voice-lane-only: re-run just the voice-lane gate (memql#2416).
-    # up.sh calls this AFTER the ArgoCD app has created the Deployments,
-    # since the full seeding pass runs before they exist.
-    if [ -n "$(cap_flag gate-voice-lane-only)" ]; then
-        gate_voice_lane
-        cap_result_set_raw voiceLaneGated true
-        cap_ok
-    fi
-
     check_prerequisites
 
     # THE DOMAIN IS RESOLVED HERE, AFTER the cluster is reachable, because the
@@ -1290,9 +1173,6 @@ function main() {
     seed_front_door_tls
     seed_db_creds
     seed_memql_secrets
-    seed_livekit_secrets
-    gate_voice_lane
-    seed_telephony_secrets
 
     info "All local secrets seeded. The k3d cluster can now start the MemQL stack."
     info "ArgoCD reconciles automatically; check: kubectl get app memql-local -n argocd -w"

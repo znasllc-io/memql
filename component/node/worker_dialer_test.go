@@ -26,7 +26,7 @@ func TestParseWorkerPeers_Empty(t *testing.T) {
 }
 
 func TestParseWorkerPeers_Basic(t *testing.T) {
-	in := "voice=voice:50059,agent=agent:50055,cognition=cognition:50054,planner=planner:50056"
+	in := "identity=identity:50053,agent=agent:50055,workbench=workbench:50057,planner=planner:50056"
 	got, issues := ParseWorkerPeers(in)
 	if len(issues) != 0 {
 		t.Errorf("expected no issues, got %v", issues)
@@ -35,9 +35,9 @@ func TestParseWorkerPeers_Basic(t *testing.T) {
 		t.Fatalf("expected 4 targets, got %d: %v", len(got), got)
 	}
 	wantByType := map[NodeType]string{
-		NodeTypeVoice:     "voice:50059",
+		NodeTypeIdentity:  "identity:50053",
 		NodeTypeAgent:     "agent:50055",
-		NodeTypeCognition: "cognition:50054",
+		NodeTypeWorkbench: "workbench:50057",
 		NodeTypePlanner:   "planner:50056",
 	}
 	for _, target := range got {
@@ -48,7 +48,7 @@ func TestParseWorkerPeers_Basic(t *testing.T) {
 }
 
 func TestParseWorkerPeers_Whitespace(t *testing.T) {
-	in := "  agent = agent:50055 ,  voice=voice:50059  "
+	in := "  agent = agent:50055 ,  planner=planner:50056  "
 	got, _ := ParseWorkerPeers(in)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 targets, got %d: %v", len(got), got)
@@ -56,12 +56,12 @@ func TestParseWorkerPeers_Whitespace(t *testing.T) {
 }
 
 func TestParseWorkerPeers_CaseInsensitiveType(t *testing.T) {
-	got, _ := ParseWorkerPeers("AGENT=agent:50055,Voice=voice:50059")
+	got, _ := ParseWorkerPeers("AGENT=agent:50055,Planner=planner:50056")
 	if len(got) != 2 {
 		t.Fatalf("expected 2 targets, got %d: %v", len(got), got)
 	}
 	for _, target := range got {
-		if target.NodeType != NodeTypeAgent && target.NodeType != NodeTypeVoice {
+		if target.NodeType != NodeTypeAgent && target.NodeType != NodeTypePlanner {
 			t.Errorf("unexpected node type: %s", target.NodeType)
 		}
 	}
@@ -175,8 +175,8 @@ func TestIsWorkerType(t *testing.T) {
 		want bool
 	}{
 		{NodeTypeAgent, true},
-		{NodeTypeVoice, true},
-		{NodeTypeCognition, true},
+		{NodeTypePlanner, true},
+		{NodeTypeAgent, true},
 		{NodeTypePlanner, true},
 		{NodeTypeBFF, false},
 		// Neither of these is a worker the BFF forwards AI work to; both are
@@ -199,8 +199,8 @@ func TestIsDialableType(t *testing.T) {
 		want bool
 	}{
 		{NodeTypeAgent, true},
-		{NodeTypeVoice, true},
-		{NodeTypeCognition, true},
+		{NodeTypePlanner, true},
+		{NodeTypeAgent, true},
 		{NodeTypePlanner, true},
 		// memql#3380: the bff dials identity for the deploy-control surface.
 		{NodeTypeIdentity, true},
@@ -251,7 +251,7 @@ func TestDialableTypeNames_MatchesPredicate(t *testing.T) {
 
 func TestTargetKey_DisambiguatesByType(t *testing.T) {
 	a := WorkerTarget{NodeType: NodeTypeAgent, Address: "same:50055"}
-	b := WorkerTarget{NodeType: NodeTypeVoice, Address: "same:50055"}
+	b := WorkerTarget{NodeType: NodeTypePlanner, Address: "same:50055"}
 	if targetKey(a) == targetKey(b) {
 		t.Errorf("targetKey should disambiguate by type: %s == %s", targetKey(a), targetKey(b))
 	}

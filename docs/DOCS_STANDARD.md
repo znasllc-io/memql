@@ -74,7 +74,7 @@ owner: znas             # github handle responsible for keeping it current
 | Bucket | Goes to | Examples |
 |---|---|---|
 | Durable user/developer reference | `docs/public/<area>/` | concepts, DSL, API, SDK, public ops guides |
-| Point-in-time design / ADR | `docs/internal/design/` | issue-tied design docs (`*-954.md`, `voice/4xx-*`) |
+| Point-in-time design / ADR | `docs/internal/design/` | issue-tied design docs (`*-954.md`, `*-971.md`), ADRs (`*-adr.md`) |
 | Active multi-phase plan | `docs/internal/planning/` | in-flight feature plans |
 | Ops runbook / DR / CI / migration | `docs/internal/ops/` | DR runbook, merge-queue, migrations |
 | Historical program-level epic/plan docs | `docs/internal/program/` | platformization program master plan + epics, kept for rationale (`area: planning`) |

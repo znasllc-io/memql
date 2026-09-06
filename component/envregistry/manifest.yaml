@@ -172,22 +172,6 @@ secrets:
     optional: true
     description: "LiveKit API secret the Polyphon voice transport uses to sign room join tokens."
 
-  # --- telephony ---
-
-  - name: MEMQL_TELEPHONY_OUTBOUND_AUTH_PASSWORD
-    component: telephony
-    scope: node
-    kind: integration
-    optional: true
-    description: "Password for SIP-trunk authentication on outbound telephony calls."
-
-  - name: MEMQL_TELEPHONY_TELNYX_API_KEY
-    component: telephony
-    scope: global
-    kind: vendor_api_key
-    optional: true
-    description: "Telnyx v2 API key used to authenticate telephony carrier requests."
-
   # --- shopify ---
 
   - name: MEMQL_SHOPIFY_STOREFRONT_TOKEN
@@ -1560,13 +1544,6 @@ variables:
     optional: true
     description: "Enables semantic (embedding-similarity) AI caching per namespace without a rebuild. Format: comma-separated \"namespace:threshold[:ttlSeconds]\" items, e.g. \"cognition.message_intent:0.96:86400\"; a bare \"namespace\" enables it at the default threshold and TTL. Env entries win over the compiled-in registry, which is EMPTY by design -- no namespace is enabled anywhere by default, because a semantic hit answers from a DIFFERENT-but-similar input and each candidate has to clear its false-positive eval first. Setting this changes a live decision path; the one declared candidate (cognition's message-intent classification) is explicitly gated on eval plus owner sign-off."
 
-  - name: MEMQL_CLASSIFICATION_SHORTCIRCUIT
-    component: ai
-    scope: node
-    default: "true"
-    optional: true
-    description: "Kill-switch for cognition's deterministic classification short-circuit, which skips the LLM classifier in a single-human single-agent space. Default ON; set false/0/off/no to force every turn back through the classifier (for A/B latency measurement, or if the trade-off proves wrong in practice). The trade-off it turns off: with the short-circuit on, text acknowledgements (\"ok thanks\") in a 1:1 space dispatch a reply instead of being suppressed. Behaviour is identical local and online -- this is an escape hatch, not an environment divergence."
-
   - name: MEMQL_WHISPER_MODEL
     component: ai
     scope: node
@@ -1594,20 +1571,6 @@ variables:
     optional: true
     description: "OpenAI realtime model id for the voice path; falls back to MEMQL_POLYPHON_OPENAI_ASR_MODEL when empty."
 
-  - name: MEMQL_VOICE_AGENT_TOOL_LOOP
-    component: voice
-    scope: node
-    default: "false"
-    optional: true
-    description: "Opt-in toggle enabling the agent tool loop for voice replies."
-
-  - name: MEMQL_VOICE_GROUNDING
-    component: voice
-    scope: node
-    default: "false"
-    optional: true
-    description: "Opt-in toggle enabling knowledge grounding for voice replies."
-
   # The voice-agent's own configuration (memql#3834). Every entry below was
   # LIVE and UNREGISTERED for its whole life, and for one reason: the agent
   # reads through an injected getter -- a local closure over a caller-supplied
@@ -1616,40 +1579,6 @@ variables:
   # the drift gate could not see was that the closure reads the environment at
   # all. envscan learned that shape in memql#3834 step 3, and these are what it
   # found.
-
-  - name: MEMQL_GRPC_ADDR
-    component: voice
-    scope: node
-    optional: true
-    description: "The bff's gRPC address the voice-agent dials (e.g. bff:50051). The voice-AGENT fail-fasts without it -- a voice-agent that cannot reach the mesh has nothing to do -- but it is registered optional rather than required[voice] deliberately: the boot gate governs the voice NODE, which does not read this, and marking it required there would refuse to boot a node over a variable only its subcommand needs. The agent's own getRequired is the enforcement, at the layer that actually reads it."
-
-  - name: MEMQL_VOICE_EXECUTOR
-    component: voice
-    scope: node
-    default: "realtime"
-    optional: true
-    description: "Which voice executor runs: 'realtime' (OpenAI gpt-realtime speech-to-speech, the default) or 'cascade' (OpenAI STT -> cognition -> OpenAI TTS). Any other value refuses to boot. Both run on OpenAI, so MEMQL_OPENAI_API_KEY is required either way."
-
-  - name: MEMQL_VOICE_AUTOJOIN
-    component: voice
-    scope: node
-    default: "true"
-    optional: true
-    description: "Whether a voice-agent launched with no room watches LiveKit and joins human-occupied polyphon rooms itself. Set to exactly \"false\" for the plain idle behaviour."
-
-  - name: MEMQL_VOICE_MAX_ROOMS
-    component: voice
-    scope: node
-    default: "8"
-    optional: true
-    description: "How many rooms one voice-agent replica serves concurrently in auto-join mode (memql#1395). Each room is an isolated session, so two users in different spaces both get the general assistant. A non-positive value falls back to the default."
-
-  - name: MEMQL_VOICE_REALTIME_NATIVE_STT
-    component: voice
-    scope: node
-    default: "true"
-    optional: true
-    description: "Whether the realtime executor uses the model's native transcription rather than a separate STT pass. Set to exactly \"false\" to disable."
 
   - name: MEMQL_VOICE_AGENT_LOG_LEVEL
     component: voice
@@ -1664,112 +1593,6 @@ variables:
     default: "en"
     optional: true
     description: "Language the voice-agent pins its speech pipeline to. Legacy alias: POLYPHON_VOICE_LANGUAGE (memql#3834)."
-
-  # --- realtime executor (gpt-realtime) tuning ---
-
-  - name: MEMQL_REALTIME_MODEL
-    component: voice
-    scope: node
-    default: "gpt-realtime-2"
-    optional: true
-    description: "The OpenAI realtime model the voice-agent's realtime executor opens its session with."
-
-  - name: MEMQL_REALTIME_TRANSCRIPTION_MODEL
-    component: voice
-    scope: node
-    default: "gpt-4o-mini-transcribe"
-    optional: true
-    description: "The model used to transcribe the user's audio alongside the realtime session."
-
-  - name: MEMQL_REALTIME_NATIVE_TURN
-    component: voice
-    scope: node
-    default: "true"
-    optional: true
-    description: "Whether gpt-realtime owns turn-taking (semantic VAD) for a standard space with exactly one human. Set to exactly \"false\" to keep the conductor gate in front of it."
-
-  - name: MEMQL_REALTIME_MULTIPARTY_SEMANTIC_VAD
-    component: voice
-    scope: node
-    default: "false"
-    optional: true
-    description: "Whether semantic VAD is also used when more than one human is present. Off by default: multiparty turn-taking is the conductor's job."
-
-  - name: MEMQL_REALTIME_NOISE_REDUCTION
-    component: voice
-    scope: node
-    default: "far_field"
-    optional: true
-    description: "Input noise-reduction mode: 'far_field', 'near_field', or 'off' (lower-cased on read). Any other value refuses to boot rather than silently disabling it."
-
-  - name: MEMQL_REALTIME_VAD_THRESHOLD
-    component: voice
-    scope: node
-    default: "0.6"
-    optional: true
-    description: "Voice-activity-detection threshold for the realtime session; higher is less sensitive."
-
-  - name: MEMQL_REALTIME_VAD_PREFIX_PADDING_MS
-    component: voice
-    scope: node
-    default: "300"
-    optional: true
-    description: "Audio kept before detected speech starts, in milliseconds, so a turn does not lose its first syllable."
-
-  - name: MEMQL_REALTIME_VAD_SILENCE_DURATION_MS
-    component: voice
-    scope: node
-    default: "500"
-    optional: true
-    description: "Silence, in milliseconds, that ends a user turn. Lower is snappier and more likely to cut somebody off mid-sentence."
-
-  - name: MEMQL_REALTIME_TRANSCRIPT_MIN_CONFIDENCE
-    component: voice
-    scope: node
-    default: "-1.0"
-    optional: true
-    description: "Minimum confidence a realtime transcript must carry to be used. Negative disables the gate, which is the default."
-
-  - name: MEMQL_REALTIME_IDLE_TIMEOUT_SEC
-    component: voice
-    scope: node
-    default: "300"
-    optional: true
-    description: "Seconds of inactivity before a realtime session is torn down. One of the guardrails that stops an abandoned session billing indefinitely."
-
-  - name: MEMQL_REALTIME_MAX_SESSION_SEC
-    component: voice
-    scope: node
-    default: "1800"
-    optional: true
-    description: "Hard ceiling in seconds on a single realtime session, whether or not it is idle."
-
-  - name: MEMQL_REALTIME_MAX_AUDIO_TOKENS
-    component: voice
-    scope: node
-    default: "1000000"
-    optional: true
-    description: "Ceiling on audio tokens one realtime session may spend. The cost guardrail that does not depend on the clock."
-
-  - name: MEMQL_REALTIME_TOOL_TIMEOUT_SEC
-    component: voice
-    scope: node
-    default: "45"
-    optional: true
-    description: "Seconds a realtime tool call may run before it is abandoned."
-
-  - name: MEMQL_REALTIME_MAX_PENDING_TOOLS
-    component: voice
-    scope: node
-    default: "4"
-    optional: true
-    description: "How many tool calls may be in flight at once within a realtime session."
-
-  - name: MEMQL_VOICE_ROOM_NAME
-    component: voice
-    scope: node
-    optional: true
-    description: "LiveKit room the Go voice-agent joins when no --room flag is passed (convention polyphon-<spaceId>)."
 
   - name: MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL
     component: voice
@@ -1789,13 +1612,6 @@ variables:
   # The voice-agent's avatar selection + Anam defaults (memql#3834), invisible
   # until the injected-getter pass; see the voice block above.
 
-  - name: MEMQL_AVATAR_VENDOR
-    component: avatar
-    scope: node
-    default: "anam"
-    optional: true
-    description: "Which avatar vendor the voice-agent publishes video through: 'anam', 'simli', or 'none' (lower-cased on read). Any other value refuses to boot. A persona's stamped avatarVendor wins over this runtime knob when set."
-
   - name: MEMQL_ANAM_DEFAULT_PERSONA_ID
     component: avatar
     scope: node
@@ -1814,33 +1630,6 @@ variables:
     default: "Assistant"
     optional: true
     description: "Display name given to an ephemeral Anam persona. Vendor-cosmetic. Legacy alias: ANAM_DEFAULT_PERSONA_NAME (memql#3834)."
-
-  - name: MEMQL_ANAM_AVATAR_MODEL
-    component: avatar
-    scope: node
-    optional: true
-    description: "Overrides the Anam avatar face model id; unset lets the engine pick the persona's default."
-
-  - name: MEMQL_ANAM_MAX_SESSION_SECONDS
-    component: avatar
-    scope: node
-    default: "3600"
-    optional: true
-    description: "Maximum Anam avatar engine session length in seconds before the session self-terminates."
-
-  - name: MEMQL_ANAM_SILENCE_END_SECONDS
-    component: avatar
-    scope: node
-    default: "3600"
-    optional: true
-    description: "Trailing-silence window in seconds before Anam ends a session on conversational silence."
-
-  - name: MEMQL_AVATAR_REQUEST_TIMEOUT_SECONDS
-    component: avatar
-    scope: node
-    default: "30"
-    optional: true
-    description: "Per-call REST timeout in seconds for avatar-vendor bring-up requests (clamped 1..300)."
 
   - name: MEMQL_DEV_DEFAULT_AVATAR_PERSONA
     component: avatar
@@ -1890,8 +1679,6 @@ variables:
     default: "openai"
     optional: true
     description: "Voice provider for the Polyphon /memql/audio WebSocket path."
-
-  # --- telephony ---
 
   # --- agent turn + tool-loop guards ---
   #
@@ -1978,60 +1765,6 @@ variables:
     default: "60"
     optional: true
     description: "How often the stranded-plan watchdog polls for stranded plans. A non-positive value is ignored."
-
-  - name: MEMQL_TELEPHONY_CARRIER
-    component: telephony
-    scope: node
-    default: "telnyx"
-    optional: true
-    description: "Selects the telephony carrier provider; empty falls back to the default carrier."
-
-  - name: MEMQL_TELEPHONY_MODEL_COST_PER_MINUTE
-    component: telephony
-    scope: node
-    default: "0.10"
-    optional: true
-    description: "Overrides the per-minute MODEL AUDIO rate used to cost a telephony call, in USD. The default is the OpenAI Realtime audio rate, so this is what an operator sets when their negotiated rate differs or the vendor's list price moves. A value that does not parse as a float is treated as unset and the built-in default stands. Distinct from the carrier's per-minute charge; this is the AI side of the call's cost."
-
-  - name: MEMQL_TELEPHONY_OUTBOUND_AUTH_USERNAME
-    component: telephony
-    scope: node
-    optional: true
-    description: "Username for SIP-trunk authentication on outbound telephony calls."
-
-  - name: MEMQL_TELEPHONY_OUTBOUND_SIP_ADDRESS
-    component: telephony
-    scope: node
-    optional: true
-    description: "Destination SIP address used when placing outbound telephony calls."
-
-  - name: MEMQL_TELEPHONY_SIP_EDGE_URI
-    component: telephony
-    scope: node
-    optional: true
-    description: >-
-      LiveKit SIP edge URI the carrier routes inbound DIDs to. Self-host plane
-      (staging/prod): the in-cluster livekit/sip edge (e.g.
-      sip:livekit-sip:5060). Cloud plane (local dev, #2186): UNSET/EMPTY --
-      LiveKit Cloud is the edge, the Telnyx Connection
-      (MEMQL_TELEPHONY_TELNYX_CONNECTION_ID) is pre-provisioned to point at the
-      Cloud SIP URI, and the inbound trunk + dispatch rule are created via the
-      LiveKit API by configureInboundNumber. carrier.ConfigureInbound only
-      requires the connection id, so an empty value is correct on the Cloud
-      path (it is recorded on the trunk row for documentation only)."
-
-  - name: MEMQL_TELEPHONY_TELNYX_BASE_URL
-    component: telephony
-    scope: node
-    default: "https://api.telnyx.com/v2"
-    optional: true
-    description: "Overrides the Telnyx v2 API root URL; defaults to the live Telnyx API."
-
-  - name: MEMQL_TELEPHONY_TELNYX_CONNECTION_ID
-    component: telephony
-    scope: node
-    optional: true
-    description: "Telnyx connection (SIP edge) identifier fronting outbound telephony calls."
 
   # --- shopify ---
 
@@ -2934,26 +2667,6 @@ variables:
     default: "false"
     optional: true
     description: "Enables action-library literal replay so fingerprinted steps replay recorded capability calls token-free instead of re-invoking the LLM."
-
-  - name: MEMQL_ACTION_UTTERANCE_ALLOWLIST_ENFORCE
-    component: safety
-    scope: node
-    default: "false"
-    optional: true
-    description: "When true, action utterances must match one of the configured allowlist prefixes or they are rejected."
-
-  - name: MEMQL_ACTION_UTTERANCE_ALLOWLIST_PREFIXES
-    component: safety
-    scope: node
-    optional: true
-    description: "Comma-separated list of allowed action-utterance prefixes; empty means no allowlist is applied."
-
-  - name: MEMQL_ACTION_UTTERANCE_MAX_BYTES
-    component: safety
-    scope: node
-    default: "65536"
-    optional: true
-    description: "Maximum byte size of an action-utterance payload, with a hard 1024-byte safety floor against misconfiguration."
 
   - name: MEMQL_AUTOMATION_BUDGET_ENABLED
     component: safety

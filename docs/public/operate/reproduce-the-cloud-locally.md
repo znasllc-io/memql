@@ -41,7 +41,7 @@ only after a deploy.
 |---|---|---|---|
 | Orchestrator | ArgoCD (k3d) | ArgoCD (AKS) | identical |
 | Manifests | `deploy/k8s/overlays/local/` | `deploy/k8s/overlays/cloud/` | same base, values differ |
-| Node-type split | identity / voice / mcp / cognition / agent / planner / workbench / voice-agent | same | identical (the product `bff` head is pack-owned, #2204) |
+| Node-type split | identity / mcp / agent / planner / workbench / edge | same | identical (the product `bff` head is pack-owned, #2204) |
 | Build model | engine (`Dockerfile`) for ALL node types (`memql-<type>:local`), product-agnostic | same product-agnostic engine images | identical -- a product's DSL mounts at runtime via `MEMQL_DSL_PATH` (the `dsl-bundle` component), not a per-product image; see [downstream-stacks.md](downstream-stacks.md) |
 | Replicas per mesh node (default) | **1** (scale to 2 with `make scale N=2`) | **2**; scaled to 0 when idle | equivalent once scaled -- the saving is the idle time, not the width |
 | Per-replica node id | `fieldRef: metadata.name` (downward API, same as the cloud) | `fieldRef: metadata.name` | **identical** |
@@ -52,7 +52,6 @@ only after a deploy.
 | Blob storage | Azurite emulator | Azure Blob | config only |
 | Secrets / keys | dev defaults (seeded by `make secrets`) | Key Vault via ESO | config only |
 | ExternalSecrets | deleted by `$patch: delete` in local overlay | present | config only |
-| LiveKit | **LiveKit Cloud** (outbound; no self-hosted livekit/sip/redis locally) | self-hosted `livekit-server` + `livekit/sip` | divergent -- justified (Epic #2184) |
 | Ingress | k3s-bundled traefik front door (`identity.memql.localhost`, mkcert TLS) + port-forwards for the gRPC heads | ingress-nginx | divergent -- traefik vs nginx |
 | Digest-pinning gate | skipped for the `local` overlay in `scripts/deploy/drift-check.sh` (`check_rendered`'s `ENV=local` branch, which still asserts the overlay renders) | enforced | divergent -- justified |
 
@@ -190,8 +189,8 @@ following in order:
 1. Creates a k3d cluster (default name `memql`).
 2. Installs ArgoCD v2.13.3 (same version as the cloud) via
    `kubectl apply -k deploy/argocd/bootstrap`.
-3. Seeds k8s Secrets (`memql-secrets`, `memql-db-app-creds`,
-   `livekit-secrets`, `telephony-secrets`) via `scripts/k3d/seed-secrets.sh`.
+3. Seeds k8s Secrets (`memql-secrets`, `memql-db-app-creds`) via
+   `scripts/k3d/seed-secrets.sh`.
 4. Applies the ArgoCD Application `memql-local` pointing at
    `deploy/k8s/overlays/local` on the current git branch.
 5. Waits for ArgoCD to sync and pods to become Ready (configurable via
@@ -262,10 +261,9 @@ After `make up`, these host ports are mapped to the k3d cluster:
 | `80` | the front door (redirects) |
 | `5432` | Postgres -- debug only, never a connection path |
 
-The identity (`8085`) and livekit (`7880`) mappings are gone: 8085 was a second
-entrance to a service the front door already serves, which is what
-[environment-parity.md](environment-parity.md) forbids, and 7880 pointed at a
-livekit Deployment this overlay removes (local voice uses LiveKit Cloud).
+The identity (`8085`) mapping is gone: it was a second entrance to a service
+the front door already serves, which is what
+[environment-parity.md](environment-parity.md) forbids.
 
 The product SPA (`:8080`) and the product `bff` gRPC head (`:50051`) -- a
 plain engine `bff` node fronting the product's DSL bundle -- are NOT part of
@@ -299,10 +297,9 @@ make dev
 # Rebuild a single node type (faster):
 make dev NODE=bff
 make dev NODE=identity
-make dev NODE=cognition
+make dev NODE=agent
 
-# Pull and import upstream infra images (postgres/azurite; the local dev
-# loop uses LiveKit Cloud, so no local livekit/redis images are needed):
+# Pull and import upstream infra images (postgres/azurite):
 make dev PULL_INFRA=1
 ```
 
@@ -552,9 +549,8 @@ with its justification.
 
 ### Invariants -- MUST stay identical
 
-- **Service set:** identity / voice / mcp / cognition / agent / planner /
-  workbench / voice-agent (the product `bff` head and SPA are pack-owned,
-  #2204).
+- **Service set:** identity / mcp / agent / planner / workbench / edge (the
+  product `bff` head and SPA are pack-owned, #2204).
 - **Build source per node:** every node is the same **product-agnostic engine
   image** (built here from this repo's Dockerfile; digest-pinned in the cloud
   overlay) -- local and cloud never diverge on build. Only the **DSL bundle** mounted at
@@ -576,15 +572,11 @@ with its justification.
 | 3 | **Digest-pinning gate** | skipped for `ENV=local` in `scripts/deploy/drift-check.sh` | enforced | Local images are built by `make dev` with a stable `:local` tag; they have no ACR digest. `check_rendered` special-cases `ENV=local`: it skips the digest-pin assertion but still fails if the overlay does not render. As of this writing no Go test asserts this exemption specifically -- `scripts/deploy/drift_check_test.go` covers image-ref normalization, not the local-skip branch -- so the behaviour is enforced by the script alone. |
 | 4 | **ExternalSecrets / Key Vault** | deleted by `$patch: delete` in local overlay | ESO syncs from Key Vault | Dev secrets are seeded directly by `make secrets`. |
 | 5 | **Connection pooler** | direct Postgres connection | direct Postgres connection (a PgBouncer `Pooler` ships ready but not enabled, `cnpg-db/optional/pooler`) | Single-node dev without a pool is safe; the cloud runs without one today too, and the optional pooler can be enabled on either side if a connection-count ceiling ever demands it. |
-| 6 | **voice-agent** | opt-in (`deploy/k8s/overlays/local/` includes it) | in base | Needs live OpenAI + a **LiveKit Cloud** project. Export `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` before `make up` (seed-secrets sources them); see [voice-bringup-verification.md](voice-bringup-verification.md) and, for telephony, [telephony-local-dev.md](telephony-local-dev.md). |
 
 ### Config-only -- EXPECTED to differ
 
 - `MEMQL_DATABASE_DSN` (local `memql-db-rw` vs cloud `memql-db-rw`, self-hosted CloudNativePG on both sides).
 - Blob backend (Azurite connection string vs Azure Blob).
-- LiveKit plane (local → a **LiveKit Cloud** project, creds from your env via
-  `livekit-secrets`; the cloud → self-hosted `livekit-server`, key/secret
-  ESO-synced from Key Vault — Epic #2184).
 - Bootstrap/dev escape hatches (`MEMQL_IDENTITY_ALLOW_INSECURE_*`).
 - `MEMQL_IDENTITY_BASE_URL` / `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER` (local port-forward
   vs AKS ingress hostname).
@@ -597,7 +589,7 @@ with its justification.
 3. Reproduce the scenario (e.g. send a chat message that triggers an assistant
    reply). Watch logs:
    ```bash
-   kubectl logs -n memql -l app=cognition --all-containers -f | grep -Ei 'node_id|EventForward|dedup'
+   kubectl logs -n memql -l app=agent --all-containers -f | grep -Ei 'node_id|EventForward|dedup'
    ```
 4. Root-cause against the cross-node path (event routing rules, session state
    on the wrong node, missing proxy forward).
@@ -628,5 +620,4 @@ are still reached via kubectl port-forward -- identity is not exposed on gRPC
 externally, and the `mcp` engine gRPC head `:50051` is forwarded on demand.
 Postgres `:5432` is likewise port-forwarded; the product SPA + the product
 `bff` (a plain engine node fronting the product's DSL bundle) are
-engine-external and absent locally (#2204); the voice/media plane is LiveKit
-Cloud, reached outbound -- no local port-forward.
+engine-external and absent locally (#2204).

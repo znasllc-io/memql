@@ -16,7 +16,7 @@
 #  2. WHICH DEPLOYMENTS. A blanket `labels:` marks every resource in the base,
 #     `redis` included -- and redis has no `volumes:` key at all, so the very
 #     first JSON6902 op fails the whole render with `doc is missing path`. The
-#     nodes that load DSL are the five mesh node types, named here, and naming
+#     nodes that load DSL are the four mesh node types, named here, and naming
 #     them is what an instance does anyway.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -32,7 +32,7 @@ components:
 patches:
   - target:
       kind: Deployment
-      name: "^(bff|agent|cognition|planner|workbench)$"
+      name: "^(bff|agent|planner|workbench)$"
     patch: |
       - op: add
         path: /metadata/labels/memql~1product-dsl

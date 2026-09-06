@@ -186,10 +186,9 @@ func mustCreateServiceLogger() *slog.Logger {
 // builds but writes JSON to os.Stderr instead of os.Stdout.
 //
 // Why this exists (memql#353): CLI subcommands (node-token mint /
-// voice-agent-token mint) print the minted bearer to stdout so a
+// service-account-token mint) print the minted bearer to stdout so a
 // `bearer=$(kubectl exec deploy/identity -- /app/memql ... mint)`
-// shell capture (e.g. `make node-token` / `make voice-agent-token`)
-// can pull it out. Under the previous
+// shell capture (e.g. `make node-token`) can pull it out. Under the previous
 // stdout-bound service logger, every app.Build() + dep.Start()
 // startup INFO log landed on stdout BEFORE the bearer, so the shell
 // capture ended up with a multi-line "bearer" of JSON log lines +

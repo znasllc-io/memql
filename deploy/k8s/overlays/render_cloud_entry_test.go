@@ -1,7 +1,7 @@
 // Render gates on the cloud-entry overlay (memql#4203).
 //
 // overlays/cloud stays top + mesh 2. This overlay is the entry / client
-// instance: entry CNPG, mesh 1, voice-off as replicas 0. A second
+// instance: entry CNPG, mesh 1, mcp held at replicas 0. A second
 // Application next to deploy/argocd/apps/memql.yaml would be the staging
 // split epic memql#3943 removed -- ZNAS Argo lives in its own cluster and
 // points at this path.
@@ -24,12 +24,13 @@ const (
 )
 
 var entryMeshOn = []string{
-	"identity", "bff", "cognition", "agent", "planner", "workbench", "edge",
+	"identity", "bff", "agent", "planner", "workbench", "edge",
 }
 
-var entryVoiceOff = []string{
-	"voice", "voice-agent", "livekit", "livekit-sip", "mcp", "livekit-redis",
-}
+// entryHeldOff are the Deployments this overlay holds at replicas 0 -- a
+// module that is not enabled on an entry install. Held rather than deleted, so
+// enabling it is a values change on the tenant's own overlay.
+var entryHeldOff = []string{"mcp"}
 
 func TestCloudEntryLandsWhollyInOneNamespace(t *testing.T) {
 	var sawNamespaceObject bool
@@ -72,12 +73,12 @@ func TestCloudEntryMeshReplicasAreOne(t *testing.T) {
 	}
 }
 
-func TestCloudEntryVoiceOffIsReplicasZero(t *testing.T) {
+func TestCloudEntryHeldOffIsReplicasZero(t *testing.T) {
 	byName := deploymentsByName(t, render(t, entryOverlay))
-	for _, node := range entryVoiceOff {
+	for _, node := range entryHeldOff {
 		r, ok := byName[node]
 		if !ok {
-			t.Errorf("%s does not render; voice-off is replicas 0, not a missing Deployment", node)
+			t.Errorf("%s does not render; a held-off module is replicas 0, not a missing Deployment", node)
 			continue
 		}
 		if r.Spec.Replicas == nil {
@@ -85,7 +86,7 @@ func TestCloudEntryVoiceOffIsReplicasZero(t *testing.T) {
 			continue
 		}
 		if *r.Spec.Replicas != 0 {
-			t.Errorf("%s has %d replicas, want 0 (voice-off)", node, *r.Spec.Replicas)
+			t.Errorf("%s has %d replicas, want 0 (held off)", node, *r.Spec.Replicas)
 		}
 	}
 }
@@ -129,19 +130,10 @@ func TestCloudEntryUsesTheEntryPreset(t *testing.T) {
 	}
 }
 
-func TestCloudEntryHasNoFailOpenVoicePins(t *testing.T) {
+func TestCloudEntryHasNoFailOpenPins(t *testing.T) {
 	rendered := render(t, entryOverlay)
 	if strings.Contains(rendered, "0000000000000000000000000000000000000000000000000000000000000000") {
-		t.Error("cloud-entry ships an all-zeros digest; voice-off is replicas 0, not a fake pin")
-	}
-	// NODE_IP=0.0.0.0 is the cloud overlay's fail-closed LiveKit advertise
-	// address. bind_addresses: ["0.0.0.0"] in livekit-config is a listen
-	// bind and is fine.
-	for _, line := range strings.Split(rendered, "\n") {
-		trim := strings.TrimSpace(line)
-		if strings.Contains(trim, "name: NODE_IP") {
-			t.Errorf("cloud-entry still sets NODE_IP (%s); voice-off is replicas 0", trim)
-		}
+		t.Error("cloud-entry ships an all-zeros digest; a held-off module is replicas 0, not a fake pin")
 	}
 }
 
@@ -173,8 +165,8 @@ func deploymentsByName(t *testing.T, rendered string) map[string]resource {
 // node that rematerializes without MEMQL_DOMAIN, so the portal hostname stays
 // portal.memql.localhost on an install that set a real domain.
 var entryRematerialize = []string{
-	"identity", "bff", "cognition", "agent", "planner",
-	"workbench", "mcp", "voice", "voice-agent", "edge",
+	"identity", "bff", "agent", "planner",
+	"workbench", "mcp", "edge",
 }
 
 func TestCloudEntryRematerializingDeploymentsMountMemqlDomain(t *testing.T) {
@@ -223,85 +215,6 @@ func TestCloudEntryCommitsNoHostname(t *testing.T) {
 	}
 }
 
-// liveKitServices are the media-plane and SIP-plane Services base declares.
-// `livekit` (signaling) is ClusterIP in base already; the other two are
-// LoadBalancers there, which is right for overlays/cloud (voice on) and wrong
-// for this overlay (memql#4225): a LoadBalancer with zero endpoints still
-// allocates a public IP on Azure.
-var liveKitServices = []string{"livekit", "livekit-rtc", "livekit-sip"}
-
-// azureLoadBalancerAnnotation is the prefix of every Azure LB tuning
-// annotation base carries on those Services. LoadBalancer-only, so it goes
-// with the type.
-const azureLoadBalancerAnnotation = "service.beta.kubernetes.io/azure-load-balancer"
-
-func servicesByName(t *testing.T, rendered string) map[string]resource {
-	t.Helper()
-	byName := map[string]resource{}
-	for _, r := range parse(t, rendered) {
-		if r.Kind == "Service" {
-			byName[r.Metadata.Name] = r
-		}
-	}
-	return byName
-}
-
-// TestCloudEntryLiveKitServicesAreClusterIP is the rendered half of the
-// voice-off Service hold (memql#4225); livekit_entry_voice_off_test.go is the
-// text-level half that cannot skip.
-//
-// The failure this catches reconciles at first and then does not: an entry install
-// converted these Services to ClusterIP by hand, and the next Argo sync of
-// the overlay -- still LoadBalancer + externalTrafficPolicy=Local -- was
-// refused by the API server ("may only be set for externally-accessible
-// services"), leaving the Application OutOfSync/Failed while the pins inside
-// it were fine.
-func TestCloudEntryLiveKitServicesAreClusterIP(t *testing.T) {
-	byName := servicesByName(t, render(t, entryOverlay))
-	for _, name := range liveKitServices {
-		r, ok := byName[name]
-		if !ok {
-			t.Errorf("Service %s does not render; voice-off holds the Service at ClusterIP, it does not delete it", name)
-			continue
-		}
-		if r.Spec.Type != "ClusterIP" {
-			t.Errorf("Service %s renders as type %q, want ClusterIP -- a LoadBalancer with zero endpoints still allocates a public IP", name, r.Spec.Type)
-		}
-		if r.Spec.ExternalTrafficPolicy != "" {
-			t.Errorf("Service %s still carries externalTrafficPolicy=%q; the API server refuses that on a ClusterIP Service and Argo stays Failed", name, r.Spec.ExternalTrafficPolicy)
-		}
-		if len(r.Spec.LoadBalancerSourceRanges) > 0 {
-			t.Errorf("Service %s still carries loadBalancerSourceRanges %v; the API server refuses that on a ClusterIP Service", name, r.Spec.LoadBalancerSourceRanges)
-		}
-		for k := range r.Metadata.Annotations {
-			if strings.HasPrefix(k, azureLoadBalancerAnnotation) {
-				t.Errorf("Service %s still carries the LoadBalancer-only annotation %s", name, k)
-			}
-		}
-	}
-}
-
-// TestCloudKeepsLiveKitLoadBalancers is the reachable positive for the gate
-// above: the same assertion, inverted, on the overlay where voice stays ON.
-// If the media plane stopped being a LoadBalancer in base, the cloud-entry
-// gate would pass for a reason that has nothing to do with the hold.
-func TestCloudKeepsLiveKitLoadBalancers(t *testing.T) {
-	byName := servicesByName(t, render(t, cloudOverlay))
-	for _, name := range []string{"livekit-rtc", "livekit-sip"} {
-		r, ok := byName[name]
-		if !ok {
-			t.Errorf("Service %s does not render in the cloud overlay", name)
-			continue
-		}
-		if r.Spec.Type != "LoadBalancer" {
-			t.Errorf("cloud overlay Service %s is %q, want LoadBalancer -- voice stays on there; the ClusterIP hold is cloud-entry's alone", name, r.Spec.Type)
-		}
-		if r.Spec.ExternalTrafficPolicy != "Local" {
-			t.Errorf("cloud overlay Service %s has externalTrafficPolicy=%q, want Local", name, r.Spec.ExternalTrafficPolicy)
-		}
-	}
-}
-
 // walStorageSize returns the `size:` under the rendered Cluster's walStorage
 // block, or "" if there is none.
 //
@@ -332,58 +245,6 @@ func walStorageSize(rendered string) string {
 		}
 	}
 	return ""
-}
-
-// externalSecretsByName indexes the ExternalSecrets in a rendered overlay.
-func externalSecretsByName(t *testing.T, rendered string) map[string]resource {
-	t.Helper()
-	out := map[string]resource{}
-	for _, r := range parse(t, rendered) {
-		if r.Kind == "ExternalSecret" {
-			out[r.Metadata.Name] = r
-		}
-	}
-	return out
-}
-
-// TestCloudEntryRendersNoExternalSecrets is the rendered half of the memql#4487
-// hold; externalsecrets_test.go carries the text-level half that cannot skip.
-//
-// The failure it catches is not a broken render -- it is a render that
-// reconciles perfectly and leaves the Application `Degraded` forever, because
-// two of its objects resolve Key Vault entries that a voice-off install
-// deliberately does not have. That red was documented as expected noise, which
-// is the actual defect: health that is always red carries no information, and
-// an operator who learns to ignore it will ignore a real one.
-func TestCloudEntryRendersNoExternalSecrets(t *testing.T) {
-	for name, r := range externalSecretsByName(t, render(t, entryOverlay)) {
-		t.Errorf("cloud-entry renders ExternalSecret %s; with voice off its Key Vault entries do not exist, so ESO reports SecretSyncedError and the Application is Degraded on every entry install (memql#4487). Enabling voice is the reverse, in this order: seed the entries, then drop the delete patch. (rendered as %s)",
-			name, r.APIVersion)
-	}
-}
-
-// TestCloudRendersTheVoiceExternalSecretsWithIgnoreExtraneous is the reachable
-// positive for the gate above AND the rendered half of memql#4489.
-//
-// Voice is ON in overlays/cloud, so the objects belong in its render -- if base
-// simply stopped shipping them, the cloud-entry gate above would pass for a
-// reason that has nothing to do with the hold. And the annotation has to
-// survive the render, not merely sit in base: External Secrets copies it onto
-// the generated Secret, which is the only thing that stops Argo claiming a
-// Secret that exists in no repository.
-func TestCloudRendersTheVoiceExternalSecretsWithIgnoreExtraneous(t *testing.T) {
-	byName := externalSecretsByName(t, render(t, cloudOverlay))
-	for _, name := range []string{"livekit-secrets", "telephony-secrets"} {
-		r, ok := byName[name]
-		if !ok {
-			t.Errorf("overlays/cloud does not render ExternalSecret %s; voice stays on there, and the cloud-entry hold is written against base still shipping it", name)
-			continue
-		}
-		if got := r.Metadata.Annotations[argoCompareOptions]; !hasCompareOption(got, ignoreExtraneous) {
-			t.Errorf("rendered ExternalSecret %s has %s=%q, want it to include %s -- the generated Secret inherits this annotation, and without it Argo reports that Secret OutOfSync forever (memql#4489)",
-				name, argoCompareOptions, got, ignoreExtraneous)
-		}
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -584,7 +445,7 @@ func mebibytes(t *testing.T, node, v string) int {
 // does not.
 func TestCloudKeepsDrainBeforeStartAtTwoReplicas(t *testing.T) {
 	byName := entryWorkloadsByName(t, render(t, cloudOverlay))
-	for _, node := range []string{"identity", "cognition", "agent", "planner", "workbench", "edge"} {
+	for _, node := range []string{"identity", "agent", "planner", "workbench", "edge"} {
 		w, ok := byName[node]
 		if !ok {
 			t.Errorf("%s does not render in overlays/cloud", node)
@@ -608,12 +469,12 @@ func TestCloudKeepsDrainBeforeStartAtTwoReplicas(t *testing.T) {
 //
 // base ships a PDB beside the Deployment for every user-facing node. The bff
 // does not live in base -- it comes from components/engine-bff, which shipped
-// the Deployment alone -- so every install had six protected user-facing nodes
-// and one unprotected one, and the unprotected one is the node the portal and
+// the Deployment alone -- so every install had its user-facing nodes protected
+// and one unprotected, and the unprotected one is the node the portal and
 // every SPA actually talk to.
 //
 // The downstream verification enumerated what it FOUND ("PDBs already exist for
-// agent, cognition, edge, identity, planner, workbench") rather than what it was
+// agent, edge, identity, planner, workbench") rather than what it was
 // LOOKING FOR. That is a true statement and also a list with bff missing from
 // it, and a check of that shape reads as complete whichever way it comes out.
 //
@@ -631,8 +492,9 @@ func TestEveryServingNodeHasAPodDisruptionBudget(t *testing.T) {
 	}
 
 	// Derived from what actually renders, NOT from entryMeshOn: a list is the
-	// thing that failed here. Voice-off nodes are excluded because a PDB over
-	// zero replicas protects nothing and blocks nothing.
+	// thing that failed here. Held-off nodes are excluded because a PDB over
+	// zero replicas protects nothing and blocks nothing, and so is anything
+	// this overlay does not itself serve traffic from.
 	byName := entryWorkloadsByName(t, rendered)
 	checked := 0
 	for name, w := range byName {

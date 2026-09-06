@@ -49,12 +49,11 @@ make scale N=2
 ```
 
 This brings up Postgres + TimescaleDB, identity, mcp, the product-neutral
-`bff` (client edge / mesh root), and the
-cognition/agent/planner/voice/workbench mesh nodes -- each pod carrying
-a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name`, exactly as in
-staging. The 2-replica topology is the only one that reproduces
-cluster-only bugs (cross-node delivery, replica fan-out, node
-lifecycle).
+`bff` (client edge / mesh root), and the agent/planner/workbench mesh
+nodes -- each pod carrying a unique `MEMQL_NODE_ID` via
+`fieldRef: metadata.name`, exactly as in staging. The 2-replica topology
+is the only one that reproduces cluster-only bugs (cross-node delivery,
+replica fan-out, node lifecycle).
 
 > Runbook + port-forward reference:
 > [docs/public/operate/reproduce-the-cloud-locally.md](../operate/reproduce-the-cloud-locally.md).
@@ -115,9 +114,7 @@ services are reached with a debugging port-forward:
 
 A downstream product's client SPA is not part of the engine overlay; it
 ships from its own repo. A product's bff is a plain engine node fronting
-the product's runtime DSL bundle (`MEMQL_DSL_PATH`). The local voice lane
-rides a LiveKit Cloud project (Epic #2184), so there is no in-cluster
-LiveKit Service to forward.
+the product's runtime DSL bundle (`MEMQL_DSL_PATH`).
 
 **Database credentials:** `memql / memql_dev` on database `memql`.
 
@@ -211,10 +208,10 @@ first time.
 
 ```bash
 make dev                  # rebuild + import + roll all app nodes
-make dev NODE=cognition   # rebuild + roll a single node (faster)
+make dev NODE=agent       # rebuild + roll a single node (faster)
 ```
 
-Each node runs a build-tagged binary (`-tags voice`, `-tags cognition`,
+Each node runs a build-tagged binary (`-tags agent`, `-tags planner`,
 etc.) in its own Deployment, all sharing one PostgreSQL database. The
 BFF dials the workers via `WorkerDialer`, seeded by `MEMQL_WORKER_PEERS`
 and reconciled against `v1:cluster:node`.
@@ -281,9 +278,5 @@ schema-validation errors: a concept declaring a reserved payload field
 
 ## Tips
 
-- The local k3d cluster runs voice against a LiveKit Cloud project
-  (Epic #2184); export `LIVEKIT_URL` / `LIVEKIT_API_KEY` /
-  `LIVEKIT_API_SECRET` before `make up` to enable the lane. Avatar
-  VIDEO remains staging-only.
 - For ad-hoc DB inspection use `make db` (opens a psql shell over the
   postgres port-forward), or point any client at the forwarded `:5432`.

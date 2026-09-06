@@ -289,14 +289,12 @@ shape identity identitySummary {
   active
 }
 
-/// Comprehensive invitation projection (user + guest kinds)
+/// Comprehensive invitation projection
 @row
 shape invitation invitationFull {
   row.id
   kind
   active
-  partitionId
-  spaceName
   inviterId
   inviterName
   inviteeId
@@ -453,14 +451,6 @@ shape identity passkeySummary {
   row.createdAt
 }
 
-/// Lightweight projection: just the user's id and activePartitionId pointer. Phase 4 of the
-/// chat-architecture plan.
-@row
-shape user userActiveSpaceProjection {
-  row.id
-  activePartitionId
-}
-
 /// Comprehensive user projection: the person behind one or more identities.
 @row
 shape user userFull {
@@ -480,7 +470,6 @@ shape user userFull {
   suspendedAt
   suspendedReason
   lastSeenAt
-  activePartitionId
   revocationEpoch
   sharedMailbox
   signInPolicy

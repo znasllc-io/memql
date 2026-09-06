@@ -100,7 +100,7 @@ func bootRefusingPackage() fstest.MapFS {
 // reservedDomainPackage ships a DSL domain the engine already owns.
 func reservedDomainPackage() fstest.MapFS {
 	p := validPackage()
-	p["dsl/cognition/concepts.memql"] = file(validConcepts)
+	p["dsl/library/concepts.memql"] = file(validConcepts)
 	return p
 }
 

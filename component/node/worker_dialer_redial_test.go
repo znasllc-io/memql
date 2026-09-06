@@ -44,7 +44,7 @@ import (
 func TestWorkerDialer_RedialsAfterExternalClose(t *testing.T) {
 	workerIdentity := &Identity{
 		ID:      "cognition-redial-test",
-		Type:    NodeTypeCognition,
+		Type:    NodeTypeAgent,
 		Version: "test",
 	}
 
@@ -95,7 +95,7 @@ func TestWorkerDialer_RedialsAfterExternalClose(t *testing.T) {
 	defer bffPM.Stop(context.Background())
 
 	seeds := []WorkerTarget{
-		{NodeType: NodeTypeCognition, Address: workerAddr},
+		{NodeType: NodeTypeAgent, Address: workerAddr},
 	}
 	wd := NewWorkerDialer(dialerIdentity, bffPM, nil, nil, seeds, testLogger())
 	if wd == nil {

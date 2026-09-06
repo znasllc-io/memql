@@ -112,10 +112,9 @@ export function Shell({
   return (
     <AuthSourceProvider source={source}>
       {/* The credential seam, reachable from inside an app. An app that
-          uploads somewhere the shell's own provider does not point at -- the
-          Training app posts to the space attachment route rather than to the
-          Library -- builds its own provider from this, and gets `bearer()`
-          rather than the token. */}
+          uploads somewhere the shell's own provider does not point at builds
+          its own provider from this, and gets `bearer()` rather than the
+          token. */}
       <OsConnectionProvider authSource={source} enabled={!ports.disableConnection}>
         <SessionScope access={access} config={config}>
         <MachinesProvider>

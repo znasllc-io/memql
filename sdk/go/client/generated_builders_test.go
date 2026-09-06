@@ -19,27 +19,28 @@ func mustParseCall(t *testing.T, call string) {
 
 // TestGeneratedBuilder_OmittedLeadingOptionalHasNoDanglingComma pins
 // memql#1319 against the REAL generated builder: omitting the leading
-// optional arg (PresenceId) of a long-named mutation must not emit a
-// dangling comma after the prefix `<kind> name(`. Pre-fix the separator
-// guard was the hardcoded `b.Len() > 17`, always true for this 33-char
-// function name, producing `... updateParticipantPresence(, ...)`.
+// optional arg of a long-named mutation must not emit a dangling comma
+// after the prefix `<kind> name(`. Pre-fix the separator guard was the
+// hardcoded `b.Len() > 17`, always true for a name this long, producing
+// `... advanceMemoryConsolidationCursor(, ...)`.
 //
-// Story 9 (#2335): the builder now emits the kind-prefixed, named-args
-// invocation form `mutation updateParticipantPresence(participantId: ...)`,
-// not the legacy object-literal wrapper.
+// Story 9 (#2335): the builder emits the kind-prefixed, named-args
+// invocation form, not the legacy object-literal wrapper.
+//
+// It used to drive updateParticipantPresence, which went with the cognition
+// concepts (epic memql#4988). What the probe needs is any mutation whose name
+// is longer than 17 characters and whose FIRST declared arg is optional.
 func TestGeneratedBuilder_OmittedLeadingOptionalHasNoDanglingComma(t *testing.T) {
-	got := UpdateParticipantPresenceBuild(UpdateParticipantPresenceArgs{
-		// PresenceId intentionally omitted -- the leading optional field.
-		ParticipantId: "v1:cognition:participant:p1",
-		PartitionId:   "v1:cognition:space:s1",
-		State:         "idle",
-		Label:         "probe",
+	got := AdvanceMemoryConsolidationCursorBuild(AdvanceMemoryConsolidationCursorArgs{
+		// CursorId intentionally omitted -- the leading optional field.
+		Watermark:    "2026-09-06T00:00:00Z",
+		EpisodesSeen: 3,
 	})
 
 	if strings.Contains(got, "(,") {
 		t.Fatalf("dangling comma after prefix (memql#1319 regression): %s", got)
 	}
-	wantPrefix := `mutation updateParticipantPresence(participantId: `
+	wantPrefix := `mutation advanceMemoryConsolidationCursor(watermark: `
 	if !strings.HasPrefix(got, wantPrefix) {
 		t.Fatalf("call = %q, want prefix %q", got, wantPrefix)
 	}
@@ -50,16 +51,18 @@ func TestGeneratedBuilder_OmittedLeadingOptionalHasNoDanglingComma(t *testing.T)
 // the REAL generated builder: optional object args left nil must be
 // omitted entirely, not rendered as `{}` (which the engine treats as a
 // real empty value and runs through concept validation). With a real
-// map the field must render. This is what makes
-// createSessionForParticipant callable from the Go SDK both
-// with streams omitted and with a real object.
+// map the field must render. This is what makes a multi-object mutation
+// callable from the Go SDK both
+// with the optional objects omitted and with a real object. It used to drive
+// createSessionForParticipant, which went with the cognition concepts (epic
+// memql#4988).
 func TestGeneratedBuilder_NilObjectArgsAreOmitted(t *testing.T) {
 	// All optional objects nil -> none of them appear.
-	got := CreateSessionForParticipantBuild(CreateSessionForParticipantArgs{
-		PartitionId:   "v1:cognition:space:s1",
-		ParticipantId: "v1:cognition:participant:p1",
+	got := UpdatePlanStatusBuild(UpdatePlanStatusArgs{
+		PlanId: "v1:planner:plan:p1",
+		Status: "running",
 	})
-	for _, absent := range []string{"streams", "humanInput", "aiOutput"} {
+	for _, absent := range []string{"output", "feedbackRequest", "feedbackResponse", "phases", "estimate", "metrics"} {
 		if strings.Contains(got, absent) {
 			t.Errorf("nil optional object %q must be omitted, got: %s", absent, got)
 		}
@@ -70,13 +73,13 @@ func TestGeneratedBuilder_NilObjectArgsAreOmitted(t *testing.T) {
 	mustParseCall(t, got)
 
 	// Real object -> the field renders with its content.
-	got = CreateSessionForParticipantBuild(CreateSessionForParticipantArgs{
-		PartitionId:   "v1:cognition:space:s1",
-		ParticipantId: "v1:cognition:participant:p1",
-		Streams:       map[string]any{"realtimeSessionId": "rt-1"},
+	got = UpdatePlanStatusBuild(UpdatePlanStatusArgs{
+		PlanId:  "v1:planner:plan:p1",
+		Status:  "running",
+		Metrics: map[string]any{"tokensSpent": "12"},
 	})
-	if !strings.Contains(got, `streams: {realtimeSessionId: "rt-1"}`) {
-		t.Errorf("real streams object must render, got: %s", got)
+	if !strings.Contains(got, `metrics: {tokensSpent: "12"}`) {
+		t.Errorf("real metrics object must render, got: %s", got)
 	}
 	mustParseCall(t, got)
 }

@@ -33,7 +33,7 @@ func TestParentConnector_StaysRunningAcrossParentDisconnect(t *testing.T) {
 	logger := testLogger()
 	identity := &Identity{
 		ID:            "child-1",
-		Type:          NodeTypeCognition,
+		Type:          NodeTypeAgent,
 		ParentAddress: "127.0.0.1:1", // nothing listens here -> dials always fail
 	}
 	pm := NewPeerManager(identity, logger)
@@ -64,7 +64,7 @@ func TestParentConnector_StopIsClean(t *testing.T) {
 	logger := testLogger()
 	identity := &Identity{
 		ID:            "child-2",
-		Type:          NodeTypeCognition,
+		Type:          NodeTypeAgent,
 		ParentAddress: "127.0.0.1:1",
 	}
 	pm := NewPeerManager(identity, logger)

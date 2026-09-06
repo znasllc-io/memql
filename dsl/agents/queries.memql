@@ -265,7 +265,7 @@ query agentRole agentRoleBySlug {
 // (memql#2985). This filter carries no caller-scope term, so one user's
 // custom role is listed for every other user in the deployment.
 //
-// The catalog is global because routing needs it to be: cognition and the
+// The catalog is global because routing needs it to be: the planner and the
 // conductor resolve an agent's role while dispatching a turn, and they have
 // to see the same role surface regardless of whose agent it is. A per-creator
 // filter would make a role resolvable only in its creator's sessions.
@@ -326,32 +326,6 @@ query skillChangeEvent skillChangeEventsForAgent {
   sort     "row.createdAt", "desc"
   paginate 50
   shape   skillChangeEventFull
-}
-
-/// List active avatar personas in the operator catalog (memql#609). Backs the Create-Assistant
-/// persona picker (frontend#239); the SPA filters to the user's selected gender client-side over
-/// this small catalog. `vendor` is an OPTIONAL filter -- omit it to list every active persona
-/// across vendors; pass vendor="simli" to scope to custom Simli avatars (memql#1708: the predicate
-/// was a hardcoded vendor==simli that silently dropped every other vendor's personas from the list,
-/// even though by-id reads returned them). Rows are hand-curated as seeds in
-/// dsl/agents/avatarPersonas.memql.
-@unbounded("avatar persona catalog -- a small bounded set consumed whole")
-query avatarPersona avatarPersonas {
-  args {
-    vendor  enum("anam", "simli")
-  }
-  filter  isActiveRecord && when(args.vendor) { vendor==args.vendor }
-  shape   avatarPersonaFull
-}
-
-/// Resolve a single avatar persona by id. Hydrates an agent's stamped avatarPersonaId for display
-/// and resolves the vendor + vendor-issued personaId.
-query avatarPersona avatarPersonaById {
-  args {
-    avatarPersonaId  string!
-  }
-  filter  row.id==args.avatarPersonaId
-  shape   avatarPersonaFull
 }
 
 // agentsForPlan -- the agents a goal raised (memql#4372, Nexus)

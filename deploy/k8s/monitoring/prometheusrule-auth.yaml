@@ -143,8 +143,7 @@ spec:
               inert by design. Rotate by re-sealing a new seed and rolling
               identity. READ THE RUNBOOK FIRST: that path bypasses the JWKS
               overlap window, so it invalidates every unexpired access
-              token, mesh node token, service-account JWT and voice-agent
-              JWT at once. See
+              token, mesh node token and service-account JWT at once. See
               docs/public/operate/auth/identity-service.md#rotating-the-signing-key
               and memql#3381.
 

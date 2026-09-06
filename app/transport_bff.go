@@ -8,26 +8,11 @@ package app
 // AI operations (chat, speech, transcribe, agent/space/group suggest)
 // live on MemqlService.Stream via AiChatMsg / AiSpeechMsg / AiTranscribeMsg /
 // AiSuggestMsg and are proxied across nodes by AiForwardRouter.
-//
-// Polyphon: the BFF also wires the LiveKit room provider so browsers
-// can fetch a room token (PolyphonRoomTokenMsg) directly from the
-// BFF gRPC stream they're already connected to. The score engine
-// itself runs on the cognition node; the BFF just mints LiveKit
-// tokens. The bridge agent is a separate container that joins the
-// room independently.
 func (a *App) transportBFF() {
 	a.transportBase()
-	a.wirePolyphonEndpoints()
-	// Attachment upload + download endpoints. The bff is the frontend-facing
-	// node every browser `/spaces/{id}/attachments` request routes to (nginx +
-	// the Vite dev proxy point `/spaces/...` at the bff), so the handler must
-	// live here, not only on the agent. Shared with the agent build in
-	// transport_attachments.go. (memql#888)
-	//
-	// Captured (not discarded) because the atomic bundle-publish endpoint
-	// below reuses the same Azure Blob client rather than constructing a
-	// second one against the same account (transport_sites.go).
-	uploader, container := a.mountAttachmentEndpoints()
+	// Azure Blob uploader + container, shared with the agent build in
+	// transport_blobstore.go.
+	uploader, container := a.resolveBlobStore()
 	// Atomic bundle-publish endpoint (POST /sites/{id}/bundles, memql#3713).
 	// Bff-only per the epic's controller ruling: component/edge is a
 	// library here, not a node-mounted endpoint, and the edge node itself

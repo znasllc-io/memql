@@ -133,20 +133,6 @@ func TestDroppedArgs1633_WireThrough(t *testing.T) {
 			"`reason` must land on the concept's supersededReason field (#1633)")
 	})
 
-	t.Run("setUserActiveSpace persists partitionId", func(t *testing.T) {
-		payload := renderPayload(t, reg, "setUserActiveSpace", map[string]any{
-			"userId": "u1", "partitionId": "s1",
-		})
-		require.Equal(t, "s1", payload["activePartitionId"])
-	})
-
-	t.Run("setUserActiveSpace persists activePartitionId alias", func(t *testing.T) {
-		payload := renderPayload(t, reg, "setUserActiveSpace", map[string]any{
-			"userId": "u1", "activePartitionId": "s2",
-		})
-		require.Equal(t, "s2", payload["activePartitionId"],
-			"the activePartitionId arg name (1-Identity QA) must also land (#1633)")
-	})
 }
 
 func TestDroppedArgs1633_RejectUnknownArgs(t *testing.T) {

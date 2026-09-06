@@ -55,7 +55,7 @@ func TestServerOnlyMutationRefusesClientOrigin(t *testing.T) {
 	//
 	// Hoisted out of the subtests deliberately: t.Fatalf on the parent's *T from
 	// inside a subtest goroutine does not reliably stop the run.
-	for _, name := range []string{"updateUser", "setUserActiveSpace"} {
+	for _, name := range []string{"updateUser"} {
 		if fn, err := fns.Get(name); err != nil || fn == nil {
 			t.Fatalf("construct %q is not in the loaded tree (%v) -- if it was renamed, move "+
 				"this guard with it rather than letting the assertion pass vacuously", name, err)

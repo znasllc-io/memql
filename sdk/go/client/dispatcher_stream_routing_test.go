@@ -50,8 +50,6 @@ var routedFamilies = map[string]string{
 	"ai_chat_result":                "streaming chat: the terminal carrying the assembled text",
 	"agent_generate_turn_delta":     "agent turn streaming: deltas",
 	"agent_generate_turn_complete":  "agent turn streaming: the terminal",
-	"voice_agent_turn_delta":        "voice-agent turn streaming: deltas",
-	"voice_agent_turn_complete":     "voice-agent turn streaming: the terminal",
 	"concepts_registry_delta":       "concept-registry follow: a snapshot then one frame per registry change (memql#4238)",
 	"query_result":                  "QueryResultChunk carries `done`; a chunked contract even where the engine emits one",
 	"query_error":                   "the error terminal that can end any of the above in place of its normal terminal",
@@ -75,13 +73,9 @@ var unroutedFamilies = map[string]string{
 	"server_hello":                           "not request-scoped",
 	"event":                                  "not request-scoped",
 	"heartbeat":                              "not request-scoped",
-	"client_tool_call":                       "not request-scoped: handled by its own tier in Run()",
 	"rotate_auth_result":                     "not request-scoped",
-	"voice_agent_speak":                      "not request-scoped: server-minted id for an exchange no caller opened",
 	"list_tools_result":                      "single-reply",
 	"call_tool_result":                       "single-reply",
-	"ai_speech_result":                       "single-reply",
-	"ai_transcribe_result":                   "single-reply",
 	"ai_suggest_result":                      "single-reply",
 	"identity_result":                        "single-reply",
 	"delegation_result":                      "single-reply",
@@ -91,27 +85,15 @@ var unroutedFamilies = map[string]string{
 	"sense_hover_result":                     "single-reply",
 	"sense_signature_help_result":            "single-reply",
 	"sense_definition_result":                "single-reply",
-	"polyphon_room_token_result":             "single-reply",
-	"polyphon_status_result":                 "single-reply",
-	"polyphon_utterance_result":              "single-reply",
 	"concepts_list_result":                   "single-reply",
 	"concepts_subscribe_result":              "single-reply",
 	"my_access_result":                       "single-reply",
-	"send_guest_invite_result":               "single-reply",
-	"resolve_guest_invite_result":            "single-reply",
-	"join_space_as_guest_result":             "single-reply",
-	"cancel_guest_invite_result":             "single-reply",
-	"resend_guest_invite_email_result":       "single-reply",
 	"revoke_current_session_result":          "single-reply",
 	"revoke_all_sessions_result":             "single-reply",
 	"revoke_session_result":                  "single-reply",
 	"set_sign_in_policy_result":              "single-reply",
 	"create_worker_token_result":             "single-reply",
 	"revoke_worker_token_result":             "single-reply",
-	"voice_agent_partial_ack":                "single-reply",
-	"voice_agent_final_ack":                  "single-reply",
-	"voice_agent_session_ack":                "single-reply",
-	"voice_agent_realtime_output_ack":        "single-reply",
 	"list_pack_domains_result":               "single-reply",
 	"list_pack_files_result":                 "single-reply",
 	"read_pack_file_result":                  "single-reply",
@@ -492,8 +474,8 @@ func TestQueryErrorReachesTheStreamListener(t *testing.T) {
 // dispatcher satisfies both -- bounded by the oneof's member count for the
 // life of a connection -- with the true volume kept on the counter.
 func TestUnroutedRequestScopedFrameIsLoudExactlyOnce(t *testing.T) {
-	if _, ok := unroutedFamilies["ai_speech_result"]; !ok {
-		t.Fatal("this test needs a family that is NOT routed; ai_speech_result has moved -- pick another")
+	if _, ok := unroutedFamilies["my_access_result"]; !ok {
+		t.Fatal("this test needs a family that is NOT routed; my_access_result has moved -- pick another")
 	}
 
 	var logs bytes.Buffer
@@ -506,8 +488,8 @@ func TestUnroutedRequestScopedFrameIsLoudExactlyOnce(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		stream.recvCh <- &memqlv1.MemqlServerMessage{
-			Payload: &memqlv1.MemqlServerMessage_AiSpeechResult{
-				AiSpeechResult: &memqlv1.AiSpeechResult{RequestId: "speech-req-1"},
+			Payload: &memqlv1.MemqlServerMessage_MyAccessResult{
+				MyAccessResult: &memqlv1.MyAccessResult{RequestId: "access-req-1"},
 			},
 		}
 	}
@@ -525,7 +507,7 @@ func TestUnroutedRequestScopedFrameIsLoudExactlyOnce(t *testing.T) {
 			"  0 means the omission is still silent (memql#3414); >1 means it can become log spam.\n"+
 			"  Log was:\n%s", n, logs.String())
 	}
-	if got := d.UnroutedFrames()["ai_speech_result"]; got != 3 {
+	if got := d.UnroutedFrames()["my_access_result"]; got != 3 {
 		t.Errorf("UnroutedFrames counts every frame even though the log speaks once; got %d, want 3", got)
 	}
 }

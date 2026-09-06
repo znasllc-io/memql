@@ -91,7 +91,7 @@ func TestAuthoredQueriesResolve(t *testing.T) {
 	fns, specs := loadRealTree(t)
 
 	for _, name := range []string{
-		"userById", "userByIdSystem", "userDisplayById", "userActiveSpace", "currentUser",
+		"userById", "userByIdSystem", "userDisplayById", "currentUser",
 		"userByEmail", // memql#2881
 		// memql#2883. searchUsers matters most here: it gained a
 		// requiresOwnerOrAdmin conjunct, and this is the test that would have

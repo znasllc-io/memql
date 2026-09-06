@@ -36,7 +36,6 @@ require (
 	github.com/znasllc-io/memql/component/node v0.0.0
 	github.com/znasllc-io/memql/component/node/gen v0.0.0
 	github.com/znasllc-io/memql/component/planner v0.0.0
-	github.com/znasllc-io/memql/component/polyphon v0.0.0
 	github.com/znasllc-io/memql/component/router v0.0.0
 	github.com/znasllc-io/memql/component/safety v0.0.0
 	github.com/znasllc-io/memql/component/secret v0.0.0
@@ -211,7 +210,6 @@ replace github.com/znasllc-io/memql/component/node/gen => ../component/node/gen
 
 replace github.com/znasllc-io/memql/component/planner => ../component/planner
 
-replace github.com/znasllc-io/memql/component/polyphon => ../component/polyphon
 
 replace github.com/znasllc-io/memql/component/provenance => ../component/provenance
 

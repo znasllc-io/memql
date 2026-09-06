@@ -61,7 +61,6 @@ shape memory memoryFull {
   kind
   agentId
   partitionId
-  sourceUtteranceId
   row.createdAt
 }
 

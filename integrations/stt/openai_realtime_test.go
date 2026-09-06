@@ -22,8 +22,8 @@ func TestOpenAIRealtimeProvider_StartStream_NilClient(t *testing.T) {
 }
 
 // Session-level behavior (SendAudio, interim/final forwarding, Finalize,
-// Close idempotency) is covered by the shared polyphonASRSession tests in
-// polyphon_session_test.go. This file only covers the provider wrapper
+// Close idempotency) is covered by the shared asrSession tests in
+// asr_session_test.go. This file only covers the provider wrapper
 // surface; adding duplicate session-level tests here would test the same
 // helper twice.
 

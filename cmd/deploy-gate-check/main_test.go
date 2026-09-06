@@ -67,7 +67,7 @@ func TestResolveToken(t *testing.T) {
 // which the engine logged as a `memql query execution failed` ERROR on the node on
 // every gate run (component=MemQL, bff node) -- the staging log noise the issue
 // flagged. This test fails (with that exact error) on the old default and passes on
-// the well-formed queryActivePartitionIds replacement.
+// the well-formed clusterNodeTypes replacement.
 func TestDefaultGateQueryParses(t *testing.T) {
 	if _, err := parser.ParseExpression(defaultGateQuery); err != nil {
 		t.Fatalf("default gate query %q must parse cleanly (znasllc-io/memql#1130); got: %v", defaultGateQuery, err)

@@ -92,7 +92,7 @@ func TestMeshFastPathWakesRemoteSubscriber(t *testing.T) {
 	// A produces a reply. This Append + PublishHint happens far faster than the
 	// 250ms poll; if the hint works, B delivers almost immediately.
 	start := time.Now()
-	if _, err := subA.Publish(ctx, mkDeliverable(key, "evt-1", "graph.node.created.v1:cognition:utterance")); err != nil {
+	if _, err := subA.Publish(ctx, mkDeliverable(key, "evt-1", "graph.node.created.v1:library:artifact")); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 
@@ -249,7 +249,7 @@ func TestMeshHintEnvelopeRoundTrip(t *testing.T) {
 		EventID:    "evt-xyz",
 		Key:        RoutingKey{Kind: "space", ID: "s-1"},
 		Seq:        42,
-		Topic:      "graph.node.created.v1:cognition:utterance",
+		Topic:      "graph.node.created.v1:library:artifact",
 		Kind:       events.KindNodeCreated,
 		Payload:    map[string]any{"id": "evt-xyz", "text": "hi"},
 		OriginNode: "node-A",

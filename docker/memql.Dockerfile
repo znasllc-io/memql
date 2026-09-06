@@ -4,7 +4,6 @@
 # Build with node type:
 #   docker build .                                    # bff (default)
 #   docker build --build-arg BUILD_TAGS=bff .         # bff (explicit)
-#   docker build --build-arg BUILD_TAGS=cognition .   # cognition
 #   docker build --build-arg BUILD_TAGS=agent .       # agent
 #   docker build --build-arg BUILD_TAGS=planner .     # planner
 
@@ -12,12 +11,6 @@
 FROM golang:1.26-alpine AS builder
 
 ARG BUILD_TAGS=""
-
-# CGO_ENABLED selects the build mode. Default node types build CGO-free; the
-# voice node sets CGO_ENABLED=1 (its LiveKit server-sdk-go + media-sdk pull a
-# CGO libopus/opusfile/soxr dependency -- see docs/voice/
-# 451-livekit-go-room-participation.md, Caveat 1).
-ARG CGO_ENABLED=0
 
 # MEMQL_RELEASE is the release tag this image is being cut at -- e.g. "v0.18.1".
 # It is linked into the binary (core/buildinfo) and is the ONLY way a node can
@@ -35,12 +28,6 @@ ARG MEMQL_COMMIT=""
 
 # Install build dependencies
 RUN apk add --no-cache git gcc musl-dev bash curl
-
-# Voice node CGO build deps: libopus/opusfile/soxr dev headers. No-op for the
-# CGO-free node types (the conditional keeps the layer cheap when unused).
-RUN if [ "${CGO_ENABLED}" = "1" ]; then \
-        apk add --no-cache opus-dev opusfile-dev soxr-dev; \
-    fi
 
 # Set working directory
 WORKDIR /build
@@ -89,14 +76,15 @@ RUN bash scripts/identity/build-css.sh
 # sibling files in package main (e.g. subcommand_stub.go, which defines
 # dispatchSubcommand called from main.go), breaking every node build.
 # The -installsuffix cgo flag is only meaningful for static (CGO-free)
-# builds, so it is omitted; CGO_ENABLED is the build arg (0 for default node
-# types, 1 for the voice node).
-RUN CGO_ENABLED=${CGO_ENABLED} GOOS=linux go build -tags "${BUILD_TAGS}" -a -ldflags="-s -w -X github.com/znasllc-io/memql/core/buildinfo.release=${MEMQL_RELEASE} -X github.com/znasllc-io/memql/core/buildinfo.commit=${MEMQL_COMMIT}" -o memql .
+# builds, so it is omitted; every node type is CGO-free.
+RUN CGO_ENABLED=0 GOOS=linux go build -tags "${BUILD_TAGS}" -a -ldflags="-s -w -X github.com/znasllc-io/memql/core/buildinfo.release=${MEMQL_RELEASE} -X github.com/znasllc-io/memql/core/buildinfo.commit=${MEMQL_COMMIT}" -o memql .
 
 # Build the health check binary (always CGO-free, for distroless containers)
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w" -o healthcheck ./cmd/healthcheck
 
-# Stage 2: Runtime (distroless for minimal attack surface) -- CGO-free nodes.
+# Stage 2: Runtime (distroless for minimal attack surface). Every node type is
+# CGO-free, so this is the only runtime stage and it is LAST -- a build with no
+# --target resolves here.
 FROM gcr.io/distroless/base-debian12
 
 WORKDIR /app
@@ -114,22 +102,4 @@ COPY --from=builder /build/dsl ./dsl
 EXPOSE 8085 50051
 
 # Run the application
-ENTRYPOINT ["/app/memql"]
-
-# Stage 3: voice-runtime -- the voice node links libopus/opusfile/soxr
-# dynamically, so distroless (no shared libraries) cannot run it. This stage
-# uses alpine with the runtime shared libraries installed. Select it with
-# `--target voice-runtime` (the voice compose service does so).
-FROM alpine:3.21 AS voice-runtime
-
-RUN apk add --no-cache opus opusfile soxr ca-certificates
-
-WORKDIR /app
-
-COPY --from=builder /build/memql .
-COPY --from=builder /build/healthcheck .
-COPY --from=builder /build/dsl ./dsl
-
-EXPOSE 8085 50051
-
 ENTRYPOINT ["/app/memql"]

@@ -662,8 +662,6 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"agentRoleBySlug":  {"v1:agents:agentRole", undeclaredGrandfatherReason},
 
 	// v1:agents:avatarPersona
-	"avatarPersonaById": {"v1:agents:avatarPersona", undeclaredGrandfatherReason},
-	"avatarPersonas":    {"v1:agents:avatarPersona", undeclaredGrandfatherReason},
 
 	// v1:agents:skill -- moved to v1:skills:skill with a declared tier
 	// (@rowAuthz(public, requiresIdentity)) in the work spine's epic A1, so
@@ -704,36 +702,20 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"clusterSpawnEvents": {"v1:cluster:spawnEvent", undeclaredGrandfatherReason},
 
 	// v1:cognition:audioOverride
-	"audioOverridesForSpace": {"v1:cognition:audioOverride", undeclaredGrandfatherReason},
 
 	// v1:cognition:participant
-	"activeHumanParticipants": {"v1:cognition:participant", undeclaredGrandfatherReason},
-	"groupGAForSpace":         {"v1:cognition:participant", undeclaredGrandfatherReason},
-	"participantByAgentSpace": {"v1:cognition:participant", undeclaredGrandfatherReason},
-	"siParticipantForSpace":   {"v1:cognition:participant", undeclaredGrandfatherReason},
-	"spaceParticipants":       {"v1:cognition:participant", undeclaredGrandfatherReason},
 
 	// v1:cognition:participant:presence
-	"spaceParticipantPresence": {"v1:cognition:participant:presence", undeclaredGrandfatherReason},
 
 	// v1:cognition:session
-	"participantSession": {"v1:cognition:session", undeclaredGrandfatherReason},
 
 	// v1:cognition:utterance
-	"agentInteractionCount":       {"v1:cognition:utterance", undeclaredGrandfatherReason},
-	"feedbackAnnouncementForPlan": {"v1:cognition:utterance", undeclaredGrandfatherReason},
-	"greetingUtterance":           {"v1:cognition:utterance", undeclaredGrandfatherReason},
-	"hasAIResponseForReply":       {"v1:cognition:utterance", undeclaredGrandfatherReason},
-	"spaceUtterances":             {"v1:cognition:utterance", undeclaredGrandfatherReason},
 
 	// v1:cognition:videoOverride
-	"videoOverridesForSpace": {"v1:cognition:videoOverride", undeclaredGrandfatherReason},
 
 	// v1:common:attachment
-	"attachmentById": {"v1:common:attachment", undeclaredGrandfatherReason},
 
 	// v1:common:media
-	"spaceMedia": {"v1:common:media", undeclaredGrandfatherReason},
 
 	// v1:data:log
 	"validationLog": {"v1:data:log", undeclaredGrandfatherReason},
@@ -803,28 +785,27 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"expiredActiveDelegations":           {"v1:identity:delegation", undeclaredGrandfatherReason},
 
 	// v1:identity:identity
-	"accountTokenById":            {"v1:identity:identity", undeclared3322AccountTokenReason},
-	"accountTokensForAccount":     {"v1:identity:identity", undeclared3322AccountTokenReason},
-	"badgeByKeyHash":              {"v1:identity:identity", undeclaredGrandfatherReason},
-	"badgesForSelf":               {"v1:identity:identity", undeclared3178SelfScopedReason},
-	"nodeTokenIdentities":         {"v1:identity:identity", undeclaredGrandfatherReason},
-	"nodeTokenIdentitiesAdmin":    {"v1:identity:identity", undeclared3324NodeTokenAdminReason},
-	"nodeTokenIdentityByBinding":  {"v1:identity:identity", undeclaredGrandfatherReason},
-	"nodeTokenIdentityById":       {"v1:identity:identity", undeclaredGrandfatherReason},
-	"voiceAgentTokenIdentityById": {"v1:identity:identity", "memql#4111: read by the voice-agent revocation gate on the auth path, before any actor exists. v1:identity:identity cannot carry an owner tier (see identity_credential_rowauthz_inventory_3349_test.go); classified machine-credential there."},
-	"patIdentitiesForSelf":        {"v1:identity:identity", undeclared3178SelfScopedReason},
-	"patIdentitiesForUser":        {"v1:identity:identity", undeclaredGrandfatherReason},
-	"patIdentityById":             {"v1:identity:identity", undeclaredGrandfatherReason},
-	"oidcIdentityBySubject":       {"v1:identity:identity", undeclared4611OidcReason},
-	"passkeyByCredentialId":       {"v1:identity:identity", undeclared3406PasskeyReason},
-	"passkeysForSelf":             {"v1:identity:identity", undeclared3406PasskeyReason},
-	"recoveryKeyByHash":           {"v1:identity:identity", undeclared3964RecoveryKeyReason},
-	"activeRecoveryKeys":          {"v1:identity:identity", undeclared3964RecoveryKeyReason},
-	"signInIdentitiesForSelf":     {"v1:identity:identity", undeclared3409SignInRoutesReason},
-	"signInIdentitiesForUser":     {"v1:identity:identity", undeclared3591ClaimedOwnerReason},
-	"patIdentityByKeyHash":        {"v1:identity:identity", undeclaredGrandfatherReason},
-	"workerTokenByKeyHash":        {"v1:identity:identity", undeclaredGrandfatherReason},
-	"workerTokensForUser":         {"v1:identity:identity", undeclaredGrandfatherReason},
+	"accountTokenById":           {"v1:identity:identity", undeclared3322AccountTokenReason},
+	"accountTokensForAccount":    {"v1:identity:identity", undeclared3322AccountTokenReason},
+	"badgeByKeyHash":             {"v1:identity:identity", undeclaredGrandfatherReason},
+	"badgesForSelf":              {"v1:identity:identity", undeclared3178SelfScopedReason},
+	"nodeTokenIdentities":        {"v1:identity:identity", undeclaredGrandfatherReason},
+	"nodeTokenIdentitiesAdmin":   {"v1:identity:identity", undeclared3324NodeTokenAdminReason},
+	"nodeTokenIdentityByBinding": {"v1:identity:identity", undeclaredGrandfatherReason},
+	"nodeTokenIdentityById":      {"v1:identity:identity", undeclaredGrandfatherReason},
+	"patIdentitiesForSelf":       {"v1:identity:identity", undeclared3178SelfScopedReason},
+	"patIdentitiesForUser":       {"v1:identity:identity", undeclaredGrandfatherReason},
+	"patIdentityById":            {"v1:identity:identity", undeclaredGrandfatherReason},
+	"oidcIdentityBySubject":      {"v1:identity:identity", undeclared4611OidcReason},
+	"passkeyByCredentialId":      {"v1:identity:identity", undeclared3406PasskeyReason},
+	"passkeysForSelf":            {"v1:identity:identity", undeclared3406PasskeyReason},
+	"recoveryKeyByHash":          {"v1:identity:identity", undeclared3964RecoveryKeyReason},
+	"activeRecoveryKeys":         {"v1:identity:identity", undeclared3964RecoveryKeyReason},
+	"signInIdentitiesForSelf":    {"v1:identity:identity", undeclared3409SignInRoutesReason},
+	"signInIdentitiesForUser":    {"v1:identity:identity", undeclared3591ClaimedOwnerReason},
+	"patIdentityByKeyHash":       {"v1:identity:identity", undeclaredGrandfatherReason},
+	"workerTokenByKeyHash":       {"v1:identity:identity", undeclaredGrandfatherReason},
+	"workerTokensForUser":        {"v1:identity:identity", undeclaredGrandfatherReason},
 
 	// v1:identity:enrolmentToken
 	"enrolmentTokenByHash": {"v1:identity:enrolmentToken", undeclared3408EnrolmentReason},
@@ -833,12 +814,10 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"githubConnectStateByHash": {"v1:identity:githubConnectState", undeclared4913GithubConnectReason},
 
 	// v1:identity:invitation
-	"invitationById":                {"v1:identity:invitation", undeclaredGrandfatherReason},
-	"invitationByPreviousTokenHash": {"v1:identity:invitation", undeclaredGrandfatherReason},
-	"invitationByTokenHash":         {"v1:identity:invitation", undeclaredGrandfatherReason},
-	"invitationsForAccount":         {"v1:identity:invitation", undeclared4800InvitationRollupReason},
-	"pendingUserInvitations":        {"v1:identity:invitation", undeclared4270InvitationReason},
-	"userInvitationByTokenHash":     {"v1:identity:invitation", undeclared4612UserInvitationReason},
+	"invitationById":            {"v1:identity:invitation", undeclaredGrandfatherReason},
+	"invitationsForAccount":     {"v1:identity:invitation", undeclared4800InvitationRollupReason},
+	"pendingUserInvitations":    {"v1:identity:invitation", undeclared4270InvitationReason},
+	"userInvitationByTokenHash": {"v1:identity:invitation", undeclared4612UserInvitationReason},
 
 	// v1:identity:magicLinkRequest
 	"expiredMagicLinkRequests":    {"v1:identity:magicLinkRequest", undeclaredGrandfatherReason},
@@ -853,13 +832,11 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"activeUsers":               {"v1:identity:user", undeclaredGrandfatherReason},
 	"currentUser":               {"v1:identity:user", undeclaredGrandfatherReason},
 	"searchUsers":               {"v1:identity:user", undeclaredGrandfatherReason},
-	"userActiveSpace":           {"v1:identity:user", undeclaredGrandfatherReason},
 	"userByEmail":               {"v1:identity:user", undeclaredGrandfatherReason},
 	"userById":                  {"v1:identity:user", undeclaredGrandfatherReason},
 	"userByIdSystem":            {"v1:identity:user", undeclaredGrandfatherReason},
 	"userCount":                 {"v1:identity:user", undeclaredGrandfatherReason},
 	"userDisplayById":           {"v1:identity:user", undeclaredGrandfatherReason},
-	"usersActiveInSpace":        {"v1:identity:user", undeclaredGrandfatherReason},
 	"usersForSeedSweep":         {"v1:identity:user", undeclared3217SeedSweepReason},
 	"usersInDeletionCooldown":   {"v1:identity:user", undeclaredGrandfatherReason},
 	"usersScheduledForDeletion": {"v1:identity:user", undeclaredGrandfatherReason},
@@ -939,14 +916,6 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 
 	// v1:safety:outputScreening
 	"allOutputScreenings": {"v1:safety:outputScreening", undeclaredGrandfatherReason},
-
-	// v1:telephony:consent
-	"consentOptOut": {"v1:telephony:consent", undeclaredGrandfatherReason},
-
-	// v1:telephony:number
-	"allNumbers":         {"v1:telephony:number", undeclaredGrandfatherReason},
-	"numberByE164":       {"v1:telephony:number", undeclaredGrandfatherReason},
-	"numbersByPartition": {"v1:telephony:number", undeclaredGrandfatherReason},
 
 	// v1:workbench:workspace and v1:worker:registration PAID OFF in epic
 	// memql#4349: both concepts now declare

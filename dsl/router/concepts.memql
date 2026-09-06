@@ -29,14 +29,14 @@ concept budget {
 /// time-series axis rides the shared MemoryNodes hypertable.
 @displayCard(primary="model", secondary="promptName", tertiary="vendor", status="outcome")
 concept call {
-  requestId           string!  @description("Correlates this AI call to an upstream request -- cognition turn, suggest envelope, prompt invocation. Free-form string; uniqueness is not enforced across partitions.")
+  requestId           string!  @description("Correlates this AI call to an upstream request -- an agent turn, a suggest envelope, a prompt invocation. Free-form string; uniqueness is not enforced across partitions.")
   agentId             string  @description("Agent whose reply this call was generating; empty for non-agent AI calls (suggest, render, TTS, etc).")
   userId              string  @description("Identity subject of the end-user driving this call, when resolvable. Empty for system-triggered calls.")
   // Epic 3 3.2 (#1899): partitionId (a product-layer notion) dropped from the
   // core AI call ledger. The tenant scope is `partition` (already recorded on
   // this row); per-space AI-cost attribution is a product concern for the
   // product pack, not core.
-  promptName          string  @description("Name of the MemQL prompt invoked when the call went through InvokeAI (e.g. agentReply, cognitionRouting).")
+  promptName          string  @description("Name of the MemQL prompt invoked when the call went through InvokeAI (e.g. agentReply, plannerAgent).")
   policyName          string  @description("Routing policy that picked the provider. Reserved for Phase 2+ when policies land; Phase 1 leaves this empty.")
 
   vendor              string!  @description("Vendor family: openai or anthropic. Derived from provider .memql @type.")

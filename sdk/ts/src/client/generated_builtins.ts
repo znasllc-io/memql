@@ -941,7 +941,6 @@ QueryClient.prototype.knowledgeAugmentDomainAnalyze = function (this: QueryClien
 export interface KnowledgeAugmentDomainGenerateArgs {
   domainId: string;
   topic: string;
-  sourceUtteranceId?: string;
   sourceAgentId?: string;
   partitionId: string;
   requestedBy: string;
@@ -951,7 +950,6 @@ export function buildKnowledgeAugmentDomainGenerate(args: KnowledgeAugmentDomain
   const parts: string[] = [];
   parts.push("domainId: " + renderMemQLValue(args.domainId));
   parts.push("topic: " + renderMemQLValue(args.topic));
-  if (args.sourceUtteranceId !== undefined) parts.push("sourceUtteranceId: " + renderMemQLValue(args.sourceUtteranceId));
   if (args.sourceAgentId !== undefined) parts.push("sourceAgentId: " + renderMemQLValue(args.sourceAgentId));
   parts.push("partitionId: " + renderMemQLValue(args.partitionId));
   parts.push("requestedBy: " + renderMemQLValue(args.requestedBy));

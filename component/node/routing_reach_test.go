@@ -94,7 +94,7 @@ func TestBrowserFacingConceptsForwardWithTheVerbsTheirSurfacesSubscribeTo(t *tes
 		{"v1:identity:invitation", []string{"created", "updated"}, "pending invitations on People"},
 		{"v1:identity:account", []string{"created"}, "the Home accounts tile"},
 		{"v1:identity:auditEvent", []string{"created"}, "the Home audit tile"},
-		{"v1:cognition:utterance", []string{"created", "updated", "deleted"}, "a chat surface -- deletes were the hole"},
+		{"v1:library:artifact", []string{"created", "updated", "deleted"}, "a chat surface -- deletes were the hole"},
 		{"v1:worker:registration", []string{"created", "updated", "deleted"}, "the Fleet machines page -- deletes were the hole"},
 		{"v1:workbench:workspace", []string{"created", "updated", "deleted"}, "the Fleet workbenches page -- deletes were the hole"},
 		{"v1:worker:routingPolicy", []string{"created", "updated", "deleted"}, "the Fleet routing policy editor"},

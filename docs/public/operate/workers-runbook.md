@@ -202,7 +202,7 @@ Three independent gates run **before** every dispatch:
 
 A single denial transitions the calling plan to
 `awaitingFeedback` with `feedbackReason=scope_elevation_required`.
-The user approves or denies on the canvas card.
+The user approves or denies the elevation.
 
 ---
 

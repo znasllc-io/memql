@@ -25,7 +25,7 @@ source "${SCRIPT_DIR}/../lib/capability.sh"
 source "${SCRIPT_DIR}/../lib/engine_build_args.sh"
 
 cap_init "deploy.buildImage" "Build a single engine node image at a version."
-cap_spec_param "nodeType" "engine node type (identity/cognition/voice/agent/...)"
+cap_spec_param "nodeType" "engine node type (identity/bff/agent/planner/...)"
 cap_spec_param "version"  "version tag to build"
 cap_spec_param "workdir"  "absolute path of the checked-out repository"
 cap_spec_param "dryRun"   "report the intended build without performing it"
@@ -48,7 +48,7 @@ function main() {
     cap_result_set image    "$image"
 
     # Per-node build args (memql#2379): BUILD_TAGS selects the node-type
-    # binary; voice needs CGO + the voice-runtime stage. Shared mapping with
+    # binary; the workbench takes its own runtime stage. Shared mapping with
     # scripts/k3d/dev.sh via scripts/lib/engine_build_args.sh -- without it
     # every node type built as the bff-default binary.
     engine_build_args_for_node "$nodeType" "$workdir"

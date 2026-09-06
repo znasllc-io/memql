@@ -73,7 +73,7 @@ DB_TIMEOUT="$(cap_param dbTimeoutSeconds "900")"
 ROLLOUT_TIMEOUT="$(cap_param rolloutTimeoutSeconds "300")"
 DRY_RUN="$(cap_bool_str dryRun false)"
 
-readonly DEFAULT_DEPLOYMENTS="identity,bff,cognition,agent,planner,workbench,edge"
+readonly DEFAULT_DEPLOYMENTS="identity,bff,agent,planner,workbench,edge"
 
 DB_READY="false"
 RESTARTED=""

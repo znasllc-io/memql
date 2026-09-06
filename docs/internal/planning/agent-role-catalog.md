@@ -71,12 +71,6 @@ The general assistant is the gatekeeper. When a conversation reveals
 that no existing agent fits the user's need, the GA proposes (and on
 approval, creates) a new specialist by walking the role catalog.
 
-**Trigger:** During cognition's per-turn routing, the conductor
-already computes `fitScore` per candidate agent. When the
-best-candidate score falls below a `roleGapThreshold` (proposed
-default: 0.4) for two consecutive turns on the same topic, the GA
-takes over with a `proposeSpecialist` turn mode.
-
 **Conversation shape:** the GA reads the conversation transcript +
 the active user's existing agents and prompts the role catalog (via
 the existing `agent("name", args)` builtin -- here we'd call a new
@@ -116,14 +110,12 @@ mutation -- collapsed into the factory tool's Go executor for simplicity:
 - `capabilities.domains` = union(`lockedDomainIds`, `defaultDomainIds`)
 - `capabilities.tools` = union(`lockedToolSlugs`, `defaultToolSlugs`)
 - `providerConfig.llm.policyName` = `recommendedPolicySlug`
-- `gender` = `recommendedGender` (or fallback to whichever bucket has
-  more unused canonical voices for this owner)
+- `gender` = `recommendedGender`
 - `systemPrompt` = the role's `systemPromptHints` prepended to the
   generic specialist prompt template
 
-**Naming:** the GA picks a name from the canonical-voice catalog
-(`voicePickForGender`) and asks the user "Their voice will be `<voice>`.
-Sound good? Or pick another name?" The agent is created on confirm.
+**Naming:** the GA proposes a name and asks the user "I'll call them
+`<name>`. Sound good? Or pick another?" The agent is created on confirm.
 
 **Bookkeeping:** the agent gets `lineage.extendedFromAgentId =
 generalAssistant`, `lineage.extensionGoals = [the conversational
@@ -169,7 +161,7 @@ acting-agent role to exercise the post-gate code path.
 ### 2c. Async `agent()` builtin (SHIPPED)
 
 `dsl/agents/builtins.memql`'s `agent` builtin changed contract:
-`agent(name, prompt, spaceId) -> {planId, agent: {name, role,
+`agent(name, prompt, partitionId) -> {planId, agent: {name, role,
 roleSlug}}`. Always async -- mints a `v1:planner:plan` with
 `kind=agentInvocation` in `queued` status via `createPlan`
 and returns the planId. Callers subscribe to plan events or

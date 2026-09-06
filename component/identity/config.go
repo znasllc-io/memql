@@ -88,13 +88,6 @@ const (
 	// and copied into MEMQL_NODE_TOKEN on the target binary.
 	DefaultNodeTokenTTLSeconds = 30 * 24 * 60 * 60 // 30 days
 
-	// DefaultVoiceAgentTokenTTLSeconds is the lifetime of issued
-	// voice-agent service-account tokens (#109). 90 days matches
-	// the worker_token rotation cadence -- the voice-agent runs
-	// long-lived in production and rotating monthly is excessive.
-	// No refresh path; rotate by minting fresh + restarting.
-	DefaultVoiceAgentTokenTTLSeconds = 90 * 24 * 60 * 60 // 90 days
-
 	// DefaultServiceAccountTokenTTLSeconds is the lifetime of issued
 	// class="service_account" tokens (#691, deployment-v2 Phase 3). Short by
 	// design: the machine principal (deploy gate / automation) mints one per

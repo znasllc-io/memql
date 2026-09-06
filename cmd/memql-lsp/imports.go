@@ -65,7 +65,7 @@ type importsResult struct {
 }
 
 type importEntry struct {
-	// Path is the dotted MODULE path as written -- "cognition.concepts". It
+	// Path is the dotted MODULE path as written -- "worker.concepts". It
 	// names a FILE (dsl/cognition/concepts.memql), not a construct. Resolving
 	// it onto disk is the client's job: the workspace layout being walked is
 	// the client's, and the brace list is what names constructs.

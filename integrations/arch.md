@@ -238,6 +238,4 @@ operator workflow lives in
 - [CLAUDE.md](CLAUDE.md) -- integration contract, capability pattern,
   preference order for extension points
 - [docs/public/build/audio-streaming.md](../docs/public/build/audio-streaming.md) --
-  audio WebSocket + streaming-transcription gRPC path
-- [docs/polyphon-architecture.md](../docs/public/operate/voice-bringup-verification.md) --
-  Polyphon multi-agent voice architecture
+  the streaming-transcription gRPC path

@@ -370,7 +370,7 @@ mutate plan requestPlanFeedback {
 // Designed to be cleanly callable by BOTH surfaces in the epic:
 //   - the needs-feedback canvas card's free-text input (frontend #1406-card),
 //     frontend -> WS -> engine;
-//   - the assistant-mediated chat path (cognition #1406), which classifies
+//   - the assistant-mediated request path (#1406), which classifies
 //     a user's answering utterance and routes it here via engine.Execute.
 //
 // What it stamps (partial-update via update(), so every @required field

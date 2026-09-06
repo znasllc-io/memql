@@ -208,7 +208,7 @@ shape participant pathSyntaxExample {
 //
 //   - From a query's `shape` clause:
 //
-//         use cognition.shapes.{ participantFull }
+//         use worker.shapes.{ registrationFull }
 //
 //         @description("Get space participants")
 //         query participant spaceParticipants {

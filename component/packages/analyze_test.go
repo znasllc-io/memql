@@ -372,7 +372,7 @@ func TestReservedDslDomainRefusesRatherThanBeingSkipped(t *testing.T) {
 	}
 	var reserved bool
 	for _, d := range rep.DslDomains {
-		if d.Domain == "cognition" && d.Reserved {
+		if d.Domain == "library" && d.Reserved {
 			reserved = true
 		}
 	}

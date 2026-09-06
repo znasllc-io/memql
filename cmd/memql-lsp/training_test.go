@@ -16,7 +16,7 @@ import (
 )
 
 // trainingDoc is the fixture buffer the contract test drives: one construct per
-// state, in a file whose directory names the `cognition` domain. Line numbers
+// state, in a file whose directory names the `worker` domain. Line numbers
 // are load-bearing (they appear in the expected JSON below), so keep edits to
 // the end of the buffer or update the expectation with them.
 //
@@ -25,7 +25,7 @@ import (
 //	line 15: query participant untrainedQuery
 //	line 21: mutate participant seededMutation
 //	line 28: action deployCluster
-const trainingDoc = `use cognition.concepts.{ participant }
+const trainingDoc = `use worker.concepts.{ registration }
 
 @description("Promoted, and the local source matches -- trained.")
 query participant trainedQuery {
@@ -60,7 +60,7 @@ action deployCluster {
 
 // trainingDocURI sits under a `cognition` directory because that directory IS
 // the domain, and the domain is what a concept declaration is matched on.
-const trainingDocURI = "file:///w/dsl/cognition/queries.memql"
+const trainingDocURI = "file:///w/dsl/worker/queries.memql"
 
 // pushCatalog delivers a catalog the way the extension does: the
 // `memql/clusterCatalog` NOTIFICATION, driven through the wrapper exactly as
@@ -541,7 +541,7 @@ concept state {
 // construct nobody can see.
 func TestTrainingState_EmptyHashNeverReadsAsTrained(t *testing.T) {
 	h, s := newInitializedHandler(t)
-	const uri = "file:///w/dsl/cognition/queries.memql"
+	const uri = "file:///w/dsl/worker/queries.memql"
 	const doc = "query participant reservedName {\n  filter  isActiveRecord\n}\n"
 	openDoc(t, s, uri, doc)
 
@@ -566,7 +566,7 @@ func TestTrainingState_EmptyHashNeverReadsAsTrained(t *testing.T) {
 // the way; the state is the same because the fact is the same.
 func TestTrainingState_SeededBecomesEditedWhenTheLocalSourceDiffers(t *testing.T) {
 	h, s := newInitializedHandler(t)
-	const uri = "file:///w/dsl/cognition/queries.memql"
+	const uri = "file:///w/dsl/worker/queries.memql"
 	const doc = "query participant coreQuery {\n  filter  isActiveRecord && status==\"moved\"\n}\n"
 	openDoc(t, s, uri, doc)
 
@@ -632,7 +632,7 @@ func TestTrainingState_UnknownURIReturnsEmptyConstructs(t *testing.T) {
 // claim about the cluster rather than about the buffer.
 func TestTrainingState_MalformedBufferStillAnswers(t *testing.T) {
 	h, s := newInitializedHandler(t)
-	const uri = "file:///w/dsl/cognition/queries.memql"
+	const uri = "file:///w/dsl/worker/queries.memql"
 	openDoc(t, s, uri, "query participant finished {\n  filter  isActiveRecord\n}\n\n@description(\"wip\")\nquery partici")
 	pushCatalog(t, h, `[]`)
 

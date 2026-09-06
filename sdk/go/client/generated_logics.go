@@ -134,26 +134,6 @@ func BootstrapClusterBuild(args BootstrapClusterArgs) string {
 	return b.String()
 }
 
-// BootstrapSession -- Decides whether a new v1:cognition:session must be created for a freshly-created participant: returns true when no session exists yet (idempotency via participantSession). The bootstrapSession automation performs the gated createSessionForParticipant insert + session.created emit.
-type BootstrapSessionArgs struct {
-	Event map[string]any
-}
-
-// BootstrapSession calls the engine logic bootstrapSession.
-func (qc *QueryClient) BootstrapSession(ctx context.Context, args BootstrapSessionArgs) (*Result, error) {
-	call := BootstrapSessionBuild(args)
-	return qc.executeNamed(ctx, "bootstrapSession", call)
-}
-
-func BootstrapSessionBuild(args BootstrapSessionArgs) string {
-	var b strings.Builder
-	b.WriteString("logic bootstrapSession(")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString(")")
-	return b.String()
-}
-
 // ClusterInfraRefresh -- True on a bff node's startup, whether or not the cluster already exists.
 // THE SECOND DECISION, SPLIT OUT OF THE FIRST (memql#4766). `bootstrapCluster` answers "should the cluster row be CREATED", which is a once-per-lifetime question and rightly gated on `existing.empty()`. The database and identity-provider rows ask something different: "what is true about this cluster's infrastructure right now".
 // Those two were the same gate, and that is the whole defect the issue is named for -- the rows were written once, at first boot, and no later start could complete or correct them. An engine upgrade never moved `engineVersion`; a new extension never appeared; a cluster that predated a field kept the gap forever.
@@ -313,7 +293,7 @@ func DeploymentRollbackAllowedBuild(args DeploymentRollbackAllowedArgs) string {
 	return "logic deploymentRollbackAllowed()"
 }
 
-// EngineNodeTypes -- Canonical ENGINE node-type list the deploy bundle builds + places: identity, cognition, voice, agent, planner, workbench, mcp, voice-agent. No bff or product-carrier nodes (carrier/product layer, shipped by their own repos).
+// EngineNodeTypes -- Canonical ENGINE node-type list the deploy bundle builds + places: identity, bff, agent, planner, workbench, mcp, edge. No product-carrier nodes (carrier/product layer, shipped by their own repos).
 type EngineNodeTypesArgs struct {
 }
 
@@ -326,26 +306,6 @@ func (qc *QueryClient) EngineNodeTypes(ctx context.Context, args EngineNodeTypes
 func EngineNodeTypesBuild(args EngineNodeTypesArgs) string {
 	_ = args
 	return "logic engineNodeTypes()"
-}
-
-// GenerateResponse -- Decides + generates the AI reply for a cognition.response.requested event: returns the reply text (empty when a response already exists -- idempotency via hasAIResponseForReply). The generateResponse automation performs the gated sendTextUtterance insert + presence bump from this text.
-type GenerateResponseArgs struct {
-	Event map[string]any
-}
-
-// GenerateResponse calls the engine logic generateResponse.
-func (qc *QueryClient) GenerateResponse(ctx context.Context, args GenerateResponseArgs) (*Result, error) {
-	call := GenerateResponseBuild(args)
-	return qc.executeNamed(ctx, "generateResponse", call)
-}
-
-func GenerateResponseBuild(args GenerateResponseArgs) string {
-	var b strings.Builder
-	b.WriteString("logic generateResponse(")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString(")")
-	return b.String()
 }
 
 // GovernanceCanCreatePrincipal -- Relational governance entry point for the create != edit split: may the actor CREATE a principal carrying newRoleSlug? Resolves the actor + new-role ranks (roleBySlug) and hands them to the Go core (component/auth/rbac_governance.go:CanCreatePrincipal), which permits minting a principal STRICTLY BELOW the actor's own rank (an owner at any sub-owner rank). Independent of update -- a role can hold create-on-principal without update-on-principal.
@@ -678,7 +638,7 @@ func RevokeExpiredDelegationsBuild(args RevokeExpiredDelegationsArgs) string {
 // SelfAccountAbsent -- True when the owner's own company has not been materialized yet, on a bff.
 // =========================================================================== THE DELIBERATE INVERSION OF THE CLUSTER SINGLETONS (D3) =========================================================================== `clusterInfraRefresh` (dsl/cluster/logic.memql) answers "what is true about this cluster's infrastructure right now" and is therefore ungated: the SYSTEM is the writer of `v1:cluster:database:primary`, so a boot rewriting it is a boot telling the truth, and memql#4766 exists because those rows were once gated like a create and froze at first boot.
 // This row is the opposite case and takes `bootstrapCluster`'s gate rather than its sibling's: the writer of `v1:accounts:account:self` is a HUMAN. The first-run card asks them what their company is called, and a boot that rewrote the row would undo that answer on a schedule nobody watches. So the question here is the once-per-lifetime one -- "should this row be CREATED" -- and `existing.empty()` is what asks it.
-// The `bff` term is `bootstrapCluster`'s too, and for the same reason: every node type receives system.startup, and without it a cognition, agent, planner and worker node would each race to create the same row on a fresh cluster. They would converge -- the id is literal, so the writes are versions of one logical row -- but converging on identical content is not a reason to write it five times.
+// The `bff` term is `bootstrapCluster`'s too, and for the same reason: every node type receives system.startup, and without it an agent, planner and worker node would each race to create the same row on a fresh cluster. They would converge -- the id is literal, so the writes are versions of one logical row -- but converging on identical content is not a reason to write it five times.
 type SelfAccountAbsentArgs struct {
 	Event map[string]any
 }
@@ -720,26 +680,6 @@ func TransitionEventKindBuild(args TransitionEventKindArgs) string {
 	}
 	b.WriteString("oldStatus: ")
 	b.WriteString(renderMemQLValue(args.OldStatus))
-	b.WriteString(")")
-	return b.String()
-}
-
-// VoiceMigrationOnSecondHuman -- Phase 7 of chat-architecture. Triggered when a user's activePartitionId pointer changes. When exactly two humans become active in the same space, emits a public 'voice.migrated.group' canvas card plus per-user 'voice.migrated.private' cards announcing voice transport migration from Team to Group thread. Idempotent via content-addressed stateIds.
-type VoiceMigrationOnSecondHumanArgs struct {
-	Event map[string]any
-}
-
-// VoiceMigrationOnSecondHuman calls the engine logic voiceMigrationOnSecondHuman.
-func (qc *QueryClient) VoiceMigrationOnSecondHuman(ctx context.Context, args VoiceMigrationOnSecondHumanArgs) (*Result, error) {
-	call := VoiceMigrationOnSecondHumanBuild(args)
-	return qc.executeNamed(ctx, "voiceMigrationOnSecondHuman", call)
-}
-
-func VoiceMigrationOnSecondHumanBuild(args VoiceMigrationOnSecondHumanArgs) string {
-	var b strings.Builder
-	b.WriteString("logic voiceMigrationOnSecondHuman(")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
 	b.WriteString(")")
 	return b.String()
 }

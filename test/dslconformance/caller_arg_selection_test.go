@@ -192,11 +192,9 @@ var callerArgSelectionExemptions = map[string]string{
 	"identity/mutations.memql bumpUserRevocationEpoch": "sets revocationEpoch to a caller-supplied int on any userId. RAISING it invalidates every live session (denial of service); LOWERING it re-validates previously revoked tokens, because the verifier rejects only claims BELOW the stored value (see the field @description). Both directions matter.",
 	"identity/mutations.memql bumpUserDataExport":      "stamps the data-export marker on any userId.",
 	"identity/mutations.memql recordLegalAcceptance":   "records legal acceptance on behalf of any userId -- attributing consent to a person who did not give it.",
-	"identity/mutations.memql setUserActiveSpace":      "sets any userId's active space.",
 
 	// --- identity: the row is one person's credential ------------------------
 	"identity/mutations.memql rotateAuthSession":         "sets refreshTokenHash to a CALLER-SUPPLIED value on an arbitrary session id -- an attacker who can name a session can install a refresh token they control. The sharpest entry in this map after updateUser.",
-	"cognition/mutations.memql touchSession":             "unrestricted `payload object!` spread onto an arbitrary authSession row.",
 	"identity/mutations.memql revokeAuthSession":         "revokes an arbitrary session by id -- the same denial-of-service primitive as bumpUserRevocationEpoch, one session at a time.",
 	"identity/mutations.memql revokeDelegation":          "revokes an arbitrary delegation by id.",
 	"identity/mutations.memql consumeAuthCode":           "marks an arbitrary auth code consumed, burning a pending login before its owner can use it.",
@@ -269,7 +267,6 @@ var callerArgSelectionExemptions = map[string]string{
 // role does not qualify -- that is what the userById / userByIdSystem /
 // userDisplayById split exists for.
 var callerArgSelectionAccepted = map[string]string{
-	"identity/queries.memql userActiveSpace": "projects userActiveSpaceProjection, which is `row.id` + `activePartitionId` and nothing else -- no PII, as its own doc comment states. Carries @public deliberately. Review caught this one filed as debt with a description (\"ungated\") that described the caller check it lacks rather than the projection that makes it safe.",
 	"identity/queries.memql userDisplayById": "projects userDisplayCard, which is `row.id` + `displayName` and nothing else. #2860 introduced it precisely so a caller can render another user's name without userById's full row; cross-user display IS the construct's purpose, so caller-scoping it would defeat it.",
 }
 

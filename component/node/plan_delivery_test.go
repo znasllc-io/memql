@@ -271,7 +271,7 @@ func TestPlanDeliveryProducerOnlyPublishesLocal(t *testing.T) {
 		Topic:        events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptPlan),
 		Kind:         events.KindNodeCreated,
 		Payload:      map[string]any{"id": "v1:planner:plan:fromPeer"},
-		OriginNodeId: "cognition-1", // remote
+		OriginNodeId: "workbench-1", // remote
 	})
 	if rows, _ := store.ReadAfter(ctx, planLifecycleKey, 0, 0); len(rows) != 0 {
 		t.Fatalf("remote plan event must not be published to the substrate, found %d rows", len(rows))
@@ -311,7 +311,7 @@ func TestPlanTopicGate(t *testing.T) {
 	off := []string{
 		events.BuildTopicWithConcept(events.TopicGraphNodeDeleted, conceptPlan),
 		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, "v1:planner:task"),
-		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptUtterance),
+		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, testDeliveryConcept),
 		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, "v1:cluster:node"),
 		"automation.completed",
 	}

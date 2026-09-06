@@ -10,7 +10,6 @@ require (
 	github.com/sashabaranov/go-openai v1.42.0
 	github.com/znasllc-io/memql/component/database v0.0.0
 	github.com/znasllc-io/memql/component/memql v0.0.0
-	github.com/znasllc-io/memql/component/polyphon v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
 	github.com/znasllc-io/memql/integrations/openai v0.0.0
 )
@@ -164,7 +163,6 @@ replace github.com/znasllc-io/memql/component/language/dslclause => ../../compon
 
 replace github.com/znasllc-io/memql/component/memql => ../../component/memql
 
-replace github.com/znasllc-io/memql/component/polyphon => ../../component/polyphon
 
 replace github.com/znasllc-io/memql/component/provenance => ../../component/provenance
 

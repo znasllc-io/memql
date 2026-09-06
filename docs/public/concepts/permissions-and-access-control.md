@@ -12,16 +12,13 @@ owner: znas
 **Last Updated:** 2026-08-18
 
 This document describes the permission model and access control rules for
-users, groups, spaces, agents, and attachments.
+users, groups, and agents.
 
 ## Table of Contents
 
 - [Role-Based Access Control](#role-based-access-control)
 - [Group-Based Access Control](#group-based-access-control)
-- [Space Access Control](#space-access-control)
 - [Agent Management](#agent-management)
-- [Space Invitation Rules](#space-invitation-rules)
-- [Attachment Access Control](#attachment-access-control)
 - [Error Responses](#error-responses)
 - [Audit Logging](#audit-logging)
 - [Best Practices](#best-practices)
@@ -129,10 +126,9 @@ uses the stricter `AtLeastAdmin` (owner/admin only).
 ### Overview
 
 Groups (`v1:identity:group`, see `dsl/identity/concepts.memql`) are
-organizational units used to scope agent visibility and space invitations:
+organizational units used to scope agent visibility:
 - Users belong to one or more groups (`memberIds`)
 - Agents are assigned to one or more groups (`agentIds`)
-- Space invitations can be scoped by group membership
 
 ### Group Model
 
@@ -154,40 +150,6 @@ organizational units used to scope agent visibility and space invitations:
   all users
 - `CanManageGroup` (owner or admin) gates group management operations
 
-## Space Access Control
-
-MemQL's chat/collaboration surface is the **space**
-(`v1:cognition:space`, delivered as product DSL) with humans and AI
-agents represented as `v1:cognition:participant` rows. There is no
-`conversation` concept in the current model -- `space` +
-`participant` replaced it.
-
-### Participant-Based Membership
-
-`v1:cognition:participant` (`dsl/cognition/concepts.memql`) tracks who
-is present in a space: `participantType` (`human` or `si`), `status`
-(`active` / `idle` / `left`), and -- for AI participants -- which user's
-team they belong to (`forUserId`). Joining and leaving a space go
-through dedicated mutations (`joinSpaceAsHuman`, `joinSpaceAsAI`,
-`leaveSpace`, `addAgentToSpace`, `removeAgentFromSpace`).
-
-### Ownership Gates Privileged Space Operations
-
-Operations that touch a space's data at the HTTP layer (for example,
-uploading or downloading an attachment via `POST`/`GET
-/spaces/{id}/attachments`, a documented HTTP exception -- see this repo's
-`CLAUDE.md` "Endpoint Protocol Policy" section) are gated by
-**ownership**, not by a participants list: the handler calls
-`h.store.CallerOwnsSpace(ctx, spaceId)` before doing any work
-(`component/server/attachment_handler.go`). A caller who does not own
-the space gets a generic `404 Not Found` -- deliberately not `403
-Forbidden`, so probing a space id can't distinguish "exists but not
-mine" from "doesn't exist."
-
-Reads and writes that flow through the DSL (`MemqlService.Stream`) are
-gated by the per-row authorization tiers described above, evaluated
-against the bound concept's `@rowAuthz` declaration.
-
 ## Agent Management
 
 ### Creating Agents
@@ -201,32 +163,6 @@ Only users with `owner` or `admin` role can create agents
 - Agents with no `groupIds` (empty array) are global/unscoped and visible
   to all users.
 
-## Space Invitation Rules
-
-- Invitations use the identity-owned `v1:identity:invitation` credential
-  (token-hashed, single-use); product-specific mutations
-  (`sendGuestInvite` in `dsl/cognition/mutations.memql`) layer space
-  semantics on top. See this repo's `CLAUDE.md` "Invitations (Identity
-  Primitive)" section for the guest-invite gRPC flow
-  (`SendGuestInviteMsg` / `ResolveGuestInviteMsg`).
-- Group membership can be used to scope who may be invited to a space by a
-  non-privileged user; `owner`/`admin` are not constrained by group
-  membership.
-
-## Attachment Access Control
-
-### Upload Permissions
-
-- Only the caller who owns the target space (`CallerOwnsSpace`) may upload
-  an attachment to it.
-- A non-owner receives `404 Not Found` (not `403`), so the response cannot
-  be used to confirm the space exists.
-
-### Retrieval Permissions
-
-- Only the caller who owns the target space may retrieve (download) an
-  attachment from it, gated the same way as upload.
-
 ## Error Responses
 
 ### HTTP 403 Forbidden
@@ -238,10 +174,11 @@ non-privileged caller attempting a user-management operation).
 ### HTTP 404 Not Found
 
 Returned when:
-- A space, attachment, group, or user does not exist
-- A caller lacks ownership of a space they are trying to read/write via the
-  attachment endpoints (a deliberate 404-not-403 to avoid confirming
-  existence -- see [Space Access Control](#space-access-control))
+- A group or user does not exist
+- A caller lacks ownership of a row behind one of the Library's byte routes
+  (`GET /artifacts/{id}/content`, `component/server/artifact_handler.go`) --
+  a deliberate 404-not-403, so probing an id cannot distinguish "exists but
+  not mine" from "doesn't exist"
 
 ## Audit Logging
 
@@ -262,8 +199,8 @@ timestamp. See `component/identity/adminops` and
 2. **Use the `component/auth/rbac.go` helpers** (`CanCreateAgent`,
    `CanManageGroup`, `AtLeastAdmin`, `AtLeastDeveloper`, ...) rather than
    comparing `role` strings directly.
-3. **Use group membership** to scope agent visibility and space invitations
-   for non-privileged users.
+3. **Use group membership** to scope agent visibility for non-privileged
+   users.
 4. **Log access denials** for auditing.
 5. **Do not conflate role (capability) with per-row ownership (data
    access)** -- a `writer` can write data they own; role alone does not

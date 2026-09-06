@@ -25,11 +25,10 @@ func buildPromptData(msg *memqlv1.AgentGenerateTurnMsg) map[string]any {
 		// rendering the history list inline.
 		"historyInMessages": true,
 		// Defaults for @required fields. Each is overwritten below
-		// when the forwarder supplies a value; the defaults keep the
-		// schema validator happy when the forwarder sends a minimal
-		// routing context (typical at session start).
+		// when the caller supplies a value; the defaults keep the
+		// schema validator happy when the caller sends a minimal
+		// routing context.
 		"trigger": "utterance",
-		"space":   map[string]any{},
 		"history": []map[string]any{},
 	}
 
@@ -53,44 +52,6 @@ func buildPromptData(msg *memqlv1.AgentGenerateTurnMsg) map[string]any {
 		if routing.FitScore > 0 {
 			data["fitScore"] = routing.FitScore
 		}
-
-		// space -- identity / type / description / goal plus the
-		// current human's display name. The agentReply template
-		// reads `.space.id`, `.space.spaceType`, `.space.goal`,
-		// `.space.description`, and `.space.currentUserDisplayName`.
-		// (template uses `spaceType` for the type field; we map the
-		// proto's `Type` onto that key for compat.) The retired
-		// `architecture` field is intentionally ignored; all spaces
-		// are multi-participant now.
-		space := map[string]any{}
-		if routing.Space != nil {
-			if id := strings.TrimSpace(routing.Space.Id); id != "" {
-				space["id"] = id
-			}
-			if t := strings.TrimSpace(routing.Space.Type); t != "" {
-				space["type"] = t
-				space["spaceType"] = t
-			}
-			if d := strings.TrimSpace(routing.Space.Description); d != "" {
-				space["description"] = d
-			}
-			if g := routing.Space.GetGoal(); g != nil {
-				if s := strings.TrimSpace(g.GetStatement()); s != "" {
-					goal := map[string]any{"statement": s}
-					if tf := strings.TrimSpace(g.GetTimeframe()); tf != "" {
-						goal["timeframe"] = tf
-					}
-					space["goal"] = goal
-				}
-			}
-			if u := strings.TrimSpace(routing.Space.CurrentUserDisplayName); u != "" {
-				space["currentUserDisplayName"] = u
-			}
-			for k, v := range routing.Space.Extra {
-				space[k] = v
-			}
-		}
-		data["space"] = space
 
 		// humans -- the people in the room. The agent prompt's
 		// PARTICIPANTS section lists everyone (humans + AI peers);

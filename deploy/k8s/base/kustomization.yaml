@@ -67,8 +67,6 @@ resources:
   # Certificate -- in this namespace, bound to the memql-engine ServiceAccount
   # every engine Deployment already runs as.
   - custom-domain-rbac.yaml
-  - cognition.yaml
-  - voice.yaml
   - agent.yaml
   - planner.yaml
   - workbench.yaml
@@ -80,16 +78,9 @@ resources:
   # -- along with the product bff/SPA Services it used to sit beside -- is now
   # owned by the downstream product pack's overlay, not this engine base.
   - mcp.yaml
-  # Self-hosted LiveKit server + its ESO-synced secret (memql#1043).
-  - livekit.yaml
-  - externalsecret-livekit.yaml
-  # Telephony (memql#1910): Redis for server<->sip coordination, the
-  # livekit/sip PSTN edge, and the carrier-credential ESO secret.
-  - redis.yaml
-  - livekit-sip.yaml
-  - externalsecret-telephony.yaml
-  # Go voice-agent -- assistant's voice participant in LiveKit rooms (memql#1049).
-  - voice-agent.yaml
+  # Redis. Its only consumer was the LiveKit server <-> livekit/sip pair, both
+  # removed with the voice node type; retained pending an explicit decision to
+  # drop it (nothing in this tree dials it today).
   # Connection-budget monitor: */5 leak/storm early-warning (memql#1958).
   - conn-monitor-cronjob.yaml
 

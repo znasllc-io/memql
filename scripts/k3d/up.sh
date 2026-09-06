@@ -329,10 +329,9 @@ function create_cluster() {
     # cloud ingress does. 80 is kept for redirects.
     #
     # 5432 is DEBUG ONLY and is not a connection path -- see
-    # docs/public/operate/environment-parity.md. The identity (8085) and
-    # livekit (7880) mappings were deleted: 8085 was a second entrance to a
-    # service the front door already serves, and 7880 pointed at a Deployment
-    # this overlay removes (local voice uses LiveKit Cloud).
+    # docs/public/operate/environment-parity.md. The identity (8085) mapping
+    # was deleted: it was a second entrance to a service the front door
+    # already serves.
     #
     # Downstream stacks add their own LoadBalancer mappings (e.g. a product
     # gRPC head or frontend) via --extra-ports=host:container,... -- k3d LB
@@ -418,9 +417,9 @@ function all_deployments() {
 # scaled_up_deployments -- the Deployments that are MEANT to be running, as
 # `deployment.apps/x` names.
 #
-# A Deployment at zero replicas has been deliberately switched off -- the voice
-# lane, on any machine with no LiveKit credentials (memql#2416) -- and waiting
-# for one is waiting for something nobody asked to start.
+# A Deployment at zero replicas has been deliberately switched off by the
+# overlay, and waiting for one is waiting for something nobody asked to
+# start.
 #
 # READ WITH custom-columns AND FILTERED HERE rather than with a jsonpath
 # comparison. `?(@.spec.replicas>0)` would put the whole question in one line of
@@ -465,16 +464,13 @@ function scaled_up_deployments() {
 # with a cluster to inspect rather than an abort in the middle of one.
 #
 # WHAT IT WAITS FOR IS WHAT IS MEANT TO BE RUNNING (memql#3585). It waited for
-# every Deployment in the namespace, voice and voice-agent included -- and those
-# two are scaled to 0 on every machine with no LiveKit credentials, because the
-# voice binaries fail fast on the missing env by design (memql#2416). So the wait
-# could not succeed on most machines, and clusterUp failed on a cluster where all
-# nine other nodes were Available.
+# every Deployment in the namespace, including ones an overlay had deliberately
+# scaled to 0 -- so the wait could not succeed on most machines, and clusterUp
+# failed on a cluster where every other node was Available.
 #
 # The set therefore comes from scaled_up_deployments, which asks the cluster
-# rather than trusting that the gate ran first. Ordering alone would have fixed
-# the symptom and left it flaky: anything that scales the lane back up between
-# the gate and the wait puts the failure back.
+# rather than trusting anything about what was scaled and when. Ordering alone
+# would have fixed the symptom and left it flaky.
 # what_is_not_ready -- one line per pod that is not Ready, with the container
 # state's own reason. This is the difference between a slow install and a
 # wedged one, and it was sitting unread in the API the whole time the old wait
@@ -1021,59 +1017,6 @@ function print_summary() {
 #=============================================================================
 
 
-# gate_voice_lane_post_sync re-runs the voice-lane gate once the ArgoCD app
-# has created the Deployments (seed-secrets runs BEFORE the app applies, so
-# its gate is a no-op on a fresh cluster).
-#
-# THE BUDGET IS ARGOCD_TIMEOUT, NOT A NUMBER OF ITS OWN (memql#3877).
-#
-# What this waits for is ArgoCD materialising the Deployments -- which is
-# exactly what `--argocd-timeout` already governs, and the operator can already
-# raise. It used to wait a private, hardcoded 120s instead, and on a machine
-# with slow access to public registries that is simply too short: measured on a
-# failing install, the gap from Application creation to the Deployments
-# appearing was 124 SECONDS. The gate gave up four seconds early, voice and
-# voice-agent started ungated with an empty livekit-secrets, crash-looped by
-# design (memql#2416), and wait_for_workloads could not pass. Every install on
-# that machine failed the same way -- deterministic, not flaky.
-#
-# Two budgets for one wait is the defect. A machine slow enough to need
-# `MEMQL_K3D_ARGOCD_TIMEOUT=600` is exactly the machine whose Deployments take
-# longer than 120s to appear, and raising the documented knob did nothing for
-# the gate because the gate was not listening to it.
-#
-# THE EXPIRY IS LOUD, because it is no longer best-effort in any useful sense.
-# With no LiveKit credentials, skipping the gate means the readiness wait two
-# lines below CANNOT pass, and that wait is what the install graph verifies. The
-# operator then sees `workloadsReady did not satisfy resultTrue` -- a
-# consequence, from a step that is not the one that went wrong, naming neither
-# voice nor LiveKit. Saying so here is the difference between a five-second fix
-# and an afternoon.
-function gate_voice_lane_post_sync() {
-    local waited=0 interval=5
-    while ! kubectl get deploy voice -n "$NAMESPACE" &>/dev/null; do
-        sleep "$interval"; waited=$((waited + interval))
-        if [ "$waited" -ge "${ARGOCD_TIMEOUT}" ]; then
-            warn "voice deployment still absent after ${waited}s -- the voice lane is NOT gated."
-            warn "  With no LiveKit credentials its pods fail fast by design, so the workload"
-            warn "  wait below cannot pass and this bring-up will report workloadsReady=false."
-            warn "  Fix: make secrets   (or raise MEMQL_K3D_ARGOCD_TIMEOUT and re-run)"
-            return 0
-        fi
-    done
-    # --caroot rides along here too, and it is INERT today: --gate-voice-lane-only
-    # returns from seed-secrets.sh before check_prerequisites, before the domain
-    # is resolved and before the front-door pair is touched at all, so nothing on
-    # this path can read it. It is passed anyway, for the reason --repo-root is
-    # (which is equally inert here): the defect being fixed IS a value that
-    # failed to travel, and a call site that omits it is where the next omission
-    # starts -- one of these two grows a certificate read and nobody rereads the
-    # other. A flag that costs nothing is cheaper than a rule about which call
-    # sites are allowed to drop it (memql#4069).
-    bash "${SCRIPT_DIR}/seed-secrets.sh" --namespace="$NAMESPACE" --repo-root="${REPO_ROOT}" --gate-voice-lane-only \
-        ${MKCERT_CAROOT:+--caroot="${MKCERT_CAROOT}"} >&2 || true
-}
-
 # require_checkout <dir> -- refuse a root that is not a real MemQL checkout.
 #
 # A BEHAVIOUR CHANGE, stated plainly: this script used to proceed with whatever
@@ -1243,12 +1186,6 @@ function main() {
     # never created.
     install_operator_stack
     apply_argocd_app
-    # GATE, THEN WAIT (memql#3585). The gate has to come after the Application --
-    # the Deployments it scales do not exist until ArgoCD has created them -- and
-    # before the wait, so the voice lane is already at zero when the wait works
-    # out what is meant to be running. The other order waits for two Deployments
-    # the next line exists to switch off.
-    gate_voice_lane_post_sync
     wait_for_workloads
     print_summary
 

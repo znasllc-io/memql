@@ -391,7 +391,7 @@ function check_secrets() {
         return 0
     fi
 
-    for secret in memql-secrets memql-db-app-creds livekit-secrets telephony-secrets; do
+    for secret in memql-secrets memql-db-app-creds; do
         if kubectl get secret "${secret}" -n "${NAMESPACE}" &>/dev/null; then
             echo "  PRESENT: ${secret}" >&2
         else

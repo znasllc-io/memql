@@ -15,8 +15,7 @@ Port 80 exists only to redirect. One certificate covers the whole door locally;
 in the cloud it is two, split by which ACME challenge can issue each half
 ([below](#the-wildcard-has-a-certificate-now-and-it-is-a-second-one)).
 
-Behind that door are **seven host rules**, committed to `deploy/k8s`, plus a
-**separate media plane** that does not and cannot go through it.
+Behind that door are **seven host rules**, committed to `deploy/k8s`.
 
 Seven is the number, and it stays seven no matter how many customers,
 applications or websites the cluster serves. That property is what this page is
@@ -460,7 +459,7 @@ Two consequences worth stating plainly:
 - **Adding an eighth host rule — a fourth ROLE — is a design change, not a
   configuration change.** If a proposal needs one, the thing being added is
   probably a site. `TestRenderedHostsAreExactlyTheProduct` fails on an eighth
-  host rule that is not one of the seven and is not the media plane.
+  host rule that is not one of the seven.
 - **A wildcard DNS record is not a wildcard hosts file.** In the cloud
   `*.<domain>` resolves at the DNS layer and nothing local is involved. On a
   developer machine there is no wildcard in `/etc/hosts`, so each name has to
@@ -557,22 +556,6 @@ scripts, allowlisted, runnable by hand or from the cockpit surface.
 Self-serve binding (v1 is cluster-owner/admin only; the v2 shape is a
 request-and-approve queue), registrar API integrations, wildcard client
 domains, certificate export, and local-cluster ACME.
-
-## The media plane is separate, permanently
-
-Voice is not one of the seven hosts and never will be. **WebRTC media is UDP and
-cannot traverse an HTTP front door.**
-
-| Target | Media plane |
-|---|---|
-| Cloud | `livekit.<domain>` for signaling, plus a LoadBalancer carrying UDP 7882 and TCP 7881 for media |
-| Local | LiveKit Cloud (the local overlay deletes the self-hosted livekit workloads) |
-
-So the honest statement of the topology is **seven HTTP host rules plus a
-separate media plane** — said here rather than left for someone to discover
-while wondering which Ingress rule is missing. See
-[livekit-provision.md](livekit-provision.md) and
-[telephony.md](telephony.md).
 
 ## Local versus cloud
 

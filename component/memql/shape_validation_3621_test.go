@@ -349,7 +349,7 @@ func TestShapeBoundConceptMustResolve(t *testing.T) {
 
 // TestAmbiguousShapeBindingResolvesByDomain pins latent hole 4, second half.
 // Four real shapes bind a bare name that is ambiguous cluster-wide
-// (forge/requestFull, planner/planFull, telephony/callFull,
+// (forge/requestFull, planner/planFull,
 // worker/workerInvocationFull). With an explicit body nothing broke, because
 // the binding was only consulted by the default-projection expansion -- so
 // converting any of them to the empty-body form (memql#2035, the encouraged

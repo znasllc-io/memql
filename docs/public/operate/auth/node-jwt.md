@@ -23,7 +23,7 @@ extra claims:
 | --- | --- |
 | `class` | `"node"` (the surface pin) |
 | `node_id` | The `v1:cluster:node.id` the token binds to |
-| `node_type` | The build-tag-derived role (`bff`, `voice`, `cognition`, `agent`, `planner`, `workbench`) |
+| `node_type` | The build-tag-derived role (`bff`, `agent`, `planner`, `workbench`, `mcp`, `edge`) |
 | `sub` | The `v1:identity:identity.id` of the underlying credential row |
 
 The token is signed with the same EdDSA key as user-class JWTs, so
@@ -50,7 +50,7 @@ Each node binary needs one provisioned token, copied into its
 `MEMQL_NODE_TOKEN` env var before startup.
 
 1. **Reserve a `v1:cluster:node.id`** for the binary (e.g.
-   `v1:cluster:node:cognition-1`). The token's `node_id` claim
+   `v1:cluster:node:agent-1`). The token's `node_id` claim
    binds to it; rotation reuses the same id.
 2. **Mint a `v1:identity:identity` row** with
    `identityType="node_token"` and the credential variant fields:

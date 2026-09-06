@@ -71,7 +71,7 @@ func TestOwnSessionsReadTakesNoArgument(t *testing.T) {
 
 // 2. The read runs on the STREAM context, never on the elevated one.
 //
-//	contextWithSystemActor stamps sub=polyphon-bridge-agent, so a read handed
+//	contextWithSystemActor stamps sub=grpc-system-actor, so a read handed
 //	that context compares `subject` against the bridge agent and matches
 //	nothing. The writes still need it; the read must not have it.
 func TestOwnSessionsReadRunsAsTheCaller(t *testing.T) {

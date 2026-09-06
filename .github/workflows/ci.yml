@@ -31,7 +31,7 @@ permissions:
 # Affected-lane routing (Tier 1, #856) + warm-cache consolidation (Tier 2, #857)
 # -----------------------------------------------------------------------------
 # `changes` classifies the PR diff into coarse buckets (go / dsl / sdkts /
-# voice / ci). The CGO-free Go work that used to live in six separate jobs --
+# ci). The CGO-free Go work that used to live in six separate jobs --
 # build, vet, test, dsl-lint, engine-load-check, sdk-gen-check --
 # is now ONE `go-checks` job so a single warm GOCACHE serves the whole
 # sequence (build populates the compiled-package cache; vet/test/run/lint
@@ -62,7 +62,6 @@ jobs:
       dsl: ${{ steps.filter.outputs.dsl }}
       sdkts: ${{ steps.filter.outputs.sdkts }}
       viewkit: ${{ steps.filter.outputs.viewkit }}
-      voice: ${{ steps.filter.outputs.voice }}
       proto: ${{ steps.filter.outputs.proto }}
       vscode: ${{ steps.filter.outputs.vscode }}
       portal: ${{ steps.filter.outputs.portal }}
@@ -360,7 +359,7 @@ jobs:
               - '**/*.yaml'
               - '**/*.yml'
               - '**/.env*'
-            # Any Go source or the module graph. Voice + generator + sdk/go
+            # Any Go source or the module graph. The generator and sdk/go
             # are Go too, so they are a subset of this.
             #
             # The module files are matched at ANY DEPTH, not only at the repo
@@ -450,10 +449,6 @@ jobs:
             # and a change confined to it must still run its lane.
             viewkit:
               - 'sdk/ts-viewkit/**'
-            # The CGO voice path (informational; the voice lane gates on
-            # `go` because the tagged build compiles the whole module).
-            voice:
-              - 'integrations/voice/**'
             # Proto sources + their generated bindings + the gate script
             # (memql#928 drift gate). A .proto edit WITHOUT its regenerated
             # .pb.go matches here but NOT `go`, so this is what makes the
@@ -571,10 +566,11 @@ jobs:
             #      would buy ~zero job-minutes until per-module lanes exist.
             #   2. Scoping the TAGGED build lanes by path would be UNSOUND.
             #      `go build -tags X ./...` compiles the whole module, so any
-            #      Go change can break it -- which is exactly why build-voice
-            #      already gates on the whole `go` bucket rather than on
-            #      integrations/voice/**. Narrowing them would let a breaking
-            #      change skip the lane: faster CI that verifies less.
+            #      Go change can break it -- which is exactly why
+            #      build-node-tags already gates on the whole `go` bucket
+            #      rather than on the tree its tag names. Narrowing them would
+            #      let a breaking change skip the lane: faster CI that verifies
+            #      less.
             #
             # So the closure becomes meaningful AFTER the module split, not
             # before it. Wiring these up is tracked as follow-up to memql#3163.
@@ -608,7 +604,6 @@ jobs:
               - 'dsl/**'
             platform:
               - 'component/node/**'
-              - 'component/polyphon/**'
               - 'component/identity/**'
             integrations:
               - 'integrations/**'
@@ -822,7 +817,7 @@ jobs:
         # ci || go || dsl), and every gate under deploy/ sat unreached.
         #
         # What that made inert is the whole render-gate family -- the
-        # front-door staleness checks, the voice-off holds, and the
+        # front-door staleness checks, the module holds, and the
         # ExternalSecret gates added with this comment. Deleting a
         # `$patch: delete` from an overlay is a yaml-only diff by
         # construction, which is to say the gate was absent for precisely the
@@ -1038,11 +1033,10 @@ jobs:
       #
       # This used to carry a hand-maintained audit of which tags have test
       # files and which lane covers each. It drifted on FOUR tags at once (mcp
-      # omitted entirely with three files; identity, telnyx_live and voice all
-      # covered by a closing "no other build tag carries test files today" that
-      # was false of each), which is how three mcp-tagged suites went their
-      # whole life without executing -- including the file the #2888
-      # vulnerability lives in.
+      # omitted entirely with three files; three more covered by a closing "no
+      # other build tag carries test files today" that was false of each),
+      # which is how three mcp-tagged suites went their whole life without
+      # executing -- including the file the #2888 vulnerability lives in.
       #
       # The audit is now EXECUTABLE: cmd/citags/scan reads the tags actually
       # present on *_test.go files and the `go test -tags ...` invocations
@@ -1075,63 +1069,16 @@ jobs:
         if: ${{ env.RUN_GO == 'true' }}
         run: go test -tags bff -timeout=300s ./app/ ./component/server/
 
-  # Voice node CGO build lane -- kept SEPARATE from go-checks because it needs
-  # the libopus/opusfile/soxr C deps + CGO_ENABLED=1 and builds under the
-  # `voice` build tag; folding it into the CGO-free lane would force the CGO
-  # toolchain (and apt installs) onto every check. The Go voice-agent
-  # (integrations/voice/agent, epic #449) joins LiveKit rooms via
-  # github.com/livekit/server-sdk-go/v2 + its media-sdk, which pull the CGO
-  # dependency (docs/voice/451-livekit-go-room-participation.md, Caveat 1).
-  # All such code is behind `//go:build voice`. Gates on `go` (not just voice
-  # paths): the tagged build compiles the whole module, so any Go change can
-  # break it.
-  build-voice:
-    name: build voice (cgo)
-    timeout-minutes: 10
-    needs: changes
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: '1.26.6'
-          cache: true
-      # component/identity/web embeds static/app.css by name; generate it.
-      - uses: ./.github/actions/identity-css
-      # Retried (memql#3166 / design D4.3): apt-get is a network op, and a
-      # transient mirror failure here reds a lane that has nothing to do with
-      # the change under test.
-      - name: install libopus + soxr dev headers
-        run: |
-          scripts/ci/retry.sh -- timeout 120 sudo apt-get update
-          scripts/ci/retry.sh -- timeout 300 sudo apt-get install -y --no-install-recommends \
-            libopus-dev libopusfile-dev libsoxr-dev
-      - name: go build -tags voice (CGO)
-        env:
-          CGO_ENABLED: '1'
-        run: go build -tags voice github.com/znasllc-io/memql/...
-      - name: go vet -tags voice (CGO)
-        env:
-          CGO_ENABLED: '1'
-        run: go vet -tags voice github.com/znasllc-io/memql/...
-      - name: go test -tags voice (CGO)
-        env:
-          CGO_ENABLED: '1'
-        run: go test -tags voice -count=1 -timeout=300s ./integrations/voice/...
-
   # Node-tag compile lane (#1584). go-checks builds/tests with the DEFAULT
   # build tags, so a file gated behind a node build tag
-  # (`//go:build identity|mcp|cognition|agent|planner|workbench`) is NEVER
+  # (`//go:build identity|mcp|agent|planner|workbench`) is NEVER
   # compiled in CI -- a tagged-only compile error passes every PR gate and
   # only fails at image-build time on the GitHub build server. That gap
   # surfaced the 0.9.61 break: #1570 changed Store.CreateAuthCode but missed
   # app/integrations_identity.go (`//go:build identity`); go-checks stayed
   # green and `go build -tags identity` only failed when build-engine-images
-  # built the identity image. This matrix compiles every CGO-free node tag so
-  # a tagged-only break is a required-check failure pre-merge. The `voice` tag
-  # is NOT here -- it needs CGO_ENABLED=1 + the libopus C deps and is already
-  # covered by the build-voice lane below. Gates on `go` (like build-voice):
+  # built the identity image. This matrix compiles every node tag so a
+  # tagged-only break is a required-check failure pre-merge. Gates on `go`:
   # a tagged build compiles the whole module, so any Go change can break it.
   build-node-tags:
     name: build node tags
@@ -1142,7 +1089,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tag: [identity, mcp, cognition, agent, planner, workbench]
+        tag: [identity, mcp, agent, planner, workbench]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -1165,7 +1112,7 @@ jobs:
   # a run (scripts/citags does not count a `-c` step as coverage, so the
   # exclusion stays honest). GOWORK=off matches scripts/test/cluster-e2e.sh,
   # which runs the live suite that way, so a require the root go.mod lacks
-  # fails here rather than on the cluster. Gates on `go` (like build-voice and
+  # fails here rather than on the cluster. Gates on `go` (like
   # build-node-tags): any Go change can break it. Listed in ci-required below;
   # scripts/citags TestClusterE2ECompileLaneGatesTheMerge pins all of this.
   build-clustere2e:
@@ -1758,7 +1705,7 @@ jobs:
       - name: db-gated -- the fast packages (tight budget)
         run: |
           start=$SECONDS
-          go test -count=1 -timeout=180s ./component/automations/... ./component/backup/... ./component/grpc/... ./component/identity/... ./component/logstore/... ./component/sitetraffic/... ./examples/referencepack/... ./integrations/cognition/... ./integrations/embedding/... ./integrations/planner/... ./integrations/shopify/... ./integrations/work/...
+          go test -count=1 -timeout=180s ./component/automations/... ./component/backup/... ./component/grpc/... ./component/identity/... ./component/logstore/... ./component/sitetraffic/... ./examples/referencepack/... ./integrations/embedding/... ./integrations/planner/... ./integrations/shopify/... ./integrations/work/...
           echo "headroom: the fast packages used $((SECONDS - start))s of their 180s budget"
 
       # SPLIT OUT RATHER THAN ADMITTED (epic memql#4885). component/packages
@@ -2241,7 +2188,6 @@ jobs:
       - path-routing
       - go-checks
       - go-tests
-      - build-voice
       - build-node-tags
       - build-clustere2e
       - sdk-ts-typecheck

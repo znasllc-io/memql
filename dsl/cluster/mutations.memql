@@ -19,7 +19,7 @@ mutate cluster createCluster {
     id: args.clusterId
     args.name
     args.region
-    seedNodeTypes: ["bff", "cognition", "planner"]
+    seedNodeTypes: ["bff", "agent", "planner"]
     args.databaseId
     args.identityProviderId
     args.version

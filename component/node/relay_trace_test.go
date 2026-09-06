@@ -6,7 +6,7 @@ func TestIsClientToolRelayTopic(t *testing.T) {
 	cases := map[string]bool{
 		"graph.node.created.v1:cognition:client:tool:request":  true,
 		"graph.node.created.v1:cognition:client:tool:response": true,
-		"graph.node.created.v1:cognition:utterance":            false,
+		"graph.node.created.v1:library:artifact":               false,
 		"graph.node.created.v1:planner:plan":                   false,
 		"voice.gate.directive":                                 false,
 	}

@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/component/bus"
 	"github.com/znasllc-io/memql/component/events"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/core/id"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -144,20 +144,6 @@ func (eb *EventBridge) HandleInbound(evt *nodev1.EventForward) {
 				eb.fastPathSink(d)
 			}
 		}
-		return
-	}
-
-	// Chat-reply path is on the durable substrate (memql#1264). On the bff the
-	// browser receives these topics ONLY via the substrate republish, so drop
-	// the inbound mesh copy here to keep the browser stream exactly-once. The
-	// mesh still carried this event to other peers (e.g. cognition's trigger);
-	// we are only declining to ALSO publish it onto this bff's local bus. The
-	// durable path is the guarantee, so dropping the best-effort mesh copy never
-	// loses the event. Non-bff nodes never set this flag.
-	if eb.suppressInboundChatReply && isChatReplyTopic(evt.Topic) {
-		// Still record the id in the dedup window so a later mesh re-circulation
-		// of the same event is recognised as already-handled.
-		eb.seen.Check(evt.EventId)
 		return
 	}
 

@@ -41,7 +41,6 @@ var ErrUnknownKID = errors.New("verifier: unknown kid")
 const (
 	ClassUser           = "user"
 	ClassNode           = "node"
-	ClassVoiceAgent     = "voice_agent"
 	ClassServiceAccount = "service_account"
 	// ClassAppSession is a delegated app run's back-channel credential
 	// (memql#4857). Its `sub` is a real user's id, which is what separates it

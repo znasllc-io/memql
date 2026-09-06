@@ -23,7 +23,7 @@ import (
 // refuses the write when the row's declared owner is not the actor.
 //
 // The fixtures below use REAL declared concepts (v1:notes:note for the
-// owned tier, v1:telephony:call for clusterOwner) rather than
+// owned tier, v1:campaigns:sendJob for clusterOwner) rather than
 // hand-built declarations, so a change to what the loader produces
 // shows up here rather than being papered over.
 //
@@ -437,4 +437,3 @@ func TestWriteGuardDayOneCoverage(t *testing.T) {
 		}
 	}
 }
-

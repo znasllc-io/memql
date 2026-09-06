@@ -23,7 +23,7 @@ follows the current primary across a failover.
 ## Mesh = cluster DNS
 
 Each node's `Service` is named after its node-type short name (`bff`,
-`cognition`, `voice`, `agent`, `planner`, `identity`, `workbench`) in
+`agent`, `planner`, `identity`, `workbench`) in
 **whichever namespace the overlay places it in**. Same-namespace cluster DNS
 resolves the mesh values (`bff:50058`, `agent:50055`, ...), so
 `MEMQL_NODE_ADDRESS` / `MEMQL_WORKER_PEERS` are the same in the local k3d
@@ -48,15 +48,13 @@ Under the live Argo Rollouts blue/green cutover the unscoped `bff` Service
 selects BOTH colors during the 3600s `scaleDownDelay`, so a leaf's single
 parent stream could land on a draining old-color pod (~1h mixed-version mesh).
 Leaf nodes therefore dial `bff-active:50058` (the Rollout-managed,
-color-pinned active Service, which carries `:50058` for exactly this reason);
-the voice-agent dials `bff-active:50051`. The local k3d cluster has
+color-pinned active Service, which carries `:50058` for exactly this reason).
+The local k3d cluster has
 a single bff color and no Rollout, so it keeps `bff:50058` -- same star
 topology, only the dial-target value differs per environment.
 
 | Node | Image | NodeService port | NODE_ADDRESS | PARENT | WORKER_PEERS |
 |------|-------|------------------|--------------|--------|--------------|
-| cognition | memql:0.9.0 | 50054 | cognition:50054 | bff-active:50058 | agent=agent:50055 |
-| voice | memql:0.9.0 | 50059 | voice:50059 | bff-active:50058 | -- |
 | agent | memql:0.9.0 | 50055 | agent:50055 | bff-active:50058 | workbench=workbench:50060 |
 | planner | memql:0.9.0 | 50056 | planner:50056 | bff-active:50058 | -- |
 | workbench | memql:0.9.0 | 50060 | workbench:50060 | bff-active:50058 | -- |
@@ -88,7 +86,7 @@ product's runtime DSL bundle (see "Running a product on this engine" above).
 (identity multi-replica rides the env-provided signing key,
 [#550](https://github.com/znasllc-io/memql/issues/550).)
 
-**The engine node-types `cognition`, `voice`, `agent`, `planner`,
+**The engine node-types `agent`, `planner`,
 `workbench` run 2 replicas + PDBs (#561).** Multi-replica was unsafe because
 automations could double-fire; both paths are now cluster-singleton:
 
@@ -127,7 +125,7 @@ reconnect.
 
 ## Migrations run once
 
-The shared database must not be migrated by 7 racing nodes. Only the
+The shared database must not be migrated by racing nodes. Only the
 **identity** node sets `MEMORY_NODES_DATABASE_MIGRATE_ON_START=true`;
 every other node has it `false`.
 
@@ -180,8 +178,8 @@ takes a direct backend:
   pooler decouples client connections from Postgres backends, so a blue-green
   + rolling deploy surge no longer maps 1:1 to direct slots.
 - `MEMORY_NODES_DATABASE_DIRECT_DSN` -> the **direct** (non-pooled) endpoint
-  (db `tsdb`). Session-scoped advisory locks (cognition dispatch/greet/feedback
-  gates, cron leader, topology reconciler, planner admission) + the bun
+  (db `tsdb`). Session-scoped advisory locks (cron leader, topology
+  reconciler, planner admission) + the bun
   migrator resolve their handle here (`Database.DirectBunDB()`), so a
   transaction-mode pooler can't recycle a held session out from under them.
   **Optional** — when unset, `DirectBunDB()` falls back to the main pool

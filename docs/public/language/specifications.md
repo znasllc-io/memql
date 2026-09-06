@@ -60,16 +60,16 @@ the call site).
 ### Row-spec (SQL pushdown)
 
 ```memql
-use cognition.concepts.{ participant }
+use library.concepts.{ artifact }
 
-@description("Matches guest participants")
-spec participant isGuestParticipant {
-  return isGuest == true
+@description("Matches archived artifacts")
+spec artifact isArchivedArtifact {
+  return archived == true
 }
 
-@description("Guest participants created by system automation")
-spec participant systemCreatedGuest {
-  return isGuest == true && createdBy == "system:automation"
+@description("Archived artifacts filed by system automation")
+spec artifact systemArchivedArtifact {
+  return archived == true && createdBy == "system:automation"
 }
 ```
 
@@ -80,14 +80,14 @@ predicates compose with the Go boolean grammar (`&&` / `||` and parens —
 there is no `!` in a filter or a spec; it is refused at load, memql#3630):
 
 ```memql
-use cognition.concepts.{ participant }
+use library.concepts.{ artifact }
 
-query participant guestParticipants {
+query artifact archivedArtifacts {
   args {
-    spaceId  string  @required
+    folderId  string  @required
   }
-  filter  spaceId==args.spaceId && isGuestParticipant
-  shape   participantFull
+  filter  folderId==args.folderId && isArchivedArtifact
+  shape   artifactFull
 }
 ```
 

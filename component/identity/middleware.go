@@ -57,7 +57,7 @@ func ContextWithSystemActor(ctx context.Context) context.Context {
 
 // SystemCredentialActorSubject is the synthetic actor attributed to
 // machine-credential v1:identity:identity writes (badge / worker_token /
-// node_token / voice_agent_token / service_account). It carries
+// node_token / service_account). It carries
 // role="system" and a "system:"-prefixed subject so it satisfies the
 // memql#2513 credential-actor guard (component/memql
 // identity_credential_actor_validation.go's validateIdentityCredentialActorScope

@@ -50,48 +50,6 @@ builtin agent {
   partitionId  string!
 }
 
-// ---- builtin askSpecialist ------------------------------------------
-//
-// Synchronous specialist query. The assistant calls this via the
-// askSpecialist tool when it wants a specialist's structured answer
-// to a question. Resolves the specialist by roleSlug, invokes the
-// askSpecialist structured-output prompt, returns the JSON response.
-//
-// Specialists never speak to humans directly; their reply lives in
-// the tool result. The assistant paraphrases response.response into
-// the human-facing reply.
-
-@executor("integration.agents.askSpecialist")
-@args(profile="object")
-@description("Synchronously query a specialist agent by role. Returns ONE JSON object {response, rationale?, confidence, needsMore?}. Specialists never write utterances; the assistant translates response to a human reply.")
-builtin askSpecialist {
-  role     string!
-  query    string!
-  context  object
-}
-
-// ---- builtin ensureAgentForGoal --------------------------------------
-//
-// Factory builtin invoked by the Assistant's `ensureAgent`
-// tool (dsl/agents/tools/ensureAgent.memql). Resolves a free-form
-// goal into an agent ready to handle it:
-//
-//   - Analyzes the goal via the agentFactoryAnalyze structured-output
-//     prompt against the role catalog + the user's existing agents.
-//   - action="match": returns the existing agent id verbatim.
-//   - action="extend": unions missing locked/relevant domains + tools
-//     onto an existing same-role agent via updateAgent, then
-//     returns its id.
-//   - action="create": composes capabilities from the chosen role's
-//     locked + default + analysis-supplied sets and writes a new
-//     v1:agents:agent row via createAgent.
-//
-// Returns one MemoryNode whose payload is
-//   { agentId, agentName, roleSlug, action, reasoning }.
-// Synchronous from the caller's perspective -- the factory completes
-// the write before returning so the GA can immediately invoke the
-// resulting agent via `agent("name", "prompt", partitionId)`.
-
 // ---- builtin requestUserFeedback -------------------------------------
 //
 // Bridges the requestUserFeedback tool (dsl/agents/tools/

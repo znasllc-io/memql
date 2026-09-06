@@ -65,14 +65,11 @@ NAMESPACE="${MEMQL_K3D_NAMESPACE:-memql}"
 # local-only infrastructure and not part of the mesh.
 APP_DEPLOYMENTS=(
     identity
-    voice
     mcp
     bff
-    cognition
     agent
     planner
     workbench
-    voice-agent
     edge
 )
 

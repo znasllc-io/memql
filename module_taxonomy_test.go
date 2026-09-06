@@ -54,14 +54,10 @@ const (
 // decided it.
 var pluginKinds = map[string]moduleKind{
 	// --- TRUE INTEGRATIONS: an outbound call to somebody else's system. ---
-	"avatardirect":   kindIntegration, // Simli / Anam + LiveKit
-	"email":          kindIntegration, // Microsoft Graph / SMTP
-	"openairealtime": kindIntegration, // api.openai.com
-	"release":        kindIntegration, // api.github.com + ghcr.io -- tags, Releases, manifests
-	"shopify":        kindIntegration, // Storefront + Admin APIs
-	"storage":        kindIntegration, // Azure Blob
-	"telephony":      kindIntegration, // Telnyx + LiveKit
-	"voice":          kindIntegration, // LiveKit
+	"email":   kindIntegration, // Microsoft Graph / SMTP
+	"release": kindIntegration, // api.github.com + ghcr.io -- tags, Releases, manifests
+	"shopify": kindIntegration, // Storefront + Admin APIs
+	"storage": kindIntegration, // Azure Blob
 
 	// --- COMPONENTS: engine internals an operator cannot switch off. ---
 	// Turning any of these off does not remove a feature, it breaks the
@@ -175,8 +171,6 @@ var pluginKinds = map[string]moduleKind{
 	"compose": kindComponent,
 
 	// --- PACKS: product features with a coherent "off". ---
-	"chat":          kindPack,
-	"dailyspace":    kindPack,
 	"agents":        kindPack,
 	"library":       kindPack,
 	"knowledge":     kindPack, // see the note below

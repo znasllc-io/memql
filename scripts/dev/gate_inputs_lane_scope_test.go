@@ -72,7 +72,7 @@ var gateInputs = []struct {
 }{
 	{"CLAUDE.md", ".", "TestDocsDoNotTeachRetiredDeclarationKeywords"},
 	{"integrations/arch.md", ".", "TestDocsDoNotTeachDeletedGoExtensionPoints"},
-	{"docs/internal/design/extension-points.md", ".", "TestDocsDoNotTeachDeletedGoExtensionPoints"},
+	{"component/node/CLAUDE.md", ".", "TestDocsDoNotTeachDeletedGoExtensionPoints"},
 	{"docs/public/concepts/events.md", ".", "TestDocsDoNotReferencePrefixedConstructNames"},
 	{"scripts/secrets/manifest.yaml", "component/envregistry", "TestEmbeddedManifestInSync"},
 	{"component/envregistry/manifest.yaml", "component/envregistry", "TestEmbeddedManifestInSync"},
@@ -103,7 +103,7 @@ var gateInputs = []struct {
 	{"component/database/memory-nodes/migrations/20260324000000_initial_setup.up.sql", ".", "TestEmbeddedFileCountsAreStable"},
 	{"component/identity/web/static/app.js", ".", "TestEmbeddedFileCountsAreStable"},
 	{"component/mcp/icon.svg", ".", "TestEmbeddedFileCountsAreStable"},
-	{"dsl/cognition/prompts/cognitionReply.tmpl", ".", "TestEmbeddedFileCountsAreStable"},
+	{"dsl/agents/prompts/plannerAgent.tmpl", ".", "TestEmbeddedFileCountsAreStable"},
 	{"examples/referencepack/dsl/namespace.pin", ".", "TestEmbeddedFileCountsAreStable"},
 	{"examples/reviewspack/dsl/namespace.pin", ".", "TestEmbeddedFileCountsAreStable"},
 	{"integrations/integrations.json", ".", "TestEmbeddedFileCountsAreStable"},

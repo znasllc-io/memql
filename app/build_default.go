@@ -1,4 +1,4 @@
-//go:build !cognition && !agent && !planner && !bff && !voice && !identity && !workbench && !mcp && !edge
+//go:build !agent && !planner && !bff && !identity && !workbench && !mcp && !edge
 
 package app
 
@@ -15,10 +15,6 @@ func Build(serviceLogger *slog.Logger, version string, overrides Overrides) *App
 	a.engineAndBus()
 	a.integrationsCore()
 	a.transportBase()
-	// Default (single-binary) mode also serves Polyphon room tokens
-	// to browsers, so wire the LiveKit room provider here. Mirror of
-	// the BFF transport's call.
-	a.wirePolyphonEndpoints()
 	a.createHTTPServer()
 	a.cluster()
 

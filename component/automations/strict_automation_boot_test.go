@@ -88,7 +88,7 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // sweepWaitingWorkRuns (resume a due timer wait or re-claim an abandoned run)
 // and workJournalRetentionSweep (fold the run summary, then archive-then-delete
 // the journal) -- epic memql#4966.
-const shippedAutomationCount = 50
+const shippedAutomationCount = 47
 
 // TestStrictAutomationBoot_MalformedAutomationRefusesBoot is the core
 // acceptance test: a malformed automation injected as a throwaway domain (the

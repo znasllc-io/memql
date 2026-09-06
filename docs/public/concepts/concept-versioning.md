@@ -39,36 +39,36 @@ declaration:
 
 ```memql
 @version("2.0.0")
-@namespace("cognition")
-@description("Participant record, v2 schema.")
-concept participant {
+@namespace("library")
+@description("Artifact record, v2 schema.")
+concept artifact {
   // v2 fields ...
 }
 ```
 
-The loader registers it as `v2:cognition:participant`.
+The loader registers it as `v2:library:artifact`.
 
 ### 2. Add a Go constant
 
 In `component/database/memory-nodes/concept_ids.go`:
 
 ```go
-const ConceptV2CognitionParticipant = "v2:cognition:participant"
+const ConceptV2LibraryArtifact = "v2:library:artifact"
 ```
 
 Add it to `AllFilesystemConcepts()` so startup validation covers it.
 
 ### 3. Add automations (if needed)
 
-Add v2-specific event handlers to `dsl/cognition/automations.memql`:
+Add v2-specific event handlers to `dsl/library/automations.memql`:
 
 ```memql
 @enabled
-@trigger(event="node.created", concept="v2:cognition:participant", partition="*")
-@description("Handle v2 participant creation")
-automation handleV2Participant {
+@trigger(event="node.created", concept="v2:library:artifact", partition="*")
+@description("Handle v2 artifact creation")
+automation handleV2Artifact {
   step run {
-    logic handleV2Participant { event: event }
+    logic handleV2Artifact { event: event }
   }
 }
 ```
@@ -78,7 +78,7 @@ automation handleV2Participant {
 - v1 and v2 concepts coexist in the same database and event bus
 - Each version has its own schema and can evolve independently
 - CDC events include the full concept ID: the topic carries
-  `v2:cognition:participant`, not `v1:...`
+  `v2:library:artifact`, not `v1:...`
 - Subscriptions target a specific version via the full concept ID in the topic pattern
 
 ## Concept ID Registry
