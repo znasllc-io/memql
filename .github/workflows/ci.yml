@@ -1861,13 +1861,25 @@ jobs:
           CREATE EXTENSION IF NOT EXISTS "pgcrypto";
           CREATE EXTENSION IF NOT EXISTS vector;
           SQL
-      - name: memql-bench --print-spec (the capability descriptor parses)
-        run: go run ./cmd/memql-bench --print-spec | jq -e '.capability == "bench.run" and (.params | length) > 0' > /dev/null
+      - name: memql-bench --print-spec (the capability descriptor parses, on one line)
+        run: |
+          go run ./cmd/memql-bench --print-spec > /tmp/proving-spec.json
+          test "$(wc -l < /tmp/proving-spec.json)" -eq 1 || { echo "::error::--print-spec wrote more than one line"; exit 1; }
+          jq -e '.capability == "bench.run" and (.params | length) > 0' /tmp/proving-spec.json > /dev/null
       - name: proving gate (structural properties block; cost and speed report)
         run: |
           go run ./cmd/memql-bench --do=gate --runner=ubuntu-latest > /tmp/proving-envelope.json 2> /tmp/proving-gate.txt
           status=$?
           cat /tmp/proving-gate.txt
+          # EXACTLY ONE LINE ON STDOUT, asserted rather than assumed. The
+          # contract says one envelope, and `jq -e` alone does not check it:
+          # given several JSON lines it evaluates each and exits on the LAST,
+          # so a run whose stdout was polluted by log records still passes
+          # while a caller reading one line gets a log record. That is what
+          # happened here before the binary took os.Stdout out of the
+          # engine's reach.
+          lines=$(wc -l < /tmp/proving-envelope.json)
+          test "$lines" -eq 1 || { echo "::error::stdout carried $lines lines; the capability contract is exactly one envelope"; cat /tmp/proving-envelope.json; exit 1; }
           jq -e '.ok == true' /tmp/proving-envelope.json > /dev/null
           exit $status
       - name: the generated page is not stale against the committed scorecard

@@ -3,6 +3,7 @@ package capability
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -87,6 +88,88 @@ func TestTheExitCodeTableMatchesTheContract(t *testing.T) {
 	}
 	if ExitOK != 0 || ExitGeneric != 1 {
 		t.Fatalf("ExitOK=%d ExitGeneric=%d; 0 and 1 are fixed by every shell caller", ExitOK, ExitGeneric)
+	}
+}
+
+// TestTheMarshalledShapeMatchesTheFormat is what keeps the drift gate meaningful
+// now that NOTHING is emitted through the format strings.
+//
+// The formats embed their values inside literal quotes (`"capability":"%s"`),
+// which is the shape that forces a caller to hand-escape -- and hand-escaping
+// JSON is a critical `go/unsafe-quoting` finding, correctly, because it is
+// right until the first value carrying a quote and then produces a malformed
+// envelope rather than an error. CodeQL flagged exactly that on this file, so
+// the emitters marshal structs and encoding/json owns every escape.
+//
+// That would have left `envelopeFormat` and `specFormat` as decoration checked
+// against the shell and against nothing here. This closes the loop: the struct
+// must marshal to precisely what the format produces for the same values, so a
+// field added, renamed or reordered on either side goes red.
+func TestTheMarshalledShapeMatchesTheFormat(t *testing.T) {
+	var o, e bytes.Buffer
+	c, _, err := Parse(spec(), []string{"--tier=ci"}, &o, &e)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	c.Changed()
+	c.OK()
+
+	want := fmt.Sprintf(envelopeFormat, "true", "bench.run", "true", "{}", "null")
+	if got := o.String(); got != want {
+		t.Errorf("the marshalled envelope has drifted from the format the shell library uses.\n got: %s want: %s", got, want)
+	}
+
+	var so, se bytes.Buffer
+	c2, handled, err := Parse(Spec{Id: "x.y", Summary: "s"}, []string{"--print-spec"}, &so, &se)
+	if err != nil || !handled {
+		t.Fatalf("Parse: %v handled=%v", err, handled)
+	}
+	_ = c2
+	wantSpec := fmt.Sprintf(specFormat, "x.y", "s", "")
+	if got := so.String(); got != wantSpec {
+		t.Errorf("the marshalled spec has drifted from the format.\n got: %s want: %s", got, wantSpec)
+	}
+}
+
+// TestAQuoteInEveryFieldStaysValidJSON is the case the hand-quoting could not
+// survive, asserted on every field a caller can influence.
+func TestAQuoteInEveryFieldStaysValidJSON(t *testing.T) {
+	nasty := `he said "no" \ and	a tab`
+	var o, e bytes.Buffer
+	c, _, err := Parse(Spec{Id: nasty, Summary: nasty, Params: []Param{{Name: "tier", Description: nasty}}},
+		[]string{"--tier=ci"}, &o, &e)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	c.Set("value", nasty)
+	c.Fail(ExitOpFailed, "%s", nasty)
+
+	env, perr := ParseEnvelope(o.Bytes())
+	if perr != nil {
+		t.Fatalf("a quote in the capability id broke the envelope: %v\n%s", perr, o.String())
+	}
+	if env.Capability != nasty {
+		t.Errorf("capability round-tripped as %q", env.Capability)
+	}
+	if env.Error == nil || env.Error.Message != nasty {
+		t.Errorf("error message round-tripped as %+v", env.Error)
+	}
+	if got, _ := env.Result["value"].(string); got != nasty {
+		t.Errorf("result value round-tripped as %q", got)
+	}
+
+	// And the spec, which has its own emitter.
+	var so, se bytes.Buffer
+	if _, _, err := Parse(Spec{Id: nasty, Summary: nasty, Params: []Param{{Name: "p", Description: nasty}}},
+		[]string{"--print-spec"}, &so, &se); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	var back map[string]any
+	if err := json.Unmarshal(so.Bytes(), &back); err != nil {
+		t.Fatalf("a quote in the summary broke the spec: %v\n%s", err, so.String())
+	}
+	if back["summary"] != nasty {
+		t.Errorf("summary round-tripped as %v", back["summary"])
 	}
 }
 

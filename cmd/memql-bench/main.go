@@ -51,7 +51,31 @@ const (
 	defaultPage      = "docs/public/overview/proving-scorecard.md"
 )
 
-func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+func main() {
+	// STDOUT CARRIES EXACTLY ONE ENVELOPE, and holding that line takes more
+	// than discipline in this binary's own code.
+	//
+	// The engine's components build their loggers with os.Stdout HARDWIRED
+	// (component/memql/ast_converter.go and its siblings), so opening an
+	// engine prints JSON log lines onto the very stream the contract reserves
+	// for the result. Nothing errors: the envelope is still there, on the last
+	// line, and `jq -e '.ok == true'` over the file even passes -- it reads
+	// every line and exits on the last one. A caller reading ONE line gets a
+	// log record instead, and a caller reading the whole stream as one
+	// document gets a parse error naming nothing.
+	//
+	// Swapping os.Stdout is what actually fixes it, rather than a promise that
+	// no dependency will ever print. The loggers resolve os.Stdout when they
+	// are CONSTRUCTED, which is after this line runs, so they land on stderr
+	// with every other human line. The real handle is kept for the envelope.
+	//
+	// Restored before os.Exit, which skips defers.
+	stdout := os.Stdout
+	os.Stdout = os.Stderr
+	code := run(os.Args[1:], stdout, os.Stderr)
+	os.Stdout = stdout
+	os.Exit(code)
+}
 
 func run(argv []string, stdout, stderr io.Writer) int {
 	spec := capability.Spec{

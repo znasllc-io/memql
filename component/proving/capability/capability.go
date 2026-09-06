@@ -55,15 +55,49 @@ const (
 	ExitOpFailed = 5
 )
 
-// envelopeFormat and specFormat are the contract's wire shapes, and they are
-// the two strings capability_shape_test.go reads out of capability.sh to
-// compare against. Keeping them as named consts is what makes that comparison
-// possible: a format string inlined at its Fprintf call site is one a test can
-// only check by running the binary.
+// envelopeFormat and specFormat are the shell library's wire shapes, quoted
+// here so the drift gate can compare them against `scripts/lib/capability.sh`
+// AND against what this package actually emits.
+//
+// NOTHING IS EMITTED THROUGH THEM. They embed their values inside literal
+// quotes (`"capability":"%s"`), which is the shape that requires the caller to
+// hand-escape -- and hand-escaping JSON is a critical `go/unsafe-quoting`
+// finding for a good reason: it is correct exactly until somebody passes a
+// value carrying a quote, and the failure is a malformed envelope rather than
+// an error. Bash has no alternative and so the shell library does it; Go does,
+// so this package marshals structs and lets encoding/json own every escape.
+//
+// The formats therefore earn their place twice over: they pin what the shell
+// emits, and TestTheMarshalledShapeMatchesTheFormat pins that the struct
+// marshals to the same thing. A change to either side goes red.
 const (
 	envelopeFormat = `{"ok":%s,"capability":"%s","changed":%s,"result":%s,"error":%s}` + "\n"
 	specFormat     = `{"capability":"%s","summary":"%s","params":[%s]}` + "\n"
 )
+
+// wireEnvelope is the emitted shape. Field ORDER is the declaration order
+// encoding/json preserves, and it matches envelopeFormat -- a caller reading
+// the line with `jq` does not care, but a human diffing two runs does.
+type wireEnvelope struct {
+	OK         bool            `json:"ok"`
+	Capability string          `json:"capability"`
+	Changed    bool            `json:"changed"`
+	Result     json.RawMessage `json:"result"`
+	Error      *EnvelopeError  `json:"error"`
+}
+
+// wireSpec is the --print-spec shape.
+type wireSpec struct {
+	Capability string      `json:"capability"`
+	Summary    string      `json:"summary"`
+	Params     []wireParam `json:"params"`
+}
+
+type wireParam struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Required    bool   `json:"required,omitempty"`
+}
 
 // Param is one declared flag. The declared set IS the accepted surface: a
 // flag not declared here is refused with exit 2, which is what stops
@@ -219,8 +253,7 @@ func (c *Capability) OK() int {
 		panic("proving/capability: a second envelope was emitted; the contract is exactly one")
 	}
 	c.emitted = true
-	fmt.Fprintf(c.out, envelopeFormat,
-		"true", jsonStringBare(c.spec.Id), boolText(c.changed), c.resultJSON(), "null")
+	c.emit(wireEnvelope{OK: true, Capability: c.spec.Id, Changed: c.changed, Result: c.resultJSON()})
 	return ExitOK
 }
 
@@ -240,34 +273,53 @@ func (c *Capability) Fail(code int, format string, a ...any) int {
 		return code
 	}
 	c.emitted = true
-	errBlock := fmt.Sprintf(`{"code":%d,"message":%s}`, code, jsonString(msg))
-	fmt.Fprintf(c.out, envelopeFormat,
-		"false", jsonStringBare(c.spec.Id), boolText(c.changed), c.resultJSON(), errBlock)
+	c.emit(wireEnvelope{
+		OK: false, Capability: c.spec.Id, Changed: c.changed, Result: c.resultJSON(),
+		Error: &EnvelopeError{Code: code, Message: msg},
+	})
 	return code
+}
+
+// emit writes one envelope, on one line. The single Marshal is the whole
+// escaping story: a capability id, a message or a result value carrying a
+// quote, a tab or a NUL comes out as valid JSON without this package knowing
+// the escaping rules.
+func (c *Capability) emit(e wireEnvelope) {
+	b, err := json.Marshal(e)
+	if err != nil {
+		// Unreachable: every field is a marshallable type and Result is
+		// already-valid JSON. A caller parsing one line still needs one line,
+		// so say so in the envelope's own shape rather than writing nothing.
+		fmt.Fprintf(c.out, "{\"ok\":false,\"capability\":\"\",\"changed\":false,\"result\":{},\"error\":{\"code\":1,\"message\":\"envelope encoding failed\"}}\n")
+		fmt.Fprintf(c.err, "ERROR: encoding the envelope: %v\n", err)
+		return
+	}
+	fmt.Fprintf(c.out, "%s\n", b)
 }
 
 // resultJSON marshals the accumulated result. A result that will not marshal
 // is reported IN the envelope rather than replacing it, because a caller
 // parsing one line needs one line.
-func (c *Capability) resultJSON() string {
+func (c *Capability) resultJSON() json.RawMessage {
 	b, err := json.Marshal(c.result)
 	if err != nil {
-		return fmt.Sprintf(`{"resultEncodingError":%s}`, jsonString(err.Error()))
+		fallback, _ := json.Marshal(map[string]string{"resultEncodingError": err.Error()})
+		return fallback
 	}
-	return string(b)
+	return b
 }
 
 func (c *Capability) writeSpec() {
-	parts := make([]string, 0, len(c.spec.Params))
+	out := wireSpec{Capability: c.spec.Id, Summary: c.spec.Summary, Params: []wireParam{}}
 	for _, p := range c.spec.Params {
-		s := fmt.Sprintf(`{"name":%s,"description":%s`, jsonString(p.Name), jsonString(p.Description))
-		if p.Required {
-			s += `,"required":true`
-		}
-		parts = append(parts, s+"}")
+		out.Params = append(out.Params, wireParam{Name: p.Name, Description: p.Description, Required: p.Required})
 	}
-	fmt.Fprintf(c.out, specFormat,
-		jsonStringBare(c.spec.Id), jsonStringBare(c.spec.Summary), strings.Join(parts, ","))
+	b, err := json.Marshal(out)
+	if err != nil {
+		fmt.Fprintf(c.err, "ERROR: encoding the spec: %v\n", err)
+		return
+	}
+	fmt.Fprintf(c.out, "%s\n", b)
 	c.emitted = true
 }
 
@@ -284,35 +336,6 @@ func (c *Capability) writeHelp() {
 	}
 	fmt.Fprintf(c.out, "\n  --print-spec   machine-readable descriptor\n  --help         this text\n")
 	c.emitted = true
-}
-
-// jsonString quotes s as a JSON string, WITH its quotes. json.Marshal rather
-// than a hand-rolled escaper: the shell library hand-rolls one because bash
-// has no alternative, and matching its five escapes by hand here would be a
-// second grammar that can drift from JSON's.
-func jsonString(s string) string {
-	b, err := json.Marshal(s)
-	if err != nil {
-		return `""`
-	}
-	return string(b)
-}
-
-// jsonStringBare escapes s for use INSIDE a pair of quotes the format string
-// already supplies. Both wire formats spell the capability id as `"%s"`, so
-// passing a fully-quoted string there produces `""bench.run""` -- which is not
-// JSON, and which every consumer discovers by failing to parse the whole
-// envelope rather than by mis-reading one field.
-func jsonStringBare(s string) string {
-	q := jsonString(s)
-	return strings.TrimSuffix(strings.TrimPrefix(q, `"`), `"`)
-}
-
-func boolText(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
 }
 
 // Envelope is the parsed shape, for a caller (or a test) that reads one back.
