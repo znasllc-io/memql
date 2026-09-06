@@ -95,12 +95,25 @@ describe("the Bin place", () => {
     expect(within(binGroup()).getByText("2")).toBeTruthy();
   });
 
-  it("says the Bin is empty when it actually is", async () => {
+  it("says the Bin is empty where nobody else is saying it", async () => {
+    // The empty line follows the rule the COUNT follows: it answers only
+    // where nothing else is. Expanded from somewhere else it is the whole
+    // answer; standing in the Bin, the list is already saying it -- and two
+    // copies of one sentence 200px apart is DESIGN.md rule 7.
     h.connection = fakeConnection({ artifacts: [artifactRow({ id: "a-live", title: "live.bin" })] });
     await renderFiles();
 
-    await click(screen.getByRole("button", { name: /^Bin/ }));
+    // Looking at the Library, peeking into the Bin.
+    await click(screen.getByRole("button", { name: "Expand Bin" }));
     expect(within(binGroup()).getByText("The Bin is empty.")).toBeTruthy();
+
+    // ...and standing in it, the list carries the sentence with the part
+    // that matters, so the rail stands down.
+    await click(screen.getByRole("button", { name: /^Bin/ }));
+    expect(within(binGroup()).queryByText("The Bin is empty.")).toBeNull();
+    expect(
+      screen.getByText("The Bin is empty. Archiving from the Library keeps files here, not deleted."),
+    ).toBeTruthy();
   });
 
   it("holds loose files behind one group rather than repeating the list in the rail", async () => {

@@ -140,6 +140,9 @@ export function Rail({
   // The Bin's own disclosures, one level in. Keyed by folder id, with one
   // reserved key for the loose group -- a folder id is a short id and can
   // never collide with it.
+  /** Standing in the Bin's own root -- where the Head and the list are
+   *  already naming and counting this place. */
+  const inBin = !searching && filter.place === "bin" && filter.folderId === "";
   const flip = (key: string) =>
     setOpenBinFolders((prev) => {
       const next = new Set(prev);
@@ -215,18 +218,27 @@ export function Rail({
       {/* THE BIN. The glyph is the dock fixture's own `Trash2` and the name is
           the dock fixture's own word: the row menu has always said "Move to
           Bin", so a rail that answered "Archive" made one destination look
-          like two. */}
+          like two.
+
+          ITS EMPTY LINE FOLLOWS THE RULE ITS COUNT FOLLOWS -- it answers only
+          where nobody else is. This place's group IS the whole place, so
+          standing in an empty Bin put "The Bin is empty." in the rail and
+          "The Bin is empty. Archiving from the Library keeps files here, not
+          deleted." in the list, 200px apart (DESIGN.md rule 7). Library's and
+          Desktop's lines stay in both states, because theirs are about
+          FOLDERS and their lists' are about files: two statements, not one
+          said twice. */}
       <Place
         place="bin"
         glyph={<Trash2 size={14} aria-hidden />}
         name="Bin"
         count={bin.fileCount + bin.folderCount}
         countTitle={binSummary(bin)}
-        current={!searching && filter.place === "bin" && filter.folderId === ""}
+        current={inBin}
         expanded={expanded.bin}
         onToggle={() => toggle("bin")}
         onSelect={() => go("bin", "")}
-        emptyText="The Bin is empty."
+        emptyText={inBin ? "" : "The Bin is empty."}
         empty={bin.folders.length === 0 && bin.loose.length === 0}
         groupClass="os-files-bin-group"
       >
@@ -364,7 +376,9 @@ function Place({
         className={groupClass ? `os-files-place-group ${groupClass}` : "os-files-place-group"}
         hidden={!expanded}
       >
-        {empty ? <p className="os-files-place-empty">{emptyText}</p> : children}
+        {!empty ? children : emptyText !== "" ? (
+          <p className="os-files-place-empty">{emptyText}</p>
+        ) : null}
       </div>
     </>
   );
