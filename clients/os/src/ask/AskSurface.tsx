@@ -70,8 +70,8 @@ export function voiceProblemSentence(problem: VoiceProblem): string {
       return "This browser cannot record audio. Typing works.";
     default:
       // The server's own sentence names the fix -- "streaming transcription
-      // is not configured" is what a cluster with no voice node answers, and
-      // a friendlier paraphrase would drop the one fact that helps.
+      // is not configured" is what a cluster answers when no node is serving
+      // it, and a friendlier paraphrase would drop the one fact that helps.
       return problem.message;
   }
 }
