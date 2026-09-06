@@ -2394,11 +2394,13 @@ at all, so a preview leaves nothing resumable. The work rows are the spine
 `v1:planner:plan` / `task` are replaced BY -- that replacement is epic A2, and
 until it lands both models are live.
 
-**Analysis path.** The attachment HTTP handler creates the queued Plan +
-`plan.created` card synchronously, then runs extract + summarize +
-`CompleteAnalyzePlan` on a detached goroutine, so the user gets instant
-acknowledgement and the `plan.completed` card lands when the work finishes
-(`runAnalysisAsync` in `component/server/attachment_handler.go`).
+**Analysis path.** A file's analysis is a system-origin work GOAL running the
+deterministic template (extract, chunk, embed, summarize), so the Training
+app's live feed is `v1:work:run` rows keyed by file id -- design record section
+G, shipped in epic A3. The attachment handler that created a queued Plan and a
+`plan.created` card is gone with the attachment route it served, and so is
+`component/server/plan_store.go`, which described that flow and had no caller
+left in the tree (memql#5000).
 
 **Planner Agent loop.** `integrations/planner/agent_loop.go` invokes the
 `plannerAgent` prompt on a new userGoal Plan; the prompt emits a structured
