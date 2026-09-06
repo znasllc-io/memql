@@ -365,6 +365,25 @@ Both buttons stay, because they answer two different questions -- "test just
 what I have" and "test the latest with what I have" -- and neither is a mode of
 the other.
 
+**The rebuild step runs the CHECKOUT's scripts, not the extension's**
+(memql#5056). A packaged extension carries a staged copy of `scripts/` so an
+install can run before any checkout exists; for these two buttons the checkout
+already exists and is the thing being built, so it supplies the build recipe as
+well as the source. Anything else is a recipe frozen at the extension's package
+date driving a tree that has since moved -- which is how an update once asked
+for a `voice` node and a `voice-runtime` Dockerfile stage that had both been
+retired in the commits it had just pulled. A checkout too old to carry
+`scripts/lib/capability.sh` falls back to the staged copy, since it could not
+have run these scripts either way. The graph document still comes from the
+extension: it names the steps, and the wizard is written against them.
+
+**A failed rebuild imports nothing** (memql#5058). Every image is built first
+and only then imported, so a build that fails partway leaves the cluster exactly
+as it was. It used to build-and-import one node at a time, which meant a failure
+on the third node left the first two with new image content under an unchanged
+`:local` tag and no rollout -- invisible to `kubectl get pods`, recorded nowhere,
+and waiting to move those two nodes onto different code at their next restart.
+
 **A refusal changes nothing on disk.** That is the property the whole thing is
 arranged around, because the person who presses this is a developer holding
 uncommitted work:

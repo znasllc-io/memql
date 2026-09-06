@@ -24,8 +24,11 @@
 //
 // Refs: #3739 #3736 #3733
 
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+
 import type { ExecEvent } from "../install/executor.js";
-import { redactResult } from "../install/secrets.js";
+import { redactLogText, redactResult } from "../install/secrets.js";
 import {
   newLocalRun,
   settleRunStatus,
@@ -199,6 +202,17 @@ export class RunRecorder {
             if (rendered !== "") detail.push(rendered);
           }
 
+          // THE STEP'S OWN OUTPUT, kept where the record can point at it
+          // (memql#5059). `dev.sh` says "the docker build output above is the
+          // account of it" -- true of a terminal, false of a JSON file, which is
+          // the only thing that survives the run. Naming the file is what makes
+          // the sentence true again.
+          const log = (event.outcome.log ?? "").trim();
+          if (log !== "" && event.outcome.status === "failed") {
+            const name = await writeStepLog(this.dir, this.run.id, event.step.id, log);
+            if (name !== "") detail.push(`log=${name}`);
+          }
+
           if (detail.length > 0) item.detail = detail.join(" · ");
           this.run = await recordRunItem(this.dir, this.run, item);
         });
@@ -239,5 +253,55 @@ export class RunRecorder {
     } catch (err) {
       this.lastError_ = err instanceof Error ? err.message : String(err);
     }
+  }
+}
+
+
+/**
+ * How much of a failing step's output the run log keeps.
+ *
+ * A BOUNDED TAIL rather than everything: a docker build log is megabytes and
+ * the run directory is not a build cache. BuildKit puts the resolved error LAST
+ * -- in the case this was written for, the whole answer was a single line
+ * ("target stage \"voice-runtime\" could not be found") -- so the tail is where
+ * the value is concentrated. 64 KiB is far more than that and still bounded.
+ */
+const LOG_TAIL_BYTES = 64 * 1024;
+
+/**
+ * Writes a failing step's own output beside the run record and returns the file
+ * name, or "" when nothing could be written (memql#5059).
+ *
+ * WHY A FILE AND NOT A FIELD. The record is rewritten on every event through
+ * runLog's atomic write, and folding a build log into it would rewrite those
+ * bytes once per step. A sibling file is written once and named from the record.
+ *
+ * `.log` and not `.json`, deliberately: the Deployments tree watches `*.json`
+ * in this directory, and a log landing there must not repaint the tree.
+ *
+ * FAILING TO WRITE IT IS NOT A FAILURE. The caller is already recording a
+ * failed step; losing the log is exactly the state that existed before this
+ * function, so it degrades to that rather than to an error about an error.
+ */
+async function writeStepLog(
+  dir: string,
+  runId: string,
+  stepId: string,
+  log: string,
+): Promise<string> {
+  const text = redactLogText(log);
+  const tail =
+    Buffer.byteLength(text, "utf8") <= LOG_TAIL_BYTES
+      ? text
+      : "[... earlier output dropped; the last " +
+        String(LOG_TAIL_BYTES) +
+        " bytes follow ...]\n" +
+        Buffer.from(text, "utf8").subarray(-LOG_TAIL_BYTES).toString("utf8");
+  const name = `${runId}.${stepId}.log`;
+  try {
+    await fs.writeFile(path.join(dir, name), tail, "utf8");
+    return name;
+  } catch {
+    return "";
   }
 }

@@ -48,6 +48,7 @@ import {
 import { normalizeNodeList } from "./nodeList.js";
 import { entryFor, readReceipt, removalParams, type Receipt } from "./receipt.js";
 import { refuseUnsupportedPlatform } from "./platform.js";
+import { resolveScriptRoot } from "./root.js";
 import { capabilityScriptPath, withInstalledTools, type RunScript } from "./runner.js";
 import {
   DEFAULT_CAROOT_DIR,
@@ -69,6 +70,14 @@ import {
 export interface SessionOptions {
   /** Repository root holding scripts/ and the graph documents. */
   root: string;
+  /**
+   * Where CAPABILITY SCRIPTS are read from, when that is not `root`.
+   *
+   * Set by the flows that build FROM a checkout, to that checkout (memql#5056).
+   * Unset everywhere else, which keeps `root` the single answer for an install
+   * that has no checkout to borrow from. See `resolveScriptRoot`.
+   */
+  scriptRoot?: string;
   receiptFile: string;
   /** Step ids the operator explicitly does not want run. */
   skip: Set<string>;
@@ -921,7 +930,7 @@ export async function runRebuild(
   hooks: SessionHooks = {},
 ): Promise<ExecutionReport> {
   const graph = hooks.graph ?? (await loadGraphFile(rebuildGraphPath(opts.root)));
-  return execute(graph, rebuildPlan(opts), opts, hooks, opts.receiptFile);
+  return execute(graph, rebuildPlan(opts), withCheckoutScripts(opts), hooks, opts.receiptFile);
 }
 
 /**
@@ -943,7 +952,7 @@ export async function runUpdateRebuild(
   hooks: SessionHooks = {},
 ): Promise<ExecutionReport> {
   const graph = hooks.graph ?? (await loadGraphFile(updateRebuildGraphPath(opts.root)));
-  return execute(graph, updateRebuildPlan(opts), opts, hooks, opts.receiptFile);
+  return execute(graph, updateRebuildPlan(opts), withCheckoutScripts(opts), hooks, opts.receiptFile);
 }
 
 /**
@@ -972,6 +981,24 @@ export async function runUninstall(
   return execute(graph, uninstallPlan(receipt, opts.skip), opts, hooks, undefined);
 }
 
+/**
+ * Points a session's capability scripts at the checkout it is about to build
+ * (memql#5056).
+ *
+ * ONLY THE TWO BUILD-FROM-CHECKOUT FLOWS CALL THIS, and the narrowness is the
+ * point. An install's checkout is a PRODUCT of the run -- `cloneStack` creates
+ * it partway through -- so its earlier steps have nothing to read from and its
+ * later ones would silently change source mid-flow. A rebuild's checkout is a
+ * PRECONDITION, already on disk, already the thing being built.
+ *
+ * `resolveScriptRoot` falls back to the staged tree when the checkout does not
+ * carry the capability contract, so this can only ever improve on the previous
+ * answer, never remove one.
+ */
+function withCheckoutScripts(opts: SessionOptions): SessionOptions {
+  return { ...opts, scriptRoot: resolveScriptRoot(opts.root, resolveStackDir(opts)) };
+}
+
 function execute(
   graph: Graph,
   plan: (step: Step) => StepPlan,
@@ -982,7 +1009,11 @@ function execute(
   return executeGraph({
     graph,
     plan,
-    scriptPath: (step) => capabilityScriptPath(step.script, opts.root),
+    // The GRAPH came from opts.root (the extension); the SCRIPTS come from
+    // opts.scriptRoot when a flow set one -- the checkout it is building
+    // (memql#5056). Steps must match the editor; scripts must match the tree
+    // they operate on.
+    scriptPath: (step) => capabilityScriptPath(step.script, opts.scriptRoot ?? opts.root),
     receiptFile,
     timeoutMs: opts.timeoutMs,
     env: childEnv(opts),

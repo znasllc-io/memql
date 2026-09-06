@@ -58,6 +58,19 @@ export interface StepOutcome {
   params: Record<string, string>;
   /** Human sentence for a non-ok status. */
   reason?: string;
+  /**
+   * The step's own output, carried ONLY for an outcome that is not ok
+   * (memql#5059).
+   *
+   * The capability contract puts human logs on stderr and one JSON envelope on
+   * stdout, which is right -- and nothing downstream kept the stderr, so a
+   * failure whose reason POINTED at it ("the docker build output above is the
+   * account of it") resolved to nothing by the time anyone read the record.
+   *
+   * Not carried for a successful step: that output is noise, and every run
+   * would pay for it.
+   */
+  log?: string;
   /** On a skip: whether the condition dependents were waiting for already holds. */
   satisfied?: boolean;
   startedAt: string;
@@ -283,7 +296,11 @@ async function runStep(
   if (!envelope) {
     // No envelope means we know nothing about the machine, which is not the
     // same as knowing nothing went wrong.
-    return { ...base, reason: outcome.parseError ?? "the script produced no result envelope" };
+    return {
+      ...base,
+      reason: outcome.parseError ?? "the script produced no result envelope",
+      ...(outcome.stderr !== "" ? { log: outcome.stderr } : {}),
+    };
   }
 
   base.preExisting = resolvePreExisting(step, envelope);
@@ -311,6 +328,7 @@ async function runStep(
         outcome.exitCode === 0
           ? `the script exited 0 but its verify did not hold: ${detail}`
           : `exit ${outcome.exitCode}: ${detail}`,
+      ...(outcome.stderr !== "" ? { log: outcome.stderr } : {}),
     };
     await record(options, step, withStatus);
     return withStatus;
