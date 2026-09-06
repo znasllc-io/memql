@@ -224,7 +224,7 @@ What it guarantees, and why each one is there:
   callers in the same tick produce one round trip.
 
 The store is framework-free on purpose. A React binding is ~40 lines over
-`subscribe()` + `snapshot`; `clients/portal/src/cluster/useLive.ts` is the
+`subscribe()` + `snapshot`; `clients/os/src/live/` is the
 worked example.
 
 ### Voice

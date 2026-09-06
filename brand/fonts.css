@@ -9,7 +9,7 @@
  * WHY RELATIVE URLS, AND WHY THAT IS LOAD-BEARING: the two builds that import
  * this file resolve ./fonts/ differently, and both are correct.
  *
- *   clients/portal   Vite sees url("./fonts/x.woff2"), copies the file into
+ *   clients/os       Vite sees url("./fonts/x.woff2"), copies the file into
  *                    the bundle and rewrites the URL to a hashed asset path.
  *   identity         The Tailwind CLI passes url() through untouched, so the
  *                    path resolves relative to the SERVED stylesheet

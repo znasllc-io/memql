@@ -282,10 +282,11 @@ var servedButNotExternallyRouted = map[string]declaration{
 	"ConceptAPIPaths": {"/api/concepts and /api/concepts/subscribe are served by the bff and " +
 		"in PublicPaths(), but NOTHING dials them over HTTP -- measured across clients/, " +
 		"sdk/ and editors/: every consumer of the concept registry reads it over gRPC via " +
-		"ConceptsListMsg (clients/portal/src/cluster/useConcepts.ts, sdk/go/client/queries.go, " +
+		"ConceptsListMsg (sdk/go/client/queries.go, " +
 		"editors/vscode/src/views/conceptsTree.ts), which is where the endpoint-protocol " +
-		"policy puts this. The portal's /concepts is a client-side ROUTE (root-relative since " +
-		"memql#3711 -- the portal is site #1, no /portal/ mount prefix), not this endpoint. " +
+		"policy puts this. A shell's /concepts, where one exists, is a client-side ROUTE " +
+		"served from the site's own origin -- not this endpoint. (The portal's was, until " +
+		"epic memql#4984; MemQL OS has no concept browser yet, memql#5010.) " +
 		"Publishing an unauthenticated schema feed nobody dials is cost " +
 		"without benefit; route it the day an HTTP caller exists.",
 		server.ConceptAPIPaths},

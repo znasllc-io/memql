@@ -18,7 +18,8 @@
 // value an operator has overridden is a fact about their configuration rather
 // than about the machine.
 //
-// This is the OS's restatement of clients/portal/src/fleet/labels.ts. The two
+// This restates the rule the portal's fleet/labels.ts carried until epic
+// memql#4984 retired it. The two
 // are deliberately separate files: the portal's is coupled to its LabelChips
 // primitive and its `rowObject` helper, and the OS shares no UI kit with it.
 // What must NOT diverge is the RULE -- operator over reported, `overrides`

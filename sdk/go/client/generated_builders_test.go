@@ -87,11 +87,12 @@ func TestGeneratedBuilder_NilObjectArgsAreOmitted(t *testing.T) {
 // TestGeneratedBuilder_CampaignSendActionsAndIntegrationStatus pins the
 // five builtins memql#4239 put on the generated surface -- the four
 // operator send actions and the integration-status read -- against the
-// REAL generated builders. The exact strings are load-bearing: they are
-// the wire forms the portal's tests assert on
-// (clients/portal/test/campaignAuthoring.test.tsx,
-// clients/portal/test/integrations.test.tsx), and the portal now composes
-// them through these builders' TypeScript twins rather than by hand. A
+// REAL generated builders. The exact strings are load-bearing: they are the
+// wire forms a client composes through these builders' TypeScript twins
+// rather than by hand. The assertions that pinned them from the other side
+// were the portal's (campaignAuthoring.test.tsx, integrations.test.tsx) and
+// went with it in epic memql#4984, which makes THIS file the remaining
+// guard rather than half of a pair -- worth knowing before weakening it. A
 // builtin that drops out of the @sdk set, or a generator change to the
 // kind-prefixed invocation form, fails here first.
 func TestGeneratedBuilder_CampaignSendActionsAndIntegrationStatus(t *testing.T) {

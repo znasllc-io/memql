@@ -14,9 +14,11 @@ import (
 //
 // # The rule
 //
-// Two surfaces wear the MemQL brand: clients/portal (Tailwind v4 via Vite) and
+// Two surfaces wear the MemQL brand: clients/os (Vite) and
 // component/identity/web (Tailwind v4 via the standalone CLI, embedded in the
-// Go binary). They share no package manager and no config format, so the
+// Go binary). It was clients/portal until epic memql#4984 retired it; the
+// SHAPE of the problem is unchanged and is why brand/ exists at all.
+// They share no package manager and no config format, so the
 // shared layer is plain CSS custom properties in brand/ at the repo root --
 // tokens.css, theme.css, fonts.css, the mark and the favicon.
 //

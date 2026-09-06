@@ -1015,7 +1015,8 @@ variables:
   # is now the seeded site row's bundleRef (dsl/platform/seeds.memql), not an
   # env var. KNOWN GAP: nothing yet replaces the identity-discovery document
   # (runtime-config.json) these variables used to configure -- see
-  # clients/portal/src/cluster/config.ts's file-level comment.
+  # the runtime-config document each bundle reads at boot (the portal's
+  # cluster/config.ts documented this until epic memql#4984).
 
   # --- public reads ---
 

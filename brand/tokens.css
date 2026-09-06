@@ -6,7 +6,7 @@
  *
  * Two builds consume this file and neither may carry a copy:
  *
- *   clients/portal   Tailwind v4 via @tailwindcss/vite, bundling with Vite.
+ *   clients/os       Vite, bundling the imported CSS.
  *   component/identity/web   Tailwind v4 via the standalone CLI, output
  *                            embedded into the Go binary.
  *
@@ -24,7 +24,9 @@
  * the palette is: two surfaces that disagree about it are two products. Semantic names, never colour
  * names: "mint-300" is a value that cannot survive a theme flip, "--memql-fg"
  * is a role that can. View-kit's --vk-* contract is NOT here -- view-kit is a
- * portal concern and its bridge stays in clients/portal/src/styles/viewkit.css.
+ * CONSUMER concern, and its bridge lives with whatever consumes it (the
+ * portal's copy went with epic memql#4984; the VS Code extension carries its
+ * own).
  *
  * THE PALETTE IS memql.io's, exactly (memql#4177). The neutrals are
  * green-tinted -- the dark ground is a near-black with a moss cast, the light

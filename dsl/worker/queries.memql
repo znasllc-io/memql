@@ -356,8 +356,8 @@ query delegationPolicy delegationPolicyForUser {
 // `online` is NOT projected, because it cannot be: a shape body is a path list
 // and online is `revokedAt is empty AND lastSeenAt within
 // 2 x HeartbeatFlushInterval`. The rule has exactly two implementations --
-// component/worker.IsOnline and clients/portal/src/fleet/online.ts -- and
-// TestFleetOnlineWindowMatchesPortal fails the build when their windows
+// component/worker.IsOnline and clients/os/src/apps/fleet/online.ts -- and
+// TestFleetOnlineWindowMatchesTheClients fails the build when their windows
 // disagree. Deriving it from the in-memory registry instead is the thing this
 // design refuses: the registry is one replica's stream table, so it answers
 // "connected to ME", and the fleet needs "connected to ANY replica".

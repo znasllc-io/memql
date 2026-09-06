@@ -449,7 +449,7 @@ export interface ElementRequirement {
 // person arriving at an unfamiliar row set asks the same three in the same
 // order -- how many are there, how does that divide, which ones specifically
 // -- and the predefined views are already built on exactly that grammar (see
-// clients/portal/src/views/registry.ts and docs/public/concepts/
+// the portal's views/registry.ts (retired, epic memql#4984) and docs/public/concepts/
 // view-elements.md section 7).
 //
 // It lives on the ELEMENT rather than in whatever is laying a page out, for

@@ -376,7 +376,7 @@ is asking) counts as online -- deliberately, a skewed clock should not make a
 live machine disappear.
 
 **There are exactly two implementations, and a test holds them together.**
-`component/worker.IsOnline` and `clients/portal/src/fleet/online.ts`;
+`component/worker.IsOnline` and `clients/os/src/apps/fleet/online.ts`;
 `TestFleetOnlineWindowMatchesTheClients` reads the TypeScript and fails the build
 when its window disagrees with the Go one. Deriving `online` from the in-memory
 registry instead is what this design refuses: the registry is ONE replica's
