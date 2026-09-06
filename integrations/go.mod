@@ -27,6 +27,7 @@ require (
 	github.com/znasllc-io/memql/component/fileprocessor v0.0.0
 	github.com/znasllc-io/memql/component/frontdoor v0.0.0
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0
+	github.com/znasllc-io/memql/component/healing v0.0.0
 	github.com/znasllc-io/memql/component/identity v0.0.0
 	github.com/znasllc-io/memql/component/language v0.0.0
 	github.com/znasllc-io/memql/component/language/ast v0.0.0
@@ -39,6 +40,7 @@ require (
 	github.com/znasllc-io/memql/component/safety v0.0.0
 	github.com/znasllc-io/memql/component/secret v0.0.0
 	github.com/znasllc-io/memql/component/skills v0.0.0
+	github.com/znasllc-io/memql/component/work v0.0.0
 	github.com/znasllc-io/memql/component/worker v0.0.0
 	github.com/znasllc-io/memql/component/workjournal v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
@@ -229,6 +231,8 @@ replace github.com/znasllc-io/memql/dsl => ../dsl
 replace github.com/znasllc-io/memql/integrations/openai => ./openai
 
 replace github.com/znasllc-io/memql/integrations/stt => ./stt
+
+replace github.com/znasllc-io/memql/component/work => ../component/work
 
 replace github.com/znasllc-io/memql/component/worker => ../component/worker
 

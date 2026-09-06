@@ -50,6 +50,7 @@ require (
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
+	github.com/znasllc-io/memql/component/healing v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/node/gen v0.0.0 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
@@ -180,6 +181,7 @@ require (
 	github.com/znasllc-io/memql/component/server v0.0.0
 	github.com/znasllc-io/memql/component/service v0.0.0
 	github.com/znasllc-io/memql/component/skills v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/work v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/worker v0.0.0
 	github.com/znasllc-io/memql/component/workjournal v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
@@ -292,6 +294,8 @@ replace github.com/znasllc-io/memql/integrations/stt => ./integrations/stt
 replace github.com/znasllc-io/memql/component/router => ./component/router
 
 replace github.com/znasllc-io/memql/component/service => ./component/service
+
+replace github.com/znasllc-io/memql/component/work => ./component/work
 
 replace github.com/znasllc-io/memql/component/worker => ./component/worker
 
