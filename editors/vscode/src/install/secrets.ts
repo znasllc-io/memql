@@ -67,6 +67,33 @@ export function redactSecrets(params: Record<string, string>): Record<string, st
   return out;
 }
 
+/**
+ * The credential prefixes this repository mints, for scanning FREE TEXT.
+ *
+ * `looksLikeProviderKey` is anchored to a whole value because a param IS the
+ * value. A log line is not: a key appears mid-sentence, inside a command echo,
+ * or in a `curl -H` a script printed. So this is the same withholding decision
+ * applied to a different shape of input, not a second policy.
+ */
+const LOG_SECRET_RE =
+  /\b(sk-[A-Za-z0-9_-]{8,}|mql_(?:pat|wkr|enr|rec)_[A-Za-z0-9_-]{8,})/g;
+
+/**
+ * A copy of `text` with anything credential-shaped replaced by REDACTED.
+ *
+ * WHY THIS EXISTS. The run log now keeps a failing step's own output
+ * (memql#5059), which is the first time raw script stderr reaches a file. Step
+ * params and results were already withheld; text was not, because none was
+ * being written down.
+ *
+ * It is deliberately a PREFIX scan and not a cleverer one. A regex that tried
+ * to recognise secrets by entropy would redact half a docker build log, and the
+ * value of keeping the log is that it is readable.
+ */
+export function redactLogText(text: string): string {
+  return text.replace(LOG_SECRET_RE, REDACTED);
+}
+
 // ---------------------------------------------------------------------------
 // step RESULTS, which are a different problem from step params
 // ---------------------------------------------------------------------------

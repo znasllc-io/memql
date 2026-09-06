@@ -168,9 +168,13 @@ IMAGE_SOURCE=""
 # set matches the Deployments in deploy/k8s/overlays/local.
 DEFAULT_APP_NODES=(identity bff mcp agent planner workbench edge)
 
-# Every node type this script can address (superset: node types a downstream
-# carrier overlay may add, e.g. bff, are valid targets too).
-VALID_NODES=(identity mcp bff agent planner workbench edge)
+# Every node type this script can address. DERIVED from the shared build-args
+# library rather than restated (memql#5057): this list and that one disagreeing
+# is how a retired node type stays addressable here after it stops being
+# buildable there. Carrier-only node types are accepted too -- see
+# is_valid_node, which consults CARRIER_NODES as well, so a downstream overlay
+# adding one does not need an edit here.
+VALID_NODES=("${ENGINE_NODE_TYPES[@]}")
 
 # Carrier override (resolved from params in main; empty = engine-only).
 CARRIER_REPO=""
@@ -198,6 +202,10 @@ DB_IMAGE="memql-db:16-dev"
 # Outcome tracking (result envelope + idempotency reporting).
 REBUILT_COUNT=0
 RESTARTED=false
+# Node types whose image CONTENT was actually imported into the cluster. Named
+# in the capability result so a run's record says which nodes moved rather than
+# leaving it to be inferred from the exit code (memql#5058).
+IMPORTED_NODES=()
 INFRA_PULLED=false
 DB_IMAGE_IMPORTED=false
 OVERRIDES_PATCHED=false
@@ -268,7 +276,10 @@ function is_valid_node() {
     for n in "${VALID_NODES[@]}"; do
         [[ "$n" == "$node" ]] && return 0
     done
-    return 1
+    # A carrier overlay may add a node type this repo has no Dockerfile target
+    # for; it is built from the carrier repo's own Dockerfile by
+    # build_carrier_node and never reaches engine_build_args_for_node.
+    is_carrier_node "$node"
 }
 
 function is_carrier_node() {
@@ -381,7 +392,11 @@ function build_engine_node() {
     # nodeType -> build-args mapping shared with the deploy.buildImage
     # capability backend (scripts/lib/engine_build_args.sh, memql#2379) so
     # the two local build paths cannot drift.
-    engine_build_args_for_node "$node" "$REPO_ROOT"
+    # `|| cap_fail 2`: the library REFUSES a node type it does not build
+    # (memql#5057). Without this the `set -u` failure would land on
+    # ENGINE_BUILD_ARGS a line later and name an array, not the node.
+    engine_build_args_for_node "$node" "$REPO_ROOT" \
+        || cap_fail 2 "'${node}' is not a node type this repo builds"
 
     # `|| cap_fail`, NOT `set -e` (memql#4458, secondary A).
     #
@@ -393,13 +408,19 @@ function build_engine_node() {
     # told the installer broke; what had actually happened was that `edge` could
     # not build. Naming the node is the difference between a bug report and a
     # shrug, and exit 5 is what the contract asks for on an operation failure.
+    #
+    # THE MESSAGE NO LONGER SAYS "the output above" (memql#5059). It is true of
+    # a terminal and false of the run record -- a JSON document holding one
+    # detail line per step, and the only thing that survives the run. The
+    # recorder now writes this stderr to a `.log` beside that record and names
+    # it in the detail, so the evidence is where the pointer is.
     docker build \
         "${ENGINE_BUILD_ARGS[@]}" \
         --target "${ENGINE_BUILD_TARGET}" \
         --tag "${image}" \
         --file "${REPO_ROOT}/Dockerfile" \
         "${REPO_ROOT}" >&2 \
-        || cap_fail 5 "building the ${node} image (${image}) failed -- the docker build output above is the account of it"
+        || cap_fail 5 "building the ${node} image (${image}) failed -- see the build output on stderr"
 
     info "Built ${image}."
 }
@@ -467,10 +488,31 @@ function restart_deployment() {
 }
 
 #=============================================================================
-# PROCESS ONE NODE
+# BUILD THE NODES, THEN IMPORT THEM
 #=============================================================================
 
-function process_node() {
+# BUILD AND IMPORT ARE TWO PASSES, NOT ONE PER NODE (memql#5058).
+#
+# They used to be one function: build this node, import this node, next node. A
+# failure partway through the list then left every node BEFORE it with new image
+# CONTENT already in the cluster under an unchanged `:local` tag, and -- under
+# --image-source=checkout, where the rollout is deferred to main() -- no restart.
+#
+# That state is invisible from every surface an operator has. `kubectl get pods`
+# is correct, because the pods are still running the old layers. The run record
+# says the run FAILED, which reads as "nothing happened". `docker images` is the
+# only place the divergence is legible. And it is not stable: the next restart of
+# those nodes for ANY reason -- a reschedule, a sync, a reboot -- rolls them onto
+# code the rest of the cluster is not running. A failed update that silently arms
+# a mixed-version mesh is worse than one that changed nothing.
+#
+# Building everything first makes a failed run a NO-OP: the images that did build
+# are in the local docker store, where they cost nothing and affect nothing, and
+# the cluster is untouched. The extra pass is free -- an import is a copy of an
+# image that already exists either way.
+
+# build_node builds one node's image and imports NOTHING.
+function build_node() {
     local node="$1"
 
     if ! is_valid_node "$node"; then
@@ -483,7 +525,36 @@ function process_node() {
     else
         build_engine_node "$node"
     fi
+}
+
+# build_and_import_nodes runs the two passes in order over every node.
+#
+# A FUNCTION RATHER THAN TWO LOOPS IN main() so the failure case is directly
+# testable: `scripts/k3d/dev_build_import_order_test.go` stubs the builder to
+# fail partway and asserts that nothing was imported. Inlined in main() that
+# assertion could only be made against the whole script.
+function build_and_import_nodes() {
+    local node
+
+    # PASS 1 -- build every image. A failure here has imported nothing, so the
+    # cluster is exactly as it was (memql#5058).
+    for node in "$@"; do
+        build_node "$node"
+    done
+
+    # PASS 2 -- import them. Only reached when EVERY build succeeded.
+    for node in "$@"; do
+        install_node "$node"
+    done
+}
+
+# install_node imports one already-built image into the cluster, and restarts
+# its Deployment unless main() is going to.
+function install_node() {
+    local node="$1"
+
     import_image "$(image_name_for_node "$node")"
+    IMPORTED_NODES+=("$node")
     # Under --image-source=checkout the Application's node overrides are dropped
     # once every image is imported, and the sync that follows rolls the pods --
     # so restarting here would roll them onto the images they are still pinned
@@ -1077,9 +1148,7 @@ function main() {
         if [ ${#CARRIER_NODES[@]} -gt 0 ]; then
             info "Carrier override: ${CARRIER_NODES[*]} (from ${CARRIER_REPO})"
         fi
-        for node in "${nodes_to_build[@]}"; do
-            process_node "$node"
-        done
+        build_and_import_nodes "${nodes_to_build[@]}"
 
         if [[ "$IMAGE_SOURCE" == "checkout" ]]; then
             point_application_at_local_images "${nodes_to_build[@]}"
@@ -1114,6 +1183,7 @@ function main() {
     cap_result_set     cluster     "$CLUSTER_NAME"
     cap_result_set     namespace   "$NAMESPACE"
     cap_result_set_raw rebuilt     "$REBUILT_COUNT"
+    cap_result_set     importedNodes "${IMPORTED_NODES[*]+"${IMPORTED_NODES[*]}"}"
     cap_result_set_raw restarted   "$RESTARTED"
     cap_result_set_raw infraPulled "$INFRA_PULLED"
     cap_result_set_raw dbImageImported "$DB_IMAGE_IMPORTED"

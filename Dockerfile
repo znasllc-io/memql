@@ -174,6 +174,45 @@ RUN set -e; \
 
 COPY . .
 
+# BUILD_TAGS must name a node type this tree actually builds (memql#5057).
+#
+# THE CHECK ASKS THE TREE, NOT A LIST. `app/build_<type>.go` is what makes a tag
+# select a node type, so the files ARE the closed set and this cannot become a
+# sixth copy of it that drifts from the other five.
+#
+# WHY IT IS NEEDED AT ALL. `app/build_default.go` claims every tag combination
+# the named types do not:
+#
+#   //go:build !agent && !planner && !bff && !identity && !workbench && !mcp && !edge
+#
+# That is a DENY list of live node types, so retiring one is precisely the edit
+# that widens what `default` absorbs. Deleting `app/build_voice.go` did not make
+# `--build-arg BUILD_TAGS=voice` an error; it made it a spelling of the BFF
+# build. The image compiled, imported, and carried the retired name, and the
+# only reason it was ever noticed was an unrelated stage deleted in the same
+# batch of commits.
+#
+# An EMPTY BUILD_TAGS is the default build and stays legal -- that is the bff,
+# and the loop below has nothing to iterate. `default` itself is refused: it is
+# a file name here, never a node type.
+#
+# Placed before templ/Tailwind so a bad tag fails in a second rather than after
+# the asset steps.
+RUN set -e; \
+    for tag in $(printf '%s' "${BUILD_TAGS}" | tr ', ' '\n\n'); do \
+        [ -n "$tag" ] || continue; \
+        if [ "$tag" = "default" ] || [ ! -f "app/build_${tag}.go" ]; then \
+            echo "ERROR: BUILD_TAGS names '${tag}', which is not a node type this tree builds." >&2; \
+            echo "       It would have compiled as the DEFAULT (bff) binary under that name." >&2; \
+            echo "       Node types with a build file in app/:" >&2; \
+            ls app/build_*.go \
+                | sed -e 's|^app/build_||' -e 's|\.go$||' \
+                | grep -v -e '^default$' -e '_test$' \
+                | sed 's|^|         |' >&2; \
+            exit 1; \
+        fi; \
+    done
+
 # Generate the identity web assets BEFORE compiling so the identity binary
 # (BUILD_TAGS=identity) embeds them via //go:embed in component/identity/web:
 #   1. templ -> component/identity/web/templ/*_templ.go

@@ -51,7 +51,11 @@ function main() {
     # binary; the workbench takes its own runtime stage. Shared mapping with
     # scripts/k3d/dev.sh via scripts/lib/engine_build_args.sh -- without it
     # every node type built as the bff-default binary.
-    engine_build_args_for_node "$nodeType" "$workdir"
+    # REFUSED rather than defaulted (memql#5057): this backend is reachable
+    # with any nodeType a caller cares to send, and a retired one used to build
+    # a plain BFF image carrying the retired name.
+    engine_build_args_for_node "$nodeType" "$workdir" \
+        || cap_fail 2 "'${nodeType}' is not a node type this repo builds"
     cap_result_set buildTags "$nodeType"
     cap_result_set target "$ENGINE_BUILD_TARGET"
 

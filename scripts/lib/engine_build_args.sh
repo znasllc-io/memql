@@ -13,7 +13,9 @@
 # AUTHORITATIVE staging/prod builds run on the GitHub build server and do
 # not use this file.
 #
-# Contract: call engine_build_args_for_node <nodeType> <sourceDir>; it sets
+# Contract: call engine_build_args_for_node <nodeType> <sourceDir>; it REFUSES
+# a nodeType outside ENGINE_NODE_TYPES (returns 1, message on stderr) and
+# otherwise sets
 #   ENGINE_BUILD_ARGS  -- array of docker build args (BUILD_TAGS +
 #                         MEMQL_COMMIT)
 #   ENGINE_BUILD_TARGET -- Dockerfile target stage
@@ -81,8 +83,45 @@ function engine_build_commit() {
     fi
 }
 
+# ENGINE_NODE_TYPES is the closed set of node types this repo builds an image
+# for -- THE list, in shell. `scripts/k3d/dev.sh` derives `VALID_NODES` from it
+# rather than restating it, and `scripts/ci/node_type_lists_test.go` holds it
+# against the four other places the same set is spelled out (the `app/build_*.go`
+# files, `build_default.go`'s deny-list, the `build-engine-images.yml` release
+# matrix, and the Deployments under `deploy/k8s/`).
+#
+# IT IS A LIST BECAUSE RETIRING A NODE TYPE IS THE DANGEROUS EDIT, not adding
+# one (memql#5057). `app/build_default.go` claims every tag combination the
+# named types do not, so deleting `app/build_voice.go` did not make
+# `BUILD_TAGS=voice` an error -- it made it a spelling of the DEFAULT build. The
+# image still built, still imported, and still carried the retired name; the
+# only reason anyone found out was an unrelated Dockerfile stage that had gone
+# in the same commit. Validating here is what turns that into a refusal.
+ENGINE_NODE_TYPES=(identity bff mcp agent planner workbench edge)
+
+# engine_is_node_type <name> -- 0 when the name is one of ENGINE_NODE_TYPES.
+function engine_is_node_type() {
+    local candidate="$1" known
+    for known in "${ENGINE_NODE_TYPES[@]}"; do
+        [[ "$known" == "$candidate" ]] && return 0
+    done
+    return 1
+}
+
 function engine_build_args_for_node() {
     local node="$1" source_dir="$2"
+    # REFUSED, not defaulted. Both callers pass a node type they got from
+    # somewhere else -- a `--node` parameter, a graph step, an out-of-tree script
+    # pinned to an older node set -- and the wrong answer to an unknown one is an
+    # image named after a node type that no longer exists.
+    if ! engine_is_node_type "$node"; then
+        echo "ERROR: '${node}' is not a node type this repo builds." >&2
+        echo "       Known node types: ${ENGINE_NODE_TYPES[*]}" >&2
+        echo "       A node type retired since the caller was written reaches" >&2
+        echo "       here as an unknown name; it used to build as a plain BFF" >&2
+        echo "       carrying the retired name (memql#5057)." >&2
+        return 1
+    fi
     ENGINE_BUILD_ARGS=(--build-arg "BUILD_TAGS=${node}")
     ENGINE_BUILD_TARGET="runtime"
     # The workbench is the node that RUNS SOMEBODY ELSE'S BUILD (epic

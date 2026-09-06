@@ -81,6 +81,74 @@ export function resolveInstallRoot(extensionPath: string, checkoutRoot?: string)
 }
 
 /**
+ * The marker a CHECKOUT must show before its capability scripts may be run:
+ * the contract library every one of them sources.
+ *
+ * `scripts/lib/capability.sh` rather than the graph directory, because that is
+ * the thing being borrowed. `resolveScriptRoot` takes SCRIPTS from the checkout
+ * and leaves the graph documents with the extension, so the graph marker would
+ * be answering a question nobody asked.
+ */
+const SCRIPT_MARKER = path.join("scripts", "lib", "capability.sh");
+
+/**
+ * Resolves the root a session's CAPABILITY SCRIPTS are read from, which is not
+ * always the root its graph documents come from.
+ *
+ * WHY THESE ARE TWO ANSWERS (memql#5056). `resolveInstallRoot` above prefers a
+ * packaged extension's staged tree, and its reasoning holds for the case it was
+ * written for: an install must be able to run BEFORE a checkout exists, so it
+ * cannot read from one. The comment on that function states the assumption in
+ * as many words -- the probe asks "was this extension packaged?", never "which
+ * version of the scripts is this?".
+ *
+ * `updateCheckout` is what makes it that question. Its entire purpose is to move
+ * the checkout to a commit the packaged extension has never seen, and the very
+ * next step then builds that checkout. Frozen scripts driving a moved tree is
+ * not a hypothetical: extension 0.3.1 asked for a `voice` node and a
+ * `voice-runtime` Dockerfile stage, both retired in the commits the update had
+ * just pulled, and 13 of the 66 staged files already differed from the checkout
+ * they were pointed at.
+ *
+ * SO: a flow that builds FROM a checkout runs THAT checkout's scripts. The
+ * staged tree stays the answer for bootstrap, and stops being the answer once a
+ * checkout is the thing being built.
+ *
+ * THE GRAPH STAYS WITH THE EXTENSION, deliberately. A graph document names the
+ * steps, and the extension's own UI is written against them -- a checkout
+ * offering different ones would be handing the wizard a flow it cannot render.
+ * Scripts are the half that must match the tree they operate on; steps are the
+ * half that must match the editor driving them. That is a difference in WHAT
+ * the two roots answer, not the shape drift `resolveInstallRoot` warns about.
+ *
+ * THE FLOOR IS THE CONTRACT LIBRARY. A checkout old enough not to carry
+ * `scripts/lib/capability.sh` cannot answer the capability contract at all, so
+ * it falls back to the staged tree rather than failing -- the same answer it
+ * gets today, for a checkout that could not have worked either way.
+ */
+export function resolveScriptRoot(installRoot: string, checkoutRoot?: string): string {
+  if (checkoutRoot && isFile(path.join(checkoutRoot, SCRIPT_MARKER))) {
+    return checkoutRoot;
+  }
+  return installRoot;
+}
+
+/**
+ * Whether a path is a regular file that exists.
+ *
+ * Swallows the stat error for the reason `isDirectory` does: absent, a
+ * directory, a dangling symlink and unreadable all mean "not a usable checkout,
+ * use the staged tree".
+ */
+function isFile(candidate: string): boolean {
+  try {
+    return fs.statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Whether a path is a directory that exists.
  *
  * Swallows the stat error on purpose: every reason a stat can fail here --

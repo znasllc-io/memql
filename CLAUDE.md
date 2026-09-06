@@ -445,6 +445,28 @@ Nodes discover each other via mesh and share one PostgreSQL + TimescaleDB
 database. Inter-node communication uses the `NodeService` gRPC bidirectional
 stream; events bridge across nodes with dedup and TTL.
 
+**RETIRING a node type is the dangerous edit, not adding one** (memql#5057).
+The set is spelled out in five places, in four languages, with nothing tying
+them together: `app/build_<type>.go`, `app/build_default.go`'s deny-list,
+`ENGINE_NODE_TYPES` in `scripts/lib/engine_build_args.sh` (from which
+`dev.sh`'s `VALID_NODES` DERIVES -- do not restate it), the
+`build-engine-images.yml` release matrix, and the `memql-<type>` image
+references under `deploy/k8s/`. Adding one and missing a list is loud. Missing
+one on the way OUT is silent, because `build_default.go` is a DENY list:
+
+```go
+//go:build !agent && !planner && !bff && !identity && !workbench && !mcp && !edge
+```
+
+Deleting `app/build_voice.go` did not make `-tags voice` an error -- it made
+`voice` a spelling of the DEFAULT build. `go build -tags voice .` exits 0 and
+produces a BFF, so the image builds, imports, and carries the retired name while
+every probe passes. Three things now stop that: the lists are gated together
+(`scripts/ci/node_type_lists_test.go`), `engine_build_args_for_node` REFUSES a
+node type it does not build, and the Dockerfile refuses a `BUILD_TAGS` value
+with no `app/build_<type>.go` behind it -- asking the tree rather than carrying
+a sixth copy of the list. **`BUILD_TAGS=""` stays legal; it is the bff.**
+
 **Build tag reference:** [docs/public/build/build-tags.md](docs/public/build/build-tags.md)
 
 #### Multi-node is the DEFAULT -- design, implement, AND test for cross-node
