@@ -23,7 +23,7 @@ require (
 )
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.68.0 // indirect
+	github.com/anthropics/anthropic-sdk-go v1.69.0 // indirect
 	github.com/dgraph-io/ristretto v0.2.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.3 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
