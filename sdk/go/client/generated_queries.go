@@ -11082,6 +11082,29 @@ func WorkGoalsForOwnerBuild(args WorkGoalsForOwnerArgs) string {
 	return "query workGoalsForOwner()"
 }
 
+// WorkGoalsForResponsibility -- The goals opened for one responsibility, newest first. Owned.
+// The reactive loop's dedup guard (C1: one live goal per continuous responsibility), replacing plansForResponsibility. Owner-scoped rather than cluster-owner: a responsibility belongs to one person, the loop already knows which, and the read runs under that person's borrowed authority -- so this needs neither @serverOnly nor a cluster-owner conjunct, and the same construct answers the Nexus surface asking "what has this responsibility produced".
+//
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalsForResponsibility"] in generated_concepts.go).
+type WorkGoalsForResponsibilityArgs struct {
+	ResponsibilityId string
+}
+
+// WorkGoalsForResponsibility calls the engine query workGoalsForResponsibility.
+func (qc *QueryClient) WorkGoalsForResponsibility(ctx context.Context, args WorkGoalsForResponsibilityArgs) (*Result, error) {
+	call := WorkGoalsForResponsibilityBuild(args)
+	return qc.executeNamed(ctx, "workGoalsForResponsibility", call)
+}
+
+func WorkGoalsForResponsibilityBuild(args WorkGoalsForResponsibilityArgs) string {
+	var b strings.Builder
+	b.WriteString("query workGoalsForResponsibility(")
+	b.WriteString("responsibilityId: ")
+	b.WriteString(quoteMemQL(args.ResponsibilityId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkModelCallsForOwnerRun -- Every model call of one of the caller's runs. An on-demand read: the concept does not broadcast, so the Work app shows when it last read this.
 //
 // Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsForOwnerRun"] in generated_concepts.go).

@@ -65,7 +65,7 @@ import (
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/core/id"
+	workintegration "github.com/znasllc-io/memql/integrations/work"
 )
 
 const (
@@ -103,13 +103,6 @@ const (
 	// hammering the model or the user.
 	convergenceGuard = time.Hour
 
-	// reactiveProactivePlanKind is the Plan kind the loop spawns when it
-	// honors a reactive / recurring responsibility (and what the
-	// convergence step's createPlan action lands as). 'agentProactive'
-	// is an existing v1:planner:plan.kind value (see dsl/planner/
-	// concepts.memql) -- the agent-proactive surface from Q4.
-	reactiveProactivePlanKind = "agentProactive"
-
 	// reactiveSystemActor is the synthetic subject the loop stamps on
 	// cross-user sweep reads (no single user). Per-user writes impersonate
 	// the row owner instead (see ownerActorContext).
@@ -123,9 +116,26 @@ const (
 // responsibilities and pursues them (epic #632). It owns its own poll
 // goroutine (like RefreshCron) rather than depending on the engine's
 // automation scheduler reaching this node-type binary.
+// responsibilityGoals is the work spine's seam for this loop (memql#5000).
+//
+// AN INTERFACE, not the concrete integration, for the reason every seam in
+// this package is one: integrations/planner cannot write a work row itself.
+// All nine work mutations are @serverOnly and this package is deliberately
+// absent from call_origin_conformance's allowlist -- work_heal_test.go pins
+// that the stamping belongs in integrations/work, at its one site.
+type responsibilityGoals interface {
+	HasLiveGoalForResponsibility(ctx context.Context, ownerUserId, responsibilityId string) (bool, error)
+	OpenResponsibilityGoal(ctx context.Context, g workintegration.ResponsibilityGoal) (string, string, error)
+}
+
 type ReactiveLoop struct {
 	engine Engine
 	logger plannerLogger
+	// goals is the work spine. Nil on a node whose work plug-in did not
+	// materialize, which is LOUD rather than silent: without it a due
+	// responsibility spawns nothing at all, and "my standing directive
+	// stopped running" names nothing on its own.
+	goals responsibilityGoals
 
 	cancel      context.CancelFunc
 	startedOnce sync.Once
@@ -147,6 +157,15 @@ type plannerLogger interface {
 	Warn(msg string, args ...any)
 	Debug(msg string, args ...any)
 	Error(msg string, args ...any)
+}
+
+// SetWorkGoals wires the work spine. Called from app/ on the planner node,
+// beside the compiler -- the two halves of the same cutover.
+func (r *ReactiveLoop) SetWorkGoals(g responsibilityGoals) {
+	if r == nil {
+		return
+	}
+	r.goals = g
 }
 
 // NewReactiveLoop constructs the loop pinned to the planner
@@ -325,13 +344,13 @@ func (r *ReactiveLoop) processResponsibility(ctx context.Context, userId string,
 		return false
 	}
 
-	// C1 dedup: skip if a live Plan already exists for this
-	// responsibility (continuity) -- a recurring tick still spawns per
-	// occurrence, but a reactive / in-flight one doesn't double-start.
-	// We also apply the in-process respawn guard so a Plan we just
-	// spawned but can't yet observe as live doesn't get re-spawned.
-	if trigger != "recurring" && r.hasLivePlan(ctx, respId) {
-		r.logger.Debug("planner reactive loop: live plan exists; skipping",
+	// C1 dedup: skip if a live GOAL already exists for this responsibility
+	// (continuity) -- a recurring tick still spawns per occurrence, but a
+	// reactive / in-flight one doesn't double-start. The in-process respawn
+	// guard below covers the window where a goal we just opened is not yet
+	// observable as live.
+	if trigger != "recurring" && r.hasLiveGoal(ctx, userId, respId) {
+		r.logger.Debug("planner reactive loop: live goal exists; skipping",
 			"responsibilityId", respId)
 		return false
 	}
@@ -442,28 +461,29 @@ func (r *ReactiveLoop) recurringIsDue(row map[string]any, now time.Time) bool {
 
 // --- C1: dedup -------------------------------------------------------------
 
-// hasLivePlan returns true when a non-terminal Plan already exists for
-// the responsibility (matched on input.responsibilityId). Terminal
-// statuses are succeeded / failed / cancelled; anything else is live.
-func (r *ReactiveLoop) hasLivePlan(ctx context.Context, respId string) bool {
-	q := fmt.Sprintf(`query plansForResponsibility(responsibilityId:%s)`, langparser.QuoteString(respId))
-	res, err := r.engine.Execute(ctx, q)
+// hasLiveGoal returns true when a non-terminal work goal already exists for
+// the responsibility, matched on v1:work:goal.responsibilityId.
+//
+// THE FAIL-OPEN DIRECTION IS UNCHANGED, and the reasoning is worth keeping
+// where it can be read: failing toward NOT-spawning would wedge the
+// responsibility forever on a transient read error, while failing toward
+// spawning risks one duplicate that the in-process respawn guard then
+// suppresses. So a read error is treated as "no live goal".
+//
+// WITH NO WORK SPINE WIRED it answers false -- there are no goals to be live
+// -- and openResponsibilityGoal is where that node says so, once per spawn
+// attempt, rather than twice.
+func (r *ReactiveLoop) hasLiveGoal(ctx context.Context, userId, respId string) bool {
+	if r.goals == nil {
+		return false
+	}
+	live, err := r.goals.HasLiveGoalForResponsibility(ctx, userId, respId)
 	if err != nil {
-		// Fail open toward NOT-spawning would wedge the responsibility
-		// forever on a transient read error; fail open toward spawning
-		// risks a duplicate. The in-process respawn guard covers the
-		// duplicate case, so treat a read error as "no live plan" and let
-		// the guard prevent a storm.
-		r.logger.Debug("planner reactive loop: live-plan check failed",
+		r.logger.Debug("planner reactive loop: live-goal check failed",
 			"responsibilityId", respId, "error", err)
 		return false
 	}
-	for _, p := range memql.MaterializeRows(res) {
-		if !isTerminalPlanStatus(getString(p, "status")) {
-			return true
-		}
-	}
-	return false
+	return live
 }
 
 // --- C2: routing -----------------------------------------------------------
@@ -604,11 +624,11 @@ func (r *ReactiveLoop) honorResponsibility(ctx context.Context, userId string, r
 	trigger := getString(row, "trigger")
 	switch trigger {
 	case "reactive", "recurring":
-		planId, err := r.createResponsibilityPlan(ctx, userId, row, agentId)
+		goalId, err := r.openResponsibilityGoal(ctx, userId, row, agentId)
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("spawned %s Plan %s (agent %s)", trigger, planId, agentId), nil
+		return fmt.Sprintf("opened %s goal %s (agent %s)", trigger, goalId, agentId), nil
 	case "standing":
 		// Standing directives carry no Plan -- the injection happened in
 		// routing (maybeInjectStanding). This branch is reached only when
@@ -620,50 +640,58 @@ func (r *ReactiveLoop) honorResponsibility(ctx context.Context, userId string, r
 	}
 }
 
-// createResponsibilityPlan inserts an agentProactive Plan owned by the
-// assigned agent, carrying the input.responsibilityId back-pointer the
-// C1 dedup query (plansForResponsibility) matches on. requestedBy
-// is the responsibility owner; triggerSource='system' marks the
-// provenance (no person asked).
-func (r *ReactiveLoop) createResponsibilityPlan(ctx context.Context, userId string, row map[string]any, agentId string) (string, error) {
+// openResponsibilityGoal opens a work goal for a due responsibility, owned by
+// the responsibility's OWNER (memql#5000, owner's decision 2026-09-06).
+//
+// WHY THE OWNER AND NOT THE DEPLOYMENT. A responsibility is one person's
+// standing directive, so the work it spawns is that person's: it appears in
+// their Nexus as theirs, row authz needs no special case, and the borrow is
+// the one integrations/work already makes on every owned write. A
+// deployment-owned goal -- a blank owner, the shape an automation's run has --
+// would be readable only through the cluster-owner queries and would need a
+// second surface before the person whose responsibility it is could see it.
+//
+// THE PLAN IS GONE FROM THIS PATH. It used to insert an agentProactive Plan
+// carrying an input.responsibilityId back-pointer that plansForResponsibility
+// matched on; the goal carries responsibilityId as a FIRST-CLASS FIELD, which
+// is what workGoalsForResponsibility reads. Pre-release rules: no shim, no
+// dual-write. A cluster mid-upgrade has plans that no longer dedup against
+// goals, and the in-process respawn guard is what covers that window.
+//
+// The agent id is no longer stamped on the work. Routing an agent to a goal is
+// the compile pass's decision, not the loop's, and stamping an owner-agent on
+// a row the work spine does not read would be recording something nothing
+// obeys. It stays in the log line, where it is evidence rather than
+// instruction.
+func (r *ReactiveLoop) openResponsibilityGoal(ctx context.Context, userId string, row map[string]any, agentId string) (string, error) {
+	if r.goals == nil {
+		// LOUD. Without the work spine a due responsibility spawns nothing,
+		// and "my standing directive stopped running" names nothing on its
+		// own -- the same reasoning wireWorkCompiler's warning carries.
+		return "", fmt.Errorf("the work spine is not wired on this node, so a due responsibility has nothing to open")
+	}
 	respId := getString(row, "id")
-	statement := getString(row, "statement")
-	partitionId := getString(row, "scopePartitionId")
-	if partitionId == "" {
-		// A responsibility without a pinned space still needs a Plan
-		// partitionId (Plan concept @required). Use the synthetic reactive
-		// space sentinel -- the assistant relays into the user's surfaces
-		// regardless of this bookkeeping space.
-		partitionId = "system:reactive-loop"
+	statement := strings.TrimSpace(getString(row, "statement"))
+	if statement == "" {
+		statement = "Honor responsibility " + respId
 	}
-	planId := id.NewSystemNodeShortId("proactive", respId)
-	goal := statement
-	if goal == "" {
-		goal = "Honor responsibility " + respId
+	goalId, _, err := r.goals.OpenResponsibilityGoal(ctx, workintegration.ResponsibilityGoal{
+		OwnerUserId:      userId,
+		ResponsibilityId: respId,
+		Statement:        statement,
+		Input: map[string]any{
+			"responsibilityId": respId,
+			"trigger":          getString(row, "trigger"),
+			"statement":        statement,
+			"successCriteria":  getString(row, "successCriteria"),
+		},
+	})
+	if err != nil {
+		return "", err
 	}
-	input := map[string]any{
-		"responsibilityId": respId,
-		"trigger":          getString(row, "trigger"),
-		"statement":        statement,
-		"successCriteria":  getString(row, "successCriteria"),
-	}
-	call := fmt.Sprintf(
-		`mutation createPlan(planId:%s, partitionId:%s, kind:%s, goal:%s, requestedBy:%s, authorizedBy:%s, triggerSource:"system", input:%s)`,
-		langparser.QuoteString(planId), langparser.QuoteString(partitionId), langparser.QuoteString(reactiveProactivePlanKind), langparser.QuoteString(goal), langparser.QuoteString(userId), langparser.QuoteString(userId), mustJSONObject(input),
-	)
-	if _, err := r.engine.Execute(ctx, call); err != nil {
-		return "", fmt.Errorf("createPlan: %w", err)
-	}
-	// Stamp the owning agent (best-effort) so downstream dispatch knows
-	// who runs it. Reuse the plan-status update path.
-	if agentId != "" {
-		upd := stampOwnerAgentQuery(planId, agentId)
-		if _, err := r.engine.Execute(ctx, upd); err != nil {
-			r.logger.Debug("planner reactive loop: ownerAgent stamp failed",
-				"planId", planId, "agentId", agentId, "error", err)
-		}
-	}
-	return planId, nil
+	r.logger.Info("planner reactive loop: opened a goal for a responsibility",
+		"responsibilityId", respId, "goalId", goalId, "agentId", agentId, "ownerUserId", userId)
+	return goalId, nil
 }
 
 // maybeInjectStanding appends a standing / behavioral directive into the
@@ -812,12 +840,12 @@ func (r *ReactiveLoop) dispatchConvergenceAction(ctx context.Context, userId str
 			"trigger":          "reactive",
 			"scopePartitionId": "",
 		}
-		// Route through the same Plan path; resolve the agent loosely (GA
-		// or the responsibility's agent). For a goal-driven plan with no
-		// responsibility we hand it to the GA.
+		// Route through the same goal path; resolve the agent loosely (GA
+		// or the responsibility's agent). For work with no responsibility
+		// we hand it to the GA.
 		agentId := r.resolveAssistant(ctx, userId)
-		if _, err := r.createResponsibilityPlan(ctx, userId, row, agentId); err != nil {
-			r.logger.Warn("planner reactive loop: convergence createPlan failed",
+		if _, err := r.openResponsibilityGoal(ctx, userId, row, agentId); err != nil {
+			r.logger.Warn("planner reactive loop: convergence goal failed",
 				"userId", userId, "error", err)
 			return
 		}

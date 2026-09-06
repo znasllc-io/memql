@@ -34,6 +34,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/num"
 )
 
@@ -520,4 +521,143 @@ func (i *Integration) RunBudget(ctx context.Context, ownerUserId, runId string) 
 		return out, fmt.Errorf("work: goal %s ceilings: %w", goalId, err)
 	}
 	return out, nil
+}
+
+// ---------------------------------------------------------------------------
+// Responsibilities: the reactive loop's seam (memql#5000)
+// ---------------------------------------------------------------------------
+//
+// WHY THE LOOP CANNOT DO THIS ITSELF. Every work mutation is @serverOnly, and
+// integrations/planner is deliberately absent from call_origin_conformance's
+// allowlist -- asserted by work_heal_test.go, which pins that the stamping
+// belongs here. So the reactive loop asks, and this package writes, exactly as
+// the compile pass does through RecordCompileOutcome.
+//
+// WHOSE GOAL IT IS. The responsibility's OWNER, decided by the repo owner
+// 2026-09-06. A responsibility is one person's standing directive, so the goal
+// it spawns is that person's work: it appears in their Nexus as theirs, row
+// authz needs no special case, and the borrow is the same one every owned
+// write in this package already makes. The alternative -- a deployment-owned
+// goal with a blank owner, like an automation's run -- would be readable only
+// through the cluster-owner queries and would need a second surface to be
+// visible to the person whose responsibility it is.
+
+// ResponsibilityGoal is a goal the reactive loop wants opened.
+type ResponsibilityGoal struct {
+	// OwnerUserId is the responsibility's owner, and becomes the goal's.
+	OwnerUserId string
+	// ResponsibilityId is v1:planner:responsibility.id, recorded on the goal
+	// so the dedup guard below can find it again.
+	ResponsibilityId string
+	// Statement is the directive in the person's own words.
+	Statement string
+	// Input is the typed input the compile pass binds.
+	Input map[string]any
+}
+
+// HasLiveGoalForResponsibility reports whether a non-terminal goal already
+// exists for this responsibility -- the C1 dedup guard.
+//
+// It returns an ERROR rather than a bool on a read failure, and the caller
+// decides. The plan version swallowed the error and answered "no live plan",
+// on the reasoning that the in-process respawn guard covers the duplicate; the
+// error is surfaced here so that reasoning is the CALLER's, stated at the call
+// site, rather than buried in a read.
+func (i *Integration) HasLiveGoalForResponsibility(ctx context.Context, ownerUserId, responsibilityId string) (bool, error) {
+	if i == nil {
+		return false, fmt.Errorf("work: no integration")
+	}
+	owner := strings.TrimSpace(ownerUserId)
+	respId := strings.TrimSpace(responsibilityId)
+	if owner == "" || respId == "" {
+		return false, fmt.Errorf("work: HasLiveGoalForResponsibility needs an owner and a responsibility id")
+	}
+	rows, err := i.store().query(ownerActor(ctx, owner),
+		"query "+call("workGoalsForResponsibility", map[string]any{"responsibilityId": respId}))
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		// "closed" is the only terminal value of v1:work:goal.status; open
+		// and active are both live. Spelled out rather than negated against a
+		// list, so a new lifecycle value is a compile-time question here
+		// rather than silently counted as live.
+		if rowString(row, "status") != "closed" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// OpenResponsibilityGoal opens a goal for a responsibility, opens its first
+// run in `compiling`, and dispatches compile -- the same three writes in the
+// same order as handleCreateGoal, and for the same reason: the run exists
+// before any template is known so the model calls COMPILATION makes have a
+// home from the first one.
+//
+// The difference from handleCreateGoal is only whose actor writes the goal.
+// There the caller IS the owner and the goal is written under their own actor;
+// here the caller is the reactive loop running as the cluster, so the owner's
+// authority is borrowed for the goal as well as for the run.
+func (i *Integration) OpenResponsibilityGoal(ctx context.Context, g ResponsibilityGoal) (string, string, error) {
+	if i == nil {
+		return "", "", fmt.Errorf("work: no integration")
+	}
+	owner := strings.TrimSpace(g.OwnerUserId)
+	respId := strings.TrimSpace(g.ResponsibilityId)
+	statement := strings.TrimSpace(g.Statement)
+	if owner == "" || respId == "" || statement == "" {
+		return "", "", fmt.Errorf("work: a responsibility goal needs an owner, a responsibility id and a statement")
+	}
+
+	st := i.store()
+	now := i.clock().UTC()
+	goalId := newRowId(goalConcept)
+	runId := newRowId(runConcept)
+	scoped := ownerActor(ctx, owner)
+
+	if err := st.createGoalRow(scoped, goalSeed{
+		GoalId:           goalId,
+		Statement:        statement,
+		Origin:           "responsibility",
+		ResponsibilityId: respId,
+		Input:            g.Input,
+		RequestedVia:     "responsibility",
+	}); err != nil {
+		return "", "", err
+	}
+	if err := st.createRunRow(scoped, runSeed{
+		RunId:          runId,
+		GoalId:         goalId,
+		AutomationName: compilingAutomationName,
+		Input:          g.Input,
+		TriggeredBy:    "responsibility:" + respId,
+		Mode:           modeLive,
+		Status:         runStatusCompiling,
+		NodeId:         selfNodeId(),
+		StartedAt:      now,
+		OwnerUserId:    owner,
+	}); err != nil {
+		return "", "", err
+	}
+
+	// The run rides the context, so the compile pass's model calls are
+	// journaled against it (memql#4999).
+	dispatchCtx := common.ContextWithRun(ctx, common.RunContext{
+		RunId:       runId,
+		GoalId:      goalId,
+		Mode:        common.RunModeLive,
+		OwnerUserId: owner,
+	})
+	if dispatched := i.dispatchCompile(dispatchCtx, CompileRequest{
+		GoalId:      goalId,
+		RunId:       runId,
+		OwnerUserId: owner,
+		Statement:   statement,
+		Input:       g.Input,
+	}); !dispatched {
+		i.log().Info("work: a responsibility's goal is waiting for a compile surface",
+			"component", "work.responsibility", "goal", goalId, "run", runId, "responsibility", respId)
+	}
+	return goalId, runId, nil
 }
