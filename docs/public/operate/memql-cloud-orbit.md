@@ -82,7 +82,7 @@ narrow shape is the enforcement rather than a note asking callers to be careful.
 | Sign up | `createSubscriber` |
 | Update billing details | `updateSubscriberBilling` |
 | Upgrade / downgrade tier | `requestTierChange`, then the two instance writes below |
-| Toggle HA, buy voice | `setSubscriptionAddOns`, then the two instance writes below |
+| Toggle HA | `setSubscriptionAddOns`, then the two instance writes below |
 | Cancel | `requestCancellation` |
 | Suspend / resume | write the instance's status |
 

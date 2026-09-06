@@ -165,20 +165,18 @@ func TestEveryTierAllowanceIsBoundedAndPriced(t *testing.T) {
 		if policy == "meter" && seed.numbers["overageMessagesUsdPer1k"] == 0 {
 			t.Errorf("tier %q meters overage at $0 per 1,000 credits. The meter runs, the ledger balances, and every message past the allowance costs us and earns nothing -- which is 'no unbounded spend path' being false in its quiet form.", name)
 		}
-		// Voice overage, on a tier that METERS. The `policy == "meter"` guard is
-		// not decoration: a throttling tier has no overage to price, so demanding
-		// a rate there would be demanding a number for something that cannot
-		// happen -- and the only tier that throttles is the trial, where a
-		// non-zero voice rate would be a bill against a card we never charge.
+		// There was a second leak check here, for voice overage on a metering
+		// tier. Voice went with the conversational product (epic memql#4988) and
+		// no tier includes, meters or prices a voice minute, so the check had no
+		// subject left.
 		//
-		// This test asked for that rate before the guard was added, which is a
-		// small demonstration of the thing it is meant to catch: an allowance
-		// rule stated one way for messages and another for voice, on the one tier
-		// where the difference decides whether an unchargeable customer can spend
-		// money.
-		if policy == "meter" && seed.numbers["voiceMinutes"] > 0 && seed.numbers["overageVoiceUsdPerMinute"] == 0 {
-			t.Errorf("tier %q meters, includes voice minutes, and prices voice overage at $0/min; voice is the expensive unit and this is where it leaks", name)
-		}
+		// What it demonstrated is worth carrying to the next metered unit: the
+		// rule it enforced had to be guarded on `policy == "meter"`, because a
+		// throttling tier has no overage to price and demanding a rate there
+		// would be demanding a number for something that cannot happen. The one
+		// tier that throttles is the trial, where a non-zero rate would be a bill
+		// against a card we never charge. An allowance rule stated one way for
+		// one unit and another way for the next is exactly where that bites.
 	}
 }
 
@@ -221,7 +219,6 @@ func TestThePublishedPriceTableMatchesTheSeeds(t *testing.T) {
 		// The allowances too -- the numbers a support conversation turns on.
 		for _, f := range []struct{ field, label string }{
 			{"messageCredits", "message credits"},
-			{"voiceMinutes", "voice minutes"},
 		} {
 			v := seed.numbers[f.field]
 			if v == 0 {

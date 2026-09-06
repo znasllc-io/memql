@@ -51,17 +51,17 @@ thing that is broken.
 
 ## What a tier buys
 
-| Tier | Price | Message credits | Voice minutes | Profile | Database | HA |
-|---|---|---|---|---|---|---|
-| Trial | $0, 14 days | 500 (throttled) | 60 (throttled) | `solo` | `entry` | never |
-| Node | $199/mo | 2,000 | 0 (add-on) | `solo` | `entry` | add-on |
-| Graph | $949/mo | 10,000 | 1,000 | `standard` | `mid` | included |
-| Mesh | $2,999/mo | 50,000 | 5,000 | `dedicated` | `top` | included |
-| Enterprise | quoted | per contract | per contract | `dedicated` | `top` | included |
+| Tier | Price | Message credits | Profile | Database | HA |
+|---|---|---|---|---|---|
+| Trial | $0, 14 days | 500 (throttled) | `solo` | `entry` | never |
+| Node | $199/mo | 2,000 | `solo` | `entry` | add-on |
+| Graph | $949/mo | 10,000 | `standard` | `mid` | included |
+| Mesh | $2,999/mo | 50,000 | `dedicated` | `top` | included |
+| Enterprise | quoted | per contract | `dedicated` | `top` | included |
 
-Overage is $30 per 1,000 message credits and $0.15 per voice minute. Annual
-billing is ten months' list price for twelve months of service, computed at
-checkout from the monthly price so the discount cannot drift.
+Overage is $30 per 1,000 message credits. Annual billing is ten months' list
+price for twelve months of service, computed at checkout from the monthly price
+so the discount cannot drift.
 
 **Trial throttles where every other tier meters**, and that is the single most
 important row in the table. A trial with metered overage is an unbounded spend

@@ -229,12 +229,23 @@ No other `config.` key is removed, and no reader exists anywhere in this repo,
 - **`v1:planner:plan` / `task` / `taskState` and `component/planner`.** Retired
   by the work spine's section F, gated on A3 re-keying Training. That is issue
   #5000, still open.
-- **`deploy/fleet`'s voice pricing.** `dsl/fleet/concepts.memql` still declares
-  `voiceMinutes`, `overageVoiceUsdPerMinute` and `voiceAddOn`, and
-  `docs/public/operate/memql-cloud*.md` still sells them. Changing what
-  customers are sold is a commercial decision, not a mechanical removal. **This
-  needs an owner ruling**; the files are named here so it is one edit when it
-  comes.
+- **`deploy/fleet`'s voice pricing.** ~~Left alone pending an owner ruling.~~
+  **RULED AND DONE** (2026-09-06, memql#5031): remove it. `voiceMinutes`,
+  `overageVoiceUsdPerMinute` and `voiceAddOn` are gone from the tierSpec and
+  subscription concepts, from all five tier seeds, from three shapes and from
+  the two mutations that wrote them; the tier table in
+  `docs/public/operate/memql-cloud.md` loses its Voice minutes column and the
+  overage sentence its voice clause.
+
+  Two things were deliberately KEPT. `usageMeter.metric` keeps its
+  `voice_minutes` enum value so periods already metered and invoiced still read
+  back -- billing history is the one thing that may not become unreadable --
+  while `openUsageMeter`'s own arg enum narrows to `message_credits`, so
+  nothing can open a new one. Same shape as D4's `invitation.kind`: close the
+  writer, keep the stored value legible. And `setSubscriptionAddOns` keeps its
+  plural name; HA is the only add-on now, but the name is a category rather
+  than a count, and this bundle is not embedded so a rename is a wire change
+  against callers outside this repository.
 - **`policy localConductor`.** A provider-selection policy in the local-first
   set from epic memql#4676. "Conductor" there names a workload shape rather
   than the cognition conductor, and renaming it would touch an unrelated
