@@ -17,9 +17,14 @@
 // lives next to the step executor (component/automations/steps), not here --
 // keeping this package free of the engine.
 //
-// The replay-CAPTURE action machinery (component/harness/action*, the
-// `v1:actions:action` graph rows) is a SEPARATE model kept for the library /
-// replay use-case; this package is only the AUTHORED path.
+// The replay-CAPTURE action machinery is RETIRED (work spine A1): the
+// candidate concept, mintAction and its ladder, the fingerprint queries and
+// the actionplan / actiontrace / actiontrust packages are gone. This package
+// is the AUTHORED path, which survived it, and now owns the four pure
+// helpers that used to live in the harness module -- pin, bind,
+// surfaceresolver and fingerprint. The `v1:actions:action` rows the capture
+// library wrote are declared and unwritten until epic A3 reshapes the
+// concept.
 package actions
 
 // Param is one declared input of an authored action (a params-block field).

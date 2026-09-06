@@ -11,7 +11,7 @@ import (
 // An action is portable; WHERE it runs is not part of its identity (§7.1).
 // This file is the engine's built-in surface registry plus the policy-default
 // tier of the capability->surface resolver (§7.2). The pure precedence
-// machinery lives in component/harness/surfaceresolver; here we (a) declare the
+// machinery lives in component/actions/surfaceresolver; here we (a) declare the
 // concrete surfaces the engine ships with and (b) decide the policy default for
 // an authored action so deploy actions resolve OUTSIDE the target cluster.
 //
