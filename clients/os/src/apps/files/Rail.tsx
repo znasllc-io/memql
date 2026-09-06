@@ -259,7 +259,7 @@ export function Rail({
             to it, and a folder glyph would say otherwise. */}
         {bin.loose.length > 0 ? (
           <BinGroup
-            id="loose"
+            id={LOOSE_GROUP}
             glyph={<Files size={14} aria-hidden />}
             name="Not in a folder"
             files={bin.loose}
