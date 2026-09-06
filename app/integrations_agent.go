@@ -21,6 +21,14 @@ import (
 func (a *App) integrationsAgent() {
 	a.integrationsCore()
 	a.selectSTTProvider()
+
+	// The agent node is what EXECUTES a compiled work run (memql#5054).
+	// Safe here because engineAndBus() has already run -- it is what builds
+	// the automation loader, the step registry and the cluster execution
+	// guard this needs -- and integrationsCore() above is what materializes
+	// the work plug-in it installs itself on.
+	a.wireWorkRunDispatcher()
+
 	a.Logger.Info("agent integration providers registered")
 }
 

@@ -78,6 +78,16 @@ type Integration struct {
 	// freshly opened run in `compiling` rather than inventing a plan.
 	compiler Compiler
 
+	// dispatcher is the execution seam (memql#5054). Set by the node that
+	// runs steps; nil everywhere else, and a nil one means this replica
+	// watches run events and acts on none of them.
+	dispatcher Dispatcher
+
+	// runClaimer is the cross-replica gate on dispatch. Unlike every other
+	// nil seam in this struct, a nil one REFUSES rather than degrades --
+	// see SetRunClaimer.
+	runClaimer RunClaimer
+
 	// rowsInFlight is the source of the abandoned sweep's rows. It is a
 	// FIELD rather than a method call so the sweep's per-row decisions --
 	// which run is parked, which is dead, whose authority each write borrows
