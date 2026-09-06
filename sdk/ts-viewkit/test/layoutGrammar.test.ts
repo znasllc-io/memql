@@ -3,12 +3,15 @@
 //
 // TWO PROPERTIES CARRY THIS FILE.
 //
-// The first is BACKWARD COMPATIBILITY, and it is not a courtesy. Every stored
-// `v1:portalviews:view` row predates layouts, so every one of them names no
-// layout and no roles. If "absent" ever came to mean anything other than
-// "stack, standard", the release that changed it would silently re-lay-out
-// every view every person has -- with no migration, no error, and nothing in
-// the row to say what it used to look like.
+// The first is BACKWARD COMPATIBILITY, and it is not a courtesy. A stored
+// arrangement written before layouts existed names no layout and no roles.
+// If "absent" ever came to mean anything other than "stack, standard", the
+// release that changed it would silently re-lay-out every stored view -- with
+// no migration, no error, and nothing in the row to say what it used to look
+// like. The rows that first made this concrete were `v1:portalviews:view`,
+// retired with the portal (epic memql#4984); the rule outlives them, because
+// it is a property of this GRAMMAR, which is a published package surface any
+// host may store against.
 //
 // The second is REPAIR-NOT-TRUST, extended. sanitizeArrangement was already
 // the one gate between an untrusted arrangement (a model's reply, a row from
