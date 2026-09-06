@@ -82,7 +82,7 @@ describe("archiving from a file row", () => {
     expect(screen.getByRole("button", { name: /cut-03\.mov/ })).toBeTruthy();
   });
 
-  it("offers Restore on an archived row, in the Archive place", async () => {
+  it("offers Restore on an archived row, in the Bin place", async () => {
     // The row's one verb flips with its state (epic memql#4842, #4846): a
     // live row moves to the Bin, an archived one restores -- the Bin's own
     // vocabulary, kept verbatim so one action has one name everywhere.
@@ -91,7 +91,7 @@ describe("archiving from a file row", () => {
     });
     h.connection = connection;
     await renderFiles();
-    fireEvent.click(screen.getByRole("button", { name: /^Archive/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Bin/ }));
 
     await rightClickRow(/cut-03\.mov/);
     const entry = screen.getByRole("menuitem", { name: "Restore" });

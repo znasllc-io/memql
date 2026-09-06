@@ -71,7 +71,7 @@ export function useLibraryFeeds(): LibraryFeeds {
   const folders = useLiveCollection<Row>("files:folders", (connection) => ({
     concept: FOLDER_CONCEPT,
     // ONE subscription, TWO reads in the seed (epic memql#4842, #4846).
-    // `libraryFolders` carries `archived != true`, and the Archive place has
+    // `libraryFolders` carries `archived != true`, and the Bin place has
     // to list archived folders -- so the seed walks the live read and then
     // the archived one into a single population. Still one collection and
     // one subscription over the concept (the Deployables rule is about

@@ -269,7 +269,7 @@ permission tree exists: row authz is unchanged, and a folder confers nothing.
 
   The rule follows from what archiving is FOR: getting something back later.
   An empty folder tree has nothing in it to get back, so archiving one leaves
-  a row in the Archive place and in the Bin that answers no question anybody
+  a row in the Files rail's Bin and in the Bin app that answers no question anybody
   asked, sitting among the files that genuinely are waiting there. Deleting
   it is still a soft delete -- the row survives, because the engine is
   append-only -- but every folder read excludes it, so it is gone from the

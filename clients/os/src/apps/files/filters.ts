@@ -17,8 +17,17 @@ import { artifactName, isContentKind, type ArtifactRow } from "./rows";
 // The rail offers three places and the fold answers for the one being looked
 // at. Library is what you have; Desktop is the subset sitting on your desks
 // (an id-set handed in by the caller, because desks are shell state and this
-// module stays pure); Archive is what you archived. The old `showArchived`
+// module stays pure); the Bin is what you archived. The old `showArchived`
 // toggle is gone -- archived rows have a place now, not a filter.
+//
+// THE PLACE IS `bin`, NOT `archive` (epic memql#4981). One destination had
+// two names: the row menu's verb has always been "Move to Bin", the dock
+// fixture it lands in is the Bin app, and the rail alone called it Archive.
+// A person who archives a file from the menu and then goes looking for
+// "Bin" in the rail found "Archive" instead and had to work out that they
+// are the same place. ARCHIVE STAYS AS THE VERB -- archiving is what you do,
+// the Bin is where it goes -- so `confirmBeforeArchive`, `planArchive` and
+// the confirm's own wording are deliberately untouched.
 
 /** No client constraint. */
 export const ACCOUNT_ANY = "all";
@@ -28,7 +37,7 @@ export const ACCOUNT_NONE = "none";
 export type KindFilter = "all" | (typeof CONTENT_KINDS)[number];
 export type SourceFilter = "all" | (typeof SOURCE_VALUES)[number];
 
-export const FILES_PLACES = ["library", "desktop", "archive"] as const;
+export const FILES_PLACES = ["library", "desktop", "bin"] as const;
 export type FilesPlace = (typeof FILES_PLACES)[number];
 
 export function isFilesPlace(value: unknown): value is FilesPlace {
@@ -55,9 +64,9 @@ export interface FilesFilter {
    * The folder scope: "" = the place's own root, an id = that folder, null =
    * everywhere. A non-empty search widens to the whole PLACE on its own --
    * someone searching is asking about the place, not about the folder they
-   * happen to be in. In the Archive place "" already means everything
-   * archived: archived rows are a flat population with folders as an
-   * optional narrowing, not a tree with a root.
+   * happen to be in. In the Bin "" already means everything archived:
+   * archived rows are a flat population with folders as an optional
+   * narrowing, not a tree with a root.
    */
   folderId: string | null;
   kind: KindFilter;
@@ -111,7 +120,7 @@ export function applyFilters(
     if (!isContentKind(row.kind)) return false;
 
     // The place decides the population before any facet narrows it.
-    if (filter.place === "archive") {
+    if (filter.place === "bin") {
       if (!row.archived) return false;
       if (!searching && filter.folderId !== null && filter.folderId !== "" && row.folderId !== filter.folderId) {
         return false;

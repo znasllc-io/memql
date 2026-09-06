@@ -17,7 +17,8 @@ import type { ArtifactRow } from "../rows";
 // ===========================================================================
 // Archiving is how somebody gets a thing back later. A folder with no file
 // anywhere beneath it has nothing to get back, so archiving one leaves a row
-// in the Archive place and in the Bin that answers no question anybody asked,
+// in the Files rail's Bin and in the Bin app that answers no question anybody
+// asked,
 // sitting next to the files that genuinely are waiting there. Those folders
 // are DELETED instead (`deleteLibraryFolder` -- still a soft delete, but one
 // every folder read excludes), and the difference is one a person can see: an

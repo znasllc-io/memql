@@ -120,6 +120,14 @@ export function FilesApp({
   // trip to Settings and back would otherwise shut everything the person had
   // just opened. Starts all-shut -- Rail.tsx says why.
   const [expanded, setExpanded] = useState<ExpandedPlaces>(ALL_COLLAPSED);
+  // The Bin's own disclosures, one level in (epic memql#4981): its archived
+  // folders and its loose group. Held HERE for exactly the reason above --
+  // the section switch below returns early, so a trip to Settings and back
+  // would shut what the person had just opened. Starts empty: the Bin opens
+  // onto its shape, and its contents are asked for.
+  const [openBinFolders, setOpenBinFolders] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
 
   // ===========================================================================
   // THE DESK, FOLDED FOR THE DESKTOP PLACE (epic memql#4842, #4846)
@@ -234,7 +242,7 @@ export function FilesApp({
   }, [files.snapshot]);
 
   // The tree, from the folders feed. Archived folders are dropped HERE, not
-  // by the read: the seed now includes them for the Archive place, and an
+  // by the read: the seed now includes them for the Bin place, and an
   // archive flip arrives as an UPDATE the fold has to keep answering for.
   //
   // DELETED folders are dropped here too, and for a sharper reason. No folder
@@ -253,10 +261,11 @@ export function FilesApp({
     [folders.snapshot],
   );
 
-  // The Archive place's folders: flat and alphabetical (epic memql#4842,
-  // #4846). Deliberately not a tree -- archived folders' ancestry mixes live
-  // and archived parents, and a tree over that would lie one way or the
-  // other. Flat, named, counted is the honest reading.
+  // The Bin place's folders: flat and alphabetical (epic memql#4842, #4846).
+  // Deliberately not a tree -- archived folders' ancestry mixes live and
+  // archived parents, and a tree over that would lie one way or the other.
+  // Flat, named, counted is the honest reading, and it is why the Bin's rail
+  // nests FILES under a folder but never a folder under a folder.
   //
   // `!f.deleted` for the live-path reason above, and it is not redundant with
   // `f.archived`: the two are independent fields, so a folder somebody
@@ -342,6 +351,8 @@ export function FilesApp({
       setFilter={setFilter}
       expanded={expanded}
       setExpanded={setExpanded}
+      openBinFolders={openBinFolders}
+      setOpenBinFolders={setOpenBinFolders}
       selectedId={selectedId}
       onSelect={setSelectedId}
       linkByFileId={linkByFileId}
@@ -399,8 +410,8 @@ function FilesSettingsSection({
           </Check>
           <p className="os-caption">
             The confirm names what is about to move -- for a folder, the live count of everything
-            inside it. Archiving never deletes: everything archived lives under Archive in the
-            browse rail, and in the Bin, where it can be put back.
+            inside it. Archiving never deletes: everything archived lives in the Bin -- the
+            browse rail's third place, and the app in the dock -- where it can be put back.
           </p>
         </fieldset>
 

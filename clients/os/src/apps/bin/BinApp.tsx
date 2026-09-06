@@ -8,7 +8,7 @@ import { useOsConnection } from "../../live/connection";
 import { useMachines } from "../../live/machines";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
-import { kindGlyph } from "../files/BrowseSection";
+import { kindGlyph } from "../files/glyphs";
 import { artifactFromRow, folderFromRow, isContentKind, fileStory } from "../files/rows";
 import type { ArtifactRow } from "../files/rows";
 import {

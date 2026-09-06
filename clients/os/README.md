@@ -1025,6 +1025,64 @@ And "was filed in" resolves against the ARCHIVED folders, because
 `libraryFolders` carries `archived != true` and a folder that went to the Bin
 with its contents is invisible to every other surface in the product.
 
+### The Bin place, in the Files rail (epic memql#4981)
+
+The rail's third place was called Archive and listed archived FOLDERS. It is
+called Bin now and reaches the files as well. Four rules came out of it.
+
+- **ONE DESTINATION, ONE WORD.** The row menu has always said "Move to Bin",
+  the dock fixture has always been the Bin, and the rail alone said Archive --
+  so a person who archived a file went looking for a place that was not there
+  under a name that was. **The VERB did not move**: archiving is what you do
+  and the Bin is where it goes, so `confirmBeforeArchive`, `planArchive`, the
+  inspector's Archive button and the folder confirm's wording are all
+  deliberately untouched. The place key in `filters.ts` is `bin`, not
+  `archive`, because a code name that disagrees with the surface is the same
+  defect one level down.
+
+- **THE FOLDERS-NOT-FILES RULE SURVIVES, AND SO DOES ITS REASON.** The rail
+  lists folders because opening a place scopes the list to exactly the files
+  it would otherwise have shown, and a second copy of them in a 184px column
+  is the same rows twice, narrower. That argument does not reach the Bin:
+  archived folders are a flat ancestry-less set, most archived files are
+  loose, and a folders-only Bin therefore expanded to "Nothing archived."
+  **while forty archived files sat in the list beside it** -- the defect the
+  epic exists for. What the rail can say there that the list cannot is which
+  archived files were filed in which archived folder, without navigating into
+  each one.
+
+  So the shape is: each archived folder is a disclosure over the files filed
+  in it, and everything else sits behind ONE group, "Not in a folder". The
+  loose group is what keeps the old reason honest -- listing those files at
+  the place's own level would put the list's own rows in the rail beside it.
+  It is not drawn as a folder: nothing can be restored to a set, so it is a
+  `span` with a chevron rather than a button.
+
+- **THE COUNTS ARE FILES AND FOLDERS, because the Bin app lists both.** The
+  shut place counts every item a person could take back, and its title says
+  which is which ("2 files and 1 folder in the Bin") -- "3" over that Bin is
+  true and unhelpful. A folder's own count stays the direct count of archived
+  files filed in it. Both come from ONE fold (`foldBinRail`), so the rail's
+  numbers and the Bin app's list cannot drift; they used to be two counting
+  loops that happened to agree.
+
+- **A shut group is NOT RENDERED, unlike a shut place.** A place has folders
+  under it and there are tens of those; a Bin group has files under it and
+  there can be thousands. `hidden` alone would put every archived file in the
+  document for a rail nobody has opened -- and a hidden node is still found by
+  `getByText`, so the rail was answering queries for rows it was not showing.
+
+**Two defects here were invisible to the whole vitest suite and were found by
+looking at a screenshot**, which is what DESIGN.md's "the acceptance is
+rendered screenshots" is for. Two chevrons flipped against one rendered value
+both read the same `openBinFolders`, so a value-taking setter applied the
+second over the first and one of them silently did nothing -- the prop is
+typed functional-only now, and `binPlace.test.tsx` pins it by taking both
+handles from one render. And the Bin's folder rows, carrying chevrons of their
+own, sat at exactly the x of Library / Desktop / Bin and read as four more
+places; the group indents 12px, which the Library's rail does not need because
+its folders have no disclosure to be confused by.
+
 ### Origin link states, in Files (epic memql#4783)
 
 A file pushed from a watched folder on a fleet machine carries a state against

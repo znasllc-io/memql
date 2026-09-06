@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, File, FileText, FolderPlus, Plus, Sparkles, Upload } from "lucide-react";
+import { ChevronDown, FolderPlus, Plus, Upload } from "lucide-react";
 import {
   newShortId,
   rowNumber,
@@ -17,6 +17,8 @@ import { downloadArtifact } from "./actions/download";
 import { useOsConnection } from "../../live/connection";
 import { entriesOf, hasDirectory, walkEntries } from "../../items/folderDrop";
 import { planArchive, runArchiveWalk, subtreeHoldsArtifact } from "./actions/archive";
+import { foldBinRail } from "./fold";
+import { kindGlyph } from "./glyphs";
 import { Rail, type ExpandedPlaces } from "./Rail";
 import {
   Button,
@@ -55,7 +57,7 @@ import type { UploadTask, UploadTasksApi } from "./useUploadTasks";
 
 // The browse (design D1, reshaped by epic memql#4842): rail, list, inspector
 // -- three readings of the feeds the app root retains, sharing one selection.
-// The rail offers three PLACES -- Library, Desktop, Archive -- and the top of
+// The rail offers three PLACES -- Library, Desktop, Bin -- and the top of
 // the section is a Head, a quiet sort, one Refine affordance and the Upload
 // primary (DESIGN.md rules 1-3): filter chrome appears when a question is
 // being asked, never as furniture.
@@ -76,14 +78,8 @@ export interface DeskFolderShortcut {
 const PLACE_TITLE: Record<FilesPlace, string> = {
   library: "Library",
   desktop: "Desktop",
-  archive: "Archive",
+  bin: "Bin",
 };
-
-export function kindGlyph(kind: string, size = 16) {
-  if (kind === "document") return <FileText size={size} aria-hidden />;
-  if (kind === "generated_output") return <Sparkles size={size} aria-hidden />;
-  return <File size={size} aria-hidden />;
-}
 
 export function BrowseSection({
   list,
@@ -100,6 +96,8 @@ export function BrowseSection({
   setFilter,
   expanded,
   setExpanded,
+  openBinFolders,
+  setOpenBinFolders,
   selectedId,
   onSelect,
   linkByFileId,
@@ -116,7 +114,7 @@ export function BrowseSection({
   foldersState: LiveState;
   tree: FolderTree;
   content: ArtifactRow[];
-  /** Archived folders, flat and alphabetical -- the Archive place's children. */
+  /** Archived folders, flat and alphabetical -- the Bin place's folders. */
   archivedFolders: FolderRow[];
   /** Folder shortcuts on any desk -- the Desktop place's children. */
   deskFolders: DeskFolderShortcut[];
@@ -132,6 +130,11 @@ export function BrowseSection({
    *  Settings and back does not shut everything the person just opened. */
   expanded: ExpandedPlaces;
   setExpanded: (next: ExpandedPlaces) => void;
+  /** Which of the Bin's own disclosures are open. Held at the app root for
+   *  the reason `expanded` is; the setter is functional-only, and Rail.tsx
+   *  records what a value-taking one costs inside a React batch. */
+  openBinFolders: ReadonlySet<string>;
+  setOpenBinFolders: (update: (prev: ReadonlySet<string>) => ReadonlySet<string>) => void;
   selectedId: string;
   onSelect: (id: string) => void;
   /** Origin link state by backing file id (epic memql#4783). */
@@ -164,7 +167,7 @@ export function BrowseSection({
   // and the archive flow -- confirm naming the LIVE count, then the
   // children-first walk with in-surface progress (design B5/D11).
   const [folderMenu, setFolderMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
-  // The Archive place's folder menu: Restore is the only verb an archived
+  // The Bin place's folder menu: Restore is the only verb an archived
   // folder offers here (epic memql#4842, #4846).
   const [archivedFolderMenu, setArchivedFolderMenu] = useState<{
     x: number;
@@ -280,7 +283,7 @@ export function BrowseSection({
     }
   };
 
-  // Restore, from the Archive place's row menu (epic memql#4842, #4846): the
+  // Restore, from the Bin place's row menu (epic memql#4842, #4846): the
   // Bin's client-driven pair, verbatim, so the two archive surfaces cannot
   // drift apart on what "putting back" means -- plus the #4846 addition: a
   // file whose folder is KNOWN-ARCHIVED re-files to the Library root, because
@@ -327,7 +330,7 @@ export function BrowseSection({
     setArchiveError("");
     try {
       await query.restoreLibraryFolder({ folderId });
-      if (filter.place === "archive" && filter.folderId === folderId) patch({ folderId: "" });
+      if (filter.place === "bin" && filter.folderId === folderId) patch({ folderId: "" });
     } catch (err: unknown) {
       setArchiveError(err instanceof Error ? err.message : String(err));
     }
@@ -405,10 +408,10 @@ export function BrowseSection({
   };
 
   // Uploads land in the folder being LOOKED AT; searching means no folder is
-  // being looked at, so the root takes them -- and the Archive place is
-  // nowhere to upload TO, so it hands them to the Library root.
+  // being looked at, so the root takes them -- and the Bin is nowhere to
+  // upload TO, so it hands them to the Library root.
   const destinationFolderId =
-    filter.search.trim() !== "" || filter.place === "archive" ? "" : (filter.folderId ?? "");
+    filter.search.trim() !== "" || filter.place === "bin" ? "" : (filter.folderId ?? "");
 
   const onDrop = (event: React.DragEvent) => {
     if (!event.dataTransfer.files.length && !event.dataTransfer.items.length) return;
@@ -507,17 +510,30 @@ export function BrowseSection({
 
   // Direct, non-archived counts by folder -- what a person would count.
   const counts = new Map<string, number>();
-  // ...and archived rows counted the same way for the Archive place.
-  const archivedCounts = new Map<string, number>();
-  let archivedTotal = 0;
+  const archivedFiles: ArtifactRow[] = [];
   for (const row of content) {
     if (row.archived) {
-      archivedTotal += 1;
-      archivedCounts.set(row.folderId, (archivedCounts.get(row.folderId) ?? 0) + 1);
+      archivedFiles.push(row);
       continue;
     }
     counts.set(row.folderId, (counts.get(row.folderId) ?? 0) + 1);
   }
+  // The Bin's picture, from the same two populations the Bin app reads: the
+  // archived index rows, and the archived folders. ONE FOLD, so the rail's
+  // per-folder numbers and the Bin app's list cannot drift apart -- they used
+  // to be two counting loops that happened to agree.
+  const bin = foldBinRail(archivedFiles, archivedFolders);
+  // Clicking a file in the Bin's rail means "show me that", which is two
+  // things at once: scope the list so the row is IN it, then select it so the
+  // inspector opens on it. The rail hands back the scope it found the file
+  // under -- "" for a loose file, which in the Bin already means everything
+  // archived rather than a root folder nothing is filed in.
+  const showBinFile = (row: ArtifactRow, folderId: string) => {
+    patch({ place: "bin", folderId, search: "" });
+    setExpanded({ ...expanded, bin: true });
+    onSelect(row.id);
+  };
+
   const deskFileCount = content.filter(
     (r) => !r.archived && deskFileArtifactIds.has(r.id),
   ).length;
@@ -525,7 +541,7 @@ export function BrowseSection({
   // A shut summary reading "3" over two hundred files is a smaller number
   // standing in front of a bigger one it does not mention; the per-folder
   // counts above stay direct, which is the recorded answer for a location.
-  const libraryTotal = content.length - archivedTotal;
+  const libraryTotal = content.length - archivedFiles.length;
 
   const folderNameOf = (folderId: string): string => {
     if (folderId === "") return "Library";
@@ -555,8 +571,8 @@ export function BrowseSection({
     ? "Nothing matches. Clear the search or filters to see your files."
     : filter.place === "desktop"
       ? "Nothing on your desks. Send a file to the desk from the Library, or drop one onto the desk."
-      : filter.place === "archive"
-        ? "Nothing archived. Archiving from the Library keeps files here, not deleted."
+      : filter.place === "bin"
+        ? "The Bin is empty. Archiving from the Library keeps files here, not deleted."
         : "Nothing in your Library yet. Drop a file onto the desk or upload one here.";
 
   // The Head names the scope ONCE (DESIGN.md rule 7): the place, or the
@@ -689,23 +705,24 @@ export function BrowseSection({
 
       <div className="os-files-body">
         {/* THE RAIL (epic memql#4842, #4846; collapsed by default here).
-            Library is what you have, Desktop is what sits on your desks,
-            Archive is what you archived. Each place is a disclosure over its
-            own folders -- see Rail.tsx for why they start shut and why
-            selecting one also opens it. */}
+            Library is what you have, Desktop is what sits on your desks, the
+            Bin is what you archived. Each place is a disclosure over its own
+            contents -- see Rail.tsx for why they start shut, why selecting
+            one also opens it, and why the Bin is the one place whose rail
+            reaches files as well as folders. */}
         <Rail
           filter={filter}
           patch={patch}
           tree={tree}
           counts={counts}
-          archivedCounts={archivedCounts}
           folderLinks={folderLinks}
-          archivedFolders={archivedFolders}
+          bin={bin}
+          openBinFolders={openBinFolders}
+          setOpenBinFolders={setOpenBinFolders}
           deskFolders={deskFolders}
           folderNameOf={folderNameOf}
           libraryTotal={libraryTotal}
           deskFileCount={deskFileCount}
-          archivedTotal={archivedTotal}
           expanded={expanded}
           setExpanded={setExpanded}
           renamingFolderId={renamingFolderId}
@@ -715,6 +732,8 @@ export function BrowseSection({
           onArchivedFolderMenu={(x, y, folder) =>
             setArchivedFolderMenu({ x, y, folder })
           }
+          onSelectBinFile={showBinFile}
+          selectedFileId={selectedId}
           railNote={railNote}
           foldersState={foldersState}
         />

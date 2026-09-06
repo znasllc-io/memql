@@ -17,7 +17,7 @@ import type { VersionEntry } from "./versions";
 import { useOsConnection } from "../../live/connection";
 import type { UploadProvider } from "../../items/upload";
 import { rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
-import { kindGlyph } from "./BrowseSection";
+import { kindGlyph } from "./glyphs";
 import {
   downloadArtifact,
   OVER_LIMIT_SENTENCE,
@@ -319,7 +319,7 @@ export function Inspector({
     }
   }, [connection, row.id]);
 
-  // Restore, for a row being read in the Archive place (epic memql#4842,
+  // Restore, for a row being read in the Bin place (epic memql#4842,
   // #4846): the Bin's client-driven pair, verbatim -- the index first, then
   // the backing file -- so the two surfaces cannot drift apart on what
   // "putting back" means. The automation mirror deliberately does not exist
