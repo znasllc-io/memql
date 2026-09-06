@@ -115,6 +115,8 @@ function report_policy() {
     if [[ -z "$rs" || "$rs" == "null" ]]; then
         log_warn "no active ruleset found -- nothing is being bypassed"
         HAS_BYPASS="unknown"
+        # REQUIRED_KNOWN stays "no", so guard_readiness falls back to refusing
+        # on ANY red check. See the note above the guard.
         return 0
     fi
 
@@ -127,6 +129,26 @@ function report_policy() {
       "  required checks            : \([.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]|join(", "))",
       "  merge queue                : \(if any(.rules[]; .type=="merge_queue") then "yes" else "no" end)"
     ' 2>/dev/null || log_warn "could not summarise the ruleset"
+
+    # The contexts the ruleset actually REQUIRES, one per line. guard_readiness
+    # intersects the failing rollup with this set; report_policy is the only
+    # place that knows it, so it is captured here rather than re-fetched.
+    #
+    # REQUIRED_KNOWN is the fail-closed switch. An empty REQUIRED_CHECKS is
+    # ambiguous -- it means EITHER "this ruleset requires no checks" OR "the
+    # read failed / the shape changed" -- and an intersection against an
+    # unknown set is empty either way, which would let the guard pass every
+    # red build silently. So the guard only narrows to required checks when
+    # the read demonstrably succeeded.
+    if REQUIRED_CHECKS="$(printf '%s\n' "$full" | jq -er '
+          [.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context] | .[]
+        ' 2>/dev/null)"; then
+        REQUIRED_KNOWN=yes
+    else
+        REQUIRED_CHECKS=""
+        REQUIRED_KNOWN=no
+        log_warn "could not read the ruleset's required checks -- every failing check will block"
+    fi
 
     if printf '%s\n' "$full" | jq -e '[.bypass_actors[]?|select(.actor_type=="RepositoryRole")]|length > 0' >/dev/null 2>&1; then
         HAS_BYPASS=yes
@@ -159,24 +181,84 @@ function report_pr() {
     FAILED="$(printf '%s' "$j" | jq '[.statusCheckRollup[]?|select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT")]|length')"
     PENDING="$(printf '%s' "$j" | jq '[.statusCheckRollup[]?|select((.status//.state)=="QUEUED" or (.status//.state)=="IN_PROGRESS")]|length')"
 
+    # The same two counts, narrowed to the contexts the ruleset REQUIRES. A
+    # check's rollup name is `.name` for a check-run and `.context` for a
+    # commit status; the ruleset names it either way, so match on both.
+    local req_json="[]"
+    if [[ "${REQUIRED_KNOWN:-no}" == "yes" ]]; then
+        req_json="$(printf '%s\n' "${REQUIRED_CHECKS}" | jq -R . | jq -sc 'map(select(length > 0))')"
+    fi
+    FAILED_REQUIRED="$(printf '%s' "$j" | jq --argjson req "$req_json" '
+        [.statusCheckRollup[]?
+         | select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT")
+         | select(((.name//.context) as $n | $req | index($n)) != null)] | length')"
+    PENDING_REQUIRED="$(printf '%s' "$j" | jq --argjson req "$req_json" '
+        [.statusCheckRollup[]?
+         | select((.status//.state)=="QUEUED" or (.status//.state)=="IN_PROGRESS")
+         | select(((.name//.context) as $n | $req | index($n)) != null)] | length')"
+
+    # Print every red check, marking which of them the ruleset requires -- the
+    # distinction the guard now turns on, so it must be visible in the report
+    # and not only in the refusal.
     if [[ "${FAILED:-0}" -gt 0 ]]; then
-        printf '%s\n' "$j" | jq -r '[.statusCheckRollup[]?|select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT")|"    FAILED: \(.name//.context)"]|.[]'
+        printf '%s\n' "$j" | jq -r --argjson req "$req_json" '
+            [.statusCheckRollup[]?
+             | select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT")
+             | (.name//.context) as $n
+             | if ($req | index($n)) != null
+               then "    FAILED (REQUIRED): \($n)"
+               else "    failed (not required): \($n)" end] | .[]'
     fi
 }
 
 # guard_readiness refuses on the two conditions a bypass must never paper over.
 # The bypass exists to skip a review that cannot be given; it is not a way past
 # a red build.
+#
+# RED WHERE IT COUNTS (memql#5016). This counted EVERY failing check, including
+# lanes the ruleset does not require -- and this repository has two that are
+# red for reasons no pull request can fix: CodeQL's `Analyze (go)`, which
+# crashes on a 2GiB query result above roughly 300 changed files and is red on
+# pristine `main`, and `install-cluster-e2e`, which is documented as flaky and
+# installs a PINNED RELEASED STACK rather than the branch under test.
+#
+# So the guard was strictest on exactly the pull requests it was written for --
+# large refactors, removal epics, regenerations -- and it named no way out. A
+# guard that cannot be satisfied is not a safety measure; it is an invitation
+# to reach for `gh pr merge --admin`, which skips this script and its reporting
+# entirely. Refusing on a red REQUIRED check and REPORTING the rest is what
+# "never a red build" meant: the ruleset already decides which lanes gate a
+# merge, and `ci-required` is an `if: always()` aggregate over all of them, so
+# its own green is the statement that everything required has settled.
+#
+# When the required-check set could not be read, REQUIRED_KNOWN is "no" and
+# this falls back to refusing on any red check. An intersection against an
+# unknown set is empty, and an empty intersection would pass every red build.
 function guard_readiness() {
     [[ "$PR_STATE" == "OPEN" ]] || { log_error "pull request is ${PR_STATE}, not OPEN"; exit 3; }
 
-    if [[ "${FAILED:-0}" -gt 0 ]]; then
-        log_error "refusing: ${FAILED} check(s) FAILED. The bypass skips a review, never a red build."
+    local blocking_failed="${FAILED:-0}" blocking_pending="${PENDING:-0}" scope="check(s)"
+    if [[ "${REQUIRED_KNOWN:-no}" == "yes" ]]; then
+        blocking_failed="${FAILED_REQUIRED:-0}"
+        blocking_pending="${PENDING_REQUIRED:-0}"
+        scope="REQUIRED check(s)"
+    fi
+
+    if [[ "${blocking_failed}" -gt 0 ]]; then
+        log_error "refusing: ${blocking_failed} ${scope} FAILED. The bypass skips a review, never a red build."
         exit 3
     fi
-    if [[ "${PENDING:-0}" -gt 0 ]]; then
-        log_error "refusing: ${PENDING} check(s) still running. Re-run when CI has settled."
+    if [[ "${blocking_pending}" -gt 0 ]]; then
+        log_error "refusing: ${blocking_pending} ${scope} still running. Re-run when CI has settled."
         exit 3
+    fi
+    # Red lanes the ruleset does not require do not block, but they are never
+    # silent: a merge that proceeded over one should say so in its own output.
+    if [[ "${FAILED:-0}" -gt 0 ]]; then
+        log_warn "proceeding over ${FAILED} failing check(s) the ruleset does not require -- listed above"
+    fi
+    if [[ "${PENDING:-0}" -gt 0 ]]; then
+        log_warn "proceeding with ${PENDING} non-required check(s) still running"
     fi
     # A bypass is only NEEDED when something is actually blocking. A CLEAN pull
     # request merges through the ordinary path, and demanding a bypass for it
