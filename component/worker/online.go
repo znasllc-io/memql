@@ -40,7 +40,7 @@ const OnlineWindow = 2 * HeartbeatBatchInterval
 // A SECOND IMPLEMENTATION EXISTS, in clients/portal/src/fleet/online.ts, and
 // it exists because the portal decides this per row while rendering and cannot
 // ask the engine per row. The two are kept in step by
-// TestFleetOnlineWindowMatchesPortal (online_portal_parity_test.go), which
+// TestFleetOnlineWindowMatchesTheClients (online_client_parity_test.go), which
 // reads the TypeScript and fails when its window disagrees with this one. If
 // you change OnlineWindow -- or HeartbeatBatchInterval, which it is derived
 // from -- that test is what will tell you the portal has not been changed too.

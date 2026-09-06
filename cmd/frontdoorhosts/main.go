@@ -10,11 +10,10 @@
 //	api         api.<d>
 //	identity    identity.<d>
 //	mcp         mcp.<d>
-//	sites       portal.<d> (the platform's own site, site #1)
 //	sites       os.<d>     (the OS shell, memql#4705)
 //	sites       *.<d> + the apex
 //
-// It emits Ingress + Certificate from those seven names, which is
+// It emits Ingress + Certificate from those six names, which is
 // what earns generation for a listed target: hand-maintaining that is the same
 // shape of mistake cmd/frontdoorpaths exists to stop, one level up. There, a
 // path with no rule does not 404 -- it hands HTTP/1.1 to an h2c backend and
@@ -44,7 +43,7 @@
 // `make frontdoor-paths`. `make frontdoor` runs both, in that order.
 //
 // The LOCAL overlay is deliberately not written here. It is traefik rather than
-// nginx, and its four hand-authored front-door files carry the measured
+// nginx, and its five hand-authored front-door files carry the measured
 // reasoning for the priority ranking that broke the API once already
 // (memql#3810). What binds it to this derivation instead is a gate:
 // deploy/k8s/overlays/frontdoor_hosts_test.go computes the host set from

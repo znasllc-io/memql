@@ -66,24 +66,23 @@ test("a promoted construct is offered no cluster source -- there is no file to s
 });
 
 // -----------------------------------------------------------------------------
-// browse rows in the portal (memql#4252) -- concepts only
+// the retired browse-rows button (memql#4252, removed by epic memql#4984)
 // -----------------------------------------------------------------------------
 
 const BROWSE_ROWS = 'data-act="browseRows"';
 
-test("a concept offers to browse its rows in the portal", () => {
-  const html = renderConstructPage({
-    construct: construct({ kind: "concept" }),
-    fileInWorkspace: false,
-    offerClusterSource: false,
-    error: "",
-  });
-  assert.ok(html.includes(BROWSE_ROWS));
-  assert.ok(html.includes("Browse rows in portal"));
-});
-
-test("no other kind offers to browse rows -- the absence is the statement", () => {
-  for (const kind of ["query", "mutation", "automation", "tool", "spec", "shape", "prompt", "provider"]) {
+// A concept used to offer "Browse rows in portal", which opened the portal's
+// `/concepts/<id>` page. The portal is retired and MemQL OS has no concept
+// browser, so there is no page to open and the button was REMOVED rather than
+// pointed somewhere that answers 404.
+//
+// The test is kept, inverted, rather than deleted: `renderConstructPage` still
+// takes a `kind` and still branches on it, so "a concept draws no browse-rows
+// button" is a claim that can become false again -- and the natural way for it
+// to become false is somebody restoring the button when a concept browser
+// lands, without noticing there is nothing at the far end yet.
+test("no kind offers to browse rows -- the button went with the portal", () => {
+  for (const kind of ["concept", "query", "mutation", "automation", "tool", "spec", "shape", "prompt", "provider"]) {
     const html = renderConstructPage({
       construct: construct({ kind }),
       fileInWorkspace: false,

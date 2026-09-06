@@ -50,7 +50,7 @@ is a **`v1:identity:user`** whose reach into an account is a grant row.
 
 So: the credential's subject is the operator. That is stated in the concept
 description, in the mint reply (`subject_user_id`), on the audit event
-(`detail.subjectKind = "user"`), and in the portal's copy. Four places, on
+(`detail.subjectKind = "user"`), and in the console's copy. Four places, on
 purpose -- the failure mode this feature has to avoid is a year passing and
 someone reasonably concluding that "the account authenticated".
 
@@ -123,7 +123,7 @@ Three things, all of them real:
 | Writes | `mutation createAccountTokenIdentity` / `revokeAccountTokenIdentity` |
 | Wire | `CreateAccountTokenMsg` / `RevokeAccountTokenMsg` on `MemqlService.Stream` |
 | Handlers | `component/grpc/account_token_handlers.go` |
-| UI | the portal's Accounts view (`clients/portal/src/accounts/`) |
+| UI | the Accounts app (`clients/os/src/apps/accounts/`) |
 
 ### 5.1 Why the mint is a gRPC envelope and the rest is not
 

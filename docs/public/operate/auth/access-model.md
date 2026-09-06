@@ -403,7 +403,7 @@ folded.
 
 **It gates nothing.** It drives copy: a warning on `/me` and `/me/settings`,
 a note on `/login` when a matching address is typed, and a field the
-portal's Users view renders like any other. The user or an admin can set
+console's Users app renders like any other. The user or an admin can set
 or clear it; every change is audited `shared_mailbox_changed{by, from, to}`.
 
 The heuristic is a guess, and both directions of correction matter: `info@`
@@ -486,7 +486,7 @@ is the only access-relevant fact a `v1:identity:user` row carries (see
 A cluster-wide role is set by an owner or admin over `IdentityAdminMsg`
 (`Service.SetUserRole`, `component/identity/adminops/adminops.go`), audited
 as `user_role_changed`. The admin screens that call it live in the MemQL
-portal, not the identity binary's own web app -- `/admin/*` on the identity
+console, not the identity binary's own web app -- `/admin/*` on the identity
 binary itself is now just its sign-in pages plus an `/admin/` root that
 answers `410 Gone`. There is no separate partition-grant mutation to run:
 setting the role is the whole of it.

@@ -20,7 +20,7 @@ Related: [access-model.md](access-model.md) ·
 ## What this is for, and what it removes
 
 MemQL is an OAuth 2.1 **authorization server**: claude.ai, the VS Code
-extension and the portal authorize against it. Until this, a person always
+extension and the console authorize against it. Until this, a person always
 proved themselves to MemQL directly — magic link, passkey, device code,
 recovery key. For an organization already on Microsoft 365 that is the wrong
 shape:

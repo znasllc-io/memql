@@ -61,7 +61,7 @@ is the back-channel the app uses to reach back in.
 `claude-code` and `codex` are the only ids the engine will open a session for.
 A cockpit may report others — they are stored on
 `v1:worker:registration.apps` and are never given a routing label, so they are
-visible in the portal and unroutable.
+visible in the console and unroutable.
 
 This is the direction that fails safe. A cockpit ships on its own cadence; if
 an unknown id could be driven, a newer cockpit reporting a third app would make
@@ -137,7 +137,7 @@ Three kinds:
 > **`run` is the only kind anything initiates today.** The protocol carries all
 > three and the runner accepts all three; `open` and `attach` have no
 > engine-side caller yet, because a planner Task is autonomous by definition —
-> they are for a portal hand-off and a resume, neither of which exists. Said
+> they are for a console hand-off and a resume, neither of which exists. Said
 > plainly here rather than implied, because the same section of CLAUDE.md spent
 > two years describing a coding agent nothing ran. The cockpit half implements
 > all three (memql-cockpit#347 / #350); the engine-side initiator is the
@@ -256,8 +256,10 @@ A refusal names which gate refused it.
 
 ## Delegation is a preference with a fallback
 
-`v1:worker:delegationPolicy`, one row per user, edited at **/machines** in the
-portal.
+`v1:worker:delegationPolicy`, one row per user. **No console surface edits it
+today** -- the portal's Local apps page did, and epic memql#4984 retired the
+portal without moving that editor into MemQL OS; the gap is filed. Fleet ->
+Machines still lists each machine's local apps.
 
 | Field | Meaning |
 |---|---|
@@ -344,7 +346,7 @@ kubectl logs -n memql deploy/agent | grep 'cockpit-app container executor instal
 |---|---|
 | `cockpit-app: the backend is registered but not wired on this node` | the Task reached a node with no WorkerService. Only an agent node serves one |
 | `cockpit-app: no credential minter configured` | `MEMQL_IDENTITY_VERIFIER_BASE_URL` or `MEMQL_NODE_BOOTSTRAP_TOKEN` is unset on the agent. The run is REFUSED rather than started with a blank bearer — an app with no credential reaches nothing over MCP and reports that as "MemQL's tools are broken" |
-| `no machine online with claude-code allowed and signed in` | check the portal's /machines page; the badge says which half is missing |
+| `no machine online with claude-code allowed and signed in` | check Fleet -> Machines page; the badge says which half is missing |
 | `executorBackend "..." is not registered` at task creation | the name was validated against `RegisteredExecutors()`. With an empty registry the message says so |
 | A session stuck in `starting` | the node holding it died. The row is the record; a live session cannot survive its node |
 

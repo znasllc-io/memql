@@ -14,7 +14,7 @@ func TestDomainDerivations(t *testing.T) {
 		"MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER": "https://identity.memql.localhost",
 		"MEMQL_IDENTITY_BOOTSTRAP_DOMAIN":         "memql.localhost",
 		"MEMQL_DISCOVERY_GRPC_ENDPOINT":           "api.memql.localhost:443",
-		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     "https://api.memql.localhost,https://app.memql.localhost,https://portal.memql.localhost,https://os.memql.localhost",
+		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     "https://api.memql.localhost,https://app.memql.localhost,https://os.memql.localhost",
 		"MEMQL_MCP_PUBLIC_URL":                    "https://mcp.memql.localhost",
 	}
 	for name, wantVal := range want {
@@ -26,9 +26,8 @@ func TestDomainDerivations(t *testing.T) {
 	clients := got["MEMQL_IDENTITY_REGISTERED_CLIENTS"]
 	for _, fragment := range []string{
 		`"clientId":"cockpit"`,
-		`"clientId":"portal"`,
+		`"clientId":"os"`,
 		`"clientId":"app"`,
-		"https://portal.memql.localhost/auth/callback",
 		"https://os.memql.localhost/auth/callback",
 		"https://app.memql.localhost/auth/callback",
 		"http://127.0.0.1/cockpit/callback",
@@ -38,16 +37,21 @@ func TestDomainDerivations(t *testing.T) {
 		}
 	}
 
-	// ONE URI for the portal, not two. Registering both the origin it is
-	// served from now AND the one it moved off of is the accept-either
-	// pattern the no-shims rule forbids. memql#3711 is the move -- the portal
-	// is site #1, served at its own origin's root -- so the pre-move
-	// api.<d>/portal/ shape (from the 7ec983a1 api.<domain> rename, back when
-	// the bundle was still mounted on that front door) must be gone, not
-	// merely superseded.
-	if strings.Contains(clients, "https://api.memql.localhost/portal/auth/callback") {
-		t.Errorf("registered clients still carry the pre-memql#3711 api.<d>/portal/ "+
-			"redirect URI alongside the new portal.<d> one: %q", clients)
+	// ONE URI for the OS shell, not two. Registering both the origin it is
+	// served from now AND one it moved off of is the accept-either pattern
+	// the no-shims rule forbids -- and this derivation has moved a redirect
+	// URI three times now, so the negative half is the half that keeps it
+	// honest. The client was called `portal` and carried BOTH the portal's
+	// callback and the OS's until epic memql#4984 retired the portal; neither
+	// the old client id nor any portal.<d> URI may come back.
+	for _, gone := range []string{
+		"https://api.memql.localhost/portal/auth/callback",
+		"https://portal.memql.localhost/auth/callback",
+		`"clientId":"portal"`,
+	} {
+		if strings.Contains(clients, gone) {
+			t.Errorf("registered clients still carry the retired %q: %q", gone, clients)
+		}
 	}
 }
 

@@ -24,7 +24,7 @@ spec:
       containers:
         - name: identity
           env:
-            # The vite dev servers for the portal and a product SPA.
+            # The vite dev servers for the OS shell and a product SPA.
             #
             # An "extra" rather than part of what the domain derives, because
             # they are not domain-shaped: folding localhost origins into the

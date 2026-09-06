@@ -33,18 +33,18 @@ const (
 	seedWriteBaseBackoff = 300 * time.Millisecond
 )
 
-// memqlDomainEnv is the ONE install-domain input (#4222 / #3593). The portal and OS
-// site hostnames are derived from it on every global rematerialize; the
-// committed DSL seeds stay *.memql.localhost.
+// memqlDomainEnv is the ONE install-domain input (#4222 / #3593). The OS site
+// hostname is derived from it on every global rematerialize; the committed DSL
+// seed stays os.memql.localhost.
 const memqlDomainEnv = "MEMQL_DOMAIN"
 
-// defaultPortalHostname is the product fail-closed hostname when MEMQL_DOMAIN
-// is unset or empty. Same committed default as dsl/platform/seeds.memql.
-const defaultPortalHostname = "portal.memql.localhost"
-
-const portalSiteSeedName = "portal"
 const osSiteSeedName = "os"
-const portalSiteConcept = "site"
+
+// siteSeedConcept is the concept a site seed binds. Named for the CONCEPT and
+// not for its one inhabitant: it was `portalSiteConcept` while both the portal
+// and the OS were seeded through it, which read as though the portal owned the
+// check the OS also depended on (epic memql#4984).
+const siteSeedConcept = "site"
 
 // defaultOsHostname is the product fail-closed hostname when MEMQL_DOMAIN
 // is unset or empty. Same committed default as dsl/platform/seeds.memql.
@@ -390,7 +390,6 @@ func (m *SeedMaterializer) materializeGlobal(ctx context.Context, def *SeedDefin
 		return fmt.Errorf("global seed %q must declare a string `id` field", def.Name)
 	}
 	args := buildArgsFromBody(def.Body, def.UseConcept, idVal.str, "")
-	applyPortalSiteHostname(def, args)
 	applyOsSiteHostname(def, args)
 	ctx = provenance.ContextWithProvenance(ctx, provenance.Seed(def.Name))
 	return m.invokeCreateMutation(ctx, def.UseConcept, args)
@@ -418,49 +417,26 @@ func (m *SeedMaterializer) materializePerUser(ctx context.Context, def *SeedDefi
 	return m.invokeCreateMutation(ctx, def.UseConcept, args)
 }
 
-// applyPortalSiteHostname rewrites the portal site hostname from MEMQL_DOMAIN
-// on every global rematerialize (#4222). The committed seed in
-// dsl/platform/seeds.memql stays portal.memql.localhost; this overwrite is
-// why a kubectl patch of the site row is out of scope -- the next boot sweep
-// would clobber it.
-//
-// Only the `portal` / concept `site` seed is touched. The hostname is
-// frontdoor.PortalHost -- the same call cmd/frontdoorhosts makes for the
-// portal's Ingress rule and certificate SAN and envregistry makes for its
-// redirect URI (memql#4224) -- so the certificate cannot name a host the site
-// row does not carry. Unset or empty MEMQL_DOMAIN fail-closed to
-// portal.memql.localhost.
-func applyPortalSiteHostname(def *SeedDefinition, args map[string]any) {
-	if def == nil || args == nil {
-		return
-	}
-	if def.Name != portalSiteSeedName || def.UseConcept != portalSiteConcept {
-		return
-	}
-	args["hostname"] = portalSiteHostname(os.Getenv(memqlDomainEnv))
-}
 
 // applyOsSiteHostname rewrites the OS site hostname from MEMQL_DOMAIN on
-// every global rematerialize (memql#4705), the same way applyPortalSiteHostname
-// does for the portal. The committed seed stays os.memql.localhost.
+// every global rematerialize (memql#4705, and #4222 before it for the portal
+// this replaced). The committed seed in dsl/platform/seeds.memql stays
+// os.memql.localhost; this overwrite is why a kubectl patch of the site row is
+// out of scope -- the next boot sweep would clobber it.
+//
+// Only the `os` / concept `site` seed is touched. The hostname is
+// frontdoor.OsHost -- the same call cmd/frontdoorhosts makes for the OS's
+// Ingress rule and certificate SAN and envregistry makes for its redirect URI
+// (memql#4224) -- so the certificate cannot name a host the site row does not
+// carry. Unset or empty MEMQL_DOMAIN fail-closed to os.memql.localhost.
 func applyOsSiteHostname(def *SeedDefinition, args map[string]any) {
 	if def == nil || args == nil {
 		return
 	}
-	if def.Name != osSiteSeedName || def.UseConcept != portalSiteConcept {
+	if def.Name != osSiteSeedName || def.UseConcept != siteSeedConcept {
 		return
 	}
 	args["hostname"] = osSiteHostname(os.Getenv(memqlDomainEnv))
-}
-
-// portalSiteHostname is the pure derivation: frontdoor.PortalHost when
-// MEMQL_DOMAIN is set, else the committed localhost default.
-func portalSiteHostname(domain string) string {
-	domain = strings.TrimSpace(domain)
-	if domain == "" {
-		return defaultPortalHostname
-	}
-	return frontdoor.PortalHost(domain)
 }
 
 // osSiteHostname is the pure derivation: frontdoor.OsHost when MEMQL_DOMAIN

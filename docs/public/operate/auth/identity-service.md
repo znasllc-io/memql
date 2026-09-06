@@ -19,8 +19,9 @@ the cluster. It runs as its own node-type binary
 - What is left of the admin web app at `/admin/*`: the sign-in
   pages, and an `/admin/` root that answers `410 Gone`. Six of its
   seven screens (users, tokens, audit, JWKS, cluster settings, and
-  the dashboard) moved into the MemQL portal in memql#3324, writes
-  and owner/admin gate together -- see [../portal.md](../portal.md).
+  the dashboard) moved into the MemQL portal in memql#3324 and into MemQL OS
+  when epic memql#4984 retired the portal, writes and owner/admin gate
+  together -- see [../memql-os.md](../memql-os.md).
   Deployments followed in memql#3380: `DeployControlService` still
   runs against an on-disk overlay checkout and therefore exists only
   on this node, but a bff now forwards the deploy RPCs here over
@@ -56,7 +57,7 @@ via magic link, then carry the resulting access JWT to bff/agent/etc.
 
 Browsers send `/auth/refresh`, `/auth/logout`, `/oauth/token`, and
 `/.well-known/jwks.json` SAME-ORIGIN through the SPA's host (e.g.
-`app.${DOMAIN}` / `portal.${DOMAIN}`). The edge binary proxies those
+`app.${DOMAIN}` / `os.${DOMAIN}`). The edge binary proxies those
 four exact paths to the identity service
 (`MEMQL_IDENTITY_VERIFIER_BASE_URL`); `/auth/callback` is a site
 route and is not forwarded. Top-level magic-link redirects (the
@@ -66,7 +67,7 @@ empty `identityApiBaseUrl` so `fetch()` stays on the site origin.
 
 Same-origin XHR avoids a Safari / Chrome quirk where cross-origin
 fetch to a sibling host that shares a cert + IP can land
-on the wrong vhost (HTTP/2 connection coalescing). The portal
+on the wrong vhost (HTTP/2 connection coalescing). The OS shell
 then reports `identity returned no access token (invalid_response)`
 because the SPA fallback answered 200 HTML. A front-door nginx
 `location =` block for each of the four paths is still fine as
@@ -119,7 +120,7 @@ the security-headers middleware.
 | `POST /me/devices/sessions/revoke`, `POST /me/devices/revoke-all` | Bearer or admin cookie | End one session, or all of them. The target is resolved from the caller's OWN session list, so a caller-supplied id cannot reach another person's row |
 | `POST /me/settings/sign-in-policy`, `POST /me/settings/shared-mailbox` | Bearer or admin cookie | The two magic-link hardening controls (memql#4304). Enabling `passkey_only` is refused server-side unless the caller holds an active passkey |
 | `GET`/`POST /me/tokens`, `POST /me/tokens/revoke` | Bearer or admin cookie | PAT issuance and revocation. Mounts only when the PAT adapter is wired |
-| `GET /admin/*` | admin session | The sign-in pages, and an `/admin/` root that answers `410 Gone`; every page moved to the portal |
+| `GET /admin/*` | admin session | The sign-in pages, and an `/admin/` root that answers `410 Gone`; every page moved to the console |
 | `GET /static/` | none | Cached UI assets |
 
 ## Required environment variables
@@ -174,7 +175,7 @@ snapshotted at boot:
 
 | Source | Set by | Takes effect | For |
 |---|---|---|---|
-| `MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS` (plus `MEMQL_IDENTITY_CORS_EXTRA_ORIGINS`) | env, on the identity Deployment | on restart | The **bootstrap** set every deployment has: identity itself, the portal, the app. Derived from `MEMQL_DOMAIN` where the overlay does not set it explicitly |
+| `MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS` (plus `MEMQL_IDENTITY_CORS_EXTRA_ORIGINS`) | env, on the identity Deployment | on restart | The **bootstrap** set every deployment has: identity itself, the OS shell, the app. Derived from `MEMQL_DOMAIN` where the overlay does not set it explicitly |
 | `corsOriginsJSON` on a `v1:identity:oauthClient` row | an **owner or admin**, over `IdentityAdminMsg` | **no restart** -- within 10 seconds | Any further origin: a customer's existing website calling this cluster with the MemQL SDK |
 
 The env list is checked first, in memory. Only a miss consults the graph, so the
@@ -222,7 +223,7 @@ this on is a decision about third-party MCP connectors and nothing else. See
 
 The reasoning, since "disabled by default" otherwise reads as mere caution:
 under one-cluster-per-customer most clusters route no `mcp.<domain>` at all, and
-their OAuth clients -- the portal, the Cockpit, the customer's own SPAs -- are
+their OAuth clients -- the OS shell, the Cockpit, the customer's own SPAs -- are
 known in advance and registerable through `MEMQL_IDENTITY_REGISTERED_CLIENTS`.
 Left on, the endpoint lets anyone who can reach identity create unbounded
 `v1:identity:oauthClient` rows and choose the `client_name` a human later
@@ -425,7 +426,7 @@ Two fixed values that have no env override, stated here because operators ask:
   and a base URL that yields no usable RP ID makes the passkey routes refuse
   rather than guess. Changing it orphans every passkey already enrolled.
 - Enrolment tokens are 15 minutes by default with a 24-hour ceiling; a longer
-  request is clamped, not refused. Set per-issue (`--ttl`, or the portal's
+  request is clamped, not refused. Set per-issue (`--ttl`, or the console's
   lifetime picker), not by env.
 
 ## Token + session lifetimes
@@ -479,7 +480,7 @@ With nothing configured, the email lane used to select a `LogSender` that
 wrote the message to the pod log and returned `nil`. Mail did not fail
 silently -- it **failed upward**. Every layer above reported success: the
 setup wizard said the link was sent, the audit row recorded
-`magic_link_issued` with `outcome=success`, and the portal's integration row
+`magic_link_issued` with `outcome=success`, and the console's integration row
 said "degraded", which on a dev cluster means "as intended". The only evidence
 was a human not receiving mail, which is indistinguishable from a spam filter.
 On the first real cloud instance the cluster owner could not claim their own
@@ -507,14 +508,14 @@ Four layers changed, and each one closes a different way of not finding out:
   real credential that can be re-requested, and a response that varied with
   delivery would tell an unauthenticated visitor which addresses are
   registered.
-- **The portal** -- the email integration reports `unhealthy` rather than
+- **The console** -- the email integration reports `unhealthy` rather than
   `degraded`, because on this install nothing can be sent at all.
 
 **Break-glass: `MEMQL_EMAIL_ALLOW_LOG_ONLY=true`.** `make up
 DOMAIN=lab.example.com` stands up a genuinely local parity cluster on a name
 that looks like production, and refusing to boot it would be a regression for
 a developer who never wanted mail. Setting this says log-only is deliberate
-here; the boot log says so, and the portal keeps calling the lane degraded.
+here; the boot log says so, and the console keeps calling the lane degraded.
 Never set it on an install real people sign in to -- their sign-in links go to
 the pod log.
 
@@ -940,7 +941,7 @@ every request.
   manager has loaded.
 - `GET /.well-known/jwks.json` always reflects the current
   PublicKeySet (current + retiring during overlap).
-- The portal's Keys page shows live key metadata (kid, role, algorithm) and
+- Settings -> Keys shows live key metadata (kid, algorithm, use) and
   explains why there is no rotate control.
 - Prometheus, on the identity node (`component/metrics`):
   `memql_identity_signing_key_created_timestamp_seconds` (key age is
@@ -969,7 +970,7 @@ between an audit trail an operator can read and one they scroll past
 | **Volume** | one row per lifecycle moment | one row per rotation (~every 10.5 minutes per open tab) and one per PAT-authenticated request |
 | **Retention** | `MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS`, default 365. The daily sweep only COUNTS -- MemQL has no `delete()` | `MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS`, default 30, HARD-DELETED daily by a Go job on the identity node |
 | **Who can read it** | cluster owner or admin (`recentAuditEvents` carries `requiresOwnerOrAdmin`) | the cluster owner sees everything (`recentAuthActivity`); **every user sees their own** (`authActivityForSelf`) |
-| **Where it renders** | the portal's Audit Trail at `/views/audit` | the concept browser, like any concept |
+| **Where it renders** | no console surface today (epic memql#4984 retired the portal's Audit Trail; a replacement is filed) | the concept browser, like any concept |
 
 **Why the reads split that way.** `authActivity` declares
 `@rowAuthz(owner="actorUserId", clusterOwner)` -- the owner, or a cluster owner.

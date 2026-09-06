@@ -149,22 +149,22 @@ func TestSiteRowGateUserSeesOwnClusterOwnerSeesAll(t *testing.T) {
 	}
 }
 
-// The seeded portal row carries an EMPTY ownerUserId, which means CLUSTER-OWNED
-// rather than "owned by nobody in particular". An empty owner must never match a
-// caller -- sameRowAuthzOwner refuses it outright -- so the row is reachable
-// through the admin branch alone.
+// The seeded OS site row carries an EMPTY ownerUserId, which means
+// CLUSTER-OWNED rather than "owned by nobody in particular". An empty owner
+// must never match a caller -- sameRowAuthzOwner refuses it outright -- so the
+// row is reachable through the admin branch alone.
 func TestSiteClusterOwnedRowIsReachableOnlyThroughTheAdminBranch(t *testing.T) {
 	siteDecl(t)
-	portal := rowOf(t, conceptPlatformSite, conceptPlatformSite+":portal",
-		map[string]any{"ownerUserId": "", "hostname": "portal.memql.localhost", "systemOwned": true})
+	shell := rowOf(t, conceptPlatformSite, conceptPlatformSite+":os",
+		map[string]any{"ownerUserId": "", "hostname": "os.memql.localhost", "systemOwned": true})
 
-	if admitRowAuthzNode(callerCtx("user-a"), portal) {
-		t.Error("an ordinary user was admitted to the cluster-owned portal row. An EMPTY " +
+	if admitRowAuthzNode(callerCtx("user-a"), shell) {
+		t.Error("an ordinary user was admitted to the cluster-owned OS site row. An EMPTY " +
 			"ownerUserId is a legal predicate value that would match every caller whose id is " +
 			"also empty -- which is why sameRowAuthzOwner refuses it rather than comparing it")
 	}
-	if !admitRowAuthzNode(ownerRoleCtx("root"), portal) {
-		t.Error("a cluster owner was denied the portal row; the admin branch does not read the " +
+	if !admitRowAuthzNode(ownerRoleCtx("root"), shell) {
+		t.Error("a cluster owner was denied the OS site row; the admin branch does not read the " +
 			"owner field at all")
 	}
 }
@@ -195,10 +195,10 @@ func TestSiteCrossUserUpdateIsRefused(t *testing.T) {
 		t.Fatalf("a cluster owner was refused a write onto a user's site: %v", err)
 	}
 	// And a cluster-OWNED row (empty owner) is nobody's but the operator's.
-	cluster := map[string]any{"ownerUserId": "", "hostname": "portal.memql.localhost"}
+	cluster := map[string]any{"ownerUserId": "", "hostname": "os.memql.localhost"}
 	if err := guardRowAuthzWrite(callerCtx("user-a"), conceptPlatformSite,
-		conceptPlatformSite+":portal", cluster, true, true); err == nil {
-		t.Fatal("a user was allowed to write the cluster-owned portal row")
+		conceptPlatformSite+":os", cluster, true, true); err == nil {
+		t.Fatal("a user was allowed to write the cluster-owned OS site row")
 	}
 }
 
@@ -233,8 +233,8 @@ func TestCreateSiteStampsTheOwnerFromTheActor(t *testing.T) {
 }
 
 // The Go step UNDOES that stamp when the writer is the deployment rather than a
-// person, leaving the row cluster-owned. That is how the seeded portal -- site
-// #1, re-materialized on EVERY boot -- stays the platform's row.
+// person, leaving the row cluster-owned. That is how the seeded OS site --
+// re-materialized on EVERY boot -- stays the platform's row.
 func TestSiteOwnerStampIsUndoneForADeploymentWriter(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -246,7 +246,7 @@ func TestSiteOwnerStampIsUndoneForADeploymentWriter(t *testing.T) {
 			name:    "the seed materializer",
 			ctx:     ownerRoleCtx("system:seedMaterializer"),
 			actor:   "system:seedMaterializer",
-			payload: map[string]any{"hostname": "portal.memql.localhost", "ownerUserId": "system:seedMaterializer"},
+			payload: map[string]any{"hostname": "os.memql.localhost", "ownerUserId": "system:seedMaterializer"},
 		},
 		{
 			name:    "a cluster owner creating a site",
@@ -322,7 +322,7 @@ func TestSiteOwnerStampNeverNamesAThirdParty(t *testing.T) {
 // already refused anybody who is not the stored owner, and the deltas for
 // updateSiteBundle / updateSiteStatus / deleteSite name no owner at all.
 func TestSiteOwnerStampDoesNotRunOnAnOrdinaryUpdate(t *testing.T) {
-	payload := map[string]any{"hostname": "portal.memql.localhost", "ownerUserId": ""}
+	payload := map[string]any{"hostname": "os.memql.localhost", "ownerUserId": ""}
 	if err := applySiteOwnerStamp(callerCtx("user-a"), payload, true, "user-a"); err != nil {
 		t.Fatalf("applySiteOwnerStamp: %v", err)
 	}
@@ -374,8 +374,8 @@ func TestUserSiteHostnamePolicy(t *testing.T) {
 		{"api.example.com", false, "reserved: the engine's API edge"},
 		{"identity.example.com", false, "reserved: sign-in"},
 		{"mcp.example.com", false, "reserved: the MCP protocol head"},
-		{"portal.example.com", false, "reserved: the platform's own console, site #1"},
 		{"os.example.com", false, "reserved: the platform's OS shell"},
+		{"portal.example.com", false, "reserved: the RETIRED portal's label, kept as a squat label"},
 		{"www.example.com", false, "reserved: reads as the organization's"},
 		{"admin.example.com", false, "reserved: reads as the organization's"},
 		{"mail.example.com", false, "reserved: where a mail host would land"},
@@ -393,8 +393,8 @@ func TestUserSiteHostnamePolicy(t *testing.T) {
 	}
 }
 
-// The reserved list is DERIVED from the front door's own role set plus the
-// portal, not re-listed. A second copy would mean adding a front-door role
+// The reserved list is DERIVED from the front door's own role set plus the OS
+// shell, not re-listed. A second copy would mean adding a front-door role
 // silently opens its hostname to the first user who asks for it.
 func TestReservedSiteLabelsCoverEveryFrontDoorRole(t *testing.T) {
 	reserved := reservedSiteLabels()
@@ -405,11 +405,15 @@ func TestReservedSiteLabelsCoverEveryFrontDoorRole(t *testing.T) {
 				frontdoor.RoleHost(r, "example.com"))
 		}
 	}
-	if !reserved[frontdoor.PortalSite] {
-		t.Error("the portal's own label is not reserved")
-	}
 	if !reserved[frontdoor.OsSite] {
 		t.Error("the OS shell's own label is not reserved")
+	}
+	// `portal` is no longer a front-door host and is STILL reserved, as a
+	// squat label (epic memql#4984). Un-reserving a label is a one-way door,
+	// and a user site at portal.<domain> on a MemQL install is exactly the
+	// confusion that list exists to prevent.
+	if !reserved["portal"] {
+		t.Error("the retired portal's label was freed rather than moved to the squat list")
 	}
 	for _, l := range squatReservedSiteLabels {
 		if !reserved[l] {
@@ -418,8 +422,8 @@ func TestReservedSiteLabelsCoverEveryFrontDoorRole(t *testing.T) {
 	}
 	// And nothing beyond those: an over-broad reserved list refuses names for
 	// no stated reason, which is how a list acquires entries nobody can defend.
-	if want := len(frontdoor.Roles()) + 2 + len(squatReservedSiteLabels); len(reserved) != want {
-		t.Errorf("the reserved set holds %d labels, want %d (%d roles + portal + os + %d squat "+
+	if want := len(frontdoor.Roles()) + 1 + len(squatReservedSiteLabels); len(reserved) != want {
+		t.Errorf("the reserved set holds %d labels, want %d (%d roles + os + %d squat "+
 			"labels). Every entry needs a reason recorded beside it",
 			len(reserved), want, len(frontdoor.Roles()), len(squatReservedSiteLabels))
 	}
@@ -444,13 +448,13 @@ func TestSiteHostnamePolicyDomainComesFromMemqlDomain(t *testing.T) {
 	}
 }
 
-// The policy's default domain and the portal seed's default hostname are ONE
-// derivation. If they drift, a fresh local cluster serves its portal at one
+// The policy's default domain and the OS site seed's default hostname are ONE
+// derivation. If they drift, a fresh local cluster serves its own shell at one
 // domain and admits user sites on another -- and both files look right.
-func TestSiteHostnamePolicyDefaultDomainMatchesThePortalSeed(t *testing.T) {
-	if got := frontdoor.PortalHost(defaultSiteDomain); got != defaultPortalHostname {
-		t.Fatalf("frontdoor.PortalHost(%q) = %q, but the portal seed defaults to %q",
-			defaultSiteDomain, got, defaultPortalHostname)
+func TestSiteHostnamePolicyDefaultDomainMatchesTheOsSeed(t *testing.T) {
+	if got := frontdoor.OsHost(defaultSiteDomain); got != defaultOsHostname {
+		t.Fatalf("frontdoor.OsHost(%q) = %q, but the OS site seed defaults to %q",
+			defaultSiteDomain, got, defaultOsHostname)
 	}
 }
 
@@ -496,31 +500,31 @@ func TestSiteHostnamePolicyShapeRuleIsWaivedForPrivilegedCallers(t *testing.T) {
 }
 
 // A system actor skips the probe entirely, so the SeedMaterializer's re-write of
-// the portal row on every boot cannot be refused by a rule written for people --
+// the OS site row on every boot cannot be refused by a rule written for people --
 // and cannot be broken by the database being unreachable at that moment either.
 func TestSiteHostnamePolicySkipsTheSystemActorEntirely(t *testing.T) {
 	e := &MemQLEngine{}
 	err := e.validateSiteHostnamePolicy(context.Background(),
-		map[string]any{"hostname": "portal.memql.localhost"}, "portal", "system:seedMaterializer", false, "")
+		map[string]any{"hostname": "os.memql.localhost"}, "os", "system:seedMaterializer", false, "")
 	if err != nil {
-		t.Fatalf("the seed materializer's portal write was refused: %v\n"+
+		t.Fatalf("the seed materializer's OS site write was refused: %v\n"+
 			"It re-materializes site #1 on EVERY boot; a refusal here is a cluster that comes up "+
 			"with no way to manage sites", err)
 	}
 }
 
-// Self-exclusion is by the CANONICAL id. A mutation carries a bare `portal`
-// while storage holds `v1:platform:site:portal`; compared raw, a row is a
+// Self-exclusion is by the CANONICAL id. A mutation carries a bare `os`
+// while storage holds `v1:platform:site:os`; compared raw, a row is a
 // duplicate of itself and every re-publish of an existing site is refused.
 func TestCanonicalSiteStorageIdCollapsesBothSpellings(t *testing.T) {
-	bare := canonicalSiteStorageId("portal")
-	qualified := canonicalSiteStorageId(conceptPlatformSite + ":portal")
+	bare := canonicalSiteStorageId("os")
+	qualified := canonicalSiteStorageId(conceptPlatformSite + ":os")
 	if bare != qualified {
 		t.Fatalf("canonicalSiteStorageId: bare=%q qualified=%q -- self-exclusion never matches, so "+
 			"every update of an existing site is refused as a duplicate of itself", bare, qualified)
 	}
-	if bare != conceptPlatformSite+":portal" {
-		t.Fatalf("canonicalSiteStorageId(\"portal\") = %q, want the stored spelling", bare)
+	if bare != conceptPlatformSite+":os" {
+		t.Fatalf("canonicalSiteStorageId(\"os\") = %q, want the stored spelling", bare)
 	}
 	if canonicalSiteStorageId("  ") != "" {
 		t.Fatal("a blank id must not canonicalize into a real-looking one")

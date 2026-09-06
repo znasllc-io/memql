@@ -248,8 +248,8 @@ MemQL/
 ├── integrations/         # External service integrations
 │   ├── cognition/        # AI collaboration
 │   └── voice/            # Voice + video pipeline (LiveKit room, avatar)
-├── clients/              # Surfaces built ON the platform (SPAs, portal)
-│   └── portal/           # MemQL Portal -- the platform's ops console
+├── clients/              # Surfaces built ON the platform (SPAs, the shell)
+│   └── os/               # MemQL OS -- the platform's ops console
 ├── dsl/                  # The MemQL DSL tree (one directory per namespace)
 │   ├── cognition/        # e.g. concepts.memql, queries.memql, mutations.memql,
 │   │                     #      tools.memql, automations.memql, ... per namespace
@@ -293,7 +293,7 @@ service** (`component/identity`):
 - OAuth-style code exchange for SPAs (`/oauth/token`)
 - JWKS-published EdDSA signing keys (`/.well-known/jwks.json`)
 - Role-based access control (RBAC) per `v1:identity:user.role`
-- Admin surfaces (people, tokens, keys, settings) live in the MemQL portal
+- Admin surfaces (people, tokens, keys, settings) live in MemQL OS
 
 **Developer access:**
 - **Local:** All developers (own machine)

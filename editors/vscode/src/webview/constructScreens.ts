@@ -166,9 +166,6 @@ function actionsHtml(input: ConstructPageInput): string {
       `<button class="secondary" type="button" data-act="viewSourceFromCluster">View source from cluster</button>`,
     );
   }
-  if (input.construct.kind === "concept") {
-    buttons.push(`<button class="secondary" type="button" data-act="browseRows">Browse rows in portal</button>`);
-  }
   if (buttons.length === 0) return "";
   return `<div class="actions">${buttons.join("")}</div>`;
 }

@@ -418,7 +418,7 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// form. Add new pre-auth GETs here rather than open-coding
 	// "if signed in, redirect" inside the handler.
 	preAuth := func(h http.HandlerFunc) http.HandlerFunc {
-		return s.redirectIfAuthenticated(s.portalHome(nil), h)
+		return s.redirectIfAuthenticated(s.shellHome(nil), h)
 	}
 	mux.HandleFunc("GET /{$}", wrap(preAuth(s.handleRoot)))
 	mux.HandleFunc("GET /login", wrap(preAuth(s.handleLoginGet)))

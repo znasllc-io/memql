@@ -446,7 +446,7 @@ broadcasts to every replica (`authoring.promote.*` / `authoring.demote.*`), and
 each replica re-registers the concept into its own registry -- which is where the
 delta is emitted, so a promote on one replica reaches a follower on another with
 no reconnect. Clients use `QueryClient.subscribeConceptRegistry` (sdk/ts); the
-portal's `useConcepts` hook folds the deltas in place.
+console's concept hook folds the deltas in place.
 
 ### Example: Subscribe to All Graph Events
 

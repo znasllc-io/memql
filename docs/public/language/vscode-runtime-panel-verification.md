@@ -225,7 +225,7 @@ somebody has already made:
   uses, sitting in this same file -- is exactly what fails.
 - **The host is `api.<domain>`, not `bff.<domain>`.** There is no
   `bff.memql.localhost` ingress. The front door is `api-front-door`, which
-  routes the HTTP paths -- `/memql/ws`, `/portal`, `/healthz` -- to
+  routes the HTTP paths -- `/memql/ws`, `/healthz` -- to
   `bff-http:8085` and `/` to `bff:50051`. Targeting "the bff" gets a 404.
 - **Absent `local` means NOT local.** Omit the key on the second entry rather
   than writing `local: false`; the Cockpit declares the field `omitempty` and
@@ -597,7 +597,7 @@ Open a file containing an `automation`.
 ## 5. Deployments, and the connection page (memql#3733)
 
 The Cluster tab is gone. Topology -- the pod grid, the replica tally, the
-orphan verdicts -- is cluster state, and the portal owns it; **Open Portal**,
+orphan verdicts -- is cluster state, and the console owns it; **Open Console**,
 on the Clusters row and on the connection page, is one click away. What
 replaced it is split in two: Deployments answers "what do I operate", and the
 connection page answers "what does this editor dial, and as whom".
@@ -762,8 +762,8 @@ somebody else is using.
 - [ ] Signed in: the email and role come from the live session
 - [ ] The token shows a **duration** and says it renews itself; leave the page
       open for a minute and the duration updates without reopening it
-- [ ] **Open Portal** opens the cluster's portal -- its own site row when
-      connected, the composed `api.<domain>/portal/` when not
+- [ ] **Open Console** opens the cluster's MemQL OS shell -- its own site row
+      when connected, the composed `os.<domain>/` when not
 - [ ] **Remove from list** on a LOCAL cluster says the cluster keeps running and
       names Deployments as where to uninstall it
 - [ ] After removing it, the **+** offers *Connect to the local cluster*, and

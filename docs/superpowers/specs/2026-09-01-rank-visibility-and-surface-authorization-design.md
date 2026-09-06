@@ -181,7 +181,7 @@ themselves declare.
 ## E. Testing
 
 - The ladder has ONE source: a test that fails if the OS ships a hardcoded
-  ordering, in the spirit of `TestFleetOnlineWindowMatchesPortal` (two
+  ordering, in the spirit of `TestFleetOnlineWindowMatchesTheClients` (two
   implementations of one rule, pinned to agree).
 - Rank rules are proved against a REAL engine and database, per rank pair, for
   read AND write AND subscription -- a green single-actor unit test is the

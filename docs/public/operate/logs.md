@@ -29,8 +29,9 @@ of [the Deployables program](../../superpowers/specs/2026-09-02-deployables-prog
 
 Two things are deliberately NOT persisted:
 
-- **The portal.** It is deprecated and will be removed. It is not
-  instrumented, so it has no component name and appears in no facet.
+- **The portal.** Retired in epic memql#4984. It was never instrumented, so it
+  has no component name and appears in no facet -- which is why its removal
+  changed nothing here.
 - **A hosted site's browser console.** MemQL has no anonymous write, the
   edge's `apiProxy` carries no site id, and a new HTTP route needs the
   owner's explicit approval under the gRPC-first policy. The recommended

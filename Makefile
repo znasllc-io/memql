@@ -75,7 +75,7 @@ workbench:
 mcp:
 	$(GO) build $(GOFLAGS) -tags mcp -o $(BIN_DIR)/memql-mcp .
 
-## Build edge node binary (serves hosted sites + the portal)
+## Build edge node binary (serves hosted sites, the OS shell among them)
 edge:
 	$(GO) build $(GOFLAGS) -tags edge -o $(BIN_DIR)/memql-edge .
 
@@ -440,7 +440,7 @@ db-failover-litmus:
 # ---------------------------------------------------------------------------
 
 ##@ Test & SDK
-.PHONY: test test-v test-cover sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test vscode-deps vscode-test vscode-test-host portal-install portal-typecheck portal-test portal-build portal-clean os-install os-typecheck os-test os-build os-clean
+.PHONY: test test-v test-cover sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test vscode-deps vscode-test vscode-test-host os-install os-typecheck os-test os-build os-clean
 
 ## Regenerate the typed SDK surface from the DSL tree. Reads every
 ## query / mutation / logic under dsl/**/*.memql and emits typed
@@ -449,7 +449,7 @@ db-failover-litmus:
 ## declare-module + prototype assignment). The TS half was deliberately
 ## OFF for a while (#171 / #172 / #43 kept sdk-core client-agnostic and
 ## left typed TS emission to product BFFs); memql#4232 turned it back on
-## for the CORE constructs so first-party clients -- the portal, the
+## for the CORE constructs so first-party clients -- the OS shell, the
 ## extension -- consume the same generated, typecheck-enforced surface
 ## the Go side always had. A product BFF still composes its OWN surface
 ## from `core DSL ∪ its DSL` by importing sdk/gen. Re-run after any DSL
@@ -608,38 +608,6 @@ vscode-deps:
 ## import `vscode`; the API layer is exercised by the host lane below.
 vscode-test: vscode-deps
 	cd editors/vscode && npm ci --no-audit --no-fund && npm test
-
-## Install the MemQL Portal's dependencies (clients/portal), building the
-## sdk/ts + sdk/ts-viewkit `file:` dependencies first -- their dist/ must
-## exist before anything in the portal can resolve against them. Idempotent.
-portal-install:
-	bash scripts/portal/build.sh install
-	bash scripts/os/build.sh install
-
-## Typecheck the portal. `tsc -b` over both projects: the browser sources and
-## vite.config.ts are deliberately separate type environments.
-portal-typecheck:
-	bash scripts/portal/build.sh typecheck
-	bash scripts/os/build.sh typecheck
-
-## Run the portal test suite (vitest + @testing-library/react on jsdom).
-portal-test:
-	bash scripts/portal/build.sh test
-	bash scripts/os/build.sh test
-
-## Build the portal bundle into clients/portal/dist. This is what the
-## Dockerfile's portal stage runs. To serve a locally-built bundle, point a
-## site row's bundleRef at it (file:///abs/path/clients/portal/dist via
-## updateSiteBundle) -- the portal is site #1 (memql#3711), so there is no
-## longer an env var that repoints it.
-portal-build:
-	bash scripts/portal/build.sh build
-	bash scripts/os/build.sh build
-
-## Remove the portal's build output (dist + the vite/tsc caches). Leaves
-## node_modules alone -- `npm ci` already fixes anything stale in there.
-portal-clean:
-	bash scripts/portal/build.sh clean
 
 ## Install the MemQL OS shell dependencies (clients/os).
 os-install:

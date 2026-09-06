@@ -337,7 +337,7 @@ Records needed (`<domain>` is the instance's `MEMQL_DOMAIN`):
 | `api.<domain>` | A | ingress public IP |
 | `identity.<domain>` | A | ingress public IP |
 | `mcp.<domain>` | A | ingress public IP |
-| `portal.<domain>` | A | ingress public IP |
+| `os.<domain>` | A | ingress public IP |
 | `*.<domain>` | A | ingress public IP |
 | `<domain>` (apex) | A | ingress public IP |
 

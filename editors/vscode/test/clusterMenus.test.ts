@@ -513,7 +513,7 @@ test("both commands the menu names are declared", () => {
     "memql.clusters.uninstall",
     "memql.clusters.repair",
     "memql.clusters.connection",
-    "memql.clusters.openPortal",
+    "memql.clusters.openConsole",
   ]) {
     assert.ok(declared.has(command), `${command} appears in a menu but is not a contributed command`);
   }

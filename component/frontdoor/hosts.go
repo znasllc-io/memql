@@ -7,7 +7,7 @@
 // compiled, reviewed and deployed separately: the Ingress rules and the
 // certificate SANs under deploy/k8s (written by cmd/frontdoorhosts), the env
 // values every node derives at boot (component/envregistry/domain.go), and the
-// portal site row the engine seeds from MEMQL_DOMAIN (component/memql's
+// OS site row the engine seeds from MEMQL_DOMAIN (component/memql's
 // SeedMaterializer). When those disagree the cluster does not fail to start --
 // identity issues tokens naming an issuer nothing is served at, every other
 // node's verifier rejects them, and the symptom is "sign-in is broken" with
@@ -39,11 +39,11 @@
 // serve an HTTP-01 challenge for a name that is not a host, and a single
 // wildcard dnsName fails the WHOLE order -- so the Certificate sat Pending, the
 // operator hand-edited it to exact names, and the edge Ingress whose tls.hosts
-// still said `*.<domain>` served ingress-nginx's self-signed default for
-// portal.<domain> ("This Connection Is Not Private").
+// still said `*.<domain>` served ingress-nginx's self-signed default for the
+// platform's own site host ("This Connection Is Not Private").
 //
 // So CertificateSANs is every EXACT host the front door serves -- the three
-// role hosts, the portal, and the apex -- and the wildcard is an Ingress RULE
+// role hosts, the OS shell, and the apex -- and the wildcard is an Ingress RULE
 // this package requests no SAN for. That is a statement about the HTTP-01
 // certificate this package derives, not about the wildcard being uncovered:
 // an overlay that declares a DNS-01 ClusterIssuer also declares a SECOND,
@@ -51,12 +51,14 @@
 // (memql#4347), which is why the render gate reads the SOLVER rather than
 // this list. Without such an issuer the wildcard rule still has nothing
 // behind it and every other site needs its own Certificate
-// (docs/public/operate/site-hosting.md). The portal and the OS shell are the two sites the
-// platform ships itself, which is why they are the sites this package can
-// name in advance. A server block under ingress-nginx is
-// created per Ingress RULE host, never per tls host, so naming the portal or the OS in
-// tls.hosts is not enough: each carries its own exact rule, pointing at the same
-// edge Service the wildcard does.
+// (docs/public/operate/site-hosting.md). The OS shell is the one site the
+// platform ships itself, which is why it is the site this package can name in
+// advance -- the MemQL Portal was the other until epic memql#4984 retired it,
+// and the slot it vacated is one the OS now occupies alone rather than a
+// second exception. A server block under ingress-nginx is created per Ingress
+// RULE host, never per tls host, so naming the OS in tls.hosts is not enough:
+// it carries its own exact rule, pointing at the same edge Service the
+// wildcard does.
 package frontdoor
 
 // Role is a front-door role: one of the fixed set of services the cluster
@@ -87,40 +89,32 @@ func RoleHost(role Role, domain string) string { return string(role) + "." + dom
 // SiteHost is the host a NAMED site is served at: `<name>.<domain>`.
 func SiteHost(name, domain string) string { return name + "." + domain }
 
-// PortalSite is the name of the one site the platform ships itself: the MemQL
-// Portal, site #1 (memql#3711). It is the seed id of its v1:platform:site row
-// and the label its hostname carries.
-const PortalSite = "portal"
-
-// PortalHost is the host the portal is served at: `portal.<domain>`.
+// OsSite is the name of the one site the platform ships itself: the MemQL OS
+// shell (memql#4705). It is the seed id of its v1:platform:site row and the
+// label its hostname carries.
 //
-// The portal is a site like any other to the edge, which resolves the request
-// Host against the graph and cannot tell it apart from a customer's SPA. What
-// makes it different to THIS package is that it is the only site whose name is
-// known before any operator creates a row, so it is the only site the
-// front-door certificate can name (memql#4224) -- and therefore the only site
-// with an exact Ingress rule of its own, because ingress-nginx builds a
-// certificate-bearing server block per RULE host, not per tls host.
-//
-// Every consumer of the portal's hostname composes it here: the engine's
-// SeedMaterializer (the site row's hostname), envregistry (the portal's OAuth
-// redirect URI and CORS origin) and cmd/frontdoorhosts (its rule and SAN). A
-// second spelling would be a certificate for a host the site row does not
-// carry.
-func PortalHost(domain string) string { return SiteHost(PortalSite, domain) }
-
-// OsSite is the name of the second site the platform ships itself: the MemQL
-// OS shell (memql#4705). Same exception the portal already has -- a closed,
-// known-in-advance platform host, not a customer site on the wildcard.
+// It is the SECOND inhabitant of this slot and the only one left. The MemQL
+// Portal held it first (memql#3711); epic memql#4984 retired the portal, and
+// the OS is what replaced the console it was -- so this is the same single
+// exception under a new name, not a survivor of a pair.
 const OsSite = "os"
 
 // OsHost is the host the OS shell is served at: `os.<domain>`.
 //
-// Like the portal it is a site to the edge and a named front-door host to this
-// package: exact Ingress rule, exact Certificate SAN, HTTP-01. Putting it on
-// `*.<domain>` would send Safari through edge site-hosting with no HTTP-01 SAN
-// (memql#4224). Every consumer composes the hostname here: the SeedMaterializer,
-// envregistry (OAuth redirect + CORS origin) and cmd/frontdoorhosts.
+// The OS is a site like any other to the edge, which resolves the request Host
+// against the graph and cannot tell it apart from a customer's SPA. What makes
+// it different to THIS package is that it is the only site whose name is known
+// before any operator creates a row, so it is the only site the front-door
+// certificate can name (memql#4224) -- and therefore the only site with an
+// exact Ingress rule of its own, because ingress-nginx builds a
+// certificate-bearing server block per RULE host, not per tls host. Putting it
+// on `*.<domain>` instead would send Safari through edge site-hosting with no
+// HTTP-01 SAN.
+//
+// Every consumer of the OS's hostname composes it here: the engine's
+// SeedMaterializer (the site row's hostname), envregistry (its OAuth redirect
+// URI and CORS origin) and cmd/frontdoorhosts (its rule and SAN). A second
+// spelling would be a certificate for a host the site row does not carry.
 func OsHost(domain string) string { return SiteHost(OsSite, domain) }
 
 // SitesWildcard is the one Ingress rule that routes every present and future
@@ -139,12 +133,12 @@ func Apex(domain string) string { return domain }
 // Host is one generated front-door rule.
 type Host struct {
 	// Role is the role that owns it, or "sites" for the rules that reach
-	// the edge: the portal, the OS shell, the wildcard and the apex.
+	// the edge: the OS shell, the wildcard and the apex.
 	Role string
 	// Name is the hostname itself.
 	Name string
 	// Sites is true for the rules that reach the edge node rather than a named
-	// service: the portal, the OS shell, the wildcard and the apex.
+	// service: the OS shell, the wildcard and the apex.
 	Sites bool
 	// Wildcard is true for the one rule whose host is `*.<domain>`. It is the
 	// only rule this package requests no certificate SAN for (memql#4224) --
@@ -157,14 +151,13 @@ type Host struct {
 const SitesRole = "sites"
 
 // Hosts is the whole front-door host set, in the order the generated manifests
-// emit them: the roles, then the portal, then the OS shell, then the sites wildcard, then the
+// emit them: the roles, then the OS shell, then the sites wildcard, then the
 // apex.
 func Hosts(domain string) []Host {
-	out := make([]Host, 0, len(Roles())+4)
+	out := make([]Host, 0, len(Roles())+3)
 	for _, r := range Roles() {
 		out = append(out, Host{Role: string(r), Name: RoleHost(r, domain)})
 	}
-	out = append(out, Host{Role: SitesRole, Name: PortalHost(domain), Sites: true})
 	out = append(out, Host{Role: SitesRole, Name: OsHost(domain), Sites: true})
 	out = append(out, Host{Role: SitesRole, Name: SitesWildcard(domain), Sites: true, Wildcard: true})
 	out = append(out, Host{Role: SitesRole, Name: Apex(domain), Sites: true})

@@ -72,7 +72,6 @@ var (
 // compiling the shared source into a served stylesheet means.
 var generatedStylesheetDirs = []string{
 	"component/identity/web/static",
-	"clients/portal/dist",
 	"clients/os/dist",
 }
 
@@ -88,15 +87,25 @@ func isGenerated(path string) bool {
 
 // The stylesheets each surface is allowed to have, and what each is for. Any
 // other .css file under these roots is fine -- it just may not define tokens.
+// THE OS SHELL IS NOT LISTED, and its absence is a statement rather than an
+// oversight (epic memql#4984, which retired the portal that WAS listed). The
+// OS imports brand/fonts.css and paints from its own `--os-*` theme packs
+// (clients/os/src/styles/tokens.css, clients/os/README.md's Theming note), so
+// it wears the FACES and not the palette. Listing it would fail this test for
+// the two imports it deliberately does not make, and relaxing the test to
+// three-of-any would let a real consumer drop the palette unnoticed.
+//
+// The negative guard above still walks clients/os/src, and that is the half
+// that matters for it: an `--os-*` pack may not redefine a `--memql-*` token,
+// declare an @theme block or declare an @font-face, whatever it imports.
 var brandConsumers = map[string]string{
-	"clients/portal/src/styles/index.css":       "the portal's entry point",
 	"component/identity/web/tailwind/input.css": "the identity CSS build's entry point",
 }
 
 // TestBrandIsImportedNeverCopied fails when a consumer defines its own copy of
 // the shared layer instead of importing brand/.
 func TestBrandIsImportedNeverCopied(t *testing.T) {
-	for _, root := range []string{"clients/portal/src", "component/identity/web"} {
+	for _, root := range []string{"clients/os/src", "component/identity/web"} {
 		root := root
 		if _, err := os.Stat(root); err != nil {
 			t.Fatalf("brand consumer root %s is missing: %v", root, err)
@@ -163,13 +172,6 @@ func TestBrandConsumersImportTheSharedLayer(t *testing.T) {
 	for path, what := range brandConsumers {
 		body, err := os.ReadFile(path)
 		if err != nil {
-			// The identity entry point arrives with memql#4267. Until it does,
-			// its absence is a known state rather than a failure -- but the
-			// portal's is not optional.
-			if strings.HasPrefix(path, "component/identity") && os.IsNotExist(err) {
-				t.Logf("%s (%s) not present yet; identity moves to the shared layer in memql#4267", path, what)
-				continue
-			}
 			t.Fatalf("reading %s (%s): %v", path, what, err)
 		}
 		text := string(body)
@@ -183,27 +185,13 @@ func TestBrandConsumersImportTheSharedLayer(t *testing.T) {
 	}
 }
 
-// TestPortalFaviconMatchesBrand pins the one deliberate copy.
+// TestOsFaviconMatchesBrand pins the one deliberate copy.
 //
 // A favicon has to be a real file at the site origin (index.html references
 // /favicon.svg), so Vite's public/ directory is where it must live -- it cannot
 // be an import. That makes it the single copy this rule tolerates, and pinning
-// it byte-for-byte is what keeps "tolerated" from becoming "drifted".
-func TestPortalFaviconMatchesBrand(t *testing.T) {
-	source, err := os.ReadFile(filepath.Join(brandDir, "favicon.svg"))
-	if err != nil {
-		t.Fatalf("reading brand/favicon.svg: %v", err)
-	}
-	copied, err := os.ReadFile("clients/portal/public/favicon.svg")
-	if err != nil {
-		t.Fatalf("reading the portal's public/favicon.svg: %v", err)
-	}
-	if string(source) != string(copied) {
-		t.Errorf("clients/portal/public/favicon.svg has drifted from brand/favicon.svg.\n" +
-			"Copy the brand file over it: cp brand/favicon.svg clients/portal/public/favicon.svg")
-	}
-}
-
+// it byte-for-byte is what keeps "tolerated" from becoming "drifted". The
+// portal had a twin of this test until epic memql#4984 retired it.
 func TestOsFaviconMatchesBrand(t *testing.T) {
 	source, err := os.ReadFile(filepath.Join(brandDir, "favicon.svg"))
 	if err != nil {

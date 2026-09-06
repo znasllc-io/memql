@@ -20,12 +20,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { connectionView, formatExpiry } from "../src/clusters/connectionView.js";
 import type { ClusterConfig } from "../src/clusters/model.js";
-import {
-  composePortalUrl,
-  encodePortalSegment,
-  portalConceptUrl,
-  portalTarget,
-} from "../src/clusters/portalUrl.js";
+import { composeConsoleUrl, consoleTarget } from "../src/clusters/consoleUrl.js";
 import type { ConnectionState } from "../src/connection/manager.js";
 
 const NOW = Date.parse("2026-08-14T12:00:00Z");
@@ -207,10 +202,11 @@ function siteRow(payload: Record<string, unknown>): Row {
 }
 
 test("the cluster's OWN site row outranks the composed host", () => {
-  // Reading the row is what keeps this correct across a move like memql#3711.
-  // It is not sufficient on its own, though -- see the composition tests below,
-  // which are what a first run actually reaches.
-  const target = portalTarget(cluster(), [
+  // Reading the row is what kept this correct across BOTH moves of the
+  // console's origin -- memql#3711 and epic memql#4984. It is not sufficient
+  // on its own, though: see the composition tests below, which are what a
+  // first run actually reaches, and which needed an edit each time.
+  const target = consoleTarget(cluster(), [
     siteRow({ hostname: "shop.example.com", systemOwned: false }),
     siteRow({ hostname: "console.example.com", systemOwned: true }),
   ]);
@@ -220,81 +216,63 @@ test("the cluster's OWN site row outranks the composed host", () => {
 
 test("systemOwned is what identifies it, not a name", () => {
   // Matching on a name would pick a customer's site the day somebody calls one
-  // "portal".
-  const target = portalTarget(cluster(), [siteRow({ hostname: "portal.example.com", systemOwned: false })]);
+  // "os". It is also what made the portal's retirement a no-op on this path:
+  // the flag moved to the row that replaced it and nothing here had to know.
+  const target = consoleTarget(cluster(), [siteRow({ hostname: "os.example.com", systemOwned: false })]);
   assert.equal(target.fromSiteRow, false);
-  assert.equal(target.url, "https://portal.example.com/");
+  assert.equal(target.url, "https://os.example.com/");
 });
 
-test("the composed portal is its OWN origin, not a path on the api front door", () => {
-  // memql#3711 moved the portal to site #1 at portal.<domain>; this composition
-  // did not follow until memql#3906. The old address does not 404 -- `/portal/`
-  // has no Ingress rule of its own, so it falls through to the `/` h2c
-  // catch-all and answers 415, an HTTP/1.1 request handed to a gRPC backend.
-  const target = portalTarget(cluster(), []);
-  assert.equal(target.url, "https://portal.example.com/");
+test("the composed console is its OWN origin, not a path on the api front door", () => {
+  // memql#3711 moved the console to its own hostname; this composition did not
+  // follow until memql#3906. The old address does not 404 -- `/portal/` had no
+  // Ingress rule of its own, so it fell through to the `/` h2c catch-all and
+  // answered 415, an HTTP/1.1 request handed to a gRPC backend.
+  //
+  // The host then moved AGAIN: epic memql#4984 retired the portal, and this
+  // composition follows the console rather than the label it used to carry.
+  const target = consoleTarget(cluster(), []);
+  assert.equal(target.url, "https://os.example.com/");
   assert.equal(target.fromSiteRow, false);
   assert.doesNotMatch(target.url, /\/portal\/$/, "the sub-path form is what 415s");
+  assert.doesNotMatch(target.url, /portal\./, "the retired portal host answers nothing");
 });
 
-test("an api.<domain> endpoint implies its portal sibling", () => {
+test("an api.<domain> endpoint implies its console sibling", () => {
   assert.equal(
-    composePortalUrl({ name: "x", endpoint: "api.lab.example.com:50051" }),
+    composeConsoleUrl({ name: "x", endpoint: "api.lab.example.com:50051" }),
     // Same derivation identityBaseUrlFor makes for identity.<domain>: the
     // endpoint IS the api front door, so stripping that label names the domain.
-    // The port is dropped -- the portal is served over 443 whatever the gRPC
+    // The port is dropped -- the console is served over 443 whatever the gRPC
     // endpoint names.
-    "https://portal.lab.example.com/",
+    "https://os.lab.example.com/",
   );
   // The shared endpoint parser, not a second `split(":")`: a scheme-prefixed
   // endpoint used to compose `https://https/portal/`.
   assert.equal(
-    composePortalUrl({ name: "x", endpoint: "https://api.lab.example.com:443" }),
-    "https://portal.lab.example.com/",
+    composeConsoleUrl({ name: "x", endpoint: "https://api.lab.example.com:443" }),
+    "https://os.lab.example.com/",
   );
 });
 
 test("an endpoint that names no api front door composes nothing", () => {
-  // The portal is a DIFFERENT host from the gRPC endpoint now, so there is no
+  // The console is a DIFFERENT host from the gRPC endpoint, so there is no
   // host left to reuse. Opening the endpoint's own hostname would point a
   // browser at an address nobody nominated.
-  assert.equal(composePortalUrl({ name: "x", endpoint: "grpc.lab.example.com:50051" }), "");
-  assert.equal(composePortalUrl({ name: "x", endpoint: "[::1]:50051" }), "");
+  assert.equal(composeConsoleUrl({ name: "x", endpoint: "grpc.lab.example.com:50051" }), "");
+  assert.equal(composeConsoleUrl({ name: "x", endpoint: "[::1]:50051" }), "");
 });
 
 test("nothing to compose from yields nothing, not https:///", () => {
-  assert.equal(composePortalUrl({ name: "x", endpoint: "" }), "");
-  assert.equal(portalTarget({ name: "x", endpoint: "" }, []).url, "");
+  assert.equal(composeConsoleUrl({ name: "x", endpoint: "" }), "");
+  assert.equal(consoleTarget({ name: "x", endpoint: "" }, []).url, "");
 });
 
-// -----------------------------------------------------------------------------
-// a concept's rows, in the portal (memql#4252)
-// -----------------------------------------------------------------------------
-
-test("a concept id keeps its colons and encodes everything else", () => {
-  // Pinned to the portal's own fixtures (clients/portal/test/conceptUrls.test.tsx):
-  // colons stay literal so an id reads as an id in the address bar.
-  assert.equal(encodePortalSegment("v1:cognition:space"), "v1:cognition:space");
-  assert.equal(encodePortalSegment("v1:a b:c/d"), "v1:a%20b:c%2Fd");
-});
-
-test("a literal %3A in an id is not mistaken for an escaped colon", () => {
-  // encodeURIComponent turns the id's own "%" into "%25" first, so the "%3A"
-  // this restores is only ever one it escaped -- never one that was already
-  // there. Same fixture as the portal's own encodeSegment test.
-  assert.equal(encodePortalSegment("already%3Aescaped"), "already%253Aescaped");
-});
-
-test("the concept url hangs off the portal root", () => {
-  assert.equal(
-    portalConceptUrl("https://portal.acme.test/", "v1:cognition:space"),
-    "https://portal.acme.test/concepts/v1:cognition:space",
-  );
-  assert.equal(
-    portalConceptUrl("https://portal.acme.test", "v1:cognition:space"),
-    "https://portal.acme.test/concepts/v1:cognition:space",
-  );
-});
+// THE CONCEPT DEEP-LINK IS GONE (epic memql#4984), and so are the three cases
+// that pinned its escaping. `portalConceptUrl` composed `<root>/concepts/<id>`
+// for the "Browse rows" button; MemQL OS has no concept browser, the button was
+// removed rather than pointed at a page that answers 404, and
+// `encodePortalSegment` had that one caller. Nothing is left to escape.
 
 // -----------------------------------------------------------------------------
 // The recorded version (memql#3995)

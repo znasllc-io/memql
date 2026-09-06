@@ -38,7 +38,7 @@ var osOfferedKindsPattern = regexp.MustCompile(
 // is a deployable nobody can create from the shell, and a kind the OS offers
 // that the enum lacks is a picker entry whose every write is refused. Both
 // sides keep working. This reads the list out of the TypeScript, the way
-// TestFleetOnlineWindowMatchesPortal reads the online window, and fails when
+// TestFleetOnlineWindowMatchesTheClients reads the online window, and fails when
 // it stops matching the LOADED concept.
 //
 // A MISSING FILE IS A FAILURE, NOT A SKIP. A skip would make this gate

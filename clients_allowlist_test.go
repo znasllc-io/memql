@@ -10,18 +10,19 @@ import (
 // allowedClients is the closed set of directories permitted under `clients/`,
 // each paired with why it is a PLATFORM surface rather than a product.
 //
-// Two entries today (portal + os), and that is the point: the list is meant to be short and
+// ONE entry today, and that is the point: the list is meant to be short and
 // arguing to extend it is meant to be the moment someone re-reads the boundary
 // below. Adding a row is a deliberate, reviewable act; landing a directory is
-// otherwise the convenient path.
+// otherwise the convenient path. It held two until epic memql#4984 retired the
+// portal, and the stale-entry check at the bottom is what made removing that
+// row part of the same change rather than something to notice later.
 //
 // DELIBERATELY NOT CONFIGURABLE FROM INSIDE clients/. A marker file or a
 // manifest that the policed tree supplies is a gate the policed change can open
 // for itself -- the same self-disabling shape this file's placement (see below)
 // exists to avoid.
 var allowedClients = map[string]string{
-	"portal": "the platform's own graphical operations console; served by component/edge as site #1, the same as any customer site (memql#3711)",
-	"os":     "the platform's OS shell; a second named front-door site (memql#4705), still kind spa, served by component/edge like the portal",
+	"os": "the platform's own graphical operations console -- the MemQL OS shell; a named front-door site (memql#4705), kind spa, served by component/edge exactly like a customer site",
 }
 
 // TestClientsDirectoryIsAllowlisted is the structural half of engine product
@@ -53,7 +54,7 @@ var allowedClients = map[string]string{
 // Both dodges have to run this test.
 //
 //   - Adding `clients/acme-spa/` (TypeScript only, no `.go` file) sets the
-//     `portal` bucket, NOT `go` -- and portal-checks runs npm, not Go. So
+//     `osclient` bucket, NOT `go` -- and os-checks runs npm, not Go. So
 //     `clients/**` is also a `gates` entry in .github/workflows/ci.yml, which
 //     makes RUN_GATES fire and the gate-inputs step run `go test ./`. The
 //     `gates` bucket is precisely "a non-Go file that a Go gate reads"
@@ -101,7 +102,7 @@ func TestClientsDirectoryIsAllowlisted(t *testing.T) {
 	// tree or a broken `git ls-files` would otherwise turn this green forever.
 	if len(found) == 0 {
 		t.Fatal("found no tracked directories under clients/, but the repo carries " +
-			"the portal. This guard cannot pass vacuously: if clients/ moved, retarget " +
+			"the OS shell. This guard cannot pass vacuously: if clients/ moved, retarget " +
 			"it rather than deleting it (memql#3326)")
 	}
 

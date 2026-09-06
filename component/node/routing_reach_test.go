@@ -31,60 +31,71 @@ import (
 // stand-in is the peerConnection's channel, which is what the gRPC stream
 // would have drained.
 //
-// Deleting the v1:portalviews:view rules makes this fail. That is the whole
-// specification: a view saved through one bff replica has to appear in a rail
-// served by the other, and before memql#4542 it never did -- which looked
-// like a bug in the rail, because the rail's subscription was working
+// Deleting the v1:worker:registration rules makes this fail. That is the whole
+// specification: a machine registered through one replica has to appear in a
+// Fleet list served by another, and before memql#4542 it never did -- which
+// looked like a bug in the list, because the list's subscription was working
 // perfectly and receiving nothing.
-func TestSavedViewCrossesTwoBffReplicas(t *testing.T) {
+//
+// IT WAS v1:portalviews:view UNTIL EPIC memql#4984, and the swap is worth
+// recording rather than doing quietly. Saved views were the marquee case for
+// the memql#4542 sweep and the concept went with the portal, but the MECHANISM
+// this exercises did not: registrations are written on the agent node and read
+// on the page the bff serves, which is the same shape and a live one. A test
+// whose subject is deleted should be re-pointed at something that still
+// matters or removed outright -- never left asserting over a concept nothing
+// writes, where it would pass forever while measuring nothing.
+func TestABrowserFacingRowCrossesTwoReplicas(t *testing.T) {
 	replicaA, replicaB, deliver := twoReplicaMesh(t)
 
-	// The rail on a browser attached to replica B.
+	// The Fleet machines list on a browser attached to replica B.
 	got := make(chan events.Event, 4)
-	unsub := replicaB.bus.Subscribe("graph.node.created.v1:portalviews:view", func(e events.Event) {
+	unsub := replicaB.bus.Subscribe("graph.node.created.v1:worker:registration", func(e events.Event) {
 		got <- e
-	}, events.WithSubscriberName("test:rail"))
+	}, events.WithSubscriberName("test:fleet"))
 	defer unsub()
 
-	// The save, landing on replica A.
+	// The registration, landing on replica A.
 	replicaA.bus.Publish(events.NewEvent(
-		"graph.node.created.v1:portalviews:view",
+		"graph.node.created.v1:worker:registration",
 		events.KindNodeCreated,
-		map[string]any{"id": "view-1", "name": "My rows", "ownerUserId": "u1"},
+		map[string]any{"id": "reg-1", "displayName": "Ada's laptop", "ownerUserId": "u1"},
 	))
 
 	deliver(t)
 
 	select {
 	case e := <-got:
-		if name, _ := e.Payload["name"].(string); name != "My rows" {
-			t.Errorf("the event crossed but its payload did not: name = %v, want %q", e.Payload["name"], "My rows")
+		if name, _ := e.Payload["displayName"].(string); name != "Ada's laptop" {
+			t.Errorf("the event crossed but its payload did not: displayName = %v, want %q",
+				e.Payload["displayName"], "Ada's laptop")
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("a saved view written on replica A never reached replica B.\n" +
-			"That is the memql#4542 bug exactly: with two bff replicas (the default " +
-			"topology) the rail is correct on load and frozen afterwards.\n" +
-			"Check the graph.node.*.v1:portalviews:view forward rules in routing.go.")
+		t.Fatal("a registration written on replica A never reached replica B.\n" +
+			"That is the memql#4542 bug exactly: with two replicas (the default " +
+			"topology) the list is correct on load and frozen afterwards.\n" +
+			"Check the graph.node.*.v1:worker:registration forward rules in routing.go.")
 	}
 }
 
 // TestBrowserFacingConceptsForwardWithTheVerbsTheirSurfacesSubscribeTo pins
-// the memql#4542 table at the level a reader can check against the portal:
+// the memql#4542 table at the level a reader can check against a client:
 // concept, verb, and the surface that needs it.
 //
-// The repo-root gate (portal_subscription_routing_test.go, memql#4543) derives
-// the same claims from the portal source and will notice a NEW subscription
-// this list does not mention. This test is the other direction -- it fails
-// when a rule is removed, naming what breaks -- and the two are worth having
-// separately: the gate answers "is anything unrouted", this answers "why was
-// this routed", and only the second one survives the portal being rewritten.
+// IT IS NOW THE ONLY GATE ON THIS. A repo-root companion
+// (portal_subscription_routing_test.go, memql#4543) used to derive the same
+// claims from the PORTAL's source and notice a new subscription this list did
+// not mention; it went with the portal in epic memql#4984, and its own doc
+// said only this direction would survive the portal being rewritten. So this
+// list is no longer cross-checked against any client, and a NEW OS
+// subscription over an unforwarded concept will present the way they all do:
+// correct on load, frozen after, and looking like a bug in the surface.
 func TestBrowserFacingConceptsForwardWithTheVerbsTheirSurfacesSubscribeTo(t *testing.T) {
 	cases := []struct {
 		concept string
 		verbs   []string
 		surface string
 	}{
-		{"v1:portalviews:view", []string{"created", "updated", "deleted"}, "the saved-views rail (compose/useSavedViews.ts)"},
 		{"v1:agents:agent", []string{"created", "updated", "deleted"}, "the Agents view"},
 		{"v1:library:artifact", []string{"created", "updated", "deleted"}, "the Artifacts page and Nexus's artifact slot"},
 		{"v1:library:file", []string{"created", "updated"}, "the Artifacts page's backing file row"},
@@ -192,7 +203,7 @@ func TestRecordedExclusionsStayExcluded(t *testing.T) {
 // publishes (concept_resolver.go builds "graph.node.%s.%s"). A gate asserting
 // against a topic nothing publishes passes forever while measuring nothing.
 func TestGraphEventTopicMatchesWhatTheEnginePublishes(t *testing.T) {
-	if got, want := GraphEventTopic("created", "v1:portalviews:view"), "graph.node.created.v1:portalviews:view"; got != want {
+	if got, want := GraphEventTopic("created", "v1:worker:registration"), "graph.node.created.v1:worker:registration"; got != want {
 		t.Fatalf("GraphEventTopic = %q, want %q", got, want)
 	}
 	// The wildcard rules are INTRA-segment globs: a concept id contains no

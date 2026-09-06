@@ -54,7 +54,7 @@ var vscodeImportAllowList = []string{
 	"views/runsTree.ts",                 // TreeDataProvider adapter over run/runConfig.ts
 	"webview/addClusterPanel.ts",        // WebviewPanel adapter over state/addCluster.ts + clusters/presence.ts
 	"webview/automationPanel.ts",        // WebviewPanel adapter over state/automationForm.ts + state/stepTrace.ts
-	"webview/connectionPanel.ts",        // WebviewPanel adapter over clusters/connectionView.ts + clusters/portalUrl.ts
+	"webview/connectionPanel.ts",        // WebviewPanel adapter over clusters/connectionView.ts + clusters/consoleUrl.ts
 	"webview/constructPanel.ts",         // WebviewPanel adapter over webview/constructScreens.ts + constructs/signature.ts
 	"webview/conceptPanel.ts",           // WebviewPanel adapter over state/conceptPanelState.ts
 	"webview/deploymentPanel.ts",        // WebviewPanel adapter over state/deploymentsCatalog.ts + install/session.ts
@@ -223,7 +223,7 @@ func TestVSCodeImportGuardCoversTheLogicModules(t *testing.T) {
 		"clusters/connectionView.ts",
 		"constructs/catalogTarget.ts",
 		"constructs/signature.ts",
-		"clusters/portalUrl.ts",
+		"clusters/consoleUrl.ts",
 		"deploy/actions.ts",
 		"deploy/controller.ts",
 		"deploy/instanceActions.ts",

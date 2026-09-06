@@ -254,7 +254,7 @@ in-process — a plan never waits for a laptop to wake up.
 Epic memql#4349. Everything here is **per-user**: a machine belongs to exactly
 one `v1:identity:user`, and only agents acting in that user's sessions can
 dispatch to it. The operator surface is `/fleet/machines` in the MemQL Portal
-(see [portal.md](portal.md)).
+(see [memql-os.md](memql-os.md)).
 
 ### 5.1 Two label fields, and why they are not one
 
@@ -377,7 +377,7 @@ live machine disappear.
 
 **There are exactly two implementations, and a test holds them together.**
 `component/worker.IsOnline` and `clients/portal/src/fleet/online.ts`;
-`TestFleetOnlineWindowMatchesPortal` reads the TypeScript and fails the build
+`TestFleetOnlineWindowMatchesTheClients` reads the TypeScript and fails the build
 when its window disagrees with the Go one. Deriving `online` from the in-memory
 registry instead is what this design refuses: the registry is ONE replica's
 stream table, so it answers "connected to me" rather than "connected to any

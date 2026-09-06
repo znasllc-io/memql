@@ -101,7 +101,7 @@ test('the runtime commands are registered, so a cluster can be selected and conn
     'memql.clusters.signOut',
     'memql.clusters.disconnect',
     'memql.clusters.connection',
-    'memql.clusters.openPortal',
+    'memql.clusters.openConsole',
     'memql.data.refresh',
     'memql.data.open',
     'memql.runs.refresh',

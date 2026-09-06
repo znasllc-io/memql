@@ -74,16 +74,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # `portal` names the Dockerfile stage the runtime copies the MemQL
-        # Portal bundle from (memql#3314). The portal is site #1, served by
-        # the edge (component/edge, memql#3711) -- component/portal, which
-        # used to serve it from the bff, is retired. Every entry here takes
-        # `portal-skip`, an empty directory, and never pulls the Node image,
-        # EXCEPT `edge` below, which takes `portal-build` -- it is the only
-        # node type that serves the bundle, so it is the only one that pays
-        # for the Node stage that builds it (memql#3714). Set on every entry
-        # rather than defaulted, because `FROM ${PORTAL_DIST_STAGE}` cannot
-        # take an empty string and a missing matrix key renders as one.
+        # `spa` names the Dockerfile stage the runtime copies the MemQL OS
+        # bundle from (memql#3314; the key was `portal` and the stages were
+        # portal-skip / portal-build until epic memql#4984 retired the
+        # portal). The OS shell is a site row served by the edge
+        # (component/edge, memql#4705). Every entry here takes `spa-skip`, an
+        # empty directory, and never pulls the Node image, EXCEPT `edge`
+        # below, which takes `spa-build` -- it is the only node type that
+        # serves the bundle, so it is the only one that pays for the Node
+        # stage that builds it (memql#3714). Set on every entry rather than
+        # defaulted, because `FROM ${SPA_DIST_STAGE}` cannot take an empty
+        # string and a missing matrix key renders as one.
         include:
           # EVERY entry names its `target` explicitly. Leaving it empty resolved
           # to the Dockerfile's LAST stage, which is how every released image
@@ -92,43 +93,43 @@ jobs:
           # or log line said out loud.
           - node: identity
             target: runtime
-            portal: portal-skip
+            spa: spa-skip
           # mcp: engine-built (no product DSL) -- same shape as identity.
           # Remote MCP node (memql#1554); CI gap fixed in #1581.
           - node: mcp
             target: runtime
-            portal: portal-skip
+            spa: spa-skip
           # Platform consolidation (#2472 Step 2): every node type now ships as
           # a PRODUCT-AGNOSTIC engine image. Product DSL is delivered at runtime
           # via MEMQL_DSL_PATH (dsl.MountRuntimeDomainsFromEnv, #2484), so these
           # nodes no longer need to be carrier-built. Same shape as
           # identity/mcp.
           #
-          # bff no longer carries the portal bundle (memql#3711) -- the portal
-          # is site #1, served by the edge at its own hostname, not a /portal/
-          # sub-path of the bff.
+          # bff carries no SPA bundle (memql#3711) -- the platform's own site
+          # is served by the edge at its own hostname, never as a sub-path of
+          # the bff.
           - node: bff
             target: runtime
-            portal: portal-skip
+            spa: spa-skip
           - node: agent
             target: runtime
-            portal: portal-skip
+            spa: spa-skip
           - node: planner
             target: runtime
-            portal: portal-skip
+            spa: spa-skip
           # workbench: the one node that runs somebody else's build command
           # (epic memql#4900), so it takes the stage carrying a Node
           # toolchain, git and the non-root uid the build runs as.
           - node: workbench
             target: workbench-runtime
-            portal: portal-skip
-          # edge: serves every hosted site, including the portal (site #1,
-          # memql#3711) -- the only node type that takes portal-build, so
+            spa: spa-skip
+          # edge: serves every hosted site, the OS shell among them
+          # (memql#4705) -- the only node type that takes spa-build, so
           # staging/prod carry the same bundle the local build path already
           # does (memql#3714).
           - node: edge
             target: runtime
-            portal: portal-build
+            spa: spa-build
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -220,7 +221,7 @@ jobs:
           # a fact an operator needs rather than one to paper over.
           build-args: |
             BUILD_TAGS=${{ matrix.node }}
-            PORTAL_DIST_STAGE=${{ matrix.portal }}
+            SPA_DIST_STAGE=${{ matrix.spa }}
             MEMQL_RELEASE=${{ inputs.version }}
             MEMQL_COMMIT=${{ github.sha }}
           tags: |

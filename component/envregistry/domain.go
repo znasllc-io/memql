@@ -71,16 +71,14 @@ func DomainDerivations(domain string) map[string]string {
 	identity := "https://identity" + suffix
 	api := "https://api" + suffix
 	app := "https://app" + suffix
-	// The portal is site #1 (memql#3711): its bundle is served at its OWN
-	// hostname, not a /portal/ sub-path of another node's origin, so its
-	// redirect URI is this origin's own /auth/callback. The host is
-	// frontdoor.PortalHost -- the same call the engine's SeedMaterializer
-	// makes for the site row and cmd/frontdoorhosts makes for the portal's
-	// Ingress rule and certificate SAN (memql#4224).
-	portal := "https://" + frontdoor.PortalHost(d)
-	// The OS shell is the second named platform site (memql#4705). Same
-	// OAuth client as the portal -- extra redirect, extra CORS origin.
-	// Missing the CORS origin is a silent sign-in death (memql#3315).
+	// The OS shell is the platform's own site (memql#4705, and the only one
+	// since epic memql#4984 retired the portal): its bundle is served at its
+	// OWN hostname, not a sub-path of another node's origin, so its redirect
+	// URI is this origin's own /auth/callback. The host is frontdoor.OsHost --
+	// the same call the engine's SeedMaterializer makes for the site row and
+	// cmd/frontdoorhosts makes for the OS's Ingress rule and certificate SAN
+	// (memql#4224). Missing the CORS origin is a silent sign-in death
+	// (memql#3315).
 	osOrigin := "https://" + frontdoor.OsHost(d)
 
 	// The cockpit CLIENT is loopback BY DESIGN (RFC 8252 native-client
@@ -89,35 +87,33 @@ func DomainDerivations(domain string) map[string]string {
 	// (memql#3704 / the api.<domain> rename) is the HOST identity itself is
 	// reached at, not the OAuth client id.
 	//
-	// THE PORTAL'S REDIRECT URI IS A FUNCTION OF WHERE ITS BUNDLE IS SERVED,
-	// not of the front door's name. The page composes it as
-	// `location.origin + import.meta.env.BASE_URL + "auth/callback"`
-	// (clients/portal/src/auth/AuthProvider.tsx defaultRedirectUri, via
-	// portalRedirectPath), and identity matches redirect_uri by EXACT string --
+	// THE OS SHELL'S REDIRECT URI IS A FUNCTION OF WHERE ITS BUNDLE IS SERVED,
+	// not of the front door's name. The page composes it from its own
+	// `location.origin`, and identity matches redirect_uri by EXACT string --
 	// so a URI registered for an origin the bundle is not served from is a 400
-	// at /authorize with nothing in the portal's own logs. It has moved twice:
-	// originally `cockpit.<d>/portal/auth/callback` (the bundle mounted on the
-	// cockpit-named front door), then briefly `api.<d>/portal/auth/callback`
-	// when that front door was renamed (memql#3704) but the bundle had not yet
-	// moved, and now `portal.<d>/auth/callback` (memql#3711 -- the portal is
-	// site #1, served at its own origin's root, no mount prefix). One URI, not
-	// several -- registering more than the one the bundle is actually served
+	// at /authorize with nothing in the shell's own logs. One URI, not
+	// several: registering more than the one the bundle is actually served
 	// from is the accept-either pattern the pre-release no-shims rule forbids.
-	// The `portal.<d>` CORS origin below predates this move deliberately
-	// (memql#3714 needs it too, and an unused allowed origin is inert); this
-	// derivation is what makes it earn its keep.
+	//
+	// THE CLIENT ID IS `os`, AND IT WAS `portal` UNTIL EPIC memql#4984. The
+	// portal owned this client and the OS shell borrowed it -- one client with
+	// two redirect URIs -- so retiring the portal left a client named after a
+	// thing that no longer exists. Renaming it is safe precisely because no
+	// client hardcodes it: a bundle reads its own client id out of the edge's
+	// runtime-config document, which resolves the request hostname against
+	// these registered redirect URIs (component/edge/runtimeconfig.go).
 	clients := fmt.Sprintf(
 		`[{"clientId":"app","redirectURIs":["%s/auth/callback"]},`+
 			`{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]},`+
-			`{"clientId":"portal","redirectURIs":["%s/auth/callback","%s/auth/callback"]}]`,
-		app, portal, osOrigin)
+			`{"clientId":"os","redirectURIs":["%s/auth/callback"]}]`,
+		app, osOrigin)
 
 	return map[string]string{
 		"MEMQL_IDENTITY_BASE_URL":                 identity,
 		"MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER": identity,
 		"MEMQL_IDENTITY_BOOTSTRAP_DOMAIN":         d,
 		"MEMQL_DISCOVERY_GRPC_ENDPOINT":           "api" + suffix + ":443",
-		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     api + "," + app + "," + portal + "," + osOrigin,
+		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     api + "," + app + "," + osOrigin,
 		"MEMQL_IDENTITY_REGISTERED_CLIENTS":       clients,
 		// The MCP protocol head's own front-door host (memql#3704) -- advertised
 		// in OAuth discovery metadata and the 401 WWW-Authenticate hint

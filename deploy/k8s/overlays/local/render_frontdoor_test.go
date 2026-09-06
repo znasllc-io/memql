@@ -11,7 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/frontdoor"
 )
 
-// The seven hosts the front door serves (design D3, plus the portal's own exact
+// The six hosts the front door serves (design D3, plus the OS shell's own exact
 // rule from memql#4224). The COUNT is the invariant: it must not grow with
 // customers, apps or sites.
 //
@@ -29,12 +29,15 @@ import (
 // defaults cannot drift from what the cloud overlay serves -- which is what
 // would make the local cluster stop proving anything about the cloud one.
 //
-// The portal is the host this gate most needs to keep honest: locally the
-// mkcert wildcard covers portal.memql.localhost whether or not an exact rule
+// The OS shell is the host this gate most needs to keep honest: locally the
+// mkcert wildcard covers os.memql.localhost whether or not an exact rule
 // exists, so a developer would never notice the rule missing. In the cloud the
 // certificate names exact hosts only (HTTP-01 cannot issue a wildcard), and
-// without the rule the portal serves the ingress controller's self-signed
-// default. Same seven rules everywhere is what lets local prove the shape.
+// without the rule the OS serves the ingress controller's self-signed default.
+// Same six rules everywhere is what lets local prove the shape. (It was the
+// portal's rule that taught this, and the portal was retired in epic
+// memql#4984 -- the OS inherited the exception whole, and TestTheOsRuleReachesTheEdge
+// below is the portal test renamed rather than a new one.)
 var frontDoorHosts = func() []string {
 	var out []string
 	for _, h := range frontdoor.Hosts("memql.localhost") {
@@ -85,33 +88,6 @@ func TestFrontDoorServesExactlyTheDerivedHosts(t *testing.T) {
 		sort.Strings(extra)
 		t.Errorf("front door serves %d hosts, want %d; unexpected: %v",
 			len(got), len(frontDoorHosts), extra)
-	}
-}
-
-// TestThePortalRuleReachesTheEdge pins that the portal's exact rule is the
-// SAME path as the wildcard -- svc/edge:8085 -- and not a second way to serve
-// the portal. The rule exists for the cloud certificate's sake (memql#4224);
-// a different backend here would be the portal-specific branch
-// component/edge's dogfood gate forbids, expressed as routing.
-func TestThePortalRuleReachesTheEdge(t *testing.T) {
-	rendered := render(t)
-	portal := frontdoor.PortalHost("memql.localhost")
-
-	var found bool
-	for _, doc := range strings.Split(rendered, "\n---\n") {
-		if !strings.Contains(doc, "kind: Ingress") || !strings.Contains(doc, "host: "+portal) {
-			continue
-		}
-		found = true
-		if !strings.Contains(doc, "name: edge") {
-			t.Errorf("the Ingress serving %q does not point at svc/edge; the portal is a site and takes the site path", portal)
-		}
-		if strings.Contains(doc, "router.priority") {
-			t.Errorf("the Ingress serving %q declares a router.priority; precedence is declared on the wildcard only (memql#3810)", portal)
-		}
-	}
-	if !found {
-		t.Fatalf("no Ingress in the rendered overlay carries an exact rule for %q", portal)
 	}
 }
 

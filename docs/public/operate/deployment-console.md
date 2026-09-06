@@ -33,14 +33,23 @@ here.
 
 | Surface | Where | Use it when |
 |---------|-------|-------------|
-| **MemQL portal -- Deployments** | `https://portal.<env>.example.com/views/deployments` | The designed operator view, and the one that acts: the live release beside the last gate's legs, the image digests in force, the whole deployment history, and every control (memql#3319 + memql#3380). The portal is site #1 (memql#3711), served at its own hostname rather than a `/portal/` sub-path of another node's origin. |
-| **Cockpit Topology** | MemQL Cockpit, cluster/Topology view | You are already in the terminal-native ops console watching node health + observability overlays and want deployment state and controls inline. |
+| **Cockpit Topology** | MemQL Cockpit, cluster/Topology view | The designed operator surface, and the one that acts: node health, observability overlays, deployment state and every control inline. |
+| **VS Code -- Deployments** | the extension's activity-bar panel | What you operate, at what version, and the runs that changed it, without leaving the editor. |
 
-> **How the portal reaches the deploy surface.** `DeployControlService` runs
-> shell scripts against an on-disk overlay checkout, so it exists only on the
-> **identity** node. The portal is served by the edge as site #1 (memql#3711)
-> and dials the origin that served it (a deliberate property -- see
-> [portal.md](portal.md)) -- but "the origin that served it" names where the
+> **There is no browser surface for this today.** The MemQL portal's
+> Deployments view was it (memql#3319 + memql#3380), and epic memql#4984
+> retired the portal without moving deploy control into MemQL OS -- the OS's
+> Settings -> Cluster section said in surface, before that epic, that deploy
+> control stayed with the portal and the cockpit, and half of that sentence is
+> now the whole of it. Everything below about the SERVICE, its gates, its
+> refusals and its audit trail is unchanged; only the third surface is gone.
+
+> **How a browser client would reach the deploy surface**, recorded because
+> the forward it needs is still built and still tested. `DeployControlService`
+> runs shell scripts against an on-disk overlay checkout, so it exists only on
+> the **identity** node. A hosted console is served by the edge and dials the
+> origin that served it (a deliberate property -- see
+> [memql-os.md](memql-os.md)) -- but "the origin that served it" names where the
 > BUNDLE came from, not where its gRPC/WS stream terminates: that stream still
 > reaches a bff (through the edge's own `/_memql/*` proxy, memql#3712), the
 > same node type it always did. Until memql#3380 that mismatch was the whole
@@ -58,15 +67,15 @@ here.
 >
 > The server-rendered `/admin/deployments` page that covered the gap is retired
 > with the fix (memql#3380). `/admin/` now answers `410 Gone` and points at the
-> portal.
+> console.
 
 Every surface calls the same role-gated **deploy-control API**
 (MemQL `DeployControlService`); none shells out to
 `kubectl` / `argocd` / `git` directly. They show the same data and
 offer the same actions. Pick whichever you are already in.
 
-A surface may HIDE an action the caller's role cannot take -- the MemQL
-portal does, so an admin is not offered a rollback that would come back
+A surface may HIDE an action the caller's role cannot take -- MemQL OS
+does, so an admin is not offered a rollback that would come back
 `PermissionDenied`. That is a courtesy, not a control: the gate is the
 service's, and it applies identically however the RPC arrived.
 
@@ -82,7 +91,7 @@ So every deploy RPC is **also** reachable on the stream, as a
 `DeployControlMsg` envelope whose `request` oneof carries the service's
 own request messages verbatim (the reply is `DeployControlResult`). The
 TS SDK exposes it as `@znasllc-io/memql-sdk-core/deploy`; that is how
-the VS Code extension and the MemQL portal drive the console.
+the VS Code extension and the Cockpit drive the console.
 
 This is a transport, not a second implementation. The stream handler
 calls the identical service methods the unary path calls, so **the role
@@ -107,9 +116,9 @@ rows are ordinary concept rows, read with a normal query.
 the same listener. That is dialable from Go (`sdk/go`'s
 `DeployControlClient`) and from `grpcurl`, but **not from a browser and
 not from any WebSocket client** -- so the VS Code extension and the
-MemQL portal, which both speak `/memql/ws`, could not reach the deploy
-surface at all. (The identity portal only sidesteps this by being
-server-rendered.)
+MemQL OS, which both speak `/memql/ws`, could not reach the deploy
+surface at all. (Identity's own server-rendered pages only sidestepped this by
+not being browser clients.)
 
 Every RPC is therefore also reachable over `MemqlService.Stream` as a
 single bridged envelope pair, `DeployControlMsg` /
@@ -170,7 +179,7 @@ has a reference to quote rather than a timestamp to argue from.
 
 | Where you read it | |
 |---|---|
-| Portal | Beside the red banner: `Audited as <id> - open the trail` |
+| A hosted console | Beside the red banner: `Audited as <id> - open the trail` |
 | TS SDK | `DeployControlError.auditEventId` |
 | Go SDK | `client.AuditEventIdFromError(err)` |
 | Streamed wire | `DeployControlResult.audit_event_id` |
@@ -258,7 +267,7 @@ posture, not a status badge.
 
 ### Enforcement per surface
 
-- **MemQL portal:** the Deployments view resolves your cluster role and
+- **A hosted console:** a Deployments view resolves your cluster role and
   hides an action you cannot take. That is a courtesy, not the control:
   the call still crosses to the identity node and is gated there.
 - **Cockpit:** the Topology view resolves your cluster role; non-admins
@@ -297,7 +306,7 @@ error page or an empty one:
 
 Concept rows go through the normal query surface and never touch the
 deploy-control gate; the status block and the version preview do. So a
-developer opening the VS Code Deployments view or the portal's Deployments
+developer opening the VS Code Deployments view or a hosted Deployments
 view gets topology, history and per-tier composition as usual, with the
 status block replaced by an explanation naming the role required. That
 explanation is the designed behaviour of the surface, not a failure of
@@ -364,7 +373,11 @@ Notes that hold on both surfaces:
   for review; landing the overlay change to `main` follows the normal
   review path. Rollout promote/abort act on the live Rollout directly.
 
-### Portal
+### The retired portal surface
+
+> Recorded rather than deleted: this is what the browser surface DID, and it
+> is the shape any replacement would have to match. Epic memql#4984 retired
+> it with the portal.
 
 `/views/deployments` -> use the action controls
 on the Overview panel (deploy / promote), next to the version
@@ -378,7 +391,7 @@ confirmations that page had and this band did not. A repair record is
 never offered as a rollback target: a repair pins no version, so there is
 nothing to roll to.
 
-The portal's own bundle is served by the edge (site #1, memql#3711), but
+A hosted console's own bundle is served by the edge, but
 the RPC itself still crosses to a bff -- through the edge's `/_memql/*`
 proxy -- and from there to the identity node over the mesh forward, same
 as before. A refusal you see here is the identity node's own
@@ -399,7 +412,7 @@ reality.
 ## Where audit events land
 
 All console writes and denials append to the identity audit log
-(`v1:identity:auditEvent`), visible in the MemQL portal's Audit view
+(`v1:identity:auditEvent`), readable through the concept browser
 view. Deploy and rollback in particular are auditable after
 the fact: actor, target version / digest, and outcome.
 
@@ -480,7 +493,7 @@ ArgoCD reports synced AND healthy, and in `failed` when it does not.
 
 `Repair` is the vision's third verb beside update and restore, and the one
 a browser could not have until it existed on the wire: a cluster must not
-be shelled into from a portal, so the portal rendered an honest "not
+be shelled into from a browser console, so the console rendered an honest "not
 exposed from the cluster yet" line until the RPC landed.
 
 ### What a repair does
@@ -539,7 +552,7 @@ providers have the repair above; what differs is only what it undoes:
 | Provider | What a repair does | What it does not do |
 |---|---|---|
 | `docker-local` (k3d) | The cluster-side half of the VS Code extension's repair -- the part of the install graph that reconciles the overlay and waits for the workloads -- run now, from inside the cluster, as an immediate form of the `selfHeal` the local Application already carries. | The host-side half of the extension's repair: the pinned k3d / kubectl / mkcert binaries, the hosts-file block, the browser-trusted local CA, the source checkout, re-creating the k3d cluster itself, re-seeding secrets from the operator's key file. None of that is reachable from a pod, and the cluster it would recreate is the one the identity node runs in. That half stays the extension's guided flow. |
-| `azure` (AKS) | The Application is on **manual sync** (`deploy/argocd/apps/memql.yaml`), so nothing re-applies drift on its own; this is the operator's converge act, owner-gated and audited, from the portal instead of a terminal. | Move the overlay, change pins, or touch anything outside the Application's reconciled set. |
+| `azure` (AKS) | The Application is on **manual sync** (`deploy/argocd/apps/memql.yaml`), so nothing re-applies drift on its own; this is the operator's converge act, owner-gated and audited. | Move the overlay, change pins, or touch anything outside the Application's reconciled set. |
 | anything else | **Refused**: the engine cannot claim the Application is that topology's reconciliation path, so the call answers `ok=false` with `repair is not defined for this provider` (`details.reason = repair_undefined_for_provider`), audited as a failure with its audit id on the result -- rather than half-run. | |
 
 An installation whose graph says nothing about its provider takes the
@@ -564,14 +577,14 @@ refusal:
 | Below the owner floor / unauthenticated | `PERMISSION_DENIED` / `UNAUTHENTICATED` (a `RefusalInfo` detail unary, `DeployControlResult.audit_event_id` streamed) | the blocked event's |
 | Provider with no defined repair, a sync already running on the Application, a repair already in flight on this node, a kick-off that failed | `ActionResult.ok = false` with `details.reason` | the failure event's, on `ActionResult.audit_event_id` |
 
-The portal shows the id beside the outcome either way.
+Every surface shows the id beside the outcome either way.
 
 ### Honest progress: the repair record
 
 `ok = true` means **accepted and kicked off**, not "repaired". The RPC
 writes a `v1:cluster:deployment` record at `in_progress` **before** the
 kick-off -- its `notes` start with `repair:` and it carries the version in
-force -- so the timeline the portal already renders shows the repair from
+force -- so the timeline every surface already renders shows the repair from
 its first instant (marked `repair`). A kick-off that fails lands the
 record at `failed` in the same call. Otherwise a watcher on the identity
 node resolves it from what it **observes** on the Application:
@@ -585,7 +598,7 @@ node resolves it from what it **observes** on the Application:
 Until the controller has picked the repair's own operation up, the
 Application's previous `Succeeded` is not read as this repair's verdict
 -- the stamped operation id is what tells them apart. Poll the record (the
-portal's timeline is live on the concept) or `GetDeploymentStatus` for
+timeline is live on the concept) or `GetDeploymentStatus` for
 the Argo sync / health it reports; there is no progress stream.
 
 One repair runs at a time per identity node, and a sync already running
@@ -602,7 +615,7 @@ finishes.
 - Supervised live cutovers: #712.
 - Cluster role model: [`docs/public/operate/auth/access-model.md`](auth/access-model.md).
 - Deploy-control stream bridge: znasllc-io/memql#3311.
-- Repair verb: znasllc-io/memql#4209 (the portal gap it closes: #4193).
+- Repair verb: znasllc-io/memql#4209 (the console gap it closes: #4193).
 - Role-matrix reconciliation (the read gate is owner/admin, the code is
   authoritative): znasllc-io/memql#3332.
 - Machine identity the gate uses: [`docs/public/operate/auth/service-account-jwt.md`](auth/service-account-jwt.md), #691.

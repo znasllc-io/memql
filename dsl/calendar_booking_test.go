@@ -47,7 +47,17 @@ func TestCalendarBookingWritePath(t *testing.T) {
 	}
 }
 
-func TestCalendarBookingPortalQueries(t *testing.T) {
+// The three reads a booking surface needs, whatever renders it.
+//
+// IT USED TO ASSERT A SECOND THING and no longer can: that
+// dsl/portalviews/concepts.memql cited memql#4142, which was how the repo
+// recorded "booking is served by the arrangement system rather than by a new
+// clients/ app". Epic memql#4984 deleted that domain with the portal, so the
+// claim has no file to live in -- and inventing a new home for it would be a
+// gate asserting over a decision nobody is at risk of reversing, since
+// clients/ is allowlisted (clients_allowlist_test.go) and adding an app there
+// is already a reviewable act.
+func TestCalendarBookingQueries(t *testing.T) {
 	q := calendarDSL(t, "queries.memql")
 	for _, name := range []string{
 		"query bookingHours bookingHours",
@@ -57,13 +67,6 @@ func TestCalendarBookingPortalQueries(t *testing.T) {
 		if !strings.Contains(q, name) {
 			t.Fatalf("missing %s", name)
 		}
-	}
-	pv, err := os.ReadFile(filepath.Join(filepath.Dir(mustCaller(t)), "portalviews", "concepts.memql"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(pv), "memql#4142") {
-		t.Fatal("portalviews must point at calendar booking rather than grow a new clients/ app")
 	}
 }
 

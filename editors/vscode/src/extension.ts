@@ -207,7 +207,7 @@ import {
 } from './state/connectionContext.js';
 import { DEPLOYMENTS_INSTANCE_KEY } from './state/deploymentsCatalog.js';
 import { DeploymentPanel, type DeploymentPanelDeps } from './webview/deploymentPanel.js';
-import { SITE_CONCEPT, portalConceptUrl, portalTarget } from './clusters/portalUrl.js';
+import { SITE_CONCEPT, consoleTarget } from './clusters/consoleUrl.js';
 import { isCatalogUri } from './constructs/catalogTarget.js';
 import { roleVisibility } from './deploy/actions.js';
 import { DeployControlClient } from '@znasllc-io/memql-sdk-core/deploy';
@@ -266,7 +266,7 @@ let client: LanguageClient | undefined;
 let connections: ConnectionManager | undefined;
 
 /**
- * What the portal handoff needs that only registerRuntimeSurface builds.
+ * What the console handoff needs that only registerRuntimeSurface builds.
  *
  * The URI handler is registered in activate(), which runs in an UNTRUSTED
  * window too -- so the things it reaches for (the registry path, the tree it
@@ -386,7 +386,7 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
   connectionOutput = window.createOutputChannel('MemQL Connection');
   context.subscriptions.push(installOutput, connectionOutput);
 
-  // The portal's handoff (memql#4251). Registered HERE rather than inside the
+  // The console's handoff (memql#4251). Registered HERE rather than inside the
   // trust gate, and before either surface comes up, because a `vscode://` link
   // is what ACTIVATES the extension: `onUri` starts it, VS Code delivers the
   // uri to whatever handler exists when activate() returns, and a handler
@@ -548,7 +548,7 @@ function startLanguageClient(context: ExtensionContext): void {
 }
 
 // -----------------------------------------------------------------------------
-// The portal handoff: vscode://znasllc.memql/open (memql#4251)
+// The console handoff: vscode://znasllc.memql/open (memql#4251)
 // -----------------------------------------------------------------------------
 
 /** What `activate()` hands back, so the host smoke lane can drive a link. */
@@ -594,12 +594,12 @@ const HANDOFF_ADD_FOLDER_TIMEOUT_MS = 5_000;
  */
 function noteHandoffFailure(err: unknown): void {
   const detail = err instanceof Error ? err.message : String(err);
-  noteDiagnostic(connectionOutput, 'Handoff from portal failed', detail);
-  void offerDetails('error', connectionOutput, 'MemQL: the portal handoff could not be completed.');
+  noteDiagnostic(connectionOutput, 'Handoff from the console failed', detail);
+  void offerDetails('error', connectionOutput, 'MemQL: the console handoff could not be completed.');
 }
 
 /**
- * Opens what a portal link names, in four steps: READ the link, MATCH a
+ * Opens what a console link names, in four steps: READ the link, MATCH a
  * registered cluster, CONNECT to it, LAND on the construct.
  *
  * WHAT A LINK MAY DO, AND WHAT IT MAY NEVER DO. A link may select a cluster
@@ -639,10 +639,10 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
     // is exactly the report a missing line cannot be answered from.
     noteDiagnostic(
       connectionOutput,
-      'Handoff from portal',
+      'Handoff from the console',
       `${request.domain} ${describeOpenRequest(request)} -> untrusted workspace`
     );
-    window.showWarningMessage('MemQL: trust this workspace to open constructs from the portal.');
+    window.showWarningMessage('MemQL: trust this workspace to open constructs from the console.');
     return { outcome: 'untrusted', detail: 'the runtime surface is not registered' };
   }
   const manager = connections;
@@ -654,17 +654,17 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
   const registry = await readClustersFileSafe(surface.clustersPath);
   if (!registry.ok) {
     window.showErrorMessage(`MemQL: ${registry.error}`);
-    // 'Handoff from portal', not 'Handoff refused': the link was fine and the
+    // 'Handoff from the console', not 'Handoff refused': the link was fine and the
     // REGISTRY was not, which is the outcome this returns. A headline naming
     // the other outcome sends a reader looking for a malformed link.
-    noteDiagnostic(connectionOutput, 'Handoff from portal', `the cluster registry could not be read: ${registry.error}`);
+    noteDiagnostic(connectionOutput, 'Handoff from the console', `the cluster registry could not be read: ${registry.error}`);
     return { outcome: 'noCluster', detail: 'the cluster registry could not be read' };
   }
   const match = matchCluster(registry.file.clusters, request.domain, registry.file.selectedCluster);
   if (match.kind === 'none') {
     noteDiagnostic(
       connectionOutput,
-      'Handoff from portal',
+      'Handoff from the console',
       `${request.domain} ${describeOpenRequest(request)} -> no registered cluster`
     );
     // DETACHED, never awaited (the shape memql#4079 established above). A
@@ -720,7 +720,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
       // abandoned, so the two toasts do not say the same thing twice.
       noteDiagnostic(
         connectionOutput,
-        'Handoff from portal',
+        'Handoff from the console',
         `${cluster.name} ${describeOpenRequest(request)} -> not connected (${settled.status})`
       );
       // THE ARTIFACT PATH SAYS ONE MORE THING, and the asymmetry is deliberate
@@ -757,7 +757,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
   if (dispatcher === undefined) {
     noteDiagnostic(
       connectionOutput,
-      'Handoff from portal',
+      'Handoff from the console',
       `${cluster.name} ${describeOpenRequest(request)} -> no dispatcher`
     );
     return { outcome: 'noCluster', detail: `${cluster.name} is not connected` };
@@ -793,7 +793,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
   // failure would have nothing to compare against.
   noteDiagnostic(
     connectionOutput,
-    'Handoff from portal',
+    'Handoff from the console',
     `${cluster.name} ${describeOpenRequest(request)} -> ${landing.kind}`
   );
 
@@ -841,7 +841,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
             await openFileAtSignature(nowIn.uri, found.kind, found.name);
             noteDiagnostic(
               connectionOutput,
-              'Handoff from portal',
+              'Handoff from the console',
               `${cluster.name} ${request.kind} ${request.name} -> workspaceFile (after adding the checkout)`
             );
             return { outcome: 'opened', detail: 'workspaceFile' };
@@ -854,7 +854,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
           });
           noteDiagnostic(
             connectionOutput,
-            'Handoff from portal',
+            'Handoff from the console',
             `${cluster.name} ${request.kind} ${request.name} -> clusterDocument (the added checkout does not hold it)`
           );
           return { outcome: 'opened', detail: 'clusterDocument' };
@@ -902,7 +902,7 @@ async function landOnArtifact(
   if (query === undefined || bearer === undefined) {
     noteDiagnostic(
       connectionOutput,
-      'Handoff from portal',
+      'Handoff from the console',
       `${cluster.name} ${describeOpenRequest(request)} -> no connection`
     );
     return { outcome: 'noCluster', detail: `${cluster.name} is not connected` };
@@ -920,7 +920,7 @@ async function landOnArtifact(
   if (!lookup.found) {
     noteDiagnostic(
       connectionOutput,
-      'Handoff from portal',
+      'Handoff from the console',
       `${cluster.name} ${describeOpenRequest(request)} -> no such artifact`
     );
     // ONE SENTENCE FOR TWO CONDITIONS, because the graph gives one answer for
@@ -939,7 +939,7 @@ async function landOnArtifact(
   if (base === undefined) {
     noteDiagnostic(
       connectionOutput,
-      'Handoff from portal',
+      'Handoff from the console',
       `${cluster.name} ${describeOpenRequest(request)} -> no https address`
     );
     void window.showErrorMessage(
@@ -954,7 +954,7 @@ async function landOnArtifact(
   // which cluster, which row, what it is and how big.
   noteDiagnostic(
     connectionOutput,
-    'Handoff from portal',
+    'Handoff from the console',
     `${artifactProvenanceLine(cluster.name, meta)} -> ${delivery.kind} as ${fileName}` +
       (lookup.archived ? ' (archived)' : '')
   );
@@ -987,7 +987,7 @@ async function landOnArtifact(
       // link this extension would not act on at all.
       noteDiagnostic(
         connectionOutput,
-        'Handoff from portal',
+        'Handoff from the console',
         `${cluster.name} ${describeOpenRequest(request)} -> save cancelled`
       );
       return { outcome: 'notLoaded', detail: 'cancelled' };
@@ -1002,7 +1002,7 @@ async function landOnArtifact(
       return { outcome: 'noCluster', detail: `save failed (${saved.failure.reason})` };
     }
     void window.showInformationMessage(`MemQL: saved ${fileName}.`);
-    noteDiagnostic(connectionOutput, 'Handoff from portal', `${cluster.name} saved ${fileName}`);
+    noteDiagnostic(connectionOutput, 'Handoff from the console', `${cluster.name} saved ${fileName}`);
     return { outcome: 'saved', detail: 'artifactFile' };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
@@ -1782,7 +1782,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // panel hands back the cluster its record came from, and a mismatch is
   // refused through `panelClusterRefusal` -- the same comparison the
   // cluster-document lens makes, for the same reason. Serving `prod`'s bytes
-  // under a record read from `staging`, or opening `prod`'s portal for a
+  // under a record read from `staging`, or opening `prod`'s console for a
   // concept picked out of `staging`'s catalog, is the failure both prevent.
   const constructPanelDeps = (): ConstructPanelDeps => ({
     viewSourceFromCluster: async (construct, panelCluster) => {
@@ -1812,47 +1812,18 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       }
     },
     // Rows live inside the cluster, not on this machine, so this hands off to
-    // the portal rather than fetching and rendering them here (memql#4252) --
-    // same division of labour as viewSourceFromCluster above, the other way
-    // round. clusters.yaml is read here because ConnectionState carries only
-    // the connected cluster's NAME (`clusterName`) -- ConnectionManager has no
-    // getter for the ClusterConfig it dialled with -- so the name is what
-    // resolves back to a full config.
-    browseRowsInPortal: async (construct, panelCluster) => {
-      const state = connections?.state;
-      const connected = state?.status === 'connected' ? state.clusterName : undefined;
-      const refusal = panelClusterRefusal(panelCluster, connected, 'browse its rows in the portal');
-      if (refusal !== undefined) {
-        void window.showInformationMessage(refusal);
-        return;
-      }
-      const clusterName = connected!;
-      // WRAPPED, unlike its sibling above, which had a try/catch from the
-      // start: three of the four calls here can reject (the registry read, the
-      // site-row lookup inside portalUrlForCluster, and openExternal), the
-      // panel dispatches messages as `void this.onMessage(...)`, and an
-      // unattached rejection is an extension-host log line the operator never
-      // sees. Same classification as every other failure in this file.
-      try {
-        const result = await readClustersFileSafe(clustersPath);
-        const cluster = result.ok ? result.file.clusters.find((c) => c.name === clusterName) : undefined;
-        const root = cluster === undefined ? '' : await portalUrlForCluster(cluster);
-        if (root === '') {
-          void window.showErrorMessage(
-            'MemQL: no portal address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.'
-          );
-          return;
-        }
-        await env.openExternal(Uri.parse(portalConceptUrl(root, construct.name)));
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        noteDiagnostic(connectionOutput, `opening the portal for ${construct.name} on "${clusterName}" failed`, detail);
-        void offerDetails('error', connectionOutput, `MemQL: the portal for ${clusterName} could not be opened.`);
-      }
-    },
+    // THE "BROWSE ROWS" ACTION IS GONE (epic memql#4984). It opened the
+    // portal's `/concepts/<id>` page for a construct; the portal is retired
+    // and MemQL OS has no concept browser, so there is no page to open. The
+    // action was REMOVED rather than pointed at the console root -- a menu
+    // item that opens a page which does not answer is worse than an absent
+    // one, because the person clicks it, gets a 404, and has learnt nothing
+    // about where the rows are. `viewSourceFromCluster` above, the other half
+    // of memql#4252's division of labour, is unaffected: it opens a construct's
+    // SOURCE, which the extension renders itself.
   });
 
-  // Everything the portal handoff (memql#4251) needs from this function, in
+  // Everything the console handoff (memql#4251) needs from this function, in
   // one place, at the point the last of it exists. The handler itself lives at
   // module scope because activate() registers it before this runs -- and, in an
   // untrusted window, instead of it.
@@ -2130,7 +2101,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // That is not a failure to report; it is the one step left. Offered as
       // information rather than an error, and wired to the action that
       // actually completes it -- which then chains on to sign-in and the
-      // portal by itself.
+      // console by itself.
       //
       // MODAL, uniquely among this file's information messages (memql#4078).
       // As a toast this was the first of three stacked notifications after the
@@ -2411,7 +2382,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // leave the next step one click away instead of leaving the operator on a
       // notification that congratulates them and stops.
       //
-      // THE ORDER IS FORCED, not chosen. The portal authenticates like every
+      // THE ORDER IS FORCED, not chosen. The console authenticates like every
       // other surface, so it cannot be the page that grants the first
       // credential; sign-in cannot work until the passkey exists. Each step is
       // therefore only offered once the one before it can succeed. The sign-in
@@ -2436,11 +2407,11 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       });
       if (!signedIn) return;
       const next = await window.showInformationMessage(
-        `MemQL: setup is complete -- you own "${displayLabel(target.cluster)}". Its portal is the operations console.`,
-        'Open portal'
+        `MemQL: setup is complete -- you own "${displayLabel(target.cluster)}". MemQL OS is its operations console.`,
+        'Open console'
       );
-      if (next === 'Open portal') {
-        await commands.executeCommand('memql.clusters.openPortal', target);
+      if (next === 'Open console') {
+        await commands.executeCommand('memql.clusters.openConsole', target);
       }
     }),
     // The counterpart: forget this cluster's session. The store owns what that
@@ -2483,7 +2454,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       }
       clustersTree.refresh();
       // The wording follows what actually happened. A session this could not
-      // end is named as such, with the portal's Devices page as the way to
+      // end is named as such, with identity's own Devices page as the way to
       // end it -- "signed out" over a live refresh token is the defect.
       if (revocation.attempted && !revocation.revoked) {
         noteDiagnostic(
@@ -2628,7 +2599,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     }),
     // The CONNECTION page (memql#3742), which replaces the Cluster tab. What
     // went with that tab was cluster state -- a pod grid, orphan verdicts,
-    // under-replica alarms -- which the portal owns and already draws. What
+    // under-replica alarms -- which the console owns and already draws. What
     // arrives is the question nothing answered: what this editor dials, as
     // whom, and what happened.
     //
@@ -2658,20 +2629,21 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         target.cluster.name,
       );
     }),
-    // Open Portal, as an inline action on the tree as well as a button on the
+    // Open Console, as an inline action on the tree as well as a button on the
     // page. The cluster's OWN site row when there is a connection to read it
-    // over, and the composed `api.<domain>/portal/` when there is not --
-    // reading the row is what keeps this correct when memql#3711 moves the
-    // portal to its own origin.
-    commands.registerCommand('memql.clusters.openPortal', async (node?: ClusterNode) => {
+    // over, and the composed `os.<domain>/` when there is not -- reading the
+    // row is what kept this correct through BOTH moves of the console's origin
+    // (memql#3711 and epic memql#4984); the composed half needed an edit each
+    // time.
+    commands.registerCommand('memql.clusters.openConsole', async (node?: ClusterNode) => {
       const target = node ?? (await pickCluster(clustersPath));
       if (target === undefined || target.cluster.name === '') {
         return;
       }
-      const url = await portalUrlForCluster(target.cluster);
+      const url = await consoleUrlForCluster(target.cluster);
       if (url === '') {
         void window.showErrorMessage(
-          'MemQL: no portal address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.'
+          'MemQL: no console address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.'
         );
         return;
       }
@@ -3957,13 +3929,14 @@ async function writeCluster(
   clustersTree.refresh();
 }
 
-// The portal's URL for a cluster: the site row when there is a live
+// The console's URL for a cluster: the site row when there is a live
 // connection to read it over, the composed address otherwise (see
-// portalTarget). Factored out of memql.clusters.openPortal (memql#4252) so
-// the construct page's "Browse rows in portal" button computes the same
-// answer instead of growing a second copy of the connected-vs-composed
-// choice.
-async function portalUrlForCluster(cluster: ClusterConfig): Promise<string> {
+// consoleTarget). It was factored out of memql.clusters.openPortal (memql#4252)
+// so the construct page's "Browse rows" button could compute the same answer
+// instead of growing a second copy of the connected-vs-composed choice; that
+// button is gone (epic memql#4984) and this stays factored, because the one
+// caller left is the command and a helper with one caller is not a cost.
+async function consoleUrlForCluster(cluster: ClusterConfig): Promise<string> {
   const query = connections?.query;
   const state = connections?.state;
   const connected =
@@ -3971,7 +3944,7 @@ async function portalUrlForCluster(cluster: ClusterConfig): Promise<string> {
   const page = connected
     ? await browseConceptPage(query, SITE_CONCEPT, { pageSize: 50 }).catch(() => null)
     : null;
-  return portalTarget(cluster, page?.rows ?? []).url;
+  return consoleTarget(cluster, page?.rows ?? []).url;
 }
 
 async function pickCluster(clustersPath: string): Promise<ClusterNode | undefined> {

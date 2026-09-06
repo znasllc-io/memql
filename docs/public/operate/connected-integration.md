@@ -20,7 +20,7 @@ bottom of.
 
 Related: [front-door.md](front-door.md) ·
 [auth/identity-service.md](auth/identity-service.md) ·
-[portal.md](portal.md)
+[memql-os.md](memql-os.md)
 
 ---
 
@@ -109,7 +109,7 @@ go run ./scripts/sdk-gen \
 > **INFO: `make sdk-gen` in this repo emits both targets.** The engine's own
 > typed surface — `dsl/`'s queries, mutations and logics plus its `@sdk`
 > builtins — is generated into `sdk/go/client` and `sdk/ts/src/client` and
-> ships inside `@znasllc-io/memql-sdk-core`; the portal consumes it that way
+> ships inside `@znasllc-io/memql-sdk-core`; the console consumes it that way
 > (memql#4232), and `make sdk-gen-check` fails CI on drift. A customer's typed
 > TS surface is generated from **core DSL ∪ their own bundle** — which is what
 > the composed `--dsl` above does — with `--ts-import-from` aiming the emitted
@@ -147,7 +147,7 @@ ways to get one:
   ([Connecting an Editor](auth/connecting-editors.md)).
 - **Configured at boot** — `MEMQL_IDENTITY_REGISTERED_CLIENTS`, a JSON array of
   `{clientId, redirectURIs[]}`. This is how the platform's own clients (the
-  portal, the Cockpit) are seeded.
+  console, the Cockpit) are seeded.
 
 Either way, `redirect_uri` is matched by **exact string**. A trailing slash, a
 missing port or `http` where the registered value says `https` is a 400 at
@@ -245,8 +245,8 @@ setting for a cookie the bff issues to its own origin, so this is not a bug to
 be fixed. It is true today, before third-party cookie deprecation is considered
 at all; deprecation only removes the workarounds.
 
-The flow that does work is the one the MemQL Portal already uses, described
-step by step in [portal.md](portal.md#how-the-portal-authenticates):
+The flow that does work is the one MemQL OS already uses, described
+step by step in [memql-os.md](memql-os.md#how-it-authenticates):
 
 1. Top-level navigation to `https://identity.<domain>/authorize` with
    `response_type=code`, the client id, the exact registered `redirect_uri`,
@@ -310,7 +310,7 @@ None of this is theoretical, and MemQL has already been on the receiving end of
 it. `component/edge/csp.go` names the cluster's identity origin in
 `connect-src` for exactly this reason (memql#3711 fix round 2) — and, because
 the edge serves every hosted site rather than one bundle on one origin, it
-does this for every site alike, not as a portal-specific carve-out
+does this for every site alike, never as a per-site carve-out
 (`TestPortalHasNoSpecialCaseInTheServingPath`). Without that origin, the OAuth
 token exchange is refused by the browser's own CSP before it reaches the
 network, while the top-level `/authorize` redirect still works — it is a

@@ -32,7 +32,7 @@ surface, and the singular form quietly forced either a second repo or a
 second build wedged into the first. Each surface is its own package, its
 own image and its own digest, and nothing enumerates them by hand. The
 engine repo uses the same convention for the one surface it owns --
-`clients/portal/`, the platform's own operations console (memql#3314) --
+`clients/os/`, the platform's own operations console (memql#4705) --
 which is what makes it the worked example the `memql-project` template
 copies. What must NOT land in the engine's `clients/` is a *product's*
 surface; that boundary is enforced by `clients_allowlist_test.go`

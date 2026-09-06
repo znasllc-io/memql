@@ -342,9 +342,9 @@ surfaces prints stringified JSON into a `<pre>`, and a guard test
 (`editors/vscode/test/surfaceGuards.test.ts`) fails the build if one
 starts to.
 
-It lives in `sdk/ts-viewkit`, which is also what the MemQL portal renders
-through, so the two surfaces agree on what a value looks like rather than
-each deriving an answer.
+It lives in `sdk/ts-viewkit`, and the extension is its one consumer since epic
+memql#4984 retired the portal. The kit is shared with nothing else today, so
+its element-fitting layer has no caller -- see the retirement record.
 
 ## Beyond browsing
 
@@ -352,7 +352,7 @@ Executing constructs from a CodeLens or from the **Constructs** catalog,
 running automations with a step trace, and driving deployments from the
 **Deployments** view have since
 landed alongside the views above. (Deployments replaced the Cluster tab in
-memql#3733: topology is cluster state and belongs to the portal, while what
+memql#3733: topology is cluster state and belongs to the console, while what
 you operate and what you can reach belong here. The extension's README states
 that boundary and the table it produces.) Each has its own section in the
 [manual verification checklist](vscode-runtime-panel-verification.md),

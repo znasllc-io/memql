@@ -1,5 +1,5 @@
 ---
-title: Cutting a release from the portal
+title: Cutting a release
 audience: public
 status: stable
 area: operate
@@ -7,7 +7,7 @@ sinceVersion: 0.20.0
 owner: znas
 ---
 
-# Cutting a release from the portal
+# Cutting a release
 
 Only owners may cut a new version of MemQL, and the platform does it end to
 end: it computes the next version, creates the tag, and publishes the GitHub
@@ -81,7 +81,7 @@ The Pull requests scope is genuinely optional. A token holding Contents alone
 is a correct token: a cut works, and the pin-bump follow-on records a note
 saying it could not open a PR rather than failing the release.
 
-Seed both from the portal's configuration surface, or as environment values on
+Seed both from the console's configuration surface, or as environment values on
 the node. Resolution order is **global secret -> global variable -> environment**,
 secret first because the token is a credential; the environment tier exists for
 the bootstrap window after `make up-refresh`, when concept storage is empty.
@@ -124,7 +124,7 @@ name is right, and the version arithmetic found your existing tags.
 
 ## 5. Cutting
 
-On the portal's **Deployments** page, the **Releases** card. It is visible only
+On a console's **Deployments** surface, the **Releases** card. It is visible only
 to owners -- a non-owner sees no card at all, and the engine refuses the call
 independently before any network request is made.
 
@@ -179,8 +179,8 @@ The check is on demand. There is no poller and no schedule.
 | `tag_created_release_failed` | **half done** -- see below | act; nothing is building |
 | `version_not_cut` | Check images was asked about a version with no row here | it was cut by hand or on another installation. There is no row to move |
 | `registry_check_failed` | the image check itself errored | the status is unchanged. Retry later |
-| `not_owner` | the caller does not hold the owner role | you will not meet this from the portal -- the card is absent for a non-owner rather than refusing. It is what a direct SDK or MCP caller gets |
-| `invalid_bump` | the bump was not major/minor/patch | same: the portal only offers the three, so this is a direct caller's typo |
+| `not_owner` | the caller does not hold the owner role | you will not meet this from a console -- the card is absent for a non-owner rather than refusing. It is what a direct SDK or MCP caller gets |
+| `invalid_bump` | the bump was not major/minor/patch | same: a console only offers the three, so this is a direct caller's typo |
 
 ### The half-done state
 
@@ -241,7 +241,7 @@ the same code.
 
 ## 10. The same cut from a lifecycle automation
 
-The portal button above is one path. `releaseEngine`
+The console button above is one path. `releaseEngine`
 (`scripts/release/release-engine.sh`, capability `release.engine`) is the
 other: the deploy pack's action, for a lifecycle that cuts a version as a step
 rather than a person pressing a button.
@@ -292,5 +292,5 @@ targets.
   sha. The decisions log ([the split](auth/access-model.md)), not the
   high-volume activity stream.
 
-Read the history from the portal card, or with `query releaseCuts()` as an
+Read the history from the console card, or with `query releaseCuts()` as an
 owner.

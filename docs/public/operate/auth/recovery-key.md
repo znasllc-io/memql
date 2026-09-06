@@ -159,7 +159,7 @@ passkey from `/me/devices`.
 
 ### Rotate it
 
-**From the portal**, as a signed-in owner: People → the owner → **Recovery key**
+**From the console**, as a signed-in owner: Users → the owner → **Recovery key**
 → *Rotate the key*. Shown once.
 
 **From the pod**, when nobody can sign in:

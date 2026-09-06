@@ -274,7 +274,7 @@ of the Packages half this passage replaces and survived it unchanged.
   renders a control for them. **`OFFERED_KINDS` is a single-line literal on
   purpose**: `component/memql/site_kind_os_parity_test.go` reads it out of the
   file and holds it equal to `v1:platform:site.kind`, the way
-  `TestFleetOnlineWindowMatchesPortal` holds the online window equal across
+  `TestFleetOnlineWindowMatchesTheClients` holds the online window equal across
   client and engine. A kind the OS offers and the enum does not is a form
   somebody can fill in and nothing can store.
 
@@ -385,7 +385,7 @@ worth restating because the recomposition tested each of them:
 Two things the app deliberately does not do, both inherited and both still
 true. There is no raw `bundleRef` editor anywhere (a field that accepts any
 URI is a way to point a live site at nothing). And a `systemOwned` row renders
-NO lifecycle controls at all: the seeded portal and OS sites are exempt from
+NO lifecycle controls at all: the seeded OS site is exempt from
 the lifecycle entirely, the server refuses those writes regardless
 (`component/memql/platform_site_status_guard.go` is the gate), and the
 presentation is the courtesy.
@@ -574,10 +574,10 @@ it), and it is one line rather than an unmount.
 
 ### The map is plain SVG, and that is enforced
 
-The portal's Nexus is the platform's ONE 3D surface and pays for it with a lazy
+Nexus was the platform's ONE 3D surface and paid for it with a lazy
 chunk and a guard of its own. This map answers a flat question -- which host,
 which site, which bundle -- so a WebGL renderer would buy it nothing while
-making every OS window carry the largest dependency the portal has.
+making every OS window carry the largest dependency that surface had.
 `test/deployables/map.test.tsx` scans the module graph for a three.js import
 AND checks the package manifest, because a static import is only one of the two
 ways one gets in. Both halves carry the reachable positive that makes an empty
