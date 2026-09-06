@@ -31,6 +31,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/proving"
@@ -404,11 +405,35 @@ func openEngine(c *capability.Capability) (*memqlengine.MemQLEngine, func(), int
 				"TimescaleDB on purpose -- a speed claim that excluded the database would be measuring a different product")
 	}
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// One context for the ping AND the migration. A migration on a fresh
+	// database applies the whole schema, so the budget is minutes rather than
+	// the ping's seconds.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
+	pingCtx, cancelPing := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelPing()
+	if err := db.PingContext(pingCtx); err != nil {
 		_ = db.Close()
 		return nil, nil, c.Fail(capability.ExitPrerequisite, "the database at the configured DSN is unreachable: %v", err)
+	}
+	// MIGRATE BEFORE OPENING THE ENGINE. The suite must work against a FRESH
+	// Postgres, and CI gives it exactly that: a service container created for
+	// the job with the four extensions and no schema.
+	//
+	// This is the defect a shared local database hides completely. Every
+	// db-gated test package migrates from its own TestMain, so a developer
+	// machine that has ever run one already has the schema -- and the whole
+	// suite passed locally while the CI lane failed with a Postgres error
+	// naming a missing relation and nothing about migrations.
+	//
+	// dbtest.EnsureSchema is the right helper despite its name: it is an
+	// ordinary package (not a _test.go file), it takes a Postgres advisory
+	// lock so two runs cannot migrate at once, and it is the same code path
+	// every db-gated package uses -- so the proving suite runs against the
+	// schema CI's other lanes run against, rather than one of its own.
+	if _, merr := dbtest.EnsureSchema(ctx); merr != nil {
+		_ = db.Close()
+		return nil, nil, c.Fail(capability.ExitPrerequisite, "migrating the database: %v", merr)
 	}
 	if _, err := memqlengine.LoadUnifiedConcepts(nil); err != nil {
 		_ = db.Close()

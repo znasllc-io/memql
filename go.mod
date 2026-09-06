@@ -183,7 +183,7 @@ require (
 	github.com/znasllc-io/memql/component/server v0.0.0
 	github.com/znasllc-io/memql/component/service v0.0.0
 	github.com/znasllc-io/memql/component/skills v0.0.0 // indirect
-	github.com/znasllc-io/memql/component/work v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/work v0.0.0
 	github.com/znasllc-io/memql/component/worker v0.0.0
 	github.com/znasllc-io/memql/component/workjournal v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
