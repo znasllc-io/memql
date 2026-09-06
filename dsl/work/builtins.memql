@@ -1,0 +1,82 @@
+// builtins.memql
+//
+// The work spine's entry points (design record
+// docs/superpowers/specs/2026-09-05-work-spine-design.md, section H).
+// Executors live in integrations/work; the pure decisions they call live
+// in component/work.
+//
+// These are BUILTINS rather than mutations because each one is more than
+// a row write: createGoal opens the goal AND its first run and dispatches
+// compile; forkRun and replayRun read a source run and derive a new one;
+// decideApproval records a decision AND resumes the run parked on it. A
+// mutation step cannot hand its inserted id to a later one, so the
+// composition has to happen in Go.
+//
+// Every handler repeats its own gate. A builtin's annotation set carries
+// no @requiresRank, so the floor is the handler's -- these are all
+// caller-scoped rather than ranked: a person acts on their own goals, and
+// the row tier is what decides which those are.
+
+@enabled
+@sdk
+@description("Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all.")
+@executor("integration.work.createGoal")
+builtin createGoal {
+  statement     string!  @description("The goal in the person's own words.")
+  input         object   @description("The typed input object: the shape the chosen template's args declare.")
+  accountIds    []string @description("Optional account tags -- a record of who the work is for, never a visibility scope.")
+  ceilings      object   @description("{tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents}. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'.")
+  requestedVia  string   @description("The surface the goal arrived through: api, ask, nexus, responsibility, library, materializer. Empty when unknown.")
+}
+
+@enabled
+@sdk
+@description("Close one of the caller's goals and ask every run of it to stop. Cancellation is REQUESTED rather than done: a run notices at its next step boundary, so a step already in flight finishes and is journaled rather than being abandoned mid-effect.")
+@executor("integration.work.cancelGoal")
+builtin cancelGoal {
+  goalId  string!  @description("The v1:work:goal to close.")
+  reason  string   @description("Why it closed, in words a person can read.")
+}
+
+@enabled
+@sdk
+@description("Fork one of the caller's runs at a step: a NEW run that serves the shared prefix from the journal and runs live from the fork step on. The source run is untouched. Returns {runId}.")
+@executor("integration.work.forkRun")
+builtin forkRun {
+  runId       string!  @description("The run to fork.")
+  atStepKey   string!  @description("The step key to diverge at. Steps before it are served from the journal; this step and everything after run live.")
+  variables   object   @description("Variables to override on the fork. Anything omitted is inherited from the source run.")
+}
+
+@enabled
+@sdk
+@description("Replay one of the caller's runs: a NEW run that serves EVERY model call from the journal, so it reaches no provider. Under the default strict policy a request with no journaled match raises a divergence pinned to the first step that differs; permissive makes a fresh call and journals it. Returns {runId}.")
+@executor("integration.work.replayRun")
+builtin replayRun {
+  runId   string!  @description("The run to replay.")
+  policy  string   @description("strict (default) raises a divergence on a journal miss; permissive makes a fresh call and journals it.")
+}
+
+@enabled
+@sdk
+@description("Decide one of the caller's pending approvals and resume the run parked on it. The decision is refused if the artifact changed since it was approved -- an approval is a decision about a specific command, patch, message or draft, and it never carries to a modified one.")
+@executor("integration.work.decideApproval")
+builtin decideApproval {
+  approvalId  string!  @description("The v1:work:approval to decide.")
+  decision    string!  @description("approved, rejected, or answered (for a feedback question).")
+  answer      object   @description("The person's answer, for a feedback approval.")
+}
+
+@enabled
+@description("Resume every run whose timer wait is due and every run whose node died mid-flight. Cron-leader gated through its scheduled automation, so it runs on one replica cluster-wide.")
+@executor("integration.work.sweepWaiting")
+builtin workSweepWaiting {
+  olderThanSeconds  int  @description("How long a run must have been silent before it counts as abandoned. Defaults to twice the heartbeat interval.")
+}
+
+@enabled
+@description("Archive then delete journal rows past their retention window: v1:work:modelCall at MEMQL_WORK_MODELCALL_RETENTION_DAYS and v1:work:observation at MEMQL_WORK_OBSERVATION_RETENTION_DAYS. The run's summary is folded onto the run row BEFORE its detail goes, so a run stays readable after. No archive means no delete.")
+@executor("integration.work.retentionSweep")
+builtin workRetentionSweep {
+  dryRun  bool  @description("Report what would be archived and deleted without doing either.")
+}

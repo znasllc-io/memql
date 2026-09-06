@@ -1,0 +1,50 @@
+// prompts.memql
+//
+// The three prompts that replace the planner agent's single
+// plannerAgent.tmpl persona (design record
+// docs/superpowers/specs/2026-09-05-work-spine-design.md, section F).
+//
+// The planner agent was one prompt asked to do five different jobs --
+// decompose, dispatch, create a specialist, succeed, escalate -- and its
+// breadth is what made every call expensive and its failures hard to
+// attribute. These three are each one job with one output shape, which is
+// what lets each be priced separately: compileGoal is the only one that
+// authors, classifySymptom is deliberately the cheapest model in the
+// tree, and replanGap only ever sees the remainder of a plan.
+
+@enabled
+@description("Compile a goal into a run: emit the steps as an automation draft in the MemQL grammar. Reached ONLY when the catalog missed and triage said the goal is neither trivial nor sectionable, so it is the expensive path by construction and every cheaper tier runs first. The draft must pass Gate 1 (the isolated compile-and-bind) before the run proceeds.")
+@defaultProvider("streamClaudeSonnet")
+@templateFile("prompts/compileGoal.tmpl")
+prompt compileGoal {
+  statement  string!   @description("The goal in the person's own words.")
+  inputKeys  []string  @description("The argument names the goal supplies; these become the automation's args, so a path or a machine label is a variable rather than a literal.")
+  catalog    []object  @description("[{name, kind, purpose}] of the caller's catalogued constructs. The draft must PREFER composing these over authoring new ones, and must reference them by their real names.")
+  now        string!   @description("RFC3339 wall-clock at invocation, so a time-relative goal needs no hardcoded clock.")
+}
+
+@enabled
+@description("Read a failed step's trace and name its symptom. Reached ONLY when the deterministic rules table had no opinion -- most failures never get here, which is the point. Deliberately the cheapest model in the tree: the answer is one of five words plus a reason, and the acts it selects are all bounded and reversible.")
+@defaultProvider("chat54Nano")
+@templateFile("prompts/classifySymptom.tmpl")
+prompt classifySymptom {
+  stepKey       string!   @description("The step that failed.")
+  stepType      string!   @description("The automation step type.")
+  errorCode     string    @description("The catalogued error code, when there was one.")
+  errorMessage  string    @description("The failure in words.")
+  attempt       int       @description("Which attempt this was; 1 is the first.")
+  trace         []object  @description("The recent journal entries for this run, oldest first, so the model can see whether the run is going in circles.")
+}
+
+@enabled
+@description("Re-plan the gap from a failed step on: emit the REMAINING steps as a new template version. The prefix is kept and never re-emitted, because the steps that already succeeded are evidence rather than a draft -- re-planning from the start is the unguided rerun the debugging literature measured as three times worse than localized repair.")
+@defaultProvider("streamClaudeSonnet")
+@templateFile("prompts/replanGap.tmpl")
+prompt replanGap {
+  statement      string!   @description("The goal in the person's own words.")
+  completedSteps []object  @description("[{key, call, result}] of the steps that already succeeded. These are FIXED: the new plan starts after them.")
+  failedStep     object!   @description("{key, call, errorMessage, symptom} -- the step the plan broke at.")
+  remainingGoal  string    @description("What is left to achieve, when the caller can state it more narrowly than the original goal.")
+  catalog        []object  @description("[{name, kind, purpose}] of the caller's catalogued constructs, to compose rather than author.")
+  now            string!   @description("RFC3339 wall-clock at invocation.")
+}

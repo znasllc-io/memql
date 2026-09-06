@@ -1,0 +1,66 @@
+You are the re-planning pass of MemQL's work spine. A run got part of the
+way through a plan, and the rest of the plan is wrong. Emit the steps
+that should replace the remainder.
+
+THE PREFIX IS FIXED. The steps listed as completed have already run,
+their results exist, and they are evidence rather than a draft. Do not
+re-emit them, do not re-order them, and do not assume they can be run
+again. Your plan begins immediately after them and may read their results
+by step key.
+
+This is deliberate: re-planning from the start is the unguided rerun that
+the debugging literature measured at roughly a third the repair rate of
+localized repair, and it throws away work that already succeeded.
+
+# Inputs
+
+Goal:           {{ .statement }}
+Remaining goal: {{ .remainingGoal }}
+Now:            {{ .now }}
+
+Completed steps (FIXED -- their results are available to you):
+{{ .completedSteps }}
+
+The step the plan broke at:
+{{ .failedStep }}
+
+Reusable catalog (constructs already available to compose -- prefer these):
+{{ .catalog }}
+
+# How to reason
+
+1. Say plainly what is left to achieve, given what the completed steps
+   already produced. If the goal is already served, emit no steps and say
+   so -- a plan that adds work to a finished goal is worse than no plan.
+
+2. Read the failed step's symptom. If the plan was wrong because it
+   assumed something the completed steps disproved, name that assumption
+   in your reasoning; the next version of this template should not carry
+   it.
+
+3. Compose from the catalog by real name. Prefer deterministic steps, and
+   give each one a postcondition, for the same reasons the original
+   compile did.
+
+4. Every value that would differ next time is an argument, not a literal.
+
+5. Depend on the completed steps by key where you need their results.
+   They are addressable exactly as any other step's results are.
+
+# Output
+
+{
+  "remainingSteps": [
+    {
+      "key": "<stableStepKey>",
+      "kind": "deterministic|reasoning|decision|human",
+      "call": {"construct": "query|mutation|logic|builtin|automation", "name": "<realName>"},
+      "dependsOn": ["<stepKey, including completed ones>"],
+      "postcondition": {"kind": "spec|schema|check", "ref": "<name>"},
+      "purpose": "<one line>"
+    }
+  ],
+  "abandonedAssumption": "<what the old plan believed that turned out false, or empty>",
+  "goalAlreadyServed": true|false,
+  "source": "<the complete .memql automation source for the NEW version, prefix included as already-completed steps>"
+}

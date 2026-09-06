@@ -124,6 +124,32 @@ query approval workApprovalsForOwner {
   shape   workApprovalFull
 }
 
+// ---------------------------------------------------------------------
+// Epic A2: the client-reachable reads.
+//
+// The @serverOnly reads above are the journal's, taken under the
+// synthetic cluster actor that resume and the executor run as. These are
+// the SAME rows read by the person who owns them, from a browser, and
+// they are separate constructs rather than one because the two callers
+// satisfy the owned tier by different arms: the journal by the
+// cluster-owner escape, a person by ownerUserId==actor.userId. One
+// construct cannot spell both without widening the read for somebody.
+//
+// Spec section I names these as client-reachable; the MemQL OS Work app
+// is what reads them.
+// ---------------------------------------------------------------------
+
+/// One of the caller's goals by id.
+@actor
+@unbounded("one goal by id -- bounded to a single row")
+query goal workGoalForOwner {
+  args {
+    goalId  string!
+  }
+  filter  row.id==args.goalId && ownerUserId==actor.userId
+  shape   workGoalFull
+}
+
 /// The caller's runs, newest first. Owned: ownerUserId==actor.userId binds server-side, and the
 /// concept's tier admits the same rows on the SUBSCRIPTION, so a browser watching this feed is not
 /// handed anybody else's work the way an undeclared concept would.
@@ -137,4 +163,61 @@ query run workRunsForOwner {
   filter  ownerUserId==actor.userId
   sort    "row.createdAt", "desc"
   shape   workRunFull
+}
+
+/// The runs of one of the caller's goals, newest first.
+@actor
+query run workRunsForGoal {
+  args {
+    goalId  string!
+  }
+  filter  goalId==args.goalId && ownerUserId==actor.userId
+  sort    "row.createdAt", "desc"
+  shape   workRunFull
+}
+
+/// One of the caller's runs by id.
+@actor
+@unbounded("one run by id -- bounded to a single row")
+query run workRunForOwner {
+  args {
+    runId  string!
+  }
+  filter  row.id==args.runId && ownerUserId==actor.userId
+  shape   workRunFull
+}
+
+/// Every step of one of the caller's runs -- the run timeline. Bounded by the run; the client
+/// orders by seq, because @unbounded and sort cannot be combined.
+@actor
+@unbounded("every step of ONE run -- bounded by the run")
+query step workStepsForOwnerRun {
+  args {
+    runId  string!
+  }
+  filter  runId==args.runId && ownerUserId==actor.userId
+  shape   workStepFull
+}
+
+/// Every model call of one of the caller's runs. An on-demand read: the concept does not
+/// broadcast, so the Work app shows when it last read this.
+@actor
+@unbounded("every model call of ONE run -- bounded by the run")
+query modelCall workModelCallsForOwnerRun {
+  args {
+    runId  string!
+  }
+  filter  runId==args.runId && ownerUserId==actor.userId
+  shape   workModelCallFull
+}
+
+/// Every observation of one of the caller's runs. On-demand, like the model calls.
+@actor
+@unbounded("every observation of ONE run -- bounded by the run")
+query observation workObservationsForOwnerRun {
+  args {
+    runId  string!
+  }
+  filter  runId==args.runId && ownerUserId==actor.userId
+  shape   workObservationFull
 }
