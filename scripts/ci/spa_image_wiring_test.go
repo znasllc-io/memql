@@ -504,13 +504,7 @@ func TestEveryReferenceToAnImageAgreesWithTheOthers(t *testing.T) {
 		if raw == "" || strings.HasPrefix(raw, "${") || stages[strings.ToLower(raw)] {
 			continue // a stage reference, not an image
 		}
-		repo := raw
-		if i := strings.Index(repo, "@"); i >= 0 {
-			repo = repo[:i]
-		}
-		if i := strings.LastIndex(repo, ":"); i >= 0 {
-			repo = repo[:i]
-		}
+		repo := imageRepoKey(raw)
 		byRepo[repo] = append(byRepo[repo], ref{
 			full: raw,
 			line: strings.Count(body[:m[0]], "\n") + 1,
@@ -564,5 +558,60 @@ func TestEveryReferenceToAnImageAgreesWithTheOthers(t *testing.T) {
 			"out of the image by name ends up on a different version from the one that built it.\n"+
 			"If two versions are genuinely required, this guard is the place to say why.",
 			repo, len(distinct), b.String())
+	}
+}
+
+// imageRepoKey reduces an image reference to the REPOSITORY it names, dropping
+// the digest and the tag. The grouping above depends on it entirely.
+//
+// The colon is overloaded: it separates a tag (`node:22`) AND a registry port
+// (`localhost:5000/img`). Stripping at the last colon is right for the first
+// and wrong for the second -- but only when the reference carries NO TAG, which
+// is easy to miss, because `localhost:5000/img:v1@sha256:...` strips correctly
+// (the last colon is the tag's) while `localhost:5000/img@sha256:...` keys as
+// `localhost`.
+//
+// The untagged, digest-pinned form is the one this repo uses everywhere, so
+// that is the case that would actually bite. A wrong key fails OPEN in a
+// particular way -- it joins unrelated repositories under one name, and the
+// gate then fires on images that legitimately differ, which reads exactly like
+// a real drift. Hence: a colon is a tag separator only when nothing after it
+// is a path.
+//
+// Raised by memql-f8's session on #5043. There is no port-bearing registry in
+// the Dockerfile today, so this is latent; TestImageRepoKey is what keeps it
+// from becoming live unnoticed, since the Dockerfile cannot exercise it.
+func imageRepoKey(raw string) string {
+	repo := raw
+	if i := strings.Index(repo, "@"); i >= 0 {
+		repo = repo[:i]
+	}
+	if i := strings.LastIndex(repo, ":"); i >= 0 && !strings.Contains(repo[i:], "/") {
+		repo = repo[:i]
+	}
+	return repo
+}
+
+func TestImageRepoKey(t *testing.T) {
+	for _, tc := range []struct{ ref, want string }{
+		// The forms actually in the Dockerfile.
+		{"node:22-bookworm-slim@sha256:d649c27d", "node"},
+		{"debian:12-slim@sha256:abd67ffc", "debian"},
+		{"gcr.io/distroless/base-debian12@sha256:fabbf1c0", "gcr.io/distroless/base-debian12"},
+		{"golang:1.26.6@sha256:640a234f", "golang"},
+
+		// A registry port. The untagged form is the one that used to key as
+		// `localhost`; the tagged form always worked, which is what made the
+		// bug easy to argue away with the wrong example.
+		{"localhost:5000/myimg@sha256:ddd", "localhost:5000/myimg"},
+		{"localhost:5000/myimg:v1@sha256:fff", "localhost:5000/myimg"},
+		{"registry.example.com:5000/team/app@sha256:eee", "registry.example.com:5000/team/app"},
+
+		// No digest, no tag.
+		{"alpine", "alpine"},
+	} {
+		if got := imageRepoKey(tc.ref); got != tc.want {
+			t.Errorf("imageRepoKey(%q) = %q, want %q", tc.ref, got, tc.want)
+		}
 	}
 }
