@@ -8,6 +8,7 @@ import { OsProvider } from "../../src/chrome/state";
 import { MachinesProvider } from "../../src/live/machines";
 import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/config";
 import { OS_REGISTRY } from "../../src/apps/registry";
+import type { OsAppManifest, OsRegistry } from "../../src/system/registry";
 import { FilesApp } from "../../src/apps/files/FilesApp";
 import type { FilesSettings } from "../../src/apps/files/settings";
 import { DEFAULT_FILES_SETTINGS } from "../../src/apps/files/settings";
@@ -97,6 +98,9 @@ export interface FakeSeed {
   versions?: Row[];
   /** The watched-folder arrangements (epic memql#4783). */
   backups?: Row[];
+  /** The Materializer's records (epic memql#4981) -- what `compositions`
+   *  answers. */
+  compositions?: Row[];
   byId?: Record<string, Row>;
   /** Refusal sentences, keyed by construct name (e.g. archiveArtifact). */
   refuse?: Record<string, string>;
@@ -126,6 +130,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call === "query libraryArchivedFolders()") return rowsResult(seed.archivedFolders ?? []);
       if (call.startsWith("query libraryFileVersionsForFile(")) return rowsResult(seed.versions ?? []);
       if (call.startsWith("query libraryWatchedFolders(")) return rowsResult(seed.backups ?? []);
+      if (call.startsWith("query compositions(")) return rowsResult(seed.compositions ?? []);
       if (call.startsWith("mutation ") || call.startsWith("builtin ")) return rowsResult([]);
 
       const match = /id==(\S+)/.exec(call);
@@ -224,11 +229,17 @@ export async function renderFiles(opts: {
   consumeIntent?: (intentId: string) => void;
   /** The Ask tag the surface hands the shell, for the tests that pin it. */
   askContext?: (tag: string) => void;
+  /**
+   * The app registry, for the cases that turn on whether ANOTHER app is
+   * installed (epic memql#4981: the Materializer handoff is absent when the
+   * app is not there, and present when it is). Defaults to the real one.
+   */
+  registry?: OsRegistry;
 } = {}) {
   const view = render(
     withSession(
       <OsProvider
-        registry={OS_REGISTRY}
+        registry={opts.registry ?? OS_REGISTRY}
         actorRole="owner"
         grid={{ cols: 8, rows: 5 }}
         {...(opts.desk ? { store: deskDocumentWith(opts.desk) } : {})}
@@ -255,6 +266,20 @@ export async function renderFiles(opts: {
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
+
+/**
+ * The real registry with one app added or removed.
+ *
+ * FOR THE CASES THAT TURN ON WHETHER ANOTHER APP IS INSTALLED. A test that
+ * reached for the real registry alone would pass or fail on when a SIBLING
+ * epic happens to land -- both directions of "is it there" have to be
+ * expressible from one fixture, or the absent case quietly stops being tested
+ * the day the app appears.
+ */
+export function registryWith(app: OsAppManifest | null, without = ""): OsRegistry {
+  const apps = OS_REGISTRY.apps.filter((a) => a.id !== without && a.id !== app?.id);
+  return { ...OS_REGISTRY, apps: app ? [...apps, app] : apps };
+}
 
 export function artifactRow(over: Partial<Row> & { id: string }): Row {
   return {

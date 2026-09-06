@@ -1083,6 +1083,82 @@ own, sat at exactly the x of Library / Desktop / Bin and read as four more
 places; the group indents 12px, which the Library's rail does not need because
 its folders have no disclosure to be confused by.
 
+### The Materializer place, and the seam it draws (epic memql#4981)
+
+The rail's fourth place is over the files the Materializer made. It exists
+because two apps now describe one thing, and the epic's job was to say which
+question each of them answers.
+
+- **THEIR LIST IS THE RECORD; THIS PLACE IS A LOCATION.** The Materializer's
+  own Materialized section answers *what was made* -- one row per
+  `v1:compose:composition`, its sources, its template, the models that
+  contributed, whether the output carries its own provenance. This place
+  answers *where the file is* -- one row per OUTPUT FILE, an ordinary
+  `v1:library:artifact` that opens in the inspector, downloads, moves to a
+  folder and archives to the Bin like every other file. Neither is a copy of
+  the other, and the rule that keeps them apart is: **a composition has one
+  record and its output has one file; Files never shows the record and the
+  Materializer never shows the file tree.**
+
+- **The seam is ONE-DIRECTIONAL and it is one act.** The row menu and the
+  inspector carry "Open in Materializer", which opens the composer on that
+  composition. The inspector says "Made in" and nothing else -- no source
+  count, no template, no model list. Restating any of that here would be a
+  second reading of one row, free to disagree with the app whose subject it
+  is. Nothing in Files writes a composition.
+
+- **The act is ABSENT when it is not legal** (DESIGN.md rule 12), and there
+  are two ways for it not to be: the file was not composed, or the caller
+  cannot open that app at all. `openApp` no-ops on an app the registry does
+  not hold or the actor's rank does not admit, so a control rendered in either
+  case would silently do nothing -- worse than one that is not there. The
+  FILE still appears in the place either way; only the act to leave for
+  another app depends on that app existing.
+
+- **THE JOIN IS ON THE BACKING FILE.** `composition.outputFileId` names a
+  `v1:library:file` and the artifact points at it through `sourceConceptRef`
+  -- the same split the origin link states already do. It is folded from the
+  composition feed against the artifact index in one pass, not read per row.
+  Filing is read from the ARTIFACT, never from the record's own `folderId`:
+  the record carries where the output was first put, and a later move re-files
+  the index row and deliberately never comes back to it.
+
+- **A composition with no output file shows nothing, anywhere in Files.** A
+  draft has not produced one and a `failed` run never will. A row for one
+  would offer Open, Download and Move on a file nothing wrote; the failure and
+  its reason belong in the Materialized list, which is the record. Agreed with
+  memql#4977 rather than inferred from the join.
+
+- **ARCHIVED OUTPUTS ARE THE BIN'S.** One file offering Restore from two
+  places is exactly the ambiguity the Bin rename removed.
+
+- **The rail lists FOLDERS here, and that is not an inconsistency with the Bin
+  one place up.** The Bin earned its exception by having almost no navigation
+  to list; this place has the LIBRARY's shape -- ordinary files in ordinary
+  folders -- so opening it scopes the list to precisely the rows the rail
+  would otherwise be repeating, narrower. The place is permanent, empty or
+  not: the three above it are locations rather than results, and a fourth that
+  came and went with the data would make the rail's shape depend on what
+  happens to be in it. Its empty state is where somebody finds out the
+  Materializer exists.
+
+- **A fifth feed at the app root, and the one-feed rule is per CONCEPT.**
+  There is no server-side "artifacts that are outputs" read, so the place
+  cannot know its own population from anything narrower than the whole
+  composition set. The same feed answers the inspector's line, which is why
+  Files makes no `compositionForOutputFile` call: a second read of one row is
+  a second answer free to disagree with this one. The set joins the list's
+  `viewKey`, because a composition landing reveals rows the browser already
+  held -- the desk-shortcut lesson, applied to a second id set.
+
+**A FOURTH DEFECT CAME OUT OF THE RENDERED PASS HERE, and it predates this
+epic**: two place chevrons flipped against one rendered `expanded` both read
+the same value, so the second applied over the first and one place silently
+stayed shut. It is the same defect the Bin's own disclosures had one level
+down. Both setters are functional-only now, both are pinned by a test that
+takes its handles from one render, and both were invisible to ~1990 green
+cases because every one of them clicks once per render.
+
 ### Origin link states, in Files (epic memql#4783)
 
 A file pushed from a watched folder on a fleet machine carries a state against

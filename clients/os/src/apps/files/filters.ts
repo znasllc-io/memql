@@ -14,11 +14,17 @@ import { artifactName, isContentKind, type ArtifactRow } from "./rows";
 // ===========================================================================
 // PLACES, NOT A CHECKBOX (epic memql#4842, #4846)
 // ===========================================================================
-// The rail offers three places and the fold answers for the one being looked
-// at. Library is what you have; Desktop is the subset sitting on your desks
-// (an id-set handed in by the caller, because desks are shell state and this
-// module stays pure); the Bin is what you archived. The old `showArchived`
-// toggle is gone -- archived rows have a place now, not a filter.
+// The rail offers four places and the fold answers for the one being looked
+// at. Library is what you have; Desktop is the subset sitting on your desks;
+// the Bin is what you archived; the Materializer is what was composed from
+// the memory graph (epic memql#4981, #4983). The old `showArchived` toggle is
+// gone -- archived rows have a place now, not a filter.
+//
+// TWO OF THE FOUR ARE ID SETS HANDED IN BY THE CALLER, and that is what keeps
+// this module pure: desks are shell state and compositions are a fifth feed,
+// neither of which a filter should know how to read. The Desktop's set comes
+// from the roamed desktop document; the Materializer's comes from joining the
+// composition rows' `outputFileId` against each artifact's backing file.
 //
 // THE PLACE IS `bin`, NOT `archive` (epic memql#4981). One destination had
 // two names: the row menu's verb has always been "Move to Bin", the dock
@@ -37,7 +43,7 @@ export const ACCOUNT_NONE = "none";
 export type KindFilter = "all" | (typeof CONTENT_KINDS)[number];
 export type SourceFilter = "all" | (typeof SOURCE_VALUES)[number];
 
-export const FILES_PLACES = ["library", "desktop", "bin"] as const;
+export const FILES_PLACES = ["library", "desktop", "bin", "materializer"] as const;
 export type FilesPlace = (typeof FILES_PLACES)[number];
 
 export function isFilesPlace(value: unknown): value is FilesPlace {
@@ -109,10 +115,26 @@ function inDesktop(row: ArtifactRow, desk: DeskMembership): boolean {
   return desk.fileArtifactIds.has(row.id) || desk.folderIds.has(row.folderId);
 }
 
+/**
+ * Membership only, structurally.
+ *
+ * The caller hands in a MAP from artifact id to the composition that made it,
+ * because the row menu needs the record's id to hand off with. This module
+ * only ever asks whether a row is an output, and saying so in the type keeps
+ * the pure fold from depending on the shape of a concept another app owns.
+ */
+export interface MaterializedSet {
+  has(artifactId: string): boolean;
+}
+
+/** No composition has claimed anything -- the answer before the feed lands. */
+export const NOTHING_MATERIALIZED: MaterializedSet = new Set<string>();
+
 export function applyFilters(
   rows: readonly ArtifactRow[],
   filter: FilesFilter,
   desk: DeskMembership = EMPTY_DESK,
+  materialized: MaterializedSet = NOTHING_MATERIALIZED,
 ): ArtifactRow[] {
   const searching = filter.search.trim() !== "";
   const kept = rows.filter((row) => {
@@ -134,6 +156,18 @@ export function applyFilters(
         // folder's contents live one click away, exactly as on the desk.
         if (!desk.fileArtifactIds.has(row.id)) return false;
       } else if (row.folderId !== filter.folderId) {
+        return false;
+      }
+    } else if (filter.place === "materializer") {
+      // ARCHIVED OUTPUTS ARE THE BIN'S, not this place's. One file offering
+      // Restore from two places is the ambiguity the Bin rename removed, and
+      // this place is about what a person HAS.
+      if (row.archived) return false;
+      if (!materialized.has(row.id)) return false;
+      // "" is everything materialized, as in the Bin: these files are spread
+      // across the Library's folders and the place is the whole subset, not
+      // a tree with a root of its own.
+      if (!searching && filter.folderId !== null && filter.folderId !== "" && row.folderId !== filter.folderId) {
         return false;
       }
     } else {

@@ -1,7 +1,7 @@
 import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
-import { ARTIFACT_CONCEPT, FILE_CONCEPT, FOLDER_CONCEPT } from "./concepts";
+import { ARTIFACT_CONCEPT, COMPOSITION_CONCEPT, FILE_CONCEPT, FOLDER_CONCEPT } from "./concepts";
 
 // The Files feeds: TWO retained collections at the app root -- the Library's
 // index rows and its folder rows -- shared by the browse, the tree, the
@@ -50,6 +50,23 @@ export interface LibraryFeeds {
    * looking at, live, with no engine change.
    */
   files: LiveCollectionHandle<Row>;
+  /**
+   * The compositions (epic memql#4981, #4983) -- what the Materializer made.
+   *
+   * A FIFTH CONCEPT, and the one-feed rule is per CONCEPT: what must never
+   * happen is two subscriptions over the same one, free to disagree. Retained
+   * at the app root like its four siblings rather than inside the place,
+   * because `useLiveCollection` retains inside an effect and a section switch
+   * would otherwise tear it down and re-seed.
+   *
+   * IT HAS TO BE THE WHOLE SET. There is no server-side "artifacts that are
+   * outputs" read -- the join is `composition.outputFileId` against each
+   * artifact's backing file -- so the place cannot know its own population
+   * from anything narrower. The same feed answers the inspector's one line,
+   * which is why Files makes no `compositionForOutputFile` call: a second
+   * read of one row is a second answer free to disagree with this one.
+   */
+  compositions: LiveCollectionHandle<Row>;
 }
 
 export function useLibraryFeeds(): LibraryFeeds {
@@ -115,5 +132,22 @@ export function useLibraryFeeds(): LibraryFeeds {
     },
   }));
 
-  return { artifacts, folders, files };
+  const compositions = useLiveCollection<Row>("files:compositions", (connection) => ({
+    concept: COMPOSITION_CONCEPT,
+    seed: async (cursor, signal) => {
+      const result = await connection.query.compositions(
+        {},
+        { signal, ...(cursor !== "" ? { cursor } : {}) },
+      );
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
+    },
+    reread: async (rowId, signal) => {
+      const row = await getRowByConceptAndId(connection.query, COMPOSITION_CONCEPT, rowId, {
+        signal,
+      });
+      return (row as Row) ?? null;
+    },
+  }));
+
+  return { artifacts, folders, files, compositions };
 }

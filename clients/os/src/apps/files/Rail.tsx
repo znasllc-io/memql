@@ -1,10 +1,10 @@
 import { type ReactNode } from "react";
-import { ChevronRight, Files, Folder, HardDrive, Monitor, Trash2 } from "lucide-react";
+import { ChevronRight, Files, Folder, HardDrive, Monitor, Sparkles, Trash2 } from "lucide-react";
 import type { LiveState } from "@znasllc-io/memql-sdk-core/client";
 
 import { Caption, Chip } from "../../kit";
 import type { FilesFilter, FilesPlace } from "./filters";
-import type { BinRail, FolderTree, TreeNode } from "./fold";
+import type { BinRail, FolderTree, MaterializedRail, TreeNode } from "./fold";
 import { kindGlyph } from "./glyphs";
 import { LINK_LABEL, LINK_SENTENCE, type LinkState } from "./links";
 import { artifactName, type ArtifactRow, type FolderRow } from "./rows";
@@ -59,6 +59,7 @@ export const ALL_COLLAPSED: ExpandedPlaces = {
   library: false,
   desktop: false,
   bin: false,
+  materializer: false,
 };
 
 export function Rail({
@@ -68,6 +69,7 @@ export function Rail({
   counts,
   folderLinks,
   bin,
+  materializedRail,
   openBinFolders,
   setOpenBinFolders,
   deskFolders,
@@ -93,6 +95,8 @@ export function Rail({
   folderLinks: Map<string, LinkState>;
   /** The Bin's picture: its folders with their files, and what is loose. */
   bin: BinRail;
+  /** The Materializer place's picture: the folders its outputs are filed in. */
+  materializedRail: MaterializedRail;
   /** Which Bin folders are open, held by the app root for the reason
    *  `expanded` is -- a trip to Settings must not shut them. */
   openBinFolders: ReadonlySet<string>;
@@ -111,7 +115,15 @@ export function Rail({
   libraryTotal: number;
   deskFileCount: number;
   expanded: ExpandedPlaces;
-  setExpanded: (next: ExpandedPlaces) => void;
+  /**
+   * FUNCTIONAL ONLY, for the reason `setOpenBinFolders` is below -- and this
+   * one was already wrong before the Bin's disclosures existed. Two place
+   * chevrons flipped inside one React batch both read the SAME rendered
+   * `expanded`, so the second applied over the first and one place silently
+   * stayed shut. Found in a screenshot of three places being opened at once;
+   * every vitest case clicks one per render.
+   */
+  setExpanded: (update: (prev: ExpandedPlaces) => ExpandedPlaces) => void;
   renamingFolderId: string;
   onRename: (folderId: string, name: string) => void;
   onCancelRename: () => void;
@@ -130,9 +142,9 @@ export function Rail({
   foldersState: LiveState;
 }) {
   const searching = filter.search.trim() !== "";
-  const open = (place: FilesPlace) => setExpanded({ ...expanded, [place]: true });
+  const open = (place: FilesPlace) => setExpanded((prev) => ({ ...prev, [place]: true }));
   const toggle = (place: FilesPlace) =>
-    setExpanded({ ...expanded, [place]: !expanded[place] });
+    setExpanded((prev) => ({ ...prev, [place]: !prev[place] }));
   const go = (place: FilesPlace, folderId: string) => {
     patch({ place, folderId, search: "" });
     open(place);
@@ -285,6 +297,57 @@ export function Rail({
             onSelectFile={(row) => onSelectBinFile(row, "")}
           />
         ) : null}
+      </Place>
+
+      {/* THE MATERIALIZER (epic memql#4981, #4983). Named for the app, the
+          way the Bin is named for the app -- a person who made a file in the
+          Materializer looks for "Materializer".
+
+          ITS RAIL LISTS FOLDERS, NOT FILES, and that is not an inconsistency
+          with the Bin one place up: the Bin earned its exception by having
+          almost no navigation to list, while this place has the LIBRARY's
+          shape -- ordinary files in ordinary folders -- so opening it scopes
+          the list to precisely the rows the rail would otherwise repeat.
+
+          THE PLACE IS PERMANENT, EMPTY OR NOT. The three above it are
+          locations rather than results, and a fourth that came and went with
+          the data would make the rail's shape depend on what happens to be in
+          it. Its empty state is where a person finds out what the Materializer
+          is for. */}
+      <Place
+        place="materializer"
+        glyph={<Sparkles size={14} aria-hidden />}
+        name="Materializer"
+        count={materializedRail.total}
+        countTitle={`${materializedRail.total} ${
+          materializedRail.total === 1 ? "file" : "files"
+        } made in the Materializer`}
+        current={!searching && filter.place === "materializer" && filter.folderId === ""}
+        expanded={expanded.materializer}
+        onToggle={() => toggle("materializer")}
+        onSelect={() => go("materializer", "")}
+        emptyText="Nothing has been materialized yet."
+        empty={materializedRail.folders.length === 0}
+      >
+        {materializedRail.folders.map((entry) => (
+          <button
+            key={entry.folder.id}
+            type="button"
+            className="os-files-node"
+            data-current={
+              !searching &&
+              filter.place === "materializer" &&
+              filter.folderId === entry.folder.id
+                ? true
+                : undefined
+            }
+            onClick={() => go("materializer", entry.folder.id)}
+          >
+            <Folder size={14} aria-hidden />
+            <span className="os-files-node-name">{entry.folder.name}</span>
+            <span className="os-files-node-count">{entry.count}</span>
+          </button>
+        ))}
       </Place>
 
       {railNote !== "" ? <Caption>{railNote}</Caption> : null}

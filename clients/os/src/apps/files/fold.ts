@@ -1,8 +1,15 @@
-import { artifactName, type ArtifactRow, type FolderRow } from "./rows";
+import type { MaterializedSet } from "./filters";
+import {
+  artifactName,
+  type ArtifactRow,
+  type CompositionRow,
+  type FolderRow,
+} from "./rows";
 
 // The rail's folds: pure functions from the snapshots to the picture the rail
-// draws. The Library tree (design B4) is the first; the Bin's own fold, at the
-// bottom of this file, is the second (epic memql#4981).
+// draws. The Library tree (design B4) is the first; the Bin's and the
+// Materializer's, at the bottom of this file, are the second and third (epic
+// memql#4981).
 //
 // ===========================================================================
 // THE PICTURE DEGRADES, IT NEVER BREAKS
@@ -203,4 +210,125 @@ export function foldBinRail(
     fileCount: archivedFiles.length,
     folderCount: folders.length,
   };
+}
+
+// ===========================================================================
+// THE MATERIALIZER'S FOLD (epic memql#4981, #4983)
+// ===========================================================================
+// A composition's OUTPUT is an ordinary `v1:library:file`, so it is already in
+// the Library tree, in a folder, with a row in the list and a panel in the
+// inspector. The place is a SHORTCUT to that subset.
+//
+// WHICH QUESTION EACH SURFACE ANSWERS, agreed with the Materializer's own epic
+// (memql#4977) so neither drifts into the other:
+//
+//   the Materializer app's Materialized section  ->  WHAT WAS MADE
+//       one row per composition: its sources, its template, the models that
+//       contributed, whether the file carries its own provenance.
+//   the Files rail's Materializer place          ->  WHERE THE FILE IS
+//       one row per output FILE: an ordinary Library artifact that opens,
+//       downloads, moves and archives like every other one.
+//
+// Files never shows the record and the Materializer never shows the file
+// tree; the seam is one-directional -- the row menu and the inspector carry
+// "Open in Materializer", and nothing here edits a composition.
+//
+// THE RAIL LISTS FOLDERS HERE, unlike the Bin. The Bin earned its exception by
+// having almost no navigation to list: a flat ancestry-less folder set and
+// mostly loose files. This place has the LIBRARY's shape -- ordinary files in
+// ordinary folders -- so opening it scopes the list to precisely the files the
+// rail would otherwise be repeating, narrower.
+
+/** One folder holding materialized outputs, and how many are in it. */
+export interface MaterializedFolder {
+  folder: FolderRow;
+  count: number;
+}
+
+export interface MaterializedRail {
+  folders: MaterializedFolder[];
+  /** Every live materialized output -- the shut place's honest number. */
+  total: number;
+}
+
+/**
+ * The composition behind each of the caller's artifacts, keyed by artifact id.
+ *
+ * A MAP RATHER THAN A SET, because the handoff needs the RECORD's id: "Open in
+ * Materializer" opens the composer on one composition, and a set would leave
+ * the caller to find it again.
+ *
+ * THE JOIN IS ON THE BACKING FILE, not on the index row, because that is the
+ * id a composition records: `outputFileId` names a `v1:library:file`, and the
+ * artifact points at it through `sourceConceptRef`. Same split the origin link
+ * states already do -- an id is BARE at every wire seam, so a canonical one is
+ * taken apart here rather than composed anywhere.
+ *
+ * A COMPOSITION WITH NO OUTPUT FILE CONTRIBUTES NOTHING, and that is the
+ * agreement with the Materializer's epic rather than an oversight: a draft has
+ * not produced one yet and a `failed` run never will, so this place -- which
+ * is over FILES -- has nothing to show for either. Drawing a row for one would
+ * offer a person Open, Download and Move on a file nothing wrote. The failure
+ * and its reason live in the Materialized list, which is the record.
+ */
+export function materializedByArtifactId(
+  compositions: readonly CompositionRow[],
+  content: readonly ArtifactRow[],
+): Map<string, CompositionRow> {
+  const byFileId = new Map<string, CompositionRow>();
+  for (const composition of compositions) {
+    if (composition.outputFileId === "") continue;
+    // Newest wins on the impossible tie. A file has one composition, but the
+    // feed is a live fold and a first-write-wins rule would pin the answer to
+    // whichever row happened to arrive first.
+    byFileId.set(composition.outputFileId, composition);
+  }
+  const byArtifactId = new Map<string, CompositionRow>();
+  if (byFileId.size === 0) return byArtifactId;
+  for (const row of content) {
+    const fileId = row.sourceConceptRef.split(":").pop() ?? "";
+    if (fileId === "") continue;
+    const composition = byFileId.get(fileId);
+    if (composition) byArtifactId.set(row.id, composition);
+  }
+  return byArtifactId;
+}
+
+/**
+ * The Materializer place's rail picture: the folders its outputs are filed in.
+ *
+ * FILED BY THE ARTIFACT, never by the composition's own `folderId`. The record
+ * carries where the output was FIRST put; a later move re-files the index row
+ * and deliberately never comes back to it, so reading the record would draw a
+ * folder the file left. The artifact is the one that answers "where is this
+ * now".
+ *
+ * ARCHIVED OUTPUTS ARE EXCLUDED -- an archived file is in the Bin, and one
+ * file offering Restore from two places is the ambiguity the Bin rename
+ * removed.
+ */
+export function foldMaterializedRail(
+  materialized: MaterializedSet,
+  content: readonly ArtifactRow[],
+  tree: FolderTree,
+): MaterializedRail {
+  const perFolder = new Map<string, number>();
+  let total = 0;
+  for (const row of content) {
+    if (row.archived || !materialized.has(row.id)) continue;
+    total += 1;
+    if (row.folderId === "") continue;
+    perFolder.set(row.folderId, (perFolder.get(row.folderId) ?? 0) + 1);
+  }
+  const folders: MaterializedFolder[] = [];
+  for (const [folderId, count] of perFolder) {
+    const node = tree.byId.get(folderId);
+    // A folder the live tree does not hold is archived or gone. Its outputs
+    // still count in the total -- the place's own root lists them -- but a
+    // rail row for it would be a destination that scopes to rows no other
+    // surface in the product can show.
+    if (node) folders.push({ folder: node.folder, count });
+  }
+  folders.sort((a, b) => byNameThenId(a.folder, b.folder));
+  return { folders, total };
 }

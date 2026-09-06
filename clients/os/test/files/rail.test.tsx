@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // The connection seam, mocked at the MODULE so the real LiveCollection
@@ -84,6 +84,32 @@ describe("the rail's places", () => {
     // answering it with a shut disclosure would make the person click the
     // same row twice to mean one thing.
     await click(screen.getByRole("button", { name: /^Bin/ }));
+    expect(screen.getByRole("button", { name: "Collapse Bin" })).toBeTruthy();
+  });
+
+  it("opens every place a person opens, not just the last one", async () => {
+    // THE SAME DEFECT THE BIN'S OWN DISCLOSURES HAD, one level up, and it
+    // predates them: two chevrons flipped against one rendered `expanded`
+    // both read the same value, so the second applied over the first. Found
+    // in a screenshot of three places being opened at once -- every other
+    // case in this file clicks one per render, which is why the suite was
+    // green over it.
+    h.connection = fakeConnection({
+      folders: [folderRow({ id: "f-a", name: "Contracts" })],
+      artifacts: [artifactRow({ id: "a-old", title: "old.zip", archived: true })],
+    });
+    await renderFiles();
+
+    // Both handles taken from ONE render, which is what a browser hands a
+    // person clicking quickly.
+    const library = screen.getByRole("button", { name: "Expand Library" });
+    const bin = screen.getByRole("button", { name: "Expand Bin" });
+    await act(async () => {
+      fireEvent.click(library);
+      fireEvent.click(bin);
+    });
+
+    expect(screen.getByRole("button", { name: "Collapse Library" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Collapse Bin" })).toBeTruthy();
   });
 

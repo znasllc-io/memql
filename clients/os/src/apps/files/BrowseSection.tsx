@@ -12,12 +12,14 @@ import { useAuthSource } from "../../auth/context";
 import { useSession } from "../../chrome/access";
 import { ContextMenu } from "../../chrome/ContextMenu";
 import { useOs } from "../../chrome/state";
+import { canOpen } from "../../system/registry";
 import { openInVsCode, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
 import { downloadArtifact } from "./actions/download";
 import { useOsConnection } from "../../live/connection";
 import { entriesOf, hasDirectory, walkEntries } from "../../items/folderDrop";
 import { planArchive, runArchiveWalk, subtreeHoldsArtifact } from "./actions/archive";
 import { foldBinRail } from "./fold";
+import { MATERIALIZER_APP, MATERIALIZER_COMPOSER } from "./materializer";
 import { kindGlyph } from "./glyphs";
 import { Rail, type ExpandedPlaces } from "./Rail";
 import {
@@ -42,12 +44,18 @@ import { useDraggable } from "@dnd-kit/core";
 import { SOURCE_VALUES } from "./concepts";
 import type { FilesFilter, FilesPlace, KindFilter } from "./filters";
 import type { FolderRow } from "./rows";
-import type { FolderTree, TreeNode } from "./fold";
+import type { FolderTree, MaterializedRail, TreeNode } from "./fold";
 import { LINK_LABEL, LINK_SENTENCE, type LinkState } from "./links";
 import type { BinDropPayload } from "../bin/concepts";
 import { binItemFromArtifact } from "../bin/rows";
 import { planRestore, runRestore } from "../bin/restore";
-import { artifactFingerprint, artifactName, fileStory, type ArtifactRow } from "./rows";
+import {
+  artifactFingerprint,
+  artifactName,
+  fileStory,
+  type ArtifactRow,
+  type CompositionRow,
+} from "./rows";
 import { accountIsArchived, accountName } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
 import { ACCOUNT_ANY, ACCOUNT_NONE } from "./filters";
@@ -79,6 +87,7 @@ const PLACE_TITLE: Record<FilesPlace, string> = {
   library: "Library",
   desktop: "Desktop",
   bin: "Bin",
+  materializer: "Materializer",
 };
 
 export function BrowseSection({
@@ -88,6 +97,8 @@ export function BrowseSection({
   tree,
   content,
   archivedFolders,
+  materialized,
+  materializedRail,
   deskFolders,
   deskFileArtifactIds,
   deskIndexByArtifactId,
@@ -116,6 +127,13 @@ export function BrowseSection({
   content: ArtifactRow[];
   /** Archived folders, flat and alphabetical -- the Bin place's folders. */
   archivedFolders: FolderRow[];
+  /**
+   * The composition behind each artifact that has one (epic memql#4981,
+   * #4983) -- membership for the place, and the record's id for the handoff.
+   */
+  materialized: ReadonlyMap<string, CompositionRow>;
+  /** The Materializer place's folders, and its honest total. */
+  materializedRail: MaterializedRail;
   /** Folder shortcuts on any desk -- the Desktop place's children. */
   deskFolders: DeskFolderShortcut[];
   /** Artifact ids of loose desk file icons -- the Desktop root's population. */
@@ -127,9 +145,11 @@ export function BrowseSection({
   filter: FilesFilter;
   setFilter: (next: FilesFilter) => void;
   /** Which rail places are open. Held by the app root so switching to
-   *  Settings and back does not shut everything the person just opened. */
+   *  Settings and back does not shut everything the person just opened. The
+   *  setter is functional-only; Rail.tsx records what a value-taking one
+   *  costs inside a React batch. */
   expanded: ExpandedPlaces;
-  setExpanded: (next: ExpandedPlaces) => void;
+  setExpanded: (update: (prev: ExpandedPlaces) => ExpandedPlaces) => void;
   /** Which of the Bin's own disclosures are open. Held at the app root for
    *  the reason `expanded` is; the setter is functional-only, and Rail.tsx
    *  records what a value-taking one costs inside a React batch. */
@@ -153,7 +173,7 @@ export function BrowseSection({
   uploads: UploadProvider;
 }) {
   const { presence } = useMachines();
-  const { actions } = useOs();
+  const { actions, registry, actorRole } = useOs();
   const { config } = useSession();
   const authSource = useAuthSource();
   const connection = useOsConnection();
@@ -411,7 +431,9 @@ export function BrowseSection({
   // being looked at, so the root takes them -- and the Bin is nowhere to
   // upload TO, so it hands them to the Library root.
   const destinationFolderId =
-    filter.search.trim() !== "" || filter.place === "bin" ? "" : (filter.folderId ?? "");
+    filter.search.trim() !== "" || filter.place === "bin" || filter.place === "materializer"
+      ? ""
+      : (filter.folderId ?? "");
 
   const onDrop = (event: React.DragEvent) => {
     if (!event.dataTransfer.files.length && !event.dataTransfer.items.length) return;
@@ -442,6 +464,26 @@ export function BrowseSection({
       label: "Ask about this file",
       onSelect: () => askContext(`app:files/browse file:${artifactName(row)}`),
     };
+    // THE ONE HANDOFF TO THE MATERIALIZER (epic memql#4981, #4983), and it is
+    // ABSENT rather than disabled when it is not legal (DESIGN.md rule 12):
+    // absent when this file was not composed, and absent when the caller
+    // cannot open that app at all -- `openApp` no-ops on an app the registry
+    // does not hold or the actor's rank does not admit, and a control that
+    // silently does nothing is worse than one that is not there.
+    const composition = materialized.get(row.id);
+    const openInMaterializer =
+      composition && canOpen(registry, actorRole, MATERIALIZER_APP)
+        ? [
+            {
+              id: "materializer",
+              label: "Open in Materializer",
+              onSelect: () =>
+                actions.openApp(MATERIALIZER_APP, MATERIALIZER_COMPOSER, {
+                  compositionId: composition.id,
+                }),
+            },
+          ]
+        : [];
     const download = {
       id: "download",
       label: "Download",
@@ -458,6 +500,7 @@ export function BrowseSection({
           onSelect: () => void restoreOneRow(row),
         },
         download,
+        ...openInMaterializer,
         ask,
       ];
     }
@@ -483,6 +526,7 @@ export function BrowseSection({
         disabled: connection === null,
         onSelect: () => setRowMove(row),
       },
+      ...openInMaterializer,
       ask,
       {
         id: "archive",
@@ -530,7 +574,7 @@ export function BrowseSection({
   // archived rather than a root folder nothing is filed in.
   const showBinFile = (row: ArtifactRow, folderId: string) => {
     patch({ place: "bin", folderId, search: "" });
-    setExpanded({ ...expanded, bin: true });
+    setExpanded((prev) => ({ ...prev, bin: true }));
     onSelect(row.id);
   };
 
@@ -573,7 +617,9 @@ export function BrowseSection({
       ? "Nothing on your desks. Send a file to the desk from the Library, or drop one onto the desk."
       : filter.place === "bin"
         ? "The Bin is empty. Archiving from the Library keeps files here, not deleted."
-        : "Nothing in your Library yet. Drop a file onto the desk or upload one here.";
+        : filter.place === "materializer"
+          ? "Nothing has been materialized yet. The Materializer composes a file -- a document, a spreadsheet, a PDF -- out of what is in the memory graph."
+          : "Nothing in your Library yet. Drop a file onto the desk or upload one here.";
 
   // The Head names the scope ONCE (DESIGN.md rule 7): the place, or the
   // folder being looked at inside it.
@@ -717,6 +763,7 @@ export function BrowseSection({
           counts={counts}
           folderLinks={folderLinks}
           bin={bin}
+          materializedRail={materializedRail}
           openBinFolders={openBinFolders}
           setOpenBinFolders={setOpenBinFolders}
           deskFolders={deskFolders}
@@ -846,6 +893,7 @@ export function BrowseSection({
           <Inspector
             key={selected.id}
             row={selected}
+            composition={materialized.get(selected.id) ?? null}
             folderNameOf={folderNameOf}
             archivedFolderIds={archivedFolderIdSet}
             presence={presence}

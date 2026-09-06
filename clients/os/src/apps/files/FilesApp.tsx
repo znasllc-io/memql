@@ -22,12 +22,18 @@ import {
   type DeskMembership,
   type FilesFilter,
 } from "./filters";
-import { foldFolderTree } from "./fold";
+import { foldFolderTree, foldMaterializedRail, materializedByArtifactId } from "./fold";
 import { rowString } from "@znasllc-io/memql-sdk-core/client";
 
 import { flatten } from "../../kit/rows";
 import { foldFolderLinkStates, linkStateOf, type LinkState } from "./links";
-import { artifactFromRow, folderFromRow, isContentKind, type ArtifactRow } from "./rows";
+import {
+  artifactFromRow,
+  compositionFromRow,
+  folderFromRow,
+  isContentKind,
+  type ArtifactRow,
+} from "./rows";
 import {
   DEFAULT_FILES_SETTINGS,
   LocalFilesSettingsStore,
@@ -80,7 +86,7 @@ export function FilesApp({
     [uploads, authSource],
   );
 
-  const { artifacts, folders, files } = useLibraryFeeds();
+  const { artifacts, folders, files, compositions } = useLibraryFeeds();
 
   // The backups feed is RETAINED AT THE APP ROOT like its three siblings, not
   // inside the section, so switching away and back does not tear the
@@ -192,6 +198,30 @@ export function FilesApp({
     consumeIntent?.(intent.id);
   }, [intent, consumeIntent]);
 
+  // The whole content population, unfiltered -- what "empty" and the rail's
+  // counts are honestly about.
+  const content = useMemo(
+    () =>
+      artifacts.snapshot.rows
+        .map(artifactFromRow)
+        .filter((r) => r.id !== "" && isContentKind(r.kind)),
+    [artifacts.snapshot],
+  );
+
+  // WHICH OF THE CALLER'S FILES CAME OUT OF THE MATERIALIZER (epic
+  // memql#4981, #4983). Folded from the composition feed against the artifact
+  // index -- one pass over two snapshots the app already holds, rather than a
+  // read per row. `fold.ts` carries why the join is on the backing FILE and
+  // why a composition with no output file contributes nothing.
+  const materialized = useMemo(
+    () =>
+      materializedByArtifactId(
+        compositions.snapshot.rows.map(compositionFromRow).filter((c) => c.id !== ""),
+        content,
+      ),
+    [compositions.snapshot, content],
+  );
+
   // The list's own reading of the artifacts feed: project, then narrow, then
   // order, in one pass -- the collection holds RAW wire rows, so every
   // predicate runs on an `artifactFromRow` result. The viewKey is the filter
@@ -208,24 +238,21 @@ export function FilesApp({
     filter.search,
     filter.sortAscending ? "asc" : "desc",
     filter.place === "desktop" ? deskKey : "",
+    // A COMPOSITION LANDING REVEALS ROWS THE BROWSER ALREADY HELD, exactly as
+    // a desk shortcut does, so the reading changes without the filter
+    // changing -- and a view that did not re-baseline would ring the arrival
+    // cue for files that have been sitting in the Library for weeks.
+    filter.place === "materializer" ? `m:${materialized.size}` : "",
   ].join("|");
   const list = useLiveView<Row, ArtifactRow>(artifacts.source, `files:list:${filterKey}`, (rows) =>
     applyFilters(
       rows.map(artifactFromRow).filter((r) => r.id !== ""),
       filter,
       desk.membership,
+      materialized,
     ),
   );
 
-  // The whole content population, unfiltered -- what "empty" and the rail's
-  // counts are honestly about.
-  const content = useMemo(
-    () =>
-      artifacts.snapshot.rows
-        .map(artifactFromRow)
-        .filter((r) => r.id !== "" && isContentKind(r.kind)),
-    [artifacts.snapshot],
-  );
 
   // The origin link states (epic memql#4783), keyed by the file id the index
   // row points at. Folded from the file feed rather than read per row: one
@@ -259,6 +286,11 @@ export function FilesApp({
           .filter((f) => f.id !== "" && !f.archived && !f.deleted),
       ),
     [folders.snapshot],
+  );
+
+  const materializedRail = useMemo(
+    () => foldMaterializedRail(materialized, content, tree),
+    [materialized, content, tree],
   );
 
   // The Bin place's folders: flat and alphabetical (epic memql#4842, #4846).
@@ -343,6 +375,8 @@ export function FilesApp({
       tree={tree}
       content={content}
       archivedFolders={archivedFolders}
+      materialized={materialized}
+      materializedRail={materializedRail}
       deskFolders={desk.shortcuts}
       deskFileArtifactIds={desk.membership.fileArtifactIds}
       deskIndexByArtifactId={desk.deskIndexByArtifactId}
