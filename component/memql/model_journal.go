@@ -7,11 +7,20 @@ package memql
 // the residual in full: "a run opened in replay mode is a row that says
 // `replay` and nothing reads it". This file is what reads it.
 //
-// It is the ONE caller of work.DecideServe, deliberately. DecideServe answers
-// exactly one model request at a time, so its caller has to be the place where
-// one model request happens -- where the request hash is computed and the
-// v1:work:modelCall row is written. Two callers would be two answers to the
-// same question.
+// THE DECISION IS NOT MADE HERE, and that is a layering decision rather than
+// a convenience. integrations/work's own header states the division: "Every
+// DECISION is a pure function in component/work... This package is only
+// responsible for OBEYING those decisions." An engine that called
+// work.DecideServe itself would be a third party to that split, and it would
+// cost the whole import graph: component/memql is imported by fifteen modules,
+// every one of which would need component/work in its own go.mod to build with
+// GOWORK=off. Measured, not guessed -- the module-boundaries lane named all
+// fifteen.
+//
+// So this seam ASKS. It computes the request hash, hands it and the run to the
+// journal, and obeys the verdict that comes back. work.DecideServe still has
+// exactly one caller, on the other side of that interface, beside the rows it
+// reads.
 //
 // WHAT IS COVERED, and what is not, because the difference decides whether the
 // headline claim is true:
@@ -39,7 +48,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -99,19 +107,41 @@ func responseOf(v any) map[string]any {
 	return map[string]any{"value": v}
 }
 
-// ModelCallJournal is the persistence seam, implemented in integrations/work.
+// ModelCallVerdict is what the journal answers about one request.
 //
-// AN INTERFACE RATHER THAN A DIRECT CALL because the row is written by an
-// @serverOnly mutation whose stamping discipline lives in integrations/work --
-// one allowlisted package, one stamp site, asserted by its own precondition
-// test. The engine must not grow a second one, and it must not import upward.
+// Exactly one of the three states holds: serve the Call, diverge with the
+// Reason, or neither -- call the provider. Diverged is checked FIRST by the
+// seam, because the underlying decision reports a strict miss as "would have
+// gone live, and that is a divergence": reading the serve flag first is how a
+// strict replay quietly becomes a live call.
+type ModelCallVerdict struct {
+	// Call is the journaled answer to serve, or nil.
+	Call *JournaledCall
+	// Diverged marks a strict replay that could not be served.
+	Diverged bool
+	// Reason is why, in the journal's own words. Required when Diverged.
+	Reason string
+	// Err is a failure to ASK -- no journal wired for a run that needs one,
+	// or a read that could not be made. Distinct from a miss, because a miss
+	// is an ordinary answer and this is not.
+	Err error
+}
+
+// ModelCallJournal is the seam, implemented in integrations/work.
+//
+// AN INTERFACE RATHER THAN A DIRECT CALL for two reasons. The row is written
+// by an @serverOnly mutation whose stamping discipline lives in
+// integrations/work -- one allowlisted package, one stamp site, asserted by
+// its own precondition test -- and the engine must not grow a second one nor
+// import upward. And the DECISION belongs beside the rows it is made from; see
+// the header.
 type ModelCallJournal interface {
-	// Lookup finds a journaled call for a request hash within one run.
-	// Not-found is (nil, false) and never an error: a miss is an ordinary
-	// answer that DecideServe is built to receive.
-	Lookup(ctx context.Context, ownerUserId, runId, requestHash string) (*JournaledCall, bool)
+	// Decide answers what to do with this request for this run: serve a
+	// recorded answer, diverge, or neither. A run in live mode reads nothing
+	// and answers "call the provider" without touching the database.
+	Decide(ctx context.Context, run common.RunContext, requestHash string) ModelCallVerdict
 	// Record writes one row. A failure is returned, never swallowed -- see
-	// recordCall for what the caller does with it and why.
+	// record for what the caller does with it and why.
 	Record(ctx context.Context, ownerUserId string, call JournaledCall) error
 }
 
@@ -202,37 +232,25 @@ func (s *modelSeam) serve(
 		return out.Value, err
 	}
 
-	// A REPLAY WITH NO JOURNAL IS NOT A DIVERGENCE, and saying so was the
-	// first thing this seam got wrong. With no journal wired, every lookup
-	// misses, and a strict replay then diverged with DecideServe's reason --
-	// "the prompt, the model or the settings changed since the recorded run"
-	// -- which is a confident, checkable, WRONG diagnosis: nothing changed,
-	// and the node simply has no journal to read. It would send the reader at
-	// the prompt. The two cases have to be told apart before the decision,
-	// because DecideServe cannot tell them apart: both reach it as a miss.
-	if s.journal == nil && strings.TrimSpace(rc.SourceRunId) != "" {
-		return nil, fmt.Errorf(
-			"run %s is in %s mode against run %s, but this node has no model-call journal wired, so nothing can be served from it",
-			rc.RunId, rc.Mode, rc.SourceRunId)
+	hash := req.Hash()
+	verdict := s.decide(ctx, rc, hash)
+
+	// FAILING TO ASK IS NOT A MISS. With no journal wired, every lookup
+	// misses, and a strict replay reported the miss's reason -- "the prompt,
+	// the model or the settings changed since the recorded run". Confident,
+	// checkable, and wrong: nothing changed, the node has no journal. The
+	// decision cannot tell those apart, because both reach it as a miss, so
+	// they are told apart before it.
+	if verdict.Err != nil {
+		return nil, verdict.Err
 	}
 
-	hash := req.Hash()
-	hit, journaled := s.lookup(ctx, rc, hash)
-
-	verdict := work.DecideServe(work.ReplayContext{
-		Mode:            rc.Mode,
-		ReplayPolicy:    rc.ReplayPolicy,
-		JournalHit:      hit,
-		SameGoal:        sameGoal(rc),
-		BeforeForkPoint: rc.BeforeForkPoint(rc.StepKey),
-	})
-
-	// DIVERGENCE IS CHECKED BEFORE THE SOURCE. DecideServe reports a strict
-	// miss as {Source: ServeLive, Diverged: true} -- it describes what would
-	// happen, and refusing is the caller's job. Reading Source first and
-	// Diverged second is how a strict replay quietly becomes a live call.
+	// DIVERGENCE IS CHECKED BEFORE THE ANSWER. A strict miss is reported as
+	// "would have gone live, and that is a divergence" -- reading the served
+	// call first and the flag second is how a strict replay quietly becomes a
+	// live call.
 	if verdict.Diverged {
-		return "", &DivergenceError{
+		return nil, &DivergenceError{
 			RunId:       rc.RunId,
 			StepKey:     rc.StepKey,
 			RequestHash: hash,
@@ -240,7 +258,7 @@ func (s *modelSeam) serve(
 		}
 	}
 
-	if verdict.Source == work.ServeJournal && journaled != nil {
+	if journaled := verdict.Call; journaled != nil {
 		// The replay run gets a row of its OWN, marked `journal`. Without it
 		// a replayed run's journal is empty and the two runs cannot be
 		// compared -- which is most of what a replay is for.
@@ -299,6 +317,24 @@ func (s *modelSeam) serve(
 	return out.Value, nil
 }
 
+// decide asks the journal, and answers for it when there is none.
+//
+// A run in LIVE mode is not asked at all: it reads no journal by definition,
+// and asking would cost a database round trip per model call for an answer
+// that is fixed. A run that DOES need one and has no journal wired is an
+// error rather than a miss -- see serve.
+func (s *modelSeam) decide(ctx context.Context, rc common.RunContext, hash string) ModelCallVerdict {
+	if strings.TrimSpace(rc.SourceRunId) == "" {
+		return ModelCallVerdict{}
+	}
+	if s.journal == nil {
+		return ModelCallVerdict{Err: fmt.Errorf(
+			"run %s is in %s mode against run %s, but this node has no model-call journal wired, so nothing can be served from it",
+			rc.RunId, rc.Mode, rc.SourceRunId)}
+	}
+	return s.journal.Decide(ctx, rc, hash)
+}
+
 // serveText is serve for the callers whose answer is always a string.
 func (s *modelSeam) serveText(
 	ctx context.Context,
@@ -312,30 +348,6 @@ func (s *modelSeam) serveText(
 	}
 	text, _ := v.(string)
 	return text, nil
-}
-
-// lookupJournal answers whether a recorded call matches this request.
-//
-// The journal being absent is a MISS, not an error: an engine with no journal
-// wired is a live-only engine, which is the configuration every non-work path
-// runs in.
-func (s *modelSeam) lookup(ctx context.Context, rc common.RunContext, hash string) (bool, *JournaledCall) {
-	if s == nil || s.journal == nil {
-		return false, nil
-	}
-	source := strings.TrimSpace(rc.SourceRunId)
-	if source == "" {
-		// A live run reads no journal. Looking one up would be answering a
-		// question nothing asked, and DecideServe ignores the hit in live
-		// mode anyway -- but the read costs a database round trip per model
-		// call, which is not free enough to do for nothing.
-		return false, nil
-	}
-	call, ok := s.journal.Lookup(ctx, rc.OwnerUserId, source, hash)
-	if !ok || call == nil {
-		return false, nil
-	}
-	return true, call
 }
 
 // recordCall writes one row, and LOGS a failure rather than returning it.
@@ -354,21 +366,6 @@ func (s *modelSeam) record(ctx context.Context, rc common.RunContext, call Journ
 		s.logger.Warn("work: journaling a model call failed; the run continues and its journal is incomplete",
 			"runId", rc.RunId, "stepKey", rc.StepKey, "served", call.Served, "error", err)
 	}
-}
-
-// sameGoal reports whether the journal being read belongs to this run's goal.
-//
-// THE CROSS-GOAL RULE OUTRANKS THE MODE (design record section D), and this is
-// where the comparison is made. A run with no source goal recorded is treated
-// as the SAME goal: the fork and replay handlers copy the source run's goalId
-// onto the new run, so a blank means the two ids came from one row rather than
-// that they differ -- and refusing on a blank would make every fork diverge.
-func sameGoal(rc common.RunContext) bool {
-	source := strings.TrimSpace(rc.SourceGoalId)
-	if source == "" {
-		return true
-	}
-	return source == strings.TrimSpace(rc.GoalId)
 }
 
 // callStructuredWithUsage calls a structured provider, preferring the variant

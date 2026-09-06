@@ -25,10 +25,13 @@ package work
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/num"
 )
 
@@ -47,33 +50,81 @@ func NewModelJournal(engine Engine) *ModelJournal {
 	return &ModelJournal{store: &store{engine: engine}}
 }
 
-// Lookup finds a recorded call for one request hash within one run.
+// Decide answers what to do with one model request, and is the ONE caller of
+// work.DecideServe.
 //
-// A MISS IS (nil, false) AND NEVER AN ERROR at the seam's contract, but a
-// FAILED read is not a miss -- so a read error is logged by the caller's
-// verdict rather than swallowed here... except that the interface has no error
-// to return. That is deliberate and the trade is stated: DecideServe is built
-// to receive a miss, and a strict replay turns a miss into a divergence that
-// FAILS the run. So a transient read failure surfaces as a loud divergence
-// rather than as a silent live call, which is the safe direction.
-func (j *ModelJournal) Lookup(ctx context.Context, ownerUserId, runId, requestHash string) (*memqlengine.JournaledCall, bool) {
+// THE DECISION LIVES HERE, beside the rows it is made from. component/work is
+// the pure half and this package is, in its own header's words, "only
+// responsible for OBEYING those decisions" -- so the engine asks and this
+// answers. It also keeps component/work out of component/memql's go.mod, and
+// therefore out of the fifteen modules that import the engine.
+//
+// A READ FAILURE IS NOT A MISS. A miss is an ordinary answer that DecideServe
+// is built to receive and, under the strict policy, turns into a divergence
+// blaming the prompt. A database that could not be reached is a different
+// thing and says so, so the run stops with the real reason rather than with a
+// confident wrong one.
+func (j *ModelJournal) Decide(ctx context.Context, rc common.RunContext, requestHash string) memqlengine.ModelCallVerdict {
 	if j == nil || j.store == nil {
-		return nil, false
+		return memqlengine.ModelCallVerdict{Err: fmt.Errorf("work: no model-call journal")}
 	}
-	runId = strings.TrimSpace(runId)
-	requestHash = strings.TrimSpace(requestHash)
-	if runId == "" || requestHash == "" {
-		return nil, false
+	source := strings.TrimSpace(rc.SourceRunId)
+	hash := strings.TrimSpace(requestHash)
+	if source == "" || hash == "" {
+		// Nothing to read against. A live run reaches this and is told to
+		// call the provider, which is the whole of its policy.
+		return memqlengine.ModelCallVerdict{}
 	}
+
+	call, err := j.lookup(ctx, rc.OwnerUserId, source, hash)
+	if err != nil {
+		return memqlengine.ModelCallVerdict{Err: fmt.Errorf(
+			"work: reading run %s's journal for replay: %w", source, err)}
+	}
+
+	verdict := work.DecideServe(work.ReplayContext{
+		Mode:            rc.Mode,
+		ReplayPolicy:    rc.ReplayPolicy,
+		JournalHit:      call != nil,
+		SameGoal:        sameGoal(rc),
+		BeforeForkPoint: rc.BeforeForkPoint(rc.StepKey),
+	})
+	if verdict.Diverged {
+		return memqlengine.ModelCallVerdict{Diverged: true, Reason: verdict.Reason}
+	}
+	if verdict.Source == work.ServeJournal && call != nil {
+		return memqlengine.ModelCallVerdict{Call: call}
+	}
+	return memqlengine.ModelCallVerdict{}
+}
+
+// sameGoal reports whether the journal being read belongs to this run's goal.
+//
+// THE CROSS-GOAL RULE OUTRANKS THE MODE (design record section D), and this is
+// where the comparison is made. A run with no source goal recorded is treated
+// as the SAME goal: deriveRun copies the source run's goalId onto the new run,
+// so a blank means the two ids came from one row rather than that they differ
+// -- and refusing on a blank would make every fork diverge.
+func sameGoal(rc common.RunContext) bool {
+	source := strings.TrimSpace(rc.SourceGoalId)
+	if source == "" {
+		return true
+	}
+	return source == strings.TrimSpace(rc.GoalId)
+}
+
+// lookup finds a recorded call for one request hash within one run.
+//
+// FIRST MATCH IN ROW ORDER, and the order is the read's. The concept declares
+// no uniqueness on requestHash, so one run CAN hold two rows with the same
+// hash -- a step retried after a failure is the ordinary case. Serving the
+// first is what makes a replay follow the recorded run's own sequence rather
+// than its last attempt.
+func (j *ModelJournal) lookup(ctx context.Context, ownerUserId, runId, requestHash string) (*memqlengine.JournaledCall, error) {
 	rows, err := j.readRun(ctx, ownerUserId, runId)
 	if err != nil {
-		return nil, false
+		return nil, err
 	}
-	// FIRST MATCH IN ROW ORDER, and the order is the read's. The concept
-	// declares no uniqueness on requestHash, so one run CAN hold two rows with
-	// the same hash -- a step retried after a failure is the ordinary case.
-	// Serving the first is what makes a replay follow the recorded run's own
-	// sequence rather than its last attempt.
 	for _, row := range rows {
 		if rowString(row, "requestHash") != requestHash {
 			continue
@@ -96,9 +147,9 @@ func (j *ModelJournal) Lookup(ctx context.Context, ownerUserId, runId, requestHa
 			OutputTokens:  rowInt(row, "outputTokens"),
 			Served:        rowString(row, "served"),
 			Response:      rowMap(row, "response"),
-		}, true
+		}, nil
 	}
-	return nil, false
+	return nil, nil
 }
 
 // readRun loads one run's journal through whichever query the run's OWNERSHIP

@@ -8,6 +8,7 @@ toolchain go1.27.1
 
 require (
 	github.com/znasllc-io/memql/component/auth v0.0.0
+	github.com/znasllc-io/memql/component/database v0.0.0
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0
 	github.com/znasllc-io/memql/component/identity v0.0.0
 	github.com/znasllc-io/memql/component/language v0.0.0
@@ -56,7 +57,6 @@ require (
 	github.com/znasllc-io/memql/component/bus v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/config v0.0.0 // indirect
-	github.com/znasllc-io/memql/component/database v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/envregistry v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/events v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/frontdoor v0.0.0 // indirect

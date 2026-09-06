@@ -22,28 +22,61 @@ import (
 // Every test here runs with no database: the seam is a decision plus a journal
 // interface, and both halves are values.
 
-// countingJournal is an in-memory ModelCallJournal. Reads and writes are
-// counted separately from the provider so a test can tell "served from the
-// journal" apart from "never asked anything at all".
+// countingJournal is an in-memory ModelCallJournal. It makes the SAME decision
+// integrations/work makes -- serve on a same-goal hit in replay, serve the
+// prefix in fork, diverge on a strict miss -- because these tests are about
+// what the SEAM does with a verdict, and a double that answered differently
+// would test nothing about the seam.
+//
+// Decisions and writes are counted separately from the provider so a test can
+// tell "served from the journal" apart from "never asked anything at all".
 type countingJournal struct {
 	rows      map[string][]JournaledCall // runId -> calls
-	lookups   int
+	decisions int
 	records   int
 	recordErr error
+	decideErr error
 }
 
 func newCountingJournal() *countingJournal {
 	return &countingJournal{rows: map[string][]JournaledCall{}}
 }
 
-func (j *countingJournal) Lookup(_ context.Context, _, runId, hash string) (*JournaledCall, bool) {
-	j.lookups++
+func (j *countingJournal) find(runId, hash string) *JournaledCall {
 	for i := range j.rows[runId] {
 		if j.rows[runId][i].RequestHash == hash {
-			return &j.rows[runId][i], true
+			return &j.rows[runId][i]
 		}
 	}
-	return nil, false
+	return nil
+}
+
+func (j *countingJournal) Decide(_ context.Context, rc common.RunContext, hash string) ModelCallVerdict {
+	j.decisions++
+	if j.decideErr != nil {
+		return ModelCallVerdict{Err: j.decideErr}
+	}
+	source := strings.TrimSpace(rc.SourceRunId)
+	if source == "" {
+		return ModelCallVerdict{}
+	}
+	hit := j.find(source, hash) != nil
+	sameGoal := rc.SourceGoalId == "" || rc.SourceGoalId == rc.GoalId
+	served := hit && sameGoal
+	switch rc.Mode {
+	case common.RunModeReplay:
+		if served {
+			return ModelCallVerdict{Call: j.find(source, hash)}
+		}
+		if rc.ReplayPolicy != common.ReplayPermissive {
+			return ModelCallVerdict{Diverged: true, Reason: "no journaled model call matches this request hash"}
+		}
+	case common.RunModeFork:
+		if served && rc.BeforeForkPoint(rc.StepKey) {
+			return ModelCallVerdict{Call: j.find(source, hash)}
+		}
+	}
+	return ModelCallVerdict{}
 }
 
 func (j *countingJournal) Record(_ context.Context, _ string, call JournaledCall) error {
@@ -302,8 +335,8 @@ func TestACallOutsideARunIsNeitherServedNorJournaled(t *testing.T) {
 	if got != "answer" || live.calls != 1 {
 		t.Errorf("a call with no run did not pass through (calls=%d, answer=%v)", live.calls, got)
 	}
-	if journal.records != 0 || journal.lookups != 0 {
-		t.Errorf("a call with no run touched the journal: %d lookups, %d records", journal.lookups, journal.records)
+	if journal.records != 0 || journal.decisions != 0 {
+		t.Errorf("a call with no run touched the journal: %d decisions, %d records", journal.decisions, journal.records)
 	}
 }
 
@@ -316,8 +349,9 @@ func TestALiveRunDoesNotReadTheJournal(t *testing.T) {
 	if _, err := seam.serve(common.ContextWithRun(context.Background(), rc), aRequest("q"), "p", (&counter{answer: "x"}).live); err != nil {
 		t.Fatalf("serve: %v", err)
 	}
-	if journal.lookups != 0 {
-		t.Errorf("a live run read the journal %d times", journal.lookups)
+	if journal.decisions != 0 {
+		t.Errorf("a live run asked the journal %d times; a live run reads nothing by definition and the "+
+			"question costs a database round trip per model call", journal.decisions)
 	}
 	if journal.records != 1 {
 		t.Errorf("a live run recorded %d calls, want 1 -- a live run is what FILLS the journal", journal.records)
