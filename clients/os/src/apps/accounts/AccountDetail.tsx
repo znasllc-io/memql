@@ -9,6 +9,7 @@ import { rowString } from "@znasllc-io/memql-sdk-core/client";
 import { flatten } from "../../kit/rows";
 import { useAccountCampaignsRollup } from "../campaigns/useCampaigns";
 import type { ArchiveAccountState, UpdateAccountState } from "./actions";
+import { CredentialsPanel } from "./CredentialsPanel";
 import { accountIsArchived, accountIsSelf, accountName, type AccountRow } from "./rows";
 import { useSession } from "../../chrome/access";
 import { useAccountRollups, type Rollup } from "./useAccounts";
@@ -54,6 +55,11 @@ export function AccountDetail({
     <div className="os-account-detail">
       <ProfilePanel account={account} update={update} />
       <Ledger account={account} rollups={rollups} />
+      {/* WHAT CAN ACT ON THIS CLIENT'S BEHALF, after what they are and what
+          is theirs. It stands on an ARCHIVED client too: a filed client's
+          credentials still exist, and the one place they can be revoked must
+          not disappear the moment somebody tidies the list. */}
+      <CredentialsPanel account={account} />
       {/* THE SELF ACCOUNT IS NOT ARCHIVABLE (memql#4837).
           The panel rendered for it like any other client, so the owner could
           file away their own company -- and archive is the ONLY exit in this

@@ -22,6 +22,7 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -39,9 +40,40 @@ const DataOriginsConcept = "v1:platform:dataOrigin"
 // memorynodes.Get, because a test or a second engine in one process has
 // its own registry and an inventory that silently described a different
 // one would be worse than an error.
-func (e *MemQLEngine) evaluateDataOriginsExpression(_ context.Context) ([]memorynodes.MemoryNode, error) {
+//
+// OWNER-ONLY, GATED HERE IN GO, for exactly the reason its sibling
+// providerAuthStatus is (provider_auth_status_read.go): a MemQL builtin
+// carries no role predicate of its own, and the projection this returns
+// is never persisted, so there is no row for a `@rowAuthz` tier to gate
+// -- v1:platform:dataOrigin declares none, and an undeclared concept is
+// delivered to every caller exactly as its reads already return to
+// everyone. The wall has to be here or there is no wall.
+//
+// WHAT IT PROTECTS is not a secret: no credential is in the payload. It
+// is a map of every external system this deployment mirrors from and
+// pushes to, which is reconnaissance and nobody's business but the
+// operator's -- the same sentence providerAuthStatus's gate carries
+// about vendors.
+//
+// THIS WAS A GAP, not a new decision (epic memql#5009). The DSL comment
+// above `builtin dataOrigins` in dsl/common/builtins.memql already
+// stated that this read and its two siblings are owner-gated, and the
+// contrast it draws -- "NEITHER is owner-gated, and that is the
+// difference from the three above", of fleetModels and inferenceStatus
+// -- only makes sense if this one is. providerAuthStatus enforced it;
+// this signature discarded its context entirely, so the claim was true
+// of the documentation and false of the code. The health half was never
+// exposed the same way: v1:platform:syncState declares
+// @rowAuthz(clusterOwner) and syncStatesAll filters on
+// actor.isClusterOwner, so an inventory anyone could read sat beside
+// health only an owner could -- which is what made the gap survive, the
+// page looked gated because half of it was.
+func (e *MemQLEngine) evaluateDataOriginsExpression(ctx context.Context) ([]memorynodes.MemoryNode, error) {
 	if e == nil || e.concepts == nil {
 		return nil, nil
+	}
+	if !rowAuthzIsClusterOwner(ctx) {
+		return nil, fmt.Errorf("dataOrigins is owner-only")
 	}
 	all := e.concepts.List()
 	nodes := make([]memorynodes.MemoryNode, 0, len(all))

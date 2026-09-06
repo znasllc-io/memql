@@ -76,6 +76,11 @@ export interface FakeSeed {
    *  interesting case: it is the one band the engine gates. */
   invitationsForAccount?: Row[] | Error;
   campaignsForAccount?: Row[] | Error;
+  /** The credentials issued on behalf of a client (memql#5013). An Error makes
+   *  the read REFUSE, which is a first-class state: "none" and "the cluster
+   *  would not tell you" are different answers and the panel renders them
+   *  differently. */
+  accountTokensForAccount?: Row[] | Error;
   byId?: Record<string, Row>;
 }
 
@@ -98,6 +103,16 @@ export function fakeConnection(seed: FakeSeed = {}) {
       // below match two elements and fail for a reason that has nothing to do
       // with what it is testing.
       campaignsForAccount: rollup(seed.campaignsForAccount),
+      // The credentials panel's read (memql#5013). TYPED ARGS for the reason
+      // the writes below carry them: a test that asserts the panel asked
+      // about THIS client cannot do it through an empty parameter list. It is
+      // re-read after every issue and revoke, so a test that wants the second
+      // answer to differ from the first reassigns this the way `app.test.tsx`
+      // reassigns `clientAccountsAll`.
+      accountTokensForAccount: vi.fn(async (_args: Record<string, unknown>) => {
+        if (seed.accountTokensForAccount instanceof Error) throw seed.accountTokensForAccount;
+        return rowsResult(seed.accountTokensForAccount ?? []);
+      }),
       // TYPED ARGS, so `.mock.calls[0][0]` is a record rather than `never` --
       // a test that asserts WHICH arguments a write received cannot do it
       // through a `vi.fn(async () => ...)` whose parameter list is empty.
@@ -151,6 +166,34 @@ export function accountRow(over: Partial<Row> & { id: string }): Row {
     configuredAt: "2026-08-01T00:00:00Z",
     ownerUserId: "",
     createdAt: "2026-08-01T00:00:00Z",
+    ...over,
+  };
+}
+
+/**
+ * A credential row as `accountTokensForAccount` returns it, overridable field
+ * by field.
+ *
+ * ACTIVE BY DEFAULT, so a test that wants a revoked one has to ASK. The
+ * revoked case is the surprising state -- it is the one where an act
+ * disappears from the surface -- and a harness whose default produced it
+ * would make every unrelated assertion measure the wrong row.
+ *
+ * `userId` rather than `subjectUserId`: this is the WIRE shape
+ * (`accountTokenSummary` keys `userId` bare), and a fixture that spelled it
+ * the way the projection does would make `accountTokenFromRow` untested by
+ * every test that uses it.
+ */
+export function accountTokenRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    userId: "v1:identity:user:me",
+    label: "Nightly export job",
+    active: true,
+    accountId: "v1:accounts:account:a1",
+    mintedBy: "v1:identity:user:me",
+    expiresAt: "",
+    lastUsedAt: "",
+    createdAt: "2026-09-01T09:00:00Z",
     ...over,
   };
 }

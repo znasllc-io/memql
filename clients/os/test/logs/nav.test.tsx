@@ -25,13 +25,31 @@ describe("the Logs section in a window's nav", () => {
   it("an admin's Fleet window offers Logs, right before Settings", () => {
     renderShell({ access: ADMIN });
     openFromLauncher("Fleet");
-    expect(navNames("Fleet")).toEqual(["Machines", "Routing", "Workbenches", "Logs", "Settings"]);
+    // Apps joined between Workbenches and Logs (epic memql#5009); Logs is
+    // still the section immediately before Settings, which is what this
+    // pins.
+    expect(navNames("Fleet")).toEqual([
+      "Machines",
+      "Routing",
+      "Workbenches",
+      "Apps",
+      "Logs",
+      "Settings",
+    ]);
   });
 
   it("a reader's Fleet window does not", () => {
     renderShell({ access: READER });
     openFromLauncher("Fleet");
-    expect(navNames("Fleet")).toEqual(["Machines", "Routing", "Workbenches", "Settings"]);
+    // Apps is NOT admin-floored -- both concepts behind it declare the
+    // composite owner tier -- so a reader keeps it and loses only Logs.
+    expect(navNames("Fleet")).toEqual([
+      "Machines",
+      "Routing",
+      "Workbenches",
+      "Apps",
+      "Settings",
+    ]);
   });
 
   it("opening the section renders it, and it says the shell is not connected", () => {

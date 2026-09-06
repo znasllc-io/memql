@@ -235,6 +235,11 @@ export function FilesApp({
     filter.kind,
     filter.source,
     filter.accountId,
+    // The label facet re-baselines like every other one (epic memql#5009):
+    // revealing rows the browser already held is not the cluster sending
+    // them, and a view that did not re-key would ring the arrival cue for
+    // files that have been in the Library for weeks.
+    filter.label,
     filter.search,
     filter.sortAscending ? "asc" : "desc",
     filter.place === "desktop" ? deskKey : "",

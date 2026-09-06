@@ -1,5 +1,6 @@
 import { rowArray, rowNumber, rowObject, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { absent, figureFrom, figureOf, figureValue, type Figure } from "../../cluster/figure";
 import { flatten } from "../../kit/rows";
 import { labelMapFrom, mergeLabels, type LabelMap, type MergedLabel } from "./labels";
 
@@ -110,7 +111,13 @@ export interface MachineApp {
 // integrations/agent/worker/cockpitapp.go), mirrored so this surface agrees
 // with selection. An id outside it is DISPLAYED -- the machine really has it
 // -- and never marked runnable, because this engine has no protocol for it.
-const RUNNABLE_APP_IDS = new Set(["claude-code", "codex"]);
+//
+// ORDERED, and exported as the ordered list rather than as the set, because
+// the delegation policy's `appOrder` is a PRIORITY and its editor has to
+// offer the members in a stable order. The set is derived from the list so
+// the two cannot disagree about membership (epic memql#5009).
+export const RUNNABLE_APPS = ["claude-code", "codex"] as const;
+const RUNNABLE_APP_IDS = new Set<string>(RUNNABLE_APPS);
 
 const APP_LABELS: Record<string, string> = {
   "claude-code": "Claude Code",
@@ -500,4 +507,246 @@ export function workspacesByNode(
       ),
     }))
     .sort((a, b) => a.nodeId.localeCompare(b.nodeId));
+}
+
+// ---------------------------------------------------------------------------
+// The delegation policy, and delegated app sessions (epic memql#5009)
+// ---------------------------------------------------------------------------
+
+/**
+ * The planner task kinds worth delegating to a local coding app.
+ *
+ * A CLOSED LIST IN THIS BUILD, and deliberately not "every kind the planner
+ * has": the rest are engine work with nothing to gain from a laptop, and
+ * offering them would invite a policy that routes a persist step to somebody's
+ * machine and then falls back in-process every time.
+ */
+export const DELEGATABLE_KINDS = [
+  "runCommand",
+  "fileProcessor",
+  "callTool",
+  "persistResult",
+] as const;
+
+/** How many sessions at once the editor offers. The concept's own default is
+ *  1; 4 is the ceiling this surface will set, not a cluster limit. */
+export const MAX_CONCURRENT_SESSION_CHOICES = [1, 2, 3, 4] as const;
+
+export interface DelegationPolicyRow {
+  id: string;
+  ownerUserId: string;
+  preferSubscriptionApps: boolean;
+  eligibleKinds: string[];
+  appOrder: string[];
+  maxConcurrentSessions: number;
+  workspaceRoot: string;
+  credentialLifetimeSeconds: number;
+  updatedAt: string;
+}
+
+/**
+ * The values the PLANNER applies to a person with no policy row.
+ *
+ * Named here rather than spelled into the editor, for the reason
+ * DEFAULT_STRATEGY / DEFAULT_FALLBACK are: the surface states what is in
+ * force today, and a caption that could drift from the draft it describes is
+ * a caption that will. `preferSubscriptionApps: false` is the master switch
+ * OFF -- an absent row means never delegate.
+ */
+export const DELEGATION_POLICY_DEFAULTS: Omit<DelegationPolicyRow, "id" | "ownerUserId" | "updatedAt"> = {
+  preferSubscriptionApps: false,
+  eligibleKinds: [],
+  appOrder: [],
+  maxConcurrentSessions: 1,
+  workspaceRoot: "",
+  credentialLifetimeSeconds: 14400,
+};
+
+export function delegationPolicyFromRow(raw: Row): DelegationPolicyRow {
+  const row = flatten(raw);
+  // `rowNumber` answers 0 for an absent key, which is exactly what the
+  // concept says to read as the default rather than as "none".
+  const max = rowNumber(row, "maxConcurrentSessions");
+  const lifetime = rowNumber(row, "credentialLifetimeSeconds");
+  return {
+    id: rowString(row, "id"),
+    ownerUserId: rowString(row, "ownerUserId"),
+    preferSubscriptionApps: row["preferSubscriptionApps"] === true,
+    eligibleKinds: stringList(row, "eligibleKinds"),
+    appOrder: stringList(row, "appOrder"),
+    // ZERO READS AS THE DEFAULT, not as "none" -- the concept says so, and it
+    // has to: a zero here would silently disable a feature the person turned
+    // on, which is the opposite of what a blank field means.
+    maxConcurrentSessions: max > 0 ? max : DELEGATION_POLICY_DEFAULTS.maxConcurrentSessions,
+    workspaceRoot: rowString(row, "workspaceRoot"),
+    credentialLifetimeSeconds:
+      lifetime > 0 ? lifetime : DELEGATION_POLICY_DEFAULTS.credentialLifetimeSeconds,
+    updatedAt: rowString(row, "updatedAt"),
+  };
+}
+
+/**
+ * What an app REPORTED about its own spend.
+ *
+ * `known` is the app's own answer to "did you say anything", and it is why
+ * the token counts are Figures rather than numbers: an app that reported
+ * nothing did not report zero, and rendering `0` next to "tokens" is the one
+ * mistake this whole reading exists to avoid (src/cluster/figure.ts).
+ */
+export interface AppSessionUsage {
+  known: boolean;
+  inputTokens: Figure;
+  outputTokens: Figure;
+  costUSD: Figure;
+}
+
+export interface AppSessionRow {
+  id: string;
+  ownerUserId: string;
+  workerId: string;
+  app: string;
+  kind: string;
+  planId: string;
+  taskId: string;
+  status: string;
+  billing: string;
+  /** A Figure, not a number: `rowNumber` answers 0 for an absent key, and
+   *  0 is the code a CLEAN run reports. The two must not read alike. */
+  exitCode: Figure;
+  usage: AppSessionUsage;
+  startedAt: string;
+  endedAt: string;
+}
+
+/** One session in full -- the detail read's extra fields, transcript included. */
+export interface AppSessionDetailRow extends AppSessionRow {
+  workspace: string;
+  prompt: string;
+  inputArtifactIds: string[];
+  transcript: string;
+  transcriptBytes: Figure;
+  transcriptTruncated: boolean;
+  producedArtifactIds: string[];
+  appSessionRef: string;
+  mcpEndpoint: string;
+  credentialExpiresAt: string;
+  errorMessage: string;
+  cancelReason: string;
+}
+
+/** The two non-terminal statuses. A session in either is still being written
+ *  to; anything else is a record that will never change again. */
+export const LIVE_SESSION_STATUSES = ["starting", "running"] as const;
+
+export function sessionIsLive(status: string): boolean {
+  return (LIVE_SESSION_STATUSES as readonly string[]).includes(status);
+}
+
+function usageFrom(row: Row): AppSessionUsage {
+  const usage = rowObject(row, "usage");
+  // AN ABSENT `usage` OBJECT IS "the app said nothing", which is exactly
+  // `unmeasured` -- not three zeros. `figureFrom` reads an absent key and a
+  // null the same way, so the three fields answer honestly even when the
+  // object is present but partial.
+  if (usage === null) {
+    return {
+      known: false,
+      inputTokens: absent("unmeasured"),
+      outputTokens: absent("unmeasured"),
+      costUSD: absent("unmeasured"),
+    };
+  }
+  const known = usage["known"] === true;
+  return {
+    known,
+    inputTokens: known ? figureFrom(usage, "inputTokens") : absent("unmeasured"),
+    outputTokens: known ? figureFrom(usage, "outputTokens") : absent("unmeasured"),
+    costUSD: known ? figureFrom(usage, "costUSD") : absent("unmeasured"),
+  };
+}
+
+export function appSessionFromRow(raw: Row): AppSessionRow {
+  const row = flatten(raw);
+  return {
+    id: rowString(row, "id"),
+    ownerUserId: rowString(row, "ownerUserId"),
+    workerId: rowString(row, "workerId"),
+    app: rowString(row, "app"),
+    kind: rowString(row, "kind"),
+    planId: rowString(row, "planId"),
+    taskId: rowString(row, "taskId"),
+    status: rowString(row, "status"),
+    // `unknown` is a REAL enum member here (the app reported nothing), so an
+    // absent field falls to it rather than to an empty chip.
+    billing: rowString(row, "billing") || "unknown",
+    exitCode: figureFrom(row, "exitCode"),
+    usage: usageFrom(row),
+    startedAt: rowString(row, "startedAt"),
+    endedAt: rowString(row, "endedAt"),
+  };
+}
+
+export function appSessionDetailFromRow(raw: Row): AppSessionDetailRow {
+  const row = flatten(raw);
+  return {
+    ...appSessionFromRow(raw),
+    workspace: rowString(row, "workspace"),
+    prompt: rowString(row, "prompt"),
+    inputArtifactIds: stringList(row, "inputArtifactIds"),
+    // VERBATIM. Never trimmed, never re-wrapped, never parsed -- the engine
+    // drops out-of-order and duplicate chunks (component/worker/session.go),
+    // so what arrived is what there is, and anything this client did to it
+    // would be a second account of somebody's run.
+    transcript: rowString(row, "transcript"),
+    transcriptBytes: figureFrom(row, "transcriptBytes"),
+    transcriptTruncated: row["transcriptTruncated"] === true,
+    producedArtifactIds: stringList(row, "producedArtifactIds"),
+    appSessionRef: rowString(row, "appSessionRef"),
+    mcpEndpoint: rowString(row, "mcpEndpoint"),
+    credentialExpiresAt: rowString(row, "credentialExpiresAt"),
+    errorMessage: rowString(row, "errorMessage"),
+    cancelReason: rowString(row, "cancelReason"),
+  };
+}
+
+/**
+ * The tone a session's status wears: ended = ok, failed = danger, cancelled =
+ * warn, starting / running = neutral.
+ *
+ * A STATUS WORD, NOT A `Chip`. The kit's chip tones are deliberately closed at
+ * neutral / accent / muted, and the stylesheet says so: a fourth would make a
+ * status colour out of a vocabulary that has none. Deployables' own
+ * `.os-deploy-status` carries ok and warn only and belongs to that app, so the
+ * Apps surface spells its own word rather than bolting a third tone onto
+ * somebody else's class.
+ */
+export type SessionTone = "ok" | "warn" | "danger" | "neutral";
+
+export function statusTone(status: string): SessionTone {
+  if (status === "ended") return "ok";
+  if (status === "failed") return "danger";
+  if (status === "cancelled") return "warn";
+  return "neutral";
+}
+
+/**
+ * Input plus output, or ABSENT.
+ *
+ * Absent the moment EITHER half is: a sum over a missing addend is not a
+ * smaller total, it is a different question. `figureValue` is the documented
+ * way to branch on a figure without letting `?? 0` quietly answer the one
+ * distinction that module exists to keep.
+ */
+export function totalTokens(session: AppSessionRow): Figure {
+  const input = figureValue(session.usage.inputTokens);
+  const output = figureValue(session.usage.outputTokens);
+  if (input === null || output === null) return session.usage.inputTokens;
+  return figureOf(input + output);
+}
+
+/** Newest run first: what somebody scanning this list is looking for. */
+export function sessionsNewestFirst(rows: readonly AppSessionRow[]): AppSessionRow[] {
+  return [...rows].sort(
+    (a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id),
+  );
 }

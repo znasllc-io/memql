@@ -75,13 +75,16 @@ beforeEach(() => {
 });
 
 describe("the Fleet manifest", () => {
-  it("declares the epic's four sections plus Logs, Machines first, with a settings gear target", () => {
+  it("declares the epic's four sections plus Apps and Logs, Machines first, with a settings gear target", () => {
     const fleet = appById(OS_REGISTRY, "fleet");
     expect(fleet).toBeTruthy();
+    // Apps sits after Workbenches (epic memql#5009): the cluster's own
+    // sandbox, then the person's own computer, then the logs about both.
     expect(sectionsForRole(fleet!, "owner").map((s) => s.id)).toEqual([
       "machines",
       "routing",
       "workbenches",
+      "apps",
       "logs",
       "settings",
     ]);
@@ -96,9 +99,17 @@ describe("the Fleet manifest", () => {
   it("admits every signed-in user: the engine's row tiers decide what comes back", () => {
     const fleet = appById(OS_REGISTRY, "fleet")!;
     expect(fleet.roles).toBeUndefined();
-    // Four for a reader: the Logs section is the one floored at admin (epic
-    // memql#4895), because every read on the log store is.
-    expect(sectionsForRole(fleet, "reader").map((s) => s.id)).toHaveLength(4);
+    // Five for a reader: the Logs section is the one floored at admin (epic
+    // memql#4895), because every read on the log store is. Apps is NOT
+    // floored -- both concepts behind it declare the composite owner tier, so
+    // every signed-in person has a policy and runs of their own.
+    expect(sectionsForRole(fleet, "reader").map((s) => s.id)).toEqual([
+      "machines",
+      "routing",
+      "workbenches",
+      "apps",
+      "settings",
+    ]);
   });
 });
 
@@ -118,6 +129,10 @@ describe("the Fleet app shell", () => {
     const third = mount(fakeConnection(), "workbenches", store);
     expect(await screen.findByRole("heading", { name: "Workbenches" })).toBeTruthy();
     third.view.unmount();
+
+    const fourth = mount(fakeConnection(), "apps", store);
+    expect(await screen.findByRole("heading", { name: "Apps" })).toBeTruthy();
+    fourth.view.unmount();
 
     mount(fakeConnection(), "settings", store);
     expect(await screen.findByRole("heading", { name: "Fleet settings" })).toBeTruthy();

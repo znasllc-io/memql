@@ -1,4 +1,5 @@
 import {
+  Boxes,
   Building2,
   Files as FilesIcon,
   GraduationCap,
@@ -8,6 +9,8 @@ import {
   ScrollText,
   Send,
   Settings as SettingsIcon,
+  Shapes,
+  Store,
   Sparkles,
   Trash2,
   Users,
@@ -23,6 +26,10 @@ import { ACCOUNTS_SECTIONS } from "./accounts/settings";
 import { BinApp } from "./bin/BinApp";
 import { BIN_APP_ID, BIN_SECTIONS } from "./bin/concepts";
 import { CampaignsApp } from "./campaigns/CampaignsApp";
+import { ClusterApp } from "./cluster/ClusterApp";
+import { CLUSTER_SECTIONS } from "./cluster/settings";
+import { ConceptsApp } from "./concepts/ConceptsApp";
+import { CONCEPTS_SECTIONS } from "./concepts/settings";
 import { CAMPAIGNS_SECTIONS } from "./campaigns/settings";
 import { DeployablesApp } from "./deployables/DeployablesApp";
 import { DEPLOYABLES_SECTIONS } from "./deployables/settings";
@@ -35,6 +42,8 @@ import { LOGS_SECTIONS } from "./logs/settings";
 import { MaterializerApp } from "./materializer/MaterializerApp";
 import { MATERIALIZER_SECTIONS } from "./materializer/settings";
 import { SettingsApp } from "./settings/SettingsApp";
+import { StoresApp } from "./stores/StoresApp";
+import { STORES_SECTIONS } from "./stores/settings";
 import { TrainingApp } from "./training/TrainingApp";
 import { TRAINING_SECTIONS } from "./training/settings";
 import { UsersApp } from "./users/UsersApp";
@@ -341,6 +350,118 @@ const accounts: OsAppManifest = {
   component: AccountsApp,
 };
 
+// Cluster, in full (epic memql#5009 / memql#5011). What this cluster is made
+// of and how it is going: its modules, where its data comes from, who acts in
+// it, what happened, and whether it is ready.
+//
+// SETTINGS IS WHAT YOU SET; THIS IS WHAT THE CLUSTER IS. That is the split
+// against Settings' own Cluster section, which holds policy and this
+// session's diagnostics. Two surfaces may share a name where they are the
+// same subject at two scopes -- the precedent is the Logs app and the Logs
+// section every other app carries.
+//
+// Readiness is first and is therefore the section a window opens on: for a
+// healthy cluster it says so in a line and gets out of the way, and for a new
+// one it is the thing somebody came to find out. The app's own settings can
+// point a window elsewhere.
+//
+// THE SECTION FLOORS ARE MIRRORS OF ENGINE GATES, ONE BY ONE, and two of them
+// correct the issue that asked for this app:
+//
+//   Modules       {owner, admin}   AuthorizeModuleRead -> auth.AtLeastAdmin
+//                                  -> roleHasCapability("create","principal"),
+//                                  which rbac_model.go withholds from
+//                                  developer. Under the one ladder developer
+//                                  ranks 300, ABOVE admin's 200, so
+//                                  { min: "admin" } would admit exactly the
+//                                  role the engine refuses -- the second
+//                                  genuinely non-monotonic gate in the shell
+//                                  after Settings -> Integrations.
+//   Data origins  owner            syncStatesAll filters
+//                                  actor.isClusterOwner==true, and
+//                                  v1:platform:syncState declares
+//                                  @rowAuthz(clusterOwner).
+//   Audit trail   owner            AND IT IS THE ONLY MECHANISM THAT CAN STOP
+//                                  THIS SURFACE LYING. Row admission returns
+//                                  ZERO ROWS, not an error, so a non-owner
+//                                  calling recentAuditEvents gets an empty
+//                                  list indistinguishable from a cluster
+//                                  where nothing happened -- there is no
+//                                  refusal for the surface to render. The
+//                                  portal shipped this list with no
+//                                  client-side gate at all.
+//   Agents        the app's        v1:agents:agent declares NO row-authz tier,
+//                 floor            so its named queries return every agent in
+//                                  the cluster to any authenticated caller.
+//                                  This floor is therefore EDITORIAL, not a
+//                                  mirror; it is presentation over an ungated
+//                                  read and the section says so rather than
+//                                  implying a gate that is not there.
+//
+// The app floor is { min: "admin" } = {admin, developer, owner}, matching
+// Users, Accounts and Logs.
+//
+// THE ICON IS A SET OF BOXES, which is what this app inventories: the parts
+// a cluster is assembled from.
+const cluster: OsAppManifest = {
+  id: "cluster",
+  name: "Cluster",
+  icon: Boxes,
+  roles: { min: "admin" },
+  sections: CLUSTER_SECTIONS,
+  settingsSection: "settings",
+  logsSection: "logs",
+  component: ClusterApp,
+};
+
+// Concepts, in full (epic memql#5009 / memql#5010). Every kind of thing this
+// cluster knows, what each one declares, and the rows it holds. Registry is
+// first and is therefore the section a window opens on; the app's own
+// settings can point it elsewhere.
+//
+// The section list is CONCEPTS_SECTIONS rather than a literal, for the
+// reason its siblings are: the gear and the manifest must offer the same
+// set, and a second copy of the list is one that can disagree.
+//
+// THE CONCEPT-AGNOSTIC SURFACE. It is the one place a person reaches a
+// concept nobody built a screen for, which is why the VS Code extension's
+// "browse rows" handoff lands here: the portal answered `/concepts/:id` and
+// nothing did after it was retired.
+//
+// `roles: { min: "admin" }` -- rank >= 200 = {admin, developer, owner} -- and
+// IT IS AN EDITORIAL FLOOR RATHER THAN A MIRROR, which is the unusual part
+// and the reason it is written down.
+//
+// There is no engine gate to mirror. `ConceptsListMsg` and its follow
+// subscription carry NO authorization check at all: the schema catalog is
+// published to any connected session, deliberately, because a declaration is
+// not data. And the rows a concept holds are decided by that concept's own
+// `@rowAuthz` tier through row admission, which this app cannot widen and
+// does not try to -- `browseConceptPage` is an unbound read and gets exactly
+// what the caller's other reads would.
+//
+// So the floor is a decision about who this app is FOR, and about one thing
+// it would otherwise change in practice: the standing long tail of concepts
+// that declare no tier at all is readable by everyone TODAY through their
+// own named queries, and a generic browser makes that long tail trivially
+// DISCOVERABLE rather than merely reachable. Those are not the same fact.
+// Hiding the app from a reader does not gate anything -- the engine remains
+// the only authority -- and this comment is here so the next reader does not
+// mistake it for one.
+//
+// THE ICON IS A SET OF SHAPES, which is what a concept registry is: the
+// kinds of thing, not the things.
+const concepts: OsAppManifest = {
+  id: "concepts",
+  name: "Concepts",
+  icon: Shapes,
+  roles: { min: "admin" },
+  sections: CONCEPTS_SECTIONS,
+  settingsSection: "settings",
+  logsSection: "logs",
+  component: ConceptsApp,
+};
+
 // Campaigns, in full (epic memql#4827 / #4828 / #4830). Writing mail, sending
 // it, and knowing what happened. Campaigns is first and is therefore the
 // section a window opens on: a campaign is what this app is for, and the other
@@ -468,6 +589,41 @@ const materializer: OsAppManifest = {
   component: MaterializerApp,
 };
 
+// Stores, in full (epic memql#5009 / memql#5012). The Shopify connector's
+// operator surface: every configured store with its health, one store's
+// scopes, subscriptions and mirror sync state, and the two acts that are
+// about a STORE.
+//
+// ITS OWN APP RATHER THAN A CLUSTER SECTION, because its subject is a live
+// integration rather than the cluster itself -- the one deferred surface
+// that is.
+//
+// `roles: { min: "owner" }` is PRESENTATION over gates the engine holds:
+// every query in dsl/shopify/overlay/queries.memql filters
+// `actor.isClusterOwner==true`, and `v1:shopify:store` declares
+// `@rowAuthz(clusterOwner)`. Owner rather than admin, which is what the
+// portal gated on too -- only the cluster owner may list, add or change a
+// store.
+//
+// THE PER-DOMAIN ACTS ARE DELIBERATELY NOT HERE. Backfill, per-domain pause,
+// retry and discard are the generic sync runtime (`datasyncStartBackfill`
+// and friends) and they act on a (concept, connector) pair rather than on a
+// store; they live in the Cluster app's Data origins section. What lives
+// here is the store-wide pause and the Shopify-specific subscription
+// reconcile. Two pages carrying the same three buttons is the duplication
+// that split exists to avoid, and the store page names where the others are
+// rather than leaving somebody to hunt.
+const stores: OsAppManifest = {
+  id: "stores",
+  name: "Stores",
+  icon: Store,
+  roles: { min: "owner" },
+  sections: STORES_SECTIONS,
+  settingsSection: "settings",
+  logsSection: "logs",
+  component: StoresApp,
+};
+
 function AskWidgetBody() {
   const { transport, voice, settings } = useAsk();
   // The widget hands a prompt off exactly as the sheet does (epic memql#4785).
@@ -497,6 +653,8 @@ export const OS_REGISTRY: OsRegistry = {
   apps: [
     accounts,
     campaigns,
+    cluster,
+    concepts,
     files,
     deployables,
     fleet,
@@ -506,6 +664,7 @@ export const OS_REGISTRY: OsRegistry = {
     training,
     nexus,
     settings,
+    stores,
     bin,
   ],
   widgets: [askWidget],

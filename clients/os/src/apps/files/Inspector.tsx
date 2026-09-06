@@ -8,7 +8,8 @@ import { canOpen } from "../../system/registry";
 import { openInVsCode, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
 import { binItemFromArtifact } from "../bin/rows";
 import { planRestore, runRestore } from "../bin/restore";
-import { Button, Chip, Chips, CopyValue, Fact, Facts, Notice, ProvenanceDot, Subhead, formatBytes, formatMoment } from "../../kit";
+import { Button, Chip, CopyValue, Fact, Facts, Notice, ProvenanceDot, Subhead, formatBytes, formatMoment } from "../../kit";
+import { LabelEditor } from "./LabelEditor";
 import { AccountLabelPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
 import { useArtifactAccounts } from "./actions/accounts";
@@ -472,13 +473,17 @@ export function Inspector({
           </Facts>
         ) : null}
 
-        {row.labels.length > 0 ? (
-          <Chips label="Labels">
-            {row.labels.map((label) => (
-              <Chip key={label}>{label}</Chip>
-            ))}
-          </Chips>
-        ) : null}
+      </div>
+
+      {/* LABELS (epic memql#5009). They were a read-only chip row inside
+          Details; they are editable now, so they take a group of their own
+          for the reason Clients does -- an editable thing on a surface that
+          is otherwise a reading is not a fact row. The browse's label FACET
+          asks a different question of the same field and lives behind Refine
+          (DESIGN.md rule 2); this is where the value is set. */}
+      <div className="os-files-group">
+        <Subhead>Labels</Subhead>
+        <LabelEditor artifactId={row.id} labels={row.labels} />
       </div>
 
       {/* WHO THIS IS FOR (epic memql#4800, D5). MULTIPLE, because the index's

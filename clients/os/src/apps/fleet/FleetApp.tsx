@@ -3,6 +3,7 @@ import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
+import { AppsSection } from "./apps/AppsSection";
 import { MachinesSection } from "./machines/MachinesSection";
 import { RoutingSection } from "./routing/RoutingSection";
 import { WorkbenchesSection } from "./workbenches/WorkbenchesSection";
@@ -27,11 +28,16 @@ import { Panel, Head } from "../../kit";
 // Sections are the app's own navigation. It never opens a window.
 
 /** The concepts this app owns, for its Logs section: a line about a
- *  machine, a routing policy or a workspace is this app's line. */
+ *  machine, a routing policy, a workspace, a delegation policy or a delegated
+ *  run is this app's line. */
 const FLEET_LOG_CONCEPTS = [
   Concepts.WORKER_REGISTRATION,
   Concepts.WORKER_ROUTING_POLICY,
   Concepts.WORKBENCH_WORKSPACE,
+  // The Apps section's two (epic memql#5009), by the same reading as the
+  // three above: this app is where they are set and read.
+  Concepts.WORKER_DELEGATION_POLICY,
+  Concepts.WORKER_APP_SESSION,
 ] as const;
 
 export function FleetApp({
@@ -98,6 +104,7 @@ export function FleetApp({
   }
   if (sectionId === "routing") return <RoutingSection />;
   if (sectionId === "workbenches") return <WorkbenchesSection />;
+  if (sectionId === "apps") return <AppsSection />;
   return <MachinesSection showRevoked={settings.showRevoked} />;
 }
 

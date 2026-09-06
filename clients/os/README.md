@@ -52,8 +52,9 @@ Pure state machines live in `src/system/` (tested without React); chrome
 in `src/chrome/`; the app/widget contracts in `src/system/registry.ts`;
 the shared kit in `src/kit/`. Every app is real: Settings, Fleet, Users,
 Deployables, Training, Files (#4721), Accounts (#4800), Campaigns
-(#4827) and the Materializer (#4977) -- the last stub went with Files, and
-`StubApp` with it.
+(#4827), the Materializer (#4977), and the three operator surfaces the
+portal was the only home for -- Concepts, Cluster and Stores (epic
+memql#5009) -- the last stub went with Files, and `StubApp` with it.
 
 ## Right-click belongs to the shell
 
@@ -1986,3 +1987,142 @@ skip and the half where copy goes wrong.
   automation to arm or retire it", under nothing. An absent control needs an
   account of itself; an instruction for a list that does not exist is worse than
   silence.
+
+## Concepts, the twelfth app (epic memql#5009, memql#5010)
+
+`src/apps/concepts/` is the concept-AGNOSTIC surface: every kind of thing
+this cluster declares, what each one declares, and the rows it holds. It is
+the one place a person reaches a concept nobody built a screen for, which is
+why the VS Code extension's row handoff lands here -- the portal answered
+`/concepts/:id` and nothing did after the retirement.
+
+Four things about it are new rules rather than repetitions.
+
+- **THE DECLARED-AGAINST-OBSERVED JOIN IS THE FEATURE, and both directions
+  of it are defects with no other symptom.** A field list alone is the DSL
+  file read back, and an author can already read the DSL file. A **declared
+  field nothing writes** reads exactly like one whose value happens to be
+  empty, so a mutation that quietly stopped setting it looks like data that
+  is merely absent; an **undeclared key** is invisible to the DSL and to
+  every shaped read, because a shape can only project declared fields.
+  Every observed claim is SCOPED to its sample -- `presentIn` is a count and
+  the sentence names how many rows it rests on -- because a field missing
+  from 200 loaded rows is evidence and not proof. The declared half comes
+  from `concept.fields` rather than from a JSON Schema riding on a row, and
+  **empty `fields` is a real answer that is not "no fields"**: it means this
+  server publishes no shape, so it has its own state instead of collapsing
+  into an empty list.
+
+- **ARRIVALS ARE COUNTED, NEVER SPLICED, and that is why this list is not
+  `LiveList`.** `browseConceptPage` walks `createdAt asc` with a cursor
+  bound to that ordering, so a row created while somebody reads belongs
+  AFTER pages the walk has not reached -- splicing it draws it among rows it
+  does not belong between, and the next page fetches it again. `LiveList`
+  takes a `LiveCollection`, whose model is one authoritative fold that
+  events are applied INTO; a paged walk is not one, and dressing it as one
+  puts the arrival ring on a row whose position is wrong. So new rows land
+  in a band with a reload. An id-only event (`payloadOmitted`, the `granted`
+  tier's fan-out) is re-read through the ordinary authorized path and a
+  refusal DROPS it -- counting those blind would tell somebody "4 new rows"
+  about rows they may not read.
+
+- **A CONCEPT WITH NO `@displayCard` GETS ITS ID, NOT A GUESS.** The
+  tempting fallback -- `name`, then `title`, then `label` -- is a guess that
+  renders as a fact: a row whose `name` field holds something that is not
+  its name appears under a heading that is simply wrong, with nothing saying
+  it was inferred. An id is always true. The hint is honoured and the
+  RENDERING is the OS's own: `sdk/ts-viewkit` renders HTML strings for the
+  VS Code webviews, and pulling in a package to read four field names would
+  be a dependency bought for a lookup.
+
+- **AN EMPTY ROW WINDOW SAYS "NOT READABLE BY THIS ACCOUNT".** Row admission
+  decides what reaches this browser, so an empty answer means "none that you
+  may read". "This concept is empty" would be the window inventing a fact
+  about the cluster.
+
+### Arriving with a concept named in the address
+
+MemQL OS has no router -- a window carries an app and a section, not a path
+-- so the equivalent of the portal's `/concepts/:id` is `?concept=<id>`,
+read once at module scope in `main.tsx`, scrubbed from the address bar with
+`replaceState`, and turned into an open intent by a dispatcher in this app's
+tree. That is the GitHub-connect return's shape line for line
+(`apps/deployables/sources/connectReturn.ts`), including where each half
+lives: the capture is strictly earlier than `AuthProvider`'s own read of the
+query string, and each reader removes only its own parameters.
+
+An EMPTY value is not a request -- honouring it would open the app on its
+list and make a broken link indistinguishable from a working one. And a
+person whose role does not admit the app opens nothing: `openApp` refuses an
+app the actor cannot see, so a link is not a way past the launcher's gate.
+
+## Cluster, the thirteenth app (memql#5011)
+
+`src/apps/cluster/` is what this cluster is made of and how it is going:
+**Readiness**, **Modules**, **Data origins**, **Agents** and the **Audit
+trail**. Read-only inspection, no preferences.
+
+**Settings is what you SET; this is what the cluster IS.** That is the split
+against Settings' own Cluster section, which holds policy and this session's
+diagnostics. Two surfaces may share a name where they are the same subject
+at two scopes -- the precedent is the Logs app and the Logs section every
+other app carries.
+
+- **THE SECTION FLOORS ARE MIRRORS OF ENGINE GATES, ONE BY ONE, and two of
+  them correct the issue that asked for this app.** Modules is
+  `{ any: ["owner", "admin"] }` and **not** `{ min: "admin" }`:
+  `AuthorizeModuleRead` is `auth.AtLeastAdmin`, which is
+  `roleHasCapability(role, "create", "principal")`, and `rbac_model.go`
+  withholds that from developer. Under the one ladder developer ranks 300,
+  ABOVE admin's 200, so the floor form would admit exactly the role the
+  engine refuses -- the second genuinely non-monotonic gate in the shell
+  after Settings -> Integrations. Data origins and the Audit trail are
+  `{ min: "owner" }`, matching `actor.isClusterOwner==true` on
+  `syncStatesAll` and `recentAuditEvents`.
+
+- **THE AUDIT TRAIL'S OWNER FLOOR IS THE ONLY THING THAT CAN STOP THAT
+  SURFACE LYING.** Row admission returns ZERO ROWS, NOT AN ERROR, so a
+  non-owner reaching `recentAuditEvents` gets `[]` with no refusal anywhere
+  in the reply -- and an empty list says "nothing happened" to precisely the
+  person who is not allowed to check whether anything did. There is no
+  client-side repair: whatever the surface renders, it is guessing which of
+  the two states it is in. The floor is the whole mechanism, so it must not
+  be relaxed to the app's own `{ min: "admin" }` for symmetry. The portal
+  shipped this list with no client-side gate at all.
+
+- **THE AGENTS FLOOR IS EDITORIAL AND SAYS SO.** `v1:agents:agent` declares
+  NO row-authz tier, so `activeAgents` / `allAgents` / `agentById` return
+  every agent in the cluster -- `systemPrompt` and `providerConfig` included
+  -- to any authenticated caller. This app does not widen that, and its
+  floor is presentation over an ungated read rather than a mirror of a gate;
+  what it buys is that a generic operator surface does not make the standing
+  undeclared-tier long tail trivially DISCOVERABLE as well as reachable,
+  which are not the same fact. `agentAuthorization` is the opposite case:
+  `@rowAuthz(owner="userId")` means that list is the caller's own grants and
+  nobody else's, **even for an owner**, and the section says so -- a
+  cluster-wide heading over a self-scoped list is a claim it cannot support.
+
+- **A CONCEPT FIELD IS NOT A READABLE FIELD, and this app hit it twice.**
+  `agentAuthorization.action` and `agent.lineage` are both declared on their
+  concepts and projected by NO shape these queries bind, so no client read
+  can return them. They are absent from the surface rather than rendered
+  blank; adding either is a DSL change that fans out to the SDK-gen gates.
+
+- **FIRST RUN IS A PLACE, NOT A GATE.** The portal blocked its console until
+  inference and a passkey were acknowledged, and that gate was client-side
+  only, latched per session, and skippable in one mode -- it enforced
+  nothing. It was a signpost wearing a gate's clothes. Readiness keeps the
+  two facts it surfaced (`inferenceStatus`, `passkeysForSelf`), states each
+  with where to fix it, and blocks nothing. The trade-off is real and is
+  recorded rather than hidden: a brand-new owner who never opens this app is
+  not told. The OS's position is that a first-run question which ambushes
+  somebody mid-task is one they dismiss, and a dismissed question needs
+  somewhere to be remembered.
+
+- **THE MODULE ENV SURFACE NEVER SHOWS A SECRET'S VALUE**, and the pack
+  switch is not a live toggle. `ModuleEnvVar.value` is empty for a secret by
+  engine contract and there is no reveal call; `setPackEnabled`'s
+  `restartRequired` is ALWAYS true in v1, because a flip changes what each
+  node reads at its NEXT BOOT rather than what a running node has loaded.
+  An `integration` or `node-type` gets a sentence explaining why there is no
+  switch instead of a disabled one (rule 12).

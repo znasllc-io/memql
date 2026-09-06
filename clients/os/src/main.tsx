@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./app/App";
 import { applyStoredTheme } from "./app/theme";
+import { captureConceptOpen } from "./apps/concepts/openConcept";
 import { captureConnectReturn } from "./apps/deployables/sources/connectReturn";
 import "./styles/index.css";
 
@@ -16,6 +17,14 @@ applyStoredTheme();
 // until the Shell exists to receive it; a browser that arrived here with no
 // marker parks nothing and this is a no-op.
 captureConnectReturn(window);
+
+// A concept named in the address, read and scrubbed at the same moment and
+// for the same reasons (epic memql#5009). This is how the VS Code
+// extension hands a concept over to the console: MemQL OS has no router, so
+// the equivalent of the portal's `/concepts/:id` route is a parameter turned
+// into an open intent. Each reader removes only its own parameter, so the
+// two cannot eat each other's.
+captureConceptOpen(window);
 
 const container = document.getElementById("root");
 if (container === null) {

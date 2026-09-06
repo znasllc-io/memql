@@ -10,6 +10,7 @@ import { AskSheet } from "../ask/AskSheet";
 import { SdkAskTransport } from "../ask/sdkTransport";
 import { type AskTransport } from "../ask/askController";
 import { OS_REGISTRY } from "../apps/registry";
+import { ConceptOpenDispatcher } from "../apps/concepts/ConceptOpenDispatcher";
 import { ConnectReturnDispatcher } from "../apps/deployables/sources/ConnectReturnDispatcher";
 import { AuthSourceProvider } from "../auth/context";
 import type { OsAuthSource } from "../auth/source";
@@ -221,6 +222,11 @@ function ShellRoster({
           that did not arrive from a callback -- which is every other one. It
           sits INSIDE OsProvider because opening an app is a shell act. */}
       <ConnectReturnDispatcher />
+      {/* A concept named in the address opens the Concepts app on it (epic
+          memql#5009) -- the VS Code extension's handoff, and the shell's
+          answer to a portal route that no longer exists. Renders nothing,
+          and does nothing on a browser that arrived without the marker. */}
+      <ConceptOpenDispatcher />
       {/* Where a captured line comes from: the focused window's app and
           section, read from this provider's state at capture time. */}
       <CaptureContextInstaller />
