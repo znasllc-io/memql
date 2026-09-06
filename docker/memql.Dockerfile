@@ -1,6 +1,21 @@
 # MemQL Service Dockerfile
 # Multi-stage build for optimized image size
 #
+# BASE IMAGES ARE PINNED BY DIGEST, as every other Dockerfile in this repo
+# already was -- this one was the outlier, and Scorecard found it (alert
+# #1080). It matters more here than most: this file builds the images that
+# actually deploy (`make dev` locally, build-engine-images.yml for the cloud),
+# so a moving tag means two builds of the same commit can ship different base
+# layers and nothing records which.
+#
+# Both digests are OCI image INDEXES, not platform manifests, so multi-arch
+# builds still resolve per platform. Pinning a platform digest here would
+# quietly break arm64.
+#
+# Dependabot's `docker` ecosystem keeps them current (.github/dependabot.yml).
+# Without that half, a pin trades a moving base for a frozen one, which is the
+# worse of the two.
+#
 # Build with node type:
 #   docker build .                                    # bff (default)
 #   docker build --build-arg BUILD_TAGS=bff .         # bff (explicit)
@@ -8,7 +23,7 @@
 #   docker build --build-arg BUILD_TAGS=planner .     # planner
 
 # Stage 1: Builder
-FROM golang:1.26-alpine AS builder
+FROM golang:1.26-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS builder
 
 ARG BUILD_TAGS=""
 
@@ -85,7 +100,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w" -o 
 # Stage 2: Runtime (distroless for minimal attack surface). Every node type is
 # CGO-free, so this is the only runtime stage and it is LAST -- a build with no
 # --target resolves here.
-FROM gcr.io/distroless/base-debian12
+FROM gcr.io/distroless/base-debian12@sha256:fabbf1c0c357a3d42550111351daed089b20a2c954df13ee2fcff60602515e84
 
 WORKDIR /app
 

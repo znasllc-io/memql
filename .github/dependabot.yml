@@ -34,6 +34,31 @@ updates:
   # That assertion is what makes this entry sufficient rather than merely
   # convenient.
 
+  # THE MISSING HALF OF A PRACTICE THIS REPO ALREADY HAD (Scorecard alert
+  # #1080). Every Dockerfile here pins its base images by digest -- and
+  # nothing was bumping those digests, so the pins were slowly going stale
+  # instead of moving. A pinned base with no updater is not more secure than
+  # an unpinned one; it is differently insecure, and quieter about it.
+  #
+  # One entry per directory that holds a Dockerfile, because the docker
+  # updater is not workspace-aware the way the gomod one above is. Adding a
+  # Dockerfile in a new directory means adding an entry here; there is no
+  # gate that will tell you, which is why the list is written out rather than
+  # globbed.
+  - package-ecosystem: "docker"
+    directories:
+      - "/"
+      - "/cmd/deploy-gate-check"
+      - "/deploy/db-image"
+      - "/deploy/fleet"
+      - "/docker"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
