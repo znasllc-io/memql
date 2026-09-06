@@ -92,11 +92,10 @@ type authoringSandbox interface {
 //
 // Returns the (possibly-not-yet-clean) bundle + its final Gate-1 report + a
 // clean flag. The caller (increment 3) hands a clean bundle to Gate 2; on an
-// unclean return it parks the Plan with the outstanding diagnostics. planId is
-// used only to thread the planner's per-plan LLM ceiling through the repair
-// loop (the bundle emission spends against the same cumulative budget as the
-// rest of the Plan).
-func (l *PlannerAgentLoop) emitAndRepairBundle(ctx context.Context, planId, statement string, plan designPlan, sandbox authoringSandbox) (authoringBundle, memql.SandboxReport, bool, error) {
+// unclean return it parks the Plan with the outstanding diagnostics. `budget`
+// bounds the repair loop's model calls -- see budgetGate for why it is a
+// closure and not a plan id.
+func (l *PlannerAgentLoop) emitAndRepairBundle(ctx context.Context, budget budgetGate, statement string, plan designPlan, sandbox authoringSandbox) (authoringBundle, memql.SandboxReport, bool, error) {
 	if sandbox == nil {
 		return authoringBundle{}, memql.SandboxReport{}, false, fmt.Errorf("authoring emit: nil sandbox (Gate 1 unavailable on this binary)")
 	}
@@ -116,10 +115,18 @@ func (l *PlannerAgentLoop) emitAndRepairBundle(ctx context.Context, planId, stat
 	// Repair loop: bounded by the per-bundle attempt cap AND the planner's
 	// cumulative per-plan LLM ceiling (#819). Re-emit only the failing
 	// constructs against the diagnostics, re-run Gate 1, repeat.
+	//
+	// `calls` counts what THIS bundle has spent: one emit before the loop,
+	// one per repair. It is the number the gate is asked about, because it is
+	// the one that exists -- v1:work:run.spent is written by nothing but the
+	// run's closing wallClockMs, so a cumulative check against its modelCalls
+	// would compare a real ceiling to a zero meaning "nobody measured" and
+	// never block.
+	calls := 1
 	for attempt := 1; attempt <= repairAttemptCap(); attempt++ {
-		if blocked, reason := l.repairBudgetExhausted(ctx, planId); blocked {
-			l.logger.Warn("authoring repair: per-plan LLM budget exhausted; stopping repair loop",
-				"planId", planId, "attempt", attempt, "reason", reason)
+		if blocked, reason := budget(ctx, calls); blocked {
+			l.logger.Warn("authoring repair: the LLM budget for this job is spent; stopping repair loop",
+				"attempt", attempt, "calls", calls, "reason", reason)
 			return bundle, report, false, nil
 		}
 
@@ -133,23 +140,24 @@ func (l *PlannerAgentLoop) emitAndRepairBundle(ctx context.Context, planId, stat
 		repaired, rerr := l.repairConstructs(ctx, statement, bundle, failing, report)
 		if rerr != nil {
 			l.logger.Warn("authoring repair: re-emit failed; stopping",
-				"planId", planId, "attempt", attempt, "error", rerr)
+				"attempt", attempt, "calls", calls, "error", rerr)
 			return bundle, report, false, rerr
 		}
+		calls++
 		bundle.Constructs = mergeRepaired(bundle.Constructs, repaired)
 
 		report = sandbox.CompileBundle(bundle.Constructs)
 		if report.OK {
 			l.logger.Info("authoring repair: bundle compiled clean",
-				"planId", planId, "automation", bundle.AutomationName, "attempt", attempt)
+				"automation", bundle.AutomationName, "attempt", attempt, "calls", calls)
 			return bundle, report, true, nil
 		}
 		l.logger.Info("authoring repair: bundle still failing; re-attempting",
-			"planId", planId, "attempt", attempt, "failures", len(failingConstructs(bundle.Constructs, report)))
+			"attempt", attempt, "calls", calls, "failures", len(failingConstructs(bundle.Constructs, report)))
 	}
 
 	l.logger.Warn("authoring repair: exhausted repair attempts without a clean bundle",
-		"planId", planId, "automation", bundle.AutomationName)
+		"automation", bundle.AutomationName, "calls", calls)
 	return bundle, report, false, nil
 }
 
@@ -226,25 +234,63 @@ func (l *PlannerAgentLoop) repairConstructs(ctx context.Context, statement strin
 	return parseEmittedConstructs(resp)
 }
 
-// repairBudgetExhausted reports whether the planner's cumulative per-plan LLM
-// ceiling (#819) is already at/over its limit, so the repair loop must not make
-// another emit call. Reuses the exact gate the decompose loop uses -- the
-// authoring job spends against the same Plan budget. A plan-load failure fails
-// OPEN (not exhausted) so a transient read error doesn't abort a healthy repair
-// loop; the hard per-bundle attempt cap still bounds it.
-func (l *PlannerAgentLoop) repairBudgetExhausted(ctx context.Context, planId string) (bool, string) {
+// budgetGate reports whether the LLM budget for this authoring job is spent,
+// given how many model calls the job has made so far.
+//
+// A CLOSURE RATHER THAN A planId, because there are two owners and only one of
+// them is a Plan. emitAndRepairBundle used to take a planId and look the Plan
+// up; the work spine's compile pass has no Plan, passed "", and the gate
+// returned "not exhausted" on its very first line -- so on the path the work
+// spine actually uses, the repair loop was bounded by nothing but
+// repairAttemptCap. That is memql#5000's "cost bug that looks like nothing",
+// except it was not waiting for the planner's retirement: it was live.
+type budgetGate func(ctx context.Context, callsMade int) (bool, string)
+
+// unboundedBudget is the gate for a caller that has no ceiling to enforce.
+// NAMED, so a call site that means it says so -- an untyped nil would read the
+// same as forgetting.
+func unboundedBudget(context.Context, int) (bool, string) { return false, "" }
+
+// planBudgetGate is the planner's cumulative per-plan LLM ceiling (#819),
+// which the authoring job spends against along with the rest of the Plan.
+//
+// A plan-load failure fails OPEN (not exhausted) so a transient read error
+// does not abort a healthy repair loop; the per-bundle attempt cap still
+// bounds it. That trade is defensible HERE, where the ceiling is one of two,
+// and was not defensible as the only ceiling on a path that had no Plan at
+// all.
+func (l *PlannerAgentLoop) planBudgetGate(planId string) budgetGate {
 	if planId == "" {
+		return unboundedBudget
+	}
+	return func(ctx context.Context, _ int) (bool, string) {
+		plan, err := l.loadPlan(ctx, planId)
+		if err != nil {
+			return false, ""
+		}
+		gate := evaluatePlannerCallGate(plan, plannerSystemPromptTokenEstimate, maxPlannerInvocationsPerPlan(), plannerDefaultTokenBudget())
+		if gate.Blocked {
+			return true, gate.Reason
+		}
 		return false, ""
 	}
-	plan, err := l.loadPlan(ctx, planId)
-	if err != nil {
-		return false, ""
+}
+
+// callCapGate bounds a job at a number of model calls.
+//
+// A ceiling of zero is UNSET, never "nothing allowed" -- the same reading
+// component/work.CheckCeilings gives every ceiling, and the reading that keeps
+// a goal with no ceilings declared runnable rather than dead on arrival.
+func callCapGate(maxCalls int, what string) budgetGate {
+	if maxCalls <= 0 {
+		return unboundedBudget
 	}
-	gate := evaluatePlannerCallGate(plan, plannerSystemPromptTokenEstimate, maxPlannerInvocationsPerPlan(), plannerDefaultTokenBudget())
-	if gate.Blocked {
-		return true, gate.Reason
+	return func(_ context.Context, callsMade int) (bool, string) {
+		if callsMade < maxCalls {
+			return false, ""
+		}
+		return true, fmt.Sprintf("%s allows %d model call(s) and this job has made %d", what, maxCalls, callsMade)
 	}
-	return false, ""
 }
 
 // repairAttemptCap returns the per-bundle repair cap, honoring the env

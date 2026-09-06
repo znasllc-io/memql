@@ -241,7 +241,7 @@ func (d *AuthoringCaptureDispatcher) runCapture(ctx context.Context, planId, kin
 	// composition stays for the genuinely-staged Responsibility path. (#1185)
 	designPlan = flattenToSingleDeliverable(designPlan)
 
-	bundle, report, clean, err := d.loop.emitAndRepairBundle(ctx, planId, statement, designPlan, ae)
+	bundle, report, clean, err := d.loop.emitAndRepairBundle(ctx, d.loop.planBudgetGate(planId), statement, designPlan, ae)
 	if err != nil {
 		return fmt.Errorf("emit/repair: %w", err)
 	}

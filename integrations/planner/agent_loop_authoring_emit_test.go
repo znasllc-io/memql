@@ -136,7 +136,7 @@ func TestEmitAndRepair_CleanFirstPass(t *testing.T) {
 		designDependency: designDependency{Kind: "spec", Name: "specDigestItemActive", CandidateSource: specCon.Source},
 		Disposition:      dispAuthor,
 	})
-	bundle, report, clean, err := l.emitAndRepairBundle(context.Background(), "p1", "digest", plan, sb)
+	bundle, report, clean, err := l.emitAndRepairBundle(context.Background(), l.planBudgetGate("p1"), "digest", plan, sb)
 	if err != nil {
 		t.Fatalf("emitAndRepairBundle: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestEmitAndRepair_RepairsThenClean(t *testing.T) {
 		designDependency: designDependency{Kind: "spec", Name: "specDigestItemActive", CandidateSource: brokenSpec.Source},
 		Disposition:      dispAuthor,
 	})
-	bundle, report, clean, err := l.emitAndRepairBundle(context.Background(), "p1", "digest", plan, sb)
+	bundle, report, clean, err := l.emitAndRepairBundle(context.Background(), l.planBudgetGate("p1"), "digest", plan, sb)
 	if err != nil {
 		t.Fatalf("emitAndRepairBundle: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestEmitAndRepair_ExhaustsAttemptCap(t *testing.T) {
 		designDependency: designDependency{Kind: "spec", Name: "specDigestItemActive", CandidateSource: brokenSpec.Source},
 		Disposition:      dispAuthor,
 	})
-	_, report, clean, err := l.emitAndRepairBundle(context.Background(), "p1", "digest", plan, sb)
+	_, report, clean, err := l.emitAndRepairBundle(context.Background(), l.planBudgetGate("p1"), "digest", plan, sb)
 	if err != nil {
 		t.Fatalf("exhausting the cap must not error: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestEmitAndRepair_BudgetExhaustedStopsLoop(t *testing.T) {
 		designDependency: designDependency{Kind: "spec", Name: "specDigestItemActive", CandidateSource: brokenSpec.Source},
 		Disposition:      dispAuthor,
 	})
-	_, _, clean, err := l.emitAndRepairBundle(context.Background(), "p1", "digest", plan, sb)
+	_, _, clean, err := l.emitAndRepairBundle(context.Background(), l.planBudgetGate("p1"), "digest", plan, sb)
 	if err != nil {
 		t.Fatalf("budget-exhausted stop must not error: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestEmitAndRepair_RealGate1_RepairsToClean(t *testing.T) {
 		designDependency: designDependency{Kind: "trait", Name: "specDigestActive", CandidateSource: broken.Source},
 		Disposition:      dispAuthor,
 	})
-	bundle, report, clean, err := l.emitAndRepairBundle(context.Background(), "p1", "Send me a daily digest of active items.", plan, realSandbox{})
+	bundle, report, clean, err := l.emitAndRepairBundle(context.Background(), l.planBudgetGate("p1"), "Send me a daily digest of active items.", plan, realSandbox{})
 	if err != nil {
 		t.Fatalf("emitAndRepairBundle: %v", err)
 	}
@@ -392,5 +392,76 @@ func TestMergeRepaired_ReplacesInPlaceAndAppends(t *testing.T) {
 		if c.Kind == "spec" && c.Name == "a" && c.Source != "new-a" {
 			t.Fatalf("spec a should be replaced in place, got %q", c.Source)
 		}
+	}
+}
+
+// TestEmitAndRepair_ACallCeilingStopsTheLoop is memql#5000's half of the same
+// property, on the path that had none.
+//
+// The plan gate above bounds the loop for a job that belongs to a Plan. The
+// work spine's compile pass has no Plan: it passed an empty plan id, and the
+// gate returned "not exhausted" on its first line, so the loop was bounded by
+// repairAttemptCap and nothing else -- whatever ceiling the goal declared. A
+// caller-supplied call ceiling is what bounds it now.
+func TestEmitAndRepair_ACallCeilingStopsTheLoop(t *testing.T) {
+	// The attempt cap is the OTHER bound, and it must not be what stops
+	// either arm: the ceiling has to be strictly tighter, or "1 repair" says
+	// nothing about the ceiling.
+	t.Setenv("MEMQL_AUTHORING_MAX_REPAIRS", "3")
+	brokenSpec := memql.SandboxConstruct{Kind: "spec", Name: "specDigestItemActive", Source: "spec x {\n  broken\n}"}
+	fe := emitFakeEngine(
+		emitJSON(t, []memql.SandboxConstruct{automationCon, brokenSpec}),
+		[]string{
+			emitJSON(t, []memql.SandboxConstruct{brokenSpec}),
+			emitJSON(t, []memql.SandboxConstruct{brokenSpec}),
+		},
+		nil,
+	)
+	l := newDesignLoop(fe)
+	sb := &fakeSandbox{reports: []memql.SandboxReport{
+		failReport("spec", "specDigestItemActive", "syntax error", automationCon, brokenSpec),
+	}}
+	plan := designPlanWith(resolvedDependency{
+		designDependency: designDependency{Kind: "spec", Name: "specDigestItemActive", CandidateSource: brokenSpec.Source},
+		Disposition:      dispAuthor,
+	})
+
+	// A ceiling of 2: the emit is one call, so exactly ONE repair is legal.
+	_, _, clean, err := l.emitAndRepairBundle(context.Background(),
+		callCapGate(2, "this run's maxModelCalls ceiling"), "digest", plan, sb)
+	if err != nil {
+		t.Fatalf("stopping at a ceiling must not error: %v", err)
+	}
+	if clean {
+		t.Fatal("a bundle that never compiles must not be reported clean")
+	}
+	_, si, _ := fe.snapshot()
+	if n := countContains(si, "authoringRepair"); n != 1 {
+		t.Fatalf("a ceiling of 2 allows the emit plus ONE repair; got %d repair calls", n)
+	}
+
+	// The control: the SAME fixture with no ceiling runs to the attempt cap.
+	// Without it, "1 repair" could be the fixture running out of responses
+	// rather than the ceiling doing anything.
+	fe2 := emitFakeEngine(
+		emitJSON(t, []memql.SandboxConstruct{automationCon, brokenSpec}),
+		[]string{
+			emitJSON(t, []memql.SandboxConstruct{brokenSpec}),
+			emitJSON(t, []memql.SandboxConstruct{brokenSpec}),
+			emitJSON(t, []memql.SandboxConstruct{brokenSpec}),
+		},
+		nil,
+	)
+	l2 := newDesignLoop(fe2)
+	sb2 := &fakeSandbox{reports: []memql.SandboxReport{
+		failReport("spec", "specDigestItemActive", "syntax error", automationCon, brokenSpec),
+	}}
+	if _, _, _, err := l2.emitAndRepairBundle(context.Background(), unboundedBudget, "digest", plan, sb2); err != nil {
+		t.Fatalf("control: %v", err)
+	}
+	_, si2, _ := fe2.snapshot()
+	if n := countContains(si2, "authoringRepair"); n <= 1 {
+		t.Fatalf("the control made %d repair call(s) -- the ceiling's 1 is not evidence of anything if the "+
+			"unbounded run does the same", n)
 	}
 }
