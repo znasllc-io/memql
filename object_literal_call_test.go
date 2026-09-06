@@ -6,12 +6,12 @@ package main
 // ===========================================================================
 // THE DEFECT, FOUR TIMES
 // ===========================================================================
-// Go that hands the engine a call composes it as text, and there is exactly
-// one accepted form: `name(k: v, ...)`. The wrapper `name({...})` -- a single
-// positional object literal -- has been REFUSED at parse since Story 9 of
-// memql#2335. Rendered from a marshalled map it looks like this, and it has
-// been written this way in nineteen places across four separate rounds of
-// fixing it:
+// Go that hands the engine a MUTATION or a QUERY composes it as text, and
+// there is exactly one accepted form: `name(k: v, ...)`. The wrapper
+// `name({...})` -- a single positional object literal -- has been REFUSED at
+// parse since Story 9 of memql#2335. Rendered from a marshalled map it looks
+// like this, and it has been written this way in nineteen places across four
+// separate rounds of fixing it:
 //
 //	payload, _ := json.Marshal(args)
 //	engine.Execute(ctx, fmt.Sprintf("createThing(%s)", string(payload)))
@@ -22,12 +22,26 @@ package main
 // because there was no way to see the rest -- and each round's gate was
 // package-local, so the next occurrence landed somewhere it did not look.
 //
-// The eleven this test was written against were: the AI router's per-call
-// BILLING record (component/router), both capability-graph edge writers
-// (component/skills), mintSkill, the planner's semantic tasks and domain
-// embedding, the agent's RAG lookup, a SECOND worker-invocation writer, the
-// cockpit-app spend ledger, the router's API-key secret, and a taskState write
-// that had never once succeeded.
+// SEVENTEEN of the nineteen were genuinely failing, measured against the real
+// engine rather than assumed: the AI router's per-call BILLING record and the
+// cockpit-app spend ledger (`recordRouterCall` twice), both capability-graph
+// edge writers, `mintSkill` twice, `createAgent`, `updateAgent` three times,
+// `createSemanticTask`, a SECOND worker-invocation writer, `setPartitionSecret`,
+// `createSkillChangeEvent` twice, `mutationCreateCanvasState` twice, and a
+// `persistTaskState` write that had never once succeeded.
+//
+// THE OTHER TWO WERE FINE, and the difference is why this gate reports a SHAPE
+// rather than claiming a breakage. `similarTo` and `embedDomainItems` are
+// PRIMITIVE BUILTINS, and parseFunctionCallWithKind's own comment says so:
+// "bare positional primitive args ... stay valid". Both accept the positional
+// object AND the named form, and validate their required fields identically
+// under each -- measured. Rewriting them was consistency, not repair.
+//
+// That distinction was got wrong first. The sweep's claim was "nineteen writes
+// that never succeeded", which was true of seventeen; two of the probes that
+// would have caught it were run and misread, because a builtin answering
+// "requires 'concept' field" is an ARGUMENT error and reads at a glance like
+// the parse refusal next to it.
 //
 // ===========================================================================
 // WHY IT IS SILENT, WHICH IS WHY IT NEEDS A GATE RATHER THAN REVIEW
@@ -46,6 +60,12 @@ package main
 // positives in this tree: a correct renderer joins per-argument `k: v` pairs,
 // so its Sprintf argument is a strings.Join or a Builder, never `string(x)`
 // where x came out of json.Marshal.
+//
+// It reports the SHAPE and does not resolve the name, so it flags the two
+// primitive-builtin sites too. That is the right trade in this direction: the
+// shape is a reliable signal that somebody reached for the wrapper, the fix
+// costs nothing where the wrapper was legal, and a gate that had to know which
+// construct is a builtin would be a second copy of the registry.
 //
 // It does NOT detect an object literal written as a string constant -- the
 // parser's own negative_grammar_test.go covers that -- nor a call assembled by
