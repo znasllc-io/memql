@@ -264,6 +264,22 @@ func (s *store) updateRun(ctx context.Context, runId string, fields map[string]a
 	return s.writeInternal(ctx, "mutation "+call("updateWorkRun", args))
 }
 
+// closeGoalRow moves a goal's lifecycle. Read-merge, so anything not named
+// keeps its prior value.
+//
+// A2 NOTE: epic A3 lands `updateWorkGoal`, which is this plus accountIds and
+// ceilings -- the same fields with a wider argument list. When A3 is on main
+// this construct is dropped and the call re-points there; the arguments below
+// are a subset of its, so the change is the name and nothing else.
+func (s *store) closeGoalRow(ctx context.Context, goalId, status string, at time.Time, reason string) error {
+	return s.writeInternal(ctx, "mutation "+call("closeWorkGoal", map[string]any{
+		"goalId":      goalId,
+		"status":      status,
+		"closedAt":    rfc(at),
+		"closeReason": reason,
+	}))
+}
+
 // decideApprovalRow records a decision on v1:work:approval.
 func (s *store) decideApprovalRow(ctx context.Context, approvalId, decision, decidedBy string, at time.Time, answer map[string]any) error {
 	return s.writeInternal(ctx, "mutation "+call("decideWorkApproval", map[string]any{

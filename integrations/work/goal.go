@@ -268,11 +268,27 @@ func (i *Integration) handleCancelGoal(ctx context.Context, args map[string]any,
 		asked++
 	}
 
+	// The goal closes AFTER its runs have been asked to stop, and the order
+	// is the guarantee: a goal closed first would be a goal reported finished
+	// while its runs were still executing. Cancellation of a run is REQUESTED
+	// -- the run notices at its next step boundary -- so "closed" here means
+	// the intent is recorded everywhere it needs to be, not that everything
+	// has already stopped.
+	closed := true
+	if err := st.closeGoalRow(ownerActor(ctx, owner), goalId, "closed", i.clock().UTC(), reason); err != nil {
+		// The runs were still asked, which is the half that matters most, so
+		// this reports rather than fails: a caller who is told the goal is
+		// still open can close it again, and a caller told nothing happened
+		// would re-issue a cancellation the runs have already taken.
+		i.log().Warn("work: runs were asked to stop but the goal row would not close",
+			"component", "work.goal", "goal", goalId, "err", err)
+		closed = false
+	}
+
 	out := map[string]any{
-		"goalId":    goalId,
-		"runsAsked": asked,
-		// Stated rather than implied. See the residual above.
-		"goalClosed": false,
+		"goalId":     goalId,
+		"runsAsked":  asked,
+		"goalClosed": closed,
 	}
 	if len(failed) > 0 {
 		out["runsRefused"] = failed
@@ -321,10 +337,10 @@ func trim(s string) string { return strings.TrimSpace(s) }
 // not have. Each is stated where the code hits it, and collected here so the
 // list is findable:
 //
-//  1. closeWorkGoal(goalId, status, closedAt, closeReason) -- @serverOnly
-//     update on goal. Without it cancelGoal cannot close the goal row and
-//     compile cannot move a goal from `open` to `active`. Today the reply
-//     says goalClosed:false.
+//  1. CLOSED. closeWorkGoal(goalId, status, closedAt, closeReason) exists
+//     and cancelGoal calls it. Compile moving a goal from `open` to `active`
+//     still has no caller. Epic A3 lands `updateWorkGoal`, the same write
+//     with a wider argument list; this drops and re-points to it then.
 //
 //  2. updateWorkRun must accept automationName, templateConstructId,
 //     templateVersion and variables. Compile chooses a template AFTER the run

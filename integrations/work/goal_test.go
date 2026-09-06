@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	work "github.com/znasllc-io/memql/component/work"
 )
@@ -201,11 +202,34 @@ func TestCancelGoalAsksOnlyLiveRuns(t *testing.T) {
 	if reply["runsAsked"] != float64(2) {
 		t.Errorf("runsAsked = %v", reply["runsAsked"])
 	}
-	// The residual is STATED rather than implied: there is no goal-update
-	// mutation, so the goal row is not closed. A reply that omitted this would
-	// let a caller believe otherwise.
-	if reply["goalClosed"] != false {
-		t.Errorf("goalClosed = %v; there is no closeWorkGoal mutation, so this must report false rather than imply the goal was closed", reply["goalClosed"])
+	if reply["goalClosed"] != true {
+		t.Errorf("goalClosed = %v, want true -- cancelGoal closes the goal row", reply["goalClosed"])
+	}
+
+	// THE ORDER IS THE GUARANTEE. The runs are asked to stop FIRST and the
+	// goal closes after: a goal closed first is one reported finished while
+	// its runs are still executing. Asserting the reply alone would pass with
+	// the writes in either order.
+	closeAt, lastRunAt := -1, -1
+	for n, c := range eng.calls {
+		switch {
+		case strings.Contains(c.Query, "closeWorkGoal("):
+			closeAt = n
+			// The close is a @serverOnly write under the OWNER's borrowed
+			// authority, not the caller's -- the same rule the run updates
+			// above follow, and worth pinning on the goal too.
+			if c.Origin != auth.OriginInternal {
+				t.Errorf("closeWorkGoal ran on origin %v; @serverOnly is refused on anything but internal", c.Origin)
+			}
+		case strings.Contains(c.Query, "updateWorkRun("):
+			lastRunAt = n
+		}
+	}
+	if closeAt < 0 {
+		t.Fatalf("the goal row was never closed: %+v", eng.calls)
+	}
+	if lastRunAt > closeAt {
+		t.Errorf("the goal closed at call %d, before a run was asked at %d -- a goal closed first reports finished while its runs are still executing", closeAt, lastRunAt)
 	}
 }
 
