@@ -78,7 +78,7 @@ MemQL/
 │   └── _reference/    Per-construct authoring reference skeletons
 ├── integrations/      External services + DSL-callable capabilities (Go)
 ├── brand/             Visual identity as plain CSS custom properties, imported
-│                      by BOTH clients/portal (Vite) and component/identity/web
+│                      by BOTH clients/os (Vite) and component/identity/web
 │                      (Tailwind CLI) -- they share no package manager, and CSS
 │                      variables are the one format both consume. Never copied:
 │                      brand_shared_source_test.go fails the build on a
@@ -86,7 +86,8 @@ MemQL/
 │                      defined outside it (memql#4266)
 ├── clients/           Surfaces built ON the platform -- the inward-facing
 │   │                  mirror of integrations/. The engine carries exactly one
-│   └── portal/        MemQL Portal, served by component/edge as site #1
+│   └── os/            MemQL OS -- the desktop shell and the graphical ops
+│                      console, served by component/edge as a site row
 ├── component/         Core Go components (memql, grpc, events, database,
 │   │                  server, auth, edge, language, ...)
 │   ├── bus/           Channel-based inter-component communication
@@ -126,7 +127,6 @@ without one is normal.
 | `dsl/policies/policies.memql` | AI provider-selection policies | — |
 | `integrations/` | External service integrations + DSL capabilities (Go) | [→](integrations/CLAUDE.md) |
 | `clients/` | Surfaces built ON the platform (SPAs, landing pages, apps) | [→](clients/README.md) |
-| `clients/portal/` | MemQL Portal -- the graphical ops console, served by `component/edge` as site #1. Nexus (`src/nexus/`) is its 3D surface | [→](clients/README.md) |
 | `clients/os/` | MemQL OS -- the desktop shell, served at `os.<domain>`. **Read its README before adding an app or a live surface**: the live-collection contract (a collection does nothing until `retain()`), which concepts are actually broadcast, and the arrival-cue rule (a heartbeat is not news) are all rules a new surface gets wrong by default | [→](clients/os/README.md) |
 | `component/` | Core service components (Go) | [→](component/CLAUDE.md) |
 | `component/language/` | The MemQL front end: lexer, parser, rewriter, AST, compiler, registries | [→](component/language/CLAUDE.md) |
@@ -420,7 +420,7 @@ build tag by expected binary size -- the measurements are in
 go build .                       # bff        (default)
 go build -tags agent .           # agent
 go build -tags planner .         # planner
-go build -tags edge .            # edge       (serves hosted sites + the portal)
+go build -tags edge .            # edge       (serves hosted sites, the OS shell among them)
 ```
 
 The seven node types are identity, bff, agent, planner, workbench, mcp, edge.
@@ -430,7 +430,7 @@ The mesh/product ones:
 - **Agent**: task execution, AI work, tool calling, streaming transcription
 - **Planner**: task planning and orchestration
 - **Edge**: serves this cluster's hosted web surfaces -- every hosted SPA and
-  the MemQL Portal itself (site #1, no special path) -- by resolving the
+  MemQL OS itself (a site row, no special path) -- by resolving the
   request `Host` header to a `v1:platform:site` graph row (epic memql#3700)
 
 Nodes discover each other via mesh and share one PostgreSQL + TimescaleDB
@@ -633,7 +633,7 @@ site, not maintained as a list:
 | api | `api.<domain>` |
 | identity | `identity.<domain>` |
 | mcp | `mcp.<domain>` |
-| sites | `portal.<domain>` (site #1, its own exact rule), `*.<domain>`, plus the apex |
+| sites | `os.<domain>` (the platform's own site, its own exact rule), `*.<domain>`, plus the apex |
 
 **Every host is a SINGLE label under the domain, and that is a ROUTING fact.**
 An Ingress wildcard matches exactly ONE label, so the one `*.<domain>` rule
@@ -648,14 +648,14 @@ RULE stays with no certificate behind it WHERE THE OVERLAY DECLARES NO DNS-01
 ISSUER; both cloud overlays now declare one (memql#4347) plus a wildcard
 Certificate the edge Ingress carries, so a freshly deployed site is live over
 TLS with no operator step. The render gate reads the SOLVER rather than the
-issuer's name, so #4224's exact-host rule holds by default. The portal carries
+issuer's name, so #4224's exact-host rule holds by default. The OS shell carries
 an exact rule because ingress-nginx builds a certificate-bearing server block
 per RULE host, never per tls host.
 
 `cmd/frontdoorhosts` writes `front-door.generated.yaml` into each instance
 overlay; `component/envregistry/domain.go` composes the node's own issuer / CORS
 origins / redirect URIs from the SAME rule through `component/frontdoor`; and
-`component/memql`'s SeedMaterializer seeds the portal site row's hostname from
+`component/memql`'s SeedMaterializer seeds the OS site row's hostname from
 it. One derivation, three consumers -- a second copy would disagree, and the
 disagreement is an issuer nothing is served at, which presents as "sign-in is
 broken" with every manifest looking correct.
@@ -759,15 +759,13 @@ REFUSES BOOT rather than falling back to a key the cutover deletes.
 
 Two things about `AiSuggest` are load-bearing:
 
-- **`viewArrangement` / `viewCompose` render DSL prompts**, not Go copies
-  (`component/memql/suggest_views.go`, declared in
-  `dsl/portalviews/prompts.memql`); a nil renderer is an ERROR rather than a
-  fallback, because a built-in substitute would serve a prompt nobody can find
-  in the tree. **When adding a domain, the registration IS the feature; test
-  it** -- `viewArrangement` was called by the portal and registered by nothing
-  until memql#4667, and the registry's unknown-domain error reaches the user as
-  "suggestions are not available on this cluster", the same sentence a cluster
-  with no provider gets.
+- **The registration IS the feature; test it.** `viewArrangement` was called by
+  the portal and registered by nothing until memql#4667, and the registry's
+  unknown-domain error reaches the user as "suggestions are not available on
+  this cluster" -- the same sentence a cluster with no provider gets, so the
+  bug reads as a configuration problem. Those two domains and `uiAssist` were
+  retired with the portal (epic memql#4984); `knowledge` is what is left, and
+  the lesson is not.
 - **`AiSuggestResult.usage` is ABSENT when nothing was reported** -- zero and
   "not measured" are different answers, and a client falls back to its own
   estimate only if the field is missing.
@@ -913,8 +911,8 @@ first-choice surface for headless work is the Workbench, below.
 - **`online` is DERIVED, never stored:** unrevoked AND `lastSeenAt` within
   `OnlineWindow` = 2 x `HeartbeatBatchInterval` = **30s**. Exactly two
   implementations, `component/worker.IsOnline` and
-  `clients/portal/src/fleet/online.ts`, held together by
-  `TestFleetOnlineWindowMatchesPortal`. Deriving it from the in-memory registry
+  `clients/os/src/apps/fleet/online.ts`, held together by
+  `TestFleetOnlineWindowMatchesTheClients`. Deriving it from the in-memory registry
   is refused: that answers "connected to ME", and the fleet needs "connected to
   ANY replica".
 - **Cross-node dispatch (memql#4352):** `connectedNodeId` names the replica
@@ -931,7 +929,7 @@ first-choice surface for headless work is the Workbench, below.
   for the owner named by the token's identity row -- and must NOT stamp internal
   origin, which is why it is deliberately absent from `call_origin.go`'s
   allowlist.
-- **Operator surface:** `/fleet/machines` in the portal -- pair, rename
+- **Operator surface:** the Fleet app in MemQL OS -- pair, rename
   (`displayName`), edit operator labels, revoke, edit the routing policy, read
   each call's `routing` record.
 - **Audit + hardening:** security signals on `v1:identity:auditEvent`; per-call
@@ -1061,7 +1059,7 @@ refresh and on demand for unknown `kid` headers. They never see the private key.
   passkey as the named user. `GET /enroll` renders; the ceremony presents
   `Authorization: Enrolment <token>`.
 - **The admin web app is gone.** `/admin/*` keeps the sign-in pages and a root
-  that answers `410 Gone`; the screens live in the portal, gated by
+  that answers `410 Gone`; the screens live in MemQL OS, gated by
   `component/identity/adminops` over `IdentityAdminMsg`.
   `DeployControlService` exists only on the identity node, but a bff FORWARDS
   the deploy RPCs over `NodeService.Stream` carrying the caller as a verified
@@ -1911,7 +1909,7 @@ schema does not say.
   and now a "deployable" (memql#4344): the edge resolves the request `Host` to
   one of these rows and serves its `bundleRef`. A user's hostname is
   `<slug>.<domain>` against a reserved set DERIVED from `frontdoor.Roles()` +
-  the portal, so a new role can never become claimable by omission; Android /
+  the OS shell, so a new role can never become claimable by omission; Android /
   iOS / macOS deliberately have NO enum values, being distribution rather than
   hostnames ([deployables.md](docs/public/operate/deployables.md)) -- they are
   a written-down TARGET shape instead (epic memql#4885), and a manifest
@@ -1995,7 +1993,7 @@ schema does not say.
   concepts the app owns. Retention is the nightly `logsRetentionSweep` on
   the cron leader: archive `logs/<day>/<nodeType>.ndjson.gz` to blob
   storage FIRST, delete second, and **no archive means no delete**. The
-  portal is not instrumented and a hosted site's console is an owner
+  retired portal was never instrumented and a hosted site's console is an owner
   decision still open (the design record's section G).
   [logs.md](docs/public/operate/logs.md) ·
   [design](docs/superpowers/specs/2026-09-03-logs-design.md).
@@ -2021,56 +2019,34 @@ schema does not say.
 
 ## Feature Notes
 
-### Views, layouts and living pages (epic memql#4661)
+### Views, layouts and living pages -- RETIRED (epic memql#4984)
 
-**The arrangement system IS the page system.** Every portal page that shows data
-is a `PageManifest` -- a title, a line of copy, and sections of one concept each
--- rendered by `clients/portal/src/pages/ArrangedPage.tsx`. The predefined
-views, the composed ones, the fleet pages, Artifacts, Deployables, the Me tabs
-and the Nexus goal page all go through it; there is no branch for which kind a
-page is, because there is no longer a difference.
+The arrangement system WAS the page system: every portal page that showed data
+was a `PageManifest` rendered by one component, the predefined views and the
+composed ones went through the same path, and a person could regenerate a
+page's arrangement with a model and revert it by appending. It is gone with the
+portal, and so is `dsl/portalviews` -- the `view` concept, the `composedViews` /
+`pageOverride` / `composedViewById` queries, the four mutations, and the
+`composeViewArrangement` / `composeView` / `uiAssistFill` prompts.
 
-- **Absent means stack, and absent means standard.** A section's `layout` and an
-  entry's `role` are additive, and every `v1:portalviews:view` row stored before
-  them names neither. Nothing writes the defaults -- if absent ever meant
-  anything else, the release that changed it would silently re-lay-out every
-  view every person has.
-- **`sanitizeArrangement` is the ONE gate**, and it repairs the RENDERED value
-  and never the stored row: unknown layout to stack; focus with no hero PROMOTED
-  (the library's own ranking) rather than demoted; split with no detail pane to
-  stack; unexpressible roles ignored but their element kept. A page manifest's
-  `required` entries are re-inserted here, which stops a regeneration producing
-  a valid arrangement of a page that no longer does its job.
-- **AI runs on ONE explicit action and never at render.** A render path that
-  reached a provider would cost money on every page view, change a page under
-  somebody mid-read, and make the console unusable with no provider configured.
-  Resolution is: the caller's override row -> else the seed -> never a model.
-- **A regeneration is a per-user row** (`kind="override"` + `targetPageId` on
-  `v1:portalviews:view`, gated by one filter conjunct and one `@serverSet`
-  field), and **revert is an APPEND** -- the history grows and nothing is
-  destroyed, which is why reverting twice is coherent. `composedViews` filters
-  `kind!="override"` and NOT `kind=="composed"`, because `!=` is null-safe
-  against a non-empty string (memql#1685) and every pre-epic row has no `kind`.
-- **Two CLOSED registries**, and their laziness differs on purpose. A `scene`
-  (`clients/portal/src/nexus/scene/registry.tsx`) is lazy because three.js is
-  the portal's largest dependency and the registry is reachable from every
-  arranged page; `nexusMap.test.tsx` enforces that only canvas modules import
-  it. A `widget` (`clients/portal/src/widgets/`) is a form, so it is static:
-  lazy where the dependency is heavy AND isolated, not lazy because a registry
-  is a natural boundary.
+**MemQL OS does not have a replacement and is not getting one by default.** Its
+answer is hand-built sections under twelve written interface rules
+(`clients/os/DESIGN.md`), and reaching for a runtime arrangement engine there is
+a design decision, not a shortcut back to something that already worked.
 
-**Element personality lives in view-kit** (`sdk/ts-viewkit/src/cell.ts`), so
-every consumer improves at once: datetimes elapsed with the exact instant on
-`title` AND `datetime`, enums as pills, booleans as a dot plus the FIELD's
-label, numbers compact and tabular, ids and unresolved references in the data
-voice. **Nothing renders blank** -- an absent value is an em dash and an
-unresolvable lookup is the id. **Lookups are batched client-side, never joined**
-(`sdk/ts/src/client/lookups.ts`, one read per (concept, id set) with
-coalescing); row authz is untouched, so a target the caller may not read simply
-does not come back.
+Two things survived the deletion and are worth knowing before you assume they
+did not:
 
-Design record:
-`docs/superpowers/specs/2026-08-26-views-layouts-personality-regeneration-design.md`.
+- **`sdk/ts-viewkit` still ships.** The VS Code extension consumes its
+  vnode / render / styles core from 18 modules. Its element-fitting and
+  arrangement layers have had NO caller since this epic, which is a fact about
+  the tree rather than a licence to delete them; `@displayCard` and the element
+  library are still documented under `docs/public/concepts/`.
+- **The retirement record is the inventory.**
+  `docs/superpowers/specs/2026-09-06-portal-removal-design.md` says, for every
+  portal capability, where it went: covered by the OS, built for that epic
+  (Settings -> AI providers / Tokens / Keys, and Cluster -> Policy), retired
+  with the legacy it served, or deferred to epic memql#5009.
 
 ### Nexus -- being rebuilt on MemQL OS (sub-project B)
 
@@ -2078,7 +2054,7 @@ Nexus is the living map of a goal: a run and its world -- the steps by
 phase, the artifacts it produced, the constructs it authored -- drawn as
 the system works and replayable from the rows' own timestamps. It is
 being rebuilt on **MemQL OS** over the work spine, and the portal's
-version was DELETED in epic A1 (decision D7), because the portal is
+version was DELETED in epic A1 (decision D7), because the portal was
 deprecated and the rows it drew (`v1:planner:plan` / `task`) are not the
 ones the spine writes.
 
@@ -2087,7 +2063,7 @@ What survived the deletion is the PURE scene library --
 functions over rows, tested on fixtures with no GPU). Sub-project B
 re-points `concepts.ts` at `v1:work:run` and `v1:work:step` and draws it
 in 2D: **the OS carries no WebGL** (epic memql#4785, owner requirement),
-so the portal's three.js renderer went with the pages and the Deployables
+so that three.js renderer went with the pages and the Deployables
 app's 2D map is the shape to adapt.
 
 Design record:
@@ -2119,7 +2095,7 @@ REFUSES BOOT, naming the four Graph vars and the SMTP pair. Break-glass:
 plug-in factory errors and `materializePlugins` fatals), send (a `LogSender`
 built anywhere else returns a permanent `SendError`), the audit row
 (`outcome=failure`, while the ROW and the HTTP response stay identical so a
-response cannot enumerate registered addresses), and the portal (`unhealthy`).
+response cannot enumerate registered addresses), and the console (`unhealthy`).
 
 **`Mail.Send` (Application) is tenant-wide until it is scoped** (memql#4478) --
 its Entra display name is literally "Send mail as any user". Narrowing it to the

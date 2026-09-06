@@ -511,4 +511,4 @@ indistinguishable from "this plan has no workspace".
 `/fleet/workbenches` in the portal lists the workbench replicas and the
 workspaces living on each, live and released, with the release reason spelled
 out. A cluster owner can widen it to every workspace in the cluster. See
-[portal.md](portal.md).
+[memql-os.md](memql-os.md).

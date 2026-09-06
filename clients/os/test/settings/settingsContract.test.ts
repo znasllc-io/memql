@@ -77,6 +77,10 @@ describe("the settings-section contract", () => {
   // rather than inside it: Diagnostics is three panels about this session,
   // and folding a fact about the deployment across releases into it would
   // change what its "copy diagnostics" button means.
+  // Twelve since the portal was retired (epic memql#4984): AI providers,
+  // Tokens and Keys are the operator capabilities that had no other home, and
+  // they sit between Integrations and Logs -- beside the other section that
+  // configures the cluster rather than describes it.
   it("Settings itself declares its sections", () => {
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
     expect(settings?.sections?.map((s) => s.id)).toEqual([
@@ -88,6 +92,9 @@ describe("the settings-section contract", () => {
       "diagnostics",
       "benchmarks",
       "integrations",
+      "providers",
+      "tokens",
+      "keys",
       "logs",
     ]);
     expect(settings?.sections?.find((s) => s.id === "cluster")?.roles).toEqual({ min: "admin" });
@@ -105,5 +112,15 @@ describe("the settings-section contract", () => {
     expect(settings?.sections?.find((s) => s.id === "integrations")?.roles).toEqual({
       any: ["owner", "developer"],
     });
+    // AI providers is the registry's FIRST floor above admin, and pinning it
+    // is what keeps somebody from rounding it down. `providerAuthStatus` and
+    // both provider writes are owner-gated in the engine, so `{ min: "admin" }`
+    // here would offer an admin a section whose every control refuses -- the
+    // exact failure the P6 note above describes in the other direction.
+    expect(settings?.sections?.find((s) => s.id === "providers")?.roles).toEqual({
+      min: "owner",
+    });
+    expect(settings?.sections?.find((s) => s.id === "tokens")?.roles).toEqual({ min: "admin" });
+    expect(settings?.sections?.find((s) => s.id === "keys")?.roles).toEqual({ min: "admin" });
   });
 });

@@ -332,7 +332,7 @@ func (s *Server) gitHubClient() *githubconnect.Client {
 // portal's: the /setup wizard's clusterDomain wins, and otherwise the
 // `identity.` label of this service's own base URL is rewritten to `os.`. It
 // deliberately does NOT import component/frontdoor -- that would add a module
-// edge for one string, and PortalHomeURL already establishes the rule this
+// edge for one string, and ShellHomeURL already establishes the rule this
 // follows.
 //
 // The return path is re-validated HERE as well as on the way in.

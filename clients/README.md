@@ -21,35 +21,35 @@ alongside the engine?" has to have an answer, and the answer is better as a
 **worked example** than as prose: one real inhabitant, wired end to end, that
 the `memql-project` template copies.
 
-The engine repo carries two platform surfaces — [`portal/`](portal), the operations console, and [`os/`](os), the named OS shell. Everything a downstream client needs is visible
-in what the portal does:
+The engine repo carries one platform surface — [`os/`](os), the MemQL OS shell, which is the operations console. Everything a downstream client needs is visible
+in what it does:
 
-- **Its own npm package**, not a workspace member. `clients/portal/package.json`
+- **Its own npm package**, not a workspace member. `clients/os/package.json`
   stands alone and consumes `sdk/ts` + `sdk/ts-viewkit` as `file:`
   dependencies.
 - **Served as an ordinary hosted site** (`component/edge`, memql#3711): the
-  portal is site #1, resolved by hostname and served from a directory a
+  shell is a site row, resolved by hostname and served from a directory a
   `v1:platform:site` row names (`bundleRef`), the same mechanism any other
   hosted site uses. Not `go:embed` — see `component/edge/doc.go` for why that
   choice is structural rather than stylistic.
-- **Its own CI lane** (`portal-checks`) and its own path-filter bucket, and the
+- **Its own CI lane** (`os-checks`) and its own path-filter bucket, and the
   bucket lists its `file:` dependencies. A consumer's bucket that omits the
   packages it compiles against is a lane that silently stops running; the repo
   has been bitten by exactly that (memql#2792) and
-  `scripts/dev/portal_lane_scope_test.go` is what keeps it from recurring.
+  `scripts/dev/os_lane_scope_test.go` is what keeps it from recurring.
 - **Its own Dockerfile stage**, selected per node type, so only the node that
   serves the client pays to build it.
 - **Deployed through the same GitOps path as everything else** — a component
   under `deploy/k8s/`, the same manifests locally and in the cloud.
 
 **And it hands off to the editor rather than growing one.** A concept page in
-the portal carries *Open definition in VS Code*, which is a link and nothing
+the shell carries *Open in VS Code*, which is a link and nothing
 more:
 
     vscode://znasllc.memql/open?v=1&cluster=<domain>&kind=<kind>&name=<registry key>
 
 composed from the construct's registry key (for a concept, its id) and the
-`domain` the node publishes in `GET /runtime-config.json`. The portal renders
+`domain` the node publishes in `GET /runtime-config.json`. The shell renders
 no `.memql` source, holds no catalog of constructs, and knows nothing about
 `clusters.yaml`, the editor's credentials, or whether the extension is
 installed at all — which is why the install pointer sits permanently beside the
@@ -57,7 +57,7 @@ link rather than appearing when it is needed. Everything after the click is the
 extension's: matching that domain against a registered cluster, connecting it
 through the ordinary sign-in, and landing on the construct. That is the
 boundary the two surfaces keep — the extension owns what is on your machine and
-what it can reach, the portal owns what is inside a cluster — and the link shape
+what it can reach, the shell owns what is inside a cluster — and the link shape
 is open to any client that knows its cluster's domain, which is the point of
 serving the domain at all.
 
@@ -65,7 +65,7 @@ serving the domain at all.
 
 1. **Never name a downstream product.** The engine is product-neutral and
    `TestEngineIsProductNeutral` enforces it over every tracked file. A client
-   in *this* repo is a platform surface (the portal is the ops console); a
+   in *this* repo is a platform surface (the OS shell is the ops console); a
    product's own client belongs in the product's own repo, which is what the
    `memql-project` template is for. The rule bans product *names*, not user
    interfaces. That repo consumes the engine as **pinned images** and never
@@ -80,13 +80,13 @@ serving the domain at all.
 3. **Reuse `sdk/ts-viewkit` for concept rendering.** view-kit turns rows plus
    their `@displayCard` hints into a framework-agnostic `VNode` tree, so a
    concept renders the day it is declared with no renderer change. Adapt the
-   tree to your framework (`clients/portal/src/viewkit/react.ts` is ~40 lines);
+   tree to your framework (a ~40-line adapter is enough);
    do not fork the package and do not re-implement per-concept rendering.
 4. **Dial the origin you were served from.** A client served by a node should
    connect back to that node's `/memql/ws`, relative. It removes an entire
    class of configuration, CORS and mis-pointing bugs.
 5. **One bucket, one lane, and the bucket lists the `file:` deps.** See rule 3
-   of the portal's wiring above.
+   of the shell's wiring above.
 6. **Every list a person watches rides a collection; every one-shot read
    renders its staleness honestly.** See Freshness below.
 
@@ -129,24 +129,23 @@ it stale, and let them refresh.
 ## Building
 
 ```bash
-make portal-install     # deps, including building the sdk/ts + view-kit file: deps first
-make portal-typecheck
-make portal-test
-make portal-build       # -> clients/portal/dist
-make portal-clean
+make os-install     # deps, including building the sdk/ts file: dep first
+make os-typecheck
+make os-test
+make os-build       # -> clients/os/dist
+make os-clean
 ```
 
-The single script behind all five is `scripts/portal/build.sh`, and the
-Dockerfile's portal stage runs the same script — so an image bundle and a
+The single script behind all five is `scripts/os/build.sh`, and the
+Dockerfile's `spa-build` stage runs the same script — so an image bundle and a
 locally built one cannot diverge in how they were produced.
 
-The portal is site #1 (memql#3711): its row's `bundleRef` names the directory
+The shell is a site row (memql#4705): its row's `bundleRef` names the directory
 the edge serves it from, the same mechanism any hosted site uses. There is no
-longer an env var that repoints it -- `MEMQL_PORTAL_DIST` retired along with
-`component/portal`. To serve a locally built bundle instead of the seeded
-`file:///app/portal`, call the `updateSiteBundle` mutation with
-`siteId: "portal"` and a `bundleRef` naming a `clients/portal/dist` the edge
+longer an env var that repoints it. To serve a locally built bundle instead of
+the seeded `file:///app/os`, call the `updateSiteBundle` mutation with
+`siteId: "os"` and a `bundleRef` naming a `clients/os/dist` the edge
 pod can read.
 
-In the local cluster the portal is already there, at its own front-door host:
-**<https://portal.memql.localhost/>** after `make up`.
+In the local cluster the shell is already there, at its own front-door host:
+**<https://os.memql.localhost/>** after `make up`.

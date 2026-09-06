@@ -18,7 +18,8 @@ import (
 // The drift this closes already happened once: on main,
 // artifactEnumValues["source"] hand-listed six values and silently dropped
 // "user_created" -- the seventh, and the exact value the portal's create
-// path writes (clients/portal/src/artifacts/useArtifacts.ts). Nothing went
+// path wrote (retired in epic memql#4984; the value is still in the DSL
+// enum, which is the point). Nothing went
 // red, because no test happened to push that value through the stub. A
 // derivation cannot go stale this way: the source of truth IS the DSL file,
 // read fresh on every test run.
@@ -295,7 +296,7 @@ func TestArtifactFullShapeFieldsDerivedFromDSL(t *testing.T) {
 // TestArtifactEnumValuesDerivedFromDSL is the direct memql#4298 regression:
 // on main, the hand-maintained artifactEnumValues["source"] listed six
 // values and silently dropped "user_created" (the value the portal's own
-// create path writes, clients/portal/src/artifacts/useArtifacts.ts) --
+// create path wrote, before epic memql#4984 retired it) --
 // nothing failed, because no existing test happened to push that value
 // through the stub. A derived list cannot go stale this way; this proves
 // the derivation actually recovers all eight declared values in their

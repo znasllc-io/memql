@@ -382,7 +382,7 @@ packs worth reading as real worked examples:
 
 - `examples/reviewspack` (memql#4139) -- the client-agnostic reviews product
   feature. A pack with no integration half: no external system sits behind it.
-- `examples/shopifypack` (memql#4138) -- the Shopify product feature (portal
+- `examples/shopifypack` (memql#4138) -- the Shopify product feature (console
   views for shop, secrets, sync), layered on the `integrations/shopify`
   integration. The pair is the canonical worked example of the
   [component / integration / pack](../concepts/component-integration-pack.md)

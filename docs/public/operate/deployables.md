@@ -331,7 +331,7 @@ say opposite things to an author, "not yet" versus "not a thing".
 
 **One list, pinned twice.** The OS's offered-kind list and the site enum are
 held equal by a parity test, in the tradition of
-`TestFleetOnlineWindowMatchesPortal`, so neither can grow a value the other
+`TestFleetOnlineWindowMatchesTheClients`, so neither can grow a value the other
 does not have.
 
 ---
@@ -469,7 +469,7 @@ owner, internal origin, system actor) has the stamp removed, and only when the
 stamped value is the caller's own id. The outcome is therefore "the caller owns
 it" or "nobody does" -- it can never name a third party.
 
-An **empty `ownerUserId` means cluster-owned.** The seeded portal row keeps it
+An **empty `ownerUserId` means cluster-owned.** The seeded OS site row keeps it
 empty and lands cluster-owned on every boot.
 
 Consequences worth stating plainly, because they are surprising:
@@ -492,7 +492,7 @@ before the click rather than refused after it.
 
 A user's site is `<slug>.<domain>`, where `<domain>` is the one this cluster
 serves (derived from `MEMQL_DOMAIN` through `component/frontdoor`, the same
-derivation the portal host uses).
+derivation the OS host uses).
 
 - The slug matches `[a-z0-9-]{3,40}`.
 - It must be a **single label** -- one label, because the front door's
@@ -501,7 +501,7 @@ derivation the portal host uses).
 - It must not be reserved.
 
 **The reserved set is derived, not listed.** It is `frontdoor.Roles()` (`api`,
-`identity`, `mcp`) plus the platform's own `portal`, plus `www`, `admin` and
+`identity`, `mcp`) plus the platform's own `os`, plus the retired `portal`, `www`, `admin` and
 `mail`. Deriving it means a new role can never become claimable by forgetting
 to add it here. The last three are different in kind: nothing serves them
 today, and that is precisely why they are held -- they are the labels a person
@@ -603,7 +603,7 @@ draw.
 
 At serve time the edge injects `{kind, storeDomain, storefrontToken}` into the
 site's runtime-config document -- the same mechanism that already gives the
-portal its config -- resolving the token from the named secret then, not at
+the console its config -- resolving the token from the named secret then, not at
 publish time.
 
 Two properties of that are load-bearing:
@@ -700,7 +700,7 @@ cluster's secrets and name it from the deployable's `binding`.
 | System-owned rows | refused, for a cluster owner too |
 
 The caps are on the row because the document is served on every page load and
-grows with it. A system-owned deployable (the portal, MemQL OS) refuses the
+grows with it. A system-owned deployable (MemQL OS) refuses the
 write whoever asks: those rows are re-seeded at every boot, so a value set on
 one would be reverted and would look like it had worked until then.
 
@@ -742,7 +742,7 @@ make a window unmeasured:
 - nobody visited;
 - `MEMQL_EDGE_REQUEST_LOG_ENABLED` is `false` on the replica that served
   (the aggregate is then short by that replica's share);
-- the deployable is **system-owned**. The portal and MemQL OS are excluded by
+- the deployable is **system-owned**. MemQL OS is excluded by
   construction, so they are always unmeasured -- measuring the console
   somebody reads a figure in would be measuring the act of looking.
 
@@ -797,9 +797,9 @@ with a quiet Back to the list.
 A package with two apps is **two rows sharing a source**, grouped under it --
 one row per thing that serves or will.
 
-The portal keeps a maintenance-only `/deployables` page, and `/sites` and
+The Deployables app is the one surface, and `/sites` and
 everything under it redirect to it, tail included, so an old bookmark or a
-link in a runbook still lands. No new portal work is done here.
+link in a runbook still lands.
 
 ---
 

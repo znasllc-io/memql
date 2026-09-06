@@ -900,7 +900,7 @@ its two queries disagree about who may read the concept's rows.
 
 ### The residuals a client is filtering today (memql#4369)
 
-The portal's Nexus surface draws one goal's world -- the plan, its tasks, the
+The Nexus surface draws one goal's world -- the plan, its tasks, the
 agents it raised, the bundle it authored and the artifacts it produced -- and
 four of those concepts reach it through reads this document classifies as
 **undeclared**. The narrowing that is actually applied is therefore partly in

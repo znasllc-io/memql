@@ -94,7 +94,7 @@ Sign-in from an editor requires the **developer role or above** on the cluster:
 The editor manages the cluster -- it edits DSL, runs constructs and drives
 deploy controls -- so the floor is a property of what the editor **is**, not a
 general OAuth setting. There is no environment variable for it. Admin is
-included deliberately: an admin operates the portal's admin console, and
+included deliberately: an admin operates the console's admin surfaces, and
 refusing them the editor while admitting them there would be incoherent.
 
 **A refused person sees a sentence naming their role**, in the editor, in both
@@ -111,11 +111,11 @@ Two things the floor does **not** do:
 
 - It does not touch any other client. Static clients from
   `MEMQL_IDENTITY_REGISTERED_CLIENTS` and self-registered DCR clients are
-  unaffected, so the portal and every MCP connector behave exactly as before.
+  unaffected, so the console and every MCP connector behave exactly as before.
 - It does not re-check on token refresh. The floor runs at approval time, when a
   human is present and can be told why. A role lowered after sign-in takes
   effect at the person's next sign-in; to cut an existing session immediately,
-  revoke it (the sessions surface in the portal, or `v1:identity:authSession`).
+  revoke it (identity's own /me/devices, or `v1:identity:authSession`).
 
 An operator who needs different policy shadows the client id in
 `MEMQL_IDENTITY_REGISTERED_CLIENTS` -- a static entry replaces the built-in

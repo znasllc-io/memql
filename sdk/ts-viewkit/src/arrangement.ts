@@ -24,8 +24,14 @@
 // and renders views -- it just stops offering a second opinion.
 //
 // It is also why a saved view is storable: an Arrangement is exactly what
-// goes in a `v1:portalviews:view` row's payload, and reading one back is a
-// parse, not a reconstruction.
+// goes in a row's payload, and reading one back is a parse, not a
+// reconstruction. The concept that first held one, `v1:portalviews:view`,
+// was retired with the portal (epic memql#4984) and this package has no
+// consumer in the engine's own clients today -- but the property is the
+// package's, not that concept's, and it is what any future host storing an
+// arrangement relies on. It is named here in the past tense deliberately: a
+// comment asserting a concept that no longer loads sends the next reader to
+// look for a row type nothing can write.
 //
 // ===========================================================================
 // THE ARRANGEMENT IS ORDERED AND BANDED, NOT POSITIONED
@@ -41,7 +47,10 @@
 // because order within a band is a real choice. The deterministic proposal
 // emits at most one entry per band; nothing else is limited to that.
 //
-// See docs/public/concepts/composed-views.md.
+// See docs/public/concepts/view-elements.md. (composed-views.md was the
+// other half of this account and went with the portal in epic
+// memql#4984; view-elements.md carries the element and fitness contract,
+// which is the part this file depends on.)
 
 import { SCENE_ELEMENT_ID, VIEW_KIT_ELEMENTS, WIDGET_ELEMENT_ID } from "./elements.js";
 import {

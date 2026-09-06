@@ -79,7 +79,7 @@ func (s *AdminServer) handleEstablish(w http.ResponseWriter, r *http.Request) {
 		ActorRole:   claims.Role,
 		Outcome:     identity.AuditOutcomeSuccess,
 	})
-	http.Redirect(w, r, s.portalHome(), http.StatusSeeOther)
+	http.Redirect(w, r, s.shellHome(), http.StatusSeeOther)
 }
 
 // handleLogout clears the admin cookie and bounces to the login page.
@@ -120,25 +120,26 @@ func claimsFromRequestToken(r *http.Request, issuer *identity.JWTIssuer) *identi
 
 // handleRoot answers /admin/ now that the console serves no pages.
 //
-// Everything it served is in the MemQL portal: the dashboard, users, tokens,
-// audit, JWKS and settings moved in memql#3324, and Deployments followed in
-// memql#3380 once a deploy call could reach the identity node from a
-// bff-served portal.
+// Everything it served is in MemQL OS: the dashboard, users, tokens, audit,
+// JWKS and settings moved to the portal in memql#3324, Deployments followed in
+// memql#3380, and epic memql#4984 retired the portal in turn and moved them
+// again -- Users, and Settings' Tokens / Keys / Cluster / AI providers
+// sections.
 //
 // The route survives its pages deliberately. /admin/ is where handleEstablish
 // lands an operator after sign-in and where a bookmark points, and a bare 404
 // there reads as an outage. 410 Gone is the accurate status -- the resource
 // existed, it is deliberately retired, and the reply says where it went --
-// where a redirect would not be: the portal is served by the bff, on a
+// where a redirect would not be: the shell is served by the edge, on a
 // different origin from this one, so this server cannot name a URL that is
 // correct for every deployment.
 func (s *AdminServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusGone)
-	dest := s.portalHome()
+	dest := s.shellHome()
 	msg := "The server-rendered admin console has been retired.\n\n" +
 		"Every surface it served -- users, tokens, audit, JWKS, settings and " +
-		"Deployments -- now lives in the MemQL portal"
+		"Deployments -- now lives in MemQL OS"
 	if dest != "" && dest != "/me" {
 		msg += " at " + dest + ".\n"
 	} else {
@@ -147,8 +148,8 @@ func (s *AdminServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(msg))
 }
 
-// portalHome is the post-establish dest (memql#4144). Never /admin/.
-func (s *AdminServer) portalHome() string {
+// shellHome is the post-establish dest (memql#4144). Never /admin/.
+func (s *AdminServer) shellHome() string {
 	base := ""
 	if s != nil {
 		base = s.Cfg.BaseURL

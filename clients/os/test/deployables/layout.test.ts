@@ -13,7 +13,7 @@ import {
   type MapNode,
 } from "../../src/apps/deployables/map/layout";
 import { siteFromRow } from "../../src/apps/deployables/rows";
-import { APEX, DOCS, MIRROR, PORTAL, SHOP, siteRow } from "./harness";
+import { APEX, DOCS, MIRROR, PLATFORM_SITE, SHOP, siteRow } from "./harness";
 
 // The map's arithmetic, on fixtures. No DOM, no GPU, no React -- which is what
 // lets the layout be asserted rather than watched.
@@ -72,7 +72,7 @@ describe("a site with no bundle", () => {
 });
 
 describe("several domains", () => {
-  const m = model([SHOP, APEX, PORTAL]);
+  const m = model([SHOP, APEX, PLATFORM_SITE]);
 
   it("groups by domain and sorts the groups", () => {
     expect(m.groups.map((g) => g.label)).toEqual(["example.org", "memql.example.com"]);
@@ -90,7 +90,7 @@ describe("several domains", () => {
 
   it("sorts sites within a group by hostname", () => {
     const under = m.groups.find((g) => g.label === "memql.example.com");
-    expect(under?.siteIds).toEqual(["site-portal", "site-shop"]);
+    expect(under?.siteIds).toEqual(["site-os", "site-shop"]);
   });
 });
 
@@ -123,8 +123,8 @@ describe("determinism", () => {
     // The collection folds events in the order the cluster sent them, so input
     // order is not something this function may depend on: a map that reshuffled
     // on an update would be unreadable exactly when somebody is watching it.
-    const forwards = model([SHOP, DOCS, MIRROR, APEX, PORTAL]);
-    const backwards = model([PORTAL, APEX, MIRROR, DOCS, SHOP]);
+    const forwards = model([SHOP, DOCS, MIRROR, APEX, PLATFORM_SITE]);
+    const backwards = model([PLATFORM_SITE, APEX, MIRROR, DOCS, SHOP]);
     expect(backwards).toEqual(forwards);
   });
 
@@ -231,7 +231,7 @@ describe("truncation", () => {
   });
 
   it("fits every rendered string to its column", () => {
-    const m = model([SHOP, DOCS, MIRROR, APEX, PORTAL]);
+    const m = model([SHOP, DOCS, MIRROR, APEX, PLATFORM_SITE]);
     for (const node of m.nodes) {
       const budget = node.kind === "host" ? HOST_CHARS : Math.max(HOST_CHARS, SUB_CHARS);
       expect(node.label.length, `${node.id} label`).toBeLessThanOrEqual(budget);

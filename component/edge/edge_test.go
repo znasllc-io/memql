@@ -67,7 +67,7 @@ func TestEngineExecutorSiteByHostnameProjectsTheRow(t *testing.T) {
 		"id":          "v1:platform:site:abc123",
 		"hostname":    "shop.example.com",
 		"kind":        "spa",
-		"bundleRef":   "file:///app/portal",
+		"bundleRef":   "file:///app/os",
 		"status":      "live",
 		"title":       "Shop",
 		"apiProxy":    true,
@@ -81,7 +81,7 @@ func TestEngineExecutorSiteByHostnameProjectsTheRow(t *testing.T) {
 	}
 	want := &Site{
 		ID: "abc123", Hostname: "shop.example.com", Kind: "spa",
-		BundleRef: "file:///app/portal", Status: "live", Title: "Shop",
+		BundleRef: "file:///app/os", Status: "live", Title: "Shop",
 		APIProxy: true, SystemOwned: true,
 		// EMPTY, NOT NIL, and the difference is the assertion: a row with no
 		// `settings` projects an empty map (epic memql#4906) so the runtime-

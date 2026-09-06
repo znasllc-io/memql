@@ -9,7 +9,6 @@
 #   api          api.memql.localhost
 #   identity     identity.memql.localhost
 #   mcp          mcp.memql.localhost
-#   sites        portal.memql.localhost
 #   sites        os.memql.localhost
 #   sites        *.memql.localhost
 #   sites        memql.localhost
@@ -19,7 +18,7 @@
 # wildcard dnsName fails the WHOLE order -- so the Certificate that used to request it sat
 # Pending, was hand-edited to exact names on the first entry-shape cluster, and the edge
 # Ingress whose tls.hosts still said *.<domain> served ingress-nginx's self-signed default
-# for portal.<domain> (Safari: "This Connection Is Not Private"). DECISION: the wildcard
+# for the platform site host (Safari: "This Connection Is Not Private"). DECISION: the wildcard
 # is NOT requested. dnsNames is every exact host above; every Ingress below lists exactly
 # its own exact rule hosts under tls; and the union of those tls lists is the dnsNames
 # set -- deploy/k8s/overlays/frontdoor_hosts_test.go fails the build when they differ.
@@ -29,13 +28,13 @@
 # under tls (memql#4347). Where it does not -- the default -- the wildcard rule still has
 # no certificate behind it and a customer site hostname needs its own Certificate and
 # exact-host Ingress (docs/public/operate/site-hosting.md). Either way this generated
-# certificate names exact hosts only, because HTTP-01 cannot issue a wildcard. The portal
+# certificate names exact hosts only, because HTTP-01 cannot issue a wildcard. The OS shell
 # is the one site the generator can name in advance, so it is the one site with an exact
 # rule and a SAN here.
 #
 # THE DOMAIN IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593). No file under deploy/
 # names a real domain: the domain is a value on the memql-domain ConfigMap, which every
-# node derives its issuer, CORS origins, redirect URIs and portal site hostname from at
+# node derives its issuer, CORS origins, redirect URIs and OS site hostname from at
 # boot (component/envregistry/domain.go and component/memql's SeedMaterializer, threaded
 # through component/frontdoor so the hosts below and the hosts the nodes believe in
 # cannot disagree). An Ingress host is a Kubernetes API object, so it has to be in the
@@ -45,7 +44,7 @@
 #
 # NO ROUTER-PRIORITY ANNOTATIONS, unlike the local overlay's traefik front door. nginx
 # resolves server_name by specificity in its own core -- an exact name beats a leading
-# wildcard -- so the role hosts and the portal outrank *.<domain> without anything being
+# wildcard -- so the role hosts and the OS shell outrank *.<domain> without anything being
 # declared. That is a guarantee traefik does not give, which is why the local overlay
 # declares the ranking by hand and why doing it there went wrong once (memql#3810). Do
 # not copy that annotation here: it would be an unnecessary declaration of something
@@ -79,7 +78,6 @@ spec:
     - "api.memql.localhost"
     - "identity.memql.localhost"
     - "mcp.memql.localhost"
-    - "portal.memql.localhost"
     - "os.memql.localhost"
     - "memql.localhost"
 ---
@@ -377,57 +375,25 @@ spec:
                 port:
                   number: 8090
 ---
-# The portal -- site #1, and the ONE site with an exact rule of its own (memql#4224).
+# The MemQL OS shell -- the platform's own site, and the ONE site with an exact rule
+# of its own (memql#4705; the portal held this slot until epic memql#4984).
 #
-# To the edge the portal is a site like any other: the same Service the wildcard below
+# To the edge the OS is a site like any other: the same Service the wildcard below
 # points at, resolved against the same v1:platform:site rows, no special path
 # (component/edge's dogfood gate forbids one). It gets its own Ingress for a TLS reason
-# and only that: ingress-nginx creates a certificate-bearing server block per RULE host,
-# never per tls host. With only the *.<domain> rule, portal.<domain> is answered by the
-# wildcard's server block, whose certificate is the controller's self-signed default
-# because no wildcard SAN can be issued over HTTP-01 -- exactly what the first entry-shape
-# cluster served to Safari. An exact rule gives the portal a server block the
-# certificate verifies for.
+# and only that (memql#4224): ingress-nginx creates a certificate-bearing server block
+# per RULE host, never per tls host. With only the *.<domain> rule, os.<domain> is
+# answered by the wildcard's server block, whose certificate is the controller's
+# self-signed default because no wildcard SAN can be issued over HTTP-01 -- exactly what
+# the first entry-shape cluster served to Safari. An exact rule gives the OS a server
+# block the certificate verifies for.
 #
 # It is the only site the generator can do this for, because it is the only site whose
 # name exists before an operator creates a row. The engine seeds that row's hostname
 # from MEMQL_DOMAIN through the same derivation that wrote this host
-# (component/frontdoor.PortalHost), so the certificate cannot name a host the row does
-# not carry. The same Service and port as the edge Ingress below, deliberately: this is
-# not a second way to serve the portal, it is the first way with a certificate.
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: portal-front-door
-  namespace: memql
-spec:
-  ingressClassName: nginx
-  tls:
-    - hosts:
-        - "portal.memql.localhost"
-      secretName: memql-front-door-tls
-  rules:
-    - host: portal.memql.localhost
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: edge
-                port:
-                  number: 8085
----
-# The OS shell -- the second named platform site, with an exact rule of its own (memql#4705).
-#
-# Same TLS reason as the portal (memql#4224): ingress-nginx creates a certificate-bearing
-# server block per RULE host. On the wildcard alone, os.<domain> is answered by the
-# wildcard's server block and the controller's self-signed default. An exact rule gives
-# the OS a server block the HTTP-01 certificate verifies for.
-#
-# The engine seeds that row's hostname from MEMQL_DOMAIN through frontdoor.OsHost, so
-# the certificate cannot name a host the row does not carry. Same Service and port as
-# the edge Ingress below.
+# (component/frontdoor.OsHost), so the certificate cannot name a host the row does not
+# carry. The same Service and port as the edge Ingress below, deliberately: this is not
+# a second way to serve the OS, it is the first way with a certificate.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -456,7 +422,7 @@ spec:
 #
 # Everything after this is a graph row. That is the whole of memql#3700's "a site is
 # data, not infrastructure": the host count is fixed by the closed ROLE set plus the
-# platform's own portal, and never grows with sites.
+# platform's own shell, and never grows with sites.
 #
 # TLS NAMES THE APEX ONLY, IN THIS GENERATED BLOCK (memql#4224). The issuer here is
 # HTTP-01, which cannot issue *.<domain>, and listing the wildcard under tls against an
@@ -482,7 +448,7 @@ spec:
       secretName: memql-front-door-tls
   rules:
     # Every hosted site: every SPA or website the operator creates a v1:platform:site
-    # row for (the portal has its own rule above, for TLS; it is served exactly like
+    # row for (the OS shell has its own rule above, for TLS; it is served exactly like
     # these). ONE rule, forever -- the edge node resolves the request Host against the
     # graph, so a new site is an upload plus a row write and the number of Kubernetes
     # objects does not grow with it. What a new site does NOT get from this rule is a

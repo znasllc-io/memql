@@ -346,7 +346,7 @@ behind.
 Supplying a key at install still works and behaves exactly as before: it is
 verified before anything on the machine changes, then seeded. Supplying
 nothing skips the `providerKey` step -- reported as `skipped` with the reason
-"no key supplied -- configure AI providers in the portal" -- and seeds
+"no key supplied -- configure AI providers in MemQL OS" -- and seeds
 nothing.
 
 ### What is actually required
@@ -375,7 +375,7 @@ does. It is separate from `MEMQL_OPERATOR_KEY`, which authenticates
 (memql#3519) -- see
 [operator-credential.md](auth/operator-credential.md).
 
-Everything AI-related is **portal-configured**: the models this cluster can
+Everything AI-related is **console-configured**: the models this cluster can
 call, and how it authenticates to them, live at **Settings -> AI providers**
 (owner-only). Workload identity federation is the recommended path for
 Anthropic, and needs no key at rest at all --

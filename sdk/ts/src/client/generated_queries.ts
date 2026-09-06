@@ -2276,53 +2276,6 @@ QueryClient.prototype.composeTemplates = function (this: QueryClient, args: Comp
   return this.executeNamed("composeTemplates", buildComposeTemplates(args), opts);
 };
 
-/** Fetch one composed view by id, gated to its owner. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller cannot open another person's view even holding its id. This is the read behind opening a saved view and behind re-opening it in the composer to edit. */
-// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["composedViewById"] in generated_concepts.ts).
-export interface ComposedViewByIdArgs {
-  viewId: string;
-}
-
-export function buildComposedViewById(args: ComposedViewByIdArgs): string {
-  const parts: string[] = [];
-  parts.push("viewId: " + renderMemQLValue(args.viewId));
-  return "query composedViewById(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    composedViewById(args: ComposedViewByIdArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.composedViewById = function (this: QueryClient, args: ComposedViewByIdArgs = {} as ComposedViewByIdArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("composedViewById", buildComposedViewById(args), opts);
-};
-
-/** List the caller's composed views, newest first. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible and no argument can widen it. Optional status narrows to the active list or to the archived one; omit it for both. Optional conceptId answers "which of my views cover this concept", which is what the composer offers when somebody opens a concept that already has a saved view. */
-// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["composedViews"] in generated_concepts.ts).
-export interface ComposedViewsArgs {
-  // Enum: active | archived
-  status?: string;
-  conceptId?: string;
-}
-
-export function buildComposedViews(args: ComposedViewsArgs): string {
-  const parts: string[] = [];
-  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
-  if (args.conceptId !== undefined) parts.push("conceptId: " + renderMemQLValue(args.conceptId));
-  return "query composedViews(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    composedViews(args: ComposedViewsArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.composedViews = function (this: QueryClient, args: ComposedViewsArgs = {} as ComposedViewsArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("composedViews", buildComposedViews(args), opts);
-};
-
 /** One composition in full, for the open Composer and the record panel. Gated to its owner, so a caller cannot read somebody else's composition even holding its id. */
 // Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositionById"] in generated_concepts.ts).
 export interface CompositionByIdArgs {
@@ -4480,7 +4433,7 @@ QueryClient.prototype.nodeSpecsForDeployment = function (this: QueryClient, args
   return this.executeNamed("nodeSpecsForDeployment", buildNodeSpecsForDeployment(args), opts);
 };
 
-/** Every node_token identity across the cluster (active + revoked), in the credential-free nodeTokenSummary shape. Owner or admin only. Backs the portal's Tokens surface (memql#3324).
+/** Every node_token identity across the cluster (active + revoked), in the credential-free nodeTokenSummary shape. Owner or admin only. Backs Settings -> Tokens (memql#3324; the portal's Tokens surface until epic memql#4984).
 Why actor.userId scoping is not the alternative: a node_token row's `userId` is the synthetic bootstrap user rather than any reader, so `userId==actor.userId` returns nothing for the admin who consumes this. The gate that fits is the role, and it is stated here rather than left to a route. */
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["nodeTokenIdentitiesAdmin"] in generated_concepts.ts).
 export interface NodeTokenIdentitiesAdminArgs {
@@ -5074,30 +5027,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.packagesTrackingRepos = function (this: QueryClient, args: PackagesTrackingReposArgs = {} as PackagesTrackingReposArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("packagesTrackingRepos", buildPackagesTrackingRepos(args), opts);
-};
-
-/** Read the caller's own override of one page (epic memql#4661). Owned: the filter gates on ownerUserId==actor.userId, so a person only ever resolves their OWN regenerations and one person's regeneration can never repaint another's console -- the per-user scope of D4 is this conjunct and nothing else.
-A page nobody has regenerated returns nothing, which is not an empty state: it is the answer, and the caller renders the page's seed.
-THE VERSION STRIP IS THIS QUERY WRAPPED IN `asOf`, the deployables pattern (D10 / memql#2880). A write in MemQL is an append onto one id, so a plain read returns the NEWEST version and re-issuing it under successive `asOf` timestamps -- each set just before the previous result's createdAt -- walks back one version at a time. There is deliberately no `asOf latest` clause here: a query that declares one refuses to be wrapped by a caller's own, which is exactly the capability the walk needs. Original is the seed and needs no row at all. */
-// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["pageOverride"] in generated_concepts.ts).
-export interface PageOverrideArgs {
-  targetPageId: string;
-}
-
-export function buildPageOverride(args: PageOverrideArgs): string {
-  const parts: string[] = [];
-  parts.push("targetPageId: " + renderMemQLValue(args.targetPageId));
-  return "query pageOverride(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    pageOverride(args: PageOverrideArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.pageOverride = function (this: QueryClient, args: PageOverrideArgs = {} as PageOverrideArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("pageOverride", buildPageOverride(args), opts);
 };
 
 /** Look up a passkey identity by its base64url credential id. Returns active + inactive rows. */
@@ -9524,7 +9453,7 @@ QueryClient.prototype.siteById = function (this: QueryClient, args: SiteByIdArgs
   return this.executeNamed("siteById", buildSiteById(args), opts);
 };
 
-/** The deployables this caller may see: their OWN sites, or every site in the cluster when the caller is a cluster owner. The portal's primary screen.
+/** The deployables this caller may see: their OWN sites, or every site in the cluster when the caller is a cluster owner. The Deployables app's primary screen.
 ARCHIVED ROWS ARE EXCLUDED HERE and listed by sitesArchived instead (epic memql#4794, D10). The exclusion is written out rather than folded into a trait, because it is the one conjunct whose counterpart query deliberately inverts it -- and a reader comparing the two needs to see the same term in both -- here `isNotArchived`, there `statusIsArchived`. The trait is `status != "archived"` rather than an allow-list of the other three: status is required, so every row carries one, and != is null-safe against a non-empty literal (memql#1685) -- while an allow-list would silently drop a row the day a fifth value is added.
 The name predates self-serve deployables and is kept: it is the same read, and the composite tier is what decides how far "all" reaches for a given actor. The caller term is that tier's own predicate written out -- see siteByHostname for why the bare admin gate it replaced would now collapse the read to cluster owners alone. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesAll"] in generated_concepts.ts).

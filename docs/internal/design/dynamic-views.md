@@ -149,10 +149,14 @@ Ordered so each step is shippable and the risky one comes last.
 
 These are enforced, not advisory:
 
-- `portal_view_composition_test.go` — no row markup or iteration in the five
-  view bodies.
-- `portal_render_path_test.go` — no concept-id literal in the generic render
-  path.
+- ~~`portal_view_composition_test.go` — no row markup or iteration in the five
+  view bodies.~~ **Deleted with the portal (epic memql#4984), along with the
+  view bodies it scanned. The constraint still describes what a replacement
+  should hold; nothing enforces it now.**
+- ~~`portal_render_path_test.go` — no concept-id literal in the generic render
+  path.~~ **Deleted with the portal (epic memql#4984). Same standing: a real
+  constraint with no enforcer, listed here so a reader of this draft does not
+  assume the check exists.**
 - `sdk/ts-viewkit/test/guards.test.ts` — no DOM, no dependencies, no branching
   on a concept id.
 - The view kit README's rule: **no inline event handlers** — data attributes,

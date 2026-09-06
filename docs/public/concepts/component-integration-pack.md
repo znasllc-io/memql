@@ -32,13 +32,13 @@ system's ownership of the data expressible. See
 The worked example is Shopify, which exists as TWO artifacts on either side of the line:
 
 - `integrations/shopify` is the **integration** — it speaks the Storefront/Admin APIs and receives inbound webhooks. It talks to somebody else's system; that is the whole test.
-- `examples/shopifypack` is the **pack** — the client-agnostic product feature layered on that integration (portal views for shop, secrets, sync). The thin product index stays core (`dsl/shopify`).
+- `examples/shopifypack` is the **pack** — the client-agnostic product feature layered on that integration (console surfaces for shop, secrets, sync). The thin product index stays core (`dsl/shopify`).
 
 Reviews is a **pack** only (`examples/reviewspack`): a product feature with no external system behind it, so it has no integration half. The thin product index and checkout URL live on the engine side of that line — merchandising stays on Shopify; checkout stays `cart.checkoutUrl`.
 
 ## "Module" is the umbrella, not a fourth word
 
-When the platform needs a collective term over these kinds — the portal's
+When the platform needs a collective term over these kinds — the console's
 management surface, the engine's inventory reporting — the word is
 **module**. A module is any of: a component, an integration, a pack, or a
 node-type module (a deployment unit of the mesh, such as edge). It names

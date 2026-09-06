@@ -41,7 +41,7 @@ the named cluster secret with a personal credential.
    again at the new version.
 
 Two clicks on a first deploy, one after. The surface is the MemQL OS
-Deployables app; the portal is maintenance-only.
+Deployables app.
 
 ## The manifest
 
@@ -369,7 +369,7 @@ draft -> live <-> disabled -> archived -> deleted
   that releases the name.
 - **An archived row stays listed** behind the Archived filter. An archive is a
   place, not a void -- which is exactly what the older soft-delete was not.
-- **The cluster's own portal and OS sites are exempt from all of it.** They are
+- **The cluster's own OS site is exempt from all of it.** It is
   re-seeded live at every boot; a status write on one is refused whoever asks,
   including a cluster owner, and the OS renders no controls on them at all.
 

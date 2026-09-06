@@ -350,7 +350,7 @@ the Library. It is a **soft** delete: the engine is append-only by
 History, labels and `sourceConceptRef` all survive. When the artifact is
 file-backed, the backing `v1:library:file` is archived with it.
 
-`libraryArtifacts()` excludes archived rows; the portal offers a toggle.
+`libraryArtifacts()` excludes archived rows; the Bin app is where they live.
 
 > **INFO: the list filter is spelled `archived != true`, not
 > `archived == false`, and the difference is load-bearing.** Measured against

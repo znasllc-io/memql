@@ -15,7 +15,7 @@ import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { SITE_CONCEPT } from "../../src/apps/deployables/concepts";
 import { DEPLOYMENT_CONCEPT } from "../../src/apps/deployables/packages/rows";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
-import { PORTAL, SHOP, click, emit, fakeConnection, siteRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
+import { PLATFORM_SITE, SHOP, click, emit, fakeConnection, siteRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
 
 // The Deployables section (epic memql#4885, task memql#4889): the list, its
 // Refine, the waiting mark, the archived flip, and the compose seam.
@@ -758,7 +758,7 @@ describe("New deployable", () => {
 
 describe("what the section does not do", () => {
   it("mounts no toast container and no dialog anywhere", async () => {
-    const { container } = mount(fakeConnection({ ...WITH_PACKAGE, sites: [STORE, ADMIN, SHOP, PORTAL] }));
+    const { container } = mount(fakeConnection({ ...WITH_PACKAGE, sites: [STORE, ADMIN, SHOP, PLATFORM_SITE] }));
     await screen.findByText("storefront");
     expect(container.querySelector("[data-toast], .os-toast, dialog, [role='dialog']")).toBeNull();
   });

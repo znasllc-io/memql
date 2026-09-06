@@ -372,19 +372,14 @@ func defaultRoutingRules() []RoutingRule {
 		// Each rule below names who writes the row and who reads it, in the
 		// memql#4349 comment shape.
 		//
-		// Saved views (memql#4542). A view is written through whichever bff
-		// replica the front door picked and read by the rail on a browser
-		// attached to EITHER replica. With two bff replicas -- the default
-		// -- a view saved in one tab never appeared in another until a
-		// reload, and the rail's own subscription made that look like a
-		// bug in the rail. This is the marquee case for this sweep: the
-		// concept is portal-only, so nothing but the portal ever noticed.
+		// The saved-views trio (v1:portalviews:view) was the first rule in
+		// this block and is GONE with the concept (epic memql#4984). It is
+		// worth a line rather than a silent deletion: it was the marquee
+		// case for this whole sweep -- a view saved in one tab never
+		// appeared in another until a reload, and the rail's own
+		// subscription made that look like a bug in the rail. The lesson
+		// outlived the concept, and the rules below are it.
 		//
-		// SAFE TO BROADCAST, checked rather than assumed: no automation in
-		// the tree triggers on v1:portalviews:*.
-		{Pattern: "graph.node.created.v1:portalviews:view", TargetType: ""},
-		{Pattern: "graph.node.updated.v1:portalviews:view", TargetType: ""},
-		{Pattern: "graph.node.deleted.v1:portalviews:view", TargetType: ""},
 		// Agents (memql#4542). Agent rows are written on agent and
 		// cognition nodes -- specialist creation is the planner's, and a
 		// capability edit is the bff's -- and read by the Agents view and

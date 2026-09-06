@@ -4,10 +4,10 @@
 // rule this epic establishes is:
 //
 //   The extension owns what is on your machine and what you can reach.
-//   The portal owns what is inside a cluster.
+//   The console owns what is inside a cluster.
 //
 // A pod grid, orphan verdicts and under-replica alarms are cluster state.
-// `clients/portal/src/cluster/` and `clients/portal/src/deploy/` already draw
+// MemQL OS's Fleet and Deployables apps already draw
 // them, and two surfaces answering one question diverge on the day the second
 // one ships.
 //
@@ -15,11 +15,11 @@
 // a cluster will not come up: which endpoint, which issuer, whose credential,
 // expiring when. Every field here is on this side of the boundary --
 // clusters.yaml, VS Code SecretStorage, the live connection -- and none of it
-// is anything the portal knows or could show.
+// is anything the console knows or could show.
 //
 // WHAT THIS FILE IS NOT ALLOWED TO DECIDE. The wording, the verdict and the
-// duration are `clusters/connectionView.ts`; where the portal is, is
-// `clusters/portalUrl.ts`. Both run under bare `node --test`. This is the
+// duration are `clusters/connectionView.ts`; where the console is, is
+// `clusters/consoleUrl.ts`. Both run under bare `node --test`. This is the
 // webview lifecycle, the postMessage boundary and the commands.
 //
 // Refs: #3742 #3733
@@ -37,7 +37,7 @@ import { browseConceptPage, type Row } from "@znasllc-io/memql-sdk-core/client";
 import { readClustersFileSafe } from "../clusters/file.js";
 import type { ClusterConfig } from "../clusters/model.js";
 import { connectionView, type ConnectionView } from "../clusters/connectionView.js";
-import { SITE_CONCEPT, portalTarget } from "../clusters/portalUrl.js";
+import { SITE_CONCEPT, consoleTarget } from "../clusters/consoleUrl.js";
 import type { ConnectionManager } from "../connection/manager.js";
 import {
   defaultReceiptPath,
@@ -74,7 +74,7 @@ export class ConnectionPanel {
    * being present, not off `cluster.local` alone.
    */
   private checkout: { path: string; ref: string; imageSource: ImageSource | "" } | undefined;
-  private portal = "";
+  private console = "";
   private error = "";
   private disposed = false;
   private ticker: NodeJS.Timeout | undefined;
@@ -137,7 +137,7 @@ export class ConnectionPanel {
     this.identity = undefined;
     this.expiresAt = undefined;
     this.checkout = undefined;
-    this.portal = "";
+    this.console = "";
     this.error = "";
     void this.load();
   }
@@ -218,7 +218,7 @@ export class ConnectionPanel {
     this.render();
   }
 
-  /** The portal's own site row, when there is a connection to read it over. */
+  /** The console's own site row, when there is a connection to read it over. */
   private async loadPortal(): Promise<void> {
     const cluster = this.cluster;
     if (cluster === undefined) return;
@@ -230,7 +230,7 @@ export class ConnectionPanel {
       rows = page?.rows ?? [];
     }
     if (this.disposed) return;
-    this.portal = portalTarget(cluster, rows).url;
+    this.console = consoleTarget(cluster, rows).url;
     this.render();
   }
 
@@ -271,13 +271,13 @@ export class ConnectionPanel {
   }
 
   private async openPortal(): Promise<void> {
-    if (this.portal === "") {
+    if (this.console === "") {
       void vscode.window.showErrorMessage(
-        "MemQL: no portal address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.",
+        "MemQL: no console address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.",
       );
       return;
     }
-    await vscode.env.openExternal(vscode.Uri.parse(this.portal));
+    await vscode.env.openExternal(vscode.Uri.parse(this.console));
   }
 
   private render(): void {
@@ -327,7 +327,7 @@ ${factsHtml(view.connection)}
 ${factsHtml(view.identity)}
 <p class="boundary">${escapeHtml(
       "This editor owns what is on your machine and what you can reach: install, repair, connect, sign in. " +
-        "Managing what runs INSIDE the cluster -- people, modules, sites, deployments, observability -- is its portal's job. Open Portal, above.",
+        "Managing what runs INSIDE the cluster -- people, modules, sites, deployments, observability -- is its console's job. Open Portal, above.",
     )}</p>
 <div class="actions">
   <button class="secondary" type="button" data-act="signIn">Sign in</button>

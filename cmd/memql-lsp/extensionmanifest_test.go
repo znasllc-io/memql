@@ -765,7 +765,7 @@ var trustGatedCommands = []string{
 	// genuinely usable from the palette and therefore need the trust clause
 	// rather than "when": "false".
 	"memql.clusters.connection",
-	"memql.clusters.openPortal",
+	"memql.clusters.openConsole",
 	"memql.data.refresh",
 	// memql#3309's run surface, plus memql#3310's automation run. The three
 	// run commands themselves (memql.run.construct / .constructWith /

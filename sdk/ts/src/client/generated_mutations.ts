@@ -434,28 +434,6 @@ QueryClient.prototype.archiveComposeTemplate = function (this: QueryClient, args
   return this.executeNamed("archiveComposeTemplate", buildArchiveComposeTemplate(args), opts);
 };
 
-/** Archive a composed view: flip status to archived and stamp archivedAt. The row is retained in full -- MemQL has no hard delete, and a person who retires a view they spent time on should be able to find it again. Owned: ownerUserId is re-stamped from actor.userId and the write guard refuses a target row the actor does not own. */
-// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["archiveComposedView"] in generated_concepts.ts).
-export interface ArchiveComposedViewArgs {
-  viewId: string;
-}
-
-export function buildArchiveComposedView(args: ArchiveComposedViewArgs): string {
-  const parts: string[] = [];
-  parts.push("viewId: " + renderMemQLValue(args.viewId));
-  return "mutation archiveComposedView(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    archiveComposedView(args: ArchiveComposedViewArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.archiveComposedView = function (this: QueryClient, args: ArchiveComposedViewArgs = {} as ArchiveComposedViewArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("archiveComposedView", buildArchiveComposedView(args), opts);
-};
-
 /** Archive a composition record. Owned, and client-reachable: retiring a record is a decision about one's own filing, unlike every field above it. ARCHIVING THE RECORD DOES NOT TOUCH THE OUTPUT FILE -- they are separate rows with separate dispositions, so somebody tidying their Materialized list has not asked to throw away the document it names. */
 // Bound concept: v1:compose:composition (machine-readable: BoundConcepts["archiveComposition"] in generated_concepts.ts).
 export interface ArchiveCompositionArgs {
@@ -2041,44 +2019,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.createComposeTemplate = function (this: QueryClient, args: CreateComposeTemplateArgs = {} as CreateComposeTemplateArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createComposeTemplate", buildCreateComposeTemplate(args), opts);
-};
-
-/** Save a composed view. Owned: ownerUserId is stamped from actor.userId, so a person can only ever create their own views. Opens at status=active. conceptIds is the selection the composer made and arrangements is what it produced -- one arrangement per selected concept, in section order. origin records whether the saved arrangement came out of a model proposal or out of the deterministic match plus hand edits; it is provenance, and both kinds render identically. */
-// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["createComposedView"] in generated_concepts.ts).
-export interface CreateComposedViewArgs {
-  viewId: string;
-  name: string;
-  description?: string;
-  conceptIds: string[];
-  arrangements: Record<string, unknown>[];
-  // Enum: manual | suggested
-  origin?: string;
-  // Enum: composed | override
-  kind?: string;
-  targetPageId?: string;
-}
-
-export function buildCreateComposedView(args: CreateComposedViewArgs): string {
-  const parts: string[] = [];
-  parts.push("viewId: " + renderMemQLValue(args.viewId));
-  parts.push("name: " + renderMemQLValue(args.name));
-  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
-  parts.push("conceptIds: " + renderMemQLValue(args.conceptIds));
-  parts.push("arrangements: " + renderMemQLValue(args.arrangements));
-  if (args.origin !== undefined) parts.push("origin: " + renderMemQLValue(args.origin));
-  if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));
-  if (args.targetPageId !== undefined) parts.push("targetPageId: " + renderMemQLValue(args.targetPageId));
-  return "mutation createComposedView(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createComposedView(args: CreateComposedViewArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createComposedView = function (this: QueryClient, args: CreateComposedViewArgs = {} as CreateComposedViewArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createComposedView", buildCreateComposedView(args), opts);
 };
 
 /** Register the cluster's database in the graph */
@@ -8176,39 +8116,6 @@ QueryClient.prototype.updateComposeTemplate = function (this: QueryClient, args:
   return this.executeNamed("updateComposeTemplate", buildUpdateComposeTemplate(args), opts);
 };
 
-/** Update a saved view: rename it, re-describe it, or replace its selection and arrangement. Partial read-merge, so an omitted field keeps its current value -- but an arrangement that IS supplied replaces the stored one whole (see the header). Owned: ownerUserId is re-stamped from actor.userId so the write cannot transfer the row, and the row-authz write guard refuses the call outright when the target belongs to somebody else. status is not accepted here; retiring a view goes through archiveComposedView so the transition timestamp is stamped with the status. */
-// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["updateComposedView"] in generated_concepts.ts).
-export interface UpdateComposedViewArgs {
-  viewId: string;
-  name?: string;
-  description?: string;
-  conceptIds?: string[];
-  arrangements?: Record<string, unknown>[];
-  // Enum: manual | suggested
-  origin?: string;
-}
-
-export function buildUpdateComposedView(args: UpdateComposedViewArgs): string {
-  const parts: string[] = [];
-  parts.push("viewId: " + renderMemQLValue(args.viewId));
-  if (args.name !== undefined) parts.push("name: " + renderMemQLValue(args.name));
-  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
-  if (args.conceptIds !== undefined) parts.push("conceptIds: " + renderMemQLValue(args.conceptIds));
-  if (args.arrangements !== undefined) parts.push("arrangements: " + renderMemQLValue(args.arrangements));
-  if (args.origin !== undefined) parts.push("origin: " + renderMemQLValue(args.origin));
-  return "mutation updateComposedView(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    updateComposedView(args: UpdateComposedViewArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.updateComposedView = function (this: QueryClient, args: UpdateComposedViewArgs = {} as UpdateComposedViewArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("updateComposedView", buildUpdateComposedView(args), opts);
-};
-
 /** Re-pin a v1:cluster:deploymentNodeSpec's version / replicas / imageDigest by (deploymentId, nodeType). Read-merge update: deploymentId + nodeType inherit, only the spec fields + updatedAt change. Append under the same hashed composite concept id. Epic 2 / #2094. */
 // Bound concept: v1:cluster:deploymentNodeSpec (machine-readable: BoundConcepts["updateDeploymentNodeSpec"] in generated_concepts.ts).
 export interface UpdateDeploymentNodeSpecArgs {
@@ -9557,37 +9464,5 @@ declare module "./query.js" {
 
 QueryClient.prototype.writeKnowledgeChunk = function (this: QueryClient, args: WriteKnowledgeChunkArgs = {} as WriteKnowledgeChunkArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("writeKnowledgeChunk", buildWriteKnowledgeChunk(args), opts);
-};
-
-/** Write the newest version of a page override -- the ONE write behind regeneration and behind "use this version" (epic memql#4661). Owned: ownerUserId is stamped from actor.userId, so a regeneration is per-person by construction and can never repaint somebody else's console.
-It is a create-or-append rather than two calls because a write in MemQL is an append onto one id: the first regeneration of a page and the fifth are the same operation, and the version history the strip walks is the row's own. `kind` and `targetPageId` are re-stamped on every write so an override cannot be turned into a composed view -- or pointed at a different page -- by a later call. */
-// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["writePageOverride"] in generated_concepts.ts).
-export interface WritePageOverrideArgs {
-  viewId: string;
-  targetPageId: string;
-  arrangements: Record<string, unknown>[];
-  conceptIds: string[];
-  // Enum: manual | suggested
-  origin?: string;
-}
-
-export function buildWritePageOverride(args: WritePageOverrideArgs): string {
-  const parts: string[] = [];
-  parts.push("viewId: " + renderMemQLValue(args.viewId));
-  parts.push("targetPageId: " + renderMemQLValue(args.targetPageId));
-  parts.push("arrangements: " + renderMemQLValue(args.arrangements));
-  parts.push("conceptIds: " + renderMemQLValue(args.conceptIds));
-  if (args.origin !== undefined) parts.push("origin: " + renderMemQLValue(args.origin));
-  return "mutation writePageOverride(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    writePageOverride(args: WritePageOverrideArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.writePageOverride = function (this: QueryClient, args: WritePageOverrideArgs = {} as WritePageOverrideArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("writePageOverride", buildWritePageOverride(args), opts);
 };
 

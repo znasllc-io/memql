@@ -21,7 +21,7 @@ on. This page does not restate it.
 
 Related: [The cluster front door](front-door.md) ·
 [Connected -- a site that stays where it is](connected-integration.md) ·
-[MemQL Portal](portal.md) ·
+[MemQL OS](memql-os.md) ·
 [Service-account JWTs](auth/service-account-jwt.md)
 
 ---
@@ -219,8 +219,8 @@ marketing copy diverges from engine release cadence immediately -- a
 content team publishing a sale banner should never be blocked on, or
 coupled to, an engine deploy.
 
-The portal itself is the worked example of the baked case: its row's
-`bundleRef` is `file:///app/portal` (`dsl/platform/seeds.memql`), because
+The OS shell itself is the worked example of the baked case: its row's
+`bundleRef` is `file:///app/os` (`dsl/platform/seeds.memql`), because
 the platform's own console has to resolve the moment the cluster boots and
 rolls out exactly on the engine's own cadence. A customer's storefront is
 the opposite case -- it will change far more often than the engine does, so
@@ -230,27 +230,27 @@ the opposite case -- it will change far more often than the engine does, so
 
 ## Deploying a site, end to end
 
-**The portal's Deployables screen is where most of this happens.**
-`/deployables` (`clients/portal/src/deployables/`, memql#4346 -- the Sites
+**The Deployables app is where most of this happens.**
+The Deployables app (`clients/os/src/apps/deployables/`, memql#4346 -- the Sites
 screen from memql#3717, renamed and widened; `/sites` redirects there) lists
 the caller's own sites, or every site in the cluster for a cluster owner, with
 a form to create one and a detail screen per site (`/deployables/:siteId`) to
 deploy, roll back, change status and delete. What follows is the underlying
-graph writes those controls perform; reach for the portal first, and use the
+graph writes those controls perform; reach for the app first, and use the
 raw mutation calls below when scripting a step (CI, an install wizard, a
 one-off fix) instead of clicking through it.
 
-**One thing the portal does NOT do, which is why step 2 below still exists as
+**One thing the app does NOT do, which is why step 2 below still exists as
 an ops task: register the hostname.** Getting bundle bytes into storage used
 to be the second one; it is not any more. A person uploads a zip to their
-Library and the portal deploys it with `sitePublishFromArtifact`, which reads
+Library and the app deploys it with `sitePublishFromArtifact`, which reads
 the bytes from object storage server-side -- see
 [Deployables](deployables.md#deploying-from-the-library).
 
 ### 1. Create the site row
 
 `createSite` (`dsl/platform/mutations.memql`) is the write behind the
-portal's "New deployable" form -- it is the only way a site starts existing. It
+app's "New deployable" form -- it is the only way a site starts existing. It
 requires a `bundleRef` up front -- there is no "empty" state in the
 schema -- so for a brand-new uploaded site, pass a placeholder prefix and
 leave `status` at its default:
@@ -289,10 +289,10 @@ Three things worth knowing before you run it:
   the deployment's.** `createSite` stamps `ownerUserId` from the actor, and
   a write made as the deployment (a cluster owner, a system actor, or
   trusted server-side Go) has that stamp UNDONE, leaving the row
-  cluster-owned -- an empty `ownerUserId`, which is what the seeded portal
+  cluster-owned -- an empty `ownerUserId`, which is what the seeded OS site
   carries. See `component/memql/platform_site_hostname_policy.go`.
 - **A user's hostname must be `<slug>.<domain>`** -- slug `[a-z0-9-]{3,40}`,
-  cluster-unique, and not one of `api`, `identity`, `mcp`, `portal`, `www`,
+  cluster-unique, and not one of `api`, `identity`, `mcp`, `os`, `portal`, `www`,
   `admin`, `mail` or the apex, under the domain the cluster serves (derived
   through `component/frontdoor`, so it cannot disagree with the front door's
   own hosts). Any other hostname stays cluster-owner-only; a CLIENT's own
@@ -333,12 +333,12 @@ Install-time prerequisites (an Azure DNS zone for the domain, the identity's
 
 **Without one, the pre-#4347 rule still stands** (memql#4224). The generated
 front-door certificate names exact hosts only -- `api.`, `identity.`, `mcp.`,
-`portal.` and the apex -- because HTTP-01 cannot issue a wildcard and a single
+`os.` and the apex -- because HTTP-01 cannot issue a wildcard and a single
 wildcard SAN fails the whole ACME order. A site routed by the wildcard then
 terminates TLS with the ingress controller's self-signed default until it has
 a cert-manager `Certificate` for its hostname and an exact-host Ingress
 pointing at `svc/edge:8085` -- the same shape as the generated
-`portal-front-door`. That is one Kubernetes object pair per site, an explicit
+`os-front-door`. That is one Kubernetes object pair per site, an explicit
 exception to "a site is data" forced by HTTP-01.
 
 The render gate decides which regime applies by reading the issuer's SOLVER,
@@ -353,7 +353,7 @@ be added to the managed block `scripts/install/hosts-entries.sh` owns
 
 > **WARNING: `--action=add` REPLACES the managed block; it does not merge
 > into it.** Passing only your new hostname drops `api.`, `identity.`,
-> `mcp.`, `portal.` and the apex from `/etc/hosts` along with it --
+> `mcp.`, `os.` and the apex from `/etc/hosts` along with it --
 > `render()`'s `upsert` mode discards every line of the existing managed
 > block before writing the new one
 > (`scripts/install/hosts-entries.sh`). Pass the **complete** set you want
@@ -361,7 +361,7 @@ be added to the managed block `scripts/install/hosts-entries.sh` owns
 
 ```bash
 sudo scripts/install/hosts-entries.sh --action=add \
-  --hostnames=api.memql.localhost,identity.memql.localhost,mcp.memql.localhost,portal.memql.localhost,memql.localhost,shop.memql.localhost \
+  --hostnames=api.memql.localhost,identity.memql.localhost,mcp.memql.localhost,os.memql.localhost,memql.localhost,shop.memql.localhost \
   --confirm=add-memql-hosts
 ```
 
@@ -390,7 +390,7 @@ pins `MemqlService.Stream` traffic to reads plus one agent-turn message
 type; this is a plain HTTP handler on the bff checking the same `class`
 claim on its own, independently.
 
-**What a signed-in person CAN do in the portal is the other half of
+**What a signed-in person CAN do in the console is the other half of
 this.** `/deployables/:siteId`'s "Point at a bundle reference" control
 (`DeployableDetailPage.tsx`) calls `updateSiteBundle` directly with a
 `bundleRef` VALUE and flips the row -- exactly the same write
@@ -399,7 +399,7 @@ bytes and cannot:
 `updateSiteBundle` has no way to know whether the prefix it is pointing at
 has anything in it. The two halves are complementary, not redundant -- CI
 puts bytes at a `blob://` prefix (this section) and gets back the
-resulting `bundleRef`; the portal is where a human then points a site's
+resulting `bundleRef`; the console is where a human then points a site's
 row at a `bundleRef` that already exists, whichever process produced it.
 A reader who has just learned a browser session cannot upload bytes here
 is usually asking what it CAN do -- this is the answer.
@@ -499,10 +499,10 @@ own.
 behind a disabled button.** `component/memql/platform_site_delete_guard.go`
 runs on every write that would set `deleted: true`, reads the PRIOR row's
 `systemOwned` flag, and refuses (naming the hostname in the error) unless
-the caller is a system actor. That is what actually protects the portal's
+the caller is a system actor. That is what actually protects the platform's own site's
 own row -- `systemOwned`'s doc comment has said "blocks deletion" since
 before this guard existed, and nothing enforced it until this landed. The
-portal's own detail screen (`DeployableDetailPage.tsx`) disables the delete
+console's own detail screen (`clients/os/src/apps/deployables/page/`) disables the delete
 control for a `systemOwned` row as a courtesy; the real gate is this
 write-path check, reachable and effective against a raw mutation call
 too.
@@ -609,7 +609,7 @@ The TS SDK exposes it as `subscriptions.subscribeGraph(handler, { concept,
 actions })` -- filtered by concept type id and by verb (`created` /
 `updated` / `deleted`); the server composes the bus topic, so no client
 ever writes a topic string. Rather than a fresh example, read the
-platform's own working one: `clients/portal/src/cluster/useConceptRows.ts`
+platform's own working one: `clients/os/src/live/`
 queries a page once, opens a subscription, and applies live events on top
 of it -- the shape any hosted site's list view wants. With `apiProxy: true`
 this connection is same-origin through `/_memql/*`: no CORS, no second
@@ -726,8 +726,8 @@ ordinary query surface -- proven against a live engine in
 whoever is asking: finding a prior version this way is a walk, not a
 lookup.
 
-**The portal does exactly this walk for you.** `/deployables/:siteId`'s
-"Version history" band (`clients/portal/src/deployables/calls.ts`,
+**The Deployables app does exactly this walk for you.** A deployable's
+"Version history" band (`clients/os/src/apps/deployables/`,
 `useDeployables.ts`) re-issues `siteById` under successive `asOf`
 timestamps, each one set just before the previous result's `createdAt`,
 bounded to the last `MAX_HISTORY_VERSIONS` (5) versions -- the mechanism
@@ -886,7 +886,7 @@ Three things about it are worth knowing while reading this page:
 - **Nothing about a visitor is recorded.** No address, no user agent, no path
   and no referrer.
 - **System-owned sites are excluded**, by their own row field rather than by
-  name: the portal and MemQL OS never write a request line, so their traffic
+  name: MemQL OS never writes a request line, so its traffic
   reads as unmeasured forever and a third system-owned surface added later is
   excluded by the same line.
 - **The write is off the request path.** It is a non-blocking hand-off to a
@@ -945,7 +945,7 @@ rather than trusting this paragraph's age.
 - Design: `docs/superpowers/specs/2026-08-13-cluster-front-door-design.md`
   (epic [memql#3700](https://github.com/znasllc-io/memql/issues/3700)) --
   decisions D5 (a site is data), D6 (the site concept's row-authz tier),
-  D8 (the portal is site #1), D9 (the same-origin proxy), D10 (publish is
+  D8 (the platform's own site), D9 (the same-origin proxy), D10 (publish is
   an atomic version flip), D11 (prerendering is a build concern, and the
   resolution order), D2 / §11 (one domain per cluster, custom domains
   shelved).
@@ -958,8 +958,8 @@ rather than trusting this paragraph's age.
   `component/server/site_bundle_handler.go`, `app/transport_sites.go`.
 - Node wiring: `app/transport_edge.go`, `app/build_edge.go`.
 - Soft-delete guard: `component/memql/platform_site_delete_guard.go`.
-- Portal Deployables screen (memql#4346, replacing the Sites screen of
-  memql#3717): `clients/portal/src/deployables/` --
+- The Deployables app (memql#4346, replacing the Sites screen of
+  memql#3717): `clients/os/src/apps/deployables/` --
   `DeployablesPage.tsx` (list + create), `DeployableDetailPage.tsx` (deploy
   from the Library, point at a bundle ref, roll back, status, delete),
   `useDeployables.ts` (all four hooks), `calls.ts` (the `asOf` version walk),

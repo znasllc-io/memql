@@ -28,10 +28,13 @@
 // their own message intact, because inventing a friendly sentence for an
 // unknown failure is how a real fault gets mistaken for a user error.
 //
-// It is a SECOND COPY of the portal's table (clients/portal/src/deployables),
-// and deliberately not an import: the two clients share no package and
-// `clients/` surfaces are independently deletable by design. The reasons
-// themselves come from the Go file, which is the one both copies answer to.
+// It WAS a second copy of the portal's table, deliberately not an import:
+// the two clients shared no package, and `clients/` surfaces are
+// independently deletable by design. Epic memql#4984 deleted the portal and
+// this survived untouched, which is that design being right rather than an
+// accident -- so the duplication argument stands for the next surface too.
+// It is now the only client copy; the reasons themselves still come from the
+// Go file, which is the one every copy answers to.
 
 export const PUBLISH_REFUSALS: Readonly<Record<string, string>> = {
   missing_argument:

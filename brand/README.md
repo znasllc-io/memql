@@ -4,7 +4,7 @@ Two surfaces wear this brand, and neither owns it:
 
 | Surface | Build | How it imports these files |
 |---|---|---|
-| `clients/portal` | Tailwind v4 via `@tailwindcss/vite`, bundled by Vite | `@import` from `src/styles/index.css` |
+| `clients/os` | Vite, with its own `--os-*` theme packs | `@import` from `src/styles/index.css` (the FACES only -- the shell paints from its own tokens) |
 | `component/identity/web` | Tailwind v4 standalone CLI, output embedded in the Go binary | `@import` from `tailwind/input.css` |
 
 One is a TypeScript app, the other a Go binary. They share no package manager
@@ -33,8 +33,9 @@ looking.
 
 What is *not* shared, deliberately:
 
-- **view-kit's `--vk-*` contract** stays in `clients/portal/src/styles/viewkit.css`.
-  view-kit is a portal concern; the identity pages render no charts.
+- **view-kit's `--vk-*` contract** is the consumer's to supply. The VS Code
+  extension is its one consumer today (`brandTokens.ts`); the identity pages
+  render no charts, and the OS shell does not use view-kit.
 - **Per-customer branding** is a runtime override, not a file here. Identity
   serves `GET /static/brand.css`, which emits a `:root` block over these
   defaults from cluster settings (memql#4269). The overridable set is small and

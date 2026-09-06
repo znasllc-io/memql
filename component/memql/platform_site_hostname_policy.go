@@ -35,7 +35,7 @@ import (
 //	 1. WHETHER A NEW ROW IS ANYBODY'S. createSite stamps
 //	    `ownerUserId: actor.userId` -- it has to, because a declared owner tier
 //	    over a caller-supplied field is a guarantee nothing provides. But the
-//	    seeded portal is site #1 and must land CLUSTER-OWNED, which is what an
+//	    seeded OS site must land CLUSTER-OWNED, which is what an
 //	    EMPTY ownerUserId means, and the SeedMaterializer runs that same
 //	    mutation under a synthetic actor on every boot. "A write made as the
 //	    DEPLOYMENT produces the deployment's row" is conditional on the actor's
@@ -69,7 +69,7 @@ import (
 //
 // rowAuthzWriteEscape (memql#3174): internal origin stamped for this one write,
 // or the cluster owner. Plus isSystemActor, matching the sibling delete guard,
-// so the SeedMaterializer's re-write of the portal row on every boot is not
+// so the SeedMaterializer's re-write of the OS site row on every boot is not
 // refused by a policy written for people. `admin` is deliberately not among
 // them, for the reason rowAuthzWriteEscape states at length.
 
@@ -90,12 +90,12 @@ const (
 )
 
 // defaultSiteDomain is the domain the policy derives from when MEMQL_DOMAIN is
-// unset -- the same committed local default the portal seed carries.
+// unset -- the same committed local default the OS site seed carries.
 //
 // It is the DOMAIN, not the host: seed_materializer.go holds the host form
-// (defaultPortalHostname). TestSiteHostnamePolicyDefaultDomainMatchesThePortalSeed
-// pins the two together through frontdoor.PortalHost, so the pair cannot drift
-// into a cluster whose portal is served at one domain and whose users are
+// (defaultOsHostname). TestSiteHostnamePolicyDefaultDomainMatchesTheOsSeed
+// pins the two together through frontdoor.OsHost, so the pair cannot drift
+// into a cluster whose own shell is served at one domain and whose users are
 // admitted on another.
 const defaultSiteDomain = "memql.localhost"
 
@@ -103,24 +103,31 @@ const defaultSiteDomain = "memql.localhost"
 // door does not already name.
 //
 // The front door's own labels come from frontdoor.Roles() and
-// frontdoor.PortalSite / frontdoor.OsSite rather than being re-listed here, so a new role reserves
+// frontdoor.OsSite rather than being re-listed here, so a new role reserves
 // its label automatically -- the failure mode of a second copy is that adding a
 // role silently opens its hostname to the first user who asks for it.
 //
-// These three are different: nothing in the cluster serves www / admin / mail
-// today, and that is exactly why they are reserved. They are the labels a
-// person reads as the ORGANISATION's rather than a tenant's, and `mail` in
+// These four are different: nothing in the cluster serves www / admin / mail /
+// portal today, and that is exactly why they are reserved. They are the labels
+// a person reads as the ORGANISATION's rather than a tenant's, and `mail` in
 // particular is where a mail host would land if one is ever added.
-var squatReservedSiteLabels = []string{"www", "admin", "mail"}
+//
+// `portal` MOVED HERE rather than being freed when the portal was retired
+// (epic memql#4984). It stopped being a front-door host and did not stop being
+// a name that reads as the platform's: a user site at portal.<domain> on a
+// MemQL install is exactly the confusion this list exists to prevent. And
+// un-reserving a label is a ONE-WAY DOOR -- once somebody has claimed it,
+// taking it back is a support conversation -- while keeping it costs one
+// entry.
+var squatReservedSiteLabels = []string{"www", "admin", "mail", "portal"}
 
 // reservedSiteLabels is the closed set of labels a user may not claim, keyed
 // lowercase.
 func reservedSiteLabels() map[string]bool {
-	out := make(map[string]bool, len(frontdoor.Roles())+2+len(squatReservedSiteLabels))
+	out := make(map[string]bool, len(frontdoor.Roles())+1+len(squatReservedSiteLabels))
 	for _, r := range frontdoor.Roles() {
 		out[string(r)] = true
 	}
-	out[frontdoor.PortalSite] = true
 	out[frontdoor.OsSite] = true
 	for _, l := range squatReservedSiteLabels {
 		out[l] = true
@@ -209,14 +216,13 @@ func validateUserSiteHostname(hostname, domain string) error {
 
 // sortedReservedSiteLabels renders the reserved set for an error message in a
 // stable order (front-door roles first, in the order the manifests emit them,
-// then the portal, then the squat list) so the message does not shuffle between
-// runs of a map iteration.
+// then the OS shell, then the squat list) so the message does not shuffle
+// between runs of a map iteration.
 func sortedReservedSiteLabels() []string {
-	out := make([]string, 0, len(frontdoor.Roles())+2+len(squatReservedSiteLabels))
+	out := make([]string, 0, len(frontdoor.Roles())+1+len(squatReservedSiteLabels))
 	for _, r := range frontdoor.Roles() {
 		out = append(out, string(r))
 	}
-	out = append(out, frontdoor.PortalSite)
 	out = append(out, frontdoor.OsSite)
 	out = append(out, squatReservedSiteLabels...)
 	return out
@@ -232,7 +238,7 @@ func sortedReservedSiteLabels() []string {
 //     Reusing it rather than re-deriving "is this an operator" is what keeps
 //     this guard and the row-authz guard from drifting apart about the very
 //     thing they both describe.
-//   - isSystemActor covers the SeedMaterializer, which re-writes the portal
+//   - isSystemActor covers the SeedMaterializer, which re-writes the OS site
 //     row on EVERY boot. It carries a cluster-owner AccessContext today
 //     (memql#3711) so rowAuthzWriteEscape would already admit it; the explicit
 //     check mirrors the sibling delete guard and survives that envelope
@@ -266,10 +272,10 @@ func siteWritePrivileged(ctx context.Context, actor string) bool {
 //
 // # Why it has to exist
 //
-// The seeded portal is site #1 and must land CLUSTER-OWNED: it is the
+// The seeded OS site must land CLUSTER-OWNED: it is the
 // platform's row, not any operator's, and it is how sites are managed at all.
 // The SeedMaterializer runs createSite for it under a synthetic actor, and
-// re-runs it on EVERY boot (memql#3711), so without this the portal would be
+// re-runs it on EVERY boot (memql#4705), so without this the OS site would be
 // owned by "system:seedMaterializer" -- a value that is not a user and that a
 // caller could, in principle, be issued.
 //
@@ -327,7 +333,7 @@ func applySiteOwnerStamp(ctx context.Context, payload map[string]any, priorExist
 		return fmt.Errorf(
 			"v1:platform:site: this create carries no caller identity, so createSite's " +
 				"`ownerUserId: actor.userId` stamp rendered empty. An empty ownerUserId means " +
-				"CLUSTER-OWNED (the seeded portal is the row that carries it), so writing it here " +
+				"CLUSTER-OWNED (the seeded OS site is the row that carries it), so writing it here " +
 				"would mint an operator's row on an unauthenticated call. Refused (memql#4344)")
 	}
 	return nil

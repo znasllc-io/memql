@@ -23,6 +23,7 @@ const h = vi.hoisted(() => {
     infraError: null as Error | null,
     mailError: null as Error | null,
     providerError: null as Error | null,
+    clusterSettings: [] as unknown[],
     integrationCalls: 0,
   };
   const connection = {
@@ -43,6 +44,7 @@ const h = vi.hoisted(() => {
         if (state.providerError) throw state.providerError;
         return reply(state.providers);
       }),
+      clusterSettingsCurrent: vi.fn(async () => reply(state.clusterSettings)),
       clusterDatabase: vi.fn(async () => {
         if (state.infraError) throw state.infraError;
         return reply(state.database);
@@ -270,16 +272,79 @@ describe("infrastructure facts (memql#4766)", () => {
 });
 
 describe("cluster facts (memql#4742)", () => {
-  it("renders the four groups read-only", async () => {
+  it("renders the fact groups read-only, with every write inside the policy panel", async () => {
     await renderCluster();
     expect(screen.getByRole("region", { name: "Cluster and identity" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Versions" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Mail sender" })).toBeTruthy();
-    expect(screen.getByRole("region", { name: "AI providers" })).toBeTruthy();
+    // AI providers moved out whole (epic memql#4984). It is its own section
+    // now, because the same panel had to both report the registry and
+    // configure it, and a read-only copy left behind would be the second
+    // place a person could read a provider's state from.
+    expect(screen.queryByRole("region", { name: "AI providers" })).toBeNull();
 
-    // Every control on the surface is a Refresh. Nothing mutates.
-    const buttons = screen.getAllByRole("button").map((b) => b.textContent);
-    expect(new Set(buttons)).toEqual(new Set(["Refresh"]));
+    // THE BOUNDARY IS THE ASSERTION. Everything above the policy panel
+    // re-asks a question and changes nothing; the one region that writes is
+    // Policy, and its controls are inside it.
+    const policy = screen.getByRole("region", { name: "Policy" });
+    const outside = screen
+      .getAllByRole("button")
+      .filter((b) => !policy.contains(b))
+      .map((b) => b.textContent);
+    expect(new Set(outside)).toEqual(new Set(["Refresh"]));
+    expect(within(policy).getByRole("button", { name: "Save" })).toBeTruthy();
+  });
+
+  it("offers no policy form to a role that could not save one", async () => {
+    // PRESENTATION, and adminops remains the authority -- but a form that
+    // could only ever be refused teaches nobody who may use it. The section
+    // itself admits developer through the ladder; the panel does not.
+    await renderCluster("developer");
+    expect(screen.getByRole("region", { name: "Cluster and identity" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Policy" })).toBeNull();
+  });
+
+  it("renders a stored lifetime in the unit a person would say it in", async () => {
+    h.state.clusterSettings = [
+      {
+        id: "cluster",
+        registrationMode: "open",
+        internalDefaultRole: "writer",
+        accessTokenTTLSeconds: 1800,
+        refreshTokenTTLSeconds: 2592000,
+        magicLinkTTLSeconds: 0,
+        invitationTTLDays: 7,
+      },
+    ];
+    await renderCluster();
+    const policy = screen.getByRole("region", { name: "Policy" });
+    // 1800 seconds is 30 MINUTES on screen; 2592000 is 30 DAYS. The wire
+    // carries seconds and nobody reasons about a session in them.
+    expect(
+      within(policy).getByLabelText("Session length in minutes").getAttribute("value"),
+    ).toBe("30");
+    expect(
+      within(policy).getByLabelText("Stay signed in for, in days").getAttribute("value"),
+    ).toBe("30");
+    // A STORED 0 IS BLANK, NOT "0". The row means "fall back to the boot
+    // default"; a literal 0 in a field labelled "Sign-in link expires after"
+    // says links expire immediately, which is the opposite of true.
+    expect(
+      within(policy).getByLabelText("Sign-in link expires after, in minutes").getAttribute("value"),
+    ).toBe("");
+  });
+
+  it("refuses to save a lifetime outside the bounds, in the unit on screen", async () => {
+    h.state.clusterSettings = [{ id: "cluster", registrationMode: "open", internalDefaultRole: "writer" }];
+    await renderCluster();
+    const policy = screen.getByRole("region", { name: "Policy" });
+    fireEvent.change(within(policy).getByLabelText("Session length in minutes"), {
+      target: { value: "4000" },
+    });
+    expect(within(policy).getByText(/between 1 and 1440 minutes/)).toBeTruthy();
+    expect(
+      within(policy).getByRole("button", { name: "Save" }).hasAttribute("disabled"),
+    ).toBe(true);
   });
 
   it("shows the domain and issuer the cluster served, and the live engine version", async () => {
@@ -325,23 +390,6 @@ describe("cluster facts (memql#4742)", () => {
       await Promise.resolve();
     });
     expect(h.state.integrationCalls).toBe(2);
-  });
-
-  it("renders a server refusal in surface, in the engine's own words", async () => {
-    h.state.providerError = new Error("providerAuthStatus is owner-only");
-    await renderCluster("admin");
-    const panel = screen.getByRole("region", { name: "AI providers" });
-    // An admin may open the section and may not make this one read. Both are
-    // true at once, and the panel says which happened where the panel is.
-    expect(within(panel).getByText(/declined this read for admin/)).toBeTruthy();
-    expect(within(panel).getByText("providerAuthStatus is owner-only")).toBeTruthy();
-  });
-
-  it("calls an empty provider list a fresh install, not a fault", async () => {
-    h.state.providers = [];
-    await renderCluster();
-    const panel = screen.getByRole("region", { name: "AI providers" });
-    expect(within(panel).getByText(/how a freshly installed\s+cluster starts/)).toBeTruthy();
   });
 
   it("renders no secret, token, DSN or credential value anywhere in the DOM", async () => {

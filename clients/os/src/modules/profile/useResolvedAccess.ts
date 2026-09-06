@@ -30,7 +30,8 @@ import type { ProfileAccess } from "./access";
 //
 // So the facts now come from `query.getMyAccess()` over the connection the
 // shell already holds -- the same call the portal makes
-// (`clients/portal/src/cluster/useMyAccess.ts`), against a message the engine
+// (the portal's `useMyAccess.ts`, retired with it in epic memql#4984),
+// against a message the engine
 // really implements. The comment that justified the HTTP stopgap said "the OS
 // bundle cannot dial the engine stream yet"; that stopped being true when the
 // live substrate landed, and nothing revisited it.

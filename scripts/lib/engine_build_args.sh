@@ -29,14 +29,14 @@
 # default distroless `runtime`, and `workbench-runtime` for the one node that
 # runs somebody else's build command.
 #
-# PORTAL_DIST_STAGE selects where the runtime copies the MemQL Portal bundle
-# from (memql#3314). Only the edge serves the portal (memql#3711 -- the
-# portal is site #1, bundleRef file:///app/portal, resolved and served the
-# same way as any other hosted site's bundle; component/portal, which used
-# to serve it from the bff, is retired), so only the edge pays for the Node
-# stage that builds it; every other node type takes the default empty stage
-# and never pulls a Node image. See the global ARG at the top of the
-# Dockerfile for why this is a stage selector rather than a flag.
+# SPA_DIST_STAGE selects where the runtime copies the MemQL OS bundle from
+# (memql#3314; it was PORTAL_DIST_STAGE until epic memql#4984 retired the
+# portal). Only the edge serves the OS shell (memql#4705 -- the OS is a site
+# row, bundleRef file:///app/os, resolved and served the same way as any other
+# hosted site's bundle), so only the edge pays for the Node stage that builds
+# it; every other node type takes the default empty stage and never pulls a
+# Node image. See the global ARG at the top of the Dockerfile for why this is
+# a stage selector rather than a flag.
 
 # MEMQL_COMMIT is the git revision the image is built FROM, linked into the
 # binary beside MEMQL_RELEASE (core/buildinfo). Without it a locally built node
@@ -93,7 +93,7 @@ function engine_build_args_for_node() {
         ENGINE_BUILD_TARGET="workbench-runtime"
     fi
     if [[ "$node" == "edge" ]]; then
-        ENGINE_BUILD_ARGS+=(--build-arg PORTAL_DIST_STAGE=portal-build)
+        ENGINE_BUILD_ARGS+=(--build-arg SPA_DIST_STAGE=spa-build)
     fi
     ENGINE_BUILD_ARGS+=(--build-arg "MEMQL_COMMIT=$(engine_build_commit "$source_dir")")
 }

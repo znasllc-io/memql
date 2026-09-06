@@ -64,7 +64,6 @@ jobs:
       viewkit: ${{ steps.filter.outputs.viewkit }}
       proto: ${{ steps.filter.outputs.proto }}
       vscode: ${{ steps.filter.outputs.vscode }}
-      portal: ${{ steps.filter.outputs.portal }}
       osclient: ${{ steps.filter.outputs.osclient }}
       proving: ${{ steps.filter.outputs.proving }}
       ci: ${{ steps.filter.outputs.ci }}
@@ -217,7 +216,7 @@ jobs:
               #                  that test.
               #   Dockerfile  -> scripts/ci/dockerfile_module_manifests_test.go
               #                  (a nested module's COPY line) and
-              #                  portal_image_wiring_test.go (the portal stage
+              #                  spa_image_wiring_test.go (the SPA stage
               #                  selector). No PR lane BUILDS these images --
               #                  that part of the old reason was true -- but
               #                  the guards over them are Go tests, and those
@@ -296,7 +295,7 @@ jobs:
               # cannot cover.
               #
               # It needs a route of its own because a new client is TypeScript:
-              # `clients/acme-spa/**` sets the `portal` bucket, and portal-checks
+              # `clients/acme-spa/**` sets the `osclient` bucket, and os-checks
               # runs npm, not Go. Without this entry the one PR shape the guard
               # exists for -- a product SPA landing under clients/ -- matches no
               # bucket that reaches a Go lane, and the guard never fires.
@@ -443,8 +442,8 @@ jobs:
             sdkts:
               - 'sdk/ts/**'
               - 'scripts/sdk-gen/**'
-            # The framework-agnostic renderer shared by the VS Code extension
-            # and the portal. Its own bucket rather than folded into `sdkts`:
+            # The framework-agnostic renderer the VS Code extension consumes.
+            # Its own bucket rather than folded into `sdkts`:
             # it is a separate package with a separate install + test cycle,
             # and a change confined to it must still run its lane.
             viewkit:
@@ -488,64 +487,53 @@ jobs:
               # Go half reads the same file -- see the note there.
               - 'test/fixtures/**'
             # The `clients/` category -- surfaces built on the platform, of
-            # which this repo carries exactly one, the MemQL Portal
-            # (memql#3314). Written as `clients/**` rather than
-            # `clients/portal/**` so a second inhabitant is covered the day it
-            # lands rather than the day someone remembers this file.
+            # which this repo carries exactly one, the MemQL OS shell
+            # (memql#4705). It absorbed the retired `portal` bucket whole in
+            # epic memql#4984, including the two entries that were the whole
+            # point of that bucket's own comment.
             #
-            # sdk/ts and sdk/ts-viewkit are in here as well as in their OWN
-            # buckets, for exactly the reason spelled out above the `vscode`
-            # bucket -- and that lesson is why they are here from the start.
-            # The portal consumes both as `file:` dependencies and Vite bundles
-            # them into the SPA, so a change confined to either package can
-            # break the portal's typecheck, its tests and `vite build`, while
-            # the sdkts / viewkit lanes run that package's own tests, go green,
-            # and report nothing. Renaming an export is enough to do it.
-            # scripts/dev/portal_lane_scope_test.go fails if either is dropped.
+            # Written as `clients/**` rather than `clients/os/**` so a second
+            # inhabitant is covered the day it lands rather than the day
+            # someone remembers this file.
             #
-            # scripts/portal/** is the install/build cycle every portal command
-            # goes through, so a change there breaks the lane's own recipe.
+            # sdk/ts is in here as well as in its OWN bucket, for exactly the
+            # reason spelled out above the `vscode` bucket. The shell consumes
+            # it as a `file:` dependency and Vite bundles it into the SPA, so a
+            # change confined to that package can break the shell's typecheck,
+            # its tests and `vite build`, while the sdkts lane runs that
+            # package's own tests, goes green, and reports nothing. Renaming an
+            # export is enough to do it. scripts/dev/os_lane_scope_test.go
+            # fails if it is dropped.
             #
-            # component/portal/** WAS here too: the Go code that served the
-            # bundle, on the theory that a bug there could break the portal in
-            # the same sense a bad build.sh could. It is retired (memql#3711
-            # -- the portal is site #1, served by the GENERIC component/edge,
-            # not portal-specific Go). component/edge/** is NOT added in its
-            # place: the edge serves every hosted site, not only the portal,
-            # so folding it into this npm-only lane's trigger set would make
-            # an unrelated customer-site change re-run portal-checks for no
-            # reason. component/edge's own Go test suite covers it instead.
-            portal:
-              - 'clients/**'
-              - 'sdk/ts/**'
-              - 'sdk/ts-viewkit/**'
-              - 'scripts/portal/**'
-              # The portal's stylesheet @imports brand/ directly, so a token
-              # change is a portal change even with nothing under clients/
-              # touched (memql#4266).
-              - 'brand/**'
-              # And the Dockerfile, because its `portal-build` stage is the
-              # thing the isolation step above tests -- a COPY dropped from
-              # that stage is a portal break with nothing under clients/
-              # touched, which is exactly how memql#4458 reached a release.
-              - 'Dockerfile'
-
-            # The MemQL OS shell (clients/os, memql#4705). Its own bucket
-            # rather than riding `portal`: the portal bucket fires portal-checks,
-            # which tests the PORTAL -- before this bucket existed the OS suite
-            # ran in NO lane at all, so an OS regression shipped behind a green
-            # ci-required. sdk/ts is here because the OS consumes it as a
-            # `file:` dependency (same reasoning as the portal bucket);
-            # scripts/os because the lane's own recipe lives there; brand
-            # because the OS stylesheet @imports brand/fonts.css directly.
-            # The Dockerfile stays with the portal bucket only -- the
-            # stage-isolation docker step runs in portal-checks and already
-            # builds the OS bundle in the same stage.
+            # sdk/ts-viewkit is NOT here, and its absence is the change epic
+            # memql#4984 made rather than an oversight: the portal consumed it
+            # as a second `file:` dependency and the OS does not
+            # (clients/os/package.json). It still exists for the VS Code
+            # extension, whose own bucket lists it.
+            #
+            # scripts/os/** is the install/build cycle every OS command goes
+            # through, so a change there breaks the lane's own recipe.
+            #
+            # brand/** because the shell's stylesheet @imports brand/fonts.css
+            # by relative path, so a token change is a client change with
+            # nothing under clients/ touched (memql#4266).
+            #
+            # Dockerfile because its `spa-build` stage is the thing the
+            # isolation step in os-checks tests -- a COPY dropped from that
+            # stage is a client break with nothing under clients/ touched,
+            # which is exactly how memql#4458 reached a release.
+            #
+            # component/edge/** is NOT here: the edge serves every hosted site,
+            # not only the shell, so folding it into this npm-only lane's
+            # trigger set would make an unrelated customer-site change re-run
+            # os-checks for no reason. component/edge's own Go test suite
+            # covers it instead.
             osclient:
-              - 'clients/os/**'
+              - 'clients/**'
               - 'sdk/ts/**'
               - 'scripts/os/**'
               - 'brand/**'
+              - 'Dockerfile'
 
             # ---------------------------------------------------------------
             # TARGET-MODULE BUCKETS (memql#3163 / design D3)
@@ -1184,67 +1172,20 @@ jobs:
       - name: test
         run: make viewkit-test
 
-  # MemQL Portal lane (memql#3314). Gates on `portal`, which deliberately
-  # includes the portal's `file:` dependencies (sdk/ts, sdk/ts-viewkit) --
-  # see the bucket definition for why omitting them is a silent fail-open.
-  #
-  # Node 22 rather than the 20 the other TS lanes use: Vite 7 requires
-  # ^20.19 || >=22.12, and pinning the floor exactly would make a patch
-  # release of Node the thing that reds the lane.
-  portal-checks:
-    name: portal-checks
-    timeout-minutes: 15
-    needs: changes
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.portal == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
-        with:
-          node-version: '22'
-      # Retried (memql#3166 / design D4.3): dependency install is a network op.
-      # The three steps below are deliberately NOT retried -- retrying a test
-      # is how a flake becomes invisible.
-      - name: install
-        run: scripts/ci/retry.sh -- make portal-install
-      - name: typecheck
-        run: make portal-typecheck
-      - name: test
-        run: make portal-test
-      # The build is a gate, not a packaging step: a type error `tsc` tolerates
-      # (a bad Tailwind token reference, a broken CSS import, a dynamic import
-      # that does not resolve) shows up only here, and the image build runs
-      # exactly this command.
-      - name: build
-        run: make portal-build
-
-      # THE SAME BUILD, IN THE ISOLATION THE IMAGE GIVES IT (memql#4458).
-      #
-      # `make portal-build` above runs in a full checkout, where every path the
-      # portal reaches for obviously exists. The Dockerfile's `portal-build`
-      # stage COPYs a hand-maintained subset -- and when memql#4266 made the
-      # portal import `../../../../brand/*.css`, that subset silently stopped
-      # covering it. The step above stayed green for three days. What finally
-      # ran the stage was the v0.19.7 release cut, which failed at the `edge`
-      # image with eight of nine images already pushed.
-      #
-      # `--target portal-build` rather than the whole edge image: this is the
-      # stage that broke and it is a fraction of the cost (no Go build), so the
-      # lane pays about a minute for a class of failure that otherwise surfaces
-      # at a release. `dockerfile_portal_stage_test.go` is the cheap static half
-      # and catches a missing ROOT path specifically; this catches the rest --
-      # a dropped `sdk/ts` COPY, a build script that reads something new.
-      - name: build the portal the way the image does (stage isolation)
-        run: docker build --target portal-build .
-
   # MemQL OS shell lane (the desktop client at clients/os). Gates on
   # `osclient` -- before this lane existed the OS suite ran NOWHERE in CI:
   # make os-test existed, #4705/#4706 merged with tests, and no job called
-  # them, so ci-required was green over an untested client. Node 22 for the
-  # same Vite 7 reason as portal-checks. The docker stage-isolation step is
-  # deliberately NOT repeated here: portal-checks runs it and that one
-  # stage builds BOTH bundles, so a second run would pay the stage twice
-  # for the same proof.
+  # them, so ci-required was green over an untested client. Node 22 rather
+  # than the 20 the other TS lanes use: Vite 7 requires ^20.19 || >=22.12,
+  # and pinning the floor exactly would make a patch release of Node the
+  # thing that reds the lane.
+  #
+  # IT NOW RUNS THE DOCKER STAGE-ISOLATION STEP ITSELF (epic memql#4984).
+  # It used to free-ride on portal-checks, which ran the step because that
+  # one stage built BOTH bundles -- so deleting portal-checks with the
+  # portal would have silently dropped the check for the OS bundle too. The
+  # comment that recorded the free-ride is the only reason that was visible
+  # at all.
   os-checks:
     name: os-checks
     timeout-minutes: 15
@@ -1270,6 +1211,26 @@ jobs:
       # and the image build runs exactly this command.
       - name: build
         run: make os-build
+
+      # THE SAME BUILD, IN THE ISOLATION THE IMAGE GIVES IT (memql#4458).
+      #
+      # `make os-build` above runs in a full checkout, where every path the
+      # shell reaches for obviously exists. The Dockerfile's `spa-build`
+      # stage COPYs a hand-maintained subset -- and when memql#4266 made the
+      # client import `../../../../brand/*.css`, that subset silently stopped
+      # covering it. The step above stayed green for three days. What finally
+      # ran the stage was the v0.19.7 release cut, which failed at the `edge`
+      # image with eight of nine images already pushed.
+      #
+      # `--target spa-build` rather than the whole edge image: this is the
+      # stage that broke and it is a fraction of the cost (no Go build), so
+      # the lane pays about a minute for a class of failure that otherwise
+      # surfaces at a release. `dockerfile_spa_stage_test.go` is the cheap
+      # static half and catches a missing ROOT path specifically; this
+      # catches the rest -- a dropped `sdk/ts` COPY, a build script that
+      # reads something new.
+      - name: build the shell the way the image does (stage isolation)
+        run: docker build --target spa-build .
 
   # MCP conformance suite (memql#1715) -- the capstone regression gate for epic
   # #1704. Unlike go-checks (which has no database, so every *_db_test.go skips),
@@ -2192,7 +2153,6 @@ jobs:
       - build-clustere2e
       - sdk-ts-typecheck
       - viewkit-checks
-      - portal-checks
       - os-checks
       - conformance
       - db-tests

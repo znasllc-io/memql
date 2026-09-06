@@ -635,28 +635,6 @@ func ArchiveComposeTemplateBuild(args ArchiveComposeTemplateArgs) string {
 	return b.String()
 }
 
-// ArchiveComposedView -- Archive a composed view: flip status to archived and stamp archivedAt. The row is retained in full -- MemQL has no hard delete, and a person who retires a view they spent time on should be able to find it again. Owned: ownerUserId is re-stamped from actor.userId and the write guard refuses a target row the actor does not own.
-//
-// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["archiveComposedView"] in generated_concepts.go).
-type ArchiveComposedViewArgs struct {
-	ViewId string
-}
-
-// ArchiveComposedView calls the engine mutation archiveComposedView.
-func (qc *QueryClient) ArchiveComposedView(ctx context.Context, args ArchiveComposedViewArgs) (*Result, error) {
-	call := ArchiveComposedViewBuild(args)
-	return qc.executeNamed(ctx, "archiveComposedView", call)
-}
-
-func ArchiveComposedViewBuild(args ArchiveComposedViewArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation archiveComposedView(")
-	b.WriteString("viewId: ")
-	b.WriteString(quoteMemQL(args.ViewId))
-	b.WriteString(")")
-	return b.String()
-}
-
 // ArchiveComposition -- Archive a composition record. Owned, and client-reachable: retiring a record is a decision about one's own filing, unlike every field above it. ARCHIVING THE RECORD DOES NOT TOUCH THE OUTPUT FILE -- they are separate rows with separate dispositions, so somebody tidying their Materialized list has not asked to throw away the document it names.
 //
 // Bound concept: v1:compose:composition (machine-readable: BoundConcepts["archiveComposition"] in generated_concepts.go).
@@ -3532,80 +3510,6 @@ func CreateComposeTemplateBuild(args CreateComposeTemplateArgs) string {
 		}
 		b.WriteString("accountIds: ")
 		b.WriteString(renderMemQLValue(args.AccountIds))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// CreateComposedView -- Save a composed view. Owned: ownerUserId is stamped from actor.userId, so a person can only ever create their own views. Opens at status=active. conceptIds is the selection the composer made and arrangements is what it produced -- one arrangement per selected concept, in section order. origin records whether the saved arrangement came out of a model proposal or out of the deterministic match plus hand edits; it is provenance, and both kinds render identically.
-//
-// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["createComposedView"] in generated_concepts.go).
-type CreateComposedViewArgs struct {
-	ViewId       string
-	Name         string
-	Description  string
-	ConceptIds   []string
-	Arrangements []map[string]any
-	// Enum: manual | suggested
-	Origin string
-	// Enum: composed | override
-	Kind         string
-	TargetPageId string
-}
-
-// CreateComposedView calls the engine mutation createComposedView.
-func (qc *QueryClient) CreateComposedView(ctx context.Context, args CreateComposedViewArgs) (*Result, error) {
-	call := CreateComposedViewBuild(args)
-	return qc.executeNamed(ctx, "createComposedView", call)
-}
-
-func CreateComposedViewBuild(args CreateComposedViewArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation createComposedView(")
-	b.WriteString("viewId: ")
-	b.WriteString(quoteMemQL(args.ViewId))
-	if b.Len() > 28 {
-		b.WriteString(", ")
-	}
-	b.WriteString("name: ")
-	b.WriteString(quoteMemQL(args.Name))
-	if args.Description != "" {
-		if b.Len() > 28 {
-			b.WriteString(", ")
-		}
-		b.WriteString("description: ")
-		b.WriteString(quoteMemQL(args.Description))
-	}
-	if b.Len() > 28 {
-		b.WriteString(", ")
-	}
-	b.WriteString("conceptIds: ")
-	b.WriteString(renderMemQLValue(args.ConceptIds))
-	if b.Len() > 28 {
-		b.WriteString(", ")
-	}
-	b.WriteString("arrangements: ")
-	b.WriteString(renderMemQLValue(args.Arrangements))
-	if args.Origin != "" {
-		if b.Len() > 28 {
-			b.WriteString(", ")
-		}
-		b.WriteString("origin: ")
-		b.WriteString(quoteMemQL(args.Origin))
-	}
-	if args.Kind != "" {
-		if b.Len() > 28 {
-			b.WriteString(", ")
-		}
-		b.WriteString("kind: ")
-		b.WriteString(quoteMemQL(args.Kind))
-	}
-	if args.TargetPageId != "" {
-		if b.Len() > 28 {
-			b.WriteString(", ")
-		}
-		b.WriteString("targetPageId: ")
-		b.WriteString(quoteMemQL(args.TargetPageId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -14103,69 +14007,6 @@ func UpdateComposeTemplateBuild(args UpdateComposeTemplateArgs) string {
 	return b.String()
 }
 
-// UpdateComposedView -- Update a saved view: rename it, re-describe it, or replace its selection and arrangement. Partial read-merge, so an omitted field keeps its current value -- but an arrangement that IS supplied replaces the stored one whole (see the header). Owned: ownerUserId is re-stamped from actor.userId so the write cannot transfer the row, and the row-authz write guard refuses the call outright when the target belongs to somebody else. status is not accepted here; retiring a view goes through archiveComposedView so the transition timestamp is stamped with the status.
-//
-// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["updateComposedView"] in generated_concepts.go).
-type UpdateComposedViewArgs struct {
-	ViewId       string
-	Name         string
-	Description  string
-	ConceptIds   []string
-	Arrangements []map[string]any
-	// Enum: manual | suggested
-	Origin string
-}
-
-// UpdateComposedView calls the engine mutation updateComposedView.
-func (qc *QueryClient) UpdateComposedView(ctx context.Context, args UpdateComposedViewArgs) (*Result, error) {
-	call := UpdateComposedViewBuild(args)
-	return qc.executeNamed(ctx, "updateComposedView", call)
-}
-
-func UpdateComposedViewBuild(args UpdateComposedViewArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation updateComposedView(")
-	b.WriteString("viewId: ")
-	b.WriteString(quoteMemQL(args.ViewId))
-	if args.Name != "" {
-		if b.Len() > 28 {
-			b.WriteString(", ")
-		}
-		b.WriteString("name: ")
-		b.WriteString(quoteMemQL(args.Name))
-	}
-	if args.Description != "" {
-		if b.Len() > 28 {
-			b.WriteString(", ")
-		}
-		b.WriteString("description: ")
-		b.WriteString(quoteMemQL(args.Description))
-	}
-	if args.ConceptIds != nil {
-		if b.Len() > 28 {
-			b.WriteString(", ")
-		}
-		b.WriteString("conceptIds: ")
-		b.WriteString(renderMemQLValue(args.ConceptIds))
-	}
-	if args.Arrangements != nil {
-		if b.Len() > 28 {
-			b.WriteString(", ")
-		}
-		b.WriteString("arrangements: ")
-		b.WriteString(renderMemQLValue(args.Arrangements))
-	}
-	if args.Origin != "" {
-		if b.Len() > 28 {
-			b.WriteString(", ")
-		}
-		b.WriteString("origin: ")
-		b.WriteString(quoteMemQL(args.Origin))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // UpdateDeploymentNodeSpec -- Re-pin a v1:cluster:deploymentNodeSpec's version / replicas / imageDigest by (deploymentId, nodeType). Read-merge update: deploymentId + nodeType inherit, only the spec fields + updatedAt change. Append under the same hashed composite concept id. Epic 2 / #2094.
 //
 // Bound concept: v1:cluster:deploymentNodeSpec (machine-readable: BoundConcepts["updateDeploymentNodeSpec"] in generated_concepts.go).
@@ -16636,56 +16477,6 @@ func WriteKnowledgeChunkBuild(args WriteKnowledgeChunkArgs) string {
 		}
 		b.WriteString("sourceTopic: ")
 		b.WriteString(quoteMemQL(args.SourceTopic))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// WritePageOverride -- Write the newest version of a page override -- the ONE write behind regeneration and behind "use this version" (epic memql#4661). Owned: ownerUserId is stamped from actor.userId, so a regeneration is per-person by construction and can never repaint somebody else's console.
-// It is a create-or-append rather than two calls because a write in MemQL is an append onto one id: the first regeneration of a page and the fifth are the same operation, and the version history the strip walks is the row's own. `kind` and `targetPageId` are re-stamped on every write so an override cannot be turned into a composed view -- or pointed at a different page -- by a later call.
-//
-// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["writePageOverride"] in generated_concepts.go).
-type WritePageOverrideArgs struct {
-	ViewId       string
-	TargetPageId string
-	Arrangements []map[string]any
-	ConceptIds   []string
-	// Enum: manual | suggested
-	Origin string
-}
-
-// WritePageOverride calls the engine mutation writePageOverride.
-func (qc *QueryClient) WritePageOverride(ctx context.Context, args WritePageOverrideArgs) (*Result, error) {
-	call := WritePageOverrideBuild(args)
-	return qc.executeNamed(ctx, "writePageOverride", call)
-}
-
-func WritePageOverrideBuild(args WritePageOverrideArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation writePageOverride(")
-	b.WriteString("viewId: ")
-	b.WriteString(quoteMemQL(args.ViewId))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("targetPageId: ")
-	b.WriteString(quoteMemQL(args.TargetPageId))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("arrangements: ")
-	b.WriteString(renderMemQLValue(args.Arrangements))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("conceptIds: ")
-	b.WriteString(renderMemQLValue(args.ConceptIds))
-	if args.Origin != "" {
-		if b.Len() > 27 {
-			b.WriteString(", ")
-		}
-		b.WriteString("origin: ")
-		b.WriteString(quoteMemQL(args.Origin))
 	}
 	b.WriteString(")")
 	return b.String()

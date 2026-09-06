@@ -115,7 +115,7 @@ offered on this cluster yet" and the rest deploys. The third stays
 
 **One list, pinned twice.** `TestSiteKindEnumIsExactlyThreeValues` keeps
 the enum; a new parity test holds the OS's offered kinds equal to it, the
-way `TestFleetOnlineWindowMatchesPortal` holds the online window equal
+way `TestFleetOnlineWindowMatchesTheClients` holds the online window equal
 across client and engine.
 
 ## C. The flow, stop by stop

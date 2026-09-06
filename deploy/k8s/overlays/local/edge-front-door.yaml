@@ -98,7 +98,7 @@ spec:
         - memql.localhost
       secretName: memql-front-door-tls
   rules:
-    # Every hosted site: the portal at portal.<domain>, and every customer SPA
+    # Every hosted site: the OS shell at os.<domain>, and every customer SPA
     # or website the operator creates a row for.
     - host: "*.memql.localhost"
       http:

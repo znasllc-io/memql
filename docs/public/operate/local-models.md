@@ -75,9 +75,9 @@ produces a parse failure three layers away, naming nothing.
 
 ## The three inference doors
 
-Using the portal requires configured inference. **Starting MemQL does not** —
+Using the console's AI surfaces requires configured inference. **Starting MemQL does not** —
 the engine boots, serves and migrates with no provider configured anywhere,
-and the installer asks for no key. The requirement lives at the portal, and
+and the installer asks for no key. The requirement lives at the console, and
 after sign-in the first-run gate runs in order:
 
 1. **Passkey**, when you have none enrolled. It is what gets you back in
@@ -100,7 +100,7 @@ integrations.
 ### Door 2 — the Anthropic workload-identity federation
 
 No key at rest anywhere: each pod exchanges its own projected Kubernetes token
-for a one-hour bearer. Configured outside the portal; once it is complete this
+for a one-hour bearer. Configured outside the console; once it is complete this
 step passes silently. See
 [anthropic-federation.md](auth/anthropic-federation.md).
 

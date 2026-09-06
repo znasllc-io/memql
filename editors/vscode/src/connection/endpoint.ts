@@ -162,7 +162,8 @@ export function identityBaseUrlFor(cluster: ClusterConfig): string | undefined {
 //
 // EXPORTED for the portal's sibling composition (memql#3906), which needs the
 // same "what domain does this endpoint imply" step identityBaseUrlFor takes
-// above. portalUrl.ts had its own `endpoint.split(":")[0]`, which is the second
+// above. consoleUrl.ts (portalUrl.ts before epic memql#4984) had its own
+// `endpoint.split(":")[0]`, which is the second
 // copy this file's comments keep warning about -- it read a scheme-prefixed
 // endpoint as the scheme and an IPv6 literal as a hostname.
 export function hostOf(rawEndpoint: string): string | undefined {

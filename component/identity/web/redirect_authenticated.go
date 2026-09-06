@@ -278,9 +278,9 @@ func buildSSORedirect(redirectURI, code, state string) string {
 	return u.String()
 }
 
-// portalHome is the signed-in dest for a bare /login or / revisit
+// shellHome is the signed-in dest for a bare /login or / revisit
 // (memql#4144). Never /admin/.
-func (s *Server) portalHome(r *http.Request) string {
+func (s *Server) shellHome(r *http.Request) string {
 	domain := ""
 	if s != nil && s.Store != nil && r != nil {
 		if row, err := s.Store.ReadClusterSettings(r.Context()); err == nil && row != nil {

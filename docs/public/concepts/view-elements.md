@@ -19,7 +19,7 @@ its fields**.
 
 The elements live in
 [`@znasllc-io/memql-view-kit`](../../../sdk/ts-viewkit) and are shared
-by every concept-agnostic surface: the portal, the VS Code concept
+by every concept-agnostic surface: the VS Code concept
 panel, anything else built on the package. It is the companion to
 [display cards](display-cards.md): a display card says what a row is
 CALLED, fitness says what shape a row IS.
@@ -244,7 +244,7 @@ palettes within a release.
   depending on which is on screen. The difference is space: a pie needs
   a 320x240 block, the rail is one line tall. That is what lets a page
   header carry "how does this population divide" above the population
-  itself, which is how every predefined view in the portal opens
+  itself, which is how a predefined view opens
   (memql#3319). Layout is the axis a form is allowed to differ on.
 - **A boolean category is not "true" / "false".** A boolean grouping
   field goes through `statusText`, so an active/inactive split reads
@@ -318,11 +318,19 @@ and it is enforced: a concept id literal or a comparison against
 
 ## 7. Predefined views, and the line they may not cross
 
-Five concepts get a hand-designed screen in the portal, because they
+> **RETIRED, and recorded rather than deleted.** Predefined views, composed
+> views and the arrangement engine were the MemQL Portal's page system, and
+> epic memql#4984 retired the portal and `dsl/portalviews` with it. What
+> follows is the account of a system that ran, kept because the ELEMENT library
+> below it did not go anywhere -- `sdk/ts-viewkit` still ships, and the VS Code
+> extension still renders through it. The line this section draws is the one a
+> future surface over those elements would have to hold again.
+
+Five concepts got a hand-designed screen in the portal, because they
 are the ones an operator lives in: people (`v1:identity:user`), agents
 (`v1:agents:agent`), customers (`v1:identity:account`), deployments
 (`v1:cluster:deployment`) and audit (`v1:identity:auditEvent`). They
-live in `clients/portal/src/views/`, addressed at `/views/:viewId` and
+lived in `clients/portal/src/views/`, addressed at `/views/:viewId` and
 `/views/:viewId/rows/:rowId` (memql#3319).
 
 **A predefined view is a LAYOUT CHOICE OVER THESE ELEMENTS.** It picks
@@ -346,19 +354,27 @@ proportion rail is the worked example: these views needed share-of-whole
 in one line of height, the pie needs a block, so the rail was added to
 the library and every concept has it now.
 
-The third tier -- a view a PERSON composes at runtime, over a concept
-nobody designed for -- is built on the same elements and the same
-requirement declarations, and is documented in
-[composed views](composed-views.md). An element gains one further piece
-of metadata for it: `band`, saying which of the three questions above the
-element answers, so a newly written element takes its place in a composed
-arrangement with no change to the composer.
+The third tier -- a view a PERSON composed at runtime, over a concept nobody
+designed for -- was built on the same elements and the same requirement
+declarations. An element carries one further piece of metadata for it: `band`,
+saying which of the three questions above the element answers, so a newly
+written element took its place in a composed arrangement with no change to the
+composer. Its own page went with the portal; the metadata stayed, because it
+costs nothing and it is what a replacement would read.
 
-That rule is mechanical, not editorial.
-`portal_view_composition_test.go` (repo root, so weakening it edits Go)
-scans the view tree and fails on row markup (`<table>`, `<tr>`, `<ul>`,
+That rule was mechanical, not editorial.
+`portal_view_composition_test.go` (repo root, so weakening it edited Go)
+scanned the view tree and failed on row markup (`<table>`, `<tr>`, `<ul>`,
 svg primitives), on iteration that could produce a row (`.map`,
 `.forEach`), on a second VNode-to-React bridge, and on reading
-`displayCard` directly. It cannot tell whether the element a view chose
-is the *right* one, and it does not police a single field read off one
-object -- its own header says so at length.
+`displayCard` directly. It could not tell whether the element a view chose
+was the *right* one, and it did not police a single field read off one
+object -- its own header said so at length.
+
+**That gate is GONE, deleted with the view bodies it scanned (epic
+memql#4984), and nothing enforces this rule today.** It is written in the
+past tense deliberately: a document that describes a retired check in the
+present tense is worse than one that omits it, because a reader plans
+against protection that is not there. A future surface over these elements
+would need to bring its own equivalent -- the rule is still right, it just
+has no enforcer.

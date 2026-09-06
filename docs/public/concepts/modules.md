@@ -35,7 +35,7 @@ A disabled pack is **mounted-inert**, not removed:
   builtins, prompts, and automations are not registered, and its Go
   side is not materialized. A model cannot call what is not there.
 - **A flip takes effect as each node restarts** (stated honestly in the
-  reply and in the portal). Between the flip and the restart, the
+  reply and in the console). Between the flip and the restart, the
   registry shows both facts: the cluster-wide desired state and what
   each node actually loaded at its own boot.
 
@@ -57,13 +57,13 @@ off.
 
 ## Where you manage modules
 
-The **MemQL Portal** is the management surface: an owner/admin-gated
+**A console** is the management surface: an owner/admin-gated
 Modules browser showing every module's kind, state, and health, and a
 detail view with the module's environment-variable surface (which
 variables it reads, which are set -- secret values never leave the
 engine, in any form) and the kind-appropriate control. The engine
 reports all of it over gRPC message types on `MemqlService.Stream`; the
-portal renders what the engine says and adds nothing.
+console renders what the engine says and adds nothing.
 
 The design record for the registry -- enumeration sources, the
 per-node vs cluster-wide honesty split, and the enablement semantics --

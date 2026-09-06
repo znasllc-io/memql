@@ -299,8 +299,8 @@
         "icon": "$(plug)"
       },
       {
-        "command": "memql.clusters.openPortal",
-        "title": "MemQL: Open Portal",
+        "command": "memql.clusters.openConsole",
+        "title": "MemQL: Open Console",
         "icon": "$(link-external)"
       },
       {
@@ -468,7 +468,7 @@
           "when": "isWorkspaceTrusted"
         },
         {
-          "command": "memql.clusters.openPortal",
+          "command": "memql.clusters.openConsole",
           "when": "isWorkspaceTrusted"
         },
         {
@@ -616,7 +616,7 @@
           "group": "inline@1"
         },
         {
-          "command": "memql.clusters.openPortal",
+          "command": "memql.clusters.openConsole",
           "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
           "group": "inline@2"
         },

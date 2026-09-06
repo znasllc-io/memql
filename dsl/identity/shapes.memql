@@ -402,7 +402,7 @@ shape identity accountTokenSummary {
   row.createdAt
 }
 
-/// Credential-free projection of a node_token identity, for the portal's Tokens surface
+/// Credential-free projection of a node_token identity, for Settings -> Tokens
 /// (memql#3324). The node fields an operator needs -- which node, which type, who minted it, when
 /// it last connected -- and nothing else.
 ///

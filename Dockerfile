@@ -1,14 +1,19 @@
 # syntax=docker/dockerfile:1
 
-# PORTAL_DIST_STAGE selects which stage the runtime copies the MemQL Portal
-# bundle from (memql#3314). It is a GLOBAL ARG -- declared before the first
-# FROM -- because that is the only scope a `FROM ${VAR}` line can read.
+# SPA_DIST_STAGE selects which stage the runtime copies the MemQL OS bundle
+# from (memql#3314). It is a GLOBAL ARG -- declared before the first FROM --
+# because that is the only scope a `FROM ${VAR}` line can read.
+#
+# It was PORTAL_DIST_STAGE and its stages were portal-build / portal-skip /
+# portal-dist until epic memql#4984 retired the portal. The mechanism did not
+# change: the stage always built BOTH bundles, so the names outlived the thing
+# they named, and renaming beats leaving a `portal-build` stage that builds no
+# portal.
 #
 # WHY A STAGE SELECTOR RATHER THAN AN UNCONDITIONAL COPY
 #
-# Only the edge serves the portal (component/edge; the portal is site #1 and
-# its bundleRef is file:///app/portal, memql#3711 -- component/portal, which
-# used to serve it from the bff, is retired). A Dockerfile has no conditional
+# Only the edge serves the OS shell (component/edge; the OS is a site row whose
+# bundleRef is file:///app/os, memql#4705). A Dockerfile has no conditional
 # COPY, so the alternatives were: build the SPA in every node image (a Node
 # toolchain + npm install + vite build on all seven, for bytes six of them
 # never serve), or add a second runtime target and duplicate the runtime
@@ -16,18 +21,18 @@
 # both runtime stages identical for every node type.
 #
 # BuildKit only builds stages that are actually referenced, so the default --
-# portal-skip, an empty directory -- means a non-edge build never pulls the
-# Node image and never runs npm. Its cost is one `mkdir` on a stage that was
+# spa-skip, an empty directory -- means a non-edge build never pulls the Node
+# image and never runs npm. Its cost is one `mkdir` on a stage that was
 # already built.
 #
-#   docker build --build-arg PORTAL_DIST_STAGE=portal-build ...   # with the SPA
-#   docker build ...                                              # without (default)
+#   docker build --build-arg SPA_DIST_STAGE=spa-build ...   # with the SPA
+#   docker build ...                                        # without (default)
 #
-# scripts/lib/engine_build_args.sh sets it for the bff on the local path;
+# scripts/lib/engine_build_args.sh sets it for the edge on the local path;
 # .github/workflows/build-engine-images.yml sets it for the release build.
 # Those two are the only callers, and both are asserted by
-# scripts/ci/portal_image_wiring_test.go.
-ARG PORTAL_DIST_STAGE=portal-skip
+# scripts/ci/spa_image_wiring_test.go.
+ARG SPA_DIST_STAGE=spa-skip
 
 FROM golang:1.26.6@sha256:640a234f4bea3e399c056b7b8f9c667c4939befae8db2f14e9785e16eccd4205 AS builder
 
@@ -39,7 +44,7 @@ FROM golang:1.26.6@sha256:640a234f4bea3e399c056b7b8f9c667c4939befae8db2f14e9785e
 #   docker build --build-arg BUILD_TAGS=bff .         # bff (explicit)
 #   docker build --build-arg BUILD_TAGS=agent .       # agent
 #   docker build --build-arg BUILD_TAGS=planner .     # planner
-#   docker build --build-arg BUILD_TAGS=edge --build-arg PORTAL_DIST_STAGE=portal-build .   # edge (serves hosted sites, including the portal, site #1)
+#   docker build --build-arg BUILD_TAGS=edge --build-arg SPA_DIST_STAGE=spa-build .   # edge (serves hosted sites, the OS shell among them)
 ARG BUILD_TAGS=""
 
 # MEMQL_RELEASE is the release tag this image is being cut at -- e.g. "v0.18.1".
@@ -212,7 +217,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -ldflags="-s -w" -o /app/bin/healthcheck ./cmd/healthcheck
 
-# --- MemQL Portal SPA (memql#3314) ----------------------------------------
+# --- MemQL OS shell SPA (memql#3314) ----------------------------------------
 #
 # A Node stage, entirely separate from the Go builder: nothing here touches
 # the Go toolchain and nothing in the Go stages touches Node. That separation
@@ -220,53 +225,53 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # //go:embed'ed (component/edge/doc.go) -- every Go lane in CI, and every
 # `go build ./...` on a developer machine, stays Node-free.
 #
-# bookworm-slim rather than alpine: scripts/portal/build.sh is a bash script
-# (per the Makefile+shell convention in CLAUDE.md) and alpine ships no bash.
+# bookworm-slim rather than alpine: scripts/os/build.sh is a bash script (per
+# the Makefile+shell convention in CLAUDE.md) and alpine ships no bash.
 # Builder-only, so image size is irrelevant.
-FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS portal-build
+FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS spa-build
 
 WORKDIR /src
 
 # Manifests first, sources second: the standard layer-caching split, and it
-# matters more here than usual because `npm ci` is the slow step. The two
-# `file:` dependencies' manifests come along because npm has to resolve them
-# to install the portal at all -- a `file:` dep is a linked source tree, not a
-# registry tarball.
-COPY clients/portal/package.json clients/portal/package-lock.json ./clients/portal/
+# matters more here than usual because `npm ci` is the slow step. The `file:`
+# dependency's manifest comes along because npm has to resolve it to install
+# the shell at all -- a `file:` dep is a linked source tree, not a registry
+# tarball.
+#
+# sdk/ts-viewkit is NOT copied. It was, for the portal, which consumed it as a
+# second `file:` dependency; the OS does not (clients/os/package.json), and it
+# still exists for the VS Code extension. Copying it here would be a source
+# input this stage does not read, which is a cache key that busts for nothing.
 COPY clients/os/package.json clients/os/package-lock.json ./clients/os/
 COPY sdk/ts/package.json ./sdk/ts/
-COPY sdk/ts-viewkit/package.json sdk/ts-viewkit/package-lock.json ./sdk/ts-viewkit/
 
-# The brand tree, which the portal's own stylesheet @imports by relative path
-# (`../../../../brand/fonts.css` and its two siblings, memql#4266): the palette
-# is shared with the identity pages, so it lives at the repo root rather than
-# being copied into two clients. That makes it a SOURCE INPUT of this stage,
-# and one that is invisible from clients/portal alone -- which is why the build
-# went red the first release after it landed while every developer machine,
-# building from a full checkout, stayed green. Kept first among the source
-# copies because it changes less often than any of them.
+# The brand tree, which the shell's own stylesheet @imports by relative path
+# (`../../../../brand/fonts.css`, memql#4266): the faces are shared with the
+# identity pages, so they live at the repo root rather than being copied into
+# two clients. That makes it a SOURCE INPUT of this stage, and one that is
+# invisible from clients/os alone -- which is why the build went red the first
+# release after it landed while every developer machine, building from a full
+# checkout, stayed green. Kept first among the source copies because it changes
+# less often than any of them.
 COPY brand ./brand
 
 COPY sdk/ts ./sdk/ts
-COPY sdk/ts-viewkit ./sdk/ts-viewkit
-COPY clients/portal ./clients/portal
-COPY scripts/portal ./scripts/portal
 COPY clients/os ./clients/os
 COPY scripts/os ./scripts/os
 
-# The SAME script `make portal-build` runs, so the image bundle and a locally
-# built one cannot diverge in how they were produced. Moved to /portal-dist so
-# both alternatives of the PORTAL_DIST_STAGE selector expose the bundle at one
-# path -- the runtime's COPY cannot branch on which stage it resolved to.
-RUN bash scripts/portal/build.sh build && mv clients/portal/dist /portal-dist && bash scripts/os/build.sh build && mv clients/os/dist /os-dist
+# The SAME script `make os-build` runs, so the image bundle and a locally built
+# one cannot diverge in how they were produced. Moved to /os-dist so both
+# alternatives of the SPA_DIST_STAGE selector expose the bundle at one path --
+# the runtime's COPY cannot branch on which stage it resolved to.
+RUN bash scripts/os/build.sh build && mv clients/os/dist /os-dist
 
-# portal-skip is the empty alternative the PORTAL_DIST_STAGE selector resolves
-# to by default. Derived FROM builder purely because that stage is already
-# built -- it contributes one empty directory and pulls no additional image.
-FROM builder AS portal-skip
-RUN mkdir -p /portal-dist /os-dist
+# spa-skip is the empty alternative the SPA_DIST_STAGE selector resolves to by
+# default. Derived FROM builder purely because that stage is already built --
+# it contributes one empty directory and pulls no additional image.
+FROM builder AS spa-skip
+RUN mkdir -p /os-dist
 
-FROM ${PORTAL_DIST_STAGE} AS portal-dist
+FROM ${SPA_DIST_STAGE} AS spa-dist
 
 # --- Runtime: workbench node -- the only image that RUNS SOMEBODY ELSE'S CODE.
 #
@@ -300,7 +305,7 @@ RUN apt-get update && \
     mkdir -p /var/lib/memql/workbenches && \
     chown 10001:10001 /var/lib/memql/workbenches
 
-# The Node toolchain, from the same pinned image the portal build uses. Both
+# The Node toolchain, from the same pinned image the SPA build uses. Both
 # are bookworm, so the C library matches and the binaries run as they were
 # built.
 COPY --from=node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 /usr/local/bin/node /usr/local/bin/node
@@ -313,11 +318,10 @@ WORKDIR /app
 
 COPY --from=builder /app/bin/memql ./memql
 COPY --from=builder /app/bin/healthcheck ./healthcheck
-# Same portal copy as every other runtime stage: empty for this node type, and
+# Same OS-bundle copy as every other runtime stage: empty for this node type, and
 # present so a stage selector change cannot silently ship an image with no
 # bundle directory at all.
-COPY --from=portal-dist /portal-dist ./portal
-COPY --from=portal-dist /os-dist ./os
+COPY --from=spa-dist /os-dist ./os
 
 EXPOSE 8085 50051
 
@@ -352,15 +356,14 @@ COPY --from=builder /app/bin/healthcheck ./healthcheck
 # MEMQL_DSL_PATH is set at runtime to override the embedded tree
 # (dev/per-deploy patches). Cloud Run runs from the embedded copy.
 #
-# The MemQL Portal bundle is the opposite: NEVER embedded, always a directory,
+# The MemQL OS bundle is the opposite: NEVER embedded, always a directory,
 # because embedding it would put a Node build in front of every Go build (see
-# component/edge/doc.go). /app/portal is the directory the site #1 seed's
-# bundleRef names (file:///app/portal, dsl/platform/seeds.memql, memql#3711).
+# component/edge/doc.go). /app/os is the directory the OS site seed's bundleRef
+# names (file:///app/os, dsl/platform/seeds.memql, memql#4705).
 # Empty for every node type except the edge -- a site whose bundle directory
 # is missing on disk 404s asset-by-asset rather than failing boot
 # (component/edge/handler.go resolves against whatever os.DirFS finds there).
-COPY --from=portal-dist /portal-dist ./portal
-COPY --from=portal-dist /os-dist ./os
+COPY --from=spa-dist /os-dist ./os
 
 EXPOSE 8085 50051
 

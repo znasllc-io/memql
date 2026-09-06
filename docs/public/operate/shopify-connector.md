@@ -79,7 +79,7 @@ Dashboard is the only route.
 
 Request these scopes. The list is derived from the allowlist, so the
 authoritative copy is `generated.Scopes` in
-`integrations/shopify/generated/model.go` and the portal shows the store's
+`integrations/shopify/generated/model.go` and the console shows the store's
 grant against it:
 
 ```
@@ -111,7 +111,7 @@ Three of them need more than a checkbox:
   covers customer records; Level 2 covers the fields marked as protected
   (name, email, phone, address). Below the level a field needs, Shopify
   returns `null` and the mirror stores `null` -- so the store row records the
-  approved level and the portal shows it, because "the customer has no phone
+  approved level and the console shows it, because "the customer has no phone
   number" and "we are not approved to see it" look identical in the data.
 - **`read_reports`** plus Level 2 is what the `shopifyql` pass-through needs.
   The connector refuses below that with a message naming the level; Shopify
@@ -130,7 +130,7 @@ rather than a code change.
 
 ## Step 3 -- enter the store in MemQL
 
-Portal → Cluster → **Stores** → Add a store. It asks for:
+The console's Stores surface → Add a store. It asks for:
 
 | Field | What it is |
 |---|---|
@@ -144,8 +144,8 @@ Portal → Cluster → **Stores** → Add a store. It asks for:
 | Owner | The MemQL user a `customers/data_request` export is filed under. |
 
 **The three token fields are REFERENCES, not tokens.** The store row is read
-by the portal and returned to a browser; a token on it would be a token on a
-screen. Create the secret first (Portal → Cluster → Secrets, or
+by the console and returned to a browser; a token on it would be a token on a
+screen. Create the secret first (the console's Secrets surface, or
 `memql env`), then name it here.
 
 ### The environment seed
@@ -166,7 +166,7 @@ MEMQL_SHOPIFY_PROTECTED_DATA_LEVEL none | level1 | level2
 The tokens are sealed into `globalSecret` rows and the store row references
 them; the variables are then never read again. **Editing them later changes
 nothing** -- the row is the configuration. That is deliberate: an env var that
-silently overrode a row would make the portal's view of a store a lie, and
+silently overrode a row would make the console's view of a store a lie, and
 would do it only on the nodes carrying the variable.
 
 ---

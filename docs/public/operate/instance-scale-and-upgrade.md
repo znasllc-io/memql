@@ -130,7 +130,7 @@ headroom the scale section measured.
 > from transiently doubling a node's Postgres pools (memql#1858), and one pod is
 > always ready. At the **one** replica an entry install runs, the identical
 > setting reads "take the only pod down, then start its replacement", and a
-> `v0.19.9 -> v0.20.0` bump returned 503 from the portal for about fifteen
+> `v0.19.9 -> v0.20.0` bump returned 503 from the console for about fifteen
 > minutes. `overlays/cloud-entry` now states the strategy itself, alongside the
 > replica counts, and right-sizes the mesh requests from measured usage (50m /
 > 128Mi against 2-12m / 44-56Mi observed) so the surge pod can actually be

@@ -127,8 +127,8 @@ caller re-reads the latest and retries.
 ### Artifact labels survive edits and restores
 
 `v1:library:artifact` rows can carry free-text
-[labels](../operate/portal.md#artifacts) the owner or their agents add
-through the portal or the `artifactAddLabel` / `artifactRemoveLabel`
+labels the owner or their agents add
+through the `artifactAddLabel` / `artifactRemoveLabel`
 tools. Labels live on the index row, not on any one version, so they play
 no part in which content is latest -- but the index row itself gets
 re-versioned every time `editDocument` or `restoreDocumentVersion` runs

@@ -2,9 +2,10 @@
 // still serves, with representative mock data, into /tmp/admin-preview/.
 //
 // It previews far less than it used to. The admin console's pages moved into
-// the MemQL portal in memql#3324, and a React page is previewed by RUNNING the
-// portal -- `make portal-install && npm run dev` in clients/portal -- rather
-// than by rendering a template into a file. What is left here is the identity
+// the MemQL portal in memql#3324 and into MemQL OS when epic memql#4984
+// retired the portal, and a React page is previewed by RUNNING the shell --
+// `make os-install` then `npm run dev` in clients/os -- rather than by
+// rendering a template into a file. What is left here is the identity
 // service's own web surface: the public sign-in flow and the admin sign-in
 // page that establishes an admin session. Used during UI iteration so the operator can
 // look at the pages without setting up the magic-link / OAuth flow.

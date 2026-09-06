@@ -36,7 +36,7 @@ numbers and why.
 | **planner** | `planner` | Task planning and orchestration |
 | **workbench** | `workbench` | Sandboxed per-Plan Linux execution surface |
 | **mcp** | `mcp` | MCP (Model Context Protocol) server -- engine tool surface to external MCP hosts (epic memql#1529) |
-| **edge** | `edge` | Serves this cluster's hosted web surfaces (every SPA/website + the MemQL Portal, site #1) by resolving the request `Host` header to a `v1:platform:site` row. Excludes file processing and the agent tool surface (epic memql#3700) |
+| **edge** | `edge` | Serves this cluster's hosted web surfaces (every SPA/website + MemQL OS) by resolving the request `Host` header to a `v1:platform:site` row. Excludes file processing and the agent tool surface (epic memql#3700) |
 
 The `bff` tag and the no-tag default build the same node; `bff` exists so a
 manifest can name it explicitly.

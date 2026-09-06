@@ -116,7 +116,7 @@ var gateInputs = []struct {
 	// of a Go lane. `package.json` is named rather than the README on purpose:
 	// `**/*.md` already covers clients/README.md, so a row for that file would
 	// stay green with `clients/**` deleted and would assert nothing.
-	{"clients/portal/package.json", ".", "TestClientsDirectoryIsAllowlisted"},
+	{"clients/os/package.json", ".", "TestClientsDirectoryIsAllowlisted"},
 	// Not embedded, so embed_inventory_test.go does not pin it -- but a gate
 	// input all the same, and in no bucket this lane read until the same
 	// sweep found it. Renaming a `service:` reddens the model staleness check,
@@ -139,7 +139,7 @@ var gateInputs = []struct {
 	// a Dockerfile / only .gitignore" reasoning that put them on the allow
 	// list in the first place.
 	{".gitignore", "scripts/dev", "TestLockfileNegationsHaveATrackedFileBehindThem"},
-	{"Dockerfile", "scripts/ci", "TestDockerfileDeclaresThePortalStageSelector"},
+	{"Dockerfile", "scripts/ci", "TestDockerfileDeclaresTheSpaStageSelector"},
 	{"cmd/deploy-gate-check/Dockerfile", "scripts/ci", "TestDockerfilesCopyEveryNestedModuleManifest"},
 }
 

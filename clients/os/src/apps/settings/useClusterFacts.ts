@@ -43,7 +43,7 @@ import type { ClusterReport } from "./buildDiagnosticsReport";
 // while showing a registry that stopped moving would invite an operator to
 // trust a minutes-old reading. Which replica answered is not knowable from
 // here, and the panel says so. This is the same deliberate downgrade
-// `clients/portal/src/admin/useProviders.ts` documents.
+// the portal's `useProviders.ts` documented before epic memql#4984 retired it.
 
 /** The section's role floor. Presentation only; every gate is server-side. */
 export const CLUSTER_SECTION_ROLE = { min: "admin" } as const;

@@ -113,11 +113,11 @@ test("concept metadata joins constructs to canonical ids and composes topics", (
 
 // The five builtins memql#4239 put on the generated surface: the four
 // operator send actions and the integration-status read. A builtin is
-// emitted only when marked @sdk, so this pins both that the marker held
-// and that the builders compose the exact wire forms the portal's tests
-// assert on (clients/portal/test/campaignAuthoring.test.tsx,
-// clients/portal/test/integrations.test.tsx) -- the portal composes them
-// through these builders now, not by hand.
+// emitted only when marked @sdk, so this pins both that the marker held and
+// that the builders compose the exact wire forms a client sends. The
+// portal's tests pinned the same forms from the consumer side until epic
+// memql#4984 retired them, so this file and its Go twin
+// (sdk/go/client/generated_builders_test.go) are now the only guard.
 test("the @sdk builtins are installed on the prototype and compose the kind-prefixed form", () => {
   assert.equal(typeof QueryClient.prototype.campaignStartSend, "function"); // builtins
   assert.equal(typeof QueryClient.prototype.integrationStatus, "function"); // builtins

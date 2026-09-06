@@ -52,9 +52,14 @@ func TestApplyOsSiteHostname_NoOpForOtherSeeds(t *testing.T) {
 	if got := args["hostname"]; got != "shop.memql.localhost" {
 		t.Fatalf("os-named non-site seed must not be rewritten, got %v", got)
 	}
-	applyOsSiteHostname(&SeedDefinition{Name: "portal", UseConcept: "site"}, args)
+	// A site seed by another name is left alone. It said "portal" until epic
+	// memql#4984 retired that seed, and the control is worth keeping under a
+	// name that is not a platform site at all: the hook keys on the seed NAME,
+	// so the mistake it guards against is a site whose name somebody adds
+	// later, not one the repo happens to ship today.
+	applyOsSiteHostname(&SeedDefinition{Name: "docs", UseConcept: "site"}, args)
 	if got := args["hostname"]; got != "shop.memql.localhost" {
-		t.Fatalf("portal site seed must not be rewritten by the OS hook, got %v", got)
+		t.Fatalf("a site seed the OS hook does not name must not be rewritten, got %v", got)
 	}
 }
 

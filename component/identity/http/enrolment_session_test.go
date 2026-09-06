@@ -249,8 +249,11 @@ func TestEnrolmentEndsHoldingASession(t *testing.T) {
 		"the first-party arm minted an auth code; it has no client to give one to")
 
 	// The destination came from the server, derived from its own base URL.
-	// The browser does not choose where a first-party sign-in lands.
-	require.Equal(t, "https://portal.test/", finish.RedirectTo)
+	// The browser does not choose where a first-party sign-in lands. It was
+	// portal.test until epic memql#4984 retired the portal; the DERIVATION is
+	// unchanged (identity.<d> rewritten to the shell's label), only the label
+	// moved.
+	require.Equal(t, "https://os.test/", finish.RedirectTo)
 }
 
 // ---------------------------------------------------------------------

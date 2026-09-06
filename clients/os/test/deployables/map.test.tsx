@@ -14,7 +14,7 @@ import {
   APEX,
   DOCS,
   MIRROR,
-  PORTAL,
+  PLATFORM_SITE,
   SHOP,
   click,
   emit,
@@ -288,8 +288,8 @@ describe("steering", () => {
     const moved = viewTransform();
     expect(moved).toBe("translate(-48 0) scale(1)");
 
-    await emit(connection, SITE_CONCEPT, PORTAL, "NODE_CREATED");
-    await screen.findByLabelText("Host portal.memql.example.com");
+    await emit(connection, SITE_CONCEPT, PLATFORM_SITE, "NODE_CREATED");
+    await screen.findByLabelText("Host os.memql.example.com");
     // Somebody who panned to read a corner must not be thrown back to the
     // origin because a deployable arrived somewhere else on the map.
     expect(viewTransform()).toBe(moved);
@@ -349,8 +349,8 @@ describe("a feed that is behind", () => {
     mount(connection);
     await screen.findByLabelText("Host shop.memql.example.com");
 
-    await emit(connection, SITE_CONCEPT, PORTAL, "NODE_CREATED");
-    expect(await screen.findByLabelText("Host portal.memql.example.com")).toBeTruthy();
+    await emit(connection, SITE_CONCEPT, PLATFORM_SITE, "NODE_CREATED");
+    expect(await screen.findByLabelText("Host os.memql.example.com")).toBeTruthy();
   });
 });
 

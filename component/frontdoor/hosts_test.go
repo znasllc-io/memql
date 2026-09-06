@@ -70,32 +70,13 @@ func TestSitesWildcardAndApex(t *testing.T) {
 	}
 }
 
-// TestPortalHostIsASiteHost pins the ONE derivation of the portal's hostname
-// (memql#4224). The engine seeds the portal site row from MEMQL_DOMAIN
-// (component/memql's SeedMaterializer), envregistry derives the portal's
-// redirect URI and CORS origin from the same value, and cmd/frontdoorhosts
-// writes the portal's Ingress rule and certificate SAN. All three call
-// PortalHost, so a disagreement -- a certificate naming a host the site row
-// does not carry -- cannot be authored.
-func TestPortalHostIsASiteHost(t *testing.T) {
-	if got, want := PortalHost(domain), "portal.example.test"; got != want {
-		t.Errorf("PortalHost = %q, want %q", got, want)
-	}
-	if got, want := PortalHost(domain), SiteHost(PortalSite, domain); got != want {
-		t.Errorf("PortalHost = %q but SiteHost(PortalSite) = %q; the portal is site #1 and must be composed like any site", got, want)
-	}
-	if got, want := PortalHost(domain), PortalSite+DomainDerivationSuffix(domain); got != want {
-		t.Errorf("PortalHost = %q but the suffix composition gives %q", got, want)
-	}
-}
-
 // TestHostsIsTheWholeSet pins the count, because the count is the property
 // docs/public/operate/front-door.md is about: it is fixed by the closed role
 // set plus the platform's own site, and never grows with customer sites.
 func TestHostsIsTheWholeSet(t *testing.T) {
 	hosts := Hosts(domain)
-	if len(hosts) != 7 {
-		t.Errorf("Hosts returns %d rules, want 7 (three roles, the portal, the OS shell, the sites wildcard, the apex)", len(hosts))
+	if len(hosts) != 6 {
+		t.Errorf("Hosts returns %d rules, want 6 (three roles, the OS shell, the sites wildcard, the apex)", len(hosts))
 	}
 
 	seen := map[string]bool{}
@@ -124,7 +105,7 @@ func TestHostsIsTheWholeSet(t *testing.T) {
 		t.Errorf("Hosts carries %d wildcard rules, want exactly 1 (the sites rule)", wildcards)
 	}
 
-	// The four rules that reach the edge: the portal (exact), the OS shell (exact), every other
+	// The three rules that reach the edge: the OS shell (exact), every other
 	// site (the wildcard), and the apex.
 	var sites []string
 	for _, h := range hosts {
@@ -132,7 +113,7 @@ func TestHostsIsTheWholeSet(t *testing.T) {
 			sites = append(sites, h.Name)
 		}
 	}
-	if want := strings.Join([]string{PortalHost(domain), OsHost(domain), SitesWildcard(domain), Apex(domain)}, ","); strings.Join(sites, ",") != want {
+	if want := strings.Join([]string{OsHost(domain), SitesWildcard(domain), Apex(domain)}, ","); strings.Join(sites, ",") != want {
 		t.Errorf("sites rules are %v, want [%s]", sites, want)
 	}
 }
@@ -152,7 +133,6 @@ func TestCertificateSANsAreExactlyTheExactHosts(t *testing.T) {
 		RoleHost(RoleAPI, domain),
 		RoleHost(RoleIdentity, domain),
 		RoleHost(RoleMCP, domain),
-		PortalHost(domain),
 		OsHost(domain),
 		Apex(domain),
 	}
@@ -206,9 +186,6 @@ func TestCoveredByIsExactOnly(t *testing.T) {
 	if coveredBy(SiteHost("shop", domain), sans) {
 		t.Errorf("a customer site host is covered by the requested SANs %v; the certificate must not claim to cover hosts it does not name", sans)
 	}
-	if !coveredBy(PortalHost(domain), sans) {
-		t.Errorf("the portal host is not covered by the requested SANs %v", sans)
-	}
 	if !coveredBy(OsHost(domain), sans) {
 		t.Errorf("the OS host is not covered by the requested SANs %v", sans)
 	}
@@ -254,18 +231,19 @@ func TestTheSuffixHelperAgreesWithTheHostBuilders(t *testing.T) {
 	if got, want := "api"+DomainDerivationSuffix(domain), RoleHost(RoleAPI, domain); got != want {
 		t.Errorf("DomainDerivationSuffix composes %q, RoleHost gives %q", got, want)
 	}
-	if got, want := "portal"+DomainDerivationSuffix(domain), PortalHost(domain); got != want {
-		t.Errorf("DomainDerivationSuffix composes %q, PortalHost gives %q", got, want)
-	}
 	if got, want := "os"+DomainDerivationSuffix(domain), OsHost(domain); got != want {
 		t.Errorf("DomainDerivationSuffix composes %q, OsHost gives %q", got, want)
 	}
 }
 
 // TestOsHostIsASiteHost pins the ONE derivation of the OS hostname (memql#4705).
-// The engine seeds the OS site row from MEMQL_DOMAIN, envregistry derives the
-// extra portal-client redirect URI and CORS origin, and cmd/frontdoorhosts
-// writes the OS Ingress rule and certificate SAN. All three call OsHost.
+// The engine seeds the OS site row from MEMQL_DOMAIN (component/memql's
+// SeedMaterializer), envregistry derives its redirect URI and CORS origin from
+// the same value, and cmd/frontdoorhosts writes the OS Ingress rule and
+// certificate SAN. All three call OsHost, so a disagreement -- a certificate
+// naming a host the site row does not carry -- cannot be authored. It is the
+// whole of that statement since epic memql#4984: the portal held the same
+// exception and had a test of its own beside this one.
 func TestOsHostIsASiteHost(t *testing.T) {
 	if got, want := OsHost(domain), "os.example.test"; got != want {
 		t.Errorf("OsHost = %q, want %q", got, want)
@@ -276,7 +254,9 @@ func TestOsHostIsASiteHost(t *testing.T) {
 	if got, want := OsHost(domain), OsSite+DomainDerivationSuffix(domain); got != want {
 		t.Errorf("OsHost = %q but the suffix composition gives %q", got, want)
 	}
-	if OsHost(domain) == PortalHost(domain) {
-		t.Error("OsHost and PortalHost must be distinct hosts")
+	for _, r := range Roles() {
+		if OsHost(domain) == RoleHost(r, domain) {
+			t.Errorf("OsHost collides with the %q role host; a site label may not shadow a role", r)
+		}
 	}
 }

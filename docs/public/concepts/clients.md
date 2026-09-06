@@ -35,14 +35,14 @@ holds: the application itself, its build, its CI lane, and the deploy
 wiring that publishes its bundle to a cluster.
 
 The engine repository carries exactly **one** client as the worked
-example -- the **MemQL Portal** (`clients/portal/`), the platform's own
+example -- **MemQL OS** (`clients/os/`), the platform's own
 browser operations console. It exists in-tree so the question "where
 does my app go, and how does it get served, built, tested, and deployed
 alongside the engine?" has a running answer rather than a prose one, and
 an allowlist test keeps `clients/` from quietly growing beyond it. The
 conventions a client follows -- own package, view-kit for concept
 rendering, dial the origin you were served from, one CI lane per client
--- are stated in `clients/README.md` next to the portal.
+-- are stated in `clients/README.md` next to the shell.
 
 ## How a client reaches the cluster
 
@@ -56,7 +56,7 @@ renders the day it is declared with no client change.
 
 A website or SPA is **hosted by the cluster itself**: the edge node
 resolves the request hostname to a `v1:platform:site` row and serves the
-client's published bundle -- the portal is site #1, served by the same
+client's published bundle -- the shell is a site row, served by the same
 mechanism as any customer site. A client can equally stay where it
 already is and connect in over the SDK.
 

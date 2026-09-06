@@ -4,7 +4,7 @@
 // memql#4177's exactly -- the same values the portal redesign ships and
 // memql.io renders. They are transcribed rather than imported: `brand/` is CSS
 // consumed by two build systems that share no package manager
-// (clients/portal's Vite and component/identity/web's Tailwind CLI), and this
+// (clients/os's Vite and component/identity/web's Tailwind CLI), and this
 // extension is a third with a strict webview CSP that loads no external
 // stylesheet at all. brand_shared_source_test.go scans those two trees and
 // deliberately does not scan this one; memql#4196's header records why. That

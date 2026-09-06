@@ -1,7 +1,7 @@
 // Package overlays -- the front-door render gates (memql#3767, memql#4224, memql#4347).
 //
 // WHY A TEST AND NOT A REVIEW. The host set is a DERIVATION -- three roles plus
-// the portal plus the sites wildcard plus the apex -- written into ~440 lines
+// the OS shell plus the sites wildcard plus the apex -- written into ~400 lines
 // of Ingress and Certificate by a generator. A host missing a rule is a service
 // nothing can reach at the name every client was told to dial: nothing fails to
 // build, nothing fails to reconcile, and the symptom arrives whenever somebody
@@ -11,10 +11,10 @@
 // does not stop the Ingress from existing; the request reaches TLS termination,
 // the controller serves whatever default certificate it has, and the browser
 // reports a name mismatch at a host nobody thinks is new. That is exactly how
-// the portal failed on the first entry-shape cluster (memql#4224): the Certificate
-// requested `*.<domain>`, which an HTTP-01 issuer cannot issue, and the edge
-// Ingress listed the wildcard under tls, so ingress-nginx served its
-// self-signed default for portal.<domain>. So three things are gated here, by
+// the platform's own site host failed on the first entry-shape cluster
+// (memql#4224): the Certificate requested `*.<domain>`, which an HTTP-01 issuer
+// cannot issue, and the edge Ingress listed the wildcard under tls, so
+// ingress-nginx served its self-signed default for it. So three things are gated here, by
 // exact name: the SANs against the hosts, each Ingress's tls.hosts against its
 // own rule hosts, and the requested SANs against the rules that serve them.
 //
@@ -43,7 +43,7 @@
 //	under this regime the omission is the bug.
 //
 // The two overlays are in the MIXED state today, deliberately: letsencrypt-prod
-// still issues the exact-host certificate for api / identity / mcp / portal and
+// still issues the exact-host certificate for api / identity / mcp / os and
 // the apex, and letsencrypt-dns01 issues one additional certificate for the
 // sites plane. Nothing here waves that through as a special case --
 // TestBothOverlaysDeclareTheDNS01Issuer states it, so a regression to either
@@ -90,7 +90,7 @@ var generatedOverlays = []string{cloudOverlay, entryOverlay}
 // select by Secret name.
 var frontDoorIngressNames = []string{
 	"api-front-door", "api-front-door-grpc", "identity-front-door",
-	"mcp-front-door", "portal-front-door", "os-front-door", "edge-front-door",
+	"mcp-front-door", "os-front-door", "edge-front-door",
 }
 
 // hostsIn returns every Ingress rule host in a rendered stream. Parsed by line
@@ -546,56 +546,19 @@ func TestEveryRequestedSANIsAHostTheFrontDoorServes(t *testing.T) {
 	}
 }
 
-// TestThePortalHasItsOwnExactRuleToTheEdge pins the mechanism of the fix. A
-// tls entry for portal.<domain> on the wildcard Ingress would NOT have been
-// enough -- ingress-nginx has no server block to attach it to -- so the portal
-// carries an exact rule of its own, pointing at the same edge Service the
-// wildcard does. The wildcard rule stays: it is how every other site reaches
-// the edge.
+// TestTheOsHasItsOwnExactRuleToTheEdge pins the mechanism of the memql#4224
+// fix, which the OS shell now carries alone (memql#4705; the portal held this
+// slot and had a twin of this test until epic memql#4984).
+//
+// A tls entry for os.<domain> on the wildcard Ingress would NOT be enough --
+// ingress-nginx has no server block to attach it to -- so the OS carries an
+// exact rule of its own, pointing at the same edge Service the wildcard does.
+// The wildcard rule stays: it is how every other site reaches the edge.
 //
 // The DNS-01 wildcard certificate does not retire this rule. It removes the
-// CERTIFICATE reason the portal needed one, not the server-block reason: nginx
-// still builds a certificate-bearing server block per rule host, and the
-// portal's exact rule is what outranks the wildcard for that name.
-func TestThePortalHasItsOwnExactRuleToTheEdge(t *testing.T) {
-	portal := frontdoor.PortalHost(committedDomain)
-	wildcard := frontdoor.SitesWildcard(committedDomain)
-
-	for _, overlay := range generatedOverlays {
-		t.Run(overlay, func(t *testing.T) {
-			var sawPortal, sawWildcard bool
-			for _, ing := range frontDoorIngresses(t, render(t, overlay)) {
-				for _, r := range ing.Spec.Rules {
-					switch r.Host {
-					case wildcard:
-						sawWildcard = true
-					case portal:
-						sawPortal = true
-						for _, p := range r.HTTP.Paths {
-							if p.Backend.Service.Name != "edge" {
-								t.Errorf("the portal rule on %s points at Service %q, want edge -- the portal is a site "+
-									"and takes the site path; the exact rule exists for TLS only",
-									ing.Metadata.Name, p.Backend.Service.Name)
-							}
-						}
-					}
-				}
-			}
-			if !sawPortal {
-				t.Errorf("the %s overlay has no exact Ingress rule for %q; ingress-nginx then answers it from the "+
-					"wildcard's server block with its self-signed default certificate (memql#4224)", overlay, portal)
-			}
-			if !sawWildcard {
-				t.Errorf("the %s overlay has no %q rule; every other site reaches the edge through it", overlay, wildcard)
-			}
-		})
-	}
-}
-
-// TestTheOsHasItsOwnExactRuleToTheEdge is the portal rule's twin (memql#4705).
-// Same TLS reason: ingress-nginx builds a certificate-bearing server block per
-// RULE host, so os.<domain> needs an exact rule to the edge or Safari sees the
-// controller's self-signed default.
+// CERTIFICATE reason the OS needs one, not the server-block reason: nginx
+// still builds a certificate-bearing server block per rule host, and the OS's
+// exact rule is what outranks the wildcard for that name.
 func TestTheOsHasItsOwnExactRuleToTheEdge(t *testing.T) {
 	osHost := frontdoor.OsHost(committedDomain)
 	wildcard := frontdoor.SitesWildcard(committedDomain)
@@ -857,7 +820,7 @@ func TestWildcardCoversRefusesAMultiLabelMatch(t *testing.T) {
 	if !wildcardCovers("api-staging.example.test", []string{"*.example.test"}) {
 		t.Error("wildcardCovers rejected a single-label host under its wildcard")
 	}
-	if wildcardCovers("shop.example.test", []string{"portal.example.test", "example.test"}) {
+	if wildcardCovers("shop.example.test", []string{"os.example.test", "example.test"}) {
 		t.Error("wildcardCovers accepted a host that no exact SAN names")
 	}
 	// The apex is NOT covered by its own wildcard -- which is why the DNS-01
@@ -868,7 +831,7 @@ func TestWildcardCoversRefusesAMultiLabelMatch(t *testing.T) {
 	}
 	// And the wildcard RULE host is covered only by an identical SAN, which is
 	// the comparison the regime gates make.
-	if wildcardCovers("*.example.test", []string{"portal.example.test", "example.test"}) {
+	if wildcardCovers("*.example.test", []string{"os.example.test", "example.test"}) {
 		t.Error("wildcardCovers accepted the wildcard rule under exact SANs")
 	}
 	if !wildcardCovers("*.example.test", []string{"*.example.test"}) {

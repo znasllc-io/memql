@@ -135,26 +135,23 @@ logs/
 package.json
 !sdk/ts/package.json
 !sdk/ts-viewkit/package.json
-!clients/portal/package.json
 !clients/os/package.json
 package-lock.json
 !sdk/ts/package-lock.json
 !sdk/ts-viewkit/package-lock.json
-# The portal (memql#3314) is an APPLICATION, so its lockfile is committed for
-# a reason the libraries' is not: it pins the exact dependency tree the
-# released bundle is built from, which is what makes `npm ci` reproducible in
-# CI and in the image build. Both negations below name files that ARE tracked,
-# per the rule above.
-!clients/portal/package-lock.json
+# The OS shell (memql#3314, memql#4705) is an APPLICATION, so its lockfile is
+# committed for a reason the libraries' is not: it pins the exact dependency
+# tree the released bundle is built from, which is what makes `npm ci`
+# reproducible in CI and in the image build. The negation below names a file
+# that IS tracked, per the rule above.
 !clients/os/package-lock.json
 node_modules/
 
-# The portal's build output. Produced by `make portal-build` (vite) and copied
-# into the image by the Dockerfile's portal stage. Never committed: keeping
-# minified bundles and hashed filenames out of git is precisely why the Go side
-# serves them from a directory instead of //go:embed'ing them (see
-# component/portal/doc.go).
-clients/portal/dist/
+# The shell's build output. Produced by `make os-build` (vite) and copied into
+# the image by the Dockerfile's spa stage. Never committed: keeping minified
+# bundles and hashed filenames out of git is precisely why the Go side serves
+# them from a directory instead of //go:embed'ing them (see
+# component/edge/doc.go).
 clients/os/dist/
 
 # Vite's dependency pre-bundle cache. It normally lives under a package's own

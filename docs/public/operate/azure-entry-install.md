@@ -71,7 +71,7 @@ company apex at AKS.** The cluster domain is the install's
 |---|---|---|
 | identity | `identity.$MEMQL_DOMAIN` | sign-in; first-run wizard at `/setup` |
 | api | `api.$MEMQL_DOMAIN` | gRPC + HTTP edge |
-| sites (portal) | `portal.$MEMQL_DOMAIN` | site #1; its own exact rule and SAN (memql#4224) |
+| sites (os) | `os.$MEMQL_DOMAIN` | the platform's own site; its own exact rule and SAN (memql#4224) |
 | sites (wildcard) | `*.$MEMQL_DOMAIN` | every other site; certified by `memql-wildcard-tls` over DNS-01 (memql#4347) |
 | sites (apex) | `$MEMQL_DOMAIN` | same edge Service |
 | mcp | `mcp.$MEMQL_DOMAIN` | exists in the generator; **leave it dark** |
@@ -99,7 +99,7 @@ because that is how the DNS-01 challenge is answered.
 
 | Certificate | Issuer | Names |
 |---|---|---|
-| `memql-front-door-tls` | `letsencrypt-prod` (HTTP-01) | `api.`, `identity.`, `mcp.`, `portal.`, the apex |
+| `memql-front-door-tls` | `letsencrypt-prod` (HTTP-01) | `api.`, `identity.`, `mcp.`, `os.`, the apex |
 | `memql-wildcard-tls` | `letsencrypt-dns01` (DNS-01, Azure DNS) | `*.$MEMQL_DOMAIN`, the apex |
 
 - **Do not add a `*.$MEMQL_DOMAIN` dnsName to `memql-front-door-tls`.** ACME
@@ -116,11 +116,11 @@ because that is how the DNS-01 challenge is answered.
   certificate does not name -- and it builds a certificate-bearing server
   block per RULE host, never per `tls` host. So `edge-front-door` carries
   TWO `tls` entries: the apex against `memql-front-door-tls`, and
-  `*.$MEMQL_DOMAIN` against `memql-wildcard-tls`. A portal with no exact
+  `*.$MEMQL_DOMAIN` against `memql-wildcard-tls`. A platform site with no exact
   rule of its own still reproduces the fake-certificate failure for
-  `portal.$MEMQL_DOMAIN` with both certificates Ready; the generator emits
-  `portal-front-door` (an exact rule to the same edge Service) for exactly
-  that reason. The cluster-side `portal-front-door` Ingress that was
+  `os.$MEMQL_DOMAIN` with both certificates Ready; the generator emits
+  `os-front-door` (an exact rule to the same edge Service) for exactly
+  that reason. The cluster-side `os-front-door` Ingress that was
   hand-made as the ops workaround has the same name, so Argo adopts and
   overwrites it on the next sync.
 
@@ -222,7 +222,7 @@ with the committed default. Install-time patches repoint every host
 the generator emitted, plus the `memql-domain` ConfigMap:
 
 - Certificate `memql-front-door-tls` `spec.dnsNames` → `api.$MEMQL_DOMAIN`,
-  `identity.$MEMQL_DOMAIN`, `mcp.$MEMQL_DOMAIN`, `portal.$MEMQL_DOMAIN`,
+  `identity.$MEMQL_DOMAIN`, `mcp.$MEMQL_DOMAIN`, `os.$MEMQL_DOMAIN`,
   `$MEMQL_DOMAIN` -- five entries in that order (`/spec/dnsNames/0` ..
   `/spec/dnsNames/4`), never a wildcard
 - Ingress `api-front-door` and `api-front-door-grpc` → `api.$MEMQL_DOMAIN`
@@ -230,7 +230,7 @@ the generator emitted, plus the `memql-domain` ConfigMap:
 - Ingress `identity-front-door` → `identity.$MEMQL_DOMAIN` (same two pointers)
 - Ingress `mcp-front-door` → `mcp.$MEMQL_DOMAIN` (same two pointers; dark,
   still patch the name so it cannot drift)
-- Ingress `portal-front-door` → `portal.$MEMQL_DOMAIN` (same two pointers)
+- Ingress `os-front-door` → `os.$MEMQL_DOMAIN` (same two pointers)
 - Ingress `edge-front-door` → `/spec/rules/0/host` = `*.$MEMQL_DOMAIN`,
   `/spec/rules/1/host` = `$MEMQL_DOMAIN`, `/spec/tls/0/hosts/0` =
   `$MEMQL_DOMAIN` (the apex, on `memql-front-door-tls`) and
@@ -261,7 +261,7 @@ the generator emitted, plus the `memql-domain` ConfigMap:
 The same derivation feeds every side: `cmd/frontdoorhosts` composes
 the Ingress hosts and SANs, `component/envregistry/domain.go` composes
 the issuer, CORS origins and redirect URIs, and the engine's
-SeedMaterializer composes the portal site row's hostname from
+SeedMaterializer composes the OS site row's hostname from
 `MEMQL_DOMAIN` -- all through `component/frontdoor`. Two copies of that
 rule would be two copies that can disagree.
 
@@ -287,7 +287,7 @@ kustomize refuses a sibling path (load restrictor).
    was about, on every exact host:
 
 ```bash
-for h in identity api portal mcp; do
+for h in identity api os mcp; do
   openssl s_client -servername "$h.$MEMQL_DOMAIN" -connect "$h.$MEMQL_DOMAIN:443" </dev/null 2>/dev/null \
     | openssl x509 -noout -issuer -subject
 done
@@ -316,8 +316,8 @@ scripts/install/verify-frontdoor.sh --hosts api.$MEMQL_DOMAIN,identity.$MEMQL_DO
 
 That script establishes dns / tls / grpc / precedence for `api.` and
 `identity.` only. `mcp.` is inconclusive by design (it does not serve
-`/healthz` on the front-door port). Portal and the apex are served by
-the edge by design -- the portal's exact rule and the apex rule point at
+`/healthz` on the front-door port). The OS shell and the apex are served by
+the edge by design -- the shell's exact rule and the apex rule point at
 the same Service the wildcard does -- so there is no exact-host
 precedence to prove for them.
 
@@ -533,7 +533,7 @@ repo-credential writes, and the Argo source switch are owner-gated.
   ships it), and the hand-seeded
   `memql-secrets` (the Graph mail credentials included). Until memql#4224
   is deployed, one cluster-only workaround sits beside them -- the
-  `portal-front-door` Ingress; with that fix in the engine tag the instance
+  `os-front-door` Ingress; with that fix in the engine tag the instance
   composes, it becomes generated content and the cluster copy is
   overwritten on sync.
 - **Pins today are a human loop:** tag `vX.Y.Z` on `main`, dispatch
@@ -553,7 +553,7 @@ repo-credential writes, and the Argo source switch are owner-gated.
   `bff-<product>` head, its own public entry and its own `letsencrypt-prod`
   ClusterIssuer), and its Makefile and CI fail by design with no
   `dsl/<domain>` and no `clients/<name>/`. An engine-only entry instance
-  runs the plain engine plus the portal.
+  runs the plain engine plus the OS shell.
 - **The mechanism exists and is verified** (kustomize v5.8.1, 54 documents
   rendered): compose the engine's entry overlay as a remote kustomize
   resource and override the install values on top.
@@ -671,7 +671,7 @@ argocd app diff memql                                                       # mu
 argocd app sync memql --dry-run && argocd app sync memql && argocd app wait memql --health
 kubectl -n memql rollout status deploy/identity                             # then bff, edge
 scripts/install/verify-frontdoor.sh --hosts api.$MEMQL_DOMAIN,identity.$MEMQL_DOMAIN   # from an engine checkout
-curl -s https://portal.$MEMQL_DOMAIN/runtime-config.json
+curl -s https://os.$MEMQL_DOMAIN/runtime-config.json
 ```
 
 Why each line is what it is:
@@ -722,7 +722,7 @@ means "within 12 hours of a cut":
    owner's call. With automated sync on the Application, Argo rolls within
    its refresh interval.
 5. Post-roll gate (a `workflow_run` after the merge, or a second cron 30
-   minutes later): `/healthz` on `identity.`, `api.` and `portal.`,
+   minutes later): `/healthz` on `identity.`, `api.` and `os.`,
    `verify-frontdoor.sh --hosts api.$MEMQL_DOMAIN,identity.$MEMQL_DOMAIN`,
    and, once the SDK exposes it, ServerHello `engine_version == X.Y.Z`.
    Failure opens an issue; rollback is `git revert` of the pin commit plus

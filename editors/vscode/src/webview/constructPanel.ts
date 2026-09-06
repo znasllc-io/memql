@@ -61,23 +61,25 @@ import { workspaceCandidates } from "../handoff/resolve.js";
  * has no business reading. The panel posts an intent; the host decides
  * whether there is a cluster to serve it.
  *
- * `browseRowsInPortal` (memql#4252) is the other half of `viewSourceFromCluster`:
- * that dep reads a construct's DEFINITION from the cluster, this one hands a
- * concept's ROWS to the portal rather than fetching or rendering them here --
- * the extension owns what is on this machine and what it can reach, the
- * portal owns what is inside a cluster.
+ * `browseRowsInPortal` WAS the other half of `viewSourceFromCluster`
+ * (memql#4252): that dep reads a construct's DEFINITION from the cluster, and
+ * the other handed a concept's ROWS to the portal rather than fetching or
+ * rendering them here. Epic memql#4984 retired the portal and MemQL OS has no
+ * concept browser, so there was no page left to hand them to and the dep and
+ * its button went. The division of labour it stood for survives in the one
+ * that is left: the extension owns what is on this machine and what it can
+ * reach, the console owns what is inside a cluster.
  *
- * BOTH TAKE THE PANEL'S CLUSTER, and neither may read the connected one in its
+ * IT TAKES THE PANEL'S CLUSTER, and may not read the connected one in its
  * place (memql#4253). This panel is a singleton that outlives the connection
  * its record was read over, and nothing re-points it when the connection
- * changes -- so a construct opened on `staging` would have these buttons served
+ * changes -- so a construct opened on `staging` would have this button served
  * by `prod` after a switch, with nothing on the page saying so. The cluster
  * travels with the record for the same reason the cluster-document lens carries
  * it (memql#4248); the host compares the two through `panelClusterRefusal`.
  */
 export interface ConstructPanelDeps {
   viewSourceFromCluster: (construct: CatalogConstruct, cluster: string) => Promise<void>;
-  browseRowsInPortal: (construct: CatalogConstruct, cluster: string) => Promise<void>;
 }
 
 /**
@@ -242,10 +244,6 @@ export class ConstructPanel {
     }
     if (type === "viewSourceFromCluster") {
       await this.deps.viewSourceFromCluster(this.construct, this.cluster);
-      return;
-    }
-    if (type === "browseRows") {
-      await this.deps.browseRowsInPortal(this.construct, this.cluster);
       return;
     }
     if (type !== "openFile") return;

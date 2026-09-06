@@ -18,7 +18,7 @@ Three consoles, and it is worth fixing which is which before anything else:
 | | What it is | Scope |
 |---|---|---|
 | **Cockpit** | the terminal IDE | a developer's machine |
-| **Portal** | the graphical ops console | one instance |
+| **MemQL OS** | the graphical ops console | one instance |
 | **Orbit** | the customer's control app | the fleet above them |
 
 ## Orbit is a client, and a client cannot be the gate
@@ -154,7 +154,7 @@ which makes Orbit same-origin with its API — removing CORS and the
 `SameSite=Lax` cookie problem entirely. See [site hosting](site-hosting.md) for
 the publish flow.
 
-**The site row is not seeded**, unlike the portal's. Its hostname is
+**The site row is not seeded**, unlike the OS shell's. Its hostname is
 `orbit.<domain>` and the domain is a per-deployment value, so the row is created
 once by an operator against the mothership rather than baked into a bundle that
 cannot know it.
@@ -180,4 +180,4 @@ Stated rather than implied.
 - [The fleet control plane](memql-cloud.md) · [Billing](memql-cloud-billing.md)
 - [Site hosting](site-hosting.md) — how Orbit gets served
 - [Per-row authz](auth/per-row-authz-audit.md) — the model these gates enforce
-- [The Portal](portal.md) — the per-instance console Orbit deep-links into
+- [MemQL OS](memql-os.md) — the per-instance console Orbit deep-links into

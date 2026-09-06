@@ -1,61 +1,41 @@
-/// The MemQL Portal, as site #1.
+/// The MemQL OS shell, as the platform's own site (memql#4705).
 ///
-/// SEEDED, not special-cased. The portal is how sites are managed, so if it
+/// SEEDED, not special-cased. The OS is how a cluster is managed, so if it
 /// were an ordinary row the cluster would ship with an empty site table and no
 /// way to reach the screen that fills it. Seeding resolves that without a
 /// branch in the serving path -- and re-seeding at boot means an operator
 /// cannot brick cluster management by deleting the row.
 ///
-/// bundleRef is file:///app/portal -- the directory the image already ships
-/// and that MEMQL_PORTAL_DIST used to point at (component/portal, retired,
-/// memql#3711). That is the whole of the difference between "in the image"
-/// and "in storage": a URI scheme.
+/// It is the SECOND inhabitant of this slot and the only one left: the MemQL
+/// Portal was site #1 (memql#3711) and epic memql#4984 retired it, so
+/// everything below was true of the portal first and is true of the OS now.
+///
+/// A named front-door host, not a wildcard site: exact Ingress, exact
+/// Certificate SAN, HTTP-01. Putting it on *.<domain> would send Safari
+/// through edge site-hosting with no SAN (memql#4224).
+///
+/// bundleRef is file:///app/os -- the directory the image already ships. That
+/// is the whole of the difference between "in the image" and "in storage": a
+/// URI scheme.
 ///
 /// status is "live" and systemOwned is true -- createSite's ordinary caller
-/// gets "draft" / false; the portal needs both flipped at materialization
-/// time, which is why createSite (dsl/platform/mutations.memql) accepts them
-/// as optional args instead of hardcoding the operator-created-site defaults.
+/// gets "draft" / false; the shell needs both flipped at materialization time,
+/// which is why createSite (dsl/platform/mutations.memql) accepts them as
+/// optional args instead of hardcoding the operator-created-site defaults.
 ///
-/// The hostname is the ONE thing a customer site gets from the portal UI and
-/// the portal gets from the cluster install. It carries the committed default
-/// the same way the Ingress hosts do (memql#3593); an install on another
-/// domain overrides it through the same seam.
+/// The hostname is the committed localhost default, carried the same way the
+/// Ingress hosts are (memql#3593); SeedMaterializer rewrites it from
+/// MEMQL_DOMAIN, so an install on another domain overrides it through the same
+/// seam.
 ///
 /// NO ownerUserId, and its ABSENCE is the meaning (memql#4344): an empty owner
-/// is the CLUSTER-OWNED state, which is what site #1 has to be -- the portal is
-/// the platform's row, not whichever principal happened to boot the cluster.
-/// createSite stamps `ownerUserId: actor.userId` like every owned concept must,
-/// and executeWrite undoes that stamp for a system actor, so adding the field
-/// here would be both unnecessary and wrong. `portal.<domain>` is also a
-/// RESERVED label a user may not claim, and the same privileged path is what
-/// lets this seed use it (component/memql/platform_site_hostname_policy.go).
-@description("The MemQL Portal as site #1")
-seed site portal {
-  id:          "portal"
-  hostname:    "portal.memql.localhost"
-  kind:        "spa"
-  bundleRef:   "file:///app/portal"
-  status:      "live"
-  apiProxy:    true
-  systemOwned: true
-  title:       "MemQL Portal"
-}
-
-/// The MemQL OS shell, as a second platform site (memql#4705).
-///
-/// SEEDED, not a wildcard site. The OS is a named front-door host like the
-/// portal: exact Ingress, exact Certificate SAN, HTTP-01. Putting it on
-/// *.<domain> would send Safari through edge site-hosting with no SAN
-/// (memql#4224).
-///
-/// bundleRef is file:///app/os -- the directory the image ships next to
-/// /app/portal. kind stays spa; this is not a new site kind.
-///
-/// The hostname is the committed localhost default; SeedMaterializer
-/// rewrites it from MEMQL_DOMAIN the same way it rewrites the portal.
-///
-/// NO ownerUserId: cluster-owned, like the portal. `os.<domain>` is a
-/// reserved label a user may not claim.
+/// is the CLUSTER-OWNED state, which is what the platform's own site has to be
+/// -- it is the platform's row, not whichever principal happened to boot the
+/// cluster. createSite stamps `ownerUserId: actor.userId` like every owned
+/// concept must, and executeWrite undoes that stamp for a system actor, so
+/// adding the field here would be both unnecessary and wrong. `os.<domain>` is
+/// also a RESERVED label a user may not claim, and the same privileged path is
+/// what lets this seed use it (component/memql/platform_site_hostname_policy.go).
 @description("The MemQL OS shell")
 seed site os {
   id:          "os"

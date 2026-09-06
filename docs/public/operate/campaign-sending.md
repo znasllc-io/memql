@@ -740,7 +740,7 @@ transport says accepted and a bounce arrives later.
 
 ## Running a send
 
-1. Author the audience, template and campaign in the portal
+1. Author the audience, template and campaign in the Campaigns app
    (Integrations → Campaigns).
 2. Mark the template **ready**. A draft is refused: half-written copy
    delivered to an audience is unrecallable, and this is the cheapest guard
@@ -760,7 +760,7 @@ transport says accepted and a bounce arrives later.
    `qc.CampaignStartSend(ctx, client.CampaignStartSendArgs{CampaignId: id})`
    in Go, `query.campaignStartSend({ campaignId })` in TypeScript. The pause,
    resume and schedule calls below have theirs too (`campaignPauseSend`,
-   `campaignResumeSend`, `campaignScheduleSend`), and the portal's buttons go
+   `campaignResumeSend`, `campaignScheduleSend`), and the app's buttons go
    through those methods rather than composing the call string by hand.
 4. Watch the campaign row's counters, or the delivery ledger
    (`deliveriesForCampaign`).

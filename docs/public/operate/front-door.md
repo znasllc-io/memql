@@ -39,7 +39,6 @@ Related: [environment-parity.md](environment-parity.md) ·
 | `api.<domain>` | `svc/bff:50051` **and** `svc/bff-http:8085` | h2c (gRPC) + http | `memql-front-door-tls` |
 | `identity.<domain>` | `svc/identity:8085` | https | `memql-front-door-tls` |
 | `mcp.<domain>` | `svc/mcp:8090` | http | `memql-front-door-tls` |
-| `portal.<domain>` | `svc/edge:8085` | http | `memql-front-door-tls` |
 | `os.<domain>` | `svc/edge:8085` | http | `memql-front-door-tls` |
 | `*.<domain>` | `svc/edge:8085` | http | `memql-wildcard-tls` — see below |
 | `<domain>` (apex) | `svc/edge:8085` | http | `memql-front-door-tls` (and named by the wildcard's too) |
@@ -55,9 +54,9 @@ HTTP-01 only.** ACME cannot serve an HTTP-01 challenge for a wildcard, and one
 wildcard `dnsName` fails the whole order, so the Certificate sat Pending; when
 it was hand-edited to exact names, the edge Ingress whose `tls.hosts` still
 said `*.<domain>` made ingress-nginx serve its self-signed default for
-`portal.<domain>` (Safari: "This Connection Is Not Private"). So the front-door
+`os.<domain>` (Safari: "This Connection Is Not Private"). So the front-door
 certificate `memql-front-door-tls` names **exact hosts only** — `api.`,
-`identity.`, `mcp.`, `portal.` and the apex — and every Ingress lists under
+`identity.`, `mcp.`, `os.` and the apex — and every Ingress lists under
 `tls` exactly the hosts the certificate it points at can cover.
 
 ### The wildcard has a certificate now, and it is a second one
@@ -73,9 +72,9 @@ reaches Key Vault — and one `Certificate` for `*.<domain>` **plus the apex**.
 | | `memql-front-door-tls` | `memql-wildcard-tls` |
 |---|---|---|
 | Issuer | `letsencrypt-prod` (HTTP-01) | `letsencrypt-dns01` (DNS-01, Azure DNS) |
-| Names | `api.`, `identity.`, `mcp.`, `portal.`, `os.`, the apex | `*.<domain>`, the apex |
+| Names | `api.`, `identity.`, `mcp.`, `os.`, the apex | `*.<domain>`, the apex |
 | Declared in | `front-door.generated.yaml` (generated) | `dns01-wildcard-tls.yaml` (hand-authored) |
-| Terminates | every role host, the portal, the OS, the apex | the `*.<domain>` rule on `edge-front-door` |
+| Terminates | every role host, the OS shell, the apex | the `*.<domain>` rule on `edge-front-door` |
 
 **Why the apex is on both.** `*.<domain>` matches exactly one label and the
 apex has none, so a sites-plane certificate without it could not serve the main
@@ -83,7 +82,7 @@ website. The apex rule still terminates with `memql-front-door-tls`; the second
 SAN is what lets it move without a reissue.
 
 **Why two certificates and not one.** The reversal is **staged on purpose**:
-sign-in (`identity.`), the API (`api.`) and the portal keep terminating with a
+sign-in (`identity.`), the API (`api.`) and the OS shell keep terminating with a
 Secret the DNS-01 issuer does not touch, so a wrong zone name, a missing role
 assignment or an expired federation cannot reach them. Until the install-time
 values below are real the wildcard Certificate simply never becomes
@@ -112,15 +111,15 @@ regime holds by default); each Ingress's `tls.hosts` equals the rule hosts
 something in the overlay can certify; and every requested SAN is a host some
 rule serves.
 
-**The portal keeps its own exact rule** — the certificate reason for it is
+**The OS shell keeps its own exact rule** — the certificate reason for it is
 gone, the server-block reason is not. ingress-nginx builds a
 certificate-bearing server block per **rule** host, never per `tls` host, so an
-exact rule is what makes `portal.<domain>` outrank `*.<domain>` and get its own
-certificate rather than the wildcard's. The portal and the OS are the two sites the
+exact rule is what makes `os.<domain>` outrank `*.<domain>` and get its own
+certificate rather than the wildcard's. The OS shell is the one site the
 platform ships itself: their names exist before any operator creates a row, so
 the generator can write each rule and SAN, and the engine seeds each
 `v1:platform:site` hostname from `MEMQL_DOMAIN` through the same derivation
-(`frontdoor.PortalHost`, `frontdoor.OsHost`).
+(`frontdoor.OsHost`).
 
 > **WARNING: the wildcard certificate is a cloud thing with install-time
 > prerequisites.** It needs an Azure DNS zone for `<domain>`, a managed identity
@@ -158,17 +157,17 @@ and it is not proxied through the edge either: MCP clients configure a URL,
 they are not browsers, and an extra hop on a tool-calling path buys nothing.
 See [mcp-connect.md](mcp-connect.md).
 
-**`portal.<domain>`, `*.<domain>` and the apex** all point at the `edge` node,
+**`os.<domain>`, `*.<domain>` and the apex** all point at the `edge` node,
 which resolves the request `Host` header against a `v1:platform:site` row and
 serves that site's bundle. The apex is not a special case: for a customer's own
 cluster the bare domain **is** their main website, so it is a site row like
-every other one. The portal is site #1 and takes the same path; its own rule
+every other one. The OS shell is a site like any other and takes the same path; its own rule
 exists for the certificate's sake ([above](#the-seven-hosts)), not because the
 edge treats it differently.
 
 > **INFO: the edge route and the edge backend both ship as of memql#3714.**
 > `deploy/k8s/overlays/local/edge-front-door.yaml` carries the wildcard and
-> apex rules (`portal-front-door.yaml` the portal's);
+> apex rules (`os-front-door.yaml` the shell's);
 > `deploy/k8s/base/edge.yaml` carries the Deployment, Service and
 > PodDisruptionBudget behind `svc/edge`. The `edge` node type itself — build
 > tag `edge`, `make edge`, see [build-tags.md](../build/build-tags.md) — is
@@ -203,9 +202,9 @@ nothing more about sites than the rule that routes them.
 ### Exact-versus-wildcard precedence is declared, not inherited
 
 `*.<domain>` also matches `api.<domain>`, `identity.<domain>`, `mcp.<domain>`
-and `portal.<domain>`, `os.<domain>`. So whether the named hosts keep their own backends is
+and `os.<domain>`. So whether the named hosts keep their own backends is
 not a detail — it is a **load-bearing assumption of the seven-host design**, and
-it is worth knowing the state of it. (For the portal the question is moot —
+it is worth knowing the state of it. (For the OS shell the question is moot —
 its rule and the wildcard reach the same Service — which is exactly why it is
 not in the precedence probe's host set.)
 
@@ -250,7 +249,7 @@ with `Content-Type: application/grpc`.
 
 The fix moved the declaration to the other side of the relationship instead of
 removing it: **`api-front-door.yaml`, `front-door.yaml`, `mcp-front-door.yaml`
-and `portal-front-door.yaml` carry NO `router.priority` annotation at all**
+and `os-front-door.yaml` carry NO `router.priority` annotation at all**
 (each file says so explicitly, in a comment naming memql#3810). Precedence over
 the wildcard is still declared — it has to be, or the wildcard genuinely does
 swallow the exact hosts — but it is declared **on the wildcard itself**, in
@@ -302,7 +301,7 @@ That single fact shapes the whole front door:
   HTTP/2 cleartext to the gRPC edge on `:50051` — and that annotation applies
   to every port of that Service. The cloud has the mirror-image constraint
   (nginx `backend-protocol: GRPC`). An HTTP/1.1 asset fetch dialed as h2c does
-  not work against Go's `net/http` server, so the portal bundle would simply
+  not work against Go's `net/http` server, so the shell's bundle would simply
   fail to load.
 - It is why `api.<domain>` needs **two rules**, not one: `/` to
   `svc/bff:50051` for gRPC, and the declared HTTP path set to
@@ -324,7 +323,7 @@ generators that answer different questions and stay separable.
 **The HOSTS** — `cmd/frontdoorhosts` writes `front-door.generated.yaml` into
 each instance overlay (`deploy/k8s/overlays/cloud` and `overlays/cloud-entry`)
 whole: the seven Ingress rules and the cert-manager `Certificate` with its
-exact-host SANs. Its whole input is the closed role set, the portal and the
+exact-host SANs. Its whole input is the closed role set, the OS shell and the
 domain, and it emits ~440 lines from those — which is what earns generation for
 a listed target.
 
@@ -410,7 +409,7 @@ path is in the generated block before you look at anything else.
 That is why the list became generated output with a CI gate: a new public HTTP
 path on the bff either reaches the front door or breaks the build. For contrast,
 on the same host the routed paths answer 200 — `/healthz` returns the bff's
-health JSON, `/portal/` returns the portal's `index.html`.
+health JSON, `os.<domain>/` returns the shell's `index.html`.
 
 See [inbound-delivery.md](inbound-delivery.md) and
 [campaign-sending.md](campaign-sending.md) for the two exceptions themselves.
@@ -445,7 +444,7 @@ Ingress and a `Certificate` of its own, one object pair each. It is still
 **cluster-owner-only**; what is no longer true is that somebody applies that
 pair by hand ([the custom-domain regime](#custom-domains-a-clients-own-name),
 epic memql#4805). And the wildcard covers exactly one label, so
-`shop.<domain>` is certified and `shop.eu.<domain>` is not. The portal is the
+`shop.<domain>` is certified and `shop.eu.<domain>` is not. The OS shell is the
 one site whose rule and SAN the generator writes, because it is the two sites
 whose names are known before any row exists.
 
@@ -588,7 +587,7 @@ The domain reaches every side through ONE derivation: `cmd/frontdoorhosts`
 composes the Ingress hosts and certificate SANs from it,
 `component/envregistry/domain.go` composes the issuer, CORS origins, redirect
 URIs and MCP public URL from it, and `component/memql`'s SeedMaterializer
-composes the portal site row's hostname from it — all through
+composes the OS site row's hostname from it — all through
 `component/frontdoor`. Two copies of that rule would be two copies that can
 disagree, and the disagreement is an issuer nothing is served at, or a
 certificate naming a host the site row does not carry — which fails as
@@ -683,7 +682,7 @@ set is only the doors we assert are up.
 
 - Design: `docs/superpowers/specs/2026-08-13-cluster-front-door-design.md`
   (epic [memql#3700](https://github.com/znasllc-io/memql/issues/3700)) —
-  decisions D3 (the five rules as designed; memql#4224 added the portal's
+  decisions D3 (the five rules as designed; memql#4224 added the platform site's
   exact rule and retired D2's wildcard SAN in the cloud, and memql#4347
   reinstated it on a second, DNS-01-issued certificate), D5 (a site is data)
   and D9 (the same-origin proxy for hosted sites), each with the alternatives

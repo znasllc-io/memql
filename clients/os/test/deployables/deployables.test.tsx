@@ -25,7 +25,7 @@ import { siteFromRow } from "../../src/apps/deployables/rows";
 import {
   NOTE,
   PDF,
-  PORTAL,
+  PLATFORM_SITE,
   SHOP,
   ZIP,
   click,
@@ -505,7 +505,7 @@ describe("the Head's action, by state", () => {
   });
 
   it("a system-owned row: no action, and no lifecycle controls at all", async () => {
-    const { page } = await mountAndOpen({ sites: [PORTAL] }, "portal.memql.example.com");
+    const { page } = await mountAndOpen({ sites: [PLATFORM_SITE] }, "os.memql.example.com");
     expect(headAction(page)).toBeNull();
     for (const label of [/Pause/, /Resume/, /Archive/, /Restore/, /Show the last/, /Roll back/]) {
       expect(within(page).queryByRole("button", { name: label })).toBeNull();

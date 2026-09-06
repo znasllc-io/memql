@@ -608,7 +608,7 @@ nothing.
 
 When a construct is authored by a **goal** rather than by a person -- the
 runtime authoring path, gated by `MEMQL_AUTHORING_CAPTURE_MODE=author` -- the
-portal has a page for it: `/nexus/:planId/constructs` shows the bundle that
+console has a page for it: the Nexus app's run view shows the bundle that
 goal produced, every construct in it with its source, and the dependency
 edges between them, with **stage** and **promote** behind confirmations. The
 Map beside it draws the same constructs materializing as the goal works.
@@ -619,7 +619,7 @@ being off, and Constructs states that plainly -- an empty list would read as
 "this goal built nothing", which is a claim about the goal rather than about
 the cluster.
 
-See [MemQL Portal -- operator guide](../operate/portal.md).
+See [MemQL OS -- operator guide](../operate/memql-os.md).
 
 ---
 
@@ -629,5 +629,5 @@ See [MemQL Portal -- operator guide](../operate/portal.md).
 - [VS Code Runtime Panel](vscode-runtime-panel.md) — Deployments, Clusters, and the concept browser
 - [Authoring Rules](authoring-rules.md) — read before writing `.memql`
 - [MemQL Language](memql.md) — the DSL reference
-- [MemQL Portal](../operate/portal.md) — Nexus: a goal's constructs, and the
+- [MemQL OS](../operate/memql-os.md) — Nexus: a goal's constructs, and the
   map of the goal that authored them

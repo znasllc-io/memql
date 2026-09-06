@@ -43,7 +43,7 @@ Work down this list and stop at the first line that is true.
    route (see [Recovery](#recovery-when-mail-does-not-work)).
 3. **You are a person with no credential on a cluster that cannot send mail**
    -- typically a freshly installed local cluster. You need an **enrolment
-   link**, minted by an owner/admin from the portal's People surface or by the
+   link**, minted by an owner/admin from the console's Users app or by the
    install wizard.
 4. **You are an editor or a CLI on a machine with a browser and a bindable
    loopback port.** Use the browser sign-in flow (the VS Code extension's
@@ -190,7 +190,7 @@ each asks the holder for a different next step:
 
 Two issuers, and the split matters:
 
-- **An owner or admin, from the portal's People surface.** Rides
+- **An owner or admin, from the console's Users app.** Rides
   `IdentityAdminMsg` on `MemqlService.Stream`; the gate lives in
   `component/identity/adminops`. The composed link must be `https` -- the issuer
   refuses to emit a plaintext one.
@@ -369,7 +369,7 @@ Two things this recovery is NOT:
   authority over the cluster, which is precisely why it is safe.
 - It is **not** available to a person who has lost access to a cluster somebody
   else operates. There, the answer is a magic link if mail works, or an
-  owner/admin issuing them an enrolment link from the portal's People surface.
+  owner/admin issuing them an enrolment link from the console's Users app.
 
 The install wizard also retains the pod-log magic-link read as a documented
 fallback (its `magicLink` graph step) for the case where the enrolment link

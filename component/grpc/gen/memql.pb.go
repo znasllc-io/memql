@@ -10624,8 +10624,9 @@ type MyAccessResult struct {
 	// read off the verified claims (memql#4306).
 	//
 	// It exists so a client can mark "this device" in a sessions list without
-	// decoding the JWT. The portal refuses to decode tokens by standing rule
-	// (clients/portal/src/cluster/useMyAccess.ts) -- a client that parses a
+	// decoding the JWT. Clients refuse to decode tokens by standing rule
+	// (the portal's useMyAccess.ts held it until epic memql#4984; MemQL OS's
+	// modules/profile/useResolvedAccess.ts holds it now) -- a client that parses a
 	// bearer starts making decisions from claims the server never promised it
 	// -- so without this field the only way to identify the current session
 	// would be to break that rule or to guess by user agent. Guessing is worse

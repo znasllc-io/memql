@@ -1,5 +1,6 @@
 // The derived online rule, restated for the OS the way
-// clients/portal/src/fleet/online.ts restates it for the portal: a machine
+// This file restates the engine's rule for the shell (the portal carried a
+// third copy until epic memql#4984): a machine
 // is online if ANY replica holds its stream, and the ROW is the only place
 // that fact is written (`lastSeenAt` bumped by the heartbeat wherever it
 // lands, `revokedAt` empty while the registration lives). Deriving it from

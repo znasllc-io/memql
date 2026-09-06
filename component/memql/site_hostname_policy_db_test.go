@@ -393,7 +393,7 @@ func TestSiteSeededBySystemActorStaysClusterOwnedAcrossReMaterialization(t *test
 	args := map[string]any{
 		"siteId":      id,
 		"hostname":    "portal." + siteTestDomain,
-		"bundleRef":   "file:///app/portal",
+		"bundleRef":   "file:///app/os",
 		"status":      "live",
 		"apiProxy":    true,
 		"systemOwned": true,

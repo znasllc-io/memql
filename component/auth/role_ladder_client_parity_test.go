@@ -36,7 +36,7 @@ import (
 // silently vacuous the moment a file were renamed or moved -- which is exactly
 // when the rule is most likely to have drifted. The failure names the path so
 // the fix is obvious in either direction. This is the rule
-// TestFleetOnlineWindowMatchesPortal already states for its own three copies.
+// TestFleetOnlineWindowMatchesTheClients already states for its own two copies.
 
 const (
 	osRolesPath  = "../../clients/os/src/system/roles.ts"

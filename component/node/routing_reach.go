@@ -26,8 +26,11 @@ import (
 //
 // A recorded exclusion is what makes the two cases different. After
 // this file, "not forwarded" is either a decision with a reason attached
-// or a gate failure -- and portal_subscription_routing_test.go is what
-// turns that into a build failure rather than a convention.
+// or a gate failure -- and TestRecordedExclusionsStayExcluded, in
+// routing_reach_test.go beside this file, is what turns that into a
+// build failure rather than a convention. (It lived in the repo-root
+// portal_subscription_routing_test.go until epic memql#4984 retired the
+// portal; the gate is the same one, moved next to what it guards.)
 //
 // # What an exclusion is NOT
 //
@@ -174,9 +177,12 @@ func RoutingExclusions() []RoutingExclusion {
 			Pattern: "graph.node.*.v1:observability:invocation",
 			Reason: "A row per instrumented call, on a hypertable sized for exactly " +
 				"that. Invocation-class volume by the same measure as " +
-				"v1:worker:invocation. The portal's module drill-in reads " +
-				"codeMetricsInWindow (an aggregate over a time range) rather " +
-				"than subscribing.",
+				"v1:worker:invocation. The read this data is shaped for is " +
+				"codeMetricsInWindow -- an aggregate over a time range, asked " +
+				"on navigation -- not a subscription. The portal's module " +
+				"drill-in was the caller until epic memql#4984 retired it; no " +
+				"client asks today, which lowers the cost of this exclusion " +
+				"rather than changing it.",
 		},
 		{
 			Pattern: "graph.node.*.v1:observability:codeMetric",
