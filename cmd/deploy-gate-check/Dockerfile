@@ -73,7 +73,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \
 
 # Distroless static: ships curl-free; deploy-gate-check does /readyz over Go's
 # net/http and the query over gRPC, so no shell/curl is needed.
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:d093aa3e30dbadd3efe1310db061a14da60299baff8450a17fe0ccc514a16639
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 COPY --from=build /out/deploy-gate-check /usr/local/bin/deploy-gate-check
 USER nonroot:nonroot
 ENTRYPOINT ["/usr/local/bin/deploy-gate-check"]

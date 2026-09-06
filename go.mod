@@ -23,7 +23,7 @@ require (
 )
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.68.0 // indirect
+	github.com/anthropics/anthropic-sdk-go v1.69.0 // indirect
 	github.com/dgraph-io/ristretto v0.2.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.3 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
@@ -38,7 +38,7 @@ require (
 	github.com/oschwald/geoip2-golang v1.13.0 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/prometheus/client_golang v1.24.1 // indirect
-	github.com/prometheus/client_model v0.6.2 // indirect
+	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1 // indirect
 	github.com/sashabaranov/go-openai v1.42.0 // indirect
@@ -47,7 +47,7 @@ require (
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
 	github.com/znasllc-io/memql/component/healing v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/node/gen v0.0.0 // indirect
-	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/crypto v0.56.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
 	nhooyr.io/websocket v1.8.17 // indirect
 )

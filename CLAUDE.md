@@ -318,8 +318,12 @@ DSL all live here.
    **"A failing check" means a failing REQUIRED one** (memql#5016). The guard
    counted every red lane, and this repo has two that no PR can turn green:
    CodeQL's `Analyze (go)`, which crashes above ~300 changed files and is red on
-   pristine `main`, and `install-cluster-e2e`, which is flaky and installs a
-   PINNED RELEASED STACK rather than the branch under test. So the guard was
+   pristine `main`, and `install-cluster-e2e`, which is not required and fails
+   for its own reasons often enough to block on nothing. **That lane DOES test
+   the branch** -- all three legs check the PR's commit out and point ArgoCD at
+   that SHA; an earlier note here claimed it installed a pinned released stack
+   instead, and only the `upgrade` leg does, as its FROM version. So a red there
+   is a log to read, not a lane to wave through. So the guard was
    strictest on exactly the PRs it exists for -- removal epics, regenerations,
    large refactors -- and named no way out, which is an invitation to reach for
    `gh pr merge --admin` and skip the script entirely. It now refuses on a red

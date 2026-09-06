@@ -267,8 +267,9 @@ export class VoiceSession {
  *
  * A `MicError` carries its own reason. Everything else came off the wire, and
  * the server's message names the fix ("streaming transcription is not
- * configured" is what a cluster with no voice node answers) -- so it is passed
- * through rather than replaced with something friendlier and emptier.
+ * configured" is what a cluster answers when no node is serving it) -- so it
+ * is passed through rather than replaced with something friendlier and
+ * emptier.
  */
 export function problemFor(err: unknown): VoiceProblem {
   const reason = (err as { reason?: VoiceProblem["kind"] } | null)?.reason;

@@ -21,3 +21,44 @@ query-filters:
   # unstructured fmt-style logging is not used in this codebase.
   - exclude:
       id: go/log-injection
+  # `go/bad-redirect-check` (Security/CWE-601/BadRedirectCheck.ql) CANNOT RUN
+  # on this codebase. It is not noisy -- it never finishes:
+  #
+  #     [36/36 eval 13m34s] Query failed:
+  #       codeql/go-queries/Security/CWE-601/BadRedirectCheck.ql
+  #       (Result set is larger than the limit of 2GiB).
+  #     1 of 36 queries failed to evaluate
+  #     Error running analysis for go: ... Exit code was 34
+  #
+  # `codeql database run-queries` exits non-zero when ANY query fails, so this
+  # one query took the whole go analysis down with it -- 35 security queries
+  # evaluated successfully and NONE of their results were uploaded. Every push
+  # to main failed `Analyze (go)` for eight consecutive merges before this
+  # exclusion; go security scanning was producing nothing at all.
+  #
+  # So this REMOVES ONE QUERY AND RESTORES THIRTY-FIVE. That direction is the
+  # whole justification, and it is the opposite of the usual reason to exclude
+  # something: the two above are excluded for signal-to-noise, this one is
+  # excluded because the alternative is no go scanning whatsoever.
+  #
+  # WHY IT EXPLODES HERE, most likely: CWE-601 models redirect targets, and
+  # this repo is unusually dense in them -- the front door, the OAuth and
+  # GitHub App callbacks, the magic-link 303, and campaigns' tracked-click
+  # redirect, whose destination is deliberately carried INSIDE a signed
+  # payload precisely so it is not an open redirect. Proving a large safe
+  # surface and producing a large result set are the same work.
+  #
+  # WHAT THIS DOES NOT DO. It does not narrow open-redirect coverage to
+  # nothing: `go/unvalidated-url-redirection` (OpenUrlRedirect.ql) is the
+  # primary CWE-601 query, it still runs, and it is the one that has actually
+  # produced findings on this repo. BadRedirectCheck is the narrower companion
+  # -- it flags a redirect check that tests for one leading slash but not two.
+  #
+  # `paths-ignore` is NOT an alternative here: as the note at the top of this
+  # file says, path filters have no effect for Go. Excluding the rule id is
+  # the only mechanism available.
+  #
+  # REVISIT when CodeQL's Go extractor or this query changes; the test is
+  # simply whether removing this entry lets `Analyze (go)` finish. memql#5016.
+  - exclude:
+      id: go/bad-redirect-check
