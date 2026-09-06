@@ -290,7 +290,7 @@ FROM ${PORTAL_DIST_STAGE} AS portal-dist
 # go and read. The engine runs as root, so a build running as root could read
 # /proc/1/environ and take every secret the pod holds. It runs as uid 10001
 # instead, which cannot.
-FROM debian:12-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS workbench-runtime
+FROM debian:13-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS workbench-runtime
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
