@@ -50,6 +50,31 @@ builtin agent {
   partitionId  string!
 }
 
+// ---- builtin runAgentTurn --------------------------------------------
+//
+// The work spine's way to invoke an agent, with no Plan in the path
+// (memql#5048). `agent()` above mints a v1:planner:plan that the planner
+// loop then executes; this runs the turn directly and returns the reply,
+// so a compiled work template can call it as an ordinary step.
+//
+// SYNCHRONOUS, and that is not a downgrade from `agent()`. The asynchrony
+// `agent()` promises belongs to the RUN: createGoal returns a goal id and
+// the run carries on detached, so the step calling this is already the
+// background. A second layer here would be a run waiting on something it
+// could not journal.
+//
+// ONLY ANSWERS ON AN AGENT NODE, and says so rather than returning an
+// empty reply -- an empty reply is indistinguishable from an agent that
+// had nothing to say, and this is a deployment fact rather than an answer.
+
+@executor("integration.agents.runAgentTurn")
+@description("Run one agent turn and return its reply. The work spine's way to invoke an agent with no Plan in the path. Synchronous: the asynchrony belongs to the run that calls it. Answers only on an agent node.")
+builtin runAgentTurn {
+  agentId  string!
+  prompt   string!
+  scopeId  string
+}
+
 // ---- builtin requestUserFeedback -------------------------------------
 //
 // Bridges the requestUserFeedback tool (dsl/agents/tools/

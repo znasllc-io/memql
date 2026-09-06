@@ -58,6 +58,9 @@ import (
 type Integration struct {
 	agents *memql.AgentRegistry
 	engine memql.IntegrationEngineAccess
+	// turnSeam carries the agent runtime, which exists only on an
+	// agent-tagged build (memql#5048). See agent_turn.go.
+	turnSeam
 }
 
 // New constructs the agents integration. Returns nil if the
@@ -91,6 +94,19 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"name":        "string",
 				"prompt":      "string",
 				"partitionId": "string",
+			},
+		},
+		{
+			// memql#5048: the work spine's way to invoke an agent, with no
+			// Plan in the path. See agent_turn.go for why it dispatches
+			// locally rather than forwarding.
+			Name:        "runAgentTurn",
+			Description: "Run one agent turn and return its reply. SYNCHRONOUS: the asynchrony belongs to the work run that calls it, which is already detached. Requires an agent runtime, so it answers only on an agent node. Returns {agentId, requestId, reply}.",
+			Handler:     i.handleRunAgentTurn,
+			ArgsSchema: map[string]string{
+				"agentId": "string (required) -- v1:agents:agent.id to run",
+				"prompt":  "string (required) -- the user-role turn to send",
+				"scopeId": "string -- optional scope the turn runs in",
 			},
 		},
 		{
