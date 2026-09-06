@@ -1,0 +1,200 @@
+// concepts.memql
+//
+// The compose namespace -- the Materializer's rows (design record
+// docs/superpowers/specs/2026-09-05-compose-materializer-design.md,
+// epic memql#4977). A composition is one materialization: the sources
+// that went into it, the template it was rendered through, the file it
+// produced, and every model that contributed.
+//
+// THE NAMESPACE IS `compose` AND THE SURFACE IS THE MATERIALIZER, and
+// that split is deliberate rather than an inconsistency (design D1). The
+// word `materializer` already names the engine's boot seeder
+// (component/memql/seed_materializer.go), so a namespace sharing it would
+// put `system:seedMaterializer` and `v1:materializer:*` one word apart in
+// every log line. The OS app id stays `materializer` and
+// v1:work:goal.requestedVia already carries that string -- what changed
+// is the name of the rows, which is the half that had a collision.
+//
+// TIER. All three declare the composite owner tier
+// (@rowAuthz(owner="ownerUserId", clusterOwner)): a person reads their
+// own, a cluster owner reads the instance's. That second half is what
+// makes "everything materialized in this instance" a read that can
+// honestly return everything -- a plain owner= tier has no cluster-owner
+// escape on the READ path, so the Materialized view would silently
+// render one person's subset (memql#4312).
+
+use accounts.concepts.{ account }
+use identity.concepts.{ user }
+use library.concepts.{ file, folder }
+use work.concepts.{ goal, run }
+
+// ---- composition: the record ----
+//
+// The epic's own sentence: "a materialization record naming the sources,
+// the template, the user, and every model that contributed, with the same
+// authoring and origin provenance written into the file itself".
+//
+// IT OWNS NO BYTES. outputFileId points at a v1:library:file, which is
+// the division v1:library:artifact already makes -- the index row owns no
+// content and the file row does (memql#693). A composition that owned its
+// output would be a second byte-bearing concept with its own upload,
+// version, quota and archive machinery, all of which the Library has.
+
+/// One materialization: what was made, from what, through which template, by which models, and
+/// whether the file it produced carries its own provenance. The record is the provenance of last
+/// resort -- for a format with no metadata channel (design D4) it is the ONLY provenance the output
+/// has, which is why it is a first-class row rather than a field on the file.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="name", secondary="format", tertiary="createdAt", status="status")
+concept composition {
+  ownerUserId  string!  @serverSet  @description("v1:identity:user.id of the person this composition belongs to. Stamped from actor.userId and never accepted as a caller arg -- the load-bearing per-row authz key.")
+
+  name         string!  @description("What the person called it, and the filename stem of the output. Sanitised the way an upload's name is: path separators and control characters removed, length bounded.")
+
+  statement    string  @description("What the person asked for, in their own words -- copied from the goal's statement. Kept on the row rather than read through goalId because the Materialized list renders it and a per-row goal read would be one read per row.")
+
+  status       enum("draft", "composing", "rendering", "ready", "failed", "cancelled")!  @default("draft")  @description("Where the materialization is. draft = sources and target chosen, nothing run; composing = the one reasoning step is in flight; rendering = the deterministic tail (render, stamp, file); ready = the output file exists; failed = terminal, with failureReason set; cancelled = somebody stopped it. NOT a mirror of the run's status: a run can be `waiting` on an approval while this row is still `composing`, and collapsing the two would make the app claim the file is being written when nothing is.")
+
+  format       enum("markdown", "html", "txt", "csv", "json", "docx", "pdf")!  @description("What kind of file this produces. The set is exactly what component/compose can WRITE (design D3). Audio and video are named in the brief and deliberately have NO value here: audio wants a compose-then-speak pipeline with a cost ceiling of its own and video wants a generation provider this cluster has none of, and a value that nothing can produce is a form somebody can fill in and nothing can store -- the same reasoning v1:platform:site.kind gives for having no ios/android value. The Target column names both absences and says why, because an absent option with no account of itself reads as something nobody got round to building.")
+
+  sources      []object  @description("What went in: a list of {kind, ref, label, capturedAt} where kind is concept_row | library_file | query. THREE KINDS RATHER THAN A LIST OF IDS, and the distinction is load-bearing (design C): 'made from the 4 invoices matching status=open' and 'made from these 4 invoice ids' are different claims about repeatability, and flattening them to ids keeps only the second. `ref` is a BARE id for the row and file kinds and a rendered call string for the query kind; `capturedAt` is when it was resolved, which is what makes a re-run's difference explainable.")
+
+  templateId   string  @description("v1:compose:template this was rendered through. Empty for a composition with no template -- the format's own default rendering is used, which is the common case for markdown and the impossible case for docx branding.")
+
+  outputFileId string  @description("v1:library:file holding the produced bytes. Empty until status reaches ready. The file is an ORDINARY Library file -- it browses, downloads, versions, moves between folders and archives to the Bin like any other, and the Files app's Materializer place is a shortcut to the subset that came from here.")
+
+  folderId     string  @description("v1:library:folder the output was filed into, chosen in the Target column. Empty means the Library root.")
+
+  accountIds   []string  @description("Optional v1:accounts:account tags -- a record of who the work is for, never a visibility scope (the accounts D1 rule). No query in this namespace narrows a read because of it.")
+
+  goalId       string  @description("The v1:work:goal this materialization is. EVERY materialization is a goal (design D6): it opens through the existing createGoal builtin with requestedVia='materializer', so Nexus shows it, the spine journals it, and forkRun/replayRun already know how to run it again. This field is how the app hands off to Nexus and how a recipe finds its run template.")
+
+  runId        string  @description("The v1:work:run currently carrying this composition, or the last one that did. Re-stamped on each attempt, so it names the run whose steps the app draws rather than the first one ever opened.")
+
+  recipeId     string  @description("v1:compose:recipe this composition was run from, when it was run from one rather than composed by hand. Empty for a first-time composition -- which is also what tells the app whether to offer 'Save as recipe'.")
+
+  modelsUsed   []object  @description("Every model that contributed, as {provider, model, calls, tokens} -- A LIST, because the brief says 'every model that contributed' and a composition drafted by one model and tightened by another has two entries. A single field would make the second contribution invisible, which is precisely the fact a provenance record exists to carry. EMPTY IS A REAL ANSWER and the honest one on a catalog hit: a re-run that matched the catalog reached no model at all, and that is the product's headline claim rather than a missing value.")
+
+  provenanceEmbedded  bool  @description("Whether the output file carries provenance in its own bytes. True for markdown (front matter), html (a meta block), docx (docProps/core.xml + custom.xml) and pdf (an XMP packet and the Info dictionary); false for txt, csv and json, which have no metadata channel (design D4). A false with no account of itself reads as a failure, which is what provenanceNote is for. NO @default, deliberately: this field has THREE states and the third is the reason the app reads it through an optional-bool rather than the SDK's rowBool. ABSENT means the stamp step has not run yet, and a default of false would put 'the record is the only copy' on a composition still composing -- a file that will carry its own provenance the moment it is written. The engine writes this once, in updateCompositionState, and never before it knows.")
+
+  provenanceNote      string  @description("One sentence saying what the flag above means for THIS file, rendered verbatim by the app: 'CSV carries no metadata channel -- the record here is the only provenance this file has.' Written by the stamp step, which is the only place that knows which branch it took.")
+
+  sha256       string  @description("Lowercase hex SHA-256 of the produced bytes, copied from the file row. A verification handle, never an access key: the bytes only ever reach a viewer through GET /artifacts/{id}/content under their own actor.")
+
+  failureReason  string  @description("Why status is failed, in terms the person who asked can act on. Empty unless status==failed. On the row rather than only in a log because the person who asked is the one who needs to read it.")
+
+  deployableKind  enum("", "spa", "static", "shopify_storefront")  @description("Set when this composition produced a PACKAGE SOURCE ZIP for the Deployables pipeline (design D8, epic issue #4980) rather than a document. The value is the site kind the zip is for, and the set matches OFFERED_KINDS in the Deployables app -- which site_kind_os_parity_test.go holds equal to v1:platform:site.kind, so this app reads that list rather than keeping a second one. EMPTY means an ordinary document composition, which is almost all of them. NO @default: the empty string is a MEMBER of this enum rather than a fallback, so an absent key and an explicit \"\" are the same answer and there is nothing for a default to add. @default is documentation and is never applied on insert, so one here would be a no-op reading as a promise.")
+
+  archived     bool  @default("false")  @description("Soft delete, the same append-only re-version every Library row gets. Archiving the RECORD does not archive the output file and never deletes bytes -- the two are separate rows with separate dispositions, which is the Bin's own rule about what an archive is.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="producedFile", field="outputFileId", target=file, direction="outgoing")
+  @relationship(type="references", as="filedIn", field="folderId", target=folder, direction="outgoing")
+  @relationship(type="references", as="renderedThrough", field="templateId", target=composeTemplate, direction="outgoing")
+  @relationship(type="references", as="ranAs", field="goalId", target=goal, direction="outgoing")
+  @relationship(type="references", as="carriedBy", field="runId", target=run, direction="outgoing")
+  @relationship(type="references", as="runFrom", field="recipeId", target=recipe, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountIds", target=account, direction="outgoing")
+}
+
+// ---- composeTemplate: the repeatable part ----
+//
+// A TEMPLATE IS AN ORDINARY LIBRARY FILE (design D7), pointed at by
+// fileId. It gets uploads, chunked transfers, versions, archive-to-Bin
+// and row authz for free; a second byte-bearing concept would have needed
+// every one of those again.
+//
+// So this row is the BINDING rather than the bytes: which file, what it
+// produces, who it is for, and what it will ask for.
+//
+// IT IS `composeTemplate` RATHER THAN `template`, AND THE PREFIX IS LOAD-
+// BEARING. `v1:campaigns:template` already exists, and a spec binds its
+// concept by BARE NAME -- `spec template isReadyTemplate` in
+// dsl/campaigns/specs.memql resolves through the flat registry, where the
+// first `template` wins. A second one made that binding ambiguous and it
+// failed SILENTLY: the spec loaded with an unresolved kind, and the spec
+// in question is what keeps half-written copy out of the campaign
+// editor's picker. Nothing in `compose` was wrong and an unrelated
+// namespace broke.
+//
+// So the concept carries the namespace in its name, exactly as every
+// query, shape and mutation in this file's siblings already does
+// (`composeTemplates`, `composeTemplateFull`, `createComposeTemplate`) --
+// leaving the concept unprefixed was the inconsistency, not the fix.
+// `composition` and `recipe` stay bare because no other namespace
+// declares either. The PERSON still sees "template" everywhere: the app
+// section, the field name and the picker are all unchanged.
+
+/// A file that makes an output repeatable for a customer: a .docx with a branded header, an HTML
+/// shell, a Markdown skeleton, or a zip of files for a deployable. The row binds one Library file
+/// to the format it produces and the placeholders it expects.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="name", secondary="format", tertiary="description", status="archived")
+concept composeTemplate {
+  ownerUserId  string!  @serverSet  @description("v1:identity:user.id that owns this template. Stamped from actor.userId, never a caller arg.")
+
+  name         string!  @description("What the person calls it in the Templates section and the Target column's picker.")
+
+  description  string  @description("What it is for, in the owner's words. Rendered under the name in the picker, which is where somebody choosing between two similar templates decides.")
+
+  fileId       string!  @description("v1:library:file holding the template's bytes -- a document, an HTML file, a Markdown file, or a zip of files. THE BYTES LIVE IN THE LIBRARY (design D7): this is a binding, not a second storage form.")
+
+  format       enum("markdown", "html", "txt", "csv", "json", "docx", "pdf")!  @description("The format this template produces. A composition inherits it, and a Target column that offered a different one would be offering a combination the render step cannot honour.")
+
+  placeholders []object  @description("What the template will ask for: {name, description, required}, read out of the template when it is bound. It lets the app show what a template needs BEFORE somebody picks it, which is the difference between choosing a template and discovering halfway through a composition that it wanted a field nobody has.")
+
+  accountIds   []string  @description("Optional v1:accounts:account tags -- 'this is the template we use for that client'. A record, never a visibility scope: no query here narrows on it, and a template tagged for one account is still selectable for another.")
+
+  archived     bool  @default("false")  @description("Soft delete. Archiving the binding does not archive the file it points at -- the file is an ordinary Library row with its own disposition, and somebody who retires a binding has not asked to throw away the document.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="bytesIn", field="fileId", target=file, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountIds", target=account, direction="outgoing")
+}
+
+// ---- recipe: the replayable part ----
+//
+// DELIBERATELY THIN, because the work spine already owns replay
+// (component/work: forkRun, replayRun, and the catalog's GoalSignature).
+// A recipe is a NAME for a signature plus its bound inputs -- not a
+// second execution model. The epic's "Nexus can capture it as a
+// replayable recipe" is that sentence.
+//
+// IT HOLDS SELECTORS, NOT ANSWERS. The sources are the SELECTION (a
+// query, a template, a folder) rather than the rows that selection
+// returned last time, which is the whole difference between "make this
+// again" and "make a copy of that".
+
+/// A composition that worked, promoted to something you can run again: the source SELECTORS, the
+/// template and the format. Running one opens a goal exactly as a fresh materialization does, and a
+/// re-run with the same shape is a catalog exact match -- so it reaches no model at all.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="name", secondary="format", tertiary="lastRunAt", status="archived")
+concept recipe {
+  ownerUserId  string!  @serverSet  @description("v1:identity:user.id that owns this recipe. Stamped from actor.userId, never a caller arg.")
+
+  name         string!  @description("What the person calls it -- 'Quarterly report for Acme'.")
+
+  description  string  @description("What running it does, in the owner's words.")
+
+  sourceSelectors []object  @description("How to find the sources NEXT time: {kind, selector, label} where kind is concept_query | library_file. A SELECTOR RATHER THAN THE ROWS IT RETURNED -- 'the invoices matching status=open' rather than the four ids that matched last quarter. Storing the answers would make a recipe a copy of one composition instead of a way to make the next one. THERE IS DELIBERATELY NO library_folder KIND: 'everything in that folder' is exactly the standing selection a recipe wants, and the Library has no read that answers it -- v1:library:file.folderId is the INITIAL FILING ONLY, so a query built on it would silently omit every file somebody had since moved. A recipe that quietly composes from a subset is worse than one that cannot express the selection, so the kind is refused by name and a concept_query over the artifact index is how to say it today.")
+
+  templateId   string  @description("v1:compose:template to render through. Empty for a recipe with no template.")
+
+  format       enum("markdown", "html", "txt", "csv", "json", "docx", "pdf")!  @description("What it produces.")
+
+  folderId     string  @description("v1:library:folder to file each run's output into. Empty means the Library root.")
+
+  accountIds   []string  @description("Optional v1:accounts:account tags. A record, never a visibility scope.")
+
+  lastRunAt    datetime  @description("When this recipe last produced something. Rendered continuously beside the row and deliberately ABSENT from the arrival-cue fingerprint: a recipe on a schedule would touch it forever, and naming it as news would strobe the list on that schedule's own cycle (the heartbeat rule, clients/os/README.md).")
+
+  runCount     int  @default("0")  @description("How many compositions this recipe has produced. ABSENT MEANS ZERO here and that is safe, unlike every `absent is not zero` case in this tree: nothing wrote this field before the concept existed, because the concept is new.")
+
+  archived     bool  @default("false")  @description("Soft delete. The compositions a recipe produced are untouched -- they are the evidence it worked.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="renderedThrough", field="templateId", target=composeTemplate, direction="outgoing")
+  @relationship(type="references", as="filesInto", field="folderId", target=folder, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountIds", target=account, direction="outgoing")
+}

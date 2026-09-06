@@ -633,6 +633,50 @@ func ArchiveClientAccountBuild(args ArchiveClientAccountArgs) string {
 	return b.String()
 }
 
+// ArchiveComposeRecipe -- Archive a recipe. Owned. The compositions it produced are untouched -- they are the evidence it worked, and an archive that took them would destroy the record this whole namespace is for.
+//
+// Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["archiveComposeRecipe"] in generated_concepts.go).
+type ArchiveComposeRecipeArgs struct {
+	RecipeId string
+}
+
+// ArchiveComposeRecipe calls the engine mutation archiveComposeRecipe.
+func (qc *QueryClient) ArchiveComposeRecipe(ctx context.Context, args ArchiveComposeRecipeArgs) (*Result, error) {
+	call := ArchiveComposeRecipeBuild(args)
+	return qc.executeNamed(ctx, "archiveComposeRecipe", call)
+}
+
+func ArchiveComposeRecipeBuild(args ArchiveComposeRecipeArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation archiveComposeRecipe(")
+	b.WriteString("recipeId: ")
+	b.WriteString(quoteMemQL(args.RecipeId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ArchiveComposeTemplate -- Archive a template binding. Owned. It does NOT archive the file it points at: the file is an ordinary Library row, and retiring a binding is not asking to throw away a document.
+//
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["archiveComposeTemplate"] in generated_concepts.go).
+type ArchiveComposeTemplateArgs struct {
+	TemplateId string
+}
+
+// ArchiveComposeTemplate calls the engine mutation archiveComposeTemplate.
+func (qc *QueryClient) ArchiveComposeTemplate(ctx context.Context, args ArchiveComposeTemplateArgs) (*Result, error) {
+	call := ArchiveComposeTemplateBuild(args)
+	return qc.executeNamed(ctx, "archiveComposeTemplate", call)
+}
+
+func ArchiveComposeTemplateBuild(args ArchiveComposeTemplateArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation archiveComposeTemplate(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ArchiveComposedView -- Archive a composed view: flip status to archived and stamp archivedAt. The row is retained in full -- MemQL has no hard delete, and a person who retires a view they spent time on should be able to find it again. Owned: ownerUserId is re-stamped from actor.userId and the write guard refuses a target row the actor does not own.
 //
 // Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["archiveComposedView"] in generated_concepts.go).
@@ -651,6 +695,28 @@ func ArchiveComposedViewBuild(args ArchiveComposedViewArgs) string {
 	b.WriteString("mutation archiveComposedView(")
 	b.WriteString("viewId: ")
 	b.WriteString(quoteMemQL(args.ViewId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ArchiveComposition -- Archive a composition record. Owned, and client-reachable: retiring a record is a decision about one's own filing, unlike every field above it. ARCHIVING THE RECORD DOES NOT TOUCH THE OUTPUT FILE -- they are separate rows with separate dispositions, so somebody tidying their Materialized list has not asked to throw away the document it names.
+//
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["archiveComposition"] in generated_concepts.go).
+type ArchiveCompositionArgs struct {
+	CompositionId string
+}
+
+// ArchiveComposition calls the engine mutation archiveComposition.
+func (qc *QueryClient) ArchiveComposition(ctx context.Context, args ArchiveCompositionArgs) (*Result, error) {
+	call := ArchiveCompositionBuild(args)
+	return qc.executeNamed(ctx, "archiveComposition", call)
+}
+
+func ArchiveCompositionBuild(args ArchiveCompositionArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation archiveComposition(")
+	b.WriteString("compositionId: ")
+	b.WriteString(quoteMemQL(args.CompositionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3548,6 +3614,144 @@ func CreateClusterSettingsBuild(args CreateClusterSettingsArgs) string {
 		}
 		b.WriteString("authoredAutomationsEnabled: ")
 		b.WriteString(fmt.Sprintf("%v", args.AuthoredAutomationsEnabled))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreateComposeRecipe -- Promote a composition that worked into something you can run again. Owned. The selectors are the caller's -- resolved under their own actor at every later run -- so a recipe can never widen what its runner may read.
+//
+// Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["createComposeRecipe"] in generated_concepts.go).
+type CreateComposeRecipeArgs struct {
+	RecipeId        string
+	Name            string
+	Description     string
+	SourceSelectors []map[string]any
+	TemplateId      string
+	Format          string
+	FolderId        string
+	AccountIds      []string
+}
+
+// CreateComposeRecipe calls the engine mutation createComposeRecipe.
+func (qc *QueryClient) CreateComposeRecipe(ctx context.Context, args CreateComposeRecipeArgs) (*Result, error) {
+	call := CreateComposeRecipeBuild(args)
+	return qc.executeNamed(ctx, "createComposeRecipe", call)
+}
+
+func CreateComposeRecipeBuild(args CreateComposeRecipeArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createComposeRecipe(")
+	b.WriteString("recipeId: ")
+	b.WriteString(quoteMemQL(args.RecipeId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if args.Description != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if args.SourceSelectors != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceSelectors: ")
+		b.WriteString(renderMemQLValue(args.SourceSelectors))
+	}
+	if args.TemplateId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("templateId: ")
+		b.WriteString(quoteMemQL(args.TemplateId))
+	}
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("format: ")
+	b.WriteString(quoteMemQL(args.Format))
+	if args.FolderId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderId: ")
+		b.WriteString(quoteMemQL(args.FolderId))
+	}
+	if args.AccountIds != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountIds: ")
+		b.WriteString(renderMemQLValue(args.AccountIds))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreateComposeTemplate -- Bind a Library file as a template. Owned. The BYTES are not written here and never are: a template is a binding to a v1:library:file (design D7), so uploading one is an ordinary Library upload through the one pinned path, and this row is what makes it selectable afterwards.
+//
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["createComposeTemplate"] in generated_concepts.go).
+type CreateComposeTemplateArgs struct {
+	TemplateId   string
+	Name         string
+	Description  string
+	FileId       string
+	Format       string
+	Placeholders []map[string]any
+	AccountIds   []string
+}
+
+// CreateComposeTemplate calls the engine mutation createComposeTemplate.
+func (qc *QueryClient) CreateComposeTemplate(ctx context.Context, args CreateComposeTemplateArgs) (*Result, error) {
+	call := CreateComposeTemplateBuild(args)
+	return qc.executeNamed(ctx, "createComposeTemplate", call)
+}
+
+func CreateComposeTemplateBuild(args CreateComposeTemplateArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createComposeTemplate(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if args.Description != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("format: ")
+	b.WriteString(quoteMemQL(args.Format))
+	if args.Placeholders != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("placeholders: ")
+		b.WriteString(renderMemQLValue(args.Placeholders))
+	}
+	if args.AccountIds != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountIds: ")
+		b.WriteString(renderMemQLValue(args.AccountIds))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -11881,6 +12085,72 @@ func RestoreArtifactBuild(args RestoreArtifactArgs) string {
 	return b.String()
 }
 
+// RestoreComposeRecipe -- Restore an archived recipe. Owned.
+//
+// Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["restoreComposeRecipe"] in generated_concepts.go).
+type RestoreComposeRecipeArgs struct {
+	RecipeId string
+}
+
+// RestoreComposeRecipe calls the engine mutation restoreComposeRecipe.
+func (qc *QueryClient) RestoreComposeRecipe(ctx context.Context, args RestoreComposeRecipeArgs) (*Result, error) {
+	call := RestoreComposeRecipeBuild(args)
+	return qc.executeNamed(ctx, "restoreComposeRecipe", call)
+}
+
+func RestoreComposeRecipeBuild(args RestoreComposeRecipeArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation restoreComposeRecipe(")
+	b.WriteString("recipeId: ")
+	b.WriteString(quoteMemQL(args.RecipeId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RestoreComposeTemplate -- Restore an archived template binding. Owned.
+//
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["restoreComposeTemplate"] in generated_concepts.go).
+type RestoreComposeTemplateArgs struct {
+	TemplateId string
+}
+
+// RestoreComposeTemplate calls the engine mutation restoreComposeTemplate.
+func (qc *QueryClient) RestoreComposeTemplate(ctx context.Context, args RestoreComposeTemplateArgs) (*Result, error) {
+	call := RestoreComposeTemplateBuild(args)
+	return qc.executeNamed(ctx, "restoreComposeTemplate", call)
+}
+
+func RestoreComposeTemplateBuild(args RestoreComposeTemplateArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation restoreComposeTemplate(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RestoreComposition -- Restore an archived composition record. The plain inverse of the archive above, and a client pair rather than an automation for the reason the Library's own restore is (memql#4784): a mirrored automation would fire on every update and close a cycle.
+//
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["restoreComposition"] in generated_concepts.go).
+type RestoreCompositionArgs struct {
+	CompositionId string
+}
+
+// RestoreComposition calls the engine mutation restoreComposition.
+func (qc *QueryClient) RestoreComposition(ctx context.Context, args RestoreCompositionArgs) (*Result, error) {
+	call := RestoreCompositionBuild(args)
+	return qc.executeNamed(ctx, "restoreComposition", call)
+}
+
+func RestoreCompositionBuild(args RestoreCompositionArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation restoreComposition(")
+	b.WriteString("compositionId: ")
+	b.WriteString(quoteMemQL(args.CompositionId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RestoreLibraryFile -- Bring a Library file back out of the Bin (memql#4784) -- the inverse of archiveLibraryFile, and the second half of the client-driven restore pair restoreArtifact's header describes. The bytes never went anywhere: an archive is an append-only re-version carrying archived=true, so this write is a re-version carrying false and the blobUrl, the provenance and every earlier version are exactly where they were.
 //
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["restoreLibraryFile"] in generated_concepts.go).
@@ -15309,6 +15579,154 @@ func UpdateClusterSettingsBuild(args UpdateClusterSettingsArgs) string {
 		}
 		b.WriteString("authoredAutomationsEnabled: ")
 		b.WriteString(fmt.Sprintf("%v", args.AuthoredAutomationsEnabled))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateComposeRecipe -- Rename or re-aim a recipe. Owned.
+//
+// Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["updateComposeRecipe"] in generated_concepts.go).
+type UpdateComposeRecipeArgs struct {
+	RecipeId        string
+	Name            string
+	Description     string
+	SourceSelectors []map[string]any
+	TemplateId      string
+	Format          string
+	FolderId        string
+	AccountIds      []string
+}
+
+// UpdateComposeRecipe calls the engine mutation updateComposeRecipe.
+func (qc *QueryClient) UpdateComposeRecipe(ctx context.Context, args UpdateComposeRecipeArgs) (*Result, error) {
+	call := UpdateComposeRecipeBuild(args)
+	return qc.executeNamed(ctx, "updateComposeRecipe", call)
+}
+
+func UpdateComposeRecipeBuild(args UpdateComposeRecipeArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateComposeRecipe(")
+	b.WriteString("recipeId: ")
+	b.WriteString(quoteMemQL(args.RecipeId))
+	if args.Name != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("name: ")
+		b.WriteString(quoteMemQL(args.Name))
+	}
+	if args.Description != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if args.SourceSelectors != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceSelectors: ")
+		b.WriteString(renderMemQLValue(args.SourceSelectors))
+	}
+	if args.TemplateId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("templateId: ")
+		b.WriteString(quoteMemQL(args.TemplateId))
+	}
+	if args.Format != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("format: ")
+		b.WriteString(quoteMemQL(args.Format))
+	}
+	if args.FolderId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderId: ")
+		b.WriteString(quoteMemQL(args.FolderId))
+	}
+	if args.AccountIds != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountIds: ")
+		b.WriteString(renderMemQLValue(args.AccountIds))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateComposeTemplate -- Rename a template, re-describe it, re-tag it, or repoint it at a different file. Owned. Repointing is deliberately allowed and is how a template is revised -- the alternative, a new template per revision, would leave every recipe naming the old one.
+//
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["updateComposeTemplate"] in generated_concepts.go).
+type UpdateComposeTemplateArgs struct {
+	TemplateId   string
+	Name         string
+	Description  string
+	FileId       string
+	Format       string
+	Placeholders []map[string]any
+	AccountIds   []string
+}
+
+// UpdateComposeTemplate calls the engine mutation updateComposeTemplate.
+func (qc *QueryClient) UpdateComposeTemplate(ctx context.Context, args UpdateComposeTemplateArgs) (*Result, error) {
+	call := UpdateComposeTemplateBuild(args)
+	return qc.executeNamed(ctx, "updateComposeTemplate", call)
+}
+
+func UpdateComposeTemplateBuild(args UpdateComposeTemplateArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateComposeTemplate(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	if args.Name != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("name: ")
+		b.WriteString(quoteMemQL(args.Name))
+	}
+	if args.Description != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if args.FileId != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("fileId: ")
+		b.WriteString(quoteMemQL(args.FileId))
+	}
+	if args.Format != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("format: ")
+		b.WriteString(quoteMemQL(args.Format))
+	}
+	if args.Placeholders != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("placeholders: ")
+		b.WriteString(renderMemQLValue(args.Placeholders))
+	}
+	if args.AccountIds != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountIds: ")
+		b.WriteString(renderMemQLValue(args.AccountIds))
 	}
 	b.WriteString(")")
 	return b.String()

@@ -219,6 +219,34 @@ readonly DB_GATED_TREES=(
 #
 # `integrations/work` is NOT here and must not be: it is a package inside the
 # existing `integrations` module, not a module.
+#
+# epic memql#4977 added `component/compose`, the Materializer's PURE half --
+# the format writers and the provenance they embed, as functions from values
+# to bytes. What the complement now means, having looked and MEASURED rather
+# than assumed, because that is the question this entry exists to make
+# somebody answer:
+#
+#	go list github.com/znasllc-io/memql/... | grep -cE 'component/compose$'
+#	  1
+#
+# So it IS enumerated in workspace mode, its tests run in THIS lane, and it
+# needs no lane of its own. It is ADDITIONALLY built and vetted with
+# GOWORK=off by `module-boundaries`, which is where the boundary is enforced.
+#
+# It is NOT db-gated and must not join DB_GATED_TREES: every test in it is a
+# property of a function over values -- render this draft in this format,
+# check what the bytes carry -- with no engine, no provider and no blob
+# storage anywhere near it. Moving it there would take real coverage out of
+# every lane that runs without Postgres.
+#
+# It is a module rather than a package for `component/work`'s reason, one
+# step further: it must stay a LEAF so the epic's headline claim about
+# provenance is checkable without a cluster. Its only requires are one pure
+# vendor PDF writer and `core/num`, and a go.mod is what keeps that true
+# under GOWORK=off rather than by convention.
+#
+# `integrations/compose` is NOT here, for `integrations/work`'s reason: it is
+# a package inside the existing `integrations` module.
 readonly KNOWN_GO_MOD_DIRS=(
 	"."
 	"component/actions"
@@ -227,6 +255,7 @@ readonly KNOWN_GO_MOD_DIRS=(
 	"component/automations"
 	"component/bus"
 	"component/bus/gen"
+	"component/compose"
 	"component/config"
 	"component/database"
 	"component/deploycontrol"

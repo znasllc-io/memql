@@ -38,6 +38,21 @@ func conceptInfoFromConcept(c *memoryNodes.Concept) *memqlv1.ConceptInfo {
 			Status:    c.DisplayCard.Status,
 		}
 	}
+	// The Materializer's mark (epic memql#4977). Sent ONLY where the
+	// concept declared it, which is the opposite of the data-origins
+	// block below and deliberately so: there, "native" is an answer and
+	// its absence is not, so every concept carries one. Here, ABSENT IS
+	// THE ANSWER -- an unmarked concept is unmarked, and a synthesised
+	// empty mark on every concept would make "unmarked" and "marked with
+	// nothing in it" the same wire shape, which is exactly the
+	// distinction the Sources column's two lists are drawn from.
+	if c.Composable != nil {
+		info.Composable = &memqlv1.Composable{
+			As:     c.Composable.As,
+			Fields: append([]string(nil), c.Composable.Fields...),
+			List:   c.Composable.List,
+		}
+	}
 	// The data-origins declaration (epic memql#4378). Sent on EVERY
 	// concept, including native ones, because "native" is an answer a
 	// client needs and its absence is not: a badge that renders only

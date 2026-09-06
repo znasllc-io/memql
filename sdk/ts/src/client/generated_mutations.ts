@@ -418,6 +418,50 @@ QueryClient.prototype.archiveClientAccount = function (this: QueryClient, args: 
   return this.executeNamed("archiveClientAccount", buildArchiveClientAccount(args), opts);
 };
 
+/** Archive a recipe. Owned. The compositions it produced are untouched -- they are the evidence it worked, and an archive that took them would destroy the record this whole namespace is for. */
+// Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["archiveComposeRecipe"] in generated_concepts.ts).
+export interface ArchiveComposeRecipeArgs {
+  recipeId: string;
+}
+
+export function buildArchiveComposeRecipe(args: ArchiveComposeRecipeArgs): string {
+  const parts: string[] = [];
+  parts.push("recipeId: " + renderMemQLValue(args.recipeId));
+  return "mutation archiveComposeRecipe(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    archiveComposeRecipe(args: ArchiveComposeRecipeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.archiveComposeRecipe = function (this: QueryClient, args: ArchiveComposeRecipeArgs = {} as ArchiveComposeRecipeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("archiveComposeRecipe", buildArchiveComposeRecipe(args), opts);
+};
+
+/** Archive a template binding. Owned. It does NOT archive the file it points at: the file is an ordinary Library row, and retiring a binding is not asking to throw away a document. */
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["archiveComposeTemplate"] in generated_concepts.ts).
+export interface ArchiveComposeTemplateArgs {
+  templateId: string;
+}
+
+export function buildArchiveComposeTemplate(args: ArchiveComposeTemplateArgs): string {
+  const parts: string[] = [];
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  return "mutation archiveComposeTemplate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    archiveComposeTemplate(args: ArchiveComposeTemplateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.archiveComposeTemplate = function (this: QueryClient, args: ArchiveComposeTemplateArgs = {} as ArchiveComposeTemplateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("archiveComposeTemplate", buildArchiveComposeTemplate(args), opts);
+};
+
 /** Archive a composed view: flip status to archived and stamp archivedAt. The row is retained in full -- MemQL has no hard delete, and a person who retires a view they spent time on should be able to find it again. Owned: ownerUserId is re-stamped from actor.userId and the write guard refuses a target row the actor does not own. */
 // Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["archiveComposedView"] in generated_concepts.ts).
 export interface ArchiveComposedViewArgs {
@@ -438,6 +482,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.archiveComposedView = function (this: QueryClient, args: ArchiveComposedViewArgs = {} as ArchiveComposedViewArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("archiveComposedView", buildArchiveComposedView(args), opts);
+};
+
+/** Archive a composition record. Owned, and client-reachable: retiring a record is a decision about one's own filing, unlike every field above it. ARCHIVING THE RECORD DOES NOT TOUCH THE OUTPUT FILE -- they are separate rows with separate dispositions, so somebody tidying their Materialized list has not asked to throw away the document it names. */
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["archiveComposition"] in generated_concepts.ts).
+export interface ArchiveCompositionArgs {
+  compositionId: string;
+}
+
+export function buildArchiveComposition(args: ArchiveCompositionArgs): string {
+  const parts: string[] = [];
+  parts.push("compositionId: " + renderMemQLValue(args.compositionId));
+  return "mutation archiveComposition(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    archiveComposition(args: ArchiveCompositionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.archiveComposition = function (this: QueryClient, args: ArchiveCompositionArgs = {} as ArchiveCompositionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("archiveComposition", buildArchiveComposition(args), opts);
 };
 
 /** Archive a Library file -- the soft delete. Sets archived so the file drops out of the owner's default list; the row, its provenance and its bytes all survive, and the append-only history keeps every earlier version. Called directly by the owner, and by archiveFileOnArtifactArchive when the owner archives the artifact the file backs, so the two rows never disagree. */
@@ -2014,6 +2080,76 @@ declare module "./query.js" {
 
 QueryClient.prototype.createClusterSettings = function (this: QueryClient, args: CreateClusterSettingsArgs = {} as CreateClusterSettingsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createClusterSettings", buildCreateClusterSettings(args), opts);
+};
+
+/** Promote a composition that worked into something you can run again. Owned. The selectors are the caller's -- resolved under their own actor at every later run -- so a recipe can never widen what its runner may read. */
+// Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["createComposeRecipe"] in generated_concepts.ts).
+export interface CreateComposeRecipeArgs {
+  recipeId: string;
+  name: string;
+  description?: string;
+  sourceSelectors?: Record<string, unknown>[];
+  templateId?: string;
+  format: string;
+  folderId?: string;
+  accountIds?: string[];
+}
+
+export function buildCreateComposeRecipe(args: CreateComposeRecipeArgs): string {
+  const parts: string[] = [];
+  parts.push("recipeId: " + renderMemQLValue(args.recipeId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  if (args.sourceSelectors !== undefined) parts.push("sourceSelectors: " + renderMemQLValue(args.sourceSelectors));
+  if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
+  parts.push("format: " + renderMemQLValue(args.format));
+  if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
+  if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
+  return "mutation createComposeRecipe(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createComposeRecipe(args: CreateComposeRecipeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createComposeRecipe = function (this: QueryClient, args: CreateComposeRecipeArgs = {} as CreateComposeRecipeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createComposeRecipe", buildCreateComposeRecipe(args), opts);
+};
+
+/** Bind a Library file as a template. Owned. The BYTES are not written here and never are: a template is a binding to a v1:library:file (design D7), so uploading one is an ordinary Library upload through the one pinned path, and this row is what makes it selectable afterwards. */
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["createComposeTemplate"] in generated_concepts.ts).
+export interface CreateComposeTemplateArgs {
+  templateId: string;
+  name: string;
+  description?: string;
+  fileId: string;
+  format: string;
+  placeholders?: Record<string, unknown>[];
+  accountIds?: string[];
+}
+
+export function buildCreateComposeTemplate(args: CreateComposeTemplateArgs): string {
+  const parts: string[] = [];
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  parts.push("format: " + renderMemQLValue(args.format));
+  if (args.placeholders !== undefined) parts.push("placeholders: " + renderMemQLValue(args.placeholders));
+  if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
+  return "mutation createComposeTemplate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createComposeTemplate(args: CreateComposeTemplateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createComposeTemplate = function (this: QueryClient, args: CreateComposeTemplateArgs = {} as CreateComposeTemplateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createComposeTemplate", buildCreateComposeTemplate(args), opts);
 };
 
 /** Save a composed view. Owned: ownerUserId is stamped from actor.userId, so a person can only ever create their own views. Opens at status=active. conceptIds is the selection the composer made and arrangements is what it produced -- one arrangement per selected concept, in section order. origin records whether the saved arrangement came out of a model proposal or out of the deterministic match plus hand edits; it is provenance, and both kinds render identically. */
@@ -6510,6 +6646,72 @@ QueryClient.prototype.restoreArtifact = function (this: QueryClient, args: Resto
   return this.executeNamed("restoreArtifact", buildRestoreArtifact(args), opts);
 };
 
+/** Restore an archived recipe. Owned. */
+// Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["restoreComposeRecipe"] in generated_concepts.ts).
+export interface RestoreComposeRecipeArgs {
+  recipeId: string;
+}
+
+export function buildRestoreComposeRecipe(args: RestoreComposeRecipeArgs): string {
+  const parts: string[] = [];
+  parts.push("recipeId: " + renderMemQLValue(args.recipeId));
+  return "mutation restoreComposeRecipe(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    restoreComposeRecipe(args: RestoreComposeRecipeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.restoreComposeRecipe = function (this: QueryClient, args: RestoreComposeRecipeArgs = {} as RestoreComposeRecipeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("restoreComposeRecipe", buildRestoreComposeRecipe(args), opts);
+};
+
+/** Restore an archived template binding. Owned. */
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["restoreComposeTemplate"] in generated_concepts.ts).
+export interface RestoreComposeTemplateArgs {
+  templateId: string;
+}
+
+export function buildRestoreComposeTemplate(args: RestoreComposeTemplateArgs): string {
+  const parts: string[] = [];
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  return "mutation restoreComposeTemplate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    restoreComposeTemplate(args: RestoreComposeTemplateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.restoreComposeTemplate = function (this: QueryClient, args: RestoreComposeTemplateArgs = {} as RestoreComposeTemplateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("restoreComposeTemplate", buildRestoreComposeTemplate(args), opts);
+};
+
+/** Restore an archived composition record. The plain inverse of the archive above, and a client pair rather than an automation for the reason the Library's own restore is (memql#4784): a mirrored automation would fire on every update and close a cycle. */
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["restoreComposition"] in generated_concepts.ts).
+export interface RestoreCompositionArgs {
+  compositionId: string;
+}
+
+export function buildRestoreComposition(args: RestoreCompositionArgs): string {
+  const parts: string[] = [];
+  parts.push("compositionId: " + renderMemQLValue(args.compositionId));
+  return "mutation restoreComposition(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    restoreComposition(args: RestoreCompositionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.restoreComposition = function (this: QueryClient, args: RestoreCompositionArgs = {} as RestoreCompositionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("restoreComposition", buildRestoreComposition(args), opts);
+};
+
 /** Bring a Library file back out of the Bin (memql#4784) -- the inverse of archiveLibraryFile, and the second half of the client-driven restore pair restoreArtifact's header describes. The bytes never went anywhere: an archive is an append-only re-version carrying archived=true, so this write is a re-version carrying false and the blobUrl, the provenance and every earlier version are exactly where they were. */
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["restoreLibraryFile"] in generated_concepts.ts).
 export interface RestoreLibraryFileArgs {
@@ -8770,6 +8972,76 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateClusterSettings = function (this: QueryClient, args: UpdateClusterSettingsArgs = {} as UpdateClusterSettingsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateClusterSettings", buildUpdateClusterSettings(args), opts);
+};
+
+/** Rename or re-aim a recipe. Owned. */
+// Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["updateComposeRecipe"] in generated_concepts.ts).
+export interface UpdateComposeRecipeArgs {
+  recipeId: string;
+  name?: string;
+  description?: string;
+  sourceSelectors?: Record<string, unknown>[];
+  templateId?: string;
+  format?: string;
+  folderId?: string;
+  accountIds?: string[];
+}
+
+export function buildUpdateComposeRecipe(args: UpdateComposeRecipeArgs): string {
+  const parts: string[] = [];
+  parts.push("recipeId: " + renderMemQLValue(args.recipeId));
+  if (args.name !== undefined) parts.push("name: " + renderMemQLValue(args.name));
+  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  if (args.sourceSelectors !== undefined) parts.push("sourceSelectors: " + renderMemQLValue(args.sourceSelectors));
+  if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
+  if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
+  if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
+  if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
+  return "mutation updateComposeRecipe(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateComposeRecipe(args: UpdateComposeRecipeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateComposeRecipe = function (this: QueryClient, args: UpdateComposeRecipeArgs = {} as UpdateComposeRecipeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateComposeRecipe", buildUpdateComposeRecipe(args), opts);
+};
+
+/** Rename a template, re-describe it, re-tag it, or repoint it at a different file. Owned. Repointing is deliberately allowed and is how a template is revised -- the alternative, a new template per revision, would leave every recipe naming the old one. */
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["updateComposeTemplate"] in generated_concepts.ts).
+export interface UpdateComposeTemplateArgs {
+  templateId: string;
+  name?: string;
+  description?: string;
+  fileId?: string;
+  format?: string;
+  placeholders?: Record<string, unknown>[];
+  accountIds?: string[];
+}
+
+export function buildUpdateComposeTemplate(args: UpdateComposeTemplateArgs): string {
+  const parts: string[] = [];
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  if (args.name !== undefined) parts.push("name: " + renderMemQLValue(args.name));
+  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  if (args.fileId !== undefined) parts.push("fileId: " + renderMemQLValue(args.fileId));
+  if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
+  if (args.placeholders !== undefined) parts.push("placeholders: " + renderMemQLValue(args.placeholders));
+  if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
+  return "mutation updateComposeTemplate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateComposeTemplate(args: UpdateComposeTemplateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateComposeTemplate = function (this: QueryClient, args: UpdateComposeTemplateArgs = {} as UpdateComposeTemplateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateComposeTemplate", buildUpdateComposeTemplate(args), opts);
 };
 
 /** Update a saved view: rename it, re-describe it, or replace its selection and arrangement. Partial read-merge, so an omitted field keeps its current value -- but an arrangement that IS supplied replaces the stored one whole (see the header). Owned: ownerUserId is re-stamped from actor.userId so the write cannot transfer the row, and the row-authz write guard refuses the call outright when the target belongs to somebody else. status is not accepted here; retiring a view goes through archiveComposedView so the transition timestamp is stamped with the status. */

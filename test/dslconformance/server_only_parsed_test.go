@@ -783,6 +783,30 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// versions would make every one of those gates optional.
 		{Path: "library/mutations.memql", Name: "createUploadSession"}:   true,
 		{Path: "library/mutations.memql", Name: "completeUploadSession"}: true,
+		// The Materializer's three writers (epic memql#4977). The same
+		// asset as the two pairs above and again not a caller-scoping
+		// question: ownerUserId is stamped from actor.userId on all three,
+		// so a caller can only ever reach their own rows, and the composite
+		// owner tier decides which those are.
+		//
+		// What a caller must never author is the RECORD ITSELF.
+		// `provenanceEmbedded` and `modelsUsed` on a composition ARE the
+		// provenance -- the whole reason this concept exists is to say
+		// truthfully what a file was made from and which models touched it
+		// -- so a client-reachable version would be a provenance record its
+		// own subject could write, which is a record that says nothing. The
+		// same argument one concept along for `recordComposeRecipeRun`:
+		// `runCount` and `lastRunAt` are the evidence a recipe works, read
+		// by somebody deciding whether to trust one with a client's report.
+		//
+		// `createComposition` is the third and its argument is narrower: a
+		// composition row is a claim that a materialization HAPPENED, and
+		// its goalId, runId and resolved sources are facts only the
+		// executor holds. A browser could write one perfectly, own it
+		// perfectly, and be recording a run nothing ever performed.
+		{Path: "compose/mutations.memql", Name: "createComposition"}:      true,
+		{Path: "compose/mutations.memql", Name: "updateCompositionState"}: true,
+		{Path: "compose/mutations.memql", Name: "recordComposeRecipeRun"}: true,
 		// The file-version supersede pair (epic memql#4806, design D10) --
 		// the same asset as the session pair above, one concept along.
 		// actor-scoping is again fully in place and again not the question:

@@ -13,6 +13,25 @@
 // recipient row, and the answer being a single equality is exactly why it
 // belongs in one place -- the day a fifth state appears (a soft bounce that
 // ages out, say) the definition changes here and every caller inherits it.
+//
+// THERE IS NO `use` LINE HERE AND THERE CANNOT BE (#2617): same-domain
+// constructs are AMBIENT, and `TestNoSameDomainUse` refuses a file that
+// imports its own domain. That matters because it means `spec template
+// isReadyTemplate` below binds its concept through the FLAT registry by
+// bare name, and there is no local defence against a second domain
+// declaring a `template` -- the first match wins, silently, and this spec
+// loads with an unresolved kind.
+//
+// It happened once, in epic memql#4977: a new `compose` namespace declared
+// one, and the failure landed HERE, in a domain whose author had changed
+// nothing. What it costs is this spec, and this spec is what keeps
+// half-written copy out of the campaign editor's picker.
+//
+// So the defence is the other side's: a concept whose bare name another
+// domain already uses must carry its namespace in its name. `compose`
+// renamed its own to `composeTemplate`. Anything declaring a bare
+// `template` after this breaks this file again, and
+// `TestSpecBindingsResolveAcrossFullTree` is what says so.
 
 /// Matches recipients that may be mailed: subscription state 'subscribed', which is the only one of
 /// the four that is sendable. 'unsubscribed' is the recipient's own choice, 'bounced' and

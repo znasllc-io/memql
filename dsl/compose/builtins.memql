@@ -1,0 +1,88 @@
+// builtins.memql
+//
+// The Materializer's entry points (design record
+// docs/superpowers/specs/2026-09-05-compose-materializer-design.md,
+// section F). Executors live in integrations/compose; the pure format
+// writers they call live in component/compose.
+//
+// THESE ARE BUILTINS RATHER THAN MUTATIONS because each one is more than
+// a row write. composeMaterialize opens the composition AND the goal AND
+// the goal's first run, then dispatches; composeRunRecipe reads a recipe
+// and derives a materialization from it. A mutation step cannot hand its
+// inserted id to a later one, so the composition has to happen in Go --
+// the same reasoning dsl/work/builtins.memql gives for createGoal.
+//
+// Every handler repeats its own gate. A builtin's annotation set carries
+// no @requiresRank, so the floor is the handler's -- and these are all
+// caller-scoped rather than ranked: a person materializes their own
+// sources into their own Library, and the row tier is what decides which
+// those are.
+
+/// Materialize: compose the named sources into a file of the chosen format and file it in the
+/// Library. Opens a v1:compose:composition, a v1:work:goal with requestedVia="materializer" and
+/// that goal's first run, then dispatches the five-step template -- gather, compose, render, stamp,
+/// file. Returns {compositionId, goalId, runId}.
+///
+/// ONE OF THOSE FIVE STEPS REACHES A MODEL, and on a catalog exact match not even that: a re-run
+/// with the same template and the same source SHAPE is a GoalSignature hit, which is the whole
+/// claim the work spine makes and the reason a second quarter's report costs nothing.
+@sdk
+@executor("integration.compose.materialize")
+builtin composeMaterialize {
+  name           string!   @description("What to call it, and the filename stem of the output. Sanitised server-side the way an upload's name is.")
+  statement      string    @description("What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on.")
+  format         string!   @description("markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of.")
+  sources        []object  @description("What to compose from: a list of {kind, ref, label} where kind is concept_row | library_file | query. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each.")
+  draft          string    @description("A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one does NOT skip the reasoning step -- it seeds it, and a composition that needed no thought is one the catalog answered.")
+  templateId     string    @description("v1:compose:template to render through. Resolved under your own actor, so a template you cannot read is refused rather than rendered through.")
+  folderId       string    @description("v1:library:folder to file the output into. Empty means the Library root.")
+  accountIds     []string  @description("Optional account tags -- a record of who the work is for, never a visibility scope.")
+  deployableKind string    @description("Set to spa, static or shopify_storefront to produce a PACKAGE SOURCE ZIP the Deployables pipeline deploys unchanged at sourceKind='artifact' (design D8), rather than a document. Empty for every ordinary composition.")
+  recipeId       string    @description("v1:compose:recipe this run came from, when it came from one. Stamps the composition and bumps the recipe's run count.")
+  ceilings       object    @description("{tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents} for the goal. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'.")
+}
+
+/// Run one of your recipes again: resolve its selectors NOW, compose, render and file. Returns
+/// {compositionId, goalId, runId}. The selectors are resolved under your own actor at this instant
+/// rather than replayed from the last run's answers -- which is the difference between "make this
+/// again" and "make a copy of that".
+@sdk
+@executor("integration.compose.runRecipe")
+builtin composeRunRecipe {
+  recipeId  string!  @description("The v1:compose:recipe to run.")
+  name      string   @description("What to call this run's output. Empty takes the recipe's name plus the date.")
+}
+
+/// Ask one of your compositions to stop. Cancellation is REQUESTED rather than done: the run
+/// notices at its next step boundary, so a step already in flight finishes and is journaled rather
+/// than being abandoned mid-effect -- the same contract cancelGoal has, for the same reason.
+@sdk
+@executor("integration.compose.cancel")
+builtin composeCancel {
+  compositionId  string!  @description("The v1:compose:composition to stop.")
+  reason         string   @description("Why, in words a person can read.")
+}
+
+/// The concepts worth composing from, in this cluster, right now: everything declaring
+/// @composable, with the label and the field projection each one declared. Returns
+/// {concepts: [{id, as, fields, description}]}.
+///
+/// BOTH CONSUMERS READ THIS ONE THING -- the Sources column lists them and the compose prompt is
+/// handed them -- so the model and the person cannot be looking at different sets. An UNMARKED
+/// concept is unmarked rather than forbidden: the mark is a ranking and a hint, never a gate, or a
+/// product that forgot the annotation would have a Materializer that cannot see its own data.
+@sdk
+@executor("integration.compose.composableConcepts")
+builtin composableConcepts {
+  includeUnmarked  bool  @description("Also return the concepts declaring no @composable, after the marked ones and flagged as unmarked. Backs the Sources column's 'show all' -- absent means the marked set alone.")
+}
+
+/// Resolve a source list WITHOUT composing anything: how many rows each entry finds and what they
+/// are called. Backs the Sources column's live count, so somebody sees that a selection is empty
+/// before they spend a model call discovering it. Every read runs under your own actor, so this
+/// can never report rows you could not have read.
+@sdk
+@executor("integration.compose.resolveSources")
+builtin composeResolveSources {
+  sources  []object!  @description("The same {kind, ref, label} list composeMaterialize takes.")
+}

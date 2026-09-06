@@ -1,0 +1,118 @@
+// queries.memql
+//
+// Reads over the compose namespace. Same-domain constructs are ambient, so
+// there is no `use compose.*` line here (#2617).
+//
+// EVERY READ SPELLS THE COMPOSITE TIER OUT as a top-level conjunct,
+// `(ownerUserId==actor.userId || actor.isClusterOwner==true)`.
+// TestRowAuthzEnforcementLandGate (component/memql) refuses a read over a
+// tiered concept that no top-level conjunct narrows, and it has no
+// exemption list -- so the filter says out loud what the concept's tier
+// already implies, and the gate can see it.
+//
+// THE ARCHIVE CONJUNCT IS ABSENT FROM THE LIST READS, deliberately, and
+// it is the Files app's lesson (clients/os/README.md, "the seed is picked
+// for the filter that cannot be server-side"): a read carrying
+// `archived != true` can only ever back a show-archived toggle that
+// reveals rows which flipped while the window was open. The list reads
+// carry no archive term, so ONE paged seed holds the complete truth and
+// the archived / not-archived split stays a client-side fold over it.
+
+/// Everything materialized, newest first: the Materialized view's one read and the Files app's
+/// Materializer place. Owned, with the cluster-owner escape -- which is what makes "everything
+/// materialized in THIS INSTANCE" (the epic's words) a claim this read can honestly make. A plain
+/// owner tier has no bypass on the read path, so an operator would silently see one person's subset.
+@actor
+query composition compositions {
+  args {
+    status  string
+    format  string
+  }
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && when(args.status) { status==args.status } && when(args.format) { format==args.format }
+  sort      "row.createdAt", "desc"
+  paginate  50
+  shape     compositionCard
+}
+
+/// One composition in full, for the open Composer and the record panel. Gated to its owner, so a
+/// caller cannot read somebody else's composition even holding its id.
+@actor
+query composition compositionById {
+  args {
+    compositionId  string!
+  }
+  filter  row.id==args.compositionId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  shape   compositionFull
+}
+
+/// The compositions produced by one recipe, newest first. Backs the recipe row's "what it has
+/// made" and the evidence that a re-run matched the catalog: two runs of one recipe, one with
+/// models and one without.
+@actor
+query composition compositionsForRecipe {
+  args {
+    recipeId  string!
+  }
+  filter    recipeId==args.recipeId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  sort      "row.createdAt", "desc"
+  paginate  50
+  shape     compositionCard
+}
+
+/// The composition that produced one Library file, if one did. Backs the Files app's inspector
+/// line ("Made in the Materializer from 3 sources") and its Open in Materializer act -- the one
+/// direction of the seam agreed with the Files-places epic, which never edits a composition.
+@actor
+query composition compositionForOutputFile {
+  args {
+    fileId  string!
+  }
+  filter  outputFileId==args.fileId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  sort    "row.createdAt", "desc"
+  shape   compositionCard
+}
+
+/// The caller's templates, newest first: the Templates section and the Target column's picker.
+@actor
+query composeTemplate composeTemplates {
+  args {
+    format  string
+  }
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && when(args.format) { format==args.format }
+  sort      "row.createdAt", "desc"
+  paginate  50
+  shape     composeTemplateFull
+}
+
+/// One template by id, gated to its owner. Backs the template editor and the render step's own
+/// resolution -- which runs under the caller's actor, so a composition naming somebody else's
+/// template resolves zero rows and is refused rather than rendering through it.
+@actor
+query composeTemplate composeTemplateById {
+  args {
+    templateId  string!
+  }
+  filter  row.id==args.templateId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  shape   composeTemplateFull
+}
+
+/// The caller's recipes, newest first: the Templates section's recipe list and the Composer's
+/// "run one again" affordance.
+@actor
+query recipe composeRecipes {
+  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  sort      "row.createdAt", "desc"
+  paginate  50
+  shape     composeRecipeFull
+}
+
+/// One recipe by id, gated to its owner. Backs running a recipe: the selectors it holds are
+/// resolved under the caller's own actor, so a recipe can never widen what its runner may read.
+@actor
+query recipe composeRecipeById {
+  args {
+    recipeId  string!
+  }
+  filter  row.id==args.recipeId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  shape   composeRecipeFull
+}

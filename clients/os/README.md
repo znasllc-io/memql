@@ -51,8 +51,9 @@ Design: `docs/superpowers/specs/2026-08-26-memql-os-desktop-shell-design.md`.
 Pure state machines live in `src/system/` (tested without React); chrome
 in `src/chrome/`; the app/widget contracts in `src/system/registry.ts`;
 the shared kit in `src/kit/`. Every app is real: Settings, Fleet, Users,
-Deployables, Training, Files (#4721), Accounts (#4800) and Campaigns
-(#4827) -- the last stub went with Files, and `StubApp` with it.
+Deployables, Training, Files (#4721), Accounts (#4800), Campaigns
+(#4827) and the Materializer (#4977) -- the last stub went with Files, and
+`StubApp` with it.
 
 ## Right-click belongs to the shell
 
@@ -1326,6 +1327,137 @@ wrong by default.
   bottom (and back), and the parent decides what that means. The jump pill
   is absolute against the list's relative root, never fixed -- the desk plate
   is CSS-transformed and becomes a fixed element's containing block.
+
+## The Materializer, the eleventh app (epic memql#4977)
+
+`src/apps/materializer/` is where a person and the model compose data from
+the memory graph into a file: a report, a spreadsheet, a branded document, a
+package a site is deployed from. Design record:
+[2026-09-05-compose-materializer-design.md](../../docs/superpowers/specs/2026-09-05-compose-materializer-design.md).
+
+**THE APP IS `materializer` AND THE ROWS ARE `v1:compose:*`, and that split is
+the epic's rather than a slip.** `materializer` already names the engine's boot
+seeder (`component/memql/seed_materializer.go`), so the namespace could not
+take the word without putting `system:seedMaterializer` and `v1:materializer:*`
+one word apart in every log line. The SURFACE keeps the name --
+`v1:work:goal.requestedVia` has carried the string since before this app
+existed.
+
+Five things about it are new rules rather than repetitions of the ten apps
+before it.
+
+- **THE COLUMNS ARE THE COMPOSITION'S OWN STRUCTURE, NOT A LAYOUT.** Sources,
+  the draft, the target: what goes in, what it is, what comes out. Three
+  columns is a shape this shell had not used and it earns it because the
+  subject genuinely has three parts a person moves between -- not because
+  three panels looked balanced. Below a pointer breakpoint they stack in that
+  reading order.
+
+  **The draft leads** (design D5, the owner's decision). The obvious build is
+  a chat transcript in the middle with the draft one click away, which is what
+  every AI writing tool does, and it is wrong here for one reason: the FILE is
+  the deliverable, and a surface where the deliverable is never on screen
+  cannot answer "which version am I about to send". It is rule 11 read
+  forward -- a list and its detail never share a scroll column, and a
+  transcript and its draft are that pair.
+
+- **THE PROVENANCE CHAIN IS THE ONE DEVICE THIS APP SPENDS ANYTHING ON, and it
+  is drawn in INK RATHER THAN HUE.** One line under the draft reads the whole
+  claim -- *from 3 rows, 1 file → through Acme quarterly → by
+  anthropic/claude-sonnet-5 → as PDF* -- with a sentence beneath saying whether
+  that survives the file leaving the cluster. The direction is drawn because
+  the direction is a RULE (sources feed the template, which produces the file),
+  which is the same ground the Files backup wire draws one on.
+
+  The models link is a **hollow mark where no model was reached and a filled
+  one where one was**: the Work app's own axis, reused deliberately rather than
+  re-invented, so somebody who has read one run already knows what a filled
+  mark means. Hue was the wrong axis for the reason the Work spine records --
+  amber is `warn`, red is `error`, the accent is live/primary/yes-here, and a
+  colour-per-state legend would put status hues on a partition that has nothing
+  to do with status.
+
+  **It is live, and that is the point.** Changing the target changes the last
+  link and the claim under the person's hand, which is how somebody learns that
+  some formats cannot carry provenance by USING the app rather than by reading
+  a design record.
+
+- **THREE ANSWERS ABOUT PROVENANCE, NEVER TWO.** `provenanceEmbedded` is read
+  through `optionalBool` rather than the SDK's `rowBool`, which answers `false`
+  for a missing key. A composition still composing has not reached the stamp
+  step, so nothing has answered yet -- and reading that as `false` would put
+  "the record is the only copy" on a file that will carry its own the moment it
+  is written. Absent renders NO claim at all. `test/materializer/rows.test.ts`
+  pins all three.
+
+  The `false` case is not a failure and the surface never draws it as one:
+  markdown, HTML, docx and PDF embed the record in their own bytes; txt, CSV
+  and JSON are written EXACTLY as composed -- no `#` header, no
+  `{provenance, rows}` wrapper -- because either would break the spreadsheet
+  or the parser downstream. The app says which it is, in the format's name.
+
+- **THE SOURCES COLUMN IS THE `@composable` MARK, AND AN UNMARKED CONCEPT IS
+  UNMARKED RATHER THAN FORBIDDEN.** `composableConcepts` reads the concept
+  registry -- so it is an on-demand read that says when it looked, not a feed:
+  there is no `graph.node.*` event for a registry, and a `useLiveCollection`
+  over one would render "Loading from the cluster" and then a list that
+  silently never moved. The set changes when a DSL bundle is redeployed, not
+  while somebody is composing.
+
+  **"Nothing is marked" and "this node cannot read the registry" look identical
+  from an empty list**, and only one of them is something an operator can fix,
+  so the engine reports which and the column says so. A marked concept with no
+  `list` query is rendered and DISABLED with the reason on it -- there the
+  useful statement is "the cluster has this and cannot offer it", which an
+  absent row could not make.
+
+- **THE APP ASKS THE SHELL WHETHER IT IS THERE** (`useOsIfPresent`, new in
+  `chrome/state.tsx`). The only thing this app wants from the shell is handing
+  off to another one -- Files for the output, Nexus for the goal -- and both
+  happen on a click. Reaching for `useOs` at an app root makes the whole app
+  unmountable without a desktop, which costs every one of its tests a shell it
+  does not otherwise need; a test that has to build a desktop to assert a
+  sentence is one that stops being written. `useOs` KEEPS ITS THROW for chrome,
+  where a missing provider is a wiring bug worth failing loudly on.
+
+### The seam with Files
+
+Agreed with the Files-places epic (memql#4981) and recorded in both places:
+**a composition has one record and its output has one file.** This app's
+Materialized section answers *what was made, from what, by which models*; the
+Files rail's Materializer place answers *where is the file*. Files carries
+"Open in Materializer" and one sentence; it never edits a composition, and this
+app never shows a file tree. `compositionForOutputFile` is the file-to-record
+direction for a surface that does not already hold the composition set.
+
+A composition whose bytes never stored is `failed` with an EMPTY
+`outputFileId`, so it is absent from the Files place by construction -- there
+is no file for it to show -- and visible only here, where the failure and its
+reason belong.
+
+### What it deliberately does not do
+
+**There is no document editor.** The draft is Markdown in a textarea. A rich
+text editor is a product of its own, and half of one is worse than none -- a
+template is how a document gets a shape, which is what design D7 makes a
+template FOR.
+
+**There is no Retry on a failed composition**, and Start over is offered
+instead. The record holds the sources it RESOLVED rather than the form that
+produced them, so a retry would silently re-run something slightly different
+from what was asked for; Start over opens the composer where a person can see
+what they are about to re-run.
+
+**Audio and video are named and unoffered.** The brief asks for both. Audio
+wants a compose-then-speak pipeline with a spending ceiling of its own and
+video wants a generation provider this cluster does not have, so the Target
+column says so -- an absent option with no account of itself reads as something
+nobody got round to building, which is the rule the Bin states about its
+missing retention control.
+
+**Nothing in this app sets a budget.** A materialization is a goal, and a
+goal's ceilings are set when the goal is accepted. The Settings section says
+that rather than leaving the gap somebody would go looking in.
 
 ## Ask voice (epic memql#4747)
 

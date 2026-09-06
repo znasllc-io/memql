@@ -38,6 +38,14 @@ func (a *App) transportBFF() {
 	// user-facing surface the portal dials, and it reuses the same blob client
 	// for the same reason the bundle endpoint above does.
 	a.mountLibraryArtifactEndpoints(uploader, container)
+	// The Materializer's collaborators (epic memql#4977). NOT a mount --
+	// it adds no route -- but it belongs here because it takes the SAME
+	// blob client and container the two mounts above take, and a
+	// materialized file and an uploaded one must not be able to land in
+	// different containers. Without it the plug-in registers, its
+	// capabilities resolve, and every materialization answers "object
+	// storage is not configured on this node" on a cluster that is.
+	a.wireComposeIntegration(uploader, container)
 	// Inbound-delivery receiver (POST /inbound/{source}, memql#2957). The
 	// counterpart to the outbound worker: a third party dials US, so it is HTTP
 	// on the frontend-facing node. Deny-by-default -- with no

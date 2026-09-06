@@ -212,6 +212,34 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.created.v1:work:approval", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:work:approval", TargetType: ""},
 		{Pattern: "graph.node.deleted.v1:work:approval", TargetType: ""},
+		// THE MATERIALIZER (epic memql#4977, design record
+		// docs/superpowers/specs/2026-09-05-compose-materializer-design.md,
+		// section I). All three compose concepts broadcast: they are one
+		// row per thing a person authored, so the volume argument that
+		// excludes v1:worker:invocation and v1:campaigns:delivery does
+		// not apply to any of them.
+		//
+		// The composition rule is the load-bearing one. A materialization
+		// moves through draft -> composing -> rendering -> ready on
+		// whichever replica took the call, while the person watching is
+		// attached to a bff -- so without it the Materialized list is
+		// correct on load and frozen after, which LOOKS LIKE IT IS
+		// WORKING. That is the exact failure the Fleet app's README
+		// bullet records, and it is why these are written down beside
+		// the concepts rather than left to be noticed.
+		//
+		// SAFE TO BROADCAST, checked rather than assumed: no automation
+		// in the tree triggers on v1:compose:*, so there is no consumer
+		// to double-fire.
+		{Pattern: "graph.node.created.v1:compose:composition", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:compose:composition", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:compose:composition", TargetType: ""},
+		{Pattern: "graph.node.created.v1:compose:composeTemplate", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:compose:composeTemplate", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:compose:composeTemplate", TargetType: ""},
+		{Pattern: "graph.node.created.v1:compose:recipe", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:compose:recipe", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:compose:recipe", TargetType: ""},
 		// THE ROAMING DESKTOP (epic memql#4746). A person's desktop
 		// document is written by whichever replica served the save and
 		// read by their OTHER signed-in browser, which is talking to a

@@ -453,6 +453,222 @@ func CommerceStockBuild(args CommerceStockArgs) string {
 	return b.String()
 }
 
+// ComposableConcepts -- The concepts worth composing from, in this cluster, right now: everything declaring @composable, with the label and the field projection each one declared. Returns {concepts: [{id, as, fields, description}]}.
+// BOTH CONSUMERS READ THIS ONE THING -- the Sources column lists them and the compose prompt is handed them -- so the model and the person cannot be looking at different sets. An UNMARKED concept is unmarked rather than forbidden: the mark is a ranking and a hint, never a gate, or a product that forgot the annotation would have a Materializer that cannot see its own data.
+type ComposableConceptsArgs struct {
+	// Also return the concepts declaring no @composable, after the marked ones and flagged as unmarked. Backs the Sources column's 'show all' -- absent means the marked set alone.
+	IncludeUnmarked    bool
+	IncludeUnmarkedSet bool // set true to send includeUnmarked; required because zero-value bool is ambiguous
+}
+
+// ComposableConcepts calls the engine builtin composableConcepts.
+func (qc *QueryClient) ComposableConcepts(ctx context.Context, args ComposableConceptsArgs) (*Result, error) {
+	call := ComposableConceptsBuild(args)
+	return qc.executeNamed(ctx, "composableConcepts", call)
+}
+
+func ComposableConceptsBuild(args ComposableConceptsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin composableConcepts(")
+	if args.IncludeUnmarkedSet {
+		b.WriteString("includeUnmarked: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeUnmarked))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ComposeCancel -- Ask one of your compositions to stop. Cancellation is REQUESTED rather than done: the run notices at its next step boundary, so a step already in flight finishes and is journaled rather than being abandoned mid-effect -- the same contract cancelGoal has, for the same reason.
+type ComposeCancelArgs struct {
+	// The v1:compose:composition to stop.
+	CompositionId string
+	// Why, in words a person can read.
+	Reason string
+}
+
+// ComposeCancel calls the engine builtin composeCancel.
+func (qc *QueryClient) ComposeCancel(ctx context.Context, args ComposeCancelArgs) (*Result, error) {
+	call := ComposeCancelBuild(args)
+	return qc.executeNamed(ctx, "composeCancel", call)
+}
+
+func ComposeCancelBuild(args ComposeCancelArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin composeCancel(")
+	b.WriteString("compositionId: ")
+	b.WriteString(quoteMemQL(args.CompositionId))
+	if args.Reason != "" {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reason: ")
+		b.WriteString(quoteMemQL(args.Reason))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ComposeMaterialize -- Materialize: compose the named sources into a file of the chosen format and file it in the Library. Opens a v1:compose:composition, a v1:work:goal with requestedVia="materializer" and that goal's first run, then dispatches the five-step template -- gather, compose, render, stamp, file. Returns {compositionId, goalId, runId}.
+// ONE OF THOSE FIVE STEPS REACHES A MODEL, and on a catalog exact match not even that: a re-run with the same template and the same source SHAPE is a GoalSignature hit, which is the whole claim the work spine makes and the reason a second quarter's report costs nothing.
+type ComposeMaterializeArgs struct {
+	// What to call it, and the filename stem of the output. Sanitised server-side the way an upload's name is.
+	Name string
+	// What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on.
+	Statement string
+	// markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of.
+	Format string
+	// What to compose from: a list of {kind, ref, label} where kind is concept_row | library_file | query. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each.
+	Sources []map[string]any
+	// A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one does NOT skip the reasoning step -- it seeds it, and a composition that needed no thought is one the catalog answered.
+	Draft string
+	// v1:compose:template to render through. Resolved under your own actor, so a template you cannot read is refused rather than rendered through.
+	TemplateId string
+	// v1:library:folder to file the output into. Empty means the Library root.
+	FolderId string
+	// Optional account tags -- a record of who the work is for, never a visibility scope.
+	AccountIds []string
+	// Set to spa, static or shopify_storefront to produce a PACKAGE SOURCE ZIP the Deployables pipeline deploys unchanged at sourceKind='artifact' (design D8), rather than a document. Empty for every ordinary composition.
+	DeployableKind string
+	// v1:compose:recipe this run came from, when it came from one. Stamps the composition and bumps the recipe's run count.
+	RecipeId string
+	// {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents} for the goal. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'.
+	Ceilings map[string]any
+}
+
+// ComposeMaterialize calls the engine builtin composeMaterialize.
+func (qc *QueryClient) ComposeMaterialize(ctx context.Context, args ComposeMaterializeArgs) (*Result, error) {
+	call := ComposeMaterializeBuild(args)
+	return qc.executeNamed(ctx, "composeMaterialize", call)
+}
+
+func ComposeMaterializeBuild(args ComposeMaterializeArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin composeMaterialize(")
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if args.Statement != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("statement: ")
+		b.WriteString(quoteMemQL(args.Statement))
+	}
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("format: ")
+	b.WriteString(quoteMemQL(args.Format))
+	if args.Sources != nil {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sources: ")
+		b.WriteString(renderMemQLValue(args.Sources))
+	}
+	if args.Draft != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("draft: ")
+		b.WriteString(quoteMemQL(args.Draft))
+	}
+	if args.TemplateId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("templateId: ")
+		b.WriteString(quoteMemQL(args.TemplateId))
+	}
+	if args.FolderId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderId: ")
+		b.WriteString(quoteMemQL(args.FolderId))
+	}
+	if args.AccountIds != nil {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountIds: ")
+		b.WriteString(renderMemQLValue(args.AccountIds))
+	}
+	if args.DeployableKind != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("deployableKind: ")
+		b.WriteString(quoteMemQL(args.DeployableKind))
+	}
+	if args.RecipeId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("recipeId: ")
+		b.WriteString(quoteMemQL(args.RecipeId))
+	}
+	if args.Ceilings != nil {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ceilings: ")
+		b.WriteString(renderMemQLValue(args.Ceilings))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ComposeResolveSources -- Resolve a source list WITHOUT composing anything: how many rows each entry finds and what they are called. Backs the Sources column's live count, so somebody sees that a selection is empty before they spend a model call discovering it. Every read runs under your own actor, so this can never report rows you could not have read.
+type ComposeResolveSourcesArgs struct {
+	// The same {kind, ref, label} list composeMaterialize takes.
+	Sources []map[string]any
+}
+
+// ComposeResolveSources calls the engine builtin composeResolveSources.
+func (qc *QueryClient) ComposeResolveSources(ctx context.Context, args ComposeResolveSourcesArgs) (*Result, error) {
+	call := ComposeResolveSourcesBuild(args)
+	return qc.executeNamed(ctx, "composeResolveSources", call)
+}
+
+func ComposeResolveSourcesBuild(args ComposeResolveSourcesArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin composeResolveSources(")
+	b.WriteString("sources: ")
+	b.WriteString(renderMemQLValue(args.Sources))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ComposeRunRecipe -- Run one of your recipes again: resolve its selectors NOW, compose, render and file. Returns {compositionId, goalId, runId}. The selectors are resolved under your own actor at this instant rather than replayed from the last run's answers -- which is the difference between "make this again" and "make a copy of that".
+type ComposeRunRecipeArgs struct {
+	// The v1:compose:recipe to run.
+	RecipeId string
+	// What to call this run's output. Empty takes the recipe's name plus the date.
+	Name string
+}
+
+// ComposeRunRecipe calls the engine builtin composeRunRecipe.
+func (qc *QueryClient) ComposeRunRecipe(ctx context.Context, args ComposeRunRecipeArgs) (*Result, error) {
+	call := ComposeRunRecipeBuild(args)
+	return qc.executeNamed(ctx, "composeRunRecipe", call)
+}
+
+func ComposeRunRecipeBuild(args ComposeRunRecipeArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin composeRunRecipe(")
+	b.WriteString("recipeId: ")
+	b.WriteString(quoteMemQL(args.RecipeId))
+	if args.Name != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("name: ")
+		b.WriteString(quoteMemQL(args.Name))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CreateGoal -- Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all.
 type CreateGoalArgs struct {
 	// The goal in the person's own words.

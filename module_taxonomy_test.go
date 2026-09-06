@@ -159,6 +159,21 @@ var pluginKinds = map[string]moduleKind{
 	// silently remove every human gate in the cluster.
 	"work": kindComponent,
 
+	// The Materializer (epic memql#4977). COMPONENT rather than integration
+	// for the reason `database` and `work` are: it talks to no external
+	// system. Its five capabilities read this cluster's own graph, render
+	// bytes through component/compose, and put the result in this cluster's
+	// own Library -- the one thing it reaches out to is object storage,
+	// which every Library upload already does through `storage`.
+	//
+	// COMPONENT rather than pack, which is the closer call, because there
+	// is no coherent "off". The five builtins are declared in
+	// dsl/compose/builtins.memql, which EVERY binary loads, and a
+	// capability the DSL names and the registry lacks is a boot-time
+	// resolution failure on every node type -- so switching this off does
+	// not withhold a feature, it refuses to start the cluster.
+	"compose": kindComponent,
+
 	// --- PACKS: product features with a coherent "off". ---
 	"chat":          kindPack,
 	"dailyspace":    kindPack,

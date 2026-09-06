@@ -2301,6 +2301,91 @@ func ComplianceJobsForStoreBuild(args ComplianceJobsForStoreArgs) string {
 	return b.String()
 }
 
+// ComposeRecipeById -- One recipe by id, gated to its owner. Backs running a recipe: the selectors it holds are resolved under the caller's own actor, so a recipe can never widen what its runner may read.
+//
+// Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["composeRecipeById"] in generated_concepts.go).
+type ComposeRecipeByIdArgs struct {
+	RecipeId string
+}
+
+// ComposeRecipeById calls the engine query composeRecipeById.
+func (qc *QueryClient) ComposeRecipeById(ctx context.Context, args ComposeRecipeByIdArgs) (*Result, error) {
+	call := ComposeRecipeByIdBuild(args)
+	return qc.executeNamed(ctx, "composeRecipeById", call)
+}
+
+func ComposeRecipeByIdBuild(args ComposeRecipeByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query composeRecipeById(")
+	b.WriteString("recipeId: ")
+	b.WriteString(quoteMemQL(args.RecipeId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ComposeRecipes -- The caller's recipes, newest first: the Templates section's recipe list and the Composer's "run one again" affordance.
+//
+// Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["composeRecipes"] in generated_concepts.go).
+type ComposeRecipesArgs struct {
+}
+
+// ComposeRecipes calls the engine query composeRecipes.
+func (qc *QueryClient) ComposeRecipes(ctx context.Context, args ComposeRecipesArgs) (*Result, error) {
+	call := ComposeRecipesBuild(args)
+	return qc.executeNamed(ctx, "composeRecipes", call)
+}
+
+func ComposeRecipesBuild(args ComposeRecipesArgs) string {
+	_ = args
+	return "query composeRecipes()"
+}
+
+// ComposeTemplateById -- One template by id, gated to its owner. Backs the template editor and the render step's own resolution -- which runs under the caller's actor, so a composition naming somebody else's template resolves zero rows and is refused rather than rendering through it.
+//
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["composeTemplateById"] in generated_concepts.go).
+type ComposeTemplateByIdArgs struct {
+	TemplateId string
+}
+
+// ComposeTemplateById calls the engine query composeTemplateById.
+func (qc *QueryClient) ComposeTemplateById(ctx context.Context, args ComposeTemplateByIdArgs) (*Result, error) {
+	call := ComposeTemplateByIdBuild(args)
+	return qc.executeNamed(ctx, "composeTemplateById", call)
+}
+
+func ComposeTemplateByIdBuild(args ComposeTemplateByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query composeTemplateById(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ComposeTemplates -- The caller's templates, newest first: the Templates section and the Target column's picker.
+//
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["composeTemplates"] in generated_concepts.go).
+type ComposeTemplatesArgs struct {
+	Format string
+}
+
+// ComposeTemplates calls the engine query composeTemplates.
+func (qc *QueryClient) ComposeTemplates(ctx context.Context, args ComposeTemplatesArgs) (*Result, error) {
+	call := ComposeTemplatesBuild(args)
+	return qc.executeNamed(ctx, "composeTemplates", call)
+}
+
+func ComposeTemplatesBuild(args ComposeTemplatesArgs) string {
+	var b strings.Builder
+	b.WriteString("query composeTemplates(")
+	if args.Format != "" {
+		b.WriteString("format: ")
+		b.WriteString(quoteMemQL(args.Format))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ComposedViewById -- Fetch one composed view by id, gated to its owner. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller cannot open another person's view even holding its id. This is the read behind opening a saved view and behind re-opening it in the composer to edit.
 //
 // Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["composedViewById"] in generated_concepts.go).
@@ -2352,6 +2437,104 @@ func ComposedViewsBuild(args ComposedViewsArgs) string {
 		b.WriteString("conceptId: ")
 		b.WriteString(quoteMemQL(args.ConceptId))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CompositionById -- One composition in full, for the open Composer and the record panel. Gated to its owner, so a caller cannot read somebody else's composition even holding its id.
+//
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositionById"] in generated_concepts.go).
+type CompositionByIdArgs struct {
+	CompositionId string
+}
+
+// CompositionById calls the engine query compositionById.
+func (qc *QueryClient) CompositionById(ctx context.Context, args CompositionByIdArgs) (*Result, error) {
+	call := CompositionByIdBuild(args)
+	return qc.executeNamed(ctx, "compositionById", call)
+}
+
+func CompositionByIdBuild(args CompositionByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query compositionById(")
+	b.WriteString("compositionId: ")
+	b.WriteString(quoteMemQL(args.CompositionId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CompositionForOutputFile -- The composition that produced one Library file, if one did. Backs the Files app's inspector line ("Made in the Materializer from 3 sources") and its Open in Materializer act -- the one direction of the seam agreed with the Files-places epic, which never edits a composition.
+//
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositionForOutputFile"] in generated_concepts.go).
+type CompositionForOutputFileArgs struct {
+	FileId string
+}
+
+// CompositionForOutputFile calls the engine query compositionForOutputFile.
+func (qc *QueryClient) CompositionForOutputFile(ctx context.Context, args CompositionForOutputFileArgs) (*Result, error) {
+	call := CompositionForOutputFileBuild(args)
+	return qc.executeNamed(ctx, "compositionForOutputFile", call)
+}
+
+func CompositionForOutputFileBuild(args CompositionForOutputFileArgs) string {
+	var b strings.Builder
+	b.WriteString("query compositionForOutputFile(")
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// Compositions -- Everything materialized, newest first: the Materialized view's one read and the Files app's Materializer place. Owned, with the cluster-owner escape -- which is what makes "everything materialized in THIS INSTANCE" (the epic's words) a claim this read can honestly make. A plain owner tier has no bypass on the read path, so an operator would silently see one person's subset.
+//
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositions"] in generated_concepts.go).
+type CompositionsArgs struct {
+	Status string
+	Format string
+}
+
+// Compositions calls the engine query compositions.
+func (qc *QueryClient) Compositions(ctx context.Context, args CompositionsArgs) (*Result, error) {
+	call := CompositionsBuild(args)
+	return qc.executeNamed(ctx, "compositions", call)
+}
+
+func CompositionsBuild(args CompositionsArgs) string {
+	var b strings.Builder
+	b.WriteString("query compositions(")
+	if args.Status != "" {
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	if args.Format != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("format: ")
+		b.WriteString(quoteMemQL(args.Format))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CompositionsForRecipe -- The compositions produced by one recipe, newest first. Backs the recipe row's "what it has made" and the evidence that a re-run matched the catalog: two runs of one recipe, one with models and one without.
+//
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositionsForRecipe"] in generated_concepts.go).
+type CompositionsForRecipeArgs struct {
+	RecipeId string
+}
+
+// CompositionsForRecipe calls the engine query compositionsForRecipe.
+func (qc *QueryClient) CompositionsForRecipe(ctx context.Context, args CompositionsForRecipeArgs) (*Result, error) {
+	call := CompositionsForRecipeBuild(args)
+	return qc.executeNamed(ctx, "compositionsForRecipe", call)
+}
+
+func CompositionsForRecipeBuild(args CompositionsForRecipeArgs) string {
+	var b strings.Builder
+	b.WriteString("query compositionsForRecipe(")
+	b.WriteString("recipeId: ")
+	b.WriteString(quoteMemQL(args.RecipeId))
 	b.WriteString(")")
 	return b.String()
 }

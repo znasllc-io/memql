@@ -38,6 +38,7 @@ use (
 	./component/automations
 	./component/bus
 	./component/bus/gen
+	./component/compose
 	./component/config
 	./component/database
 	./component/deploycontrol

@@ -9052,3 +9052,427 @@ a.os-button {
     transition: none;
   }
 }
+
+/* --- materializer (epic memql#4977) -----------------------------------
+ *
+ * ONE CONTIGUOUS BLOCK, under one comment, so a conflict with a sibling
+ * epic touching this file is a clean take-both.
+ *
+ * EVERY COLOUR HERE IS A TOKEN. A theme pack carries colour and wallpaper
+ * values, so a literal in this block would be a surface a pack cannot
+ * restyle -- and the accent, warn and error hues carry fixed meanings in
+ * this shell (live/primary/yes-here, warn, error) that this app has no
+ * business adding a fourth to. The one axis this app introduces is INK
+ * WEIGHT, which survives greyscale and every pack.
+ */
+
+.os-mz {
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  gap: 12px;
+  min-height: 0;
+  height: 100%;
+}
+
+/* THE COLUMNS ARE THE COMPOSITION'S OWN STRUCTURE: what goes in, what it
+ * is, what comes out. The middle is fluid because it holds prose; the
+ * outer two are fixed-measure because they hold controls. */
+.os-mz-columns {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr) 15rem;
+  gap: 16px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.os-mz-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* A SETTLED COMPOSITION IS A RECORD, NOT A FORM (DESIGN.md rule 9).
+ * Composing, the three columns fill the window because the draft is the
+ * page and real estate belongs to it. Finished, they are three short
+ * readings of one row -- and stretching them drew 500px of dead space
+ * beneath three paragraphs, which is exactly what rule 9 names. Found in
+ * a browser; jsdom lays nothing out, so the suite was green over it. */
+.os-mz-columns[data-settled="true"] {
+  align-content: start;
+  overflow-y: auto;
+}
+
+.os-mz-columns[data-settled="true"] .os-mz-col {
+  overflow-y: visible;
+}
+
+/* A FLEX ITEM'S DEFAULT min-width: auto REFUSES TO SHRINK BELOW ITS
+ * CONTENT, which is how the Work app's goal list came to scroll sideways
+ * on a sentence. Every column here is min-width: 0 for that reason. */
+.os-mz-col-draft {
+  min-width: 0;
+}
+
+.os-mz-draft {
+  flex: 1 1 auto;
+  min-height: 12rem;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-plate);
+  color: var(--os-ink);
+  font-family: var(--os-font);
+  /* THE ONE TYPOGRAPHIC DECISION THIS APP MAKES. Everything else in the
+   * shell is chrome being scanned at --os-text-base; this is prose being
+   * READ, so it takes the app-content size and a longer line-height. */
+  font-size: var(--os-text-md);
+  line-height: 1.6;
+}
+
+.os-mz-draft:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+}
+
+.os-mz-statement {
+  margin: 0;
+  font-size: var(--os-text-md);
+  line-height: 1.6;
+  color: var(--os-ink);
+  /* Under 80 characters, so a statement reads as a sentence rather than
+   * as a banner. */
+  max-width: 60ch;
+}
+
+/* ---- the sources picker ---- */
+
+.os-mz-concepts,
+.os-mz-picked,
+.os-mz-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.os-mz-concept {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: var(--os-control-h);
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--os-radius-xs);
+  background: none;
+  color: var(--os-ink);
+  font-family: inherit;
+  font-size: var(--os-text-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.os-mz-concept:hover:not(:disabled) {
+  background: var(--os-field-dot);
+  border-color: var(--os-line);
+}
+
+.os-mz-concept:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+}
+
+.os-mz-concept:disabled {
+  color: var(--os-muted);
+  cursor: default;
+}
+
+.os-mz-concept-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An unmarked concept is offered AFTER the marked ones and says which it
+ * is. The mark is a ranking and a hint, never a gate. */
+.os-mz-concept-tag {
+  flex: 0 0 auto;
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+
+.os-mz-picked-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--os-radius-xs);
+  background: var(--os-field-dot);
+  font-size: var(--os-text-base);
+}
+
+.os-mz-picked-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.os-mz-picked-count {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.os-mz-picked-remove {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--os-muted);
+  font-family: inherit;
+  font-size: var(--os-text-xs);
+  cursor: pointer;
+}
+
+.os-mz-picked-remove:hover {
+  color: var(--os-ink);
+}
+
+.os-mz-picked-remove:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+}
+
+.os-mz-picked-problem {
+  grid-column: 1 / -1;
+  color: var(--os-warn);
+  font-size: var(--os-text-xs);
+  overflow-wrap: anywhere;
+}
+
+/* ---- the target's absent options ---- */
+
+/* IT SITS WITH THE CONTROL IT IS ABOUT, not at the bottom of the column.
+ * `margin-top: auto` put it 400px below the format select whose options it
+ * explains, where it read as detached chrome rather than as the rest of
+ * that control's answer. */
+.os-mz-unoffered {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--os-line);
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+
+.os-mz-unoffered ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.os-mz-refine-format {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--os-text-base);
+}
+
+/* =====================================================================
+ * THE PROVENANCE CHAIN -- this app's one device
+ * =====================================================================
+ * The chain is drawn as a chain because the DIRECTION is a rule: sources
+ * feed the template, which produces the file. The Files app's backup wire
+ * draws a direction for exactly that reason.
+ *
+ * It is one line, and it is live: as somebody changes the target the last
+ * link and the claim change under them, which is how a person learns the
+ * "some formats cannot carry provenance" rule by using the app rather
+ * than by reading a docs page.
+ */
+
+.os-mz-chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+}
+
+/* A PENDING CHAIN IS QUIETER, not a different thing. It is the same
+ * sentence about a file that does not exist yet, so it recedes rather
+ * than changing colour. */
+.os-mz-chain[data-pending="true"] {
+  background: none;
+  border-style: dashed;
+}
+
+.os-mz-chain-links {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.os-mz-link {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  font-size: var(--os-text-base);
+  color: var(--os-ink);
+}
+
+/* The direction between links. It is a pseudo-element rather than text so
+ * a screen reader hears the LABELS ("from", "through", "by", "as"), which
+ * carry the same meaning in words -- an arrow that is only a glyph is a
+ * link somebody cannot hear. */
+.os-mz-link + .os-mz-link::before {
+  content: "\2192";
+  margin-right: 4px;
+  color: var(--os-muted);
+}
+
+.os-mz-link-label {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+
+.os-mz-link-value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.os-mz-link[data-strong="true"] .os-mz-link-value {
+  font-weight: 600;
+}
+
+.os-mz-link[data-muted="true"] .os-mz-link-value {
+  color: var(--os-muted);
+}
+
+/* WEIGHT, NOT HUE -- the Work app's own ink axis, reused deliberately.
+ * A hollow mark is a composition that reached no model; a filled one is
+ * one that did. Amber is warn and red is error in this shell, so a
+ * colour-per-state legend here would put status hues on a partition that
+ * has nothing to do with status. Ink survives greyscale and every pack. */
+.os-mz-mark {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--os-ink);
+  align-self: center;
+}
+
+.os-mz-mark[data-mark="filled"] {
+  background: var(--os-ink);
+}
+
+.os-mz-mark[data-mark="hollow"] {
+  background: none;
+  border-color: var(--os-muted);
+}
+
+.os-mz-chain-claim {
+  margin: 0;
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.os-mz-rowmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+
+.os-mz-rowmark-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- the list and the templates section ---- */
+
+.os-mz-list-section,
+.os-mz-templates {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  height: 100%;
+}
+
+.os-mz-template-desc {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.os-mz-template-acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* THE COLUMNS STACK WHERE THERE IS NOT ROOM FOR THREE, in the order they
+ * are read: what goes in, what it is, what comes out. */
+@media (max-width: 60rem) {
+  .os-mz-columns {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+
+  .os-mz-col,
+  .os-mz-columns[data-settled="true"] .os-mz-col {
+    overflow-y: visible;
+  }
+
+  .os-mz-unoffered {
+    margin-top: 10px;
+  }
+
+  /* THE MARK SURVIVES AND ITS TEXT DOES NOT. Narrow, the row's name wraps
+   * to two lines -- which is the right priority, the identifier outliving
+   * the context, and the inverse of the Work app's own defect -- but the
+   * count then truncated to "2…", which says nothing at all. The mark
+   * carries the whole sentence in its accessible name, so dropping the
+   * text loses a sighted reader a figure and loses a screen reader
+   * nothing, while an ellipsis loses both. */
+  .os-mz-rowmark-text {
+    display: none;
+  }
+}

@@ -197,6 +197,31 @@ export function useOs(): OsContextValue {
 }
 
 /**
+ * The shell, or null when this tree is not inside one.
+ *
+ * `useOs` THROWS, which is right for chrome: the dock, the desk and a
+ * window frame have no meaning outside a shell, so a missing provider
+ * there is a wiring bug worth failing loudly on.
+ *
+ * An APP is the other case. Most of what an app does -- read rows, draw
+ * them, write them back -- needs no shell at all; the one thing that does
+ * is handing off to ANOTHER app, which happens on a click. Reaching for
+ * `useOs` at an app's root to have `openApp` available for that click
+ * makes the whole app unmountable without the entire desktop, which costs
+ * every one of its tests a shell it does not otherwise need -- and a test
+ * that has to build a desktop to assert a sentence is one that stops
+ * being written.
+ *
+ * So an app asks this instead and treats null as "there is nowhere to
+ * hand off to", which is exactly what it means. It is deliberately NOT a
+ * silent fallback for chrome: `useOs` keeps its throw, and this is a
+ * different question with a different answer.
+ */
+export function useOsIfPresent(): OsContextValue | null {
+  return useContext(OsContext);
+}
+
+/**
  * Grid size from the viewport (cell tokens are 96x104). The surface pads
  * 20px on each side and the dock reserves the bottom -- both come OUT of
  * the cell budget, or the last column paints past the viewport edge and

@@ -494,7 +494,37 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// integrations/work/internal_origin_test.go drives every capability
 		// with a client-origin context against a recording executor, and counts
 		// the stamp sites.
-		"integrations/work":       "the work spine's entry points -- server-initiated; every id is engine-minted or copied off a row the caller already read under their own actor, and its nine @serverOnly writers are refused without it (epic memql#4966)",
+		"integrations/work": "the work spine's entry points -- server-initiated; every id is engine-minted or copied off a row the caller already read under their own actor, and its nine @serverOnly writers are refused without it (epic memql#4966)",
+
+		// The Materializer (epic memql#4977). The context here IS derived
+		// from an inbound capability call, so the gate's own warning is the
+		// right question to ask -- and the answer is that the stamp opens a
+		// construct and changes NOTHING about who is writing.
+		//
+		// THE ACTOR IS NEVER TOUCHED. `integrations/compose` has no
+		// `ContextWithUserActor` at all: unlike campaigns' drain worker and
+		// component/worker's store, it borrows nobody's authority, because
+		// everything it writes is the caller's own. So the composite owner
+		// tier still decides every row, the caller can only ever write
+		// compositions they own, and what the stamp buys is exactly the
+		// three @serverOnly writers -- which are @serverOnly because
+		// `provenanceEmbedded` and `modelsUsed` ARE the provenance, and a
+		// record a caller can author says nothing.
+		//
+		// Every id it writes is engine-minted (`id.NewShortId`) or copied
+		// off a row the caller already read under their own actor: the
+		// recipe id passed to recordComposeRecipeRun is only used after
+		// `recipeById` returned a row for it, unstamped, under the caller.
+		//
+		// The stamp is applied INLINE inside store.executeInternal and the
+		// marked context is never returned, so no later frame can inherit
+		// it and open a different @serverOnly construct -- the memql#2989
+		// escalation. Asserted rather than asserted here:
+		// integrations/compose/capabilities_test.go's
+		// TestTheStampNeverEscapesItsCall counts the site with comments
+		// stripped.
+		"integrations/compose": "the Materializer's writers -- the stamp opens three @serverOnly mutations and changes no actor, so the composite owner tier still decides every row and a caller can only ever write their own (epic memql#4977)",
+
 		"integrations/dailyspace": "scheduled space provisioning, no caller in scope",
 	}
 
