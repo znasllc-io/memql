@@ -455,7 +455,47 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// component/packages/internal_origin_test.go.
 		"component/packages":        "package deploy pipeline -- server-initiated; stage advances happen after cross-node handoffs with no caller in scope, and every id is engine-minted (memql#4794)",
 		"integrations/agent/worker": "worker store, server-initiated",
-		"integrations/dailyspace":   "scheduled space provisioning, no caller in scope",
+		// THE WORK SPINE's entry points (epic memql#4966). SERVER-INITIATED,
+		// and not one of the request-derived exceptions -- stated rather than
+		// borrowed, because the createGoal and decideApproval paths DO begin at
+		// a person, which is the shape call_origin.go warns about.
+		//
+		// What makes it server-initiated is that NO CALLER-SUPPLIED IDENTIFIER
+		// IS IN SCOPE ON ANY STAMPED CALL. Every id the stamp reaches is
+		// engine-minted (core/id, in this package) or copied off a row the
+		// caller ALREADY READ UNDER THEIR OWN ACTOR -- a goal through
+		// workGoalForOwner, a run through workRunForOwner, an approval through
+		// the caller's own pending list. A caller who cannot read the row
+		// cannot reach the write, and the owner value can therefore never name
+		// a user the caller could not act as. The two sweeps have no caller at
+		// all: they are a scheduled automation on the cron leader.
+		//
+		// The stamp is not a widening. All nine work mutations are @serverOnly
+		// (dsl/work/mutations.memql), OriginClient is the zero value, and the
+		// function validator refuses an unstamped @serverOnly write with only a
+		// WARN -- so without it createGoal returns ids nothing stored, a decided
+		// approval never reaches the run parked on it, and the sweeps close
+		// nothing. That is the shape of bug that survives a release, which is
+		// why this package stamps rather than being exempted from the
+		// annotation.
+		//
+		// WHAT IT DOES NOT BUY, and this is the narrowing worth stating: the
+		// READ gate has no internal-origin bypass, so the stamp cannot widen a
+		// read by one row. Every owned read here runs UNSTAMPED under the
+		// caller's own actor, and every owned WRITE runs under the row owner's
+		// borrowed authority -- because the write guard ignores the clusterOwner
+		// arm (memql#4312), so internal origin is what opens the CONSTRUCT and
+		// the borrowed actor is what makes the row writable.
+		//
+		// The stamp is applied INLINE inside store.executeInternal and the
+		// marked context is never returned, so no later frame can inherit it and
+		// open a different @serverOnly construct -- the memql#2989 escalation.
+		// Asserted rather than asserted here:
+		// integrations/work/internal_origin_test.go drives every capability
+		// with a client-origin context against a recording executor, and counts
+		// the stamp sites.
+		"integrations/work":       "the work spine's entry points -- server-initiated; every id is engine-minted or copied off a row the caller already read under their own actor, and its nine @serverOnly writers are refused without it (epic memql#4966)",
+		"integrations/dailyspace": "scheduled space provisioning, no caller in scope",
 	}
 
 	// The wire path. These must never appear, allowlist or not: every handler
