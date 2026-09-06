@@ -31,8 +31,8 @@ a resume is a scale-up, not a restore.
 
 The sweeps bound a trial in **time**. What bounds it in **spend** is the
 [ceiling inside the tenant](memql-cloud-billing.md#two-layers-of-allowance-and-why-one-is-not-enough)
-— 500 message credits, 60 voice minutes, `overagePolicy: throttle`, enforced
-in-process with no network.
+— 500 message credits, `overagePolicy: throttle`, enforced in-process with no
+network.
 
 That distinction is the whole safety argument. **A sweep runs once a day, and a
 runaway does not wait for it.** A trial's card has been authorized and never
