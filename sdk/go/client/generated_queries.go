@@ -2275,61 +2275,6 @@ func ComposeTemplatesBuild(args ComposeTemplatesArgs) string {
 	return b.String()
 }
 
-// ComposedViewById -- Fetch one composed view by id, gated to its owner. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller cannot open another person's view even holding its id. This is the read behind opening a saved view and behind re-opening it in the composer to edit.
-//
-// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["composedViewById"] in generated_concepts.go).
-type ComposedViewByIdArgs struct {
-	ViewId string
-}
-
-// ComposedViewById calls the engine query composedViewById.
-func (qc *QueryClient) ComposedViewById(ctx context.Context, args ComposedViewByIdArgs) (*Result, error) {
-	call := ComposedViewByIdBuild(args)
-	return qc.executeNamed(ctx, "composedViewById", call)
-}
-
-func ComposedViewByIdBuild(args ComposedViewByIdArgs) string {
-	var b strings.Builder
-	b.WriteString("query composedViewById(")
-	b.WriteString("viewId: ")
-	b.WriteString(quoteMemQL(args.ViewId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// ComposedViews -- List the caller's composed views, newest first. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible and no argument can widen it. Optional status narrows to the active list or to the archived one; omit it for both. Optional conceptId answers "which of my views cover this concept", which is what the composer offers when somebody opens a concept that already has a saved view.
-//
-// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["composedViews"] in generated_concepts.go).
-type ComposedViewsArgs struct {
-	// Enum: active | archived
-	Status    string
-	ConceptId string
-}
-
-// ComposedViews calls the engine query composedViews.
-func (qc *QueryClient) ComposedViews(ctx context.Context, args ComposedViewsArgs) (*Result, error) {
-	call := ComposedViewsBuild(args)
-	return qc.executeNamed(ctx, "composedViews", call)
-}
-
-func ComposedViewsBuild(args ComposedViewsArgs) string {
-	var b strings.Builder
-	b.WriteString("query composedViews(")
-	if args.Status != "" {
-		b.WriteString("status: ")
-		b.WriteString(quoteMemQL(args.Status))
-	}
-	if args.ConceptId != "" {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("conceptId: ")
-		b.WriteString(quoteMemQL(args.ConceptId))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // CompositionById -- One composition in full, for the open Composer and the record panel. Gated to its owner, so a caller cannot read somebody else's composition even holding its id.
 //
 // Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositionById"] in generated_concepts.go).
@@ -5080,30 +5025,6 @@ func (qc *QueryClient) PackagesTrackingRepos(ctx context.Context, args PackagesT
 func PackagesTrackingReposBuild(args PackagesTrackingReposArgs) string {
 	_ = args
 	return "query packagesTrackingRepos()"
-}
-
-// PageOverride -- Read the caller's own override of one page (epic memql#4661). Owned: the filter gates on ownerUserId==actor.userId, so a person only ever resolves their OWN regenerations and one person's regeneration can never repaint another's console -- the per-user scope of D4 is this conjunct and nothing else.
-// A page nobody has regenerated returns nothing, which is not an empty state: it is the answer, and the caller renders the page's seed.
-// THE VERSION STRIP IS THIS QUERY WRAPPED IN `asOf`, the deployables pattern (D10 / memql#2880). A write in MemQL is an append onto one id, so a plain read returns the NEWEST version and re-issuing it under successive `asOf` timestamps -- each set just before the previous result's createdAt -- walks back one version at a time. There is deliberately no `asOf latest` clause here: a query that declares one refuses to be wrapped by a caller's own, which is exactly the capability the walk needs. Original is the seed and needs no row at all.
-//
-// Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["pageOverride"] in generated_concepts.go).
-type PageOverrideArgs struct {
-	TargetPageId string
-}
-
-// PageOverride calls the engine query pageOverride.
-func (qc *QueryClient) PageOverride(ctx context.Context, args PageOverrideArgs) (*Result, error) {
-	call := PageOverrideBuild(args)
-	return qc.executeNamed(ctx, "pageOverride", call)
-}
-
-func PageOverrideBuild(args PageOverrideArgs) string {
-	var b strings.Builder
-	b.WriteString("query pageOverride(")
-	b.WriteString("targetPageId: ")
-	b.WriteString(quoteMemQL(args.TargetPageId))
-	b.WriteString(")")
-	return b.String()
 }
 
 // PasskeyByCredentialId -- Look up a passkey identity by its base64url credential id. Returns active + inactive rows.
