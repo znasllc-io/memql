@@ -921,6 +921,7 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "work/mutations.memql", Name: "createWorkStep"}:        true,
 		{Path: "work/mutations.memql", Name: "updateWorkStep"}:        true,
 		{Path: "work/mutations.memql", Name: "createWorkGoal"}:        true,
+		{Path: "work/mutations.memql", Name: "updateWorkGoal"}:        true,
 		{Path: "work/mutations.memql", Name: "createWorkModelCall"}:   true,
 		{Path: "work/mutations.memql", Name: "createWorkObservation"}: true,
 		{Path: "work/mutations.memql", Name: "createWorkApproval"}:    true,
@@ -942,6 +943,8 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// provenance, never a scope.
 		{Path: "skills/mutations.memql", Name: "createSkillEdge"}: true,
 		{Path: "skills/mutations.memql", Name: "commitSkillEdge"}: true,
+		{Path: "skills/mutations.memql", Name: "setSkillScripts"}: true,
+		{Path: "skills/mutations.memql", Name: "reinforceSkill"}:  true,
 	}
 	for k := range want {
 		if !set[k] {

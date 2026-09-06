@@ -10389,6 +10389,29 @@ func SitesForPackageBuild(args SitesForPackageArgs) string {
 	return b.String()
 }
 
+// SkillById -- One skill by id. The read `runScript` makes before it ships anything: it needs the row's `scripts[]`, its slug for the refusal message, and its `active` flag.
+// Public tier, so there is no owner conjunct -- and adding one would hide the predefined catalog every person's agents read, which is the whole reason the tier is what it is.
+//
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillById"] in generated_concepts.go).
+type SkillByIdArgs struct {
+	SkillId string
+}
+
+// SkillById calls the engine query skillById.
+func (qc *QueryClient) SkillById(ctx context.Context, args SkillByIdArgs) (*Result, error) {
+	call := SkillByIdBuild(args)
+	return qc.executeNamed(ctx, "skillById", call)
+}
+
+func SkillByIdBuild(args SkillByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query skillById(")
+	b.WriteString("skillId: ")
+	b.WriteString(quoteMemQL(args.SkillId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SkillBySlug -- Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it.
 //
 // Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillBySlug"] in generated_concepts.go).
@@ -11510,6 +11533,24 @@ func (qc *QueryClient) WorkGoalsForOwner(ctx context.Context, args WorkGoalsForO
 func WorkGoalsForOwnerBuild(args WorkGoalsForOwnerArgs) string {
 	_ = args
 	return "query workGoalsForOwner()"
+}
+
+// WorkRunsForOwner -- The caller's runs, newest first. Owned: ownerUserId==actor.userId binds server-side, and the concept's tier admits the same rows on the SUBSCRIPTION, so a browser watching this feed is not handed anybody else's work the way an undeclared concept would.
+// DELIBERATELY NOT NARROWED BY TEMPLATE. A caller that wants one kind of run filters `automationName` itself: the MemQL OS Training app shows analyses and reads `libraryAnalyzeFile`, and Nexus (sub-project B) wants every run of a goal. Narrowing here would make this query one surface's, and the second surface would add a second query that drifts.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunsForOwner"] in generated_concepts.go).
+type WorkRunsForOwnerArgs struct {
+}
+
+// WorkRunsForOwner calls the engine query workRunsForOwner.
+func (qc *QueryClient) WorkRunsForOwner(ctx context.Context, args WorkRunsForOwnerArgs) (*Result, error) {
+	call := WorkRunsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workRunsForOwner", call)
+}
+
+func WorkRunsForOwnerBuild(args WorkRunsForOwnerArgs) string {
+	_ = args
+	return "query workRunsForOwner()"
 }
 
 // WorkerByIdentityId -- Look up the worker registration owned by an identity row.

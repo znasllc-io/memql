@@ -135,6 +135,7 @@ mutate step updateWorkStep {
     status             string
     result             object
     resultFingerprint  string
+    binding            object
     actualFootprint    object
     postcondition      object
     symptom            string
@@ -151,7 +152,7 @@ mutate step updateWorkStep {
     externalKey        string
   }
   update {
-    accept { status, result, resultFingerprint, actualFootprint, postcondition, symptom, attempt, errorCode, errorMessage, finishedAt, durationMs, tokens, cost, childRunId, approvalId, resumeAt, externalKey }
+    accept { status, result, resultFingerprint, binding, actualFootprint, postcondition, symptom, attempt, errorCode, errorMessage, finishedAt, durationMs, tokens, cost, childRunId, approvalId, resumeAt, externalKey }
     stamp {
       id: args.stepId
     }
@@ -181,6 +182,41 @@ mutate goal createWorkGoal {
       ownerUserId: actor.userId
       status: "open"
       requestedVia: args.requestedVia ?? ""
+    }
+  }
+}
+
+/// Advance a goal: the lifecycle, and how it closed. Read-merge, so every field not named keeps
+/// its prior value.
+///
+/// THE COUNTERPART OF updateWorkRun, and it exists for one reason a reader should not have to
+/// infer: `createWorkGoal` stamps `open` and nothing else could ever move it. A goal whose only
+/// run has finished reads as work still in progress on every surface that shows one, and the
+/// Library's analysis pass produces one of these per file -- so without this every file anybody
+/// ever uploaded would sit in a person's goal list, permanently open.
+///
+/// @serverOnly, and scoping to actor.userId is not the alternative. A goal's lifecycle is the
+/// ENGINE's account of work it is doing: the run opens the goal when it starts and closes it when
+/// it finishes, and both edges are facts about an execution rather than a person's intent. An
+/// actor.userId conjunct would narrow this to the goal's owner and change nothing that matters --
+/// the owner still could not honestly say a run had finished, and the system-origin goals the
+/// Library pass writes carry a present-and-empty owner that no caller matches at all, so the one
+/// population this construct exists for would be the population it could never reach. The
+/// client-reachable lifecycle act is cancelGoal, which epic A2 adds with its own gate.
+@serverOnly
+mutate goal updateWorkGoal {
+  args {
+    goalId       string!
+    status       string
+    closedAt     string
+    closeReason  string
+    accountIds   []string
+    ceilings     object
+  }
+  update {
+    accept { status, closedAt, closeReason, accountIds, ceilings }
+    stamp {
+      id: args.goalId
     }
   }
 }

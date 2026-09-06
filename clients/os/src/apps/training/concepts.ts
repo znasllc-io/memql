@@ -1,12 +1,29 @@
-// What the Training app is about: the two populations it reads, the one route
-// it writes bytes to, and the closed lists it owns.
+// What the Training app is about: the three populations it reads, the one
+// route it writes bytes to, and the closed lists it owns.
 //
-// Naming a concept id here is what a DESIGNED surface does -- this app is
-// about the caller's analysis plans and about knowledge chunks specifically,
-// not about whatever concept a browser happened to be pointed at.
+// ===========================================================================
+// THE APP TEACHES FROM THE LIBRARY NOW, NOT FROM A SPACE (spec section G)
+// ===========================================================================
+// It used to upload into the caller's daily cognition space and watch
+// `v1:planner:plan` rows. That path taught nothing: the plan's completion
+// wrote a `v1:knowledge:document` through a mutation declared in no `.memql`
+// file, with the error swallowed at the call site, so an upload produced a
+// summary and NO knowledge chunks -- the app's own headline had never been
+// true.
+//
+// The Library route is the one that works. A file lands as `v1:library:file`,
+// the analysis pass reads it into `v1:library:fileChunk`, and
+// `libraryTrainFile(fileId, domainId)` is the SECOND, deliberate act that
+// ingests those chunks into a knowledge domain as `v1:knowledge:documentChunk`
+// rows with `source: "fileUpload"` -- which is exactly what the Review queue
+// on the next section is for. Upload and teach are two acts, and the surface
+// says so.
 
-/** The analysis work, live (`dsl/planner/concepts.memql`). */
-export const PLAN_CONCEPT = "v1:planner:plan";
+/** The files, live (`dsl/library/concepts.memql`). */
+export const FILE_CONCEPT = "v1:library:file";
+
+/** The analysis work, live (`dsl/work/concepts.memql`). */
+export const RUN_CONCEPT = "v1:work:run";
 
 /**
  * What the pipeline learned (`dsl/knowledge/concepts.memql`).
@@ -22,47 +39,67 @@ export const PLAN_CONCEPT = "v1:planner:plan";
 export const CHUNK_CONCEPT = "v1:knowledge:documentChunk";
 
 /**
- * The one `v1:planner:plan.kind` the attachment route stamps
- * (`CreateQueuedAnalyzePlan`, `component/server/plan_store.go`).
+ * The one `v1:work:run.automationName` the Library's analysis pass writes
+ * (`integrations/library/analysis.go`, `AnalysisTemplate`).
  *
- * Everything else on that concept is other work the same person may have
- * running -- a userGoal, a trainSpecialist run -- and this app shows analysis,
- * so the kind is a filter rather than a label.
+ * A FILTER THIS APP OWNS, not a narrowing of somebody else's query.
+ * `workRunsForOwner` deliberately returns every run the caller owns, because
+ * Nexus wants every run of a goal; this app shows analyses, so it picks them
+ * out here. The constant is duplicated from Go on purpose and the Go side is
+ * authoritative -- when they disagree the list goes empty rather than wrong,
+ * which is a visible failure rather than a silent one.
  */
-export const ANALYZE_PLAN_KIND = "analyzeFile";
+export const ANALYSIS_TEMPLATE = "libraryAnalyzeFile";
 
 /**
- * The plan statuses this surface treats as finished.
+ * `v1:library:file.status`, which is the axis this surface is built on.
  *
- * Read as a SET rather than as "not queued and not running": the nine-value
- * status enum carries parked states (`awaitingFeedback`, `waitingForSlot`)
- * that are neither running nor over, and calling those terminal would retire a
- * plan on screen that is still waiting for somebody.
+ * `stored` is the moment the bytes became durable and before the pass has
+ * touched them. It is deliberately NOT shown as a state of its own: it lasts
+ * milliseconds on a readable file, and a row that flickered through "stored"
+ * on its way to "reading" would be a state nobody could act on.
  */
-export const TERMINAL_PLAN_STATUSES: readonly string[] = [
-  "succeeded",
-  "failed",
-  "cancelled",
-];
+export const FILE_STORED = "stored";
+export const FILE_ANALYZING = "analyzing";
+export const FILE_READY = "ready";
+export const FILE_FAILED = "failed";
+
+/** `v1:library:file.embeddingStatus`. `complete` on a file with no text means
+ *  there was nothing to embed, which is why `passages` is what the surface
+ *  counts rather than this. */
+export const EMBEDDING_NONE = "none";
+
+/**
+ * What a person is looking at, derived from the file row and its run.
+ *
+ * SIX STATES, and each one offers exactly one act or none (the OS's rule 12:
+ * an act that is not legal is ABSENT, never disabled). They are derived
+ * rather than stored because no single row holds them: `uploading` is this
+ * browser's own knowledge, `reading` is the run, `unreadable` is the file row
+ * plus the run's outcome, and `trained` is a list on the file row.
+ */
+export type FileStage =
+  | "uploading"
+  | "reading"
+  | "unreadable"
+  | "untrained"
+  | "trained"
+  | "failed";
 
 // ---------------------------------------------------------------------------
 // Upload
 // ---------------------------------------------------------------------------
 
 /**
- * The MIME types the analyzer accepts, mirroring `allowedAttachmentMIMETypes`
- * (`component/server/attachment_handler.go`).
+ * The types the analysis pass can read, mirroring
+ * `component/fileprocessor`'s own set.
  *
- * MIRRORED, NOT AUTHORITATIVE. The handler refuses an unsupported type with
- * its own 415 and its own sentence whatever this list says; the list is here
- * so the file picker offers what stands a chance rather than letting somebody
- * choose a `.zip` and learn about it from a refusal. When the two disagree the
- * SERVER is right, and its sentence is what renders -- which is why a file the
- * picker would not have offered is still uploaded rather than blocked here.
- *
- * `application/octet-stream` is deliberately absent for the reason it is
- * absent server-side: it is what a file with no usable type falls back to, so
- * accepting it would turn "the analyzer reads these" into "anything".
+ * MIRRORED, NOT AUTHORITATIVE, and the Library route is more permissive than
+ * this list: it accepts ANY type and stores it, and a type it cannot read
+ * becomes a stored file with nothing to teach. So this list is what the
+ * PICKER offers -- the types worth uploading here -- while a file dragged in
+ * from elsewhere is still accepted and still lands in the Library. The
+ * surface says which happened rather than refusing the drop.
  */
 export const ACCEPTED_UPLOAD_TYPES: readonly string[] = [
   "application/pdf",
@@ -85,9 +122,17 @@ export const ACCEPTED_UPLOAD_TYPES: readonly string[] = [
 /** The `accept` attribute for the file input, from the same one list. */
 export const UPLOAD_ACCEPT_ATTRIBUTE = ACCEPTED_UPLOAD_TYPES.join(",");
 
-/** `maxAttachmentBytes` (`component/server/attachment_handler.go`), mirrored
- *  for the same reason and with the same caveat: the server decides. */
-export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+/**
+ * `DefaultLibraryMaxUploadBytes` (`component/server/artifact_handler.go`),
+ * mirrored for the caption and nothing else -- the server decides, and a file
+ * over its own ceiling comes back with the server's own sentence.
+ *
+ * FOUR GIB, not the twenty-five MEGABYTES the space attachment route allowed.
+ * That is the re-key's most visible gain and it is worth stating on screen:
+ * the Library route chunks anything over 32 MiB into a resumable session, so
+ * a re-drop after a dropped connection uploads only what is missing.
+ */
+export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // Chunks

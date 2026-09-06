@@ -71,7 +71,9 @@ use (
 	./component/secret
 	./component/server
 	./component/service
+	./component/skills
 	./component/worker
+	./component/workjournal
 	./core
 	./docs
 	./dsl

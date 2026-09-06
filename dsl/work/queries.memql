@@ -123,3 +123,18 @@ query approval workApprovalsForOwner {
   sort    "row.createdAt", "desc"
   shape   workApprovalFull
 }
+
+/// The caller's runs, newest first. Owned: ownerUserId==actor.userId binds server-side, and the
+/// concept's tier admits the same rows on the SUBSCRIPTION, so a browser watching this feed is not
+/// handed anybody else's work the way an undeclared concept would.
+///
+/// DELIBERATELY NOT NARROWED BY TEMPLATE. A caller that wants one kind of run filters
+/// `automationName` itself: the MemQL OS Training app shows analyses and reads
+/// `libraryAnalyzeFile`, and Nexus (sub-project B) wants every run of a goal. Narrowing here would
+/// make this query one surface's, and the second surface would add a second query that drifts.
+@actor
+query run workRunsForOwner {
+  filter  ownerUserId==actor.userId
+  sort    "row.createdAt", "desc"
+  shape   workRunFull
+}

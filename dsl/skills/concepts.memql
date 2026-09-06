@@ -4,8 +4,9 @@
 // (design record docs/superpowers/specs/2026-09-05-work-spine-design.md,
 // section C). Moved out of the agents namespace in epic A1 so the
 // catalog survives the retirement of that namespace (sub-project F).
-// Epic A3 grows skill with instructions, scripts, resources, effects and
-// the trust ladder; this file is the move plus the edge concept.
+// Epic A1 moved the concept here; epic A3 grew it with instructions,
+// scripts, resources, constructRefs, effects, a version and the trust
+// ladder, and re-pointed its provenance at the spine.
 //
 // TIER: public, requiresIdentity (the A1 plan's second amendment). The
 // predefined catalog is read by every signed-in person's agents, so
@@ -13,9 +14,8 @@
 // everybody. Minted skills carry an owner for provenance and visibility
 // is NOT narrowed by it.
 
-use agents.concepts.{ agent }
 use identity.concepts.{ user }
-use planner.concepts.{ plan }
+use work.concepts.{ goal, run }
 
 /// First-class capability bundle: a named unit of (knowledgeDomains + toolSlugs + liveSources) that
 /// the Planner Agent attaches to agents in createSpecialist / extendSpecialist. After the full
@@ -38,12 +38,31 @@ concept skill {
   tier           enum("A", "B", "C")!  @default("A")  @description("Safety tier mirroring v1:knowledge:knowledgeDomain.tier. The materializer enforces skill.tier >= max(tier across domainIds[]) at load time: a skill cannot bundle a Tier-C medical domain while declaring itself Tier-A. A = general; B = safety-relevant; C = high-stakes regulated. The disclaimer effect flows from the skill's DOMAINS, not from this field or from agentRole.tier: a Tier-B domain carries disclaimerChunkText as chunk 0 (integrations/knowledge/seed_domain_content.go), and an agent inherits that by carrying the domain. There is no 'effective tier' propagation and no system-prompt disclaimer injection keyed on a tier field -- this description claimed both, which is the same defect memql#3068 corrected one field up.")
   predefined     bool    @default("false")  @description("True for catalog rows seeded by dsl/agents/skills/*.memql on every startup. Predefined rows are LOCKED in the cockpit's Skills admin view: slug / category / tier / domain+tool composition are read-only; only tags / description edits are accepted. User-created skills default to predefined=false and stay fully editable.")
   active         bool    @default("true")  @description("Soft-deactivate flag. Inactive skills disappear from the picker but agents that already carry the skill keep functioning. Lets us retire a poorly-shaped catalog row without churning every agent that bound to it.")
-  originatingPlanId string @description("Phase 3 (#159) provenance: the v1:planner:plan.id whose dispatch surfaced the need for this skill. Empty for predefined catalog rows. Stamped by mintSkill at attach time. Pairs with mintedByAgentId for the 'who/when/why' triad the Skills admin view + the trace viewer (cockpit#125) surface as 'Created by planner from Plan X'.")
-  mintedByAgentId   string @description("Phase 3 (#159) provenance: the v1:agents:agent.id of the planner agent whose mintSkill action produced this row. Empty for predefined catalog rows. The trace viewer renders this alongside the planner trace tree so an operator can correlate a skill mint with the upstream LLM decision that triggered it.")
+  originatingGoalId string @description("Provenance: the v1:work:goal.id whose work surfaced the need for this skill (spec section C). Empty for predefined catalog rows. Replaces originatingPlanId, which named a v1:planner:plan -- the concept the spine retires. Pre-release, so this is a rename and not a second field: nothing reads the old name.")
+  mintedByRunId     string @description("Provenance: the v1:work:run.id whose compile emitted the mint. Empty for predefined catalog rows. Replaces mintedByAgentId, and the change is not cosmetic -- work never routes to an agent row (decision D3), so the agent that used to be recorded here no longer exists as a step's executor. What a person wants from this field is 'which run decided I needed this', and the run is what can answer it.")
+
+  // --- epic A3: the skill grown into a capability, not just a bundle ---
+  //
+  // Everything above describes what a skill GRANTS. Everything below is
+  // what a skill IS: the instructions a model reads, the scripts it runs,
+  // the constructs it contributes, the effects it declares, and how much
+  // the platform trusts it.
+  instructions   object  @description("The three-tier progressive-disclosure body (spec section C): {summary, body, references[]}. `summary` is loaded with the name and description on every selection and must stay short enough that carrying twenty skills costs nothing; `body` loads when the skill is ACTIVATED for a step; `references` are Library file ids fetched only when the body points at one. The tiers exist because a skill that always loads everything is a skill nobody can afford to have many of.")
+  scripts        []object  @description("[{platform, artifactId, entry, argsSchema}] -- executables this skill can run. `platform` is linux / darwin / windows / any; `artifactId` is a LIBRARY ARTIFACT and never a path on a machine, which is the whole point of capture (integrations/skills/capture.go); `entry` is the command line with {script} standing for the shipped path. runScript ships the bytes by content hash and verifies them on the far side before executing.")
+  resources      []string  @description("v1:library:artifact ids the skill's instructions may refer to -- a checklist, a schema, a worked example. Fetched on demand, which is the third disclosure tier.")
+  constructRefs  []string  @description("The catalog constructs this skill contributes (query / mutation / logic / automation names). Two skills naming the same construct is what a `duplicates` edge is proposed from, and it is why this is a list of names rather than prose.")
+  effects        object  @description("The declared footprint of this skill's scripts: {concepts[], files, machine, external, spend}. Spec section B's typed-action claim -- a step's expected footprint is the union over what it calls, and the safety gate reads it before a side effect. Absent means UNDECLARED, never 'no effects': a skill that has not said what it touches is one the gate treats as touching everything.")
+  version        int  @description("Bumped when the instructions, scripts or effects change. A run's binding records the version it bound, so a replay can say the skill moved underneath it rather than silently using the new one.")
+
+  // --- the trust ladder, moved off the action library (spec section F) ---
+  reliability     float  @description("How well this skill has done, 0.0 to 1.0. Climbs on a run that succeeded using it and decays on a mismatch and on disuse, exactly as the action library's ladder did. Absent reads as 0 -- a skill nobody has run is untrusted, which is the fail-closed direction and the honest one.")
+  reinforceCount  int  @description("How many successful runs have used this skill. Absent reads as 0.")
+  lastReinforced  datetime  @description("When reliability last moved up. Empty for a skill that has never been used successfully; the decay-on-disuse rule reads it, and an empty value means the skill has nothing to decay from.")
+  status          enum("candidate", "active", "deprecated")  @description("Where the skill stands. `candidate` is minted and not yet proven -- selection may bind it, and the ladder is what promotes it. `active` is the predefined catalog and anything that earned its way there. `deprecated` is retired: still readable, so a run that bound it can be explained, and never selected as a direct match. DISTINCT FROM `active` above, which is the soft-delete flag the picker reads; this is the ladder's own axis, and collapsing them would make 'retired by an operator' and 'never proved itself' the same state.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
-  @relationship(type="references", field="originatingPlanId", target=plan, direction="outgoing")
-  @relationship(type="references", field="mintedByAgentId", target=agent, direction="outgoing")
+  @relationship(type="references", field="originatingGoalId", target=goal, direction="outgoing")
+  @relationship(type="references", field="mintedByRunId", target=run, direction="outgoing")
 }
 
 /// A typed relationship between two skills. Compile may propose an edge; a run that succeeds commits

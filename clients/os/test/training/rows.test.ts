@@ -3,99 +3,179 @@ import { describe, expect, it } from "vitest";
 import {
   chunkAwaitsReview,
   chunkFromRow,
+  fileBelongsHere,
+  fileDotTone,
+  fileFingerprint,
+  fileFromRow,
   groupChunksByDocument,
-  planBelongsHere,
-  planDotTone,
-  planFileName,
-  planFingerprint,
-  planFromRow,
   rollupDomains,
+  runBelongsHere,
+  runFromRow,
+  runsByFile,
+  stageOf,
 } from "../../src/apps/training/rows";
-import { chunkRow, domainLiteRow, planRow } from "./harness";
+import { chunkRow, domainLiteRow, fileRow, runRow } from "./harness";
 
 // The Training app's projections, tested without a DOM. These are the
 // predicates the whole app is defined by -- what belongs on the surface, what
-// counts as news, and what the rollup claims.
+// counts as news, and which act a row offers.
 
-describe("planBelongsHere", () => {
-  it("keeps the caller's own analyzeFile plans", () => {
-    const plan = planFromRow(planRow({ id: "p-1" }));
-    expect(planBelongsHere(plan, "u-me")).toBe(true);
+describe("fileBelongsHere", () => {
+  it("keeps the caller's own files", () => {
+    expect(fileBelongsHere(fileFromRow(fileRow({ id: "f-1" })))).toBe(true);
   });
 
-  it("DROPS a plan somebody else requested", () => {
-    // The subscription is where these arrive: `v1:planner:plan` declares no
-    // row-authz tier, so a concept that declares nothing admits every
-    // subscriber and other people's plan rows reach this browser.
-    const plan = planFromRow(planRow({ id: "p-2", requestedBy: "u-someone-else" }));
-    expect(planBelongsHere(plan, "u-me")).toBe(false);
-  });
-
-  it("DROPS a plan of another kind", () => {
-    const plan = planFromRow(planRow({ id: "p-3", kind: "userGoal" }));
-    expect(planBelongsHere(plan, "u-me")).toBe(false);
-  });
-
-  it("matches NOTHING while the viewer is unknown", () => {
-    // Access resolves asynchronously. "Show every plan in the cluster until we
-    // know who is looking" is the exact shape of the bug this guards.
-    const mine = planFromRow(planRow({ id: "p-4" }));
-    const theirs = planFromRow(planRow({ id: "p-5", requestedBy: "u-someone-else" }));
-    expect(planBelongsHere(mine, "")).toBe(false);
-    expect(planBelongsHere(theirs, "")).toBe(false);
-    expect(planBelongsHere(mine, "   ")).toBe(false);
+  it("drops an archived file, which lives in the Bin", () => {
+    expect(fileBelongsHere(fileFromRow(fileRow({ id: "f-2", archived: true })))).toBe(false);
   });
 
   it("drops a row with no id", () => {
-    const plan = planFromRow({ requestedBy: "u-me", kind: "analyzeFile" });
-    expect(planBelongsHere(plan, "u-me")).toBe(false);
+    expect(fileBelongsHere(fileFromRow({ name: "x" }))).toBe(false);
+  });
+
+  // THE RESIDUAL THIS FEED NO LONGER HAS. The plan feed it replaced filtered
+  // `requestedBy` client-side, because `v1:planner:plan` declares no tier and
+  // a concept that declares nothing admits every subscriber.
+  // `v1:library:file` declares the composite owner tier, so admission runs on
+  // the subscription too and nobody else's rows arrive -- which is why this
+  // predicate takes no viewer id at all. A signature that still accepted one
+  // would invite somebody to re-add the filter and conclude it was load-bearing.
+  it("takes no viewer id, because the engine scopes the subscription", () => {
+    expect(fileBelongsHere.length).toBe(1);
   });
 });
 
-describe("planFingerprint", () => {
-  it("changes on a status transition", () => {
-    const queued = planFromRow(planRow({ id: "p-1", status: "queued" }));
-    const running = planFromRow(planRow({ id: "p-1", status: "running" }));
-    expect(planFingerprint(queued)).not.toBe(planFingerprint(running));
+describe("fileFingerprint", () => {
+  it("changes when the pipeline moves", () => {
+    const reading = fileFromRow(fileRow({ id: "f-1", status: "analyzing" }));
+    const ready = fileFromRow(fileRow({ id: "f-1", status: "ready" }));
+    expect(fileFingerprint(reading)).not.toBe(fileFingerprint(ready));
   });
 
-  it("is SILENT on a token counter moving", () => {
-    // A HEARTBEAT IS NOT NEWS. `tokenSpent` and the metrics rollup tick for
-    // the whole life of an analysis; naming one would pulse the row
-    // continuously, which is the standing badge the arrival cue exists not to
-    // be.
-    const before = planFromRow(planRow({ id: "p-1", status: "running", tokenSpent: 10 }));
-    const after = planFromRow(planRow({ id: "p-1", status: "running", tokenSpent: 9000 }));
-    expect(planFingerprint(before)).toBe(planFingerprint(after));
+  it("changes when a domain is taught", () => {
+    const before = fileFromRow(fileRow({ id: "f-1" }));
+    const after = fileFromRow(fileRow({ id: "f-1", trainedIntoDomainIds: ["d-1"] }));
+    expect(fileFingerprint(before)).not.toBe(fileFingerprint(after));
   });
-});
 
-describe("planDotTone", () => {
-  it("speaks the shell's dot language and stays QUIET on success", () => {
-    const tone = (status: string) => planDotTone(planFromRow(planRow({ id: "p", status })));
-    expect(tone("running")).toBe("reachable");
-    expect(tone("failed")).toBe("unreachable");
-    expect(tone("cancelled")).toBe("unreachable");
-    // No dot: a queued plan has not started and a succeeded one is over.
-    expect(tone("queued")).toBe("unknown");
-    expect(tone("succeeded")).toBe("unknown");
+  // A HEARTBEAT IS NOT NEWS. Nothing on a file row moves on a timer, and the
+  // summary lands in the same write as `status: "ready"` -- naming it would
+  // announce one event twice.
+  it("does not change when only the summary is written", () => {
+    const a = fileFromRow(fileRow({ id: "f-1", summary: "one" }));
+    const b = fileFromRow(fileRow({ id: "f-1", summary: "another" }));
+    expect(fileFingerprint(a)).toBe(fileFingerprint(b));
   });
 });
 
-describe("planFileName", () => {
-  it("reads the file out of the server's own goal wording", () => {
-    expect(planFileName(planFromRow(planRow({ id: "p", goal: "Analyze notes.pdf" })))).toBe(
-      "notes.pdf",
+describe("runBelongsHere", () => {
+  it("keeps an analysis run", () => {
+    expect(runBelongsHere(runFromRow(runRow({ id: "r-1" })))).toBe(true);
+  });
+
+  it("drops a run of another template", () => {
+    const other = runFromRow(runRow({ id: "r-2", automationName: "somethingElse" }));
+    expect(runBelongsHere(other)).toBe(false);
+  });
+
+  it("drops a run that names no file, which it has nothing to decorate", () => {
+    expect(runBelongsHere(runFromRow(runRow({ id: "r-3", input: {} })))).toBe(false);
+  });
+});
+
+describe("runFromRow", () => {
+  it("reads the file id off the run's own input envelope", () => {
+    const run = runFromRow(runRow({ id: "r-1", input: { fileId: "file-9" } }));
+    expect(run.fileId).toBe("file-9");
+  });
+
+  it("reads the outcome the file row cannot say", () => {
+    const run = runFromRow(
+      runRow({ id: "r-1", outcome: { readable: true, chunks: 12, embedded: 9, summarized: true } }),
     );
+    expect(run.passages).toBe(12);
+    expect(run.embedded).toBe(9);
+    expect(run.summarized).toBe(true);
   });
 
-  it("renders a goal it cannot parse WHOLE rather than blanking it", () => {
-    const goal = "Something else entirely";
-    expect(planFileName(planFromRow(planRow({ id: "p", goal })))).toBe(goal);
+  // ABSENT IS NOT FALSE. A run in flight has written no outcome, and reading
+  // that as "there is nothing in this file" would label every file unreadable
+  // for as long as the pass takes -- which is why `stageOf` asks the status
+  // first.
+  it("reads an absent outcome as zero and false, not as a claim", () => {
+    const run = runFromRow(runRow({ id: "r-1", status: "running", outcome: {} }));
+    expect(run.readable).toBe(false);
+    expect(run.passages).toBe(0);
+  });
+});
+
+describe("runsByFile", () => {
+  it("keeps the NEWEST run per file, which is the first the feed carries", () => {
+    const newest = runFromRow(runRow({ id: "r-new", input: { fileId: "f-1" } }));
+    const older = runFromRow(runRow({ id: "r-old", input: { fileId: "f-1" } }));
+    expect(runsByFile([newest, older]).get("f-1")?.id).toBe("r-new");
+  });
+});
+
+describe("stageOf", () => {
+  const file = (over: Record<string, unknown>) => fileFromRow(fileRow({ id: "f-1", ...over }));
+  const run = (over: Record<string, unknown>) => runFromRow(runRow({ id: "r-1", ...over }));
+
+  it("reads a file the cluster is working on as reading", () => {
+    expect(stageOf(file({ status: "analyzing" }), undefined)).toBe("reading");
+    expect(stageOf(file({ status: "stored" }), undefined)).toBe("reading");
   });
 
-  it("keeps the goal when the prefix is all there is", () => {
-    expect(planFileName(planFromRow(planRow({ id: "p", goal: "Analyze " })))).toBe("Analyze");
+  it("reads a failed file as failed", () => {
+    expect(stageOf(file({ status: "failed" }), undefined)).toBe("failed");
+  });
+
+  it("reads a ready file with no domains as ready to teach", () => {
+    expect(stageOf(file({}), run({}))).toBe("untrained");
+  });
+
+  it("reads a ready file with a domain as trained", () => {
+    expect(stageOf(file({ trainedIntoDomainIds: ["d-1"] }), run({}))).toBe("trained");
+  });
+
+  // The one branch the file row genuinely cannot decide: a photograph and a
+  // spreadsheet both end at `ready` with `embeddingStatus: "complete"`.
+  it("uses the run to tell a stored photograph from a read document", () => {
+    const unreadable = run({ outcome: { readable: false, chunks: 0 } });
+    expect(stageOf(file({ summary: "" }), unreadable)).toBe("unreadable");
+  });
+
+  // THE FILE LEADS. The upload route writes the file row inside the request
+  // and the analysis pass writes the run from a detached goroutine, so a
+  // surface that waited for the run would show nothing for the first moments
+  // of every upload.
+  it("does not wait for a run", () => {
+    expect(stageOf(file({ status: "analyzing" }), undefined)).toBe("reading");
+    expect(stageOf(file({ trainedIntoDomainIds: ["d-1"] }), undefined)).toBe("trained");
+  });
+
+  it("reads a run still in flight as reading rather than unreadable", () => {
+    const inFlight = run({ status: "running", outcome: {} });
+    expect(stageOf(file({ status: "analyzing" }), inFlight)).toBe("reading");
+  });
+});
+
+describe("fileDotTone", () => {
+  it("is reachable while work is happening", () => {
+    expect(fileDotTone("reading")).toBe("reachable");
+    expect(fileDotTone("uploading")).toBe("reachable");
+  });
+
+  it("is unreachable on a failure", () => {
+    expect(fileDotTone("failed")).toBe("unreachable");
+  });
+
+  // QUIET IS THE SETTLED STATE: painting every trained file green would make
+  // a page of finished work look like a page of running work.
+  it("has NO dot for a settled file", () => {
+    expect(fileDotTone("untrained")).toBe("unknown");
+    expect(fileDotTone("trained")).toBe("unknown");
+    expect(fileDotTone("unreadable")).toBe("unknown");
   });
 });
 

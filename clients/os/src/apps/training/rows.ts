@@ -3,13 +3,16 @@ import { rowBool, rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-c
 import { flatten } from "../../kit/rows";
 
 import {
-  ANALYZE_PLAN_KIND,
+  ANALYSIS_TEMPLATE,
   CORPUS_GROUP_ID,
   CORPUS_GROUP_LABEL,
+  FILE_ANALYZING,
+  FILE_FAILED,
+  FILE_READY,
   REJECTED,
-  TERMINAL_PLAN_STATUSES,
   UNVALIDATED,
   VALIDATED,
+  type FileStage,
 } from "./concepts";
 
 // The Training app's projections: raw wire rows in, the app's own types out.
@@ -21,116 +24,223 @@ import {
 // `useLiveView` is for, and these are the functions it runs.
 
 // ---------------------------------------------------------------------------
-// Analysis plans
+// Files
 // ---------------------------------------------------------------------------
 
-export interface AnalysisPlan {
+export interface TrainingFile {
   id: string;
-  kind: string;
+  name: string;
+  mimeType: string;
+  size: number;
   status: string;
-  goal: string;
-  requestedBy: string;
-  errorMessage: string;
+  summary: string;
+  failureReason: string;
+  embeddingStatus: string;
+  trainedIntoDomainIds: string[];
+  archived: boolean;
   createdAt: string;
-  completedAt: string;
 }
 
-export function planFromRow(row: Row): AnalysisPlan {
+export function fileFromRow(raw: Row): TrainingFile {
+  const row = flatten(raw);
   return {
     id: rowString(row, "id"),
-    kind: rowString(row, "kind"),
+    name: rowString(row, "name"),
+    mimeType: rowString(row, "mimeType"),
+    size: rowNumber(row, "size"),
     status: rowString(row, "status"),
-    goal: rowString(row, "goal"),
-    requestedBy: rowString(row, "requestedBy"),
-    errorMessage: rowString(row, "errorMessage"),
+    summary: rowString(row, "summary"),
+    failureReason: rowString(row, "failureReason"),
+    embeddingStatus: rowString(row, "embeddingStatus"),
+    trainedIntoDomainIds: stringList(row, "trainedIntoDomainIds"),
+    archived: rowBool(row, "archived"),
     createdAt: rowString(row, "createdAt"),
-    completedAt: rowString(row, "completedAt"),
   };
 }
 
 /**
- * Whether a plan row belongs on this surface.
+ * Whether a file belongs on this surface.
  *
- * BOTH HALVES ARE CLIENT-SIDE, and they are client-side for two different
- * reasons that must not be collapsed:
- *
- *   - `kind` is a filter this app owns. `plansForUser` returns every plan the
- *     caller requested, whatever its kind, because that is the query the Nexus
- *     goal picker needs; narrowing it server-side would be a change to a
- *     surface this app does not own.
- *   - `requestedBy` is a RESIDUAL. `v1:planner:plan` declares no row-authz
- *     tier (memql#4366), so while the SEED is server-scoped
- *     (`plansForUser` binds `requestedBy==actor.userId`), the SUBSCRIPTION is
- *     not: a concept that declares nothing admits every subscriber, so
- *     `graph.node.*.v1:planner:*` delivers other people's plans to this
- *     browser. Nexus labels the same filter the same way, and the residual is
- *     recorded in `docs/public/operate/auth/per-row-authz-audit.md`.
- *
- * A BLANK viewer id matches NOTHING rather than everything. Access resolves
- * asynchronously, and "show every plan in the cluster until we know who is
- * looking" is the exact shape of the bug this filter exists to prevent.
+ * NO `requestedBy` RESIDUAL, and that is the re-key's quiet security gain.
+ * The old plan feed filtered other people's rows out CLIENT-SIDE, because
+ * `v1:planner:plan` declares no row-authz tier and a concept that declares
+ * nothing admits every subscriber. `v1:library:file` declares
+ * `@rowAuthz(owner="ownerUserId", clusterOwner)`, so admission runs on the
+ * SUBSCRIPTION as well as the read (memql#4309) and other people's files
+ * never arrive here at all. What is left is this app's own business: an
+ * archived file is in the Bin, and the Bin is where you restore it.
  */
-export function planBelongsHere(plan: AnalysisPlan, viewerUserId: string): boolean {
-  if (plan.id === "") return false;
-  if (plan.kind !== ANALYZE_PLAN_KIND) return false;
-  if (viewerUserId.trim() === "") return false;
-  return plan.requestedBy === viewerUserId;
+export function fileBelongsHere(file: TrainingFile): boolean {
+  if (file.id === "") return false;
+  return !file.archived;
 }
 
 /**
- * What a person would call a change on an analysis plan.
+ * What a person would call a change on a file.
  *
  * A HEARTBEAT IS NOT NEWS: nothing here moves on a timer. `status` is the
- * whole point of the surface, `errorMessage` arrives with a failure, and
- * `completedAt` is stamped once. Token counters and metrics are deliberately
- * absent -- they tick while a plan runs, and naming one would pulse the row
- * continuously for the life of the analysis.
+ * pipeline, `embeddingStatus` settles once, `trainedIntoDomainIds` changes
+ * when somebody teaches a domain, and `failureReason` arrives with a failure.
+ * `summary` is deliberately absent even though it is written once -- it lands
+ * in the same write as `status: "ready"`, so naming it would announce the
+ * same event twice.
  */
-export function planFingerprint(plan: AnalysisPlan): string {
-  return `${plan.status}|${plan.completedAt}|${plan.errorMessage}`;
+export function fileFingerprint(file: TrainingFile): string {
+  return [
+    file.status,
+    file.embeddingStatus,
+    file.failureReason,
+    file.trainedIntoDomainIds.join(","),
+  ].join("|");
 }
 
-export function planIsTerminal(plan: AnalysisPlan): boolean {
-  return TERMINAL_PLAN_STATUSES.includes(plan.status);
+// ---------------------------------------------------------------------------
+// Analysis runs
+// ---------------------------------------------------------------------------
+
+export interface AnalysisRun {
+  id: string;
+  template: string;
+  status: string;
+  /** The file this run is about, off the run's own input envelope. */
+  fileId: string;
+  errorMessage: string;
+  startedAt: string;
+  finishedAt: string;
+  /** Whether the pass found text at all. */
+  readable: boolean;
+  /** How many passages the file was split into, and how many are searchable. */
+  passages: number;
+  embedded: number;
+  summarized: boolean;
+}
+
+export function runFromRow(raw: Row): AnalysisRun {
+  const row = flatten(raw);
+  const input = objectAt(row, "input");
+  const outcome = objectAt(row, "outcome");
+  return {
+    id: rowString(row, "id"),
+    template: rowString(row, "automationName"),
+    status: rowString(row, "status"),
+    fileId: stringAt(input, "fileId"),
+    errorMessage: rowString(row, "errorMessage"),
+    startedAt: rowString(row, "startedAt"),
+    finishedAt: rowString(row, "finishedAt"),
+    // ABSENT IS NOT FALSE for `readable`: a run still in flight has written
+    // no outcome, and reading that as "there is nothing in this file" would
+    // label every file unreadable for as long as the pass takes. The caller
+    // asks the run's STATUS first, which is what `stageOf` does.
+    readable: boolAt(outcome, "readable"),
+    passages: numberAt(outcome, "chunks"),
+    embedded: numberAt(outcome, "embedded"),
+    summarized: boolAt(outcome, "summarized"),
+  };
 }
 
 /**
- * The dot's reading of a plan.
+ * Whether a run belongs on this surface.
+ *
+ * The template check is a filter this app owns: `workRunsForOwner` returns
+ * every run the caller owns because Nexus needs that, and this app shows
+ * analyses. Owner scoping is the ENGINE's -- `v1:work:run` declares the
+ * composite owner tier, so nobody else's runs reach this browser.
+ */
+export function runBelongsHere(run: AnalysisRun): boolean {
+  if (run.id === "" || run.fileId === "") return false;
+  return run.template === ANALYSIS_TEMPLATE;
+}
+
+export function runFingerprint(run: AnalysisRun): string {
+  return `${run.status}|${run.finishedAt}|${run.passages}|${run.embedded}`;
+}
+
+/** The newest run per file. Runs arrive newest-first, so the first win. */
+export function runsByFile(runs: readonly AnalysisRun[]): Map<string, AnalysisRun> {
+  const byFile = new Map<string, AnalysisRun>();
+  for (const run of runs) {
+    if (!byFile.has(run.fileId)) byFile.set(run.fileId, run);
+  }
+  return byFile;
+}
+
+// ---------------------------------------------------------------------------
+// The stage: what a person is looking at, and therefore what they may do
+// ---------------------------------------------------------------------------
+
+/**
+ * Fold a file and its newest run into ONE state.
+ *
+ * THE FILE ROW LEADS AND THE RUN DECORATES. Every branch below can be decided
+ * from the file alone, and the run is consulted only for `unreadable` -- which
+ * the file row genuinely cannot express, because a stored image and a read
+ * spreadsheet both end at `ready`. That ordering matters: the file row is
+ * written synchronously by the upload route and the run row is written by a
+ * detached goroutine, so a surface that waited for the run would show nothing
+ * for the first moments of every upload.
+ *
+ * A file with NO run at all reads from its own status. That is not a
+ * degradation to paper over: it is exactly what a cluster with no journal
+ * wired looks like, and what every file uploaded before this epic looks like.
+ */
+export function stageOf(file: TrainingFile, run: AnalysisRun | undefined): FileStage {
+  if (file.status === FILE_FAILED) return "failed";
+  if (file.status === FILE_ANALYZING) return "reading";
+  if (file.status !== FILE_READY) return "reading";
+  // Ready. The run says whether there was anything in it to read.
+  if (run !== undefined && run.status === "succeeded" && !run.readable) return "unreadable";
+  // No run, and nothing was embedded: the same shape as an unreadable file,
+  // and the honest reading when the journal is not wired.
+  if (run === undefined && file.embeddingStatus === "complete" && file.summary === "") {
+    return "unreadable";
+  }
+  return file.trainedIntoDomainIds.length > 0 ? "trained" : "untrained";
+}
+
+/**
+ * The dot's reading of a file.
  *
  * The kit's `ProvenanceDot` is green = reachable now, amber = not reachable,
  * unknown = NO DOT, and the same component renders the dock's "running", the
  * connection state and the fleet's "online" -- so aliveness reads identically
  * everywhere. This maps onto it rather than inventing a fourth dot:
  *
- *   running            -> reachable.   Work is happening right now.
- *   failed / cancelled -> unreachable. The work stopped and did not finish;
- *                                      amber is what the shell says that with.
- *   queued / succeeded -> unknown, so NO dot. A queued plan has not started
- *                                      and a succeeded one is over, and
- *                                      neither is a liveness reading. QUIET IS
- *                                      THE SUCCESS STATE: painting every
- *                                      finished analysis green would make a
- *                                      page of history look like a page of
- *                                      running work.
+ *   reading            -> reachable.   Work is happening right now.
+ *   failed             -> unreachable. It stopped and did not finish.
+ *   everything else    -> unknown, so NO dot. QUIET IS THE SETTLED STATE:
+ *                         painting every trained file green would make a page
+ *                         of finished work look like a page of running work.
  */
-export function planDotTone(plan: AnalysisPlan): "reachable" | "unreachable" | "unknown" {
-  if (plan.status === "failed" || plan.status === "cancelled") return "unreachable";
-  if (plan.status === "running") return "reachable";
+export function fileDotTone(stage: FileStage): "reachable" | "unreachable" | "unknown" {
+  if (stage === "failed") return "unreachable";
+  if (stage === "reading" || stage === "uploading") return "reachable";
   return "unknown";
 }
 
-/**
- * The file this plan is about.
- *
- * `CreateQueuedAnalyzePlan` writes the goal as `Analyze <name>`, so the name
- * is recoverable -- but the prefix is the SERVER's wording and this parse is a
- * courtesy over it. A goal that does not carry the prefix renders whole rather
- * than being blanked: a plan whose goal we cannot parse still has a goal.
- */
-export function planFileName(plan: AnalysisPlan): string {
-  const goal = plan.goal.trim();
-  const prefix = "Analyze ";
-  return goal.startsWith(prefix) ? goal.slice(prefix.length).trim() || goal : goal;
+function stringList(row: Row, key: string): string[] {
+  const raw = (row as Record<string, unknown>)[key];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((v): v is string => typeof v === "string" && v.trim() !== "");
+}
+
+function objectAt(row: Row, key: string): Record<string, unknown> {
+  const raw = (row as Record<string, unknown>)[key];
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return raw as Record<string, unknown>;
+}
+
+function stringAt(obj: Record<string, unknown>, key: string): string {
+  const raw = obj[key];
+  return typeof raw === "string" ? raw : "";
+}
+
+function numberAt(obj: Record<string, unknown>, key: string): number {
+  const raw = obj[key];
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
+}
+
+function boolAt(obj: Record<string, unknown>, key: string): boolean {
+  return obj[key] === true;
 }
 
 // ---------------------------------------------------------------------------

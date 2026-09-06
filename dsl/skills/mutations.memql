@@ -25,8 +25,13 @@ mutate skill mintSkill {
     toolSlugs          array
     liveSourceIds      array
     tier               string!
-    originatingPlanId  string
-    mintedByAgentId    string
+    instructions       object
+    scripts            array
+    resources          array
+    constructRefs      array
+    effects            object
+    originatingGoalId  string
+    mintedByRunId      string
   }
   insert {
     id: args.skillId ?? args.slug
@@ -41,8 +46,19 @@ mutate skill mintSkill {
     args.tier
     predefined: false
     active: true
-    args.originatingPlanId
-    args.mintedByAgentId
+    instructions: args.instructions ?? {}
+    scripts: args.scripts ?? []
+    resources: args.resources ?? []
+    constructRefs: args.constructRefs ?? []
+    effects: args.effects ?? {}
+    version: 1
+    // CANDIDATE, hard-stamped, for the same reason predefined is hard-stamped
+    // false: a freshly minted skill has proved nothing, and letting the mint
+    // caller declare itself `active` would let the ladder be skipped by the
+    // one path that most needs it.
+    status: "candidate"
+    args.originatingGoalId
+    args.mintedByRunId
   }
 }
 
@@ -69,6 +85,13 @@ mutate skill createSkill {
     tier           string!
     predefined     bool
     active         bool
+    instructions   object
+    scripts        array
+    resources      array
+    constructRefs  array
+    effects        object
+    version        int
+    status         string
   }
   insert {
     id: args.skillId ?? args.slug
@@ -83,6 +106,17 @@ mutate skill createSkill {
     args.tier
     predefined: args.predefined ?? true
     active: args.active ?? true
+    instructions: args.instructions ?? {}
+    scripts: args.scripts ?? []
+    resources: args.resources ?? []
+    constructRefs: args.constructRefs ?? []
+    effects: args.effects ?? {}
+    version: args.version ?? 1
+    // ACTIVE by default, which is the one place the seed path and the mint
+    // path differ on the ladder: a row somebody shipped in the tree is the
+    // catalog, and making an operator promote the thing they just installed
+    // would be a ceremony with one right answer.
+    status: args.status ?? "active"
   }
 }
 
@@ -124,6 +158,56 @@ mutate skillEdge commitSkillEdge {
     stamp {
       id: args.edgeId
       status: "committed"
+    }
+  }
+}
+
+/// Rewrite a skill's `scripts[]`. @serverOnly: the list names the EXECUTABLES a skill may ship to a
+/// workbench or to somebody's own machine, so a client-reachable write is a primitive for pointing
+/// any skill at any artifact and having the platform run it under the caller's fleet scope. Scoping
+/// by actor.userId does not help and would make it worse -- the concept is public-tier by design so
+/// there is no owner conjunct to narrow by, and the predefined catalog every person's agents read
+/// has a present-and-empty owner, which no caller matches. The one writer is capture
+/// (integrations/skills/capture.go), which reads the bytes off a surface the caller already reached
+/// and files them in the Library first.
+///
+/// TAKES THE FULL LIST, like appendLibraryFileTrainedDomain and for the same reason: MemQL has no
+/// array append, so a caller sending one entry would clobber whatever another run captured
+/// concurrently. Capture reads, merges by platform and writes back.
+@serverOnly
+mutate skill setSkillScripts {
+  args {
+    skillId  string!
+    scripts  array
+  }
+  update {
+    id: args.skillId
+    scripts: args.scripts ?? []
+  }
+}
+
+/// Move a skill along the trust ladder. @serverOnly: reliability is EVIDENCE gathered from runs the
+/// engine executed, so a caller-written value is a claim about executions the caller did not
+/// observe -- the same reasoning createSkillEdge carries, and the same non-answer applies, because
+/// scoping by actor.userId cannot narrow a public-tier catalog whose rows are the deployment's.
+///
+/// The caller computes the new value rather than sending a delta. Reliability decays on disuse as
+/// well as climbing on success, so "add 0.05" is not expressible as one write, and a read-modify-
+/// write in the caller is what lets the ladder's rule live in one readable place instead of being
+/// split between a mutation and its callers.
+@serverOnly
+mutate skill reinforceSkill {
+  args {
+    skillId         string!
+    reliability     float!
+    reinforceCount  int!
+    lastReinforced  string
+    status          string
+  }
+  update {
+    accept { reliability, reinforceCount, lastReinforced, status }
+    stamp {
+      id: args.skillId
     }
   }
 }

@@ -143,6 +143,7 @@ export class EdgeUploadProvider implements UploadProvider {
       title: file.name,
       fileKind: "file",
       source: "uploaded",
+      ...(landed.fileId === "" ? {} : { fileId: landed.fileId }),
       ...(landed.versionNumber === undefined ? {} : { versionNumber: landed.versionNumber }),
     };
   }
@@ -309,6 +310,7 @@ export class EdgeUploadProvider implements UploadProvider {
       title: file.name,
       fileKind: "file",
       source: "uploaded",
+      ...(landed.fileId === "" ? {} : { fileId: landed.fileId }),
       ...(landed.versionNumber === undefined ? {} : { versionNumber: landed.versionNumber }),
     };
   }
@@ -320,12 +322,23 @@ export class EdgeUploadProvider implements UploadProvider {
  * "not stated" must not become version zero -- a surface reading zero would
  * announce "Version 0 uploaded".
  */
-function readUploadResponse(raw: unknown): { artifactId: string; versionNumber?: number } {
-  const payload = (raw ?? {}) as { artifactId?: unknown; versionNumber?: unknown };
+function readUploadResponse(raw: unknown): {
+  artifactId: string;
+  fileId: string;
+  versionNumber?: number;
+} {
+  const payload = (raw ?? {}) as {
+    artifactId?: unknown;
+    fileId?: unknown;
+    versionNumber?: unknown;
+  };
   const artifactId = typeof payload.artifactId === "string" ? payload.artifactId : "";
+  const fileId = typeof payload.fileId === "string" ? payload.fileId : "";
   const versionNumber =
     typeof payload.versionNumber === "number" && payload.versionNumber >= 1
       ? payload.versionNumber
       : undefined;
-  return versionNumber === undefined ? { artifactId } : { artifactId, versionNumber };
+  return versionNumber === undefined
+    ? { artifactId, fileId }
+    : { artifactId, fileId, versionNumber };
 }

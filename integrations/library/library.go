@@ -59,6 +59,7 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/workjournal"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/core/num"
 )
@@ -92,6 +93,12 @@ type Integration struct {
 	// fetcher keeps chunked files hash-absent -- "not measured" -- and
 	// unextracted; see SetBlobFetcher in analysis.go.
 	blobFetcher BlobFetcher
+	// journal writes the analysis pass's goal, run and step rows (spec
+	// section G). Unset, the pass is invisible outside the file row's own
+	// `status` -- which is exactly how it behaved before epic memql#4970,
+	// so the absence is a downgrade rather than a failure. See
+	// SetWorkJournal in analysis.go.
+	journal *workjournal.Journal
 }
 
 // NewIntegration wires the engine handle. The factory is in plugin.go;

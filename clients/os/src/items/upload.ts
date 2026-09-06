@@ -22,6 +22,21 @@ export interface UploadResult {
    * nothing rather than as version zero.
    */
   versionNumber?: number;
+  /**
+   * The `v1:library:file` row behind the artifact, when the cluster named
+   * one (epic memql#4970). The upload route has always answered with it --
+   * `{artifactId, fileId, versionNumber}` -- and this reads it through.
+   *
+   * OPTIONAL, because two providers here honestly have no answer: the
+   * in-memory stand-in never talked to a cluster, and an older cluster's
+   * reply may carry only the artifact. Absent means "not stated", which a
+   * surface shows as nothing rather than as a row that does not exist.
+   *
+   * The Training app keys on it: the file row is what carries `status`,
+   * `summary` and `trainedIntoDomainIds`, so a surface about teaching needs
+   * the file rather than its index entry.
+   */
+  fileId?: string;
 }
 
 /**

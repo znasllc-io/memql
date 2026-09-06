@@ -9798,6 +9798,29 @@ QueryClient.prototype.sitesForPackage = function (this: QueryClient, args: Sites
   return this.executeNamed("sitesForPackage", buildSitesForPackage(args), opts);
 };
 
+/** One skill by id. The read `runScript` makes before it ships anything: it needs the row's `scripts[]`, its slug for the refusal message, and its `active` flag.
+Public tier, so there is no owner conjunct -- and adding one would hide the predefined catalog every person's agents read, which is the whole reason the tier is what it is. */
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillById"] in generated_concepts.ts).
+export interface SkillByIdArgs {
+  skillId: string;
+}
+
+export function buildSkillById(args: SkillByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("skillId: " + renderMemQLValue(args.skillId));
+  return "query skillById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    skillById(args: SkillByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.skillById = function (this: QueryClient, args: SkillByIdArgs = {} as SkillByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("skillById", buildSkillById(args), opts);
+};
+
 /** Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it. */
 // Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillBySlug"] in generated_concepts.ts).
 export interface SkillBySlugArgs {
@@ -10865,6 +10888,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.workGoalsForOwner = function (this: QueryClient, args: WorkGoalsForOwnerArgs = {} as WorkGoalsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workGoalsForOwner", buildWorkGoalsForOwner(args), opts);
+};
+
+/** The caller's runs, newest first. Owned: ownerUserId==actor.userId binds server-side, and the concept's tier admits the same rows on the SUBSCRIPTION, so a browser watching this feed is not handed anybody else's work the way an undeclared concept would.
+DELIBERATELY NOT NARROWED BY TEMPLATE. A caller that wants one kind of run filters `automationName` itself: the MemQL OS Training app shows analyses and reads `libraryAnalyzeFile`, and Nexus (sub-project B) wants every run of a goal. Narrowing here would make this query one surface's, and the second surface would add a second query that drifts. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunsForOwner"] in generated_concepts.ts).
+export interface WorkRunsForOwnerArgs {
+}
+
+export function buildWorkRunsForOwner(args: WorkRunsForOwnerArgs): string {
+  void args;
+  return "query workRunsForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workRunsForOwner(args?: WorkRunsForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workRunsForOwner = function (this: QueryClient, args: WorkRunsForOwnerArgs = {} as WorkRunsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workRunsForOwner", buildWorkRunsForOwner(args), opts);
 };
 
 /** Look up the worker registration owned by an identity row.

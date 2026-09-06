@@ -10,10 +10,10 @@ import type { OsAppSection } from "../../system/registry";
 /**
  * The sections this app declares, in manifest order.
  *
- * UPLOAD IS FIRST, and therefore the section a window opens on: this app is
- * for teaching MemQL from files, and the dropzone is the thing it is for.
- * Somebody who mostly reviews can point it at Review instead, which the
- * default-landing preference below does.
+ * TEACH IS FIRST, and therefore the section a window opens on: this app is
+ * for teaching MemQL from files, and that section is where a file becomes
+ * something a domain has learned. Somebody who mostly reviews can point it at
+ * Review instead, which the default-landing preference below does.
  *
  * NO SECTION CARRIES A ROLE, and the APP carries `writer`. That split is
  * deliberate: every surface here reads or writes the same two populations, so
@@ -30,7 +30,12 @@ import type { OsAppSection } from "../../system/registry";
  * as a broken app rather than as a stale preference.
  */
 export const TRAINING_SECTIONS: OsAppSection[] = [
-  { id: "upload", name: "Upload" },
+  // "Teach", not "Upload": the section's own Head says "Teach from a file"
+  // and its one act is "Teach a domain", so the nav says the same word (rule
+  // 7 -- a thing is named in one place). The ID stays `upload` because a
+  // stored preference names it, and renaming an id to match a label is how a
+  // preference silently stops resolving.
+  { id: "upload", name: "Teach" },
   { id: "review", name: "Review" },
   { id: "domains", name: "Domains" },
   // The app's slice of the cluster's logs (epic memql#4895): the lines it

@@ -117,7 +117,45 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// replica's log. That is the shape of bug that survives a release, which
 		// is why these two packages stamp rather than being exempted from the
 		// annotation.
-		"component/campaigns":  "campaign drain worker, tracking endpoints and consent writers -- server-initiated; every write it stamps for is @serverOnly (memql#4820)",
+		"component/campaigns": "campaign drain worker, tracking endpoints and consent writers -- server-initiated; every write it stamps for is @serverOnly (memql#4820)",
+		// The work spine's journal for SERVER-STARTED passes (epic
+		// memql#4970, spec section G). SERVER-INITIATED: its one caller today
+		// is the Library's file analysis pass, which runs on a detached
+		// goroutine over context.Background() with the file owner's actor --
+		// there is no request in scope by the time it begins.
+		//
+		// It is a package rather than a few calls in integrations/library
+		// precisely because of the standard this list sets. That package also
+		// serves request-derived paths (libraryTrainFile runs under the
+		// CALLER's actor), so an entry for it would put the stamp within
+		// reach of a caller-scoped read; this package exists for one
+		// operation family, and every call site in it is downstream of one
+		// gate -- Begin refuses a blank owner, so no row is ever written
+		// under an actor that could read nothing back. That precondition is
+		// asserted rather than stated:
+		// component/workjournal/internal_origin_precondition_test.go.
+		//
+		// The stamp is not a widening: goal, run and step have only
+		// @serverOnly writers, origin defaults to CLIENT, and the function
+		// validator refuses an unstamped @serverOnly write with a WARN -- so
+		// without it every analysis would report itself complete while the
+		// Training app's feed stayed permanently empty.
+		"component/workjournal": "the work spine's journal for server-started passes -- server-initiated; its goal, run and step writers are all @serverOnly and refused without it (memql#4970)",
+		// The capability graph's three @serverOnly writers -- setSkillScripts,
+		// createSkillEdge, commitSkillEdge (epic memql#4970, spec section C).
+		// SERVER-INITIATED: an edge is EVIDENCE the engine gathered from runs
+		// it executed, and a script list names the executables a skill may
+		// ship to somebody's machine, so neither is a thing a request should
+		// be able to write.
+		//
+		// It is this package rather than its two callers for the standard
+		// this list sets. `integrations/planner` is large and full of
+		// request-derived paths; `integrations/skills` serves the
+		// caller-scoped Library reads runScript makes. An entry for either
+		// would put the stamp within reach of code that has nothing to do
+		// with these three writes. `writer.go` is the operation family and
+		// `selection.go` beside it holds no engine at all.
+		"component/skills":     "the capability graph's three @serverOnly writers -- server-initiated evidence and executable lists, refused without the stamp (memql#4970)",
 		"component/emailrules": "event-email rule generation, activation and firing -- server-initiated; the callers are the authoring pipeline and an authored automation, and the three writes it stamps for are @serverOnly (memql#4829)",
 		// The custom-domain reconciliation sweep (epic memql#4805). SERVER-
 		// INITIATED, and not one of the request-derived exceptions: the caller

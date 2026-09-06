@@ -3074,15 +3074,56 @@ a.os-button {
   gap: 8px;
 }
 
-/* A plan's failure reason, on the row. Clipped rather than wrapped: the row is
- * one line, and the full text is on the element's own title. */
+/* A file's failure reason, on the row.
+ *
+ * IT WRAPS ONTO ITS OWN LINE rather than being clipped, and the change is a
+ * correction (epic memql#4970). The rule here used to end in an ellipsis and
+ * say the full text was "on the element's own title" -- no call site ever set
+ * one, so the sentence the cluster wrote was truncated mid-word and available
+ * nowhere. The server's own words are the single thing that helps somebody
+ * whose upload failed; a row that keeps its height by hiding them is keeping
+ * the wrong thing. */
 .os-train-plan-error {
   font-size: var(--os-text-xs);
   color: var(--os-warn);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 40ch;
+  font-family: var(--os-font-mono);
+}
+
+/* The Teach worklist: rows that carry more than one line.
+ *
+ * SCOPED, not a change to `.os-row`. Every other list in the shell is
+ * deliberately one line per row -- that is what lets a long list be scanned --
+ * and this one is not a list, it is a worklist where a row carries a failure
+ * sentence or an open picker. `flex-basis: 100%` on those two children is what
+ * puts each on its own line without moving the name, the facts or the state
+ * cluster off the first. */
+.os-train-files .os-row {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+.os-train-files .os-train-plan-error,
+.os-train-files .os-train-teach,
+.os-train-files .os-caption[data-line] {
+  flex-basis: 100%;
+  /* ORDER, not DOM position. `Row` renders icon, name, children, state -- so a
+   * full-width child declared among the children would wrap BEFORE the state
+   * cluster and push "could not be read" to the bottom of the row, under the
+   * sentence it labels. `order: 1` moves only these three past the state,
+   * which keeps the first line reading exactly as every other row in the
+   * shell does. */
+  order: 1;
+}
+.os-train-teach {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* A domain name is short, so the picker is sized for one rather than for the
+ * row. A select that fills the width reads as the row's main content, which
+ * is the file -- not the question being asked about it. */
+.os-train-teach .os-select-wrap {
+  flex: 0 1 20rem;
+  min-width: 0;
 }
 
 /* ---- the review queue ---- */
