@@ -49,8 +49,8 @@ const MIN_VISIBLE_SHARE = 0.012;
 export function KindBand({ breakdown }: { breakdown: KindBreakdown }) {
   if (breakdown.empty) {
     return (
-      <div className="os-work-band">
-        <div className="os-work-band-bar" data-empty role="img" aria-label={kindBreakdownLabel(breakdown)} />
+      <div className="os-nexus-band">
+        <div className="os-nexus-band-bar" data-empty role="img" aria-label={kindBreakdownLabel(breakdown)} />
         <Caption>
           No steps yet. The band fills in as the run works out what it has to do.
         </Caption>
@@ -59,17 +59,17 @@ export function KindBand({ breakdown }: { breakdown: KindBreakdown }) {
   }
 
   return (
-    <div className="os-work-band">
+    <div className="os-nexus-band">
       {/* `flex-grow` per segment rather than a percentage width, so rounding
           cannot leave a one-pixel gap at the end: the slices divide the
           container rather than each claiming a share of it. */}
-      <div className="os-work-band-bar" role="img" aria-label={kindBreakdownLabel(breakdown)}>
+      <div className="os-nexus-band-bar" role="img" aria-label={kindBreakdownLabel(breakdown)}>
         {breakdown.segments
           .filter((segment) => segment.count > 0)
           .map((segment) => (
             <span
               key={segment.kind === "" ? "unclassified" : segment.kind}
-              className="os-work-band-seg"
+              className="os-nexus-band-seg"
               data-kind={segment.kind === "" ? "unclassified" : segment.kind}
               style={{ flexGrow: Math.max(segment.share, MIN_VISIBLE_SHARE) }}
             />
@@ -80,16 +80,16 @@ export function KindBand({ breakdown }: { breakdown: KindBreakdown }) {
           number. Every slice appears, including the ones at zero: "no steps
           are waiting on a person" is a reading somebody wants, and an omitted
           row is silence about it. */}
-      <ul className="os-work-band-legend" aria-label="What this run's steps are made of">
+      <ul className="os-nexus-band-legend" aria-label="What this run's steps are made of">
         {breakdown.segments.map((segment) => (
-          <li key={segment.kind === "" ? "unclassified" : segment.kind} className="os-work-band-item">
+          <li key={segment.kind === "" ? "unclassified" : segment.kind} className="os-nexus-band-item">
             <span
-              className="os-work-band-swatch"
+              className="os-nexus-band-swatch"
               data-kind={segment.kind === "" ? "unclassified" : segment.kind}
               aria-hidden
             />
-            <span className="os-work-band-label">{segment.label}</span>
-            <span className="os-work-band-count">{segment.count}</span>
+            <span className="os-nexus-band-label">{segment.label}</span>
+            <span className="os-nexus-band-count">{segment.count}</span>
           </li>
         ))}
       </ul>

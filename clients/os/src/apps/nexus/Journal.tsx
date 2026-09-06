@@ -1,5 +1,5 @@
 import { Button, Caption, Chip, Notice, Subhead, formatDuration, formatMoment } from "../../kit";
-import type { Journal as JournalState } from "./useWork";
+import type { Journal as JournalState } from "./useNexus";
 import { formatMoney, formatTokens, observationKindWord, servedWord } from "./rows";
 
 // THE JOURNAL: the model calls and the observations of one run.
@@ -33,10 +33,10 @@ export function JournalPanel({ journal }: { journal: JournalState }) {
     journal.observations.length === 0;
 
   return (
-    <section className="os-work-journal" aria-label="The journal for this run">
-      <div className="os-work-journal-head">
+    <section className="os-nexus-journal" aria-label="The journal for this run">
+      <div className="os-nexus-journal-head">
         <Subhead>Journal</Subhead>
-        <span className="os-work-journal-when">
+        <span className="os-nexus-journal-when">
           {journal.state === "idle" ? (
             <Caption>Not read yet</Caption>
           ) : journal.state === "loading" ? (
@@ -79,21 +79,21 @@ export function JournalPanel({ journal }: { journal: JournalState }) {
       ) : null}
 
       {journal.modelCalls.length === 0 ? null : (
-        <div className="os-work-journal-group">
-          <p className="os-work-journal-count">
+        <div className="os-nexus-journal-group">
+          <p className="os-nexus-journal-count">
             {journal.modelCalls.length} model {journal.modelCalls.length === 1 ? "call" : "calls"}
           </p>
-          <ul className="os-work-journal-list" aria-label="Model calls">
+          <ul className="os-nexus-journal-list" aria-label="Model calls">
             {journal.modelCalls.map((call) => (
-              <li key={call.id} className="os-work-journal-row" data-served={call.served}>
-                <span className="os-work-journal-model os-mono">{call.model || "--"}</span>
-                <span className="os-work-journal-served">{servedWord(call.served)}</span>
+              <li key={call.id} className="os-nexus-journal-row" data-served={call.served}>
+                <span className="os-nexus-journal-model os-mono">{call.model || "--"}</span>
+                <span className="os-nexus-journal-served">{servedWord(call.served)}</span>
                 {call.stepKey === "" ? null : (
                   <Chip tone="muted" title="The step that made this call">
                     {call.stepKey}
                   </Chip>
                 )}
-                <span className="os-work-journal-figures os-mono">
+                <span className="os-nexus-journal-figures os-mono">
                   <span>
                     {formatTokens(
                       call.inputTokens === null && call.outputTokens === null
@@ -106,7 +106,7 @@ export function JournalPanel({ journal }: { journal: JournalState }) {
                   <span>{call.latencyMs === null ? "--" : formatDuration(call.latencyMs)}</span>
                 </span>
                 {call.error === "" ? null : (
-                  <span className="os-work-journal-error os-mono">{call.error}</span>
+                  <span className="os-nexus-journal-error os-mono">{call.error}</span>
                 )}
               </li>
             ))}
@@ -115,21 +115,21 @@ export function JournalPanel({ journal }: { journal: JournalState }) {
       )}
 
       {journal.observations.length === 0 ? null : (
-        <div className="os-work-journal-group">
-          <p className="os-work-journal-count">
+        <div className="os-nexus-journal-group">
+          <p className="os-nexus-journal-count">
             {journal.observations.length}{" "}
             {journal.observations.length === 1 ? "observation" : "observations"}
           </p>
-          <ul className="os-work-journal-list" aria-label="Observations">
+          <ul className="os-nexus-journal-list" aria-label="Observations">
             {journal.observations.map((observation) => (
-              <li key={observation.id} className="os-work-journal-row">
-                <span className="os-work-journal-obs-kind">
+              <li key={observation.id} className="os-nexus-journal-row">
+                <span className="os-nexus-journal-obs-kind">
                   {observationKindWord(observation.kind)}
                 </span>
                 {observation.stepKey === "" ? null : (
                   <Chip tone="muted">{observation.stepKey}</Chip>
                 )}
-                <span className="os-work-journal-content">{observation.content}</span>
+                <span className="os-nexus-journal-content">{observation.content}</span>
               </li>
             ))}
           </ul>

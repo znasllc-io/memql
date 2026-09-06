@@ -90,7 +90,7 @@ export function RunsSection({ runs, goalsById, showFinished, onOpenRun }: RunsSe
   );
 
   return (
-    <div className="os-work-list">
+    <div className="os-nexus-list">
       <Head
         title="Runs"
         meta={
@@ -108,7 +108,7 @@ export function RunsSection({ runs, goalsById, showFinished, onOpenRun }: RunsSe
         />
       </Head>
 
-      <div className="os-work-scope">
+      <div className="os-nexus-scope">
         <SortControl ascending={ascending} onToggle={() => setAscending((v) => !v)} />
       </div>
 
@@ -169,7 +169,7 @@ export function RunLine({
   const moving = run.status === "running" || run.status === "compiling";
   return (
     <KitRow
-      name={<span className="os-work-run-name">{runTitle(run)}</span>}
+      name={<span className="os-nexus-run-name">{runTitle(run)}</span>}
       onOpen={onOpen}
       // `current` takes a row from muted to full ink: a run that is moving or
       // one that is stuck on you is what this list is about, and everything
@@ -188,7 +188,7 @@ export function RunLine({
               {runModeWord(run.mode)}
             </Chip>
           )}
-          <span className="os-work-run-status" data-status={run.status}>
+          <span className="os-nexus-run-status" data-status={run.status}>
             {runStatusWord(run.status)}
           </span>
           <span className="os-caption" title={formatMoment(run.startedAt || run.createdAt)}>
@@ -198,7 +198,7 @@ export function RunLine({
       }
     >
       {showContext ? (
-        <span className="os-work-run-for">
+        <span className="os-nexus-run-for">
           {goal === null ? (run.goalId === "" ? "an automation" : "a goal") : goalTitle(goal)}
         </span>
       ) : null}
@@ -217,12 +217,12 @@ export function RunLine({
 export function RunMarks({ runs }: { runs: readonly RunRow[] }) {
   if (runs.length === 0) return <Caption>no runs yet</Caption>;
   return (
-    <span className="os-work-marks" role="list" aria-label="Runs of this goal">
+    <span className="os-nexus-marks" role="list" aria-label="Runs of this goal">
       {runs.map((run) => (
         <span
           key={run.id}
           role="listitem"
-          className="os-work-mark"
+          className="os-nexus-mark"
           data-status={run.status}
           data-parked={runWaitsOnYou(run) || undefined}
           aria-label={`${runTitle(run)}: ${runStatusWord(run.status)}`}

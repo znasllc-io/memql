@@ -1,11 +1,17 @@
 // Pan and zoom, as arithmetic.
 //
-// Extracted from the component for the reason `layout.ts` is: a viewport
+// Extracted from the component for the reason a layout module is: a viewport
 // asserted through a rendered SVG is asserted through React, the DOM and a
 // transform string. These are four functions over four numbers, and they are
 // where the one genuinely fiddly rule lives -- a wheel zoom has to keep the
 // point under the cursor under the cursor, which is the difference between a
 // map you can steer and one that runs away from you.
+//
+// IN `kit/` RATHER THAN IN AN APP, since epic memql#4785. It was written for
+// the Deployables map and the Nexus map needs exactly the same four functions;
+// a copy would be a second implementation of a rule whose whole value is that
+// it is written down ONCE, and the day one of them learned something the other
+// would not. Nothing in here knows what is being panned.
 
 export interface Viewport {
   /** Translation in SCREEN pixels, applied before the scale. */

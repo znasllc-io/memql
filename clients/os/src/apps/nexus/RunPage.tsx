@@ -44,7 +44,7 @@ import {
   symptomWord,
   waitingWord,
 } from "./words";
-import type { Journal } from "./useWork";
+import type { Journal } from "./useNexus";
 
 // ONE RUN, TOP TO BOTTOM.
 //
@@ -176,9 +176,9 @@ export function RunPage({
         runStatusDetail(run.status) || "replay and fork wait until it finishes";
 
   return (
-    <div className="os-work-run">
+    <div className="os-nexus-run">
       <div className="os-head">
-        <button type="button" className="os-work-back" onClick={onBack}>
+        <button type="button" className="os-nexus-back" onClick={onBack}>
           <ArrowLeft size={13} aria-hidden />
           Runs
         </button>
@@ -190,13 +190,13 @@ export function RunPage({
         </span>
       </div>
 
-      <div className="os-work-run-body">
+      <div className="os-nexus-run-body">
         {/* WHAT THIS RUN IS FOR, FIRST. A run's own name is an automation
             name; the reason it exists is the goal's statement, and that is
             what somebody arriving from a notification needs. A run with no
             goal says so rather than leaving a blank -- most runs in epic A1
             have none, being ordinary automation executions. */}
-        <p className="os-work-run-lede">
+        <p className="os-nexus-run-lede">
           {goal === null ? (
             run.goalId === "" ? (
               <>No goal asked for this run -- it is an automation execution.</>
@@ -209,7 +209,7 @@ export function RunPage({
           ) : (
             <>
               For{" "}
-              <button type="button" className="os-work-link" onClick={() => onOpenGoal(goal.id)}>
+              <button type="button" className="os-nexus-link" onClick={() => onOpenGoal(goal.id)}>
                 {goal.statement}
               </button>
             </>
@@ -247,7 +247,7 @@ export function RunPage({
             Forked from{" "}
             <button
               type="button"
-              className="os-work-link"
+              className="os-nexus-link"
               onClick={() => onOpenRun(run.forkedFromRunId)}
             >
               its source run
@@ -264,18 +264,18 @@ export function RunPage({
               Every value can be ABSENT and renders as an em dash -- epic A1
               writes none of them, and "0 model calls" on a run that made three
               is the single most damaging thing this surface could say. */}
-          <ul className="os-work-spend" aria-label="What this run spent">
+          <ul className="os-nexus-spend" aria-label="What this run spent">
             {spend.map((figure) => (
-              <li key={figure.many} className="os-work-spend-item">
-                <span className="os-work-spend-value os-mono">{formatSpend(figure)}</span>
-                <span className="os-work-spend-label">{spendLabel(figure)}</span>
+              <li key={figure.many} className="os-nexus-spend-item">
+                <span className="os-nexus-spend-value os-mono">{formatSpend(figure)}</span>
+                <span className="os-nexus-spend-label">{spendLabel(figure)}</span>
               </li>
             ))}
-            <li className="os-work-spend-item">
-              <span className="os-work-spend-value os-mono">
+            <li className="os-nexus-spend-item">
+              <span className="os-nexus-spend-value os-mono">
                 {run.startedAt === "" ? "--" : formatFreshness(run.startedAt, now)}
               </span>
-              <span className="os-work-spend-label">started</span>
+              <span className="os-nexus-spend-label">started</span>
             </li>
           </ul>
           {breakdown.unclassified > 0 ? (
@@ -287,10 +287,10 @@ export function RunPage({
           ) : null}
         </Panel>
 
-        <section className="os-work-timeline" aria-label="What this run did, in order">
-          <ol className="os-work-steps">
+        <section className="os-nexus-timeline" aria-label="What this run did, in order">
+          <ol className="os-nexus-steps">
             {steps.map((step, index) => (
-              <li key={step.id || step.key} className="os-work-step-item">
+              <li key={step.id || step.key} className="os-nexus-step-item">
                 <StepSpineRow
                   step={step}
                   position={index + 1}
@@ -325,7 +325,7 @@ export function RunPage({
         acts={acts}
       >
         {derive.error === "" ? null : (
-          <span className="os-work-act-error os-mono" role="alert">
+          <span className="os-nexus-act-error os-mono" role="alert">
             {derive.error}
           </span>
         )}
@@ -350,8 +350,8 @@ function StepDetail({
   onOpenRun: (runId: string) => void;
 }) {
   return (
-    <div className="os-work-step-detail">
-      <p className="os-work-step-meaning">
+    <div className="os-nexus-step-detail">
+      <p className="os-nexus-step-meaning">
         <strong>{stepKindWord(step.kind)}</strong> -- {stepKindMeaning(step.kind)}
       </p>
       <Facts>
@@ -418,7 +418,7 @@ function StepDetail({
       {step.childRunId === "" ? null : (
         <p className="os-caption">
           It opened{" "}
-          <button type="button" className="os-work-link" onClick={() => onOpenRun(step.childRunId)}>
+          <button type="button" className="os-nexus-link" onClick={() => onOpenRun(step.childRunId)}>
             a run of its own
           </button>{" "}
           and waited for it.

@@ -3,7 +3,7 @@ import { useCallback, useState } from "react";
 import { useOsConnection } from "../../live/connection";
 import { idTail } from "./rows";
 
-// Every write the Work app makes, and the busy/error pair each one owns.
+// Every write the Nexus app makes, and the busy/error pair each one owns.
 //
 // ===========================================================================
 // NOTHING HERE CHECKS A ROLE, AND NOTHING HERE IS THE AUTHORIZATION

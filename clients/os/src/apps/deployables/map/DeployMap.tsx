@@ -1,20 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo } from "react";
 import type { LiveState } from "@znasllc-io/memql-sdk-core/client";
 
 import { Caption } from "../../../kit";
 import type { ArrivalKind, ArrivalTick } from "../../../live/arrival";
 import type { SiteRow } from "../rows";
 import { EMPTY_LAYOUT, layout, nodeCentre, type MapLayout, type MapNode } from "./layout";
-import {
-  IDENTITY,
-  KEY_PAN_STEP,
-  KEY_ZOOM_STEP,
-  fitTo,
-  panBy,
-  transformOf,
-  zoomAt,
-  type Viewport,
-} from "./viewport";
+import { transformOf } from "../../../kit/viewport";
+import { usePanZoom } from "../../../kit/usePanZoom";
 
 // The deploy map: what serves where, as a shape.
 //
@@ -32,16 +24,6 @@ import {
 // Every colour is a token, so a theme restyles the map with no code. Every
 // position comes from `layout.ts`, so the map lays out identically in a test
 // and on a screen.
-
-/**
- * Total pointer travel, in screen pixels, past which a press is a DRAG.
- *
- * Manhattan distance rather than Euclidean: it is the cheaper arithmetic and it
- * over-counts slightly, which errs toward treating a wobble as a drag -- and
- * failing to open a deployable is recoverable in a way that opening one
- * somebody did not ask for, mid-drag, is not.
- */
-const DRAG_THRESHOLD_PX = 5;
 
 const GLYPHS: Record<string, string> = {
   spa: "{ }",
@@ -64,8 +46,6 @@ export function DeployMap({
   onSelect: (node: MapNode) => void;
 }) {
   const model: MapLayout = useMemo(() => (sites.length === 0 ? EMPTY_LAYOUT : layout(sites)), [sites]);
-  const [view, setView] = useState<Viewport>(IDENTITY);
-  const frame = useRef<HTMLDivElement | null>(null);
 
   // A DEGRADED FEED MUST NOT READ AS A HEALTHY FLEET. A map is a picture of
   // now; when the subscription is behind, the picture is of some earlier now,
@@ -83,80 +63,15 @@ export function DeployMap({
 
   // ---- pan and zoom -------------------------------------------------------
   //
-  // Pointer events cover mouse, pen and touch with one code path, which is what
-  // makes "works with pointer and touch" a property of the implementation
-  // rather than of two implementations that have to agree. Two live pointers
-  // are a PINCH; one is a drag.
-  const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const pinch = useRef<{ distance: number; midX: number; midY: number } | null>(null);
-  /**
-   * How far the pointer has travelled since it went down.
-   *
-   * A node lives INSIDE the canvas, so a drag that begins on one bubbles to the
-   * pan handler and then ends in a `click` on that node -- which would open a
-   * deployable somebody was only steering past. Anything past the threshold is
-   * a drag and swallows the click; anything under it is a click with a shaky
-   * hand, which is most clicks.
-   */
-  const travelled = useRef(0);
-
-  const localPoint = useCallback((clientX: number, clientY: number) => {
-    const box = frame.current?.getBoundingClientRect();
-    return { x: clientX - (box?.left ?? 0), y: clientY - (box?.top ?? 0) };
-  }, []);
-
-  const onPointerDown = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
-    // A PRIMARY pointer down starts a fresh gesture, so anything still in the
-    // map is stale -- a pointerup that landed outside the element in a browser
-    // with no pointer capture. Without this, the next press would see two live
-    // pointers and read a single-finger drag as a pinch, which scales the map
-    // by whatever the ghost happened to be sitting at. The second finger of a
-    // real pinch is NOT primary, so it never clears the first.
-    if (e.isPrimary) pointers.current.clear();
-    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    pinch.current = null;
-    travelled.current = 0;
-    // Capture so a drag that leaves the frame keeps steering. jsdom has no
-    // implementation, and a map that threw on mousedown under test would be a
-    // map nothing could test -- hence the optional call rather than a branch.
-    try {
-      (e.currentTarget as unknown as Element).setPointerCapture?.(e.pointerId);
-    } catch {
-      // A browser that refuses capture still pans; it just stops at the edge.
-    }
-  }, []);
-
-  const onPointerMove = useCallback(
-    (e: React.PointerEvent<SVGSVGElement>) => {
-      const held = pointers.current.get(e.pointerId);
-      if (!held) return;
-      const previous = { ...held };
-      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-      const live = [...pointers.current.values()];
-      const a = live[0];
-      const b = live[1];
-      if (a && b) {
-        const distance = Math.hypot(a.x - b.x, a.y - b.y);
-        const mid = localPoint((a.x + b.x) / 2, (a.y + b.y) / 2);
-        const last = pinch.current;
-        pinch.current = { distance, midX: mid.x, midY: mid.y };
-        // The FIRST move after a second finger lands only establishes the
-        // baseline: a ratio against a distance nobody measured yet would jump
-        // the scale by whatever the fingers happened to be apart.
-        if (last && last.distance > 0 && distance > 0) {
-          setView((v) => zoomAt(v, distance / last.distance, mid.x, mid.y));
-        }
-        return;
-      }
-
-      const dx = e.clientX - previous.x;
-      const dy = e.clientY - previous.y;
-      travelled.current += Math.abs(dx) + Math.abs(dy);
-      setView((v) => panBy(v, dx, dy));
-    },
-    [localPoint],
-  );
+  // The gesture is `kit/usePanZoom`, shared with the Nexus beacon map since
+  // epic memql#4785: pointer, touch, wheel and keyboard over one viewport,
+  // with the pointer-capture, pinch-baseline and drag-threshold rules that
+  // each took a bug to get right. Nothing about it is specific to this map.
+  const { view, frameRef, handlers, steering } = usePanZoom({
+    width: model.width,
+    height: model.height,
+    ready: model.nodes.length > 0,
+  });
 
   /**
    * Open a node -- unless the pointer was steering rather than choosing.
@@ -166,98 +81,12 @@ export function DeployMap({
    */
   const activate = useCallback(
     (node: MapNode) => {
-      if (travelled.current > DRAG_THRESHOLD_PX) return;
+      if (steering()) return;
       onSelect(node);
     },
-    [onSelect],
+    [onSelect, steering],
   );
 
-  const endPointer = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
-    pointers.current.delete(e.pointerId);
-    if (pointers.current.size < 2) pinch.current = null;
-  }, []);
-
-  const onWheel = useCallback(
-    (e: React.WheelEvent<SVGSVGElement>) => {
-      // deltaY < 0 is a scroll UP, which is a zoom IN everywhere else in
-      // every map anybody has used.
-      const factor = e.deltaY < 0 ? KEY_ZOOM_STEP : 1 / KEY_ZOOM_STEP;
-      const at = localPoint(e.clientX, e.clientY);
-      setView((v) => zoomAt(v, factor, at.x, at.y));
-    },
-    [localPoint],
-  );
-
-  const onKeyDown = useCallback((e: React.KeyboardEvent<SVGSVGElement>) => {
-    // The keyboard steers the same viewport the pointer does. It is not a
-    // fallback: a map you can only reach with a mouse is a map somebody cannot
-    // read at all, and this is the app's signature surface.
-    const centre = () => {
-      const box = frame.current?.getBoundingClientRect();
-      return { x: (box?.width ?? 0) / 2, y: (box?.height ?? 0) / 2 };
-    };
-    switch (e.key) {
-      case "ArrowLeft":
-        setView((v) => panBy(v, KEY_PAN_STEP, 0));
-        break;
-      case "ArrowRight":
-        setView((v) => panBy(v, -KEY_PAN_STEP, 0));
-        break;
-      case "ArrowUp":
-        setView((v) => panBy(v, 0, KEY_PAN_STEP));
-        break;
-      case "ArrowDown":
-        setView((v) => panBy(v, 0, -KEY_PAN_STEP));
-        break;
-      case "+":
-      case "=": {
-        const c = centre();
-        setView((v) => zoomAt(v, KEY_ZOOM_STEP, c.x, c.y));
-        break;
-      }
-      case "-":
-      case "_": {
-        const c = centre();
-        setView((v) => zoomAt(v, 1 / KEY_ZOOM_STEP, c.x, c.y));
-        break;
-      }
-      case "0":
-        setView(IDENTITY);
-        break;
-      default:
-        return;
-    }
-    e.preventDefault();
-  }, []);
-
-  // ==========================================================================
-  // FIT ONCE, THEN NEVER AGAIN
-  // ==========================================================================
-  // A map that opens clipped is a map somebody has to discover they can pan
-  // before they can read it, and a cluster with a dozen deployables is taller
-  // than any window this draws in. So the first paint frames the whole thing.
-  //
-  // ONCE is the whole rule. A row set that changes shape must NOT re-fit:
-  // somebody who panned into a corner to read a bundle reference would be
-  // thrown back to the origin because a publish landed somewhere else on the
-  // map -- which is the same class of rudeness as a list that scrolls itself.
-  // An empty map resets instead, so the next one that opens starts framed.
-  const fitted = useRef(false);
-  useEffect(() => {
-    if (model.nodes.length === 0) {
-      fitted.current = false;
-      setView(IDENTITY);
-      return;
-    }
-    if (fitted.current) return;
-    const box = frame.current?.getBoundingClientRect();
-    // An unmeasured frame -- a window mid-open, a hidden desk, jsdom -- is not
-    // a fit of zero; it is no answer yet, so the attempt is left for a later
-    // render rather than being spent on a viewport nobody has laid out.
-    if (!box || box.width <= 0 || box.height <= 0) return;
-    fitted.current = true;
-    setView(fitTo(model.width, model.height, box.width, box.height));
-  }, [model]);
 
   if (model.nodes.length === 0) {
     return (
@@ -274,18 +103,13 @@ export function DeployMap({
   }
 
   return (
-    <div className="os-deploy-map" ref={frame} data-behind={behind || undefined}>
+    <div className="os-deploy-map" ref={frameRef} data-behind={behind || undefined}>
       <svg
         className="os-deploy-map-canvas"
         role="application"
         aria-label="Deploy map"
         tabIndex={0}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={endPointer}
-        onPointerCancel={endPointer}
-        onWheel={onWheel}
-        onKeyDown={onKeyDown}
+        {...handlers}
       >
         <g data-os-map-view transform={transformOf(view)}>
           {model.groups.map((group) => (

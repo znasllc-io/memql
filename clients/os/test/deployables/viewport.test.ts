@@ -9,7 +9,7 @@ import {
   panBy,
   transformOf,
   zoomAt,
-} from "../../src/apps/deployables/map/viewport";
+} from "../../src/kit/viewport";
 
 // Pan and zoom as arithmetic. The one rule worth writing down is the zoom
 // invariant, and it is the one a hand-rolled wheel handler gets wrong.

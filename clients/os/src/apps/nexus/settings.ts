@@ -1,6 +1,6 @@
 import type { OsAppSection } from "../../system/registry";
 
-// The Work app's own settings, kept in their own versioned store.
+// The Nexus app's own settings, kept in their own versioned store.
 //
 // A SEPARATE KEY FROM THE DESKTOP DOCUMENT, for the reason every app since
 // Fleet has one: the shell's `DesktopDocument` rejects a version it does not
@@ -22,7 +22,7 @@ import type { OsAppSection } from "../../system/registry";
  * preference naming a section the manifest does not declare leaves the window
  * on Goals with the nav highlighting nothing.
  */
-export const WORK_SECTIONS: OsAppSection[] = [
+export const NEXUS_SECTIONS: OsAppSection[] = [
   { id: "goals", name: "Goals" },
   { id: "runs", name: "Runs" },
   { id: "approvals", name: "Approvals" },
@@ -32,9 +32,9 @@ export const WORK_SECTIONS: OsAppSection[] = [
   { id: "settings", name: "Settings" },
 ];
 
-export const WORK_SECTION_IDS = WORK_SECTIONS.map((s) => s.id);
+export const NEXUS_SECTION_IDS = NEXUS_SECTIONS.map((s) => s.id);
 
-export interface WorkSettings {
+export interface NexusSettings {
   version: 1;
   /** The section the app navigates to when its window opens. */
   defaultSection: string;
@@ -60,11 +60,11 @@ export interface WorkSettings {
 // approvals properly needs a second read, and offering a switch that half
 // works is worse than not offering one.
 
-export const WORK_SETTINGS_KEY = "memql-os-work-v1";
+export const NEXUS_SETTINGS_KEY = "memql-os-nexus-v1";
 
-export const DEFAULT_WORK_SETTINGS: WorkSettings = {
+export const DEFAULT_NEXUS_SETTINGS: NexusSettings = {
   version: 1,
-  // Named rather than read off WORK_SECTIONS[0]: this value is what a corrupt
+  // Named rather than read off NEXUS_SECTIONS[0]: this value is what a corrupt
   // or absent document falls back to, and falling back to "whatever is first
   // in an array" would move with an unrelated edit to that array.
   defaultSection: "goals",
@@ -79,17 +79,17 @@ export const DEFAULT_WORK_SETTINGS: WorkSettings = {
  * somebody their approvals preference. A wrong `version` IS wholesale,
  * because then the field names cannot be trusted at all.
  */
-export function sanitizeWorkSettings(raw: unknown): WorkSettings {
+export function sanitizeNexusSettings(raw: unknown): NexusSettings {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    return { ...DEFAULT_WORK_SETTINGS };
+    return { ...DEFAULT_NEXUS_SETTINGS };
   }
-  const doc = raw as Partial<WorkSettings>;
-  if (doc.version !== 1) return { ...DEFAULT_WORK_SETTINGS };
+  const doc = raw as Partial<NexusSettings>;
+  if (doc.version !== 1) return { ...DEFAULT_NEXUS_SETTINGS };
 
   const defaultSection =
-    typeof doc.defaultSection === "string" && WORK_SECTION_IDS.includes(doc.defaultSection)
+    typeof doc.defaultSection === "string" && NEXUS_SECTION_IDS.includes(doc.defaultSection)
       ? doc.defaultSection
-      : DEFAULT_WORK_SETTINGS.defaultSection;
+      : DEFAULT_NEXUS_SETTINGS.defaultSection;
 
   return {
     version: 1,
@@ -97,16 +97,16 @@ export function sanitizeWorkSettings(raw: unknown): WorkSettings {
     showFinishedRuns:
       typeof doc.showFinishedRuns === "boolean"
         ? doc.showFinishedRuns
-        : DEFAULT_WORK_SETTINGS.showFinishedRuns,
+        : DEFAULT_NEXUS_SETTINGS.showFinishedRuns,
   };
 }
 
-export interface WorkSettingsStore {
-  load(): WorkSettings;
-  save(settings: WorkSettings): void;
+export interface NexusSettingsStore {
+  load(): NexusSettings;
+  save(settings: NexusSettings): void;
 }
 
-export class LocalWorkSettingsStore implements WorkSettingsStore {
+export class LocalNexusSettingsStore implements NexusSettingsStore {
   /** `null` is "no storage" -- a private window and a full quota are normal
    *  cases, not failures. The default only replaces `undefined`. */
   constructor(
@@ -114,20 +114,20 @@ export class LocalWorkSettingsStore implements WorkSettingsStore {
       | Pick<Storage, "getItem" | "setItem">
       | null
       | undefined = globalThis.localStorage,
-    private readonly key: string = WORK_SETTINGS_KEY,
+    private readonly key: string = NEXUS_SETTINGS_KEY,
   ) {}
 
-  load(): WorkSettings {
+  load(): NexusSettings {
     try {
       const raw = this.storage?.getItem(this.key);
-      if (!raw) return { ...DEFAULT_WORK_SETTINGS };
-      return sanitizeWorkSettings(JSON.parse(raw));
+      if (!raw) return { ...DEFAULT_NEXUS_SETTINGS };
+      return sanitizeNexusSettings(JSON.parse(raw));
     } catch {
-      return { ...DEFAULT_WORK_SETTINGS };
+      return { ...DEFAULT_NEXUS_SETTINGS };
     }
   }
 
-  save(settings: WorkSettings): void {
+  save(settings: NexusSettings): void {
     try {
       this.storage?.setItem(this.key, JSON.stringify(settings));
     } catch {

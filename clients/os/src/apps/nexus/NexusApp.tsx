@@ -6,7 +6,7 @@ import { ApprovalsSection } from "./ApprovalsSection";
 import { GoalsSection } from "./GoalsSection";
 import { RunPage } from "./RunPage";
 import { RunsSection } from "./RunsSection";
-import { WORK_APP_ID, WORK_LOG_CONCEPTS } from "./concepts";
+import { NEXUS_APP_ID, NEXUS_LOG_CONCEPTS } from "./concepts";
 import {
   useCancelGoal,
   useCreateGoal,
@@ -26,13 +26,13 @@ import {
   type RunRow,
 } from "./rows";
 import {
-  DEFAULT_WORK_SETTINGS,
-  LocalWorkSettingsStore,
-  WORK_SECTIONS,
-  type WorkSettings,
-  type WorkSettingsStore,
+  DEFAULT_NEXUS_SETTINGS,
+  LocalNexusSettingsStore,
+  NEXUS_SECTIONS,
+  type NexusSettings,
+  type NexusSettingsStore,
 } from "./settings";
-import { useApprovals, useGoals, useJournal, useRunSteps, useRuns } from "./useWork";
+import { useApprovals, useGoals, useJournal, useRunSteps, useRuns } from "./useNexus";
 
 // WORK: what you asked the system to do, what it did about it, and the places
 // it had to stop and ask you.
@@ -62,20 +62,20 @@ import { useApprovals, useGoals, useJournal, useRunSteps, useRuns } from "./useW
 // they were.
 
 /** The concepts this app owns, for its Logs section's subject scope. */
-const LOG_CONCEPTS = WORK_LOG_CONCEPTS;
+const LOG_CONCEPTS = NEXUS_LOG_CONCEPTS;
 
-export function WorkApp({
+export function NexusApp({
   sectionId,
   navigate,
   askContext,
   intent,
   consumeIntent,
   store,
-}: OsAppProps & { store?: WorkSettingsStore }) {
+}: OsAppProps & { store?: NexusSettingsStore }) {
   // Injectable for tests, which is the whole reason the parameter exists --
   // nothing in the shell passes one.
-  const settingsStore = useMemo(() => store ?? new LocalWorkSettingsStore(), [store]);
-  const [settings, setSettings] = useState<WorkSettings>(() => settingsStore.load());
+  const settingsStore = useMemo(() => store ?? new LocalNexusSettingsStore(), [store]);
+  const [settings, setSettings] = useState<NexusSettings>(() => settingsStore.load());
 
   const goals = useGoals();
   const runs = useRuns();
@@ -114,7 +114,7 @@ export function WorkApp({
   function openRun(runId: string) {
     if (runId.trim() === "") return;
     setOpenRunId(runId);
-    askContext(`work run:${idTail(runId)}`);
+    askContext(`nexus run:${idTail(runId)}`);
     navigate("runs");
   }
 
@@ -149,7 +149,7 @@ export function WorkApp({
     consumeIntent?.(intent.id);
   }, [intent]);
 
-  function update(patch: Partial<WorkSettings>) {
+  function update(patch: Partial<NexusSettings>) {
     const next = { ...settings, ...patch, version: 1 as const };
     setSettings(next);
     settingsStore.save(next);
@@ -165,7 +165,7 @@ export function WorkApp({
   useEffect(() => {
     if (applied.current) return;
     applied.current = true;
-    const shellDefault = WORK_SECTIONS[0]?.id ?? "";
+    const shellDefault = NEXUS_SECTIONS[0]?.id ?? "";
     if (sectionId !== shellDefault) return;
     if (settings.defaultSection && settings.defaultSection !== sectionId) {
       navigate(settings.defaultSection);
@@ -174,12 +174,12 @@ export function WorkApp({
   }, []);
 
   if (sectionId === "settings") {
-    return <WorkSettingsSection settings={settings} update={update} />;
+    return <NexusSettingsSection settings={settings} update={update} />;
   }
   if (sectionId === "logs") {
     return (
       <AppLogsSection
-        app={WORK_APP_ID}
+        app={NEXUS_APP_ID}
         subjectConcepts={LOG_CONCEPTS}
         intent={intent}
         consumeIntent={consumeIntent}
@@ -295,21 +295,21 @@ function RunView({
   );
 }
 
-function WorkSettingsSection({
+function NexusSettingsSection({
   settings,
   update,
 }: {
-  settings: WorkSettings;
-  update: (patch: Partial<WorkSettings>) => void;
+  settings: NexusSettings;
+  update: (patch: Partial<NexusSettings>) => void;
 }) {
   return (
     <div className="os-settings">
-      <Head title="Work settings" />
-      <Panel label="Work settings">
+      <Head title="Nexus settings" />
+      <Panel label="Nexus settings">
         <fieldset className="os-field-group">
-          <legend>Open Work on</legend>
+          <legend>Open Nexus on</legend>
           <div className="os-choice-row" role="radiogroup" aria-label="Default section">
-            {WORK_SECTIONS.map((section) => (
+            {NEXUS_SECTIONS.map((section) => (
               <button
                 key={section.id}
                 type="button"
@@ -323,7 +323,7 @@ function WorkSettingsSection({
             ))}
           </div>
           <p className="os-caption">
-            Applies the next time a Work window opens; it does not move the window you are looking
+            Applies the next time a Nexus window opens; it does not move the window you are looking
             at. Approvals is the one worth choosing if you spend the day here -- a run parked on a
             question does not move until somebody answers it.
           </p>
@@ -372,7 +372,7 @@ function WorkSettingsSection({
         <p className="os-caption">
           These are kept in this browser, separately from your desktop, so an app learning a
           checkbox can never cost you your desks. The defaults are{" "}
-          {DEFAULT_WORK_SETTINGS.defaultSection} with finished runs listed.
+          {DEFAULT_NEXUS_SETTINGS.defaultSection} with finished runs listed.
         </p>
       </Panel>
       <Caption>

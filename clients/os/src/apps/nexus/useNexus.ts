@@ -6,7 +6,7 @@ import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLive
 import { APPROVAL_CONCEPT, GOAL_CONCEPT, RUN_CONCEPT, STEP_CONCEPT } from "./concepts";
 import { modelCallFromRow, observationFromRow, type ModelCallRow, type ObservationRow } from "./rows";
 
-// The Work app's feeds, and the one read that is deliberately not a feed.
+// The Nexus app's feeds, and the one read that is deliberately not a feed.
 //
 // ===========================================================================
 // THREE FEEDS AT THE APP ROOT, ONE PER CONCEPT

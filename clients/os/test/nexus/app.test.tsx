@@ -10,8 +10,8 @@ vi.mock("../../src/live/connection", () => ({
   osBridgePath: "/_memql/ws",
 }));
 
-const { WorkApp } = await import("../../src/apps/work/WorkApp");
-const { LocalWorkSettingsStore } = await import("../../src/apps/work/settings");
+const { NexusApp } = await import("../../src/apps/nexus/NexusApp");
+const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings");
 const { approvalRow, fakeConnection, goalRow, runRow, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
@@ -22,7 +22,7 @@ const APPROVAL = "v1:work:approval";
 
 function memoryStore(over: Record<string, unknown> = {}) {
   const bag = new Map<string, string>();
-  const store = new LocalWorkSettingsStore({
+  const store = new LocalNexusSettingsStore({
     getItem: (k: string) => bag.get(k) ?? null,
     setItem: (k: string, v: string) => void bag.set(k, v),
   });
@@ -35,7 +35,7 @@ function mount(connection: Conn, sectionId = "goals", settings: Record<string, u
   const navigate = vi.fn();
   const view = render(
     withSession(
-      <WorkApp
+      <NexusApp
         sectionId={sectionId}
         navigate={navigate}
         askContext={() => {}}
@@ -332,7 +332,7 @@ describe("the section list", () => {
     const consumeIntent = vi.fn();
     render(
       withSession(
-        <WorkApp
+        <NexusApp
           sectionId="goals"
           navigate={navigate}
           askContext={() => {}}
@@ -352,7 +352,7 @@ describe("the section list", () => {
     const consumeIntent = vi.fn();
     render(
       withSession(
-        <WorkApp
+        <NexusApp
           sectionId="goals"
           navigate={navigate}
           askContext={() => {}}

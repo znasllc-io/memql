@@ -167,7 +167,7 @@ export function ApprovalsSection({
   }
 
   return (
-    <div className="os-work-approvals">
+    <div className="os-nexus-approvals">
       <Head
         title="Approvals"
         meta={rows.length === 0 ? "nothing waiting" : `${rows.length} waiting for you`}
@@ -180,12 +180,12 @@ export function ApprovalsSection({
         />
       </Head>
 
-      <div className="os-work-scope">
+      <div className="os-nexus-scope">
         <Caption>Longest wait first -- a queue is answered from the front.</Caption>
       </div>
 
-      <div className="os-work-split">
-        <div className="os-work-column">
+      <div className="os-nexus-split">
+        <div className="os-nexus-column">
           <LiveList<ApprovalRow>
             source={view}
             label="Approvals waiting for you"
@@ -213,7 +213,7 @@ export function ApprovalsSection({
             a clickable row already says, and pushed the queue -- the thing
             this section is for -- into a column. */}
         {selected === null ? null : (
-          <div className="os-work-column os-work-aside">
+          <div className="os-nexus-column os-nexus-aside">
             <ApprovalDetail
               approval={selected}
               run={runsById.get(idTail(selected.runId)) ?? null}
@@ -245,7 +245,7 @@ export function ApprovalsSection({
           acts={acts}
         >
           {decide.error === "" ? null : (
-            <span className="os-work-act-error os-mono" role="alert">
+            <span className="os-nexus-act-error os-mono" role="alert">
               {decide.error}
             </span>
           )}
@@ -303,7 +303,7 @@ function ApprovalLine({
   const lapsed = approval.expiresAt !== "" && Date.parse(approval.expiresAt) < now.getTime();
   return (
     <KitRow
-      name={<span className="os-work-approval-subject">{approvalSubjectLine(approval)}</span>}
+      name={<span className="os-nexus-approval-subject">{approvalSubjectLine(approval)}</span>}
       onOpen={onOpen}
       open={selected}
       current={approval.decision === "" && !lapsed}
@@ -320,7 +320,7 @@ function ApprovalLine({
       <Chip tone="neutral" title={approvalKindMeaning(approval.kind)}>
         {approvalKindWord(approval.kind)}
       </Chip>
-      <span className="os-work-approval-run">{run === null ? "a run" : runTitle(run)}</span>
+      <span className="os-nexus-approval-run">{run === null ? "a run" : runTitle(run)}</span>
     </KitRow>
   );
 }
@@ -348,7 +348,7 @@ function ApprovalDetail({
   return (
     <>
       <Panel label="What is being asked">
-        <p className="os-work-approval-ask">{approvalSubjectLine(approval)}</p>
+        <p className="os-nexus-approval-ask">{approvalSubjectLine(approval)}</p>
         <Caption>{approvalKindMeaning(approval.kind)}</Caption>
 
         {isFeedback ? (
@@ -415,7 +415,7 @@ function ApprovalDetail({
               run === null ? (
                 approval.runId
               ) : (
-                <button type="button" className="os-work-link" onClick={() => onOpenRun(run.id)}>
+                <button type="button" className="os-nexus-link" onClick={() => onOpenRun(run.id)}>
                   {runTitle(run)}
                 </button>
               )

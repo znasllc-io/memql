@@ -15,7 +15,7 @@ import type { CreateGoalState } from "./actions";
 // system is about into a slot the width of a name field, and somebody would
 // write less than they meant to.
 //
-// `.os-work-statement` is LOCAL rather than promoted to the kit, and the count
+// `.os-nexus-statement` is LOCAL rather than promoted to the kit, and the count
 // is the reason. There are two multi-line boxes in this shell: the campaigns
 // template editor's, which is MONO because it holds markup somebody will paste
 // elsewhere, and this one, which is PROSE because it holds a sentence. The
@@ -57,7 +57,7 @@ export function NewGoal({
       </label>
       <textarea
         id="work-new-goal"
-        className="os-work-statement"
+        className="os-nexus-statement"
         rows={3}
         value={statement}
         placeholder="Reconcile last month's ledger against the bank export and tell me what does not match"
@@ -99,7 +99,7 @@ export function NewGoal({
         />
       )}
 
-      <div className="os-work-form-acts">
+      <div className="os-nexus-form-acts">
         <Button onClick={onCancel}>Cancel</Button>
         <Button tone="primary" busy={create.busy} busyLabel="Starting" onClick={() => void submit()}>
           Start work

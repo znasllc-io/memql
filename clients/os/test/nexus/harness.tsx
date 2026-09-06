@@ -5,7 +5,7 @@ import { Result, type Row } from "@znasllc-io/memql-sdk-core/client";
 import { SessionProvider } from "../../src/chrome/access";
 import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/config";
 
-// The Work app's test harness: a connection-shaped double.
+// The Nexus app's test harness: a connection-shaped double.
 //
 // CONNECTION-SHAPED rather than a mocked hook per call site, for the reason
 // every harness in this suite records: every read goes through

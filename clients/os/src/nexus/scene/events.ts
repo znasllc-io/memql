@@ -3,124 +3,128 @@
 // ===========================================================================
 // WHY THERE IS NO BACKEND HERE
 // ===========================================================================
-// MemQL is append-only and every concept the map draws stamps the moments
-// that matter -- `createdAt`, `startedAt`, `completedAt`, the plan's
-// `phases[].startedAt/completedAt`, the bundle's `activatedAt`. So the
-// timeline Replay scrubs is not a recording of anything: it is the rows,
-// read in time order. Nothing is persisted for it, nothing is replayed off
-// the bus, and a goal from six months ago replays exactly as well as one from
-// this morning.
+// MemQL is append-only and every concept this map draws stamps the moments
+// that matter -- `createdAt`, `startedAt`, `finishedAt`, an approval's
+// `requestedAt` and `decidedAt`. So the timeline Replay scrubs is not a
+// recording of anything: it is the rows, read in time order. Nothing is
+// persisted for it, nothing is replayed off the bus, and a goal from six
+// months ago replays exactly as well as one from this morning.
 //
 // ===========================================================================
 // AN EVENT IS NEVER INVENTED
 // ===========================================================================
 // The rule this module is really about: a moment with no timestamp produces
-// NO event. Not an event at the plan's createdAt, not an event at "now", not
-// an event ordered after the last one it could plausibly follow. A task with
-// `status: "succeeded"` and an empty `completedAt` is a task whose completion
-// this cluster did not record, and the honest rendering of that is a node
-// that never lands in the replay -- not a landing at a fabricated time, which
-// would put a lie on a scrubber an operator reads as evidence.
+// NO event. Not an event at the run's createdAt, not an event at "now", not an
+// event ordered after the last one it could plausibly follow. A step with
+// `status: "done"` and an empty `finishedAt` is a step whose completion this
+// cluster did not record, and the honest rendering of that is a node that
+// never lands in the replay -- not a landing at a fabricated time, which would
+// put a lie on a scrubber somebody reads as evidence.
 //
-// There is exactly ONE derived event, and it is derived from a real
-// timestamp on a real row rather than conjured: a construct that is `active`
-// inside a bundle carrying an `activatedAt` emits `construct.activated` AT
-// THE BUNDLE'S activation. That is what promotion does -- the bundle
-// activates and its constructs go live with it (dsl/authoring/mutations.memql:
-// activateAuthoringBundle) -- and the construct concept records no per-status
-// timestamp of its own. A construct that is active with no bundle activation
-// behind it emits nothing, which is the same rule applied to a case the
-// derivation cannot reach.
+// There is NO derived event at all in this version, which is a simplification
+// the spine bought: the portal had one (a construct going live at its
+// bundle's activation, because the construct row records no per-status
+// timestamp), and every population here dates its own transitions.
 //
 // ===========================================================================
 // A RETRY RE-LIGHTS, IT DOES NOT DUPLICATE
 // ===========================================================================
-// Every ATTEMPT row emits its own started/completed pair, and every one of
-// them carries the SAME `nodeId` (world.ts's taskNodeId keys on
-// logicalStepId). So a retried step appears once in the scene and three times
-// in the timeline, which is exactly what the prototype's re-light does and
-// what an operator needs to see: the node did not multiply, it went again.
+// Every ATTEMPT row emits its own started/finished pair, and every one of them
+// carries the SAME node id (world.ts keys a step's node on `runId:key`). So a
+// retried step appears once in the scene and three times in the timeline,
+// which is exactly what somebody needs to see: the node did not multiply, it
+// went again.
 //
-// That is also why this walks every semantic task row rather than
-// `latestAttempts` -- collapsing first would erase the retries from the
-// history while leaving them in the counter, which is the worst of both.
+// That is also why this walks every step ROW rather than `latestAttempts` --
+// collapsing first would erase the retries from the history while leaving them
+// in the counter, which is the worst of both.
 
 import {
-  nodeIdFor,
-  semanticTasks,
-  taskNodeId,
+  approvalNodeId,
+  compareSteps,
   GOAL_NODE_ID,
+  stepNodeId,
+  templateNodeId,
   type GoalWorld,
 } from "./world";
 
 export type EventKind =
-  | "plan.created"
-  | "plan.succeeded"
-  | "plan.failed"
-  | "plan.cancelled"
-  | "task.created"
-  | "task.started"
-  | "task.completed"
-  | "task.failed"
-  | "agent.raised"
-  | "bundle.created"
-  | "bundle.activated"
-  | "construct.created"
-  | "construct.activated"
-  | "artifact.produced";
+  | "goal.created"
+  | "goal.closed"
+  | "run.started"
+  | "run.succeeded"
+  | "run.failed"
+  | "run.cancelled"
+  | "step.created"
+  | "step.started"
+  | "step.completed"
+  | "step.failed"
+  | "approval.raised"
+  | "approval.decided";
 
 export interface SceneEvent {
-  // Stable and unique across a world, so React can key the event list and a
-  // scrub position can be compared without an index into an array that a
-  // re-read may have re-ordered.
+  /**
+   * Stable and unique across a world, so React can key the event list and a
+   * scrub position can be compared without an index into an array that a
+   * re-read may have re-ordered.
+   */
   id: string;
-  // RFC3339, exactly as the row carried it. Never reformatted here: the
-  // scrubber compares these as strings and the list renders them through the
-  // portal's own time treatment.
+  /**
+   * RFC3339, exactly as the row carried it. Never reformatted here: the
+   * scrubber compares these as strings and the surface renders them through
+   * the OS's own time treatment.
+   */
   at: string;
   kind: EventKind;
-  // The node this event lights. The event list doubles as the map's keyboard
-  // index (design 4.4), so every event must name a node that exists in the
-  // layout -- there is a test for exactly that.
+  /**
+   * The node this event lights. The event list doubles as the map's keyboard
+   * index, so every event must name a node that exists in the layout -- there
+   * is a test for exactly that.
+   */
   nodeId: string;
-  // The row behind the event, for the list's Enter-opens-the-detail path.
+  /** The row behind the event, for the Enter-opens-the-detail path. */
   rowId: string;
-  // A short sentence, already written for a screen reader rather than
-  // assembled at render time from three fields and a separator.
+  /**
+   * A short sentence, already written for a screen reader rather than
+   * assembled at render time from three fields and a separator.
+   */
   label: string;
-  // >1 marks a retry, which is the one thing the list says that the map's
-  // re-light cannot: WHICH attempt this was.
+  /** >1 marks a retry -- the one thing the list says that a re-light cannot:
+   *  WHICH attempt this was. */
   attempt: number;
 }
 
-// The tie-break when two events share a timestamp, which is common -- a task
-// created and started in the same write, a bundle activated with its
-// constructs. Creation before start before finish, so a node cannot appear to
-// finish before it arrived.
+/**
+ * The tie-break when two events share a timestamp, which is common -- a step
+ * created and started in the same write, an approval raised as its step parks.
+ * Creation before start before finish, so a node cannot appear to finish
+ * before it arrived.
+ */
 const KIND_RANK: Record<EventKind, number> = {
-  "plan.created": 0,
-  "agent.raised": 1,
-  "task.created": 2,
-  "task.started": 3,
-  "artifact.produced": 4,
-  "bundle.created": 4,
-  "construct.created": 4,
-  "task.completed": 5,
-  "task.failed": 5,
-  "construct.activated": 6,
-  "bundle.activated": 7,
-  "plan.succeeded": 8,
-  "plan.failed": 8,
-  "plan.cancelled": 8,
+  "goal.created": 0,
+  "run.started": 1,
+  "step.created": 2,
+  "step.started": 3,
+  "approval.raised": 4,
+  "approval.decided": 5,
+  "step.completed": 6,
+  "step.failed": 6,
+  "run.succeeded": 7,
+  "run.failed": 7,
+  "run.cancelled": 7,
+  "goal.closed": 8,
 };
 
 function push(out: SceneEvent[], event: SceneEvent | null): void {
   if (event !== null) out.push(event);
 }
 
-// at() is the whole no-invention rule in one function: no timestamp, no
-// event. Whitespace counts as absent -- the wire can carry "" and " " for a
-// datetime that was never written, and neither is a moment.
+/**
+ * The whole no-invention rule in one function: no timestamp, no event.
+ *
+ * Whitespace counts as absent -- the wire can carry "" and " " for a datetime
+ * that was never written, and neither is a moment.
+ */
 function at(
   stamp: string,
   build: (moment: string) => Omit<SceneEvent, "id" | "at">,
@@ -135,204 +139,187 @@ function at(
   };
 }
 
+const RUN_TERMINAL: Record<string, EventKind> = {
+  succeeded: "run.succeeded",
+  failed: "run.failed",
+  cancelled: "run.cancelled",
+  abandoned: "run.failed",
+};
+
 export function events(world: GoalWorld): SceneEvent[] {
   const out: SceneEvent[] = [];
-  const plan = world.plan;
+  const goal = world.goal;
+  const run = world.run;
 
-  if (plan !== null) {
+  if (goal !== null) {
     push(
       out,
-      at(plan.createdAt, () => ({
-        kind: "plan.created",
+      at(goal.createdAt, () => ({
+        kind: "goal.created",
         nodeId: GOAL_NODE_ID,
-        rowId: plan.id,
-        label: `Goal set: ${plan.goal}`,
+        rowId: goal.id,
+        label: goal.statement === "" ? "Goal set" : `Goal set: ${goal.statement}`,
         attempt: 1,
       })),
     );
-
-    // The plan's terminal moment is ONE event whose kind is read off the
-    // status. A plan sitting at `running` with a completedAt is a row this
-    // cluster wrote inconsistently; it lands as `plan.succeeded` only when
-    // the status says so, and otherwise produces nothing rather than a
-    // guess about which ending it had.
-    const terminal: EventKind | null =
-      plan.status === "succeeded"
-        ? "plan.succeeded"
-        : plan.status === "failed"
-          ? "plan.failed"
-          : plan.status === "cancelled"
-            ? "plan.cancelled"
-            : null;
-    if (terminal !== null) {
-      push(
-        out,
-        at(plan.completedAt, () => ({
-          kind: terminal,
-          nodeId: GOAL_NODE_ID,
-          rowId: plan.id,
-          label:
-            terminal === "plan.succeeded"
-              ? "Goal reached"
-              : terminal === "plan.failed"
-                ? `Goal failed${plan.errorMessage === "" ? "" : `: ${plan.errorMessage}`}`
-                : "Goal cancelled",
-          attempt: 1,
-        })),
-      );
-    }
-  }
-
-  for (const agent of world.agents) {
     push(
       out,
-      at(agent.createdAt, () => ({
-        kind: "agent.raised",
-        nodeId: nodeIdFor(agent.id === world.planner?.id ? "planner" : "specialist", agent.id),
-        rowId: agent.id,
-        label: `${agent.name} raised`,
+      at(goal.closedAt, () => ({
+        kind: "goal.closed",
+        nodeId: GOAL_NODE_ID,
+        rowId: goal.id,
+        label: goal.closeReason === "" ? "Goal closed" : `Goal closed: ${goal.closeReason}`,
         attempt: 1,
       })),
     );
   }
 
-  for (const task of semanticTasks(world.tasks)) {
-    const nodeId = taskNodeId(task);
-    const name = task.kind === "" ? task.id : task.kind;
+  if (run !== null) {
+    const runNode = templateNodeId(run);
     push(
       out,
-      at(task.createdAt, () => ({
-        kind: "task.created",
-        nodeId,
-        rowId: task.id,
-        label: `${name} queued`,
-        attempt: task.attemptNumber,
-      })),
-    );
-    push(
-      out,
-      at(task.startedAt, () => ({
-        kind: "task.started",
-        nodeId,
-        rowId: task.id,
+      at(run.startedAt, () => ({
+        kind: "run.started",
+        nodeId: runNode,
+        rowId: run.id,
         label:
-          task.attemptNumber > 1
-            ? `${name} started again (attempt ${task.attemptNumber})`
-            : `${name} started`,
-        attempt: task.attemptNumber,
+          run.automationName === "" ? "Run started" : `Run started: ${run.automationName}`,
+        attempt: 1,
       })),
     );
-    if (task.status === "succeeded" || task.status === "failed") {
-      const failed = task.status === "failed";
+    // The terminal event takes its KIND from the row's status and its MOMENT
+    // from finishedAt. A run that is `succeeded` with no `finishedAt` produces
+    // nothing, which is the rule applied to the case that would most tempt a
+    // fabrication -- the outcome is known and the moment is not.
+    const terminal = RUN_TERMINAL[run.status];
+    if (terminal !== undefined) {
       push(
         out,
-        at(task.completedAt, () => ({
-          kind: failed ? "task.failed" : "task.completed",
-          nodeId,
-          rowId: task.id,
-          label: failed
-            ? `${name} failed${task.errorMessage === "" ? "" : `: ${task.errorMessage}`}`
-            : `${name} completed`,
-          attempt: task.attemptNumber,
+        at(run.finishedAt, () => ({
+          kind: terminal,
+          nodeId: runNode,
+          rowId: run.id,
+          label:
+            terminal === "run.failed" && run.errorMessage !== ""
+              ? `Run failed: ${run.errorMessage}`
+              : terminal === "run.cancelled"
+                ? "Run cancelled"
+                : terminal === "run.failed"
+                  ? "Run failed"
+                  : "Run finished",
+          attempt: 1,
         })),
       );
     }
-  }
 
-  for (const artifact of world.artifacts) {
-    push(
-      out,
-      at(artifact.createdAt, () => ({
-        kind: "artifact.produced",
-        nodeId: nodeIdFor("artifact", artifact.id),
-        rowId: artifact.id,
-        label: `Produced ${artifact.title === "" ? artifact.id : artifact.title}`,
-        attempt: 1,
-      })),
-    );
-  }
-
-  const bundle = world.bundle;
-  if (bundle !== null) {
-    push(
-      out,
-      at(bundle.createdAt, () => ({
-        kind: "bundle.created",
-        nodeId: nodeIdFor("bundle", bundle.id),
-        rowId: bundle.id,
-        label: `Bundle ${bundle.title === "" ? bundle.id : bundle.title} opened`,
-        attempt: 1,
-      })),
-    );
-    push(
-      out,
-      at(bundle.activatedAt, () => ({
-        kind: "bundle.activated",
-        nodeId: nodeIdFor("bundle", bundle.id),
-        rowId: bundle.id,
-        label: `Bundle ${bundle.title === "" ? bundle.id : bundle.title} activated`,
-        attempt: 1,
-      })),
-    );
-  }
-
-  for (const construct of world.constructs) {
-    push(
-      out,
-      at(construct.createdAt, () => ({
-        kind: "construct.created",
-        nodeId: nodeIdFor("construct", construct.id),
-        rowId: construct.id,
-        label: `Authored ${construct.kind} ${construct.name}`,
-        attempt: 1,
-      })),
-    );
-    // The one derived event -- see this file's header for why it is a
-    // derivation rather than an invention, and why an active construct
-    // without a bundle activation emits nothing.
-    if (construct.status === "active" && bundle !== null) {
+    // EVERY ATTEMPT ROW, not the latest of each key -- see the header.
+    const rows = world.steps.filter((step) => step.runId === run.id).sort(compareSteps);
+    for (const step of rows) {
+      const nodeId = stepNodeId(step);
+      const name = step.key === "" ? step.callName : step.key;
       push(
         out,
-        at(bundle.activatedAt, () => ({
-          kind: "construct.activated",
-          nodeId: nodeIdFor("construct", construct.id),
-          rowId: construct.id,
-          label: `${construct.kind} ${construct.name} went live`,
+        at(step.createdAt, () => ({
+          kind: "step.created",
+          nodeId,
+          rowId: step.id,
+          label: `${name} queued`,
+          attempt: step.attempt,
+        })),
+      );
+      push(
+        out,
+        at(step.startedAt, () => ({
+          kind: "step.started",
+          nodeId,
+          rowId: step.id,
+          label: step.attempt > 1 ? `${name} started, attempt ${step.attempt}` : `${name} started`,
+          attempt: step.attempt,
+        })),
+      );
+      const failed = step.status === "failed";
+      push(
+        out,
+        at(step.finishedAt, () => ({
+          kind: failed ? "step.failed" : "step.completed",
+          nodeId,
+          rowId: step.id,
+          label: failed
+            ? step.errorMessage === ""
+              ? `${name} failed`
+              : `${name} failed: ${step.errorMessage}`
+            : `${name} finished`,
+          attempt: step.attempt,
+        })),
+      );
+    }
+
+    for (const approval of world.approvals.filter((a) => a.runId === run.id)) {
+      const nodeId = approvalNodeId(approval);
+      const what = approval.kind === "" ? "approval" : approval.kind;
+      push(
+        out,
+        at(approval.requestedAt, () => ({
+          kind: "approval.raised",
+          nodeId,
+          rowId: approval.id,
+          label: `Asked you: ${what}`,
+          attempt: 1,
+        })),
+      );
+      push(
+        out,
+        at(approval.decidedAt, () => ({
+          kind: "approval.decided",
+          nodeId,
+          rowId: approval.id,
+          label:
+            approval.decision === "" ? `Decided: ${what}` : `${approval.decision}: ${what}`,
           attempt: 1,
         })),
       );
     }
   }
 
-  out.sort(compareEvents);
-  return out;
+  return out.sort(compareEvents);
 }
 
+/**
+ * Total order over events: moment, then kind rank, then id.
+ *
+ * The final id tie-break is what makes it TOTAL. Two step rows written in the
+ * same millisecond with the same kind would otherwise sort by whichever the
+ * fold produced first, and a scrubber that re-orders between renders is a
+ * scrubber that jumps under a cursor.
+ */
 export function compareEvents(a: SceneEvent, b: SceneEvent): number {
   if (a.at !== b.at) return a.at < b.at ? -1 : 1;
-  const ra = KIND_RANK[a.kind];
-  const rb = KIND_RANK[b.kind];
-  if (ra !== rb) return ra - rb;
-  if (a.attempt !== b.attempt) return a.attempt - b.attempt;
-  if (a.nodeId !== b.nodeId) return a.nodeId < b.nodeId ? -1 : 1;
+  const rank = KIND_RANK[a.kind] - KIND_RANK[b.kind];
+  if (rank !== 0) return rank;
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
 export interface TimelineBounds {
-  // Empty strings when the world produced no events at all, which is a
-  // legitimate state (a goal set on a cluster that stamped no timestamps, a
-  // world that has not seeded yet). Replay renders its empty state on it
-  // rather than a scrubber with no travel.
-  first: string;
-  last: string;
+  /** The first moment, or "" when there is nothing dated. */
+  from: string;
+  /** The last moment, or "". */
+  to: string;
   count: number;
 }
 
+/**
+ * The span the scrubber covers.
+ *
+ * An EMPTY list gives empty bounds rather than a zero-width span at "now": a
+ * goal whose rows carry no timestamps has no timeline, and a scrubber over one
+ * point would be a control that looks like it works.
+ */
 export function timelineBounds(list: readonly SceneEvent[]): TimelineBounds {
-  if (list.length === 0) return { first: "", last: "", count: 0 };
+  if (list.length === 0) return { from: "", to: "", count: 0 };
+  const sorted = [...list].sort(compareEvents);
   return {
-    first: list[0]?.at ?? "",
-    last: list[list.length - 1]?.at ?? "",
-    count: list.length,
+    from: sorted[0]?.at ?? "",
+    to: sorted[sorted.length - 1]?.at ?? "",
+    count: sorted.length,
   };
 }

@@ -142,7 +142,7 @@ export function GoalsSection({
           : "none";
 
   return (
-    <div className="os-work-goals">
+    <div className="os-nexus-goals">
       <Head title="Goals" meta={`${rows.length} ${rows.length === 1 ? "goal" : "goals"}`}>
         <Refine
           search={search}
@@ -164,12 +164,12 @@ export function GoalsSection({
         </Button>
       </Head>
 
-      <div className="os-work-scope">
+      <div className="os-nexus-scope">
         <SortControl ascending={ascending} onToggle={() => setAscending((v) => !v)} />
       </div>
 
-      <div className="os-work-split">
-        <div className="os-work-column">
+      <div className="os-nexus-split">
+        <div className="os-nexus-column">
           <LiveList<GoalRow>
             source={view}
             label="Your goals"
@@ -202,7 +202,7 @@ export function GoalsSection({
             An empty panel saying "pick a goal" reserved 500px to say what a
             clickable row already says. Bin does the same. */}
         {composing || selected !== null ? (
-          <div className="os-work-column os-work-aside">
+          <div className="os-nexus-column os-nexus-aside">
             {composing ? (
               <NewGoal
                 create={create}
@@ -235,7 +235,7 @@ export function GoalsSection({
               something -- and what it asks for is the statement, because that
               is what they would call it. */}
           {closable ? (
-            <span className="os-work-confirm">
+            <span className="os-nexus-confirm">
               <Input
                 id="work-close-confirm"
                 label={`Type the goal's own words to close it: ${goalTitle(selected)}`}
@@ -246,7 +246,7 @@ export function GoalsSection({
             </span>
           ) : null}
           {cancel.error === "" ? null : (
-            <span className="os-work-act-error os-mono" role="alert">
+            <span className="os-nexus-act-error os-mono" role="alert">
               {cancel.error}
             </span>
           )}
@@ -272,7 +272,7 @@ function GoalLine({
   const parked = runs.some(runWaitsOnYou);
   return (
     <KitRow
-      name={<span className="os-work-goal-statement">{goalTitle(goal)}</span>}
+      name={<span className="os-nexus-goal-statement">{goalTitle(goal)}</span>}
       onOpen={onOpen}
       open={selected}
       current={goal.status === "active" || parked}
@@ -284,7 +284,7 @@ function GoalLine({
               clock and would only be seen by whoever was looking. */}
           {parked ? <Chip tone="accent">waiting for you</Chip> : null}
           <RunMarks runs={runs} />
-          <span className="os-work-goal-status" data-status={goal.status}>
+          <span className="os-nexus-goal-status" data-status={goal.status}>
             {goalStatusWord(goal.status)}
           </span>
           <span className="os-caption" title={formatMoment(goal.createdAt)}>
@@ -299,7 +299,7 @@ function GoalLine({
           A goal a responsibility or the platform raised is the case worth
           marking. */}
       {goal.origin === "user" ? null : (
-        <span className="os-work-goal-origin">{originWord(goal.origin)}</span>
+        <span className="os-nexus-goal-origin">{originWord(goal.origin)}</span>
       )}
     </KitRow>
   );
@@ -327,7 +327,7 @@ function GoalDetail({
         {/* THE STATEMENT IN FULL, AT CONTENT SIZE. The list row truncates it
             to one line because it has to; the detail is where the whole
             sentence lives, and it is the reason the panel exists. */}
-        <p className="os-work-goal-full">{goalTitle(goal)}</p>
+        <p className="os-nexus-goal-full">{goalTitle(goal)}</p>
         <Facts>
           <Fact label="Origin" value={originWord(goal.origin)} />
           <Fact label="Asked through" value={goal.requestedVia} mono />
@@ -403,7 +403,7 @@ function GoalDetail({
             the run has not reached this window.
           </Caption>
         ) : (
-          <ul className="os-work-runlist">
+          <ul className="os-nexus-runlist">
             {runs.map((run) => (
               <li key={run.id}>
                 <RunLine

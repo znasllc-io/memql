@@ -221,12 +221,17 @@ export function stepKindMeaning(kind: string): string {
   }
 }
 
-/** Whether a model was called. Unclassified answers NEITHER, deliberately. */
-export function kindCalledAModel(kind: string): boolean | null {
-  if (kind === "reasoning" || kind === "loop") return true;
-  if (kind === "deterministic" || kind === "decision" || kind === "subrun") return false;
-  return null;
-}
+/**
+ * Whether a model was called. Unclassified answers NEITHER, deliberately.
+ *
+ * RE-EXPORTED FROM THE SCENE LIBRARY rather than defined here (epic
+ * memql#4785). The rail's ink weight, the road's weight on the map and the
+ * receipt's count are three surfaces reading one rule, and for a moment they
+ * did not agree -- the map counted `decision` as thinking and the rail did
+ * not. The leaf owns it now; this line is here so the app's own import sites
+ * did not all have to move.
+ */
+export { kindCalledAModel } from "../../nexus/scene/world";
 
 export function stepStatusWord(status: string): string {
   switch (status) {
