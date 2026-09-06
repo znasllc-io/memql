@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -116,11 +115,10 @@ func (s *EngineStore) CreateRegistration(ctx context.Context, row RegistrationRo
 		"lastConnectedFromIP":  row.LastConnectedFromIP,
 		"connectedNodeId":      row.ConnectedNodeId,
 	}
-	body, err := json.Marshal(args)
+	query, err := langparser.RenderCall("createWorkerRegistration", args)
 	if err != nil {
-		return fmt.Errorf("worker.store: marshal create args: %w", err)
+		return fmt.Errorf("worker.store: render create: %w", err)
 	}
-	query := fmt.Sprintf("createWorkerRegistration(%s)", string(body))
 	if _, err := s.Engine.Execute(writeCtx, query); err != nil {
 		return fmt.Errorf("worker.store: create registration: %w", err)
 	}
@@ -169,11 +167,10 @@ func (s *EngineStore) RefreshRegistration(ctx context.Context, row RegistrationR
 		"lastConnectedFromIP":  row.LastConnectedFromIP,
 		"connectedNodeId":      row.ConnectedNodeId,
 	}
-	body, err := json.Marshal(args)
+	query, err := langparser.RenderCall("refreshWorkerRegistration", args)
 	if err != nil {
-		return fmt.Errorf("worker.store: marshal refresh args: %w", err)
+		return fmt.Errorf("worker.store: render refresh: %w", err)
 	}
-	query := fmt.Sprintf("refreshWorkerRegistration(%s)", string(body))
 	if _, err := s.Engine.Execute(writeCtx, query); err != nil {
 		return fmt.Errorf("worker.store: refresh registration: %w", err)
 	}
@@ -201,11 +198,10 @@ func (s *EngineStore) UpdateLastSeen(ctx context.Context, registrationId, ownerU
 		"connectedNodeId":     connectedNodeId,
 		"activeCount":         activeCount,
 	}
-	body, err := json.Marshal(args)
+	query, err := langparser.RenderCall("updateWorkerLastSeen", args)
 	if err != nil {
-		return fmt.Errorf("worker.store: marshal lastSeen args: %w", err)
+		return fmt.Errorf("worker.store: render lastSeen: %w", err)
 	}
-	query := fmt.Sprintf("updateWorkerLastSeen(%s)", string(body))
 	if _, err := s.Engine.Execute(writeCtx, query); err != nil {
 		return fmt.Errorf("worker.store: update lastSeen: %w", err)
 	}
@@ -231,11 +227,10 @@ func (s *EngineStore) ClearConnectedNode(ctx context.Context, registrationId, ow
 	args := map[string]any{
 		"registrationId": registrationId,
 	}
-	body, err := json.Marshal(args)
+	query, err := langparser.RenderCall("clearWorkerConnectedNode", args)
 	if err != nil {
-		return fmt.Errorf("worker.store: marshal clearConnectedNode args: %w", err)
+		return fmt.Errorf("worker.store: render clearConnectedNode: %w", err)
 	}
-	query := fmt.Sprintf("clearWorkerConnectedNode(%s)", string(body))
 	if _, err := s.Engine.Execute(writeCtx, query); err != nil {
 		return fmt.Errorf("worker.store: clear connected node: %w", err)
 	}
@@ -260,11 +255,10 @@ func (s *EngineStore) RevokeRegistration(ctx context.Context, registrationId, ow
 		"revokedBy":      revokedBy,
 		"revokeReason":   reason,
 	}
-	body, err := json.Marshal(args)
+	query, err := langparser.RenderCall("revokeWorker", args)
 	if err != nil {
-		return fmt.Errorf("worker.store: marshal revoke args: %w", err)
+		return fmt.Errorf("worker.store: render revoke: %w", err)
 	}
-	query := fmt.Sprintf("revokeWorker(%s)", string(body))
 	if _, err := s.Engine.Execute(writeCtx, query); err != nil {
 		return fmt.Errorf("worker.store: revoke registration: %w", err)
 	}
@@ -314,11 +308,10 @@ func (s *EngineStore) CreateInvocation(ctx context.Context, row InvocationRow) e
 		// to check than to reason about.
 		"routing": row.Routing,
 	}
-	body, err := json.Marshal(args)
+	query, err := langparser.RenderCall("createWorkerInvocation", args)
 	if err != nil {
-		return fmt.Errorf("worker.store: marshal invocation args: %w", err)
+		return fmt.Errorf("worker.store: render invocation: %w", err)
 	}
-	query := fmt.Sprintf("createWorkerInvocation(%s)", string(body))
 	if _, err := s.Engine.Execute(writeCtx, query); err != nil {
 		return fmt.Errorf("worker.store: create invocation: %w", err)
 	}
@@ -654,11 +647,10 @@ func (s *EngineStore) UpdateApps(ctx context.Context, registrationId, ownerUserI
 		"lastSeenAt":          at.UTC().Format(time.RFC3339Nano),
 		"lastConnectedFromIP": sourceIP,
 	}
-	body, err := json.Marshal(args)
+	query, err := langparser.RenderCall("updateWorkerApps", args)
 	if err != nil {
-		return fmt.Errorf("worker.store: marshal apps args: %w", err)
+		return fmt.Errorf("worker.store: render apps: %w", err)
 	}
-	query := fmt.Sprintf("updateWorkerApps(%s)", string(body))
 	if _, err := s.Engine.Execute(writeCtx, query); err != nil {
 		return fmt.Errorf("worker.store: update apps: %w", err)
 	}

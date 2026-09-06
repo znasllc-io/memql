@@ -51,10 +51,15 @@ func TestRefreshRegistration_PreservesOperatorLabelsAndDisplayName(t *testing.T)
 			t.Fatalf("refresh must NOT write %s -- update{} is a read-merge and that is how the owner's value survives a reconnect:\n%s", forbidden, q)
 		}
 	}
-	if !strings.Contains(q, `"labels":{"os":"darwin"}`) {
+	// Spelled as NAMED ARGUMENTS since memql#5004. These assertions used to
+	// read `"labels":{...}` because the store rendered the retired
+	// object-literal wrapper, which the parser refuses -- so they were
+	// asserting the content of a statement that never ran. The content is
+	// what they mean; render_parses_test.go owns the form.
+	if !strings.Contains(q, `labels: {"os":"darwin"}`) {
 		t.Fatalf("refresh must still overwrite the cockpit's own labels:\n%s", q)
 	}
-	if !strings.Contains(q, `"name":"hostname-from-cockpit"`) {
+	if !strings.Contains(q, `name: "hostname-from-cockpit"`) {
 		t.Fatalf("refresh must still overwrite the cockpit's own name:\n%s", q)
 	}
 }
@@ -336,7 +341,7 @@ func TestEngineStoreCreateInvocation_RoutingWireShape(t *testing.T) {
 	if err := store.CreateInvocation(context.Background(), row); err != nil {
 		t.Fatalf("create invocation without routing: %v", err)
 	}
-	if !strings.Contains(eng.queries[1], `"routing":null`) {
+	if !strings.Contains(eng.queries[1], `routing: null`) {
 		t.Fatalf("a nil routing map must serialize as null for the mutation's ?? {} to fire:\n%s", eng.queries[1])
 	}
 }
