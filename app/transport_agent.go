@@ -3,8 +3,25 @@
 package app
 
 import (
+	"github.com/znasllc-io/memql/component/server"
+	"github.com/znasllc-io/memql/integrations/skills"
 	"github.com/znasllc-io/memql/integrations/stt"
 )
+
+// blobFetcherOrNil narrows the attachment uploader to the streaming half a
+// script read needs. A checked assertion rather than a cast: the in-memory
+// uploader a test wires satisfies FileUploader and streams nothing, and a
+// blind cast would panic on it.
+func blobFetcherOrNil(uploader server.FileUploader) skills.BlobFetcher {
+	if uploader == nil {
+		return nil
+	}
+	fetcher, ok := uploader.(skills.BlobFetcher)
+	if !ok {
+		return nil
+	}
+	return fetcher
+}
 
 // transportAgent sets up transport for an agent node.
 // Includes: gRPC, WebSocket, AI HTTP, audio WS, attachments, worker.
@@ -58,6 +75,14 @@ func (a *App) transportAgent() {
 			wo.SetAttachmentUploader(uploader, blobContainer)
 		}
 	}
+
+	// `runScript` / `captureScript` (epic memql#4970, spec section C). LAST of
+	// the three, and the order is load-bearing: it reads the workbench's and
+	// the worker's `dispatchHost` capability handlers off the registry, so
+	// both integrations have to be registered first. The blob fetcher is the
+	// same Azure client, which is why this needs the transport phase rather
+	// than integrationsAgent.
+	a.setupSkillsIntegration(blobFetcherOrNil(uploader))
 
 	// AI endpoints live on MemqlService.Stream: AiChatMsg, AiSuggestMsg,
 	// AiSpeechMsg, AiTranscribeMsg. The legacy /si/* HTTP endpoints are

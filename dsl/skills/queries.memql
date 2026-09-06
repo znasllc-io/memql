@@ -68,3 +68,17 @@ query skillEdge skillEdgesForSkill {
   filter  (fromSkillId==args.skillId || toSkillId==args.skillId) && status=="committed"
   shape   skillEdgeFull
 }
+
+/// One skill by id. The read `runScript` makes before it ships anything: it needs the row's
+/// `scripts[]`, its slug for the refusal message, and its `active` flag.
+///
+/// Public tier, so there is no owner conjunct -- and adding one would hide the predefined catalog
+/// every person's agents read, which is the whole reason the tier is what it is.
+@unbounded("one skill by id -- bounded to a single row")
+query skill skillById {
+  args {
+    skillId  string  @required
+  }
+  filter  row.id==args.skillId
+  shape   skillFull
+}

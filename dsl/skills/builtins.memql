@@ -1,0 +1,51 @@
+// builtins.memql
+//
+// The capability graph's runtime surface (spec section C): running a
+// skill's script wherever the step needs it to run, and copying a script
+// a run discovered back into the Library under the skill that used it.
+//
+// BOTH ARE COMPOSITIONS, not new wire verbs. The workbench and a fleet
+// machine each speak the same six primitives -- exec, fs_read, fs_write,
+// fs_list, fs_stat, http_fetch -- and the reroute between them is
+// written on the fact that the sets are identical. A seventh verb would
+// have to land in the cockpit too, which ships from another repository
+// on its own cadence: a capability nobody could use until every machine
+// in every fleet had been upgraded. So these ship, verify and run using
+// what is already there, every existing gate still applies, and a
+// machine that has never heard of this executes it correctly on the day
+// it lands.
+
+@enabled
+@description("Run a skill's script. Ships the bytes from the Library by content hash, verifies them on the far side by reading them back, and only then executes -- a script that cannot be verified is refused rather than run. The workbench is the default; a label requirement or an environment need it structurally lacks moves the call to a fleet machine.")
+@executor("integration.skills.runScript")
+@args(profile="object")
+builtin runScript {
+  skillId           string!  @description("The v1:skills:skill whose scripts[] entry to run.")
+  scriptArtifactId  string  @description("Pin one entry by its Library artifact id. Empty picks by the surface's platform, which is the ordinary case. A pinned id that the skill does not carry is REFUSED rather than substituted.")
+  args              array  @description("Arguments appended to the entry command, each quoted individually. They are arguments to the script, never interpolated into it.")
+  planId            string!  @description("Scopes the workbench workspace, and is the fleet's per-task approval key. Both dispatchers refuse without it.")
+  agentId           string  @description("The calling agent, for the fleet's authorization gate.")
+  ownerUserId       string  @description("Whose fleet to route on. Required for a call that reaches a machine.")
+  stepId            string  @description("The v1:work:step this call is a step of, when it is one. The receipt is stamped onto that step's binding.")
+  runId             string  @description("The v1:work:run the step belongs to.")
+  environment       object  @description("{os, needs[]} -- the same hint workbenchDispatchHost takes, passed through unchanged so the workbench's own evaluator stays the authority on what it does not provide.")
+  requireLabels     object  @description("Machine labels that MUST match. A non-empty map is what moves a call to the fleet; labels match exactly, and there is no any-value form.")
+  timeoutSec        integer  @description("Exec timeout. Absent takes the surface's own default.")
+}
+
+@enabled
+@description("Copy a script a run discovered on a surface into the Library, and record it on the skill as a scripts[] entry naming the artifact rather than the path. Idempotent by content hash: capturing the same bytes twice changes nothing, and a re-capture replaces the entry for that platform without deleting the artifact a pinned template may still name.")
+@executor("integration.skills.captureScript")
+@args(profile="object")
+builtin captureScript {
+  skillId      string!  @description("The v1:skills:skill to record the script on.")
+  path         string!  @description("Where the file is on the far side. It is read from there and never referred to again -- the point of capture is that a template stops naming a path on a machine.")
+  platform     string  @description("linux / darwin / windows / any. Empty records `any`, which is the honest reading of a question nobody asked: a shell script found on a laptop is not evidence about which platforms it runs on.")
+  entry        string  @description("The command line, with {script} standing for the shipped path. Empty means the file is executed directly.")
+  name         string  @description("The Library file name. Empty uses the path's base name.")
+  planId       string!  @description("Scopes the surface the file is read from.")
+  agentId      string
+  ownerUserId  string
+  requireLabels  object  @description("Read the file from a fleet machine rather than the workbench.")
+  environment    object
+}
