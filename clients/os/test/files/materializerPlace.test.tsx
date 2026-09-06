@@ -10,11 +10,13 @@ vi.mock("../../src/live/connection", () => ({
 import {
   artifactRow,
   click,
+  emit,
   fakeConnection,
   folderRow,
   registryWith,
   renderFiles,
 } from "./harness";
+import { COMPOSITION_CONCEPT } from "../../src/apps/files/concepts";
 import { Sparkles } from "lucide-react";
 import { MATERIALIZER_APP } from "../../src/apps/files/materializer";
 import type { OsAppManifest } from "../../src/system/registry";
@@ -256,6 +258,61 @@ const MATERIALIZER_MANIFEST: OsAppManifest = {
   logsSection: "logs",
   component: () => null,
 };
+
+describe("the place is live", () => {
+  it("takes in a composition that landed while the window was open", async () => {
+    // THE CLAIM THIS PINS, and it is the one the rest of the file assumes:
+    // the place reads a RETAINED feed rather than a snapshot taken at mount.
+    // `v1:compose:composition` carries a broadcast routing rule so that this
+    // works; without the subscription the place would be correct on load and
+    // frozen afterwards, which looks exactly like a place with nothing in it.
+    //
+    // The neighbouring risk is worth naming: a feed that resolves but never
+    // subscribes fails the same way an integration that registers but is
+    // never wired does -- everything answers, nothing is wrong, and the
+    // surface is simply always empty.
+    const connection = fakeConnection({
+      artifacts: [outputArtifact({ id: "a-made", title: "Q3 report.pdf", fileId: "f-1" })],
+      compositions: [],
+    });
+    h.connection = connection;
+    await renderFiles();
+
+    // Nothing has been materialized yet: the file is an ordinary Library row.
+    await click(screen.getByRole("button", { name: /^Materializer/ }));
+    expect(screen.queryByText(/Q3 report\.pdf/)).toBeNull();
+
+    await emit(
+      connection,
+      COMPOSITION_CONCEPT,
+      compositionRow({ id: "c-1", name: "Q3 report", outputFileId: "f-1" }),
+      "NODE_CREATED",
+    );
+
+    // ...and now it is one, with no reload and no re-seed.
+    expect(screen.getByRole("button", { name: /Q3 report\.pdf/ })).toBeTruthy();
+  });
+
+  it("counts it on the shut place too, so the rail does not go stale", async () => {
+    const connection = fakeConnection({
+      artifacts: [outputArtifact({ id: "a-made", title: "Q3 report.pdf", fileId: "f-1" })],
+      compositions: [],
+    });
+    h.connection = connection;
+    await renderFiles();
+
+    const place = () => screen.getByRole("button", { name: /^Materializer/ });
+    expect(within(place()).queryByText("1")).toBeNull();
+
+    await emit(
+      connection,
+      COMPOSITION_CONCEPT,
+      compositionRow({ id: "c-1", outputFileId: "f-1" }),
+      "NODE_CREATED",
+    );
+    expect(within(place()).getByText("1")).toBeTruthy();
+  });
+});
 
 describe("the handoff to the Materializer", () => {
   it("offers Open in Materializer on a file a composition made, and on no other", async () => {
