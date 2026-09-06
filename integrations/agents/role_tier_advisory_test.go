@@ -80,7 +80,7 @@ func TestAgentRoleTierIsPromptAdvisoryOnly(t *testing.T) {
 		"skill_tier_validation.go | tier := readSeedStringField(def.Body, \"tier\")":      "skill/domain tier",
 		"skill_tier_validation.go | skillTier := readSeedStringField(def.Body, \"tier\")": "skill tier",
 		// memql#3616 added the skill catalog to the agentFactoryAnalyze
-		// payload. Both lines read v1:agents:skill.tier off a skillSnapshot
+		// payload. Both lines read v1:skills:skill.tier off a skillSnapshot
 		// -- a DIFFERENT concept's tier from agentRole.tier -- and both sit
 		// on the same prompt-rendering path the role catalog does: one
 		// populates the snapshot, one projects it into the prompt. Nothing

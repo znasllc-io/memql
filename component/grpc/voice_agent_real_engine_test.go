@@ -453,10 +453,10 @@ func seedSkillCatalogRows(ctx context.Context, t *testing.T, db *bun.DB) {
 	for slug, tools := range catalogSkillTools {
 		p, _ := json.Marshal(map[string]any{"slug": slug, "toolSlugs": tools})
 		node := &concept.MemoryNode{
-			ID:         "v1:agents:skill:" + slug,
+			ID:         "v1:skills:skill:" + slug,
 			CreatedAt:  time.Now(),
 			CreatedBy:  "test:#1454",
-			Concept:    "v1:agents:skill",
+			Concept:    "v1:skills:skill",
 			Type:       "skill",
 			Schema:     json.RawMessage(`{}`),
 			Payload:    p,

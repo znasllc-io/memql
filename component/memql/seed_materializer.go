@@ -328,7 +328,7 @@ func (m *SeedMaterializer) Start(ctx context.Context) error {
 	// But a per-row materialize failure in the global pass is
 	// logged-and-continued and never re-verified, which is how staging
 	// ended up with the Assistant's capabilities.skillIds referencing
-	// pack skills whose v1:agents:skill ROWS were absent --
+	// pack skills whose v1:skills:skill ROWS were absent --
 	// ResolveSkills then silently dropped them and the realtime voice
 	// model got zero UI primitives.
 	// This pass re-asserts that every registered skill seed has a row,

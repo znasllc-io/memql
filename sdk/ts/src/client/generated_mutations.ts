@@ -3677,8 +3677,8 @@ QueryClient.prototype.createSite = function (this: QueryClient, args: CreateSite
   return this.executeNamed("createSite", buildCreateSite(args), opts);
 };
 
-/** Materialize a v1:agents:skill catalog row from a `seed skill ...` declaration under dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming convention -- the materializer stamps the seed body's id into `skillId` and forwards every other seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed body 1:1. Sibling to `mintSkill`: same row shape, but the seed path is for the predefined catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to materialize with `function "createSkill" not found`. The materializer convention itself lives in component/memql/seed_materializer.go. */
-// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["createSkill"] in generated_concepts.ts).
+/** Materialize a v1:skills:skill catalog row from a `seed skill ...` declaration under dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming convention -- the materializer stamps the seed body's id into `skillId` and forwards every other seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed body 1:1. Sibling to `mintSkill`: same row shape, but the seed path is for the predefined catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to materialize with `function "createSkill" not found`. The materializer convention itself lives in component/memql/seed_materializer.go. */
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["createSkill"] in generated_concepts.ts).
 export interface CreateSkillArgs {
   skillId?: string;
   slug: string;
@@ -5200,8 +5200,8 @@ QueryClient.prototype.mintAction = function (this: QueryClient, args: MintAction
   return this.executeNamed("mintAction", buildMintAction(args), opts);
 };
 
-/** Mint a new v1:agents:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check. */
-// Bound concept: v1:agents:skill (machine-readable: BoundConcepts["mintSkill"] in generated_concepts.ts).
+/** Mint a new v1:skills:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check. */
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["mintSkill"] in generated_concepts.ts).
 export interface MintSkillArgs {
   skillId?: string;
   slug: string;

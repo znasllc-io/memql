@@ -93,7 +93,7 @@ func defaultRoutingRules() []RoutingRule {
 		// subscribes to it (no automations, no other consumers), so
 		// forwarding it everywhere has ZERO side effects. This SUPERSEDES the
 		// per-concept graph-write cache rules 5.5 added (the
-		// v1:agents:agentRole / v1:agents:skill / v1:router:budget
+		// v1:agents:agentRole / v1:skills:skill / v1:router:budget
 		// create/update/delete rules and the v1:cognition:utterance delete
 		// rule), which are now retired: they coupled cache eviction to
 		// per-concept graph-write forwarding and carried an automation-
@@ -188,6 +188,30 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.created.v1:planner:*", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:planner:*", TargetType: ""},
 		{Pattern: "graph.node.deleted.v1:planner:*", TargetType: ""},
+		// THE WORK SPINE (design record
+		// docs/superpowers/specs/2026-09-05-work-spine-design.md, section D
+		// "Live feeds"): goal, run, step and approval broadcast so the OS
+		// draws them live. A run's status flips on the replica executing it
+		// while the person watching is attached to a bff, which is the
+		// cross-replica shape every block above exists for.
+		//
+		// modelCall and observation are deliberately ABSENT. They are
+		// on-demand reads that say when they were read, and they are
+		// excluded on volume grounds exactly as v1:worker:invocation is: a
+		// busy run writes one observation per tool result, and forwarding
+		// those to every replica buys nothing any surface subscribes to.
+		{Pattern: "graph.node.created.v1:work:goal", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:work:goal", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:work:goal", TargetType: ""},
+		{Pattern: "graph.node.created.v1:work:run", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:work:run", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:work:run", TargetType: ""},
+		{Pattern: "graph.node.created.v1:work:step", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:work:step", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:work:step", TargetType: ""},
+		{Pattern: "graph.node.created.v1:work:approval", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:work:approval", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:work:approval", TargetType: ""},
 		// THE ROAMING DESKTOP (epic memql#4746). A person's desktop
 		// document is written by whichever replica served the save and
 		// read by their OTHER signed-in browser, which is talking to a

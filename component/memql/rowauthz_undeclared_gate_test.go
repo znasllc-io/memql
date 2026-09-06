@@ -665,11 +665,9 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"avatarPersonaById": {"v1:agents:avatarPersona", undeclaredGrandfatherReason},
 	"avatarPersonas":    {"v1:agents:avatarPersona", undeclaredGrandfatherReason},
 
-	// v1:agents:skill
-	"activeSkills":      {"v1:agents:skill", undeclaredGrandfatherReason},
-	"activeSkillsFull":  {"v1:agents:skill", undeclaredGrandfatherReason},
-	"skillBySlug":       {"v1:agents:skill", undeclaredGrandfatherReason},
-	"skillNeedsRefresh": {"v1:agents:skill", undeclaredGrandfatherReason},
+	// v1:agents:skill -- moved to v1:skills:skill with a declared tier
+	// (@rowAuthz(public, requiresIdentity)) in the work spine's epic A1, so
+	// its four reads are no longer undeclared and their entries are gone.
 
 	// v1:agents:skillChangeEvent
 	"skillChangeEventsForAgent": {"v1:agents:skillChangeEvent", undeclaredGrandfatherReason},

@@ -1,0 +1,70 @@
+// queries.memql
+//
+// Reads over the skill catalog and its edges, moved out of the agents
+// namespace in epic A1. Every construct keeps its NAME, so the Go
+// callers that render activeSkillsFull() keep working unchanged; only
+// the concept id and the imports moved.
+
+use common.traits.{ isActiveRecord }
+
+/// Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach
+/// flows to look up a candidate skill's full composition before deciding whether to apply it.
+@unbounded("skill by unique slug -- bounded to a single row")
+@cache(300)
+query skill skillBySlug {
+  args {
+    slug  string!
+  }
+  filter  slug==args.slug && isActiveRecord
+  shape   skillFull
+}
+
+/// List every active skill catalog row -- summary projection. Backs the Skills picker on the
+/// role-edit surface (cockpit#124) and the Planner Agent's candidate scan when deciding which skill
+/// bundle to attach in extendSpecialist. Predefined rows render with a lock icon; user-created rows
+/// are fully editable.
+@unbounded("skill catalog (summary) -- a small admin-defined bounded registry consumed whole")
+@cache(300)
+query skill activeSkills {
+  filter  isActiveRecord
+  shape   skillSummary
+}
+
+/// List every active skill catalog row with its full bundle composition (domainIds + toolSlugs +
+/// liveSourceIds). Heavier projection than activeSkills; use this when a caller needs to resolve
+/// agent capabilities by unioning skill bundles in-process (cockpit#124's Agents view does this on
+/// every detail render). The catalog is small (25 rows in Phase 2; growth tracked via the Phase 3
+/// mintSkill roadmap) so the single-shot full-list query is cheaper than N skillBySlug round-trips.
+@unbounded("skill catalog (full) -- a small admin-defined bounded registry consumed whole")
+@cache(300)
+query skill activeSkillsFull {
+  filter  isActiveRecord
+  shape   skillFull
+}
+
+/// Per #157 (Phase 1 of the skills rollout): list active skills that bundle a caller-supplied
+/// knowledge domain id. The Planner Agent's Phase 2 refresh loop calls queryDueRefreshDomains first
+/// (already shipping), then fans out one call per stale domain id to discover 'which skills are
+/// downstream of this domain and want a re-attach run after the underlying knowledge refreshes
+/// complete'. Pure derivation -- no new state. Argument-as-scalar (rather than list intersection)
+/// mirrors activeAgents's per-group fanout pattern so the existing DSL push-down operator surface
+/// stays sufficient.
+@unbounded("skills needing refresh on a stale domain -- an internal refresh sweep over the bounded skill catalog")
+query skill skillNeedsRefresh {
+  args {
+    staleDomainId  string!
+  }
+  filter  isActiveRecord && when(args.staleDomainId) { args.staleDomainId in domainIds }
+  shape   skillSummary
+}
+
+/// Every committed edge touching one skill, in either direction. Bounded by the skill: the
+/// capability graph is a small admin-and-planner-shaped registry, not a per-user table.
+@unbounded("the edges of ONE skill -- bounded by the skill")
+query skillEdge skillEdgesForSkill {
+  args {
+    skillId  string!
+  }
+  filter  (fromSkillId==args.skillId || toSkillId==args.skillId) && status=="committed"
+  shape   skillEdgeFull
+}

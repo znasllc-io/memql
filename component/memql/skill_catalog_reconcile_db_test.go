@@ -27,10 +27,10 @@ import (
 // pack's takeover / guide / ui / canvas skills reach the engine --
 // and then drives the full staging failure mode:
 //
-//	agent.capabilities.skillIds -> ResolveSkills (a v1:agents:skill ROW
+//	agent.capabilities.skillIds -> ResolveSkills (a v1:skills:skill ROW
 //	lookup) -> ExpandCapabilitySlugs (the takeover slug -> uiClick/uiType/...)
 //
-// The bug (#1459): on staging the v1:agents:skill rows for the pack's
+// The bug (#1459): on staging the v1:skills:skill rows for the pack's
 // skills were ABSENT, so ResolveSkills resolved them to NOTHING and the
 // realtime voice model got zero UI primitives. NO MOCKS: the #1455 test
 // passed only because it hand-fed a canned skill->tool map; here the tool
@@ -142,7 +142,7 @@ func TestSeedMaterializer_CarrierOverlaySkillRowsResolve(t *testing.T) {
 
 	// Run the full sweep (writes the row on a carrier node), then DELETE
 	// the catalog row to reproduce the staging data gap: the assistant's
-	// skillIds still reference it, but the v1:agents:skill row is gone.
+	// skillIds still reference it, but the v1:skills:skill row is gone.
 	if err := sm.Start(ctx); err != nil {
 		t.Fatalf("materializer Start: %v", err)
 	}

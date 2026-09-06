@@ -7,7 +7,7 @@ import (
 )
 
 // validateSkillTiers runs the load-time tier-consistency check on every
-// registered v1:agents:skill seed:
+// registered v1:skills:skill seed:
 //
 //	skill.tier >= max(tier across knowledgeDomain rows referenced by skill.domainIds)
 //

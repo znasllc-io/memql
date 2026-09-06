@@ -137,7 +137,7 @@ Three places touch:
    carries no Go, so there is no per-product registration path -- a
    reusable capability lives in the engine as a generic bundle here.
 2. `dsl/agents/skills/` -- if the new slug needs to be advertised
-   through the skill catalog (`v1:agents:skill.toolSlugs`), update
+   through the skill catalog (`v1:skills:skill.toolSlugs`), update
    the skill definitions.
 3. This doc -- add the row to the table above.
 
