@@ -677,7 +677,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.1'
           cache: true
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
@@ -712,7 +712,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.1'
           cache: true
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
@@ -948,7 +948,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.1'
           cache: true
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
@@ -1082,7 +1082,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.1'
           cache: true
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
@@ -1116,7 +1116,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.1'
           cache: true
       # component/identity/web embeds static/app.css by name; generate it.
       # Needed here since memql#4302, when the cross-replica magic-link gate
@@ -1284,7 +1284,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.1'
           cache: true
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
@@ -1389,7 +1389,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.1'
           cache: true
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
@@ -1753,7 +1753,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.1'
           cache: true
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
@@ -1812,7 +1812,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.1'
           cache: true
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
@@ -1897,7 +1897,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.1'
           cache: true
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
@@ -1975,7 +1975,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.27.1'
           cache: true
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css

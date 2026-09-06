@@ -11,7 +11,7 @@ module github.com/znasllc-io/memql/component/workjournal
 
 go 1.26.1
 
-toolchain go1.26.6
+toolchain go1.27.1
 
 require (
 	github.com/znasllc-io/memql/component/auth v0.0.0

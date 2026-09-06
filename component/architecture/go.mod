@@ -4,7 +4,7 @@ module github.com/znasllc-io/memql/component/architecture
 
 go 1.26.1
 
-toolchain go1.26.6
+toolchain go1.27.1
 
 require (
 	golang.org/x/tools v0.49.0
