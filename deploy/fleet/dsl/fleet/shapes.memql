@@ -42,7 +42,6 @@ shape subscription subscriptionFull {
   tier
   billingPeriod
   status
-  voiceAddOn
   haAddOn
   currentPeriodStart
   currentPeriodEnd
@@ -66,9 +65,7 @@ shape tierSpec tierFull {
   displayName
   monthlyPriceUsd
   messageCredits
-  voiceMinutes
   overageMessagesUsdPer1k
-  overageVoiceUsdPerMinute
   overagePolicy
   instanceProfile
   dbPreset
@@ -87,9 +84,7 @@ shape tierSpec tierPublic {
   displayName
   monthlyPriceUsd
   messageCredits
-  voiceMinutes
   overageMessagesUsdPer1k
-  overageVoiceUsdPerMinute
   haIncluded
   haAvailable
   status

@@ -146,7 +146,6 @@ mutate subscription createSubscription {
       id: args.subscriptionId
       ownerUserId: actor.userId
       billingPeriod: args.billingPeriod ?? "monthly"
-      voiceAddOn: false
       haAddOn: false
     }
   }
@@ -236,19 +235,25 @@ mutate subscription requestTierChange {
   }
 }
 
-/// Turn the paid add-ons on or off. Only meaningful on Node, where voice and HA are not in the base
-/// price; from Graph up the tier's own haIncluded wins and haAddOn is ignored.
+/// Turn the paid add-ons on or off. HA is the only one: it is meaningful on Node, where HA is not in
+/// the base price, and from Graph up the tier's own haIncluded wins and haAddOn is ignored. The
+/// voice add-on went with the conversational product (epic memql#4988).
+///
+/// The name stays PLURAL. "The add-ons a subscription carries" is the category, not a count, so it
+/// would have to be bought back the next time one lands. It is also not free to change: this bundle
+/// is mounted at MEMQL_DSL_PATH rather than embedded, so sdk-gen never sees it and neither SDK
+/// carries a generated method -- which means the callers that name it do so over the wire, from
+/// Orbit, whose code is not in this repository. A rename here is a wire change whose blast radius
+/// cannot be measured from inside this tree.
 @actor
 mutate subscription setSubscriptionAddOns {
   args {
     subscriptionId  string!
-    voiceAddOn      bool!
     haAddOn         bool!
   }
   update {
     id: args.subscriptionId
     ownerUserId: actor.userId
-    voiceAddOn: args.voiceAddOn
     haAddOn: args.haAddOn
   }
 }
@@ -469,7 +474,7 @@ mutate usageMeter openUsageMeter {
   args {
     meterId         string!
     subscriptionId  string!
-    metric          string!  @enum("message_credits", "voice_minutes")
+    metric          string!  @enum("message_credits")
     periodStart     datetime!
     periodEnd       datetime!
     included        float!

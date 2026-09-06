@@ -55,8 +55,8 @@
 // =============================================================================
 //
 // A trial runs Graph-level FEATURES on Node-shaped infrastructure (the `solo`
-// profile, `entry` database) with the tier's hard caps: 500 message credits, 60
-// voice minutes, `overagePolicy: throttle`. Roughly $30-40 of cost of goods.
+// profile, `entry` database) with the tier's hard cap: 500 message credits,
+// `overagePolicy: throttle`.
 //
 // The caps are enforced in the tenant's own process by the spend ceiling
 // (task memql#3854), not by these sweeps. That distinction matters: a sweep runs
