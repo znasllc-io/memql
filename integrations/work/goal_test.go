@@ -213,13 +213,13 @@ func TestCancelGoalAsksOnlyLiveRuns(t *testing.T) {
 	closeAt, lastRunAt := -1, -1
 	for n, c := range eng.calls {
 		switch {
-		case strings.Contains(c.Query, "closeWorkGoal("):
+		case strings.Contains(c.Query, "updateWorkGoal("):
 			closeAt = n
 			// The close is a @serverOnly write under the OWNER's borrowed
 			// authority, not the caller's -- the same rule the run updates
 			// above follow, and worth pinning on the goal too.
 			if c.Origin != auth.OriginInternal {
-				t.Errorf("closeWorkGoal ran on origin %v; @serverOnly is refused on anything but internal", c.Origin)
+				t.Errorf("updateWorkGoal ran on origin %v; @serverOnly is refused on anything but internal", c.Origin)
 			}
 		case strings.Contains(c.Query, "updateWorkRun("):
 			lastRunAt = n
