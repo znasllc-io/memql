@@ -1,0 +1,93 @@
+// queries.memql
+//
+// Reads over the work namespace. The @serverOnly ones are what resume
+// (component/automations/resume.go) and the epic A2 executor read under
+// the journal's synthetic cluster actor; they carry no owner conjunct
+// because the rows they read are the deployment's and the caller's
+// admission is the tier's cluster-owner escape. The two @actor lists are
+// the owner-facing reads Nexus (sub-project B) seeds from.
+
+use work.concepts.{ goal, run, step, modelCall, approval, observation }
+use work.shapes.{ workGoalFull, workRunFull, workStepFull, workModelCallFull, workApprovalFull, workObservationFull }
+
+/// One run by id, for resume. Server-only: read under the journal's cluster actor.
+@serverOnly
+@unbounded("one run by id -- bounded to a single row")
+query run workRunById {
+  args {
+    runId  string  @required
+  }
+  filter  row.id==args.runId
+  shape   workRunFull
+}
+
+/// Every step of one run, for resume and for the OS run rail. Bounded by the run.
+@serverOnly
+@unbounded("every step of ONE run -- bounded by the run, and resume needs all of them")
+query step workStepsForRun {
+  args {
+    runId  string  @required
+  }
+  filter  runId==args.runId
+  shape   workStepFull
+}
+
+/// Runs of one automation, newest first, for the operator's run list.
+@serverOnly
+query run workRunsForAutomation {
+  args {
+    automationName  string  @required
+  }
+  filter  automationName==args.automationName
+  sort    "row.createdAt", "desc"
+  shape   workRunFull
+}
+
+/// Every model call of one run, for replay. Bounded by the run.
+@serverOnly
+@unbounded("every model call of ONE run -- bounded by the run, and replay needs all of them")
+query modelCall workModelCallsForRun {
+  args {
+    runId  string  @required
+  }
+  filter  runId==args.runId
+  shape   workModelCallFull
+}
+
+/// Every observation of one run. Bounded by the run.
+@serverOnly
+@unbounded("every observation of ONE run -- bounded by the run")
+query observation workObservationsForRun {
+  args {
+    runId  string  @required
+  }
+  filter  runId==args.runId
+  shape   workObservationFull
+}
+
+/// One approval by id, for resume's artifact-hash check.
+@serverOnly
+@unbounded("one approval by id -- bounded to a single row")
+query approval workApprovalById {
+  args {
+    approvalId  string  @required
+  }
+  filter  row.id==args.approvalId
+  shape   workApprovalFull
+}
+
+/// The caller's goals, newest first. Owned: ownerUserId==actor.userId binds server-side.
+@actor
+query goal workGoalsForOwner {
+  filter  ownerUserId==actor.userId
+  sort    "row.createdAt", "desc"
+  shape   workGoalFull
+}
+
+/// The caller's pending approvals, newest first. Owned.
+@actor
+query approval workApprovalsForOwner {
+  filter  ownerUserId==actor.userId && decision==""
+  sort    "row.createdAt", "desc"
+  shape   workApprovalFull
+}
