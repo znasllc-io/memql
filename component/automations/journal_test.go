@@ -27,18 +27,66 @@ func (r *recordingJournalExecutor) Execute(ctx context.Context, query string) (*
 	return &memql.ExecuteResult{}, nil
 }
 
-// argsOf parses the JSON object a rendered `name({...})` call carries.
+// argsOf parses a rendered `name(k: v, ...)` call back into its name and
+// arguments.
+//
+// It does that by quoting the top-level keys and reading the result as a JSON
+// object, which works because journalArgs JSON-encodes every VALUE. Written
+// this way rather than against `name({...})` deliberately: the object-literal
+// wrapper is rejected by the parser (#2335), so a test that accepted it would
+// be asserting a call the engine refuses -- which is exactly what the first
+// version of this file did, with every test green and every journal write
+// silently failing.
 func argsOf(t *testing.T, call string) (string, map[string]any) {
 	t.Helper()
 	open := strings.Index(call, "(")
 	if open < 0 || !strings.HasSuffix(call, ")") {
-		t.Fatalf("call %q is not name({...})", call)
+		t.Fatalf("call %q is not name(k: v, ...)", call)
 	}
-	var args map[string]any
-	if err := json.Unmarshal([]byte(call[open+1:len(call)-1]), &args); err != nil {
-		t.Fatalf("call %q carries no JSON object: %v", call, err)
+	name, body := call[:open], call[open+1:len(call)-1]
+	args := map[string]any{}
+	if strings.TrimSpace(body) == "" {
+		return name, args
 	}
-	return call[:open], args
+
+	// Walk the body quoting bare top-level keys: `runId: "x", seq: 0` becomes
+	// `"runId": "x", "seq": 0`. Depth and in-string tracking keep nested
+	// object values (`call: {"construct": "query"}`) untouched.
+	var b strings.Builder
+	depth, inString, escaped, atKey := 0, false, false, true
+	for i := 0; i < len(body); i++ {
+		c := body[i]
+		switch {
+		case escaped:
+			escaped = false
+		case inString && c == '\\':
+			escaped = true
+		case c == '"':
+			inString = !inString
+		case inString:
+		case c == '{' || c == '[':
+			depth++
+		case c == '}' || c == ']':
+			depth--
+		case c == ',' && depth == 0:
+			atKey = true
+		case depth == 0 && atKey && (c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'):
+			j := i
+			for j < len(body) && (body[j] != ':') {
+				j++
+			}
+			key := strings.TrimSpace(body[i:j])
+			b.WriteString(`"` + key + `"`)
+			i = j - 1
+			atKey = false
+			continue
+		}
+		b.WriteByte(c)
+	}
+	if err := json.Unmarshal([]byte("{"+b.String()+"}"), &args); err != nil {
+		t.Fatalf("call %q does not re-read as named args (%q): %v", call, "{"+b.String()+"}", err)
+	}
+	return name, args
 }
 
 func TestWorkStepId_SanitisesTheKey(t *testing.T) {
@@ -274,4 +322,50 @@ type failingRegistry struct{}
 func (failingRegistry) Execute(_ context.Context, step *Step, _ *StepContext) (*StepResult, error) {
 	now := time.Now()
 	return &StepResult{StepId: step.ID, Status: "failed", Error: "boom", StartedAt: now, CompletedAt: now}, errBoom
+}
+
+// TestJournalArgs_RendersNamedArgsAndDropsNils pins the two defects the
+// db-gated lane caught, both of which every DB-free test in this package was
+// green through -- because a recording fake accepts whatever it is handed and
+// call() logs a Warn rather than failing the run.
+//
+//  1. THE OBJECT-LITERAL WRAPPER IS REJECTED. `name({...})` was removed in
+//     #2335 and the parser refuses it outright, so the first version of this
+//     journal never wrote a single row.
+//  2. A NIL VALUE MUST BE DROPPED, not rendered. exec.Input is nil whenever
+//     an automation declares no `input:` block, and `input: null` fails the
+//     concept's `object` type -- so every step row landed and no run row ever
+//     did, which reads as "resume is broken" rather than "the writer is".
+func TestJournalArgs_RendersNamedArgsAndDropsNils(t *testing.T) {
+	got, err := journalArgs("createWorkRun", map[string]any{
+		"runId":                 "r1",
+		"input":                 nil,
+		"callerSuppliedPayload": false,
+		"seq":                   0,
+	})
+	if err != nil {
+		t.Fatalf("journalArgs: %v", err)
+	}
+	want := `createWorkRun(callerSuppliedPayload: false, runId: "r1", seq: 0)`
+	if got != want {
+		t.Fatalf("journalArgs =\n  %s\nwant\n  %s", got, want)
+	}
+	if strings.Contains(got, "({") {
+		t.Error("the object-literal wrapper is rejected by the parser (#2335); every write would fail silently")
+	}
+	if strings.Contains(got, "null") {
+		t.Error("a nil argument must be DROPPED: `input: null` fails the concept's object type and refuses the whole row")
+	}
+	// false and 0 are values, not absences, and dropping them would change
+	// what the row says.
+	if !strings.Contains(got, "callerSuppliedPayload: false") {
+		t.Error("callerSuppliedPayload=false was dropped; it is the memql#2888 flag and its absence reads as unset")
+	}
+	if !strings.Contains(got, "seq: 0") {
+		t.Error("seq=0 was dropped; step 0 is the first step, not a missing one")
+	}
+
+	if got, err := journalArgs("x", map[string]any{"a": nil}); err != nil || got != "x()" {
+		t.Fatalf("all-nil args = %q, %v; want x()", got, err)
+	}
 }

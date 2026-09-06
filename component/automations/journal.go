@@ -45,6 +45,7 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -172,15 +173,60 @@ func stepCallSummary(step *Step) map[string]any {
 	return call
 }
 
-// journalArgs renders one call in the form the engine already accepts
-// from Go callers: name({"arg": value, ...}) -- see mintSkill in
-// integrations/planner/mint_skill_handler.go.
+// journalArgs renders one call in the NAMED-ARGS invocation form:
+// `name(k: v, ...)`, with every value JSON-encoded so a value carrying a
+// quote can never break out of its literal.
+//
+// NOT `name({...})`. That object-literal wrapper was removed in #2335 and
+// the parser refuses it outright ("object-literal call args are removed"),
+// for reads and writes alike. It is worth stating because the wrapper is
+// still rendered by a dozen Go call sites in this tree and looks like the
+// house style -- and because a journal write that fails to parse is
+// SILENT: call() logs a Warn and the run continues, exactly as designed,
+// so the whole journal can be empty with every DB-free test green. The
+// db-gated tests in journal_db_test.go are what make that audible.
+//
+// Keys are sorted so a rendered call is stable, which is what lets a test
+// assert one.
 func journalArgs(name string, args map[string]any) (string, error) {
-	payload, err := json.Marshal(args)
-	if err != nil {
-		return "", fmt.Errorf("work journal: marshal %s args: %w", name, err)
+	if len(args) == 0 {
+		return name + "()", nil
 	}
-	return name + "(" + string(payload) + ")", nil
+	// A NIL VALUE IS AN ABSENT ARGUMENT, and it has to be dropped rather than
+	// rendered. `input: null` is the case that found this: exec.Input is nil
+	// whenever an automation declares no `input:` block -- most of them -- and
+	// the concept declares `input object`, so the engine refused the whole row
+	// with "expected object, but got null". The refusal was invisible, because
+	// call() logs a Warn and lets the run continue: every step row landed and
+	// no run row ever did.
+	keys := make([]string, 0, len(args))
+	for k, v := range args {
+		if v == nil {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	if len(keys) == 0 {
+		return name + "()", nil
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString(name)
+	b.WriteByte('(')
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		v, err := json.Marshal(args[k])
+		if err != nil {
+			return "", fmt.Errorf("work journal: marshal %s arg %q: %w", name, k, err)
+		}
+		b.WriteString(k)
+		b.WriteString(": ")
+		b.Write(v)
+	}
+	b.WriteByte(')')
+	return b.String(), nil
 }
 
 func (j *workJournal) call(ctx context.Context, name string, args map[string]any) {
