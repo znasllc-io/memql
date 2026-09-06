@@ -82,6 +82,17 @@ const settings: OsAppManifest = {
     // says exactly that, and it is presentation over a gate the status
     // capability's own `statusAuthorized` remains the authority on.
     { id: "integrations", name: "Integrations", roles: { any: ["owner", "developer"] } },
+    // The three that arrived when the portal's admin console was retired
+    // (epic memql#4984). Each floor is the one the ENGINE will actually
+    // apply, not a rounder number: `providerAuthStatus` and the two
+    // provider writes are owner-gated, so offering Providers to an admin
+    // would be a section whose every control answers with a refusal, while
+    // the Tokens reads and the revokes are owner-or-admin and Keys reads a
+    // PUBLIC feed that needs no role at all -- floored at admin because
+    // knowing which keys a cluster signs with is operator business.
+    { id: "providers", name: "AI providers", roles: { min: "owner" } },
+    { id: "tokens", name: "Tokens", roles: { min: "admin" } },
+    { id: "keys", name: "Keys", roles: { min: "admin" } },
     // The shell's own lines (epic memql#4895): what the OS front end
     // recorded under no app, plus everything the Settings surfaces logged.
     // Last rather than before a settings section, because this app HAS no

@@ -6,10 +6,28 @@ import type { RoleRequirement } from "../../src/system/roles";
 
 const OWNER_OR_DEVELOPER: RoleRequirement = { any: ["owner", "developer"] };
 
-/** A set requirement that does not name admin -- the only shape that can hide
- *  a surface from one in a registry whose floors all sit at or below admin. */
+/** A set requirement that does not name admin. */
 function excludesAdmin(requirement?: RoleRequirement): boolean {
   return !!requirement && "any" in requirement && !requirement.any.includes("admin");
+}
+
+/**
+ * A ladder MINIMUM an admin does not clear.
+ *
+ * This used not to exist, and the comment where it is used explains why: every
+ * `{ min }` in the registry sat at or below admin, so a set was the only shape
+ * that could hide anything from one. Settings -> AI providers (epic
+ * memql#4984) is the first floor above admin -- `providerAuthStatus` and both
+ * provider writes are owner-gated, so offering it to an admin would be a
+ * section whose every control answers with a refusal.
+ *
+ * `owner` is named rather than compared through the ladder on purpose: the
+ * ladder is loaded from the cluster at runtime and is empty in a unit test, so
+ * a rank comparison here would answer "admin clears everything" and make the
+ * assertion vacuous.
+ */
+function aboveAdmin(requirement?: RoleRequirement): boolean {
+  return !!requirement && "min" in requirement && requirement.min === "owner";
 }
 
 describe("the permissions self-view (memql#4744)", () => {
@@ -34,26 +52,35 @@ describe("the permissions self-view (memql#4744)", () => {
   });
 
   it("an admin loses only what a role SET leaves them out of", () => {
-    // The ladder cannot hide anything from an admin here: every `{ min }` in
-    // this registry is at or below admin. A `{ any: [...] }` requirement is
-    // the other shape, and one that does not name admin legitimately hides
-    // its surface -- P6's owner-or-developer Integrations section is exactly
-    // that, and it is a policy rather than a defect.
+    // TWO SHAPES CAN HIDE A SURFACE FROM AN ADMIN, and until epic memql#4984
+    // only one of them appeared in this registry. A `{ any: [...] }` that does
+    // not name admin legitimately hides its surface -- P6's owner-or-developer
+    // Integrations section is exactly that. A `{ min }` ABOVE admin does too,
+    // and Settings -> AI providers is the first: the provider reads and writes
+    // are owner-gated in the engine, so an admin offered that section would
+    // meet a refusal on every control in it.
     //
     // The expectation is DERIVED from the manifests rather than written out,
-    // so it stays true as that section lands. It is a different walk from the
-    // one under test: it ignores the ladder entirely and reads only the set
-    // requirements, which is what keeps it from being a reimplementation.
-    const setGated = [
+    // so it stays true as sections land. It is a different walk from the one
+    // under test: it ignores the ladder entirely and reads the requirement
+    // shapes directly, which is what keeps it from being a reimplementation.
+    const gated = [
       ...OS_REGISTRY.apps.flatMap((app) => [
-        ...(excludesAdmin(app.roles) ? [app.name] : []),
+        ...(excludesAdmin(app.roles) || aboveAdmin(app.roles) ? [app.name] : []),
         ...(app.sections ?? [])
-          .filter((s) => excludesAdmin(s.roles))
+          .filter((s) => excludesAdmin(s.roles) || aboveAdmin(s.roles))
           .map((s) => `${app.name} -- ${s.name}`),
       ]),
-      ...OS_REGISTRY.widgets.filter((w) => excludesAdmin(w.roles)).map((w) => w.name),
+      ...OS_REGISTRY.widgets
+        .filter((w) => excludesAdmin(w.roles) || aboveAdmin(w.roles))
+        .map((w) => w.name),
     ];
-    expect(hiddenSurfaces(OS_REGISTRY, "admin").map((h) => h.label)).toEqual(setGated);
+    expect(hiddenSurfaces(OS_REGISTRY, "admin").map((h) => h.label)).toEqual(gated);
+    // The anti-vacuous floor: if both helpers ever stopped matching anything,
+    // the assertion above would compare two empty lists and pass against a
+    // registry that hid everything from an admin.
+    expect(gated).toContain("Settings -- Integrations");
+    expect(gated).toContain("Settings -- AI providers");
   });
 
   it("names both roles when a set requirement is what hid the surface", () => {

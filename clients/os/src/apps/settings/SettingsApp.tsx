@@ -12,6 +12,9 @@ import { ClusterSection } from "./ClusterSection";
 import { BenchmarksSection } from "./BenchmarksSection";
 import { DiagnosticsSection } from "./DiagnosticsSection";
 import { IntegrationsSection } from "./IntegrationsSection";
+import { KeysSection } from "./KeysSection";
+import { ProvidersSection } from "./ProvidersSection";
+import { TokensSection } from "./TokensSection";
 import { ConnectionHistoryProvider } from "./useConnectionHistory";
 
 // Settings (spec D12): the app that PROVES the sections pattern, and since
@@ -20,11 +23,15 @@ import { ConnectionHistoryProvider } from "./useConnectionHistory";
 // Every app's title-bar gear deep-links to a section in its own manifest;
 // this app is the reference, and its Apps section is the directory.
 //
-// Everything here is READ-ONLY against the engine. The one write the
-// settings-app epic introduced is the theme-pack choice, which goes to
-// DesktopStore and never to the cluster; Integrations (issue #4826) reads the
-// node's integration registry and states in surface why it does not yet
-// save.
+// IT WRITES NOW, and the sections say which ones do. The settings-app epic
+// left this app read-only against the engine apart from the theme choice,
+// which goes to DesktopStore. Integrations (issue #4826) added the first
+// cluster write, and epic memql#4984 added three more sections when the
+// portal's admin console was retired: Providers seals a credential, Tokens
+// revokes one, and Cluster's Policy panel edits the runtime settings. Every
+// one of those goes through a server-side gate -- adminops for the identity
+// writes, the owner-gated builtins for the provider ones -- and nothing in
+// this app is the authorization for any of them.
 
 export function SettingsApp({ sectionId, intent, consumeIntent }: OsAppProps) {
   // The history provider wraps the WHOLE app, not the Diagnostics section:
@@ -45,6 +52,9 @@ function sectionFor(sectionId: string, intent: OsAppProps["intent"], consumeInte
   if (sectionId === "diagnostics") return <DiagnosticsSection />;
   if (sectionId === "benchmarks") return <BenchmarksSection />;
   if (sectionId === "integrations") return <IntegrationsSection />;
+  if (sectionId === "providers") return <ProvidersSection />;
+  if (sectionId === "tokens") return <TokensSection />;
+  if (sectionId === "keys") return <KeysSection />;
   // No owned concepts: the shell's own lines are tagged with no app, and
   // this app's slice is what its surfaces logged under "settings".
   if (sectionId === "logs") return <AppLogsSection app="settings" intent={intent} consumeIntent={consumeIntent} />;

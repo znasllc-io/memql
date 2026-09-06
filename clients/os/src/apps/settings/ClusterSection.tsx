@@ -8,19 +8,25 @@ import {
   useDeploymentFacts,
   useInfrastructureFacts,
   useMailStatus,
-  useProviderStatus,
 } from "./useClusterFacts";
+import { PolicyPanel } from "./PolicyPanel";
 
-// Cluster facts (memql#4742) -- READ-ONLY. No control on this surface
-// mutates anything: the two buttons are Refresh, and Refresh re-asks a
-// question. Cluster settings editing stays in the portal's admin console
-// and deploy control stays with the portal and the cockpit.
+// Cluster facts (memql#4742), plus the policy that governs them (epic
+// memql#4984).
+//
+// THE FACTS ARE READ-ONLY AND THE POLICY IS NOT, and the panels are ordered so
+// that boundary is visible: everything down to Mail sender re-asks a question
+// and changes nothing, and the one Panel below them is the form. Cluster
+// settings editing arrived here when the portal's admin console was retired;
+// DEPLOY control did not, and stays with the cockpit.
 //
 // NO SECRET APPEARS HERE, and that is a property of the surfaces consumed
 // rather than of this file's discretion: `integrationStatus` reports slot
 // PRESENCE and never a value (its redactSecrets invariant), and
-// `providerAuthStatus` carries no credential or fingerprint of one. The
-// panel adds no secret-bearing read of its own.
+// `clusterSettingsCurrent` carries no credential. The policy form below writes
+// registration and lifetime values and no credential of any kind -- the two
+// surfaces that DO take one are Providers and Integrations, and both are
+// write-only in both directions.
 //
 // WHAT THIS PANEL CLAIMS, AND WHAT IT STILL WILL NOT.
 //
@@ -54,7 +60,6 @@ export function ClusterSection() {
   const identity = useClusterIdentity();
   const deployment = useDeploymentFacts(identity.cluster?.id ?? "");
   const mail = useMailStatus(true);
-  const providers = useProviderStatus(true);
   // Owner-only reads, same as providerAuthStatus: gate the CALL on the role so
   // an admin does not issue a read whose empty answer we already know, and let
   // the engine remain the authority either way.
@@ -235,38 +240,14 @@ export function ClusterSection() {
         <Refresh facts={mail} serverStamp={mail.value?.checkedAt ?? ""} />
       </section>
 
-      <section className="os-field-group" aria-label="AI providers">
-        <h4 className="os-subhead">AI providers</h4>
-        {providers.error ? (
-          <Refusal role={access?.clusterRole ?? ""} message={providers.error} />
-        ) : providers.value === null ? (
-          <Caption>
-            {providers.loading ? "Loading from the cluster" : "No providers reported."}
-          </Caption>
-        ) : providers.value.length === 0 ? (
-          <Caption>
-            No AI providers are configured. That is how a freshly installed
-            cluster starts.
-          </Caption>
-        ) : (
-          <ul className="os-hidden-list" aria-label="AI providers">
-            {providers.value.map((p) => (
-              <li key={p.name}>
-                <span
-                  className="os-dot"
-                  data-os-dot={p.available ? "reachable" : "unreachable"}
-                  role="img"
-                  aria-label={p.available ? "available" : "unavailable"}
-                />{" "}
-                <span className="os-mono">{p.name}</span> -- {p.vendor} {p.model}, credential
-                from {p.authSource || "unknown"}
-                {p.reason ? ` -- ${p.reason}` : ""}
-              </li>
-            ))}
-          </ul>
-        )}
-        <Refresh facts={providers} serverStamp="" />
-      </section>
+      {/* The editable half, LAST and in its own Panel. The sections above are
+          facts; this one is policy, and interleaving a control into a `dl` of
+          read-only rows is how somebody comes to believe a fact is a control
+          (DESIGN.md rule 6). Owner or admin, which is what adminops enforces
+          -- the same floor this section already carries, so there is no
+          narrower gate to apply here. */}
+      <PolicyPanel enabled={access?.clusterRole === "owner" || access?.clusterRole === "admin"} />
+
     </div>
   );
 }
