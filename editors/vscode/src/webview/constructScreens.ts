@@ -131,11 +131,15 @@ ${sourceHtml(construct)}`;
  * reachable. For a promoted construct the source is shown below instead, and
  * saying so beats a button that opens nothing.
  *
- * "Browse rows in portal" is CONCEPTS ONLY (memql#4252) -- rows are cluster
- * state, which the portal already draws, so this hands off rather than a
- * second rows browser growing in the extension. No other kind has rows, so no
- * other kind draws the button; the absence is the statement, same as the run
- * button above.
+ * "Browse rows" is CONCEPTS ONLY (memql#4252, re-pointed by epic memql#5009)
+ * -- rows are cluster state, which the console draws, so this hands off
+ * rather than a second rows browser growing in the extension. No other kind
+ * has rows, so no other kind draws the button; the absence is the statement,
+ * same as the run button above.
+ *
+ * It said "in portal" and opened `<root>/concepts/<id>`. Epic memql#4984
+ * retired the portal and the button was REMOVED rather than left pointing at
+ * a route nothing answered; this is its return, at MemQL OS's Concepts app.
  */
 function actionsHtml(input: ConstructPageInput): string {
   const buttons: string[] = [];
@@ -165,6 +169,10 @@ function actionsHtml(input: ConstructPageInput): string {
     buttons.push(
       `<button class="secondary" type="button" data-act="viewSourceFromCluster">View source from cluster</button>`,
     );
+  }
+  // Concepts only: no other kind has rows to browse.
+  if (input.construct.kind === "concept") {
+    buttons.push(`<button class="secondary" type="button" data-act="browseRows">Browse rows</button>`);
   }
   if (buttons.length === 0) return "";
   return `<div class="actions">${buttons.join("")}</div>`;

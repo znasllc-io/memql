@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, FolderPlus, Plus, Upload } from "lucide-react";
 import {
   newShortId,
@@ -58,7 +58,7 @@ import {
 } from "./rows";
 import { accountIsArchived, accountName } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
-import { ACCOUNT_ANY, ACCOUNT_NONE } from "./filters";
+import { ACCOUNT_ANY, ACCOUNT_NONE, applyFilters, labelsOf, LABEL_ANY } from "./filters";
 import { Inspector } from "./Inspector";
 import type { UploadProvider } from "../../items/upload";
 import type { UploadTask, UploadTasksApi } from "./useUploadTasks";
@@ -606,6 +606,7 @@ export function BrowseSection({
     filter.kind !== "all" ||
     filter.source !== "all" ||
     filter.accountId !== ACCOUNT_ANY ||
+    filter.label !== LABEL_ANY ||
     filter.folderId !== "";
   // The Head's meta is what the LIST is showing right now -- scoped folder,
   // facets and search included -- never a different population's number
@@ -648,6 +649,47 @@ export function BrowseSection({
       onRemove: () => patch({ accountId: ACCOUNT_ANY }),
     });
   }
+  if (filter.label !== LABEL_ANY) {
+    refineChips.push({
+      id: "label",
+      label: filter.label,
+      onRemove: () => patch({ label: LABEL_ANY }),
+    });
+  }
+
+  // THE LABELS ON OFFER, folded from the rows every OTHER facet already keeps
+  // (filters.ts `labelsOf`): so a label listed always has at least one row
+  // behind it in the view being looked at, and the one currently chosen stays
+  // listed -- clearing the label facet is exactly what produces that
+  // population. Client-side over the seeded snapshot like every other facet
+  // here; see the label field's own note in filters.ts for why the engine's
+  // `libraryArtifactsByLabel` is the wrong read for this control.
+  const labelOptions = useMemo(
+    () =>
+      labelsOf(
+        applyFilters(
+          content,
+          { ...filter, label: LABEL_ANY },
+          {
+            fileArtifactIds: deskFileArtifactIds,
+            folderIds: new Set(deskFolders.map((f) => f.folderId)),
+          },
+          materialized,
+        ),
+      ),
+    [content, filter, deskFileArtifactIds, deskFolders, materialized],
+  );
+
+  /** Back to the place, with every facet and the search dropped. */
+  const clearFilters = () =>
+    patch({
+      kind: "all",
+      source: "all",
+      accountId: ACCOUNT_ANY,
+      label: LABEL_ANY,
+      search: "",
+      folderId: "",
+    });
 
   return (
     <div
@@ -721,6 +763,31 @@ export function BrowseSection({
               </option>
             ))}
           </Select>
+          {/* THE LABEL FACET (epic memql#5009). A FACET BEHIND THIS ONE
+              AFFORDANCE, never a standing rail: DESIGN.md rule 2 puts every
+              filter control here, and the Files rail is the app's place
+              language -- a label is not a place, so a second navigational
+              axis beside the folder tree would make a rail click ambiguous.
+              See the `label` field in filters.ts for the full reasoning.
+
+              ABSENT WHEN NOTHING IS LABELLED, rather than an empty select: a
+              control offering only "Any label" is a question with no answers,
+              which is the same furniture the rule removes. */}
+          {labelOptions.length === 0 && filter.label === LABEL_ANY ? null : (
+            <Select
+              id="files-label"
+              label="Label"
+              value={filter.label}
+              onChange={(label) => patch({ label })}
+            >
+              <option value={LABEL_ANY}>Any label</option>
+              {labelOptions.map((label) => (
+                <option key={label} value={label}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          )}
         </Refine>
         {/* ONE WAY TO ADD SOMETHING (DESIGN.md rule 1: at most one primary
             action). Uploading a file and making a folder are the same
@@ -858,7 +925,7 @@ export function BrowseSection({
             <UploadPlaceholder key={task.id} task={task} />
           ))}
           <LiveList<ArtifactRow>
-            key={`${filter.place}|${filter.folderId ?? "~"}|${filter.kind}|${filter.source}|${filter.accountId}|${filter.search}`}
+            key={`${filter.place}|${filter.folderId ?? "~"}|${filter.kind}|${filter.source}|${filter.accountId}|${filter.label}|${filter.search}`}
             source={list}
             rowId={(r) => r.id}
             fingerprint={artifactFingerprint}
@@ -887,6 +954,17 @@ export function BrowseSection({
               />
             )}
           />
+          {/* THE EMPTY STATE OFFERS THE WAY OUT (DESIGN.md rule 4's shape:
+              an empty list that does not explain itself is the failure).
+              `emptyText` says a filter is why; this is the act that undoes
+              it, and it exists only while there IS something to undo -- a
+              standing Clear control over a full list would be exactly the
+              furniture rule 2 removes. */}
+          {narrowed && listedCount === 0 && tasks.length === 0 ? (
+            <div className="os-files-clear">
+              <Button onClick={clearFilters}>Clear the search and filters</Button>
+            </div>
+          ) : null}
         </div>
 
         {selected === null ? null : (

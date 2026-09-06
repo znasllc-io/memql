@@ -9706,3 +9706,1158 @@ a.os-button {
     margin-left: 0;
   }
 }
+
+/* ---- the honest-figure vocabulary (epic memql#5009) ----
+ *
+ * Shared by every operator surface that reports a number somebody acts on.
+ * The absent form is an em dash and it is MUTED INK, not disabled ink:
+ * somebody scanning a column for the gap has to be able to see it. Making it
+ * invisible is the same mistake as printing a zero, one step quieter. */
+.os-figure {
+  font-variant-numeric: tabular-nums;
+}
+.os-figure-unit {
+  margin-left: 3px;
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+.os-figure-absent {
+  color: var(--os-muted);
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+/* ---- concepts: the registry, a concept, and its rows (memql#5010) ---- */
+
+.os-concept-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.os-concept-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+/* The whole line is the target, so the hit area matches what a person reads
+ * as one row -- not just the name inside it. */
+.os-concept-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: var(--os-radius-xs);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.os-concept-open:hover {
+  background: var(--os-raised);
+}
+.os-concept-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.os-concept-id {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  white-space: nowrap;
+}
+/* The description yields first: it is the only part of the line that is
+ * prose, and truncating it costs less than truncating an identifier. */
+.os-concept-desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--os-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.os-concept-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.os-concept-lede {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--os-muted);
+}
+.os-concept-marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Two columns, two scrollers, one Head (DESIGN.md rule 11). The schema is a
+ * reference that does not move while you read rows, so it takes a readable
+ * measure and the rows take the rest. They stack, schema first, when the
+ * window is too narrow to hold both -- the schema is what somebody opened
+ * the concept to consult. */
+.os-concept-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: stretch;
+}
+.os-concept-schema {
+  flex: 1 1 300px;
+  max-width: 420px;
+  min-width: 0;
+  overflow-y: auto;
+  align-self: flex-start;
+  max-height: 100%;
+}
+.os-concept-rows {
+  flex: 2 1 360px;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.os-schema-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.os-schema-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--os-line);
+}
+.os-schema-row:last-child {
+  border-bottom: 0;
+}
+.os-schema-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.os-schema-name {
+  font-weight: 600;
+}
+.os-schema-kind {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+.os-schema-desc,
+.os-schema-enum,
+.os-schema-observed {
+  margin: 0;
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+/* A declared field nothing writes, and a key nothing declares, are the two
+ * findings this surface exists to produce. They are marked on the line as
+ * well as counted under the list, because a person scrolling a long schema
+ * should not have to hold a total in their head to find them. */
+.os-schema-declared-not-seen .os-schema-name,
+.os-schema-undeclared .os-schema-name {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
+/* The band. It states a fact and offers the act that resolves it, and it is
+ * not an unread badge: reloading makes it gone, and nothing about it waits to
+ * be dismissed. */
+.os-rows-band {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border: 1px solid var(--os-accent-soft, var(--os-line));
+  border-radius: var(--os-radius-xs);
+  color: var(--os-ink);
+}
+.os-rows-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.os-rows-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.os-rows-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: var(--os-radius-xs);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.os-rows-open:hover {
+  background: var(--os-raised);
+}
+.os-rows-primary {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-rows-secondary,
+.os-rows-tertiary {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-rows-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+}
+.os-rows-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.os-row-fields {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.os-row-field {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.os-row-field dt {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+/* A row's value is read, not scanned: it wraps and keeps its own whitespace,
+ * because a JSON object flattened onto one line is a value nobody can read.
+ * It scrolls sideways inside its own box rather than widening the column. */
+.os-row-field dd {
+  margin: 0;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.os-row-intrinsics dd {
+  color: var(--os-muted);
+}
+
+/* ---- cluster: what this cluster is made of and how it is going (memql#5011) ---- */
+
+/* ===========================================================================
+ * The Cluster app (epic memql#5009, memql#5011)
+ * ===========================================================================
+ *
+ * Every rule here uses the existing --os-* tokens and introduces no colour of
+ * its own. It is all `.os-cluster-*`: this app's own vocabulary, in the sense
+ * the kit's header states -- what is genuinely about ITS subject, after every
+ * generic control has come from `kit/controls.tsx`.
+ */
+
+/* ---------------------------------------------------------------------------
+ * NOT HERE: the Figure component's own rules
+ * ------------------------------------------------------------------------- */
+/* `.os-figure`, `.os-figure-unit` and `.os-figure-absent` belong to
+ * `src/cluster/FigureValue.tsx`, which is shared with the Stores app, and
+ * index.css already carries them ("the honest-figure vocabulary"). They are
+ * deliberately absent from this file so the fold-in cannot produce a second,
+ * drifting copy of a rule that three surfaces read. */
+
+/* ---------------------------------------------------------------------------
+ * The section root
+ * ------------------------------------------------------------------------- */
+
+.os-cluster {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+/* A fact stated in prose rather than as a labelled value: the readiness
+ * lines, an agent's description. App content size, not chrome size. */
+.os-cluster-fact {
+  margin: 0;
+  font-size: var(--os-text-base);
+  color: var(--os-ink);
+  line-height: 1.5;
+}
+
+/* One readiness line: a Subhead and what it says, grouped so the notice under
+ * it reads as belonging to that heading and not to the next one. */
+.os-cluster-line {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.os-cluster-row-glyph {
+  display: inline-flex;
+  color: var(--os-muted);
+}
+
+/* The quiet middle of a row. It yields first when the row is tight, because
+ * the name and the state cluster must not. */
+.os-cluster-row-note {
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.os-cluster-row-when {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The one state band that asks for something: configured to run and unable
+ * to. Warn ink, and only ever as WORDS -- the chip beside it stays in the
+ * shell's three tones. */
+.os-cluster-row-attention {
+  color: var(--os-warn);
+  font-size: var(--os-text-sm);
+}
+
+/* The server's own sentence, in the data voice. Wraps rather than
+ * ellipsizing: a truncated error is an error nobody can act on. */
+.os-cluster-row-error {
+  color: var(--os-error);
+  font-size: var(--os-text-xs);
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------------------
+ * DESIGN.md rule 11: a list and its detail never share a scroll column
+ * ------------------------------------------------------------------------- */
+
+/* The beside-the-list shape, as `.os-bin-*` draws it. Capped rather than
+ * `flex: 1`, because these sections carry a panel AFTER the body (the
+ * standing authorizations, the read-at line) and a body that took the whole
+ * pane would push it out of reach. */
+.os-cluster-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: stretch;
+  min-height: 0;
+  max-height: 60vh;
+}
+
+.os-cluster-list {
+  flex: 1 1 320px;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.os-cluster-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.os-cluster-detail {
+  flex: 1 1 300px;
+  max-width: 380px;
+  min-width: 240px;
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-self: flex-start;
+  max-height: 100%;
+}
+
+/* ---------------------------------------------------------------------------
+ * The replace-the-list shape, for a detail that is too tall to sit beside one
+ * ------------------------------------------------------------------------- */
+
+/* A two-row grid: the scrolling half, then the ActionBar on the window's
+ * bottom edge. NOT `position: fixed` -- the desk plate is CSS-transformed and
+ * is therefore the containing block for any fixed descendant, so a fixed bar
+ * would anchor to the desk and travel with the wallpaper. */
+.os-cluster-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  /* Cancels the window's own padding so the bar can meet the window's edges,
+   * then gives it back to the scrolling half. A bar inset from the edge reads
+   * as a card that happens to be at the bottom, not as the floor. */
+  margin: -18px -20px;
+}
+
+.os-cluster-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 20px;
+}
+
+/* The confirm, in place: the sentence and the two acts on one line. It
+ * replaces the acts in the bar rather than sitting beside them, so there is
+ * never a moment where the thing being confirmed can also just be pressed. */
+.os-cluster-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.os-cluster-confirm-text {
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+}
+
+/* ---------------------------------------------------------------------------
+ * Modules: the environment list
+ * ------------------------------------------------------------------------- */
+
+.os-cluster-env {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Name and reading on the first line, marks after them, the description on
+ * its own line beneath -- rather than four columns, which would make every
+ * description a four-word ribbon. */
+.os-cluster-env-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "name value marks"
+    "note note note";
+  gap: 2px 10px;
+  padding: 6px 8px;
+  border-radius: var(--os-radius-xs);
+}
+
+.os-cluster-env-row:nth-child(odd) {
+  background: var(--os-plate);
+}
+
+.os-cluster-env-name {
+  grid-area: name;
+  color: var(--os-ink);
+  font-size: var(--os-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.os-cluster-env-value {
+  grid-area: value;
+  color: var(--os-ink);
+  font-size: var(--os-text-sm);
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An unset variable reads muted: it is the ABSENCE of a value, and rendering
+ * the word `unset` at full ink puts it on the same footing as a value
+ * somebody configured. */
+.os-cluster-env-value[data-unset] {
+  color: var(--os-muted);
+}
+
+.os-cluster-env-marks {
+  grid-area: marks;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.os-cluster-env-note {
+  grid-area: note;
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  line-height: 1.5;
+}
+
+.os-cluster-env-default,
+.os-cluster-env-required {
+  color: var(--os-muted);
+}
+
+/* ---------------------------------------------------------------------------
+ * Data origins: the health table
+ * ------------------------------------------------------------------------- */
+
+.os-cluster-table {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  /* Wide content scrolls inside its own container; the section body must
+   * never scroll horizontally. */
+  overflow-x: auto;
+}
+
+.os-cluster-tr {
+  display: grid;
+  grid-template-columns: minmax(240px, 3fr) minmax(120px, 1fr) repeat(4, minmax(56px, auto)) minmax(160px, auto);
+  gap: 8px;
+  align-items: start;
+  padding: 8px;
+  border-bottom: 1px solid var(--os-line);
+  font-size: var(--os-text-sm);
+}
+
+.os-cluster-tr:last-child {
+  border-bottom: none;
+}
+
+.os-cluster-th {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  text-transform: lowercase;
+  border-bottom: 1px solid var(--os-line);
+}
+
+/* A paused pairing is still true and no longer going -- muted, the way a
+ * revoked row is, rather than marked with a colour of its own. */
+.os-cluster-tr[data-paused] {
+  color: var(--os-muted);
+}
+
+.os-cluster-td-concept,
+.os-cluster-td-connector {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.os-cluster-state-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.os-cluster-dir {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+
+.os-cluster-td-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.os-cluster-connectors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Data origins: the dead-letter band
+ * ------------------------------------------------------------------------- */
+
+.os-cluster-band {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--os-line);
+}
+
+.os-cluster-dl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-plate);
+}
+
+.os-cluster-dl-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.os-cluster-dl-concept {
+  color: var(--os-ink);
+  font-size: var(--os-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.os-cluster-dl-ref {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.os-cluster-dl-error {
+  color: var(--os-error);
+  font-size: var(--os-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.os-cluster-dl-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Agents: one standing grant
+ * ------------------------------------------------------------------------- */
+
+.os-cluster-grant {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+}
+
+.os-cluster-grant-agent {
+  color: var(--os-ink);
+  font-size: var(--os-text-sm);
+  overflow-wrap: anywhere;
+}
+
+/* ---- stores: the Shopify connector's operator surface (memql#5012) ---- */
+
+/* ===========================================================================
+ * Stores (epic memql#5009 / memql#5012).
+ *
+ * Existing --os-* tokens only; not one raw colour. Nothing here restyles
+ * another app's class: the status word is `.os-stores-status` rather than a
+ * fourth tone bolted onto Deployables' `.os-deploy-status`, because that
+ * class belongs to that app and only carries ok / warn.
+ * ======================================================================== */
+
+/* `.os-figure*` (src/cluster/FigureValue.tsx) is deliberately ABSENT from
+ * this file. Those three rules are SHARED -- Stores, Cluster and whatever
+ * reports a count next all render through the same component -- and they are
+ * already folded into index.css under "the honest-figure vocabulary". A copy
+ * here would be a second thing to keep in step with them.
+ *
+ * ---------------------------------------------------------------------------
+ * The pane: the view owns its scroll, so the bar can be pinned
+ * ---------------------------------------------------------------------------
+ * `.os-window-content` is the window's scroller, so anything inside it
+ * scrolls -- including a bar that must not. Filling the height and scrolling
+ * INSIDE is what lets the ActionBar sit on the window's bottom edge without
+ * `position: fixed`, which would anchor to the CSS-transformed desk plate
+ * rather than to the window. Same arrangement as `.os-deploy-pane` and
+ * `.os-nexus-goals`; each app names its own, so no app can move another's. */
+.os-stores-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  /* Cancels the window's own padding so the bar meets the window's edges,
+   * then gives it back to the scrolling half. A bar inset from the edge
+   * reads as a card that happens to be at the bottom, not as the floor. */
+  margin: -18px -20px;
+}
+.os-stores-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+ * The status word
+ * ---------------------------------------------------------------------------
+ * The chip tones are closed at neutral / accent / muted, so a status colour
+ * has no chip to wear. This is the tone-carrying WORD, and `currentColor`
+ * turns its ink into its ring exactly as the accent chip does.
+ *
+ * `neutral` is not a fourth colour: it is the muted ink a status this shell
+ * has no copy for gets, so an unrecognised value reads as unrecognised
+ * rather than borrowing the confidence of a green one. */
+.os-stores-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  white-space: nowrap;
+}
+.os-stores-status[data-tone="ok"] {
+  color: var(--os-accent);
+}
+.os-stores-status[data-tone="warn"] {
+  color: var(--os-warn);
+}
+.os-stores-status[data-tone="danger"] {
+  color: var(--os-error);
+}
+
+/* ---------------------------------------------------------------------------
+ * The list line
+ * ------------------------------------------------------------------------ */
+.os-stores-subline {
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A line of prose inside a band -- the scopes sentence, the subscription
+ * count. It is content rather than a caption, so it keeps the ink and the
+ * app text size; `data-tone` is for the one line that reports a failure. */
+.os-stores-line {
+  margin: 0 0 8px;
+  font-size: var(--os-text-base);
+  color: var(--os-ink);
+}
+.os-stores-line[data-tone="danger"] {
+  color: var(--os-error);
+}
+
+/* A quiet aside beside a value -- "not observed yet", a drift total. */
+.os-stores-note {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+
+/* ---------------------------------------------------------------------------
+ * The add form
+ * ---------------------------------------------------------------------------
+ * Two columns where there is room, one where there is not. `auto-fit` with a
+ * min track rather than a media query: this form renders inside a WINDOW, and
+ * a window's width is not the viewport's. */
+.os-stores-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 8px 12px;
+  margin: 8px 0 12px;
+}
+
+/* A band's own act, under its content. Not on the ActionBar: the bar carries
+ * the acts that change this STORE's state, and reconciling subscriptions
+ * changes no store's status -- it also runs for every ingesting store, which
+ * is a scope the bar has no room to say. */
+.os-stores-bandact {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--os-line);
+}
+
+/* ---------------------------------------------------------------------------
+ * The per-domain table
+ * ---------------------------------------------------------------------------
+ * IT SCROLLS INSIDE ITS OWN BOX. Six columns of concept ids inside a window
+ * that can be half a screen wide is the case where a table pushes the whole
+ * pane sideways; the wrapper takes that instead, so the window body never
+ * scrolls horizontally. */
+.os-stores-tablewrap {
+  overflow-x: auto;
+  margin: 4px 0 10px;
+}
+.os-stores-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--os-text-base);
+}
+.os-stores-table th {
+  text-align: left;
+  padding: 4px 14px 6px 0;
+  font-size: var(--os-text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--os-muted);
+  white-space: nowrap;
+}
+.os-stores-table td {
+  padding: 5px 14px 5px 0;
+  border-top: 1px solid var(--os-line);
+  vertical-align: baseline;
+}
+.os-stores-table td:first-child {
+  font-size: var(--os-text-sm);
+}
+/* The counters read down the column, so they are tabular and right-aligned
+ * against each other -- a drift of 4 under a drift of 1,204 is the comparison
+ * this table exists for. */
+.os-stores-table td:nth-child(3),
+.os-stores-table td:nth-child(4),
+.os-stores-table td:nth-child(5),
+.os-stores-table th:nth-child(3),
+.os-stores-table th:nth-child(4),
+.os-stores-table th:nth-child(5) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.os-stores-table td:last-child {
+  white-space: nowrap;
+}
+
+/* ---- labels in Files, and Fleet -> Apps (memql#5013) ---- */
+
+/* ===========================================================================
+ * The two gaps in existing apps (epic memql#5009 / memql#5013).
+ *
+ *   1. Files: the artifact label editor in the inspector, and the way out of
+ *      a filter that emptied the list.
+ *   2. Fleet -> Apps: the delegation policy form, the delegated runs, and one
+ *      run's transcript.
+ *
+ * Existing --os-* tokens only; not one raw colour. Nothing here restyles
+ * another app's class -- the session's status word is
+ * `.os-fleet-session-status` rather than a third tone bolted onto Deployables'
+ * `.os-deploy-status`, which belongs to that app and carries ok / warn only.
+ *
+ * `.os-figure*` (src/cluster/FigureValue.tsx) is deliberately ABSENT here:
+ * `_pending_stores.css` and `_pending_cluster.css` already carry the same
+ * three rules with a note to fold one copy and drop the other. A third copy
+ * would be a third thing to keep in step.
+ * ======================================================================== */
+
+/* ---------------------------------------------------------------------------
+ * FILES: the label editor (Inspector.tsx -> LabelEditor.tsx)
+ * ---------------------------------------------------------------------------
+ * The same column shape as Fleet's `.os-fleet-labeledit`, because it is the
+ * same arrangement -- a chip row, then the control that grows it, then what
+ * the surface has to say about the write. Its own class rather than a shared
+ * one: the two editors sit in different apps and one of them saves per chip
+ * while the other does not (MapEditor.tsx records that split), so a single
+ * class would invite them to converge on a behaviour only one of them has. */
+.os-files-labeledit {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+/* The add field takes the width; the button keeps its own. */
+.os-files-labeledit .os-form-row {
+  align-items: center;
+}
+.os-files-labeledit .os-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* THE WAY OUT OF A FILTER, under the list it emptied.
+ *
+ * It renders only while the list IS empty AND narrowed, so it is never chrome
+ * standing over content (DESIGN.md rule 2) -- and it sits with the empty
+ * text, because the sentence and the act that answers it belong together. */
+.os-files-clear {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 12px;
+}
+
+/* ---------------------------------------------------------------------------
+ * FLEET -> APPS: the delegation form
+ * ---------------------------------------------------------------------------
+ * Checkboxes in a wrapping row. They are legitimate here and nowhere near a
+ * browsing surface: this is a FORM stating a choice, which is exactly what
+ * rule 10 carves out. */
+.os-fleet-apps-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 18px;
+  margin-bottom: 5px;
+}
+
+/* ---------------------------------------------------------------------------
+ * FLEET -> APPS: the delegated runs
+ * --------------------------------------------------------------------------- */
+.os-fleet-sessions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+/* A STATUS WORD IN ITS OWN TONE, never a colour alone: "the red one" is not
+ * something a person can say to a colleague on a call, and a screen reader has
+ * no colour at all. Four tones because a session has four meanings --
+ * `neutral` is the starting/running case and inherits the muted ink. */
+.os-fleet-session-status {
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+.os-fleet-session-status[data-tone="ok"] {
+  color: var(--os-accent);
+}
+.os-fleet-session-status[data-tone="warn"] {
+  color: var(--os-warn);
+}
+.os-fleet-session-status[data-tone="danger"] {
+  color: var(--os-error);
+}
+
+.os-fleet-session-tokens {
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+}
+
+/* ---------------------------------------------------------------------------
+ * FLEET -> APPS: one run's transcript
+ * ---------------------------------------------------------------------------
+ * A RECORD, RENDERED VERBATIM. `pre-wrap` + `break-word` are the only two
+ * liberties taken and both are about the CONTAINER rather than the text:
+ * nothing is re-ordered, nothing is re-indented, and a long line stays one
+ * line as far as the reader is concerned. It scrolls INSIDE its own box, so
+ * a 40,000-line run cannot push the facts above it off the top of the window
+ * and the page body never scrolls sideways. */
+.os-fleet-transcript {
+  margin: 0;
+  max-height: 32rem;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+  color: var(--os-ink);
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  tab-size: 2;
+}
+/* The prompt is shorter by nature and sits inside a panel that already draws
+ * a box, so it drops the frame and keeps the face. */
+.os-fleet-prompt {
+  max-height: 14rem;
+  border: 0;
+  background: none;
+  padding: 0;
+}
+
+.os-fleet-artifacts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  font-size: var(--os-text-xs);
+}
+
+/* The run page fills the pane like every other detail view, so the transcript
+ * has room and the back-Head stays where a reader left it. */
+.os-fleet-session {
+  min-height: 100%;
+}
+
+/* ---- accounts: credentials on behalf of a billing account (memql#5013) ---- */
+
+/* ===========================================================================
+ * The Accounts app's credentials panel (epic memql#5009, memql#5013),
+ * pending fold-in to index.css
+ * ===========================================================================
+ *
+ * Every rule here uses the existing --os-* tokens and introduces no colour of
+ * its own. It is all `.os-account-*`: this app's own vocabulary, in the sense
+ * the kit's header states -- what is genuinely about ITS subject, after every
+ * generic control has come from `kit/controls.tsx`.
+ *
+ * NOT HERE, deliberately: the panel, the subhead, the field, the notice, the
+ * row and the chip. Those are all kit, index.css already carries them, and a
+ * second copy in this file is a copy that would drift the moment either side
+ * is touched. `.os-account-form-actions` is likewise reused from the archive
+ * confirm rather than respelled -- the revoke confirm's button pair is the
+ * same object.
+ */
+
+/* ---------------------------------------------------------------------------
+ * The one-time reveal
+ * ------------------------------------------------------------------------- */
+
+/* The credential, its copy control and the Done that discards it, on one
+ * line where there is room and wrapping where there is not. The VALUE takes
+ * the whole width when it wraps: it is one unbreakable token and the reason
+ * this notice exists, so it is never the thing that gets squeezed. */
+.os-account-secret {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* `user-select: all` so one click takes the whole credential. A clipboard can
+ * refuse -- an insecure origin, a permission the browser declined -- and when
+ * it does, selecting by hand is the only way the value gets out, so it has to
+ * be one gesture rather than a careful drag across 50 characters. */
+.os-account-secret-value {
+  flex: 1 1 24ch;
+  min-width: 0;
+  padding: 6px 9px;
+  font-size: var(--os-text-xs);
+  color: var(--os-ink);
+  background: var(--os-raised);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* ---------------------------------------------------------------------------
+ * The list of credentials
+ * ------------------------------------------------------------------------- */
+
+.os-account-credentials {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * The revoke confirm
+ * ------------------------------------------------------------------------- */
+
+/* Indented under the row it belongs to, so which credential is about to be
+ * revoked is answered by POSITION as well as by the name in the sentence. A
+ * confirm that floated free of its row would be the generic "are you sure"
+ * that the in-surface confirm exists to avoid. */
+.os-account-credential-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 6px 26px;
+  padding: 10px 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+}
+
+.os-account-credential-confirm-line {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-ink);
+}
+
+/* ---------------------------------------------------------------------------
+ * The Credentials section (memql#5013)
+ * ------------------------------------------------------------------------- */
+
+/*
+ * THE DISAMBIGUATION, AS PROSE. Body ink at the small size rather than a
+ * muted caption or a bordered notice, for `.os-bin-lede`'s reason: it is not
+ * a warning about something going wrong, it is the one fact that makes the
+ * list mean anything -- these are billing accounts, not the clients the
+ * Accounts section lists. A notice would read as an error about the surface;
+ * a caption would read as an aside. It is the app talking, so it takes body
+ * ink and a readable measure.
+ */
+.os-credentials-lede {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--os-ink);
+  font-size: var(--os-text-sm);
+  line-height: 1.55;
+}
+
+/* The concept id inside that sentence. It is the one thing a reader can
+ * actually check the claim against, so it is set as code and dimmed -- read
+ * when wanted, skipped when not, and never mistaken for the account's name. */
+.os-credentials-lede code {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+
+/* The billing accounts. Same shape as `.os-account-credentials` one level
+ * down -- a plain column of kit Rows -- rather than a LiveList: this read is
+ * not a feed (the routing table carries no update rule for the concept), and
+ * a LiveList would draw arrival cues over a list that cannot receive
+ * arrivals. */
+.os-credentials-accounts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* DESIGN.md rule 9: real estate belongs to CONTENT, and prose is content that
+ * stops being readable past about 90 characters. The panel now stands in a
+ * full-window section rather than in a client's detail stack, so these two
+ * sentences ran the whole width of the window -- 170-odd characters a line,
+ * measured. The list rows below them still take the window, because a row is
+ * scanned rather than read. */
+.os-account-credential-note {
+  max-width: 92ch;
+}
+
+/* The empty answer takes the lede's measure, for the lede's reason: it is a
+ * sentence to be READ, not a row to be scanned, and at a full window it ran to
+ * about 200 characters a line. */
+.os-credentials-empty {
+  max-width: 62ch;
+}

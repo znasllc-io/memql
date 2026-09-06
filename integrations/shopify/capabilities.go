@@ -296,11 +296,31 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 				"phase":            phaseOf(st),
 				"lastAppliedAt":    mapString(st, "lastInboundAt"),
 				"lastReconciledAt": mapString(st, "lastReconcileAt"),
-				"driftLast":        mapInt(st, "driftCount"),
-				"driftTotal":       mapInt(st, "driftCount"),
-				"staleWrites":      mapInt(st, "lagSeconds"),
-				"tombstoned":       mapInt(st, "outboxDepth"),
-				"lastError":        mapString(st, "lastError"),
+				// EACH KEY NAMES WHAT IT CARRIES (epic memql#5009). Three of
+				// them did not, and the operator surface reading them is the
+				// only consumer, so the repair belongs here rather than in a
+				// rename at the render:
+				//
+				//   staleWrites -> lagSeconds   carried lagSeconds, which is a
+				//                               LATENCY in seconds and not a
+				//                               count of writes.
+				//   tombstoned  -> outboxDepth  carried outboxDepth, the pending
+				//                               and failed outbox entries.
+				//                               "Tombstoned: 340" for an outbox
+				//                               backlog is a wrong number under
+				//                               a wrong name.
+				//   driftTotal                  carried driftCount -- the SAME
+				//                               value as driftLast -- so a
+				//                               surface rendering "n / total"
+				//                               always printed "n / n" and
+				//                               claimed a cumulative figure
+				//                               nothing measures. Dropped
+				//                               rather than renamed: there is
+				//                               no second number to report.
+				"driftLast":   mapInt(st, "driftCount"),
+				"lagSeconds":  mapInt(st, "lagSeconds"),
+				"outboxDepth": mapInt(st, "outboxDepth"),
+				"lastError":   mapString(st, "lastError"),
 			})
 		}
 		entry := map[string]any{

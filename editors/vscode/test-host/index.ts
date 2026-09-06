@@ -563,10 +563,17 @@ smoke("every webview surface opens without throwing", async () => {
       viewSourceFromCluster: () => {
         throw new Error("no cluster source in the smoke lane");
       },
-      // `browseRowsInPortal` was the second dep here and is GONE with the
-      // portal (epic memql#4984). It opened the portal's /concepts/<id> page
-      // for a concept; MemQL OS has no concept browser, so the button was
-      // removed rather than pointed at a page that answers 404.
+      // The second dep, back and re-pointed (epic memql#5009). It was
+      // `browseRowsInPortal`, opening the portal's `/concepts/<id>`; epic
+      // memql#4984 removed it because no page answered that route after the
+      // retirement, and MemQL OS's Concepts app answers it now.
+      //
+      // It REJECTS for the same reason its sibling does: nothing in this lane
+      // clicks the button, and a stub that resolved would let a page which
+      // reached for the console on OPEN sail through.
+      browseRows: () => {
+        throw new Error("no console handoff in the smoke lane");
+      },
     },
     // The cluster this record was "read from" (memql#4253). The smoke lane has
     // no connection, so "" is the honest answer -- and it is the value that

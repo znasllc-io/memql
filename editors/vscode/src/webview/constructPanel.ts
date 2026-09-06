@@ -61,14 +61,17 @@ import { workspaceCandidates } from "../handoff/resolve.js";
  * has no business reading. The panel posts an intent; the host decides
  * whether there is a cluster to serve it.
  *
- * `browseRowsInPortal` WAS the other half of `viewSourceFromCluster`
- * (memql#4252): that dep reads a construct's DEFINITION from the cluster, and
- * the other handed a concept's ROWS to the portal rather than fetching or
- * rendering them here. Epic memql#4984 retired the portal and MemQL OS has no
- * concept browser, so there was no page left to hand them to and the dep and
- * its button went. The division of labour it stood for survives in the one
- * that is left: the extension owns what is on this machine and what it can
- * reach, the console owns what is inside a cluster.
+ * `browseRows` is the other half of `viewSourceFromCluster` (memql#4252):
+ * that dep reads a construct's DEFINITION from the cluster, and this one
+ * hands a concept's ROWS to the console rather than fetching or rendering
+ * them here. The division of labour is the point -- the extension owns what
+ * is on this machine and what it can reach, the console owns what is inside a
+ * cluster -- and a second rows browser growing in here is what it prevents.
+ *
+ * IT WAS ABSENT FOR ONE EPIC. memql#4984 retired the portal, leaving no page
+ * to hand rows to, and the dep and its button were removed rather than left
+ * pointing at a route nothing answered. Epic memql#5009 built MemQL OS's
+ * Concepts app and this came back at it.
  *
  * IT TAKES THE PANEL'S CLUSTER, and may not read the connected one in its
  * place (memql#4253). This panel is a singleton that outlives the connection
@@ -80,6 +83,8 @@ import { workspaceCandidates } from "../handoff/resolve.js";
  */
 export interface ConstructPanelDeps {
   viewSourceFromCluster: (construct: CatalogConstruct, cluster: string) => Promise<void>;
+  /** Open the console at this concept's rows (epic memql#5009). */
+  browseRows: (construct: CatalogConstruct, cluster: string) => Promise<void>;
 }
 
 /**
@@ -244,6 +249,10 @@ export class ConstructPanel {
     }
     if (type === "viewSourceFromCluster") {
       await this.deps.viewSourceFromCluster(this.construct, this.cluster);
+      return;
+    }
+    if (type === "browseRows") {
+      await this.deps.browseRows(this.construct, this.cluster);
       return;
     }
     if (type !== "openFile") return;

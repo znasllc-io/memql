@@ -30,11 +30,17 @@ export interface FakeQuery {
   myWorkspaces: ReturnType<typeof vi.fn>;
   clusterNodes: ReturnType<typeof vi.fn>;
   invocationsForWorker: ReturnType<typeof vi.fn>;
+  // The Apps section's reads (epic memql#5009). Neither concept broadcasts,
+  // so both are on-demand reads rather than seeds behind a subscription.
+  delegationPolicyForUser: ReturnType<typeof vi.fn>;
+  appSessionsForUser: ReturnType<typeof vi.fn>;
+  appSessionById: ReturnType<typeof vi.fn>;
   renameWorker: ReturnType<typeof vi.fn>;
   setWorkerOperatorLabels: ReturnType<typeof vi.fn>;
   revokeWorker: ReturnType<typeof vi.fn>;
   createRoutingPolicy: ReturnType<typeof vi.fn>;
   updateRoutingPolicy: ReturnType<typeof vi.fn>;
+  setDelegationPolicy: ReturnType<typeof vi.fn>;
 }
 
 // The subscription seam, faithful to the one bit of it a collection uses:
@@ -103,11 +109,15 @@ export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {
       myWorkspaces: read("myWorkspaces"),
       clusterNodes: read("clusterNodes"),
       invocationsForWorker: read("invocationsForWorker"),
+      delegationPolicyForUser: read("delegationPolicyForUser"),
+      appSessionsForUser: read("appSessionsForUser"),
+      appSessionById: read("appSessionById"),
       renameWorker: vi.fn(async () => rowsResult([])),
       setWorkerOperatorLabels: vi.fn(async () => rowsResult([])),
       revokeWorker: vi.fn(async () => rowsResult([])),
       createRoutingPolicy: vi.fn(async () => rowsResult([])),
       updateRoutingPolicy: vi.fn(async () => rowsResult([])),
+      setDelegationPolicy: vi.fn(async () => rowsResult([])),
     },
     subscriptions: fakeSubscriptions(),
     dispatcher: { sendAndWait: vi.fn() },
@@ -151,6 +161,48 @@ export function machineRow(over: Partial<Row> & { id: string }): Row {
     activeCount: 0,
     registeredAt: "2026-08-01T00:00:00Z",
     lastSeenAt: new Date().toISOString(),
+    ...over,
+  };
+}
+
+/**
+ * A delegated app-session row (epic memql#5009).
+ *
+ * `usage` IS ABSENT BY DEFAULT, which is the state most easily got wrong: an
+ * app that reported nothing did not report zero, and the reading has to keep
+ * those apart all the way to the pixel. Pass one explicitly to model an app
+ * that DID report.
+ */
+export function appSessionRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    ownerUserId: "v1:identity:user:me",
+    workerId: "v1:worker:registration:laptop",
+    app: "claude-code",
+    kind: "run",
+    planId: "",
+    taskId: "",
+    status: "ended",
+    billing: "subscription",
+    startedAt: "2026-09-01T09:00:00Z",
+    endedAt: "2026-09-01T09:04:00Z",
+    ...over,
+  };
+}
+
+/** A delegation policy row. ABSENT is the common case -- pass no row at all
+ *  for it, rather than one of these with the switch off: they are different
+ *  facts about a person. */
+export function delegationPolicyRow(over: Partial<Row> = {}): Row {
+  return {
+    id: "v1:worker:delegationPolicy:v1-identity-user-me",
+    ownerUserId: "v1:identity:user:me",
+    preferSubscriptionApps: true,
+    eligibleKinds: ["runCommand"],
+    appOrder: ["claude-code"],
+    maxConcurrentSessions: 2,
+    workspaceRoot: "/Users/ana/memql-workspaces",
+    credentialLifetimeSeconds: 14400,
+    updatedAt: "2026-09-01T08:00:00Z",
     ...over,
   };
 }

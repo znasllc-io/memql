@@ -8,8 +8,12 @@ import {
   parseLabelChip,
 } from "../../src/apps/fleet/labels";
 import { formatDuration, formatFreshness, formatMoment } from "../../src/kit/format";
+import { figureValue } from "../../src/cluster/figure";
 import {
   activePolicy,
+  appSessionDetailFromRow,
+  appSessionFromRow,
+  delegationPolicyFromRow,
   invocationFromRow,
   isRevoked,
   latestPerId,
@@ -17,6 +21,8 @@ import {
   machineName,
   nodeFromRow,
   routingPolicyFromRow,
+  sessionIsLive,
+  sessionsNewestFirst,
   workspaceFromRow,
   workspacesByNode,
 } from "../../src/apps/fleet/rows";
@@ -251,5 +257,115 @@ describe("the fleet's time voice", () => {
   it("renders a blank moment as -- and an unparseable one verbatim", () => {
     expect(formatMoment("")).toBe("--");
     expect(formatMoment("whenever")).toBe("whenever");
+  });
+});
+
+// The Apps section's projections (epic memql#5009). PURE, so the one rule
+// that matters most -- an unreported usage is ABSENT, never zero -- is
+// asserted on a function of a row rather than through three render layers.
+describe("appSessionFromRow", () => {
+  it("reads an ABSENT usage object as unmeasured, never as three zeros", () => {
+    const session = appSessionFromRow({
+      id: "v1:worker:appSession:a",
+      app: "claude-code",
+      status: "ended",
+      billing: "subscription",
+    });
+    expect(session.usage.known).toBe(false);
+    // An app that reported nothing did not report zero. These lead to
+    // opposite conclusions about a run, so they are different VALUES.
+    expect(session.usage.inputTokens.kind).toBe("absent");
+    expect(session.usage.outputTokens.kind).toBe("absent");
+    expect(session.usage.costUSD.kind).toBe("absent");
+    expect(figureValue(session.usage.inputTokens)).toBeNull();
+  });
+
+  it("reads a REPORTED zero as a measurement, because it is one", () => {
+    const session = appSessionFromRow({
+      id: "v1:worker:appSession:a",
+      usage: { known: true, inputTokens: 0, outputTokens: 0, costUSD: 0 },
+    });
+    expect(session.usage.known).toBe(true);
+    expect(figureValue(session.usage.inputTokens)).toBe(0);
+  });
+
+  it("refuses a usage the app did not vouch for, even when numbers are present", () => {
+    // `known: false` is the app's own answer to "did you say anything". A
+    // partial object that arrived without it is not a report.
+    const session = appSessionFromRow({
+      id: "v1:worker:appSession:a",
+      usage: { inputTokens: 900 },
+    });
+    expect(session.usage.known).toBe(false);
+    expect(session.usage.inputTokens.kind).toBe("absent");
+  });
+
+  it("falls to `unknown` billing rather than to a blank chip", () => {
+    expect(appSessionFromRow({ id: "v1:worker:appSession:a" }).billing).toBe("unknown");
+  });
+
+  it("keeps the transcript byte for byte and reads truncation as a flag", () => {
+    const detail = appSessionDetailFromRow({
+      id: "v1:worker:appSession:a",
+      transcript: "  keep   this\n\n",
+      transcriptBytes: 15,
+      transcriptTruncated: true,
+    });
+    expect(detail.transcript).toBe("  keep   this\n\n");
+    expect(figureValue(detail.transcriptBytes)).toBe(15);
+    expect(detail.transcriptTruncated).toBe(true);
+  });
+
+  it("reads an ABSENT transcriptBytes as unmeasured rather than as 0 bytes", () => {
+    const detail = appSessionDetailFromRow({ id: "v1:worker:appSession:a" });
+    expect(detail.transcriptBytes.kind).toBe("absent");
+  });
+
+  it("names starting and running as the only live statuses", () => {
+    expect(sessionIsLive("starting")).toBe(true);
+    expect(sessionIsLive("running")).toBe(true);
+    for (const done of ["ended", "failed", "cancelled", ""]) {
+      expect(sessionIsLive(done)).toBe(false);
+    }
+  });
+
+  it("orders newest first, breaking a tie by id so arrival order never decides", () => {
+    const rows = [
+      { id: "b", startedAt: "2026-09-01T09:00:00Z" },
+      { id: "a", startedAt: "2026-09-02T09:00:00Z" },
+      { id: "c", startedAt: "2026-09-01T09:00:00Z" },
+    ].map((r) => appSessionFromRow(r));
+    expect(sessionsNewestFirst(rows).map((r) => r.id)).toEqual(["a", "c", "b"]);
+  });
+});
+
+describe("delegationPolicyFromRow", () => {
+  it("reads a ZERO maxConcurrentSessions as the default, never as none", () => {
+    // The concept says so, and it has to: a zero here would silently disable
+    // a feature the person turned on.
+    const policy = delegationPolicyFromRow({
+      id: "p",
+      ownerUserId: "u",
+      preferSubscriptionApps: true,
+      maxConcurrentSessions: 0,
+      credentialLifetimeSeconds: 0,
+    });
+    expect(policy.maxConcurrentSessions).toBe(1);
+    expect(policy.credentialLifetimeSeconds).toBe(14400);
+  });
+
+  it("keeps appOrder in the order the row stored it -- the list IS the priority", () => {
+    const policy = delegationPolicyFromRow({
+      id: "p",
+      appOrder: ["codex", "claude-code"],
+      eligibleKinds: ["runCommand", 7, "callTool"],
+    });
+    expect(policy.appOrder).toEqual(["codex", "claude-code"]);
+    // A non-string member is dropped rather than coerced: it is not a kind.
+    expect(policy.eligibleKinds).toEqual(["runCommand", "callTool"]);
+  });
+
+  it("reads an absent master switch as OFF", () => {
+    expect(delegationPolicyFromRow({ id: "p" }).preferSubscriptionApps).toBe(false);
   });
 });

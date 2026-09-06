@@ -2,13 +2,26 @@ import { describe, expect, it } from "vitest";
 
 import { hiddenSurfaces } from "../../src/apps/settings/hiddenSurfaces";
 import { OS_REGISTRY } from "../../src/apps/registry";
-import type { RoleRequirement } from "../../src/system/roles";
+import { roleRank, type RoleRequirement } from "../../src/system/roles";
 
 const OWNER_OR_DEVELOPER: RoleRequirement = { any: ["owner", "developer"] };
 
-/** A set requirement that does not name admin. */
+/**
+ * A SET requirement that does not name admin.
+ *
+ * One of the two shapes that can hide a surface from an admin; `aboveAdmin`
+ * below is the other. They stay separate predicates because they are
+ * different statements -- "these roles, and admin is not one of them" versus
+ * "a floor an admin does not clear" -- and a single helper answering both
+ * would make the expectation below unreadable.
+ */
 function excludesAdmin(requirement?: RoleRequirement): boolean {
-  return !!requirement && "any" in requirement && !requirement.any.includes("admin");
+  if (!requirement) return false;
+  if ("any" in requirement) return !requirement.any.includes("admin");
+  // A floor ABOVE admin excludes one. `roleRank` reads the seeded ladder the
+  // test setup installs, so this is the cluster's ordering rather than a
+  // second copy of it -- the thing memql#4832 deleted the literal to stop.
+  return roleRank(requirement.min) > roleRank("admin");
 }
 
 /**
@@ -27,7 +40,15 @@ function excludesAdmin(requirement?: RoleRequirement): boolean {
  * assertion vacuous.
  */
 function aboveAdmin(requirement?: RoleRequirement): boolean {
-  return !!requirement && "min" in requirement && requirement.min === "owner";
+  if (!requirement || !("min" in requirement)) return false;
+  // RANK, NOT `=== "owner"`. The ladder is cluster state -- ranks are spaced
+  // 50/100/200/300/400 precisely so a customer-defined role can slot between
+  // two base ones -- and a literal here would be the second hand-maintained
+  // ordering that epic memql#4832 deleted the first one to stop. It also
+  // happens to be wrong already for a shipped rung: developer ranks 300,
+  // ABOVE admin's 200, so `{ min: "developer" }` excludes an admin too and a
+  // string comparison against "owner" would miss it.
+  return roleRank(requirement.min) > roleRank("admin");
 }
 
 describe("the permissions self-view (memql#4744)", () => {
@@ -51,29 +72,43 @@ describe("the permissions self-view (memql#4744)", () => {
     expect(labels).toContain("Settings -- Cluster");
   });
 
-  it("an admin loses only what a role SET leaves them out of", () => {
-    // TWO SHAPES CAN HIDE A SURFACE FROM AN ADMIN, and until epic memql#4984
-    // only one of them appeared in this registry. A `{ any: [...] }` that does
-    // not name admin legitimately hides its surface -- P6's owner-or-developer
-    // Integrations section is exactly that. A `{ min }` ABOVE admin does too,
-    // and Settings -> AI providers is the first: the provider reads and writes
-    // are owner-gated in the engine, so an admin offered that section would
-    // meet a refusal on every control in it.
+  it("an admin loses exactly what the manifests leave them out of", () => {
+    // TWO SHAPES CAN HIDE A SURFACE FROM AN ADMIN, and until recently only
+    // one of them appeared in this registry. A `{ any: [...] }` that does not
+    // name admin legitimately hides its surface -- P6's owner-or-developer
+    // Integrations section is exactly that. A `{ min }` ABOVE admin does too:
+    // Settings -> AI providers (epic memql#4984), and then the Cluster app's
+    // Data origins and Audit trail sections and the whole Stores app (epic
+    // memql#5009), all of which are owner-floored because the ENGINE is.
+    //
+    // The Audit trail's is the one worth knowing about. Row admission returns
+    // ZERO ROWS rather than an error, so an admin admitted to that section
+    // would be shown an empty trail with no refusal to render -- "nothing
+    // happened", to the one person who cannot check. The floor is the only
+    // mechanism that can prevent it, so this table listing it as hidden from
+    // an admin is correct and must stay correct.
     //
     // The expectation is DERIVED from the manifests rather than written out,
     // so it stays true as sections land. It is a different walk from the one
-    // under test: it ignores the ladder entirely and reads the requirement
-    // shapes directly, which is what keeps it from being a reimplementation.
+    // under test: it ignores the ladder's own predicate and reads the
+    // requirement shapes directly, which is what keeps it from being a
+    // reimplementation.
+    const hides = (r?: RoleRequirement) => excludesAdmin(r) || aboveAdmin(r);
     const gated = [
-      ...OS_REGISTRY.apps.flatMap((app) => [
-        ...(excludesAdmin(app.roles) || aboveAdmin(app.roles) ? [app.name] : []),
-        ...(app.sections ?? [])
-          .filter((s) => excludesAdmin(s.roles) || aboveAdmin(s.roles))
-          .map((s) => `${app.name} -- ${s.name}`),
-      ]),
-      ...OS_REGISTRY.widgets
-        .filter((w) => excludesAdmin(w.roles) || aboveAdmin(w.roles))
-        .map((w) => w.name),
+      ...OS_REGISTRY.apps.flatMap((app) =>
+        // A HIDDEN APP IS THE WHOLE ANSWER -- its sections are not enumerated
+        // under it. Listing "Stores -- Stores" beneath a hidden "Stores" pads
+        // the table with rows that all say the same thing and buries the
+        // informative case: a section gated ABOVE an app the person can
+        // otherwise open. `hiddenSurfaces` states that rule, and this walk has
+        // to share it or it is testing a different function. It only began to
+        // matter when an owner-floored APP landed; before that, no app in the
+        // registry was hidden from an admin at all.
+        hides(app.roles)
+          ? [app.name]
+          : (app.sections ?? []).filter((s) => hides(s.roles)).map((s) => `${app.name} -- ${s.name}`),
+      ),
+      ...OS_REGISTRY.widgets.filter((w) => hides(w.roles)).map((w) => w.name),
     ];
     expect(hiddenSurfaces(OS_REGISTRY, "admin").map((h) => h.label)).toEqual(gated);
     // The anti-vacuous floor: if both helpers ever stopped matching anything,

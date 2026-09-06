@@ -54,6 +54,15 @@ export function AccountDetail({
     <div className="os-account-detail">
       <ProfilePanel account={account} update={update} />
       <Ledger account={account} rollups={rollups} />
+      {/* NO CREDENTIALS PANEL HERE, AND THAT IS THE POINT (memql#5013).
+          A credential is minted against a `v1:identity:account` -- the paying
+          account of the isolation model -- and `mintAccountToken` gates on
+          `query accountById`, which binds that concept. This row is a
+          `v1:accounts:account`: a CLIENT. The two share the word and nothing
+          else, there is no field linking them, and handing a client id to the
+          mint resolves zero rows -- which IS the refusal. The panel lives in
+          the app's Credentials section, under the billing account it can
+          actually be issued against. */}
       {/* THE SELF ACCOUNT IS NOT ARCHIVABLE (memql#4837).
           The panel rendered for it like any other client, so the owner could
           file away their own company -- and archive is the ONLY exit in this

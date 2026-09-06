@@ -5,6 +5,7 @@ import { Check, Head, Panel } from "../../kit";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { AccountsSection } from "./AccountsSection";
+import { CredentialsSection } from "./CredentialsSection";
 import { FirstRunCard } from "./FirstRunCard";
 import { useArchiveAccount, useCreateAccount, useUpdateAccount } from "./actions";
 import { accountFromRow, needsFirstRun, SELF_ACCOUNT_ID, type AccountRow } from "./rows";
@@ -86,6 +87,16 @@ export function AccountsApp({
 
   if (sectionId === "settings") {
     return <AccountsSettingsSection settings={settings} update={updateSettings} />;
+  }
+  // CREDENTIALS IS ITS OWN SECTION AND SHARES NOTHING WITH THE REST OF THIS
+  // APP (memql#5013). It reads `v1:identity:account` -- the paying account of the
+  // isolation model -- while everything else in this app reads
+  // `v1:accounts:account`, the client registry. The two share the word and
+  // nothing else, so the section takes no props from here: not the feed, not
+  // the write states, not the settings. A shared prop would be the first step
+  // back towards the placement this fixed.
+  if (sectionId === "credentials") {
+    return <CredentialsSection />;
   }
   if (sectionId === "logs") {
     return (

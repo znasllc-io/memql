@@ -65,19 +65,6 @@ export type {
 } from "./types.js";
 export { viewKitStyles, VIEW_KIT_CSS_VARIABLES } from "./styles.js";
 
-// Where the elements of an arrangement go. A PLAN rather than a renderer:
-// the host wraps each element itself (selection, keyboard, theme), and what
-// it should not re-derive is which slot each entry belongs in.
-export {
-  planLayout,
-  layoutClassName,
-  slotClassName,
-  roleClassName,
-  type LayoutPlan,
-  type LayoutSlotName,
-  type PlannedEntry,
-  type PlannedSlot,
-} from "./layout.js";
 
 // Element fitness -- the contract a view system matches elements against.
 export {
@@ -110,37 +97,35 @@ export {
   type UnmetRequirement,
 } from "./fitness.js";
 
-// Arrangements -- the composition layer a user-composed view is built out of
-// (memql#3320). Deterministic first: everything here works with no model, no
-// network and no provider, and the AI path is one more producer of the same
-// value.
-export {
-  elementCandidates,
-  proposeArrangement,
-  explainArrangement,
-  arrangementProblems,
-  sanitizeArrangement,
-  readArrangement,
-  arrangementRequest,
-  arrangementLayout,
-  entryRole,
-  elementOptions,
-  EMPTY_ARRANGEMENT,
-  ARRANGEMENT_PROPOSAL_SCHEMA,
-  SECTION_LAYOUTS,
-  ENTRY_ROLES,
-  LAYOUT_DESCRIPTIONS,
-  type ArrangedElement,
-  type Arrangement,
-  type ArrangementFault,
-  type ArrangementOptions,
-  type ArrangementProblem,
-  type ArrangementProposal,
-  type ArrangementRequest,
-  type ElementCandidate,
-  type EntryRole,
-  type SectionLayout,
-} from "./arrangement.js";
+// THE ARRANGEMENT AND LAYOUT MODULES ARE GONE (epic memql#5009, memql#5020).
+//
+// They were the composition layer a user-composed portal view was built out
+// of. The portal was retired in epic memql#4984 and took the only consumer
+// with it -- `v1:portalviews:view`, the concept the arrangements were stored
+// in, was deleted with it.
+//
+// REMOVED RATHER THAN DEPRECATED, and the reason is worth keeping because
+// the issue that filed this got it backwards. It looked like a breaking
+// change to a published package surface: `publishConfig` in package.json, an
+// `sdk/` path, an index that re-exports, and a genuinely-published sibling.
+// Every signal of a public surface was present except the one that decides
+// it. The org registry holds exactly one npm package (`memql-sdk-core`), the
+// only publish workflow is `publish-sdk-core.yml` with
+// working-directory `sdk/ts`, and nothing has ever published this package --
+// its only consumers were two in-repo `file:` dependencies. **Whether
+// something is a published surface is answered by the release pipeline, not
+// by the package's own metadata.**
+//
+// With no external consumer possible, keeping it marked would be a
+// deprecation window, which this pre-release repo does not do.
+//
+// ONE RULE FROM IT OUTLIVES IT, and any future grammar with optional layout
+// fields needs it: **absent means stack, absent means standard.** An absent
+// `layout` or `role` had exactly one reading, decided in one function, so an
+// arrangement stored before layouts existed rendered exactly as it always
+// had. If "absent" ever came to mean something else, the release that
+// changed it would silently re-lay-out every stored arrangement, with no
+// migration and nothing in the row to say what it used to look like.
 
 // The element library.
 export {

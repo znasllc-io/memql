@@ -17,6 +17,19 @@ import type { OsAppSection } from "../../system/registry";
  */
 export const ACCOUNTS_SECTIONS: OsAppSection[] = [
   { id: "accounts", name: "Accounts" },
+  // The credentials an operator has issued on behalf of a BILLING account
+  // (memql#5013). ITS OWN SECTION, not a panel inside a client's detail, and
+  // the reason is that the two are different concepts: a credential is minted
+  // against `v1:identity:account` and the Accounts section lists
+  // `v1:accounts:account`. They share the word and nothing else -- no field,
+  // no reference -- so a panel hung on a client row was refused on every mint,
+  // with the engine's zero-rows permission error as the only clue.
+  //
+  // NO ROLE FLOOR, for the reason this app declares none: `v1:identity:account`
+  // is the plain owned tier (`@rowAuthz(owner="ownerUserId")`, no cluster-owner
+  // escape), so the engine already answers "which of these are yours" and a
+  // floor written here would be presentation pretending to be authorization.
+  { id: "credentials", name: "Credentials" },
   // The app's slice of the cluster's logs (epic memql#4895): the lines it
   // tagged and the lines about the things it owns. Admin-floored because
   // every read on the log store is (spec L3), and this is the ONE section

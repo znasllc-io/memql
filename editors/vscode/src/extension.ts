@@ -207,7 +207,7 @@ import {
 } from './state/connectionContext.js';
 import { DEPLOYMENTS_INSTANCE_KEY } from './state/deploymentsCatalog.js';
 import { DeploymentPanel, type DeploymentPanelDeps } from './webview/deploymentPanel.js';
-import { SITE_CONCEPT, consoleTarget } from './clusters/consoleUrl.js';
+import { SITE_CONCEPT, consoleConceptUrl, consoleTarget } from './clusters/consoleUrl.js';
 import { isCatalogUri } from './constructs/catalogTarget.js';
 import { roleVisibility } from './deploy/actions.js';
 import { DeployControlClient } from '@znasllc-io/memql-sdk-core/deploy';
@@ -1785,6 +1785,39 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // under a record read from `staging`, or opening `prod`'s console for a
   // concept picked out of `staging`'s catalog, is the failure both prevent.
   const constructPanelDeps = (): ConstructPanelDeps => ({
+    // Hand a concept's ROWS to the console (epic memql#5009, memql#5010).
+    //
+    // THE PANEL'S CLUSTER DECIDES, not the connected one, which is the whole
+    // point of the note above -- opening prod's console for a concept picked
+    // out of staging's catalog is the failure it names. Resolving the address
+    // from the PANEL's entry is what prevents it, so this needs no refusal of
+    // its own; `consoleUrlForCluster` only reaches for the live connection
+    // when that connection IS this cluster, and composes the address
+    // otherwise.
+    //
+    // Which is also why this works DISCONNECTED, unlike its sibling above: it
+    // opens a page rather than fetching anything, and the composed address is
+    // a real answer.
+    browseRows: async (construct, panelCluster) => {
+      const result = await readClustersFileSafe(clustersPath);
+      const entry = result.ok
+        ? result.file.clusters.find((c) => c.name === panelCluster)
+        : undefined;
+      if (entry === undefined) {
+        void window.showInformationMessage(
+          `MemQL: ${panelCluster} is not in clusters.yaml any more, so its console address cannot be worked out.`
+        );
+        return;
+      }
+      const url = consoleConceptUrl(await consoleUrlForCluster(entry), construct.name);
+      if (url === '') {
+        void window.showErrorMessage(
+          'MemQL: no console address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.'
+        );
+        return;
+      }
+      await env.openExternal(Uri.parse(url));
+    },
     viewSourceFromCluster: async (construct, panelCluster) => {
       const state = connections?.state;
       const connected = state?.status === 'connected' ? state.clusterName : undefined;

@@ -265,7 +265,10 @@ func TestARelaxedPlanStillFoldsTheCallerIntoTheCacheKey(t *testing.T) {
 // declares. Never persisted.
 func TestDataOriginsProjectsEveryConceptFromTheLiveRegistry(t *testing.T) {
 	e := testEngineOverLoadedTree(t)
-	nodes, err := e.evaluateDataOriginsExpression(context.Background())
+	// An OWNER context, because the read is owner-only. It used to be
+	// context.Background() and passed, which is the gap the sibling test
+	// below now pins.
+	nodes, err := e.evaluateDataOriginsExpression(ownerRoleCtx("owner-1"))
 	if err != nil {
 		t.Fatalf("evaluateDataOriginsExpression: %v", err)
 	}
@@ -300,5 +303,64 @@ func TestDataOriginsProjectsEveryConceptFromTheLiveRegistry(t *testing.T) {
 	connectors, _ := mirror["connectors"].([]any)
 	if len(connectors) != 1 || connectors[0] != "shopify" {
 		t.Errorf("%s connectors = %v, want [shopify]", testMirrorConcept, connectors)
+	}
+}
+
+// The inventory is OWNER-ONLY, and it was not (epic memql#5009).
+//
+// v1:platform:dataOrigin is a virtual projection: it is never persisted,
+// so there is no row for a @rowAuthz tier to gate, and the concept
+// declares none. An undeclared concept is delivered to every caller, so
+// with no check in the executor the full map of every external system
+// this deployment mirrors from and pushes to was readable by anyone who
+// could reach a builtin at all.
+//
+// The claim that it was gated already existed -- dsl/common/builtins.memql
+// says so above the declaration, and draws the contrast explicitly with
+// fleetModels and inferenceStatus, which are NOT owner-gated. Only the
+// enforcement was missing. providerAuthStatus, the sibling that projects
+// the same class of reconnaissance, had it all along.
+//
+// WHY IT SURVIVED: the health half beside it in the same page really was
+// gated (v1:platform:syncState declares @rowAuthz(clusterOwner), and
+// syncStatesAll filters on actor.isClusterOwner), so an operator looking
+// at the two together saw a surface that behaved as though it were
+// owner-only, because half of it was.
+func TestDataOriginsIsOwnerOnly(t *testing.T) {
+	e := testEngineOverLoadedTree(t)
+
+	// The negative control comes first, and it must fail for the RIGHT
+	// reason: an empty result would also "pass" a test that only checked
+	// for no rows, and an unrelated error would too. Assert the sentence.
+	for _, ctx := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{"no actor at all", context.Background()},
+		{"an ordinary writer", callerCtx("u1")},
+	} {
+		nodes, err := e.evaluateDataOriginsExpression(ctx.ctx)
+		if err == nil {
+			t.Fatalf("%s: dataOrigins returned %d rows and no error -- the inventory names every external "+
+				"system this deployment talks to, and this caller is not the operator", ctx.name, len(nodes))
+		}
+		if !strings.Contains(err.Error(), "owner-only") {
+			t.Fatalf("%s: refused with %q, want a sentence naming the owner gate -- a refusal for some "+
+				"other reason would pass this test while leaving the read open", ctx.name, err)
+		}
+		if len(nodes) != 0 {
+			t.Fatalf("%s: refused AND returned %d rows", ctx.name, len(nodes))
+		}
+	}
+
+	// The reachable positive: the same call, as an owner, still answers.
+	// Without this a gate that refused everybody would pass the half above.
+	nodes, err := e.evaluateDataOriginsExpression(ownerRoleCtx("owner-1"))
+	if err != nil {
+		t.Fatalf("owner: evaluateDataOriginsExpression: %v", err)
+	}
+	if len(nodes) == 0 {
+		t.Fatal("owner: dataOrigins returned no rows -- the gate refuses everybody, " +
+			"which would make the negative half above meaningless")
 	}
 }

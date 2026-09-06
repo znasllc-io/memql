@@ -86,10 +86,39 @@ export interface FilesFilter {
    * to file things -- and it is the only one the other two cannot express.
    */
   accountId: string;
+  /**
+   * The label constraint (epic memql#5009): "" = no constraint, otherwise the
+   * exact label a row must carry.
+   *
+   * =========================================================================
+   * A LABEL IS A FACET BEHIND `Refine`, NOT A SECOND RAIL (DESIGN.md rule 2)
+   * =========================================================================
+   * The portal filtered by `?label=`, and the obvious port of that is a
+   * standing label list beside the folder tree. Two rules refuse it. Rule 2:
+   * search and facet controls live behind ONE affordance on the Head line,
+   * and a permanent label list is precisely the filter chrome that rule
+   * exists to remove -- it would also stand over an empty Library, which the
+   * same rule forbids outright. And the rail is this app's PLACE LANGUAGE:
+   * Library, Desktop, Bin, Materializer, and the folders inside them. A label
+   * is not a place -- one file carries several at once -- so a second
+   * navigational axis beside the one that answers "where is this" would make
+   * a rail click ambiguous about what it means. The label rides in the
+   * Refine, and an active one shows as a removable chip beside it exactly as
+   * kind, source and client do.
+   *
+   * "" IS THE SENTINEL rather than a word like ACCOUNT_ANY's "all", because
+   * labels are FREE TEXT: "all" is a label somebody may genuinely have used,
+   * and a blank one is not -- the editor refuses an empty string, so "" can
+   * never collide with a real value.
+   */
+  label: string;
   search: string;
   /** false = newest first, the default. */
   sortAscending: boolean;
 }
+
+/** No label constraint. */
+export const LABEL_ANY = "";
 
 export const DEFAULT_FILTER: FilesFilter = {
   place: "library",
@@ -97,6 +126,7 @@ export const DEFAULT_FILTER: FilesFilter = {
   kind: "all",
   source: "all",
   accountId: ACCOUNT_ANY,
+  label: LABEL_ANY,
   search: "",
   sortAscending: false,
 };
@@ -177,6 +207,12 @@ export function applyFilters(
 
     if (filter.kind !== "all" && row.kind !== filter.kind) return false;
     if (filter.source !== "all" && row.source !== filter.source) return false;
+    // EXACT, never a prefix or a case-fold. A label is a name somebody chose;
+    // two labels differing only in case are two labels, and quietly folding
+    // them would show rows under a name that is not written on them. The
+    // fuzzy reading already exists one line down -- `matchesSearch` looks
+    // inside labels -- so the two questions stay separable.
+    if (filter.label !== LABEL_ANY && !row.labels.includes(filter.label)) return false;
     if (!matchesSearch(row, filter.search)) return false;
     // THE CLIENT SCOPE READS ABSENCE AND THE EMPTY LIST AS ONE ANSWER, and it
     // has to: every row promoted before `accountIds` existed carries no key at
@@ -197,4 +233,30 @@ export function applyFilters(
   return kept.sort(
     (a, b) => direction * (a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)),
   );
+}
+
+/**
+ * Every label present in a population, de-duplicated and alphabetical.
+ *
+ * A CLIENT-SIDE FOLD OVER THE SEEDED SET, like every other facet here, and
+ * for the reason the README gives about `libraryArtifactsByLens`: the seed is
+ * picked so one paged read holds the complete truth, and the engine's own
+ * `libraryArtifactsByLabel` carries the default `archived != true` conjunct,
+ * so a server-side label read would disagree with the archived, kind, source,
+ * client and search filters standing beside it in the same Refine panel.
+ *
+ * The caller passes the rows that pass every OTHER facet, so a label offered
+ * always has at least one row behind it in the view being looked at -- and
+ * the one currently selected stays offered, because clearing the label facet
+ * is what produces that population.
+ */
+export function labelsOf(rows: readonly ArtifactRow[]): string[] {
+  const seen = new Set<string>();
+  for (const row of rows) {
+    for (const label of row.labels) {
+      const text = label.trim();
+      if (text !== "") seen.add(text);
+    }
+  }
+  return [...seen].sort((a, b) => a.localeCompare(b));
 }

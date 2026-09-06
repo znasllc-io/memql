@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { applyFilters, DEFAULT_FILTER, type FilesFilter } from "../../src/apps/files/filters";
+import {
+  applyFilters,
+  DEFAULT_FILTER,
+  labelsOf,
+  LABEL_ANY,
+  type FilesFilter,
+} from "../../src/apps/files/filters";
 import { artifactFromRow, type ArtifactRow } from "../../src/apps/files/rows";
 
 // The list derivation (design D1): kind / source / archived / search / folder
@@ -120,5 +126,37 @@ describe("applyFilters", () => {
     const forward = applyFilters([twinA, twinB], DEFAULT_FILTER).map((r) => r.id);
     const reversed = applyFilters([twinB, twinA], DEFAULT_FILTER).map((r) => r.id);
     expect(forward).toEqual(reversed);
+  });
+});
+
+// The label facet (epic memql#5009): a pure fold like every other one here.
+describe("the label facet", () => {
+  const TAGGED = make({ id: "a-tag-a", title: "one.pdf", labels: ["Client-Acme", "urgent"] });
+  const ALSO = make({ id: "a-tag-b", title: "two.pdf", labels: ["urgent"] });
+  const BLANKS = make({ id: "a-tag-c", title: "three.pdf", labels: ["  ", "kept"] });
+
+  it("passes everything through when no label is asked for", () => {
+    // Same createdAt, so the order is the id tiebreak under the default
+    // newest-first direction -- the facet changes membership, never order.
+    expect(
+      applyFilters([TAGGED, ALSO], { ...DEFAULT_FILTER, label: LABEL_ANY }).map((r) => r.id),
+    ).toEqual(["a-tag-b", "a-tag-a"]);
+  });
+
+  it("matches EXACTLY -- not a prefix, and never case-folded", () => {
+    const on = (label: string) =>
+      applyFilters([TAGGED, ALSO], { ...DEFAULT_FILTER, label }).map((r) => r.id);
+    expect(on("urgent")).toEqual(["a-tag-b", "a-tag-a"]);
+    expect(on("Client-Acme")).toEqual(["a-tag-a"]);
+    // Two labels differing only in case are two labels: quietly folding them
+    // would show rows under a name that is not written on them. The fuzzy
+    // reading is `search`, which already looks inside labels.
+    expect(on("client-acme")).toEqual([]);
+    expect(on("urg")).toEqual([]);
+  });
+
+  it("collects the labels in a population, de-duplicated, alphabetical, blanks dropped", () => {
+    expect(labelsOf([TAGGED, ALSO, BLANKS])).toEqual(["Client-Acme", "kept", "urgent"]);
+    expect(labelsOf([])).toEqual([]);
   });
 });

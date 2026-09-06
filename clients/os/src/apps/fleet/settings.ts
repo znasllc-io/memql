@@ -30,6 +30,18 @@ export const FLEET_SECTIONS: OsAppSection[] = [
   { id: "machines", name: "Machines" },
   { id: "routing", name: "Routing" },
   { id: "workbenches", name: "Workbenches" },
+  // When work is handed to a local app on one of the caller's own machines,
+  // and what happened when it was (epic memql#5009). It follows Workbenches
+  // because the three read as one progression -- the cluster's own sandbox,
+  // then the person's own computer -- and precedes Logs, which is every
+  // app's last-but-one section by convention.
+  //
+  // NO ROLE FLOOR. Both concepts behind it declare the composite owner tier
+  // (`@rowAuthz(owner="ownerUserId", clusterOwner)`), so every signed-in
+  // person has a policy and runs of their own and the engine decides how far
+  // the read reaches -- exactly the reasoning that leaves Machines, Routing
+  // and Workbenches ungated.
+  { id: "apps", name: "Apps" },
   // The app's slice of the cluster's logs (epic memql#4895): the lines it
   // tagged and the lines about the things it owns. Admin-floored because
   // every read on the log store is (spec L3), and this is the ONE section
