@@ -94,10 +94,14 @@ function fakeSubscriptions(): FakeSubscriptions {
 }
 
 export interface FakeSeed {
-  /** Rows `plansForUser` answers with. */
-  plans?: Row[];
+  /** Rows `libraryFilesForOwner` answers with. */
+  files?: Row[];
+  /** Rows `workRunsForOwner` answers with. */
+  runs?: Row[];
   /** Rows `allDocumentChunkDomains` answers with (the LITE shape). */
   domainRows?: Row[];
+  /** Rows `knowledgeDomainsAll` answers with (the domain catalog). */
+  domainCatalog?: Row[];
   /**
    * Pages `documentChunksForDomain` answers with, per domain.
    *
@@ -107,10 +111,10 @@ export interface FakeSeed {
    * a full page).
    */
   chunkPages?: Record<string, Row[][]>;
-  /** The user's active space id. Absent = a user row with no pointer. */
-  activeSpaceId?: string;
-  /** Fails `userActiveSpace` with this server message. */
-  activeSpaceError?: string;
+  /** Fails `libraryFilesForOwner` with this server message. */
+  filesError?: string;
+  /** Fails the next `libraryTrainFile` with this server message. */
+  trainError?: string;
   /** Fails `allDocumentChunkDomains` with this server message. */
   domainsError?: string;
   /** Fails the next `setChunkValidationStatus` with this server message. */
@@ -137,18 +141,23 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
     executeNamed: vi.fn(async (_name: string, call: string, opts?: { cursor?: string }) => {
       calls.push(call);
 
-      if (call === "query plansForUser()") return rowsResult(seed.plans ?? []);
+      if (call === "query libraryFilesForOwner()") {
+        if (seed.filesError !== undefined) throw new Error(seed.filesError);
+        return rowsResult(seed.files ?? []);
+      }
+
+      if (call === "query workRunsForOwner()") return rowsResult(seed.runs ?? []);
+
+      if (call.startsWith("builtin libraryTrainFile(")) {
+        if (seed.trainError !== undefined) throw new Error(seed.trainError);
+        return rowsResult([]);
+      }
+
+      if (call === "query knowledgeDomainsAll()") return rowsResult(seed.domainCatalog ?? []);
 
       if (call === "query allDocumentChunkDomains()") {
         if (seed.domainsError !== undefined) throw new Error(seed.domainsError);
         return rowsResult(seed.domainRows ?? []);
-      }
-
-      if (call.startsWith("query userActiveSpace(")) {
-        if (seed.activeSpaceError !== undefined) throw new Error(seed.activeSpaceError);
-        return rowsResult([
-          { id: "u-me", ...(seed.activeSpaceId ? { activePartitionId: seed.activeSpaceId } : {}) },
-        ]);
       }
 
       if (call.startsWith("query documentChunksForDomain(")) {
@@ -216,59 +225,95 @@ export function withSession(
 // Fixtures
 // ---------------------------------------------------------------------------
 
-export function planRow(over: Partial<Row> & { id: string }): Row {
+export function fileRow(over: Partial<Row> & { id: string }): Row {
   return {
-    partitionId: "space-1",
-    kind: "analyzeFile",
-    status: "queued",
-    goal: "Analyze notes.pdf",
-    requestedBy: "u-me",
-    errorMessage: "",
-    completedAt: "",
+    ownerUserId: "u-me",
+    name: "notes.pdf",
+    mimeType: "application/pdf",
+    size: 2048,
+    status: "ready",
+    summary: "A short note.",
+    failureReason: "",
+    embeddingStatus: "complete",
+    trainedIntoDomainIds: [],
+    archived: false,
     createdAt: "2026-08-30T10:00:00Z",
     ...over,
   };
 }
 
-/** The caller's own, mid-flight. */
-export const RUNNING_PLAN = planRow({
-  id: "plan-running",
+export function runRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    ownerUserId: "u-me",
+    automationName: "libraryAnalyzeFile",
+    status: "succeeded",
+    input: { fileId: "file-1", name: "notes.pdf" },
+    outcome: { readable: true, chunks: 4, embedded: 4, summarized: true },
+    errorMessage: "",
+    startedAt: "2026-08-30T10:00:00Z",
+    finishedAt: "2026-08-30T10:00:05Z",
+    createdAt: "2026-08-30T10:00:00Z",
+    ...over,
+  };
+}
+
+/** Read, indexed and teaching nothing yet -- the state the Teach act is for. */
+export const READY_FILE = fileRow({ id: "file-1", name: "handbook.docx" });
+export const READY_RUN = runRow({ id: "run-1", input: { fileId: "file-1" } });
+
+/** Mid-flight. */
+export const READING_FILE = fileRow({
+  id: "file-reading",
+  name: "contract.pdf",
+  status: "analyzing",
+  summary: "",
+  embeddingStatus: "none",
+});
+export const READING_RUN = runRow({
+  id: "run-reading",
   status: "running",
-  goal: "Analyze contract.pdf",
+  input: { fileId: "file-reading" },
+  outcome: {},
+  finishedAt: "",
 });
 
-/** The caller's own, finished. */
-export const DONE_PLAN = planRow({
-  id: "plan-done",
-  status: "succeeded",
-  goal: "Analyze handbook.docx",
-  completedAt: "2026-08-30T10:05:00Z",
+/** Stored, with nothing in it to read: the case the file row alone cannot
+ *  express, because a photograph and a spreadsheet both end at `ready`. */
+export const UNREADABLE_FILE = fileRow({
+  id: "file-photo",
+  name: "scan.png",
+  mimeType: "image/png",
+  summary: "",
+});
+export const UNREADABLE_RUN = runRow({
+  id: "run-photo",
+  input: { fileId: "file-photo" },
+  outcome: { readable: false, chunks: 0 },
 });
 
-/** The caller's own, failed, carrying the engine's reason. */
-export const FAILED_PLAN = planRow({
-  id: "plan-failed",
+/** Failed, carrying the engine's own sentence. */
+export const FAILED_FILE = fileRow({
+  id: "file-broken",
+  name: "broken.pdf",
   status: "failed",
-  goal: "Analyze broken.pdf",
-  errorMessage: "extract: unsupported pdf encoding",
-  completedAt: "2026-08-30T10:06:00Z",
+  summary: "",
+  failureReason: "no text could be extracted from this file -- it may be image-only",
+  embeddingStatus: "none",
 });
 
-/** SOMEBODY ELSE'S. It reaches the browser because `v1:planner:plan` declares
- *  no tier, so the subscription admits every subscriber. */
-export const OTHER_USERS_PLAN = planRow({
-  id: "plan-theirs",
-  requestedBy: "u-someone-else",
-  status: "running",
-  goal: "Analyze theirs.pdf",
+/** Already teaching a domain. */
+export const TRAINED_FILE = fileRow({
+  id: "file-trained",
+  name: "pricing.csv",
+  mimeType: "text/csv",
+  trainedIntoDomainIds: ["domain-sales"],
 });
 
-/** The caller's own, but a different KIND of work. */
-export const GOAL_PLAN = planRow({
-  id: "plan-goal",
-  kind: "userGoal",
-  status: "running",
-  goal: "Ship the quarterly report",
+/** A run of something that is NOT an analysis -- the app filters it out. */
+export const OTHER_RUN = runRow({
+  id: "run-other",
+  automationName: "somethingElse",
+  input: { fileId: "file-1" },
 });
 
 export function chunkRow(over: Partial<Row> & { id: string }): Row {
@@ -287,6 +332,11 @@ export function chunkRow(over: Partial<Row> & { id: string }): Row {
     createdAt: "2026-08-30T09:00:00Z",
     ...over,
   };
+}
+
+/** A catalog row: what `knowledgeDomainsAll` returns per domain. */
+export function domainRow(over: Partial<Row> & { id: string }): Row {
+  return { name: "Sales", category: "professional", tier: "A", accountId: "", ...over };
 }
 
 /** A lite-shape row: what `allDocumentChunkDomains` returns per chunk. */

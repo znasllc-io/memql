@@ -229,9 +229,10 @@ const users: OsAppManifest = {
   component: UsersApp,
 };
 
-// Training, in full (epic #4737). Upload is first and is therefore the section
-// a window opens on: this app is for teaching MemQL from files, and the
-// dropzone is the thing it is for. The app's own settings can point it
+// Training, in full (epic #4737), re-keyed to the Library in epic memql#4970.
+// Teach is first and is therefore the section a window opens on: this app is
+// for teaching MemQL from files, and that section is where a file becomes
+// something a domain has learned. The app's own settings can point it
 // elsewhere, which it does by navigating itself on open.
 //
 // The section list is TRAINING_SECTIONS rather than a literal, for the reason
@@ -243,12 +244,17 @@ const users: OsAppManifest = {
 //
 // `roles: { min: "writer" }` is PRESENTATION (spec section E). It is on the
 // APP rather than on any section because every surface here reads or writes
-// the same two populations -- there is no line inside the app where the answer
-// changes. The engine remains the authority: row admission decides every read,
-// the attachment handler checks space ownership before it parses a byte, and
-// `setChunkValidationStatus` is admitted for any authenticated caller because
-// `v1:knowledge:documentChunk` declares no tier (the standing residual its
-// sibling mutations already sit on, recorded in the per-row-authz audit).
+// the same populations -- there is no line inside the app where the answer
+// changes. The engine remains the authority, and the re-key TIGHTENED what
+// that means: `v1:library:file` and `v1:work:run` both declare the composite
+// owner tier, so row admission gates the subscriptions as well as the reads
+// and nobody else's rows reach this browser at all -- which the plan feed
+// this replaced could not say. `libraryTrainFile` re-reads the file under the
+// caller's own actor and checks the domain write authorizer before it ingests
+// anything. `setChunkValidationStatus` remains admitted for any authenticated
+// caller because `v1:knowledge:documentChunk` declares no tier (the standing
+// residual its sibling mutations already sit on, recorded in the
+// per-row-authz audit).
 const training: OsAppManifest = {
   id: "training",
   name: "Training",

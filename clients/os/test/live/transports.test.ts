@@ -88,7 +88,17 @@ describe("EdgeUploadProvider", () => {
     }) as unknown as typeof fetch;
     const provider = new EdgeUploadProvider(async () => "tok-123", "/_memql/artifacts", fetchImpl);
     const result = await provider.upload(new File(["x"], "notes.txt")).done;
-    expect(result).toEqual({ artifactId: "art-1", title: "notes.txt", fileKind: "file", source: "uploaded" });
+    // `fileId` rides through from the same 201 (epic memql#4970): the upload
+    // route has always answered with it, and a surface about a FILE -- its
+    // status, its summary, the domains it teaches -- needs the file row
+    // rather than its index entry.
+    expect(result).toEqual({
+      artifactId: "art-1",
+      fileId: "f-1",
+      title: "notes.txt",
+      fileKind: "file",
+      source: "uploaded",
+    });
     expect(calls[0]!.url).toBe("/_memql/artifacts");
     expect((calls[0]!.init.headers as Record<string, string>).Authorization).toBe("Bearer tok-123");
     expect(calls[0]!.init.body).toBeInstanceOf(FormData);

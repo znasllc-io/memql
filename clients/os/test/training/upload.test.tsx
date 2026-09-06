@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -11,28 +11,34 @@ vi.mock("../../src/live/connection", () => ({
 
 import { TrainingApp } from "../../src/apps/training/TrainingApp";
 import { LocalTrainingSettingsStore } from "../../src/apps/training/settings";
-import { PLAN_CONCEPT } from "../../src/apps/training/concepts";
-import type {
-  AttachmentUploadProvider,
-  AttachmentUploadResult,
-} from "../../src/apps/training/attachmentUpload";
-import type { UploadHandle } from "../../src/items/upload";
+import { FILE_CONCEPT } from "../../src/apps/training/concepts";
+import type { UploadHandle, UploadProvider, UploadResult } from "../../src/items/upload";
 import {
-  DONE_PLAN,
-  FAILED_PLAN,
-  GOAL_PLAN,
-  OTHER_USERS_PLAN,
-  RUNNING_PLAN,
+  FAILED_FILE,
+  READING_FILE,
+  READING_RUN,
+  READY_FILE,
+  READY_RUN,
+  TRAINED_FILE,
+  UNREADABLE_FILE,
+  UNREADABLE_RUN,
   click,
+  domainLiteRow,
+  domainRow,
   emit,
   fakeConnection,
-  planRow,
+  fileRow,
+  runRow,
   settle,
   withSession,
   type FakeConnection,
 } from "./harness";
 
-// The Upload section, through the real LiveCollection.
+// The Teach section, through the real LiveCollection.
+//
+// What this file is FOR: the surface is a worklist, so every test below is
+// about a row saying where its file is and offering exactly the act that is
+// legal from there.
 
 function memStore() {
   const data = new Map<string, string>();
@@ -44,35 +50,46 @@ function memStore() {
 
 /** An upload provider the test drives by hand. */
 function fakeUploads() {
-  const calls: { spaceId: string; file: File }[] = [];
-  let settleNext: ((result: AttachmentUploadResult) => void) | null = null;
+  const calls: File[] = [];
+  let settleNext: ((result: UploadResult) => void) | null = null;
   let failNext: ((err: Error) => void) | null = null;
-  const provider: AttachmentUploadProvider = {
-    upload(spaceId, file): UploadHandle<AttachmentUploadResult> {
-      calls.push({ spaceId, file });
-      const done = new Promise<AttachmentUploadResult>((resolve, reject) => {
+  let report: ((p: { sentBytes: number; totalBytes: number }) => void) | null = null;
+  const provider: UploadProvider = {
+    upload(file): UploadHandle {
+      calls.push(file);
+      const done = new Promise<UploadResult>((resolve, reject) => {
         settleNext = resolve;
         failNext = reject;
       });
-      return { done, abort: () => failNext?.(new Error("aborted")) };
+      return {
+        done,
+        abort: () => failNext?.(new Error("aborted")),
+        onProgress: (listener) => {
+          report = listener;
+          return () => void (report = null);
+        },
+      };
     },
   };
   return {
     provider,
     calls,
-    land: () => settleNext?.({ attachmentId: "att-1", fileName: "notes.pdf" }),
+    land: (fileId = "file-new") =>
+      settleNext?.({
+        artifactId: "art-1",
+        fileId,
+        title: "notes.pdf",
+        fileKind: "file",
+        source: "uploaded",
+      }),
     fail: (message: string) => failNext?.(new Error(message)),
+    progress: (sentBytes: number, totalBytes: number) => report?.({ sentBytes, totalBytes }),
   };
 }
 
 function mount(
   connection: FakeConnection,
-  opts: {
-    section?: string;
-    userId?: string;
-    uploads?: AttachmentUploadProvider;
-    navigate?: () => void;
-  } = {},
+  opts: { section?: string; uploads?: UploadProvider; navigate?: () => void } = {},
 ) {
   h.connection = connection;
   return render(
@@ -84,366 +101,330 @@ function mount(
         store={memStore()}
         {...(opts.uploads ? { uploads: opts.uploads } : {})}
       />,
-      { userId: opts.userId ?? "u-me" },
+      { userId: "u-me" },
     ),
   );
 }
 
-function drop(files: File[]) {
-  const input = document.querySelector('input[type="file"]') as HTMLInputElement;
-  Object.defineProperty(input, "files", { value: files, configurable: true });
-  return input;
+function rowFor(name: string): HTMLElement {
+  const row = screen.getByText(name).closest(".os-row");
+  if (!(row instanceof HTMLElement)) throw new Error(`no row for ${name}`);
+  return row;
 }
 
 beforeEach(() => {
   h.connection = null;
 });
 
-describe("the analysis list", () => {
-  it("reads plansForUser and renders the caller's analyses", async () => {
-    const connection = fakeConnection({
-      plans: [RUNNING_PLAN, DONE_PLAN],
-      activeSpaceId: "space-1",
-    });
+describe("the file list", () => {
+  it("reads libraryFilesForOwner and workRunsForOwner, and renders the caller's files", async () => {
+    const connection = fakeConnection({ files: [READY_FILE], runs: [READY_RUN] });
     mount(connection);
-
-    await screen.findByText("contract.pdf");
-    expect(screen.getByText("handbook.docx")).toBeTruthy();
-    // The generated builder ran, and this is the text that reached the wire.
-    expect(connection.calls).toContain("query plansForUser()");
-  });
-
-  it("NEVER renders a plan somebody else requested, even off the subscription", async () => {
-    // `v1:planner:plan` declares no row-authz tier, so the SUBSCRIPTION admits
-    // every subscriber -- the seed is scoped and the live feed is not. The
-    // filter has to hold on the client, and this is the case that proves it
-    // does: the row arrives on the wire and never reaches the screen.
-    const connection = fakeConnection({ plans: [RUNNING_PLAN], activeSpaceId: "space-1" });
-    mount(connection);
-    await screen.findByText("contract.pdf");
-
-    await emit(connection, PLAN_CONCEPT, OTHER_USERS_PLAN, "NODE_CREATED");
-
-    expect(screen.queryByText("theirs.pdf")).toBeNull();
-    expect(screen.getByText("contract.pdf")).toBeTruthy();
-  });
-
-  it("NEVER renders a plan of another kind", async () => {
-    const connection = fakeConnection({
-      plans: [RUNNING_PLAN, GOAL_PLAN],
-      activeSpaceId: "space-1",
-    });
-    mount(connection);
-    await screen.findByText("contract.pdf");
-    expect(screen.queryByText("Ship the quarterly report")).toBeNull();
-  });
-
-  it("renders NOTHING while the viewer is unknown", async () => {
-    // Access resolves asynchronously; showing the cluster's plans until it
-    // does would be the exact bug the filter exists to prevent.
-    const connection = fakeConnection({ plans: [RUNNING_PLAN], activeSpaceId: "space-1" });
-    mount(connection, { userId: "" });
     await settle();
-    expect(screen.queryByText("contract.pdf")).toBeNull();
+
+    expect(connection.calls).toContain("query libraryFilesForOwner()");
+    expect(connection.calls).toContain("query workRunsForOwner()");
+    expect(screen.getByText("handbook.docx")).toBeTruthy();
+  });
+
+  // NAMES NO SPACE AND NO PLAN, which is what the re-key was for.
+  it("never reads a space or a plan", async () => {
+    const connection = fakeConnection({ files: [READY_FILE], runs: [READY_RUN] });
+    mount(connection);
+    await settle();
+
+    for (const call of connection.calls) {
+      expect(call).not.toContain("userActiveSpace");
+      expect(call).not.toContain("plansForUser");
+      expect(call).not.toContain("attachment");
+    }
+  });
+
+  it("drops a run of another template rather than showing it as a file", async () => {
+    const stray = runRow({ id: "r-other", automationName: "somethingElse", input: { fileId: "file-1" } });
+    const connection = fakeConnection({ files: [READY_FILE], runs: [stray] });
+    mount(connection);
+    await settle();
+
+    // The file still renders -- the run is what was filtered, and its
+    // outcome is what goes missing, so no passage count appears.
+    expect(screen.getByText("handbook.docx")).toBeTruthy();
+    expect(screen.queryByText(/passages/)).toBeNull();
+  });
+
+  it("says how many passages a file became, which only the run knows", async () => {
+    const connection = fakeConnection({
+      files: [READY_FILE],
+      runs: [runRow({ id: "r-1", input: { fileId: "file-1" }, outcome: { readable: true, chunks: 12, embedded: 12 } })],
+    });
+    mount(connection);
+    await settle();
+
+    expect(within(rowFor("handbook.docx")).getByText(/12 passages/)).toBeTruthy();
+  });
+
+  it("says when only some of a file is searchable", async () => {
+    const connection = fakeConnection({
+      files: [READY_FILE],
+      runs: [runRow({ id: "r-1", input: { fileId: "file-1" }, outcome: { readable: true, chunks: 12, embedded: 9 } })],
+    });
+    mount(connection);
+    await settle();
+
+    expect(within(rowFor("handbook.docx")).getByText(/9 searchable/)).toBeTruthy();
   });
 
   it("pulses on a status transition and marks a new row", async () => {
-    const connection = fakeConnection({ plans: [RUNNING_PLAN], activeSpaceId: "space-1" });
+    const connection = fakeConnection({ files: [READING_FILE], runs: [READING_RUN] });
     mount(connection);
-    await screen.findByText("contract.pdf");
+    await settle();
+    expect(within(rowFor("contract.pdf")).getByText("reading")).toBeTruthy();
 
-    // A NEW plan rises and rings.
-    await emit(connection, PLAN_CONCEPT, planRow({ id: "plan-2", goal: "Analyze fresh.pdf" }), "NODE_CREATED");
-    const fresh = (await screen.findByText("fresh.pdf")).closest(".os-livelist-row");
-    expect(fresh?.getAttribute("data-arrival")).toBe("added");
-
-    // An UPDATE to one already on screen rings only.
-    await emit(connection, PLAN_CONCEPT, { ...RUNNING_PLAN, status: "succeeded" });
-    const row = screen.getByText("contract.pdf").closest(".os-livelist-row");
-    expect(row?.getAttribute("data-arrival")).toBe("updated");
+    await emit(connection, FILE_CONCEPT, fileRow({ id: "file-reading", name: "contract.pdf" }));
+    expect(within(rowFor("contract.pdf")).getByText("ready to teach")).toBeTruthy();
   });
 
-  it("puts a failure's own reason on the row", async () => {
-    const connection = fakeConnection({ plans: [FAILED_PLAN], activeSpaceId: "space-1" });
+  it("puts a failure's own sentence on the row", async () => {
+    const connection = fakeConnection({ files: [FAILED_FILE] });
     mount(connection);
-    const row = (await screen.findByText("broken.pdf")).closest(".os-livelist-row");
-    expect(within(row as HTMLElement).getByText("extract: unsupported pdf encoding")).toBeTruthy();
-    expect(within(row as HTMLElement).getByText("failed")).toBeTruthy();
+    await settle();
+
+    const row = rowFor("broken.pdf");
+    expect(within(row).getByText("could not be read")).toBeTruthy();
+    expect(within(row).getByText(/image-only/)).toBeTruthy();
+  });
+});
+
+describe("the act each row offers", () => {
+  it("offers Teach a domain on a file that has been read", async () => {
+    const connection = fakeConnection({ files: [READY_FILE], runs: [READY_RUN] });
+    mount(connection);
+    await settle();
+
+    expect(within(rowFor("handbook.docx")).getByRole("button", { name: "Teach a domain" })).toBeTruthy();
+  });
+
+  it("offers Teach another on a file already teaching one", async () => {
+    const connection = fakeConnection({ files: [TRAINED_FILE], domainRows: [domainLiteRow("domain-sales", "unvalidated")] });
+    mount(connection);
+    await settle();
+
+    const row = rowFor("pricing.csv");
+    expect(within(row).getByRole("button", { name: "Teach another" })).toBeTruthy();
+    expect(within(row).getByText(/Teaching/)).toBeTruthy();
+  });
+
+  // AN ACT THAT IS NOT LEGAL IS ABSENT, NEVER DISABLED (the shell's rule 12).
+  // There is no act that would make a photograph teach something, so a
+  // disabled Teach beside it would be a control whose only purpose is to be
+  // refused.
+  it("offers NOTHING on a file with no text in it", async () => {
+    const connection = fakeConnection({ files: [UNREADABLE_FILE], runs: [UNREADABLE_RUN] });
+    mount(connection);
+    await settle();
+
+    const row = rowFor("scan.png");
+    expect(within(row).getByText("nothing to read")).toBeTruthy();
+    expect(within(row).queryByRole("button", { name: /Teach/ })).toBeNull();
+  });
+
+  it("offers nothing while the cluster is still reading a file", async () => {
+    const connection = fakeConnection({ files: [READING_FILE], runs: [READING_RUN] });
+    mount(connection);
+    await settle();
+
+    expect(within(rowFor("contract.pdf")).queryByRole("button", { name: /Teach/ })).toBeNull();
+  });
+});
+
+describe("teaching a domain", () => {
+  async function open(connection: FakeConnection) {
+    mount(connection);
+    await settle();
+    await click(within(rowFor("handbook.docx")).getByRole("button", { name: "Teach a domain" }));
+  }
+
+  it("calls libraryTrainFile with the file and the chosen domain", async () => {
+    const connection = fakeConnection({
+      files: [READY_FILE],
+      runs: [READY_RUN],
+      domainCatalog: [domainRow({ id: "domain-sales", name: "Sales" })],
+    });
+    await open(connection);
+
+    await click(within(rowFor("handbook.docx")).getByRole("combobox", { name: /Knowledge domain/ }));
+    await click(screen.getByRole("option", { name: "Sales" }));
+    await click(within(rowFor("handbook.docx")).getByRole("button", { name: "Teach" }));
+    await settle();
+
+    const trained = connection.callsNamed("libraryTrainFile");
+    expect(trained.length).toBe(1);
+    expect(trained[0]).toContain(`fileId: "file-1"`);
+    expect(trained[0]).toContain(`domainId: "domain-sales"`);
+  });
+
+  // A REFUSAL RENDERS ON THE ROW THAT PRODUCED IT, never as a toast: somebody
+  // who looked away would have lost the only account of what happened.
+  it("renders the server's own sentence on the row when the engine refuses", async () => {
+    const connection = fakeConnection({
+      files: [READY_FILE],
+      runs: [READY_RUN],
+      domainCatalog: [domainRow({ id: "domain-sales", name: "Sales" })],
+      trainError: "not authorized to write to this knowledge domain",
+    });
+    await open(connection);
+
+    await click(within(rowFor("handbook.docx")).getByRole("combobox", { name: /Knowledge domain/ }));
+    await click(screen.getByRole("option", { name: "Sales" }));
+    await click(within(rowFor("handbook.docx")).getByRole("button", { name: "Teach" }));
+    await settle();
+
+    expect(within(rowFor("handbook.docx")).getByText(/not authorized/)).toBeTruthy();
+  });
+
+  it("will not send without a domain chosen", async () => {
+    const connection = fakeConnection({
+      files: [READY_FILE],
+      runs: [READY_RUN],
+      domainCatalog: [domainRow({ id: "domain-sales", name: "Sales" })],
+    });
+    await open(connection);
+
+    const teach = within(rowFor("handbook.docx")).getByRole("button", { name: "Teach" });
+    expect(teach.hasAttribute("disabled")).toBe(true);
+    expect(connection.callsNamed("libraryTrainFile").length).toBe(0);
   });
 });
 
 describe("the dropzone", () => {
-  it("uploads to the resolved daily space", async () => {
+  it("uploads through the Library provider, naming no space", async () => {
     const uploads = fakeUploads();
-    const connection = fakeConnection({ activeSpaceId: "space-daily" });
+    const connection = fakeConnection();
     mount(connection, { uploads: uploads.provider });
+    await settle();
 
-    await screen.findByText("Choose files");
-    // The space read ran, with the caller's own id.
-    expect(connection.calls).toContain('query userActiveSpace(userId: "u-me")');
+    const input = document.querySelector('input[type="file"]');
+    const file = new File(["hello"], "notes.pdf", { type: "application/pdf" });
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    fireEvent.change(input!);
+    await settle();
 
-    const input = drop([new File(["x"], "notes.pdf", { type: "application/pdf" })]);
-    await click(screen.getByText("Choose files"));
-    await import("@testing-library/react").then(({ fireEvent, act }) =>
-      act(async () => {
-        fireEvent.change(input);
-      }),
-    );
+    expect(uploads.calls.length).toBe(1);
+    expect(uploads.calls[0]?.name).toBe("notes.pdf");
+  });
 
-    expect(uploads.calls).toHaveLength(1);
-    expect(uploads.calls[0]?.spaceId).toBe("space-daily");
-    expect(uploads.calls[0]?.file.name).toBe("notes.pdf");
-    expect(screen.getByText("notes.pdf")).toBeTruthy();
+  it("shows byte progress, which the space route could never report", async () => {
+    const uploads = fakeUploads();
+    mount(fakeConnection(), { uploads: uploads.provider });
+    await settle();
+
+    const input = document.querySelector('input[type="file"]');
+    const file = new File(["0123456789"], "big.pdf", { type: "application/pdf" });
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    fireEvent.change(input!);
+    await settle();
+
+    // Reported against the FILE's own size, which is what the bar measures:
+    // the provider's `totalBytes` and the File's size are the same number on
+    // every real path, and the File is the one this browser can be sure of.
+    await act(async () => uploads.progress(5, file.size));
+    expect(screen.getByRole("progressbar", { name: /big.pdf/ })).toBeTruthy();
+    expect(screen.getByText("50%")).toBeTruthy();
   });
 
   it("renders a refusal IN SURFACE with a retry, and the retry re-sends", async () => {
     const uploads = fakeUploads();
-    const connection = fakeConnection({ activeSpaceId: "space-daily" });
-    mount(connection, { uploads: uploads.provider });
-    await screen.findByText("Choose files");
+    mount(fakeConnection(), { uploads: uploads.provider });
+    await settle();
 
-    const input = drop([new File(["x"], "big.zip", { type: "application/zip" })]);
-    const { fireEvent, act } = await import("@testing-library/react");
-    await act(async () => {
-      fireEvent.change(input);
-    });
-    await act(async () => {
-      uploads.fail("unsupported file type: application/zip");
-    });
+    const input = document.querySelector('input[type="file"]');
+    const file = new File(["x"], "huge.zip", { type: "application/zip" });
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    fireEvent.change(input!);
+    await settle();
 
-    // The SERVER'S OWN SENTENCE, beside the file it is about. Never a toast.
-    expect(screen.getByText("unsupported file type: application/zip")).toBeTruthy();
+    await act(async () => uploads.fail("file too large: max 4294967296 bytes"));
+    expect(screen.getByText("file too large: max 4294967296 bytes")).toBeTruthy();
 
-    await click(screen.getByText("Retry"));
-    expect(uploads.calls).toHaveLength(2);
-    expect(uploads.calls[1]?.file.name).toBe("big.zip");
+    await click(screen.getByRole("button", { name: "Try again" }));
+    expect(uploads.calls.length).toBe(2);
   });
 
-  it("acknowledges a landed upload and lets it be dismissed", async () => {
+  // THE HANDOVER IS THE ROW APPEARING, not the 201. On a 201 the file row is
+  // still on its way, so an entry that vanished there would leave a gap.
+  it("keeps the upload entry until its file row arrives on the feed", async () => {
     const uploads = fakeUploads();
-    const connection = fakeConnection({ activeSpaceId: "space-daily" });
+    const connection = fakeConnection();
     mount(connection, { uploads: uploads.provider });
-    await screen.findByText("Choose files");
+    await settle();
 
-    const input = drop([new File(["x"], "notes.pdf", { type: "application/pdf" })]);
-    const { fireEvent, act } = await import("@testing-library/react");
-    await act(async () => {
-      fireEvent.change(input);
-    });
-    await act(async () => {
-      uploads.land();
-    });
+    const input = document.querySelector('input[type="file"]');
+    const file = new File(["x"], "notes.pdf", { type: "application/pdf" });
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    fireEvent.change(input!);
+    await settle();
 
-    expect(screen.getByText("in the cluster")).toBeTruthy();
-    await click(screen.getByText("Dismiss"));
-    expect(screen.queryByText("in the cluster")).toBeNull();
+    await act(async () => uploads.land("file-new"));
+    await settle();
+    expect(screen.getByText("in your Library")).toBeTruthy();
+
+    await emit(connection, FILE_CONCEPT, fileRow({ id: "file-new", name: "notes.pdf" }), "NODE_CREATED");
+    await settle();
+    expect(screen.queryByText("in your Library")).toBeNull();
   });
 
   it("CONSUMES the drop so the desk never also uploads it", async () => {
-    // A WindowFrame renders inside the desk plate, and the desk plate is a
-    // file drop target of its own (`Desktop.tsx`'s `onHostDrop` makes a
-    // Library artifact and a desk icon). A drop here that only called
-    // preventDefault would bubble, and one file would be uploaded twice, to
-    // two different places.
-    //
-    // The ancestor handler here stands in for the desk's. It is a REACHABLE
-    // POSITIVE as well as the assertion: the second case drops on a plain
-    // sibling and shows the same handler does fire when nothing stops it, so
-    // an unfired handler is evidence about the dropzone rather than about the
-    // test.
     const uploads = fakeUploads();
-    const connection = fakeConnection({ activeSpaceId: "space-daily" });
-    const desk = vi.fn();
-
-    h.connection = connection;
-    const { container } = render(
-      <div onDrop={desk} onDragOver={desk}>
-        {withSession(
-          <TrainingApp
-            sectionId="upload"
-            navigate={vi.fn()}
-            askContext={vi.fn()}
-            store={memStore()}
-            uploads={uploads.provider}
-          />,
-        )}
-        <div data-testid="plain-sibling" />
-      </div>,
-    );
-    await screen.findByText("Choose files");
-
-    const { fireEvent, act } = await import("@testing-library/react");
-    const file = new File(["x"], "notes.pdf", { type: "application/pdf" });
-    const zone = container.querySelector(".os-train-drop") as HTMLElement;
-    await act(async () => {
-      fireEvent.dragOver(zone, { dataTransfer: { types: ["Files"], files: [file] } });
-      fireEvent.drop(zone, { dataTransfer: { types: ["Files"], files: [file] } });
-    });
-
-    expect(uploads.calls).toHaveLength(1);
-    expect(desk).not.toHaveBeenCalled();
-
-    // The reachable positive: the same handler DOES fire for a drop the
-    // dropzone did not consume.
-    await act(async () => {
-      fireEvent.drop(screen.getByTestId("plain-sibling"), {
-        dataTransfer: { types: ["Files"], files: [file] },
-      });
-    });
-    expect(desk).toHaveBeenCalled();
-  });
-
-  it("consumes the drop even when DISABLED, rather than letting the desk have it", async () => {
-    // Dropping a file on a visibly-disabled control must not produce a desktop
-    // icon. "Nothing happens where nothing is offered" is the shell's own rule.
-    const uploads = fakeUploads();
-    const connection = fakeConnection({});
-    const desk = vi.fn();
-
-    h.connection = connection;
-    const { container } = render(
-      <div onDrop={desk} onDragOver={desk}>
-        {withSession(
-          <TrainingApp
-            sectionId="upload"
-            navigate={vi.fn()}
-            askContext={vi.fn()}
-            store={memStore()}
-            uploads={uploads.provider}
-          />,
-        )}
-      </div>,
-    );
-    await screen.findByText(/no active space yet/i);
-
-    const { fireEvent, act } = await import("@testing-library/react");
-    const zone = container.querySelector(".os-train-drop") as HTMLElement;
-    await act(async () => {
-      fireEvent.drop(zone, {
-        dataTransfer: { types: ["Files"], files: [new File(["x"], "a.pdf")] },
-      });
-    });
-
-    expect(uploads.calls).toHaveLength(0);
-    expect(desk).not.toHaveBeenCalled();
-  });
-
-  it("refuses to upload, in surface, when there is NO active space", async () => {
-    const uploads = fakeUploads();
-    const connection = fakeConnection({});
-    mount(connection, { uploads: uploads.provider });
-
-    await screen.findByText(/no active space yet/i);
-    // The control is present and disabled rather than hidden: the notice
-    // above it explains what is missing, and hiding the control would leave
-    // that notice explaining the absence of something.
-    const button = screen.getByText("Choose files").closest("button") as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-    expect(uploads.calls).toHaveLength(0);
-  });
-
-  it("says so, and offers a retry, when the space read FAILED", async () => {
-    const connection = fakeConnection({ activeSpaceError: "read refused" });
-    mount(connection);
-    await screen.findByText(/did not say which space is yours/i);
-    expect(screen.getByText("read refused")).toBeTruthy();
-  });
-});
-
-describe("cancelling an upload", () => {
-  it("aborts the request and drops the entry", async () => {
-    const uploads = fakeUploads();
-    const connection = fakeConnection({ activeSpaceId: "space-daily" });
-    mount(connection, { uploads: uploads.provider });
-    await screen.findByText("Choose files");
-
-    const input = drop([new File(["x"], "notes.pdf", { type: "application/pdf" })]);
-    const { fireEvent, act } = await import("@testing-library/react");
-    await act(async () => {
-      fireEvent.change(input);
-    });
-    expect(screen.getByText("sending")).toBeTruthy();
-
-    await click(screen.getByText("Cancel"));
+    mount(fakeConnection(), { uploads: uploads.provider });
     await settle();
 
-    // The row is gone, and the abort did NOT leave a failure behind: an abort
-    // is what the person asked for, not something to report back to them.
+    const zone = document.querySelector(".os-train-drop");
+    let bubbled = false;
+    document.addEventListener("drop", () => void (bubbled = true));
+    const file = new File(["x"], "notes.pdf", { type: "application/pdf" });
+    await act(async () => {
+      fireEvent.drop(zone!, { dataTransfer: { files: [file] } });
+    });
+    expect(bubbled).toBe(false);
+    expect(uploads.calls.length).toBe(1);
+  });
+
+  it("aborts an upload in flight and drops the entry", async () => {
+    const uploads = fakeUploads();
+    mount(fakeConnection(), { uploads: uploads.provider });
+    await settle();
+
+    const input = document.querySelector('input[type="file"]');
+    const file = new File(["x"], "notes.pdf", { type: "application/pdf" });
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    fireEvent.change(input!);
+    await settle();
+
+    await click(screen.getByRole("button", { name: "Cancel" }));
+    await settle();
     expect(screen.queryByText("notes.pdf")).toBeNull();
-    expect(screen.queryByText("aborted")).toBeNull();
   });
 });
 
 describe("auto-open review", () => {
-  it("is OFF by default, so a finished analysis moves nobody", async () => {
+  it("is OFF by default, so a file becoming teachable moves nobody", async () => {
     const navigate = vi.fn();
-    const connection = fakeConnection({ plans: [RUNNING_PLAN], activeSpaceId: "space-1" });
+    const connection = fakeConnection({ files: [READY_FILE], runs: [READY_RUN] });
     mount(connection, { navigate });
-    await screen.findByText("contract.pdf");
-
-    await emit(connection, PLAN_CONCEPT, { ...RUNNING_PLAN, status: "succeeded" });
-    expect(navigate).not.toHaveBeenCalledWith("review");
-  });
-
-  it("does NOT fire for a plan that had already succeeded when the window opened", async () => {
-    // The first observation is a BASELINE, exactly as the arrival cue treats
-    // its first snapshot. Without it, opening the window on a history of
-    // finished analyses would bounce somebody straight to the queue.
-    const navigate = vi.fn();
-    const connection = fakeConnection({ plans: [DONE_PLAN], activeSpaceId: "space-1" });
-    h.connection = connection;
-    render(
-      withSession(
-        <TrainingApp
-          sectionId="upload"
-          navigate={navigate}
-          askContext={vi.fn()}
-          store={autoOpenStore()}
-        />,
-      ),
-    );
-    await screen.findByText("handbook.docx");
     await settle();
-    expect(navigate).not.toHaveBeenCalledWith("review");
+
+    await emit(connection, FILE_CONCEPT, fileRow({ id: "file-1", trainedIntoDomainIds: ["d-1"] }));
+    expect(navigate).not.toHaveBeenCalled();
   });
 
-  it("fires on a plan REACHING succeeded, and never on a failure", async () => {
+  // The seed that lands after mount must not look like every file in it was
+  // just taught -- that would bounce somebody straight to the queue on open.
+  it("does NOT fire for a file already trained when the window opened", async () => {
     const navigate = vi.fn();
-    const connection = fakeConnection({ plans: [RUNNING_PLAN], activeSpaceId: "space-1" });
-    h.connection = connection;
-    render(
-      withSession(
-        <TrainingApp
-          sectionId="upload"
-          navigate={navigate}
-          askContext={vi.fn()}
-          store={autoOpenStore()}
-        />,
-      ),
-    );
-    await screen.findByText("contract.pdf");
+    const connection = fakeConnection({ files: [TRAINED_FILE] });
+    mount(connection, { navigate });
+    await settle();
 
-    // A FAILURE moves nobody: there is nothing to review, and navigating away
-    // would hide the only account of what happened.
-    await emit(connection, PLAN_CONCEPT, {
-      ...RUNNING_PLAN,
-      status: "failed",
-      errorMessage: "extract failed",
-    });
     expect(navigate).not.toHaveBeenCalledWith("review");
-
-    await emit(connection, PLAN_CONCEPT, planRow({ id: "plan-new", status: "succeeded" }), "NODE_CREATED");
-    expect(navigate).toHaveBeenCalledWith("review");
   });
 });
-
-/** A settings store with auto-open already on. */
-function autoOpenStore() {
-  const data = new Map<string, string>([
-    ["memql-os-training-v1", JSON.stringify({ version: 1, defaultSection: "upload", autoOpenReview: true })],
-  ]);
-  return new LocalTrainingSettingsStore({
-    getItem: (k) => data.get(k) ?? null,
-    setItem: (k, v) => void data.set(k, v),
-  });
-}

@@ -3,19 +3,24 @@ import { Concepts, type LiveSnapshot, type Row } from "@znasllc-io/memql-sdk-cor
 
 import { Check, Head, Panel } from "../../kit";
 import { useAuthSource } from "../../auth/context";
-import { useSession } from "../../chrome/access";
 import { useLiveView } from "../../live/liveView";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
+import { EdgeUploadProvider } from "../../items/edgeUpload";
+import type { UploadProvider } from "../../items/upload";
 import { useChunkDecisions } from "./actions";
-import {
-  EdgeAttachmentUploadProvider,
-  type AttachmentUploadProvider,
-} from "./attachmentUpload";
-import type { ChunkDecision } from "./concepts";
+import { CHUNK_CONCEPT, FILE_CONCEPT, RUN_CONCEPT, type ChunkDecision } from "./concepts";
 import { DomainsSection } from "./DomainsSection";
 import { ReviewSection } from "./ReviewSection";
-import { planBelongsHere, planFromRow, type AnalysisPlan } from "./rows";
+import {
+  fileBelongsHere,
+  fileFromRow,
+  runBelongsHere,
+  runFromRow,
+  runsByFile,
+  type AnalysisRun,
+  type TrainingFile,
+} from "./rows";
 import {
   DEFAULT_TRAINING_SETTINGS,
   LocalTrainingSettingsStore,
@@ -24,44 +29,58 @@ import {
   type TrainingSettingsStore,
 } from "./settings";
 import { UploadSection } from "./UploadSection";
-import { useActiveSpace } from "./useActiveSpace";
-import { useAnalysisPlans } from "./useAnalysisPlans";
+import { useAnalysisRuns } from "./useAnalysisRuns";
 import { useDomains } from "./useDomains";
+import { useLibraryFiles } from "./useLibraryFiles";
 import { useReviewQueue } from "./useReviewQueue";
+import { useTrain } from "./useTrain";
 import { useUploads } from "./useUploads";
 
-// Training: teach MemQL from files (epic memql#4737).
+// Training: teach MemQL from files (epic memql#4737, re-keyed to the Library
+// in epic memql#4970).
 //
 // ===========================================================================
-// TWO FEEDS, HELD HERE, READ BY THREE SECTIONS
+// THREE FEEDS, HELD HERE, READ BY THREE SECTIONS
 // ===========================================================================
-// The plan feed is live and the domain feed is not, and both are retained at
-// this root rather than inside the sections that read them.
+// The file feed and the run feed are live and the domain feed is not, and all
+// three are retained at this root rather than inside the sections that read
+// them.
 //
 // For the DOMAINS read that is the Deployables lesson applied: the Domains
-// cards and the Review queue's walk are two readings of one answer, and a
-// second `useDomains()` inside the queue would be free to disagree with the
-// list beside it about which domains this cluster holds.
+// cards, the Review queue's walk and now the Teach picker are three readings
+// of one answer, and a second `useDomains()` inside any of them would be free
+// to disagree with the others about which domains this cluster holds.
 //
-// For the PLAN feed it is also what makes switching sections free: the
-// collection stays retained for the life of the window rather than re-seeding
+// For the two LIVE feeds it is also what makes switching sections free: the
+// collections stay retained for the life of the window rather than re-seeding
 // every time somebody looks at the queue and comes back.
+//
+// WHY THE FILE FEED AND THE RUN FEED ARE TWO, rather than one read that joins
+// them: they are written by different things at different times. The upload
+// route writes the file row synchronously, inside the request; the analysis
+// pass writes the run from a detached goroutine on whichever node took the
+// upload. A surface that waited for both would show nothing for the first
+// moments of every upload, so the FILE leads and the run decorates
+// (`stageOf`, rows.ts).
 //
 // Sections are the app's own navigation. It never opens a window.
 
-const EMPTY_SNAPSHOT: LiveSnapshot<AnalysisPlan> = {
+const EMPTY_SNAPSHOT: LiveSnapshot<TrainingFile> = {
   rows: [],
   state: "disconnected",
   error: "",
   version: 0,
 };
 
-/** The concepts this app owns, for its Logs section: the knowledge it
- *  feeds, the chunks it reviews, and the analysis plans that produce them. */
+/** The concepts this app owns, for its Logs section: the files it teaches
+ *  from, the runs that read them, the knowledge it feeds and the chunks it
+ *  reviews. `v1:planner:plan` is gone from this list because it is gone from
+ *  this app -- nothing here names a plan or a space any more. */
 const TRAINING_LOG_CONCEPTS = [
+  FILE_CONCEPT,
+  RUN_CONCEPT,
   Concepts.KNOWLEDGE_KNOWLEDGE_DOMAIN,
-  Concepts.KNOWLEDGE_DOCUMENT_CHUNK,
-  Concepts.PLANNER_PLAN,
+  CHUNK_CONCEPT,
 ] as const;
 
 export function TrainingApp({
@@ -74,42 +93,57 @@ export function TrainingApp({
   uploads: injectedUploads,
 }: OsAppProps & {
   store?: TrainingSettingsStore;
-  uploads?: AttachmentUploadProvider;
+  uploads?: UploadProvider;
 }) {
   // Injectable for tests, which is the whole reason the parameters exist --
   // nothing in the shell passes either.
   const settingsStore = useMemo(() => store ?? new LocalTrainingSettingsStore(), [store]);
   const [settings, setSettings] = useState<TrainingSettings>(() => settingsStore.load());
 
-  const { access } = useSession();
-  const viewerUserId = access?.userId ?? "";
   const authSource = useAuthSource();
 
-  const provider = useMemo<AttachmentUploadProvider>(
-    () => injectedUploads ?? new EdgeAttachmentUploadProvider(() => authSource.bearer()),
+  // THE LIBRARY'S OWN PROVIDER, not a second one. Every upload in the OS
+  // rides `EdgeUploadProvider` (the desk's drops, the Files browse,
+  // drop-onto-window), and this surface now does too -- which is where the
+  // chunked resumable session, the per-chunk retry and the byte progress come
+  // from. The space attachment provider this replaced had none of them and
+  // capped at 25 MB.
+  const provider = useMemo<UploadProvider>(
+    () => injectedUploads ?? new EdgeUploadProvider(() => authSource.bearer()),
     [injectedUploads, authSource],
   );
 
-  const space = useActiveSpace(viewerUserId);
   const uploads = useUploads(provider);
 
-  const { source: collection, reseed } = useAnalysisPlans();
+  const { source: fileCollection, reseed } = useLibraryFiles();
+  const { source: runCollection } = useAnalysisRuns();
 
-  // PROJECT, THEN NARROW, IN ONE PASS. The collection holds RAW wire rows --
+  // PROJECT, THEN NARROW, IN ONE PASS. A collection holds RAW wire rows --
   // its fold upserts an arriving event's payload AS the row type with no
-  // projection hook -- so every predicate has to run on a `planFromRow`
-  // result.
+  // projection hook -- so every predicate has to run on a projected result.
   //
-  // The view KEY carries the viewer id, and that is deliberate even though a
-  // key change re-baselines the arrival cue: `planBelongsHere` refuses a blank
-  // viewer id outright, so the transform genuinely MEANS something different
-  // once access resolves, and a view that did not re-run would show an empty
-  // list forever. It is the transform's identity, not the collection's -- the
-  // subscription and the seed are untouched, so nothing is re-read.
-  const plans = useLiveView<Row, AnalysisPlan>(collection, `plans:${viewerUserId}`, (rows) =>
-    rows.map(planFromRow).filter((plan) => planBelongsHere(plan, viewerUserId)),
+  // THE VIEW KEYS ARE CONSTANTS NOW, and that is the re-key's quiet security
+  // gain rather than a simplification. The plan feed's key carried the viewer
+  // id because its transform had to filter other people's rows out
+  // client-side: `v1:planner:plan` declares no row-authz tier, and a concept
+  // that declares nothing admits every subscriber. `v1:library:file` and
+  // `v1:work:run` both declare the composite owner tier, so admission runs on
+  // the SUBSCRIPTION as well as the read (memql#4309) and nobody else's rows
+  // arrive at all. There is no residual left to filter, so nothing about the
+  // transform changes when access resolves.
+  const files = useLiveView<Row, TrainingFile>(fileCollection, "files", (rows) =>
+    rows.map(fileFromRow).filter(fileBelongsHere),
   );
-  const snapshot = plans?.snapshot ?? EMPTY_SNAPSHOT;
+  const snapshot = files?.snapshot ?? EMPTY_SNAPSHOT;
+
+  const runs = useLiveView<Row, AnalysisRun>(runCollection, "runs", (rows) =>
+    rows.map(runFromRow).filter(runBelongsHere),
+  );
+  const runRows = runs?.snapshot.rows ?? [];
+  // NEWEST RUN PER FILE. A re-analysis is a second run of the same goal, so a
+  // file legitimately has several, and the one that describes it now is the
+  // newest -- which is the first, because the feed is newest-first.
+  const runsByFileId = useMemo(() => runsByFile(runRows), [runRows]);
 
   const domains = useDomains();
   // Only the domains that actually hold work. This is what the
@@ -135,6 +169,7 @@ export function TrainingApp({
   // the person opened this app to do.
   const queue = useReviewQueue(domainsWithWork);
   const decisions = useChunkDecisions();
+  const train = useTrain();
 
   async function decide(chunkId: string, status: ChunkDecision) {
     // The card updates FROM THE REPLY, never optimistically. `v1:knowledge:*`
@@ -174,44 +209,62 @@ export function TrainingApp({
     // away.
   }, []);
 
-  // AUTO-OPEN REVIEW, off by default and driven by a SUCCEEDED transition.
+  // AUTO-OPEN REVIEW, off by default and driven by a TRAINED transition.
   //
-  // The trigger is a plan id arriving in the succeeded set that was not in it
-  // before -- not a count, and not "the newest plan is succeeded". A count
-  // would fire again on a resync, and reading the newest row would fire on
-  // every render for a plan that finished an hour ago.
+  // RE-KEYED, and the trigger moved for a reason rather than a rename. It
+  // used to fire when an analysis plan reached `succeeded`, which under the
+  // Library route means only that a file was read -- and a file that has been
+  // read has taught nothing yet, so the queue it opened would be empty. The
+  // act that puts chunks in the queue is teaching a domain, so that is what
+  // this watches: a file id arriving in the trained set that was not in it
+  // before.
   //
-  // It fires only on `succeeded`: there is nothing to review after a failure,
-  // and navigating away from the error message would hide the only account of
-  // what happened.
+  // Not a count, and not "the newest file is trained". A count would fire
+  // again on a resync, and reading the newest row would fire on every render
+  // for a file taught an hour ago.
   //
   // A SNAPSHOT THAT FOLLOWS A NON-LIVE ONE IS A BASELINE, which is
   // `arrival.ts`'s rule applied to a second consumer and for the same reason.
   // Keying the baseline on "the first time this effect ran" is what does NOT
   // work: the effect runs once on mount with an EMPTY snapshot, so the seed
-  // that lands a moment later looks like every plan in it just succeeded --
-  // opening the window on a history of finished analyses would bounce
-  // somebody straight to the queue. The same reading also stops a reconnect's
-  // resync from firing, which is the failure the cue's own version guards.
-  const succeeded = useRef<{ ids: Set<string>; wasLive: boolean }>({
+  // that lands a moment later looks like every file in it was just taught --
+  // opening the window on a history of trained files would bounce somebody
+  // straight to the queue.
+  const trained = useRef<{ ids: Set<string>; wasLive: boolean }>({
     ids: new Set(),
     wasLive: false,
   });
   useEffect(() => {
-    const finished = new Set(
-      snapshot.rows.filter((p) => p.status === "succeeded").map((p) => p.id),
+    const taught = new Set(
+      snapshot.rows.filter((f) => f.trainedIntoDomainIds.length > 0).map((f) => f.id),
     );
-    const held = succeeded.current;
-    succeeded.current = { ids: finished, wasLive: snapshot.state === "live" };
+    const held = trained.current;
+    trained.current = { ids: taught, wasLive: snapshot.state === "live" };
     if (!held.wasLive) return;
     if (!settings.autoOpenReview) return;
-    for (const id of finished) {
+    for (const id of taught) {
       if (!held.ids.has(id)) {
         navigate("review");
         return;
       }
     }
   }, [snapshot.rows, snapshot.state, settings.autoOpenReview, navigate]);
+
+  // THE DROPZONE HANDS OFF TO THE LIST when the file it produced arrives.
+  //
+  // The upload entry is retired by the ROW APPEARING rather than by the 201,
+  // which is the stronger handover: on a 201 the file row is on its way and
+  // this browser has nothing to show, so an entry that vanished there would
+  // leave a gap. Nothing is inserted locally either way -- the row arrives
+  // with the arrival cue, exactly like one raised by an upload from
+  // somebody's phone.
+  const arrivedFileIds = useMemo(
+    () => new Set(snapshot.rows.map((f) => f.id)),
+    [snapshot.rows],
+  );
+  useEffect(() => {
+    uploads.settle(arrivedFileIds);
+  }, [arrivedFileIds, uploads]);
 
   if (sectionId === "settings") {
     return <TrainingSettingsSection settings={settings} update={update} />;
@@ -241,10 +294,12 @@ export function TrainingApp({
   }
   return (
     <UploadSection
-      space={space}
       uploads={uploads}
-      source={plans}
+      files={files}
       snapshot={snapshot}
+      runsByFileId={runsByFileId}
+      domains={domains}
+      train={train}
       onReseed={reseed}
       onAsk={askContext}
     />
@@ -283,7 +338,7 @@ function TrainingSettingsSection({
             ))}
           </div>
           <p className="os-caption">
-            Upload is the default because this app is for teaching MemQL from files. Applies the
+            Teach is the default because this app is for teaching MemQL from files. Applies the
             next time a Training window opens; it does not move the window you are looking at.
           </p>
         </fieldset>
