@@ -366,6 +366,154 @@ QueryClient.prototype.commerceStock = function (this: QueryClient, args: Commerc
   return this.executeNamed("commerceStock", buildCommerceStock(args), opts);
 };
 
+/** The concepts worth composing from, in this cluster, right now: everything declaring @composable, with the label and the field projection each one declared. Returns {concepts: [{id, as, fields, description}]}.
+BOTH CONSUMERS READ THIS ONE THING -- the Sources column lists them and the compose prompt is handed them -- so the model and the person cannot be looking at different sets. An UNMARKED concept is unmarked rather than forbidden: the mark is a ranking and a hint, never a gate, or a product that forgot the annotation would have a Materializer that cannot see its own data. */
+export interface ComposableConceptsArgs {
+  /** Also return the concepts declaring no @composable, after the marked ones and flagged as unmarked. Backs the Sources column's 'show all' -- absent means the marked set alone. */
+  includeUnmarked?: boolean;
+}
+
+export function buildComposableConcepts(args: ComposableConceptsArgs): string {
+  const parts: string[] = [];
+  if (args.includeUnmarked !== undefined) parts.push("includeUnmarked: " + renderMemQLValue(args.includeUnmarked));
+  return "builtin composableConcepts(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    composableConcepts(args: ComposableConceptsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.composableConcepts = function (this: QueryClient, args: ComposableConceptsArgs = {} as ComposableConceptsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("composableConcepts", buildComposableConcepts(args), opts);
+};
+
+/** Ask one of your compositions to stop. Cancellation is REQUESTED rather than done: the run notices at its next step boundary, so a step already in flight finishes and is journaled rather than being abandoned mid-effect -- the same contract cancelGoal has, for the same reason. */
+export interface ComposeCancelArgs {
+  /** The v1:compose:composition to stop. */
+  compositionId: string;
+  /** Why, in words a person can read. */
+  reason?: string;
+}
+
+export function buildComposeCancel(args: ComposeCancelArgs): string {
+  const parts: string[] = [];
+  parts.push("compositionId: " + renderMemQLValue(args.compositionId));
+  if (args.reason !== undefined) parts.push("reason: " + renderMemQLValue(args.reason));
+  return "builtin composeCancel(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    composeCancel(args: ComposeCancelArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.composeCancel = function (this: QueryClient, args: ComposeCancelArgs = {} as ComposeCancelArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("composeCancel", buildComposeCancel(args), opts);
+};
+
+/** Materialize: compose the named sources into a file of the chosen format and file it in the Library. Opens a v1:compose:composition, a v1:work:goal with requestedVia="materializer" and that goal's first run, then dispatches the five-step template -- gather, compose, render, stamp, file. Returns {compositionId, goalId, runId}.
+ONE OF THOSE FIVE STEPS REACHES A MODEL, and on a catalog exact match not even that: a re-run with the same template and the same source SHAPE is a GoalSignature hit, which is the whole claim the work spine makes and the reason a second quarter's report costs nothing. */
+export interface ComposeMaterializeArgs {
+  /** What to call it, and the filename stem of the output. Sanitised server-side the way an upload's name is. */
+  name: string;
+  /** What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. */
+  statement?: string;
+  /** markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of. */
+  format: string;
+  /** What to compose from: a list of {kind, ref, label} where kind is concept_row | library_file | query. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each. */
+  sources?: Record<string, unknown>[];
+  /** A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one does NOT skip the reasoning step -- it seeds it, and a composition that needed no thought is one the catalog answered. */
+  draft?: string;
+  /** v1:compose:template to render through. Resolved under your own actor, so a template you cannot read is refused rather than rendered through. */
+  templateId?: string;
+  /** v1:library:folder to file the output into. Empty means the Library root. */
+  folderId?: string;
+  /** Optional account tags -- a record of who the work is for, never a visibility scope. */
+  accountIds?: string[];
+  /** Set to spa, static or shopify_storefront to produce a PACKAGE SOURCE ZIP the Deployables pipeline deploys unchanged at sourceKind='artifact' (design D8), rather than a document. Empty for every ordinary composition. */
+  deployableKind?: string;
+  /** v1:compose:recipe this run came from, when it came from one. Stamps the composition and bumps the recipe's run count. */
+  recipeId?: string;
+  /** {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents} for the goal. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'. */
+  ceilings?: Record<string, unknown>;
+}
+
+export function buildComposeMaterialize(args: ComposeMaterializeArgs): string {
+  const parts: string[] = [];
+  parts.push("name: " + renderMemQLValue(args.name));
+  if (args.statement !== undefined) parts.push("statement: " + renderMemQLValue(args.statement));
+  parts.push("format: " + renderMemQLValue(args.format));
+  if (args.sources !== undefined) parts.push("sources: " + renderMemQLValue(args.sources));
+  if (args.draft !== undefined) parts.push("draft: " + renderMemQLValue(args.draft));
+  if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
+  if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
+  if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
+  if (args.deployableKind !== undefined) parts.push("deployableKind: " + renderMemQLValue(args.deployableKind));
+  if (args.recipeId !== undefined) parts.push("recipeId: " + renderMemQLValue(args.recipeId));
+  if (args.ceilings !== undefined) parts.push("ceilings: " + renderMemQLValue(args.ceilings));
+  return "builtin composeMaterialize(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    composeMaterialize(args: ComposeMaterializeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.composeMaterialize = function (this: QueryClient, args: ComposeMaterializeArgs = {} as ComposeMaterializeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("composeMaterialize", buildComposeMaterialize(args), opts);
+};
+
+/** Resolve a source list WITHOUT composing anything: how many rows each entry finds and what they are called. Backs the Sources column's live count, so somebody sees that a selection is empty before they spend a model call discovering it. Every read runs under your own actor, so this can never report rows you could not have read. */
+export interface ComposeResolveSourcesArgs {
+  /** The same {kind, ref, label} list composeMaterialize takes. */
+  sources: Record<string, unknown>[];
+}
+
+export function buildComposeResolveSources(args: ComposeResolveSourcesArgs): string {
+  const parts: string[] = [];
+  parts.push("sources: " + renderMemQLValue(args.sources));
+  return "builtin composeResolveSources(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    composeResolveSources(args: ComposeResolveSourcesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.composeResolveSources = function (this: QueryClient, args: ComposeResolveSourcesArgs = {} as ComposeResolveSourcesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("composeResolveSources", buildComposeResolveSources(args), opts);
+};
+
+/** Run one of your recipes again: resolve its selectors NOW, compose, render and file. Returns {compositionId, goalId, runId}. The selectors are resolved under your own actor at this instant rather than replayed from the last run's answers -- which is the difference between "make this again" and "make a copy of that". */
+export interface ComposeRunRecipeArgs {
+  /** The v1:compose:recipe to run. */
+  recipeId: string;
+  /** What to call this run's output. Empty takes the recipe's name plus the date. */
+  name?: string;
+}
+
+export function buildComposeRunRecipe(args: ComposeRunRecipeArgs): string {
+  const parts: string[] = [];
+  parts.push("recipeId: " + renderMemQLValue(args.recipeId));
+  if (args.name !== undefined) parts.push("name: " + renderMemQLValue(args.name));
+  return "builtin composeRunRecipe(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    composeRunRecipe(args: ComposeRunRecipeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.composeRunRecipe = function (this: QueryClient, args: ComposeRunRecipeArgs = {} as ComposeRunRecipeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("composeRunRecipe", buildComposeRunRecipe(args), opts);
+};
+
 /** Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all. */
 export interface CreateGoalArgs {
   /** The goal in the person's own words. */

@@ -2139,6 +2139,62 @@ message ConceptInfo {
   // rather than rendering a concept as having no fields.
   repeated ConceptField fields = 11;
   repeated ConceptRelationship relationships = 12;
+
+  // The Materializer's mark (epic memql#4977, design D2): this
+  // concept's rows are worth composing a file FROM. Absent when the
+  // concept declared no `@composable(...)`.
+  //
+  // AN UNMARKED CONCEPT IS UNMARKED, NOT FORBIDDEN. The mark ranks and
+  // hints -- the Materializer's Sources column lists marked concepts
+  // first and the compose prompt is handed the same list -- and never
+  // gates. A gate would mean a product whose DSL bundle forgot the
+  // annotation ships a Materializer that cannot see its own data, and
+  // the concepts most worth composing from are exactly the ones that
+  // arrive at MEMQL_DSL_PATH rather than in the engine tree.
+  //
+  // It sits beside display_card for the reason display_card exists: a
+  // concept-agnostic client should not carry per-concept knowledge,
+  // and one derivation read by both the person's picker and the
+  // model's prompt is what stops the two seeing different sets.
+  //
+  // ADDITIVE. An older client ignores it; a newer client reading an
+  // older server sees it absent, which reads as "no concept here is
+  // marked" -- honest, and the state that preceded this field.
+  Composable composable = 13;
+}
+
+// Composable is the Materializer's per-concept mark (epic memql#4977).
+// Both fields are OPTIONAL, and a bare `@composable` carrying neither
+// is a complete declaration meaning "yes, and take the defaults" --
+// which is what keeps the mark cheap enough that a product applies it.
+message Composable {
+  // What a person and a prompt call this concept when its id is not
+  // that word ("invoice" for v1:billing:invoiceRecord). Empty means
+  // the concept's own entity name.
+  string as = 1;
+  // The projection worth composing FROM, in declaration order. Empty
+  // means the concept's own shape decides. It exists because a compose
+  // prompt handed forty fields spends its context on ids.
+  repeated string fields = 2;
+  // list names the query returning the caller's rows of this concept.
+  //
+  // IT IS HERE BECAUSE MemQL HAS NO GENERIC ROW READ, which is a
+  // feature rather than a gap: every read goes through a declared
+  // construct, and that is what makes row authz enforceable. A mark
+  // saying only "this concept is composable" would name something the
+  // Materializer then has nothing to run against.
+  //
+  // There is deliberately no second by-id field: a MemQL query takes
+  // NAMED arguments, so calling one by id means knowing the name it
+  // declares, and a mark that guessed would compose a call the engine
+  // refuses with a message about an undeclared argument -- which reads
+  // as the row being gone. A single row is selected out of THIS
+  // query's answer instead.
+  //
+  // Optional. A concept marked without it is composable but not
+  // directly pickable, and the Sources column says so rather than
+  // offering a control that cannot work.
+  string list = 3;
 }
 
 // ConceptField is one declared field of a concept, as the DSL declared

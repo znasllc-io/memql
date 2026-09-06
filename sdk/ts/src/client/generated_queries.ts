@@ -2301,6 +2301,92 @@ QueryClient.prototype.complianceJobsForStore = function (this: QueryClient, args
   return this.executeNamed("complianceJobsForStore", buildComplianceJobsForStore(args), opts);
 };
 
+/** One recipe by id, gated to its owner. Backs running a recipe: the selectors it holds are resolved under the caller's own actor, so a recipe can never widen what its runner may read. */
+// Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["composeRecipeById"] in generated_concepts.ts).
+export interface ComposeRecipeByIdArgs {
+  recipeId: string;
+}
+
+export function buildComposeRecipeById(args: ComposeRecipeByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("recipeId: " + renderMemQLValue(args.recipeId));
+  return "query composeRecipeById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    composeRecipeById(args: ComposeRecipeByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.composeRecipeById = function (this: QueryClient, args: ComposeRecipeByIdArgs = {} as ComposeRecipeByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("composeRecipeById", buildComposeRecipeById(args), opts);
+};
+
+/** The caller's recipes, newest first: the Templates section's recipe list and the Composer's "run one again" affordance. */
+// Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["composeRecipes"] in generated_concepts.ts).
+export interface ComposeRecipesArgs {
+}
+
+export function buildComposeRecipes(args: ComposeRecipesArgs): string {
+  void args;
+  return "query composeRecipes()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    composeRecipes(args?: ComposeRecipesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.composeRecipes = function (this: QueryClient, args: ComposeRecipesArgs = {} as ComposeRecipesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("composeRecipes", buildComposeRecipes(args), opts);
+};
+
+/** One template by id, gated to its owner. Backs the template editor and the render step's own resolution -- which runs under the caller's actor, so a composition naming somebody else's template resolves zero rows and is refused rather than rendering through it. */
+// Bound concept: v1:compose:template (machine-readable: BoundConcepts["composeTemplateById"] in generated_concepts.ts).
+export interface ComposeTemplateByIdArgs {
+  templateId: string;
+}
+
+export function buildComposeTemplateById(args: ComposeTemplateByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  return "query composeTemplateById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    composeTemplateById(args: ComposeTemplateByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.composeTemplateById = function (this: QueryClient, args: ComposeTemplateByIdArgs = {} as ComposeTemplateByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("composeTemplateById", buildComposeTemplateById(args), opts);
+};
+
+/** The caller's templates, newest first: the Templates section and the Target column's picker. */
+// Bound concept: v1:compose:template (machine-readable: BoundConcepts["composeTemplates"] in generated_concepts.ts).
+export interface ComposeTemplatesArgs {
+  format?: string;
+}
+
+export function buildComposeTemplates(args: ComposeTemplatesArgs): string {
+  const parts: string[] = [];
+  if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
+  return "query composeTemplates(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    composeTemplates(args: ComposeTemplatesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.composeTemplates = function (this: QueryClient, args: ComposeTemplatesArgs = {} as ComposeTemplatesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("composeTemplates", buildComposeTemplates(args), opts);
+};
+
 /** Fetch one composed view by id, gated to its owner. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller cannot open another person's view even holding its id. This is the read behind opening a saved view and behind re-opening it in the composer to edit. */
 // Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["composedViewById"] in generated_concepts.ts).
 export interface ComposedViewByIdArgs {
@@ -2346,6 +2432,96 @@ declare module "./query.js" {
 
 QueryClient.prototype.composedViews = function (this: QueryClient, args: ComposedViewsArgs = {} as ComposedViewsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("composedViews", buildComposedViews(args), opts);
+};
+
+/** One composition in full, for the open Composer and the record panel. Gated to its owner, so a caller cannot read somebody else's composition even holding its id. */
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositionById"] in generated_concepts.ts).
+export interface CompositionByIdArgs {
+  compositionId: string;
+}
+
+export function buildCompositionById(args: CompositionByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("compositionId: " + renderMemQLValue(args.compositionId));
+  return "query compositionById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    compositionById(args: CompositionByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.compositionById = function (this: QueryClient, args: CompositionByIdArgs = {} as CompositionByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("compositionById", buildCompositionById(args), opts);
+};
+
+/** The composition that produced one Library file, if one did. Backs the Files app's inspector line ("Made in the Materializer from 3 sources") and its Open in Materializer act -- the one direction of the seam agreed with the Files-places epic, which never edits a composition. */
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositionForOutputFile"] in generated_concepts.ts).
+export interface CompositionForOutputFileArgs {
+  fileId: string;
+}
+
+export function buildCompositionForOutputFile(args: CompositionForOutputFileArgs): string {
+  const parts: string[] = [];
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  return "query compositionForOutputFile(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    compositionForOutputFile(args: CompositionForOutputFileArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.compositionForOutputFile = function (this: QueryClient, args: CompositionForOutputFileArgs = {} as CompositionForOutputFileArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("compositionForOutputFile", buildCompositionForOutputFile(args), opts);
+};
+
+/** Everything materialized, newest first: the Materialized view's one read and the Files app's Materializer place. Owned, with the cluster-owner escape -- which is what makes "everything materialized in THIS INSTANCE" (the epic's words) a claim this read can honestly make. A plain owner tier has no bypass on the read path, so an operator would silently see one person's subset. */
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositions"] in generated_concepts.ts).
+export interface CompositionsArgs {
+  status?: string;
+  format?: string;
+}
+
+export function buildCompositions(args: CompositionsArgs): string {
+  const parts: string[] = [];
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
+  return "query compositions(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    compositions(args: CompositionsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.compositions = function (this: QueryClient, args: CompositionsArgs = {} as CompositionsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("compositions", buildCompositions(args), opts);
+};
+
+/** The compositions produced by one recipe, newest first. Backs the recipe row's "what it has made" and the evidence that a re-run matched the catalog: two runs of one recipe, one with models and one without. */
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositionsForRecipe"] in generated_concepts.ts).
+export interface CompositionsForRecipeArgs {
+  recipeId: string;
+}
+
+export function buildCompositionsForRecipe(args: CompositionsForRecipeArgs): string {
+  const parts: string[] = [];
+  parts.push("recipeId: " + renderMemQLValue(args.recipeId));
+  return "query compositionsForRecipe(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    compositionsForRecipe(args: CompositionsForRecipeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.compositionsForRecipe = function (this: QueryClient, args: CompositionsForRecipeArgs = {} as CompositionsForRecipeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("compositionsForRecipe", buildCompositionsForRecipe(args), opts);
 };
 
 /** Consent event stream for one subscriber, newest first. Export answers status/date/source from these rows: current status is the latest kind. Owned: (ownerUserId==actor.userId || actor.isClusterOwner==true) is a top-level conjunct. */

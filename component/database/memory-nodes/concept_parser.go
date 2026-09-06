@@ -109,6 +109,18 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		}
 	}
 
+	// Same late pass, same reason: every name in
+	// `@composable(fields="a,b")` is a payload field, and the property
+	// set only exists now. A typo'd field would otherwise reach the
+	// compose prompt as a key no row carries -- which a model renders
+	// as an absent value rather than as a mistake, so nothing on the
+	// page would ever say the projection was wrong.
+	if parsed.composable != nil {
+		if err := validateComposable(conceptName, parsed.composable, parsed.properties); err != nil {
+			return nil, err
+		}
+	}
+
 	// Same late pass, same reason: `@rowAuthz(owner="<field>")` names
 	// a payload field, and the property set only exists now.
 	if parsed.rowAuthz != nil {
@@ -134,10 +146,42 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		Version:       version,
 		Relationships: parsed.relationships,
 		DisplayCard:   parsed.displayCard,
+		Composable:    parsed.composable,
 		RowAuthz:      parsed.rowAuthz,
 		Origin:        parsed.origin,
 		MirroredTo:    parsed.mirroredTo,
 	}, nil
+}
+
+// validateComposable checks the half of a @composable declaration that
+// can only be checked once the property set is known: every name in
+// `fields` must be a field the concept actually declares, or a row
+// intrinsic.
+//
+// UNLIKE @displayCard, THERE IS NO TYPE RESTRICTION HERE. A display slot
+// has to reduce to one cell of row chrome, so an object or an array in
+// one is a mistake; a compose projection is handed to a model as DATA,
+// and a nested object is frequently the interesting part of a row. The
+// two annotations validate names the same way and types differently
+// because they are answering different questions.
+func validateComposable(conceptName string, mark *Composable, props []parsedProperty) error {
+	if mark == nil {
+		return nil
+	}
+	byName := make(map[string]struct{}, len(props))
+	for _, p := range props {
+		byName[p.name] = struct{}{}
+	}
+	for _, field := range mark.Fields {
+		if _, ok := byName[field]; ok {
+			continue
+		}
+		if _, ok := displayableIntrinsicType(field); ok {
+			continue
+		}
+		return fmt.Errorf("@composable on concept %q: fields=%q names %q, which is neither a declared property nor a row intrinsic", conceptName, strings.Join(mark.Fields, ","), field)
+	}
+	return nil
 }
 
 // validateRowAuthz checks the half of a row-authz declaration that can
@@ -298,6 +342,14 @@ type parsedConcept struct {
 	// the property pass (named fields must exist + be displayable).
 	// See memql#160.
 	displayCard *DisplayCard
+
+	// composable is the optional Materializer mark declared via
+	// `@composable(...)`. Like displayCard, its `fields` list is
+	// validated against the property list AFTER the property pass,
+	// because attributes are folded before properties on this path.
+	// Nil means unmarked, which is most concepts and which is not the
+	// same statement as "not composable" (epic memql#4977, design D2).
+	composable *Composable
 
 	// rowAuthz is the optional row-authorization tier declared via
 	// `@rowAuthz(...)`. Like displayCard, the `owner="<field>"` form
@@ -1041,6 +1093,29 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 			return err
 		}
 		c.displayCard = card
+	case "composable":
+		// @composable(as="invoice", fields="number,issuedAt,total")
+		//   -- the Materializer's mark: this concept's rows are worth
+		//   composing a file FROM (epic memql#4977, design D2).
+		//
+		//   Declared at most once, for the reason @rowAuthz and
+		//   @origin are: the parser folds attributes in source order,
+		//   so a second declaration would silently win and a reader
+		//   scanning top-down would see a projection the engine does
+		//   not use.
+		//
+		//   The `fields` existence check runs in BuildConceptFromDecl
+		//   AFTER the property pass, exactly as @displayCard's slot
+		//   check does -- attributes are folded before properties on
+		//   this code path, so there is nothing to check against yet.
+		if c.composable != nil {
+			return fmt.Errorf("@composable declared more than once -- name every composable field in one annotation, e.g. @composable(fields=\"a,b\")")
+		}
+		mark, err := parseComposableAttr(attr)
+		if err != nil {
+			return err
+		}
+		c.composable = mark
 	case parser.RowAuthzAnnotation:
 		// @rowAuthz(public) / @rowAuthz(clusterOwner) /
 		// @rowAuthz(owner="<field>") / @rowAuthz(via="<spec>")
@@ -1151,6 +1226,67 @@ func parseDisplayCardAttr(attr *parser.Attribute) (*DisplayCard, error) {
 		return nil, fmt.Errorf("@displayCard requires primary=\"<field>\"")
 	}
 	return out, nil
+}
+
+// parseComposableAttr extracts the named args from
+// @composable(as="<label>", fields="<a,b,c>") -- the Materializer's mark
+// (epic memql#4977, design D2). Both arguments are OPTIONAL: a bare
+// `@composable` is a complete declaration meaning "yes, and take the
+// defaults", which is what most concepts want and what keeps the mark
+// cheap enough that a product actually applies it.
+//
+// `fields` is a COMMA-SEPARATED STRING rather than a list because the
+// annotation grammar's string-arg form is the one every concept
+// annotation in this tree already uses; field-existence checks happen
+// later, in BuildConceptFromDecl, for @displayCard's reason.
+func parseComposableAttr(attr *parser.Attribute) (*Composable, error) {
+	if attr == nil {
+		return nil, fmt.Errorf("@composable: nil attribute")
+	}
+	out := &Composable{}
+	for k, v := range attr.Args {
+		val := strings.TrimSpace(asString(v))
+		switch k {
+		case "as":
+			out.As = val
+		case "fields":
+			for f := range strings.SplitSeq(val, ",") {
+				if f = strings.TrimSpace(f); f != "" {
+					out.Fields = append(out.Fields, f)
+				}
+			}
+		case "list":
+			out.List = val
+		default:
+			return nil, fmt.Errorf("@composable: unknown argument %q (allowed: as, fields, list)", k)
+		}
+	}
+	// FORM ONLY. The query registry does not exist during the concept
+	// pass, so existence is checked at use (see the Composable type's
+	// comment). What IS checkable here is that the value is an
+	// identifier rather than a whole call string with parens -- the
+	// mistake an author makes, and one that would otherwise compose
+	// into an unparseable statement at run time.
+	if out.List != "" && !isPlainIdentifier(out.List) {
+		return nil, fmt.Errorf("@composable: list=%q must be a bare query name, not a call or a path", out.List)
+	}
+	return out, nil
+}
+
+// isPlainIdentifier reports whether s is a bare construct name.
+func isPlainIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '_':
+		case r >= '0' && r <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // asString coerces an attribute-arg value (any) to its string

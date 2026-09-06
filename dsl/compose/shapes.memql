@@ -1,0 +1,107 @@
+// shapes.memql
+//
+// Projections over the compose concepts. EXPLICIT rather than the default
+// projection, for the reason the Users app records in clients/os/README.md:
+// a query with no shape projects every field of its concept, so a later
+// field lands in every browser that ever opened the list without anybody
+// deciding it should.
+//
+// TWO SHAPES PER LIST-BEARING CONCEPT, and the split is what makes the
+// Materialized view one read rather than a page walk. The `Card` shape is
+// what a row in a list needs; the `Full` shape is what an open composition
+// needs. `sources` and `modelsUsed` are the reason: they are lists whose
+// length is the interesting fact on a row and whose CONTENTS are only
+// interesting once somebody has opened the thing. A card carrying them
+// would put every source ref of every composition in the instance into a
+// browser that is drawing forty one-line rows.
+
+/// The Materialized list's row: what was made, in what shape, and whether the file it produced
+/// carries its own provenance. Deliberately WITHOUT `sources` and `modelsUsed` -- their length is
+/// the row's fact and their contents are the open composition's.
+@row
+shape composition compositionCard {
+  row.id
+  row.createdAt
+  ownerUserId
+  name
+  statement
+  status
+  format
+  templateId
+  outputFileId
+  folderId
+  accountIds
+  goalId
+  runId
+  recipeId
+  provenanceEmbedded
+  provenanceNote
+  deployableKind
+  failureReason
+  archived
+}
+
+/// Everything about one composition, for the open Composer and the record panel. The two list
+/// fields the card omits are the whole reason this shape exists.
+@row
+shape composition compositionFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  name
+  statement
+  status
+  format
+  sources
+  templateId
+  outputFileId
+  folderId
+  accountIds
+  goalId
+  runId
+  recipeId
+  modelsUsed
+  provenanceEmbedded
+  provenanceNote
+  sha256
+  failureReason
+  deployableKind
+  archived
+}
+
+/// One template, everywhere it appears -- the Templates list, the Target column's picker, and the
+/// record panel's "rendered through" line. One shape rather than a card/full pair: `placeholders`
+/// is what a picker needs in order to say what a template will ask for BEFORE it is chosen, so
+/// there is no reading of a template that wants less than this.
+@row
+shape template composeTemplateFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  name
+  description
+  fileId
+  format
+  placeholders
+  accountIds
+  archived
+}
+
+/// One recipe. Same reasoning as the template shape: `sourceSelectors` is what makes a recipe row
+/// legible ("the invoices matching status=open"), so a card without it would be a name and a date.
+@row
+shape recipe composeRecipeFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  name
+  description
+  sourceSelectors
+  templateId
+  format
+  folderId
+  accountIds
+  lastRunAt
+  runCount
+  archived
+}

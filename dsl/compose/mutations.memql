@@ -1,0 +1,303 @@
+// mutations.memql
+//
+// Writes over the compose namespace. Every one stamps ownerUserId from
+// actor.userId, never from a caller argument, and every UPDATE re-stamps it
+// -- an update that omitted it would leave the field to the read-merge, and
+// a row whose ownership depends on a merge is a row whose ownership can
+// drift.
+//
+// THE SPLIT IN THIS FILE IS BY WHO CALLS, NOT BY WHAT IS TOUCHED.
+//
+//   - The template and recipe writes are ORDINARY owned-tier mutations a
+//     browser calls: binding a file as a template, naming a recipe,
+//     archiving either. Nothing about them is more than a row write.
+//
+//   - The composition LIFECYCLE writes are @serverOnly, and scoping to
+//     actor.userId is not the fix -- these rows are already owner-scoped, so
+//     a caller can only ever reach their own. The problem is that a caller
+//     may not perform the transition AT ALL: a browser flipping a
+//     composition to `ready` with no bytes behind it, or stamping
+//     `provenanceEmbedded=true` on a CSV, desyncs the row from the engine
+//     while owning it perfectly. Worse, `provenanceEmbedded` and
+//     `modelsUsed` ARE THE PROVENANCE -- a record a caller can author says
+//     nothing, and the whole point of this concept is that it says
+//     something. The builtin does the work and this write is its last step.
+//
+// A @serverOnly construct is reachable only from server-side Go under
+// INTERNAL ORIGIN (memql#3175); integrations/compose stamps it.
+
+/// Open the record for one materialization, at `draft`. @serverOnly: the row is opened by
+/// composeMaterialize together with the goal and the run it belongs to, and a caller-authored
+/// composition would be a provenance record whose subject never happened.
+@actor
+@serverOnly
+mutate composition createComposition {
+  args {
+    compositionId  string!
+    name           string!
+    statement      string
+    format         string!
+    sources        []object
+    templateId     string
+    folderId       string
+    accountIds     []string
+    goalId         string
+    runId          string
+    recipeId       string
+    deployableKind string
+  }
+  insert {
+    accept { name, statement, format, sources, templateId, folderId, accountIds, goalId, runId, recipeId, deployableKind }
+    stamp {
+      id: args.compositionId
+      ownerUserId: actor.userId
+      status: "draft"
+    }
+  }
+}
+
+/// Move a composition through its lifecycle and, at the end, record what it produced.
+/// @serverOnly for the reason at the top of this file: every field here is either a claim about
+/// bytes that exist or a claim about which models thought, and both are the engine's to make.
+///
+/// MINIMAL ARGUMENTS ON PURPOSE. `update{}` has been a read-merge since memql#1628, so
+/// re-supplying every discriminator is dead weight that an undeclared-argument DISCARD hides
+/// (memql#4258). A caller passing only `status` moves only the status.
+@actor
+@serverOnly
+mutate composition updateCompositionState {
+  args {
+    compositionId       string!
+    status              string
+    runId               string
+    outputFileId        string
+    modelsUsed          []object
+    provenanceEmbedded  bool
+    provenanceNote      string
+    sha256              string
+    failureReason       string
+  }
+  update {
+    accept { status, runId, outputFileId, modelsUsed, provenanceEmbedded, provenanceNote, sha256, failureReason }
+    stamp {
+      id: args.compositionId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Archive a composition record. Owned, and client-reachable: retiring a record is a decision about
+/// one's own filing, unlike every field above it. ARCHIVING THE RECORD DOES NOT TOUCH THE OUTPUT
+/// FILE -- they are separate rows with separate dispositions, so somebody tidying their Materialized
+/// list has not asked to throw away the document it names.
+@actor
+mutate composition archiveComposition {
+  args {
+    compositionId  string!
+  }
+  update {
+    stamp {
+      id: args.compositionId
+      ownerUserId: actor.userId
+      archived: true
+    }
+  }
+}
+
+/// Restore an archived composition record. The plain inverse of the archive above, and a client
+/// pair rather than an automation for the reason the Library's own restore is (memql#4784): a
+/// mirrored automation would fire on every update and close a cycle.
+@actor
+mutate composition restoreComposition {
+  args {
+    compositionId  string!
+  }
+  update {
+    stamp {
+      id: args.compositionId
+      ownerUserId: actor.userId
+      archived: false
+    }
+  }
+}
+
+// ---- templates: ordinary owned writes ----
+
+/// Bind a Library file as a template. Owned. The BYTES are not written here and never are: a
+/// template is a binding to a v1:library:file (design D7), so uploading one is an ordinary Library
+/// upload through the one pinned path, and this row is what makes it selectable afterwards.
+@actor
+mutate template createComposeTemplate {
+  args {
+    templateId    string!
+    name          string!
+    description   string
+    fileId        string!
+    format        string!
+    placeholders  []object
+    accountIds    []string
+  }
+  insert {
+    accept { name, description, fileId, format, placeholders, accountIds }
+    stamp {
+      id: args.templateId
+      ownerUserId: actor.userId
+      archived: false
+    }
+  }
+}
+
+/// Rename a template, re-describe it, re-tag it, or repoint it at a different file. Owned.
+/// Repointing is deliberately allowed and is how a template is revised -- the alternative, a new
+/// template per revision, would leave every recipe naming the old one.
+@actor
+mutate template updateComposeTemplate {
+  args {
+    templateId    string!
+    name          string
+    description   string
+    fileId        string
+    format        string
+    placeholders  []object
+    accountIds    []string
+  }
+  update {
+    accept { name, description, fileId, format, placeholders, accountIds }
+    stamp {
+      id: args.templateId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Archive a template binding. Owned. It does NOT archive the file it points at: the file is an
+/// ordinary Library row, and retiring a binding is not asking to throw away a document.
+@actor
+mutate template archiveComposeTemplate {
+  args {
+    templateId  string!
+  }
+  update {
+    stamp {
+      id: args.templateId
+      ownerUserId: actor.userId
+      archived: true
+    }
+  }
+}
+
+/// Restore an archived template binding. Owned.
+@actor
+mutate template restoreComposeTemplate {
+  args {
+    templateId  string!
+  }
+  update {
+    stamp {
+      id: args.templateId
+      ownerUserId: actor.userId
+      archived: false
+    }
+  }
+}
+
+// ---- recipes: ordinary owned writes, plus one the engine makes ----
+
+/// Promote a composition that worked into something you can run again. Owned. The selectors are
+/// the caller's -- resolved under their own actor at every later run -- so a recipe can never widen
+/// what its runner may read.
+@actor
+mutate recipe createComposeRecipe {
+  args {
+    recipeId         string!
+    name             string!
+    description      string
+    sourceSelectors  []object
+    templateId       string
+    format           string!
+    folderId         string
+    accountIds       []string
+  }
+  insert {
+    accept { name, description, sourceSelectors, templateId, format, folderId, accountIds }
+    stamp {
+      id: args.recipeId
+      ownerUserId: actor.userId
+      runCount: 0
+      archived: false
+    }
+  }
+}
+
+/// Rename or re-aim a recipe. Owned.
+@actor
+mutate recipe updateComposeRecipe {
+  args {
+    recipeId         string!
+    name             string
+    description      string
+    sourceSelectors  []object
+    templateId       string
+    format           string
+    folderId         string
+    accountIds       []string
+  }
+  update {
+    accept { name, description, sourceSelectors, templateId, format, folderId, accountIds }
+    stamp {
+      id: args.recipeId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Record that a recipe ran. @serverOnly: `runCount` and `lastRunAt` are the evidence a recipe
+/// works, and evidence a caller can author is evidence that says nothing. Written by the
+/// materialize executor under the owner's borrowed authority.
+@actor
+@serverOnly
+mutate recipe recordComposeRecipeRun {
+  args {
+    recipeId   string!
+    lastRunAt  datetime!
+    runCount   int!
+  }
+  update {
+    accept { lastRunAt, runCount }
+    stamp {
+      id: args.recipeId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Archive a recipe. Owned. The compositions it produced are untouched -- they are the evidence it
+/// worked, and an archive that took them would destroy the record this whole namespace is for.
+@actor
+mutate recipe archiveComposeRecipe {
+  args {
+    recipeId  string!
+  }
+  update {
+    stamp {
+      id: args.recipeId
+      ownerUserId: actor.userId
+      archived: true
+    }
+  }
+}
+
+/// Restore an archived recipe. Owned.
+@actor
+mutate recipe restoreComposeRecipe {
+  args {
+    recipeId  string!
+  }
+  update {
+    stamp {
+      id: args.recipeId
+      ownerUserId: actor.userId
+      archived: false
+    }
+  }
+}

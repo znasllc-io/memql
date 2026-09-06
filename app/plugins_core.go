@@ -30,6 +30,14 @@ import (
 	// de-coupled first. avatarvendor STAYS here (shared vendor-REST core).
 	_ "github.com/znasllc-io/memql/integrations/avatardirect"
 	_ "github.com/znasllc-io/memql/integrations/chat"
+	// The Materializer (epic memql#4977). Registered on EVERY node type,
+	// like customdomain below and for the same reason: the five builtins
+	// are declared in dsl/compose/builtins.memql, which every binary
+	// loads, and a capability present in the DSL and absent from the
+	// registry is a boot-time resolution failure. Gating it by build tag
+	// would additionally make whether a person can materialize depend on
+	// which replica their stream landed on.
+	_ "github.com/znasllc-io/memql/integrations/compose"
 	// Custom domains (epic memql#4805). Registered on every node type, like
 	// release above and for the same reason: the two builtins are declared in
 	// dsl/platform/builtins.memql, which every binary loads, and a capability

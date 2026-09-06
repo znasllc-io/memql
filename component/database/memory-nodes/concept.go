@@ -62,6 +62,78 @@ type (
 		Status string `json:"status,omitempty"`
 	}
 
+	// Composable is the Materializer's mark: this concept's rows are
+	// worth composing a file FROM (epic memql#4977, design D2). Nil
+	// when the concept did not declare `@composable(...)`.
+	//
+	// AN UNMARKED CONCEPT IS UNMARKED, NOT FORBIDDEN. The mark is a
+	// ranking and a hint -- the Sources column lists marked concepts
+	// first and the compose prompt is handed the same list -- never a
+	// gate. A gate would mean a product whose DSL bundle forgot the
+	// annotation ships a Materializer that cannot see its own data,
+	// and the product concepts most worth composing from are exactly
+	// the ones that arrive at MEMQL_DSL_PATH rather than in this tree.
+	//
+	// It rides the wire beside DisplayCard for the same reason
+	// DisplayCard does: one derivation, read by the person's picker
+	// and by the model's prompt, so the two cannot be looking at
+	// different sets.
+	Composable struct {
+		// As is what a person and a prompt call this concept when
+		// its id is not that word ("invoice" for
+		// v1:billing:invoiceRecord). Optional; empty means the
+		// concept's own entity name.
+		As string `json:"as,omitempty"`
+		// Fields is the projection worth composing FROM, in
+		// declaration order. Optional; empty means "the shape's
+		// own projection decides", which is the honest default
+		// for a concept with few fields. It exists because a
+		// compose prompt handed forty fields spends its context
+		// on ids.
+		Fields []string `json:"fields,omitempty"`
+		// List names the QUERY that returns the caller's rows of
+		// this concept.
+		//
+		// IT IS HERE BECAUSE MemQL HAS NO GENERIC ROW READ, and
+		// that is a feature rather than a gap: every read goes
+		// through a declared construct, which is what makes row
+		// authz enforceable at all. So a mark saying only "this
+		// concept is composable" would name something the
+		// Materializer then has nothing to run against -- the
+		// person picks a concept and the app has no read.
+		//
+		// THERE IS DELIBERATELY NO SECOND `readBy` ARGUMENT for a
+		// by-id read, and the reason is worth knowing before
+		// adding one: a MemQL query takes NAMED arguments, so
+		// calling one by id means knowing the name it declares
+		// ("invoiceId", "fileId", ...) -- and a mark cannot know
+		// that without either carrying the name too or guessing
+		// it. Guessing composes a call the engine refuses with a
+		// message about an undeclared argument, which reads as the
+		// row being gone. So a single row is resolved through
+		// THIS query and selected by id, which uses exactly the
+		// read the concept declared and needs no knowledge the
+		// mark does not carry. The cost is a page read per source;
+		// the `query` source kind is the O(1) escape for a concept
+		// where that matters.
+		//
+		// Optional. A concept marked without it is composable but
+		// not directly pickable, and the Sources column says so
+		// rather than offering a control that cannot work.
+		//
+		// VALIDATED FOR FORM HERE AND FOR EXISTENCE AT USE. The
+		// concept pass runs before the query registry exists, so
+		// this loader can only check that the name is an
+		// identifier. A name resolving to no query produces an
+		// error at the moment somebody picks that concept, naming
+		// the query -- and TestComposableListsResolve in
+		// integrations/compose resolves every one declared in THIS
+		// tree at build time. A product bundle mounted at
+		// MEMQL_DSL_PATH gets the use-time error, which is the
+		// same coverage split cmd/memqllint has.
+		List string `json:"list,omitempty"`
+	}
+
 	// Concept provides runtime helpers for interacting with memory nodes described by a concept definition.
 	Concept struct {
 		Name          string                     `json:"concept"`
@@ -80,6 +152,13 @@ type (
 		// declared via `@displayCard(...)`. Nil when the concept
 		// did not declare the annotation. See memql#160.
 		DisplayCard *DisplayCard `json:"displayCard,omitempty"`
+
+		// Composable carries the Materializer's mark, declared via
+		// `@composable(...)`. Nil when the concept did not declare
+		// it -- which is most concepts, and which means "unmarked",
+		// never "forbidden". See the Composable type above and
+		// epic memql#4977's design record, section D.
+		Composable *Composable `json:"composable,omitempty"`
 
 		// RowAuthz carries the row-authorization tier declared via
 		// `@rowAuthz(...)`: who may see this concept's rows, stated
