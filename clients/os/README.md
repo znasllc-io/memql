@@ -699,13 +699,53 @@ repetitions of what the app already had.
   source moves, then what", which is a property of the source rather than of
   any one run.
 
-## Training, the fourth app (memql#4737)
+## Training, the fourth app (memql#4737, re-keyed to the Library in memql#4970)
 
-`src/apps/training/` is teaching MemQL from files: a dropzone into the
-attachment analysis pipeline, the analysis plans running live beside it, a
-review queue over what the pipeline extracted, and a browser of the knowledge
-domains it feeds. Four things about it are new rules rather than repetitions of
-the three apps before it.
+`src/apps/training/` is teaching MemQL from files: a dropzone into the LIBRARY,
+a worklist of the caller's files moving through the analysis, an explicit act
+that teaches a knowledge domain from one, a review queue over what that
+produced, and a browser of the domains it feeds.
+
+**THE APP NAMED TRAINING NEVER TRAINED, until the re-key.** It uploaded into
+the caller's daily cognition space, and the completion path there writes a
+`v1:knowledge:document` through `mutationCreateDocument` -- a mutation declared
+in no `.memql` file in this tree, with its error swallowed at the call site
+(`component/server/plan_store.go:244`). So an upload produced a summary and no
+knowledge chunks, and the review queue could only ever show chunks some other
+path had written. Nothing on screen said so: a plan reached `succeeded` and the
+queue was empty, which is a completely plausible answer.
+
+Keyed to the Library the loop is real, and it is TWO ACTS rather than one: a
+file lands as `v1:library:file` and the analysis pass reads it into fileChunks,
+and then `libraryTrainFile(fileId, domainId)` ingests those into a domain as
+`documentChunk` rows with `source: "fileUpload"` -- which is exactly what the
+review queue is for. The surface says so, because hiding the second act is what
+made the first one look like it had done something.
+
+**The section is a WORKLIST, not a log.** Every file is a row that says where it
+is and offers exactly the act legal from there -- rule 12 applied per row,
+because here the state is per row. `unreadable` (a photograph, a zip) offers
+NOTHING: no act would make it teach something, so a disabled Teach beside it
+would be a control whose only purpose is to be refused.
+
+**THE FILE LEADS AND THE RUN DECORATES.** Two live feeds, and the ordering
+matters: the upload route writes the file row synchronously inside the request,
+and the analysis pass writes `v1:work:run` from a detached goroutine on
+whichever node took the upload. A surface that waited for both would show
+nothing for the first moments of every upload. The run earns its place by
+carrying what the file row cannot say -- twelve passages of which nine are
+searchable, or a photograph with nothing in it, both of which end at `ready` on
+the file row.
+
+**The client-side owner filter is GONE**, and that is a security gain rather
+than a simplification. `v1:planner:plan` declares no row-authz tier, so its
+subscription admitted every subscriber and other people's plans reached this
+browser to be filtered here. `v1:library:file` and `v1:work:run` both declare
+the composite owner tier, so admission runs on the subscription too
+(memql#4309) and they never arrive.
+
+Four more things about it are new rules rather than repetitions of the three
+apps before it.
 
 - **A CONCEPT FIELD IS NOT A READABLE FIELD, and the omission is silent.**
   `documentChunk` declares `validationStatus`, `source`, `documentId`,

@@ -9884,6 +9884,29 @@ QueryClient.prototype.sitesForPackage = function (this: QueryClient, args: Sites
   return this.executeNamed("sitesForPackage", buildSitesForPackage(args), opts);
 };
 
+/** One skill by id. The read `runScript` makes before it ships anything: it needs the row's `scripts[]`, its slug for the refusal message, and its `active` flag.
+Public tier, so there is no owner conjunct -- and adding one would hide the predefined catalog every person's agents read, which is the whole reason the tier is what it is. */
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillById"] in generated_concepts.ts).
+export interface SkillByIdArgs {
+  skillId: string;
+}
+
+export function buildSkillById(args: SkillByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("skillId: " + renderMemQLValue(args.skillId));
+  return "query skillById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    skillById(args: SkillByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.skillById = function (this: QueryClient, args: SkillByIdArgs = {} as SkillByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("skillById", buildSkillById(args), opts);
+};
+
 /** Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it. */
 // Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillBySlug"] in generated_concepts.ts).
 export interface SkillBySlugArgs {

@@ -929,22 +929,31 @@ Two things follow, and neither is a criticism of the surface:
 `v1:authoring:dependencyEdge` are owner-gated in their reads and are not part
 of this residual.
 
-### The MemQL OS Training app's two residuals (memql#4737)
+### The MemQL OS Training app's residual (memql#4737, one of two CLOSED in memql#4970)
 
-The Training app (`clients/os/src/apps/training/`) adds a second instance of
-the same pattern and one that is different in kind. Both are recorded here for
-the reason Nexus's are: the narrowing that is actually applied is partly in a
+The Training app (`clients/os/src/apps/training/`) had two entries here. One is
+gone; the other is different in kind and remains. Both are recorded for the
+reason Nexus's are: the narrowing that is actually applied is partly in a
 browser.
 
 | Concept | State | What the app does |
 |---|---|---|
-| `v1:planner:plan` | undeclared; blocked on #4366 | the SEED is server-scoped (`plansForUser` is `@actor` and binds `requestedBy==actor.userId`); the SUBSCRIPTION is not, so `planBelongsHere` (`apps/training/rows.ts`) drops any plan row whose `requestedBy` is not the caller's own, and drops everything while the viewer is unknown |
+| ~~`v1:planner:plan`~~ | **CLOSED, memql#4970** | the app no longer reads a plan at all -- see below |
 | `v1:knowledge:documentChunk` | undeclared, long tail | **nothing**, and that is the honest entry -- see below |
 
-The first is the Nexus residual exactly: a read that is already caller-scoped
-server-side, paired with a subscription that is not, because a concept
-declaring no tier admits every subscriber (memql#4309). It closes nothing that
-was open and it is not a gate.
+The first entry closed by the app being re-keyed rather than by the concept
+being declared, which is worth stating precisely because the two look the same
+from here and are not. Epic memql#4970 moved the app off the space attachment
+route onto the Library (`POST /artifacts`), so its feeds are now
+`v1:library:file` and `v1:work:run` -- both of which declare
+`@rowAuthz(owner="ownerUserId", clusterOwner)`. Row admission gates
+subscriptions through the same function it gates reads with (memql#4309), so
+other people's rows never arrive and there is nothing left for a client-side
+filter to drop. `planBelongsHere` and its viewer-id check are deleted.
+
+`v1:planner:plan` itself is UNCHANGED and still undeclared: Nexus's entry above
+still stands, and this is one consumer leaving rather than the concept being
+fixed.
 
 The second is a different shape and is worth stating plainly rather than
 filing under the long tail. `setChunkValidationStatus`

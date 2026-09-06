@@ -52,6 +52,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // MaxVerifiableBytes is the far side's fs_read ceiling
@@ -592,30 +594,26 @@ func boolFrom(v any) bool {
 	return b
 }
 
-// intFrom narrows a decoded payload number. The three arms are what
-// core/num's saturate answer does for the values a dispatch payload can
-// actually carry (an exit code, a duration), and anything else answers zero
-// -- "not reported" rather than a guess.
+// intFrom narrows a decoded payload number.
+//
+// narrowing: SATURATE -- the two numbers a dispatch payload carries here are
+// an EXIT CODE and a DURATION, and both are orderings. Zero is the wrong
+// answer for either: for an exit code it means SUCCESS, so an absurd value
+// from a misbehaving far side would report a failed script as having worked;
+// for a duration it means instantaneous. Saturating keeps an out-of-range
+// value on the correct side of every comparison a reader will make.
+//
+// A value that is not a number at all is a different question and answers 0:
+// nothing reported it, which is what an absent key means, and `timeoutSec`
+// omitted is the ordinary case.
 func intFrom(v any) int {
 	switch n := v.(type) {
 	case int:
 		return n
 	case int64:
-		if n > int64(^uint(0)>>1) {
-			return int(^uint(0) >> 1)
-		}
-		if n < -int64(^uint(0)>>1)-1 {
-			return -int(^uint(0)>>1) - 1
-		}
-		return int(n)
+		return num.ClampInt64(n)
 	case float64:
-		if n > float64(int64(^uint(0)>>1)) {
-			return int(^uint(0) >> 1)
-		}
-		if n < float64(-int64(^uint(0)>>1)-1) {
-			return -int(^uint(0)>>1) - 1
-		}
-		return int(n)
+		return num.ClampFloat64(n)
 	default:
 		return 0
 	}

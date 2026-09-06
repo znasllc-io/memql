@@ -10472,6 +10472,29 @@ func SitesForPackageBuild(args SitesForPackageArgs) string {
 	return b.String()
 }
 
+// SkillById -- One skill by id. The read `runScript` makes before it ships anything: it needs the row's `scripts[]`, its slug for the refusal message, and its `active` flag.
+// Public tier, so there is no owner conjunct -- and adding one would hide the predefined catalog every person's agents read, which is the whole reason the tier is what it is.
+//
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillById"] in generated_concepts.go).
+type SkillByIdArgs struct {
+	SkillId string
+}
+
+// SkillById calls the engine query skillById.
+func (qc *QueryClient) SkillById(ctx context.Context, args SkillByIdArgs) (*Result, error) {
+	call := SkillByIdBuild(args)
+	return qc.executeNamed(ctx, "skillById", call)
+}
+
+func SkillByIdBuild(args SkillByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query skillById(")
+	b.WriteString("skillId: ")
+	b.WriteString(quoteMemQL(args.SkillId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SkillBySlug -- Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it.
 //
 // Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillBySlug"] in generated_concepts.go).

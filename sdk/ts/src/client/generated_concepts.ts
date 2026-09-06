@@ -947,6 +947,7 @@ export const BoundConcepts = {
   sitesArchived: "v1:platform:site",
   sitesForAccount: "v1:platform:site",
   sitesForPackage: "v1:platform:site",
+  skillById: "v1:skills:skill",
   skillBySlug: "v1:skills:skill",
   skillChangeEventsForAgent: "v1:agents:skillChangeEvent",
   skillEdgesForSkill: "v1:skills:skillEdge",
