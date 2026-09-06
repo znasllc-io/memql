@@ -320,6 +320,60 @@ describe("the arrival cue", () => {
   });
 });
 
+// EVERY FEED IS TESTED FOR LIVENESS, NOT JUST THE ONE THE CUE IS ABOUT.
+//
+// A test that seeds rows and renders passes identically against a feed that
+// SEEDED AND NEVER SUBSCRIBED -- correct on load, frozen afterwards, which
+// on screen is indistinguishable from a surface with nothing new to show.
+// The concept constant is the thing that breaks: `TEMPLATE_CONCEPT` was
+// re-pointed when the concept was renamed to `composeTemplate`, and a
+// subscription on the OLD id would still have seeded (the seed is a query
+// call) while receiving nothing forever.
+//
+// So each of the three feeds gets one case that emits AFTER mount. The
+// negative control is the rename itself: point any of these at the wrong
+// concept id and only these three cases fail.
+describe("the three feeds are live", () => {
+  it("a composition arriving after mount reaches the list", async () => {
+    const conn = fakeConnection({ compositions: [] });
+    mount(conn, "materialized");
+    await screen.findByText(/Nothing materialized yet/);
+
+    conn.subscriptions.emit(
+      COMPOSITION,
+      compositionRow({ id: `${COMPOSITION}:late`, name: "Arrived late" }),
+      "NODE_CREATED",
+    );
+    expect(await screen.findByText("Arrived late")).toBeTruthy();
+  });
+
+  it("a template arriving after mount reaches the section", async () => {
+    const conn = fakeConnection({ templates: [] });
+    mount(conn, "templates");
+    await screen.findByText(/No templates yet/);
+
+    conn.subscriptions.emit(
+      "v1:compose:composeTemplate",
+      templateRow({ id: "v1:compose:composeTemplate:late", name: "Bound late" }),
+      "NODE_CREATED",
+    );
+    expect(await screen.findByText("Bound late")).toBeTruthy();
+  });
+
+  it("a recipe arriving after mount reaches the section", async () => {
+    const conn = fakeConnection({ recipes: [] });
+    mount(conn, "templates");
+    await screen.findByText(/No recipes yet/);
+
+    conn.subscriptions.emit(
+      "v1:compose:recipe",
+      recipeRow({ id: "v1:compose:recipe:late", name: "Saved late" }),
+      "NODE_CREATED",
+    );
+    expect(await screen.findByText("Saved late")).toBeTruthy();
+  });
+});
+
 describe("templates and recipes", () => {
   it("says a template is a binding to a Library file rather than an upload", async () => {
     mount(fakeConnection(), "templates");
