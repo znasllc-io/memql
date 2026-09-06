@@ -372,6 +372,55 @@ func TestPDFFoldsTypographyRatherThanDroppingIt(t *testing.T) {
 	}
 }
 
+// TestHTMLEscapesEveryContextItWritesInto pins what the html/template
+// refactor bought (epic memql#4977). Every value in this page is free text
+// somebody typed -- a title, a goal statement, a person's name -- and each
+// lands in a DIFFERENT context: an attribute value, an element body, a
+// <title>. The concatenated version escaped them all identically and was
+// safe by care; the template escapes them by where they land.
+func TestHTMLEscapesEveryContextItWritesInto(t *testing.T) {
+	p := fixtureProvenance()
+	p.Title = `A "quoted" title`
+	p.Statement = `He said "ship it" & <b>meant</b> it`
+	p.AuthorName = `O'Brien`
+	d := Draft{Title: p.Title, Body: `A <script>alert(1)</script> paragraph.`}
+
+	res, err := Render(FormatHTML, d, p)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	out := string(res.Bytes)
+
+	// NOTHING ESCAPES ITS CONTEXT. A raw `<script>` in the body or an
+	// unescaped quote closing an attribute are the two failures this
+	// whole refactor is about.
+	for _, leak := range []string{"<script>", `content="He said "ship`, `<title>A "quoted"`} {
+		if strings.Contains(out, leak) {
+			t.Fatalf("%q reached the output unescaped:\n%s", leak, out)
+		}
+	}
+
+	// THE REACHABLE POSITIVE: the values are PRESENT, escaped, rather
+	// than dropped. A renderer that emitted nothing would pass the
+	// assertions above.
+	for _, want := range []string{"&lt;script&gt;", "&#34;quoted&#34;", "meant", "MemQL Materializer"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in the escaped output:\n%s", want, out)
+		}
+	}
+
+	// And an absent value is an ABSENT TAG rather than an empty one, for
+	// the front matter's reason.
+	p.TemplateName = ""
+	res2, err := Render(FormatHTML, d, p)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(string(res2.Bytes), `name="memql:template"`) {
+		t.Fatalf("an empty template name wrote a blank meta tag:\n%s", res2.Bytes)
+	}
+}
+
 func TestParseFormatRefusesRatherThanDefaulting(t *testing.T) {
 	if _, err := ParseFormat("markdown"); err != nil {
 		t.Fatalf("markdown must parse: %v", err)

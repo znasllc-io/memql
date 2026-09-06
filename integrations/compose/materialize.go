@@ -112,32 +112,20 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 
 	// --- the goal, first, so the composition can name it ---
 	//
-	// A NIL OPENER LEAVES goalId EMPTY RATHER THAN REFUSING. A node with
-	// no work spine wired can still materialize; what it loses is the
-	// Nexus hand-off and replay, and the app renders an empty goalId as
-	// "not tracked" rather than as a broken link.
-	var goalId, runId string
-	if opener := i.goalsRef(); opener != nil {
-		statement := a.Statement
-		if statement == "" {
-			statement = "Materialize " + a.Name + " as " + string(a.Format)
-		}
-		g, r, gerr := opener.OpenGoal(ctx, statement, map[string]any{
-			"compositionId": compositionId,
-			"format":        string(a.Format),
-			"templateId":    a.TemplateId,
-		}, a.AccountIds, a.Ceilings, "materializer")
-		if gerr != nil {
-			// A goal that could not be opened is LOGGED and not fatal,
-			// for the reason a nil opener is not: the file is the
-			// deliverable and the tracking is around it. Failing here
-			// would make a work-spine outage into a Materializer
-			// outage.
-			i.log().Warn("compose: could not open the goal for a materialization", "error", gerr, "compositionId", compositionId)
-		} else {
-			goalId, runId = g, r
-		}
-	}
+	// EVERY MATERIALIZATION IS A GOAL (design D6), opened through the work
+	// spine's OWN `createGoal` builtin over this package's engine handle,
+	// under the caller's own actor. That is deliberately a DSL call rather
+	// than a Go seam onto integrations/work: `createGoal` exists there as
+	// a capability handler and not as an exported method, and adding one
+	// would couple two integrations in Go for something the DSL already
+	// exposes -- plus give `requestedVia` a second spelling.
+	//
+	// A FAILURE HERE IS LOGGED AND NOT FATAL. The file is the deliverable
+	// and the tracking is around it, so a node with no work plug-in -- or
+	// a work spine having a bad day -- still materializes. The composition
+	// then carries an empty goalId, which the app renders as "not tracked"
+	// rather than as a broken link.
+	goalId, runId := i.openGoal(ctx, compositionId, a)
 
 	// --- step 1: gather ---
 	//
@@ -353,6 +341,49 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 		"modelsUsed":         modelRows(models),
 		"sourcesResolved":    len(resolved),
 	}, nil
+}
+
+// openGoal opens the v1:work:goal this materialization is, through the
+// work spine's own `createGoal` builtin.
+//
+// UNSTAMPED, so the caller's actor decides: the goal is the caller's own,
+// `createGoal` is `@sdk` rather than `@serverOnly`, and stamping internal
+// origin here would widen a call that needs no widening.
+//
+// It returns EMPTY IDS on every failure rather than an error, and the
+// caller carries on. A work spine that is absent, refusing or slow must
+// not be able to stop somebody making a file; what it costs is the Nexus
+// hand-off and replay, which the app says plainly rather than pretending.
+func (i *Integration) openGoal(ctx context.Context, compositionId string, a materializeArgs) (string, string) {
+	statement := strings.TrimSpace(a.Statement)
+	if statement == "" {
+		statement = "Materialize " + a.Name + " as " + string(a.Format)
+	}
+	args := map[string]any{
+		"statement":    statement,
+		"requestedVia": "materializer",
+		"input": map[string]any{
+			"compositionId": compositionId,
+			"format":        string(a.Format),
+			"templateId":    a.TemplateId,
+		},
+	}
+	if len(a.AccountIds) > 0 {
+		args["accountIds"] = a.AccountIds
+	}
+	if len(a.Ceilings) > 0 {
+		args["ceilings"] = a.Ceilings
+	}
+	rows, err := i.store().query(ctx, "builtin "+call("createGoal", args))
+	if err != nil {
+		i.log().Warn("compose: could not open the goal for a materialization; it will not appear in Nexus",
+			"error", err, "compositionId", compositionId)
+		return "", ""
+	}
+	if len(rows) == 0 {
+		return "", ""
+	}
+	return stringOf(rows[0]["goalId"]), stringOf(rows[0]["runId"])
 }
 
 // renderDeployable produces the package source zip (design D8).

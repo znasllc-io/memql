@@ -64,18 +64,20 @@ type ConceptSource interface {
 	ConceptDefinitions() []*memorynodes.Concept
 }
 
-// GoalOpener is the work spine's createGoal, narrowed. A materialization
-// IS a goal (design D6), so this package opens one rather than growing a
-// second execution model beside it.
+// THERE IS NO GoalOpener SEAM, and its absence is a decision. A
+// materialization IS a goal (design D6), and the obvious shape is a Go
+// interface onto integrations/work -- but `createGoal` exists there as a
+// capability HANDLER rather than as an exported method, so taking that
+// shape would mean adding one, coupling two integrations in Go for
+// something the DSL already exposes, and giving `requestedVia` a second
+// spelling.
 //
-// NIL LEAVES THE COMPOSITION WITHOUT A GOAL RATHER THAN REFUSING IT.
-// A node that has not wired the work spine can still materialize; what
-// it loses is the Nexus hand-off and the replay, and the composition row
-// carries an empty goalId which the app renders as "not tracked" rather
-// than as a broken link.
-type GoalOpener interface {
-	OpenGoal(ctx context.Context, statement string, input map[string]any, accountIds []string, ceilings map[string]any, requestedVia string) (goalId string, runId string, err error)
-}
+// So `openGoal` in materialize.go calls the `createGoal` BUILTIN over
+// this package's own engine handle, unstamped, under the caller's actor
+// -- the same path a DSL author would take. A failure there is logged
+// and never fatal: the file is the deliverable and the tracking is
+// around it, so the composition carries an empty goalId, which the app
+// renders as "not tracked" rather than as a broken link.
 
 // Composer produces the draft. It is the ONE step that reaches a model,
 // and the only one.
@@ -122,7 +124,6 @@ type Integration struct {
 	instance string
 
 	concepts ConceptSource
-	goals    GoalOpener
 	composer Composer
 
 	now func() time.Time
@@ -164,17 +165,6 @@ func (i *Integration) SetConceptSource(c ConceptSource) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.concepts = c
-}
-
-// SetGoalOpener wires the work spine. Called once, from the node that
-// runs work; a later call is ignored, so two halves of one run cannot
-// disagree about where a materialization was tracked.
-func (i *Integration) SetGoalOpener(g GoalOpener) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	if i.goals == nil {
-		i.goals = g
-	}
 }
 
 // SetComposer wires the reasoning step.
@@ -225,11 +215,6 @@ func (i *Integration) conceptsRef() ConceptSource {
 	return i.concepts
 }
 
-func (i *Integration) goalsRef() GoalOpener {
-	i.mu.RLock()
-	defer i.mu.RUnlock()
-	return i.goals
-}
 
 func (i *Integration) composerRef() Composer {
 	i.mu.RLock()

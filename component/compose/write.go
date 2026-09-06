@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"html"
+	"html/template"
 	"strings"
 	"time"
 
@@ -194,46 +194,86 @@ func quoteYAML(v string) string {
 
 // ---- html: a meta block ----
 
-func renderHTML(d Draft, p Provenance) ([]byte, error) {
-	var b bytes.Buffer
-	title := firstNonEmpty(d.Title, p.Title)
-	b.WriteString("<!doctype html>\n<html lang=\"en\">\n<head>\n")
-	b.WriteString("<meta charset=\"utf-8\">\n")
-	b.WriteString("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n")
-	b.WriteString("<title>" + html.EscapeString(title) + "</title>\n")
-	writeMeta(&b, "memql:statement", p.Statement)
-	writeMeta(&b, "author", p.AuthorName)
-	writeMeta(&b, "memql:authorId", p.AuthorId)
-	writeMeta(&b, "memql:instance", p.Instance)
-	writeMeta(&b, "memql:compositionId", p.CompositionId)
-	writeMeta(&b, "memql:goalId", p.GoalId)
-	writeMeta(&b, "memql:template", p.TemplateName)
-	writeMeta(&b, "memql:sources", p.SourceSummary())
-	writeMeta(&b, "memql:models", p.ModelSummary())
-	writeMeta(&b, "memql:createdAt", p.CreatedAt.UTC().Format(time.RFC3339))
-	writeMeta(&b, "generator", "MemQL Materializer")
-	b.WriteString("</head>\n<body>\n")
-	if title != "" {
-		b.WriteString("<h1>" + html.EscapeString(title) + "</h1>\n")
-	}
-	// The body is Markdown source and is emitted as escaped
-	// paragraphs. THIS IS NOT A MARKDOWN RENDERER and does not pretend
-	// to be one: a half-implemented one that handles bold and not
-	// tables produces documents that are wrong in ways nobody predicts,
-	// and the honest small thing is paragraphs plus escaping. A real
-	// renderer is a dependency decision, and it is not this epic's.
-	for _, para := range splitParagraphs(d.Body) {
-		b.WriteString("<p>" + html.EscapeString(para) + "</p>\n")
-	}
-	b.WriteString("</body>\n</html>\n")
-	return b.Bytes(), nil
+// htmlDoc is the whole page, rendered by html/template rather than
+// assembled by concatenation.
+//
+// THE TEMPLATE IS THE POINT, not a style preference. The concatenated
+// version was safe -- `html.EscapeString` escapes `"` to `&#34;`, so no
+// value could break out of an attribute -- and it was still the exact
+// pattern `go/unsafe-quoting` names: a quoted context built by joining
+// strings, where correctness rests on every call site remembering to
+// escape. `html/template` escapes CONTEXTUALLY, so an attribute value, an
+// element body and a title are each escaped for where they land, and a
+// future line that forgets cannot exist.
+//
+// Refactored rather than dismissed: a dismissal is per-ref, needs a
+// justification somebody re-reads in a year, and leaves the pattern in
+// place for the next person to copy.
+var htmlDoc = template.Must(template.New("composition").Parse(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title>
+{{- range .Meta}}
+<meta name="{{.Name}}" content="{{.Content}}">
+{{- end}}
+</head>
+<body>
+{{- if .Title}}
+<h1>{{.Title}}</h1>
+{{- end}}
+{{- range .Paragraphs}}
+<p>{{.}}</p>
+{{- end}}
+</body>
+</html>
+`))
+
+type htmlMeta struct{ Name, Content string }
+
+type htmlPage struct {
+	Title      string
+	Meta       []htmlMeta
+	Paragraphs []string
 }
 
-func writeMeta(b *bytes.Buffer, name, content string) {
-	if strings.TrimSpace(content) == "" {
-		return
+func renderHTML(d Draft, p Provenance) ([]byte, error) {
+	page := htmlPage{
+		Title: firstNonEmpty(d.Title, p.Title),
+		// The body is Markdown source and is emitted as paragraphs. THIS
+		// IS NOT A MARKDOWN RENDERER and does not pretend to be one: a
+		// half-implemented one that handles bold and not tables produces
+		// documents wrong in ways nobody predicts, and the honest small
+		// thing is paragraphs. A real renderer is a dependency decision,
+		// and it is not this epic's.
+		Paragraphs: splitParagraphs(d.Body),
 	}
-	b.WriteString("<meta name=\"" + html.EscapeString(name) + "\" content=\"" + html.EscapeString(content) + "\">\n")
+	for _, m := range []htmlMeta{
+		{"memql:statement", p.Statement},
+		{"author", p.AuthorName},
+		{"memql:authorId", p.AuthorId},
+		{"memql:instance", p.Instance},
+		{"memql:compositionId", p.CompositionId},
+		{"memql:goalId", p.GoalId},
+		{"memql:template", p.TemplateName},
+		{"memql:sources", p.SourceSummary()},
+		{"memql:models", p.ModelSummary()},
+		{"memql:createdAt", p.CreatedAt.UTC().Format(time.RFC3339)},
+		{"generator", "MemQL Materializer"},
+	} {
+		// AN EMPTY VALUE IS OMITTED rather than written blank, for the
+		// front matter's reason: `content=""` reads as "there was one and
+		// it is empty", and an absent tag reads as "there was none".
+		if strings.TrimSpace(m.Content) != "" {
+			page.Meta = append(page.Meta, m)
+		}
+	}
+	var b bytes.Buffer
+	if err := htmlDoc.Execute(&b, page); err != nil {
+		return nil, fmt.Errorf("compose: writing html: %w", err)
+	}
+	return b.Bytes(), nil
 }
 
 // ---- txt / csv / json: written clean (design D4) ----
