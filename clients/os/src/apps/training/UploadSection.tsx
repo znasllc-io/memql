@@ -143,10 +143,13 @@ export function UploadSection({
             teach -- three sentences because they are three separate things,
             and the third one is the act this surface exists for. */}
         <Caption>
-          It lands in your Library, the cluster reads it, and then you choose which knowledge domain
-          it teaches. PDFs, Word and Excel documents, CSV and TSV, JSON, text, Markdown, HTML and
-          images, up to {Math.round(MAX_UPLOAD_BYTES / (1024 * 1024 * 1024))} GB each. Anything
-          larger than 32 MB uploads in pieces and resumes if you drop it again.
+          It lands in your Library, the cluster reads it, and then you choose which domain it
+          teaches.
+        </Caption>
+        <Caption>
+          Documents, spreadsheets, text and images, up to{" "}
+          {Math.round(MAX_UPLOAD_BYTES / (1024 * 1024 * 1024))} GB. Anything over 32 MB uploads in
+          pieces and resumes if you drop it again.
         </Caption>
       </div>
 
@@ -224,7 +227,8 @@ export function UploadSection({
         </Notice>
       ) : null}
 
-      <LiveList<TrainingFile>
+      <div className="os-train-files">
+        <LiveList<TrainingFile>
         source={files}
         rowId={(file) => file.id}
         fingerprint={(file) => fileLineFingerprint(file, runsByFileId.get(file.id))}
@@ -240,9 +244,16 @@ export function UploadSection({
             train={train}
           />
         )}
-      />
+        />
+      </div>
 
-      <Caption>Your most recent files. Older ones are in the Files app.</Caption>
+      {/* The scope note, and only over content. An empty list has no "most
+          recent" to be showing part of, and the empty state above already
+          says what to do -- a second sentence under it would be answering a
+          question nobody has yet. */}
+      {snapshot.rows.length > 0 ? (
+        <Caption>Your most recent files. Older ones are in the Files app.</Caption>
+      ) : null}
     </div>
   );
 }
@@ -357,17 +368,17 @@ function FileLine({
       ) : null}
 
       {stage === "unreadable" ? (
-        <span className="os-caption">
-          Stored and downloadable, but there is no text in it to read.
-        </span>
+        <span className="os-caption">Stored and downloadable; there is no text in it to read.</span>
       ) : null}
 
       {stage === "failed" ? (
         <>
-          <span className="os-train-plan-error os-mono">
+          <span className="os-train-plan-error">
             {file.failureReason || run?.errorMessage || "The cluster did not say why."}
           </span>
-          <Caption>Re-upload the file to try again.</Caption>
+          <span className="os-caption" data-line>
+            Drop it again to retry.
+          </span>
         </>
       ) : null}
 
@@ -405,7 +416,7 @@ function FileLine({
       ) : null}
 
       {/* The refusal belongs on the row that produced it. */}
-      {refusal !== "" ? <span className="os-train-plan-error os-mono">{refusal}</span> : null}
+      {refusal !== "" ? <span className="os-train-plan-error">{refusal}</span> : null}
 
       {domains.error !== "" && picking ? (
         <span className="os-caption">
