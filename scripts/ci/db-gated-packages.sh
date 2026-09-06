@@ -67,6 +67,21 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # happen to run beside a database they ignore. The tree took about two seconds
 # of the step's 180s budget when measured.
 #
+# epic memql#4966 added `integrations/work`. Every other test in that
+# package speaks to a recording executor, and render_test.go hands each
+# composed call to the real parser -- but a call that PARSES is not a row
+# that LANDS. Four things sit between the two and none is reachable without
+# Postgres: the concept's own type check (an optional object rendered as
+# null refuses the whole insert, which is one of the two defects this epic
+# fixed), @serverSet stamping of ownerUserId, row-authz admission -- whose
+# failure mode is ZERO ROWS AND NO ERROR, indistinguishable from "this
+# person has no goals" -- and whether the row exists afterwards at all.
+# goal_db_test.go asserts both directions: the owner reads the goal back
+# and a different actor does not. Without this entry that test runs on
+# developer machines and never in CI, which is the shape of gate the root
+# CLAUDE.md warns about: one skipped by default cannot be what stands
+# between a feature and the bug it prevents.
+#
 # memql#4389 added `integrations/shopify`. The Shopify connector's
 # customers/redact job rewrites the PII fields of every VERSION of every row
 # referencing a customer, through raw SQL, because "every version" is exactly
@@ -125,6 +140,7 @@ readonly DB_GATED_TREES=(
 	"integrations/embedding"
 	"integrations/planner"
 	"integrations/shopify"
+	"integrations/work"
 	"examples/referencepack"
 )
 
