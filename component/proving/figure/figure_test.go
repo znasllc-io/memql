@@ -60,7 +60,11 @@ func TestAMeasuredZeroAndAnAbsentFigureRenderDifferently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Measured: %v", err)
 	}
-	absent, err := Unmeasured(MetricProviderCalls, ReasonSeamNotBuilt, "DecideServe has no call site", ciProv())
+	// The detail is a STAND-IN, not a claim about this tree. It used to read
+	// "DecideServe has no call site", which was true until memql#4999 built
+	// that seam -- at which point a fixture was asserting something false
+	// about the repository and nothing could tell.
+	absent, err := Unmeasured(MetricProviderCalls, ReasonSeamNotBuilt, "<the seam this figure would count>", ciProv())
 	if err != nil {
 		t.Fatalf("Unmeasured: %v", err)
 	}
@@ -73,8 +77,23 @@ func TestAMeasuredZeroAndAnAbsentFigureRenderDifferently(t *testing.T) {
 	if !strings.HasPrefix(absent.Render(), "--") {
 		t.Errorf("an absent figure should lead with an em dash; got %q", absent.Render())
 	}
-	if !strings.Contains(absent.Render(), "not built") {
-		t.Errorf("an absent figure must carry its reason; got %q", absent.Render())
+	// The DETAIL is what an absent figure says when it has one -- the reason
+	// alone is a category, and a category can be right about who can answer
+	// while explaining the wrong mechanism (memql#4999).
+	if !strings.Contains(absent.Render(), "<the seam this figure would count>") {
+		t.Errorf("an absent figure must carry its detail; got %q", absent.Render())
+	}
+}
+
+// With no detail there is still a reason, and it must reach the page: an
+// absent figure that renders a bare em dash says nothing at all.
+func TestAnAbsentFigureWithNoDetailStillCarriesItsReason(t *testing.T) {
+	f, err := Unmeasured(MetricProviderCalls, ReasonTierNotRun, "", ciProv())
+	if err != nil {
+		t.Fatalf("Unmeasured: %v", err)
+	}
+	if !strings.Contains(f.Render(), ReasonTierNotRun.Sentence()) {
+		t.Errorf("an absent figure with no detail dropped its reason; got %q", f.Render())
 	}
 }
 

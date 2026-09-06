@@ -19,10 +19,14 @@ import (
 // be a property of the CI runner or a trivial consequence of determinism
 // rather than a fact about the product.
 //
-// The two `seamNotBuilt` entries are the other half of the same discipline. A
-// benchmark that reported "zero provider calls" because nothing in the path
-// calls a provider would have told a lie that reads exactly like the headline
-// result, so those figures name the missing code instead.
+// The discipline held for the work spine's two unbuilt seams until memql#4999
+// built them, and it is worth recording what it bought: a benchmark that
+// reported "zero provider calls" because nothing in the path calls a provider
+// would have told a lie that reads exactly like the headline result. Those
+// figures named the missing code instead, and when the code arrived the reason
+// CHANGED rather than the number appearing -- the CI harness still cannot
+// reach the seam. `seamNotBuilt` has no caller today and stays in the set for
+// the next one.
 // Overhead is the journal-overhead measurement, or the reason there is none.
 type Overhead struct {
 	Ratio  float64
@@ -267,12 +271,22 @@ func Figures(s scenario.Scenario, results map[figure.Arm]ArmResult, overhead *Ov
 			}
 		}
 		if claims[figure.MetricModelCallsJournaled] {
-			// The concept, the shape, the query and the @serverOnly mutation
-			// all exist; no Go writer does. Reporting 1.0 here would be
-			// reporting that every model call was journaled because none was
-			// made and none was recorded.
-			if err := absent(figure.ArmPlatform, figure.MetricModelCallsJournaled, figure.ReasonSeamNotBuilt,
-				"nothing writes v1:work:modelCall: the concept, shape, query and @serverOnly mutation exist and the Go writer is the remaining half of epic A2"); err != nil {
+			// THE SEAM IS BUILT NOW (memql#4999) and this figure is still
+			// absent, for a DIFFERENT reason -- which is the whole point of a
+			// closed reason set.
+			//
+			// component/memql's model seam journals every call that reaches
+			// it, and integrations/work writes the row. But no model call in
+			// THIS harness reaches it: runPlatform's step registry is a fake
+			// and its model responses come from a cassette player, so a
+			// scenario's "model call" is a recorded read that never touches
+			// InvokeAI, the provider chain or the journal. Counting journaled
+			// rows against calls made would be 0/0 dressed as a ratio.
+			//
+			// The live tier CAN answer it -- it makes real calls down the
+			// real path -- which is exactly what notMeasurableOnReplay means.
+			if err := absent(figure.ArmPlatform, figure.MetricModelCallsJournaled, figure.ReasonNotMeasurableOnReplay,
+				"the CI tier's model responses come from a cassette through a fake step registry, so no call reaches the journal seam; the live tier calls a provider down the real path and can count it"); err != nil {
 				return nil, nil, err
 			}
 		}

@@ -25,12 +25,17 @@ import (
 // model-call seam, beside where the request hash is computed and the
 // v1:work:modelCall row is written.
 //
-// RESIDUAL, stated so it is findable rather than discovered: that seam is the
-// OTHER half of epic A2 and does not exist yet. Until it does, a run opened in
-// replay mode is a row that says `replay` and nothing reads it -- so a replay
-// today records its intent and does not yet serve from the journal. A
-// pass-through adapter here would not change that and would make it look
-// wired.
+// BUILT, as of memql#4999. That seam is component/memql/model_journal.go: it
+// computes the request hash, asks DecideServe once, and either serves the
+// journaled answer or calls through and writes the row via
+// integrations/work.ModelJournal. The context stamped in deriveRun below is
+// what carries this run's mode and lineage to it.
+//
+// This paragraph used to record the RESIDUAL -- "a run opened in replay mode
+// is a row that says `replay` and nothing reads it" -- and it is kept in this
+// shape rather than deleted because the next reader's question is the same
+// one: where does the decision get made. It is made in exactly one place, and
+// a pass-through adapter here would still be wrong.
 
 // handleForkRun derives a run that diverges at a step key.
 func (i *Integration) handleForkRun(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

@@ -2309,11 +2309,18 @@ never a best case" is unrepresentable rather than merely discouraged.
   live tier fills them. The live lane ships **DISARMED** (P3) --
   `proving-live.yml` is `workflow_dispatch` with no schedule -- and the
   scorecard's tier table says so rather than leaving empty columns unexplained.
-- **`seamNotBuilt` names the missing code.** Two work-spine seams are not
-  built: nothing writes `v1:work:modelCall`, and `work.DecideServe` has no
-  caller. The suite reports those figures as absent WITH the gap named, because
-  reporting "zero provider calls" when nothing in the path calls a provider is
-  a lie that reads exactly like the headline result.
+- **An absent figure names its own reason, and the reason CHANGES rather than
+  the number appearing.** `seamNotBuilt` carried the work spine's two unbuilt
+  seams -- nothing wrote `v1:work:modelCall` and `work.DecideServe` had no
+  caller -- until memql#4999 built both. `governance.modelCallsJournaled` is
+  still absent, now as `notMeasurableOnReplay`: the CI tier plays model
+  responses from a cassette through a fake step registry, so no call reaches
+  the journal seam at all. Reporting "zero provider calls" when nothing in the
+  path calls a provider is a lie that reads exactly like the headline result,
+  and so is reporting 1.0 for a ratio whose denominator is zero. `Render`
+  prints the figure's DETAIL when it has one, because the reason alone is a
+  category and a category can be right about who can answer while explaining
+  the wrong mechanism.
 - **Every zero-claim is paired with a NEGATIVE CONTROL that must produce a
   non-zero**, and a control reading zero FAILS the suite. Usually the control
   is the same scenario's baseline arm -- a bare loop with no journal restarts

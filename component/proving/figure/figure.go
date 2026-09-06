@@ -282,10 +282,13 @@ const (
 	// Only the live tier can answer.
 	ReasonNotMeasurableOnReplay AbsentReason = "notMeasurableOnReplay"
 	// ReasonSeamNotBuilt -- the code that would produce this does not exist
-	// yet. Detail names it. This is the reason that keeps the suite honest
-	// about the work spine's two unbuilt seams: reporting zero provider calls
-	// because nothing calls a provider is a lie that reads exactly like the
-	// headline result.
+	// yet. Detail names it, and Unmeasured REFUSES a blank one.
+	//
+	// It carried the work spine's two unbuilt seams until memql#4999 built
+	// them, and reporting zero provider calls because nothing calls a
+	// provider would have been a lie that reads exactly like the headline
+	// result. No figure uses it today; it stays in the set because the next
+	// unbuilt seam should reach for it rather than invent a reason.
 	ReasonSeamNotBuilt AbsentReason = "seamNotBuilt"
 	// ReasonTierNotRun -- this tier has not been dispatched. The normal state
 	// of every live figure while the live lane is disarmed.
@@ -577,6 +580,18 @@ func (f Figure) Render() string {
 		return "[" + err.Error() + "]"
 	}
 	if f.Stat == nil {
+		// THE DETAIL WINS WHEN THERE IS ONE (memql#4999). The reason's own
+		// sentence is a category, and a category can be right about WHO can
+		// answer while explaining the wrong mechanism: governance's
+		// modelCallsJournaled reads notMeasurableOnReplay because only the
+		// live tier can count it, but the reason a replay cannot is that this
+		// harness plays model responses from a cassette -- not that a replay
+		// is deterministic, which is what the sentence says. The detail is
+		// where the figure said something specific, and it was going
+		// unprinted.
+		if d := strings.TrimSpace(f.Detail); d != "" {
+			return "-- (" + d + ")"
+		}
 		return "-- (" + f.Absent.Sentence() + ")"
 	}
 	s := *f.Stat
