@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // The operator knobs bounding a package source.
@@ -87,7 +89,19 @@ func DefaultLimits() Limits {
 	return Limits{
 		MaxSourceBytes: envInt64(MaxSourceBytesEnv, DefaultMaxSourceBytes),
 		MaxFileBytes:   envInt64(MaxFileBytesEnv, DefaultMaxFileBytes),
-		MaxFileCount:   int(envInt64(MaxFileCountEnv, int64(DefaultMaxFileCount))),
+		// THROUGH core/num WITH A NAMED ANSWER, never a bare `int(v)` -- the rule
+		// store.go's rowInt states, and which this line was the one violation of
+		// in this package (CodeQL go/incorrect-integer-conversion, alert #1082).
+		//
+		// The answer here is CALLER-DEFAULT rather than the saturate rowInt uses,
+		// and the paragraph above this function is what decides it: a set-but-
+		// unparseable or non-positive value falls back to the DEFAULT rather than
+		// to "no limit", because an unbounded expansion is the one outcome a
+		// misconfigured cap must never produce. Saturating would do the opposite
+		// -- on a 32-bit build a value past the int range would become
+		// math.MaxInt32, which for a FILE COUNT is "no limit" wearing a number.
+		// A value that will not fit is a misconfigured cap like any other.
+		MaxFileCount: num.Int64Or(envInt64(MaxFileCountEnv, int64(DefaultMaxFileCount)), DefaultMaxFileCount),
 	}
 }
 
