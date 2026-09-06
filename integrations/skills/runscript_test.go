@@ -604,3 +604,136 @@ func TestCaptureWithNoPlatformRecordsAny(t *testing.T) {
 		t.Fatalf("platform = %q, want any", got.Platform)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The binding
+// ---------------------------------------------------------------------------
+
+type recordedBinding struct {
+	owner   string
+	stepID  string
+	binding map[string]any
+}
+
+type fakeBindings struct{ calls []recordedBinding }
+
+func (f *fakeBindings) StampBinding(_ context.Context, owner, stepID string, binding map[string]any) error {
+	f.calls = append(f.calls, recordedBinding{owner: owner, stepID: stepID, binding: binding})
+	return nil
+}
+
+func TestADispatchRecordsItsBindingOnTheStep(t *testing.T) {
+	runner, _, _, _, _, _ := fixture(t)
+	bindings := &fakeBindings{}
+	runner = runner.WithBindings(bindings)
+
+	r := req()
+	r.StepID = "step-1"
+	r.RunID = "run-1"
+	if _, err := runner.Run(context.Background(), r); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(bindings.calls) != 1 {
+		t.Fatalf("bindings = %+v, want exactly one", bindings.calls)
+	}
+	got := bindings.calls[0]
+	if got.stepID != "step-1" || got.owner != "user-1" {
+		t.Fatalf("stamped (%q, %q)", got.owner, got.stepID)
+	}
+	if got.binding["surface"] != SurfaceWorkbench {
+		t.Fatalf("surface = %v", got.binding["surface"])
+	}
+	if got.binding["contentHash"] != hashOf([]byte(scriptBody)) {
+		t.Fatalf("contentHash = %v -- the bytes the step will run are what make a receipt answerable", got.binding["contentHash"])
+	}
+	skillIDs, _ := got.binding["skillIds"].([]string)
+	if len(skillIDs) != 1 || skillIDs[0] != "skill-1" {
+		t.Fatalf("skillIds = %v", got.binding["skillIds"])
+	}
+}
+
+// The provider half of a binding belongs to a REASONING step's dispatch. A
+// script step calls no model, and writing those keys here would be recording
+// a decision nobody made.
+func TestAScriptStepsBindingClaimsNoProvider(t *testing.T) {
+	runner, _, _, _, _, _ := fixture(t)
+	bindings := &fakeBindings{}
+	runner = runner.WithBindings(bindings)
+
+	r := req()
+	r.StepID = "step-1"
+	if _, err := runner.Run(context.Background(), r); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, key := range []string{"provider", "model", "providerPolicy"} {
+		if _, present := bindings.calls[0].binding[key]; present {
+			t.Fatalf("the binding claims %q, which a script dispatch does not decide", key)
+		}
+	}
+}
+
+// An ad-hoc runScript is not a step of anything, so there is no row to stamp.
+func TestACallThatNamesNoStepRecordsNothing(t *testing.T) {
+	runner, _, _, _, _, _ := fixture(t)
+	bindings := &fakeBindings{}
+	runner = runner.WithBindings(bindings)
+
+	if _, err := runner.Run(context.Background(), req()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(bindings.calls) != 0 {
+		t.Fatalf("bindings = %+v, want none", bindings.calls)
+	}
+}
+
+// BEFORE THE BODY, which is the whole point (spec section D: the `running`
+// version carries the binding, written before anything executes). A binding
+// stamped afterwards would be missing from exactly the case a person reads it
+// for -- a step that started and never came back.
+func TestTheBindingIsRecordedBeforeTheBodyRuns(t *testing.T) {
+	runner, wb, _, _, _, calls := fixture(t)
+	bindings := &fakeBindings{}
+	runner = runner.WithBindings(bindings)
+	// exec fails, so the only way a binding exists is if it was written first.
+	wb.refuse["exec"] = CallResult{OK: false, ErrorCode: "denied_by_scope", ErrorMsg: "no"}
+
+	r := req()
+	r.StepID = "step-1"
+	if _, err := runner.Run(context.Background(), r); err == nil {
+		t.Fatal("the refused exec did not surface")
+	}
+	if len(bindings.calls) != 1 {
+		t.Fatalf("bindings = %+v -- a step that started and was refused still has a binding", bindings.calls)
+	}
+	ranExec := false
+	for _, c := range *calls {
+		if c.action == "exec" {
+			ranExec = true
+		}
+	}
+	if !ranExec {
+		t.Fatal("the test did not reach exec, so it proves nothing about the order")
+	}
+}
+
+// A machine requirement is part of what the dispatch decided.
+func TestALabelRequirementIsRecordedOnTheBinding(t *testing.T) {
+	runner, _, _, _, _, _ := fixture(t)
+	bindings := &fakeBindings{}
+	runner = runner.WithBindings(bindings)
+
+	r := req()
+	r.StepID = "step-1"
+	r.RequireLabels = map[string]string{"os": "darwin"}
+	if _, err := runner.Run(context.Background(), r); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	labels, _ := bindings.calls[0].binding["machineLabels"].(map[string]string)
+	if labels["os"] != "darwin" {
+		t.Fatalf("machineLabels = %v", bindings.calls[0].binding["machineLabels"])
+	}
+	if bindings.calls[0].binding["surface"] != SurfaceMachine {
+		t.Fatalf("surface = %v, want the fleet", bindings.calls[0].binding["surface"])
+	}
+}

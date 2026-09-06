@@ -4,11 +4,13 @@ package app
 
 import (
 	"context"
+	"os"
 	"runtime"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/server"
+	"github.com/znasllc-io/memql/component/workjournal"
 	"github.com/znasllc-io/memql/integrations/skills"
 )
 
@@ -74,6 +76,17 @@ func (a *App) setupSkillsIntegration(fetcher skills.BlobFetcher, uploader server
 			store,
 		)
 	}
+
+	// The step journal, so a script step's dispatch is recorded on the row it
+	// was made for. Nil-safe: a call naming no `stepId` records nothing
+	// either way, which is every ad-hoc runScript.
+	runner = runner.WithBindings(workjournal.New(
+		workjournal.ExecutorFunc(func(ctx context.Context, q string) (any, error) {
+			return a.engine.Execute(ctx, q)
+		}),
+		a.Logger,
+		strings.TrimSpace(os.Getenv("MEMQL_NODE_ID")),
+	))
 
 	if err := a.engine.RegisterIntegration(skills.NewIntegration(runner, a.Logger)); err != nil {
 		a.fatal("skills integration: register failed", "error", err)

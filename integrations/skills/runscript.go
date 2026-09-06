@@ -247,6 +247,14 @@ type ArtifactReader interface {
 	ReadArtifact(ctx context.Context, artifactID string) (ScriptBytes, error)
 }
 
+// BindingRecorder stamps what a dispatch decided onto the step it was made
+// for (spec section C). Injected, because the write is `@serverOnly` and the
+// internal-origin stamp is allowlisted to a package that is only those
+// writes -- this one is not that package.
+type BindingRecorder interface {
+	StampBinding(ctx context.Context, ownerUserID, stepID string, binding map[string]any) error
+}
+
 // Runner is the composition.
 type Runner struct {
 	skills    SkillResolver
@@ -259,6 +267,18 @@ type Runner struct {
 	// without them; Capture refuses by name without them.
 	artifactWriter ArtifactWriter
 	skillWriter    SkillWriter
+
+	// The journal, wired separately by WithBindings. Absent, a script still
+	// runs and the step simply carries no binding -- which is what every
+	// call outside a run looks like anyway.
+	bindings BindingRecorder
+}
+
+// WithBindings wires the step journal. A call that names no `stepId` records
+// nothing either way: an ad-hoc runScript is not a step of anything.
+func (r *Runner) WithBindings(b BindingRecorder) *Runner {
+	r.bindings = b
+	return r
 }
 
 // NewRunner builds one. Either surface may be nil -- a node that hosts
@@ -417,6 +437,13 @@ func (r *Runner) Run(ctx context.Context, req Request) (Receipt, error) {
 	command := buildCommand(script.Entry, remotePath, req.Args)
 	receipt.Command = command
 
+	// THE BINDING IS RECORDED BEFORE THE BODY RUNS, which is the whole point
+	// of recording it (spec section D: the `running` version carries the
+	// binding and the bound input, written before anything executes). A
+	// binding stamped afterwards would be missing from exactly the case a
+	// person reads it for -- a step that started and never came back.
+	r.stampBinding(ctx, req, receipt)
+
 	started := r.now()
 	execArgs := map[string]any{"cmd": command}
 	if req.TimeoutSec > 0 {
@@ -444,6 +471,39 @@ func (r *Runner) Run(ctx context.Context, req Request) (Receipt, error) {
 		receipt.DurationMs = int64(d)
 	}
 	return receipt, nil
+}
+
+// stampBinding records what this dispatch decided.
+//
+// WHAT IT KNOWS AND WHAT IT DOES NOT. A script step's dispatch decides the
+// SKILL, the SURFACE, the machine labels it required and the bytes it shipped
+// -- and those are what go on the row. The provider half of the binding
+// (`providerPolicy`, `provider`, `model`) belongs to a REASONING step's
+// dispatch, which resolves a provider; a script step calls no model, so
+// writing those keys here would be recording a decision nobody made.
+//
+// Best-effort: a binding that does not land is logged by the journal and
+// costs the caller nothing. The script is the work; this is the record.
+func (r *Runner) stampBinding(ctx context.Context, req Request, receipt Receipt) {
+	if r.bindings == nil || strings.TrimSpace(req.StepID) == "" {
+		return
+	}
+	binding := map[string]any{
+		"skillIds": []string{receipt.SkillID},
+		"surface":  receipt.Surface,
+		// The bytes this step will run, by hash. It is what makes a receipt
+		// answerable later: two runs of one step key that shipped different
+		// content are visibly different runs.
+		"artifactId":  receipt.ArtifactID,
+		"contentHash": receipt.ContentHash,
+	}
+	if receipt.Platform != "" {
+		binding["platform"] = receipt.Platform
+	}
+	if len(req.RequireLabels) > 0 {
+		binding["machineLabels"] = req.RequireLabels
+	}
+	_ = r.bindings.StampBinding(ctx, req.OwnerID, req.StepID, binding)
 }
 
 func (r *Runner) ship(ctx context.Context, surface Surface, req Request, remotePath string, data []byte) error {

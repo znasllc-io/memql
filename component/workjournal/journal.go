@@ -480,3 +480,45 @@ func firstWord(s string) string {
 	}
 	return s
 }
+
+// ---------------------------------------------------------------------------
+// Bindings
+// ---------------------------------------------------------------------------
+
+// StampBinding records on a step what the dispatch decided (spec section C).
+//
+// A SECOND WRITER OF updateWorkStep, and it is deliberately not the Step
+// handle above. A binding is made by whatever DISPATCHED the step -- for a
+// script step that is `runScript`, which runs inside the tool loop and holds
+// no journal handle -- so it is addressed by step id rather than by a handle
+// somebody would have to thread through the dispatcher.
+//
+// It is here rather than at the dispatcher for the reason everything else in
+// this package is: `updateWorkStep` is `@serverOnly`, the internal-origin
+// stamp is allowlisted per package, and `integrations/skills` is not a
+// package that list should admit.
+//
+// AN EMPTY BINDING IS NOT WRITTEN. `objectArg` drops an empty map, so a
+// dispatch that decided nothing leaves the field ABSENT rather than writing
+// `{}` -- and absent is the honest reading of "no dispatch has happened yet".
+// The distinction matters because `null` is a different thing again: it fails
+// the concept's `object` type and would refuse the whole row, which is why
+// nothing here ever renders one.
+func (j *Journal) StampBinding(ctx context.Context, ownerUserID, stepID string, binding map[string]any) error {
+	if j == nil || j.engine == nil {
+		return nil
+	}
+	stepID = strings.TrimSpace(stepID)
+	if stepID == "" || len(binding) == 0 {
+		return nil
+	}
+	owner := strings.TrimSpace(ownerUserID)
+	if owner == "" {
+		return fmt.Errorf("workjournal: a binding needs the step owner's id to be written under")
+	}
+	_, err := j.engine.Execute(
+		auth.ContextWithInternalOrigin(auth.ContextWithUserActor(ctx, owner)),
+		call("mutation updateWorkStep", arg("stepId", stepID), objectArg("binding", binding)),
+	)
+	return err
+}

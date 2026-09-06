@@ -153,6 +153,36 @@ readonly DB_GATED_TREES=(
 # derives a node's issuer and CORS origins from the SAME role-vs-site host rule
 # the Ingress generator writes hosts with, and a root-module package cannot be
 # imported from a nested one with GOWORK=off.
+#
+# memql#4970 added `component/skills` and `component/workjournal`, for exactly
+# the reason `component/frontdoor` exists: both are imported from `integrations`
+# (the planner's bundle mint and the skills integration take the first; the
+# Library's analysis pass takes the second), and a root-module package cannot
+# be imported from a nested one with GOWORK=off.
+#
+# What the complement now means, HAVING LOOKED rather than assumed:
+#
+#	go list github.com/znasllc-io/memql/... | grep -E 'component/(skills|workjournal)$'
+#	  github.com/znasllc-io/memql/component/skills
+#	  github.com/znasllc-io/memql/component/workjournal
+#
+# Both are enumerated in workspace mode, so `selection_test.go`,
+# `internal_origin_precondition_test.go` and their siblings run in THIS lane and
+# need no lane of their own -- and both appear in the complement itself, which
+# is the check that matters and is the one that was run:
+#
+#	scripts/ci/db-gated-packages.sh --complement | grep -cE 'component/(skills|workjournal)$'
+#	  2
+#
+# The complement rose to 191. Each module is additionally built and vetted with
+# GOWORK=off by the `module-boundaries` lane, which is where the boundary itself
+# is enforced.
+#
+# Neither is db-gated: `component/skills` is pure over row structs, and
+# `component/workjournal` asserts the calls it renders against a recording
+# executor rather than against a database -- so neither belongs in
+# DB_GATED_TREES above, and adding one there would move real coverage out of
+# every lane that runs without Postgres.
 readonly KNOWN_GO_MOD_DIRS=(
 	"."
 	"component/actions"
@@ -195,7 +225,9 @@ readonly KNOWN_GO_MOD_DIRS=(
 	"component/secret"
 	"component/server"
 	"component/service"
+	"component/skills"
 	"component/worker"
+	"component/workjournal"
 	"core"
 	"docs"
 	"dsl"
