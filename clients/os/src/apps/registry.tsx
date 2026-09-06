@@ -10,6 +10,7 @@ import {
   Sparkles,
   Trash2,
   Users,
+  Waypoints,
 } from "lucide-react";
 
 import { AskSurface } from "../ask/AskSurface";
@@ -34,6 +35,8 @@ import { TrainingApp } from "./training/TrainingApp";
 import { TRAINING_SECTIONS } from "./training/settings";
 import { UsersApp } from "./users/UsersApp";
 import { USERS_SECTIONS } from "./users/settings";
+import { WorkApp } from "./work/WorkApp";
+import { WORK_SECTIONS } from "./work/settings";
 
 // The installed roster (spec D12). Every app is real now -- Files (epic
 // #4721) replaced the last stub, and the `stub` helper and StubApp went with
@@ -365,6 +368,40 @@ const bin: OsAppManifest = {
   component: BinApp,
 };
 
+// Work, in full (the work spine, sub-project A). What you asked the system to
+// do, what it did about it, and the places it had to stop and ask you.
+//
+// GOALS IS FIRST and is therefore the section a window opens on: a goal is
+// what this app is for, and runs, steps and approvals are all things a goal
+// produced. The app's own settings can point a window at Approvals instead,
+// which is the choice somebody who lives in this app all day makes -- a run
+// parked on a question does not move until a person answers it.
+//
+// The section list is WORK_SECTIONS rather than a literal, for the reason its
+// nine siblings are: the gear and the manifest must offer the same set, and a
+// second copy of the list is one that can disagree.
+//
+// NO MANIFEST ROLE. Every `v1:work:*` concept declares the composite tier
+// (`@rowAuthz(owner="ownerUserId", clusterOwner)`), so every signed-in person
+// has goals of their own to read and the engine decides how far each list
+// reaches. Gating here would be presentation pretending to be authorization --
+// the same reading Files, Deployables and Campaigns record. The writes carry
+// their gate in the engine: each `integration.work.*` builtin repeats its own,
+// because a builtin's annotation set carries no `@requiresRank`.
+//
+// THE ICON IS A PATH WITH STOPS ON IT, which is what a run is and what this
+// app draws: the spine down the left of a run timeline, thin between the steps
+// that cost nothing and thick where the machine had to think.
+const work: OsAppManifest = {
+  id: "work",
+  name: "Work",
+  icon: Waypoints,
+  sections: WORK_SECTIONS,
+  settingsSection: "settings",
+  logsSection: "logs",
+  component: WorkApp,
+};
+
 function AskWidgetBody() {
   const { transport, voice, settings } = useAsk();
   return (
@@ -381,6 +418,6 @@ const askWidget: OsWidgetManifest = {
 };
 
 export const OS_REGISTRY: OsRegistry = {
-  apps: [accounts, campaigns, files, deployables, fleet, logs, users, training, settings, bin],
+  apps: [accounts, campaigns, files, deployables, fleet, logs, users, training, work, settings, bin],
   widgets: [askWidget],
 };
