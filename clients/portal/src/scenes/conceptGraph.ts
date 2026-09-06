@@ -6,7 +6,7 @@ import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 //
 // PURE, AND IMPORTS NO three.js. Everything the graph can be wrong about that
 // does not need a GPU is here and is tested without one -- the same split the
-// goal map already makes between nexus/scene/ and nexus/map/NexusCanvas.tsx,
+// registry already makes between scenes/ and scenes/ConceptGraphCanvas.tsx,
 // for the same reason: a scene that renders nothing at all does so silently,
 // with a live WebGL context and a full scene graph behind it, so the parts
 // that CAN be asserted must be assertable.
@@ -43,7 +43,7 @@ export interface ConceptGraph {
 }
 
 // The node budget. Above this the layout stops adding, for the same reason the
-// goal map clusters: a sphere of ten thousand points is not a reading of
+// the retired goal map clustered: a sphere of ten thousand points is not a reading of
 // anything, and the frame cost is real.
 export const GRAPH_NODE_CAP = 300;
 

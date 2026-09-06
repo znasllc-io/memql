@@ -17,10 +17,10 @@ import {
   DEFAULT_CLUSTER_THRESHOLD,
   MIN_SEPARATION,
   layout,
-} from "../src/nexus/scene/layout";
-import { events, timelineBounds } from "../src/nexus/scene/events";
-import { NOW, goalProgress, scene } from "../src/nexus/scene/scene";
-import { GOAL_NODE_ID, YOU_NODE_ID, semanticTasks } from "../src/nexus/scene/world";
+} from "../../src/nexus/scene/layout";
+import { events, timelineBounds } from "../../src/nexus/scene/events";
+import { NOW, goalProgress, scene } from "../../src/nexus/scene/scene";
+import { GOAL_NODE_ID, YOU_NODE_ID, semanticTasks } from "../../src/nexus/scene/world";
 import {
   MOMENT,
   cancelledGoal,
@@ -28,7 +28,7 @@ import {
   emptyGoal,
   failedGoal,
   springCatalogGoal,
-} from "../src/nexus/scene/fixtures";
+} from "../../src/nexus/scene/fixtures";
 
 describe("layout", () => {
   it("puts you at the start and the goal at the end", () => {

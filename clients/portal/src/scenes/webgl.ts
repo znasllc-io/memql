@@ -63,4 +63,4 @@ export function probeWebGL(): boolean {
 // Re-exported from the kit since memql#4651: the Constellation needs the same
 // read, so there is one implementation of it and this module keeps the name
 // the scene's helpers already import.
-export { prefersReducedMotion } from "../../ui/motion";
+export { prefersReducedMotion } from "../ui/motion";

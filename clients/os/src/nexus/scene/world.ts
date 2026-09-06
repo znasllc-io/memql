@@ -1,3 +1,24 @@
+// MOVED FROM THE PORTAL in the work spine's epic A1 (decision D7).
+//
+// The portal's Nexus pages are deleted; this pure layout library is what
+// survived, because it is functions over rows with no renderer and no GPU
+// -- it tests on fixtures and it is the part sub-project B reuses.
+//
+// TWO THINGS SUB-PROJECT B CHANGES, and they are why this is not just a
+// file move:
+//
+//  1. concepts.ts still names PLAN_CONCEPT_ID and TASK_CONCEPT_ID
+//     (v1:planner:plan / task). B re-points them at v1:work:run and
+//     v1:work:step, which is the whole reason the library was worth
+//     keeping -- the SHAPE of a goal's world (a root, its steps by phase,
+//     the artifacts and constructs hanging off them) is unchanged by the
+//     rows underneath it.
+//  2. The OS map is 2D. The portal rendered this with three.js; MemQL OS
+//     carries NO WebGL by owner requirement (epic memql#4785), so the
+//     renderer was deleted with the pages and the Deployables app's 2D
+//     map is the shape to adapt. Nothing in this directory imports a
+//     renderer, which is what makes that swap a rendering decision rather
+//     than a rewrite.
 // The rows a goal's world is made of, and the node identities drawn from
 // them.
 //

@@ -441,7 +441,6 @@ var convergedPages = []struct {
 	{"clients/portal/src/me/manifests.ts", "me.settings"},
 	{"clients/portal/src/me/manifests.ts", "me.sessions"},
 	{"clients/portal/src/me/manifests.ts", "me.security"},
-	{"clients/portal/src/nexus/goalPage.ts", "nexus.goal"},
 }
 
 // TestConvergedPagesAreManifests is the guard growing with each converged page,

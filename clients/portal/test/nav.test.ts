@@ -23,10 +23,11 @@ import {
 describe("the rail", () => {
   it("is seven flat destinations, in the designed order", () => {
     // The COUNT is the decision (D1). A rail is a thing you scan, and this one
-    // carried seventeen rows plus one per saved view.
+    // carried seventeen rows plus one per saved view. Six now: Nexus left with
+    // the pages it named (work spine A1, decision D7) and is being rebuilt on
+    // MemQL OS.
     expect(DESTINATIONS.map((d) => d.label)).toEqual([
       "Console",
-      "Nexus",
       "Views",
       "Concepts",
       "Fleet",
@@ -137,7 +138,7 @@ describe("which destination owns the open address", () => {
     // "/" prefixes every path in the application, so a prefix match would
     // light Console permanently.
     expect(active("console", "/")).toBe(true);
-    for (const path of ["/nexus", "/views", "/concepts", "/fleet/machines"]) {
+    for (const path of ["/views", "/concepts", "/artifacts", "/fleet/machines"]) {
       expect(`${path}: ${active("console", path)}`).toBe(`${path}: false`);
     }
   });

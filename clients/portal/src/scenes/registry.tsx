@@ -1,7 +1,7 @@
 import { Suspense, lazy, type ReactNode } from "react";
 import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Skeleton } from "../../ui";
+import { Skeleton } from "../ui";
 
 // The SCENE registry (epic memql#4661, task memql#4672).
 //
@@ -29,9 +29,13 @@ import { Skeleton } from "../../ui";
 // THE LAZY-CHUNK RULE, EXTENDED
 // ===========================================================================
 // three.js, react-three-fiber and drei are the portal's largest dependency and
-// no other page uses them. The rule was "only NexusCanvas.tsx may import
-// them"; with a registry it becomes "only the modules under nexus/*/canvas
-// paths may", enforced by nexusMap.test.tsx over the whole nexus tree.
+// no other page uses them. The rule is "only ConceptGraphCanvas.tsx may import
+// them", enforced by scenes.test.ts over the whole portal tree.
+//
+// The rule used to name NexusCanvas.tsx as well; the Nexus pages are deleted
+// (work spine A1, decision D7) and the goal map went with them, because the
+// rows it drew are being replaced and MemQL OS -- where Nexus is rebuilt --
+// carries no WebGL at all.
 //
 // Every entry below is therefore a `lazy()` boundary. That is not an
 // optimisation to revisit: a static import here would put the entire WebGL
@@ -61,9 +65,6 @@ export interface SceneDefinition {
 const ConceptGraphScene = lazy(async () => ({
   default: (await import("./ConceptGraphScene")).ConceptGraphScene,
 }));
-const GoalMapScene = lazy(async () => ({
-  default: (await import("./GoalMapScene")).GoalMapScene,
-}));
 
 export const SCENES: readonly SceneDefinition[] = [
   {
@@ -74,19 +75,6 @@ export const SCENES: readonly SceneDefinition[] = [
     render: (props) => (
       <ConceptGraphScene
         concept={props.concept}
-        rows={props.rows}
-        selectedRowId={props.selectedRowId}
-        onSelect={props.onSelect}
-      />
-    ),
-  },
-  {
-    id: "goalMap",
-    title: "Goal map",
-    summary: "One goal materializing: its planner, its specialists, its tasks and what they made.",
-    needs: "A plan of yours. It reads one goal at a time, not a population.",
-    render: (props) => (
-      <GoalMapScene
         rows={props.rows}
         selectedRowId={props.selectedRowId}
         onSelect={props.onSelect}

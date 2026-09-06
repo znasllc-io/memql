@@ -18,7 +18,7 @@ import { LiveBandPanel } from "../concepts/LiveBandPanel";
 import { Empty } from "../components/StatusMessage";
 import { ErrorNotice, PopulationMeta, Skeleton } from "../ui";
 import { WIDGET_IDS, renderWidget } from "../widgets/registry";
-import { SCENE_IDS, renderScene } from "../nexus/scene/registry";
+import { SCENE_IDS, renderScene } from "../scenes/registry";
 import { useLookups } from "./useLookups";
 import type { PageSection } from "./manifest";
 

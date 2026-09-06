@@ -11,4 +11,4 @@
 // Constellation became a second consumer of the identical hook. This module
 // stays as the name the map's own files import, so the scene keeps reading as
 // a self-contained surface.
-export { useReducedMotion } from "../../ui/motion";
+export { useReducedMotion } from "../ui/motion";

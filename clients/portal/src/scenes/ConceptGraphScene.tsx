@@ -1,9 +1,9 @@
 import { Suspense, lazy, useMemo, useState, type ReactNode } from "react";
 import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Panel, Skeleton } from "../../ui";
-import { useReducedMotion } from "../map/useReducedMotion";
-import { probeWebGL } from "../map/webgl";
+import { Panel, Skeleton } from "../ui";
+import { useReducedMotion } from "./useReducedMotion";
+import { probeWebGL } from "./webgl";
 import { buildConceptGraph } from "./conceptGraph";
 
 // The Constellation, made live and generic (epic memql#4661, task memql#4672).
@@ -20,7 +20,7 @@ import { buildConceptGraph } from "./conceptGraph";
 // ===========================================================================
 // THE CANVAS IS A LAZY CHUNK AND THIS FILE IS NOT
 // ===========================================================================
-// Same discipline as the goal map, and the same reason: three.js, fiber and
+// The lazy-chunk discipline, and the reason for it: three.js, fiber and
 // drei are the portal's largest dependency, this registry is reachable from
 // every arranged page, and a static import here would put the whole WebGL
 // stack in the main bundle. So the three.js lives one dynamic import away, and

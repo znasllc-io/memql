@@ -14,7 +14,7 @@ import {
 import { newShortId } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "../cluster/ClusterProvider";
-import { SCENE_IDS } from "../nexus/scene/registry";
+import { SCENE_IDS } from "../scenes/registry";
 import { WIDGET_IDS } from "../widgets/registry";
 import { ARRANGEMENT_SUGGEST_DOMAIN } from "../compose/suggest";
 import { serializeArrangement } from "../compose/savedViews";

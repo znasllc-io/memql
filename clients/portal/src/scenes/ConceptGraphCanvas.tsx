@@ -3,7 +3,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 
-import { readPalette } from "../map/palette";
+import { readPalette } from "./palette";
 import type { ConceptGraph, GraphNode } from "./conceptGraph";
 
 // The constellation, drawn (epic memql#4661, task memql#4672).
@@ -11,11 +11,11 @@ import type { ConceptGraph, GraphNode } from "./conceptGraph";
 // ===========================================================================
 // THIS MODULE IMPORTS three.js, AND ITS SIBLING DOES NOT
 // ===========================================================================
-// Same rule the goal map follows, extended to the scene registry: everything
+// The scene registry's rule: everything
 // the graph can be wrong about that does not need a GPU lives in
 // conceptGraph.ts and is tested there; this file draws what that returns and
-// is reached only through a dynamic import. nexusMap.test.tsx fails the build
-// if any other module under nexus/ imports three, fiber or drei.
+// is reached only through a dynamic import. scenes.test.ts fails the build if
+// any other module in the portal imports three, fiber or drei.
 //
 // ===========================================================================
 // FRAME LOOP ON DEMAND
@@ -27,7 +27,7 @@ import type { ConceptGraph, GraphNode } from "./conceptGraph";
 //
 // THE PREDICATE IS EVALUATED PER FRAME, not captured at render. A boolean
 // closed over at render time either spins forever or never wakes: this is the
-// bug the goal map's governor comment records, and it is the same shape here.
+// bug a captured-boolean governor produces, and it is the shape to avoid here.
 //
 // Under reduced motion there is no drift at all, so the loop settles on the
 // first frame and stays settled.
@@ -90,7 +90,7 @@ export default function ConceptGraphCanvas({
 // One instanced mesh for every node.
 //
 // INSTANCED because the count is unbounded up to the cap: 300 nodes is one
-// draw call rather than three hundred. The goal map makes the same choice for
+// draw call rather than three hundred. The retired goal map made the same choice for
 // the same reason, and does NOT instance its singletons -- there is no
 // singleton here, so everything is instanced.
 function Nodes({
