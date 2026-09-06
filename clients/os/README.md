@@ -1151,6 +1151,15 @@ question each of them answers.
   `viewKey`, because a composition landing reveals rows the browser already
   held -- the desk-shortcut lesson, applied to a second id set.
 
+  Two consequences of that feed, both deliberate. It is always on, including
+  for somebody who has never used the Materializer, because the SHUT place's
+  count needs it -- a place that could only count once you opened it would be
+  unlike the three above it. And for a CLUSTER OWNER `compositions` returns
+  the instance's, not just theirs (the composite tier's read escape), so the
+  feed holds rows whose outputs this caller does not own. Nothing leaks: the
+  join runs against `content`, which is the caller's own artifacts and
+  nobody else's, so a composition of somebody else's simply matches nothing.
+
 - **Its empty line has THREE states, because the rail lists folders and the
   place holds files.** No folder holds an output while the place is full is a
   real state -- every output filed at the Library root -- and "Nothing has been
