@@ -27,7 +27,7 @@ require (
 	github.com/znasllc-io/memql/core v0.0.0
 	github.com/znasllc-io/memql/dsl v0.0.0
 	github.com/znasllc-io/memql/integrations/email v0.0.0
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
 )
@@ -110,7 +110,6 @@ replace github.com/znasllc-io/memql/component/events => ../events
 replace github.com/znasllc-io/memql/component/envregistry => ../envregistry
 
 replace github.com/znasllc-io/memql/component/grpc/gen => ../grpc/gen
-
 
 replace github.com/znasllc-io/memql/component/language => ../language
 
