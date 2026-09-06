@@ -36,6 +36,7 @@
 package ci
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -443,4 +444,125 @@ func keysOf(m map[string]bool) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// ---------------------------------------------------------------------------
+// The image references have to agree with each other, and nothing else checks it
+// ---------------------------------------------------------------------------
+
+// EVERY reference to the same image REPOSITORY must be byte-identical -- same
+// tag, same digest -- whether it appears as `FROM` or as `COPY --from=`.
+//
+// # The failure this exists to prevent
+//
+// Dependabot cannot see `COPY --from=<image>`. It updates `FROM` lines and
+// leaves those behind, so a base-image bump is PARTIAL BY CONSTRUCTION
+// wherever a stage copies out of an image by name rather than by stage.
+//
+// This Dockerfile has exactly that shape: `spa-build` is `FROM node:...`, and
+// `workbench-runtime` lifts the node binary and its modules with two
+// `COPY --from=node:...` lines. A bump that moved the FROM and not the copies
+// would ship one Node version building the bundle and a different one running
+// somebody else's code -- in the image whose whole purpose is running somebody
+// else's code -- while the comment above those two lines says they are the same
+// image.
+//
+// It nearly happened twice on 2026-09-06: dependabot#5033 (node 22 -> 26) and
+// #5032 (debian 12 -> 13) were both this, and both were caught by a human
+// reading line numbers rather than by any lane.
+//
+// # Why the grouping key is the REPOSITORY and not the tag
+//
+// The obvious implementation groups by `node:22-bookworm-slim` and asserts one
+// digest per group. That detects nothing here: dependabot's edit changes the
+// TAG, so the drifted lines land in two different groups and each is
+// internally consistent. The key has to be the part before the tag.
+//
+// A Dockerfile that genuinely needs two versions of one repository would fail
+// this. That is deliberate -- it is rare, it is worth stating out loud, and a
+// gate that permits it by default cannot see the case it exists for.
+func TestEveryReferenceToAnImageAgreesWithTheOthers(t *testing.T) {
+	body := readRepoFile(t, "Dockerfile")
+	stages := dockerfileStages(t, body)
+
+	// `FROM x [AS y]` and `COPY --from=x`. `x` is a STAGE when it names one
+	// this file declares, or is an ARG expansion; anything else is an image.
+	refRe := regexp.MustCompile(`(?mi)^(?:FROM\s+(\S+)|COPY\s+--from=(\S+))`)
+
+	type ref struct {
+		full string
+		line int
+	}
+	byRepo := map[string][]ref{}
+	for _, m := range refRe.FindAllStringSubmatchIndex(body, -1) {
+		raw := ""
+		for _, g := range [][2]int{{2, 3}, {4, 5}} {
+			if m[g[0]] >= 0 {
+				raw = body[m[g[0]]:m[g[1]]]
+			}
+		}
+		if raw == "" || strings.HasPrefix(raw, "${") || stages[strings.ToLower(raw)] {
+			continue // a stage reference, not an image
+		}
+		repo := raw
+		if i := strings.Index(repo, "@"); i >= 0 {
+			repo = repo[:i]
+		}
+		if i := strings.LastIndex(repo, ":"); i >= 0 {
+			repo = repo[:i]
+		}
+		byRepo[repo] = append(byRepo[repo], ref{
+			full: raw,
+			line: strings.Count(body[:m[0]], "\n") + 1,
+		})
+	}
+
+	if len(byRepo) == 0 {
+		t.Fatal("no external image references found in the Dockerfile; this guard is scanning nothing")
+	}
+
+	for _, repo := range keysOf(func() map[string]bool {
+		s := map[string]bool{}
+		for k := range byRepo {
+			s[k] = true
+		}
+		return s
+	}()) {
+		refs := byRepo[repo]
+
+		// Every reference must carry a digest. Without one the agreement
+		// below is satisfied by two unpinned copies of a moving tag.
+		for _, r := range refs {
+			if !strings.Contains(r.full, "@sha256:") {
+				t.Errorf("Dockerfile:%d references %q with no @sha256 digest.\n"+
+					"Every external image is digest-pinned here; an unpinned tag moves under the build.",
+					r.line, r.full)
+			}
+		}
+
+		distinct := map[string][]int{}
+		for _, r := range refs {
+			distinct[r.full] = append(distinct[r.full], r.line)
+		}
+		if len(distinct) <= 1 {
+			continue
+		}
+		var b strings.Builder
+		for _, form := range keysOf(func() map[string]bool {
+			s := map[string]bool{}
+			for k := range distinct {
+				s[k] = true
+			}
+			return s
+		}()) {
+			fmt.Fprintf(&b, "\n    %s  (lines %v)", form, distinct[form])
+		}
+		t.Errorf("the Dockerfile references image repository %q in %d different forms:%s\n"+
+			"Every FROM and COPY --from naming the same repository must be byte-identical.\n"+
+			"Dependabot updates FROM lines and CANNOT SEE `COPY --from=<image>`, so this is\n"+
+			"what a partially-applied base-image bump looks like -- and the stage that copies\n"+
+			"out of the image by name ends up on a different version from the one that built it.\n"+
+			"If two versions are genuinely required, this guard is the place to say why.",
+			repo, len(distinct), b.String())
+	}
 }
