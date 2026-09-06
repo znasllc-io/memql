@@ -286,6 +286,12 @@ concept memory {
 /// indexFileOnCreate. Per-row authz: the composite tier (memql#4312) -- the owner, or a cluster
 /// owner; ownerUserId is stamped from actor.userId and never accepted from caller args.
 @displayCard(primary="name", secondary="summary", tertiary="createdAt", status="status")
+// The Materializer's mark (epic memql#4977). A person's own files are the
+// most obvious thing to compose a new file FROM -- a set of notes into a
+// report, three spreadsheets into one. `fields` is deliberately short: the
+// compose step is handed the summary and the shape of the file rather than
+// its blobUrl and its sha256, which say nothing a model can write from.
+@composable(as="file", fields="name,mimeType,format,summary,createdAt", list="libraryFilesForOwner")
 @rowAuthz(owner="ownerUserId", clusterOwner)
 concept file {
   ownerUserId  string!  @serverSet  @description("v1:identity:user.id that owns this file. Stamped from actor.userId on every write and never accepted as a mutation arg -- the upload route runs as the authenticated caller, and the detached analysis pass re-enters under that same user's actor (auth.ContextWithUserActor). @serverSet turns 'never a caller arg' into a LOAD-TIME rejection (memql#3175); the engine also server-stamps it from the @rowAuthz declaration above on the raw insert() surface that bypasses accept/stamp (memql#3059). The load-bearing per-row authz key.")

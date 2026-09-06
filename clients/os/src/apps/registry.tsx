@@ -2,6 +2,7 @@ import {
   Building2,
   Files as FilesIcon,
   GraduationCap,
+  Layers,
   MonitorSmartphone,
   Rocket,
   ScrollText,
@@ -31,6 +32,8 @@ import { FleetApp } from "./fleet/FleetApp";
 import { FLEET_SECTIONS } from "./fleet/settings";
 import { LogsApp } from "./logs/LogsApp";
 import { LOGS_SECTIONS } from "./logs/settings";
+import { MaterializerApp } from "./materializer/MaterializerApp";
+import { MATERIALIZER_SECTIONS } from "./materializer/settings";
 import { SettingsApp } from "./settings/SettingsApp";
 import { TrainingApp } from "./training/TrainingApp";
 import { TRAINING_SECTIONS } from "./training/settings";
@@ -415,6 +418,35 @@ const nexus: OsAppManifest = {
   component: NexusApp,
 };
 
+// THE MATERIALIZER (epic memql#4977): where a person and the model compose
+// data from the memory graph into a file.
+//
+// NO MANIFEST ROLE. Every `v1:compose:*` concept declares the composite tier
+// (`@rowAuthz(owner="ownerUserId", clusterOwner)`), so every signed-in person
+// has compositions of their own and the engine decides how far each list
+// reaches. Gating here would be presentation pretending to be authorization --
+// the reading Files, Deployables, Campaigns and Work all record. The writes
+// carry their gate in the engine: each `integration.compose.*` builtin repeats
+// its own, because a builtin's annotation set carries no `@requiresRank`.
+//
+// THE APP IS `materializer` WHILE THE NAMESPACE IS `compose`, and that is the
+// epic's own split rather than a slip: `materializer` already names the
+// engine's boot seeder, so the ROWS could not take the word -- but
+// `v1:work:goal.requestedVia` has carried the string "materializer" for the
+// surface since before this app existed.
+//
+// THE ICON IS STACKED PLANES, which is what a composition is: rows, a
+// template and a format pressed into one file.
+const materializer: OsAppManifest = {
+  id: "materializer",
+  name: "Materializer",
+  icon: Layers,
+  sections: MATERIALIZER_SECTIONS,
+  settingsSection: "settings",
+  logsSection: "logs",
+  component: MaterializerApp,
+};
+
 function AskWidgetBody() {
   const { transport, voice, settings } = useAsk();
   // The widget hands a prompt off exactly as the sheet does (epic memql#4785).
@@ -441,6 +473,19 @@ const askWidget: OsWidgetManifest = {
 };
 
 export const OS_REGISTRY: OsRegistry = {
-  apps: [accounts, campaigns, files, deployables, fleet, logs, users, training, nexus, settings, bin],
+  apps: [
+    accounts,
+    campaigns,
+    files,
+    deployables,
+    fleet,
+    logs,
+    materializer,
+    users,
+    training,
+    nexus,
+    settings,
+    bin,
+  ],
   widgets: [askWidget],
 };

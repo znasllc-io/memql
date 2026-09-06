@@ -203,6 +203,12 @@ concept senderIdentity {
 /// is on the operator-facing writes, and the counters land on a row the worker was authorized to
 /// touch rather than on one it reached past the owner tier.
 @displayCard(primary="name", secondary="scheduledAt", tertiary="audienceId", status="status")
+// The Materializer's mark (epic memql#4977). "How did last quarter's sends
+// go" is a document somebody writes by hand today. `fields` carries the
+// campaign's identity and its outcome and NOT its counters: those live on
+// the send job and the delivery ledger, and a compose prompt handed a
+// frozen estimate would report it as a result.
+@composable(as="campaign", fields="name,status,scheduledAt,startedAt,completedAt,lastError", list="campaigns")
 @rowAuthz(owner="ownerUserId", clusterOwner)
 concept campaign {
   ownerUserId     string!  @description("v1:identity:user.id that owns this campaign. Stamped from actor.userId. The per-row authz key.")

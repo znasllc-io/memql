@@ -84,6 +84,13 @@ use identity.concepts.{ user }
 /// plus the cluster-owner escape.
 @rowAuthz(owner="ownerUserId", rankVisible, unowned="admin", clusterOwner)
 @displayCard(primary="name", secondary="domain", tertiary="primaryContactEmail", status="status")
+// The Materializer's mark (epic memql#4977). A client is what most of the
+// work this instance does is FOR, so a composition addressed to one is the
+// commonest shape there is: a quarterly summary, a statement of work.
+// `fields` excludes every contact detail but the primary one -- a compose
+// prompt handed a full contact card spends its context on an address it
+// will not write.
+@composable(as="client", fields="name,domain,primaryContactEmail,status", list="clientAccountsAll")
 concept account {
   ownerUserId  string   @description("v1:identity:user.id that created this account, or EMPTY for a cluster-owned one. Stamped from the actor by createAccount, which is what makes the tier above true rather than aspirational; a write made by a SYNTHETIC actor -- the seed materializer, a maintenance actor, an automation's system actor -- has that stamp undone and produces a cluster-owned row instead, which is how the seeded `self` row gets its empty owner (memql#4817). NARROWER THAN THE SENTENCE THIS REPLACED, which said `a cluster owner, a system actor, or trusted server-side Go` and was wrong on two of the three: a real cluster owner keeps their stamp, and so does an internal-origin write. Only an actor carrying AccessContext.Synthetic is undone -- and borrowed authority (ContextWithUserActor) is deliberately NOT one, because it acts as a real person and the rows it creates are theirs. NOT `string!`: an empty value is the meaningful cluster-owned state, and `string!` would refuse the seed.")
   name         string!  @description("The client's name, as a person would say it. REQUIRED, and it is the one thing the first-run card insists on (D7) -- an account whose name is a placeholder is a row nobody can pick out of a list. The seeded `self` row gets a starter value rather than a real one precisely so the card has something to ask for; see dsl/accounts/seeds.memql for why that starter is not a lie the app has to detect.")
