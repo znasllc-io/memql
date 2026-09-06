@@ -1,0 +1,253 @@
+// mutations.memql
+//
+// Writes over the work namespace. ALL @serverOnly in epic A1: the journal
+// writes them from component/automations/journal.go under internal
+// origin, and nothing client-reachable writes a run. Epic A2 adds the
+// client-reachable createGoal / cancelGoal / decideApproval on top.
+//
+// The insert blocks use accept/stamp: accept names the caller-provided
+// args copied verbatim, stamp names what the engine decides. ownerUserId
+// is stamped from actor.userId; under the journal's synthetic cluster
+// actor the engine then blanks it to present-and-empty, which is the
+// deployment's row (component/memql/rowauthz_nonprincipal_owner.go).
+
+use work.concepts.{ goal, run, step, modelCall, approval, observation }
+
+/// Open a run. status is an argument rather than a stamp so epic A2 can open a run in `compiling`.
+@serverOnly
+@actor
+mutate run createWorkRun {
+  args {
+    runId                  string!
+    goalId                 string
+    automationName         string!
+    templateFingerprint    string!
+    input                  object
+    inputFingerprint       string
+    triggeredBy            string
+    triggerEvent           object
+    callerSuppliedPayload  bool
+    mode                   string
+    forkedFromRunId        string
+    forkAtStepKey          string
+    status                 string!
+    nodeId                 string
+    initialChainHead       string
+    startedAt              string!
+  }
+  insert {
+    accept { goalId, automationName, templateFingerprint, input, inputFingerprint, triggeredBy, triggerEvent, callerSuppliedPayload, mode, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, startedAt }
+    stamp {
+      id: args.runId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Advance a run: a heartbeat, the chain head, or the terminal status. Read-merge, so every field
+/// not named keeps its prior value.
+@serverOnly
+mutate run updateWorkRun {
+  args {
+    runId            string!
+    status           string
+    heartbeatAt      string
+    chainHead        string
+    stepOrder        []string
+    waitingOn        object
+    spent            object
+    outcome          object
+    errorCode        string
+    errorMessage     string
+    finishedAt       string
+    cancelRequested  bool
+    cancelledBy      string
+    actualFootprint  object
+    summary          object
+  }
+  update {
+    accept { status, heartbeatAt, chainHead, stepOrder, waitingOn, spent, outcome, errorCode, errorMessage, finishedAt, cancelRequested, cancelledBy, actualFootprint, summary }
+    stamp {
+      id: args.runId
+    }
+  }
+}
+
+/// Write a step's intent: the `running` version before the body executes. A retry writes this
+/// again for the same stepId with attempt incremented.
+@serverOnly
+@actor
+mutate step createWorkStep {
+  args {
+    stepId          string!
+    runId           string!
+    key             string!
+    seq             int!
+    stepType        string!
+    kind            string
+    call            object
+    dependsOn       []string
+    status          string!
+    attempt         int!
+    idempotencyKey  string
+    startedAt       string
+  }
+  insert {
+    accept { runId, key, seq, stepType, kind, call, dependsOn, status, attempt, idempotencyKey, startedAt }
+    stamp {
+      id: args.stepId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Write a step's receipt: the done / failed / skipped version after the body. Read-merge.
+@serverOnly
+mutate step updateWorkStep {
+  args {
+    stepId             string!
+    status             string
+    result             object
+    resultFingerprint  string
+    actualFootprint    object
+    postcondition      object
+    symptom            string
+    attempt            int
+    errorCode          string
+    errorMessage       string
+    finishedAt         string
+    durationMs         int
+    tokens             int
+    cost               float
+    childRunId         string
+    approvalId         string
+    resumeAt           string
+    externalKey        string
+  }
+  update {
+    accept { status, result, resultFingerprint, actualFootprint, postcondition, symptom, attempt, errorCode, errorMessage, finishedAt, durationMs, tokens, cost, childRunId, approvalId, resumeAt, externalKey }
+    stamp {
+      id: args.stepId
+    }
+  }
+}
+
+/// Create a goal. Server-only in A1; epic A2 adds the client-reachable createGoal.
+@serverOnly
+@actor
+mutate goal createWorkGoal {
+  args {
+    goalId            string!
+    statement         string!
+    origin            string!
+    responsibilityId  string
+    accountIds        []string
+    input             object
+    ceilings          object
+    requestedVia      string
+  }
+  insert {
+    accept { statement, origin, responsibilityId, accountIds, input, ceilings, requestedVia }
+    stamp {
+      id: args.goalId
+      ownerUserId: actor.userId
+      status: "open"
+    }
+  }
+}
+
+/// Journal one model call.
+@serverOnly
+@actor
+mutate modelCall createWorkModelCall {
+  args {
+    modelCallId    string!
+    runId          string!
+    stepKey        string
+    requestHash    string!
+    provider       string!
+    model          string!
+    settings       object
+    promptRef      string
+    promptVersion  string
+    inputTokens    int
+    outputTokens   int
+    cost           float
+    latencyMs      int
+    served         string!
+    response       object
+    error          string
+  }
+  insert {
+    accept { runId, stepKey, requestHash, provider, model, settings, promptRef, promptVersion, inputTokens, outputTokens, cost, latencyMs, served, response, error }
+    stamp {
+      id: args.modelCallId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Journal one observation.
+@serverOnly
+@actor
+mutate observation createWorkObservation {
+  args {
+    observationId  string!
+    runId          string!
+    stepKey        string
+    kind           string!
+    content        string!
+    data           object
+  }
+  insert {
+    accept { runId, stepKey, kind, content, data }
+    stamp {
+      id: args.observationId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Raise a human gate.
+@serverOnly
+@actor
+mutate approval createWorkApproval {
+  args {
+    approvalId    string!
+    runId         string!
+    stepKey       string
+    kind          string!
+    subject       object
+    artifactHash  string!
+    question      string
+    options       []object
+    evidence      object
+    requestedAt   string!
+    expiresAt     string
+  }
+  insert {
+    accept { runId, stepKey, kind, subject, artifactHash, question, options, evidence, requestedAt, expiresAt }
+    stamp {
+      id: args.approvalId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Record a decision. Server-only in A1; the client-reachable form arrives in epic A2 with its gate.
+@serverOnly
+mutate approval decideWorkApproval {
+  args {
+    approvalId  string!
+    decision    string!
+    decidedBy   string!
+    decidedAt   string!
+    answer      object
+  }
+  update {
+    accept { decision, decidedBy, decidedAt, answer }
+    stamp {
+      id: args.approvalId
+    }
+  }
+}
