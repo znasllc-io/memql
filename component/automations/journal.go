@@ -260,9 +260,13 @@ func (j *workJournal) stepRunning(ctx context.Context, exec *AutomationExecution
 }
 
 // stepFinished writes the receipt version of a step row and a heartbeat on
-// the run. The result is the trimmed MinimalStepResult shape, the same
+// the run. chainHead is passed rather than read off exec because
+// AutomationExecution.ChainHead is assigned only on the success path -- the
+// checkpoint this replaces was handed the executor loop's local variable for
+// the same reason, and reading the struct would write an empty chain head on
+// exactly the failed runs resume exists for. The result is the trimmed MinimalStepResult shape, the same
 // shape the checkpoint carried and resume rehydrates from.
-func (j *workJournal) stepFinished(ctx context.Context, exec *AutomationExecution, step *Step, result *StepResult) {
+func (j *workJournal) stepFinished(ctx context.Context, exec *AutomationExecution, step *Step, result *StepResult, chainHead string) {
 	if j == nil || exec == nil || step == nil || result == nil {
 		return
 	}
@@ -293,7 +297,7 @@ func (j *workJournal) stepFinished(ctx context.Context, exec *AutomationExecutio
 	j.call(ctx, "updateWorkRun", map[string]any{
 		"runId":       exec.ID,
 		"heartbeatAt": rfc3339(time.Now()),
-		"chainHead":   exec.ChainHead,
+		"chainHead":   chainHead,
 		"stepOrder":   exec.StepOrder,
 	})
 }
@@ -332,7 +336,7 @@ func (j *workJournal) reopenRun(ctx context.Context, exec *AutomationExecution) 
 
 // closeRun writes the terminal status. The executor's status vocabulary
 // (completed / failed / cancelled) maps onto the spec's.
-func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution) {
+func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, chainHead string) {
 	if j == nil || exec == nil {
 		return
 	}
@@ -351,7 +355,7 @@ func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution) {
 		"runId":      exec.ID,
 		"status":     status,
 		"finishedAt": rfc3339(finished),
-		"chainHead":  exec.ChainHead,
+		"chainHead":  chainHead,
 		"stepOrder":  exec.StepOrder,
 		"outcome":    map[string]any{"executorStatus": exec.Status},
 	}

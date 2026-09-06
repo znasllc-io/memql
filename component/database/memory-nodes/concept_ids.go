@@ -92,10 +92,6 @@ const (
 // MemQL internal concepts (v1:memql:*) -- engine-internal state, not
 // user-facing config. User-facing secrets / variables live under
 // v1:platform:* (see Platform domain above).
-const (
-	ConceptMemQLCheckpoint = "v1:memql:checkpoint"
-)
-
 // MemQL runtime concepts -- used in Go code but registered dynamically
 // (no concept directory on disk).
 const (
@@ -134,8 +130,6 @@ func AllFilesystemConcepts() []string {
 		ConceptClusterNode,
 		ConceptClusterNodeType,
 		ConceptClusterSpawnEvent,
-		// memql (filesystem-backed only)
-		ConceptMemQLCheckpoint,
 	}
 }
 

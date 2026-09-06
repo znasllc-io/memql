@@ -117,9 +117,9 @@ func TestJournal_RunAndStepLifecycle(t *testing.T) {
 	j.openRun(context.Background(), auto, exec, nil)
 	j.stepRunning(context.Background(), exec, auto.Steps[0], 0, 1)
 	res := &StepResult{StepId: "one", Status: "completed", Result: map[string]any{"rows": 3}, StartedAt: exec.StartedAt, CompletedAt: exec.StartedAt.Add(20 * time.Millisecond), Duration: 20 * time.Millisecond}
-	j.stepFinished(context.Background(), exec, auto.Steps[0], res)
+	j.stepFinished(context.Background(), exec, auto.Steps[0], res, "")
 	exec.Complete()
-	j.closeRun(context.Background(), exec)
+	j.closeRun(context.Background(), exec, "")
 
 	if len(rec.calls) != 5 {
 		t.Fatalf("calls = %d (%v), want 5: createWorkRun, createWorkStep, updateWorkStep, updateWorkRun (heartbeat), updateWorkRun (close)", len(rec.calls), rec.calls)
@@ -168,9 +168,9 @@ func TestJournal_FailedStepAndFailedRun(t *testing.T) {
 	exec.ID = "run-2"
 	j.stepRunning(context.Background(), exec, auto.Steps[0], 0, 1)
 	res := &StepResult{StepId: "one", Status: "failed", Error: "boom", StartedAt: time.Now(), CompletedAt: time.Now()}
-	j.stepFinished(context.Background(), exec, auto.Steps[0], res)
+	j.stepFinished(context.Background(), exec, auto.Steps[0], res, "")
 	exec.Fail(errBoom)
-	j.closeRun(context.Background(), exec)
+	j.closeRun(context.Background(), exec, "")
 	_, args := argsOf(t, rec.calls[1])
 	if args["status"] != "failed" || args["errorMessage"] != "boom" {
 		t.Errorf("failed step: %v", args)
@@ -187,8 +187,91 @@ func TestJournal_FailedStepAndFailedRun(t *testing.T) {
 func TestJournal_NilIsANoOp(t *testing.T) {
 	var j *workJournal
 	j.openRun(context.Background(), &Automation{Name: "x"}, NewExecution("x", "t"), nil)
-	j.closeRun(context.Background(), NewExecution("x", "t"))
+	j.closeRun(context.Background(), NewExecution("x", "t"), "")
 	if newWorkJournal(nil, nil) != nil {
 		t.Fatal("no executor means no journal")
 	}
+}
+
+// journalProbeRegistry runs every step as a success and records nothing
+// else; it exists so the executor's own loop drives the journal.
+type journalProbeRegistry struct{}
+
+func (journalProbeRegistry) Execute(_ context.Context, step *Step, _ *StepContext) (*StepResult, error) {
+	now := time.Now()
+	return &StepResult{StepId: step.ID, Status: "completed", Result: map[string]any{"ok": true}, StartedAt: now, CompletedAt: now}, nil
+}
+
+func TestExecutor_JournalsEveryStepBoundary(t *testing.T) {
+	rec := &recordingJournalExecutor{}
+	e := NewExecutor(ExecutorOptions{StepRegistry: journalProbeRegistry{}})
+	e.journal = newWorkJournal(rec, nil)
+	auto := &Automation{Name: "demo", Steps: []*Step{
+		{ID: "a", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}},
+		{ID: "b", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}, Condition: "false"},
+	}}
+	exec, err := e.Execute(context.Background(), auto, "test")
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if exec.Status != "completed" {
+		t.Fatalf("status = %q", exec.Status)
+	}
+	var names []string
+	for _, c := range rec.calls {
+		n, _ := argsOf(t, c)
+		names = append(names, n)
+	}
+	want := []string{"createWorkRun", "createWorkStep", "updateWorkStep", "updateWorkRun", "createWorkStep", "updateWorkRun"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("journal calls = %v, want %v (open; a running; a done + heartbeat; b skipped; close)", names, want)
+	}
+	_, skipped := argsOf(t, rec.calls[4])
+	if skipped["key"] != "b" || skipped["status"] != "skipped" {
+		t.Errorf("skipped step: %v", skipped)
+	}
+}
+
+func TestExecutor_SandboxRunWritesNoJournal(t *testing.T) {
+	e := NewExecutor(ExecutorOptions{StepRegistry: journalProbeRegistry{}, SandboxRun: true})
+	if e.journal != nil {
+		t.Fatal("a sandboxed dry-run must not journal: nothing resumes a preview and the write would escape the sandbox")
+	}
+}
+
+// TestExecutor_JournalCarriesTheChainHeadOnFailure pins the one place the
+// journal is NOT a straight read of AutomationExecution. exec.ChainHead is
+// assigned only on the success path, so a failed run's close would carry an
+// empty chain head if closeRun read the struct -- which is exactly what the
+// checkpoint it replaces did NOT do (saveCheckpointOnFailure was handed the
+// loop's local `chainHead`). The journal takes it as an argument for that
+// reason, and this test is what stops it being "simplified" back.
+func TestExecutor_JournalCarriesTheChainHeadOnFailure(t *testing.T) {
+	rec := &recordingJournalExecutor{}
+	e := NewExecutor(ExecutorOptions{StepRegistry: failingRegistry{}, ChainTrackingEnabled: true})
+	e.journal = newWorkJournal(rec, nil)
+	auto := &Automation{Name: "demo", Steps: []*Step{
+		{ID: "a", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}, OnError: ErrorStrategyStop},
+	}}
+	exec, _ := e.Execute(context.Background(), auto, "test")
+	if exec.Status != "failed" {
+		t.Fatalf("status = %q, want failed", exec.Status)
+	}
+	last := rec.calls[len(rec.calls)-1]
+	name, args := argsOf(t, last)
+	if name != "updateWorkRun" || args["status"] != "failed" {
+		t.Fatalf("close: %s %v", name, args)
+	}
+	if args["chainHead"] == nil || args["chainHead"] == "" {
+		t.Error("a failed run's close carries no chain head; resume cannot verify the prefix it is resuming onto")
+	}
+}
+
+// failingRegistry fails every step, with a result attached, which is the
+// shape the executor's stop-on-error path takes.
+type failingRegistry struct{}
+
+func (failingRegistry) Execute(_ context.Context, step *Step, _ *StepContext) (*StepResult, error) {
+	now := time.Now()
+	return &StepResult{StepId: step.ID, Status: "failed", Error: "boom", StartedAt: now, CompletedAt: now}, errBoom
 }

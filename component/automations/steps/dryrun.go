@@ -129,9 +129,9 @@ func runBundleDryRun(ctx context.Context, engine *memql.MemQLEngine, req memql.D
 	// a dry-run is a one-shot, and dedup would skip a re-run of the same
 	// automation. Concurrency is irrelevant for a single run.
 	executor := automations.NewExecutor(automations.ExecutorOptions{
-		// No checkpoint from a preview (memql#2932): nothing resumes a
-		// dry-run, and SaveCheckpoint bypasses the sandbox registry to reach
-		// the live graph -- the only escaping write that is a RESUMABLE token.
+		// No journal from a preview (memql#2932): nothing resumes a dry-run,
+		// and the journal writer bypasses the sandbox registry to reach the
+		// live graph -- the only escaping write that is a RESUMABLE token.
 		SandboxRun:   true,
 		Logger:       discardLogger(),
 		Engine:       engine,
@@ -152,25 +152,29 @@ func runBundleDryRun(ctx context.Context, engine *memql.MemQLEngine, req memql.D
 	// None of them is a payload the server produced.
 	//
 	// This matters beyond the in-run origin. executeWithEvent stamps TWO
-	// fields, and the second is PERSISTED onto any checkpoint the run mints:
+	// fields, and the second is PERSISTED onto the v1:work:run row the
+	// journal opens (component/automations/journal.go):
 	//
 	//	exec.SourceTrusted         = automation.Trusted && !callerSuppliedPayload
 	//	exec.CallerSuppliedPayload = callerSuppliedPayload
 	//
-	// and resume.go recomputes trust from the checkpoint:
+	// and resume.go recomputes trust from that row:
 	//
-	//	exec.SourceTrusted = automation.Trusted && !checkpoint.CallerSuppliedPayload
+	//	exec.SourceTrusted = automation.Trusted && !journal.CallerSuppliedPayload
 	//
 	// So with ExecuteWithEvent the preview stamped CallerSuppliedPayload=false
 	// onto a caller-chosen payload, and a later POST /automations/resume of
-	// that checkpoint re-dispatched the attacker's payload at INTERNAL origin
+	// that run re-dispatched the attacker's payload at INTERNAL origin
 	// against the tree-loaded (Trusted=true) automation. That is exactly the
 	// replay #2888's comment describes -- with the dry-run as leg 1, which
 	// #2888 fixed only on the live leg.
 	//
-	// The refusal is what mints the token: saveCheckpointOnFailure fires on
-	// step failure, so the @serverOnly refusal a preview is SUPPOSED to report
-	// is the thing that writes the resumable checkpoint.
+	// The refusal is what mints the token: the journal writes a step receipt
+	// on failure and closes the run at `failed`, so the @serverOnly refusal a
+	// preview is SUPPOSED to report is the thing that leaves a resumable run.
+	// Which is why a sandboxed executor holds no journal at all
+	// (NewExecutor: `if !opts.SandboxRun && opts.Engine != nil`) -- nothing
+	// resumes a preview, and the write would escape the sandbox.
 	//
 	// SourceTrusted itself is unchanged by this (CompileSource already leaves
 	// Trusted false, so it was false either way). The change is strictly more

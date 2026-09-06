@@ -266,6 +266,16 @@ func skipDir(path string) bool {
 	switch base {
 	case "vendor", "gen", ".git", "node_modules", "testdata":
 		return true
+	// `.claude` holds git worktrees (`.claude/worktrees/<name>`), which are
+	// FULL COPIES OF THE REPO INSIDE THE REPO. Without this the scan reads a
+	// concurrent session's in-progress branch and reports its env vars as
+	// drift on YOURS -- naming vars that exist in no file this checkout has.
+	// It fails only for whoever holds a worktree and stays green in CI, so the
+	// session that created the worktree is usually not the one that sees it.
+	// memql#3677 / memql#3678 fixed five walkers this way; this is a sixth
+	// that was written after them.
+	case ".claude":
+		return true
 	}
 	return false
 }

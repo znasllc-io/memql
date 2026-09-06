@@ -1,7 +1,12 @@
 package steps
 
-// dryrun_source_trust_2890_db_test.go -- a dry-run must not mint a resume
-// checkpoint that a later resume can promote to internal origin (memql#2890).
+// dryrun_source_trust_2890_db_test.go -- a dry-run must not write a resume
+// record that a later resume can promote to internal origin (memql#2890).
+//
+// THE RECORD IS THE WORK JOURNAL now (v1:work:run and v1:work:step, work
+// spine epic A1); it was a v1:memql:checkpoint row when this was written. The
+// defect, the replay and the reason the failing preview is the dangerous one
+// are all unchanged -- only the row the token lives in moved.
 //
 // # The defect
 //
@@ -10,10 +15,10 @@ package steps
 //	exec.SourceTrusted         = automation.Trusted && !callerSuppliedPayload
 //	exec.CallerSuppliedPayload = callerSuppliedPayload
 //
-// The second is PERSISTED onto any checkpoint the run mints, and resume.go
+// The second is PERSISTED onto the run row the journal opens, and resume.go
 // recomputes trust from it:
 //
-//	exec.SourceTrusted = automation.Trusted && !checkpoint.CallerSuppliedPayload
+//	exec.SourceTrusted = automation.Trusted && !journal.CallerSuppliedPayload
 //
 // The dry-run drove the run through ExecuteWithEvent, so it stamped
 // CallerSuppliedPayload=FALSE onto a caller-chosen payload -- run_automation
@@ -21,17 +26,17 @@ package steps
 // NAME from caller-submitted source. (The planner's Gate-2 path passes no
 // trigger at all; what is caller-influenced there is the SOURCE, not the
 // payload, and marking it caller-supplied is right for the same reason.) A later
-// POST /automations/resume of that checkpoint loads the automation from the
-// tree (Trusted=true) and therefore re-dispatches the caller's payload at
-// INTERNAL origin.
+// POST /automations/resume of that run loads the automation from the tree
+// (Trusted=true) and therefore re-dispatches the caller's payload at INTERNAL
+// origin.
 //
 // That is the replay memql#2888 documents in resume.go's own comment. #2888
 // fixed the LIVE leg by moving run_automation to ExecuteWithClientEvent; the
 // dry-run leg was left behind, which is what memql#2890 was really reporting.
 //
-// The vicious part, and why this went unnoticed: saveCheckpointOnFailure fires
-// on step failure, so the @serverOnly refusal a preview is SUPPOSED to report
-// is precisely the thing that writes the resumable checkpoint. The failing
+// The vicious part, and why this went unnoticed: the journal closes the run at
+// `failed` on step failure, so the @serverOnly refusal a preview is SUPPOSED
+// to report is precisely the thing that leaves a resumable run. The failing
 // preview mints the token.
 //
 // # What these assert
@@ -39,7 +44,7 @@ package steps
 // Checking SourceTrusted alone is NOT sufficient and is how this was nearly
 // missed: both paths already resolved SourceTrusted=false, so a test on that
 // axis passes while the persisted axis diverges. The assertion has to be on
-// what the checkpoint carries.
+// what the run row carries.
 //
 // Postgres-gated: skips cleanly when no DB is reachable.
 
@@ -62,11 +67,11 @@ import (
 
 // trustProbeAutomation is the automation memql#2890 cites. It is read from the
 // tree so this exercises the real construct, and it reaches a @serverOnly
-// function, which is what makes the run fail and mint a checkpoint.
+// function, which is what makes the run fail and close its run row at failed.
 const trustProbeAutomation = "killSwitchSuspendsRunningPlans"
 
-// callerChosenSentinel is planted in the trigger payload so the checkpoint this
-// run mints is positively identifiable among any others on a shared DB.
+// callerChosenSentinel is planted in the trigger payload so the run row this
+// run would write is positively identifiable among any others on a shared DB.
 const callerChosenSentinel = "v1:identity:user:caller-chosen-2890"
 
 func dryRunTrustTestEngine(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
@@ -92,33 +97,40 @@ func dryRunTrustTestEngine(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
 	return eng, db
 }
 
-// memql#2890's guard -- that a dry-run's minted checkpoint is marked
+// memql#2890's guard -- that a dry-run's minted resume record is marked
 // caller-supplied so resume cannot promote it -- lived here and has been
-// REMOVED, not weakened: memql#2932's fix means a dry-run mints no checkpoint
-// at all, so that assertion has no subject on this path and would pass
+// REMOVED, not weakened: memql#2932's fix means a dry-run mints no such
+// record at all, so that assertion has no subject on this path and would pass
 // unconditionally. A test that cannot fail is worse than no test.
 //
 // The underlying property is still defended in two places: dryrun.go still
 // drives the run through ExecuteWithClientEvent (defence in depth, should
-// SandboxRun ever be unset), and the checkpoint field mapping itself is
-// asserted at the executor level by the memql#2888 tests over
-// newCheckpointFromExecution.
+// SandboxRun ever be unset), and the field mapping itself is asserted at the
+// executor level by the memql#2888 tests over workJournal.openRun
+// (TestRunRowCarriesTheCallerSuppliedFlag).
 
-// TestDryRunMintsNoCheckpoint is the stronger property memql#2932 asked for,
+// TestDryRunWritesNoWorkJournal is the stronger property memql#2932 asked for,
 // now that it holds: a preview writes NOTHING resumable.
 //
-// SaveCheckpoint went straight to the engine rather than through the sandbox
-// step registry, so it was the one write that escaped Gate-2's isolation and
-// landed a durable row in the LIVE graph -- contradicting dryrun.go's "zero
-// rows land in the live graph". Measured before the fix: one v1:memql:checkpoint
-// row per failing dry-run, accumulating without bound.
+// THE SUBJECT MOVED, THE PROPERTY DID NOT. The resume record is now the work
+// journal's v1:work:run row rather than a v1:memql:checkpoint row (work spine
+// epic A1), and the journal writer goes straight to the engine for exactly the
+// reason SaveCheckpoint did -- never through the sandbox step registry -- so it
+// is still the one write that would escape Gate-2's isolation and land a
+// durable row in the LIVE graph, contradicting dryrun.go's "zero rows land in
+// the live graph". Measured before the original fix: one row per failing
+// dry-run, accumulating without bound.
+//
+// The mechanism that makes it hold is now structural rather than a branch at
+// the write: NewExecutor builds no journal at all when SandboxRun is set, so
+// there is nothing to forget to check.
 //
 // This supersedes the callerSuppliedPayload assertion above rather than
-// replacing it: memql#2890's fix made a minted checkpoint unpromotable, and
-// this removes the mint. Both are kept because they fail for different reasons
-// -- if checkpointing is ever re-enabled for sandbox runs, THIS test catches
-// it, and the one above catches it being promotable.
-func TestDryRunMintsNoCheckpoint(t *testing.T) {
+// replacing it: memql#2890's fix made a minted record unpromotable, and this
+// removes the mint. Both are kept because they fail for different reasons --
+// if journalling is ever re-enabled for sandbox runs, THIS test catches it,
+// and the one above catches it being promotable.
+func TestDryRunWritesNoWorkJournal(t *testing.T) {
 	eng, db := dryRunTrustTestEngine(t)
 	ctx := context.Background()
 
@@ -128,8 +140,8 @@ func TestDryRunMintsNoCheckpoint(t *testing.T) {
 	}
 
 	// Time-mark the run. A GLOBAL count would be racy: test/conformance's
-	// conf_1727 builds a NON-sandbox executor against this same DB and mints a
-	// checkpoint when its automation fails, and `go test ./...` runs those
+	// conf_1727 builds a NON-sandbox executor against this same DB and writes
+	// a run row when its automation fails, and `go test ./...` runs those
 	// packages concurrently. An unscoped count blames SandboxRun for a row the
 	// dry-run did not write. The sibling test above already solved this; this
 	// one has to as well.
@@ -152,20 +164,22 @@ func TestDryRunMintsNoCheckpoint(t *testing.T) {
 		t.Fatalf("runBundleDryRun: %v", err)
 	}
 
-	// The run must actually have FAILED -- saveCheckpointOnFailure only fires
-	// on step failure, so a passing run would make this vacuous.
+	// The run must actually have FAILED -- the journal closes a run at
+	// `failed` only on step failure, so a passing run would make this vacuous.
+	// (An OPEN would be written either way, which is what makes the count
+	// below the right assertion rather than a count of failures.)
 	if report.OK || !strings.Contains(strings.ToLower(report.FailureReason), "server-only") {
-		t.Fatalf("dry-run did not fail at the @serverOnly gate, so it would not have checkpointed "+
-			"even before the fix; this guard is not exercising anything. ok=%v reason=%q",
+		t.Fatalf("dry-run did not fail at the @serverOnly gate, so it would not have written a "+
+			"resume record even before the fix; this guard is not exercising anything. ok=%v reason=%q",
 			report.OK, report.FailureReason)
 	}
 
-	// Count only checkpoints minted since the mark that carry THIS run's
-	// sentinel payload, so a concurrent package's checkpoint cannot be
+	// Count only run rows written since the mark that carry THIS run's
+	// sentinel payload, so a concurrent package's run row cannot be
 	// attributed to the dry-run.
 	var mine int
 	if err := db.NewSelect().Table("MemoryNodes").ColumnExpr("count(*)").
-		Where("concept = ?", "v1:memql:checkpoint").
+		Where("concept = ?", "v1:work:run").
 		Where("\"createdAt\" >= ?::timestamptz", mark).
 		Where("payload::text LIKE ?", "%"+callerChosenSentinel+"%").
 		Scan(ctx, &mine); err != nil {
@@ -173,9 +187,9 @@ func TestDryRunMintsNoCheckpoint(t *testing.T) {
 	}
 
 	if mine != 0 {
-		t.Fatalf("a FAILING dry-run wrote %d checkpoint row(s) carrying its own payload into the "+
+		t.Fatalf("a FAILING dry-run wrote %d v1:work:run row(s) carrying its own payload into the "+
 			"LIVE graph. A preview has nothing to resume, and the row is a durable resumable token "+
-			"naming a real tree automation (memql#2932). ExecutorOptions.SandboxRun must suppress "+
-			"saveCheckpointOnFailure.", mine)
+			"naming a real tree automation (memql#2932). ExecutorOptions.SandboxRun must leave "+
+			"the executor with NO journal (NewExecutor).", mine)
 	}
 }

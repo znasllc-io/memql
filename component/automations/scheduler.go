@@ -429,22 +429,24 @@ func catalogTrigger(a *Automation) *sense.RunnableTrigger {
 // It loads the checkpoint by executionId, validates it, and resumes execution
 // from the specified step (or the failed step if fromStep is empty).
 func (s *Scheduler) ResumeAutomation(ctx context.Context, executionId string, fromStep string) (*AutomationExecution, error) {
-	// Load the checkpoint
-	checkpoint, err := LoadCheckpoint(ctx, s.engine, executionId)
+	// Load the run and its steps. executionId IS the run id: the executor
+	// mints one and the journal writes the run row under it, so the HTTP
+	// contract (POST /automations/resume) does not change.
+	journal, err := LoadRunJournal(ctx, s.engine, executionId)
 	if err != nil {
 		return nil, err
 	}
 
 	// Load the automation by name
 	s.mu.RLock()
-	automation, ok := s.automations[checkpoint.AutomationName]
+	automation, ok := s.automations[journal.AutomationName]
 	s.mu.RUnlock()
 
 	if !ok {
 		// Try loading from disk in case it was added after scheduler started
-		automation, err = s.loader.LoadByName(checkpoint.AutomationName)
+		automation, err = s.loader.LoadByName(journal.AutomationName)
 		if err != nil {
-			return nil, fmt.Errorf("automation %q not found: %w", checkpoint.AutomationName, err)
+			return nil, fmt.Errorf("automation %q not found: %w", journal.AutomationName, err)
 		}
 	}
 
@@ -452,7 +454,7 @@ func (s *Scheduler) ResumeAutomation(ctx context.Context, executionId string, fr
 	opts := &ResumeOptions{
 		FromStep: fromStep,
 	}
-	return s.scheduleExecutor.ResumeFrom(ctx, checkpoint, automation, opts)
+	return s.scheduleExecutor.ResumeFrom(ctx, journal, automation, opts)
 }
 
 func (s *Scheduler) run(ctx context.Context) {

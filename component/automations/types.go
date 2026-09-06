@@ -808,68 +808,10 @@ func generateExecutionId() string {
 	return id.NewShortId()
 }
 
-// ExecutionCheckpoint captures the state of a failed automation for later resume.
-// Stored as a MemQL node with concept v1:memql:checkpoint.
-type ExecutionCheckpoint struct {
-	// ExecutionId is the unique ID of the failed execution.
-	ExecutionId string `json:"executionId"`
-
-	// AutomationName identifies which automation was running.
-	AutomationName string `json:"automationName"`
-
-	// AutomationFingerprint is a content-addressed hash of the automation definition.
-	// Used to detect if the automation changed between failure and resume.
-	AutomationFingerprint string `json:"automationFingerprint"`
-
-	// StepIndex is the index in Steps slice where failure occurred.
-	StepIndex int `json:"stepIndex"`
-
-	// ChainHead is the chain state before the failed step.
-	ChainHead string `json:"chainHead,omitempty"`
-
-	// InitialChainHead captures the starting state for chain validation.
-	InitialChainHead string `json:"initialChainHead,omitempty"`
-
-	// StepResults contains results for all completed steps before failure.
-	// Uses MinimalStepResult to avoid storing large payloads.
-	StepResults map[string]*MinimalStepResult `json:"stepResults"`
-
-	// StepOrder preserves execution sequence for verification.
-	StepOrder []string `json:"stepOrder,omitempty"`
-
-	// FailedAt contains details about the failure.
-	FailedAt *StepFailure `json:"failedAt"`
-
-	// Input is the automation input data (for evaluator restoration).
-	Input any `json:"input,omitempty"`
-
-	// InputFingerprint is the hash of input for verification.
-	InputFingerprint string `json:"inputFingerprint,omitempty"`
-
-	// TriggerContext captures the original trigger for event replay.
-	TriggerContext *TriggerContext `json:"triggerContext,omitempty"`
-
-	// CallerSuppliedPayload records that the checkpointed run's trigger payload
-	// came from a caller, so a resume cannot restore internal origin to a run
-	// that never had it (memql#2888).
-	//
-	// This field is the whole reason the fix is not bypassable. The checkpoint
-	// PERSISTS TriggerContext.Event -- the attacker's payload -- and resume
-	// replays it; without this flag resume re-derived trust from
-	// automation.Trusted alone and handed that payload internal origin. The
-	// refusal that the origin downgrade produces is itself what triggers the
-	// checkpoint write, so the fix was minting its own laundering token.
-	CallerSuppliedPayload bool `json:"callerSuppliedPayload,omitempty"`
-
-	// SavedAt is when the checkpoint was saved.
-	SavedAt time.Time `json:"savedAt"`
-
-	// ExpiresAt is when the checkpoint becomes invalid (SavedAt + 24h).
-	ExpiresAt time.Time `json:"expiresAt"`
-}
-
-// MinimalStepResult stores only fields needed for evaluator rehydration.
-// Avoids storing large query result payloads in checkpoint.
+// MinimalStepResult stores only the fields the evaluator needs to be
+// rehydrated on resume. It is what a v1:work:step row's `result` carries, and
+// keeping it minimal is why a run's journal does not grow with the size of
+// every query result the run read.
 type MinimalStepResult struct {
 	StepId    string         `json:"stepId"`
 	Status    string         `json:"status"`
@@ -877,18 +819,4 @@ type MinimalStepResult struct {
 	Error     string         `json:"error,omitempty"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
 	ContentId string         `json:"contentId,omitempty"`
-}
-
-// StepFailure describes where and why an automation failed.
-type StepFailure struct {
-	StepId    string    `json:"stepId"`
-	Error     string    `json:"error"`
-	ErrorCode string    `json:"errorCode,omitempty"`
-	Timestamp time.Time `json:"timestamp"`
-}
-
-// TriggerContext captures the original trigger for evaluator restoration.
-type TriggerContext struct {
-	TriggeredBy string         `json:"triggeredBy"`
-	Event       map[string]any `json:"event,omitempty"`
 }
