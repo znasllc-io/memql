@@ -1,0 +1,61 @@
+{
+  "id": "governance.every-side-effect-leaves-a-receipt",
+  "family": "governance",
+  "title": "Every side-effecting step is performed under an idempotency key",
+  "goal": "Deliver three notices for {{account}}",
+  "variables": [
+    {
+      "account": "acme"
+    }
+  ],
+  "steps": [
+    {
+      "key": "first",
+      "type": "function",
+      "target": "sendFirst",
+      "effect": "mailbox"
+    },
+    {
+      "key": "second",
+      "type": "function",
+      "target": "sendSecond",
+      "dependsOn": [
+        "first"
+      ],
+      "effect": "mailbox"
+    },
+    {
+      "key": "third",
+      "type": "function",
+      "target": "sendThird",
+      "dependsOn": [
+        "second"
+      ],
+      "effect": "mailbox"
+    }
+  ],
+  "world": {
+    "mailbox": {
+      "addresses": [
+        "ops@example.test"
+      ]
+    }
+  },
+  "inject": [],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "succeeded"
+      },
+      "count": 1
+    },
+    {
+      "effects": "mailbox.sent",
+      "count": 3
+    }
+  ],
+  "claims": [
+    "governance.effectsWithReceipts"
+  ]
+}

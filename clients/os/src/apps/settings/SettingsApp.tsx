@@ -9,6 +9,7 @@ import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { AppsIndexSection } from "./AppsIndexSection";
 import { ClusterSection } from "./ClusterSection";
+import { BenchmarksSection } from "./BenchmarksSection";
 import { DiagnosticsSection } from "./DiagnosticsSection";
 import { IntegrationsSection } from "./IntegrationsSection";
 import { ConnectionHistoryProvider } from "./useConnectionHistory";
@@ -42,6 +43,7 @@ function sectionFor(sectionId: string, intent: OsAppProps["intent"], consumeInte
   if (sectionId === "apps") return <AppsIndexSection />;
   if (sectionId === "cluster") return <ClusterSection />;
   if (sectionId === "diagnostics") return <DiagnosticsSection />;
+  if (sectionId === "benchmarks") return <BenchmarksSection />;
   if (sectionId === "integrations") return <IntegrationsSection />;
   // No owned concepts: the shell's own lines are tagged with no app, and
   // this app's slice is what its surfaces logged under "settings".

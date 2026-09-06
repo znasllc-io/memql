@@ -1,0 +1,72 @@
+{
+  "scenario": "amortizedCost.control-a-catalog-miss-reaches-a-model",
+  "arm": "baseline",
+  "modelId": "synthetic",
+  "recordedAt": "2026-09-06",
+  "turns": [
+    {
+      "requestHash": "e62effb616e761838ac61fc5",
+      "prompt": "step=draft target=draftNarrative attempt=1",
+      "response": "placeholder answer for draft (attempt 1)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "e10931d4d74763c120df0a9a",
+      "prompt": "step=draft target=draftNarrative attempt=2",
+      "response": "placeholder answer for draft (attempt 2)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "0e1f86bb3d11dedc1087e899",
+      "prompt": "step=draft target=draftNarrative attempt=3",
+      "response": "placeholder answer for draft (attempt 3)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "bc887cc913fca8d586b54bff",
+      "prompt": "step=draft target=draftNarrative attempt=4",
+      "response": "placeholder answer for draft (attempt 4)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "fc4a1761ede0b0be8d6aa2ef",
+      "prompt": "step=draft target=draftNarrative attempt=5",
+      "response": "placeholder answer for draft (attempt 5)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "ef640061c1aca168e95619af",
+      "prompt": "step=draft target=draftNarrative attempt=6",
+      "response": "placeholder answer for draft (attempt 6)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "e5bac1ad337633f16f4a27d0",
+      "prompt": "step=draft target=draftNarrative attempt=7",
+      "response": "placeholder answer for draft (attempt 7)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "882790ccb8c229f9563a05d0",
+      "prompt": "step=draft target=draftNarrative attempt=8",
+      "response": "placeholder answer for draft (attempt 8)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    }
+  ]
+}

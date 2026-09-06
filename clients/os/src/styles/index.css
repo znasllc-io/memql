@@ -9524,3 +9524,185 @@ a.os-button {
     display: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * BENCHMARKS (epic memql#4993) -- Settings -> Benchmarks.
+ *
+ * The design idea in CSS terms: AN ABSENCE OCCUPIES THE NUMBER'S SLOT. The
+ * value column is one grid track wide whether it holds a figure or the
+ * sentence saying why there is none, so a page full of gaps looks like a page
+ * full of information rather than a page that failed to load. The epic's
+ * standard is that the numbers must be honest before they are good, and a
+ * stylesheet that made absences small would argue the opposite of the thing it
+ * renders.
+ *
+ * The rail is a SHAPE, not a chart -- the same call TrafficStrip makes, and
+ * for the same reason: sixty marks in a 200px column is a smear, and the
+ * numbers beside it are where the values live. Plain flex, one hue, no
+ * dependency.
+ *
+ * ONE HUE, AND IT IS NEVER A STATUS COLOUR. Amber is `warn` and red is `error`
+ * everywhere in this shell, so a regression is said in words rather than
+ * painted. The platform arm takes the accent; the bare-loop arm takes the
+ * neutral rail colour, which is the same pairing the traffic strip uses for a
+ * series against its ground.
+ * ------------------------------------------------------------------------- */
+
+.os-bench-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 18px;
+}
+
+.os-bench-metric {
+  display: grid;
+  gap: 6px;
+}
+
+.os-bench-name {
+  margin: 0;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+.os-bench-arms {
+  display: grid;
+  gap: 4px;
+}
+
+/* label | rail | value. The rail is fixed so two arms of one metric align
+ * mark-for-mark; the value takes the rest, because a reason is a sentence and
+ * a sentence needs room. */
+.os-bench-arm {
+  display: grid;
+  grid-template-columns: 68px 132px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.os-bench-arm-label {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+.os-bench-rail {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  /* Small on purpose: it is a shape, not a chart. At 22px with six wide marks
+   * a flat series rendered as one solid block and outweighed everything
+   * around it -- seen at real size, not in the diff. */
+  height: 16px;
+  /* The floor the marks stand on. --os-rail rather than --os-line for the
+   * reason the traffic strip records: at 8% on near-black the line is
+   * invisible, and a baseline nobody can see is a baseline that is not
+   * there. */
+  border-bottom: 1px solid var(--os-rail);
+}
+
+.os-bench-mark {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.os-bench-fill {
+  display: block;
+  width: 100%;
+  /* Capped, the way the traffic strip caps its bars: at six runs an uncapped
+   * mark is 20px wide and 16px tall, which is a block rather than a series. */
+  max-width: 12px;
+  margin: 0 auto;
+  border-radius: 1px 1px 0 0;
+  background: var(--os-rail-hover);
+}
+
+.os-bench-rail[data-os-bench-accent="on"] .os-bench-fill {
+  background: var(--os-accent);
+}
+
+/* A MEASURED MARK NEVER DRAWS NOTHING. A measured zero is a real answer and
+ * has to be visible as one -- the alternative is a blank column that reads
+ * exactly like the unmeasured mark below, which is the one distinction this
+ * whole surface exists to keep. */
+.os-bench-mark[data-os-bench-mark="measured"] .os-bench-fill {
+  min-height: 2px;
+}
+
+/* AN UNMEASURED RUN IS AN OPEN NOTCH, NOT A BAR OF HEIGHT ZERO. Different
+ * shape, not a dimmer version of the same one: a bar of height zero is a
+ * measurement of zero. */
+.os-bench-mark[data-os-bench-mark="absent"] .os-bench-fill {
+  height: 6px !important;
+  min-height: 6px;
+  background: transparent;
+  border: 1px solid var(--os-rail-hover);
+  border-radius: 1px;
+}
+
+/* A run that published nothing for this metric leaves the column empty. The
+ * gap is information too -- it says the metric was not published at all,
+ * which is not the same as being published as unmeasured. */
+.os-bench-mark[data-os-bench-mark="gap"] .os-bench-fill {
+  height: 0 !important;
+}
+
+.os-bench-value {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--os-text-sm);
+}
+
+.os-bench-number {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--os-ink);
+}
+
+.os-bench-spread {
+  font-size: var(--os-text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--os-muted);
+}
+
+/* The absence, at the number's own size. Muted, because it is not an error --
+ * it is a fact about what this tier can answer -- but never smaller than the
+ * figure it stands in for. */
+.os-bench-absent {
+  color: var(--os-muted);
+  min-width: 0;
+}
+
+.os-bench-compare {
+  margin: 2px 0 0 78px;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+/* Narrow: the rail stacks under the label and the value takes the full width,
+ * because a sentence squeezed into 90 pixels is a sentence nobody reads. The
+ * rail keeps its height so the shape survives. */
+@media (max-width: 520px) {
+  .os-bench-arm {
+    grid-template-columns: 68px minmax(0, 1fr);
+    row-gap: 4px;
+  }
+  .os-bench-rail {
+    grid-column: 2;
+  }
+  .os-bench-value {
+    grid-column: 1 / -1;
+  }
+  .os-bench-compare {
+    margin-left: 0;
+  }
+}

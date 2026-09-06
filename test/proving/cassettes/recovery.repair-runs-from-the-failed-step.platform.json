@@ -1,0 +1,72 @@
+{
+  "scenario": "recovery.repair-runs-from-the-failed-step",
+  "arm": "platform",
+  "modelId": "synthetic",
+  "recordedAt": "2026-09-06",
+  "turns": [
+    {
+      "requestHash": "0d72a4f136390d2d2d0dfcf8",
+      "prompt": "step=summarize target=summarizeClose attempt=1",
+      "response": "placeholder answer for summarize (attempt 1)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "780c69921358caf544334df3",
+      "prompt": "step=summarize target=summarizeClose attempt=2",
+      "response": "placeholder answer for summarize (attempt 2)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "61977d02808e4fbfad1171d6",
+      "prompt": "step=summarize target=summarizeClose attempt=3",
+      "response": "placeholder answer for summarize (attempt 3)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "dd4a1b46bb09d89c75b2bdb5",
+      "prompt": "step=summarize target=summarizeClose attempt=4",
+      "response": "placeholder answer for summarize (attempt 4)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "09f7d6aa473d2e810f0cdab2",
+      "prompt": "step=summarize target=summarizeClose attempt=5",
+      "response": "placeholder answer for summarize (attempt 5)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "488135ad8649ff568a177f03",
+      "prompt": "step=summarize target=summarizeClose attempt=6",
+      "response": "placeholder answer for summarize (attempt 6)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "4d8da29344b3dc256aea6092",
+      "prompt": "step=summarize target=summarizeClose attempt=7",
+      "response": "placeholder answer for summarize (attempt 7)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "9dec590f40c258a50ad2abfa",
+      "prompt": "step=summarize target=summarizeClose attempt=8",
+      "response": "placeholder answer for summarize (attempt 8)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    }
+  ]
+}

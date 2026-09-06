@@ -118,6 +118,24 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// is why these two packages stamp rather than being exempted from the
 		// annotation.
 		"component/campaigns": "campaign drain worker, tracking endpoints and consent writers -- server-initiated; every write it stamps for is @serverOnly (memql#4820)",
+		// The proving suite's row writer (epic memql#4993, design section G).
+		// SERVER-INITIATED with no request anywhere near it: its only caller is
+		// cmd/memql-bench, a CI-lane binary run from a workflow step, and the
+		// context it stamps is built from context.Background() plus a synthetic
+		// cluster actor. There is no inbound request to derive one from.
+		//
+		// The stamp is not a widening. It is for exactly two mutations,
+		// createBenchRun and createBenchSample, both @serverOnly and both bound
+		// to a @rowAuthz(clusterOwner) concept -- and @serverOnly is the point
+		// rather than a precaution here, because README and docs/public carry
+		// published claims checked against these rows by
+		// TestPublishedClaimsRestOnAScorecardNumber. A client-reachable write
+		// would be a primitive for forging the numbers the product is sold on.
+		//
+		// Without the stamp the function validator refuses those writes with ONE
+		// WARN and nothing above it hears: the suite would report a clean run
+		// and the published record would stay permanently empty.
+		"component/proving": "the proving suite's benchmark row writer -- server-initiated from a CI binary; its two writers are @serverOnly and refused without it (memql#4993)",
 		// The work spine's journal for SERVER-STARTED passes (epic
 		// memql#4970, spec section G). SERVER-INITIATED: its one caller today
 		// is the Library's file analysis pass, which runs on a detached

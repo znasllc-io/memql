@@ -1,0 +1,94 @@
+{
+  "id": "durability.a-stopped-run-resumes-with-no-duplicated-effect",
+  "family": "durability",
+  "title": "A run stopped mid-plan resumes from its journal and delivers nothing twice",
+  "goal": "Send the {{account}} reconciliation notice and record it",
+  "variables": [
+    {
+      "account": "acme"
+    },
+    {
+      "account": "globex"
+    }
+  ],
+  "steps": [
+    {
+      "key": "read",
+      "type": "function",
+      "target": "ledgerLines"
+    },
+    {
+      "key": "send",
+      "type": "function",
+      "target": "sendNotice",
+      "dependsOn": [
+        "read"
+      ],
+      "effect": "mailbox"
+    },
+    {
+      "key": "record",
+      "type": "function",
+      "target": "recordDelivery",
+      "dependsOn": [
+        "send"
+      ]
+    },
+    {
+      "key": "close",
+      "type": "function",
+      "target": "closeLedger",
+      "dependsOn": [
+        "record"
+      ]
+    }
+  ],
+  "world": {
+    "mailbox": {
+      "addresses": [
+        "ops@example.test"
+      ]
+    }
+  },
+  "inject": [
+    {
+      "at": "record",
+      "kind": "kill",
+      "once": true
+    }
+  ],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "succeeded"
+      },
+      "count": 1
+    },
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "resumed"
+      },
+      "count": 1
+    },
+    {
+      "effects": "mailbox.sent",
+      "count": 1
+    },
+    {
+      "effects": "mailbox.duplicates",
+      "count": 0
+    },
+    {
+      "check": "resumedRunKeepsItsRunId",
+      "count": 1
+    }
+  ],
+  "claims": [
+    "durability.duplicatedSideEffects",
+    "durability.resumedStepsReExecuted",
+    "durability.resumedOnAnotherNode"
+  ],
+  "negativeControlFor": "durability.duplicatedSideEffects"
+}

@@ -1,0 +1,96 @@
+{
+  "id": "amortizedCost.a-resume-does-not-recall-the-model",
+  "family": "amortizedCost",
+  "title": "A resumed run does not ask the model again for work it already did",
+  "goal": "Reconcile the ledger for {{account}} and mail the summary",
+  "variables": [
+    {
+      "account": "acme"
+    },
+    {
+      "account": "globex"
+    },
+    {
+      "account": "initech"
+    }
+  ],
+  "steps": [
+    {
+      "key": "plan",
+      "type": "function",
+      "target": "planReconciliation",
+      "reasoning": true
+    },
+    {
+      "key": "read",
+      "type": "function",
+      "target": "ledgerLines",
+      "dependsOn": [
+        "plan"
+      ]
+    },
+    {
+      "key": "post",
+      "type": "function",
+      "target": "postReconciliation",
+      "dependsOn": [
+        "read"
+      ],
+      "effect": "mailbox"
+    },
+    {
+      "key": "close",
+      "type": "function",
+      "target": "closeLedger",
+      "dependsOn": [
+        "post"
+      ]
+    }
+  ],
+  "world": {
+    "mailbox": {
+      "addresses": [
+        "ops@example.test"
+      ]
+    }
+  },
+  "inject": [
+    {
+      "at": "post",
+      "kind": "contract",
+      "message": "postcondition failed: the reconciliation row was not written",
+      "once": true
+    }
+  ],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "succeeded"
+      },
+      "count": 1
+    },
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "resumed"
+      },
+      "count": 1
+    },
+    {
+      "effects": "mailbox.sent",
+      "count": 1
+    },
+    {
+      "effects": "mailbox.duplicates",
+      "count": 0
+    }
+  ],
+  "claims": [
+    "amortizedCost.providerCalls",
+    "amortizedCost.stepsServedFromJournal",
+    "amortizedCost.tokensPerGoal",
+    "amortizedCost.usdPerGoal"
+  ],
+  "negativeControlFor": "amortizedCost.providerCalls"
+}

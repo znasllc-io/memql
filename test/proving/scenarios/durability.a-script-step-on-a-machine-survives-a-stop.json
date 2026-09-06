@@ -1,0 +1,77 @@
+{
+  "id": "durability.a-script-step-on-a-machine-survives-a-stop",
+  "family": "durability",
+  "title": "A script step on a machine is not run twice across a stop and a resume",
+  "goal": "Run the {{account}} reconciliation script on a machine and file the result",
+  "variables": [
+    {
+      "account": "acme"
+    }
+  ],
+  "steps": [
+    {
+      "key": "run",
+      "type": "function",
+      "target": "reconcile.sh",
+      "effect": "machine"
+    },
+    {
+      "key": "file",
+      "type": "function",
+      "target": "fileResult",
+      "dependsOn": [
+        "run"
+      ]
+    },
+    {
+      "key": "close",
+      "type": "function",
+      "target": "closeLedger",
+      "dependsOn": [
+        "file"
+      ]
+    }
+  ],
+  "world": {
+    "machine": {
+      "labels": {
+        "os": "linux"
+      },
+      "scripts": {
+        "reconcile.sh": "ok: 42 lines\n"
+      }
+    }
+  },
+  "inject": [
+    {
+      "at": "file",
+      "kind": "kill",
+      "once": true
+    }
+  ],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "succeeded"
+      },
+      "count": 1
+    },
+    {
+      "effects": "machine.run",
+      "count": 1
+    },
+    {
+      "effects": "machine.duplicates",
+      "count": 0
+    },
+    {
+      "check": "scriptHashMatchesWhatWasAsked",
+      "count": 1
+    }
+  ],
+  "claims": [
+    "durability.duplicatedSideEffects",
+    "durability.resumedStepsReExecuted"
+  ]
+}

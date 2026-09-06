@@ -67,6 +67,7 @@ jobs:
       vscode: ${{ steps.filter.outputs.vscode }}
       portal: ${{ steps.filter.outputs.portal }}
       osclient: ${{ steps.filter.outputs.osclient }}
+      proving: ${{ steps.filter.outputs.proving }}
       ci: ${{ steps.filter.outputs.ci }}
       # Target-module buckets (memql#3163 / design D3). Declared so the split
       # in memql#3165 is a no-op for CI, per decision F. NOT yet consumed by any
@@ -392,6 +393,23 @@ jobs:
             # here IS "a pattern silently matches less than its author
             # thought", so root coverage is stated outright instead of resting
             # on globstar's zero-directory case.
+            # THE PROVING SUITE (epic memql#4993). Its own bucket rather than a
+            # corner of `go`, because the CORPUS IS DATA: a scenario JSON or a
+            # cassette changes what the lane measures without changing a line
+            # of Go, and a `**/*.go` filter would skip the lane on exactly the
+            # diff that needs it most. The generated scorecard and page are
+            # here for the same reason -- the lane checks the page against the
+            # committed JSON, so an edit to either must run it.
+            proving:
+              - '.github/workflows/ci.yml'
+              - 'cmd/memql-bench/**'
+              - 'component/proving/**'
+              - 'component/automations/**'
+              - 'component/work/**'
+              - 'dsl/bench/**'
+              - 'test/proving/**'
+              - 'docs/public/overview/proving-scorecard.md'
+              - 'docs/public/overview/proving/scorecard/**'
             go:
               - '**/*.go'
               - 'go.mod'
@@ -1773,6 +1791,97 @@ jobs:
   # but it gates on the `go` bucket, so an editors/vscode-only PR skips it and
   # this lane is the only coverage those guards get. Gates on the vscode bucket
   # (editors/vscode, cmd/memql-lsp, scripts/vscode); push + merge_group run it.
+  # THE PROVING SUITE (epic memql#4993), in the slot the harness eval gate left
+  # when epic A1 deleted it -- with one difference that made it a JOB rather
+  # than a step in go-checks: the harness eval ran with NO Postgres, and this
+  # cannot. The epic is explicit that the only real infrastructure is Postgres
+  # with TimescaleDB, "because a speed claim must include it", and a benchmark
+  # that measured the platform without its database would be measuring a
+  # different product.
+  #
+  # WHAT BLOCKS AND WHAT MERELY REPORTS (design P2). A scenario that stops
+  # passing, a replay that reaches a provider, a duplicated side effect, a
+  # failed governance property, or a NEGATIVE CONTROL THAT READ ZERO all fail
+  # this lane. Cost and speed movements are computed, printed and never red:
+  # they are noisy on a shared runner, the first fix anybody reaches for is
+  # widening the threshold until it means nothing, and the structural half
+  # dies with it.
+  #
+  # The envelope is piped through `jq` on purpose. cmd/memql-bench claims to be
+  # under the capability-script contract and no shell-side conformance test can
+  # see a Go binary -- scripts/lib/capability_contract_test.go walks
+  # scripts/**/*.sh -- so this step is half of what stands behind that claim.
+  # The other half is component/proving/capability's drift gate, which reads
+  # the printf formats out of scripts/lib/capability.sh at test time.
+  proving:
+    name: proving
+    timeout-minutes: 20
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.proving == 'true' }}
+    runs-on: ubuntu-latest
+    services:
+      # The same pinned mirror the conformance and db-tests lanes use, for the
+      # reason recorded there: an unauthenticated Hub pull happens at job setup
+      # before any step runs, and a blip evicts the merge-queue candidate.
+      postgres:
+        image: ghcr.io/znasllc-io/ci-timescaledb@sha256:d8336a5c9cc49bdbf1e935234e8c87ab64b6d6d195fd2ecedff7b00185557631
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_USER: memql
+          POSTGRES_PASSWORD: memql_dev
+          POSTGRES_DB: memql
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U memql"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      MEMQL_DATABASE_DSN: postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.6'
+          cache: true
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
+      - name: create required Postgres extensions
+        run: |
+          for i in $(seq 1 30); do
+            PGPASSWORD=memql_dev pg_isready -h localhost -U memql && break
+            echo "waiting for postgres ($i)"; sleep 2
+          done
+          PGPASSWORD=memql_dev psql -h localhost -U memql -d memql -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+          CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+          CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+          CREATE EXTENSION IF NOT EXISTS vector;
+          SQL
+      - name: memql-bench --print-spec (the capability descriptor parses)
+        run: go run ./cmd/memql-bench --print-spec | jq -e '.capability == "bench.run" and (.params | length) > 0' > /dev/null
+      - name: proving gate (structural properties block; cost and speed report)
+        run: |
+          go run ./cmd/memql-bench --do=gate --runner=ubuntu-latest > /tmp/proving-envelope.json 2> /tmp/proving-gate.txt
+          status=$?
+          cat /tmp/proving-gate.txt
+          jq -e '.ok == true' /tmp/proving-envelope.json > /dev/null
+          exit $status
+      - name: the generated page is not stale against the committed scorecard
+        run: go run ./cmd/memql-bench --do=scorecard --check | jq -e '.ok == true' > /dev/null
+      - name: publish the gate's report
+        if: ${{ !cancelled() }}
+        run: |
+          {
+            echo '### Proving gate'
+            echo '```'
+            cat /tmp/proving-gate.txt 2>/dev/null || echo '(the gate did not run)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   vscode-extension:
     name: vscode-extension
     timeout-minutes: 10
@@ -2129,6 +2238,7 @@ jobs:
       - os-checks
       - conformance
       - db-tests
+      - proving
       - vscode-extension
       - vscode-extension-host
       - module-boundaries

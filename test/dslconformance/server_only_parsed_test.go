@@ -982,6 +982,26 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "work/mutations.memql", Name: "createWorkApproval"}:    true,
 		{Path: "work/mutations.memql", Name: "decideWorkApproval"}:    true,
 
+		// THE PROVING SUITE'S PUBLISHED RECORD (epic memql#4993, design section
+		// G). Caller-scoping is not available even in principle, for the reason
+		// the skill edges below give and one of its own: a benchmark is a fact
+		// about the DEPLOYMENT rather than about a person. v1:bench:run and
+		// v1:bench:sample declare @rowAuthz(clusterOwner) and carry no owner
+		// field at all, so there is no actor.userId for a filter to compare
+		// against -- and inventing one, by stamping the caller as a run's owner,
+		// would turn a cluster-wide measurement into a per-person one and give
+		// every signed-in account its own private set of numbers.
+		//
+		// What barring these from the wire buys is the thing the numbers are
+		// FOR. README and docs/public carry published claims marked with the
+		// figure each rests on, and TestPublishedClaimsRestOnAScorecardNumber
+		// fails the build when the committed scorecard stops agreeing. A
+		// client-reachable write here is therefore a primitive for forging the
+		// numbers the product is sold on, which is a sharper consequence than
+		// the usual "somebody could write a row they should not".
+		{Path: "bench/mutations.memql", Name: "createBenchRun"}:    true,
+		{Path: "bench/mutations.memql", Name: "createBenchSample"}: true,
+
 		// THE CAPABILITY GRAPH'S EDGES (work spine A1, spec section C). An
 		// edge is EVIDENCE that two skills relate, gathered from runs the
 		// engine executed and committed only by a run that succeeded -- so a

@@ -1,0 +1,95 @@
+{
+  "id": "recovery.repair-runs-from-the-failed-step",
+  "family": "recovery",
+  "title": "A contract violation is repaired from the failed step, with the prefix kept",
+  "goal": "Assemble the {{account}} close pack and file it",
+  "variables": [
+    {
+      "account": "acme"
+    }
+  ],
+  "steps": [
+    {
+      "key": "gather",
+      "type": "function",
+      "target": "gatherDocuments"
+    },
+    {
+      "key": "summarize",
+      "type": "function",
+      "target": "summarizeClose",
+      "dependsOn": [
+        "gather"
+      ],
+      "reasoning": true
+    },
+    {
+      "key": "check",
+      "type": "function",
+      "target": "checkTotals",
+      "dependsOn": [
+        "summarize"
+      ]
+    },
+    {
+      "key": "file",
+      "type": "function",
+      "target": "fileClosePack",
+      "dependsOn": [
+        "check"
+      ],
+      "effect": "mailbox"
+    },
+    {
+      "key": "close",
+      "type": "function",
+      "target": "closeLedger",
+      "dependsOn": [
+        "file"
+      ]
+    }
+  ],
+  "world": {
+    "mailbox": {
+      "addresses": [
+        "ops@example.test"
+      ]
+    }
+  },
+  "inject": [
+    {
+      "at": "file",
+      "kind": "contract",
+      "message": "postcondition failed: the close pack has no total",
+      "once": true
+    }
+  ],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "succeeded"
+      },
+      "count": 1
+    },
+    {
+      "rows": "v1:work:step",
+      "where": {
+        "status": "reExecuted"
+      },
+      "count": 0
+    },
+    {
+      "effects": "mailbox.duplicates",
+      "count": 0
+    }
+  ],
+  "claims": [
+    "recovery.rate",
+    "recovery.modelCalls",
+    "recovery.stepsReExecuted",
+    "recovery.repairStepsVsRestartSteps",
+    "recovery.wallClockMs"
+  ],
+  "negativeControlFor": "recovery.stepsReExecuted"
+}

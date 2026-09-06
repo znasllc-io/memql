@@ -1,0 +1,56 @@
+{
+  "id": "governance.an-approval-does-not-carry-to-a-changed-artifact",
+  "family": "governance",
+  "title": "An approval is bound to the hash of the exact thing approved, and every model call is journaled",
+  "goal": "Ask for approval of a command for {{account}} and then change it",
+  "variables": [
+    {
+      "account": "acme"
+    }
+  ],
+  "steps": [
+    {
+      "key": "propose",
+      "type": "function",
+      "target": "proposeCommand",
+      "reasoning": true
+    },
+    {
+      "key": "apply",
+      "type": "function",
+      "target": "apply-command.sh",
+      "dependsOn": [
+        "propose"
+      ],
+      "effect": "machine"
+    }
+  ],
+  "world": {
+    "machine": {
+      "labels": {
+        "os": "linux"
+      },
+      "scripts": {
+        "apply-command.sh": "applied\n"
+      }
+    }
+  },
+  "inject": [],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "succeeded"
+      },
+      "count": 1
+    },
+    {
+      "check": "approvalRefusesAChangedArtifact",
+      "count": 1
+    }
+  ],
+  "claims": [
+    "governance.approvalsBoundToArtifactHash",
+    "governance.modelCallsJournaled"
+  ]
+}

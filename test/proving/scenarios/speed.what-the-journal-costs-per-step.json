@@ -1,0 +1,89 @@
+{
+  "id": "speed.what-the-journal-costs-per-step",
+  "family": "speed",
+  "title": "What the journal itself adds per step, measured in one process against the same steps unjournaled",
+  "goal": "Run an eight-step deterministic plan for {{account}}",
+  "variables": [
+    {
+      "account": "acme"
+    }
+  ],
+  "steps": [
+    {
+      "key": "s1",
+      "type": "function",
+      "target": "noop1"
+    },
+    {
+      "key": "s2",
+      "type": "function",
+      "target": "noop2",
+      "dependsOn": [
+        "s1"
+      ]
+    },
+    {
+      "key": "s3",
+      "type": "function",
+      "target": "noop3",
+      "dependsOn": [
+        "s2"
+      ]
+    },
+    {
+      "key": "s4",
+      "type": "function",
+      "target": "noop4",
+      "dependsOn": [
+        "s3"
+      ]
+    },
+    {
+      "key": "s5",
+      "type": "function",
+      "target": "noop5",
+      "dependsOn": [
+        "s4"
+      ]
+    },
+    {
+      "key": "s6",
+      "type": "function",
+      "target": "noop6",
+      "dependsOn": [
+        "s5"
+      ]
+    },
+    {
+      "key": "s7",
+      "type": "function",
+      "target": "noop7",
+      "dependsOn": [
+        "s6"
+      ]
+    },
+    {
+      "key": "s8",
+      "type": "function",
+      "target": "noop8",
+      "dependsOn": [
+        "s7"
+      ]
+    }
+  ],
+  "world": {},
+  "inject": [],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "succeeded"
+      },
+      "count": 1
+    }
+  ],
+  "claims": [
+    "speed.journalPerStepOverheadRatio",
+    "speed.wallClockPerGoalMs"
+  ]
+}

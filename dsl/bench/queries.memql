@@ -1,0 +1,47 @@
+// Reads over the proving suite's published record.
+//
+// Every one is cluster-owner tier, matching the concepts: a benchmark is a
+// fact about the deployment, and there is no per-person slice of it to offer.
+// The MemQL OS's Benchmarks section is gated at admin for exactly that reason
+// -- a reader below the floor would see an empty list with no explanation.
+
+/// Every benchmark run, newest first. The trend across releases is read from this.
+@actor
+query run benchRuns {
+  filter  actor.isClusterOwner==true
+  sort    "row.createdAt", "desc"
+  shape   benchRunFull
+}
+
+/// One benchmark run by id.
+@actor
+query run benchRunById {
+  args {
+    benchRunId  string!
+  }
+  filter  row.id==args.benchRunId && actor.isClusterOwner==true
+  shape   benchRunFull
+}
+
+/// Every published figure for one benchmark run.
+@actor
+query sample benchSamplesForRun {
+  args {
+    benchRunId  string!
+  }
+  filter  benchRunId==args.benchRunId && actor.isClusterOwner==true
+  sort    "metric", "asc"
+  shape   benchSampleFull
+}
+
+/// One metric's figures across runs, which is how a trend is drawn.
+@actor
+query sample benchSamplesForMetric {
+  args {
+    metric  string!
+    arm     string
+  }
+  filter  metric==args.metric && actor.isClusterOwner==true && when(args.arm) { arm==args.arm }
+  sort    "row.createdAt", "desc"
+  shape   benchSampleFull
+}

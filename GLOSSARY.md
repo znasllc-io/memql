@@ -18,6 +18,7 @@ The complete map of MemQL documentation. Layout + rules:
 - [What Is MemQL](docs/public/overview/what-is-memql.md) — the platform: modules it runs, clients you build on it, the memory graph underneath.
 - [The Harness](docs/public/overview/why-memql-harness.md) — the proof-driven tour of the work spine: the journal, resume, budgets, memory consolidation. Each claim names the test that backs it, and the ones not yet proven are listed as such.
 - [MemQL vs. Agent Libraries and Frameworks](docs/public/overview/vs-other-harnesses.md) — honest comparison with the Go + Python field.
+- [The Proving Scorecard](docs/public/overview/proving-scorecard.md) — generated. What the platform measures about itself against the same model in a bare tool loop, and — with equal prominence — what it does not measure and why.
 - [Quickstart](docs/public/overview/quickstart.md) — get running fast.
 - [Tech Stack & Practices](docs/public/overview/tech-stack.md) — the stack + engineering practices.
 

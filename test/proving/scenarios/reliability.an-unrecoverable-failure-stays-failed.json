@@ -1,0 +1,46 @@
+{
+  "id": "reliability.an-unrecoverable-failure-stays-failed",
+  "family": "reliability",
+  "title": "A failure that cannot be recovered stays failed rather than being papered over",
+  "goal": "Reconcile {{account}} against a ledger the run cannot reach",
+  "variables": [
+    {
+      "account": "acme"
+    }
+  ],
+  "steps": [
+    {
+      "key": "read",
+      "type": "function",
+      "target": "ledgerLines"
+    },
+    {
+      "key": "post",
+      "type": "function",
+      "target": "postReconciliation",
+      "dependsOn": [
+        "read"
+      ]
+    }
+  ],
+  "world": {},
+  "inject": [
+    {
+      "at": "post",
+      "kind": "environment",
+      "message": "permission denied: the ledger is not writable by this actor"
+    }
+  ],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "failed"
+      },
+      "count": 1
+    }
+  ],
+  "claims": [
+    "reliability.passRate"
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "id": "recovery.a-transient-failure-is-retried",
+  "family": "recovery",
+  "title": "A transient failure is retried and the run completes",
+  "goal": "Fetch the {{account}} statement and notify",
+  "variables": [
+    {
+      "account": "acme"
+    }
+  ],
+  "steps": [
+    {
+      "key": "fetch",
+      "type": "function",
+      "target": "fetchStatement",
+      "effect": "http"
+    },
+    {
+      "key": "notify",
+      "type": "function",
+      "target": "notifyOps",
+      "dependsOn": [
+        "fetch"
+      ],
+      "effect": "mailbox"
+    }
+  ],
+  "world": {
+    "mailbox": {
+      "addresses": [
+        "ops@example.test"
+      ]
+    },
+    "http": {
+      "routes": {
+        "POST /fetchStatement": "{\"lines\":42}"
+      }
+    }
+  },
+  "inject": [
+    {
+      "at": "notify",
+      "kind": "transient",
+      "message": "connection refused",
+      "once": true
+    }
+  ],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "succeeded"
+      },
+      "count": 1
+    },
+    {
+      "effects": "mailbox.sent",
+      "count": 1
+    },
+    {
+      "effects": "http.duplicates",
+      "count": 0
+    }
+  ],
+  "claims": [
+    "recovery.rate",
+    "recovery.modelCalls",
+    "recovery.stepsReExecuted"
+  ]
+}

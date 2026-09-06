@@ -1,0 +1,59 @@
+{
+  "id": "learningCurve.a-deterministic-plan-needs-no-model-at-all",
+  "family": "learningCurve",
+  "title": "A plan whose every step is deterministic serves the whole run without a model",
+  "goal": "Run the {{account}} standing close, which has no reasoning left in it",
+  "variables": [
+    {
+      "account": "acme"
+    }
+  ],
+  "steps": [
+    {
+      "key": "gather",
+      "type": "function",
+      "target": "gatherDocuments"
+    },
+    {
+      "key": "total",
+      "type": "function",
+      "target": "checkTotals",
+      "dependsOn": [
+        "gather"
+      ]
+    },
+    {
+      "key": "file",
+      "type": "function",
+      "target": "fileClosePack",
+      "dependsOn": [
+        "total"
+      ],
+      "effect": "mailbox"
+    }
+  ],
+  "world": {
+    "mailbox": {
+      "addresses": [
+        "ops@example.test"
+      ]
+    }
+  },
+  "inject": [],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "succeeded"
+      },
+      "count": 1
+    },
+    {
+      "effects": "mailbox.sent",
+      "count": 1
+    }
+  ],
+  "claims": [
+    "learningCurve.catalogServedFraction"
+  ]
+}

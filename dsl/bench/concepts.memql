@@ -1,0 +1,76 @@
+// Per-construct DSL layout: every <kind>s.memql file in a domain holds every
+// construct of that kind in the domain. This domain is the PROVING SUITE's
+// published record: what each benchmark run measured, and -- just as
+// deliberately -- what it did not.
+//
+// Design record: docs/superpowers/specs/2026-09-06-proving-suite-design.md.
+// The Go side is component/proving/ and cmd/memql-bench.
+
+/// One invocation of the proving suite. Written by `memql-bench --do=run`,
+/// once per run, before any sample.
+///
+/// CLUSTER-OWNER TIER, and it has no owner field at all. A benchmark is a fact
+/// about the DEPLOYMENT rather than about a person: there is nobody whose row
+/// this is, so the composite `owner=..., clusterOwner` form other operator
+/// surfaces use would have an owner key that nothing could ever fill.
+///
+/// EVERY MUTATION BOUND TO THIS CONCEPT IS @serverOnly, and that is the
+/// load-bearing part. These rows are what the README's published claims rest
+/// on (the claims gate in scorecard/claims.go checks a marked claim against
+/// the committed scorecard), so a client-reachable write here would be a
+/// primitive for forging the numbers the product is sold on. The writer stamps
+/// internal origin and takes an entry in call_origin_conformance_test.go's
+/// allowlist saying exactly that.
+@displayCard(primary="tier", secondary="verdict", tertiary="commit", status="verdict")
+@rowAuthz(clusterOwner)
+concept run {
+  tier               enum("ci", "live")!  @description("Which lane produced this run. `ci` replays from recorded responses and reaches no provider; `live` runs against real providers. The two measure different things about the same metric names, which is why a figure from one is never compared against a figure from the other -- component/proving/figure.Compare returns `undecidable` across a tier boundary rather than pretending.")
+  commit             string!  @description("Short SHA the suite ran at. Required on every figure: a number nobody can reproduce is a number nobody should act on.")
+  corpusFingerprint  string!  @description("Digest over the scenario corpus's CONTENT, from component/proving/scenario. Two runs with different fingerprints measured different things, and joining them into a trend is the mistake this field exists to make visible. It moves when an asserted value changes and stays put when the JSON is merely reformatted.")
+  scenarioCount      int!  @description("How many scenarios ran. A run whose count fell without a corpus change is a run that skipped something.")
+  verdict            enum("pass", "blocked", "error")!  @description("`pass` means no blocking failure; `blocked` means a structural property regressed, a verifier failed, or a negative control read zero; `error` means the suite could not run. Cost and speed movements never produce `blocked` -- design P2, because a threshold that reds the lane for runner noise gets widened until it means nothing, taking the structural half with it.")
+  modelIds           []string  @description("The models involved, sorted. On a live run these are the providers called. On a CI run they are what the cassettes were RECORDED against -- `synthetic` where the tape holds placeholder responses, which is honest about structure and silent about anything model-dependent.")
+  costUsd            float  @description("What this run cost. Absent rather than zero on a CI run, which reaches no provider: an absent figure and a zero are different answers, about money as much as anything else.")
+  runner             string  @description("The machine class the run happened on, so a wall-clock figure from a shared CI runner is not silently compared against one from a workstation.")
+  blockingFailures   []string  @description("The blocking failures, in the suite's own words. Empty on a pass. A negative control that read zero appears here and is the most serious entry it can carry: it means the counter behind a metric never goes up on any path, so every green figure that metric produced means nothing.")
+  startedAt          datetime!  @description("When the run began.")
+  finishedAt         datetime  @description("When it ended. Empty on a run that did not finish.")
+}
+
+/// One published figure: a metric, on one arm, for one scenario.
+///
+/// A SAMPLE CARRIES EITHER A STATISTIC OR AN ABSENT REASON, NEVER BOTH AND
+/// NEVER NEITHER. That invariant is enforced in Go by component/proving/figure
+/// before a row is composed, and it is why `absentReason` is a first-class
+/// field rather than an empty median: a run whose provider-call count could
+/// not be measured and a run that genuinely made zero provider calls are
+/// different answers, and a schema that could only say "0" would collapse
+/// them.
+///
+/// There is deliberately NO `mean` field, and no single-number form. The epic's
+/// honesty rule is medians and spread, never a best case, and a schema that
+/// offered a bare number is a schema somebody would eventually publish from.
+@displayCard(primary="metric", secondary="arm", tertiary="scenarioId", status="arm")
+@rowAuthz(clusterOwner)
+concept sample {
+  benchRunId    string!  @description("v1:bench:run.id this sample belongs to.")
+  family        enum("amortizedCost", "reliability", "recovery", "durability", "learningCurve", "speed", "governance")!  @description("Which of the six families this belongs to, or `governance` -- which is carried by the same rows and is deliberately NOT a family in the epic's sense: it is pass-or-fail and has no statistics, so there is no governance score to be tempted by.")
+  scenarioId    string!  @description("The corpus scenario that produced it, which is also the filename under test/proving/scenarios/.")
+  arm           enum("platform", "baseline")!  @description("What was under test. `platform` is the work spine with its machinery on; `baseline` is the same model, the same tools and the same scenario in a plain bounded tool loop, with catalog, journal, replay, classifier and healing switched off. There are exactly two and there will not be a third: the epic's comparison is a model by itself against the model with MemQL, and a third arm turns a comparison into a survey.")
+  metric        string!  @description("The metric id, registered in component/proving/figure. Registration is what supplies its unit and its DIRECTION -- whether lower or higher is better -- so an unregistered metric cannot be compared at all rather than being compared by a guess.")
+  unit          enum("calls", "steps", "tokens", "usd", "ms", "ratio", "percent", "count")!  @description("What the number counts. Two figures in different units are never compared.")
+  n             int  @description("Sample size. Absent when the figure is unmeasured.")
+  median        float  @description("The median. Absent when the figure is unmeasured -- and note that ABSENT is not 0.0: a reader must consult absentReason before treating this as a number.")
+  p10           float  @description("Tenth percentile. Quoted for N of five or more; below that the scorecard quotes the range and the median absolute deviation instead, because a p10 over three samples is an order statistic wearing a percentile's name.")
+  p90           float  @description("Ninetieth percentile.")
+  minimum       float  @description("Smallest observation. Named `minimum` rather than `min` because `min` reads as an intrinsic.")
+  maximum       float  @description("Largest observation.")
+  mad           float  @description("Median absolute deviation -- the spread figure quoted for a small N.")
+  absentReason  enum("", "notMeasurableOnReplay", "seamNotBuilt", "tierNotRun", "noProvider", "belowFloor", "ceilingReached")  @default("")  @description("Why there is no number. A CLOSED set: a free-text reason drifts into 'n/a' within two releases and stops meaning anything, and the whole value of an absent figure is that it says something specific. `seamNotBuilt` is the one that matters most today -- it names code that does not exist yet, and it is what stops the suite reporting 'zero provider calls' because nothing in the path calls a provider, which is a lie that reads exactly like the headline result.")
+  detail        string  @description("Qualifies absentReason. Required for `seamNotBuilt`, where it NAMES the missing code -- 'the code is not built' without naming the code is the sort of absence that never becomes a work item.")
+  tier          enum("ci", "live")!  @description("Copied from the run, so a sample is self-describing when read on its own.")
+  commit        string!  @description("Copied from the run.")
+  measuredOn    string!  @description("The date, YYYY-MM-DD. A date rather than a timestamp: the scorecard is a daily artifact and a timestamp invites reading a precision into it that the refresh cadence does not support.")
+
+  @relationship(type="parent", field="benchRunId", target=run, direction="outgoing")
+}

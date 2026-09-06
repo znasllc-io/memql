@@ -1,0 +1,42 @@
+{
+  "id": "amortizedCost.control-a-catalog-miss-reaches-a-model",
+  "family": "amortizedCost",
+  "title": "The control: a goal the catalog does not hold DOES reach a model",
+  "goal": "Draft an unprecedented settlement narrative for {{account}} in the style of a court filing",
+  "variables": [
+    {
+      "account": "acme"
+    }
+  ],
+  "steps": [
+    {
+      "key": "draft",
+      "type": "function",
+      "target": "draftNarrative",
+      "reasoning": true
+    },
+    {
+      "key": "close",
+      "type": "function",
+      "target": "closeLedger",
+      "dependsOn": [
+        "draft"
+      ]
+    }
+  ],
+  "world": {},
+  "inject": [],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "succeeded"
+      },
+      "count": 1
+    }
+  ],
+  "claims": [
+    "amortizedCost.compileCallsOnCatalogHit"
+  ],
+  "negativeControlFor": "amortizedCost.compileCallsOnCatalogHit"
+}

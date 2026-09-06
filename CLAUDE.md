@@ -2434,6 +2434,72 @@ touches rows.
   retires them, gated on epic A3 re-keying Training off them; until that lands
   the planner concepts and `component/planner` stay exactly as they are.
 
+### The proving suite -- what the platform measures about itself (epic memql#4993)
+
+A corpus of scenarios and benchmarks answering "does this work, and how well",
+measured as **the platform against the same model in a bare tool loop** with
+its machinery switched off -- no catalog, no journal, no replay, no classifier,
+no healing. No other framework is named or measured. Design record:
+[the proving suite](docs/superpowers/specs/2026-09-06-proving-suite-design.md).
+
+**The numbers must be honest before they are good, and that is a TYPE rather
+than a policy.** `component/proving/figure` carries either a `Stat` or an
+`AbsentReason`, never both and never neither; a `Stat` has `N`, median, spread
+and **no `Mean` field and no single-number constructor**; and `Render` refuses
+a figure whose provenance is incomplete for its tier. So `unmeasured` is a
+value distinct from zero all the way to the pixel, and "medians and spread,
+never a best case" is unrepresentable rather than merely discouraged.
+
+- **Two tiers, and what each may publish is a DECISION** (P1). A CI replay is
+  deterministic by construction, so pass-rate variance is trivially perfect and
+  wall-clock belongs to the runner: both read `notMeasurableOnReplay` until the
+  live tier fills them. The live lane ships **DISARMED** (P3) --
+  `proving-live.yml` is `workflow_dispatch` with no schedule -- and the
+  scorecard's tier table says so rather than leaving empty columns unexplained.
+- **`seamNotBuilt` names the missing code.** Two work-spine seams are not
+  built: nothing writes `v1:work:modelCall`, and `work.DecideServe` has no
+  caller. The suite reports those figures as absent WITH the gap named, because
+  reporting "zero provider calls" when nothing in the path calls a provider is
+  a lie that reads exactly like the headline result.
+- **Every zero-claim is paired with a NEGATIVE CONTROL that must produce a
+  non-zero**, and a control reading zero FAILS the suite. Usually the control
+  is the same scenario's baseline arm -- a bare loop with no journal restarts
+  from the beginning, so it re-executes and re-delivers. A counter that never
+  rises on any path reads as zero forever.
+- **The CI gate blocks on STRUCTURAL properties and reports on cost and speed**
+  (P2). A scenario that stops passing, a duplicated side effect, a failed
+  governance property, a dead control, or **a metric that stopped being
+  measured at all** fail the `proving` lane. Cost and speed never do: a
+  threshold that reds the lane for runner noise gets widened until it means
+  nothing, and the structural half dies with it.
+- **`cmd/memql-bench` adopts the capability-script contract**, which
+  `scripts/lib/capability_contract_test.go` cannot check because its walk is
+  `scripts/**/*.sh`. What stands behind the claim is
+  `component/proving/capability`, whose test READS THE PRINTF FORMATS OUT OF
+  `scripts/lib/capability.sh` at test time, plus the CI job piping the envelope
+  through `jq`.
+- **A claim may not outlive its number** (P4). A published numeric claim in
+  README or `docs/public` carries a `<!-- proving: metric=... value=... -->`
+  marker; `TestPublishedClaimsRestOnAScorecardNumber` fails the build when the
+  committed scorecard does not carry it, reports it unmeasured, or measures it
+  differently. `<!-- proving-pending: ... -->` is the OPPOSITE marker for the
+  "does NOT make yet" table, and the mirror gate fails when one of those has
+  quietly become true. NEGATIVE CONTROLS are excluded from claim checking --
+  without that, every zero-claim is unclaimable.
+- **The pure sub-packages are a BUILD-GRAPH fact.** `figure`, `scenario`,
+  `scorecard`, `capability`, `world` and `cassette` import nothing outside the
+  standard library and each other, asserted by reading `go list -deps`. That is
+  what a nested Go module would have bought at none of its twelve gates' cost.
+  `component/proving` itself is deliberately DATABASE-FREE, so no db-gated lane
+  changes; the database-touching verification is the binary running end to end
+  in the `proving` job.
+- Rows: `v1:bench:run` and `v1:bench:sample`, `@rowAuthz(clusterOwner)`,
+  broadcast, every mutation `@serverOnly` -- a client-reachable write here is a
+  primitive for forging the numbers the README rests on. Surfaced at MemQL OS
+  Settings -> Benchmarks (`{ min: "admin" }`), where an absence takes the same
+  room as a number and an unmeasured run draws an OPEN NOTCH rather than a bar
+  of height zero.
+
 ### Planner / Knowledge / Validation
 
 The schema is stable, so new features add fields/automations without migrations.

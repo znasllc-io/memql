@@ -1,0 +1,72 @@
+{
+  "scenario": "speed.a-first-run-against-a-replay",
+  "arm": "platform",
+  "modelId": "synthetic",
+  "recordedAt": "2026-09-06",
+  "turns": [
+    {
+      "requestHash": "fd235a1c3de8ba3a354afe55",
+      "prompt": "step=plan target=planClose attempt=1",
+      "response": "placeholder answer for plan (attempt 1)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "432bc5429bdf7a9e7244e3ca",
+      "prompt": "step=plan target=planClose attempt=2",
+      "response": "placeholder answer for plan (attempt 2)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "9e3217a6cc01480004eaec4f",
+      "prompt": "step=plan target=planClose attempt=3",
+      "response": "placeholder answer for plan (attempt 3)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "6052018867162a2973575e46",
+      "prompt": "step=plan target=planClose attempt=4",
+      "response": "placeholder answer for plan (attempt 4)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "7324817b657c4013c31c6007",
+      "prompt": "step=plan target=planClose attempt=5",
+      "response": "placeholder answer for plan (attempt 5)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "d9adb4a76d5c6414d0627992",
+      "prompt": "step=plan target=planClose attempt=6",
+      "response": "placeholder answer for plan (attempt 6)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "1e838e005030d51f9367b0f9",
+      "prompt": "step=plan target=planClose attempt=7",
+      "response": "placeholder answer for plan (attempt 7)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "23fdb6ebf7511e1031736ed3",
+      "prompt": "step=plan target=planClose attempt=8",
+      "response": "placeholder answer for plan (attempt 8)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    }
+  ]
+}
