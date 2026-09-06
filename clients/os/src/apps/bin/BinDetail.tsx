@@ -17,7 +17,7 @@ import {
 import { useOsConnection } from "../../live/connection";
 import { OVER_LIMIT_SENTENCE, planDownload, runBufferedDownload } from "../files/actions/download";
 import { downloadWorkerRegistration, runWorkerDownload } from "../files/actions/downloadWorker";
-import { kindGlyph } from "../files/BrowseSection";
+import { kindGlyph } from "../files/glyphs";
 import { fileStory } from "../files/rows";
 import type { ArtifactRow } from "../files/rows";
 import { restoreNote } from "./restore";

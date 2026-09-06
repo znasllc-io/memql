@@ -10,8 +10,8 @@ vi.mock("../../src/live/connection", () => ({
 
 import { artifactRow, click, fakeConnection, folderRow, renderFiles } from "./harness";
 
-// The rail's three places (epic memql#4842, #4846): Library / Desktop /
-// Archive, and the open intent that lands a window on one.
+// The rail's three places (epic memql#4842, #4846, renamed by memql#4981):
+// Library / Desktop / Bin, and the open intent that lands a window on one.
 
 beforeEach(() => {
   h.connection = null;
@@ -85,7 +85,7 @@ describe("the open intent", () => {
   });
 });
 
-describe("restore out of the Archive place", () => {
+describe("restore out of the Bin place", () => {
   it("re-files a row to the root when its folder is not live (the #4846 rule)", async () => {
     h.connection = fakeConnection({
       archivedFolders: [folderRow({ id: "f-gone", name: "Old drafts", archived: true })],
@@ -94,7 +94,7 @@ describe("restore out of the Archive place", () => {
       ],
     });
     await renderFiles();
-    await click(screen.getByRole("button", { name: /^Archive/ }));
+    await click(screen.getByRole("button", { name: /^Bin/ }));
     fireEvent.contextMenu(screen.getByRole("button", { name: /stranded\.txt/ }));
     await click(screen.getByRole("menuitem", { name: "Restore" }));
     const conn = h.connection as ReturnType<typeof fakeConnection>;

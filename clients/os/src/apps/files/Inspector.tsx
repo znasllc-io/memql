@@ -4,6 +4,7 @@ import { Archive, CornerUpRight, Download, FilePlus2, RotateCcw, Sparkles, X } f
 import { useAuthSource } from "../../auth/context";
 import { useSession } from "../../chrome/access";
 import { useOs } from "../../chrome/state";
+import { canOpen } from "../../system/registry";
 import { openInVsCode, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
 import { binItemFromArtifact } from "../bin/rows";
 import { planRestore, runRestore } from "../bin/restore";
@@ -17,7 +18,8 @@ import type { VersionEntry } from "./versions";
 import { useOsConnection } from "../../live/connection";
 import type { UploadProvider } from "../../items/upload";
 import { rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
-import { kindGlyph } from "./BrowseSection";
+import { kindGlyph } from "./glyphs";
+import { MATERIALIZER_APP, MATERIALIZER_COMPOSER } from "./materializer";
 import {
   downloadArtifact,
   OVER_LIMIT_SENTENCE,
@@ -25,7 +27,7 @@ import {
   runBufferedDownload,
 } from "./actions/download";
 import { downloadWorkerRegistration, runWorkerDownload } from "./actions/downloadWorker";
-import { artifactName, fileStory, type ArtifactRow } from "./rows";
+import { artifactName, fileStory, type ArtifactRow, type CompositionRow } from "./rows";
 
 // The inspector (design D1): the file's story, its facts, and the five
 // actions -- open in VS Code, send to desktop, download, upload a new version,
@@ -84,6 +86,7 @@ function describe(err: unknown): string {
 
 export function Inspector({
   row,
+  composition,
   folderNameOf,
   archivedFolderIds,
   presence,
@@ -93,6 +96,15 @@ export function Inspector({
   onClose,
 }: {
   row: ArtifactRow;
+  /**
+   * The composition that produced this file, if one did (epic memql#4981,
+   * #4983). ONE SENTENCE AND ONE ACT is the whole of what Files says about
+   * it: the record -- the sources, the template, the models that contributed,
+   * the provenance -- belongs to the Materializer, and restating any of it
+   * here would be a second reading free to disagree with the app whose
+   * subject it is.
+   */
+  composition: CompositionRow | null;
   folderNameOf: (folderId: string) => string;
   /** Ids of KNOWN-archived folders -- the restore re-file predicate. */
   archivedFolderIds: ReadonlySet<string>;
@@ -114,7 +126,7 @@ export function Inspector({
   onClose: () => void;
 }) {
   const { config } = useSession();
-  const { actions } = useOs();
+  const { actions, registry, actorRole } = useOs();
   const connection = useOsConnection();
   const authSource = useAuthSource();
 
@@ -319,7 +331,7 @@ export function Inspector({
     }
   }, [connection, row.id]);
 
-  // Restore, for a row being read in the Archive place (epic memql#4842,
+  // Restore, for a row being read in the Bin place (epic memql#4842,
   // #4846): the Bin's client-driven pair, verbatim -- the index first, then
   // the backing file -- so the two surfaces cannot drift apart on what
   // "putting back" means. The automation mirror deliberately does not exist
@@ -427,6 +439,38 @@ export function Inspector({
           ) : null}
           <Fact label="Id" value={<CopyValue value={row.id} label="Id" />} mono />
         </Facts>
+
+        {/* MADE IN THE MATERIALIZER. A fact and an act, and deliberately not a
+            panel: what this file was made FROM is the record's question, and
+            the record is one click away in the app that owns it. The act is
+            ABSENT rather than disabled when that app is not open-able
+            (DESIGN.md rule 12) -- `openApp` no-ops on an app the registry
+            does not hold, and a button that silently does nothing is worse
+            than one that is not there. */}
+        {composition !== null ? (
+          <Facts>
+            <Fact
+              label="Made in"
+              value={
+                canOpen(registry, actorRole, MATERIALIZER_APP) ? (
+                  <button
+                    type="button"
+                    className="os-link"
+                    onClick={() =>
+                      actions.openApp(MATERIALIZER_APP, MATERIALIZER_COMPOSER, {
+                        compositionId: composition.id,
+                      })
+                    }
+                  >
+                    Open in Materializer
+                  </button>
+                ) : (
+                  "the Materializer"
+                )
+              }
+            />
+          </Facts>
+        ) : null}
 
         {row.labels.length > 0 ? (
           <Chips label="Labels">

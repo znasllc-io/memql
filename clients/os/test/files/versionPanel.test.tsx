@@ -262,7 +262,7 @@ describe("the upload-new-version action", () => {
       versions: [versionRow({ id: "f-1-v1", fileId: "f-1", versionNumber: 1 })],
     });
     await renderFiles();
-    fireEvent.click(screen.getByRole("button", { name: /^Archive/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Bin/ }));
     const inspector = await openInspector("gone\\.pdf");
     expect(within(inspector).queryByRole("button", { name: /Upload new version/ })).toBeNull();
     // The HISTORY is still there: an archived file keeps its bytes and its

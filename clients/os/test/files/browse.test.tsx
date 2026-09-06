@@ -97,7 +97,7 @@ describe("the live list and its cue", () => {
     expect(screen.getByText(/Nothing matches/)).toBeTruthy();
   });
 
-  it("keeps archived rows out of the Library and lists them under the Archive place", async () => {
+  it("keeps archived rows out of the Library and lists them under the Bin place", async () => {
     h.connection = fakeConnection({
       artifacts: [
         artifactRow({ id: "a-live", title: "live.bin" }),
@@ -106,9 +106,9 @@ describe("the live list and its cue", () => {
     });
     await renderFiles();
     expect(screen.queryByText(/old\.zip/)).toBeNull();
-    await click(screen.getByRole("button", { name: /^Archive/ }));
+    await click(screen.getByRole("button", { name: /^Bin/ }));
     const row = screen.getByRole("button", { name: /old\.zip/ });
-    // No "archived" chip inside the Archive place -- every row there is,
+    // No "archived" chip inside the Bin place -- every row there is,
     // and a chip stating the place would be furniture (rule 7).
     expect(within(row).queryByText("archived")).toBeNull();
     expect(screen.queryByText(/live\.bin/)).toBeNull();
@@ -149,7 +149,8 @@ describe("the folder rail", () => {
     fireEvent.contextMenu(screen.getByRole("button", { name: /Client videos/ }));
     await click(screen.getByRole("menuitem", { name: "Archive" }));
     expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
-    // The rail's Archive PLACE is also a button named Archive now, so the
+    // The rail's place is named Bin now, but the ROW menu's own verb is
+    // still Archive, so the
     // confirm's own action is reached inside its notice.
     const confirm = screen
       .getByText(/Archive "Client videos" and its 2 items\?/)

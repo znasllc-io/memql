@@ -22,12 +22,18 @@ import {
   type DeskMembership,
   type FilesFilter,
 } from "./filters";
-import { foldFolderTree } from "./fold";
+import { foldFolderTree, foldMaterializedRail, materializedByArtifactId } from "./fold";
 import { rowString } from "@znasllc-io/memql-sdk-core/client";
 
 import { flatten } from "../../kit/rows";
 import { foldFolderLinkStates, linkStateOf, type LinkState } from "./links";
-import { artifactFromRow, folderFromRow, isContentKind, type ArtifactRow } from "./rows";
+import {
+  artifactFromRow,
+  compositionFromRow,
+  folderFromRow,
+  isContentKind,
+  type ArtifactRow,
+} from "./rows";
 import {
   DEFAULT_FILES_SETTINGS,
   LocalFilesSettingsStore,
@@ -80,7 +86,7 @@ export function FilesApp({
     [uploads, authSource],
   );
 
-  const { artifacts, folders, files } = useLibraryFeeds();
+  const { artifacts, folders, files, compositions } = useLibraryFeeds();
 
   // The backups feed is RETAINED AT THE APP ROOT like its three siblings, not
   // inside the section, so switching away and back does not tear the
@@ -120,6 +126,14 @@ export function FilesApp({
   // trip to Settings and back would otherwise shut everything the person had
   // just opened. Starts all-shut -- Rail.tsx says why.
   const [expanded, setExpanded] = useState<ExpandedPlaces>(ALL_COLLAPSED);
+  // The Bin's own disclosures, one level in (epic memql#4981): its archived
+  // folders and its loose group. Held HERE for exactly the reason above --
+  // the section switch below returns early, so a trip to Settings and back
+  // would shut what the person had just opened. Starts empty: the Bin opens
+  // onto its shape, and its contents are asked for.
+  const [openBinFolders, setOpenBinFolders] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
 
   // ===========================================================================
   // THE DESK, FOLDED FOR THE DESKTOP PLACE (epic memql#4842, #4846)
@@ -184,6 +198,30 @@ export function FilesApp({
     consumeIntent?.(intent.id);
   }, [intent, consumeIntent]);
 
+  // The whole content population, unfiltered -- what "empty" and the rail's
+  // counts are honestly about.
+  const content = useMemo(
+    () =>
+      artifacts.snapshot.rows
+        .map(artifactFromRow)
+        .filter((r) => r.id !== "" && isContentKind(r.kind)),
+    [artifacts.snapshot],
+  );
+
+  // WHICH OF THE CALLER'S FILES CAME OUT OF THE MATERIALIZER (epic
+  // memql#4981, #4983). Folded from the composition feed against the artifact
+  // index -- one pass over two snapshots the app already holds, rather than a
+  // read per row. `fold.ts` carries why the join is on the backing FILE and
+  // why a composition with no output file contributes nothing.
+  const materialized = useMemo(
+    () =>
+      materializedByArtifactId(
+        compositions.snapshot.rows.map(compositionFromRow).filter((c) => c.id !== ""),
+        content,
+      ),
+    [compositions.snapshot, content],
+  );
+
   // The list's own reading of the artifacts feed: project, then narrow, then
   // order, in one pass -- the collection holds RAW wire rows, so every
   // predicate runs on an `artifactFromRow` result. The viewKey is the filter
@@ -200,24 +238,21 @@ export function FilesApp({
     filter.search,
     filter.sortAscending ? "asc" : "desc",
     filter.place === "desktop" ? deskKey : "",
+    // A COMPOSITION LANDING REVEALS ROWS THE BROWSER ALREADY HELD, exactly as
+    // a desk shortcut does, so the reading changes without the filter
+    // changing -- and a view that did not re-baseline would ring the arrival
+    // cue for files that have been sitting in the Library for weeks.
+    filter.place === "materializer" ? `m:${materialized.size}` : "",
   ].join("|");
   const list = useLiveView<Row, ArtifactRow>(artifacts.source, `files:list:${filterKey}`, (rows) =>
     applyFilters(
       rows.map(artifactFromRow).filter((r) => r.id !== ""),
       filter,
       desk.membership,
+      materialized,
     ),
   );
 
-  // The whole content population, unfiltered -- what "empty" and the rail's
-  // counts are honestly about.
-  const content = useMemo(
-    () =>
-      artifacts.snapshot.rows
-        .map(artifactFromRow)
-        .filter((r) => r.id !== "" && isContentKind(r.kind)),
-    [artifacts.snapshot],
-  );
 
   // The origin link states (epic memql#4783), keyed by the file id the index
   // row points at. Folded from the file feed rather than read per row: one
@@ -234,7 +269,7 @@ export function FilesApp({
   }, [files.snapshot]);
 
   // The tree, from the folders feed. Archived folders are dropped HERE, not
-  // by the read: the seed now includes them for the Archive place, and an
+  // by the read: the seed now includes them for the Bin place, and an
   // archive flip arrives as an UPDATE the fold has to keep answering for.
   //
   // DELETED folders are dropped here too, and for a sharper reason. No folder
@@ -253,10 +288,16 @@ export function FilesApp({
     [folders.snapshot],
   );
 
-  // The Archive place's folders: flat and alphabetical (epic memql#4842,
-  // #4846). Deliberately not a tree -- archived folders' ancestry mixes live
-  // and archived parents, and a tree over that would lie one way or the
-  // other. Flat, named, counted is the honest reading.
+  const materializedRail = useMemo(
+    () => foldMaterializedRail(materialized, content, tree),
+    [materialized, content, tree],
+  );
+
+  // The Bin place's folders: flat and alphabetical (epic memql#4842, #4846).
+  // Deliberately not a tree -- archived folders' ancestry mixes live and
+  // archived parents, and a tree over that would lie one way or the other.
+  // Flat, named, counted is the honest reading, and it is why the Bin's rail
+  // nests FILES under a folder but never a folder under a folder.
   //
   // `!f.deleted` for the live-path reason above, and it is not redundant with
   // `f.archived`: the two are independent fields, so a folder somebody
@@ -334,6 +375,8 @@ export function FilesApp({
       tree={tree}
       content={content}
       archivedFolders={archivedFolders}
+      materialized={materialized}
+      materializedRail={materializedRail}
       deskFolders={desk.shortcuts}
       deskFileArtifactIds={desk.membership.fileArtifactIds}
       deskIndexByArtifactId={desk.deskIndexByArtifactId}
@@ -342,6 +385,8 @@ export function FilesApp({
       setFilter={setFilter}
       expanded={expanded}
       setExpanded={setExpanded}
+      openBinFolders={openBinFolders}
+      setOpenBinFolders={setOpenBinFolders}
       selectedId={selectedId}
       onSelect={setSelectedId}
       linkByFileId={linkByFileId}
@@ -399,8 +444,8 @@ function FilesSettingsSection({
           </Check>
           <p className="os-caption">
             The confirm names what is about to move -- for a folder, the live count of everything
-            inside it. Archiving never deletes: everything archived lives under Archive in the
-            browse rail, and in the Bin, where it can be put back.
+            inside it. Archiving never deletes: everything archived lives in the Bin -- the
+            browse rail's third place, and the app in the dock -- where it can be put back.
           </p>
         </fieldset>
 

@@ -10,7 +10,7 @@ import (
 // against a real store.
 //
 // Archiving a folder that held no file anywhere beneath it used to leave a row
-// in the Archive place and in the Bin. Archiving exists so a person can get
+// in the Files rail's Bin and in the Bin app. Archiving exists so a person can get
 // something back, and an empty folder tree has nothing in it to get back, so
 // that row answered no question anybody asked while sitting among the files
 // that genuinely were waiting there. Those folders take `deleted` instead.

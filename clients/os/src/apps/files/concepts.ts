@@ -11,6 +11,13 @@ export const FOLDER_CONCEPT = "v1:library:folder";
 export const FILE_CONCEPT = "v1:library:file";
 
 /**
+ * The Materializer's record (epic memql#4981, #4983). READ ONLY here: the
+ * Materializer app owns this concept, and Files reads it to answer which of
+ * its own files were composed and to offer the one handoff back.
+ */
+export const COMPOSITION_CONCEPT = "v1:compose:composition";
+
+/**
  * The kinds this app shows (design D2): content-bearing only. Notes, todos,
  * calendar events, memories and live sources stay indexed and wait for their
  * own surface -- they never render here, under any filter combination.

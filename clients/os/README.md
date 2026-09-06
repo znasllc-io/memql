@@ -1025,6 +1025,158 @@ And "was filed in" resolves against the ARCHIVED folders, because
 `libraryFolders` carries `archived != true` and a folder that went to the Bin
 with its contents is invisible to every other surface in the product.
 
+### The Bin place, in the Files rail (epic memql#4981)
+
+The rail's third place was called Archive and listed archived FOLDERS. It is
+called Bin now and reaches the files as well. Four rules came out of it.
+
+- **ONE DESTINATION, ONE WORD.** The row menu has always said "Move to Bin",
+  the dock fixture has always been the Bin, and the rail alone said Archive --
+  so a person who archived a file went looking for a place that was not there
+  under a name that was. **The VERB did not move**: archiving is what you do
+  and the Bin is where it goes, so `confirmBeforeArchive`, `planArchive`, the
+  inspector's Archive button and the folder confirm's wording are all
+  deliberately untouched. The place key in `filters.ts` is `bin`, not
+  `archive`, because a code name that disagrees with the surface is the same
+  defect one level down.
+
+- **THE FOLDERS-NOT-FILES RULE SURVIVES, AND SO DOES ITS REASON.** The rail
+  lists folders because opening a place scopes the list to exactly the files
+  it would otherwise have shown, and a second copy of them in a 184px column
+  is the same rows twice, narrower. That argument does not reach the Bin:
+  archived folders are a flat ancestry-less set, most archived files are
+  loose, and a folders-only Bin therefore expanded to "Nothing archived."
+  **while forty archived files sat in the list beside it** -- the defect the
+  epic exists for. What the rail can say there that the list cannot is which
+  archived files were filed in which archived folder, without navigating into
+  each one.
+
+  So the shape is: each archived folder is a disclosure over the files filed
+  in it, and everything else sits behind ONE group, "Not in a folder". The
+  loose group is what keeps the old reason honest -- listing those files at
+  the place's own level would put the list's own rows in the rail beside it.
+  It is not drawn as a folder: nothing can be restored to a set, so it is a
+  `span` with a chevron rather than a button.
+
+- **THE COUNTS ARE FILES AND FOLDERS, because the Bin app lists both.** The
+  shut place counts every item a person could take back, and its title says
+  which is which ("2 files and 1 folder in the Bin") -- "3" over that Bin is
+  true and unhelpful. A folder's own count stays the direct count of archived
+  files filed in it. Both come from ONE fold (`foldBinRail`), so the rail's
+  numbers and the Bin app's list cannot drift; they used to be two counting
+  loops that happened to agree.
+
+- **A shut group is NOT RENDERED, unlike a shut place.** A place has folders
+  under it and there are tens of those; a Bin group has files under it and
+  there can be thousands. `hidden` alone would put every archived file in the
+  document for a rail nobody has opened -- and a hidden node is still found by
+  `getByText`, so the rail was answering queries for rows it was not showing.
+
+**Two defects here were invisible to the whole vitest suite and were found by
+looking at a screenshot**, which is what DESIGN.md's "the acceptance is
+rendered screenshots" is for. Two chevrons flipped against one rendered value
+both read the same `openBinFolders`, so a value-taking setter applied the
+second over the first and one of them silently did nothing -- the prop is
+typed functional-only now, and `binPlace.test.tsx` pins it by taking both
+handles from one render. And the Bin's folder rows, carrying chevrons of their
+own, sat at exactly the x of Library / Desktop / Bin and read as four more
+places; the group indents 12px, which the Library's rail does not need because
+its folders have no disclosure to be confused by.
+
+### The Materializer place, and the seam it draws (epic memql#4981)
+
+The rail's fourth place is over the files the Materializer made. It exists
+because two apps now describe one thing, and the epic's job was to say which
+question each of them answers.
+
+- **THEIR LIST IS THE RECORD; THIS PLACE IS A LOCATION.** The Materializer's
+  own Materialized section answers *what was made* -- one row per
+  `v1:compose:composition`, its sources, its template, the models that
+  contributed, whether the output carries its own provenance. This place
+  answers *where the file is* -- one row per OUTPUT FILE, an ordinary
+  `v1:library:artifact` that opens in the inspector, downloads, moves to a
+  folder and archives to the Bin like every other file. Neither is a copy of
+  the other, and the rule that keeps them apart is: **a composition has one
+  record and its output has one file; Files never shows the record and the
+  Materializer never shows the file tree.**
+
+- **The seam is ONE-DIRECTIONAL and it is one act.** The row menu and the
+  inspector carry "Open in Materializer", which opens the composer on that
+  composition. The inspector says "Made in" and nothing else -- no source
+  count, no template, no model list. Restating any of that here would be a
+  second reading of one row, free to disagree with the app whose subject it
+  is. Nothing in Files writes a composition.
+
+- **The act is ABSENT when it is not legal** (DESIGN.md rule 12), and there
+  are two ways for it not to be: the file was not composed, or the caller
+  cannot open that app at all. `openApp` no-ops on an app the registry does
+  not hold or the actor's rank does not admit, so a control rendered in either
+  case would silently do nothing -- worse than one that is not there. The
+  FILE still appears in the place either way; only the act to leave for
+  another app depends on that app existing.
+
+- **THE JOIN IS ON THE BACKING FILE.** `composition.outputFileId` names a
+  `v1:library:file` and the artifact points at it through `sourceConceptRef`
+  -- the same split the origin link states already do. It is folded from the
+  composition feed against the artifact index in one pass, not read per row.
+  Filing is read from the ARTIFACT, never from the record's own `folderId`:
+  the record carries where the output was first put, and a later move re-files
+  the index row and deliberately never comes back to it.
+
+- **A composition with no output file shows nothing, anywhere in Files.** A
+  draft has not produced one and a `failed` run never will. A row for one
+  would offer Open, Download and Move on a file nothing wrote; the failure and
+  its reason belong in the Materialized list, which is the record. Agreed with
+  memql#4977 rather than inferred from the join.
+
+- **ARCHIVED OUTPUTS ARE THE BIN'S.** One file offering Restore from two
+  places is exactly the ambiguity the Bin rename removed.
+
+- **The rail lists FOLDERS here, and that is not an inconsistency with the Bin
+  one place up.** The Bin earned its exception by having almost no navigation
+  to list; this place has the LIBRARY's shape -- ordinary files in ordinary
+  folders -- so opening it scopes the list to precisely the rows the rail
+  would otherwise be repeating, narrower. The place is permanent, empty or
+  not: the three above it are locations rather than results, and a fourth that
+  came and went with the data would make the rail's shape depend on what
+  happens to be in it. Its empty state is where somebody finds out the
+  Materializer exists.
+
+- **A fifth feed at the app root, and the one-feed rule is per CONCEPT.**
+  There is no server-side "artifacts that are outputs" read, so the place
+  cannot know its own population from anything narrower than the whole
+  composition set. The same feed answers the inspector's line, which is why
+  Files makes no `compositionForOutputFile` call: a second read of one row is
+  a second answer free to disagree with this one. The set joins the list's
+  `viewKey`, because a composition landing reveals rows the browser already
+  held -- the desk-shortcut lesson, applied to a second id set.
+
+  Two consequences of that feed, both deliberate. It is always on, including
+  for somebody who has never used the Materializer, because the SHUT place's
+  count needs it -- a place that could only count once you opened it would be
+  unlike the three above it. And for a CLUSTER OWNER `compositions` returns
+  the instance's, not just theirs (the composite tier's read escape), so the
+  feed holds rows whose outputs this caller does not own. Nothing leaks: the
+  join runs against `content`, which is the caller's own artifacts and
+  nobody else's, so a composition of somebody else's simply matches nothing.
+
+- **Its empty line has THREE states, because the rail lists folders and the
+  place holds files.** No folder holds an output while the place is full is a
+  real state -- every output filed at the Library root -- and "Nothing has been
+  materialized yet." there is the Bin's own original falsehood rebuilt in the
+  new place, with the list beside it showing those files. So: files but no
+  folder says "None of these are in a folder."; nothing at all says so, and
+  only from somewhere else, because standing in the place the list already
+  carries the sentence with the part that matters.
+
+**A FOURTH DEFECT CAME OUT OF THE RENDERED PASS HERE, and it predates this
+epic**: two place chevrons flipped against one rendered `expanded` both read
+the same value, so the second applied over the first and one place silently
+stayed shut. It is the same defect the Bin's own disclosures had one level
+down. Both setters are functional-only now, both are pinned by a test that
+takes its handles from one render, and both were invisible to ~1990 green
+cases because every one of them clicks once per render.
+
 ### Origin link states, in Files (epic memql#4783)
 
 A file pushed from a watched folder on a fleet machine carries a state against

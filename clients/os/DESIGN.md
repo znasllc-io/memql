@@ -62,7 +62,7 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
 
 10. **In-surface state is never a checkbox.** "Show archived" as a standing
     checkbox is the legacy tell this language exists to remove: archived
-    things get a PLACE (the Bin; the Files Archive place) or a settings
+    things get a PLACE (the Bin app; the Files rail's Bin) or a settings
     preference (rule 4) -- never chrome that sits in front of content
     forever. Checkboxes belong to forms and settings, where they state a
     choice, not to browsing surfaces, where they would be furniture.

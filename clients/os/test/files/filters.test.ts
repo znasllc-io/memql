@@ -61,7 +61,7 @@ function ids(filter: Partial<FilesFilter>): string[] {
 describe("applyFilters", () => {
   it("never renders a records-lens row, under every filter combination", () => {
     expect(ids({})).not.toContain("a-note");
-    expect(ids({ place: "archive", kind: "all", source: "all", search: "standup" })).toEqual([]);
+    expect(ids({ place: "bin", kind: "all", source: "all", search: "standup" })).toEqual([]);
     expect(ids({ folderId: null })).not.toContain("a-note");
   });
 
@@ -71,11 +71,11 @@ describe("applyFilters", () => {
     expect(ids({ folderId: null })).toContain("a-video");
   });
 
-  it("keeps archived rows out of the Library and gives them the Archive place", () => {
+  it("keeps archived rows out of the Library and gives them the Bin place", () => {
     expect(ids({})).not.toContain("a-archived");
-    // The Archive root is the whole archived population, not a tree root.
-    expect(ids({ place: "archive" })).toEqual(["a-archived"]);
-    expect(ids({ place: "archive", folderId: "" })).toContain("a-archived");
+    // The Bin's root is the whole archived population, not a tree root.
+    expect(ids({ place: "bin" })).toEqual(["a-archived"]);
+    expect(ids({ place: "bin", folderId: "" })).toContain("a-archived");
   });
 
   it("the Desktop place mirrors the desk: loose icons at the root, a desk folder's contents one click in", () => {

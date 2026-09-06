@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // The connection seam, mocked at the MODULE so the real LiveCollection
@@ -40,7 +40,7 @@ describe("the rail's places", () => {
     // The places themselves are reachable...
     expect(within(rail).getByRole("button", { name: /^Library/ })).toBeTruthy();
     expect(within(rail).getByRole("button", { name: /^Desktop/ })).toBeTruthy();
-    expect(within(rail).getByRole("button", { name: /^Archive/ })).toBeTruthy();
+    expect(within(rail).getByRole("button", { name: /^Bin/ })).toBeTruthy();
     // ...and their folders are not, because nothing has been opened. The
     // group carries `hidden`, so it is out of the accessibility tree rather
     // than merely invisible.
@@ -80,11 +80,37 @@ describe("the rail's places", () => {
     });
     await renderFiles();
 
-    // Clicking "Archive" is the gesture for "show me what is in Archive";
+    // Clicking "Bin" is the gesture for "show me what is in the Bin";
     // answering it with a shut disclosure would make the person click the
     // same row twice to mean one thing.
-    await click(screen.getByRole("button", { name: /^Archive/ }));
-    expect(screen.getByRole("button", { name: "Collapse Archive" })).toBeTruthy();
+    await click(screen.getByRole("button", { name: /^Bin/ }));
+    expect(screen.getByRole("button", { name: "Collapse Bin" })).toBeTruthy();
+  });
+
+  it("opens every place a person opens, not just the last one", async () => {
+    // THE SAME DEFECT THE BIN'S OWN DISCLOSURES HAD, one level up, and it
+    // predates them: two chevrons flipped against one rendered `expanded`
+    // both read the same value, so the second applied over the first. Found
+    // in a screenshot of three places being opened at once -- every other
+    // case in this file clicks one per render, which is why the suite was
+    // green over it.
+    h.connection = fakeConnection({
+      folders: [folderRow({ id: "f-a", name: "Contracts" })],
+      artifacts: [artifactRow({ id: "a-old", title: "old.zip", archived: true })],
+    });
+    await renderFiles();
+
+    // Both handles taken from ONE render, which is what a browser hands a
+    // person clicking quickly.
+    const library = screen.getByRole("button", { name: "Expand Library" });
+    const bin = screen.getByRole("button", { name: "Expand Bin" });
+    await act(async () => {
+      fireEvent.click(library);
+      fireEvent.click(bin);
+    });
+
+    expect(screen.getByRole("button", { name: "Collapse Library" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Collapse Bin" })).toBeTruthy();
   });
 
   it("counts a shut place you are NOT in, and leaves the Head to count the one you are", async () => {
@@ -99,9 +125,9 @@ describe("the rail's places", () => {
     });
     await renderFiles();
 
-    // Archive is shut and elsewhere, so its number says what is waiting there.
-    const archive = screen.getByRole("button", { name: /^Archive/ });
-    expect(within(archive).getByText("1")).toBeTruthy();
+    // The Bin is shut and elsewhere, so its number says what is waiting there.
+    const bin = screen.getByRole("button", { name: /^Bin/ });
+    expect(within(bin).getByText("1")).toBeTruthy();
 
     // Library is where the person IS, and the Head already names and counts
     // that scope. "Library 2" in the Head beside "Library 3" in the rail is
@@ -178,7 +204,7 @@ describe("the row's right-click menu", () => {
       artifacts: [artifactRow({ id: "a-1", title: "old.zip", archived: true })],
     });
     await renderFiles();
-    await click(screen.getByRole("button", { name: /^Archive/ }));
+    await click(screen.getByRole("button", { name: /^Bin/ }));
 
     fireEvent.contextMenu(screen.getByRole("button", { name: /old\.zip/ }));
     const menu = screen.getByRole("menu", { name: "File" });

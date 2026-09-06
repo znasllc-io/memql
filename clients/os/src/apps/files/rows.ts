@@ -108,6 +108,42 @@ export function folderFromRow(raw: Row): FolderRow {
   };
 }
 
+/**
+ * A composition, projected to the little this app needs of it (epic
+ * memql#4981, #4983).
+ *
+ * FILES READS THE RECORD AND NEVER WRITES IT. The Materializer app owns
+ * `v1:compose:composition`; this projection exists so the Files rail can
+ * answer "which of my files were made in the Materializer" and the inspector
+ * can offer one handoff. Everything the record is ABOUT -- the sources, the
+ * template, the models that contributed, the provenance -- is deliberately
+ * absent, because restating it here would be a second reading of one row that
+ * is free to disagree with the app whose subject it is.
+ */
+export interface CompositionRow {
+  id: string;
+  name: string;
+  /** The v1:library:file this composition produced. "" while it has none --
+   *  a draft, or a run that failed before storing anything. */
+  outputFileId: string;
+  format: string;
+  status: string;
+  archived: boolean;
+}
+
+export function compositionFromRow(raw: Row): CompositionRow {
+  const row = flatten(raw);
+  return {
+    id: rowString(row, "id"),
+    name: rowString(row, "name"),
+    outputFileId: rowString(row, "outputFileId"),
+    format: rowString(row, "format"),
+    status: rowString(row, "status"),
+    // ABSENT IS NOT ARCHIVED, the rule this file already applies twice.
+    archived: boolOr(row, "archived", false),
+  };
+}
+
 /** What to call a file. NEVER blank: a nameless row is indistinguishable from
  *  a row that failed to render. */
 export function artifactName(row: ArtifactRow): string {

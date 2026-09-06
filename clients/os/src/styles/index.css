@@ -3464,6 +3464,54 @@ a.os-button {
   color: var(--os-muted);
 }
 
+/* ---- the Bin's second level (epic memql#4981) ----
+ *
+ * THE SAME TWO-BUTTON GRAMMAR AS A PLACE, ONE LEVEL IN: chevron, then
+ * destination. It reuses `.os-files-disclose` rather than respelling it, so
+ * the rotation, the focus ring and the reduced-motion rule stay defined once.
+ * It is NOT `.os-files-place-row`, and the difference is one property: a
+ * place opens its own block with 8px above it, and eight pixels between every
+ * archived folder would make the Bin's contents read as more places. */
+.os-files-bin-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.os-files-bin-row .os-files-node {
+  flex: 1;
+  min-width: 0;
+}
+/* THE BIN'S GROUP INDENTS AND THE LIBRARY'S DOES NOT, and the difference is
+ * the chevron. A Library folder carries no disclosure of its own, so it can
+ * never be mistaken for a place; a Bin folder carries one, which put a
+ * chevron, a glyph and a name at the SAME x as Library, Desktop and Bin --
+ * four rows that read as four more places. Twelve pixels is the whole fix,
+ * and only a rendered screenshot showed it was needed. */
+.os-files-bin-group {
+  padding-inline-start: 12px;
+}
+/* A folder holding nothing in the Bin has no chevron, so the gutter stands in
+ * for one -- otherwise its name would sit 20px left of its siblings' and the
+ * group would read as two indent levels that mean nothing. */
+.os-files-rail-gutter {
+  flex: 0 0 18px;
+}
+/* "Not in a folder" is a SET, not a destination: no hover lift, no pointer,
+ * no current state. It is a `span` rather than a `button`, so this only has
+ * to undo the reach the shared node class gives it. */
+.os-files-node-static {
+  cursor: default;
+}
+.os-files-node-static:hover {
+  background: none;
+}
+/* A file inside a Bin group aligns under the NAMES above it (the 18px gutter
+ * + the 2px gap + the node's own 10px), then one indent step in -- the same
+ * 14px the Library tree steps by, so the two rails read as one language. */
+.os-files-bin-file {
+  padding-inline-start: 44px;
+}
+
 /* ---- Add: one control, two ways to put something in this folder ----
  *
  * Replaces the Upload primary AND the rail's "New folder" action. The menu
