@@ -295,6 +295,14 @@ DSL all live here.
    itself; rebase on `origin/main` and force-push. A watcher looking only for
    merged / failed / clean cannot see `DIRTY` at all, and its silence is
    indistinguishable from "still queued".
+
+   **`BEHIND` is the other one, and it has a one-command fix.** The ruleset sets
+   `strict_required_status_checks_policy: true`, so a PR whose base has moved
+   reads `BEHIND` rather than `BLOCKED`. `gh pr update-branch <n>` clears it;
+   wait for CI on the new merge commit before merging, which is the whole point
+   of the setting. `merge-as-owner.sh` refuses `BEHIND` by name and says this,
+   because forcing it with `--admin` would land a tree CI never tested against
+   the current base.
 2. **Merging your own PR: the owner uses the BYPASS, never a settings change.**
    The ruleset requires a code-owner review and that requirement stays on, but
    **GitHub never lets a pull request's author approve it** -- there is no

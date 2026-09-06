@@ -123,10 +123,15 @@ const requiresCIRequired = `{
   "bypass_actors": [{"actor_type":"RepositoryRole","actor_id":5,"bypass_mode":"pull_request"}]
 }`
 
-func prRollup(checks string) string {
+func prRollup(checks string) string { return prRollupIn("BLOCKED", checks) }
+
+// prRollupIn is the same envelope with the merge state as a parameter. The
+// state decides whether merge_pr reaches for --admin, and two states cannot be
+// served by it at all -- see TestGuardRefusesBehindAndUnknownByName.
+func prRollupIn(state, checks string) string {
 	return `{
   "state":"OPEN","title":"t","author":{"login":"znas-io"},
-  "mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","reviewDecision":null,
+  "mergeable":"MERGEABLE","mergeStateStatus":"` + state + `","reviewDecision":null,
   "statusCheckRollup":[` + checks + `]
 }`
 }
@@ -229,5 +234,60 @@ func TestPendingRequiredRefusesButPendingNonRequiredDoesNot(t *testing.T) {
 	}
 	if !strings.Contains(out, "non-required check(s) still running") {
 		t.Errorf("proceeding past a running lane must be stated; output:\n%s", out)
+	}
+}
+
+// BEHIND and UNKNOWN are refused BY NAME, and this is the regression test for a
+// reassuring else (memql#5019 shipped it; a peer session hit it merging behind
+// a sibling).
+//
+// merge_pr reaches for --admin on BLOCKED and takes the ordinary path
+// otherwise. Neither of these states can be served by the ordinary path: the
+// author cannot give themselves the code-owner review it needs. So both used to
+// log "no bypass needed", merge nothing, and report the non-merge as something
+// that might still be enqueued -- every line consistent with success.
+//
+// BEHIND must be REFUSED rather than added to the bypass: the ruleset sets
+// strict_required_status_checks_policy=true, so BEHIND means CI has not run
+// against the current base, and forcing it is precisely what `strict` exists to
+// prevent. The refusal names `gh pr update-branch` instead.
+func TestGuardRefusesBehindAndUnknownByName(t *testing.T) {
+	for _, tc := range []struct{ state, wants string }{
+		{"BEHIND", "update-branch"},
+		{"UNKNOWN", "recomputing mergeability"},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			stub := mergeGuardGhStub(t, rulesetsActive, requiresCIRequired,
+				prRollupIn(tc.state, ciRequiredGreen))
+			out, code := runMergeAsOwner(t, stub)
+			if code != 3 {
+				t.Fatalf("%s must be refused with exit 3, got %d\n%s", tc.state, code, out)
+			}
+			if strings.Contains(out, "STUB-MERGE-INVOKED") {
+				t.Fatalf("%s reached the merge; the ordinary path cannot satisfy a code-owner "+
+					"review the author may not give, so this merges nothing and says it worked", tc.state)
+			}
+			if strings.Contains(out, "no bypass needed") {
+				t.Errorf("%s fell through to the reassuring else; output:\n%s", tc.state, out)
+			}
+			if !strings.Contains(out, tc.wants) {
+				t.Errorf("the refusal must say what to do next (%q); output:\n%s", tc.wants, out)
+			}
+		})
+	}
+}
+
+// The control for the pair above: a state the ordinary path CAN serve is not
+// caught by the new refusals. Without this, "refuse everything that is not
+// BLOCKED" would pass every assertion in this file.
+func TestGuardStillMergesACleanPullRequest(t *testing.T) {
+	stub := mergeGuardGhStub(t, rulesetsActive, requiresCIRequired,
+		prRollupIn("CLEAN", ciRequiredGreen))
+	out, code := runMergeAsOwner(t, stub)
+	if code != 0 {
+		t.Fatalf("a CLEAN pull request must still merge, got exit %d\n%s", code, out)
+	}
+	if !strings.Contains(out, "STUB-MERGE-INVOKED") {
+		t.Errorf("the script did not reach the merge; output:\n%s", out)
 	}
 }

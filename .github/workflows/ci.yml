@@ -2029,8 +2029,10 @@ jobs:
       # No lane can catch that pre-merge, because the failing tree is not the
       # tree either PR tested. The structural fix is the merge queue
       # (`merge_group` is already a trigger in this file) or
-      # `strict_required_status_checks_policy: true` on the `default` ruleset,
-      # which currently sets it false -- both are repo settings, not workflow.
+      # `strict_required_status_checks_policy` on the `default` ruleset. Both
+      # are repo settings rather than workflow. (That policy read false when
+      # this was written; it is true as of 2026-09-06, which is why a PR whose
+      # base has moved now reports BEHIND.)
       # What this step buys is DIAGNOSIS: `go mod tidy -diff` prints the exact
       # go.mod/go.sum delta and exits non-zero WITHOUT writing, so the failure
       # names what is stale instead of the bare "updates to go.mod needed" that

@@ -289,6 +289,34 @@ function guard_readiness() {
         log_error "refusing: this pull request is BLOCKED and the ruleset grants no admin bypass, so --admin would fail. Add one deliberately, or have a second code owner review."
         exit 3
     fi
+
+    # TWO STATES THE BYPASS CANNOT SERVE, REFUSED BY NAME.
+    #
+    # merge_pr reaches for --admin on BLOCKED and takes the ordinary path
+    # otherwise. That `otherwise` is an else, and an else is reached by falling
+    # through rather than by being chosen -- so both of these used to arrive at
+    # "merging through the ordinary path, no bypass needed", which is
+    # reassurance, and then merge nothing, because the ordinary path cannot
+    # satisfy a code-owner review the author is not allowed to give.
+    #
+    #   BEHIND  -- the ruleset sets strict_required_status_checks_policy=true,
+    #              so a PR whose base has moved reads BEHIND, not BLOCKED. It
+    #              SHOULD be refused: forcing it with --admin would merge a tree
+    #              CI never tested against the current base, which is the one
+    #              thing `strict` exists to prevent. Update the branch instead.
+    #   UNKNOWN -- GitHub is still recomputing mergeability, which it does for a
+    #              few seconds after anything lands on the base. Merging two
+    #              pull requests back to back is how you meet it.
+    case "$MERGE_STATE" in
+        BEHIND)
+            log_error "refusing: the base has moved and this branch is BEHIND it. Run 'gh pr update-branch ${PR} --repo ${REPO}', wait for CI, then re-run -- merging now would land a tree CI never tested against the current base."
+            exit 3
+            ;;
+        UNKNOWN)
+            log_error "refusing: GitHub is still recomputing mergeability (UNKNOWN). It settles within seconds of anything landing on the base; re-run then."
+            exit 3
+            ;;
+    esac
 }
 
 function merge_pr() {
@@ -303,6 +331,9 @@ function merge_pr() {
         extra+=(--admin)
         log_info "pull request is BLOCKED; using the admin bypass. Code-owner review remains required for everyone else."
     else
+        # CLEAN, or another state that genuinely needs no special powers.
+        # guard_readiness has already refused BEHIND and UNKNOWN by name, so
+        # this branch is no longer where a state nobody thought about lands.
         log_info "pull request is ${MERGE_STATE}; merging through the ordinary path, no bypass needed"
     fi
 
