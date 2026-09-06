@@ -17,7 +17,7 @@ GO          := go
 # with exactly this value regardless of what the caller exported. That is what
 # keeps `make arch-model` -- and therefore the reproducibility gate -- immune to
 # a stray `GOFLAGS=-tags=...` in the environment, which changes the extracted
-# model (20186 nodes / 108689 edges under -tags=voice, vs 20182 / 121609).
+# model (a tagged build resolves a different package set).
 # Do not add `export` or change this to `+=` without re-checking that gate.
 GOFLAGS     := -v
 CGO_ENABLED := 0
@@ -43,7 +43,7 @@ ALL_PKGS    := $(MODULE)/...
 
 ##@ Build
 ##> Deployable images are built on the GitHub build server, not here (see CLAUDE.md).
-.PHONY: all build build-all bff voice cognition agent planner workbench mcp edge identity identity-templ identity-tailwind identity-assets identity-build healthcheck
+.PHONY: all build build-all bff agent planner workbench mcp edge identity identity-templ identity-tailwind identity-assets identity-build healthcheck
 
 ## Build all binaries (standalone + healthcheck)
 all: build healthcheck
@@ -53,24 +53,11 @@ build:
 	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/memql .
 
 ## Build all binaries including node-type variants
-build-all: build bff voice cognition agent planner identity healthcheck
+build-all: build bff agent planner identity healthcheck
 
 ## Build BFF node binary
 bff:
 	$(GO) build $(GOFLAGS) -tags bff -o $(BIN_DIR)/memql-bff .
-
-## Build voice node binary (CGO; needs libopus-dev / libopusfile-dev / libsoxr-dev).
-## The Go voice-agent's LiveKit server-sdk-go + media-sdk pull a CGO
-## libopus/opusfile/soxr dependency (see docs/voice/
-## 451-livekit-go-room-participation.md, Caveat 1), so this target overrides
-## the repo-wide CGO_ENABLED=0 default. Requires libopus-dev / libopusfile-dev
-## / libsoxr-dev (apt) or opus-dev / opusfile-dev / soxr-dev (apk) installed.
-voice:
-	CGO_ENABLED=1 $(GO) build $(GOFLAGS) -tags voice -o $(BIN_DIR)/memql-voice .
-
-## Build cognition node binary
-cognition:
-	$(GO) build $(GOFLAGS) -tags cognition -o $(BIN_DIR)/memql-cognition .
 
 ## Build agent node binary
 agent:
@@ -143,28 +130,7 @@ identity-build: identity-assets identity
 healthcheck:
 	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/healthcheck ./cmd/healthcheck
 
-# ---------------------------------------------------------------------------
-# Realtime voice + video (Go voice-agent, integrations/voice/agent)
-# The voice-agent is the `voice-agent` subcommand of the memql-voice
-# binary (`memql-voice voice-agent`); build it with `make voice`. The
-# Python voice-agent (LiveKit Agents 1.5) and the legacy Go Bridge Agent
-# have both been retired.
-# ---------------------------------------------------------------------------
-
 ##@ Tokens & keys
-.PHONY: voice-agent-token
-
-## Mint a class="voice_agent" JWT for the running local k3d cluster's
-## voice-agent process. Execs the identity binary inside the identity
-## pod so the mint runs against the same DB + Ed25519 key the live
-## service uses, then prints the bearer to stdout. Used to inject
-## VOICE_AGENT_TOKEN at bring-up. Override INSTANCE / TTL / OUT /
-## NAMESPACE as needed. See docs/auth/voice-agent-jwt.md.
-voice-agent-token:
-	@kubectl exec -n "$${NAMESPACE:-memql}" deploy/identity -- /app/memql voice-agent-token mint \
-		--instance-id="$${INSTANCE:-voice-agent-local}" \
-		$${TTL:+--ttl=$$TTL} \
-		$${OUT:+--out=$$OUT}
 
 ## Mint a class="node" JWT for the given cluster node. Seeds
 ## MEMQL_NODE_TOKEN for a cluster-node binary (without it the receiving
@@ -327,8 +293,8 @@ secrets:
 ## carrier repo's Dockerfile) is the LEGACY compile-time path, retiring with
 ## #2472.
 ##   make dev                          # rebuild + restart all app node types
-##   make dev NODE=cognition           # one node type
-##   make dev NODE=mcp,cognition       # comma-separated list
+##   make dev NODE=agent               # one node type
+##   make dev NODE=mcp,agent           # comma-separated list
 ##   make dev PULL_INFRA=1            # pull + re-import infra images
 dev:
 	@bash scripts/k3d/dev.sh \
@@ -474,7 +440,7 @@ db-failover-litmus:
 # ---------------------------------------------------------------------------
 
 ##@ Test & SDK
-.PHONY: test test-v test-cover test-polyphon sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test vscode-deps vscode-test vscode-test-host portal-install portal-typecheck portal-test portal-build portal-clean os-install os-typecheck os-test os-build os-clean
+.PHONY: test test-v test-cover sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test vscode-deps vscode-test vscode-test-host portal-install portal-typecheck portal-test portal-build portal-clean os-install os-typecheck os-test os-build os-clean
 
 ## Regenerate the typed SDK surface from the DSL tree. Reads every
 ## query / mutation / logic under dsl/**/*.memql and emits typed
@@ -719,10 +685,6 @@ test-cover:
 	$(GO) tool cover -func=coverage.out
 	@rm -f coverage.out
 
-## Run Polyphon/cognition tests only
-test-polyphon:
-	$(GO) test ./component/polyphon/... ./integrations/cognition/...
-
 # ---------------------------------------------------------------------------
 # Code quality
 # ---------------------------------------------------------------------------
@@ -848,8 +810,8 @@ tag-submodules:
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)
 
-# The per-node `docker-*` targets (docker / docker-bff / docker-voice /
-# docker-cognition / docker-agent / docker-planner) were removed in #2205:
+# The per-node `docker-*` targets (docker / docker-bff / docker-agent /
+# docker-planner) were removed in #2205:
 # immutable release images come from `make release` (and the GitHub build
 # server for the cloud), while the local inner loop is `make dev` (build +
 # k3d import). A hand-built `docker build` image fed neither path.

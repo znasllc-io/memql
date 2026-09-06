@@ -23,7 +23,7 @@ import (
 // a Resolver + Handler for the READ side of the same package, applied to
 // build a Publisher + SiteBundleHandler for the write side.
 //
-// uploader/container are the Azure Blob client mountAttachmentEndpoints
+// uploader/container are the Azure Blob client resolveBlobStore
 // (transport_attachments.go) already constructed for the SAME account --
 // reused rather than building a second client, per that function's own doc
 // comment ("so the agent node can additionally hand them to the
@@ -80,11 +80,11 @@ func (a sitePublisherAdapter) Publish(ctx context.Context, siteID string, files 
 
 // siteBundleBlobWriter adapts the already-constructed uploader to
 // edge.BlobWriter, or -- when object storage wasn't configured at all
-// (mountAttachmentEndpoints's uploader is then a nil interface value) --
+// (resolveBlobStore's uploader is then a nil interface value) --
 // returns a writer that always fails cleanly rather than silently
 // succeeding.
 //
-// UNCONFIGURED IS A HARD FAILURE HERE, unlike mountAttachmentEndpoints' own
+// UNCONFIGURED IS A HARD FAILURE HERE, unlike resolveBlobStore' own
 // graceful "fall back to a local:// placeholder" posture for attachments.
 // An attachment row is still useful with an undownloadable placeholder URL
 // -- the metadata and AI summary survive regardless. A site publish with

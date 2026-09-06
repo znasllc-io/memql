@@ -480,5 +480,5 @@ Stated here so nobody plans against it:
 - [User Provisioning](user-provisioning.md) -- registration modes and the
   magic-link flow.
 - [Account Tokens](account-tokens.md), [Node JWT](node-jwt.md),
-  [Service-account JWT](service-account-jwt.md),
-  [Voice-agent JWT](voice-agent-jwt.md) -- the machine-credential families.
+  [Service-account JWT](service-account-jwt.md) -- the machine-credential
+  families.

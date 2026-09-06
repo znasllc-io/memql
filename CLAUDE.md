@@ -1,9 +1,9 @@
 # MemQL - the AI memory platform
 
-**Type:** AI platform -- agents, automations, and voice on a time-series memory graph
+**Type:** AI platform -- agents and automations on a time-series memory graph
 **Language:** Go + MemQL DSL
 **Stack:** PostgreSQL + TimescaleDB extension
-**Purpose:** Run agents, automations, and voice against a time-series memory graph
+**Purpose:** Run agents and automations against a time-series memory graph
 
 > **Positioning is load-bearing, not marketing** (memql#3843). MemQL is an AI
 > platform *built on* a time-series memory graph; it is not a database, and no
@@ -27,7 +27,7 @@ make up                      # fresh bring-up: cluster + ArgoCD + secrets + imag
 make up SERVERS=2 AGENTS=1   # multi-node (cross-node mesh testing)
 make dev                     # inner-loop: rebuild images -> import -> restart pods
 make dev NODE=bff            # ...one node only (faster)
-make dev PULL_INFRA=1        # ...also refresh infra images (postgres/azurite/livekit)
+make dev PULL_INFRA=1        # ...also refresh infra images (postgres/azurite)
 make scale N=2               # 2 replicas per Deployment (NAMESPACE= overrides `memql`)
 make status                  # mesh litmus: unique MEMQL_NODE_ID per pod + one shared identity keyset
 make secrets                 # re-seed secrets (idempotent; use after a cluster recreate)
@@ -40,7 +40,6 @@ make test
 # Build. BFF is the default (no tag needed); the other node types are under
 # Distributed Node Architecture below.
 go build -o bin/memql .
-go build -tags voice -o bin/memql-voice .
 
 # Database shell (after `make up`)
 psql postgres://memql:memql_dev@localhost:5432/memql
@@ -62,7 +61,7 @@ MemQL has **exactly three** extension words. Do not invent a fourth.
 See [Component vs integration vs pack](docs/public/concepts/component-integration-pack.md).
 
 - **component** — engine internals (`component/`: DSL lexer/AST, HTTP servers, bus, identity)
-- **integration** — talk to other DBs/services (`integrations/`). Shopify, email, telephony live here
+- **integration** — talk to other DBs/services (`integrations/`). Shopify and email live here
 - **pack** — client-agnostic product feature (Plugin SDK v1 / `examples/referencepack`). Intake "plugin" means this
 
 `dsl/todos`, `dsl/calendar`, `dsl/campaigns` are **core**. Packs cannot shadow them.
@@ -246,8 +245,8 @@ Where a container image is built depends ONLY on where it runs:
   server** (GitHub Actions, OIDC -> ACR `acrmemql`), NOT on an operator
   machine. This spans the repos in the project:
   - `memql` -> `.github/workflows/build-engine-images.yml` builds **every**
-    node type (identity / bff / cognition / agent / planner / voice /
-    workbench / mcp / edge) as one set of **product-agnostic** engine images.
+    node type (identity / bff / agent / planner / workbench / mcp / edge) as one
+    set of **product-agnostic** engine images.
   - the product's DSL-bundle repo -> a tiny **data-only bundle image** the
     engine mounts at runtime via `MEMQL_DSL_PATH`.
   - the product client repo -> its `build-spa-image.yml`.
@@ -356,7 +355,7 @@ coordination.
 ### Core Technologies
 - **Language:** Go 1.26.1+
 - **Database:** PostgreSQL 16 + TimescaleDB
-- **API:** gRPC (`MemqlService.Stream` is the primary surface) + HTTP for the documented exceptions (OAuth, health, file uploads, Polyphon room tokens) + WebSocket bridge to the gRPC stream for browsers (`/memql/ws`)
+- **API:** gRPC (`MemqlService.Stream` is the primary surface) + HTTP for the documented exceptions (OAuth, health, file uploads) + WebSocket bridge to the gRPC stream for browsers (`/memql/ws`)
 - **AI:** Centralized provider system (OpenAI, Anthropic). All AI ops on gRPC.
 - **Auth:** in-house identity service (magic-link + JWT, JWKS-published)
 - **Query Language:** MemQL DSL
@@ -394,7 +393,7 @@ Front door (TLS 443) -> bff gRPC :50051 (h2c)
    +-- AI Provider Registry (OpenAI, Anthropic)
    |     +-- AI gRPC messages on MemqlService.Stream:
    |         AiChatMsg, AiSpeechMsg, AiTranscribeMsg, AiSuggestMsg
-   +-- Integrations (cognition, audio, ...)
+   +-- Integrations (agent, workbench, library, ...)
    +-- MemQL Sense (Tokenize, Complete, Diagnose, Hover, SignatureHelp)
    |
    PostgreSQL + TimescaleDB
@@ -415,20 +414,16 @@ build tag by expected binary size -- the measurements are in
 
 ```bash
 go build .                       # bff        (default)
-go build -tags voice .           # voice      (CGO_ENABLED=1 required)
-go build -tags cognition .       # cognition
 go build -tags agent .           # agent
 go build -tags planner .         # planner
 go build -tags edge .            # edge       (serves hosted sites + the portal)
 ```
 
-The nine node types are identity, bff, cognition, agent, planner, voice,
-workbench, mcp, edge. The mesh/product ones:
+The seven node types are identity, bff, agent, planner, workbench, mcp, edge.
+The mesh/product ones:
 
 - **BFF** (default): backend for frontend, domain-specific API surface
-- **Voice**: voice transport (audio WS, LiveKit)
-- **Cognition**: cognition pipeline, Polyphon
-- **Agent**: task execution, AI work, tool calling
+- **Agent**: task execution, AI work, tool calling, streaming transcription
 - **Planner**: task planning and orchestration
 - **Edge**: serves this cluster's hosted web surfaces -- every hosted SPA and
   the MemQL Portal itself (site #1, no special path) -- by resolving the
@@ -449,7 +444,7 @@ The blessed local repro is `make up SERVERS=2` + `make scale N=2`.
 
 **When implementing:** any state/context/event that crosses a node boundary
 needs EXPLICIT plumbing -- it does NOT travel implicitly.
-- Session / in-memory state (caches, waiters, fields like `voiceAgentSpaceId`)
+- Session / in-memory state (caches, waiters, per-stream fields)
   lives on exactly ONE node. A different node handling a **proxied /
   forwarded** request (`AiForwardRouter`, `proxySI`, `NodeService` forwards)
   does NOT see it -- thread it through the message or metadata and resolve it
@@ -483,7 +478,7 @@ by default cannot be what stands between a feature and the bug it prevents.
 **The engine is the whole platform.** Every node type ships as a
 **product-agnostic engine image** from THIS repo's Dockerfile
 (`BUILD_TAGS=<type>`). There are no per-product node images. Reusable
-capabilities (chat, daily-space, avatar, ...) live in the engine as **generic,
+capabilities live in the engine as **generic,
 DSL-configurable features**, never product code.
 
 **Product DSL is delivered at runtime, not compiled in.** A product ships its
@@ -567,24 +562,6 @@ What makes the local cluster parity rather than a lookalike:
   identity replica publishes the same JWKS keyset (divergent keysets fail
   roughly half of all auth, memql#3400).
 
-#### Client-tool relay (agent → browser, across nodes)
-
-The tool registry supports **client-executed tools** (tools whose implementation
-runs in the browser). In single-binary mode the agent's `InvokeClientTool`
-writes directly to the browser's stream and parks on a session-scoped waiter. In
-cluster mode the agent and browser live on different nodes, so the
-`ClientToolCall` envelope needs a cross-node round-trip via the graph event bus:
-
-1. Cognition intercepts `ClientToolCall` in `consumeAgentTurnStream` and inserts
-   a `v1:cognition:client:tool:request` node (`emitClientToolRequest`).
-2. Browsers subscribed to the space dispatch the tool locally and insert a
-   matching `v1:cognition:client:tool:response` (`emitClientToolResponse`).
-3. Cognition subscribes to those responses, wraps the payload in a
-   `ClientToolResult`, and calls `AgentForwarder.ForwardContinuation` so the
-   agent's service-scoped waiter fires and the parked tool loop returns.
-
-The relay lives in `integrations/cognition/client_tool_relay.go`.
-
 ### Component Bus (Channel-Based Communication)
 
 Components communicate via typed Go channels carrying protobuf-defined messages
@@ -635,8 +612,7 @@ dictates the wire (a browser, a mail client, a probe, a third-party webhook).
 | **Auth (identity service)** | `/login`, `/auth/magic-link`, `/auth/complete`, `POST /auth/landing`, `GET /auth/magic-link/status`, `POST /auth/magic-link/finish`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json`, `POST /auth/webauthn/{register,login}/{begin,finish}`, `POST /device/code`, `GET+POST /device`, `GET /enroll` | OAuth 2.0 / magic-link needs HTTP redirects, browser form posts and JWKS publishing; WebAuthn is a **browser API**; RFC 8628 device grant is **defined over HTTP**; `GET /enroll` is a page a person opens from a link, before any application code exists to speak a protocol. The magic-link three (memql#4302): a GET now renders and never changes state so mail scanners stop burning links, `POST /auth/landing` is the form post it used to do, `/auth/magic-link/status` is the requesting tab's poll gated on the `memql_ml` cookie, and `finish` must be a real form POST because the reply is a 303 the tab must NAVIGATE. All identity routes are declared on the identity server's own route table, not `component/server`'s |
 | **Health check** | `/healthz` | Docker and Kubernetes probes expect HTTP GET |
 | **GitHub Connect callback** | `GET /auth/github/callback` (identity only) | GitHub redirects a person's BROWSER here after they authorize the GitHub App, and after they install it (the same route is the app's setup URL), so gRPC cannot serve it (memql#4912, owner-approved as program decision P11). It is the OAuth-callback class, and the ONLY HTTP surface Connect adds: the flow STARTS over the stream, on `githubConnectBegin`. It is a CONNECTION rather than a sign-in -- the row it writes is a `v1:platform:sourceCredential` grant, and the identity model does not change -- which is why it sits in its own row rather than under Auth above. Declared on identity's own route table beside `/auth/oidc/callback`, so it needs no `component/server` `*Paths()` declaration and no front-door regeneration: `identity.<domain>` is a single `/` prefix rule to the identity Service, and declaring it in `component/server` would route it to the bff instead. State is consumed exactly once under a Postgres advisory lock, the magic-link discipline, so a replayed link is `connect_state_invalid` rather than a second grant; and an `installation_id` arriving without a valid state updates nothing, because GitHub's own docs warn that parameter can be spoofed by anyone who hits the URL |
-| **WebSocket upgrades** | `/memql/ws`, `/memql/audio` | Browsers need an HTTP upgrade |
-| **File uploads** | `/spaces/{id}/attachments` | Multipart form-data maps poorly to gRPC |
+| **WebSocket upgrades** | `/memql/ws` | Browsers need an HTTP upgrade |
 | **Site bundle publish** | `POST /sites/{id}/bundles` (bff only) | A CI job hands over an arbitrary tree of files -- unknown paths, count and content types -- which is what multipart exists to carry and a fixed protobuf schema does not (memql#3713). `component/edge.Publisher` makes it atomic: the bundle lands under a content-addressed version prefix and only then does the site row's `bundleRef` flip. Authorization is a `class="service_account"` JWT; declared in `HandlerAuthorizedPaths()`, never `PublicPaths()`. Served by the bff, never the edge |
 | **Inbound webhooks** | `POST /inbound/{source}` (bff only) | The third party dials US and will POST to a URL and nothing else (memql#2957). Deny-by-default source allowlist + per-source HMAC; `HandlerAuthorizedPaths()`. [inbound-delivery.md](docs/public/operate/inbound-delivery.md) |
 | **One-click unsubscribe** | `GET+POST /unsubscribe` (bff only) | Here the third party is the RECIPIENT'S MAIL CLIENT (memql#3348); RFC 8058 is a contract with Gmail / Outlook / Yahoo. The GET/POST split is load-bearing: mail clients PREFETCH links, so a GET with the side effect unsubscribes people who never clicked. Authorization is an HMAC-signed token carrying (owner, recipient, campaign), verified before any row is read. `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()` |
@@ -703,7 +679,7 @@ Three things about the derivation are load-bearing:
 - **It is per-ROUTE, not per-authentication-tier.** `PublicPaths()` +
   `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()` answer *who may reach
   this without a bearer*. An **authenticated** HTTP route appears in none of
-  them, which is how `/spaces/` and `/polyphon/*` came to be served by the bff
+  them, which is how `/polyphon/*` came to be served by the bff
   and routed by nothing. The generator unions the aggregates **and** every
   per-route declaration a bff-tagged build mounts.
 - **It over-approximates for a path the bff does NOT serve.** Identity-only
@@ -737,11 +713,9 @@ Everything below lives on `MemqlService.Stream`; cross-node proxying rides
 
 | Category | gRPC Message Types | Handler |
 |----------|--------------------|---------|
-| **AI service-to-service** | `AiChatMsg`, `AiSpeechMsg`, `AiTranscribeMsg`, `AiSuggestMsg` (space / group / agent) | `ai_handlers.go` |
-| **Streaming transcription** | `AiTranscribeStreamStart` / `Chunk` / `End` + `AiTranscribeStreamDelta` / `Complete` | `ai_transcribe_stream.go` -- multi-message flow keyed by `request_id`, forwarded BFF -> Voice via `AiForwardRouter.ForwardContinuation` |
-| **Polyphon internal** | `PolyphonRoomTokenMsg`, `PolyphonStatusMsg`, `PolyphonUtteranceMsg` | `polyphon_handlers.go` |
+| **AI service-to-service** | `AiChatMsg`, `AiSuggestMsg` | `ai_handlers.go` |
+| **Streaming transcription** | `AiTranscribeStreamStart` / `Chunk` / `End` + `AiTranscribeStreamDelta` / `Complete` | `ai_transcribe_stream.go` -- multi-message flow keyed by `request_id`, forwarded BFF -> Agent via `AiForwardRouter.ForwardContinuation`. The one caller is MemQL OS's Ask hold-to-talk |
 | **Concepts API** | `ConceptsListMsg`, `ConceptsSubscribeMsg` (+ `follow=true` -> `ConceptsRegistryDelta` stream, memql#4238) | `concepts_handlers.go` |
-| **Guest invites** | `SendGuestInviteMsg`, `ResolveGuestInviteMsg`, `ResendGuestInviteEmailMsg`, `CancelGuestInviteMsg` | `guest_handlers.go` |
 
 ### For AI Agents and Developers
 
@@ -794,103 +768,11 @@ Two things about `AiSuggest` are load-bearing:
   "not measured" are different answers, and a client falls back to its own
   estimate only if the field is missing.
 
-Cross-node proxying (BFF -> Voice, BFF -> Agent, ...) rides `AiForwardRequest` /
+Cross-node proxying (BFF -> Agent) rides `AiForwardRequest` /
 `AiForwardResponse` on `NodeService.Stream`. Handlers:
 `component/grpc/{ai_handlers,ai_transcribe_stream,ai_forward}.go`, which emit a
 short error id via `generateErrorId()` (`ERR-{6 hex}`), visible in slog output
 as `"errorId":"ERR-..."`.
-
-### Voice + Video Pipeline (Go voice-agent)
-
-The realtime voice + video channel is owned by the Go voice-agent in
-[`integrations/voice/agent/`](integrations/voice/agent/), shipped as the
-`voice-agent` subcommand of `memql-voice` (`make voice`, CGO_ENABLED=1,
-`-tags voice`). It joins LiveKit rooms as the General Assistant's voice + video
-participant; specialists are text-only by design and never publish into the
-room.
-
-```
-LiveKit room -> OpenAI Realtime STT -> memql gRPC (VoiceAgentTurnRequest -> Delta)
-             -> memql cognition (conductor + agent tool loop)
-             -> OpenAI TTS -> Anam or Simli avatar (lip-synced video)
-```
-
-Two executors, selected by `MEMQL_VOICE_EXECUTOR`: `realtime` (default --
-OpenAI gpt-realtime speech-to-speech) and `cascade` (the STT -> cognition -> TTS
-path above). The CGO-free vendor REST core for avatars lives in the shared
-`integrations/avatarvendor` package.
-
-- **Auth:** identity-issued `class="voice_agent"` JWT, pinned to the
-  `VoiceAgent*` message surface by
-  `component/grpc/voice_agent_stream_interceptor.go`. The voice-agent cannot
-  write graph rows directly; memql does that server-side. Mint via
-  `make voice-agent-token` or self-bootstrap
-  ([voice-agent-jwt.md](docs/public/operate/auth/voice-agent-jwt.md)).
-- **Deployment gotcha:** LOCALLY the voice lane uses a LiveKit Cloud project and
-  is GATED on the operator's credentials (memql#2416) -- without `LIVEKIT_URL` /
-  `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` at `make up` / `make secrets`, voice
-  + voice-agent scale to 0 with a loud warning, because the binaries fail-fast
-  on missing env by design. The cloud stays self-hosted
-  (`deploy/k8s/base/livekit.yaml`).
-- **Env** (full list in the runbook): `MEMQL_GRPC_ADDR`, the three `LIVEKIT_*`,
-  `MEMQL_OPENAI_API_KEY` (required), `MEMQL_VOICE_EXECUTOR`,
-  `MEMQL_VOICE_ROOM_NAME`, `MEMQL_VOICE_IDLE_TEARDOWN_SECONDS` (default 60,
-  #1378 -- stops the dispatcher wedging on an empty room),
-  `MEMQL_VOICE_MAX_ROOMS` (default 8, #1395 -- cross-replica double-serve is
-  prevented by skipping rooms already containing a `-ga` participant),
-  `MEMQL_REALTIME_*`, `VOICE_AGENT_TOKEN`, `MEMQL_AVATAR_VENDOR` (`anam`
-  default / `simli` / `none`) + the vendor key.
-- **Canonical voice catalog** (`integrations/voice/voices.go`): every agent
-  carries a provider-agnostic voice name (alto / soprano / tenor / baritone /
-  ...) on `providerConfig.voice.voiceId` plus a `gender` enum; cognition
-  resolves canonical -> provider voice id at TTS-publish time via
-  `MEMQL_POLYPHON_VOICE_PROVIDER`. Auto-assigned at agent creation, never
-  user-edited. Builtins `voicePickForGender` + `voiceResolve`.
-- **Per-agent audio + video control:** `v1:agents:agent.audioControl` +
-  `videoControl` (`always_on` | `always_off` | `mirror_user`, default
-  `mirror_user`) seed the defaults; `v1:cognition:audioOverride` +
-  `videoOverride` carry per-(space, agent) session overrides. Mutations
-  `setAgentAudioOverride` / `setAgentVideoOverride`; queries
-  `audioOverridesForSpace` / `videoOverridesForSpace`. An empty
-  `avatarPersonaId` makes the voice-agent disable the avatar plugin and fall
-  back to audio-only.
-
-### Cognition (Routing + Conductor)
-
-Cognition decides whether and which agent responds to an utterance, then
-dispatches the turn. The text path uses a **single LLM brain**: the conductor
-(`dsl/cognition/prompts/conductorTurn.tmpl`) emits both the routing decision
-(fitScore / turnMode / handoff / severity) and the per-agent plan in one
-structured-output call. The standalone router LLM call fires only for voice
-utterances (latency-sensitive); fast-path mention dispatch bypasses both.
-`integrations/cognition/{cognition_handler,conductor_consult,ai_router}.go`.
-
-- **Capability-aware routing.** Conductor and voice router both see each
-  candidate's tool list; tool-fit mismatch drops fitScore by 0.4+, and a total
-  tool gap routes to the GA with `turnMode=escalation_notice`.
-- **Conversational continuity.** The conductor gets an explicit `lastResponder`
-  input and must keep the primary with that agent on a follow-up shape absent
-  an @-mention or domain pivot -- plugs "GA jumps in to defer to the specialist".
-- **Greet-on-join pacing** (`greet_on_join.go`): 3s initial delay, 4s minimum
-  gap, process-local. Cross-replica exactly-once is `dispatchGate.tryGreet`
-  (#1386), a Postgres advisory-lock gate keyed on (space, agent). The greeting
-  directive is "familiar" for ALL agents -- every agent is one the user created
-  and named, so the "Hi, I'm X" opener is forbidden across the board.
-
-### Agent reply envelope (`respondToUser`)
-
-Every user-facing chat reply is delivered through a structured-output envelope,
-not free-form prose. The agent ends every turn with a sentinel `respondToUser`
-tool call carrying `{response, citations[]}`; the streaming tool loop
-intercepts it by name (no engine executor exists for it), parses the args as
-`Envelope`, and uses that as the turn's final text + citations.
-`integrations/agent/{envelope,streaming}.go`; enforced by the OUTPUT CONTRACT
-block at the top of `dsl/cognition/prompts/cognitionReply.tmpl`.
-
-`citations` is a list of `{domainId, matchedPhrase}` pairs naming
-knowledge-domain sources; cognition stamps them on
-`v1:cognition:utterance.citations` and the frontend turns each `matchedPhrase`
-into a chip linking to the domain. Empty array when no trained sources were used.
 
 ### Coding Agent -- the container-executor seam
 
@@ -912,7 +794,7 @@ over MCP.
   second copy of those gates is a copy that drifts.
 - **Legacy `claw` fields are still present and unused by any of this.**
   `v1:agents:agent.claw` + `clawWorkspace`, read by `ClawCapable()` in
-  `integrations/cognition/ai_responder.go`, plus display strings in
+  the replier, plus display strings in
   `tool_labels.go`. No `tool claw*` under `dsl/`, no sidecar, no `CLAW_*` env
   var. Do not wire them to `cockpit-app` on the assumption that they belong
   together.
@@ -1121,7 +1003,7 @@ computer-use control, files already on the user's computer).
   read on the page the bff serves, and without them default-deny leaves the list
   correct on load and frozen after, which looks like it is working.
   `v1:worker:invocation` is excluded on volume grounds.
-- **Routing preference:** `cognitionReply.tmpl` and the `workbench` knowledge
+- **Routing preference:** the agent reply prompt and the `workbench` knowledge
   domain (auto-attached by `replier.go` when the expanded tool list includes
   `workbenchHost`) instruct the agent to prefer workbench over computer-use and
   to surface a "workbench can't do this -- needs computer use" message rather
@@ -1232,7 +1114,7 @@ JWKS where a PAT can't, surface-pinned to the read/query path).
 
 The DSL tree is **flattened per construct**: every namespace gets one directory
 under `dsl/<namespace>/`, and within it each construct kind is consolidated into
-a single `<construct>s.memql` file (e.g. `dsl/cognition/queries.memql`,
+a single `<construct>s.memql` file (e.g. `dsl/library/queries.memql`,
 `dsl/identity/concepts.memql`, `dsl/providers/providers.memql`). The flattened
 tree is produced by
 [`scripts/restructure-by-construct`](scripts/restructure-by-construct/main.go).
@@ -1258,7 +1140,7 @@ $MEMQL_DSL_PATH/
 ```
 
 - **Adds new domains.** A directory colliding with a core embedded domain (e.g.
-  `cognition`) is skipped -- the embedded tree owns that namespace.
+  `library`) is skipped -- the embedded tree owns that namespace.
 - **Fail-loud.** The mounted tree loads through the same strict-boot gate as the
   embedded tree: a malformed construct refuses boot (`MEMQL_DSL_ALLOW_SKIPS` is
   the operator break-glass).
@@ -1373,7 +1255,7 @@ don't-do-this skeletons.
 The live `policy` construct is an **AI provider-selection record**:
 empty-bodied, annotated with `@primary` / `@fallback` / `@maxLatencyMs` /
 `@preferredRole`, consolidated in `dsl/policies/policies.memql` and consumed by
-the AI Router to pick chat/voice/embedding providers.
+the AI Router to pick chat/embedding providers.
 
 ```memql
 @primary("streamClaudeSonnet")
@@ -1523,8 +1405,8 @@ Event-driven workflows. The `@trigger` annotation keys off an event name plus
 the target concept, using keyword args:
 
 ```memql
-@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
-automation autoJoinSI { ... }
+@trigger(event="node.created", concept="v1:worker:registration", partition="*")
+automation onWorkerRegistered { ... }
 ```
 
 A time-driven automation uses the `schedule` kwarg instead:
@@ -1549,13 +1431,13 @@ another file pulls into local scope (shapes, traits, specs, mutations, queries,
 logic, builtins, prompts, providers, tools) is declared via a dotted path:
 
 ```memql
-use cognition.concepts.{ participant, space }
-use cognition.shapes.{ participantFull }
+use worker.concepts.{ registration }
+use worker.shapes.{ registrationFull }
 use common.traits.{ isActiveRecord, isNotDeleted }
 ```
 
-The dotted path maps to a file on disk (`cognition.concepts` →
-`dsl/cognition/concepts.memql`); the brace-list names the constructs imported.
+The dotted path maps to a file on disk (`worker.concepts` →
+`dsl/worker/concepts.memql`); the brace-list names the constructs imported.
 The bound concept's payload is referenced from filter clauses by the **bare
 property name**, and from mutation bodies via the bare `insert { ... }` /
 `update { ... }` block without re-stating the concept id.
@@ -1633,32 +1515,32 @@ property name**, and from mutation bodies via the bare `insert { ... }` /
 
 Queries:
 ```memql
-use cognition.concepts.{ participant }
-use cognition.shapes.{ participantFull }
+use worker.concepts.{ registration }
+use worker.shapes.{ registrationFull }
 use common.traits.{ isActiveRecord }
 
-@description("Get space participants")
-query participant spaceParticipants {
+@description("Get a user's registered machines")
+query registration registrationsForOwner {
   args {
-    spaceId  string  @required
+    ownerUserId  string  @required
   }
-  filter  spaceId==args.spaceId && isActiveRecord
-  shape   participantFull
+  filter  ownerUserId==args.ownerUserId && isActiveRecord
+  shape   registrationFull
 }
 ```
 
 Mutations:
 ```memql
-use cognition.concepts.{ space }
+use library.concepts.{ folder }
 
-@description("Create a cognition space")
-mutate space mutationCreateSpace {
+@description("Create a Library folder")
+mutate folder mutationCreateFolder {
   args {
-    spaceId  string  @required
-    name     string  @required
+    folderId  string  @required
+    name      string  @required
   }
   insert {
-    id:        args.spaceId
+    id:        args.folderId
     name:      args.name
     status:    "active"
     createdAt: now
@@ -1770,11 +1652,11 @@ segment.
 is named by the signature `shape <Concept> <name>`:
 
 ```memql
-use cognition.concepts.{ space }
+use library.concepts.{ folder }
 
-@description("Space summary card")
+@description("Folder summary card")
 @row
-shape space spaceCard {
+shape folder folderCard {
   row.id
   name
   description
@@ -1831,12 +1713,12 @@ it and read the projected key bare). A `trait` is the one deliberately-unbound
 row predicate (bare payload fields, validated at the call site).
 
 ```memql
-use cognition.concepts.{ participant }
+use worker.concepts.{ registration }
 
 @enabled
-@description("Matches guest participants")
-spec participant isGuestParticipant {
-  return isGuest == true             // concept-bound row-spec
+@description("Matches revoked machine registrations")
+spec registration isRevokedRegistration {
+  return revoked == true             // concept-bound row-spec
 }
 
 use common.shapes.{ actorEnvelope }
@@ -1883,8 +1765,12 @@ tool searchUsers {
   `method`) and `type` is required. `@rateLimit` is closed the same way, and a
   non-integer value is refused.
 - **The handler is validated at load** -- unknown type, missing function name /
-  query / URL -- and a tool must carry a handler at all unless it is
-  `@clientExecution` (whose body lives in the browser).
+  query / URL -- and a tool must carry a handler at all. There is no
+  exception: `@clientExecution` put a tool's body in the connected browser and
+  reached it over the client-tool relay, and both went with the conversational
+  product (epic memql#4988). The annotation is now REFUSED at parse, so an
+  author who writes it is told, rather than getting a tool that loads, is
+  advertised to the model, and fails on the one call that reaches it.
 - **The handler's TARGET is resolved** against the function + builtin registry
   at boot (`tool_handler_resolution.go`), so a handler naming a function that
   does not exist is a load problem strict boot refuses, not a mid-turn failure.
@@ -1903,24 +1789,23 @@ Go integration named by `@executor`.
 
 ```memql
 @enabled
-@description("Score an utterance for an AI participant")
-@executor("integration.cognition.scoreUtterance")
-@args(profile="object")
-builtin cognitionScore {
-  spaceId        string  @required
-  participantId  string  @required
-  utterance      string  @required
+@description("Run one command on a per-plan workbench workspace")
+@executor("integration.workbench.dispatchHost")
+@args(environment="object")
+builtin workbenchDispatchHost {
+  planId   string  @required
+  action   string  @required
+  command  string
 }
 ```
 
 Available integrations (core, registered via the plug-in system):
-agents, auth, avatardirect, chat, dailyspace, database,
-deployversion, email, embedding, files, azureblob (as `storage`),
-harnessRecall, identity, knowledge, library, liveknowledge,
-openairealtime, rbac, router, shopify, similarity, telephony, timeutil,
-voice, workbench, workTrace, plus node-type-scoped ones (cognition, agent, stt,
-openaiVoice) wired explicitly in `app/integrations_*.go` when their
-dependencies sit outside the stable `PluginContext` surface. `training` is a
+agents, auth, database, deployversion, email, embedding, files,
+azureblob (as `storage`), harnessRecall, identity, knowledge, library,
+liveknowledge, rbac, router, shopify, similarity, timeutil, workbench,
+workTrace, plus node-type-scoped ones (agent, stt) wired explicitly in
+`app/integrations_*.go` when their dependencies sit outside the stable
+`PluginContext` surface. `training` is a
 product-repo pack, not part of engine-only core.
 
 `shopify` is a CONNECTOR rather than an ordinary integration, and the reference
@@ -1947,7 +1832,7 @@ Three ways to extend MemQL, in preference order:
    to add product-specific Go without touching `app/` internals. See
    `component/memql/plugins.go`.
 3. **Explicit `app/` wiring** -- reserved for first-party integrations whose
-   dependencies don't fit `PluginContext` (cognition, agent, stt). Lives in
+   dependencies don't fit `PluginContext` (agent, stt). Lives in
    `app/integrations_*.go` with build tags.
 
 Event routing is also plug-in-registerable: `node.RegisterRoutingRule(...)`
@@ -2132,20 +2017,6 @@ schema does not say.
 
 ## Feature Notes
 
-### Canvas + Spaces
-
-Under platform consolidation (#2472) the space lifecycle (three-state + daily
-spaces) is an **engine-generic feature** rather than product code; the core
-participant/session/utterance machinery is engine-side
-(`dsl/cognition/mutations.memql`: joinSpaceAsHuman, leaveSpace, addAgentToSpace,
-...).
-
-The canvas timeline (the `canvasState` concept) is still delivered as **product
-DSL** at runtime through the product's bundle (`MEMQL_DSL_PATH`); its physical
-absorption into the engine is mid-migration, so treat canvas as product-owned
-for now. Product rows ride the chat-reply delivery substrate via
-`node.RegisterChatReplyConcept`.
-
 ### Views, layouts and living pages (epic memql#4661)
 
 **The arrangement system IS the page system.** Every portal page that shows data
@@ -2220,22 +2091,14 @@ Design record:
 
 ### Invitations (Identity Primitive)
 
-Token-hashed invitation credential for user and guest flows, under
-`v1:identity:invitation`. Two gRPC messages drive the guest flow:
-`SendGuestInviteMsg` (authenticated space owner -- mints a 32-byte token, stores
-only its SHA-256 hash, sends the email) and `ResolveGuestInviteMsg`
-(unauthenticated public call from the product `/join/<token>` page, returning
-scope + inviter metadata or a typed status).
+Token-hashed invitation credential, under `v1:identity:invitation`. It is the
+USER invitation now: the guest flow -- the five guest gRPC messages, the
+`Authorization: Guest <token>` interceptor, the `identity.guest` claim and the
+mutations that minted a guest participant -- went with the space concept it
+scoped to (epic memql#4988). `kind` keeps its `guest` value for rows already
+written; nothing produces one.
 
-Guest authentication is `Authorization: Guest <token>`.
-`NewGuestAwareStreamInterceptor` wraps the identity-verifier interceptor,
-validates the token against the invitation registry, and builds a guest
-`AccessContext` under the `identity.guest` claim key (subject
-`guest:<invitationId>`). The WS bridge accepts it as `?guest_token=<token>`
-since browsers cannot set custom headers on the upgrade.
-
-Key files: `dsl/identity/{concepts,queries,shapes}.memql`,
-`component/grpc/guest_handlers.go` + `guest_stream_interceptor.go`, and
+Key files: `dsl/identity/{concepts,queries,shapes}.memql` and
 `integrations/email/` (self-registering plug-in exposing
 `integration.email.sendEmail` -- GraphSender via Microsoft Graph `sendMail`
 preferred, SMTPSender fallback, LogSender for dev; env `AZURE_TENANT_ID` /
@@ -2261,19 +2124,6 @@ Exchange Online PowerShell and NOT reachable from `az`. Any automation that adds
 a secret must pass `az ad app credential reset --append`: without it the command
 DELETES every existing secret on the registration.
 [azure-entry-install.md](docs/public/operate/azure-entry-install.md#mailsend-is-tenant-wide-until-you-scope-it).
-
-**The guest write path is ENGINE DSL, split across two domains** (memql#4258):
-`createGuestInvitation`, `markGuestInvitationAccepted`,
-`markGuestInvitationKicked` (also the CANCEL path -- a soft cancel, so the
-tokenHash stays taken) and `rotateGuestInvitationToken` live in
-`dsl/identity/mutations.memql`; `createGuestParticipant` lives in
-`dsl/cognition/mutations.memql`, because the SPACE is cognition's. All five are
-`@serverOnly`: each writes a `tokenHash`, the whole credential the guest-auth
-interceptor matches on, so a client-reachable create is a credential-forging
-primitive. The three update-shaped ones take MINIMAL arguments -- `update{}` has
-been a read-merge since memql#1628, so re-supplying every discriminator is dead
-weight that an undeclared-argument DISCARD hides.
-`component/grpc/render_query_args_parse_test.go` gates both directions.
 
 ### Email campaigns + the sending engine
 

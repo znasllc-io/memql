@@ -683,15 +683,14 @@ engine's write chokepoint regardless of what the concept declares.
 
 **Two things this is not.** It is not a way to let visitors submit
 anything -- that is `POST /inbound/{source}`
-([inbound-delivery.md](inbound-delivery.md)) or the guest-token path, both
-of which authenticate. And it is not per-visitor: every anonymous reader is
-the same actor, which is deliberate -- it is what lets one cached result
-serve every visitor, and it means no filter can branch on which stranger is
-asking.
+([inbound-delivery.md](inbound-delivery.md)), which authenticates. And it is
+not per-visitor: every anonymous reader is the same actor, which is
+deliberate -- it is what lets one cached result serve every visitor, and it
+means no filter can branch on which stranger is asking.
 
 **Caching.** Anonymous reads carry no caller dimension, so they are the
 best-cached data in the system: one computation, served to everyone. That
-is a reason to prefer the public tier over a per-visitor guest token for
+is a reason to prefer the public tier over a per-visitor credential for
 genuinely public content, not merely a side effect.
 
 ---

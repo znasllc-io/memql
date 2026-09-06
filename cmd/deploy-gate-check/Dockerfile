@@ -49,7 +49,6 @@ COPY component/node/gen/go.* ./component/node/gen/
 COPY component/observe/go.* ./component/observe/
 COPY component/outbound/go.* ./component/outbound/
 COPY component/planner/go.* ./component/planner/
-COPY component/polyphon/go.* ./component/polyphon/
 COPY component/provenance/go.* ./component/provenance/
 COPY component/router/go.* ./component/router/
 COPY component/safety/go.* ./component/safety/

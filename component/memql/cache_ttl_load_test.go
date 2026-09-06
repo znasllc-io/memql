@@ -111,7 +111,6 @@ func TestLoad_EmbeddedCachedQueriesCarryHint(t *testing.T) {
 		"activeSkillsFull": 300,
 		"skillBySlug":      300,
 		"routerBudgets":    120,
-		"spaceUtterances":  30,
 	}
 
 	for name, ttl := range want {

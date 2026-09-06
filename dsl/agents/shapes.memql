@@ -49,17 +49,10 @@ shape agent agentFull {
   roleSlug
   kind
   capabilities
-  avatar
   providerConfig
-  triggerBehavior
   groupIds
   active
   deleted
-  audioControl
-  videoControl
-  gender
-  avatarPersonaId
-  avatarVendor
   row.createdAt
   row.createdBy
 }
@@ -110,7 +103,6 @@ shape agentRole agentRoleFull {
   forbiddenSkillIds
   maxSkills
   recommendedPolicySlug
-  recommendedGender
   systemPromptHints
   active
   predefined
@@ -131,21 +123,5 @@ shape skillChangeEvent skillChangeEventFull {
   actorAgentId
   actorUserId
   planId
-  row.createdAt
-}
-
-/// Avatar persona catalog projection (memql#609). Backs the Create-Assistant persona picker
-/// (frontend#239) and the agent-display hydration of a stamped avatarPersonaId. Carries the vendor
-/// + vendor-issued personaId the voice-agent resolves at session start.
-@row
-shape avatarPersona avatarPersonaFull {
-  row.id
-  vendor
-  personaId
-  name
-  gender
-  imageRef
-  previewRef
-  active
   row.createdAt
 }

@@ -36,11 +36,8 @@ func TestIsServiceAccountPayload_Allowlist(t *testing.T) {
 		&memqlv1.MemqlClientMessage_CreateWorkerToken{},
 		&memqlv1.MemqlClientMessage_RevokeWorkerToken{},
 		&memqlv1.MemqlClientMessage_DelegationCreate{},
-		&memqlv1.MemqlClientMessage_SendGuestInvite{},
 		&memqlv1.MemqlClientMessage_RotateAuth{},
 		&memqlv1.MemqlClientMessage_RevokeAllSessions{},
-		// Off-surface (other credential families' message types):
-		&memqlv1.MemqlClientMessage_VoiceAgentTurnRequest{},
 	}
 	for _, p := range rejected {
 		assert.Falsef(t, isServiceAccountPayload(p), "%T must be rejected", p)

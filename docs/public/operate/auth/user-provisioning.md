@@ -118,13 +118,9 @@ the start. Subsequent registrations use the configured defaults.
 
 ## Invitations
 
-`v1:identity:invitation` is an identity primitive used by two
-flows:
+`v1:identity:invitation` is an identity primitive used by one
+flow:
 
-- **Guest invites** (driven by the product frontend): a space owner
-  sends a guest a link via `SendGuestInviteMsg`. Guests authenticate with
-  `Authorization: Guest <token>` (the gRPC stream interceptor's
-  guest-aware path).
 - **User invitations** (memql#4270): an owner, admin **or developer** issues one
   over `IdentityAdminMsg.issue_user_invitation`, and the reply carries the link
   ONCE -- only the token's SHA-256 digest is persisted, the same convention

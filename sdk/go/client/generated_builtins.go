@@ -1207,12 +1207,11 @@ func KnowledgeAugmentDomainAnalyzeBuild(args KnowledgeAugmentDomainAnalyzeArgs) 
 
 // KnowledgeAugmentDomainGenerate -- Generate + embed + persist topic-focused chunks for a knowledge domain. Inserts a Plan row for audit. Returns {planId, chunksAdded, domainId, domainName, topic}.
 type KnowledgeAugmentDomainGenerateArgs struct {
-	DomainId          string
-	Topic             string
-	SourceUtteranceId string
-	SourceAgentId     string
-	PartitionId       string
-	RequestedBy       string
+	DomainId      string
+	Topic         string
+	SourceAgentId string
+	PartitionId   string
+	RequestedBy   string
 }
 
 // KnowledgeAugmentDomainGenerate calls the engine builtin knowledgeAugmentDomainGenerate.
@@ -1231,13 +1230,6 @@ func KnowledgeAugmentDomainGenerateBuild(args KnowledgeAugmentDomainGenerateArgs
 	}
 	b.WriteString("topic: ")
 	b.WriteString(quoteMemQL(args.Topic))
-	if args.SourceUtteranceId != "" {
-		if b.Len() > 39 {
-			b.WriteString(", ")
-		}
-		b.WriteString("sourceUtteranceId: ")
-		b.WriteString(quoteMemQL(args.SourceUtteranceId))
-	}
 	if args.SourceAgentId != "" {
 		if b.Len() > 39 {
 			b.WriteString(", ")

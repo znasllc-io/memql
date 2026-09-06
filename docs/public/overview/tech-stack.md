@@ -109,7 +109,7 @@ them.
 # There is no imperative deploy command (memql#4550).
 
 # View logs
-kubectl logs -n memql deployment/cognition -f
+kubectl logs -n memql deployment/bff -f
 ```
 
 See [docs/public/operate/deploy-bundle-runbook.md](../operate/deploy-bundle-runbook.md)
@@ -128,10 +128,10 @@ All environments use the in-house identity service
 - Magic-link login as the primary path
 - Personal Access Tokens (PATs) for CLI clients
 - Per-node JWT verifier (`component/identity/verifier`) on every
-  verifier-consuming node type (bff/voice/cognition/agent/planner/
-  workbench/mcp); JWKS-published. The identity node is the JWKS
-  authority and does not verify against itself; the edge node serves
-  public bytes to anonymous visitors and is not an auth boundary
+  verifier-consuming node type (bff/agent/planner/workbench/mcp);
+  JWKS-published. The identity node is the JWKS authority and does not
+  verify against itself; the edge node serves public bytes to anonymous
+  visitors and is not an auth boundary
 - Role-based access control (owner / admin / developer / writer / reader)
 - Centralized user + invitation management via the MemQL Portal's
   People surface (`IdentityAdminMsg`, gated by
@@ -298,7 +298,7 @@ make secrets                                     # Seed/re-seed the k8s Secrets 
 
 # AKS
 kubectl get pods -n memql                                   # List pods
-kubectl logs -n memql deployment/cognition -f               # View logs
+kubectl logs -n memql deployment/bff -f                     # View logs
 kubectl get deployments -n memql                            # Deployment status
 ```
 

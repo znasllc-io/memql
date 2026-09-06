@@ -33,7 +33,7 @@
 #       patch: |
 #         - op: replace
 #           path: /rules/0/resourceNames
-#           value: ["agent", "cognition", "planner", "bff-acme"]
+#           value: ["agent", "planner", "bff-acme"]
 #
 # It is deliberately NOT bundled into `dsl-packages`: fetching staged DSL and
 # being allowed to restart pods are different permissions, an instance may

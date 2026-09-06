@@ -201,20 +201,29 @@ under `core/audio/`. PCM16 resampling (16kHz <-> 24kHz for Polyphon <-> OpenAI)
 with a persistent-filter streaming resampler (`resample.go`), WAV header
 generation + PCM chunking (`wav.go`), MP3 helpers (`mp3.go`).
 
-### openai/ -- OpenAI ASR + TTS for Polyphon
+### openai/ -- OpenAI ASR for streaming transcription
 
-Streaming ASR via the Realtime API in transcription-only mode (WebSocket), TTS
-via `/v1/audio/speech` with PCM16 output, automatic 16kHz <-> 24kHz resampling.
-Implements `polyphon.ASRProvider` / `TTSProvider`. Files: `openai.go` (config),
-`asr.go`, `tts.go`. Env: `MEMQL_POLYPHON_VOICE_PROVIDER=openai` (default),
-`MEMQL_POLYPHON_OPENAI_ASR_MODEL` (gpt-4o-transcribe),
-`..._TTS_MODEL` (gpt-4o-mini-tts), `..._TTS_VOICE` (alloy).
+Streaming ASR via the Realtime API in transcription-only mode (WebSocket), with
+automatic 16kHz <-> 24kHz resampling. Implements `audio.ASRProvider`; the only
+constructor is `app/integrations_stt.go`. Files: `openai.go` (config),
+`asr.go`. Env: `MEMQL_OPENAI_REALTIME_MODEL`, falling back to
+`MEMQL_POLYPHON_OPENAI_ASR_MODEL` and then to `whisper-1`; plus
+`MEMQL_POLYPHON_OPENAI_VAD_SILENCE_MS` (600) for the server-VAD
+end-of-utterance window.
+
+The package also carried a TTS client against `/v1/audio/speech`, for the
+Polyphon voice transport. Epic memql#4988 retired that transport with the voice
+and cognition node types and nothing constructed the client, so it and its
+`..._TTS_MODEL` / `..._TTS_VOICE` knobs are gone. **The engine's own
+text-to-speech is unaffected**: `AiSpeechMsg` is served by the AI provider
+registry in `component/memql/ai_providers.go`, which has always called OpenAI
+directly and never went through this package.
 
 ### stt/ -- speech-to-text
 
 Real-time streaming transcription over `MemqlService.Stream`
 (`AiTranscribeStreamStart` / `Chunk` / `End` -> `Delta` / `Complete`); the
-**voice** node owns the provider session and the BFF proxies through
+**agent** node owns the provider session and the BFF proxies through
 `AiForwardRouter.ForwardContinuation`. Single-shot batch via `AiTranscribeMsg`
 is still supported, plus the DSL capability `integration.stt.transcribe`.
 
@@ -545,6 +554,5 @@ logs through the logger its plug-in factory is handed.
 ## See Also
 
 - [Architecture](arch.md) - integration system architecture
-- [Audio Streaming](../docs/public/build/audio-streaming.md) - audio WebSocket + streaming-transcription gRPC path
-- [Polyphon Architecture](../docs/public/operate/voice-bringup-verification.md) - voice pipeline architecture
+- [Audio Streaming](../docs/public/build/audio-streaming.md) - the streaming-transcription gRPC path
 - [Authoring rules](../docs/public/language/authoring-rules.md) - MemQL gotchas (read before extending the DSL surface)

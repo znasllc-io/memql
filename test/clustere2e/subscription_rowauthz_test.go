@@ -20,6 +20,14 @@
 // that a deterministic test cannot reach: that the new gates did not break
 // live delivery on a real mesh, and that the subscribe-time kind gate
 // answers a real role over a real front door.
+//
+// THE UNDECLARED CONCEPT IS NOW v1:planner:plan (memql#4988). The fan-out
+// assertion below needs a concept that declares NO tier and IS forwarded
+// across the mesh; that used to be v1:cognition:utterance, which is deleted
+// along with the rest of cognition. dsl/planner/concepts.memql declares no
+// @rowAuthz on `plan`, and component/node/routing.go broadcasts
+// graph.node.created.v1:planner:* -- the same two properties, so the
+// assertion means exactly what it meant.
 
 package clustere2e
 
@@ -97,25 +105,16 @@ func TestClusterGraphSubscriptionStillDeliversUnderTheRowGate(t *testing.T) {
 	}()
 	producer := conns[0]
 
-	spaceID, participantID := newSpaceWithHuman(ctx, t, producer, userIDFromToken(t, tok))
+	userID := userIDFromToken(t, tok)
+	scope := newProbeScope()
 	chans := make([]<-chan string, len(conns))
 	for i, c := range conns {
-		openSpaceOnConn(ctx, t, c, spaceID, userIDFromToken(t, tok))
-		chans[i] = subscribeUtterancesForConcept(ctx, t, c)
+		chans[i] = subscribePlansForConcept(ctx, t, c)
 	}
 	time.Sleep(1500 * time.Millisecond)
 
 	shortID := id.NewShortId()
-	qc := memqlclient.NewQueryClient(producer.Dispatcher())
-	if _, err := qc.SendTextUtterance(ctx, memqlclient.SendTextUtteranceArgs{
-		UtteranceId:     shortID,
-		PartitionId:     spaceID,
-		ParticipantId:   participantID,
-		ParticipantType: "human",
-		Text:            "clustere2e row-authz fan-out probe",
-	}); err != nil {
-		t.Fatalf("send utterance: %v", err)
-	}
+	createProbePlan(ctx, t, producer, scope, shortID, "clustere2e row-authz fan-out probe", userID)
 
 	observed := 0
 	deadline := time.After(8 * time.Second)
@@ -127,9 +126,9 @@ func TestClusterGraphSubscriptionStillDeliversUnderTheRowGate(t *testing.T) {
 			drained := false
 			for _, ch := range chans {
 				select {
-				case uid := <-ch:
+				case pid := <-ch:
 					drained = true
-					if uid == shortID {
+					if pid == shortID {
 						observed++
 					}
 				default:
@@ -141,7 +140,7 @@ func TestClusterGraphSubscriptionStillDeliversUnderTheRowGate(t *testing.T) {
 		}
 	}
 	if observed == 0 {
-		t.Fatalf("NO subscriber observed %s. v1:cognition:utterance declares no tier, so row "+
+		t.Fatalf("NO subscriber observed %s. v1:planner:plan declares no tier, so row "+
 			"admission must admit it to everyone exactly as its reads already return it to "+
 			"everyone (design D1). Zero observations means the fan-out gate is denying an "+
 			"UNDECLARED concept -- the live feed goes quiet and an operator reads it as an idle "+

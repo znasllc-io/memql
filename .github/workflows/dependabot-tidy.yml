@@ -8,7 +8,7 @@
 # a bump in one module leaves every module that replaces it with a stale
 # go.sum, and the `module-boundaries` lane fails -- correctly.
 #
-# Measured on #3294, which changed ONLY `component/polyphon/go.mod`: six other
+# Measured on #3294, which changed ONLY ONE nested `go.mod`: six other
 # modules went stale (`.`, component/grpc, component/server, integrations,
 # integrations/openai, integrations/stt). Even the workspace-wide PRs land
 # untidy -- #3293 left component/{automations,deploycontrol} stale, and #3299

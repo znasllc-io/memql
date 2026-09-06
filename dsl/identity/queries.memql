@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use common.traits.{ identityIsApiKey, identityIsBadge, identityIsMagicLink, identityIsNodeToken, identityIsOidc, identityIsPasskey, identityIsRecoveryKey, identityIsVoiceAgentToken, identityIsWorkerToken, isActiveRecord, isDeletionScheduled, statusIsPending }
+use common.traits.{ identityIsApiKey, identityIsBadge, identityIsMagicLink, identityIsNodeToken, identityIsOidc, identityIsPasskey, identityIsRecoveryKey, identityIsWorkerToken, isActiveRecord, isDeletionScheduled, statusIsPending }
 use common.specs.{ requiresOwnerOrAdmin, requiresDeveloperOrAbove }
 
 // account -- the operator's customer records
@@ -1176,81 +1176,27 @@ query invitation invitationById {
   shape   invitationFull
 }
 
-// ---- queries/v1/identity/invitationByTokenHash.memql ----
-
-// invitationByTokenHash - Look Up a Guest Invitation by Token Hash
-// =================================================================
-//
-// Takes the SHA-256 hash of a guest invite token and returns the
-// matching invitation record. Used by:
-//   1. The guest-auth stream interceptor -- to resolve
-//      `Authorization: Guest <token>` on every inbound request.
-//   2. The ResolveGuestInvite gRPC handler -- to render the
-//      /join/<token> landing page (inviter name + invitee email + any
-//      product scope context).
-//
-// Returns the latest version of the invitation (append-only semantics)
-// with any status. Callers are responsible for checking `status` and
-// `expiresAt`.
-//
-// Arguments:
-//   tokenHash (string) - SHA-256 hex digest (lowercase) of the plain token
-//
-// Returns:
-//   Zero or one invitation record.
-//
-
-/// Returns the invitation whose tokenHash matches the argument. Zero or one result.
-@unbounded("invitation by unique tokenHash -- a credential lookup bounded to a single row")
-query invitation invitationByTokenHash {
-  args {
-    tokenHash  string!
-  }
-  filter  kind=="guest" && tokenHash==args.tokenHash
-  shape   invitationFull
-}
-
 // ---- queries/v1/identity/userInvitationByTokenHash.memql ----
 
 // userInvitationByTokenHash - Look Up a USER Invitation by Token Hash
 // ===================================================================
 //
-// The kind="user" twin of invitationByTokenHash above, and the reason it is a
-// SEPARATE query rather than a widened filter on that one (memql#4612).
+// The kind="user" redeem lookup, split out of invitationByTokenHash by
+// memql#4612 because that query filtered kind=="guest": it was written when
+// guest invitations were the only kind, so a user invitation was looked up
+// through a query that excluded user invitations, and user-invitation
+// redemption never once succeeded on any shipped version.
 //
-// invitationByTokenHash filters kind=="guest". It was written when guest
-// invitations were the only kind, and its own heading still says "Guest".
-// kind="user" arrived later (memql#4270) and reused the Go store method that
-// runs it, so a user invitation was looked up through a query that excludes
-// user invitations: the lookup returned nothing, the redeem path refused
-// `invitation_not_found`, and user-invitation redemption never once succeeded
-// on any shipped version.
-//
-// THE OBVIOUS FIX -- drop `kind=="guest"` and let callers discriminate -- is the
-// wrong one. That query is shared with the guest path
-// (component/grpc/guest_handlers.go, reached from the stream interceptor and
-// two handlers), and widening a credential lookup so that a user invitation can
-// come back through the guest door makes every present and future caller
-// responsible for a privilege boundary the filter used to hold. The guest path
-// does re-check kind today; relying on that is a confused-deputy waiting to
-// happen. Two kinds, two doors.
-//
-// The tree already partitions these verbs by name -- createUserInvitation /
-// createGuestInvitation, markUserInvitationAccepted / markGuestInvitationAccepted
-// -- so the split here is the existing convention rather than a new one.
+// Its guest twin went with the space concept (epic memql#4988). This one is
+// deliberately NOT widened to compensate: a credential lookup that returns
+// any kind makes every present and future caller responsible for a privilege
+// boundary the filter used to hold. One kind, one door.
 //
 // Returns the latest version of the invitation with ANY status. Callers must
 // check status, active and expiresAt: "you already used this", "somebody
 // cancelled this" and "this expired" are three different next steps for the
-// person holding the link, and collapsing them is what makes an invitation flow
-// feel broken.
-//
-// Arguments:
-//   tokenHash (string) - SHA-256 hex digest (lowercase) of the plain token
-//
-// Returns:
-//   Zero or one invitation record.
-//
+// person holding the link, and collapsing them into one "invalid" is what
+// makes an invitation flow impossible to support.
 
 /// Returns the kind="user" invitation whose tokenHash matches the argument. Zero or one result.
 @unbounded("invitation by unique tokenHash -- a credential lookup bounded to a single row")
@@ -1259,45 +1205,6 @@ query invitation userInvitationByTokenHash {
     tokenHash  string!
   }
   filter  kind=="user" && tokenHash==args.tokenHash
-  shape   invitationFull
-}
-
-// ---- queries/v1/identity/invitationByPreviousTokenHash.memql ----
-
-// invitationByPreviousTokenHash - Look Up a Guest Invitation by an Older Token Hash
-// ==================================================================================
-//
-// Companion to invitationByTokenHash. After
-// rotateGuestInvitationToken runs (the resend path), the
-// row's tokenHash is the FRESH hash and previousTokenHash is the
-// one the row carried immediately before. A recipient who clicks
-// the older /join/<token> link presents a token whose hash matches
-// previousTokenHash but NOT tokenHash. This query catches that
-// case so the resolve handler can return a UX-friendly
-// `superseded` status instead of a generic `invalid`.
-//
-// Only matches the one-generation-back history -- two rotations
-// back drops off and the link becomes plain-invalid. Guest auth
-// (Authorization: Guest <token>) still only admits the CURRENT
-// hash via invitationByTokenHash; this query never grants
-// auth, it only feeds the friendlier 404 message.
-//
-// Reference: memql#108.
-//
-// Arguments:
-//   tokenHash (string) - SHA-256 hex digest of the plain token the caller presented
-//
-// Returns:
-//   Zero or one invitation record (latest version, append-only semantics).
-
-/// Returns the invitation whose previousTokenHash matches the argument. Used by the resolve handler
-/// to label rotated-out links as `superseded` rather than `invalid`. See memql#108.
-@unbounded("invitation by unique previousTokenHash -- a credential lookup bounded to a single row")
-query invitation invitationByPreviousTokenHash {
-  args {
-    tokenHash  string!
-  }
-  filter  kind=="guest" && previousTokenHash==args.tokenHash
   shape   invitationFull
 }
 
@@ -1688,54 +1595,6 @@ query auditEvent recentAuditEvents {
   shape   auditEventFull
 }
 
-// ---- queries/v1/identity/userActiveSpace.memql ----
-
-// userActiveSpace
-// ===============
-//
-// Returns a single user's current activePartitionId. Frontend uses this to
-// derive the per-participant isActive flag (a participant is active iff
-// User.activePartitionId == participant.partitionId for that participant's
-// userId).
-//
-// Phase 4 of the chat-architecture plan. Read-only counterpart of
-// setUserActiveSpace.
-//
-// Subscribing to graph.node.created.v1:identity:user is the
-// canonical way to react to a switch -- the user concept is global,
-// so the partition slot is _system; the rewriter handles that.
-
-/// Returns a user's current activePartitionId. Empty when the user is not focused on any space.
-/// memql#2800: deliberately cross-user, and acknowledged as such.
-///
-/// The frontend derives per-participant `isActive` from it (a participant is
-/// active iff User.activePartitionId == participant.partitionId), so resolving
-/// OTHER users is the entire purpose -- caller-scoping would break presence in
-/// every space. It is safe to leave open because the projection carries no
-/// PII: userActiveSpaceProjection is id + activePartitionId and nothing else.
-///
-/// The `when(args.userId)` guard was removed. userId is declared required, so
-/// the guard should be unreachable -- but it made "no argument" mean "no
-/// filter" rather than "no rows", i.e. an unfiltered dump of every user, on a
-/// query whose only predicate it was. That is the wrong failure direction to
-/// leave standing on the strength of a required-arg check elsewhere.
-///
-/// AUDIT 2026-08-04 (memql#2987): re-audited and KEPT @public. Re-verified
-/// that userActiveSpaceProjection still projects id + activePartitionId and
-/// nothing else -- the "shapes drift" risk that moved userByEmail to
-/// @serverOnly in memql#2881 has not materialised here. Cross-user resolution
-/// is load-bearing for presence, so this is the second kind of @public in this
-/// repo (documenting intent) rather than the first (acknowledging a flag).
-@public
-@unbounded("the user's active-space projection by id -- bounded to a single row")
-query user userActiveSpace {
-  args {
-    userId  string!
-  }
-  filter  row.id==args.userId && isActiveRecord
-  shape   userActiveSpaceProjection
-}
-
 // ---- queries/v1/identity/userByEmail.memql ----
 
 // userByEmail - Look up user by primary email
@@ -1913,36 +1772,6 @@ query user currentUser {
 query user userCount {
   filter  isActiveRecord
   count
-}
-
-// ---- queries/v1/identity/usersActiveInSpace.memql ----
-
-// usersActiveInSpace
-// ==================
-//
-// Returns the set of users whose activePartitionId pointer matches the
-// supplied partitionId -- i.e., humans CURRENTLY focused on the given
-// space (camera, mic, voice transport bound here per the activity
-// model).
-//
-// Phase 7 of the chat-architecture plan -- backs the voice-migration
-// trigger automation. Read by voiceMigrationOnSecondHuman to count
-// active humans in a space when a user's activePartitionId changes; the
-// 1-to-2 transition fires the migration canvas cards.
-//
-// Note: a user with an empty activePartitionId is "in the app but not on
-// any space" -- they don't appear here. The query result count IS the
-// active-human count for the space.
-
-/// Returns users whose activePartitionId == arg(partitionId). Active-human roster per the activity
-/// model (Phase 4).
-@unbounded("users whose activePartitionId matches a space -- bounded by space membership, presence resolution consumed whole")
-query user usersActiveInSpace {
-  args {
-    partitionId  string!
-  }
-  filter  when(args.partitionId) { activePartitionId==args.partitionId }
-  shape   userActiveSpaceProjection
 }
 
 // ---- queries/v1/identity/usersInDeletionCooldown.memql ----
@@ -2413,7 +2242,7 @@ query identity passkeysForSelf {
 // The set is `magic_link` OR `passkey`, and the omissions are the
 // design:
 //
-//   - api_key (PAT), worker_token, node_token, voice_agent_token,
+//   - api_key (PAT), worker_token, node_token,
 //     account_token, badge: none of them is a SIGN-IN. A PAT is the
 //     sharpest case -- it authenticates as the user against the API,
 //     but /login verifies a JWT and an `mql_pat_` bearer is not one, so
@@ -2518,7 +2347,7 @@ query identity signInIdentitiesForUser {
 // the same (nodeType, nodeId)).
 //
 // Arguments:
-//   nodeType (string, required) - bff / voice / cognition / agent / planner / workbench
+//   nodeType (string, required) - bff / agent / planner / workbench
 //   nodeId   (string, required) - v1:cluster:node.id the credential authenticates
 //
 // Returns:
@@ -2680,41 +2509,6 @@ query identity nodeTokenIdentityById {
     identityId  string!
   }
   filter  identityIsNodeToken && row.id==args.identityId
-  shape   identityFull
-}
-
-// ---- queries/v1/identity/voiceAgentTokenIdentityById.memql ----
-
-// voiceAgentTokenIdentityById
-// ===========================
-//
-// Backs the voice-agent revocation check on the VERIFY path
-// (memql#4111). A class="voice_agent" JWT carries the identity row's
-// id as its `sub`, so the interceptor can ask "is that row still
-// active?" on every stream open.
-//
-// Returns the row even when active=false -- that IS the answer the
-// caller needs. A missing row reads as not-revoked, matching the
-// node-class convention in component/node/node_token_revocation.go:
-// an operator-CLI mint that pre-dates row persistence must not be
-// locked out by a lookup that finds nothing.
-
-/// Lookup a voice_agent_token identity by row id, for the verify-path revocation check
-/// (memql#4111). Returns the row regardless of `active`, because `active=false` is the answer
-/// the caller is asking for -- filtering it out would make a revoked credential indistinguishable
-/// from an unknown one, and those two states must produce OPPOSITE decisions.
-///
-/// Why actor.userId scoping is not the fix: same as its node_token sibling -- a voice_agent_token
-/// row's `userId` is the synthetic minting user rather than any reader, and the caller here is an
-/// auth interceptor running BEFORE any actor is resolved. There is no caller to scope to, which is
-/// what makes origin the only boundary available.
-@serverOnly
-@unbounded("voice-agent identity by row id -- bounded to a single row")
-query identity voiceAgentTokenIdentityById {
-  args {
-    identityId  string!
-  }
-  filter  identityIsVoiceAgentToken && row.id==args.identityId
   shape   identityFull
 }
 

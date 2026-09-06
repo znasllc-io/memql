@@ -40,7 +40,7 @@ func TestMountRuntimeDomainsFromEnv_MountsProductDomains(t *testing.T) {
 	writeDomain(t, root, "myprod", "// runtime product domain\n")
 	// A directory that collides with a core embedded domain must be skipped
 	// (the embedded tree owns it; RegisterTree would reject the collision).
-	writeDomain(t, root, "cognition", "// should be ignored\n")
+	writeDomain(t, root, "library", "// should be ignored\n")
 	// Soft-disabled/hidden dirs are skipped.
 	writeDomain(t, root, "_disabled", "// skipped\n")
 
@@ -57,8 +57,8 @@ func TestMountRuntimeDomainsFromEnv_MountsProductDomains(t *testing.T) {
 		t.Fatal("Tree() should expose the runtime-mounted myprod/concepts.memql")
 	}
 	// The core collision must NOT have been shadowed by the disk copy.
-	if got := readTreeFile(t, "cognition/concepts.memql"); wantContains(got, "should be ignored") {
-		t.Fatal("core domain 'cognition' must be owned by the embedded tree, not the disk override")
+	if got := readTreeFile(t, "library/concepts.memql"); wantContains(got, "should be ignored") {
+		t.Fatal("core domain 'library' must be owned by the embedded tree, not the disk override")
 	}
 }
 

@@ -39,9 +39,9 @@ Right -- one bare insert. The target concept comes from the
 `mutate <Concept> <name>` signature; restating it is retired.
 
 ```memql
-use cognition.concepts.{ space }
+use library.concepts.{ folder }
 
-mutate space createSpace {
+mutate folder createFolder {
   args { name string @required }
   insert {
     name: args.name
@@ -55,7 +55,7 @@ mutate space createSpace {
 Wrong -- two writes in one body. The parser rejects it.
 
 ```memql retired
-mutate space createSpaceAndGrantOwner {
+mutate folder createFolderAndGrantOwner {
   args { name string @required }
   insert { ... }                  // ERROR -- only one write allowed
   insert { ... }
@@ -119,8 +119,7 @@ The product calls `createPartition` once. The automation
 takes care of the second write. The user gets one product action;
 the engine gets two atomic rows with clean audit trails.
 
-**Cross-references**: see the cognition + partition / workspace
-creation flow in `dsl/cognition/automations.memql` and
+**Cross-references**: see `dsl/library/automations.memql` and
 `dsl/identity/automations.memql` for live examples of this pattern.
 
 **Sense diagnostics for these gotchas** land at edit time in Cockpit
@@ -154,19 +153,19 @@ function "<name>" references unknown function "sort"
 ```
 
 If you put a directive inside a function body, the entire engine
-refuses to start. The primary node crashes. Cognition / agent / planner
-can't attach. Whole cluster bricked.
+refuses to start. The primary node crashes. Agent / planner / workbench
+/ mcp / edge can't attach. Whole cluster bricked.
 
 **Wrong:**
 
 ```memql retired
-use cognition.queries.{ activeSpaceIds }
+use library.queries.{ activeFolderIds }
 
 // `sort` is not a registered function -- engine init fails.
-logic listSpacesSorted {
+logic listFoldersSorted {
   args { event object @required }
   body {
-    return sort(activeSpaceIds({}), "name", "asc")
+    return sort(activeFolderIds({}), "name", "asc")
   }
 }
 ```
@@ -174,8 +173,8 @@ logic listSpacesSorted {
 **Right -- struct queries have dedicated clauses.** Sorting,
 windowing, and latest-per-id snapshots are `sort` / `paginate` /
 `asOf` clauses on the struct query itself, not directive calls
-(live examples: `spaceUtterances` in
-`dsl/cognition/queries.memql`, `staleClusterNodes` in
+(live examples: `libraryArtifacts` in
+`dsl/library/queries.memql`, `staleClusterNodes` in
 `dsl/cluster/queries.memql`):
 
 **`asOf` takes a caller-chosen instant, not only a literal** (memql#2992).
@@ -230,17 +229,17 @@ Note the value is validated as RFC3339 at call time, so a malformed
 instant is an error rather than a silent fall back to `latest`.
 
 ```memql
-use cognition.concepts.{ context }
+use library.concepts.{ artifact }
 
-/// Latest space-context row for a space.
-query context latestSpaceContextForSpace {
+/// Latest artifact row filed under a folder.
+query artifact latestArtifactForFolder {
   args {
-    spaceId  string  @required
+    folderId  string  @required
   }
-  filter  spaceId == args.spaceId
+  filter  folderId == args.folderId
   sort    "row.createdAt", "desc"
   paginate 1
-  shape   spaceContextFull
+  shape   artifactFull
 }
 ```
 
@@ -270,7 +269,7 @@ accepted call form is **named arguments** --
 
 ```memql fragment
 createPartition(name: "test", partitionType: "standard")
-spaceParticipants(spaceId: "space-123", participantType: "si")
+folderArtifacts(folderId: "folder-123", kind: "document")
 ```
 
 There is nothing left to have a bare-vs-quoted split, because a named-arg
@@ -925,9 +924,9 @@ automation "test": dependency cycle among steps [a b]
 ## 14. Function naming: the construct name says what it does
 
 **Rule.** A construct is named for what it does, not for its kind --
-the declaration keyword already carries that: `activeHumanParticipants`,
-`addAgentToSpace`, `isHumanParticipant`, `isActiveRecord`,
-`bootstrapSession`. No `query*` / `mutation*` / `logic*` / `spec*` /
+the declaration keyword already carries that: `libraryArtifacts`,
+`moveArtifactToFolder`, `isArchivedArtifact`, `isActiveRecord`,
+`indexArtifact`. No `query*` / `mutation*` / `logic*` / `spec*` /
 `trait*` / `seed*` prefix -- settled in #2853, which measured 0 of 1091
 shipped declarations carrying one. (See naming-conventions.md.)
 Constructs live in one consolidated file per kind per namespace
@@ -935,11 +934,11 @@ Constructs live in one consolidated file per kind per namespace
 carries an individual construct's name.
 
 ```
-dsl/cognition/queries.memql     query space activeSpaces { ... }
-dsl/cognition/mutations.memql   mutate space createSpace { ... }
+dsl/library/queries.memql       query folder activeFolders { ... }
+dsl/library/mutations.memql     mutate folder createFolder { ... }
 dsl/common/specs.memql          spec actorEnvelope requiresAdmin { ... }
 dsl/common/traits.memql         trait isActiveRecord { ... }
-dsl/cognition/logic.memql       logic bootstrapSession { ... }
+dsl/library/logic.memql         logic indexArtifact { ... }
 ```
 
 Note the declaration keyword on the mutation line: it is `mutate`.
@@ -966,17 +965,17 @@ the dependency-tree validator (C3/#2043) fails a reference that does not
 exist at load time.
 
 An automation step calls a logic construct by the same name the
-file-top import names -- `step decide { logic bootstrapSession ( event )
-}` resolves through `use cognition.logic.{ bootstrapSession }` (see
-`dsl/cognition/automations.memql`). The corpus uses the paren call form
+file-top import names -- `step decide { logic indexArtifact ( event )
+}` resolves through `use library.logic.{ indexArtifact }` (see
+`dsl/library/automations.memql`). The corpus uses the paren call form
 throughout.
 
 Automations are event-triggered, not called by name, so they use
-verb-first names with no prefix (`autoJoinSI`, `bootstrapSession`,
-`purgeExpiredArchivedSpaces`). Builtins, tools, prompts, providers,
-and shapes are out of scope for this rule and use their own
-conventions (shapes are conventionally `<concept><Projection>`, e.g.
-`participantFull`, `spaceCard`).
+verb-first names with no prefix (`indexFileOnCreate`,
+`archiveFileOnArtifactArchive`, `releaseWorkspaceOnPlanTerminal`).
+Builtins, tools, prompts, providers, and shapes are out of scope for
+this rule and use their own conventions (shapes are conventionally
+`<concept><Projection>`, e.g. `artifactFull`, `folderCard`).
 
 ---
 
@@ -1025,13 +1024,13 @@ values, single mirrors) stay longhand deliberately.
 // This block stays longhand deliberately: the multi-line computed id
 // is exactly the shape the codemod refuses to reflow.
 insert {
-  id: concat("si-", hash(concat(
-    canonicalId(args.agentId, agent), ":",
-    canonicalId(args.spaceId, space)
+  id: concat("filed-", hash(concat(
+    canonicalId(args.artifactId, artifact), ":",
+    canonicalId(args.folderId, folder)
   )))
-  args.spaceId
-  args.agentId
-  participantType: "si"
+  args.folderId
+  args.artifactId
+  kind: "document"
   args.displayName
   status: "active"
 }
@@ -1135,24 +1134,24 @@ to it (loud refusal on a violated contract) and step bodies read the
 fields BARE -- `event.payload.<field>` reads are retired and rejected
 with a migration hint, and the legacy `name({ ... })` object-literal call
 wrapper is rejected at parse time. A bare simple identifier in a
-construct-call arg position is PUNNED (`f(spaceId)` ==
-`f(spaceId: spaceId)`, G3 #2365); step results read via
+construct-call arg position is PUNNED (`f(folderId)` ==
+`f(folderId: folderId)`, G3 #2365); step results read via
 `steps.<name>.result`.
 
 ```memql
-automation sendGreeting {
+automation indexNewDocument {
   args {
-    spaceId          string @required
-    siParticipantId  string @required
+    folderId     string @required
+    documentRef  string @required
   }
   step decide {
-    logic composeGreeting ( spaceId )              // punned
+    logic composeTitle ( folderId )                // punned
   }
-  step send {
-    mutation sendTextUtterance (
-      spaceId,                                     // punned bare field
-      participantId: siParticipantId,              // renamed key
-      text:          steps.decide.result           // step-result read
+  step index {
+    mutation createArtifact (
+      folderId,                                    // punned bare field
+      sourceConceptRef: documentRef,               // renamed key
+      title:            steps.decide.result        // step-result read
     )
   }
 }
@@ -1177,8 +1176,8 @@ automation sendGreeting {
 ## 18. Object-literal keys: unquoted identifiers only
 
 **Rule.** Inside MemQL `{...}` object literals, keys MUST be unquoted
-identifiers (`name:`, `spaceId:`, `createdAt:`). Quoted-string keys
-(`"name":`, `"spaceId":`) were historically allowed by the parsers
+identifiers (`name:`, `folderId:`, `createdAt:`). Quoted-string keys
+(`"name":`, `"folderId":`) were historically allowed by the parsers
 for JSON interop but are not idiomatic MemQL and must not appear in
 new code.
 
@@ -1186,7 +1185,7 @@ new code.
 // Correct -- mutation write block
 insert {
   name: args.name
-  spaceId: args.spaceId
+  folderId: args.folderId
   active: true
   metadata: { source: "import" }   // unquoted key in a nested object VALUE
 }
@@ -1300,16 +1299,17 @@ Practical consequences for mutation authors:
 
 This bit hard in 2026-04-29: a partition concept added a `createdBy`
 payload field, which made the loader refuse the entire concept set.
-Cognition / agent / planner all dropped off the mesh because the
-primary couldn't serve queries. The fix was a one-line concept-schema
-delete plus dropping the matching `createPartition` arg.
+The cognition node (a node type since removed), agent and planner all
+dropped off the mesh because the primary couldn't serve queries. The fix
+was a one-line concept-schema delete plus dropping the matching
+`createPartition` arg.
 
 ---
 
 ## 20. Foreign-key id derivation: normalise before hashing
 
 When a mutation derives a deterministic id by hashing foreign-key
-args (the participant id pattern: `id = hash(spaceId + ":" + userId)`),
+args (the filing id pattern: `id = hash(folderId + ":" + userId)`),
 the args MUST be normalised first, with `canonicalId(value, <concept>)`
 by default -- see below for when `shortId(value)` is the right choice
 instead, and what it does not give you.
@@ -1319,21 +1319,21 @@ reference under different shapes (`"user-abc"` vs
 produce DUPLICATE rows with distinct ids.
 
 ```memql retired
-// Wrong -- bare-vs-canonical input shape changes the participant id
+// Wrong -- bare-vs-canonical input shape changes the derived id
 insert {
-  id: hash(concat(args.spaceId, ":", args.userId))
+  id: hash(concat(args.folderId, ":", args.userId))
   ...
 }
 
 // Right -- canonicalId() collapses both forms to the same string, AND
 // each part is hashed before concatenation so the composite cannot
 // alias. The second argument is the imported concept short-name
-// (resolved against the file-top `use ...concepts.{ space, user }`
+// (resolved against the file-top `use ...concepts.{ folder, user }`
 // imports).
 insert {
   id: hash(concat(
-    hash(canonicalId(args.spaceId, space)),
-    hash(canonicalId(args.userId,  user))
+    hash(canonicalId(args.folderId, folder)),
+    hash(canonicalId(args.userId,   user))
   ))
   ...
 }
@@ -1348,7 +1348,7 @@ insert {
 ```
 
 (Don't prefix the hash with the concept name -- `id:
-concat("participant-", hash(...))` duplicates information already in
+concat("folder-", hash(...))` duplicates information already in
 the canonical id position, and `test/dslconformance/conformance_test.go`'s
 `TestNoShortIdConceptPrefix` rejects known concept-name prefixes
 outright. The shortId is the bare hash / uuid / slug.)
@@ -1362,7 +1362,7 @@ short-name (the stringly-typed `"v1:ns:name"` literal is retired):
   `canonicalizeIdValue`)
 - already-canonical, matching concept → returns as-is
 - canonical for a different concept → errors loudly (catches type-tag
-  typos like passing `userId` to `canonicalId(..., space)`)
+  typos like passing `userId` to `canonicalId(..., folder)`)
 - an unimported / unknown concept name → errors at load
 - empty string → returns empty (optional foreign keys stay null)
 
@@ -1441,12 +1441,14 @@ be met). Use it when `canonicalId()` will not resolve. Otherwise prefer
   colon- and whitespace-free, so `shortId()` is exact for those and for
   the canonical forms built around them.
 
-Compliant mutations (audit done 2026-05-06), in
-`dsl/cognition/mutations.memql`:
+Compliant mutations (audit done 2026-05-06), in the cognition mutations
+file, since removed with that tree:
 `joinSpaceAsHuman`, `joinSpaceAsSI`, `createGreetingUtterance`,
 `createSessionForParticipant`, `sendTextUtterance`,
 `sendSpeechUtterance`, `sendActionUtterance`,
-`sendRealtimeTranscriptUtterance`.
+`sendRealtimeTranscriptUtterance`. The roster is kept because it is
+what the audit measured; do not read it as a list of constructs to go
+and look at.
 
 Compliant via `shortId()` (memql#2925), in
 `dsl/deployment/mutations.memql`: `createDeploymentNodeSpec`,
@@ -1525,7 +1527,8 @@ exist, which is a question about the deployment rather than the code.
 them is the useful rule.** Reach for the constraint when the trailing
 part is drawn from a **known set** — a `nodeType`, an enum — where
 forbidding a character costs the caller nothing. Reach for construction
-when it is not:
+when it is not -- the derivation memql#3009 landed, in a construct since
+removed with the cognition tree:
 
 ```memql fragment
 id: concat("utt-", hash(concat(
@@ -1540,8 +1543,9 @@ id: concat("utt-", hash(concat(
 and the concatenation has exactly one decomposition. No separator, no
 constraint on what a caller may send, injective by construction.
 
-`sendActionUtterance` needed it because the constraint was **both
-unavailable and wrong**. Unavailable: `action` is declared `object!`, so
+`sendActionUtterance` (in the cognition mutations file, since removed
+with that tree) needed it because the constraint was **both unavailable
+and wrong**. Unavailable: `action` was declared `object!`, so
 `type` and `idempotencyKey` are nested in an unstructured object and
 `validateArgsField` only matches `patternRegex` on *declared* fields —
 there is nowhere to hang the annotation and nothing would enforce it.
@@ -1554,9 +1558,10 @@ separator-bearing. `hash(concat(args.nodeType, ":", now))` aliased with
 no caller involvement at all, because an RFC3339 timestamp always
 carries colons.
 
-**Where the tree stands.** Every composite id derivation in
-`dsl/cognition/` and `dsl/cluster/` uses construction (memql#3009); the
-two in `dsl/deployment/` use the constraint (memql#2980). Both are
+**Where the tree stands.** The memql#3009 conversion put every composite
+id derivation in `dsl/cognition/` and `dsl/cluster/` on construction; the
+cognition half went with that tree, so `dsl/cluster/` is what survives of
+it. The two in `dsl/deployment/` use the constraint (memql#2980). Both are
 gated — `TestConvertedIdDerivationsKeepPerPartHashing` and
 `TestCompositeHashedIdTrailingPartRejectsTheSeparator` — and **both
 gates check by path, not by shape**. A new file adopting the separator
@@ -1587,24 +1592,28 @@ live examples of the hazard rather than of the fix.** `grep -rn
 "hash(concat(" dsl/` finds around a dozen. Several are safe only
 incidentally — the trailing part is a `canonicalId()` result whose fixed
 `v1:<ns>:<concept>:` prefix happens to make the split recoverable — and
-at least one is not safe: `sendActionUtterance`
-(`dsl/cognition/mutations.memql`) hashes `args.action.type` and
-`args.action.idempotencyKey`, which live inside an untyped `object!` and
-therefore **cannot** carry `@pattern` at all, so `("chat", "k:1")` and
-`("chat:k", "1")` derive one id from client-supplied input. Tracked in
-memql#3009; do not read this section as a statement that the tree
-complies with it.
+the one that was measurably not safe was `sendActionUtterance` (in the
+cognition mutations file, since removed with that tree): it hashed
+`args.action.type` and `args.action.idempotencyKey`, which lived inside
+an untyped `object!` and therefore **could not** carry `@pattern` at
+all, so `("chat", "k:1")` and `("chat:k", "1")` derived one id from
+client-supplied input. Tracked in memql#3009; do not read this section
+as a statement that the tree complies with it -- that construct is gone,
+the missing detector is not, and the next one to be written this way
+will be found the same way.
 
 A shape detector — find every `id: hash(concat(...))` and require its
 trailing parts to be constrained — is the gate that would make the rule
 true tree-wide. It does not exist yet.
 
 The historical `concat("ga-", hash(actor))` pattern in the auto-join
-path is gone entirely: the logic (`dsl/cognition/logic.memql`) now
-resolves the assistant via `assistantAgentForUser` + the space
-row's `ownerUserId` (memql#273, locked in by
+path was gone before the tree that held it was: the cognition logic file
+resolved the assistant via `assistantAgentForUser` + the space row's
+`ownerUserId` instead (memql#273, locked in at the time by
 `TestAutoJoinSILocksInOwnerUserIdResolution`), and shortId prefixes
-like `ga-` are banned by `TestNoShortIdConceptPrefix`.
+like `ga-` are banned tree-wide by `TestNoShortIdConceptPrefix`. That
+last ban is the part still standing; the auto-join path and its test
+went with the cognition tree.
 
 ---
 
@@ -1644,14 +1653,14 @@ schema and do retain it. Same de-overload as `@default` on an args
 field, which is likewise rejected (#991).
 
 ```memql retired
-query space activeSpaces {
+query folder activeFolders {
   args {
-    /// The owner whose spaces to list.
+    /// The owner whose folders to list.
     ownerId string @required                        // correct
     limit   number @description("page size")        // REJECTED at load
   }
   filter  ownerId == args.ownerId && isActiveRecord
-  shape   spaceFull
+  shape   folderFull
 }
 ```
 
@@ -1663,36 +1672,36 @@ which strips the annotation; re-add the prose as a `///` comment.
 **Right (struct form — the canonical author surface):**
 
 ```memql
-use cognition.concepts.{ utterance, space, participant }
+use library.concepts.{ artifact, folder }
 use common.traits.{ isActiveRecord }
 
-/// Insert a chat utterance
-mutate utterance sendUtterance {
+/// Insert a Library artifact
+mutate artifact recordArtifact {
   args {
-    spaceId  string  @required
-    content  string  @required
+    folderId  string  @required
+    title     string  @required
   }
   insert {
-    space:     args.spaceId
-    content:   args.content
+    folderId:  args.folderId
+    title:     args.title
     createdAt: now
     createdBy: actor.userId
   }
 }
 
-/// Active spaces visible to caller
-query space activeSpaces {
+/// Active folders visible to caller
+query folder activeFolders {
   args {
     ownerId  string  @required
   }
   filter  ownerId == args.ownerId && isActiveRecord
-  shape   spaceFull
+  shape   folderFull
 }
 
 // Spec — struct form. Binds one shape XOR concept in the signature;
 // the body returns a boolean over bare field names. No args.
-spec participant isGuestParticipant {
-  return isGuest == true
+spec artifact isArchivedArtifact {
+  return archived == true
 }
 ```
 
@@ -1718,7 +1727,7 @@ func (Spec) example(ctx any) bool {
 }
 
 // args.X is the only way to reach caller-passed fields.
-mutate space example {
+mutate folder example {
   args { x string @required }
   insert {
     field: ctx.x   // ctx is not in scope inside struct-form bodies
@@ -1741,9 +1750,9 @@ write `ctx.output = ...`.
 
 **Why `args.X` is required (not bare).** In a mutation's `insert`
 block, the keys ARE bare field names of the row's payload. Saying
-`spaceId: args.spaceId` keeps the LHS (concept payload key) and RHS
+`folderId: args.folderId` keeps the LHS (concept payload key) and RHS
 (caller arg) visually distinct. The same precedent applies to query
-filters: `spaceId == args.spaceId` reads correctly without
+filters: `folderId == args.folderId` reads correctly without
 needing the reader to guess which side is concept-field vs caller-arg.
 
 **For automations:** the triggering event payload is bound as
@@ -1968,17 +1977,17 @@ A query is list-returning when its `shape` projects a row set
 
 ```memql
 // Single-row read — exempt (row.id == equality).
-query space spaceMeta {
-  args { spaceId string @required }
-  filter  row.id==args.spaceId
-  shape   spaceFull
+query folder folderMeta {
+  args { folderId string @required }
+  filter  row.id==args.folderId
+  shape   folderFull
 }
 
 // Bounded list — compliant (paginate window).
-query space firstTenSpaces {
+query folder firstTenFolders {
   filter  active==true
   paginate 10
-  shape   spaceFull
+  shape   folderFull
 }
 
 // Legitimate full-set read — compliant, marked + auditable.
@@ -2028,7 +2037,7 @@ the rule. Two consumers derive from it:
   `@unbounded` mark carries a non-empty reason.
 
 **Why it bites you.** Without a bound, a query against a growing concept
-(participants, events, plans) starts cheap and silently degrades into a
+(artifacts, events, plans) starts cheap and silently degrades into a
 full-table scan as the data grows — no error, just creeping latency and
 memory. The runtime cap bounds the blast radius; the authoring rule makes
 the author think about the bound up front.
@@ -2060,7 +2069,7 @@ query agentRole activeAgentRoles {
 
 **When to reach for it.** Read-heavy queries whose underlying rows change
 rarely: bounded catalogs / registries (role / skill catalogs, router
-budgets) get long TTLs; hot append-only streams (the per-space utterance
+budgets) get long TTLs; hot append-only streams (the per-folder artifact
 list) get short ones and lean on invalidation.
 
 **When to reach for `@nocache`.** Rarely, and never on a hunch. Because
@@ -2103,8 +2112,9 @@ memql#1970)** and pinned as gone by
 > through a proxy -- it listed the topics the retired rules forwarded and
 > required all of them to be dark -- which was sound only while nothing
 > else wanted them. memql#4542 added browser-reach rules for `v1:agents:*`
-> and for cognition deletes, so several of those topics forward again for
-> a reason that has nothing to do with caching. The invariant is unchanged;
+> and for cognition deletes -- the cognition half went with that tree, the
+> `v1:agents:*` half did not -- so several of those topics forward again
+> for a reason that has nothing to do with caching. The invariant is unchanged;
 > `v1:router:budget` is now the witness, being the one concept in the
 > retired set that no surface subscribes to. **A forward rule for a
 > concept is no longer evidence that somebody is caching it** -- do not
@@ -2510,11 +2520,14 @@ data validation failed: ... additionalProperties 'phase',
   'agentTurnCounts', 'threadHolder', 'timeSinceLastHuman' not allowed
 ```
 
-`cognitionPrediction` declared two fields while `component/polyphon`
-passed nine, and the caller swallowed the error into its pattern-based
-fallback -- so the entire predictive-cognition LLM path was dead, and
-looked like normal operation the whole time. The same class had already
-been fixed once by hand (the `directive` field on `cognitionReply`).
+The prompt this was found on, `cognitionPrediction`, declared two fields
+while `component/polyphon` passed nine, and the caller swallowed the
+error into its pattern-based fallback -- so the entire
+predictive-cognition LLM path was dead, and looked like normal operation
+the whole time. The same class had already been fixed once by hand (the
+`directive` field on `cognitionReply`). Both prompts and the caller have
+since been removed with the cognition tree; the check they motivated
+runs on every prompt in the tree today.
 
 The check is one-way: template reads must be declared, but a declared
 field the template never reads is inert and allowed. A prompt declaring
@@ -2704,8 +2717,9 @@ a bare filter conjunct — with comments **and string literals** stripped:
 
 The tree was already 113/114 compliant *by habit*: authors have been writing
 the imports the engine never asked for. The single holdout was
-`builtin cognitionTrackPresence(...)` in `dsl/cognition/automations.memql`, a
-file that carried no `use` block at all.
+`builtin cognitionTrackPresence(...)` in the cognition automations file
+(since removed with that tree), which carried no `use` block at all.
+The measurement is what it was; the file it names is gone.
 
 > **A naive count says 345.** Word-boundary matching over raw source reports
 > `builtin agent`, `builtin error`, `builtin tools`, `builtin help` and
@@ -2763,9 +2777,10 @@ silent last-wins overwrite it always was, and is still refused.
 
 The cross-namespace-import gate reads the MERGED tree at boot (memql#4051):
 embedded core plus every runtime domain a product bundle mounts at
-`MEMQL_DSL_PATH`. One reference shape in the core tree is therefore declared
-elsewhere by construction: `dsl/cognition/logic.memql` calls
-`mutation mutationCreateCanvasState(...)`, which the engine documents as
+`MEMQL_DSL_PATH`. A reference in the core tree can therefore be declared
+elsewhere by construction, and the case that found it was the cognition logic
+file (since removed with that tree) calling
+`mutation mutationCreateCanvasState(...)`, which the engine documented as
 "supplied by a product bundle at runtime". The `use` the gate would ask for
 cannot be written -- the core file does not know the product namespace exists
 -- and a violation lands on the load report as a skip, which strict boot

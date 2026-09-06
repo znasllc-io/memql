@@ -12,17 +12,20 @@ owner: znas
 **Status:** Phases 0-2 shipped -- the vector-classification cache primitive
 (S1.3, Epic 5 #1973) and the cognition affirmation-guard migration (Phase 2:
 `looksLikeCorrection`/`previousAgentAskedQuestion`/`userFollowUpCarriesAction`/
-`agentTextInvitesReply` are gone from `integrations/cognition/cognition_handler.go`,
-replaced by `integrations/cognition/message_classifier.go`'s
-`MessageClassification`). Phase 3 (codebase-wide sweep) and Phase 4 (tune)
-remain open.
+`agentTextInvitesReply` were removed from the cognition handler and replaced by
+a structured `MessageClassification`). The cognition pipeline itself has since
+been removed from the platform, so every `integrations/cognition` path named
+below is a citation of the tree AT THE TIME, not somewhere to go and read.
+Phase 3 (codebase-wide sweep) and Phase 4 (tune) remain open, and the argument
+they rest on is unchanged: the heuristics-versus-classification lesson is about
+how decisions are made, not about the subsystem that happened to teach it.
 **Priority:** High — current state is a slow-growing bandaid pile that misfires in user-visible ways.
 **Owner:** TBD.
-**Related:** cognition (affirmation guard, intent classification, dispatch routing); knowledge (domain inference); planner (kind discrimination); any future decision logic.
+**Related:** knowledge (domain inference); planner (kind discrimination); any future decision logic.
 
 ## What's broken today
 
-The cognition pipeline (and a handful of other places) makes runtime decisions through hardcoded string-match heuristics. Concrete examples currently in `integrations/cognition/cognition_handler.go`:
+The cognition pipeline (and a handful of other places) made runtime decisions through hardcoded string-match heuristics. The worked examples below are from `integrations/cognition/cognition_handler.go`, the file the pattern was first measured in:
 
 ```go
 func looksLikeCorrection(text string) bool {
@@ -166,13 +169,11 @@ Migrate decision-making from hardcoded heuristics to LLM-driven structured outpu
 
 **3.1 Inventory.** Grep + read for hardcoded decision logic. Build a list with: location, what it decides, current logic complexity, replacement priority. Likely candidates from a quick scan:
 
-- *cognition*: intent classification fallbacks, `endsWithQuestionMark` and friends, `looksLikeFarewell`-style helpers.
 - *knowledge*: domain inference (which knowledge domains apply to a query), validation status heuristics.
 - *planner*: plan-kind discrimination (what kind of work is this?), task-kind selection within a plan.
-- *router/conductor*: any `if intent == "x" { ... } else if intent == "y" { ... }` chain.
 
 **3.2 Prioritize.**
-- High-priority: decisions that misfire and cause UX bugs (the cognition guard pattern from Phase 2 — likely 3-5 sites in cognition alone).
+- High-priority: decisions that misfire and cause UX bugs.
 - Medium-priority: decisions that work today but are brittle (knowledge domain inference, planner kind discrimination).
 - Low-priority / leave-alone: truly mechanical decisions (slash command parsing, structural shape checks, exact-string operator commands). These don't benefit from LLM reasoning.
 
@@ -220,7 +221,6 @@ Migrate decision-making from hardcoded heuristics to LLM-driven structured outpu
 - New product features. This is infrastructure work; it should be invisible to users except as fewer bugs and more consistent latency.
 - Frontend changes. Almost all of this lives in MemQL.
 - Migration of user-facing strings. Those are i18n, not decisions.
-- The conductor itself. The conductor already does LLM-driven decisions with structured outputs; we don't re-architect it. We just stop letting hardcoded pre-stages override its signal.
 
 ## Sequencing notes
 

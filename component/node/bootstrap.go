@@ -65,16 +65,12 @@ type NodeBootstrap interface {
 // BootstrapFor returns the appropriate NodeBootstrap for the given node type.
 func BootstrapFor(nodeType NodeType) NodeBootstrap {
 	switch nodeType {
-	case NodeTypeCognition:
-		return &CognitionBootstrap{}
 	case NodeTypeAgent:
 		return &AgentBootstrap{}
 	case NodeTypePlanner:
 		return &PlannerBootstrap{}
 	case NodeTypeBFF:
 		return &BFFBootstrap{}
-	case NodeTypeVoice:
-		return &VoiceBootstrap{}
 	case NodeTypeWorkbench:
 		return &WorkbenchBootstrap{}
 	case NodeTypeMCP:

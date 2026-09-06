@@ -305,7 +305,7 @@ func TestPointApplicationRefusesTheGoArrayRenderingRatherThanMisSplittingIt(t *t
 
 // allAppNodes is DEFAULT_APP_NODES: what a wizard install writes an override
 // for, and what a bare `make dev` rebuilds.
-var allAppNodes = []string{"identity", "bff", "voice", "mcp", "cognition", "agent", "planner", "workbench", "edge"}
+var allAppNodes = []string{"identity", "bff", "mcp", "agent", "planner", "workbench", "edge"}
 
 // releasedOverrides is the override list `k3d.up --image-registry/--image-tag`
 // leaves on a wizard-installed Application: one per node type, plus the operand.

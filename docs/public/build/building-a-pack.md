@@ -218,7 +218,7 @@ examples/referencepack/
     ├── concepts.memql            one concept (greeting, owned-tier ownerUserId)
     ├── builtins.memql            one builtin backed by @executor("integration.referencepack.composeGreeting")
     ├── tools.memql               one tool surfacing the builtin to the agent tool loop
-    └── automations.memql         one automation hooking the CORE v1:cognition:space node.created event
+    └── automations.memql         one automation hooking the CORE v1:notes:note node.created event
 ```
 
 **`dsl/concepts.memql`** -- a single `greeting` concept. Its id assembles from
@@ -240,8 +240,8 @@ builtin by name, so an agent that calls the tool ultimately runs the pack's Go
 handler. This is how a pack surfaces a capability into an agent's tool loop.
 
 **`dsl/automations.memql`** -- a single automation that **hooks a core service
-event**: `@trigger(event="node.created", concept="v1:cognition:space", ...)`.
-When the core engine creates a `space` row, this pack-owned automation fires --
+event**: `@trigger(event="node.created", concept="v1:notes:note", ...)`.
+When the core engine creates a `note` row, this pack-owned automation fires --
 the core has no knowledge of the pack. Its step calls the pack's own builtin via
 a kind-prefixed call (`builtin referencePackComposeGreeting ( userName: ownerUserId )` -- the owner bound via the automation's typed `args { }` contract, G5 #2367),
 so it also exercises the pack's Go capability. The automation pulls the builtin

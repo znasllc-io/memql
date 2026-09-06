@@ -5,7 +5,7 @@
 #
 # `go-checks` ran `go test ./...` over all 182 packages; `db-tests` then re-ran
 # six trees carrying 543+ test files (component/memql 342, component/automations
-# 100, component/grpc 42, integrations/planner 45, integrations/cognition 14,
+# 100, component/grpc 42, integrations/planner 45,
 # examples/referencepack). Both jobs therefore compiled and executed those files
 # on every PR. In go-checks the DB-gated CASES skip (no MEMQL_DATABASE_DSN), but
 # the packages still compile and their non-DB tests still run.
@@ -136,7 +136,6 @@ readonly DB_GATED_TREES=(
 	"component/logstore"
 	"component/packages"
 	"component/sitetraffic"
-	"integrations/cognition"
 	"integrations/embedding"
 	"integrations/planner"
 	"integrations/shopify"
@@ -283,7 +282,6 @@ readonly KNOWN_GO_MOD_DIRS=(
 	"component/observe"
 	"component/outbound"
 	"component/planner"
-	"component/polyphon"
 	"component/provenance"
 	"component/router"
 	"component/safety"

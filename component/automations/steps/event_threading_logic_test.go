@@ -102,13 +102,6 @@ func TestEventContextThreadsIntoNestedSteps(t *testing.T) {
 		wantValues []string
 	}{
 		{
-			logic: "voiceMigrationOnSecondHuman",
-			event: map[string]any{"topic": "node.created", "kind": "node.created", "payload": map[string]any{
-				"id": "user-2", "activePartitionId": "space-xyz",
-			}},
-			wantValues: []string{"space-xyz"},
-		},
-		{
 			logic: "conflictDetection",
 			event: map[string]any{"topic": "node.created", "kind": "node.created", "payload": map[string]any{
 				"id": "rec-1", "partitionId": "space-1", "recordType": "contact",
@@ -116,17 +109,10 @@ func TestEventContextThreadsIntoNestedSteps(t *testing.T) {
 			}},
 			wantValues: []string{"space-1", "contact", "a@b.io"},
 		},
-		{
-			logic: "generateResponse",
-			event: map[string]any{"topic": "cognition.response.requested", "kind": "ai", "payload": map[string]any{
-				"utteranceId": "utt-1", "siParticipantId": "p-1", "partitionId": "space-1",
-				"agentId": "a-1", "promptTemplateId": "agentReply", "promptData": map[string]any{},
-			}},
-			wantValues: []string{"utt-1", "p-1"},
-		},
-		// (logicAutoJoinAI -- the node.created->ownerUserId event-threading
-		// fixture -- moved to the product pack in B2 (#2038) alongside the
-		// `space` concept; the pack's own load tests cover the moved logic.)
+		// (generateResponse -- the cognition.response.requested fixture --
+		// went with the cognition namespace in epic memql#4988. logicAutoJoinAI
+		// moved to the product pack in B2 (#2038) alongside the `space`
+		// concept; the pack's own load tests cover the moved logic.)
 		// (logicEnsureDailySpaceOnAuthSession -- the coalesce-in-step-body
 		// event-threading fixture, memql#1065 -- moved to the product pack in
 		// #1976; the remaining core logics keep this coverage. The pack's

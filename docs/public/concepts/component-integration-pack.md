@@ -41,7 +41,7 @@ Reviews is a **pack** only (`examples/reviewspack`): a product feature with no e
 When the platform needs a collective term over these kinds — the portal's
 management surface, the engine's inventory reporting — the word is
 **module**. A module is any of: a component, an integration, a pack, or a
-node-type module (a deployment unit of the mesh, such as voice). It names
+node-type module (a deployment unit of the mesh, such as edge). It names
 the group, never a new kind of thing, and each kind keeps its own
 enablement mechanism. The full mental model, including what
 enabling/disabling means per kind, is [Modules](modules.md).

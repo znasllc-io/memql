@@ -64,7 +64,6 @@ async function completeHello(socket: FakeWebSocket): Promise<void> {
 
 async function dialWith(auth: {
   bearer?: string;
-  guestToken?: string;
   workerToken?: string;
   legacyUrlToken?: boolean;
 }): Promise<{
@@ -99,16 +98,6 @@ test("Connection.dial -- bearer travels as subprotocol, never on the URL (#2511)
   }
 });
 
-test("Connection.dial -- guest token travels as subprotocol, never on the URL (#2511)", async () => {
-  const { conn, socket, protocols } = await dialWith({ guestToken: "invite-abc" });
-  try {
-    assert.deepEqual(protocols, ["guest", "invite-abc"]);
-    assert.ok(!socket.url.includes("invite-abc"), `url leaks the guest token: ${socket.url}`);
-  } finally {
-    conn.close();
-  }
-});
-
 test("Connection.dial -- no auth offers no subprotocols", async () => {
   const { conn, protocols } = await dialWith({});
   try {
@@ -119,7 +108,7 @@ test("Connection.dial -- no auth offers no subprotocols", async () => {
 });
 
 // -----------------------------------------------------------------------
-// Legacy transport opt-in (#2524): bearer/guest fall back to the deprecated
+// Legacy transport opt-in (#2524): the bearer falls back to the deprecated
 // query-param carry and the subprotocol channel is NOT used.
 // -----------------------------------------------------------------------
 
@@ -134,20 +123,6 @@ test("Connection.dial -- legacyUrlToken stamps bearer on the URL, offers no subp
     // It rides the deprecated query param instead.
     const url = new URL(socket.url);
     assert.equal(url.searchParams.get("bearer_token"), "legacy-bearer-jwt");
-  } finally {
-    conn.close();
-  }
-});
-
-test("Connection.dial -- legacyUrlToken stamps guest token as guest_token (#2524)", async () => {
-  const { conn, socket, protocols } = await dialWith({
-    guestToken: "legacy-invite",
-    legacyUrlToken: true,
-  });
-  try {
-    assert.equal(protocols, undefined);
-    const url = new URL(socket.url);
-    assert.equal(url.searchParams.get("guest_token"), "legacy-invite");
   } finally {
     conn.close();
   }

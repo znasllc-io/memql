@@ -478,7 +478,6 @@ BackgroundLoop:
 		}
 
 		hadSuccess := false
-		wheelContested := false
 		for _, tc := range turnCalls {
 			args := parseToolArgs(tc.Arguments)
 			if args == nil {
@@ -529,9 +528,6 @@ BackgroundLoop:
 					"error", execErr)
 				content = se.JSON()
 				sink.ToolResult(tc.ID, "", execErr.Error())
-				if strings.Contains(execErr.Error(), wheelContestedMarker) {
-					wheelContested = true
-				}
 				// Repeated-identical-failure breaker (memql#1128): abort the
 				// turn rather than spin to maxIterations on a stuck call.
 				if trip, count := failBreaker.observeFailure(tc.Name, tc.Arguments, execErr); trip {
@@ -565,9 +561,6 @@ BackgroundLoop:
 				if tc.Name == "canvasPublish" {
 					r.promoteCanvasOutput(ctx, turnCtx, args)
 				}
-				if strings.Contains(result, wheelContestedMarker) {
-					wheelContested = true
-				}
 			}
 			messages = append(messages, common.ChatMessage{
 				Role:       "tool",
@@ -575,14 +568,6 @@ BackgroundLoop:
 				ToolCallId: tc.ID,
 				Content:    content,
 			})
-		}
-
-		if wheelContested {
-			// Background turns rarely drive the frontend's UI-control widget,
-			// but a worker/UI tool can still hit a contested wheel. Break
-			// rather than spin retrying a widget that has stopped obeying.
-			r.logger.Info("agent background: wheel contested -- breaking loop", "iter", iter)
-			break
 		}
 
 		if !hadSuccess {

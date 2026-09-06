@@ -36,48 +36,6 @@ func ActivateAuthoringBundleBuild(args ActivateAuthoringBundleArgs) string {
 	return b.String()
 }
 
-// AddAgentToSpace -- Add the caller's agent to a space's roster. forUserId is server-stamped; per-user-per-space 3-cap and agent-ownership are enforced by the engine guard.
-//
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["addAgentToSpace"] in generated_concepts.go).
-type AddAgentToSpaceArgs struct {
-	PartitionId         string
-	AgentId             string
-	DisplayName         string
-	CapabilityOverrides map[string]any
-}
-
-// AddAgentToSpace calls the engine mutation addAgentToSpace.
-func (qc *QueryClient) AddAgentToSpace(ctx context.Context, args AddAgentToSpaceArgs) (*Result, error) {
-	call := AddAgentToSpaceBuild(args)
-	return qc.executeNamed(ctx, "addAgentToSpace", call)
-}
-
-func AddAgentToSpaceBuild(args AddAgentToSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation addAgentToSpace(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 25 {
-		b.WriteString(", ")
-	}
-	b.WriteString("agentId: ")
-	b.WriteString(quoteMemQL(args.AgentId))
-	if b.Len() > 25 {
-		b.WriteString(", ")
-	}
-	b.WriteString("displayName: ")
-	b.WriteString(quoteMemQL(args.DisplayName))
-	if args.CapabilityOverrides != nil {
-		if b.Len() > 25 {
-			b.WriteString(", ")
-		}
-		b.WriteString("capabilityOverrides: ")
-		b.WriteString(renderMemQLValue(args.CapabilityOverrides))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // AddRecipient -- Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert.
 //
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.go).
@@ -1196,47 +1154,6 @@ func ClearWorkerConnectedNodeBuild(args ClearWorkerConnectedNodeArgs) string {
 	return b.String()
 }
 
-// CloseCall -- Close a call record on disconnect: stamp end time, duration, disposition, and cost estimate.
-//
-// Bound concept: v1:telephony:call (machine-readable: BoundConcepts["closeCall"] in generated_concepts.go).
-type CloseCallArgs struct {
-	Id              string
-	DurationSeconds int
-	// Enum: completed | no_answer | busy | failed | canceled
-	Disposition  string
-	CostEstimate float64
-}
-
-// CloseCall calls the engine mutation closeCall.
-func (qc *QueryClient) CloseCall(ctx context.Context, args CloseCallArgs) (*Result, error) {
-	call := CloseCallBuild(args)
-	return qc.executeNamed(ctx, "closeCall", call)
-}
-
-func CloseCallBuild(args CloseCallArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation closeCall(")
-	b.WriteString("id: ")
-	b.WriteString(quoteMemQL(args.Id))
-	if b.Len() > 19 {
-		b.WriteString(", ")
-	}
-	b.WriteString("durationSeconds: ")
-	b.WriteString(fmt.Sprintf("%v", args.DurationSeconds))
-	if b.Len() > 19 {
-		b.WriteString(", ")
-	}
-	b.WriteString("disposition: ")
-	b.WriteString(quoteMemQL(args.Disposition))
-	if b.Len() > 19 {
-		b.WriteString(", ")
-	}
-	b.WriteString("costEstimate: ")
-	b.WriteString(renderMemQLValue(args.CostEstimate))
-	b.WriteString(")")
-	return b.String()
-}
-
 // CompleteTodo -- Mark a to-do complete (or re-open it) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so the operation re-enforces ownership and can never transfer the row. The caller threads the full updated payload (with done flipped); the complete tool builds it from the current row + done=true.
 //
 // Bound concept: v1:todos:todo (machine-readable: BoundConcepts["completeTodo"] in generated_concepts.go).
@@ -1687,27 +1604,20 @@ func CreateAdHocPlanBuild(args CreateAdHocPlanArgs) string {
 //
 // Bound concept: v1:agents:agent (machine-readable: BoundConcepts["createAgent"] in generated_concepts.go).
 type CreateAgentArgs struct {
-	AgentId         string
-	OwnerUserId     string
-	Name            string
-	Description     string
-	Personality     string
-	Role            string
-	RoleSlug        string
-	Kind            string
-	Gender          string
-	AudioControl    string
-	VideoControl    string
-	AvatarPersonaId string
-	AvatarVendor    string
-	Capabilities    map[string]any
-	Avatar          map[string]any
-	ProviderConfig  map[string]any
-	TriggerBehavior map[string]any
-	Active          bool
-	ActiveSet       bool // set true to send active; required because zero-value bool is ambiguous
-	Deleted         bool
-	DeletedSet      bool // set true to send deleted; required because zero-value bool is ambiguous
+	AgentId        string
+	OwnerUserId    string
+	Name           string
+	Description    string
+	Personality    string
+	Role           string
+	RoleSlug       string
+	Kind           string
+	Capabilities   map[string]any
+	ProviderConfig map[string]any
+	Active         bool
+	ActiveSet      bool // set true to send active; required because zero-value bool is ambiguous
+	Deleted        bool
+	DeletedSet     bool // set true to send deleted; required because zero-value bool is ambiguous
 }
 
 // CreateAgent calls the engine mutation createAgent.
@@ -1770,41 +1680,6 @@ func CreateAgentBuild(args CreateAgentArgs) string {
 		b.WriteString("kind: ")
 		b.WriteString(quoteMemQL(args.Kind))
 	}
-	if args.Gender != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("gender: ")
-		b.WriteString(quoteMemQL(args.Gender))
-	}
-	if args.AudioControl != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("audioControl: ")
-		b.WriteString(quoteMemQL(args.AudioControl))
-	}
-	if args.VideoControl != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("videoControl: ")
-		b.WriteString(quoteMemQL(args.VideoControl))
-	}
-	if args.AvatarPersonaId != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("avatarPersonaId: ")
-		b.WriteString(quoteMemQL(args.AvatarPersonaId))
-	}
-	if args.AvatarVendor != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("avatarVendor: ")
-		b.WriteString(quoteMemQL(args.AvatarVendor))
-	}
 	if args.Capabilities != nil {
 		if b.Len() > 21 {
 			b.WriteString(", ")
@@ -1812,26 +1687,12 @@ func CreateAgentBuild(args CreateAgentArgs) string {
 		b.WriteString("capabilities: ")
 		b.WriteString(renderMemQLValue(args.Capabilities))
 	}
-	if args.Avatar != nil {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("avatar: ")
-		b.WriteString(renderMemQLValue(args.Avatar))
-	}
 	if args.ProviderConfig != nil {
 		if b.Len() > 21 {
 			b.WriteString(", ")
 		}
 		b.WriteString("providerConfig: ")
 		b.WriteString(renderMemQLValue(args.ProviderConfig))
-	}
-	if args.TriggerBehavior != nil {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("triggerBehavior: ")
-		b.WriteString(renderMemQLValue(args.TriggerBehavior))
 	}
 	if args.ActiveSet {
 		if b.Len() > 21 {
@@ -1933,7 +1794,6 @@ type CreateAgentRoleArgs struct {
 	ForbiddenSkillIds     []any
 	MaxSkills             int
 	RecommendedPolicySlug string
-	RecommendedGender     string
 	SystemPromptHints     string
 	Active                bool
 	ActiveSet             bool // set true to send active; required because zero-value bool is ambiguous
@@ -2026,13 +1886,6 @@ func CreateAgentRoleBuild(args CreateAgentRoleArgs) string {
 		}
 		b.WriteString("recommendedPolicySlug: ")
 		b.WriteString(quoteMemQL(args.RecommendedPolicySlug))
-	}
-	if args.RecommendedGender != "" {
-		if b.Len() > 25 {
-			b.WriteString(", ")
-		}
-		b.WriteString("recommendedGender: ")
-		b.WriteString(quoteMemQL(args.RecommendedGender))
 	}
 	if args.SystemPromptHints != "" {
 		if b.Len() > 25 {
@@ -2817,79 +2670,6 @@ func CreateAuthoringConstructBuild(args CreateAuthoringConstructArgs) string {
 		}
 		b.WriteString("grammarVersion: ")
 		b.WriteString(quoteMemQL(args.GrammarVersion))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// CreateAvatarPersona -- Insert a v1:agents:avatarPersona catalog row (memql#609). Called by the SeedMaterializer when it walks the avatar-persona seed declarations under dsl/agents/avatarPersonas.memql -- the materializer stamps the seed body's `id` (the seed name) into `avatarPersonaId`. The seeds themselves are hand-curated in dsl/agents/avatarPersonas.memql (the vendor-issued faceId pasted in per persona). Global operator catalog: the engine stamps the insert into the _system slot regardless of the caller's partition, exactly like createAgentRole / createSkill.
-//
-// Bound concept: v1:agents:avatarPersona (machine-readable: BoundConcepts["createAvatarPersona"] in generated_concepts.go).
-type CreateAvatarPersonaArgs struct {
-	AvatarPersonaId string
-	Vendor          string
-	PersonaId       string
-	Name            string
-	Gender          string
-	ImageRef        string
-	PreviewRef      string
-	Active          bool
-	ActiveSet       bool // set true to send active; required because zero-value bool is ambiguous
-}
-
-// CreateAvatarPersona calls the engine mutation createAvatarPersona.
-func (qc *QueryClient) CreateAvatarPersona(ctx context.Context, args CreateAvatarPersonaArgs) (*Result, error) {
-	call := CreateAvatarPersonaBuild(args)
-	return qc.executeNamed(ctx, "createAvatarPersona", call)
-}
-
-func CreateAvatarPersonaBuild(args CreateAvatarPersonaArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation createAvatarPersona(")
-	if args.AvatarPersonaId != "" {
-		b.WriteString("avatarPersonaId: ")
-		b.WriteString(quoteMemQL(args.AvatarPersonaId))
-	}
-	if b.Len() > 29 {
-		b.WriteString(", ")
-	}
-	b.WriteString("vendor: ")
-	b.WriteString(quoteMemQL(args.Vendor))
-	if b.Len() > 29 {
-		b.WriteString(", ")
-	}
-	b.WriteString("personaId: ")
-	b.WriteString(quoteMemQL(args.PersonaId))
-	if b.Len() > 29 {
-		b.WriteString(", ")
-	}
-	b.WriteString("name: ")
-	b.WriteString(quoteMemQL(args.Name))
-	if b.Len() > 29 {
-		b.WriteString(", ")
-	}
-	b.WriteString("gender: ")
-	b.WriteString(quoteMemQL(args.Gender))
-	if args.ImageRef != "" {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("imageRef: ")
-		b.WriteString(quoteMemQL(args.ImageRef))
-	}
-	if args.PreviewRef != "" {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("previewRef: ")
-		b.WriteString(quoteMemQL(args.PreviewRef))
-	}
-	if args.ActiveSet {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("active: ")
-		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -4246,20 +4026,19 @@ func CreateDeviceCodeBuild(args CreateDeviceCodeArgs) string {
 	return b.String()
 }
 
-// CreateDocumentChunk -- Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceUtteranceId / sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.
+// CreateDocumentChunk -- Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.
 //
 // Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["createDocumentChunk"] in generated_concepts.go).
 type CreateDocumentChunkArgs struct {
-	ChunkId           string
-	DomainId          string
-	Text              string
-	Source            string
-	SourceRef         string
-	Seq               int
-	TokenCount        int
-	SourceUtteranceId string
-	SourceAgentId     string
-	SourceTopic       string
+	ChunkId       string
+	DomainId      string
+	Text          string
+	Source        string
+	SourceRef     string
+	Seq           int
+	TokenCount    int
+	SourceAgentId string
+	SourceTopic   string
 }
 
 // CreateDocumentChunk calls the engine mutation createDocumentChunk.
@@ -4308,13 +4087,6 @@ func CreateDocumentChunkBuild(args CreateDocumentChunkArgs) string {
 		}
 		b.WriteString("tokenCount: ")
 		b.WriteString(fmt.Sprintf("%v", args.TokenCount))
-	}
-	if args.SourceUtteranceId != "" {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("sourceUtteranceId: ")
-		b.WriteString(quoteMemQL(args.SourceUtteranceId))
 	}
 	if args.SourceAgentId != "" {
 		if b.Len() > 29 {
@@ -4617,52 +4389,6 @@ func CreateGeneratedOutputBuild(args CreateGeneratedOutputArgs) string {
 		b.WriteString("producedByWorkerName: ")
 		b.WriteString(quoteMemQL(args.ProducedByWorkerName))
 	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// CreateGreetingUtterance -- Create a greeting utterance for an AI participant joining a space
-//
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["createGreetingUtterance"] in generated_concepts.go).
-type CreateGreetingUtteranceArgs struct {
-	PartitionId   string
-	ParticipantId string
-	AgentId       string
-	Text          string
-	GreetingKind  string
-}
-
-// CreateGreetingUtterance calls the engine mutation createGreetingUtterance.
-func (qc *QueryClient) CreateGreetingUtterance(ctx context.Context, args CreateGreetingUtteranceArgs) (*Result, error) {
-	call := CreateGreetingUtteranceBuild(args)
-	return qc.executeNamed(ctx, "createGreetingUtterance", call)
-}
-
-func CreateGreetingUtteranceBuild(args CreateGreetingUtteranceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation createGreetingUtterance(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("participantId: ")
-	b.WriteString(quoteMemQL(args.ParticipantId))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("agentId: ")
-	b.WriteString(quoteMemQL(args.AgentId))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("text: ")
-	b.WriteString(quoteMemQL(args.Text))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("greetingKind: ")
-	b.WriteString(quoteMemQL(args.GreetingKind))
 	b.WriteString(")")
 	return b.String()
 }
@@ -5150,10 +4876,9 @@ type CreateMemoryArgs struct {
 	Content  string
 	Summary  string
 	// Enum: fact | preference | instruction | episodic | other
-	Kind              string
-	AgentId           string
-	PartitionId       string
-	SourceUtteranceId string
+	Kind        string
+	AgentId     string
+	PartitionId string
 }
 
 // CreateMemory calls the engine mutation createMemory.
@@ -5204,13 +4929,6 @@ func CreateMemoryBuild(args CreateMemoryArgs) string {
 		}
 		b.WriteString("partitionId: ")
 		b.WriteString(quoteMemQL(args.PartitionId))
-	}
-	if args.SourceUtteranceId != "" {
-		if b.Len() > 22 {
-			b.WriteString(", ")
-		}
-		b.WriteString("sourceUtteranceId: ")
-		b.WriteString(quoteMemQL(args.SourceUtteranceId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -6757,66 +6475,6 @@ func CreateSenderIdentityBuild(args CreateSenderIdentityArgs) string {
 	return b.String()
 }
 
-// CreateSessionForParticipant -- Create a session record for a participant in a space.
-//
-// Bound concept: v1:cognition:session (machine-readable: BoundConcepts["createSessionForParticipant"] in generated_concepts.go).
-type CreateSessionForParticipantArgs struct {
-	SessionId     string
-	PartitionId   string
-	ParticipantId string
-	HumanInput    map[string]any
-	AiOutput      map[string]any
-	Streams       map[string]any
-}
-
-// CreateSessionForParticipant calls the engine mutation createSessionForParticipant.
-func (qc *QueryClient) CreateSessionForParticipant(ctx context.Context, args CreateSessionForParticipantArgs) (*Result, error) {
-	call := CreateSessionForParticipantBuild(args)
-	return qc.executeNamed(ctx, "createSessionForParticipant", call)
-}
-
-func CreateSessionForParticipantBuild(args CreateSessionForParticipantArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation createSessionForParticipant(")
-	if args.SessionId != "" {
-		b.WriteString("sessionId: ")
-		b.WriteString(quoteMemQL(args.SessionId))
-	}
-	if b.Len() > 37 {
-		b.WriteString(", ")
-	}
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 37 {
-		b.WriteString(", ")
-	}
-	b.WriteString("participantId: ")
-	b.WriteString(quoteMemQL(args.ParticipantId))
-	if args.HumanInput != nil {
-		if b.Len() > 37 {
-			b.WriteString(", ")
-		}
-		b.WriteString("humanInput: ")
-		b.WriteString(renderMemQLValue(args.HumanInput))
-	}
-	if args.AiOutput != nil {
-		if b.Len() > 37 {
-			b.WriteString(", ")
-		}
-		b.WriteString("aiOutput: ")
-		b.WriteString(renderMemQLValue(args.AiOutput))
-	}
-	if args.Streams != nil {
-		if b.Len() > 37 {
-			b.WriteString(", ")
-		}
-		b.WriteString("streams: ")
-		b.WriteString(renderMemQLValue(args.Streams))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // CreateSite -- Create a site. Defaults are applied with ?? because a concept-field @default is never applied on insert (memql#2960) -- writing the field without ?? leaves it empty and the edge refuses to serve a row whose status it cannot read.
 // status and systemOwned are caller-settable (default "draft" / false, the ordinary operator-created site) so the SeedMaterializer can pass "live" / true for the portal seed (dsl/platform/seeds.memql, memql#3711) -- the platform's own console has to resolve the moment the cluster boots, and it must not be deletable by an operator who does not realize it is how sites get managed at all.
 // `createdAt` / `createdBy` are NEVER authored here -- both are reserved payload fields (component/database/memory-nodes/constants.go) the engine stamps intrinsically from `now` / the caller's actor (component/database/memory-nodes/concept.go). An earlier version of this mutation stamped them explicitly in `stamp{}`, which every write refused at the reserved-field guard in executor_mutation.go with "mutation payload ... declares reserved field" -- silently, because nothing exercised this mutation against a live boot until memql#3714's edge verification found the portal's own seed failing with exactly that error on every fresh cluster (memql#3714b).
@@ -7753,68 +7411,6 @@ func CreateUserOnFirstLoginBuild(args CreateUserOnFirstLoginArgs) string {
 	return b.String()
 }
 
-// CreateVoiceAgentTokenIdentity -- Create a voice_agent_token identity (credential row for the Go voice-agent process). Plain JWT is returned by JWTIssuer.IssueVoiceAgentAccessToken; this row stores only the SHA-256 of an auxiliary random bearer for schema completeness + audit fingerprinting.
-//
-// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createVoiceAgentTokenIdentity"] in generated_concepts.go).
-type CreateVoiceAgentTokenIdentityArgs struct {
-	IdentityId string
-	UserId     string
-	InstanceId string
-	KeyHash    string
-	MintedBy   string
-	ExpiresAt  string
-	Label      string
-}
-
-// CreateVoiceAgentTokenIdentity calls the engine mutation createVoiceAgentTokenIdentity.
-func (qc *QueryClient) CreateVoiceAgentTokenIdentity(ctx context.Context, args CreateVoiceAgentTokenIdentityArgs) (*Result, error) {
-	call := CreateVoiceAgentTokenIdentityBuild(args)
-	return qc.executeNamed(ctx, "createVoiceAgentTokenIdentity", call)
-}
-
-func CreateVoiceAgentTokenIdentityBuild(args CreateVoiceAgentTokenIdentityArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation createVoiceAgentTokenIdentity(")
-	b.WriteString("identityId: ")
-	b.WriteString(quoteMemQL(args.IdentityId))
-	if b.Len() > 39 {
-		b.WriteString(", ")
-	}
-	b.WriteString("userId: ")
-	b.WriteString(quoteMemQL(args.UserId))
-	if b.Len() > 39 {
-		b.WriteString(", ")
-	}
-	b.WriteString("instanceId: ")
-	b.WriteString(quoteMemQL(args.InstanceId))
-	if b.Len() > 39 {
-		b.WriteString(", ")
-	}
-	b.WriteString("keyHash: ")
-	b.WriteString(quoteMemQL(args.KeyHash))
-	if b.Len() > 39 {
-		b.WriteString(", ")
-	}
-	b.WriteString("mintedBy: ")
-	b.WriteString(quoteMemQL(args.MintedBy))
-	if args.ExpiresAt != "" {
-		if b.Len() > 39 {
-			b.WriteString(", ")
-		}
-		b.WriteString("expiresAt: ")
-		b.WriteString(quoteMemQL(args.ExpiresAt))
-	}
-	if args.Label != "" {
-		if b.Len() > 39 {
-			b.WriteString(", ")
-		}
-		b.WriteString("label: ")
-		b.WriteString(quoteMemQL(args.Label))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // CreateWorkerInvocation -- Insert a worker tool-invocation telemetry row.
 // ownerUserId is NOT an argument: v1:worker:invocation declares the composite owner tier (memql#4406) and marks the field @serverSet, so the owner reaches the row from actor.userId and through nothing else. Both Go writers already resolve the owner before calling -- they need it to route the dispatch at all -- and now stamp it as the actor rather than passing it as data.
 //
@@ -8479,199 +8075,6 @@ func DisablePackageDeployablesBuild(args DisablePackageDeployablesArgs) string {
 	return b.String()
 }
 
-// EmitClientToolRequest -- Emit a client-tool request envelope for cross-node relay to a browser stream.
-//
-// Bound concept: v1:cognition:client:tool:request (machine-readable: BoundConcepts["emitClientToolRequest"] in generated_concepts.go).
-type EmitClientToolRequestArgs struct {
-	RequestId     string
-	CallId        string
-	ToolName      string
-	ArgumentsJSON string
-	PartitionId   string
-	ParticipantId string
-	AgentId       string
-	ExpiresAt     string
-}
-
-// EmitClientToolRequest calls the engine mutation emitClientToolRequest.
-func (qc *QueryClient) EmitClientToolRequest(ctx context.Context, args EmitClientToolRequestArgs) (*Result, error) {
-	call := EmitClientToolRequestBuild(args)
-	return qc.executeNamed(ctx, "emitClientToolRequest", call)
-}
-
-func EmitClientToolRequestBuild(args EmitClientToolRequestArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation emitClientToolRequest(")
-	b.WriteString("requestId: ")
-	b.WriteString(quoteMemQL(args.RequestId))
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("callId: ")
-	b.WriteString(quoteMemQL(args.CallId))
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("toolName: ")
-	b.WriteString(quoteMemQL(args.ToolName))
-	if args.ArgumentsJSON != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("argumentsJSON: ")
-		b.WriteString(quoteMemQL(args.ArgumentsJSON))
-	}
-	if args.PartitionId != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("partitionId: ")
-		b.WriteString(quoteMemQL(args.PartitionId))
-	}
-	if args.ParticipantId != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("participantId: ")
-		b.WriteString(quoteMemQL(args.ParticipantId))
-	}
-	if args.AgentId != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("agentId: ")
-		b.WriteString(quoteMemQL(args.AgentId))
-	}
-	if args.ExpiresAt != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("expiresAt: ")
-		b.WriteString(quoteMemQL(args.ExpiresAt))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// EmitClientToolResponse -- Emit a client-tool response envelope fulfilling a pending clientToolRequest.
-//
-// Bound concept: v1:cognition:client:tool:response (machine-readable: BoundConcepts["emitClientToolResponse"] in generated_concepts.go).
-type EmitClientToolResponseArgs struct {
-	ResponseId   string
-	CallId       string
-	ContentJSON  string
-	IsError      bool
-	IsErrorSet   bool // set true to send isError; required because zero-value bool is ambiguous
-	ErrorMessage string
-	PartitionId  string
-}
-
-// EmitClientToolResponse calls the engine mutation emitClientToolResponse.
-func (qc *QueryClient) EmitClientToolResponse(ctx context.Context, args EmitClientToolResponseArgs) (*Result, error) {
-	call := EmitClientToolResponseBuild(args)
-	return qc.executeNamed(ctx, "emitClientToolResponse", call)
-}
-
-func EmitClientToolResponseBuild(args EmitClientToolResponseArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation emitClientToolResponse(")
-	b.WriteString("responseId: ")
-	b.WriteString(quoteMemQL(args.ResponseId))
-	if b.Len() > 32 {
-		b.WriteString(", ")
-	}
-	b.WriteString("callId: ")
-	b.WriteString(quoteMemQL(args.CallId))
-	if args.ContentJSON != "" {
-		if b.Len() > 32 {
-			b.WriteString(", ")
-		}
-		b.WriteString("contentJSON: ")
-		b.WriteString(quoteMemQL(args.ContentJSON))
-	}
-	if args.IsErrorSet {
-		if b.Len() > 32 {
-			b.WriteString(", ")
-		}
-		b.WriteString("isError: ")
-		b.WriteString(fmt.Sprintf("%v", args.IsError))
-	}
-	if args.ErrorMessage != "" {
-		if b.Len() > 32 {
-			b.WriteString(", ")
-		}
-		b.WriteString("errorMessage: ")
-		b.WriteString(quoteMemQL(args.ErrorMessage))
-	}
-	if args.PartitionId != "" {
-		if b.Len() > 32 {
-			b.WriteString(", ")
-		}
-		b.WriteString("partitionId: ")
-		b.WriteString(quoteMemQL(args.PartitionId))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// EmitTextChunk -- Emit a streaming text chunk during AI response generation.
-//
-// Bound concept: v1:cognition:text:chunk (machine-readable: BoundConcepts["emitTextChunk"] in generated_concepts.go).
-type EmitTextChunkArgs struct {
-	ChunkId       string
-	PartitionId   string
-	ParticipantId string
-	ReplyId       string
-	Text          string
-	Index         float64
-	Done          bool
-}
-
-// EmitTextChunk calls the engine mutation emitTextChunk.
-func (qc *QueryClient) EmitTextChunk(ctx context.Context, args EmitTextChunkArgs) (*Result, error) {
-	call := EmitTextChunkBuild(args)
-	return qc.executeNamed(ctx, "emitTextChunk", call)
-}
-
-func EmitTextChunkBuild(args EmitTextChunkArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation emitTextChunk(")
-	b.WriteString("chunkId: ")
-	b.WriteString(quoteMemQL(args.ChunkId))
-	if b.Len() > 23 {
-		b.WriteString(", ")
-	}
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 23 {
-		b.WriteString(", ")
-	}
-	b.WriteString("participantId: ")
-	b.WriteString(quoteMemQL(args.ParticipantId))
-	if b.Len() > 23 {
-		b.WriteString(", ")
-	}
-	b.WriteString("replyId: ")
-	b.WriteString(quoteMemQL(args.ReplyId))
-	if b.Len() > 23 {
-		b.WriteString(", ")
-	}
-	b.WriteString("text: ")
-	b.WriteString(quoteMemQL(args.Text))
-	if b.Len() > 23 {
-		b.WriteString(", ")
-	}
-	b.WriteString("index: ")
-	b.WriteString(fmt.Sprintf("%v", args.Index))
-	if b.Len() > 23 {
-		b.WriteString(", ")
-	}
-	b.WriteString("done: ")
-	b.WriteString(fmt.Sprintf("%v", args.Done))
-	b.WriteString(")")
-	return b.String()
-}
-
 // EnablePackageDeployables -- Turn one or more of a source's deployables back ON.
 // The exact inverse of disablePackageDeployables above, and the reason that one is a membership change rather than a whole-list write: removing a member had no form at all. Removing a name that is not there is a no-op rather than an error, so two people enabling the same app both succeed and a retry is safe.
 //
@@ -9118,176 +8521,6 @@ func InsertSafetyClassificationBuild(args InsertSafetyClassificationArgs) string
 	}
 	b.WriteString("mode: ")
 	b.WriteString(quoteMemQL(args.Mode))
-	b.WriteString(")")
-	return b.String()
-}
-
-// JoinSpaceAsAI -- Join a space as an AI participant. Uses canonicalized deterministic ID.
-//
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["joinSpaceAsAI"] in generated_concepts.go).
-type JoinSpaceAsAIArgs struct {
-	PartitionId         string
-	AgentId             string
-	DisplayName         string
-	Status              string
-	JoinedAt            string
-	CapabilityOverrides map[string]any
-	Hidden              bool
-	HiddenSet           bool // set true to send hidden; required because zero-value bool is ambiguous
-	ForUserId           string
-	IsGroupGA           bool
-	IsGroupGASet        bool // set true to send isGroupGA; required because zero-value bool is ambiguous
-}
-
-// JoinSpaceAsAI calls the engine mutation joinSpaceAsAI.
-func (qc *QueryClient) JoinSpaceAsAI(ctx context.Context, args JoinSpaceAsAIArgs) (*Result, error) {
-	call := JoinSpaceAsAIBuild(args)
-	return qc.executeNamed(ctx, "joinSpaceAsAI", call)
-}
-
-func JoinSpaceAsAIBuild(args JoinSpaceAsAIArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation joinSpaceAsAI(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 23 {
-		b.WriteString(", ")
-	}
-	b.WriteString("agentId: ")
-	b.WriteString(quoteMemQL(args.AgentId))
-	if b.Len() > 23 {
-		b.WriteString(", ")
-	}
-	b.WriteString("displayName: ")
-	b.WriteString(quoteMemQL(args.DisplayName))
-	if args.Status != "" {
-		if b.Len() > 23 {
-			b.WriteString(", ")
-		}
-		b.WriteString("status: ")
-		b.WriteString(quoteMemQL(args.Status))
-	}
-	if args.JoinedAt != "" {
-		if b.Len() > 23 {
-			b.WriteString(", ")
-		}
-		b.WriteString("joinedAt: ")
-		b.WriteString(quoteMemQL(args.JoinedAt))
-	}
-	if args.CapabilityOverrides != nil {
-		if b.Len() > 23 {
-			b.WriteString(", ")
-		}
-		b.WriteString("capabilityOverrides: ")
-		b.WriteString(renderMemQLValue(args.CapabilityOverrides))
-	}
-	if args.HiddenSet {
-		if b.Len() > 23 {
-			b.WriteString(", ")
-		}
-		b.WriteString("hidden: ")
-		b.WriteString(fmt.Sprintf("%v", args.Hidden))
-	}
-	if args.ForUserId != "" {
-		if b.Len() > 23 {
-			b.WriteString(", ")
-		}
-		b.WriteString("forUserId: ")
-		b.WriteString(quoteMemQL(args.ForUserId))
-	}
-	if args.IsGroupGASet {
-		if b.Len() > 23 {
-			b.WriteString(", ")
-		}
-		b.WriteString("isGroupGA: ")
-		b.WriteString(fmt.Sprintf("%v", args.IsGroupGA))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// JoinSpaceAsHuman -- Join a space as a human participant.
-//
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["joinSpaceAsHuman"] in generated_concepts.go).
-type JoinSpaceAsHumanArgs struct {
-	PartitionId         string
-	UserId              string
-	DisplayName         string
-	Status              string
-	JoinedAt            string
-	CapabilityOverrides map[string]any
-}
-
-// JoinSpaceAsHuman calls the engine mutation joinSpaceAsHuman.
-func (qc *QueryClient) JoinSpaceAsHuman(ctx context.Context, args JoinSpaceAsHumanArgs) (*Result, error) {
-	call := JoinSpaceAsHumanBuild(args)
-	return qc.executeNamed(ctx, "joinSpaceAsHuman", call)
-}
-
-func JoinSpaceAsHumanBuild(args JoinSpaceAsHumanArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation joinSpaceAsHuman(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 26 {
-		b.WriteString(", ")
-	}
-	b.WriteString("userId: ")
-	b.WriteString(quoteMemQL(args.UserId))
-	if b.Len() > 26 {
-		b.WriteString(", ")
-	}
-	b.WriteString("displayName: ")
-	b.WriteString(quoteMemQL(args.DisplayName))
-	if args.Status != "" {
-		if b.Len() > 26 {
-			b.WriteString(", ")
-		}
-		b.WriteString("status: ")
-		b.WriteString(quoteMemQL(args.Status))
-	}
-	if args.JoinedAt != "" {
-		if b.Len() > 26 {
-			b.WriteString(", ")
-		}
-		b.WriteString("joinedAt: ")
-		b.WriteString(quoteMemQL(args.JoinedAt))
-	}
-	if args.CapabilityOverrides != nil {
-		if b.Len() > 26 {
-			b.WriteString(", ")
-		}
-		b.WriteString("capabilityOverrides: ")
-		b.WriteString(renderMemQLValue(args.CapabilityOverrides))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// LeaveSpace -- Insert a new version of a participant record (typically used to mark the participant as left).
-//
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["leaveSpace"] in generated_concepts.go).
-type LeaveSpaceArgs struct {
-	ParticipantId string
-	Payload       map[string]any
-}
-
-// LeaveSpace calls the engine mutation leaveSpace.
-func (qc *QueryClient) LeaveSpace(ctx context.Context, args LeaveSpaceArgs) (*Result, error) {
-	call := LeaveSpaceBuild(args)
-	return qc.executeNamed(ctx, "leaveSpace", call)
-}
-
-func LeaveSpaceBuild(args LeaveSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation leaveSpace(")
-	b.WriteString("participantId: ")
-	b.WriteString(quoteMemQL(args.ParticipantId))
-	if b.Len() > 20 {
-		b.WriteString(", ")
-	}
-	b.WriteString("payload: ")
-	b.WriteString(renderMemQLValue(args.Payload))
 	b.WriteString(")")
 	return b.String()
 }
@@ -10037,100 +9270,6 @@ func RecordBundleValidationBuild(args RecordBundleValidationArgs) string {
 	return b.String()
 }
 
-// RecordCall -- Write an append-only call record. A completed leg writes one row with the real duration + disposition; durationSeconds/disposition default to an in-progress row when omitted (Amendment A: bound to partition + partition-scoped room).
-//
-// Bound concept: v1:telephony:call (machine-readable: BoundConcepts["recordCall"] in generated_concepts.go).
-type RecordCallArgs struct {
-	// Enum: inbound | outbound
-	Direction       string
-	FromE164        string
-	ToE164          string
-	PartitionId     string
-	Room            string
-	Carrier         string
-	ProviderCallId  string
-	AgentId         string
-	DurationSeconds int
-	// Enum: in_progress | completed | no_answer | busy | failed | canceled
-	Disposition  string
-	CostEstimate float64
-}
-
-// RecordCall calls the engine mutation recordCall.
-func (qc *QueryClient) RecordCall(ctx context.Context, args RecordCallArgs) (*Result, error) {
-	call := RecordCallBuild(args)
-	return qc.executeNamed(ctx, "recordCall", call)
-}
-
-func RecordCallBuild(args RecordCallArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation recordCall(")
-	b.WriteString("direction: ")
-	b.WriteString(quoteMemQL(args.Direction))
-	if b.Len() > 20 {
-		b.WriteString(", ")
-	}
-	b.WriteString("fromE164: ")
-	b.WriteString(quoteMemQL(args.FromE164))
-	if b.Len() > 20 {
-		b.WriteString(", ")
-	}
-	b.WriteString("toE164: ")
-	b.WriteString(quoteMemQL(args.ToE164))
-	if b.Len() > 20 {
-		b.WriteString(", ")
-	}
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 20 {
-		b.WriteString(", ")
-	}
-	b.WriteString("room: ")
-	b.WriteString(quoteMemQL(args.Room))
-	if args.Carrier != "" {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("carrier: ")
-		b.WriteString(quoteMemQL(args.Carrier))
-	}
-	if args.ProviderCallId != "" {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("providerCallId: ")
-		b.WriteString(quoteMemQL(args.ProviderCallId))
-	}
-	if args.AgentId != "" {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("agentId: ")
-		b.WriteString(quoteMemQL(args.AgentId))
-	}
-	if args.DurationSeconds != 0 {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("durationSeconds: ")
-		b.WriteString(fmt.Sprintf("%v", args.DurationSeconds))
-	}
-	if args.Disposition != "" {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("disposition: ")
-		b.WriteString(quoteMemQL(args.Disposition))
-	}
-	if b.Len() > 20 {
-		b.WriteString(", ")
-	}
-	b.WriteString("costEstimate: ")
-	b.WriteString(renderMemQLValue(args.CostEstimate))
-	b.WriteString(")")
-	return b.String()
-}
-
 // RecordConsentBounce -- Append a provider bounce event. Append-only.
 //
 // Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["recordConsentBounce"] in generated_concepts.go).
@@ -10538,72 +9677,6 @@ func RecordMentoredEventBuild(args RecordMentoredEventArgs) string {
 	}
 	b.WriteString("note: ")
 	b.WriteString(quoteMemQL(args.Note))
-	b.WriteString(")")
-	return b.String()
-}
-
-// RecordNumber -- Persist a provisioned DID. Called after a carrier BuyNumber succeeds.
-//
-// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["recordNumber"] in generated_concepts.go).
-type RecordNumberArgs struct {
-	E164        string
-	Carrier     string
-	PartitionId string
-	// Enum: inbound | outbound | both
-	Purpose    string
-	ProviderId string
-	// Enum: local | tollfree | mobile
-	NumberType  string
-	MonthlyCost float64
-}
-
-// RecordNumber calls the engine mutation recordNumber.
-func (qc *QueryClient) RecordNumber(ctx context.Context, args RecordNumberArgs) (*Result, error) {
-	call := RecordNumberBuild(args)
-	return qc.executeNamed(ctx, "recordNumber", call)
-}
-
-func RecordNumberBuild(args RecordNumberArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation recordNumber(")
-	b.WriteString("e164: ")
-	b.WriteString(quoteMemQL(args.E164))
-	if b.Len() > 22 {
-		b.WriteString(", ")
-	}
-	b.WriteString("carrier: ")
-	b.WriteString(quoteMemQL(args.Carrier))
-	if b.Len() > 22 {
-		b.WriteString(", ")
-	}
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if args.Purpose != "" {
-		if b.Len() > 22 {
-			b.WriteString(", ")
-		}
-		b.WriteString("purpose: ")
-		b.WriteString(quoteMemQL(args.Purpose))
-	}
-	if args.ProviderId != "" {
-		if b.Len() > 22 {
-			b.WriteString(", ")
-		}
-		b.WriteString("providerId: ")
-		b.WriteString(quoteMemQL(args.ProviderId))
-	}
-	if args.NumberType != "" {
-		if b.Len() > 22 {
-			b.WriteString(", ")
-		}
-		b.WriteString("numberType: ")
-		b.WriteString(quoteMemQL(args.NumberType))
-	}
-	if b.Len() > 22 {
-		b.WriteString(", ")
-	}
-	b.WriteString("monthlyCost: ")
-	b.WriteString(renderMemQLValue(args.MonthlyCost))
 	b.WriteString(")")
 	return b.String()
 }
@@ -11227,67 +10300,6 @@ func RecordSuppressionBuild(args RecordSuppressionArgs) string {
 	return b.String()
 }
 
-// RecordTrunk -- Persist a LiveKit SIP trunk configuration. secretRef points at external-secrets, never a secret value.
-//
-// Bound concept: v1:telephony:trunk (machine-readable: BoundConcepts["recordTrunk"] in generated_concepts.go).
-type RecordTrunkArgs struct {
-	Carrier string
-	// Enum: inbound | outbound | both
-	Direction      string
-	Name           string
-	LivekitTrunkId string
-	SipEdgeUri     string
-	SecretRef      string
-}
-
-// RecordTrunk calls the engine mutation recordTrunk.
-func (qc *QueryClient) RecordTrunk(ctx context.Context, args RecordTrunkArgs) (*Result, error) {
-	call := RecordTrunkBuild(args)
-	return qc.executeNamed(ctx, "recordTrunk", call)
-}
-
-func RecordTrunkBuild(args RecordTrunkArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation recordTrunk(")
-	b.WriteString("carrier: ")
-	b.WriteString(quoteMemQL(args.Carrier))
-	if b.Len() > 21 {
-		b.WriteString(", ")
-	}
-	b.WriteString("direction: ")
-	b.WriteString(quoteMemQL(args.Direction))
-	if args.Name != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("name: ")
-		b.WriteString(quoteMemQL(args.Name))
-	}
-	if args.LivekitTrunkId != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("livekitTrunkId: ")
-		b.WriteString(quoteMemQL(args.LivekitTrunkId))
-	}
-	if args.SipEdgeUri != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("sipEdgeUri: ")
-		b.WriteString(quoteMemQL(args.SipEdgeUri))
-	}
-	if args.SecretRef != "" {
-		if b.Len() > 21 {
-			b.WriteString(", ")
-		}
-		b.WriteString("secretRef: ")
-		b.WriteString(quoteMemQL(args.SecretRef))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // RecordWarmupState -- ENGINE: record what the warming ramp just decided and why (memql#3462). One row per sending identity, id = the identity, so a restart or a second replica lands on the same timeline rather than starting a competing ramp.
 // `reason` is written on every evaluation including the ones that change nothing, because "held" is the ramp's common state and an operator seeing a step that has not moved for two days needs to read why rather than guess.
 // clusterOwner tier.
@@ -11742,34 +10754,6 @@ func ReleaseWorkspaceBuild(args ReleaseWorkspaceArgs) string {
 	}
 	b.WriteString("reason: ")
 	b.WriteString(quoteMemQL(args.Reason))
-	b.WriteString(")")
-	return b.String()
-}
-
-// RemoveAgentFromSpace -- Remove the caller's agent from a space (status='left'). The engine guard enforces caller-owns-agent and rejects removal of the pinned owner GA.
-//
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["removeAgentFromSpace"] in generated_concepts.go).
-type RemoveAgentFromSpaceArgs struct {
-	PartitionId string
-	AgentId     string
-}
-
-// RemoveAgentFromSpace calls the engine mutation removeAgentFromSpace.
-func (qc *QueryClient) RemoveAgentFromSpace(ctx context.Context, args RemoveAgentFromSpaceArgs) (*Result, error) {
-	call := RemoveAgentFromSpaceBuild(args)
-	return qc.executeNamed(ctx, "removeAgentFromSpace", call)
-}
-
-func RemoveAgentFromSpaceBuild(args RemoveAgentFromSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation removeAgentFromSpace(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 30 {
-		b.WriteString(", ")
-	}
-	b.WriteString("agentId: ")
-	b.WriteString(quoteMemQL(args.AgentId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -12716,355 +11700,6 @@ func ScheduleAccountDeletionBuild(args ScheduleAccountDeletionArgs) string {
 	return b.String()
 }
 
-// SendActionUtterance -- Create an action utterance in a space.
-//
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["sendActionUtterance"] in generated_concepts.go).
-type SendActionUtteranceArgs struct {
-	UtteranceId     string
-	PartitionId     string
-	ParticipantId   string
-	ParticipantType string
-	ReplyToId       string
-	Source          map[string]any
-	CreatedAt       string
-	Action          map[string]any
-}
-
-// SendActionUtterance calls the engine mutation sendActionUtterance.
-func (qc *QueryClient) SendActionUtterance(ctx context.Context, args SendActionUtteranceArgs) (*Result, error) {
-	call := SendActionUtteranceBuild(args)
-	return qc.executeNamed(ctx, "sendActionUtterance", call)
-}
-
-func SendActionUtteranceBuild(args SendActionUtteranceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation sendActionUtterance(")
-	if args.UtteranceId != "" {
-		b.WriteString("utteranceId: ")
-		b.WriteString(quoteMemQL(args.UtteranceId))
-	}
-	if b.Len() > 29 {
-		b.WriteString(", ")
-	}
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 29 {
-		b.WriteString(", ")
-	}
-	b.WriteString("participantId: ")
-	b.WriteString(quoteMemQL(args.ParticipantId))
-	if args.ParticipantType != "" {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("participantType: ")
-		b.WriteString(quoteMemQL(args.ParticipantType))
-	}
-	if args.ReplyToId != "" {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("replyToId: ")
-		b.WriteString(quoteMemQL(args.ReplyToId))
-	}
-	if args.Source != nil {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("source: ")
-		b.WriteString(renderMemQLValue(args.Source))
-	}
-	if args.CreatedAt != "" {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("createdAt: ")
-		b.WriteString(quoteMemQL(args.CreatedAt))
-	}
-	if b.Len() > 29 {
-		b.WriteString(", ")
-	}
-	b.WriteString("action: ")
-	b.WriteString(renderMemQLValue(args.Action))
-	b.WriteString(")")
-	return b.String()
-}
-
-// SendRealtimeTranscriptUtterance -- Create a transcript-only realtime voice utterance in a space.
-//
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["sendRealtimeTranscriptUtterance"] in generated_concepts.go).
-type SendRealtimeTranscriptUtteranceArgs struct {
-	UtteranceId    string
-	IdempotencyKey string
-	CreatedAt      string
-	PartitionId    string
-	ParticipantId  string
-	// Enum: human | si | system
-	ParticipantType string
-	Text            string
-	AudioId         string
-	VideoId         string
-	Duration        float64
-	Timestamps      map[string]any
-	Source          map[string]any
-}
-
-// SendRealtimeTranscriptUtterance calls the engine mutation sendRealtimeTranscriptUtterance.
-func (qc *QueryClient) SendRealtimeTranscriptUtterance(ctx context.Context, args SendRealtimeTranscriptUtteranceArgs) (*Result, error) {
-	call := SendRealtimeTranscriptUtteranceBuild(args)
-	return qc.executeNamed(ctx, "sendRealtimeTranscriptUtterance", call)
-}
-
-func SendRealtimeTranscriptUtteranceBuild(args SendRealtimeTranscriptUtteranceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation sendRealtimeTranscriptUtterance(")
-	if args.UtteranceId != "" {
-		b.WriteString("utteranceId: ")
-		b.WriteString(quoteMemQL(args.UtteranceId))
-	}
-	if args.IdempotencyKey != "" {
-		if b.Len() > 41 {
-			b.WriteString(", ")
-		}
-		b.WriteString("idempotencyKey: ")
-		b.WriteString(quoteMemQL(args.IdempotencyKey))
-	}
-	if args.CreatedAt != "" {
-		if b.Len() > 41 {
-			b.WriteString(", ")
-		}
-		b.WriteString("createdAt: ")
-		b.WriteString(quoteMemQL(args.CreatedAt))
-	}
-	if b.Len() > 41 {
-		b.WriteString(", ")
-	}
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 41 {
-		b.WriteString(", ")
-	}
-	b.WriteString("participantId: ")
-	b.WriteString(quoteMemQL(args.ParticipantId))
-	if args.ParticipantType != "" {
-		if b.Len() > 41 {
-			b.WriteString(", ")
-		}
-		b.WriteString("participantType: ")
-		b.WriteString(quoteMemQL(args.ParticipantType))
-	}
-	if args.Text != "" {
-		if b.Len() > 41 {
-			b.WriteString(", ")
-		}
-		b.WriteString("text: ")
-		b.WriteString(quoteMemQL(args.Text))
-	}
-	if args.AudioId != "" {
-		if b.Len() > 41 {
-			b.WriteString(", ")
-		}
-		b.WriteString("audioId: ")
-		b.WriteString(quoteMemQL(args.AudioId))
-	}
-	if args.VideoId != "" {
-		if b.Len() > 41 {
-			b.WriteString(", ")
-		}
-		b.WriteString("videoId: ")
-		b.WriteString(quoteMemQL(args.VideoId))
-	}
-	if args.Duration != 0 {
-		if b.Len() > 41 {
-			b.WriteString(", ")
-		}
-		b.WriteString("duration: ")
-		b.WriteString(fmt.Sprintf("%v", args.Duration))
-	}
-	if args.Timestamps != nil {
-		if b.Len() > 41 {
-			b.WriteString(", ")
-		}
-		b.WriteString("timestamps: ")
-		b.WriteString(renderMemQLValue(args.Timestamps))
-	}
-	if args.Source != nil {
-		if b.Len() > 41 {
-			b.WriteString(", ")
-		}
-		b.WriteString("source: ")
-		b.WriteString(renderMemQLValue(args.Source))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// SendSpeechUtterance -- Create a speech utterance in a space.
-//
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["sendSpeechUtterance"] in generated_concepts.go).
-type SendSpeechUtteranceArgs struct {
-	UtteranceId     string
-	PartitionId     string
-	ParticipantId   string
-	ParticipantType string
-	Text            string
-	AudioId         string
-	VideoId         string
-	Duration        float64
-	Timestamps      map[string]any
-	Source          map[string]any
-}
-
-// SendSpeechUtterance calls the engine mutation sendSpeechUtterance.
-func (qc *QueryClient) SendSpeechUtterance(ctx context.Context, args SendSpeechUtteranceArgs) (*Result, error) {
-	call := SendSpeechUtteranceBuild(args)
-	return qc.executeNamed(ctx, "sendSpeechUtterance", call)
-}
-
-func SendSpeechUtteranceBuild(args SendSpeechUtteranceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation sendSpeechUtterance(")
-	if args.UtteranceId != "" {
-		b.WriteString("utteranceId: ")
-		b.WriteString(quoteMemQL(args.UtteranceId))
-	}
-	if b.Len() > 29 {
-		b.WriteString(", ")
-	}
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 29 {
-		b.WriteString(", ")
-	}
-	b.WriteString("participantId: ")
-	b.WriteString(quoteMemQL(args.ParticipantId))
-	if args.ParticipantType != "" {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("participantType: ")
-		b.WriteString(quoteMemQL(args.ParticipantType))
-	}
-	if args.Text != "" {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("text: ")
-		b.WriteString(quoteMemQL(args.Text))
-	}
-	if args.AudioId != "" {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("audioId: ")
-		b.WriteString(quoteMemQL(args.AudioId))
-	}
-	if args.VideoId != "" {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("videoId: ")
-		b.WriteString(quoteMemQL(args.VideoId))
-	}
-	if args.Duration != 0 {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("duration: ")
-		b.WriteString(fmt.Sprintf("%v", args.Duration))
-	}
-	if args.Timestamps != nil {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("timestamps: ")
-		b.WriteString(renderMemQLValue(args.Timestamps))
-	}
-	if args.Source != nil {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("source: ")
-		b.WriteString(renderMemQLValue(args.Source))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// SendTextUtterance -- Create a text utterance in a space.
-//
-// Bound concept: v1:cognition:utterance (machine-readable: BoundConcepts["sendTextUtterance"] in generated_concepts.go).
-type SendTextUtteranceArgs struct {
-	UtteranceId     string
-	PartitionId     string
-	ParticipantId   string
-	ParticipantType string
-	Text            string
-	ReplyToId       string
-	Source          map[string]any
-	Citations       []map[string]any
-}
-
-// SendTextUtterance calls the engine mutation sendTextUtterance.
-func (qc *QueryClient) SendTextUtterance(ctx context.Context, args SendTextUtteranceArgs) (*Result, error) {
-	call := SendTextUtteranceBuild(args)
-	return qc.executeNamed(ctx, "sendTextUtterance", call)
-}
-
-func SendTextUtteranceBuild(args SendTextUtteranceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation sendTextUtterance(")
-	if args.UtteranceId != "" {
-		b.WriteString("utteranceId: ")
-		b.WriteString(quoteMemQL(args.UtteranceId))
-	}
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("participantId: ")
-	b.WriteString(quoteMemQL(args.ParticipantId))
-	if args.ParticipantType != "" {
-		if b.Len() > 27 {
-			b.WriteString(", ")
-		}
-		b.WriteString("participantType: ")
-		b.WriteString(quoteMemQL(args.ParticipantType))
-	}
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("text: ")
-	b.WriteString(quoteMemQL(args.Text))
-	if args.ReplyToId != "" {
-		if b.Len() > 27 {
-			b.WriteString(", ")
-		}
-		b.WriteString("replyToId: ")
-		b.WriteString(quoteMemQL(args.ReplyToId))
-	}
-	if args.Source != nil {
-		if b.Len() > 27 {
-			b.WriteString(", ")
-		}
-		b.WriteString("source: ")
-		b.WriteString(renderMemQLValue(args.Source))
-	}
-	if args.Citations != nil {
-		if b.Len() > 27 {
-			b.WriteString(", ")
-		}
-		b.WriteString("citations: ")
-		b.WriteString(renderMemQLValue(args.Citations))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // SetAccountEntitlement -- Set (upsert) an account's task-concurrency entitlement (epic memql#902 / #903). Deterministic per-account id so each set appends a new version and the latest wins. Finite maxConcurrentTasks caps the account; <=0 or tier='enterprise' leaves it unlimited.
 //
 // Bound concept: v1:identity:accountEntitlement (machine-readable: BoundConcepts["setAccountEntitlement"] in generated_concepts.go).
@@ -13114,108 +11749,6 @@ func SetAccountEntitlementBuild(args SetAccountEntitlementArgs) string {
 		}
 		b.WriteString("note: ")
 		b.WriteString(quoteMemQL(args.Note))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// SetAgentAudioOverride -- Set the per-session audio control mode for an agent in a space.
-//
-// Bound concept: v1:cognition:audioOverride (machine-readable: BoundConcepts["setAgentAudioOverride"] in generated_concepts.go).
-type SetAgentAudioOverrideArgs struct {
-	PartitionId string
-	AgentId     string
-	Mode        string
-	SetBy       string
-	Active      bool
-	ActiveSet   bool // set true to send active; required because zero-value bool is ambiguous
-}
-
-// SetAgentAudioOverride calls the engine mutation setAgentAudioOverride.
-func (qc *QueryClient) SetAgentAudioOverride(ctx context.Context, args SetAgentAudioOverrideArgs) (*Result, error) {
-	call := SetAgentAudioOverrideBuild(args)
-	return qc.executeNamed(ctx, "setAgentAudioOverride", call)
-}
-
-func SetAgentAudioOverrideBuild(args SetAgentAudioOverrideArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation setAgentAudioOverride(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("agentId: ")
-	b.WriteString(quoteMemQL(args.AgentId))
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("mode: ")
-	b.WriteString(quoteMemQL(args.Mode))
-	if args.SetBy != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("setBy: ")
-		b.WriteString(quoteMemQL(args.SetBy))
-	}
-	if args.ActiveSet {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("active: ")
-		b.WriteString(fmt.Sprintf("%v", args.Active))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// SetAgentVideoOverride -- Set the per-session video control mode for an agent in a space.
-//
-// Bound concept: v1:cognition:videoOverride (machine-readable: BoundConcepts["setAgentVideoOverride"] in generated_concepts.go).
-type SetAgentVideoOverrideArgs struct {
-	PartitionId string
-	AgentId     string
-	Mode        string
-	SetBy       string
-	Active      bool
-	ActiveSet   bool // set true to send active; required because zero-value bool is ambiguous
-}
-
-// SetAgentVideoOverride calls the engine mutation setAgentVideoOverride.
-func (qc *QueryClient) SetAgentVideoOverride(ctx context.Context, args SetAgentVideoOverrideArgs) (*Result, error) {
-	call := SetAgentVideoOverrideBuild(args)
-	return qc.executeNamed(ctx, "setAgentVideoOverride", call)
-}
-
-func SetAgentVideoOverrideBuild(args SetAgentVideoOverrideArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation setAgentVideoOverride(")
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("agentId: ")
-	b.WriteString(quoteMemQL(args.AgentId))
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("mode: ")
-	b.WriteString(quoteMemQL(args.Mode))
-	if args.SetBy != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("setBy: ")
-		b.WriteString(quoteMemQL(args.SetBy))
-	}
-	if args.ActiveSet {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("active: ")
-		b.WriteString(fmt.Sprintf("%v", args.Active))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -13493,57 +12026,6 @@ func SetChunkValidationStatusBuild(args SetChunkValidationStatusArgs) string {
 	}
 	b.WriteString("status: ")
 	b.WriteString(quoteMemQL(args.Status))
-	b.WriteString(")")
-	return b.String()
-}
-
-// SetConsent -- Record TCPA consent / opt-out for an external number (append-only; newest wins).
-//
-// Bound concept: v1:telephony:consent (machine-readable: BoundConcepts["setConsent"] in generated_concepts.go).
-type SetConsentArgs struct {
-	PhoneNumber string
-	PartitionId string
-	// Enum: opted_in | opted_out
-	Status string
-	Reason string
-	Source string
-}
-
-// SetConsent calls the engine mutation setConsent.
-func (qc *QueryClient) SetConsent(ctx context.Context, args SetConsentArgs) (*Result, error) {
-	call := SetConsentBuild(args)
-	return qc.executeNamed(ctx, "setConsent", call)
-}
-
-func SetConsentBuild(args SetConsentArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation setConsent(")
-	b.WriteString("phoneNumber: ")
-	b.WriteString(quoteMemQL(args.PhoneNumber))
-	if b.Len() > 20 {
-		b.WriteString(", ")
-	}
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 20 {
-		b.WriteString(", ")
-	}
-	b.WriteString("status: ")
-	b.WriteString(quoteMemQL(args.Status))
-	if args.Reason != "" {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("reason: ")
-		b.WriteString(quoteMemQL(args.Reason))
-	}
-	if args.Source != "" {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("source: ")
-		b.WriteString(quoteMemQL(args.Source))
-	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -13992,51 +12474,6 @@ func SetLibraryWatchedFolderStatusBuild(args SetLibraryWatchedFolderStatusArgs) 
 	return b.String()
 }
 
-// SetNumberE911 -- Set E911 / caller-ID verification state on an owned DID (by row id).
-//
-// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["setNumberE911"] in generated_concepts.go).
-type SetNumberE911Args struct {
-	Id                  string
-	E911Registered      bool
-	E911AddressId       string
-	CallerIdVerified    bool
-	CallerIdVerifiedSet bool // set true to send callerIdVerified; required because zero-value bool is ambiguous
-}
-
-// SetNumberE911 calls the engine mutation setNumberE911.
-func (qc *QueryClient) SetNumberE911(ctx context.Context, args SetNumberE911Args) (*Result, error) {
-	call := SetNumberE911Build(args)
-	return qc.executeNamed(ctx, "setNumberE911", call)
-}
-
-func SetNumberE911Build(args SetNumberE911Args) string {
-	var b strings.Builder
-	b.WriteString("mutation setNumberE911(")
-	b.WriteString("id: ")
-	b.WriteString(quoteMemQL(args.Id))
-	if b.Len() > 23 {
-		b.WriteString(", ")
-	}
-	b.WriteString("e911Registered: ")
-	b.WriteString(fmt.Sprintf("%v", args.E911Registered))
-	if args.E911AddressId != "" {
-		if b.Len() > 23 {
-			b.WriteString(", ")
-		}
-		b.WriteString("e911AddressId: ")
-		b.WriteString(quoteMemQL(args.E911AddressId))
-	}
-	if args.CallerIdVerifiedSet {
-		if b.Len() > 23 {
-			b.WriteString(", ")
-		}
-		b.WriteString("callerIdVerified: ")
-		b.WriteString(fmt.Sprintf("%v", args.CallerIdVerified))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // SetPackEnabled -- Flip a pack's per-instance enablement in v1:platform:packState. clusterOwner tier via the concept's @rowAuthz -- these rows are the deployment's, not any operator's, and the tier injects the actor gate. The caller (component/grpc's SetPackEnabledMsg handler) verifies the owner role and writes the audit event BEFORE invoking this; the tier here is the independent second layer. The id is the bare pack domain -- the engine canonicalizes it to v1:platform:packState:<packDomain>, so one row per pack with the version history as the flip audit trail. RESTART-REQUIRED lifecycle: the write changes what each node reads at its next boot, never what a running node has loaded.
 //
 // Bound concept: v1:platform:packState (machine-readable: BoundConcepts["setPackEnabled"] in generated_concepts.go).
@@ -14477,44 +12914,6 @@ func SetSurfaceAvailabilityBuild(args SetSurfaceAvailabilityArgs) string {
 	return b.String()
 }
 
-// SetUserActiveSpace -- Set or clear the caller's activePartitionId. Empty partitionId clears the pointer.
-//
-// Bound concept: v1:identity:user (machine-readable: BoundConcepts["setUserActiveSpace"] in generated_concepts.go).
-type SetUserActiveSpaceArgs struct {
-	UserId            string
-	PartitionId       string
-	ActivePartitionId string
-}
-
-// SetUserActiveSpace calls the engine mutation setUserActiveSpace.
-func (qc *QueryClient) SetUserActiveSpace(ctx context.Context, args SetUserActiveSpaceArgs) (*Result, error) {
-	call := SetUserActiveSpaceBuild(args)
-	return qc.executeNamed(ctx, "setUserActiveSpace", call)
-}
-
-func SetUserActiveSpaceBuild(args SetUserActiveSpaceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation setUserActiveSpace(")
-	b.WriteString("userId: ")
-	b.WriteString(quoteMemQL(args.UserId))
-	if args.PartitionId != "" {
-		if b.Len() > 28 {
-			b.WriteString(", ")
-		}
-		b.WriteString("partitionId: ")
-		b.WriteString(quoteMemQL(args.PartitionId))
-	}
-	if args.ActivePartitionId != "" {
-		if b.Len() > 28 {
-			b.WriteString(", ")
-		}
-		b.WriteString("activePartitionId: ")
-		b.WriteString(quoteMemQL(args.ActivePartitionId))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // SetWorkerOperatorLabels -- Replace the operator-set labels on one of the caller's machines. The whole map is replaced, not merged: the Fleet page edits the set as a set, and a merge would make removing a label impossible through this surface.
 //
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["setWorkerOperatorLabels"] in generated_concepts.go).
@@ -14930,34 +13329,6 @@ func TouchDeviceCodePollBuild(args TouchDeviceCodePollArgs) string {
 	}
 	b.WriteString("intervalSeconds: ")
 	b.WriteString(fmt.Sprintf("%v", args.IntervalSeconds))
-	b.WriteString(")")
-	return b.String()
-}
-
-// TouchSession -- Update an auth-session record (typically a heartbeat to bump lastActivityAt). Read-merges the existing row (update()): only the fields in `payload` change; the @required discriminators (subject, tokenHash, source, expiresAt) and every other omitted field inherit from the persisted row instead of having to be re-supplied (memql#1628). The session row must already exist.
-//
-// Bound concept: v1:identity:authSession (machine-readable: BoundConcepts["touchSession"] in generated_concepts.go).
-type TouchSessionArgs struct {
-	SessionId string
-	Payload   map[string]any
-}
-
-// TouchSession calls the engine mutation touchSession.
-func (qc *QueryClient) TouchSession(ctx context.Context, args TouchSessionArgs) (*Result, error) {
-	call := TouchSessionBuild(args)
-	return qc.executeNamed(ctx, "touchSession", call)
-}
-
-func TouchSessionBuild(args TouchSessionArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation touchSession(")
-	b.WriteString("sessionId: ")
-	b.WriteString(quoteMemQL(args.SessionId))
-	if b.Len() > 22 {
-		b.WriteString(", ")
-	}
-	b.WriteString("payload: ")
-	b.WriteString(renderMemQLValue(args.Payload))
 	b.WriteString(")")
 	return b.String()
 }
@@ -16271,9 +14642,6 @@ type UpdateMyPreferencesArgs struct {
 	// Interactive Mode pace preset.
 	// Enum: quick | steady | deliberate
 	InteractivePace string
-	// Per-user mic mode preference for Polyphon rooms.
-	// Enum: toggle | continuous
-	VoiceMode string
 }
 
 // UpdateMyPreferences calls the engine mutation updateMyPreferences.
@@ -16352,13 +14720,6 @@ func UpdateMyPreferencesBuild(args UpdateMyPreferencesArgs) string {
 		b.WriteString("interactivePace: ")
 		b.WriteString(quoteMemQL(args.InteractivePace))
 	}
-	if args.VoiceMode != "" {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("voiceMode: ")
-		b.WriteString(quoteMemQL(args.VoiceMode))
-	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -16421,35 +14782,6 @@ func UpdateNoteBuild(args UpdateNoteArgs) string {
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString(")")
-	return b.String()
-}
-
-// UpdateNumberStatus -- Update a DID's lifecycle status (e.g. on release).
-//
-// Bound concept: v1:telephony:number (machine-readable: BoundConcepts["updateNumberStatus"] in generated_concepts.go).
-type UpdateNumberStatusArgs struct {
-	Id string
-	// Enum: active | releasing | released
-	Status string
-}
-
-// UpdateNumberStatus calls the engine mutation updateNumberStatus.
-func (qc *QueryClient) UpdateNumberStatus(ctx context.Context, args UpdateNumberStatusArgs) (*Result, error) {
-	call := UpdateNumberStatusBuild(args)
-	return qc.executeNamed(ctx, "updateNumberStatus", call)
-}
-
-func UpdateNumberStatusBuild(args UpdateNumberStatusArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation updateNumberStatus(")
-	b.WriteString("id: ")
-	b.WriteString(quoteMemQL(args.Id))
-	if b.Len() > 28 {
-		b.WriteString(", ")
-	}
-	b.WriteString("status: ")
-	b.WriteString(quoteMemQL(args.Status))
 	b.WriteString(")")
 	return b.String()
 }
@@ -16548,131 +14880,6 @@ func UpdatePackageSourceBuild(args UpdatePackageSourceArgs) string {
 		b.WriteString("credentialId: ")
 		b.WriteString(quoteMemQL(args.CredentialId))
 	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// UpdateParticipantPresence -- Upsert a participant presence snapshot for multi-client status consistency.
-//
-// Bound concept: v1:cognition:participant:presence (machine-readable: BoundConcepts["updateParticipantPresence"] in generated_concepts.go).
-type UpdateParticipantPresenceArgs struct {
-	PresenceId    string
-	ParticipantId string
-	PartitionId   string
-	// Enum: idle | listening | thinking | typing | responding | working | waiting | needs_human | needs_clarification | paused | error | using_tool | researching | investigating
-	State           string
-	Label           string
-	Reason          string
-	SinceAt         string
-	LastUpdatedAt   string
-	LastUtteranceId string
-	LastError       string
-	Intent          map[string]any
-}
-
-// UpdateParticipantPresence calls the engine mutation updateParticipantPresence.
-func (qc *QueryClient) UpdateParticipantPresence(ctx context.Context, args UpdateParticipantPresenceArgs) (*Result, error) {
-	call := UpdateParticipantPresenceBuild(args)
-	return qc.executeNamed(ctx, "updateParticipantPresence", call)
-}
-
-func UpdateParticipantPresenceBuild(args UpdateParticipantPresenceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation updateParticipantPresence(")
-	if args.PresenceId != "" {
-		b.WriteString("presenceId: ")
-		b.WriteString(quoteMemQL(args.PresenceId))
-	}
-	if b.Len() > 35 {
-		b.WriteString(", ")
-	}
-	b.WriteString("participantId: ")
-	b.WriteString(quoteMemQL(args.ParticipantId))
-	if b.Len() > 35 {
-		b.WriteString(", ")
-	}
-	b.WriteString("partitionId: ")
-	b.WriteString(quoteMemQL(args.PartitionId))
-	if b.Len() > 35 {
-		b.WriteString(", ")
-	}
-	b.WriteString("state: ")
-	b.WriteString(quoteMemQL(args.State))
-	if b.Len() > 35 {
-		b.WriteString(", ")
-	}
-	b.WriteString("label: ")
-	b.WriteString(quoteMemQL(args.Label))
-	if args.Reason != "" {
-		if b.Len() > 35 {
-			b.WriteString(", ")
-		}
-		b.WriteString("reason: ")
-		b.WriteString(quoteMemQL(args.Reason))
-	}
-	if args.SinceAt != "" {
-		if b.Len() > 35 {
-			b.WriteString(", ")
-		}
-		b.WriteString("sinceAt: ")
-		b.WriteString(quoteMemQL(args.SinceAt))
-	}
-	if args.LastUpdatedAt != "" {
-		if b.Len() > 35 {
-			b.WriteString(", ")
-		}
-		b.WriteString("lastUpdatedAt: ")
-		b.WriteString(quoteMemQL(args.LastUpdatedAt))
-	}
-	if args.LastUtteranceId != "" {
-		if b.Len() > 35 {
-			b.WriteString(", ")
-		}
-		b.WriteString("lastUtteranceId: ")
-		b.WriteString(quoteMemQL(args.LastUtteranceId))
-	}
-	if args.LastError != "" {
-		if b.Len() > 35 {
-			b.WriteString(", ")
-		}
-		b.WriteString("lastError: ")
-		b.WriteString(quoteMemQL(args.LastError))
-	}
-	if args.Intent != nil {
-		if b.Len() > 35 {
-			b.WriteString(", ")
-		}
-		b.WriteString("intent: ")
-		b.WriteString(renderMemQLValue(args.Intent))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// UpdateParticipantStatus -- Update a participant record (typically status). Read-merges the existing row (update()): only the fields in `payload` change; every omitted field inherits from the persisted row instead of being wiped (memql#1628 class). The participant row must already exist (created on join).
-//
-// Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["updateParticipantStatus"] in generated_concepts.go).
-type UpdateParticipantStatusArgs struct {
-	ParticipantId string
-	Payload       map[string]any
-}
-
-// UpdateParticipantStatus calls the engine mutation updateParticipantStatus.
-func (qc *QueryClient) UpdateParticipantStatus(ctx context.Context, args UpdateParticipantStatusArgs) (*Result, error) {
-	call := UpdateParticipantStatusBuild(args)
-	return qc.executeNamed(ctx, "updateParticipantStatus", call)
-}
-
-func UpdateParticipantStatusBuild(args UpdateParticipantStatusArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation updateParticipantStatus(")
-	b.WriteString("participantId: ")
-	b.WriteString(quoteMemQL(args.ParticipantId))
-	if b.Len() > 33 {
-		b.WriteString(", ")
-	}
-	b.WriteString("payload: ")
-	b.WriteString(renderMemQLValue(args.Payload))
 	b.WriteString(")")
 	return b.String()
 }
@@ -17311,62 +15518,6 @@ func UpdateSenderIdentityBuild(args UpdateSenderIdentityArgs) string {
 		b.WriteString("notes: ")
 		b.WriteString(quoteMemQL(args.Notes))
 	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// UpdateSessionDevices -- Update a session record's device state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.
-//
-// Bound concept: v1:cognition:session (machine-readable: BoundConcepts["updateSessionDevices"] in generated_concepts.go).
-type UpdateSessionDevicesArgs struct {
-	SessionId string
-	Payload   map[string]any
-}
-
-// UpdateSessionDevices calls the engine mutation updateSessionDevices.
-func (qc *QueryClient) UpdateSessionDevices(ctx context.Context, args UpdateSessionDevicesArgs) (*Result, error) {
-	call := UpdateSessionDevicesBuild(args)
-	return qc.executeNamed(ctx, "updateSessionDevices", call)
-}
-
-func UpdateSessionDevicesBuild(args UpdateSessionDevicesArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation updateSessionDevices(")
-	b.WriteString("sessionId: ")
-	b.WriteString(quoteMemQL(args.SessionId))
-	if b.Len() > 30 {
-		b.WriteString(", ")
-	}
-	b.WriteString("payload: ")
-	b.WriteString(renderMemQLValue(args.Payload))
-	b.WriteString(")")
-	return b.String()
-}
-
-// UpdateSessionStreams -- Update a session record's stream state. Read-merges the existing row (update()): only the fields in `payload` change; the @required fields (participantId, partitionId, ...) and every other omitted field inherit from the persisted row instead of being wiped (memql#1628). The session row must already exist.
-//
-// Bound concept: v1:cognition:session (machine-readable: BoundConcepts["updateSessionStreams"] in generated_concepts.go).
-type UpdateSessionStreamsArgs struct {
-	SessionId string
-	Payload   map[string]any
-}
-
-// UpdateSessionStreams calls the engine mutation updateSessionStreams.
-func (qc *QueryClient) UpdateSessionStreams(ctx context.Context, args UpdateSessionStreamsArgs) (*Result, error) {
-	call := UpdateSessionStreamsBuild(args)
-	return qc.executeNamed(ctx, "updateSessionStreams", call)
-}
-
-func UpdateSessionStreamsBuild(args UpdateSessionStreamsArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation updateSessionStreams(")
-	b.WriteString("sessionId: ")
-	b.WriteString(quoteMemQL(args.SessionId))
-	if b.Len() > 30 {
-		b.WriteString(", ")
-	}
-	b.WriteString("payload: ")
-	b.WriteString(renderMemQLValue(args.Payload))
 	b.WriteString(")")
 	return b.String()
 }

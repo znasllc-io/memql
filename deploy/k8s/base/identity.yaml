@@ -117,8 +117,13 @@ spec:
           # SIGKILLed at the grace deadline and orphaning Postgres backends.
           lifecycle:
             preStop:
-              exec:
-                command: ["/bin/sh", "-c", "sleep 5"]
+              # The NATIVE sleep action, not `exec: /bin/sh -c sleep 5`. The
+              # runtime image is distroless and has no shell, so the exec form
+              # fails on every drain -- silently, because a failed preStop is
+              # logged as an event and the pod is terminated anyway. Requires
+              # k8s >= 1.30 (GA 1.32); the local cluster pins v1.32.
+              sleep:
+                seconds: 5
           ports:
             - { name: http, containerPort: 8085 }
             - { name: grpc, containerPort: 50051 }
@@ -167,8 +172,8 @@ spec:
             # and there is no rotate control anywhere. Rotate by writing a new
             # seed to the Key Vault entry the ExternalSecret names and rolling.
             # That path never populates the JWKS overlap window, so it is a HARD
-            # SWAP: every unexpired access token, mesh node token,
-            # service-account JWT and voice-agent JWT dies at once (opaque
+            # SWAP: every unexpired access token, mesh node token and
+            # service-account JWT dies at once (opaque
             # credentials -- refresh tokens, PATs, worker tokens -- survive).
             # Follow the procedure and the blast-radius table in
             # docs/public/operate/auth/identity-service.md#rotating-the-signing-key.

@@ -5,8 +5,8 @@ name: build-engine-images
 # build off the operator laptop onto native linux/amd64 CI.
 #
 # Platform consolidation (#2472 Step 2 / #2484): the engine now ships EVERY node
-# type as a product-agnostic image -- identity, voice, mcp, and the mesh nodes
-# bff / cognition / agent / planner / workbench. Product DSL is delivered at
+# type as a product-agnostic image -- identity, mcp, edge, and the mesh nodes
+# bff / agent / planner / workbench. Product DSL is delivered at
 # runtime via MEMQL_DSL_PATH (a bundle image's init-container -> shared volume),
 # so these nodes no longer need to be carrier-built. A product's own repo builds
 # only its tiny DSL-bundle image + its SPA.
@@ -57,7 +57,7 @@ env:
   # has to be able to pull them (memql#3572). ACR is private and reachable only
   # by the deployment that owns it; an operator installing a local cluster has
   # no Azure credentials and no reason to acquire any. The alternative was
-  # building all eight node types on their machine at install time.
+  # building all seven node types on their machine at install time.
   #
   # One build, two tags: the image is identical, so there is no second thing to
   # keep in step and no way for the two registries to disagree.
@@ -85,52 +85,41 @@ jobs:
         # rather than defaulted, because `FROM ${PORTAL_DIST_STAGE}` cannot
         # take an empty string and a missing matrix key renders as one.
         include:
-          # identity: CGO-free; matches build_one (no --target -> the
-          # Dockerfile's last stage). voice: CGO + the voice-runtime stage.
+          # EVERY entry names its `target` explicitly. Leaving it empty resolved
+          # to the Dockerfile's LAST stage, which is how every released image
+          # came to be built from the CGO/libopus `voice-runtime` stage while
+          # every locally built one was distroless -- a divergence no manifest
+          # or log line said out loud.
           - node: identity
-            cgo: "0"
-            target: ""
+            target: runtime
             portal: portal-skip
-          - node: voice
-            cgo: "1"
-            target: voice-runtime
-            portal: portal-skip
-          # mcp: engine-built (no product DSL), CGO-free -- same shape as
-          # identity. Remote MCP node (memql#1554); CI gap fixed in #1581.
+          # mcp: engine-built (no product DSL) -- same shape as identity.
+          # Remote MCP node (memql#1554); CI gap fixed in #1581.
           - node: mcp
-            cgo: "0"
-            target: ""
+            target: runtime
             portal: portal-skip
           # Platform consolidation (#2472 Step 2): every node type now ships as
           # a PRODUCT-AGNOSTIC engine image. Product DSL is delivered at runtime
           # via MEMQL_DSL_PATH (dsl.MountRuntimeDomainsFromEnv, #2484), so these
-          # nodes no longer need to be carrier-built. CGO-free, default runtime
-          # stage -- same shape as identity/mcp.
+          # nodes no longer need to be carrier-built. Same shape as
+          # identity/mcp.
           #
           # bff no longer carries the portal bundle (memql#3711) -- the portal
           # is site #1, served by the edge at its own hostname, not a /portal/
           # sub-path of the bff.
           - node: bff
-            cgo: "0"
-            target: ""
-            portal: portal-skip
-          - node: cognition
-            cgo: "0"
-            target: ""
+            target: runtime
             portal: portal-skip
           - node: agent
-            cgo: "0"
-            target: ""
+            target: runtime
             portal: portal-skip
           - node: planner
-            cgo: "0"
-            target: ""
+            target: runtime
             portal: portal-skip
           # workbench: the one node that runs somebody else's build command
           # (epic memql#4900), so it takes the stage carrying a Node
           # toolchain, git and the non-root uid the build runs as.
           - node: workbench
-            cgo: "0"
             target: workbench-runtime
             portal: portal-skip
           # edge: serves every hosted site, including the portal (site #1,
@@ -138,8 +127,7 @@ jobs:
           # staging/prod carry the same bundle the local build path already
           # does (memql#3714).
           - node: edge
-            cgo: "0"
-            target: ""
+            target: runtime
             portal: portal-build
     steps:
       - name: Checkout
@@ -232,7 +220,6 @@ jobs:
           # a fact an operator needs rather than one to paper over.
           build-args: |
             BUILD_TAGS=${{ matrix.node }}
-            CGO_ENABLED=${{ matrix.cgo }}
             PORTAL_DIST_STAGE=${{ matrix.portal }}
             MEMQL_RELEASE=${{ inputs.version }}
             MEMQL_COMMIT=${{ github.sha }}

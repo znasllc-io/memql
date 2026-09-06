@@ -240,16 +240,6 @@ func (a *App) cluster() {
 		// deliberately not swept (see pgOutboxStore.SweepOlderThan).
 		a.Dependencies = append(a.Dependencies, node.NewOutboxRetention(dbGetter, a.Logger))
 
-		isBFF := nodeIdentity.Type == node.NodeTypeBFF
-		if crd := node.NewChatReplyDelivery(nodeIdentity, substrate, a.eventBus, isBFF, a.Logger); crd != nil {
-			if isBFF && eventBridge != nil {
-				eventBridge.SuppressInboundChatReply(true)
-			}
-			a.Dependencies = append(a.Dependencies, crd)
-			a.Logger.Info("chat-reply path routed through durable delivery substrate",
-				"node_id", nodeIdentity.ID, "node_type", string(nodeIdentity.Type), "is_bff", isBFF)
-		}
-
 		// Plan-lifecycle path on the durable substrate (memql#1495): plan
 		// graph events (graph.node.created/updated.v1:planner:plan) get a real
 		// at-least-once delivery leg, mirroring ChatReplyDelivery. Before this
@@ -390,25 +380,6 @@ func (a *App) cluster() {
 				nodeServer.SetAiForwardHandler(a.grpcServer.AiForwardHandler())
 			}
 
-			// Agent-side client-tool RPC return channel (memql#1265): the agent
-			// serves each in-flight turn's logical key so a ClientToolResult
-			// cognition publishes there fires the local waiter over the durable
-			// substrate, surviving cognition<->agent connection churn (the #1245
-			// fix). Wired only on agent binaries where the substrate exists; the
-			// firer resolves to the lazily-built grpc service.
-			if nodeIdentity.Type == node.NodeTypeAgent && a.deliverySubstrate != nil && a.grpcServer != nil {
-				if ctrs := node.NewClientToolResultServer(
-					a.deliverySubstrate,
-					a.grpcServer.ClientToolResultFirer(),
-					nodeIdentity.ID,
-					a.Logger,
-				); ctrs != nil {
-					a.grpcServer.SetClientToolResultServer(ctrs)
-					a.Logger.Info("agent: client-tool RPC return channel served over delivery substrate",
-						"node_id", nodeIdentity.ID)
-				}
-			}
-
 			// Cognition + Planner both originate AgentGenerateTurnMsg
 			// forwards to agent peers (cognition for chat-driven
 			// turns, planner for Plan-execution dispatch). Each gets
@@ -416,7 +387,7 @@ func (a *App) cluster() {
 			// agent peers. The router is also exposed to the
 			// integration of the same name so it can Forward() from
 			// its handlers.
-			if nodeIdentity.Type == node.NodeTypeCognition || nodeIdentity.Type == node.NodeTypePlanner {
+			if nodeIdentity.Type == node.NodeTypePlanner {
 				forwarder := memqlgrpc.NewAiForwardRouter(peerMgr, a.Logger)
 				a.agentForwarder = forwarder
 				if nodeServer != nil {
@@ -447,23 +418,8 @@ func (a *App) cluster() {
 				// PeerManager + node topology resolved. Each helper
 				// is build-tagged for its node type and reads back
 				// the integration via type assertion.
-				switch nodeIdentity.Type {
-				case node.NodeTypeCognition:
-					a.attachAgentForwarderToCognition(forwarder)
-				case node.NodeTypePlanner:
+				if nodeIdentity.Type == node.NodeTypePlanner {
 					a.attachAgentForwarderToPlanner(forwarder)
-				}
-
-				// Cognition-side client-tool RPC return leg (memql#1265): replace
-				// the churn-fragile ForwardContinuation with a substrate-RPC Call
-				// addressed to the agent turn's logical key. Wired only on
-				// cognition (the relay's host) where the substrate exists.
-				if nodeIdentity.Type == node.NodeTypeCognition && a.deliverySubstrate != nil {
-					if client := node.NewClientToolResultClient(a.deliverySubstrate, nodeIdentity.ID, a.Logger); client != nil {
-						a.attachClientToolResultClientToCognition(client)
-						a.Logger.Info("cognition: client-tool RPC return leg routed over delivery substrate",
-							"node_id", nodeIdentity.ID)
-					}
 				}
 			}
 

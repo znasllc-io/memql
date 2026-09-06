@@ -31,8 +31,6 @@ func envelopeBytes(t *testing.T, payload any) []byte {
 		env.Payload = p
 	case *memqlv1.MemqlClientMessage_AgentPreemptTurn:
 		env.Payload = p
-	case *memqlv1.MemqlClientMessage_ClientToolResult:
-		env.Payload = p
 	case *memqlv1.MemqlClientMessage_AiTranscribeStreamChunk:
 		env.Payload = p
 	default:
@@ -97,7 +95,6 @@ func TestHandleForwardedRequestDropsARefusedContinuation(t *testing.T) {
 		payload any
 	}{
 		{"AgentPreemptTurn", &memqlv1.MemqlClientMessage_AgentPreemptTurn{AgentPreemptTurn: &memqlv1.AgentPreemptTurnMsg{RequestId: "req-parent"}}},
-		{"ClientToolResult", &memqlv1.MemqlClientMessage_ClientToolResult{ClientToolResult: &memqlv1.ClientToolResult{CallId: "c1"}}},
 		{"AiTranscribeStreamChunk", &memqlv1.MemqlClientMessage_AiTranscribeStreamChunk{AiTranscribeStreamChunk: &memqlv1.AiTranscribeStreamChunk{RequestId: "req-parent"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -225,17 +222,14 @@ func TestHandleForwardedRequestRefusesWhenClaimsDisagreeWithTheAssertion(t *test
 // table is a test failure rather than a silently mis-shaped refusal.
 func TestForwardPayloadClassCoversEveryDispatchedPayload(t *testing.T) {
 	dispatched := []any{
-		&memqlv1.MemqlClientMessage_AiTranscribe{},
 		&memqlv1.MemqlClientMessage_AiTranscribeStreamStart{},
 		&memqlv1.MemqlClientMessage_AiTranscribeStreamChunk{},
 		&memqlv1.MemqlClientMessage_AiTranscribeStreamEnd{},
-		&memqlv1.MemqlClientMessage_AiSpeech{},
 		&memqlv1.MemqlClientMessage_AiChat{},
 		&memqlv1.MemqlClientMessage_AiSuggest{},
 		&memqlv1.MemqlClientMessage_ListTools{},
 		&memqlv1.MemqlClientMessage_CallTool{},
 		&memqlv1.MemqlClientMessage_AgentGenerateTurn{},
-		&memqlv1.MemqlClientMessage_ClientToolResult{},
 		&memqlv1.MemqlClientMessage_AgentPreemptTurn{},
 	}
 	for _, p := range dispatched {

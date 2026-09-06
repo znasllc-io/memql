@@ -35,15 +35,15 @@ The canonical post-migration shape is the only one the engine accepts:
 ## Authoring example
 
 ```memql
-use cognition.concepts.{ participant }
-use cognition.shapes.{ participantFull }
-use common.traits.{ isActiveRecord }
+use library.concepts.{ artifact }
+use library.shapes.{ artifactFull }
+use common.traits.{ isNotDeleted }
 
-@description("Get space participants")
-query participant spaceParticipants {
-  args   { spaceId string @required }
-  filter spaceId == args.spaceId && isActiveRecord
-  shape  participantFull
+@description("Get a user's Library artifacts by lens")
+query artifact libraryArtifactsByLens {
+  args   { lens string @required }
+  filter ownerUserId == actor.userId && lens == args.lens && isNotDeleted
+  shape  artifactFull
 }
 ```
 

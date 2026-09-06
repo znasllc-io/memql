@@ -45,9 +45,9 @@ enforced copy; this table is the reasoning.
 
 | Kind | Names | Why |
 |---|---|---|
-| **integration** (7) | `avatardirect`, `email`, `openairealtime`, `shopify`, `storage`, `telephony`, `voice` | each makes an outbound call to a named third party's API |
+| **integration** (3) | `email`, `shopify`, `storage` | each makes an outbound call to a named third party's API |
 | **component** (8) | `auth`, `rbac`, `router`, `database`, `identity`, `timeutil`, `deployversion`, `embedding` | there is no MemQL with these switched off; turning one off does not remove a feature, it breaks the engine |
-| **pack** (12) | `chat`, `dailyspace`, `agents`, `library`, `knowledge`, `liveknowledge`, `actionSearch`, `similarity`, `files`, `workbench`, `harnessRecall`, `harnessTrace` | a product feature with a coherent "off" |
+| **pack** (10) | `agents`, `library`, `knowledge`, `liveknowledge`, `actionSearch`, `similarity`, `files`, `workbench`, `harnessRecall`, `harnessTrace` | a product feature with a coherent "off" |
 
 ### The four the epic left open
 
@@ -60,7 +60,9 @@ Each was decided by reading the source, not by preference.
   a second answer to one question.
 
 - **`dailyspace` → pack.** No HTTP anywhere in the package, and a user
-  preference for it already exists.
+  preference for it already existed. (The package has since been removed
+  with the cognition tree; the ruling is kept because it is the clearest
+  worked example of "no outbound call, therefore not a connector".)
 
 - **`workbench` → pack.** It holds an `http.Client`, and that is *not* the
   doc's test being met. `handleHTTPFetch` fetches a URL the model chooses at
@@ -81,10 +83,6 @@ Each was decided by reading the source, not by preference.
   a product feature over an email connector, so **pack**. It does not appear in
   `pluginKinds` because nothing registers it; that is why the guard's
   stale-row check exists rather than a fixed count.
-- **Voice and telephony** genuinely do talk to LiveKit and Telnyx. They are the
-  Shopify shape: **an integration (the transport) plus a pack (the product
-  feature)**. That split is what makes "we don't want audio" a toggle rather
-  than a rebuild.
 - **Harness** is already a pack and proves the mechanism works.
 
 ## What is done
@@ -117,9 +115,9 @@ modules read. Touches: `dsl/integrations/builtins.memql`,
 **2. Make the classifications real.** Today `pluginKinds` is a table a test
 enforces; it does not change what `/modules` enumerates. For a pack row to
 behave like a pack — to get the cluster-wide `v1:platform:packState` toggle for
-free — it needs a pack domain plus a `BindPluginToPack` call. Twelve of those,
-plus the `knowledge` and `voice`/`telephony` splits above. This is the bulk of
-the epic and the reason it was filed as a spike.
+free — it needs a pack domain plus a `BindPluginToPack` call. Ten of those,
+plus the `knowledge` split above. This is the bulk of the epic and the
+reason it was filed as a spike.
 
 **3. Move what is misplaced.** Sixteen packages under `integrations/` are not
 integrations. Whether they move is a separate question from what they are

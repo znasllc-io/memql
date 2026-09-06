@@ -8,16 +8,6 @@ export {
   type AiChatStreamHandle,
 } from "./chat.js";
 export {
-  aiSpeech,
-  type AiSpeechOptions,
-  type AiSpeechResult,
-} from "./speech.js";
-export {
-  aiTranscribe,
-  type AiTranscribeOptions,
-  type AiTranscribeResult,
-} from "./transcribe.js";
-export {
   aiSuggest,
   type AiSuggestOptions,
   type AiSuggestResult,

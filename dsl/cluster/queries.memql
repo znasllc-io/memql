@@ -5,7 +5,7 @@
 
 use deployment.specs.{ requiresOwner }
 
-/// Returns all registered cluster node types (bff, voice, cognition, agent, planner, ...)
+/// Returns all registered cluster node types (bff, agent, planner, ...)
 @unbounded("node-type registry -- a tiny bounded topology set consumed whole")
 query nodeType clusterNodeTypes {
 }

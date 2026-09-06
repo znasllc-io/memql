@@ -19,7 +19,7 @@ package dslconformance
 //
 // Every literal name passed to QueryClient.ExecuteNamed inside test/clustere2e
 // must be a construct the ENGINE tree declares -- a query, mutation, logic or
-// builtin in dsl/. The generated SDK methods (qc.CreateNote, qc.SpaceUtterances,
+// builtin in dsl/. The generated SDK methods (qc.CreateNote, qc.PlansForSpace,
 // ...) are already compile-checked against the tree and need no gate; this
 // covers the escape hatch they do not.
 //

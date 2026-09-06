@@ -162,9 +162,6 @@ func TestAppSessionCredentialCannotPublishASiteBundle(t *testing.T) {
 	if httpResolvableClass(verifier.ClassServiceAccount) {
 		t.Error("service_account must not resolve an HTTP actor: its subject names a machine")
 	}
-	if httpResolvableClass(verifier.ClassVoiceAgent) {
-		t.Error("voice_agent must not resolve an HTTP actor: its subject names a process")
-	}
 	if !httpResolvableClass(verifier.ClassAppSession) {
 		t.Error("app_session must resolve an HTTP actor: its subject is a real user")
 	}
@@ -324,86 +321,6 @@ func TestUploadSessionRoutesResolveTheActorFromVerifiedClaims(t *testing.T) {
 // ---------------------------------------------------------------------------
 // the attachment route's ownership gate
 // ---------------------------------------------------------------------------
-
-// actorGatedAttachmentStore models what EngineAttachmentStore actually gets
-// from the engine: queryOwnedSpaceById pins ownerUserId == actor.userId, and
-// actor.userId binds from the AccessContext -- absent, the envelope DENIES and
-// the owner's own space reads as not-there. A stub that ignores the context
-// (like stubAttachmentStore) is exactly how this suite missed memql#4843.
-type actorGatedAttachmentStore struct {
-	owner        string
-	createdCount int
-	attachment   *AttachmentRow
-}
-
-func (s *actorGatedAttachmentStore) CallerOwnsSpace(ctx context.Context, _ string) (bool, error) {
-	ac, ok := auth.AccessFromContext(ctx)
-	return ok && ac != nil && strings.TrimSpace(ac.UserId) == s.owner, nil
-}
-
-func (s *actorGatedAttachmentStore) CreateAttachment(_ context.Context, _ AttachmentCreateParams) (json.RawMessage, error) {
-	s.createdCount++
-	return json.RawMessage(`{"id":"v1:common:attachment:new"}`), nil
-}
-
-func (s *actorGatedAttachmentStore) GetAttachment(ctx context.Context, _, _ string) (*AttachmentRow, error) {
-	if ac, ok := auth.AccessFromContext(ctx); !ok || ac == nil || strings.TrimSpace(ac.UserId) != s.owner {
-		return nil, nil
-	}
-	return s.attachment, nil
-}
-
-// The attachment upload's CallerOwnsSpace gate resolves the caller from
-// verified claims: the space owner's POST lands 201 instead of the opaque 404
-// an unresolvable actor produces.
-func TestAttachmentUploadResolvesTheActorForTheOwnershipCheck(t *testing.T) {
-	store := &actorGatedAttachmentStore{owner: verifiedSub}
-	h := NewAttachmentHandler(AttachmentHandlerOptions{Logger: quietLogger(), Store: store})
-
-	body, ct := uploadBody(t, "notes.md", "text/markdown", []byte("# hi\n"), nil)
-	req := httptest.NewRequest(http.MethodPost, "/spaces/v1:cognition:space:s1/attachments", body)
-	req.Header.Set("Content-Type", ct)
-	req = withVerifiedClaims(req, verifiedSub, "owner")
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 -- the ownership check must see the claims-resolved "+
-			"actor, or the owner's own space reads as not-there. body: %s", rec.Code, rec.Body.String())
-	}
-	if store.createdCount != 1 {
-		t.Fatalf("CreateAttachment called %d times, want 1", store.createdCount)
-	}
-}
-
-// The download half of the same route resolves the caller the same way.
-func TestAttachmentDownloadResolvesTheActorForTheOwnershipCheck(t *testing.T) {
-	store := &actorGatedAttachmentStore{
-		owner: verifiedSub,
-		attachment: &AttachmentRow{
-			ID: "att1", FileName: "birds.md", MimeType: "text/markdown",
-			BlobUrl:     "https://acct.blob.core.windows.net/c/spaces/s1/attachments/x/birds.md",
-			PartitionId: "v1:cognition:space:s1",
-		},
-	}
-	h := NewAttachmentHandler(AttachmentHandlerOptions{
-		Logger: quietLogger(), Store: store,
-		Downloader: &stubDownloader{data: []byte("# Ten birds")},
-	})
-
-	req := httptest.NewRequest(http.MethodGet,
-		"/spaces/v1:cognition:space:s1/attachments/v1:cognition:space:s1:att1", nil)
-	req = withVerifiedClaims(req, verifiedSub, "owner")
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200. body: %s", rec.Code, rec.Body.String())
-	}
-	if rec.Body.String() != "# Ten birds" {
-		t.Fatalf("body = %q, want the file bytes", rec.Body.String())
-	}
-}
 
 // ---------------------------------------------------------------------------
 // claimless requests keep their 401

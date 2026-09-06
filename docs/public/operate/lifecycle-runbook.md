@@ -83,7 +83,7 @@ The sequence:
    before it stops taking work.
 3. **Bounded in-flight drain** — the node waits up to
    `MEMQL_SHUTDOWN_GRACE_PERIOD` for active user streams
-   (`MemqlService.Stream` sessions; mesh/worker/voice infra streams don't count)
+   (`MemqlService.Stream` sessions; mesh/worker infra streams don't count)
    to reach zero. So a deploy never drops a turn mid-flight.
 4. **`Draining → Stopped` + Stop sweep** — anything still in flight at the
    deadline is cut off; the bounded `GracefulStop` (#1119) forces remaining
@@ -186,7 +186,7 @@ the work spine, not a module:
 build-tagged `clustere2e`, #1261. The gate asserts the #1259 invariant on two
 shapes:
 
-- **Single-event delivery** (`TestClusterCrossReplicaDelivery`): an utterance
+- **Single-event delivery** (`TestClusterCrossReplicaDelivery`): a graph row
   produced on one bff replica reaches a subscriber anchored on **every** bff
   replica, exactly once. RED-by-design on the pre-fix mesh; went **green** once
   #1264 migrated the chat-reply path onto the durable backbone.
@@ -198,10 +198,10 @@ shapes:
   streaming contract over the same substrate.
 
 Both are synthetic-event tests (no AI provider keys): the streamed turn drives a
-sequence of utterance rows whose ids encode their order, so ordering is
-observable without a live LLM.
+sequence of rows whose ids encode their order, so ordering is observable
+without a live LLM.
 
-**It gates the DEPLOY path, not the PR merge queue.** A full-cluster boot (~16
+**It gates the DEPLOY path, not the PR merge queue.** A full-cluster boot (~14
 containers, a cold-cache multi-image build, a 10m health wait) is heavy and
 flakier than a unit lane; a required check on `pull_request` would let one slow
 boot wedge the merge queue. So the workflow runs on the **deploy

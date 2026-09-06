@@ -134,27 +134,21 @@ var grpcSurface = map[string]bool{"/": true}
 //	MemqlWebsocketPaths     /memql/ws -- HTTP/1.1 with an Upgrade, not gRPC.
 //	                        Also reached through HandlerAuthorizedPaths(); named
 //	                        here because the mount is what makes it required.
-//	SpaceAttachmentPaths    POST /spaces/{id}/attachments, app/transport_attachments.go
 //	                        under `bff || agent`. Multipart, authenticated.
 //	ArtifactPaths           POST /artifacts + GET /artifacts/{id}/content,
 //	                        app/transport_artifacts.go under `bff` (memql#4341).
 //	                        Multipart in, bytes out; authenticated, so it is in
-//	                        no aggregate -- the same class as SpaceAttachmentPaths,
+//	                        no aggregate -- an authenticated route,
 //	                        which is what item 2 above is about. It emits TWO
 //	                        entries, /artifacts and /artifacts/, because the
 //	                        upload's own path has no trailing slash and traefik's
 //	                        PathPrefix(`/artifacts/`) would not match it.
-//	PolyphonRoomTokenPaths  app/transport_voice.go under `!agent && !planner`,
-//	PolyphonStatusPaths     which a bff build satisfies. Authenticated.
 var includedPathFuncs = map[string]func() []string{
 	"PublicPaths":            server.PublicPaths,
 	"HandlerAuthorizedPaths": server.HandlerAuthorizedPaths,
 	"SelfAuthenticatedPaths": server.SelfAuthenticatedPaths,
 	"MemqlWebsocketPaths":    server.MemqlWebsocketPaths,
-	"SpaceAttachmentPaths":   server.SpaceAttachmentPaths,
 	"ArtifactPaths":          server.ArtifactPaths,
-	"PolyphonRoomTokenPaths": server.PolyphonRoomTokenPaths,
-	"PolyphonStatusPaths":    server.PolyphonStatusPaths,
 }
 
 // declaration pairs a reason with the function the reason is about, so the two
@@ -235,8 +229,7 @@ var reachedThroughAggregate = map[string]declaration{
 // The evidence takes THREE shapes, and the third was learned from a member
 // rather than anticipated:
 //
-//   - build tags on the MOUNT, so no bff-tagged build registers the route
-//     (AudioWebsocketPaths);
+//   - build tags on the MOUNT, so no bff-tagged build registers the route;
 //   - a retired surface that returns nothing at all (AIHTTPPaths);
 //   - a declaration that is unconditionally compiled while its CONTRIBUTION to
 //     an aggregate is build-tag scoped (EdgePaths).
@@ -248,10 +241,6 @@ var reachedThroughAggregate = map[string]declaration{
 // exhaustiveness gate can still see it. What matters for membership is that the
 // BFF does not serve the path, not where the tag that arranges it happens to sit.
 var notServedByTheBFF = map[string]declaration{
-	"AudioWebsocketPaths": {"/memql/audio is mounted only at app/transport_audio.go under " +
-		"`//go:build agent || voice`, so a bff-tagged build does not serve it. Neither node " +
-		"type has a front-door host either -- the media plane is deliberately separate.",
-		server.AudioWebsocketPaths},
 	"AIHTTPPaths": {"returns nil: the legacy /si/* HTTP surface is retired in favour of " +
 		"MemqlService.Stream (component/server/nethttp.go).", server.AIHTTPPaths},
 	// Caught by TestEveryServerPathDeclarationIsClassified in production rather

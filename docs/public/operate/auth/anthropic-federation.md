@@ -200,8 +200,8 @@ kubectl get secret memql-secrets -n memql -o json \
   | jq 'del(.data.MEMQL_AI_ANTHROPIC_API_KEY)' \
   | kubectl apply -f -
 
-kubectl rollout restart -n memql deploy/agent deploy/cognition deploy/planner \
-  deploy/bff deploy/workbench deploy/voice deploy/edge deploy/mcp
+kubectl rollout restart -n memql deploy/agent deploy/planner deploy/bff \
+  deploy/workbench deploy/edge deploy/mcp
 
 kubectl exec -n memql deploy/agent -- /app/memql provider-auth check
 ```

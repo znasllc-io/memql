@@ -20,7 +20,6 @@ was deleted once its substance was folded in here and elsewhere).
 1. [SI → AI rename](01-epic-si-to-ai-rename.md)
 2. [Platform / plugin architecture](02-epic-platform-plugin.md)
 3. Decouple the product from core (no surviving epic doc)
-4. [Telephony into core](04-epic-telephony.md)
 
 ---
 
@@ -75,12 +74,10 @@ Each epic is a separate working session. Within an epic, issues tagged
 | **S1** | 1 — rename | now | (runs mostly solo to avoid merge churn) |
 | **S2** | 2 — plugin | **G1** | S3-prep |
 | **S3** | 3 — decouple | **G1** for prep; **G2** for core re-pointing | S2 |
-| **S4** | 4 — telephony | **G3** | — |
 
 Maximum concurrency: after **G1**, S2 (plugin) and S3-prep (inventory + moving
 pure-the product concepts that don't touch partition) run **together**. S3's
-heavy `spaceId → partitionId` re-pointing waits on **G2** from S2. S4 waits on
-**G3**.
+heavy `spaceId → partitionId` re-pointing waits on **G2** from S2.
 
 ---
 
@@ -91,7 +88,6 @@ heavy `spaceId → partitionId` re-pointing waits on **G2** from S2. S4 waits on
 | 1 — rename | `memql` (core), `the product carrier repo`, `memql-cockpit`, `the product` (frontend gen) |
 | 2 — plugin | `memql` |
 | 3 — decouple | `memql` (extract from), `the product carrier repo` (move into) |
-| 4 — telephony | `memql` |
 
 ---
 

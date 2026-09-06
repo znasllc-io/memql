@@ -63,12 +63,7 @@ func TestEvaluateRouting_ForwardRules(t *testing.T) {
 	}{
 		{"graph.node.created.v1:cluster:node", true, true, ""},
 		{"graph.node.updated.v1:cluster:spawnEvent", true, true, ""},
-		{"graph.node.created.v1:cognition:participant", true, true, ""},
-		{"graph.node.updated.v1:cognition:utterance", true, true, ""},
-		// #1412 regression: the voice gate directive must reach the BFF's
-		// per-turn waiter across the mesh; default-deny stranded it on the
-		// cognition node and every gate-path voice turn timed out.
-		{"voice.gate.directive", true, false, NodeTypeBFF},
+		{"graph.node.updated.v1:library:artifact", true, true, ""},
 	}
 
 	for _, tt := range tests {
@@ -143,8 +138,7 @@ func TestEvaluateRouting_CacheInvalidateBroadcast(t *testing.T) {
 		"v1:agents:agentRole",
 		"v1:skills:skill",
 		"v1:router:budget",
-		"v1:cognition:utterance",
-		"v1:cognition:space",        // default-cached, never had a per-concept cache rule
+		"v1:library:artifact",
 		"v1:knowledge:document",     // arbitrary concept -- broadcast covers it
 		"v1:somenamespace:whatever", // even a concept the engine has never seen
 	}
@@ -196,8 +190,8 @@ func TestEvaluateRouting_PreconditionMissBroadcast(t *testing.T) {
 // the old approach carried -- e.g. reRouteNeedsAgentOnAgentCreate on
 // v1:agents:agent, memql#1396).
 //
-// NOTE: v1:cognition:* create/update stays forwarded by the PRE-EXISTING broad
-// cognition rules (cognition's own delivery, not cache).
+// NOTE: the cognition rules this note used to describe went with the cognition
+// node type (epic memql#4988).
 //
 // # What memql#4542 changed here, and what it deliberately did not
 //
@@ -205,7 +199,7 @@ func TestEvaluateRouting_PreconditionMissBroadcast(t *testing.T) {
 // topics the retired rules used to forward and required all of them to be
 // dark. That was sound while nothing else wanted them -- and it stopped being
 // sound the moment something did. memql#4542 added browser-reach rules for
-// v1:agents:* (the Agents view and Nexus) and for cognition DELETES (rows that
+// v1:agents:* (the Agents view and Nexus) and for DELETES (rows that
 // vanished everywhere except the screen), so several of those topics now
 // forward again for a reason that has nothing to do with caching.
 //
@@ -247,7 +241,7 @@ func TestEvaluateRouting_PerConceptCacheRulesRetired(t *testing.T) {
 	for _, topic := range []string{
 		"graph.node.created.v1:agents:agent",
 		"graph.node.updated.v1:agents:agentAuthorization",
-		"graph.node.deleted.v1:cognition:utterance",
+		"graph.node.deleted.v1:library:artifact",
 	} {
 		if d := evaluateRouting(rules, topic); !d.Forward {
 			t.Errorf("topic %q must be forwarded -- memql#4542 added a reasoned browser-reach rule for it; losing that rule freezes the surface that subscribes to it", topic)

@@ -965,13 +965,6 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, fmt.Errorf("canonicalize relationship fields: %w", err)
 	}
 
-	// Validate structured action utterances (limits + allowlist support).
-	if conceptMeta.Name == memorynodes.ConceptCognitionUtterance {
-		if err := validateCognitionActionUtterancePayload(payload); err != nil {
-			return nil, meta, err
-		}
-	}
-
 	conceptDefs := e.relationshipDefinitionsForConcept(conceptMeta.Name)
 
 	if mutation.ParentRef != nil {
@@ -1017,19 +1010,6 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	actor, err := mutationActor(ctx)
 	if err != nil {
 		return nil, meta, err
-	}
-	if conceptMeta.Name == memorynodes.ConceptCognitionUtterance {
-		if err := e.validateCognitionUtteranceWriteAuthorization(ctx, payload, actor); err != nil {
-			return nil, meta, err
-		}
-	}
-	// AI-participant guard: server-stamps forUserId, enforces per-user
-	// 3-cap, and protects the pinned owner GA from removal. Skips human
-	// participants. See validateAndStampParticipantPayload.
-	if conceptMeta.Name == memorynodes.ConceptCognitionParticipant {
-		if err := e.validateAndStampParticipantPayload(ctx, payload, mutation.ID, actor); err != nil {
-			return nil, meta, err
-		}
 	}
 	// Agent-role lock guard: rejects writes that would remove any id
 	// in the agent's role.lockedDomainIds / lockedToolSlugs from the

@@ -231,7 +231,7 @@ From `go list -json ./...` over 182 packages, aggregated to area level:
 | `wire` | `component/grpc/gen`, `node/gen`, `bus/gen` | **Independent** |
 | `base` | `core/*`, the 5 extracted L0 leaves, `language/{annotations,ast,dslclause}`, `core/audio` (from `integrations/audio`), `component/{auth,bus,events,safety}` | Lockstep |
 | `engine` | `component/memql`, `language`, `database`, `actions`, `harness`, `dsl` | **Independent** |
-| `platform` | `component/node`, `polyphon`, `identity` | Lockstep |
+| `platform` | `component/node`, `identity` | Lockstep |
 | `integrations` | `integrations/*` | Lockstep |
 | `server-grpc` / `server-http` / `server-mcp` | `component/grpc`, `component/server`, `component/mcp` | Lockstep |
 | `app` | `app/`, `main.go`, `cmd/*` | Not published |
@@ -255,7 +255,7 @@ matches. Read as tiers:
 | tier | modules |
 |---|---|
 | `wire` | `component/{grpc,node,bus}/gen` |
-| `base` | `core`, `component/{architecture,auth,bus,config,envregistry,events,fileprocessor,healing,metadata,metrics,observe,planner,polyphon,provenance,safety,secret}`, `component/language/{annotations,ast,dslclause}`, `docs` |
+| `base` | `core`, `component/{architecture,auth,bus,config,envregistry,events,fileprocessor,healing,metadata,metrics,observe,planner,provenance,safety,secret}`, `component/language/{annotations,ast,dslclause}`, `docs` |
 | `engine` | `component/{language,database,harness,actions,memql}`, `dsl` |
 | `platform` | `component/{identity,node}`, `integrations/{email,openai,stt}` |
 | between platform and the servers | `component/{deploycontrol,router,service,worker,mcp,outbound,automations}`, `component/identity/admin`, `integrations` |
@@ -405,7 +405,7 @@ including the downstream closure required by D2 invariant 2.
 | `wire` | `**/*.proto`, `component/*/gen/**` | everything |
 | `base` | `core/**`, `component/language/{annotations,ast,dslclause}/**`, the 5 extracted leaves, `component/{auth,bus,events,safety}/**` | everything above base |
 | `engine` | `component/{memql,language,database,actions,harness}/**`, `dsl/**` | engine, platform, integrations, all servers, app |
-| `platform` | `component/{node,polyphon,identity}/**` | platform, integrations, all servers, app |
+| `platform` | `component/{node,identity}/**` | platform, integrations, all servers, app |
 | `integrations` | `integrations/**` | integrations, app |
 | `server-grpc` | `component/grpc/**` (excl. `gen`) | server-grpc, app |
 | `server-http` | `component/server/**` | server-http, app |
@@ -549,12 +549,11 @@ win. See Open Items.
 ./component/memql/...      (342 test files)
 ./component/automations/... (100)
 ./component/grpc/...        (42)
-./integrations/cognition/... (14)
 ./integrations/planner/...   (45)
 ./examples/referencepack/...
 ```
 
-That is 543+ test files compiled and executed in both jobs. In `go-checks`
+That is 529+ test files compiled and executed in both jobs. In `go-checks`
 the DB-gated cases skip (no `MEMQL_DATABASE_DSN`, no `MEMQL_REQUIRE_DB`), but
 the packages still compile and their non-DB tests still run.
 

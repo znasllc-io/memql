@@ -114,10 +114,10 @@ func TestDocsDoNotReferencePrefixedConstructNames(t *testing.T) {
 	// the probe goes stale, and aborting here would suppress every real doc
 	// violation below. A stale probe should be noisy, not blinding.
 	for _, probe := range []struct{ written, want string }{
-		{"queryRecordsByState", "recordsByState"},     // dsl/data/queries.memql
-		{"mutationRevokeWorker", "revokeWorker"},      // dsl/worker/mutations.memql
-		{"logicBootstrapSession", "bootstrapSession"}, // dsl/cognition/logic.memql
-		{"queryPATIdentityById", "patIdentityById"},   // dsl/identity/queries.memql -- acronym path
+		{"queryRecordsByState", "recordsByState"},       // dsl/data/queries.memql
+		{"mutationRevokeWorker", "revokeWorker"},        // dsl/worker/mutations.memql
+		{"logicConflictDetection", "conflictDetection"}, // dsl/data/logic.memql
+		{"queryPATIdentityById", "patIdentityById"},     // dsl/identity/queries.memql -- acronym path
 	} {
 		if got, _, ok := docsResolvePrefixed(probe.written, declared); !ok || got != probe.want {
 			t.Errorf("resolver self-check failed for %q: got (%q, %v), want (%q, true) -- "+

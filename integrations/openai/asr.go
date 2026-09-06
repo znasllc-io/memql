@@ -12,14 +12,13 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/znasllc-io/memql/component/polyphon"
 	"github.com/znasllc-io/memql/core/audio"
 	"nhooyr.io/websocket"
 )
 
 const realtimeBaseURL = "wss://api.openai.com/v1/realtime"
 
-// ASRClient implements polyphon.ASRProvider using the OpenAI Realtime API
+// ASRClient implements audio.ASRProvider using the OpenAI Realtime API
 // in transcription-only mode (type: "transcription"). This provides streaming
 // speech-to-text without bundling an LLM -- the fastest streaming transcription
 // available from OpenAI.
@@ -71,8 +70,8 @@ func NewASRClient(cfg Config) (*ASRClient, error) {
 // sends it as an input_audio_buffer.append message.
 //
 // Transcription results arrive as conversation.item.input_audio_transcription
-// delta (interim) and completed (final) events, mapped to polyphon.ASRResult.
-func (c *ASRClient) StartStream(ctx context.Context, config polyphon.ASRConfig) (polyphon.ASRStream, error) {
+// delta (interim) and completed (final) events, mapped to audio.ASRResult.
+func (c *ASRClient) StartStream(ctx context.Context, config audio.ASRConfig) (audio.ASRStream, error) {
 	url := realtimeBaseURL + "?intent=transcription"
 
 	headers := http.Header{}
@@ -89,7 +88,7 @@ func (c *ASRClient) StartStream(ctx context.Context, config polyphon.ASRConfig) 
 	conn.SetReadLimit(512 * 1024) // 512KB
 
 	// Create upsampler: Polyphon 16kHz -> OpenAI 24kHz.
-	upsampler, err := audio.NewPCM16Resampler(audio.PolyphonSampleRate, audio.OpenAISampleRate)
+	upsampler, err := audio.NewPCM16Resampler(audio.WireSampleRate, audio.OpenAISampleRate)
 	if err != nil {
 		conn.Close(websocket.StatusInternalError, "resampler init failed")
 		return nil, fmt.Errorf("openai asr: create upsampler: %w", err)
@@ -99,7 +98,7 @@ func (c *ASRClient) StartStream(ctx context.Context, config polyphon.ASRConfig) 
 		conn:      conn,
 		upsampler: upsampler,
 		model:     c.model,
-		results:   make(chan polyphon.ASRResult, 16),
+		results:   make(chan audio.ASRResult, 16),
 		done:      make(chan struct{}),
 		logger:    c.logger,
 	}
@@ -131,7 +130,7 @@ type openaiASRStream struct {
 	conn      *websocket.Conn
 	upsampler *audio.PCM16Resampler
 	model     string
-	results   chan polyphon.ASRResult
+	results   chan audio.ASRResult
 	done      chan struct{}
 	logger    *slog.Logger
 	once      sync.Once
@@ -180,7 +179,7 @@ func (s *openaiASRStream) SendAudio(audioData []byte) error {
 }
 
 // Results returns the channel of transcription results.
-func (s *openaiASRStream) Results() <-chan polyphon.ASRResult {
+func (s *openaiASRStream) Results() <-chan audio.ASRResult {
 	return s.results
 }
 
@@ -210,9 +209,9 @@ func (s *openaiASRStream) Close() error {
 //
 // Model selection: audio.input.transcription.model carries the transcription
 // model (whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe). Override via
-// MEMQL_OPENAI_REALTIME_MODEL on the voice node or MEMQL_POLYPHON_OPENAI_ASR_MODEL
-// on the bridge agent.
-func (s *openaiASRStream) sendSessionConfig(ctx context.Context, config polyphon.ASRConfig) error {
+// MEMQL_OPENAI_REALTIME_MODEL, falling back to MEMQL_POLYPHON_OPENAI_ASR_MODEL
+// -- see app/integrations_stt.go, which resolves the pair in that order.
+func (s *openaiASRStream) sendSessionConfig(ctx context.Context, config audio.ASRConfig) error {
 	lang := config.Language
 	if lang == "" {
 		lang = "en"
@@ -328,7 +327,7 @@ func (s *openaiASRStream) handleEvent(data []byte) {
 		// to enter human-turn and raise a barge-in candidate while the
 		// assistant has the floor (the onset contract the cascade's
 		// turn-taking machine consumes, see turntaking.go).
-		s.results <- polyphon.ASRResult{Kind: polyphon.ASRKindSpeechStarted}
+		s.results <- audio.ASRResult{Kind: audio.ASRKindSpeechStarted}
 
 	case "conversation.item.input_audio_transcription.delta":
 		// Interim transcription result -- append the token to the running
@@ -342,7 +341,7 @@ func (s *openaiASRStream) handleEvent(data []byte) {
 		s.interimBuf += delta
 		text := s.interimBuf
 		s.mu.Unlock()
-		s.results <- polyphon.ASRResult{
+		s.results <- audio.ASRResult{
 			Text:       text,
 			IsFinal:    false,
 			Confidence: 0.0, // Interim results don't include confidence.
@@ -358,7 +357,7 @@ func (s *openaiASRStream) handleEvent(data []byte) {
 		s.interimBuf = ""
 		s.mu.Unlock()
 		if transcript != "" {
-			s.results <- polyphon.ASRResult{
+			s.results <- audio.ASRResult{
 				Text:       transcript,
 				IsFinal:    true,
 				Confidence: 1.0, // Final results are high-confidence.

@@ -25,10 +25,20 @@ package clustere2e
 // Delete component/node/routing_automation_run.go's init() (or its
 // RegisterRoutingRule call) and run this file. The forward decision for
 // automationrun.request goes false, node B never hears the request, and
-// TestAutomationRunCrossesNodes fails with the relay's "no cognition node in
+// TestAutomationRunCrossesNodes fails with the relay's "no planner node in
 // the mesh picked up the run" refusal. Restore it and the test passes. If it
 // passes both ways it is worthless, which is the whole risk this feature
 // carries.
+//
+// THE TWO NODES ARE bff AND planner (memql#4988). Node B used to be
+// `cognition`; that node type is deleted, and this harness only ever needed a
+// node type that is NOT the one taking the request, so `planner` stands in
+// with nothing about the routing decision changed. The stub mesh treats both
+// names as opaque labels -- the routing rule under test is
+// `automationrun.#`, which is node-type-agnostic -- so the swap keeps this
+// file honest against a tree cognition no longer exists in, and keeps it
+// reading the same as its live-cluster sibling automation_run_test.go, which
+// now targets planner too.
 
 import (
 	"context"
@@ -201,7 +211,7 @@ func (c *collectSink) snapshot() ([]automations.RunAccepted, []automations.RunSt
 }
 
 // twoNodeMesh stands up node A (bff, takes the request) and node B
-// (cognition, owns the automation) joined by a routing-rule-respecting link.
+// (planner, owns the automation) joined by a routing-rule-respecting link.
 type twoNodeMesh struct {
 	a       *automations.RunRelay
 	b       *automations.RunRelay
@@ -232,7 +242,7 @@ func newTwoNodeMesh(t *testing.T, auto *automations.Automation, steps []*automat
 		t.Fatalf("relay A: %v", err)
 	}
 	relayB, err := automations.NewRunRelay(automations.RunRelayOptions{
-		Runner: runnerB, EventBus: busB, NodeId: "cognition-1", NodeType: "cognition",
+		Runner: runnerB, EventBus: busB, NodeId: "planner-1", NodeType: "planner",
 	})
 	if err != nil {
 		t.Fatalf("relay B: %v", err)
@@ -246,18 +256,18 @@ func newTwoNodeMesh(t *testing.T, auto *automations.Automation, steps []*automat
 		a:       relayA,
 		b:       relayB,
 		bRunner: runnerB,
-		link:    newMeshLink(t, "bff-1", busA, "cognition-1", busB),
+		link:    newMeshLink(t, "bff-1", busA, "planner-1", busB),
 	}
 }
 
 // THE GATE. The run is requested on the bff node; the automation exists only
-// on the cognition node. It can only work if automationrun.request forwards
+// on the planner node. It can only work if automationrun.request forwards
 // across the mesh and automationrun.trace forwards back -- i.e. only if
 // component/node/routing_automation_run.go's rule is registered.
 func TestAutomationRunCrossesNodes(t *testing.T) {
 	auto := &automations.Automation{
 		Name:    "crossNodeSubject",
-		Trigger: &automations.TriggerConfig{Event: "graph.node.created.v1:cognition:participant"},
+		Trigger: &automations.TriggerConfig{Event: "graph.node.created.v1:planner:plan"},
 	}
 	mesh := newTwoNodeMesh(t, auto, []*automations.StepResult{
 		{StepId: "loadRow", Status: "success", Duration: 2 * time.Millisecond},
@@ -270,8 +280,8 @@ func TestAutomationRunCrossesNodes(t *testing.T) {
 
 	mesh.a.Run(ctx, automations.RunRequest{
 		Automation:     auto.Name,
-		Payload:        map[string]any{"id": "v1:cognition:participant:xyz"},
-		TargetNodeType: "cognition",
+		Payload:        map[string]any{"id": "v1:planner:plan:xyz"},
+		TargetNodeType: "planner",
 	}, sink)
 
 	accepted, steps, complete := sink.snapshot()
@@ -296,8 +306,8 @@ func TestAutomationRunCrossesNodes(t *testing.T) {
 	}
 
 	// The hop itself, asserted rather than assumed.
-	if done.ExecutedOnNodeType != "cognition" || done.ExecutedOnNodeId != "cognition-1" {
-		t.Fatalf("the automation must have run on the cognition node, got %s/%s",
+	if done.ExecutedOnNodeType != "planner" || done.ExecutedOnNodeId != "planner-1" {
+		t.Fatalf("the automation must have run on the planner node, got %s/%s",
 			done.ExecutedOnNodeType, done.ExecutedOnNodeId)
 	}
 	if len(accepted) != 1 {

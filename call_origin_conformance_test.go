@@ -542,8 +542,6 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// TestTheStampNeverEscapesItsCall counts the site with comments
 		// stripped.
 		"integrations/compose": "the Materializer's writers -- the stamp opens three @serverOnly mutations and changes no actor, so the composite owner tier still decides every row and a caller can only ever write their own (epic memql#4977)",
-
-		"integrations/dailyspace": "scheduled space provisioning, no caller in scope",
 	}
 
 	// The wire path. These must never appear, allowlist or not: every handler

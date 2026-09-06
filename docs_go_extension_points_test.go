@@ -189,10 +189,16 @@ func TestDocsDoNotTeachDeletedGoExtensionPoints(t *testing.T) {
 			"pattern has stopped matching and this gate would now pass vacuously",
 			mentions, scanned)
 	}
+	// component/node/CLAUDE.md stands where docs/internal/design/extension-points.md
+	// used to: that file was deleted with the cognition/voice tree, and it was one of
+	// the three carrying memql#2967's worked example. The replacement is not arbitrary
+	// -- it is the other doc that still names `node.RegisterConceptOwnership`, the
+	// retired symbol this gate exists for, so the sentinel keeps asserting what it
+	// always asserted rather than merely naming a file that happens to exist.
 	for _, sentinel := range []string{
 		"CLAUDE.md",
 		"integrations/arch.md",
-		"docs/internal/design/extension-points.md",
+		"component/node/CLAUDE.md",
 	} {
 		if !seen[sentinel] {
 			t.Fatalf("%s was not scanned (%d files were) -- the sweep has narrowed away from the "+

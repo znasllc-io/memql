@@ -5,8 +5,8 @@
 // Structured graph subscriptions (concept + actions; the server composes
 // the bus topic) must deliver across the mesh exactly like the retired
 // free-text form did. This test opens a CONCEPT-SCOPED structured
-// subscription (concept = v1:cognition:utterance, action = created) on
-// every connection, produces one utterance on the producer replica, and
+// subscription (concept = v1:planner:plan, action = created) on
+// every connection, produces one plan on the producer replica, and
 // asserts every subscriber -- including ones anchored on a different
 // replica than the producer -- observes the created row by its bare id.
 //
@@ -14,6 +14,11 @@
 // structured subscriptions didn't forward cross-node, or if the delivered
 // id regressed to canonical. Gated on MEMQL_E2E_TOKEN like the rest of the
 // suite.
+//
+// The concept is v1:planner:plan rather than the v1:cognition:utterance this
+// suite used to drive, because cognition is deleted (memql#4988); see the
+// package comment in delivery_test.go for why a plan row carries the same
+// meaning here.
 
 package clustere2e
 
@@ -26,16 +31,16 @@ import (
 	memqlclient "github.com/znasllc-io/memql/sdk/go/client"
 )
 
-// subscribeUtterancesForConcept opens a CONCEPT-SCOPED structured graph
-// subscription (v1:cognition:utterance / created) on conn and returns a
-// channel of created-utterance ids observed by THAT connection's replica.
-// Unlike subscribeUtterances (all concepts), this exercises the
-// server-composed concept-scoped pattern graph.node.created.v1:cognition:utterance.
-func subscribeUtterancesForConcept(ctx context.Context, t *testing.T, conn *memqlclient.Connection) <-chan string {
+// subscribePlansForConcept opens a CONCEPT-SCOPED structured graph
+// subscription (v1:planner:plan / created) on conn and returns a channel of
+// created-plan ids observed by THAT connection's replica. Unlike
+// subscribePlans (all concepts), this exercises the server-composed
+// concept-scoped pattern graph.node.created.v1:planner:plan.
+func subscribePlansForConcept(ctx context.Context, t *testing.T, conn *memqlclient.Connection) <-chan string {
 	t.Helper()
 	sm := memqlclient.NewSubscriptionManager(conn.Dispatcher())
 	_, events, err := sm.SubscribeGraph(ctx, memqlclient.GraphSubscribeOptions{
-		Concept: "v1:cognition:utterance",
+		Concept: "v1:planner:plan",
 		Actions: []memqlclient.GraphAction{memqlclient.GraphActionCreated},
 	})
 	if err != nil {
@@ -44,8 +49,8 @@ func subscribeUtterancesForConcept(ctx context.Context, t *testing.T, conn *memq
 	out := make(chan string, 64)
 	go func() {
 		for ev := range events {
-			if uid := utteranceIDFor(ev); uid != "" {
-				out <- uid
+			if pid := planIDFor(ev); pid != "" {
+				out <- pid
 			}
 		}
 	}()
@@ -65,30 +70,21 @@ func TestClusterStructuredGraphSubscription(t *testing.T) {
 	}()
 	producer := conns[0]
 
-	spaceID, participantID := newSpaceWithHuman(ctx, t, producer, userIDFromToken(t, tok))
-	t.Logf("opened %d connections (round-robined across bff replicas); space %s", len(conns), spaceID)
+	userID := userIDFromToken(t, tok)
+	scope := newProbeScope()
+	t.Logf("opened %d connections (round-robined across bff replicas); scope %s", len(conns), scope)
 
-	// Each connection opens the space + opens a CONCEPT-SCOPED structured
-	// subscription, then the subscriptions settle before the insert.
+	// Each connection opens a CONCEPT-SCOPED structured subscription, then
+	// the subscriptions settle before the insert.
 	chans := make([]<-chan string, len(conns))
 	for i, c := range conns {
-		openSpaceOnConn(ctx, t, c, spaceID, userIDFromToken(t, tok))
-		chans[i] = subscribeUtterancesForConcept(ctx, t, c)
+		chans[i] = subscribePlansForConcept(ctx, t, c)
 	}
 	time.Sleep(1500 * time.Millisecond)
 
 	shortID := id.NewShortId()
-	qc := memqlclient.NewQueryClient(producer.Dispatcher())
-	if _, err := qc.SendTextUtterance(ctx, memqlclient.SendTextUtteranceArgs{
-		UtteranceId:     shortID,
-		PartitionId:     spaceID,
-		ParticipantId:   participantID,
-		ParticipantType: "human",
-		Text:            "clustere2e structured-subscribe probe",
-	}); err != nil {
-		t.Fatalf("send utterance: %v", err)
-	}
-	t.Logf("produced utterance with bare mint %s", shortID)
+	createProbePlan(ctx, t, producer, scope, shortID, "clustere2e structured-subscribe probe", userID)
+	t.Logf("produced plan with bare mint %s", shortID)
 
 	// Every subscriber (concept-scoped, server-composed topic) must observe
 	// the created row by its BARE id, including subscribers on a different
@@ -103,12 +99,12 @@ func TestClusterStructuredGraphSubscription(t *testing.T) {
 			drained := false
 			for _, ch := range chans {
 				select {
-				case uid := <-ch:
+				case pid := <-ch:
 					drained = true
-					if isCanonicalID(uid) {
-						t.Errorf("structured subscriber received a CANONICAL id %q -- must be bare", uid)
+					if isCanonicalID(pid) {
+						t.Errorf("structured subscriber received a CANONICAL id %q -- must be bare", pid)
 					}
-					if uid == shortID {
+					if pid == shortID {
 						observations++
 					}
 				default:
@@ -121,7 +117,7 @@ func TestClusterStructuredGraphSubscription(t *testing.T) {
 	}
 
 	if observations == 0 {
-		t.Fatalf("no structured subscriber observed the utterance %s -- concept-scoped structured subscription or its cross-node delivery regressed", shortID)
+		t.Fatalf("no structured subscriber observed the plan %s -- concept-scoped structured subscription or its cross-node delivery regressed", shortID)
 	}
 	t.Logf("cross-replica structured-subscription delivery confirmed: %d observations", observations)
 }

@@ -57,23 +57,6 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.created.v1:cluster:*", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:cluster:*", TargetType: ""},
 		{Pattern: "graph.node.deleted.v1:cluster:*", TargetType: ""},
-		{Pattern: "graph.node.created.v1:cognition:*", TargetType: ""},
-		{Pattern: "graph.node.updated.v1:cognition:*", TargetType: ""},
-		// Cognition DELETES (memql#4542). Creates and updates have crossed
-		// since the mesh existed; deletes never did, so a row removed on
-		// one replica stayed on the screen of every browser attached to
-		// another until the tab reloaded. The asymmetry is worse than a
-		// uniformly dark concept: the surface demonstrably updates -- new
-		// utterances and participants arrive live -- which is exactly what
-		// makes a row that will not go away read as a rendering bug rather
-		// than as an event that never arrived.
-		//
-		// Deletes are rarer than the creates already crossing here, so the
-		// added volume is strictly below a rule that has been in place for
-		// the mesh's whole life. No automation in the tree triggers on a
-		// DELETED event (checked across dsl/), so there is no consumer to
-		// double-fire.
-		{Pattern: "graph.node.deleted.v1:cognition:*", TargetType: ""},
 		// Per-user provisioning fan-out: v1:identity:user rows are written
 		// by the identity node, but their consumers live on OTHER node
 		// types -- the seed materializer's per-user runtime hook
@@ -642,13 +625,6 @@ func defaultRoutingRules() []RoutingRule {
 		// peer hears it. Healing is low-volume (a miss is an exception path),
 		// so broadcasting the whole healing.# tree carries negligible cost.
 		{Pattern: "healing.#", TargetType: ""},
-		{Pattern: "cognition.response.audio", TargetType: NodeTypeVoice},
-		// Voice gate directive (#479 gate path): cognition publishes the
-		// per-turn gate decision, the BFF's voice-turn waiter subscribes
-		// (component/grpc/voice_agent_handlers.go). Without this rule the
-		// default-deny strands the directive on the cognition node and every
-		// gate-path voice turn times out after 30s in cluster mode (#1412).
-		{Pattern: "voice.gate.directive", TargetType: NodeTypeBFF},
 	}
 
 	extraRulesMu.Lock()

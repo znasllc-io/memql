@@ -56,7 +56,7 @@ the executor reads at SQL push-down time.
 | Field | Type | Stamped by | Notes |
 |-------|------|-----------|-------|
 | `id` | string | mutation execution | Canonical id format: `{concept}:{shortId}` (the `{partition}:` prefix was retired in #56). Canonical internally; bare-ified toward clients. See [identifiers.md](../concepts/identifiers.md). |
-| `concept` | string | mutation execution | The concept id, e.g. `v1:cognition:participant`. |
+| `concept` | string | mutation execution | The concept id, e.g. `v1:library:artifact`. |
 | `type` | string | concept declaration | Currently mirrors `concept`; reserved for future versioning differences. |
 | `createdAt` | datetime | mutation execution | RFC3339 timestamp at insert time. |
 | `createdBy` | string | mutation execution | Stamped from the request actor's identity. |
@@ -117,7 +117,7 @@ properties in the same clause are bare, so the namespace is what keeps
 the two surfaces apart:
 
 ```memql fragment
-filter  row.id == args.spaceId && status == "active"
+filter  row.id == args.folderId && status == "active"
 //      ^^^^^^ row envelope      ^^^^^^ payload property
 ```
 
@@ -205,12 +205,12 @@ and is unaffected.
 Cross-file dependencies are declared with file-top `use` imports:
 
 ```memql fragment
-use cognition.concepts.{ participant, space }
+use library.concepts.{ artifact, folder }
 use common.traits.{ isActiveRecord }
 ```
 
-The dotted path maps to a file on disk (`cognition.concepts` →
-`dsl/cognition/concepts.memql`); the brace list names the constructs
+The dotted path maps to a file on disk (`library.concepts` →
+`dsl/library/concepts.memql`); the brace list names the constructs
 pulled into local scope **under their declared names** -- there is no
 aliasing clause. Every imported name shares the same identifier
 namespace as the top-level engine-provided names in section 1, so the
@@ -280,7 +280,7 @@ in the import-model pivot (memql PRs #47 / #48 / #49, 2026-05-19) and
 is rejected at parse time. The canonical post-migration shape:
 
 - **File-top Form B imports** declare cross-file dependencies:
-  `use cognition.concepts.{ participant }`,
+  `use library.concepts.{ artifact }`,
   `use common.traits.{ isActiveRecord }`.
 - **Concept binding lives in the construct signature** for seeds /
   queries / mutations / shapes:

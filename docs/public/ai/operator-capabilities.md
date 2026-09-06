@@ -52,12 +52,12 @@ Two pressures:
 `capabilitySlugs` map in `component/memql/capability_registry.go` via
 `RegisterCapabilitySlug` at `init()` time.
 
-Capability slugs are **engine-owned**. Reusable capability bundles that
-were once product-specific -- a UI-control bundle whose tools drive a
-client, chat, daily-space, avatar-direct -- are absorbed into the engine
-as **generic features**: they register from an engine bundle via
+Capability slugs are **engine-owned**. A reusable capability bundle that
+was once product-specific -- a UI-control bundle whose tools drive a
+client, say -- is absorbed into the engine as a **generic feature**: it
+registers from an engine bundle via
 `RegisterCapabilitySlug(slug, tools, tags...)` at `init()` time, the same
-path as the worker/workbench slugs above, and expand identically on every
+path as the worker/workbench slugs above, and expands identically on every
 product-agnostic engine image. A slug registered with the `operator` tag
 (`CapabilityTagOperator`) marks tools that let an agent drive a UI on the
 user's behalf; the agent replier keys its operator scope-fence and
@@ -84,7 +84,7 @@ Example:
 capabilities {
   tools: [
     "computer-use-headless",   # slug
-    "respondToUser",           # concrete
+    "workbenchHost",           # concrete
     "workerStatus",            # concrete (already in the headless expansion)
   ]
 }
@@ -93,10 +93,10 @@ capabilities {
 After expansion:
 
 ```
-[workerHost, workerStatus, requestComputerUseScope, canvasPublish, respondToUser]
+[workerHost, workerStatus, requestComputerUseScope, canvasPublish, workbenchHost]
 ```
 
-The duplicate `workerStatus` is collapsed; `respondToUser` stays in
+The duplicate `workerStatus` is collapsed; `workbenchHost` stays in
 seed order; the slug `computer-use-headless` is replaced by its
 expansion.
 
@@ -157,8 +157,6 @@ with the tool slugs above:
 |------|------|-------|
 | `claw` | Coding-agent flag (`v1:agents:agent.claw`). Toggles OpenClaw / NemoClaw tools for the agent. Not part of `capabilities.tools[]`. | `dsl/agents/concepts.memql`, the frontend's agent edit modal. |
 | `assistant` / `agent` / `delegate` | Role slugs on `v1:agents:agent.role` and `roleSlug`. | `dsl/agents/roles/` (per-role seeds). |
-| `human` / `si` | `v1:cognition:participant.participantType`. | `dsl/cognition/concepts.memql`. |
-| `mirror_user` / `always_on` / `always_off` | Audio / video control enum on agents. | `v1:agents:agent.audioControl`, `videoControl`. |
 
 These are values, not capability identifiers. The author surface
 distinguishes them by position: tool capabilities live inside

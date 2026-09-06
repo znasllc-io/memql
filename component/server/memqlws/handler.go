@@ -803,17 +803,11 @@ func metadataFromRequest(r *http.Request) metadata.MD {
 		return md
 	}
 	// Browser clients carry the credential as the second
-	// Sec-WebSocket-Protocol entry (["bearer"|"guest", token], #2511) --
-	// the header channel that stays out of request-line access logs.
+	// Sec-WebSocket-Protocol entry (["bearer", token], #2511) -- the header
+	// channel that stays out of request-line access logs.
 	if scheme, cred := auth.WebSocketSubprotocolCredential(r); cred != "" {
-		switch scheme {
-		case auth.WSCredentialSchemeBearer:
+		if scheme == auth.WSCredentialSchemeBearer {
 			md.Append("authorization", "Bearer "+cred)
-			return md
-		case auth.WSCredentialSchemeGuest:
-			// The guest-aware stream interceptor validates the invitation
-			// token against the invitation store.
-			md.Append("authorization", "Guest "+cred)
 			return md
 		}
 	}
@@ -824,10 +818,6 @@ func metadataFromRequest(r *http.Request) metadata.MD {
 	} else if token := strings.TrimSpace(r.URL.Query().Get("token")); token != "" {
 		// Legacy alias for ?bearer_token=.
 		md.Append("authorization", "Bearer "+token)
-	} else if guest := strings.TrimSpace(r.URL.Query().Get("guest_token")); guest != "" {
-		// Guest invite flow: browsers opening /join/<token> send the
-		// invitation token as ?guest_token=<token>.
-		md.Append("authorization", "Guest "+guest)
 	}
 	return md
 }

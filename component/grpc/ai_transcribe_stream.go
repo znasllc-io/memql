@@ -62,9 +62,10 @@ type transcribeStream struct {
 }
 
 // handleAiTranscribeStreamStart opens a streaming transcription
-// session on the local STT provider (or proxies to a Voice worker when
-// running on a BFF) and keeps the session state in service.transcribeStreams.
-// Subsequent Chunk / End envelopes find the session by request_id.
+// session on the local STT provider (or proxies to the transcription node
+// when running on a BFF) and keeps the session state in
+// service.transcribeStreams. Subsequent Chunk / End envelopes find the
+// session by request_id.
 func (s *streamSession) handleAiTranscribeStreamStart(
 	envelope *memqlv1.MemqlClientMessage,
 	msg *memqlv1.AiTranscribeStreamStart,
@@ -76,7 +77,7 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
 
-	// BFF short-circuit: open a forwarded stream to a Voice worker.
+	// BFF short-circuit: open a forwarded stream to the transcription node.
 	// The Chunk/End envelopes will land on BFF later and flow through
 	// ForwardContinuation on the same inflight entry.
 	if s.shouldProxyAI(nodeTargetForTranscribe()) {
@@ -511,12 +512,16 @@ func pickPositiveInt(primary, fallback int) int {
 	return fallback
 }
 
-// init asserts the streaming handlers stay in sync with the
-// single-shot handler on where transcription is routed. If
-// nodeTargetForTranscribe ever stops returning NodeTypeVoice the BFF
-// proxy path here would silently stop working.
+// init pins where streaming transcription is routed.
+//
+// The BFF proxies the Start/Chunk/End trigger to this node type and consumes
+// the transcript frames back; if the target ever resolves to a node type that
+// wires no stt.StreamingProvider, the proxy path stops working SILENTLY --
+// the browser holds the mic open and no transcript ever arrives. The one
+// caller is MemQL OS's Ask hold-to-talk, so the failure would present as
+// "dictation is broken" with nothing in the logs naming a cause.
 func init() {
-	if nodeTargetForTranscribe() != node.NodeTypeVoice {
-		panic("nodeTargetForTranscribe must resolve to NodeTypeVoice; the streaming transcription handlers rely on it")
+	if nodeTargetForTranscribe() != node.NodeTypeAgent {
+		panic("nodeTargetForTranscribe must resolve to NodeTypeAgent; the streaming transcription handlers rely on it")
 	}
 }

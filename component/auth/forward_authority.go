@@ -82,10 +82,8 @@ const (
 	ForwardedClassPat            = "pat"
 	ForwardedClassServiceAccount = "service_account"
 	ForwardedClassAppSession     = "app_session"
-	ForwardedClassVoiceAgent     = "voice_agent"
 	ForwardedClassWorkerToken    = "worker_token"
 	ForwardedClassNode           = "node"
-	ForwardedClassGuest          = "guest"
 	ForwardedClassLocalDev       = "local_dev"
 	ForwardedClassOperator       = "operator"
 	ForwardedClassSystem         = "system"
@@ -94,8 +92,6 @@ const (
 func knownForwardedClass(class string) bool {
 	switch class {
 	case ForwardedClassUser, ForwardedClassBadge, ForwardedClassPat,
-		ForwardedClassServiceAccount, ForwardedClassAppSession, ForwardedClassVoiceAgent,
-		ForwardedClassWorkerToken, ForwardedClassNode, ForwardedClassGuest,
 		ForwardedClassLocalDev, ForwardedClassOperator, ForwardedClassSystem:
 		return true
 	default:

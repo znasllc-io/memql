@@ -54,7 +54,6 @@ var checkedNestedBlocks = []struct {
 	Concept string
 	Block   string
 }{
-	{"cognition/concepts.memql", "utterance", "source"},
 	{"agents/concepts.memql", "agent", "capabilities"},
 	{"identity/concepts.memql", "user", "preferences"},
 }
@@ -260,13 +259,13 @@ func isBareIdentifier(s string) bool {
 // checked nested block must be a declared sub-field of it.
 //
 // Two live drifts failed this when it was written (memql#3641):
-// `transcriptOnly` + `idempotencyKey` on utterance.source, written by
-// sendRealtimeTranscriptUtterance and read back by cognition_handler.go; and
-// `domains` + `tools` on agent.capabilities, seeded by plannerAgent.memql and
-// trainerAgent.memql long after #158 replaced that surface with skillIds.
+// `transcriptOnly` + `idempotencyKey` on utterance.source (that concept went
+// with cognition in epic memql#4988), and `domains` + `tools` on
+// agent.capabilities, seeded by plannerAgent.memql and trainerAgent.memql long
+// after #158 replaced that surface with skillIds.
 //
-// The two have opposite fixes, which is the point of reporting the key rather
-// than prescribing one: the first pair is legitimately in use and wanted a
+// The two had opposite fixes, which is the point of reporting the key rather
+// than prescribing one: the first pair was legitimately in use and wanted a
 // DECLARATION, the second is a retired surface and wanted DELETING.
 func TestNestedBlockWritesAreDeclared(t *testing.T) {
 	for _, b := range checkedNestedBlocks {

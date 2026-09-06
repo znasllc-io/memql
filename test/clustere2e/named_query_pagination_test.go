@@ -11,23 +11,26 @@
 // ----------------------------------------------
 // keyset_cursor_test.go proves the engine primitive against a handwritten
 // query string. THIS test proves the actual authored queries
-// (`spaceUtterances`, `notes`) -- the strings the generated SDK *Build helpers
+// (`plansForSpace`, `notes`) -- the strings the generated SDK *Build helpers
 // emit -- carry the sort+paginate directives end-to-end and thread the opaque
 // cursor through `ExecuteQueryMsg.cursor` / `ResultMeta.cursor` on the generic
 // executeNamed path. If a future edit drops the paginate directive from one of
 // the offenders, this test regresses; the 5.12 codec test would not.
 //
-// Both queries are ENGINE-owned. The 5.2 offender this file used to drive
-// alongside spaceUtterances, queryActiveSpaces, is product-pack DSL the engine
-// tree does not declare and the parity cluster does not load (memql#4212); the
-// owner-scoped `notes` query (5.3 backfill, `paginate 50`) has the same shape
-// and a cheap engine-owned write.
+// Both queries are ENGINE-owned. The scoped half used to be `spaceUtterances`;
+// cognition is deleted (memql#4988), so it is now `plansForSpace`, which has
+// the same shape the 5.2 offender had -- one required scope argument,
+// `sort "row.createdAt", "desc"`, `paginate 50` -- and is what makes this a
+// per-scope pagination proof rather than a second owner-scoped one. (The 5.2
+// offender this file drove before EITHER of those, queryActiveSpaces, was
+// product-pack DSL the parity cluster never loaded; memql#4212.) The
+// owner-scoped `notes` query (5.3 backfill, `paginate 50`) is unchanged.
 //
 // HOW IT EXERCISES THE HOP
 // ------------------------
 // nginx round-robins each new gRPC connection across the bff replicas, so two
 // separate connections (connA, connB) typically land on different replicas.
-// We seed an ordered set in a fresh space, take PAGE 1 (+ its nextCursor) on
+// We seed an ordered set in a fresh scope, take PAGE 1 (+ its nextCursor) on
 // connA via the named query, then replay that cursor on connB and assert
 // PAGE 2 continues with no overlap (no dup) and no gap -- regardless of which
 // replica minted vs. resolved the cursor. The cursor carries only the keyset
@@ -94,39 +97,34 @@ func TestNamedQueryPaginationCrossNode(t *testing.T) {
 	connA, connB := conns[0], conns[1]
 
 	// namedPageSize MUST match the `paginate <N>` literal authored on both
-	// queries in dsl/ (cognition/queries.memql spaceUtterances, notes/queries.memql
+	// queries in dsl/ (planner/queries.memql plansForSpace, notes/queries.memql
 	// notes). The cross-node proof seeds strictly more than this so the NAMED
 	// query itself mints a real nextCursor on its full first page (rather than
 	// exhausting the set in one page).
 	const namedPageSize = 50
 
-	t.Run("spaceUtterances", func(t *testing.T) {
+	t.Run("plansForSpace", func(t *testing.T) {
 		qcA := memqlclient.NewQueryClient(connA.Dispatcher())
-		spaceID, participantID := newSpaceWithHuman(ctx, t, connA, userID)
+		scope := newProbeScope()
 
 		// Seed > one page so the named query mints + we resolve a real cursor.
 		const total = namedPageSize + 7
 		sent := make([]string, 0, total) // oldest-first send order.
 		for i := 0; i < total; i++ {
-			uid := "v1:cognition:utterance:" + id.NewShortId()
-			if _, err := qcA.SendTextUtterance(ctx, memqlclient.SendTextUtteranceArgs{
-				UtteranceId:     uid,
-				PartitionId:     spaceID,
-				ParticipantId:   participantID,
-				ParticipantType: "human",
-				Text:            fmt.Sprintf("named-query pagination probe %03d", i),
-			}); err != nil {
-				t.Fatalf("send utterance %d: %v", i, err)
+			pid := "v1:planner:plan:" + id.NewShortId()
+			if _, err := qcA.CreatePlan(ctx, probePlanArgs(scope, pid,
+				fmt.Sprintf("named-query pagination probe %03d", i), userID)); err != nil {
+				t.Fatalf("seed plan %d: %v", i, err)
 			}
-			sent = append(sent, uid)
+			sent = append(sent, pid)
 			time.Sleep(8 * time.Millisecond) // strictly increasing createdAt.
 		}
 
 		// The SDK *Build helper emits the exact authored named-query call string;
 		// the sort+paginate directives are baked into the query DEFINITION, so the
 		// cursor rides ExecuteQueryMsg.cursor and we never pass a page size.
-		query := memqlclient.SpaceUtterancesBuild(memqlclient.SpaceUtterancesArgs{
-			PartitionId: spaceID,
+		query := memqlclient.PlansForSpaceBuild(memqlclient.PlansForSpaceArgs{
+			PartitionId: scope,
 		})
 
 		// PAGE 1 on connA (replica X mints the cursor from the named query).
@@ -151,7 +149,7 @@ func TestNamedQueryPaginationCrossNode(t *testing.T) {
 			t.Fatalf("named query page 2 returned %d rows, want %d (remainder)", len(page2.Rows), total-namedPageSize)
 		}
 
-		got := append(utteranceRowIDs(page1.Rows), utteranceRowIDs(page2.Rows)...)
+		got := append(rowIDs(page1.Rows), rowIDs(page2.Rows)...)
 		wantNewestFirst := make([]string, 0, total)
 		for i := len(sent) - 1; i >= 0; i-- {
 			wantNewestFirst = append(wantNewestFirst, sent[i])

@@ -14,7 +14,7 @@ import (
 func TestMountOverlayDomains_SkipRules(t *testing.T) {
 	root := fstest.MapFS{
 		"mypack/concepts.memql":    {Data: []byte("// concepts")},
-		"cognition/concepts.memql": {Data: []byte("// collides with a core domain")},
+		"library/concepts.memql":   {Data: []byte("// collides with a core domain")},
 		"_disabled/concepts.memql": {Data: []byte("// soft-disabled")},
 		// A CORE-named directory holding no .memql. It was never a product
 		// domain, so it must NOT be reported as a collision skip -- this is
@@ -35,7 +35,7 @@ func TestMountOverlayDomains_SkipRules(t *testing.T) {
 	if !got["mypack"] {
 		t.Errorf("expected mypack to be mounted; mounted=%v", mounted)
 	}
-	for _, skip := range []string{"cognition", "_disabled", "identity", "sidecaronly", "README.md"} {
+	for _, skip := range []string{"library", "_disabled", "identity", "sidecaronly", "README.md"} {
 		if got[skip] {
 			t.Errorf("expected %q to be skipped; mounted=%v", skip, mounted)
 		}
@@ -44,14 +44,14 @@ func TestMountOverlayDomains_SkipRules(t *testing.T) {
 	// memql#2782: the core-collision skip is REPORTED, so a caller can tell a
 	// namespace that was validated from one that was silently left out.
 	//
-	// Exactly one entry. "cognition" collides AND holds a .memql, so it would
+	// Exactly one entry. "library" collides AND holds a .memql, so it would
 	// have mounted but for the collision -- that is the reportable case. The
 	// other four are skipped for reasons visible in the root's own shape and
 	// would only dilute the signal; "identity" in particular collides too, but
 	// carries no .memql, so it was never a product domain and reporting it
 	// would be a false alarm.
-	if len(skippedCore) != 1 || skippedCore[0] != "cognition" {
-		t.Errorf("skippedCore = %v, want exactly [cognition]", skippedCore)
+	if len(skippedCore) != 1 || skippedCore[0] != "library" {
+		t.Errorf("skippedCore = %v, want exactly [library]", skippedCore)
 	}
 
 	// The mounted domain is visible through the unified Tree().
@@ -59,10 +59,10 @@ func TestMountOverlayDomains_SkipRules(t *testing.T) {
 		t.Errorf("mounted domain should be visible in Tree(): %v", err)
 	}
 
-	// A core domain is never shadowed by an overlay: cognition still resolves
+	// A core domain is never shadowed by an overlay: library still resolves
 	// to the embedded tree, not the fixture's stub.
-	if _, err := fs.Stat(dsl.Tree(), "cognition/concepts.memql"); err != nil {
-		t.Errorf("core cognition domain should still resolve from embedded: %v", err)
+	if _, err := fs.Stat(dsl.Tree(), "library/concepts.memql"); err != nil {
+		t.Errorf("core library domain should still resolve from embedded: %v", err)
 	}
 
 	unmount()

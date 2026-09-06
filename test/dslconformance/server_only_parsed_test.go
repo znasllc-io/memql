@@ -625,7 +625,6 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// voice_agent_token row is the synthetic minting user, so
 		// userId==actor.userId would match zero rows for every real request and
 		// fail the credential open.
-		{Path: "identity/queries.memql", Name: "voiceAgentTokenIdentityById"}: true,
 		// memql#3063. The item memql#2987 deferred and then closed: same shape
 		// as the trio above -- caller-supplied id, no actor check, identityFull
 		// projecting `credentials` (keyHash, registeredBy, lastSeenAt,
@@ -766,10 +765,6 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// the invitation, check status and expiry, and verify the caller before
 		// any of these run. The boundary therefore sits where the authorization
 		// already lives -- the argument setOAuthClientCORSOrigins makes above.
-		{Path: "identity/mutations.memql", Name: "createGuestInvitation"}:       true,
-		{Path: "identity/mutations.memql", Name: "markGuestInvitationAccepted"}: true,
-		{Path: "identity/mutations.memql", Name: "markGuestInvitationKicked"}:   true,
-		{Path: "identity/mutations.memql", Name: "rotateGuestInvitationToken"}:  true,
 		// The chunked-upload session writes (memql#4782). NOT the
 		// caller-has-no-user-row shape above: ownerUserId IS stamped from
 		// actor.userId, and actor-scoping is fully in place. What a caller
@@ -831,7 +826,6 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// exists separately from joinSpaceAsHuman precisely because that one
 		// content-addresses the participant id on (space, user) and requires
 		// the userId a guest does not have.
-		{Path: "cognition/mutations.memql", Name: "createGuestParticipant"}: true,
 		// memql#4328. The two engine-internal halves of the authentication
 		// ACTIVITY log, and neither is caller-scopable -- for opposite
 		// reasons, which is why they are listed together.

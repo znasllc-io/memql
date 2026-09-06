@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/znasllc-io/memql/component/polyphon"
+	"github.com/znasllc-io/memql/core/audio"
 	openaivoice "github.com/znasllc-io/memql/integrations/openai"
 )
 
@@ -36,13 +36,13 @@ func NewOpenAIRealtimeProvider(asr *openaivoice.ASRClient, logger *slog.Logger) 
 func (p *OpenAIRealtimeProvider) Name() string { return "openai-realtime" }
 
 // StartStream opens a streaming transcription session on the Realtime API
-// and returns a shared polyphon-asr-backed session.
+// and returns a shared asr-backed session.
 func (p *OpenAIRealtimeProvider) StartStream(ctx context.Context, config StreamConfig) (StreamingSession, error) {
 	if p.inner == nil {
 		return nil, fmt.Errorf("openai realtime asr client not configured")
 	}
 
-	asrCfg := polyphon.ASRConfig{
+	asrCfg := audio.ASRConfig{
 		SampleRate: config.SampleRate,
 		Language:   config.LanguageHint,
 	}
@@ -60,7 +60,7 @@ func (p *OpenAIRealtimeProvider) StartStream(ctx context.Context, config StreamC
 		return nil, fmt.Errorf("openai realtime start stream: %w", err)
 	}
 
-	return newPolyphonASRSession(asrStream, "openai-realtime", p.logger), nil
+	return newASRSession(asrStream, "openai-realtime", p.logger), nil
 }
 
 // openaiLanguage maps the shared MEMQL_STT_LANGUAGE knob to the bare

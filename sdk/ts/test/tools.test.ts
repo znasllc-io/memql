@@ -1,15 +1,10 @@
-// Mock-dispatcher tests for the tools surface: listTools / callTool
-// (outbound) and registerClientToolHandler (inbound dispatch).
+// Mock-dispatcher tests for the outbound tools surface: listTools /
+// callTool.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import { listTools, callTool } from "../src/tools/outbound.js";
-import {
-  registerClientToolHandler,
-  type ClientToolCall,
-  type ClientToolResult,
-} from "../src/tools/inbound.js";
 import type { Dispatcher } from "../src/client/dispatcher.js";
 import type { ClientMessage, ServerMessage } from "../src/client/wire.js";
 
@@ -102,8 +97,8 @@ test("listTools -- happy path returns the catalog + cursor", async () => {
     listToolsResult: {
       requestId: mock.lastRequestId(),
       tools: [
-        { name: "uiClick", description: "Click", inputSchema: "{}", clientExecution: true, scopes: ["highlight"] },
-        { name: "createSpace", description: "Make a space", inputSchema: "{}", clientExecution: false, scopes: ["create"] },
+        { name: "uiClick", description: "Click", inputSchema: "{}", scopes: ["highlight"] },
+        { name: "createSpace", description: "Make a space", inputSchema: "{}", scopes: ["create"] },
       ],
       nextCursor: "page-2",
     },
@@ -111,7 +106,6 @@ test("listTools -- happy path returns the catalog + cursor", async () => {
   const r = await promise;
   assert.equal(r.tools.length, 2);
   assert.equal(r.tools[0]!.name, "uiClick");
-  assert.equal(r.tools[0]!.clientExecution, true);
   assert.deepEqual(r.tools[0]!.scopes, ["highlight"]);
   assert.equal(r.nextCursor, "page-2");
 });
@@ -179,156 +173,4 @@ test("callTool -- isError rides the result (no throw)", async () => {
 test("callTool -- rejects missing name", async () => {
   const mock = new MockDispatcher();
   await assert.rejects(() => callTool(mock.asDispatcher(), { name: "" }), /name is required/);
-});
-
-// ---------------------------------------------------------------------
-// registerClientToolHandler -- inbound dispatch
-// ---------------------------------------------------------------------
-
-test("registerClientToolHandler -- inbound call dispatches to handler + ships result back", async () => {
-  const mock = new MockDispatcher();
-  // Hold via an object so closure-mutation widens the type (TS's
-  // flow analysis doesn't see the inner `let` assignment).
-  const ref: { call: ClientToolCall | null } = { call: null };
-  registerClientToolHandler(mock.asDispatcher(), async (call) => {
-    ref.call = call;
-    return {
-      content: [{ type: "text", text: "ok", mimeType: "", data: "", uri: "" }],
-      isError: false,
-    };
-  });
-
-  mock.push({
-    clientToolCall: {
-      callId: "call-1",
-      turnId: "turn-1",
-      agentId: "agent-1",
-      toolName: "uiClick",
-      argumentsJson: '{"opId":"chat.send"}',
-      timeoutMs: 5000,
-    },
-  });
-
-  // Handler runs in a microtask; give it a turn.
-  await new Promise<void>((r) => setTimeout(r, 10));
-
-  const captured = ref.call;
-  assert.ok(captured, "handler invoked");
-  assert.equal(captured.callId, "call-1");
-  assert.equal(captured.toolName, "uiClick");
-  assert.equal(captured.argumentsJson, '{"opId":"chat.send"}');
-
-  // Result envelope shipped back as a send.
-  const sent = mock.sent.find((s) => {
-    const m = s.msg as unknown as { clientToolResult?: { callId?: string } };
-    return m.clientToolResult?.callId === "call-1";
-  });
-  assert.ok(sent, "clientToolResult shipped");
-  const result = (sent!.msg as unknown as { clientToolResult: { callId: string; content: { text: string }[]; isError: boolean } }).clientToolResult;
-  assert.equal(result.isError, false);
-  assert.equal(result.content[0]!.text, "ok");
-});
-
-test("registerClientToolHandler -- handler that throws ships isError=true", async () => {
-  const mock = new MockDispatcher();
-  registerClientToolHandler(mock.asDispatcher(), () => {
-    throw new Error("dispatch failed");
-  });
-
-  mock.push({
-    clientToolCall: {
-      callId: "call-err",
-      toolName: "uiClick",
-      argumentsJson: "{}",
-      timeoutMs: 1000,
-    },
-  });
-
-  await new Promise<void>((r) => setTimeout(r, 10));
-
-  const sent = mock.sent.find((s) => {
-    const m = s.msg as unknown as { clientToolResult?: { callId?: string } };
-    return m.clientToolResult?.callId === "call-err";
-  });
-  assert.ok(sent);
-  const result = (sent!.msg as unknown as { clientToolResult: { isError: boolean; errorMessage: string } }).clientToolResult;
-  assert.equal(result.isError, true);
-  assert.equal(result.errorMessage, "dispatch failed");
-});
-
-test("registerClientToolHandler -- handler returning null ships isError=true with default message", async () => {
-  const mock = new MockDispatcher();
-  registerClientToolHandler(mock.asDispatcher(), () => null as unknown as ClientToolResult);
-
-  mock.push({
-    clientToolCall: { callId: "call-null", toolName: "x", argumentsJson: "{}", timeoutMs: 0 },
-  });
-
-  await new Promise<void>((r) => setTimeout(r, 10));
-  const sent = mock.sent.find((s) => {
-    const m = s.msg as unknown as { clientToolResult?: { callId?: string } };
-    return m.clientToolResult?.callId === "call-null";
-  });
-  assert.ok(sent);
-  const result = (sent!.msg as unknown as { clientToolResult: { isError: boolean; errorMessage: string } }).clientToolResult;
-  assert.equal(result.isError, true);
-  assert.match(result.errorMessage, /handler returned null/);
-});
-
-test("registerClientToolHandler -- re-register replaces; stale unregister is no-op", async () => {
-  const mock = new MockDispatcher();
-  const calls: string[] = [];
-  const stale = registerClientToolHandler(mock.asDispatcher(), async () => {
-    calls.push("handler-1");
-    return { content: [], isError: false };
-  });
-  // Re-register supersedes.
-  registerClientToolHandler(mock.asDispatcher(), async () => {
-    calls.push("handler-2");
-    return { content: [], isError: false };
-  });
-  // The stale unregister returned from the first Register should be
-  // a no-op now (it would otherwise wipe handler-2 too).
-  stale();
-
-  mock.push({ clientToolCall: { callId: "c", toolName: "x", argumentsJson: "{}", timeoutMs: 0 } });
-  await new Promise<void>((r) => setTimeout(r, 10));
-  assert.deepEqual(calls, ["handler-2"]);
-});
-
-test("registerClientToolHandler -- timeoutMs arms the AbortSignal", async () => {
-  const mock = new MockDispatcher();
-  let observedAborted = false;
-  registerClientToolHandler(mock.asDispatcher(), async (_call, signal) => {
-    // Long-running -- signal aborts before we resolve.
-    await new Promise<void>((resolve) => {
-      const onAbort = () => {
-        observedAborted = signal.aborted;
-        resolve();
-      };
-      if (signal.aborted) onAbort();
-      else signal.addEventListener("abort", onAbort, { once: true });
-    });
-    return { content: [], isError: false };
-  });
-
-  mock.push({
-    clientToolCall: { callId: "to", toolName: "slow", argumentsJson: "{}", timeoutMs: 20 },
-  });
-  await new Promise<void>((r) => setTimeout(r, 60));
-  assert.equal(observedAborted, true);
-});
-
-test("registerClientToolHandler -- no handler -> push silently dropped", async () => {
-  const mock = new MockDispatcher();
-  const unregister = registerClientToolHandler(mock.asDispatcher(), async () => ({
-    content: [],
-    isError: false,
-  }));
-  unregister();
-
-  // Should not throw, should not send.
-  mock.push({ clientToolCall: { callId: "ghost", toolName: "x", argumentsJson: "{}", timeoutMs: 0 } });
-  await new Promise<void>((r) => setTimeout(r, 10));
-  assert.equal(mock.sent.length, 0);
 });

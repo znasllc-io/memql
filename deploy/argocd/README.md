@@ -187,11 +187,10 @@ Before the `memql` app can sync:
    (copy `deploy/external-secrets/secretstore.yaml` and set the `vaultUrl`).
    `SecretStore` is namespace-scoped, so base's `ExternalSecret`s cannot resolve
    without one.
-3. **Pin the placeholder values in `deploy/k8s/overlays/cloud`.** Two are
+3. **Pin the placeholder values in `deploy/k8s/overlays/cloud`.** One is
    deliberately unroutable rather than plausible-looking, so that reconciling
-   before the cluster exists fails visibly: the `memql-mcp` all-zeros digest,
-   and the livekit `NODE_IP` of `0.0.0.0`. Set them from real infrastructure and
-   pin real digests for the rest.
+   before the cluster exists fails visibly: the `memql-mcp` all-zeros digest.
+   Set it from real infrastructure and pin real digests for the rest.
 
 Until those are done the app **fails closed**, which is the intended
 not-yet-configured state.

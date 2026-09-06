@@ -13,13 +13,6 @@ export {
   type ConnectionStatusEvent,
   type ReconnectOptions,
 } from "./connection.js";
-export {
-  uploadAttachment,
-  type AttachmentUploadSource,
-  type UploadAttachmentParams,
-  type AttachmentFile,
-  type AttachmentRef,
-} from "./attachments.js";
 export { Dispatcher, type DispatcherOptions } from "./dispatcher.js";
 export { QueryClient, type QueryCallOptions, type ConceptRegistryFollow } from "./query.js";
 export {

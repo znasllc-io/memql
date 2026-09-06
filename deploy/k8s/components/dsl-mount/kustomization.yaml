@@ -42,7 +42,7 @@
 # failure it exists to remove; there is no dedupe to fall back on.
 #
 # The engine container is index 0 on every mesh node Deployment (bff /
-# cognition / agent / planner / workbench), so the patch is name-agnostic.
+# agent / planner / workbench), so the patch is name-agnostic.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 

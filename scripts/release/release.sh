@@ -7,7 +7,7 @@
 # foundation (znasllc-io/memql#493, epic #491).
 #
 # The engine is the whole platform: this repo builds EVERY node type
-# (identity/bff/cognition/agent/planner/voice/workbench/mcp) as a
+# (identity/bff/agent/planner/workbench/mcp/edge) as a
 # product-agnostic image from docker/memql.Dockerfile. Product DSL is
 # NOT compiled in -- it is delivered at RUNTIME: a product ships its
 # DSL as a tiny data-only bundle image, an init-container copies the

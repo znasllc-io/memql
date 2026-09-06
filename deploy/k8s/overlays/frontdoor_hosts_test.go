@@ -71,8 +71,7 @@ import (
 const committedDomain = "memql.localhost"
 
 // frontDoorSecret is the Secret the EXACT-host certificate creates and every
-// role host terminates with. It is also how a front-door Ingress is told apart
-// from the media plane's (deploy/k8s/base/livekit.yaml names its own).
+// role host terminates with.
 const frontDoorSecret = "memql-front-door-tls"
 
 // wildcardSecret is the Secret the DNS-01 certificate creates (memql#4347). A
@@ -362,11 +361,10 @@ type ingressDoc struct {
 //
 // Selecting by "a Secret a declared Certificate writes" rather than by the one
 // hard-coded name is what lets the edge Ingress carry two certificates without
-// the selector having to learn each new secret by hand. The media plane is
-// excluded by that same rule rather than by a special case:
-// deploy/k8s/base/livekit.yaml asks cert-manager's ingress-shim for its
-// certificate through an annotation, so no Certificate object for it exists in
-// the render.
+// the selector having to learn each new secret by hand. An Ingress that asks
+// cert-manager's ingress-shim for a certificate through an annotation is
+// excluded by that same rule rather than by a special case: no Certificate
+// object for it exists in the render.
 func frontDoorIngresses(t *testing.T, rendered string) []ingressDoc {
 	t.Helper()
 
@@ -986,11 +984,8 @@ func sortedHosts(rendered string) []string {
 // TestRenderedHostsAreExactlyTheProduct is the closing statement: not merely
 // that every expected host is present, but that NO OTHER front-door host is.
 //
-// The media plane is the deliberate exception and it is subtracted by name.
-// Voice is not a front-door host and never will be -- WebRTC media is UDP and
-// cannot traverse an HTTP front door -- so deploy/k8s/base/livekit.yaml's
-// signaling Ingress is a separate plane, documented as such in
-// docs/public/operate/front-door.md.
+// There is no exception. Every host the render serves comes from the role set
+// (docs/public/operate/front-door.md).
 func TestRenderedHostsAreExactlyTheProduct(t *testing.T) {
 	for _, overlay := range generatedOverlays {
 		t.Run(overlay, func(t *testing.T) {
@@ -1001,11 +996,11 @@ func TestRenderedHostsAreExactlyTheProduct(t *testing.T) {
 				want[h.Name] = true
 			}
 			for _, got := range sortedHosts(rendered) {
-				if want[got] || strings.HasPrefix(got, "livekit.") {
+				if want[got] {
 					continue
 				}
-				t.Errorf("the %s overlay serves %q, which is not one of the seven derived hosts and is "+
-					"not the media plane -- an eighth host rule is a design change, not a configuration "+
+				t.Errorf("the %s overlay serves %q, which is not one of the derived hosts -- an extra "+
+					"host rule is a design change, not a configuration "+
 					"change (docs/public/operate/front-door.md)", overlay, got)
 			}
 		})

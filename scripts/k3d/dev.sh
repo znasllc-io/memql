@@ -30,7 +30,7 @@
 # ------------------------------------
 # By default every app node type builds from THIS repo's Dockerfile
 # (--build-arg BUILD_TAGS=<type>) and is tagged memql-<type>:local:
-#     identity  voice  mcp  cognition  agent  planner  workbench
+#     identity  bff  mcp  agent  planner  workbench  edge
 #
 # A downstream product repo that ships its own DSL/integrations on top of
 # the engine (a "carrier" image) reuses this script and overrides a subset
@@ -49,7 +49,6 @@
 #   LOCAL infra (pulled from public registries, not rebuilt here):
 #     azurite     mcr.microsoft.com/azure-storage/azurite -- pull + import
 #     redis       redis -- pull + import
-#     livekit     livekit/livekit-server -- pull + import
 #
 #   LOCAL database (BUILT here, not pulled -- memql#3846):
 #     memql-db    deploy/db-image -- build + import when absent from the cluster
@@ -105,8 +104,8 @@
 # Usage
 # -----
 #   make dev                          # rebuild + restart all app nodes
-#   make dev NODE=cognition           # rebuild + restart one node
-#   make dev NODE=mcp,cognition       # comma-separated list
+#   make dev NODE=agent               # rebuild + restart one node
+#   make dev NODE=mcp,agent           # comma-separated list
 #   make dev PULL_INFRA=1            # pull + re-import infra images
 #
 # This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
@@ -167,11 +166,11 @@ IMAGE_SOURCE=""
 
 # App node types buildable from this repo's Dockerfile. The default `make dev`
 # set matches the Deployments in deploy/k8s/overlays/local.
-DEFAULT_APP_NODES=(identity bff voice mcp cognition agent planner workbench edge)
+DEFAULT_APP_NODES=(identity bff mcp agent planner workbench edge)
 
 # Every node type this script can address (superset: node types a downstream
 # carrier overlay may add, e.g. bff, are valid targets too).
-VALID_NODES=(identity voice mcp bff cognition agent planner workbench edge)
+VALID_NODES=(identity mcp bff agent planner workbench edge)
 
 # Carrier override (resolved from params in main; empty = engine-only).
 CARRIER_REPO=""
@@ -190,7 +189,6 @@ CARRIER_NODES=()
 INFRA_IMAGES=(
     "mcr.microsoft.com/azure-storage/azurite:3.34.0"
     "redis:7-alpine"
-    "livekit/livekit-server:v1.8"
 )
 
 # The locally-built database operand image, and the tag the local overlay's
@@ -384,10 +382,6 @@ function build_engine_node() {
     # capability backend (scripts/lib/engine_build_args.sh, memql#2379) so
     # the two local build paths cannot drift.
     engine_build_args_for_node "$node" "$REPO_ROOT"
-    if [[ "$node" == "voice" ]]; then
-        warn "voice node requires libopus headers -- building from repo Dockerfile."
-        warn "If the build fails with 'opus.h not found', see docs/public/build/build-tags.md."
-    fi
 
     # `|| cap_fail`, NOT `set -e` (memql#4458, secondary A).
     #

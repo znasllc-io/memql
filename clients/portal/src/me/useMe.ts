@@ -71,7 +71,6 @@ export interface MePreferences {
   cursorTweenMs: number;
   takeoverMode: string;
   interactivePace: string;
-  voiceMode: string;
   // Read-only here: written ONLY through toggleComputerUseEnabled, never
   // through updateMyPreferences, which cannot reach it (memql#2840 / #4522).
   computerUseEnabled: boolean;
@@ -88,7 +87,6 @@ export const PREFERENCE_DEFAULTS: MePreferences = {
   cursorTweenMs: 1000,
   takeoverMode: "clean",
   interactivePace: "steady",
-  voiceMode: "toggle",
   computerUseEnabled: true,
 };
 
@@ -124,7 +122,6 @@ export function preferencesFrom(bag: Record<string, unknown> | null): MePreferen
     cursorTweenMs: num("cursorTweenMs", PREFERENCE_DEFAULTS.cursorTweenMs),
     takeoverMode: str("takeoverMode", PREFERENCE_DEFAULTS.takeoverMode),
     interactivePace: str("interactivePace", PREFERENCE_DEFAULTS.interactivePace),
-    voiceMode: str("voiceMode", PREFERENCE_DEFAULTS.voiceMode),
     computerUseEnabled: bool("computerUseEnabled", PREFERENCE_DEFAULTS.computerUseEnabled),
   };
 }

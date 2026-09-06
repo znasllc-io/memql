@@ -151,14 +151,12 @@ func TestApplyToolDefaults_AutoInjectedStripsEvenWhenNoDefaults(t *testing.T) {
 	}
 }
 
-// TestToolParser_OperatorAnnotations locks the full path for a
-// client-executed operator-UI tool: parser captures
-// @clientExecution / @allowedRoles / @scopes on the *ast.ToolDecl,
-// toolDeclToTool copies them onto the runtime *Tool so the registry
-// + tool-calling loop see them correctly.
+// TestToolParser_OperatorAnnotations locks the full path for a gated
+// operator-UI tool: parser captures @allowedRoles / @scopes on the
+// *ast.ToolDecl, toolDeclToTool copies them onto the runtime *Tool so
+// the registry + tool-calling loop see them correctly.
 func TestToolParser_OperatorAnnotations(t *testing.T) {
-	src := `@clientExecution
-@allowedRoles("assistant", "specialist")
+	src := `@allowedRoles("assistant", "specialist")
 @scopes("operator")
 @description("Operator UI: click a target element")
 tool uiClick {
@@ -176,9 +174,6 @@ tool uiClick {
 		t.Fatalf("expected 1 tool, got %d", len(tools))
 	}
 	got := tools[0]
-	if !got.ClientExecution {
-		t.Error("ClientExecution = false, want true")
-	}
 	if !reflect.DeepEqual(got.AllowedRoles, []string{"assistant", "specialist"}) {
 		t.Errorf("AllowedRoles = %v, want [assistant specialist]", got.AllowedRoles)
 	}
@@ -205,9 +200,6 @@ tool plainTool {
 		t.Fatalf("toolDeclToTool: %v", err)
 	}
 	got := tools[0]
-	if got.ClientExecution {
-		t.Error("ClientExecution = true, want false")
-	}
 	if got.AllowedRoles != nil {
 		t.Errorf("AllowedRoles = %v, want nil", got.AllowedRoles)
 	}

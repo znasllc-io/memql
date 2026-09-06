@@ -14,7 +14,6 @@ export interface ToolDefinition {
   name: string;
   description: string;
   inputSchema: string; // JSON Schema (raw string per MCP)
-  clientExecution: boolean;
   scopes: string[];
 }
 
@@ -116,7 +115,6 @@ function toolFromWire(t: ToolDefinitionWire): ToolDefinition {
     name: t.name ?? "",
     description: t.description ?? "",
     inputSchema: t.inputSchema ?? "",
-    clientExecution: t.clientExecution === true,
     scopes: t.scopes ?? [],
   };
 }

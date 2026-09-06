@@ -49,96 +49,10 @@ numbers an entry / client install actually wants:
 |---|---|---|
 | Database | `cnpg-db/presets/top` | `cnpg-db/presets/entry` (1 instance, 32+32 GiB) |
 | Mesh replicas | 2 | 1 |
-| Voice / LiveKit / MCP | running pins + fail-closed placeholders | replicas 0 (voice-off) |
+| MCP | 2 | replicas 0 |
 
-Voice-off is first-class replicas 0 on `voice`, `voice-agent`,
-`livekit`, `livekit-sip`, `mcp`, and `livekit-redis`. It is not
-`NODE_IP=0.0.0.0` and not an all-zeros MCP digest.
-
-### The voice-off hold on the LiveKit Services
-
-Replicas 0 stops the pods; it does not stop Azure allocating a public IP
-for every `LoadBalancer` Service base declares -- `livekit-rtc` (media)
-and `livekit-sip` (SIP) -- so the first entry install converted both to
-`ClusterIP` by hand, and the next Argo sync was refused:
-
-```
-Service "livekit-rtc" is invalid: spec.externalTrafficPolicy: Invalid value: "Local": may only be set for externally-accessible services
-```
-
-The overlay still said `LoadBalancer` + `externalTrafficPolicy: Local`,
-and a `ClusterIP` Service cannot carry that field (nor
-`loadBalancerSourceRanges`). The pins applied by digest, but the
-Application stayed OutOfSync/Failed.
-
-Since memql#4225 the hold is part of `overlays/cloud-entry` itself: JSON
-6902 patches on `livekit-rtc` and `livekit-sip` set `type: ClusterIP` and
-remove `externalTrafficPolicy`, `loadBalancerSourceRanges` and the Azure
-mixed-protocol annotation, beside the replica-0 patches. `livekit`
-(signaling) is `ClusterIP` in base already. Nothing needs ignoring in the
-Application and nothing needs hand-editing on the cluster; a hand-edited
-Service is simply overwritten with the same values on the next sync.
-Gated by `deploy/k8s/overlays/livekit_entry_voice_off_test.go` (text-level,
-cannot skip) and `render_cloud_entry_test.go` (rendered). Verify:
-
-```bash
-kubectl kustomize deploy/k8s/overlays/cloud-entry | grep -A12 'name: livekit-rtc' | grep -E 'type:|externalTrafficPolicy'
-kubectl -n memql get svc livekit livekit-rtc livekit-sip   # TYPE ClusterIP, EXTERNAL-IP <none>
-```
-
-Turning voice on for an entry install is a different decision and not
-this overlay: `overlays/cloud` keeps the LoadBalancers and is untouched.
-
-### The voice-off hold on the ExternalSecrets
-
-The third thing voice-off means, and the one that was missing until
-memql#4487. `base` ships `externalsecret-livekit.yaml` and
-`externalsecret-telephony.yaml`, which resolve five Key Vault entries:
-
-```
-livekit-keys   polyphon-livekit-api-key   polyphon-livekit-api-secret
-telnyx-api-key   telnyx-connection-id
-```
-
-On a voice-off install those entries **deliberately do not exist**. ESO
-reported `SecretSyncedError` on both objects and the Application was
-`Degraded` -- permanently, on a correctly installed cluster, and every
-entry install ever made shipped that way.
-
-**This page used to write that down as expected noise, and that was the
-defect.** An operator who learns that `Degraded` is normal will not see a
-real degradation. Health that is always red carries no information, and
-writing the red down converts a fixable configuration gap into a
-permanently disabled alarm.
-
-So `overlays/cloud-entry` removes both objects from the render with a
-`$patch: delete`, beside the replica-0 and ClusterIP patches -- the same
-shape `overlays/local` uses for the same two objects (there because ESO
-and Key Vault do not exist locally, here because the entries deliberately
-do not). Gated by `deploy/k8s/overlays/externalsecrets_test.go`
-(text-level, cannot skip) and `render_cloud_entry_test.go` (rendered).
-Verify:
-
-```bash
-kubectl kustomize deploy/k8s/overlays/cloud-entry | grep -c 'kind: ExternalSecret'   # 0
-kubectl kustomize deploy/k8s/overlays/cloud       | grep -c 'kind: ExternalSecret'   # 2 -- voice on
-argocd app get memql                                                                 # no SecretSyncedError
-```
-
-**Enabling voice on an entry install is the reverse, and the order
-matters:** seed the five Key Vault entries first, *then* drop the two
-delete patches. Doing it the other way round reproduces exactly the
-`Degraded` this removed, for however long the seeding takes.
-
-The rule this is an instance of, which belongs to the lifecycle model
-rather than to this overlay:
-
-> **Enablement must be a fact about the DESIRED state, not a tolerated
-> failure of the live state.** The render includes a module's
-> infrastructure objects **iff** the module is enabled.
-
-Module enablement reaching node-type infrastructure generally -- rather
-than one hand-written hold per module -- is memql#4488.
+`mcp` is first-class replicas 0, with no pin at all -- not an all-zeros
+MCP digest, which was a fail-closed placeholder for a running pin.
 
 ## Domain and hosts
 
@@ -162,7 +76,7 @@ company apex at AKS.** The cluster domain is the install's
 | sites (apex) | `$MEMQL_DOMAIN` | same edge Service |
 | mcp | `mcp.$MEMQL_DOMAIN` | exists in the generator; **leave it dark** |
 
-The MCP host is part of the closed role set. Voice-off already sets
+The MCP host is part of the closed role set. The overlay already sets
 `mcp` replicas to 0. Do not publish it, do not send clients there.
 
 ## DNS and certificates
@@ -618,11 +532,10 @@ repo-credential writes, and the Argo source switch are owner-gated.
   (DNS-01, which unlike the first one IS in git -- overlays/cloud-entry
   ships it), and the hand-seeded
   `memql-secrets` (the Graph mail credentials included). Until memql#4224
-  and memql#4225 are deployed, two cluster-only workarounds sit beside
-  them -- the `portal-front-door` Ingress and the LiveKit Services forced
-  to `ClusterIP`; with those fixes in the engine tag the instance
-  composes, both become generated / overlay content and the cluster
-  copies are overwritten on sync.
+  is deployed, one cluster-only workaround sits beside them -- the
+  `portal-front-door` Ingress; with that fix in the engine tag the instance
+  composes, it becomes generated content and the cluster copy is
+  overwritten on sync.
 - **Pins today are a human loop:** tag `vX.Y.Z` on `main`, dispatch
   `build-engine-images.yml` with `version=X.Y.Z` (it pushes the same image
   to ACR and to `ghcr.io/znasllc-io/memql-<node>:X.Y.Z`), edit
@@ -653,7 +566,7 @@ resources:
 patches:                       # Certificate dnsNames + Ingress hosts (the Argo host-patch list, now in git),
                                # Cluster memql-db serviceAccountTemplate client-id,
                                # ObjectStore memql-db-backup destinationPath
-images:                        # the eight engine digests (identity bff cognition voice agent planner workbench edge)
+images:                        # the six engine digests (identity bff agent planner workbench edge)
 ```
 
   kustomize shallow-clones the public engine repo at the ref and resolves
@@ -691,12 +604,10 @@ rather than applying the committed literals, so a new install does not
 inherit that problem
 ([azure-instance-bringup.md](azure-instance-bringup.md)).
 
-**The two base ExternalSecrets are no longer part of that caveat.**
-`livekit` and `telephony` used to be described here as expected to stay
-unhealthy and part of the OutOfSync / Degraded noise; since memql#4487
-`cloud-entry` does not render them at all, because voice-off means their
-Key Vault entries deliberately do not exist. See [the voice-off hold on
-the ExternalSecrets](#the-voice-off-hold-on-the-externalsecrets) above.
+**`base` ships no ExternalSecret objects of its own.** The two it used to
+ship were described here as expected to stay unhealthy and part of the
+OutOfSync / Degraded noise -- which was the defect, because an operator
+who learns that `Degraded` is normal will not see a real degradation.
 Nothing about this instance's health is expected to be red.
 
 **Any ExternalSecret that does run here carries
@@ -729,7 +640,6 @@ kubectl get clusterissuer letsencrypt-prod -o yaml                  > capture/cl
 kubectl -n memql get ingress,certificate,configmap/memql-domain -o yaml > capture/memql-ns.yaml
 kubectl -n memql get objectstore memql-db-backup -o yaml             > capture/objectstore.yaml
 kubectl -n memql get cluster memql-db -o jsonpath='{.spec.serviceAccountTemplate}'
-kubectl -n memql get svc livekit livekit-rtc livekit-sip -o yaml     > capture/livekit-svcs.yaml
 argocd app get memql ; argocd app manifests memql > capture/live-render.yaml
 kubectl -n memql get deploy -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.template.spec.containers[0].image}{"\n"}{end}'
 ```
@@ -742,8 +652,8 @@ kubectl kustomize <instance-repo>/deploy/k8s/overlays/<instance> | diff - captur
 ```
 
 The diff must be empty apart from the items deliberately being moved into
-git (the ClusterIssuer, and the memql#4224 / memql#4225 workarounds until
-the engine tag carries them).
+git (the ClusterIssuer, and the memql#4224 workaround until the engine tag
+carries it).
 
 **Switch (every line is a cluster write; each is reversible; the order
 matters):**
@@ -800,11 +710,11 @@ means "within 12 hours of a cut":
 
 1. `git ls-remote --tags https://github.com/znasllc-io/memql.git` -> the
    newest `vX.Y.Z`.
-2. For each of the eight nodes,
+2. For each of the six pinned nodes,
    `docker buildx imagetools inspect ghcr.io/znasllc-io/memql-<node>:X.Y.Z`
    -> digest. Abort if any node lacks the tag (the images are not built
    yet; never half-pin).
-3. Rewrite `?ref=vX.Y.Z` and the eight `digest:` lines in
+3. Rewrite `?ref=vX.Y.Z` and the six `digest:` lines in
    `deploy/k8s/overlays/<instance>/kustomization.yaml`; render. A render
    failure -- typically a patch target the new engine tag renamed -- means
    do not commit; an unchanged render is a no-op.

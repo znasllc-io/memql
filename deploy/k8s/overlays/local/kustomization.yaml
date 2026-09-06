@@ -26,8 +26,6 @@
 #   - memql-secrets      -- the one config delivery path: master key, identity
 #                          signing seed, node bootstrap token, DB DSNs, blob
 #                          connection string (epic memql#3958)
-#   - livekit-secrets    -- LiveKit API key+secret for local livekit server
-#   - telephony-secrets  -- stub (telephony disabled locally)
 #   - memql-db-app-creds -- Postgres credentials for the in-cluster DB. A
 #                           kubernetes.io/basic-auth Secret (username /
 #                           password), which is the shape CNPG's
@@ -46,9 +44,7 @@
 # CLOUD-ONLY RESOURCES EXCLUDED
 # The base includes resources that require cloud infrastructure not present
 # locally.  This overlay removes them with $patch: delete:
-#   - ExternalSecret (livekit-secrets, telephony-secrets) -- needs ESO + Key Vault
 #   - CronJob (conn-monitor) -- Tiger Cloud connection monitor; irrelevant locally
-#   - livekit Ingress -- local livekit is accessed via k3d port-forward.
 #
 # The product public-entry ingresses + ClusterIssuer and the product bff/SPA
 # workloads no longer live in the engine base (they moved to the downstream
@@ -107,39 +103,6 @@ patches:
         namespace: memql
         annotations:
           traefik.ingress.kubernetes.io/service.serversscheme: h2c
-  # ExternalSecret resources require External Secrets Operator + Azure Key Vault.
-  # Not available locally; the corresponding secrets are created directly via
-  # `make secrets` in the local bootstrap (#2065).
-  #
-  # cloud-entry deletes the same two objects for a DIFFERENT reason -- voice-off
-  # means the Key Vault entries deliberately do not exist (memql#4487). Both are
-  # the same rule: the render includes a module's infrastructure objects iff the
-  # module is enabled here.
-  #
-  # The apiVersion below must track the objects in base. It said v1beta1 while
-  # base said v1, which happened to keep working only because `target:` is what
-  # kustomize selects on -- the patch body's GVK is not consulted when a target
-  # is given. A delete patch that stops matching does not fail; it silently
-  # renders the object it was supposed to remove, which locally is an
-  # ExternalSecret pointing at a Key Vault this cluster cannot reach.
-  - target:
-      kind: ExternalSecret
-      name: livekit-secrets
-    patch: |
-      $patch: delete
-      apiVersion: external-secrets.io/v1
-      kind: ExternalSecret
-      metadata:
-        name: livekit-secrets
-  - target:
-      kind: ExternalSecret
-      name: telephony-secrets
-    patch: |
-      $patch: delete
-      apiVersion: external-secrets.io/v1
-      kind: ExternalSecret
-      metadata:
-        name: telephony-secrets
   # Connection-budget CronJob monitors Tiger Cloud connection headroom.
   # Locally we run a plain Postgres container; the monitor is irrelevant.
   - target:
@@ -151,156 +114,17 @@ patches:
       kind: CronJob
       metadata:
         name: conn-monitor
-  # livekit Ingress (in livekit.yaml) -- requires ingress-nginx + cert-manager
-  # on AKS.  Locally livekit is reached via k3d port-forward (#2065).
-  - target:
-      kind: Ingress
-      name: livekit
-    patch: |
-      $patch: delete
-      apiVersion: networking.k8s.io/v1
-      kind: Ingress
-      metadata:
-        name: livekit
-  # ---------------------------------------------------------------------------
-  # LiveKit Cloud for local dev (Epic #2184 / #2186)
-  # ---------------------------------------------------------------------------
-  # The local dev loop uses a LiveKit Cloud project as the SIP + WebRTC media
-  # plane -- there is NO self-hosted livekit-server / livekit/sip / coordination
-  # Redis locally (Cloud's TURN handles NAT, so no coturn/ngrok either). Remove
-  # those base workloads, then repoint the LiveKit URL env on voice / voice-agent
-  # / bff at the cloud project. The URL + key/secret are sourced from the
-  # livekit-secrets Secret that seed-secrets.sh fills from the operator's
-  # environment (LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET) -- NEVER
-  # hard-coded. The cloud stays self-hosted and pulls these from ESO/Key Vault;
-  # the no-cloud-leak guard (deploy/k8s/overlays/livekit_cloud_guard_test.go)
-  # fails CI if a *.livekit.cloud reference ever lands in the cloud overlay or
-  # in deploy/k8s/base. This overlay is deliberately out of its scope.
-  #
-  # Remove the self-hosted media-plane workloads (livekit-server + SIP edge +
-  # the LiveKit<->SIP coordination Redis).
-  - target: { kind: Deployment, name: livekit }
-    patch: |
-      $patch: delete
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata: { name: livekit }
-  - target: { kind: Service, name: livekit }
-    patch: |
-      $patch: delete
-      apiVersion: v1
-      kind: Service
-      metadata: { name: livekit }
-  - target: { kind: Service, name: livekit-rtc }
-    patch: |
-      $patch: delete
-      apiVersion: v1
-      kind: Service
-      metadata: { name: livekit-rtc }
-  - target: { kind: ConfigMap, name: livekit-config }
-    patch: |
-      $patch: delete
-      apiVersion: v1
-      kind: ConfigMap
-      metadata: { name: livekit-config }
-  - target: { kind: Deployment, name: livekit-sip }
-    patch: |
-      $patch: delete
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata: { name: livekit-sip }
-  - target: { kind: Service, name: livekit-sip }
-    patch: |
-      $patch: delete
-      apiVersion: v1
-      kind: Service
-      metadata: { name: livekit-sip }
-  - target: { kind: ConfigMap, name: livekit-sip-config }
-    patch: |
-      $patch: delete
-      apiVersion: v1
-      kind: ConfigMap
-      metadata: { name: livekit-sip-config }
-  - target: { kind: Deployment, name: livekit-redis }
-    patch: |
-      $patch: delete
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata: { name: livekit-redis }
-  - target: { kind: Service, name: livekit-redis }
-    patch: |
-      $patch: delete
-      apiVersion: v1
-      kind: Service
-      metadata: { name: livekit-redis }
   # NOTE: the product SPA and the product `bff` workloads (Deployments,
   # Services, PodDisruptionBudget) are not in the engine base -- they live in the
   # downstream product overlay (bff is a plain engine node running the product via
   # the runtime dsl-bundle mount at MEMQL_DSL_PATH) -- so this overlay does not
   # delete them.
-  # Repoint the LiveKit URL env at the cloud project (secret-sourced). The
-  # `value: null` strategic-merge directive deletes the base's hard-coded
-  # ws://livekit:7880 so valueFrom is the only source.
-  - target: { kind: Deployment, name: voice-agent }
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata: { name: voice-agent, namespace: memql }
-      spec:
-        template:
-          spec:
-            containers:
-              - name: voice-agent
-                env:
-                  - name: LIVEKIT_URL
-                    value: null
-                    valueFrom:
-                      secretKeyRef: { name: livekit-secrets, key: LIVEKIT_URL }
-                  # The avatar vendor (cloud) joins the room over a publicly-
-                  # reachable URL -- the cloud project URL on the local path.
-                  - name: LIVEKIT_PUBLIC_URL
-                    value: null
-                    valueFrom:
-                      secretKeyRef: { name: livekit-secrets, key: MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL }
-  - target: { kind: Deployment, name: voice }
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata: { name: voice, namespace: memql }
-      spec:
-        template:
-          spec:
-            containers:
-              - name: voice
-                env:
-                  - name: MEMQL_POLYPHON_LIVEKIT_URL
-                    value: null
-                    valueFrom:
-                      secretKeyRef: { name: livekit-secrets, key: MEMQL_POLYPHON_LIVEKIT_URL }
-                  - name: MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL
-                    value: null
-                    valueFrom:
-                      secretKeyRef: { name: livekit-secrets, key: MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL }
   # ---------------------------------------------------------------------------
   # Replicas: 1 per app node (multi-node is a separate opt-in via #2067)
   # ---------------------------------------------------------------------------
   - target:
       kind: Deployment
       name: identity
-    patch: |
-      - op: replace
-        path: /spec/replicas
-        value: 1
-  - target:
-      kind: Deployment
-      name: cognition
-    patch: |
-      - op: replace
-        path: /spec/replicas
-        value: 1
-  - target:
-      kind: Deployment
-      name: voice
     patch: |
       - op: replace
         path: /spec/replicas
@@ -355,20 +179,6 @@ patches:
         value: IfNotPresent
   - target:
       kind: Deployment
-      name: cognition
-    patch: |
-      - op: add
-        path: /spec/template/spec/containers/0/imagePullPolicy
-        value: IfNotPresent
-  - target:
-      kind: Deployment
-      name: voice
-    patch: |
-      - op: add
-        path: /spec/template/spec/containers/0/imagePullPolicy
-        value: IfNotPresent
-  - target:
-      kind: Deployment
       name: agent
     patch: |
       - op: add
@@ -402,16 +212,6 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/imagePullPolicy
         value: IfNotPresent
-  - target:
-      kind: Deployment
-      name: voice-agent
-    patch: |
-      - op: replace
-        path: /spec/replicas
-        value: 1
-      - op: add
-        path: /spec/template/spec/containers/0/imagePullPolicy
-        value: IfNotPresent
   # ---------------------------------------------------------------------------
   # The domain, delivered once (memql#3593, memql#3600, memql#4281)
   #
@@ -442,7 +242,7 @@ patches:
   - path: patches/bootstrap-secret-envfrom.yaml
     target:
       kind: Deployment
-      name: "^(identity|bff|cognition|agent|planner|workbench|mcp|voice|voice-agent|edge)$"
+      name: "^(identity|bff|agent|planner|workbench|mcp|edge)$"
   # Override the Postgres pool bounds (base is tuned for Tiger Cloud limits;
   # local in-cluster Postgres can handle larger pools).
   - path: patches/db-pool-local.yaml
@@ -520,12 +320,6 @@ images:
     newTag: local
   - name: acrmemql.azurecr.io/memql-identity
     newName: memql-identity
-    newTag: local
-  - name: acrmemql.azurecr.io/memql-cognition
-    newName: memql-cognition
-    newTag: local
-  - name: acrmemql.azurecr.io/memql-voice
-    newName: memql-voice
     newTag: local
   - name: acrmemql.azurecr.io/memql-agent
     newName: memql-agent

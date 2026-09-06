@@ -50,7 +50,7 @@ type WorkerTarget struct {
 // may reach" -- see isDialableType for that.
 func isWorkerType(t NodeType) bool {
 	switch t {
-	case NodeTypeAgent, NodeTypeVoice, NodeTypeCognition, NodeTypePlanner:
+	case NodeTypeAgent, NodeTypePlanner:
 		return true
 	default:
 		return false
@@ -105,12 +105,10 @@ func isDialableType(t NodeType) bool {
 func dialableTypeNames() []string {
 	names := []string{
 		string(NodeTypeAgent),
-		string(NodeTypeCognition),
 		// Not in ValidNodeTypes -- identity is the node-token issuer, not a
 		// mesh worker -- but it is dialable (memql#3380).
 		string(NodeTypeIdentity),
 		string(NodeTypePlanner),
-		string(NodeTypeVoice),
 		string(NodeTypeWorkbench),
 	}
 	slices.Sort(names)

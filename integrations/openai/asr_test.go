@@ -1,14 +1,13 @@
 package openai
 
 import (
+	"github.com/znasllc-io/memql/core/audio"
 	"log/slog"
 	"testing"
-
-	"github.com/znasllc-io/memql/component/polyphon"
 )
 
 // Compile-time interface compliance check.
-var _ polyphon.ASRProvider = (*ASRClient)(nil)
+var _ audio.ASRProvider = (*ASRClient)(nil)
 
 func TestNewASRClient_MissingAPIKey(t *testing.T) {
 	cfg := DefaultConfig()
@@ -53,7 +52,7 @@ func TestNewASRClient_CustomModel(t *testing.T) {
 // -- see the interimBuf comment on openaiASRStream.
 func TestHandleEvent_AccumulatesInterimDeltas(t *testing.T) {
 	s := &openaiASRStream{
-		results: make(chan polyphon.ASRResult, 16),
+		results: make(chan audio.ASRResult, 16),
 		logger:  slog.New(slog.DiscardHandler),
 	}
 
@@ -90,7 +89,7 @@ func TestHandleEvent_AccumulatesInterimDeltas(t *testing.T) {
 // transcription-only mode).
 func TestHandleEvent_CompletedResetsInterim(t *testing.T) {
 	s := &openaiASRStream{
-		results: make(chan polyphon.ASRResult, 16),
+		results: make(chan audio.ASRResult, 16),
 		logger:  slog.New(slog.DiscardHandler),
 	}
 
@@ -122,7 +121,7 @@ func TestHandleEvent_CompletedResetsInterim(t *testing.T) {
 // concatenation), since OpenAI sometimes applies punctuation / corrections.
 func TestHandleEvent_FinalUsesCompletedTranscript(t *testing.T) {
 	s := &openaiASRStream{
-		results: make(chan polyphon.ASRResult, 16),
+		results: make(chan audio.ASRResult, 16),
 		logger:  slog.New(slog.DiscardHandler),
 	}
 
@@ -149,7 +148,7 @@ func TestHandleEvent_FinalUsesCompletedTranscript(t *testing.T) {
 // uses for human-turn entry and barge-in.
 func TestHandleEvent_SpeechStartedEmitsOnset(t *testing.T) {
 	s := &openaiASRStream{
-		results: make(chan polyphon.ASRResult, 16),
+		results: make(chan audio.ASRResult, 16),
 		logger:  slog.New(slog.DiscardHandler),
 	}
 
@@ -157,7 +156,7 @@ func TestHandleEvent_SpeechStartedEmitsOnset(t *testing.T) {
 
 	select {
 	case r := <-s.results:
-		if r.Kind != polyphon.ASRKindSpeechStarted {
+		if r.Kind != audio.ASRKindSpeechStarted {
 			t.Errorf("expected ASRKindSpeechStarted, got kind=%d", r.Kind)
 		}
 		if r.Text != "" || r.IsFinal {

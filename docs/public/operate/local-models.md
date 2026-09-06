@@ -9,9 +9,8 @@ owner: znas
 
 # Local models on the fleet
 
-Running the platform's own operations — planning, conductor/routing,
-suggestions, embeddings — on models the machines in your fleet already host,
-instead of on a metered API.
+Running the platform's own operations — planning, suggestions, embeddings —
+on models the machines in your fleet already host, instead of on a metered API.
 
 The premise is simple: if a machine you own can run the model, there is no
 reason to pay per token for work a 7–8B model handles well. Cloud providers
@@ -69,8 +68,8 @@ apart:
 
 Capabilities default to **absent**. A machine that says nothing about
 structured output is not selected for a structured prompt. That direction is
-deliberate: a model that quietly answers prose to a conductor turn produces a
-parse failure three layers away, naming nothing.
+deliberate: a model that quietly answers prose to a structured-output turn
+produces a parse failure three layers away, naming nothing.
 
 ---
 
@@ -158,11 +157,11 @@ the only providers a policy chain can reach are the ones it names.
 
 ### The shipped defaults are local-first with no cloud fallback
 
-`localPlanner`, `localConductor`, `localSuggest` and `localEmbeddings` each
-name a fleet model as primary and author **no** cloud fallback. With an idle
-fleet they park. The cloud-quality policies (`balancedChat`,
-`strongReasoning`, `cheapestCapable`, …) are all still present and are wired
-per purpose when a purpose genuinely needs one.
+`localPlanner`, `localSuggest` and `localEmbeddings` each name a fleet model
+as primary and author **no** cloud fallback. With an idle fleet they park.
+The cloud-quality policies (`balancedChat`, `strongReasoning`,
+`cheapestCapable`, …) are all still present and are wired per purpose when a
+purpose genuinely needs one.
 
 ---
 
@@ -245,7 +244,7 @@ function that throws.
 
 ## What is not here
 
-- **Realtime voice stays on its cloud path.** No local STT or TTS.
+- **Transcription stays on its cloud path.** No local STT.
 - **No models on workbenches.** Machines only.
 - Machine-side discovery, serving and usage reporting live in the
   `memql-cockpit` repo. This repo fixes the wire contract and the engine side,

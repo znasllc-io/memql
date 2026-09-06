@@ -67,24 +67,25 @@ func TestValidateToolRefusesMissingHandler(t *testing.T) {
 		t.Fatal("a tool with no handler was accepted. It has no way to execute, and was still " +
 			"advertised to the model (memql#3625).")
 	}
-	if !strings.Contains(err.Error(), "clientExecution") {
-		t.Errorf("the error must name the one legitimate exception, or an author of a "+
-			"browser-executed tool reads it as a wall; got: %v", err)
+	if !strings.Contains(err.Error(), "@handler") {
+		t.Errorf("the error must name the thing the author has to add; got: %v", err)
 	}
 }
 
-// The exception, kept honest: a client-executed tool's body lives in the
-// browser and ExecuteTool routes to the ClientToolInvoker before it ever reads
-// tool.Handler.
-func TestValidateToolAllowsClientExecutedToolWithoutHandler(t *testing.T) {
+// The exception is gone, and its absence is the assertion. @clientExecution
+// put a tool's body in the connected browser, reached over the client-tool
+// relay, which went with the conversational product (epic memql#4988). A
+// handler is now unconditional: a tool declaring none has no way to execute
+// on any node, so accepting one would advertise it to the model and fail on
+// the one call that reached it.
+func TestValidateToolRefusesEveryHandlerlessTool(t *testing.T) {
 	tool := &Tool{
-		Name:            "zzClientTool",
-		Description:     "d",
-		InputSchema:     json.RawMessage(`{"type":"object"}`),
-		ClientExecution: true,
+		Name:        "zzClientTool",
+		Description: "d",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
 	}
-	if err := ValidateTool(tool); err != nil {
-		t.Fatalf("a @clientExecution tool legitimately carries no handler: %v", err)
+	if err := ValidateTool(tool); err == nil {
+		t.Fatal("a handlerless tool was accepted; there is no longer an exception for one")
 	}
 }
 

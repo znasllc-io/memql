@@ -45,8 +45,7 @@ import (
 // Two remedies coexist on purpose -- constrain the input where the input has a
 // known shape, digest the parts where it does not.
 var perPartHashedIdFiles = []string{
-	"cognition/mutations.memql",
-	"cognition/logic.memql",
+	"library/mutations.memql",
 	"cluster/mutations.memql",
 }
 

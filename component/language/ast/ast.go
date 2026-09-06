@@ -2024,7 +2024,6 @@ type ToolDecl struct {
 	ExecutionTime        string   // "fast" / "medium" / "slow"
 	RateLimitMaxCalls    int      // 0 = no rate limit; @rateLimit(maxCalls=...)
 	RateLimitPeriod      int      // seconds; paired with RateLimitMaxCalls
-	ClientExecution      bool     // @clientExecution flag -- dispatched to the browser via ClientToolCall instead of executing server-side
 	AllowedRoles         []string // @allowedRoles("assistant", ...) -- empty = no restriction
 	Scopes               []string // @scopes("operator", ...) -- caller must hold a superset
 	MCPExposed           bool     // @mcp flag -- opt this tool into the curated MCP connector surface (memql#1596)

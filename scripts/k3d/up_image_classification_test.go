@@ -43,8 +43,6 @@ import (
 var engineNodeImages = map[string]bool{
 	"memql-bff":       true,
 	"memql-identity":  true,
-	"memql-cognition": true,
-	"memql-voice":     true,
 	"memql-agent":     true,
 	"memql-planner":   true,
 	"memql-workbench": true,

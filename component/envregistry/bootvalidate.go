@@ -15,8 +15,8 @@ const DefaultNodeType = "bff"
 // ResolveNodeType returns the boot node type from MEMQL_NODE_TYPE,
 // defaulting to DefaultNodeType ("bff") when the var is unset or empty.
 // The multi-node fleet keys its required-var set off this value, so
-// each pod validates only its own set (a voice node fails on missing
-// LiveKit vars; a bff node does not).
+// each pod validates only its own set (an identity node fails on a
+// missing MEMQL_IDENTITY_BASE_URL; a bff node does not).
 func ResolveNodeType() string {
 	if nt := strings.TrimSpace(os.Getenv("MEMQL_NODE_TYPE")); nt != "" {
 		return nt

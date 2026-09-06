@@ -541,11 +541,15 @@ func TestEveryDirectMemoryNodesReadIsClassified(t *testing.T) {
 // second, the marker regexp could match anything and every run would be green
 // too.
 func TestStagedReadSiteGateCatchesAStrippedVerdict(t *testing.T) {
-	// A real, gated, single-concept read site: the chat integration's utterance
-	// reads, which feed LLM context. Chosen over a MUST-NOT-GATE site so the
-	// mutation removes a POSITIVE claim -- the direction a careless edit
-	// actually goes.
-	const victim = "integrations/chat/recent_chat.go"
+	// A real read site whose every holder is ruled GATE, so the mutation below
+	// removes a POSITIVE claim -- the direction a careless edit actually goes.
+	//
+	// It replaced integrations/chat/recent_chat.go, which had five such holders
+	// and went with the cognition utterance stream it read (epic memql#4988).
+	// This is the only all-GATE multi-holder file left, hence two rather than
+	// five: what the floor buys is "more than one holder, so a detector that
+	// half-works is loud", not the specific number.
+	const victim = "component/memql/executor_filter.go"
 
 	src, err := os.ReadFile(victim)
 	if err != nil {
@@ -557,10 +561,9 @@ func TestStagedReadSiteGateCatchesAStrippedVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("classify %s: %v", victim, err)
 	}
-	if len(sites) < 5 {
-		t.Fatalf("%s: detector found %d read holders, want at least 5 (readRecent, readByKeyword, "+
-			"readByTime, getSpaceContext, listParticipants). A detector that stopped seeing this file "+
-			"would report the whole tree clean", victim, len(sites))
+	if len(sites) < 2 {
+		t.Fatalf("%s: detector found %d read holders, want at least 2. A detector that stopped "+
+			"seeing this file would report the whole tree clean", victim, len(sites))
 	}
 	if len(strays) > 0 {
 		t.Errorf("%s: unexpected stray verdicts %v", victim, strays)

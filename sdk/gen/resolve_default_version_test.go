@@ -24,9 +24,9 @@ func TestBuildConceptIndex_RealTreeDefaultVersion(t *testing.T) {
 		t.Fatal("concept index over the real dsl/ tree is empty -- absent @version must default to major 1 (#2613)")
 	}
 
-	cognition, ok := idx["cognition"]
+	cognition, ok := idx["worker"]
 	if !ok || len(cognition) == 0 {
-		t.Fatalf("cognition namespace missing from real-tree index (dirs=%d)", len(idx))
+		t.Fatalf("worker namespace missing from real-tree index (dirs=%d)", len(idx))
 	}
 	for name, id := range cognition {
 		if len(id) < 4 || id[:3] != "v1:" {

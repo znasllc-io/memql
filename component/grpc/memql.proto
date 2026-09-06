@@ -50,6 +50,11 @@ message MemqlClientMessage {
   map<string, string> metadata = 3;
   reserved 4;
   reserved "partition";
+  // Retired with the cognition and voice node types (epic memql#4988):
+  // Polyphon, the voice agent, guest invites, the client-tool relay,
+  // and the one-shot speech pair (streaming transcription stays).
+  reserved 19, 20, 35, 36, 37, 45, 46, 47, 48, 49, 50, 60, 61, 62, 63, 64, 65, 74;
+  reserved "ai_speech", "ai_transcribe", "cancel_guest_invite", "client_tool_result", "join_space_as_guest", "polyphon_room_token", "polyphon_status", "polyphon_utterance", "resend_guest_invite_email", "resolve_guest_invite", "send_guest_invite", "voice_agent_final_transcript", "voice_agent_partial_transcript", "voice_agent_realtime_output", "voice_agent_realtime_speaking", "voice_agent_session_end", "voice_agent_session_start", "voice_agent_turn_request";
   // 70 (evaluate_policy) retired with the decision-policy tier, #984.
   reserved 70;
   reserved "evaluate_policy";
@@ -75,8 +80,6 @@ message MemqlClientMessage {
     CallToolMsg call_tool = 17;
     // AI operations
     AiChatMsg ai_chat = 18;
-    AiSpeechMsg ai_speech = 19;
-    AiTranscribeMsg ai_transcribe = 20;
     AiSuggestMsg ai_suggest = 21;
     // Identity and delegation operations
     IdentityCreateMsg identity_create = 22;
@@ -91,13 +94,9 @@ message MemqlClientMessage {
     SenseDiagnoseMsg sense_diagnose = 32;
     SenseHoverMsg sense_hover = 33;
     SenseSignatureHelpMsg sense_signature_help = 34;
-    // The Sense block 30-34 is full and 35 belongs to Polyphon, so the
+    // The Sense block 30-34 is full and 35 is reserved, so the
     // go-to-definition pair appends at the current maxima instead.
     SenseDefinitionMsg sense_definition = 85;
-    // Polyphon -- multi-agent voice
-    PolyphonRoomTokenMsg polyphon_room_token = 35;
-    PolyphonStatusMsg polyphon_status = 36;
-    PolyphonUtteranceMsg polyphon_utterance = 37;
     // Concepts -- schema metadata
     ConceptsListMsg concepts_list = 38;
     ConceptsSubscribeMsg concepts_subscribe = 39;
@@ -117,37 +116,6 @@ message MemqlClientMessage {
     // stream. Streamed replies come back as AgentGenerateTurnDelta (N)
     // followed by AgentGenerateTurnComplete (1).
     AgentGenerateTurnMsg agent_generate_turn = 44;
-    // Result of a ClientToolCall that the server emitted earlier. The
-    // agent microservice parks its tool loop on a per-call channel
-    // keyed by call_id; this message unblocks it and feeds the tool
-    // result back into the streaming reply.
-    ClientToolResult client_tool_result = 45;
-    // Guest invite by email. The authenticated space owner sends this
-    // to create an invitation record and deliver the email in one
-    // transactional op. See SendGuestInviteResult for the reply and
-    // docs/planning/GUEST_INVITE_SPECS.md for the full flow.
-    SendGuestInviteMsg send_guest_invite = 46;
-    // Public (unauthenticated) token resolution. The /join/<token>
-    // landing page calls this to render space + inviter metadata
-    // before asking the guest for a display name.
-    ResolveGuestInviteMsg resolve_guest_invite = 47;
-    // Guest-side accept + participant-create. Atomically marks the
-    // invitation accepted and creates the guest's Participant record.
-    // Called from the /join/<token> page after the guest confirms
-    // their display name. Authenticated via `Authorization: Guest
-    // <token>` which the stream interceptor resolves to a claims map
-    // carrying the invitation + space IDs.
-    JoinSpaceAsGuestMsg join_space_as_guest = 48;
-    // Inviter-side revoke for a guest invitation. Server-side lookup
-    // means we don't depend on the caller passing every required
-    // field (kind, tokenHash, etc.), which was unreliable when the
-    // shared respondToInvitation path was reused for guest rows.
-    CancelGuestInviteMsg cancel_guest_invite = 49;
-    // Re-send the invitation email for an EXISTING guest invitation
-    // without creating a new record. Server looks up the invitation,
-    // reads the stored plain token, and re-sends the same
-    // /join/<token> URL. Used by the "resend email" button.
-    ResendGuestInviteEmailMsg resend_guest_invite_email = 50;
     // Per-device sign-out. Marks the v1:identity:authSession row tied
     // to the caller's current bearer token as revoked, so the next
     // request from another tab/device using the same token is rejected
@@ -178,41 +146,6 @@ message MemqlClientMessage {
     // row by flipping active=false. The interceptor refuses any
     // future connect attempts with this token.
     RevokeWorkerTokenMsg revoke_worker_token = 54;
-    // Worker-pairing-code create + redeem live on the identity
-    // service's HTTP surface (POST /pair/codes, POST /pair/redeem)
-    // -- pairing is fundamentally an auth operation, so it lives
-    // alongside magic-link / OAuth / JWKS rather than on the BFF's
-    // gRPC plane.
-    // -------------------------------------------------------------
-    // Realtime Voice + Video architecture (Initiative C, 2026-05).
-    // -------------------------------------------------------------
-    // The Go voice-agent process (integrations/voice/agent) speaks
-    // these messages over MemqlService.Stream. Authenticated via a
-    // service-account JWT; the stream interceptor restricts that
-    // identity-type to ONLY this group of message types -- it has
-    // no surface for direct graph writes.
-    //
-    // Flow per utterance:
-    //   1. voice-agent emits VoiceAgentPartialTranscript (N times).
-    //   2. voice-agent emits VoiceAgentFinalTranscript (once).
-    //   3. voice-agent emits VoiceAgentTurnRequest to ask the GA to
-    //      respond. Server replies with N VoiceAgentTurnDelta
-    //      messages and one terminal VoiceAgentTurnComplete.
-    VoiceAgentPartialTranscript voice_agent_partial_transcript = 60;
-    VoiceAgentFinalTranscript voice_agent_final_transcript = 61;
-    VoiceAgentTurnRequest voice_agent_turn_request = 62;
-    VoiceAgentSessionStart voice_agent_session_start = 63;
-    VoiceAgentSessionEnd voice_agent_session_end = 64;
-    // Realtime output capture (#437). When the realtime executor owns
-    // the voice (MEMQL_VOICE_EXECUTOR=realtime), OpenAI's gpt-realtime
-    // model speaks the assistant turn directly -- it does NOT route
-    // through VoiceAgentTurnRequest, so cognition never inserts the SI
-    // reply utterance. The voice-agent captures the model's output
-    // transcript + derived citations and forwards them here; the
-    // server inserts the SI utterance with full chat/canvas/audit
-    // parity (same shape as a text/cascade reply). See
-    // handleVoiceAgentRealtimeOutput.
-    VoiceAgentRealtimeOutput voice_agent_realtime_output = 65;
     // 70 (evaluate_policy) retired with the decision-policy tier, #984;
     // the number is reserved at the message level below.
     // RotateAuth -- swap the bearer token on a live stream without
@@ -244,17 +177,6 @@ message MemqlClientMessage {
     // message (operators address a specific node directly), which is how
     // the ordered-rollout driver drains one replica at a time.
     NodeMaintenanceMsg node_maintenance = 73;
-    // VoiceAgentRealtimeSpeaking signals the GA's speaking state for the
-    // native realtime path (#1421). The realtime executor (gpt-realtime)
-    // speaks directly and never routes through the cognition reply path, so
-    // nobody writes the GA participant's presence state=responding while it
-    // speaks and the frontend orb's speaking animation never plays. The
-    // voice-agent emits speaking=true on the FIRST output audio frame of a
-    // response and speaking=false on response.done; the server resolves the
-    // GA's SI participant and writes presence responding/idle through the
-    // same engine + mesh routing rule every other presence write uses. See
-    // handleVoiceAgentRealtimeSpeaking.
-    VoiceAgentRealtimeSpeaking voice_agent_realtime_speaking = 74;
     // Pack browser -- read-only enumeration of the embedded + plugin-
     // registered .memql tree (memql#2127 / B1). The cockpit consumes
     // these to browse domains, list a domain's .memql files, and fetch
@@ -375,6 +297,10 @@ message MemqlServerMessage {
   // tier, #984.
   reserved 110;
   reserved "evaluate_policy_result";
+  // Retired with the cognition and voice node types (epic memql#4988):
+  // the reply half of the client message's retired payloads.
+  reserved 56, 57, 75, 76, 77, 85, 86, 87, 88, 89, 90, 95, 96, 97, 98, 99, 100, 101;
+  reserved "ai_speech_result", "ai_transcribe_result", "cancel_guest_invite_result", "client_tool_call", "join_space_as_guest_result", "polyphon_room_token_result", "polyphon_status_result", "polyphon_utterance_result", "resend_guest_invite_email_result", "resolve_guest_invite_result", "send_guest_invite_result", "voice_agent_final_ack", "voice_agent_partial_ack", "voice_agent_realtime_output_ack", "voice_agent_session_ack", "voice_agent_speak", "voice_agent_turn_complete", "voice_agent_turn_delta";
   // 129 (promote_site_result) retired with the environment concept,
   // epic memql#3943.
   reserved 129;
@@ -392,8 +318,6 @@ message MemqlServerMessage {
     CallToolResult call_tool_result = 51;
     // AI results
     AiChatResult ai_chat_result = 55;
-    AiSpeechResult ai_speech_result = 56;
-    AiTranscribeResult ai_transcribe_result = 57;
     AiSuggestResult ai_suggest_result = 58;
     // Identity and delegation results
     IdentityResult identity_result = 60;
@@ -405,10 +329,6 @@ message MemqlServerMessage {
     SenseHoverResult sense_hover_result = 73;
     SenseSignatureHelpResult sense_signature_help_result = 74;
     SenseDefinitionResult sense_definition_result = 122;
-    // Polyphon results
-    PolyphonRoomTokenResult polyphon_room_token_result = 75;
-    PolyphonStatusResult polyphon_status_result = 76;
-    PolyphonUtteranceResult polyphon_utterance_result = 77;
     // Concepts results
     ConceptsListResult concepts_list_result = 78;
     ConceptsSubscribeResult concepts_subscribe_result = 79;
@@ -427,19 +347,6 @@ message MemqlServerMessage {
     // Agent turn streaming replies (see AgentGenerateTurnMsg).
     AgentGenerateTurnDelta agent_generate_turn_delta = 83;
     AgentGenerateTurnComplete agent_generate_turn_complete = 84;
-    // Client-executed tool call. When the agent loop resolves a tool
-    // whose ToolDefinition.client_execution is true, instead of
-    // executing locally it emits this envelope on the stream and
-    // parks the loop on a per-call channel keyed by call_id. The
-    // client dispatches the call against its local Operator, runs
-    // it, and responds with ClientToolResult.
-    ClientToolCall client_tool_call = 85;
-    // Guest invite results (see SendGuestInviteMsg / ResolveGuestInviteMsg).
-    SendGuestInviteResult send_guest_invite_result = 86;
-    ResolveGuestInviteResult resolve_guest_invite_result = 87;
-    JoinSpaceAsGuestResult join_space_as_guest_result = 88;
-    CancelGuestInviteResult cancel_guest_invite_result = 89;
-    ResendGuestInviteEmailResult resend_guest_invite_email_result = 90;
     // Session-revocation replies (see RevokeCurrentSessionMsg / RevokeAllSessionsMsg).
     RevokeCurrentSessionResult revoke_current_session_result = 91;
     RevokeAllSessionsResult revoke_all_sessions_result = 92;
@@ -450,27 +357,6 @@ message MemqlServerMessage {
     // Worker-token mint / revoke replies.
     CreateWorkerTokenResult create_worker_token_result = 93;
     RevokeWorkerTokenResult revoke_worker_token_result = 94;
-    // Voice-agent replies (Initiative C, 2026-05).
-    // PartialAck / FinalAck are confirmation-only; the real value of
-    // the partial/final flow is the v1:cognition:utterance.partial
-    // graph event and the inserted utterance row, which the frontend
-    // subscribes to independently. Acks are kept so the voice-agent
-    // can correlate retries.
-    VoiceAgentPartialAck voice_agent_partial_ack = 95;
-    VoiceAgentFinalAck voice_agent_final_ack = 96;
-    VoiceAgentTurnDelta voice_agent_turn_delta = 97;
-    VoiceAgentTurnComplete voice_agent_turn_complete = 98;
-    VoiceAgentSessionAck voice_agent_session_ack = 99;
-    // Server-pushed "speak this text" command. Emitted by BFF when an
-    // SI reply lands for a space and audio output is enabled
-    // (always_on override). voice-agent handles by calling
-    // AgentSession.say(text) so Aura-2 synthesizes and publishes
-    // alongside the existing TurnRequest path.
-    VoiceAgentSpeak voice_agent_speak = 100;
-    // Realtime output-capture ack (#437). Confirms the SI utterance
-    // insert for a realtime assistant turn and returns the canonical
-    // utterance id so the voice-agent can correlate + audit.
-    VoiceAgentRealtimeOutputAck voice_agent_realtime_output_ack = 101;
     // Pack browser replies (see ListPackDomainsMsg / ListPackFilesMsg /
     // ReadPackFileMsg -- memql#2127 / B1).
     ListPackDomainsResult list_pack_domains_result = 112;
@@ -941,17 +827,6 @@ message ListToolsMsg {
   string request_id = 1;
   // Optional cursor for pagination
   string cursor = 2;
-  // Voice-agent tool-scope context, threaded across the proxy hop (#1448).
-  // ListTools is proxied from the bff to the agent node (nodeTargetForListTools
-  // -> NodeTypeAgent), and the agent-node session has no local voiceAgentScopeId
-  // / voiceAgentGaAgentId -- those are bound only on the bff session that
-  // received VoiceAgentSessionStart. The bff stamps the bound scope here before
-  // proxying so the receiving node can scope the realtime tool surface to the
-  // GA's tool list instead of failing open to the full registry. Empty for
-  // non-voice callers (text loop, direct browser), which keeps the local
-  // session-state path unchanged.
-  string voice_agent_scope_id = 3;
-  string voice_agent_ga_agent_id = 4;
 }
 
 // ListToolsResult returns available tools (MCP tools/list response equivalent).
@@ -970,12 +845,13 @@ message ToolDefinition {
   string description = 2;
   // JSON Schema describing the tool's input parameters (as JSON string)
   string input_schema = 3;
-  // When true, the tool is executed by the connected client (not the
-  // backend). The agent loop will emit a ClientToolCall envelope and
-  // await the matching ClientToolResult instead of running the tool
-  // locally. Used by the product's Operator primitive (ui.*, space.*,
-  // agent.updateSelf) where the tool affects the browser UI.
-  bool client_execution = 4;
+  // Field 4 was client_execution. Client-executed tools ran in the
+  // connected browser and reached it over the client-tool relay, which
+  // went with the conversational product (epic memql#4988). Every tool
+  // now carries a server-side handler, so there is nothing for a client
+  // to execute and no flag to advertise.
+  reserved 4;
+  reserved "client_execution";
   // Optional scopes the tool requires (e.g. "read", "navigate",
   // "highlight", "create", "update", "delete", "identity", "billing").
   // The caller's granted scope set must be a superset before dispatch.
@@ -991,18 +867,6 @@ message CallToolMsg {
   string name = 2;
   // Arguments as a Struct (JSON object)
   google.protobuf.Struct arguments = 3;
-  // Voice-agent execution context, threaded across the proxy hop (mirror of
-  // ListToolsMsg #1448). CallTool is proxied from the bff to the agent node
-  // (nodeTargetForCallTool -> NodeTypeAgent), and the agent-node session has no
-  // local voiceAgentScopeId / voiceAgentGaRole -- those bind only on the bff
-  // session that received VoiceAgentSessionStart. The bff stamps them here
-  // before proxying so the agent node can (a) gate tool EXECUTION on the GA's
-  // role (assistant), not the empty caller role -- unblocking GA-only tools like
-  // the operator/uiClick Takeover surface + produceArtifact -- and (b) route a
-  // client-executed tool through the cross-node relay scoped to the voice space.
-  // Empty for non-voice callers, which keeps the local session-state path.
-  string voice_agent_scope_id = 4;
-  string voice_agent_ga_role = 5;
 }
 
 // CallToolResult returns tool execution result (MCP tools/call response equivalent).
@@ -1028,48 +892,6 @@ message ToolResultContent {
   string uri = 5;
 }
 
-// ClientToolCall is emitted by the server when the agent loop resolves
-// a tool marked client_execution=true. The connected client is expected
-// to dispatch the call locally and reply with ClientToolResult bearing
-// the same call_id. See MemqlServerMessage.client_tool_call.
-message ClientToolCall {
-  // Unique per-call correlation ID. The agent loop uses this to route
-  // the matching ClientToolResult back to the parked tool call.
-  string call_id = 1;
-  // Optional grouping ID of the AgentGenerateTurn that owns this call.
-  // Lets the client render per-turn progress and cancel in-flight calls
-  // when the enclosing turn is cancelled.
-  string turn_id = 2;
-  // The v1:agents:agent (or equivalent) ID of the caller.
-  string agent_id = 3;
-  // Tool name as registered in the tool registry.
-  string tool_name = 4;
-  // Tool arguments (JSON string). Matches CallToolMsg semantics.
-  string arguments_json = 5;
-  // Deadline the server is willing to wait for a ClientToolResult. If
-  // the client cannot complete within the budget it should reply with
-  // is_error=true + a descriptive error_message rather than silently
-  // timing out, so the agent reasoning trace stays coherent.
-  int32 timeout_ms = 6;
-}
-
-// ClientToolResult is the client's reply to a ClientToolCall, carrying
-// the outcome of the locally-executed tool. The agent loop matches on
-// call_id and unblocks the parked tool call before resuming the
-// streaming reply.
-message ClientToolResult {
-  // Matches ClientToolCall.call_id.
-  string call_id = 1;
-  // Same shape as CallToolResult.content.
-  repeated ToolResultContent content = 2;
-  // True if execution failed. The agent loop surfaces this to the
-  // LLM so it can decide whether to retry, choose a different tool,
-  // or abandon the step.
-  bool is_error = 3;
-  // Human-readable error message when is_error is true.
-  string error_message = 4;
-}
-
 // -----------------------------------------------------------------------------
 // AI Operations
 // -----------------------------------------------------------------------------
@@ -1090,31 +912,6 @@ message AiChatMessage {
 message AiChatResult {
   string request_id = 1;
   AiChatMessage message = 2;
-}
-
-message AiSpeechMsg {
-  string request_id = 1;
-  string input = 2;
-  string voice = 3;
-  string format = 4;
-  string provider = 5;
-}
-
-message AiSpeechResult {
-  string request_id = 1;
-  bytes audio = 2;
-  string format = 3;
-}
-
-message AiTranscribeMsg {
-  string request_id = 1;
-  string audio = 2;
-  string mime_type = 3;
-}
-
-message AiTranscribeResult {
-  string request_id = 1;
-  string text = 2;
 }
 
 // Streaming transcription: Start / Chunk / End (client -> server).
@@ -2007,51 +1804,6 @@ message DslSpecResult {
 }
 
 // -----------------------------------------------------------------------------
-// Polyphon -- Multi-Agent Voice (Phase 3)
-// -----------------------------------------------------------------------------
-
-// PolyphonRoomTokenMsg requests a LiveKit room token for voice participation.
-message PolyphonRoomTokenMsg {
-  string request_id = 1;
-  string scope_id = 2;
-  string participant_id = 3;
-  string display_name = 4;
-}
-
-message PolyphonRoomTokenResult {
-  string request_id = 1;
-  string token = 2;
-  string room_name = 3;
-  string livekit_url = 4;
-  int64 expires_at = 5;
-}
-
-// PolyphonStatusMsg queries Polyphon score engine health and session counts.
-message PolyphonStatusMsg {
-  string request_id = 1;
-}
-
-message PolyphonStatusResult {
-  string request_id = 1;
-  bool enabled = 2;
-  int32 active_sessions = 3;
-  string platform = 4;
-}
-
-// PolyphonUtteranceMsg inserts a human utterance from the voice pipeline.
-message PolyphonUtteranceMsg {
-  string request_id = 1;
-  string scope_id = 2;
-  string participant_id = 3;
-  string text = 4;
-}
-
-message PolyphonUtteranceResult {
-  string request_id = 1;
-  string utterance_id = 2;
-}
-
-// -----------------------------------------------------------------------------
 // Concepts -- Schema Metadata (Phase 3)
 // -----------------------------------------------------------------------------
 
@@ -2291,7 +2043,6 @@ message ConceptsRegistryDelta {
   string subscription_id = 6;
 }
 
-
 // -----------------------------------------------------------------------------
 // Access / authorization
 // -----------------------------------------------------------------------------
@@ -2349,7 +2100,7 @@ message MyAccessResult {
 // Agent turn generation
 // -----------------------------------------------------------------------------
 //
-// Cognition selects a speaker via Polyphon scoring, then ships an
+// The caller selects a speaker, then ships an
 // AgentGenerateTurnMsg to an agent peer via NodeService.AiForwardRequest.
 // The agent node renders the prompt, runs the tool-calling loop (or a
 // non-tool generation for polyphon-text / voice paths), and streams
@@ -2418,13 +2169,17 @@ message AgentTurnMessage {
 }
 
 message AgentTurnRoutingContext {
+  // 4 (space_architecture) and 7 (space) went with the cognition router and
+  // the space concept, epic memql#4988. What is left is what a plan-driven
+  // turn actually carries: the planner populates request/agent/scope/history
+  // and nothing here, so every remaining field is optional by construction.
+  reserved 4, 7;
+  reserved "space_architecture", "space";
   string trigger = 1;              // "utterance" | "continuation" | "silence" | "addressed"
-  string selection_reason = 2;     // why cognition picked this agent
+  string selection_reason = 2;     // why the caller picked this agent
   string handoff_from = 3;         // previous speaker on handoff, empty otherwise
-  string space_architecture = 4;   // "polyphon" | "conductor" | ...
   repeated AgentTurnPeer peers = 5;
   repeated AgentTurnPeerActivity peer_activity = 6;
-  AgentTurnSpaceContext space = 7;
   // Guardrail turn mode set by the cognition router. Drives the three
   // branches in the agentReply template:
   //   "answer"            -- specialist in scope; answer normally.
@@ -2472,39 +2227,6 @@ message AgentTurnPeerActivity {
   string last_message = 3;
   string last_topic = 4;
   int32 messages_ago = 5;
-}
-
-message AgentTurnSpaceContext {
-  string id = 1;
-  string type = 2;
-  string description = 3;
-  string architecture = 4;
-  // Free-form additional context (survey progress, tour progress, etc.).
-  map<string, string> extra = 5;
-  // The structured space goal set by the Configure-manually path in
-  // CreateSpaceModal ("Plan Q3 roadmap", "Talk to ops about the
-  // Houston facility"). Distinct from `description` (which can be
-  // long-form / AI-generated). Agents use this to ground their
-  // first turn in a multi-agent space -- without it the agent has
-  // no idea what the user is here to discuss and falls back to
-  // generic "what are you working on?" prompting. Absent when the
-  // space has no goal.
-  AgentTurnSpaceGoal goal = 6;
-  // The current user's display name (the human whose utterance
-  // triggered this turn). Lets agents address the user by name
-  // and gives the model basic profile awareness without needing
-  // a separate tool call. Empty when the user is anonymous or
-  // unidentified.
-  string current_user_display_name = 7;
-}
-
-// AgentTurnSpaceGoal is the structured space goal threaded into the
-// agent turn for grounding. timeframe is one of daily / weekly /
-// monthly and is purely descriptive -- NOT tied to space.kind=daily
-// or status=scheduled (separate lifecycle concerns).
-message AgentTurnSpaceGoal {
-  string statement = 1;
-  string timeframe = 2;
 }
 
 message AgentTurnAttachment {
@@ -2609,184 +2331,6 @@ message AgentTurnError {
   string error_id = 1;       // matches ERR-XXXXXX format
   string message = 2;
   string code = 3;           // "timeout" | "tool_failure" | "model_error" | ...
-}
-
-// -----------------------------------------------------------------------------
-// Guest invites (by email)
-// -----------------------------------------------------------------------------
-//
-// Zoom-style external-guest invitations. A space owner sends
-// SendGuestInviteMsg to create an Invitation record and deliver the
-// invitation email in a single transactional op. The email carries a
-// one-time join URL of the form <frontend>/join/<token>. The guest
-// loads that URL, the page calls ResolveGuestInviteMsg (unauth) to
-// render the space + inviter details, then the guest chooses a
-// display name and the frontend runs joinSpaceAsGuest over an
-// authenticated `Authorization: Guest <token>` stream to create the
-// Participant record.
-//
-// Full flow + security notes:
-//   docs/planning/GUEST_INVITE_SPECS.md
-
-// SendGuestInviteMsg creates a guest invitation and emails the link
-// to the recipient. Caller must be an authenticated participant of
-// space_id.
-message SendGuestInviteMsg {
-  string request_id = 1;
-  string space_id = 2;
-  string space_name = 3;       // denormalized for the email body
-  string inviter_name = 4;     // denormalized for the email body
-  string email = 5;            // guest email address
-  string guest_name = 6;       // optional suggested display name
-  // Absolute base URL the frontend serves /join/<token> from. The
-  // backend appends /join/<token> to build the link that goes in the
-  // email. Example: "https://app.example.com".
-  string join_url_base = 7;
-  // How long the invitation is valid for, in minutes. When unset or
-  // <= 0 the backend falls back to the default TTL (currently 5 min).
-  // The UI currently exposes 5 / 15 / 30 as choices. Kept as minutes
-  // rather than seconds because the surface is deliberately coarse --
-  // longer-lived "scheduled" invitations are a separate feature.
-  int32 expires_in_minutes = 8;
-  // OPTIONAL. The v1:accounts:account this guest is being invited on
-  // behalf of -- which client's person they are (epic memql#4800, D5).
-  // Wire-compatible by construction: a client that omits it sends
-  // exactly what it sent before, and the handler writes no key at all,
-  // so the invitation row is byte-identical to one created yesterday.
-  //
-  // IT GRANTS NOTHING. An account is a record, never an authorization
-  // boundary -- a guest invited "for" a client reaches exactly the one
-  // space this invitation already names and not a byte more. The field
-  // is what lets the Users app say who a guest is for, and what a
-  // future client-access feature would point at.
-  string account_id = 9;
-}
-
-// SendGuestInviteResult is the reply for SendGuestInviteMsg. error_code
-// carries a short machine-readable tag on failure:
-//   "" (empty)        -- success
-//   "invalid_email"   -- email failed validation
-//   "forbidden"       -- caller is not a participant of space_id
-//   "space_not_found"
-//   "email_failed"    -- persistence succeeded but delivery did not;
-//                        invitation_id is set so the caller can retry
-message SendGuestInviteResult {
-  string request_id = 1;
-  bool success = 2;
-  string invitation_id = 3;
-  string error_code = 4;
-  string error_message = 5;
-}
-
-// ResolveGuestInviteMsg is the UNAUTHENTICATED public endpoint used
-// by the /join/<token> landing page to render space + inviter details
-// before the guest commits to a display name.
-message ResolveGuestInviteMsg {
-  string request_id = 1;
-  string token = 2;            // plain token from the URL
-}
-
-// ResolveGuestInviteResult mirrors the guest-visible subset of the
-// invitation. status carries the validation outcome:
-//   "ok"                -- invitation is pending + not expired
-//   "invalid"           -- no invitation matches the token
-//   "expired"           -- token matched, invitation past expires_at
-//   "already_accepted"  -- guest already joined via this invitation
-//   "cancelled"         -- inviter kicked / dismissed the invitation
-message ResolveGuestInviteResult {
-  string request_id = 1;
-  string status = 2;
-  string invitation_id = 3;
-  string space_id = 4;
-  string space_name = 5;
-  string inviter_name = 6;
-  string invitee_email = 7;
-  string invitee_name = 8;          // suggested name, may be empty
-  google.protobuf.Timestamp expires_at = 9;
-  string error_message = 10;        // populated when status != "ok"
-  reserved 11;
-  reserved "partition";
-}
-
-// JoinSpaceAsGuestMsg is the single atomic op the /join/<token> page
-// fires once the guest confirms their display name. The stream
-// interceptor has already validated `Authorization: Guest <token>`
-// and stashed the resolved invitation + space in the request claims;
-// the handler runs markGuestInvitationAccepted +
-// createGuestParticipant back-to-back on the engine and
-// replies with the created participant ID on success.
-message JoinSpaceAsGuestMsg {
-  string request_id = 1;
-  string participant_id = 2;        // UUID minted by the frontend
-  string display_name = 3;          // guest's confirmed display name
-}
-
-// JoinSpaceAsGuestResult is the reply for JoinSpaceAsGuestMsg.
-// error_code carries a short machine-readable tag on failure:
-//   ""                   -- success
-//   "unauthenticated"    -- no guest claims on the stream
-//   "invitation_expired"
-//   "invitation_already_used"
-//   "invalid_arguments"
-//   "persist_failed"     -- engine.Execute returned an error
-message JoinSpaceAsGuestResult {
-  string request_id = 1;
-  bool success = 2;
-  string participant_id = 3;        // echoes the request value on success
-  string space_id = 4;              // resolved from the guest claims
-  string error_code = 5;
-  string error_message = 6;
-}
-
-// CancelGuestInviteMsg revokes a still-pending guest invitation by
-// invitation_id. Authenticated space-owner op (runs under the
-// inviter's Bearer token); the handler looks up the current
-// invitation row, preserves its guest fields, and rewrites it with
-// status=kicked. No-op if the invitation is already accepted or
-// kicked.
-message CancelGuestInviteMsg {
-  string request_id = 1;
-  string invitation_id = 2;
-}
-
-// CancelGuestInviteResult - error_code values:
-//   ""                  -- success
-//   "not_found"         -- no invitation with this ID
-//   "not_guest"         -- invitation isn't kind=guest
-//   "invalid_arguments"
-//   "persist_failed"
-message CancelGuestInviteResult {
-  string request_id = 1;
-  bool success = 2;
-  string invitation_id = 3;
-  string error_code = 4;
-  string error_message = 5;
-}
-
-// ResendGuestInviteEmailMsg asks the server to re-send the invitation
-// email for an existing guest invitation. No new invitation is
-// created; the server reads the stored plain token and emails the
-// same /join/<token> URL. join_url_base is the frontend's current
-// origin so a changed frontend host doesn't break the link.
-message ResendGuestInviteEmailMsg {
-  string request_id = 1;
-  string invitation_id = 2;
-  string join_url_base = 3;
-}
-
-// ResendGuestInviteEmailResult - error_code values:
-//   ""                 -- success
-//   "not_found"        -- invitation gone or not guest
-//   "not_pending"      -- invitation was accepted / kicked / expired
-//   "expired"          -- past expiresAt
-//   "invalid_arguments"
-//   "email_failed"     -- record ok but delivery failed; caller can retry
-message ResendGuestInviteEmailResult {
-  string request_id = 1;
-  bool success = 2;
-  string invitation_id = 3;
-  string error_code = 4;
-  string error_message = 5;
 }
 
 // -----------------------------------------------------------------------------
@@ -3035,334 +2579,6 @@ message RevokeBadgeResult {
   bool success = 2;
   string error_code = 3;
   string error_message = 4;
-}
-
-// Worker pairing-code mint + redeem live on the identity service's
-// HTTP surface (POST /pair/codes, POST /pair/redeem). Pairing is
-// fundamentally an auth operation -- it sits next to magic-link /
-// OAuth / JWKS, not on the BFF gRPC plane.
-
-// -----------------------------------------------------------------------------
-// Realtime Voice + Video (Initiative C, 2026-05-10)
-// -----------------------------------------------------------------------------
-//
-// The Go voice-agent process (lives at integrations/voice/agent)
-// speaks these messages over MemqlService.Stream
-// while authenticated as a service account. The stream interceptor
-// pins service-account callers to this set of message types only --
-// they CANNOT execute queries, run mutations, or call any other
-// graph-writing surface. All graph writes happen server-side here,
-// inside memql, with the partition / actor / forUserId server-stamped.
-//
-// Specialists are NEVER voice. The voice-agent only ever publishes
-// for the Assistant in a space. Specialist replies that the
-// cognition handler dispatches alongside the GA's response land in
-// chat via the normal agent dispatch path; they never reach the
-// voice-agent.
-
-// VoiceAgentSessionStart announces a new LiveKit session for a space.
-// Sent once when the voice-agent worker joins a room. Memql uses
-// this to bind the session to the space and look up the GA's
-// canonical voice, persona image, and audio/video control state.
-message VoiceAgentSessionStart {
-  string request_id = 1;
-  string space_id = 2;      // v1:cognition:space.id
-  string ga_agent_id = 3;   // v1:agents:agent.id of the Assistant
-  string room_name = 4;     // LiveKit room name
-  // Optional: identity hint for the avatar vendor. Currently
-  // 'anam' or 'simli'. Driven by MEMQL_AVATAR_VENDOR on the
-  // voice-agent side. Echoed for audit; memql does NOT switch
-  // logic on this.
-  string avatar_vendor = 5;
-}
-
-message VoiceAgentSessionAck {
-  string request_id = 1;
-  bool success = 2;
-  string error_code = 3;
-  string error_message = 4;
-  // GA's canonical voice (alto / soprano / tenor / etc.).
-  // The voice-agent resolves canonical -> provider voice id
-  // locally via its voice catalog.
-  string ga_canonical_voice = 5;
-  // Anam persona id when avatar_vendor=anam.
-  // Empty if not configured yet (voice-agent disables avatar).
-  string ga_avatar_persona_id = 6;
-  // Initial audio/video gate decided from the GA's audioControl /
-  // videoControl + any existing override row.
-  // 'always_on' / 'always_off' / 'mirror_user'.
-  string initial_audio_mode = 7;
-  string initial_video_mode = 8;
-  // GA persona identity (#478), loaded from the v1:agents:agent record:
-  // name, role label, role description, and personality prose. The voice
-  // session renders the REAL agent from these (via the shared
-  // agentdef.RenderIdentityBlock the text path uses) instead of the neutral
-  // "Assistant, General Assistant" default. Each is empty when the agent
-  // record omits it -- the voice instruction builder degrades to the neutral
-  // default per field, so a partial ack never breaks the session.
-  string ga_display_name = 9;
-  string ga_role = 10;
-  string ga_description = 11;
-  string ga_personality = 12;
-  // Space context (#1470, Option C): the bound space's name + goal statement
-  // and the human participants present, resolved server-side at session start
-  // and injected into the realtime session instructions so Sofia knows WHERE
-  // she is and WHO she is talking to (the native realtime path bypasses
-  // cognition, which is where the text path gets this). Each is best-effort:
-  // a resolution failure leaves the field empty and the instruction builder
-  // simply omits the corresponding line, so a partial ack never breaks bring-up.
-  //
-  // space_name is the space display name; space_purpose is the goal statement
-  // (payload.goal.statement) when set. participant_names are the human
-  // participants' display names (or user ids when unnamed).
-  string space_name = 13;
-  string space_purpose = 14;
-  repeated string participant_names = 15;
-}
-
-// VoiceAgentSessionEnd closes a session. Memql persists a
-// session-end audit event and tears down any per-session
-// in-memory state.
-message VoiceAgentSessionEnd {
-  string request_id = 1;
-  string space_id = 2;
-  string room_name = 3;
-  // Optional reason: 'normal', 'error', 'inactivity'.
-  string reason = 4;
-}
-
-// VoiceAgentPartialTranscript carries an interim ASR transcript.
-// Memql emits a v1:cognition:utterance.partial graph event so the
-// chat UI can ghost-text the in-progress utterance in real time.
-// No graph row inserted -- partials are event-only.
-message VoiceAgentPartialTranscript {
-  string request_id = 1;
-  string space_id = 2;
-  string speaker_user_id = 3;   // v1:identity:user.id
-  string partial_text = 4;
-  // Monotonic per (space, user) so out-of-order events sort
-  // correctly client-side. voice-agent stamps a wall-clock-derived
-  // counter; memql does not interpret it.
-  int64 sequence = 5;
-}
-
-message VoiceAgentPartialAck {
-  string request_id = 1;
-  bool success = 2;
-  string error_code = 3;
-  string error_message = 4;
-}
-
-// VoiceAgentFinalTranscript carries the user's final utterance.
-// Memql inserts the canonical chat row (v1:cognition:utterance)
-// and server-stamps partition + createdBy; the voice-agent provides
-// only content + speaker context.
-message VoiceAgentFinalTranscript {
-  string request_id = 1;
-  string space_id = 2;
-  string speaker_user_id = 3;
-  string final_text = 4;
-  // Provider confidence, 0.0-1.0 (provider-dependent).
-  float confidence = 5;
-  // Wall-clock millis the utterance ended (voice-agent side).
-  int64 ended_at_ms = 6;
-  // Native-authored flag (#478, 1-on-1 native mode). True when the realtime
-  // model already authored AND spoke the reply to this user turn natively
-  // (turn_detection: semantic_vad), so the server must stamp this user
-  // utterance transcript-only (source.inputMethod="realtimeVoice") and
-  // cognition must NOT author a second reply. False is the conductor-gated /
-  // cascade path: cognition authors as today.
-  bool native_authored = 7;
-}
-
-message VoiceAgentFinalAck {
-  string request_id = 1;
-  bool success = 2;
-  // Bare shortId of the inserted utterance (server-minted
-  // "utt-<nanos>-<hex>"; the stored row id is
-  // v1:cognition:utterance:<this>). Aligned with the sibling
-  // VoiceAgentTurnComplete.utterance_id, which #2441 (bare-ids cutover)
-  // stripped to bare -- both surfaces now carry the bare shortId.
-  string utterance_id = 3;
-  string thread = 4;         // 'team' | 'group'
-  string error_code = 5;
-  string error_message = 6;
-}
-
-// VoiceAgentTurnRequest asks memql to drive the Assistant
-// for one turn. Memql runs the conductor (GA-always-primary on
-// voice triggers), then the GA's agent tool loop, and streams
-// the GA's response prose back via VoiceAgentTurnDelta. Tools
-// execute server-side; voice-agent only ever sees the prose.
-message VoiceAgentTurnRequest {
-  string request_id = 1;
-  string space_id = 2;
-  string speaker_user_id = 3;
-  // Final transcript text. Same content as the most-recent
-  // VoiceAgentFinalTranscript; passed explicitly so the turn
-  // request is self-contained and doesn't depend on memql's
-  // ability to look up the just-inserted row.
-  string utterance_text = 4;
-  string ga_agent_id = 5;
-  // Thread context. The voice-agent's thread_context tracks
-  // active-human migration locally and stamps it here so memql
-  // doesn't re-derive it on every turn.
-  enum ThreadContext {
-    THREAD_CONTEXT_UNSPECIFIED = 0;
-    THREAD_CONTEXT_TEAM = 1;
-    THREAD_CONTEXT_GROUP = 2;
-  }
-  ThreadContext thread = 6;
-}
-
-// VoiceAgentTurnDelta streams the GA's response prose. The
-// voice-agent's memql LLM custom plugin feeds these directly into
-// the Aura-2 TTS plugin's token-streaming input, so the first
-// phrase starts synthesizing before the full response is ready.
-//
-// text_delta is the incremental chunk -- DO NOT pass the full
-// accumulated text. (Contrast with AiTranscribeStreamDelta which
-// is full-accumulated; that's an ASR ergonomic.)
-message VoiceAgentTurnDelta {
-  string request_id = 1;
-  string text_delta = 2;
-}
-
-// VoiceAgentTurnComplete is the terminal message for a turn.
-// final_text is the canonical full GA response (for the
-// voice-agent's audit log + reconciliation). The chat row for
-// the GA's reply is already inserted in memql by this point;
-// utterance_id refers to that row.
-message VoiceAgentTurnComplete {
-  string request_id = 1;
-  string final_text = 2;
-  string utterance_id = 3;
-  // GA's effective audio/video mode at the moment this turn
-  // ran, so voice-agent can short-circuit publishing if the
-  // mode flipped to always_off mid-turn.
-  string effective_audio_mode = 4;
-  string effective_video_mode = 5;
-  string error_code = 6;
-  string error_message = 7;
-  // Conductor GATE decision (#477/#479): when set, this turn carries a
-  // content-free mode+brevity directive the realtime model conditions its OWN
-  // generation on, instead of final_text the model re-voices. directive_mode is
-  // the DirectiveMode wire string (primary | brief_ack | chimein | defer);
-  // brevity is short | normal | detailed. Empty directive_mode = the legacy
-  // authored-text path (final_text). This is how "the conductor decides WHEN,
-  // the model decides WHAT" reaches the executor.
-  string directive_mode = 8;
-  string brevity = 9;
-  // Grounding block (#490): a pre-rendered, numbered, domain-attributed context
-  // block the realtime model conditions its native generation on. Retrieved
-  // cognition-side over the agent's domains for the user turn and injected as a
-  // system conversation.item before response.create on the gate path, so a
-  // model-authored voice reply is grounded + citable. Empty = no grounding for
-  // this turn.
-  string grounding = 10;
-}
-
-// VoiceAgentSpeak is a server-pushed "synthesize and publish
-// this text" command. BFF emits one per SI reply utterance that
-// lands in a voice-agent-bound space when audio output is
-// enabled (current override is always_on) and no VoiceAgentTurn
-// is in flight for the same space (the TurnRequest path already
-// drives the audio for STT-initiated turns).
-//
-// Voice-agent handles by calling AgentSession.say(text) so the
-// existing Aura-2 TTS + avatar lip-sync pipeline kicks in
-// without needing a TurnRequest. This is how chat-typed user
-// messages produce audible replies: cognition inserts the reply
-// row -> BFF sees the SI utterance event -> emits Speak ->
-// voice-agent synthesizes.
-//
-// Fire-and-forget: no ack message. Voice-agent logs failures.
-message VoiceAgentSpeak {
-  string request_id = 1;
-  string space_id = 2;
-  string ga_agent_id = 3;
-  string utterance_id = 4;
-  string text = 5;
-}
-
-// VoiceAgentRealtimeOutput carries the assistant's spoken output for one
-// realtime turn (#437). The realtime executor (gpt-realtime) speaks
-// directly, bypassing the VoiceAgentTurnRequest path that the cascade
-// uses -- so without this message the SI reply never lands in the graph
-// and chat/canvas/audit go dark for voice turns. The server inserts a
-// v1:cognition:utterance with participantType="si" for the GA, server-
-// stamping partition + createdBy. The voice-agent supplies only the
-// final transcript, attribution context, and derived citations.
-//
-// reply_id is the caller-minted utterance id. It MUST be the same id
-// the voice-agent used to key any in-flight streaming UI state so the
-// committed utterance shares the chat panel's streaming `replyId`
-// contract (see the frontend's chat hook -- the synthetic in-flight
-// Utterance keyed by replyId swaps in-place when the committed row
-// lands). When empty the server mints one.
-//
-// citations are structured source attributions derived voice-agent-side
-// (the realtime model speaks, so citations can't ride a respondToUser
-// envelope as they do in the cascade -- see #436 grounding). They reuse
-// the AgentTurnCitation shape so the persisted utterance.citations is
-// byte-identical to a text/cascade reply and the frontend's existing
-// citation-chip renderer handles them with no special-casing.
-message VoiceAgentRealtimeOutput {
-  string request_id = 1;
-  string space_id = 2;        // v1:cognition:space.id (bare slug ok)
-  string ga_agent_id = 3;     // v1:agents:agent.id of the speaking GA
-  // Caller-minted utterance id; doubles as the chat streaming replyId.
-  string reply_id = 4;
-  // The assistant's final spoken transcript for this turn.
-  string text = 5;
-  // The user utterance this reply answers, when known. Threads the
-  // reply under the triggering turn for ordering parity with the
-  // cascade (which sets replyToId on the SI utterance).
-  string reply_to_id = 6;
-  // Structured source citations. Empty -> the utterance is inserted
-  // with no citations field at all (visually identical to an
-  // un-grounded text reply).
-  repeated AgentTurnCitation citations = 7;
-}
-
-message VoiceAgentRealtimeOutputAck {
-  string request_id = 1;
-  bool success = 2;
-  string utterance_id = 3;   // canonical row id of the inserted SI utterance
-  string error_code = 4;
-  string error_message = 5;
-}
-
-// VoiceAgentRealtimeSpeaking signals the GA participant's speaking state for
-// the native realtime voice path so the frontend orb animates while the
-// assistant speaks (#1421). On turnModeNative the realtime model (gpt-realtime)
-// authors + speaks the reply directly: cognition resets the GA's presence to
-// idle at gate-publish (it no longer authors the reply), and the only output
-// capture (VoiceAgentRealtimeOutput) fires once at response.done with the FINAL
-// transcript -- so nothing ever writes presence state=responding during the
-// spoken turn and the orb stays still.
-//
-// The voice-agent observes the realtime output stream, so it is the natural
-// emitter: speaking=true on the FIRST output audio frame of a response,
-// speaking=false on response.done. The presence WRITE stays server-side
-// (handleVoiceAgentRealtimeSpeaking): the server resolves the GA's
-// v1:cognition:participant row (resolveAIParticipantId) and upserts presence
-// state=responding / idle through the engine -- the same writer-of-record and
-// the same graph.node.created.v1:cognition:* mesh routing rule every other
-// presence write uses, so the row reaches the frontend presence stream in
-// multi-replica cluster mode (cross-node), not just single-node.
-//
-// Fire-and-forget: no ack. A first-audio responding lands AFTER the
-// gate-publish idle reset (the model only produces audio once the directive is
-// published and it engages), so it is not stomped; the response.done idle
-// closes the turn.
-message VoiceAgentRealtimeSpeaking {
-  string request_id = 1;
-  string space_id = 2;      // v1:cognition:space.id (bare slug ok)
-  string ga_agent_id = 3;   // v1:agents:agent.id of the speaking GA
-  // true = the GA started speaking this response (write presence responding);
-  // false = the response is done (write presence idle).
-  bool speaking = 4;
 }
 
 // EvaluatePolicyMsg / EvaluatePolicyResult retired with the
@@ -3843,7 +3059,6 @@ message RevokeAccountTokenResult {
   string error_code = 4;
   string error_message = 5;
 }
-
 
 // -----------------------------------------------------------------------------
 // Identity administration (memql#3324)

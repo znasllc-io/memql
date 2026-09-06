@@ -11,7 +11,7 @@ owner: znas
 
 `partition` is MemQL's **canonical tenant/scope primitive**. When core code
 (the engine and the core services) needs to scope work to a tenant, it scopes
-by **partition** -- never by a product notion like a pack's `spaceId`.
+by **partition** -- never by an ad-hoc per-feature key.
 
 This page is the reference for the partition-scoping API and the rule that
 keeps core product-agnostic. It pairs with the [Plugin SDK](../build/plugin-sdk.md),
@@ -42,10 +42,9 @@ A **partition** is a tenant scope key carried on the request context.
 
 The platformization program **re-establishes `partition` as the canonical
 tenant scope for core services**: the scope key core threads through context
-and resolves with the API below. Epic 3 re-points the core call sites that
-currently lean on `spaceId` onto this scope. That is a deliberate direction,
-not a contradiction of #56: #56 removed the old per-row partition column;
-this adopts the surviving partition primitive as the one scope vocabulary core
+and resolves with the API below. That is a deliberate direction, not a
+contradiction of #56: #56 removed the old per-row partition column; this
+adopts the surviving partition primitive as the one scope vocabulary core
 speaks.
 
 ---
@@ -66,26 +65,26 @@ scope from a product id.**
 
 ---
 
-## Worked example: mapping a product concept (`space`) onto a partition
+## Worked example: a product concept scoped *by* a partition
 
-A product pack's `space` (`v1:cognition:space`) is a **product concept scoped
-*by* a partition** -- it is not itself a scope key. The mapping is
-one-directional:
+A concept that names a customer -- `v1:accounts:account`, and the `accountId`
+every campaigns row carries -- is a **product concept scoped *by* a
+partition**. It is not itself a scope key. The mapping is one-directional:
 
 ```
 request  --carries-->  partition P   (the tenant scope)
                           |
-                          +--  space S1   (a product space within tenant P)
-                          +--  space S2
+                          +--  account A1   (a client within tenant P)
+                          +--  account A2
                           +--  agents, knowledge, ... (all within P)
 ```
 
-So a core operation that today reaches for `spaceId` to "scope" should instead
+So a core operation that reaches for `accountId` to "scope" should instead
 read the partition off the request:
 
 ```go
-// WRONG (core leaking a product scope key):
-//   scope := req.SpaceId
+// WRONG (core leaking a product id into the scope position):
+//   scope := req.AccountId
 //
 // RIGHT (core scoping by the canonical primitive):
 scope := memql.PartitionScope(ctx)        // any core package
@@ -93,27 +92,8 @@ scope := memql.PartitionScope(ctx)        // any core package
 scope := engine.ResolvePartitionFromContext(ctx)
 ```
 
-The `space` still exists -- the product pack owns it and may filter its own
-rows by `spaceId` *within* the active partition. What changes is that **core
-stops treating `spaceId` as the scope**: the tenant boundary is the partition,
-and a space is one of many things that live inside it.
-
-The actual re-pointing of the existing core call sites is **Epic 3.2** (issue
-#1899); this issue makes the target real, documented, and lint-guarded.
-
----
-
-## Guardrail: no new `spaceId` in core
-
-A test ratchet -- `TestNoNewSpaceIdInCore` in
-`component/memql/partition_scope_lint_test.go` -- fails when a core `.go` file
-outside the grandfathered baseline
-(`component/memql/testdata/spaceid_core_baseline.txt`) introduces `spaceId`.
-
-- The files that reference `spaceId` today are baselined and get cleaned up
-  by Epic 3.2.
-- **New core code must scope by partition**, so a fresh `spaceId` reference
-  trips the lint with a pointer back here.
-- As Epic 3.2 removes `spaceId` from a baselined file, it prunes that path from
-  the baseline (additions-only ratchet -- a baseline file that no longer
-  references `spaceId` is harmless, but pruning keeps the list honest).
+The `account` still exists -- it records whose work a row is for, and a
+product surface may group its own rows by it *within* the active partition.
+What changes is that **core never treats a per-feature id as the scope**: the
+tenant boundary is the partition, and everything else is one of the many
+things that live inside it.

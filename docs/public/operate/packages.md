@@ -241,7 +241,7 @@ Three components, and the order is load-bearing:
 # match nothing (memql#4933). It renders, it applies, every pod is healthy,
 # and not one of them has an init container or MEMQL_DSL_PATH.
 patches:
-  - target: { kind: Deployment, name: "^(bff|agent|cognition|planner|workbench)$" }
+  - target: { kind: Deployment, name: "^(bff|agent|planner|workbench)$" }
     patch: |
       - op: add
         path: /metadata/labels/memql~1product-dsl

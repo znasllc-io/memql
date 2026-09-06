@@ -100,23 +100,20 @@ func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
 // bffRootPrefixes are the bff route roots that are NOT under its "/memql"
 // multiplexed root, so the marker is stripped for them rather than swapped.
 //
-//   - "/artifacts"  -- the Library's two byte-bearing endpoints
-//     (server.ArtifactPaths(): POST /artifacts and
-//     GET /artifacts/{id}/content, memql#4341).
-//   - "/spaces"     -- the space attachment endpoints
-//     (server.SpaceAttachmentPaths(): POST /spaces/{id}/attachments and
-//     GET /spaces/{id}/attachments/{attachmentId}, memql#4738). This is
-//     what puts the knowledge pipeline within reach of a hosted surface:
-//     the MemQL OS Training app drops a file into the caller's own daily
-//     space and the analyzer runs from there.
+//   - "/artifacts"  -- the Library's byte-bearing endpoints
+//     (server.ArtifactPaths(): POST /artifacts, GET /artifacts/{id}/content
+//     and the chunked-session family, memql#4341). This is what puts the
+//     knowledge pipeline within reach of a hosted surface: the MemQL OS
+//     Training app uploads through it and the analyzer runs from there.
 //
-// Named, not spelled inline, so the one place that has to agree with
-// component/server says which.
+// "/spaces" was the second member until the space attachment endpoints went
+// with the space concept (epic memql#4988). Named, not spelled inline, so the
+// one place that has to agree with component/server says which.
 //
-// A LIST RATHER THAN A SECOND CONSTANT because the rule is one rule with two
-// members, and the day a third bff root appears the alternative is a second
+// A LIST RATHER THAN A CONSTANT because the rule is one rule over a set, and
+// the day a second bff root reappears the alternative is a second
 // `strings.HasPrefix` pair somebody has to notice is the same test twice.
-var bffRootPrefixes = []string{"/artifacts", "/spaces"}
+var bffRootPrefixes = []string{"/artifacts"}
 
 // isBffRootPath reports whether a marker-stripped path addresses one of the
 // bff's own roots.
@@ -124,8 +121,8 @@ var bffRootPrefixes = []string{"/artifacts", "/spaces"}
 // The prefix must end the path or be followed by "/" -- never a bare
 // HasPrefix. "/artifactsomething" is a different route from "/artifacts", and
 // treating it as the same one would silently make any future
-// "/memql/artifacts*" or "/memql/spaces*" path unreachable through this proxy
-// while every manifest looked correct.
+// "/memql/artifacts*" path unreachable through this proxy while every
+// manifest looked correct.
 func isBffRootPath(rest string) bool {
 	for _, prefix := range bffRootPrefixes {
 		if rest == prefix || strings.HasPrefix(rest, prefix+"/") {
@@ -143,8 +140,7 @@ func isBffRootPath(rest string) bool {
 // rather than deleted -- deleting it outright would make every proxied path
 // lose its leading segment along with the marker. The Library's byte routes
 // live at the bff's own root instead ("/artifacts", "/artifacts/{id}/content"),
-// as do the space attachment routes ("/spaces/{id}/attachments"), so for those
-// the marker is stripped and nothing put back.
+// so for those the marker is stripped and nothing put back.
 //
 // WHY THE PORTAL CANNOT JUST CALL "/artifacts" DIRECTLY, which is the obvious
 // question. It is served BY this handler, and a path that resolves to no file

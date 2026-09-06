@@ -45,8 +45,8 @@ const (
 // a node type arriving and the wiring not covering it, and a discovered list
 // would grow with the tree and assert nothing.
 var meshDeployments = []string{
-	"identity", "bff", "cognition", "agent", "planner",
-	"workbench", "mcp", "voice", "voice-agent", "edge",
+	"identity", "bff", "agent", "planner",
+	"workbench", "mcp", "edge",
 }
 
 // render builds an overlay with whichever renderer the machine has.
@@ -72,8 +72,8 @@ func render(t *testing.T, dir string) string {
 // resource is the slice of a rendered document these gates reason about.
 //
 // The Service fields (Type, ExternalTrafficPolicy, LoadBalancerSourceRanges)
-// are the LoadBalancer-only surface the cloud-entry voice-off hold removes
-// (memql#4225); they decode to their zero values on every other kind.
+// are the LoadBalancer-only surface a hold on a module removes; they decode to
+// their zero values on every other kind.
 type resource struct {
 	APIVersion string `yaml:"apiVersion"`
 	Kind       string `yaml:"kind"`
@@ -185,11 +185,6 @@ func TestNothingFullyQualifiesAClusterDNSName(t *testing.T) {
 // the cluster silently changes width. Stating it in the overlay makes the width
 // a reviewed value; this asserts every mesh node actually carries one.
 func TestCommittedReplicaCountsAreStatedNotInherited(t *testing.T) {
-	// voice-agent is a room dispatcher rather than a request-serving mesh node:
-	// one replica serves up to MEMQL_VOICE_MAX_ROOMS rooms, so its count does
-	// not track the rest of the mesh.
-	const dispatcher = "voice-agent"
-
 	byName := map[string]resource{}
 	for _, r := range parse(t, render(t, cloudOverlay)) {
 		if r.Kind == "Deployment" {
@@ -207,9 +202,6 @@ func TestCommittedReplicaCountsAreStatedNotInherited(t *testing.T) {
 			continue
 		}
 		want := cloudReplicas
-		if node == dispatcher {
-			want = 1
-		}
 		if *r.Spec.Replicas != want {
 			t.Errorf("%s has %d replicas, want %d", node, *r.Spec.Replicas, want)
 		}

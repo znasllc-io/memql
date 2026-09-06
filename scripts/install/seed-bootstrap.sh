@@ -477,9 +477,8 @@ function pod_states() {
 # a moment that has passed. The question here is "is a NEW generation of pods
 # serving", and only the pods can answer it.
 #
-# A Deployment at zero replicas is satisfied by having no pods -- the voice lane
-# on any machine with no LiveKit credentials (memql#2416), which consumes this
-# Secret and is deliberately switched off.
+# A Deployment at zero replicas is satisfied by having no pods -- a module an
+# install has deliberately switched off, which still consumes this Secret.
 #
 # WHY READY IS ENOUGH FOR IDENTITY, which is the assumption this whole fix rests
 # on. `attemptAutoBootstrap` runs in the INTEGRATIONS phase (phase 4,
@@ -537,7 +536,7 @@ function wait_for_fresh_pods() {
 #
 #     agent      deleted 07:39:45  ready 07:41:25   cumulative 100s
 #     bff        deleted 07:41:29  ready 07:43:09   cumulative 204s
-#     cognition  deleted 07:43:12  ready 07:44:52   cumulative 307s   <- budget 240s
+#     planner    deleted 07:43:12  ready 07:44:52   cumulative 307s   <- budget 240s
 #
 # Nothing was slow: every node took the same 100s. Issuing the deletes together
 # makes the recoveries overlap, so the run costs max(T) instead of sum(T) and the

@@ -47,14 +47,11 @@ func (a *App) transportAgent() {
 		a.grpcServer.SetSTTProvider(a.sttProvider.(stt.StreamingProvider))
 	}
 
-	// Audio WebSocket (shared with the voice node; see transport_audio.go).
-	a.setupAudioWebsocket()
-
-	// Attachment upload + download endpoints (mountAttachmentEndpoints lives in
-	// transport_attachments.go, shared with the bff build). Returns the blob
+	// Azure Blob uploader + container (resolveBlobStore lives in
+	// transport_blobstore.go, shared with the bff build). Returns the blob
 	// uploader + container so the agent can additionally hand them to the
 	// workbench / worker integrations below.
-	uploader, blobContainer := a.mountAttachmentEndpoints()
+	uploader, blobContainer := a.resolveBlobStore()
 
 	// memql#733/#801: hand the workbench integration the Azure Blob uploader so a
 	// successful LOCAL fs_write uploads its bytes to v1:common:attachment

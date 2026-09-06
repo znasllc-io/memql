@@ -39,7 +39,6 @@ func TestAnonymousPayloadAllowlist(t *testing.T) {
 	// identity family is the dangerous one, and the tool loop is both.
 	for _, p := range []any{
 		&memqlv1.MemqlClientMessage_AiChat{},
-		&memqlv1.MemqlClientMessage_AiSpeech{},
 		&memqlv1.MemqlClientMessage_AiSuggest{},
 		&memqlv1.MemqlClientMessage_CallTool{},
 		&memqlv1.MemqlClientMessage_ListTools{},
@@ -48,15 +47,12 @@ func TestAnonymousPayloadAllowlist(t *testing.T) {
 		&memqlv1.MemqlClientMessage_IdentityList{},
 		&memqlv1.MemqlClientMessage_DelegationCreate{},
 		&memqlv1.MemqlClientMessage_CreateWorkerToken{},
-		&memqlv1.MemqlClientMessage_SendGuestInvite{},
 		&memqlv1.MemqlClientMessage_RotateAuth{},
 		&memqlv1.MemqlClientMessage_RevokeAllSessions{},
 		&memqlv1.MemqlClientMessage_NodeMaintenance{},
 		&memqlv1.MemqlClientMessage_AgentGenerateTurn{},
 		&memqlv1.MemqlClientMessage_ConceptsList{},
 		&memqlv1.MemqlClientMessage_MyAccess{},
-		&memqlv1.MemqlClientMessage_PolyphonRoomToken{},
-		&memqlv1.MemqlClientMessage_VoiceAgentTurnRequest{},
 	} {
 		assert.Falsef(t, isAnonymousPayload(p), "%T must be refused on an anonymous session", p)
 	}

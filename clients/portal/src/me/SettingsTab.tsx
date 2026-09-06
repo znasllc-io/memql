@@ -243,33 +243,18 @@ function SettingsForm({
       </SettingsGroup>
 
       <SettingsGroup
-        title="Sessions and voice"
+        title="Sessions"
         meta="How an agent behaves while it is working with you"
         group={GROUP_SESSIONS}
         writes={writes}
         onSave={() =>
           writes.save(GROUP_SESSIONS, {
-            voiceMode: draft.voiceMode,
             interactivePace: draft.interactivePace,
             takeoverMode: draft.takeoverMode,
             cursorTweenMs: draft.cursorTweenMs,
           })
         }
       >
-        <Field
-          label="Microphone"
-          hint="Toggle: click on, click off. Continuous: the mic stays open and speech detection gates it."
-        >
-          <Select
-            ariaLabel="Microphone"
-            value={draft.voiceMode}
-            onChange={(next) => set({ voiceMode: next })}
-            disabled={busy(GROUP_SESSIONS)}
-          >
-            <option value="toggle">Click to talk</option>
-            <option value="continuous">Always listening</option>
-          </Select>
-        </Field>
         <Field
           label="Pace"
           hint="Cursor speed in conversational sessions -- walkthroughs, demos, teaching flows."

@@ -24,7 +24,6 @@
 
 use identity.concepts.{ user }
 use agents.concepts.{ agent }
-use cognition.concepts.{ utterance }
 use common.concepts.{ attachment }
 use planner.concepts.{ plan }
 use worker.concepts.{ registration }
@@ -69,7 +68,7 @@ concept artifact {
 
   folderId         string  @description("v1:library:folder.id this item is filed under -- the ORGANIZATIONAL TRUTH of the Files app's Drive-model tree (memql#4781, design D3). An id, never a path string; empty or absent means the root. Any kind can be filed, not only files. moveArtifactToFolder is the re-filing write (a read-merge update, so labels and archived survive a move); at promotion time createArtifact carries the backing row's initial filing forward, after which THIS copy is authoritative and the backing row's is not tracked further. Every folder filter runs CLIENT-SIDE over the owner's snapshot, because rows promoted before this field existed have no key at all and `folderId == \"\"` cannot match them -- the `archived != true` lesson, applied to a field where the honest reader is the fold, not the filter.")
 
-  partitionId          string  @description("v1:cognition:space.id this item belongs to, when space-scoped (documents, generated outputs). Empty for user-global records (notes / to-dos / memories). Backs the per-space facet filter.")
+  partitionId          string  @description("Optional product scope tag. The engine derives nothing from it; it is carried so a product can facet its own index rows. Empty for everything the engine writes.")
 
   agentId          string  @description("v1:agents:agent.id associated with this item, when one applies (e.g. the agent that produced a generated output or owns a memory). Backs the per-agent facet filter.")
 
@@ -124,7 +123,7 @@ concept generatedOutput {
   format            enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "other")! @default("markdown")  @description("Content classification -- picks the Library viewer. Mirrors the artifact.format vocabulary.")
   mimeType          string  @description("MIME type of the backing bytes when attachment-backed.")
   source            enum("workbench_generated", "computer_use", "agent_generated", "derived", "user_created")!  @description("Provenance -- where the output was produced. Copied onto the artifact index row's source field. user_created is the portal's own create path: a person typed the content rather than a tool producing it, and calling that 'derived' would render a false provenance label on their own row.")
-  partitionId           string  @description("v1:cognition:space.id this output was produced in, when space-scoped.")
+  partitionId           string  @description("Optional product scope tag, carried through from the artifact index. The engine derives nothing from it.")
   producedByPlanId  string  @description("v1:planner:plan.id that produced this output, when it came from a plan.")
   producedByAgentId string  @description("v1:agents:agent.id that produced this output, when an agent emitted it.")
   producedByWorkerId   string  @description("v1:worker:registration.id of the worker MACHINE that produced this output, when source=computer_use. Empty otherwise. Copied onto the artifact index row.")
@@ -205,7 +204,7 @@ concept documentVersion {
 
   producedByPlanId string  @description("v1:planner:plan.id that produced this version, when an assistant/agent edit came through the planner. Provenance back-pointer mirroring the artifact/generatedOutput spine.")
 
-  partitionId          string  @description("v1:cognition:space.id the edit happened in, when space-scoped. Carried for facet parity with the artifact index; empty for user-global edits.")
+  partitionId          string  @description("Optional product scope tag, carried for facet parity with the artifact index. The engine derives nothing from it.")
 
   // NOTE: the append timestamp is the row intrinsic `createdAt` (the
   // MemoryNodes hypertable time dimension + the natural history ordering
@@ -244,12 +243,10 @@ concept memory {
   summary           string  @description("Optional one-line summary for dense list rendering.")
   kind              enum("fact", "preference", "instruction", "episodic", "other")! @default("fact")  @description("Memory flavor. fact = stable truth about the user; preference = how they like things done; instruction = a standing directive; episodic = a specific past interaction worth recalling.")
   agentId           string  @description("v1:agents:agent.id that formed / owns this memory, when agent-scoped. Empty for user-global memories.")
-  partitionId           string  @description("v1:cognition:space.id this memory was formed in, when space-scoped.")
-  sourceUtteranceId string  @description("Optional back-reference to the v1:cognition:utterance that produced this memory -- provenance for 'where did the assistant learn this'.")
+  partitionId           string  @description("Optional product scope tag. The engine derives nothing from it.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="agentId", target=agent, direction="outgoing")
-  @relationship(type="references", field="sourceUtteranceId", target=utterance, direction="outgoing")
 }
 
 // ---- file: the Library's own byte-bearing row ----

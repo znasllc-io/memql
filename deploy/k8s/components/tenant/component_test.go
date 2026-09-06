@@ -106,15 +106,7 @@ func renderExample(t *testing.T, name string) (replicas map[string]int, dbInstan
 // count in each preset fails this test instead of silently inheriting base's
 // number into a tier that never priced it.
 var meshNodes = []string{
-	"identity", "bff", "cognition", "agent", "planner", "workbench", "mcp", "edge",
-}
-
-// voiceLane is what `solo` scales to zero. Five, not three: livekit's redis and
-// SIP sidecars are the ones that get forgotten, and forgetting them is the
-// expensive half of the mistake -- they idle forever serving a LiveKit server
-// that is scaled to zero.
-var voiceLane = []string{
-	"voice", "voice-agent", "livekit", "livekit-redis", "livekit-sip",
+	"identity", "bff", "agent", "planner", "workbench", "mcp", "edge",
 }
 
 // TestTierPresetsMatchTheirDocumentedShape asserts the tier table in README.md,
@@ -129,15 +121,14 @@ func TestTierPresetsMatchTheirDocumentedShape(t *testing.T) {
 		example     string
 		mesh        int
 		dbInstances int
-		voiceOff    bool
 	}{
-		// Trial and Node: solo + entry. One of everything, voice lane off.
-		{example: "tenant-node", mesh: 1, dbInstances: 1, voiceOff: true},
+		// Trial and Node: solo + entry. One of everything.
+		{example: "tenant-node", mesh: 1, dbInstances: 1},
 		// Node + the HA add-on: the mesh doubles AND the database moves to the
 		// `mid` preset. Both halves, or the mesh survives a drain and has
 		// nothing to talk to.
-		{example: "tenant-node-ha", mesh: 2, dbInstances: 2, voiceOff: true},
-		// Graph: standard + mid. Two of everything, voice on.
+		{example: "tenant-node-ha", mesh: 2, dbInstances: 2},
+		// Graph: standard + mid. Two of everything.
 		{example: "tenant-graph", mesh: 2, dbInstances: 2},
 		// Mesh: dedicated + top. Two of everything, three database instances
 		// across three zones.
@@ -155,16 +146,6 @@ func TestTierPresetsMatchTheirDocumentedShape(t *testing.T) {
 				if got != tc.mesh {
 					t.Errorf("%s: %s has %d replicas, want %d (README.md's tier table)", tc.example, node, got, tc.mesh)
 				}
-			}
-
-			if tc.voiceOff {
-				for _, node := range voiceLane {
-					if got := replicas[node]; got != 0 {
-						t.Errorf("%s: %s has %d replicas, want 0 -- the solo profile bills no voice, so a running voice pod is cost for a capability the tenant cannot use", tc.example, node, got)
-					}
-				}
-			} else if got := replicas["voice"]; got < 1 {
-				t.Errorf("%s: voice has %d replicas; this tier includes voice minutes, so the capability has to exist", tc.example, got)
 			}
 
 			if dbInstances != tc.dbInstances {
@@ -215,55 +196,5 @@ func TestSoloAndStandardActuallyDiffer(t *testing.T) {
 	}
 	if same && soloDB == stdDB {
 		t.Fatal("the solo and standard profiles render identically -- a tier that costs $199 and a tier that costs $949 are buying the same infrastructure")
-	}
-}
-
-// TestSoloSavesTheVoiceLane pins the pod-count claim published in
-// docs/public/operate/memql-cloud-trials.md (task memql#3856).
-//
-// That page says `solo` renders 8 running Deployments against the mesh's 13,
-// and that the five it saves are the whole voice lane. Numbers in a runbook go
-// stale silently -- and this particular number is the entry tier's cost of
-// goods, which the tier's margin is computed from.
-//
-// It is deliberately the POD COUNT and not a dollar figure. The epic models
-// ~$143 -> ~$90; confirming that needs a running cluster and a month of
-// billing, and publishing a modelled number as a measured one would be the same
-// class of error as the stale provider costs this epic already had to fix.
-func TestSoloSavesTheVoiceLane(t *testing.T) {
-	solo, _ := renderExample(t, "tenant-node")
-	full, _ := renderExample(t, "tenant-graph")
-
-	running := func(m map[string]int) int {
-		var n int
-		for _, v := range m {
-			if v > 0 {
-				n++
-			}
-		}
-		return n
-	}
-
-	const (
-		wantSolo = 8
-		wantFull = 13
-	)
-	if got := running(solo); got != wantSolo {
-		t.Errorf("the solo profile runs %d Deployments, and memql-cloud-trials.md says %d", got, wantSolo)
-	}
-	if got := running(full); got != wantFull {
-		t.Errorf("the full mesh runs %d Deployments, and memql-cloud-trials.md says %d", got, wantFull)
-	}
-
-	// And the saving is the voice lane specifically -- not some other five pods
-	// that happen to add up. A tier that quietly stopped running `agent` would
-	// hit the same arithmetic and be a very different product.
-	for _, node := range voiceLane {
-		if solo[node] != 0 {
-			t.Errorf("%s is running under the solo profile; the documented saving is the voice lane, and this is not it", node)
-		}
-		if full[node] == 0 {
-			t.Errorf("%s is NOT running under the full mesh, so the difference between the two profiles is not what the runbook says it is", node)
-		}
 	}
 }

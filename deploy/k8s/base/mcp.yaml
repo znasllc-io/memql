@@ -103,8 +103,13 @@ spec:
           # SIGKILLed at the grace deadline and orphaning Postgres backends.
           lifecycle:
             preStop:
-              exec:
-                command: ["/bin/sh", "-c", "sleep 5"]
+              # The NATIVE sleep action, not `exec: /bin/sh -c sleep 5`. The
+              # runtime image is distroless and has no shell, so the exec form
+              # fails on every drain -- silently, because a failed preStop is
+              # logged as an event and the pod is terminated anyway. Requires
+              # k8s >= 1.30 (GA 1.32); the local cluster pins v1.32.
+              sleep:
+                seconds: 5
           ports:
             - { name: http, containerPort: 8085 }
             - { name: grpc, containerPort: 50051 }

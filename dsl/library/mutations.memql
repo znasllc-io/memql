@@ -127,10 +127,9 @@ mutate memory createMemory {
     kind               enum("fact", "preference", "instruction", "episodic", "other")
     agentId            string
     partitionId            string
-    sourceUtteranceId  string
   }
   insert {
-    accept { title, content, summary, agentId, partitionId, sourceUtteranceId }
+    accept { title, content, summary, agentId, partitionId }
     stamp {
       id: args.memoryId
       ownerUserId: actor.userId

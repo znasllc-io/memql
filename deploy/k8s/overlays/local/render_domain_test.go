@@ -19,13 +19,13 @@ import (
 	"github.com/znasllc-io/memql/core/vendorname"
 )
 
-// The ten node Deployments the local mesh runs. Listed rather than discovered,
-// because the failure this exists to catch is precisely a node type arriving
-// and the patch not covering it -- discovery would grow the list and the check
-// with it, and assert nothing.
+// The seven node Deployments the local mesh runs. Listed rather than
+// discovered, because the failure this exists to catch is precisely a node type
+// arriving and the patch not covering it -- discovery would grow the list and
+// the check with it, and assert nothing.
 var nodes = []string{
-	"identity", "bff", "cognition", "agent", "planner",
-	"workbench", "mcp", "voice", "voice-agent", "edge",
+	"identity", "bff", "agent", "planner",
+	"workbench", "mcp", "edge",
 }
 
 // render builds this overlay with whichever renderer the machine has.

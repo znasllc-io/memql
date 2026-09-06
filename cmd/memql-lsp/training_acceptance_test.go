@@ -44,12 +44,12 @@ import (
 // realCatalogDocURI places it in a directory named for its domain, which is what
 // the concept-matching rule reads.
 //
-// `dsl/cognition/queries.memql` is chosen for being ordinary: a dozen-odd
+// `dsl/worker/queries.memql` is chosen for being ordinary: a dozen-odd
 // queries, a file-top `use` block, and comment blocks between declarations --
 // the shapes a hand-written fixture tends not to have. Any other domain file
 // would do; nothing here depends on which constructs it holds.
-const realCatalogDocPath = "../../dsl/cognition/queries.memql"
-const realCatalogDocURI = "file:///w/dsl/cognition/queries.memql"
+const realCatalogDocPath = "../../dsl/worker/queries.memql"
+const realCatalogDocURI = "file:///w/dsl/worker/queries.memql"
 
 // realEngineCatalog builds a real engine over the embedded tree and returns its
 // catalog as the notification payload a client would push.

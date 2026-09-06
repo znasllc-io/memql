@@ -95,11 +95,8 @@ func loadFromEnv() *busv1.ConfigSnapshot {
 		AuthEnabled:       envStr("MEMQL_IDENTITY_VERIFIER_BASE_URL") != "" && IdentityAuthEnabled(),
 		DelegationEnabled: envBool("MEMQL_DELEGATION_ENABLED"),
 
-		// Polyphon
-		PolyphonVoiceProvider:  envStr("MEMQL_POLYPHON_VOICE_PROVIDER"),
+		// Streaming transcription (AiTranscribeStream*)
 		PolyphonOpenaiAsrModel: envStr("MEMQL_POLYPHON_OPENAI_ASR_MODEL"),
-		PolyphonOpenaiTtsModel: envStr("MEMQL_POLYPHON_OPENAI_TTS_MODEL"),
-		PolyphonOpenaiTtsVoice: envStr("MEMQL_POLYPHON_OPENAI_TTS_VOICE"),
 
 		// Node
 		NodeType:           envStr("MEMQL_NODE_TYPE"),

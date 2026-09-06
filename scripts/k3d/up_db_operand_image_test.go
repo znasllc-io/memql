@@ -72,7 +72,7 @@ func TestImageOverridesDoNotStampTheEngineTagOnTheDatabase(t *testing.T) {
 func TestImageOverridesStillCoverEveryNodeWithTheEngineTag(t *testing.T) {
 	block := upEmit(t, "memql.localhost", "ghcr.io/znasllc-io", "0.19.0", "kustomize_image_overrides")
 
-	for _, node := range []string{"bff", "identity", "cognition", "agent", "planner", "workbench", "mcp", "edge"} {
+	for _, node := range []string{"bff", "identity", "agent", "planner", "workbench", "mcp", "edge"} {
 		want := "memql-" + node + "=ghcr.io/znasllc-io/memql-" + node + ":0.19.0"
 		if !strings.Contains(block, want) {
 			t.Errorf("node override missing %q:\n%s", want, block)

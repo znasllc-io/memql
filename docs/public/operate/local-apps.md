@@ -172,7 +172,7 @@ It was minted as `class="service_account"` until then, and the collapse cost a
 capability the design had already granted on paper.
 
 Every other machine class names a **machine**: a node token's subject is a
-binary, a voice-agent token's is a process. This one's subject is a **person**.
+binary, a service account's is a CI job. This one's subject is a **person**.
 `component/server/http_access.go` refuses to resolve an HTTP actor for a
 machine class, and it is right to — the Library's byte routes stamp ownership
 from `actor.userId`, so resolving one for a binary would invent somebody to own
@@ -218,9 +218,9 @@ path buys.
 
 `POST /node/bootstrap` with `tokenClass="app_session"` is the mint surface —
 the request field and the resulting class claim now agree, which they did not
-before memql#4857. Before this path existed, that secret bought only
-**machine** principals (`node`, `voice_agent`); it now also buys a
-**user-scoped** one. Narrowing it:
+before memql#4857. Before this path existed, that secret bought only the
+**machine** principal `node`; it now also buys a **user-scoped** one.
+Narrowing it:
 
 - the named user must exist (a forged subject would verify and then act as a
   user nobody can point at in an audit);

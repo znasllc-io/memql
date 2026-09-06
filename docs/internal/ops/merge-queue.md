@@ -17,12 +17,11 @@ action that cannot be done from a workflow file).
 
 Without a merge queue, the full CI suite re-runs on every push to every
 open PR, and again implicitly when each PR merges. The heavy lanes
-(CodeQL `Analyze` across go/js/python, the CGO voice build, the full
-`go test`) are the long pole. A merge queue runs the **fast affected
-subset on the PR** (Tier 1 routing, #856) and the **full suite once on
-the batched merge candidate** — so the expensive coverage happens a
-single time on the exact tree that will land, not N times across PR
-pushes.
+(CodeQL `Analyze` across go/js/python, the full `go test`) are the long
+pole. A merge queue runs the **fast affected subset on the PR** (Tier 1
+routing, #856) and the **full suite once on the batched merge candidate**
+— so the expensive coverage happens a single time on the exact tree that
+will land, not N times across PR pushes.
 
 ## What shipped in the workflows (this PR, #858)
 

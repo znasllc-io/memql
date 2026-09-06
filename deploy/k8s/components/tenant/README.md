@@ -58,18 +58,11 @@ it from, and `component_test.go` asserts this table against those seeds.
 
 ### What each profile is
 
-| Preset | Mesh nodes | Voice lane | Intended for |
-|---|---|---|---|
-| `solo` | 1 replica each | scaled to zero | Trial, Node |
-| `standard` | 2 replicas each | 1 replica | Graph |
-| `dedicated` | 2 replicas each | 2 replicas | Mesh, Enterprise |
-
-**`solo` scales the voice lane to zero, and that is a pricing fact rather than a
-technical one.** Voice is not in Node's base price (a voice minute costs roughly
-two orders of magnitude more than a text turn), so a Node tenant that has not
-bought the add-on should not be paying for three idle voice pods — and the
-binaries fail-fast without LiveKit credentials by design, so running them
-unconfigured is a guaranteed crash-loop rather than a harmless idle.
+| Preset | Mesh nodes | Intended for |
+|---|---|---|
+| `solo` | 1 replica each | Trial, Node |
+| `standard` | 2 replicas each | Graph |
+| `dedicated` | 2 replicas each | Mesh, Enterprise |
 
 > `solo` is today the **replica-count** half of the condensed instance profile.
 > The deeper condensation — collapsing the mesh into fewer processes, which is

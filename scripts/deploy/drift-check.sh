@@ -140,9 +140,9 @@ function rendered_images() {
 # Canonicalize a "[registry/]repo@sha256:DIGEST" image ref so two refs that
 # name the SAME image compare equal regardless of the implicit Docker Hub
 # defaults. Docker reports a pod's imageID with the registry fully qualified
-# (docker.io/livekit/livekit-server@sha256:...) while a kustomize overlay
-# typically pins the bare form (livekit/livekit-server@sha256:...) -- same
-# digest, different surface text. Without this they spuriously diverge (#1441).
+# (docker.io/library/redis@sha256:...) while a kustomize overlay typically pins
+# the bare form (redis@sha256:...) -- same digest, different surface text.
+# Without this they spuriously diverge (#1441).
 #
 # The defaults Docker fills in for a bare reference, and which we therefore
 # strip back off:
@@ -237,9 +237,9 @@ function check_live() {
     info "comparing committed $ENV overlay digests vs live cluster digests..."
     local committed live
     # Normalize the implicit docker.io/ + library/ defaults on BOTH sides so a
-    # bare overlay pin (livekit/livekit-server@sha256:...) matches the live
-    # pod's registry-qualified imageID (docker.io/livekit/...@sha256:...) for
-    # the same image (#1441).
+    # bare overlay pin (redis@sha256:...) matches the live pod's
+    # registry-qualified imageID (docker.io/library/redis@sha256:...) for the
+    # same image (#1441).
     committed="$(rendered_images | grep -oE '[^ ]+@sha256:[a-f0-9]+' | normalize_imageref_list)"
     live="$(kubectl get pods -n "$NAMESPACE" \
         -o jsonpath='{range .items[*]}{range .status.containerStatuses[*]}{.imageID}{"\n"}{end}{end}' 2>/dev/null \

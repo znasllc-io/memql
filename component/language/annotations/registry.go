@@ -53,7 +53,7 @@ var ByReceiver = map[string][]string{
 	"Tool": {
 		"description", "enabled", "disabled", "handler", "executionTime",
 		"destructive", "requiresConfirmation", "rateLimit",
-		"clientExecution", "allowedRoles", "scopes", "mcp",
+		"allowedRoles", "scopes", "mcp",
 	},
 	"Builtin": {
 		"description", "enabled", "disabled", "executor", "alias", "args", "sdk",
@@ -119,7 +119,6 @@ var Docs = map[string]string{
 	"destructive":          "Mark a tool as destructive (mutates/deletes); the tool loop gates it behind a confirmation.",
 	"requiresConfirmation": "Require explicit user confirmation before the tool executes.",
 	"rateLimit":            "Tool rate limiting. Format: @rateLimit(maxCalls=100, periodSeconds=3600).",
-	"clientExecution":      "Mark a tool as client-executed (runs in the browser, relayed agent->browser).",
 	"allowedRoles":         "Restrict the tool to a set of agent roles.",
 	"scopes":               "Authorization scopes the tool requires.",
 	// Builtin.

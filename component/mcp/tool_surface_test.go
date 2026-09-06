@@ -127,15 +127,14 @@ func (e *fakeEngine) MCPPromotedFunctionKind(name string) (string, bool) {
 	return kind, ok
 }
 
-func tool(name string, roles []string, clientExec bool) *memql.Tool {
-	return &memql.Tool{Name: name, Description: name + " desc", AllowedRoles: roles, ClientExecution: clientExec}
+func tool(name string, roles []string) *memql.Tool {
+	return &memql.Tool{Name: name, Description: name + " desc", AllowedRoles: roles}
 }
 
 func newFakeEngine() *fakeEngine {
 	return &fakeEngine{reg: &fakeRegistry{tools: []*memql.Tool{
-		tool("openTool", nil, false),                 // unrestricted
-		tool("gaTool", []string{"assistant"}, false), // restricted to assistant
-		tool("uiClick", nil, true),                   // client-execution: skipped
+		tool("openTool", nil),                 // unrestricted
+		tool("gaTool", []string{"assistant"}), // restricted to assistant
 	}}}
 }
 
@@ -285,8 +284,8 @@ func TestListMCPTools_CuratedAllowlist(t *testing.T) {
 	// Inert: no tool tagged -> full reflected surface (back-compat).
 	t.Run("inert when none tagged", func(t *testing.T) {
 		eng := &fakeEngine{reg: &fakeRegistry{tools: []*memql.Tool{
-			tool("alpha", nil, false),
-			tool("beta", nil, false),
+			tool("alpha", nil),
+			tool("beta", nil),
 		}}}
 		names := toolNames(listMCPTools(eng, "assistant", TierSealed))
 		if !names["alpha"] || !names["beta"] {
@@ -298,8 +297,8 @@ func TestListMCPTools_CuratedAllowlist(t *testing.T) {
 	// (e.g. an infra/admin tool, #1597) is dropped. Meta-tools still present.
 	t.Run("allowlist when any tagged", func(t *testing.T) {
 		eng := &fakeEngine{reg: &fakeRegistry{tools: []*memql.Tool{
-			mcpTool("notesCreate"),           // curated -> shown
-			tool("clusterSweep", nil, false), // untagged infra -> hidden
+			mcpTool("notesCreate"),    // curated -> shown
+			tool("clusterSweep", nil), // untagged infra -> hidden
 		}}}
 		names := toolNames(listMCPTools(eng, "assistant", TierSealed))
 		if !names["notesCreate"] {

@@ -23,9 +23,9 @@ func TestListPackDomains_EmbeddedCore(t *testing.T) {
 		}
 	}
 
-	cog, ok := byName["cognition"]
+	cog, ok := byName["library"]
 	if !ok {
-		t.Fatal("expected core domain 'cognition' in the embedded tree")
+		t.Fatal("expected core domain 'library' in the embedded tree")
 	}
 	if cog.Origin != "embedded" {
 		t.Errorf("cognition origin = %q, want embedded", cog.Origin)
@@ -111,13 +111,13 @@ func TestReadPackFile_PathTraversalRejected(t *testing.T) {
 	cases := []struct {
 		domain, path string
 	}{
-		{"cognition", "../identity/concepts.memql"}, // escape attempt
-		{"cognition", "/etc/passwd"},                // absolute
-		{"cognition", "queries.go"},                 // non-browsable suffix
-		{"cognition", ""},                           // empty
-		{"", "queries.memql"},                       // empty domain
-		{"foo/bar", "queries.memql"},                // slash in domain
-		{"_reference", "_concept/x.memql"},          // underscore domain
+		{"library", "../identity/concepts.memql"}, // escape attempt
+		{"library", "/etc/passwd"},                // absolute
+		{"library", "queries.go"},                 // non-browsable suffix
+		{"library", ""},                           // empty
+		{"", "queries.memql"},                     // empty domain
+		{"foo/bar", "queries.memql"},              // slash in domain
+		{"_reference", "_concept/x.memql"},        // underscore domain
 	}
 	for _, c := range cases {
 		if _, _, err := dsl.ReadPackFile(c.domain, c.path); err == nil {
@@ -135,13 +135,13 @@ func TestListPackFiles_UnknownDomain(t *testing.T) {
 
 // TestPackFileExists covers the handler's pre-read validation helper.
 func TestPackFileExists(t *testing.T) {
-	if !dsl.PackFileExists("cognition", "queries.memql") {
-		t.Error("cognition/queries.memql should exist")
+	if !dsl.PackFileExists("library", "queries.memql") {
+		t.Error("library/queries.memql should exist")
 	}
-	if dsl.PackFileExists("cognition", "no-such-file.memql") {
+	if dsl.PackFileExists("library", "no-such-file.memql") {
 		t.Error("nonexistent file reported as existing")
 	}
-	if dsl.PackFileExists("cognition", "../identity/concepts.memql") {
+	if dsl.PackFileExists("library", "../identity/concepts.memql") {
 		t.Error("traversal path reported as existing")
 	}
 }

@@ -18,11 +18,11 @@
 // mutually exclusive; live transcript is the feature.)
 //
 // So the browser owns the conversion: 16 kHz, mono, signed 16-bit
-// little-endian PCM, matching core/audio.PolyphonSampleRate. Everything here
+// little-endian PCM, matching core/audio.WireSampleRate. Everything here
 // is pure and synchronous so it is tested against fixtures rather than against
 // a microphone.
 
-/** What the wire wants. `core/audio.PolyphonSampleRate` on the Go side. */
+/** What the wire wants. `core/audio.WireSampleRate` on the Go side. */
 export const TARGET_SAMPLE_RATE = 16000;
 
 /**

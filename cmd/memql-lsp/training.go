@@ -207,7 +207,7 @@ type clusterCatalogParams struct {
 // contradictable answer to "which domain is this concept in".
 type catalogConstruct struct {
 	// Name is the registry key: a concept's canonical id
-	// ("v1:cognition:space"), or the declared name for every other kind.
+	// ("v1:worker:registration"), or the declared name for every other kind.
 	Name string `json:"name"`
 	// Kind is the catalog's kind, not the authored keyword -- "mutation" for
 	// what a file spells `mutate`. Passed through untranslated; the translation

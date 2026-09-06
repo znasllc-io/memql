@@ -2,12 +2,11 @@ package openai
 
 import (
 	"context"
+	"github.com/znasllc-io/memql/core/audio"
 	"log/slog"
 	"os"
 	"testing"
 	"time"
-
-	"github.com/znasllc-io/memql/component/polyphon"
 )
 
 // TestASRStreamLiveGA verifies the GA transcription session against the real
@@ -43,7 +42,7 @@ func TestASRStreamLiveGA(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	stream, err := client.StartStream(ctx, polyphon.ASRConfig{Language: "en"})
+	stream, err := client.StartStream(ctx, audio.ASRConfig{Language: "en"})
 	if err != nil {
 		t.Fatalf("StartStream: %v", err)
 	}

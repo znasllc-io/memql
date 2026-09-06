@@ -52,9 +52,11 @@
 // shapes:
 //
 //   - an injected getter func value, used for testability:
-//     get("MEMQL_VOICE_EXECUTOR", "realtime") in the voice-agent, where
-//     `get` is a plain func parameter and so is indistinguishable from any
-//     other two-argument call;
+//     get("SOME_KNOB", "default"), where `get` is a plain func parameter and
+//     so is indistinguishable from any other two-argument call. The shape
+//     that motivated this rule was the voice-agent's, which went with the
+//     voice node (epic memql#4988); the rule stays because the shape is a
+//     Go idiom, not that binary's habit;
 //   - a name table, like integrations/email's Host: "SMTP_HOST", where the
 //     key is data rather than an argument.
 //
@@ -97,23 +99,6 @@ var external = map[string]bool{
 	"LANG":                true,
 	"TZ":                  true,
 	"CI":                  true,
-	// LiveKit runtime-platform var (LiveKit's own convention, not MemQL-owned
-	// config): the externally-dialable LiveKit URL that avatardirect + the
-	// voice-agent hand to the cloud media plane. The MemQL-owned equivalent is
-	// MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL; this bare form is the third-party knob.
-	"LIVEKIT_PUBLIC_URL": true,
-	// The rest of LiveKit's own credential trio, surfaced when memql#3834's
-	// local-closure pass made the voice-agent's injected getter resolvable.
-	// SAME CATEGORY AS THE LINE ABOVE, and the evidence is in the tree rather
-	// than in a judgement call: integrations/telephony/plugin.go reads
-	// `firstEnv("LIVEKIT_URL", "MEMQL_POLYPHON_LIVEKIT_URL")` -- the bare name
-	// FIRST because it is what LiveKit's own CLI and SDKs expect an operator to
-	// have set, and the MEMQL_ name second because that is the one MemQL owns.
-	// Renaming these (the exit memql#3831 prescribes for a pre-convention name)
-	// would be wrong here: it is not MemQL's name to change.
-	"LIVEKIT_URL":        true,
-	"LIVEKIT_API_KEY":    true,
-	"LIVEKIT_API_SECRET": true,
 	// Injected into every pod by the KUBELET, not by any MemQL manifest
 	// (memql#4257). component/deploycontrol's in-cluster substrate reads them
 	// to address the API server, which is what a ServiceAccount-authenticated
@@ -128,8 +113,7 @@ var external = map[string]bool{
 	// pre-convention MemQL names, so the memql#3831 exit (rename to MEMQL_,
 	// alias the old spelling) does not apply: it is not MemQL's name to change.
 	//
-	// Same category as LIVEKIT_URL above, one layer down: a platform's own
-	// convention that MemQL consumes rather than owns.
+	// A platform's own convention that MemQL consumes rather than owns.
 	"KUBERNETES_SERVICE_HOST": true,
 	"KUBERNETES_SERVICE_PORT": true,
 }

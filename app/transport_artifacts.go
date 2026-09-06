@@ -21,19 +21,19 @@ import (
 //	GET  /artifacts/{id}/content    -- export a file's bytes, or a note /
 //	                                   generated output / memory's body
 //
-// BFF-ONLY, unlike mountAttachmentEndpoints' `bff || agent`. The Library is a
+// BFF-ONLY, unlike resolveBlobStore' `bff || agent`. The Library is a
 // user-facing surface the portal dials; nothing on the agent uploads to it,
 // and mounting a route on a node no client addresses is how a declaration
 // stops meaning anything.
 //
-// uploader/container are the Azure Blob client mountAttachmentEndpoints
+// uploader/container are the Azure Blob client resolveBlobStore
 // already constructed for the SAME storage account -- reused rather than
 // building a second one, the same reuse mountSiteBundleEndpoints does for the
 // publish path.
 //
 // # Why the downloader comes from a type assertion
 //
-// mountAttachmentEndpoints returns server.FileUploader and a container name;
+// resolveBlobStore returns server.FileUploader and a container name;
 // it holds the DOWNLOADER too, but does not return it, and widening its
 // signature would edit the shared bff+agent file for a bff-only consumer.
 // *azureblob.AzureBlobUploader satisfies both interfaces -- it is the very
@@ -56,7 +56,7 @@ func (a *App) mountLibraryArtifactEndpoints(uploader server.FileUploader, contai
 			a.Logger.Error("library: the configured blob uploader cannot download, so "+
 				"GET /artifacts/{id}/content will answer 404 for every file artifact",
 				"detail", "server.FileDownloader is not implemented by the uploader "+
-					"mountAttachmentEndpoints built; the export route needs it to stream "+
+					"resolveBlobStore built; the export route needs it to stream "+
 					"stored bytes back")
 		}
 	}

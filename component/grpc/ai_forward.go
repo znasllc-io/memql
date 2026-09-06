@@ -492,16 +492,12 @@ func (s *service) HandleForwardedRequest(
 
 	// Dispatch to the appropriate handler based on the envelope payload.
 	switch payload := envelope.GetPayload().(type) {
-	case *memqlv1.MemqlClientMessage_AiTranscribe:
-		_ = sess.handleAiTranscribe(&envelope, payload.AiTranscribe)
 	case *memqlv1.MemqlClientMessage_AiTranscribeStreamStart:
 		_ = sess.handleAiTranscribeStreamStart(&envelope, payload.AiTranscribeStreamStart)
 	case *memqlv1.MemqlClientMessage_AiTranscribeStreamChunk:
 		_ = sess.handleAiTranscribeStreamChunk(&envelope, payload.AiTranscribeStreamChunk)
 	case *memqlv1.MemqlClientMessage_AiTranscribeStreamEnd:
 		_ = sess.handleAiTranscribeStreamEnd(&envelope, payload.AiTranscribeStreamEnd)
-	case *memqlv1.MemqlClientMessage_AiSpeech:
-		_ = sess.handleAiSpeech(&envelope, payload.AiSpeech)
 	case *memqlv1.MemqlClientMessage_AiChat:
 		_ = sess.handleAiChat(&envelope, payload.AiChat)
 	case *memqlv1.MemqlClientMessage_AiSuggest:
@@ -515,13 +511,6 @@ func (s *service) HandleForwardedRequest(
 		// AgentGenerateTurnDelta + AgentGenerateTurnComplete through the
 		// forwardedStream, each wrapped in AiForwardResponse.
 		_ = sess.handleAgentGenerateTurn(&envelope, payload.AgentGenerateTurn)
-	case *memqlv1.MemqlClientMessage_ClientToolResult:
-		// Cluster relay: a client-executed tool ran in the browser and
-		// its result was wrapped here (by cognition) so it reaches the
-		// agent node's service-scoped waiter. The dispatch below looks
-		// the waiter up by call_id and unblocks the original tool loop
-		// regardless of which forwarded session delivered it.
-		_ = sess.handleClientToolResult(&envelope, payload.ClientToolResult)
 	case *memqlv1.MemqlClientMessage_AgentPreemptTurn:
 		// Planner "pass" (epic memql#902 / #906): flag the in-flight
 		// background turn (keyed by request_id) to stop at its next
@@ -558,9 +547,7 @@ const (
 // silently mis-shaped refusal.
 func forwardPayloadClass(payload any) (forwardPayloadKind, bool) {
 	switch payload.(type) {
-	case *memqlv1.MemqlClientMessage_AiTranscribe,
-		*memqlv1.MemqlClientMessage_AiTranscribeStreamStart,
-		*memqlv1.MemqlClientMessage_AiSpeech,
+	case *memqlv1.MemqlClientMessage_AiTranscribeStreamStart,
 		*memqlv1.MemqlClientMessage_AiChat,
 		*memqlv1.MemqlClientMessage_AiSuggest,
 		*memqlv1.MemqlClientMessage_ListTools,
@@ -569,7 +556,6 @@ func forwardPayloadClass(payload any) (forwardPayloadKind, bool) {
 		return forwardPayloadOpener, true
 	case *memqlv1.MemqlClientMessage_AiTranscribeStreamChunk,
 		*memqlv1.MemqlClientMessage_AiTranscribeStreamEnd,
-		*memqlv1.MemqlClientMessage_ClientToolResult,
 		*memqlv1.MemqlClientMessage_AgentPreemptTurn:
 		return forwardPayloadContinuation, true
 	default:
@@ -835,8 +821,6 @@ func (f *forwardedStream) RecvMsg(_ any) error { return io.EOF }
 func isTerminalServerPayload(p any) bool {
 	switch p.(type) {
 	case *memqlv1.MemqlServerMessage_AiChatResult,
-		*memqlv1.MemqlServerMessage_AiSpeechResult,
-		*memqlv1.MemqlServerMessage_AiTranscribeResult,
 		*memqlv1.MemqlServerMessage_AiTranscribeStreamComplete,
 		*memqlv1.MemqlServerMessage_AiSuggestResult,
 		*memqlv1.MemqlServerMessage_ListToolsResult,
@@ -863,12 +847,24 @@ var _ = status.Code // keep status import if future error paths need it
 
 // nodeTargetForChat returns the node type that owns chat completion
 // providers. Hardcoded for now; future capability-discovery rework.
-func nodeTargetForChat() node.NodeType       { return node.NodeTypeAgent }
-func nodeTargetForSuggest() node.NodeType    { return node.NodeTypeAgent }
-func nodeTargetForListTools() node.NodeType  { return node.NodeTypeAgent }
-func nodeTargetForCallTool() node.NodeType   { return node.NodeTypeAgent }
-func nodeTargetForSpeech() node.NodeType     { return node.NodeTypeVoice }
-func nodeTargetForTranscribe() node.NodeType { return node.NodeTypeVoice }
+func nodeTargetForChat() node.NodeType      { return node.NodeTypeAgent }
+func nodeTargetForSuggest() node.NodeType   { return node.NodeTypeAgent }
+func nodeTargetForListTools() node.NodeType { return node.NodeTypeAgent }
+func nodeTargetForCallTool() node.NodeType  { return node.NodeTypeAgent }
+
+// nodeTargetForTranscribe moved from the voice node to the agent node when
+// the voice node was removed (epic memql#4988). The agent node already wired
+// an stt.StreamingProvider, so this is a re-point rather than new plumbing --
+// and it is what keeps MemQL OS's Ask hold-to-talk working, which is the only
+// caller of the streaming-transcription family that survives.
+func nodeTargetForTranscribe() node.NodeType { return node.NodeTypeAgent }
+
+// TranscriptionNodeType exports the streaming-transcription target so app/ can
+// assert that the node it names is the one whose transport wires an
+// stt.StreamingProvider. The two halves live in packages that cannot import
+// each other, and when they disagree the mic opens and no transcript arrives
+// with nothing in the logs naming a cause (epic memql#4988).
+func TranscriptionNodeType() node.NodeType { return nodeTargetForTranscribe() }
 
 // shouldProxyAI reports whether an AI handler should short-circuit
 // to the forwarder rather than executing locally. True when:
@@ -885,11 +881,36 @@ func (s *streamSession) shouldProxyAI(target node.NodeType) bool {
 	if node.CompiledNodeType() != node.NodeTypeBFF {
 		return false
 	}
-	// Don't engage the forwarder if no peer of the target type is
-	// visible yet. Let the local handler produce its usual
-	// "provider unavailable" error instead of a less-friendly
-	// "no X node available" proxy error.
-	return len(s.service.aiForwarder.peerMgr.ByType(target)) > 0
+	// Don't engage the forwarder if no peer of the target type can actually
+	// be dispatched to. Let the local handler produce its usual "provider
+	// unavailable" error instead of a less-friendly "no X node available"
+	// proxy error.
+	//
+	// DISPATCHABLE, not merely present (epic memql#4988). This counted rows in
+	// the peer table, which selectPeer then rejects for Connection==nil -- dead
+	// pods left there after a rollout keep a HEALTHY status from their last DB
+	// heartbeat (#1056). In that window the check passed, the forward failed,
+	// and the caller got the topology sentence this function exists to avoid.
+	// It is a narrow window and it lands on the worst surface: streaming
+	// transcription is a person holding a key down to dictate, and "no agent
+	// node available" names neither what failed for them nor a fix.
+	return s.service.aiForwarder.hasDispatchablePeer(target)
+}
+
+// hasDispatchablePeer reports whether selectPeer would find a target -- a peer
+// of this type with a LIVE outbound connection. Kept beside selectPeer so the
+// two answers cannot drift; a predicate that disagreed with the selector would
+// reintroduce exactly the window it exists to close.
+func (r *AiForwardRouter) hasDispatchablePeer(targetType node.NodeType) bool {
+	if r == nil || r.peerMgr == nil {
+		return false
+	}
+	for _, p := range r.peerMgr.ByType(targetType) {
+		if p != nil && p.Info != nil && p.Connection != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // proxyAI forwards the original envelope to a worker peer and streams
@@ -1010,8 +1031,6 @@ func (s *streamSession) forwardedPrincipal() (auth.ForwardedPrincipal, error) {
 		class, ceiling, expiresAt = auth.ForwardedClassLocalDev, "", time.Time{}
 	case strings.EqualFold(s.identity.Subject, OperatorSubject):
 		class, ceiling, expiresAt = auth.ForwardedClassOperator, "", time.Time{}
-	case strings.HasPrefix(s.identity.Subject, GuestSubjectPrefix):
-		class, ceiling, expiresAt = auth.ForwardedClassGuest, "", time.Time{}
 	}
 
 	authority, err := auth.ForwardedAuthorityForUser(access, class, auth.Role(ceiling), expiresAt, time.Now())

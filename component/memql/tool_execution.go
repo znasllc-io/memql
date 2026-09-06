@@ -614,28 +614,9 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 		return nil, fmt.Errorf("tool %q is not allowed for caller role %q", tool.Name, callerRole)
 	}
 
-	// Client-executed tools: the tool body lives in the connected
-	// client (browser / app). Delegate to the ClientToolInvoker
-	// carried on ctx -- typically the BFF streamSession that owns the
-	// originating request. The invoker handles the ClientToolCall <->
-	// ClientToolResult round-trip. Role gate already enforced above.
-	if tool.ClientExecution {
-		invoker := ClientToolInvokerFromContext(ctx)
-		if invoker == nil {
-			return nil, fmt.Errorf("tool %q requires client execution but no ClientToolInvoker is attached to the context", tool.Name)
-		}
-		argsJSON := "{}"
-		if len(args) > 0 {
-			if b, err := json.Marshal(args); err == nil {
-				argsJSON = string(b)
-			}
-		}
-		return invoker.InvokeClientTool(ctx, tool.Name, argsJSON, callerRole)
-	}
-
-	// No handler and not client-executed: the tool cannot run. ValidateTool
-	// now refuses this at load (memql#3625), so reaching here means a tool
-	// built in Go rather than declared in `.memql`.
+	// No handler: the tool cannot run. ValidateTool refuses this at load
+	// (memql#3625), so reaching here means a tool built in Go rather than
+	// declared in `.memql`.
 	//
 	// IsError was FALSE here, which is the part that mattered: the streaming
 	// tool loop hands a non-error result to the model as the tool's
@@ -646,7 +627,7 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 		return &ToolCallResult{
 			IsError: true,
 			Content: []ToolResultContent{
-				{Type: "text", Text: fmt.Sprintf("Tool %q has no handler defined and is not client-executed -- it cannot be invoked", tool.Name)},
+				{Type: "text", Text: fmt.Sprintf("Tool %q has no handler defined -- it cannot be invoked", tool.Name)},
 			},
 		}, nil
 	}

@@ -9,13 +9,19 @@ import (
 // module_nodetype_env_test.go -- memql#4488.
 //
 // A node-type module row used to carry no EnvComponents, and moduleEnvSurface
-// returns nil the moment that list is empty. So the portal's detail page for
-// `voice` reported ZERO environment variables -- about the module whose absent
+// returns nil the moment that list is empty. So a node type's detail page
+// reported ZERO environment variables -- about the module whose absent
 // configuration is the entire reason it is held off. The page said "no
 // configuration" and the state said "credential_gated" on the same screen.
+//
+// The module that motivated it was `voice`, gated on its LiveKit pair. Epic
+// memql#4988 retired the voice node type and its whole env surface, so the
+// rule is asserted on `identity`, which is the same shape in the shipped
+// manifest: a component named after the node type, carrying an entry
+// (MEMQL_IDENTITY_BASE_URL) required for it. The rule did not change.
 
 // shippedManifest is the REAL manifest, not a fixture. The claim under test is
-// about what manifest.yaml actually says for the voice node type, and a fixture
+// about what manifest.yaml actually says for the node type, and a fixture
 // would only restate the assertion.
 //
 // (The package already has a testManifest() returning a small fixture, for the
@@ -29,25 +35,25 @@ func shippedManifest(t *testing.T) *envregistry.Manifest {
 	return m
 }
 
-// TestVoiceNodeTypeCarriesItsOwnEnvComponents is the rule, on the module that
-// motivated it.
-func TestVoiceNodeTypeCarriesItsOwnEnvComponents(t *testing.T) {
-	got := envComponentsForNodeType(shippedManifest(t), "voice")
+// TestIdentityNodeTypeCarriesItsOwnEnvComponents is the rule, on the module
+// that carries its shape in the shipped manifest today.
+func TestIdentityNodeTypeCarriesItsOwnEnvComponents(t *testing.T) {
+	got := envComponentsForNodeType(shippedManifest(t), "identity")
 	if len(got) == 0 {
-		t.Fatal("the voice node type resolves to no env components, so its module detail page " +
+		t.Fatal("the identity node type resolves to no env components, so its module detail page " +
 			"shows no configuration at all -- which is what memql#4488 is about. manifest.yaml " +
-			"carries a `voice` component whose entries are required for the voice node type.")
+			"carries an `identity` component whose entries are required for the identity node type.")
 	}
-	var sawVoice bool
+	var sawIdentity bool
 	for _, c := range got {
-		if c == "voice" {
-			sawVoice = true
+		if c == "identity" {
+			sawIdentity = true
 		}
 	}
-	if !sawVoice {
-		t.Errorf("voice resolves to %v, which does not include its own `voice` component", got)
+	if !sawIdentity {
+		t.Errorf("identity resolves to %v, which does not include its own `identity` component", got)
 	}
-	t.Logf("voice -> %v", got)
+	t.Logf("identity -> %v", got)
 }
 
 // TestTheAllSentinelIsNotFoldedIn is the control, and it is the one that keeps
@@ -71,18 +77,18 @@ func TestTheAllSentinelIsNotFoldedIn(t *testing.T) {
 		t.Skip("no manifest entry uses the \"all\" sentinel with a component; nothing to exclude")
 	}
 
-	voice := envComponentsForNodeType(m, "voice")
+	identity := envComponentsForNodeType(m, "identity")
 	all := map[string]bool{}
 	for _, e := range m.AllEntries() {
 		for _, nt := range e.Required {
-			if nt == "all" && e.Component != "" && e.Component != "voice" {
+			if nt == "all" && e.Component != "" && e.Component != "identity" {
 				all[e.Component] = true
 			}
 		}
 	}
-	for _, c := range voice {
+	for _, c := range identity {
 		if all[c] {
-			t.Errorf("voice resolves to component %q, which is required for ALL node types. "+
+			t.Errorf("identity resolves to component %q, which is required for ALL node types. "+
 				"Folding the sentinel in makes every module's page show the same shared surface, "+
 				"which reads the same as showing nothing.", c)
 		}
@@ -97,7 +103,7 @@ func TestAnUnknownNodeTypeResolvesToNothing(t *testing.T) {
 		t.Errorf("an unknown node type resolves to %v, want nothing -- this function must be "+
 			"answering about its argument, not returning the vocabulary", got)
 	}
-	if got := envComponentsForNodeType(nil, "voice"); len(got) != 0 {
+	if got := envComponentsForNodeType(nil, "identity"); len(got) != 0 {
 		t.Errorf("a nil manifest resolves to %v, want nothing", got)
 	}
 }

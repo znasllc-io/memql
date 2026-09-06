@@ -75,7 +75,7 @@ The panel dials with the `token` field, which must hold an
 
 **A Personal Access Token does not work here, and cannot.** PAT
 verification is a database lookup wired only into the identity binary, so
-every mesh node (bff, voice, cognition, agent, planner) rejects an
+every mesh node (bff, agent, planner, workbench) rejects an
 `mql_pat_...` bearer *before* looking anything up. The panel detects one
 in the `token` field and refuses it by name rather than letting it fail as
 an unexplained handshake error (memql#3383).

@@ -365,8 +365,8 @@ it is recorded as an argument *key* rather than as the attribute's value:
 ```
 
 The reader only understood the second shape, so the bare spelling was read
-as the empty string. `isGroupGA bool @default(false)`
-(`dsl/cognition/concepts.memql`) had therefore been emitting
+as the empty string. `isGroupGA bool @default(false)` (in the cognition
+concepts file, since removed with that tree) had therefore been emitting
 `"default": ""` on a field declared `"type": "boolean"` since the line was
 written. That is the same defect one layer earlier — the value read
 without regard for how it was written, then lowered without regard for the
@@ -585,14 +585,14 @@ construct.
 Event-based trigger. Graph events name the lifecycle
 (`node.created` / `node.updated` / `node.deleted`) plus the concept;
 the partition segment is a #56 phase-8 vestige -- always pass
-`partition="*"`. Domain events (`cognition.response.requested`,
+`partition="*"`. Domain events (`library.artifact.indexed`,
 `system.startup`) use the bare `event=` form.
 
 ```memql fragment
-@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
-automation bootstrapSession { ... }
+@trigger(event="node.created", concept="v1:library:file", partition="*")
+automation indexArtifact { ... }
 
-@trigger(event="cognition.response.requested")
+@trigger(event="library.artifact.indexed")
 automation generateResponse { ... }
 ```
 
@@ -603,7 +603,7 @@ live tree uses the `@trigger(schedule=...)` form exclusively.
 
 ```memql fragment
 @trigger(schedule="0 0 2 * * *")
-automation purgeExpiredArchivedSpaces { ... }
+automation purgeExpiredArchivedFolders { ... }
 
 @trigger(schedule="0 */10 * * * *")
 automation pruneStaleClusterNodes { ... }
@@ -614,9 +614,9 @@ Predicate over the triggering event's payload. The automation only
 fires when the predicate holds.
 
 ```memql fragment
-@trigger(event="node.created", concept="v1:cognition:space", partition="*")
+@trigger(event="node.created", concept="v1:library:folder", partition="*")
 @filter(active==true)
-automation autoJoinSI { ... }
+automation indexFolder { ... }
 ```
 
 #### `@async` (removed)
@@ -631,32 +631,32 @@ asynchronously off their event/schedule trigger.
 ### Query
 
 ```memql
-use cognition.concepts.{ participant }
+use library.concepts.{ artifact }
 use common.traits.{ isActiveRecord }
 
-@description("Get active human participants in a space")
-query participant activeHumanParticipants {
+@description("Get live document artifacts filed under a folder")
+query artifact activeDocumentArtifacts {
   args {
-    spaceId  string  @required
+    folderId  string  @required
   }
-  filter  spaceId==args.spaceId && participantType=="human" && isActiveRecord
-  shape   participantFull
+  filter  folderId==args.folderId && kind=="document" && isActiveRecord
+  shape   artifactFull
 }
 ```
 
 ### Mutation
 
 ```memql
-use cognition.concepts.{ space }
+use library.concepts.{ folder }
 
-@description("Create a cognition space")
-mutate space createSpace {
+@description("Create a Library folder")
+mutate folder createFolder {
   args {
-    spaceId  string  @required
-    name     string  @required
+    folderId  string  @required
+    name      string  @required
   }
   insert {
-    id:        args.spaceId
+    id:        args.folderId
     name:      args.name
     status:    "active"
     createdAt: now
@@ -668,13 +668,13 @@ mutate space createSpace {
 ### Automation
 
 ```memql
-use cognition.logic.{ bootstrapSession }
+use library.logic.{ indexArtifact }
 
-@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
-@description("Auto-creates a session when a participant joins a space")
-automation bootstrapSession {
+@trigger(event="node.created", concept="v1:library:file", partition="*")
+@description("Indexes a file into the Library the moment its row lands")
+automation indexArtifact {
   step run {
-    logic bootstrapSession { event: event }
+    logic indexArtifact { event: event }
   }
 }
 ```
@@ -720,7 +720,7 @@ sets; unknown annotations are rejected at load time:
   semver and absent means 1.0.0 (#2613) -- annotate only genuine
   non-defaults; the same default applies to seeds. `@namespace` absent
   DEFAULTS to the containing `dsl/<domain>/` directory (#2614): write it
-  only for a colon-scoped sub-namespace (`cognition:client:tool`) or a
+  only for a colon-scoped sub-namespace (`library:text`) or a
   deliberate divergence pinned by a one-line `namespace.pin` file in the
   domain directory (the id-preserving precedent: `dsl/deployment` pins
   `cluster`). Any other explicit-vs-directory mismatch is a load error.
@@ -741,7 +741,7 @@ sets; unknown annotations are rejected at load time:
   prefix one binds to the property ABOVE it (memql#3692). A bare
   `object` field with no sub-fields is already free-form and is
   unaffected by the closure.
-- **Tools**: `@allowedRoles`, `@clientExecution`, `@description`,
+- **Tools**: `@allowedRoles`, `@description`,
   `@destructive`, `@disabled`, `@enabled`, `@executionTime`, `@handler`,
   `@rateLimit(maxCalls=N, periodSeconds=N)`, `@requiresConfirmation`,
   `@scopes` (`component/language/parser/tool_decl.go`).

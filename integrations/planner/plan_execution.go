@@ -1001,10 +1001,6 @@ func (p *PlannerIntegration) consumeAgentTurn(
 				if t := payload.AgentGenerateTurnDelta.GetText(); t != nil {
 					fullText.WriteString(t.GetText())
 				}
-			case *memqlv1.MemqlServerMessage_ClientToolCall:
-				p.logger.Warn("plan execution: client-tool call ignored (not supported on planner-driven turns)",
-					"request_id", requestId,
-				)
 			case *memqlv1.MemqlServerMessage_AgentGenerateTurnComplete:
 				complete := payload.AgentGenerateTurnComplete
 				if complete.GetError() != nil {

@@ -29,7 +29,7 @@ func TestPeerManager_RegisterAndGet(t *testing.T) {
 
 	info := &nodev1.PeerInfo{
 		NodeId:   "peer-1",
-		NodeType: string(NodeTypeCognition),
+		NodeType: string(NodeTypeAgent),
 		Address:  "peer1:50052",
 		Health:   nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY,
 	}
@@ -53,7 +53,7 @@ func TestPeerManager_Remove(t *testing.T) {
 
 	pm.Register(&nodev1.PeerInfo{
 		NodeId:   "peer-1",
-		NodeType: string(NodeTypeCognition),
+		NodeType: string(NodeTypeAgent),
 		Address:  "peer1:50052",
 	})
 
@@ -71,13 +71,13 @@ func TestPeerManager_ByType(t *testing.T) {
 	pm := NewPeerManager(testIdentity(), testLogger())
 
 	pm.Register(&nodev1.PeerInfo{
-		NodeId:   "cognition-1",
-		NodeType: string(NodeTypeCognition),
+		NodeId:   "workbench-1",
+		NodeType: string(NodeTypeWorkbench),
 		Address:  "c1:50052",
 	})
 	pm.Register(&nodev1.PeerInfo{
-		NodeId:   "cognition-2",
-		NodeType: string(NodeTypeCognition),
+		NodeId:   "workbench-2",
+		NodeType: string(NodeTypeWorkbench),
 		Address:  "c2:50052",
 	})
 	pm.Register(&nodev1.PeerInfo{
@@ -86,9 +86,9 @@ func TestPeerManager_ByType(t *testing.T) {
 		Address:  "a1:50052",
 	})
 
-	cognitions := pm.ByType(NodeTypeCognition)
-	if len(cognitions) != 2 {
-		t.Errorf("expected 2 cognitions, got %d", len(cognitions))
+	workbenches := pm.ByType(NodeTypeWorkbench)
+	if len(workbenches) != 2 {
+		t.Errorf("expected 2 workbenches, got %d", len(workbenches))
 	}
 
 	agents := pm.ByType(NodeTypeAgent)
@@ -106,10 +106,10 @@ func TestPeerManager_ByCapability(t *testing.T) {
 	pm := NewPeerManager(testIdentity(), testLogger())
 
 	pm.Register(&nodev1.PeerInfo{
-		NodeId:       "cognition-1",
-		NodeType:     string(NodeTypeCognition),
+		NodeId:       "workbench-1",
+		NodeType:     string(NodeTypeAgent),
 		Address:      "c1:50052",
-		Capabilities: []string{"integration.cognition.scoreUtterance", "integration.cognition.trackPresence"},
+		Capabilities: []string{"integration.workbench.dispatchHost", "integration.workbench.releaseWorkspace"},
 	})
 	pm.Register(&nodev1.PeerInfo{
 		NodeId:       "agent-1",
@@ -118,12 +118,12 @@ func TestPeerManager_ByCapability(t *testing.T) {
 		Capabilities: []string{"integration.claw.executeTask"},
 	})
 
-	results := pm.ByCapability("integration.cognition.scoreUtterance")
+	results := pm.ByCapability("integration.workbench.dispatchHost")
 	if len(results) != 1 {
 		t.Errorf("expected 1 peer with scoreUtterance, got %d", len(results))
 	}
-	if len(results) > 0 && results[0].Info.NodeId != "cognition-1" {
-		t.Errorf("expected cognition-1, got %s", results[0].Info.NodeId)
+	if len(results) > 0 && results[0].Info.NodeId != "workbench-1" {
+		t.Errorf("expected workbench-1, got %s", results[0].Info.NodeId)
 	}
 
 	results = pm.ByCapability("nonexistent")
@@ -156,7 +156,7 @@ func TestPeerManager_PeerInfoList(t *testing.T) {
 
 	pm.Register(&nodev1.PeerInfo{
 		NodeId:   "peer-1",
-		NodeType: string(NodeTypeCognition),
+		NodeType: string(NodeTypeAgent),
 		Address:  "p1:50052",
 	})
 	pm.Register(&nodev1.PeerInfo{
@@ -257,7 +257,7 @@ func TestPeerManager_ReapsStaleUnmonitoredPeers(t *testing.T) {
 	// (1) Stale, unmonitored, no connection -> should be reaped.
 	pm.Register(&nodev1.PeerInfo{
 		NodeId:   "stale-gossip",
-		NodeType: string(NodeTypeCognition),
+		NodeType: string(NodeTypeWorkbench),
 		Address:  "stale:50052",
 		Health:   nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY,
 	})
@@ -306,8 +306,8 @@ func TestPeerManager_ReapsStaleUnmonitoredPeers(t *testing.T) {
 	}
 
 	// Type index must be cleaned up too (no dangling byType entry).
-	if got := pm.ByType(NodeTypeCognition); len(got) != 0 {
-		t.Errorf("expected byType cognition cleared after reap, got %d entries", len(got))
+	if got := pm.ByType(NodeTypeWorkbench); len(got) != 0 {
+		t.Errorf("expected byType workbench cleared after reap, got %d entries", len(got))
 	}
 }
 
@@ -417,13 +417,13 @@ func TestPeerManager_UpdateExisting(t *testing.T) {
 
 	pm.Register(&nodev1.PeerInfo{
 		NodeId:   "peer-1",
-		NodeType: string(NodeTypeCognition),
+		NodeType: string(NodeTypeAgent),
 		Address:  "old:50052",
 	})
 
 	pm.Register(&nodev1.PeerInfo{
 		NodeId:   "peer-1",
-		NodeType: string(NodeTypeCognition),
+		NodeType: string(NodeTypeAgent),
 		Address:  "new:50052",
 	})
 

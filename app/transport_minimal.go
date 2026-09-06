@@ -1,4 +1,4 @@
-//go:build !cognition && !agent
+//go:build !agent
 
 package app
 

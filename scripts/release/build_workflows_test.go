@@ -1,6 +1,6 @@
 // Build-speed C3 (#1508, epic #1505): static guard over the engine image-build
 // workflow (.github/workflows/build-engine-images.yml). It builds the
-// product-agnostic engine images (memql-identity, memql-voice) and pushes them
+// product-agnostic engine images (memql-identity, memql-bff, ...) and pushes them
 // to ACR via OIDC; the built engine digests pin directly into a release's
 // {engine, bundle, client} deploy overlay (no release lockfile). These string
 // assertions keep the workflow's invariants from silently regressing; the real
@@ -92,9 +92,8 @@ func TestEngineBuildWorkflowUsesTheVersionInputVerbatim(t *testing.T) {
 func TestEngineBuildWorkflowInvariants(t *testing.T) {
 	wf := engineBuildWorkflow(t)
 
-	// Builds BOTH engine images the engine-image build owns
-	// (memql-identity + memql-voice).
-	for _, node := range []string{"identity", "voice"} {
+	// Builds the engine images the engine-image build owns.
+	for _, node := range []string{"identity", "bff", "edge"} {
 		if !strings.Contains(wf, "node: "+node) {
 			t.Errorf("workflow must build the %q engine node", node)
 		}
@@ -123,8 +122,16 @@ func TestEngineBuildWorkflowInvariants(t *testing.T) {
 	if !strings.Contains(wf, "Immutability guard") {
 		t.Error("workflow must guard against overwriting an existing release tag")
 	}
-	// voice is the CGO/voice-runtime exception.
-	if !strings.Contains(wf, "voice-runtime") {
-		t.Error("the voice build must target the voice-runtime stage (CGO)")
+	// The workbench is the one node with a runtime stage of its own -- it runs
+	// somebody else's build command, so it needs a Node toolchain the shared
+	// distroless runtime does not carry.
+	if !strings.Contains(wf, "workbench-runtime") {
+		t.Error("the workbench build must target the workbench-runtime stage")
+	}
+	// EVERY entry names a target. An empty one resolves to the Dockerfile's
+	// last stage, which is how released images and locally built ones came to
+	// be built from different bases with nothing saying so.
+	if strings.Contains(wf, `target: ""`) {
+		t.Error("an engine-image matrix entry leaves `target` empty; it must name its runtime stage")
 	}
 }

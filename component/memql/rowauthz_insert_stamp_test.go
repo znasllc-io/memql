@@ -398,14 +398,15 @@ func TestThePerConceptGuardsStillFire(t *testing.T) {
 	source := readExecutorMutationSource(t)
 	// concept const -> the guard call that must still be dispatched for it.
 	guards := map[string][]string{
-		"memorynodes.ConceptCognitionUtterance":   {"validateCognitionUtteranceWriteAuthorization("},
-		"memorynodes.ConceptCognitionParticipant": {"validateAndStampParticipantPayload("},
-		"conceptAgentsAgent":                      {"validateAgentLockedItems(", "validateAgentKindActorScope("},
-		"conceptRbacRole":                         {"validateRbacBaseRoleImmutable(", "validateRbacCustomRoleRankBound("},
-		"conceptIdentityIdentity":                 {"validateIdentityCredentialActorScope("},
-		"conceptHealingOverride":                  {"validateHealingBaseImmutable(", "validateHealingValidationRankBound("},
-		"conceptPlannerPlan":                      {"validateFeedbackIntakeTransition("},
-		"conceptForgeRequest":                     {"validateForgeRequestTransition("},
+		// The two cognition guards (utterance write-authorization, AI-participant
+		// stamp-and-cap) went with their concepts in epic memql#4988. The six
+		// below are the surviving defence-in-depth set.
+		"conceptAgentsAgent":      {"validateAgentLockedItems(", "validateAgentKindActorScope("},
+		"conceptRbacRole":         {"validateRbacBaseRoleImmutable(", "validateRbacCustomRoleRankBound("},
+		"conceptIdentityIdentity": {"validateIdentityCredentialActorScope("},
+		"conceptHealingOverride":  {"validateHealingBaseImmutable(", "validateHealingValidationRankBound("},
+		"conceptPlannerPlan":      {"validateFeedbackIntakeTransition("},
+		"conceptForgeRequest":     {"validateForgeRequestTransition("},
 	}
 	names := make([]string, 0, len(guards))
 	for name := range guards {

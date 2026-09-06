@@ -50,7 +50,7 @@ client-callable, so no caller-check applies and it is never flagged.
 | Bucket | Definition | Required gating |
 |---|---|---|
 | **owned** | Row carries `ownerUserId` (or `userId` for identity-domain concepts) | `filter` must include `ownerUserId == actor.userId` (the caller can only read rows they own) |
-| **granted** | Row visible via a relationship (e.g. space participant, group member) | Filter must reference a relationship spec that gates on `actor.userId` |
+| **granted** | Row visible via a relationship (e.g. a task through its plan, a recipient through its audience) | Filter must reference a relationship spec that gates on `actor.userId` |
 | **admin** | Cluster-owner-only (e.g. audit log, identity admin views) | A top-level conjunct `actor.isClusterOwner == true`, or an admin context-spec |
 | **public** | Globally readable by intent (concept catalogs, role registry, public lookup tables) | `@public` annotation on the construct |
 
@@ -191,7 +191,7 @@ restate it:
 concept note { ... }        // dsl/notes/concepts.memql
 
 @rowAuthz(clusterOwner)
-concept call { ... }        // dsl/telephony/concepts.memql
+concept suppression { ... } // dsl/campaigns/concepts.memql
 ```
 
 Both examples are tree-true. The first used to read
@@ -577,7 +577,7 @@ concepts carry reads that must run *before an actor exists*.
      `TestRowAuthzEnforcementLandGate` reports **nine of the eleven** reads
      undecidable -- credential verification itself is in the blast radius.
   3. **It is a union of eight credential kinds** with different subjects.
-     `node_token` and `voice_agent_token` authenticate a *process*;
+     `node_token` and `worker_token` authenticate a *process*;
      `nodeTokenIdentities` is an operator listing of every node credential
      in the cluster and is caller-scopable by nobody.
 
@@ -591,9 +591,9 @@ concepts carry reads that must run *before an actor exists*.
   wire-contract change across every caller, not a one-line annotation.
 - **`v1:identity:user`** adds two more obstacles: `userByEmail` /
   `userByIdSystem` are pre-actor for the same reason, and
-  `userDisplayById` (`@public`) plus `usersActiveInSpace` are
-  **legitimate cross-user reads for ordinary callers** -- they render one
-  participant's name in another's chat. Its admin reads
+  `userDisplayById` (`@public`) is a **legitimate cross-user read for
+  ordinary callers** -- it renders one person's name on a row somebody
+  else owns. Its admin reads
   (`searchUsers`, `userById`) are an admin **roll-up**, which `owned`
   cannot express: the owned predicate is ANDed with no cluster-owner
   escape, so declaring it would narrow an admin's user list to the
@@ -751,7 +751,7 @@ like the honest one and was built and **refuted**: `@serverOnly` is
 enforced as `fn.ServerOnly && !auth.OriginFromContext(ctx).IsInternal()`,
 so annotating requires the callers to stamp internal origin — and all
 five run on **request-derived** contexts (an agent turn driven by a user
-utterance, a library edit handler, a workbench dispatch inside an agent
+request, a library edit handler, a workbench dispatch inside an agent
 turn). Internal origin is the only thing that opens the `@serverOnly`
 gate at all, so stamping it there would open *every* server-only
 construct for the remainder of that request.
@@ -847,7 +847,7 @@ means a sibling query carrying no caller-scope term is not a neutral
 bystander — it is a counterexample, reading rows the floor would
 exclude. One such query blocks the declaration. (Counting only the
 positive votes declares `planner.plan` owned off 2 of its 10 queries
-while the primary user-facing read is space-scoped, and declared
+while the primary user-facing read is not caller-scoped, and declared
 `library.artifact` owned while `libraryWorkspaceLiveSources` documented
 its rows as having no owner at all — that read was rescoped when
 memql#4340 declared the concept's tier by hand, which is the other way
@@ -943,7 +943,7 @@ browser.
 
 The first entry closed by the app being re-keyed rather than by the concept
 being declared, which is worth stating precisely because the two look the same
-from here and are not. Epic memql#4970 moved the app off the space attachment
+from here and are not. Epic memql#4970 moved the app off the attachment upload
 route onto the Library (`POST /artifacts`), so its feeds are now
 `v1:library:file` and `v1:work:run` -- both of which declare
 `@rowAuthz(owner="ownerUserId", clusterOwner)`. Row admission gates
@@ -1049,7 +1049,7 @@ numerically wrong, it used the retired `mutation` keyword (the surface
 keyword is `mutate`, memql#2041), it had no Seeds column, and many live
 namespaces were missing from it entirely. The classification block was
 worse — a fraction of the live namespaces, no `srvOnly` column, and it
-reported no `owned` constructs outside cognition when the tree is full
+reported `owned` constructs in a single namespace when the tree is full
 of them.
 
 The counts that sentence originally quoted are gone from it on purpose.
@@ -1362,24 +1362,19 @@ trio — `v1:planner:plan`, `v1:planner:task`, `v1:planner:taskState` —
 is not**, and the reason is specific enough to write down so the next
 attempt starts from it:
 
-- **Every internal reader is chicken-and-egg.** `planById` has seven Go
-  call sites (`integrations/workbench`, `integrations/agent/worker`,
-  four in `integrations/planner`, plus `integrations/cognition`), and
-  every one of them is a `loadPlan(ctx, planId)` helper that takes a
-  plan id and *no owner*. `integrations/workbench`'s `resolvePlanOwner`
-  is the clearest case: it reads the plan **in order to discover the
-  owner**, which an owner-gated read cannot answer. So the fix is not a
-  stamp at each call site — the value to stamp is not in hand.
+- **Every internal reader is chicken-and-egg.** `planById` has six Go
+  call sites (`integrations/workbench`, `integrations/agent/worker` and
+  four in `integrations/planner`), and every one of them is a
+  `loadPlan(ctx, planId)` helper that takes a plan id and *no owner*.
+  `integrations/workbench`'s `resolvePlanOwner` is the clearest case: it
+  reads the plan **in order to discover the owner**, which an owner-gated
+  read cannot answer. So the fix is not a stamp at each call site — the
+  value to stamp is not in hand.
 - **The maintenance principal is the wrong tool here.** It would work
   mechanically and make the tier decorative for exactly the code that
   touches plans most: declared, and unenforced where it matters. The
   right shape is threading the owner down from wherever the plan id
   came from, which is a refactor of the planner's dispatch plumbing.
-- **`plansForSpace` is no longer the blocker it was recorded as.** It
-  has no live consumer at all — only the generated SDK and the gate
-  fixtures — so the "reads collaborators' rows BY DESIGN" ruling
-  (`cmd/memqlmigrate/rowauthz_infer.go`) is now a statement about dead
-  surface. Deleting it, or scoping it, is a decision available for free.
 - `task` and `taskState` additionally need a new `ownerUserId` field
   with server stamping at four mutations.
 

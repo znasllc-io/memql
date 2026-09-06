@@ -19,7 +19,7 @@
 /// -- and `existing.empty()` is what asks it.
 ///
 /// The `bff` term is `bootstrapCluster`'s too, and for the same reason: every
-/// node type receives system.startup, and without it a cognition, agent,
+/// node type receives system.startup, and without it an agent,
 /// planner and worker node would each race to create the same row on a fresh
 /// cluster. They would converge -- the id is literal, so the writes are
 /// versions of one logical row -- but converging on identical content is not a

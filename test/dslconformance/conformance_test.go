@@ -425,30 +425,17 @@ func TestNoCanonicalPatternOnArgs(t *testing.T) {
 // already bare / not a node id (leave alone) OR pending A2's coordinated flip.
 var idBearingFieldExemptions = map[string]string{
 	// --- pack-owned target: v1:cognition:space (rides A2 #2441 partition_id->space_id) ---
-	"cognition/audioOverride.partitionId":     "pack-owned-target v1:cognition:space; A2 #2441",
-	"cognition/videoOverride.partitionId":     "pack-owned-target v1:cognition:space; A2 #2441",
-	"identity/invitation.partitionId":         "pack-owned-target v1:cognition:space; A2 #2441",
-	"identity/user.activePartitionId":         "pack-owned-target v1:cognition:space; A2 #2441",
-	"library/artifact.partitionId":            "pack-owned-target v1:cognition:space; A2 #2441",
-	"library/generatedOutput.partitionId":     "pack-owned-target v1:cognition:space; A2 #2441",
-	"library/documentVersion.partitionId":     "pack-owned-target v1:cognition:space; A2 #2441",
-	"library/memory.partitionId":              "pack-owned-target v1:cognition:space; A2 #2441",
-	"planner/plan.partitionId":                "pack-owned-target v1:cognition:space; A2 #2441",
-	"planner/responsibility.scopePartitionId": "pack-owned-target v1:cognition:space; A2 #2441",
 	// --- pack-owned target: v1:knowledge:* (moved to pack in decoupling P2) ---
 	"knowledge/documentChunk.documentId": "pack-owned-target v1:knowledge:document; A2 #2441",
 	// --- bare-by-contract, fixed in A0 (#2439) ---
-	"knowledge/documentChunk.domainId":          "bare-by-contract-A0 (#2439); also pack-owned v1:knowledge:knowledgeDomain + bare raw-SQL readers",
-	"knowledge/documentChunk.sourceUtteranceId": "bare-by-contract-A0 (#2439); replier/augment store bare",
-	"knowledge/documentChunk.sourceAgentId":     "bare-by-contract-A0 (#2439); replier/augment store bare",
+	"knowledge/documentChunk.domainId":      "bare-by-contract-A0 (#2439); also pack-owned v1:knowledge:knowledgeDomain + bare raw-SQL readers",
+	"knowledge/documentChunk.sourceAgentId": "bare-by-contract-A0 (#2439); replier/augment store bare",
 	// --- nested sub-field: @relationship binds top-level payload fields only ---
 	// Both live inside utterance's closed `source { }` block. Every
 	// @relationship in the tree names a top-level field (zero use a dotted
 	// path), so the annotation cannot address these -- exempting is the only
 	// way to describe them accurately instead of under-documenting them to
 	// duck this gate (#2794).
-	"cognition/utterance.agentId":                "nested-subfield-of-source; @relationship binds top-level fields only (#2794)",
-	"cognition/utterance.feedbackAnnouncePlanId": "nested-subfield-of-source; dedup key for feedbackAnnouncementForPlan, not a graph edge (#2794)",
 	// --- plain string FK by design (own @description says so) ---
 	"deployment/deployment.clusterId":            "plain-fk-by-design (@description declares plain string FK)",
 	"deployment/deploymentNodeSpec.deploymentId": "plain-fk-by-design; hashed into the composite concept id (#2885)",
@@ -472,8 +459,6 @@ var idBearingFieldExemptions = map[string]string{
 	// writer produces and no reader expects (epic memql#4906).
 	"observability/siteTraffic.siteId": "bare-by-construction; a virtual projection over a TimescaleDB aggregate, never written through executeWrite, and the reader matches the caller's bare ids against it (memql#4906)",
 	// --- non-node correlation ids (description mentions a concept but value is a random UUID) ---
-	"cognition/request.callId":        "non-node-correlation-id (UUID correlating a client tool call, not a node FK)",
-	"cognition/response.callId":       "non-node-correlation-id (UUID correlating a client tool call, not a node FK)",
 	"worker/invocation.correlationId": "non-node-correlation-id (random ID linking to an auditEvent row, not a canonicalizable FK)",
 	// --- non-node string key (looks like a v1:rbac:capability id but is a stable slug) ---
 	"healing/healedOverride.baseConstructId": "non-node string key (stable construct slug e.g. 'deployStaging', FK-by-slug like rbac.capability.roleSlug); read + matched BARE at component/memql/healing_base_immutable_validation.go:64",

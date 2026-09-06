@@ -98,8 +98,8 @@ answer changes the plan.
 
 Build tags are **mutually exclusive** by design — `docs/public/build/build-tags.md`
 says so explicitly, and `app/build_default.go` is guarded
-`!cognition && !agent && !planner && !bff && !voice && !identity && !workbench && !mcp && !edge`.
-There is no `-tags "identity cognition agent"` binary and adding one is not a
+`!agent && !planner && !bff && !identity && !workbench && !mcp && !edge`.
+There is no `-tags "identity agent"` binary and adding one is not a
 flag, it is an engine change.
 
 ### What the untagged binary does cover
@@ -107,25 +107,21 @@ flag, it is an engine change.
 | Included | How |
 |---|---|
 | bff transport, engine, core integrations | `build_default.go` |
-| cognition | `integrations_cognition_init.go` — `!agent && !planner` |
-| polyphon room tokens | `engine_polyphon.go` — `!agent && !planner` |
 | STT | `integrations_stt.go` — `!planner` |
-| voice transport | `transport_voice.go` — `!agent && !planner` |
 
 | Excluded | Why |
 |---|---|
 | **identity** | its own tag — and a tenant with no sign-in is not a tenant |
 | **agent** | its own tag — the tool surface, i.e. most of what an agent does |
 | planner, workbench, mcp, edge | their own tags |
-| audio WS | `transport_audio.go` — `agent \|\| voice` |
 
 Measured at **76 MB** untagged (the build-tags table's "~25 MB" for bff is
 stale; noted, not fixed here).
 
 ### So the floor is three app pods, not one
 
-A functioning tenant needs at minimum: the untagged binary (bff + cognition +
-polyphon + STT), **identity**, and **agent**. Plus the database.
+A functioning tenant needs at minimum: the untagged binary (bff + STT),
+**identity**, and **agent**. Plus the database.
 
 **That is the finding.** The epic's "single-process/reduced-pod 'solo' overlay
 (1-3 pods)" is right about the range and wrong about the mechanism: you get
@@ -135,19 +131,18 @@ there by *scaling the mesh down*, not by *collapsing it into one process*.
 
 The **replica-count** condensation, shipped in
 [the tenant component](https://github.com/znasllc-io/memql/tree/main/deploy/k8s/components/tenant):
-one replica of each mesh node, and the entire voice lane — including LiveKit's
-redis and SIP sidecars — at zero.
+one replica of each mesh node.
 
 | | pods | notes |
 |---|---|---|
-| base mesh (untuned) | 13 | every node at ≥1 |
-| `solo` | **8** | voice lane (5) at zero |
-| `solo` + HA add-on | 8 | mesh doubles to 2 replicas each; voice stays at zero |
+| base mesh (untuned) | 13 | seven Deployments at their base replicas |
+| `solo` | **7** | one replica of each |
+| `solo` + HA add-on | 14 | mesh doubles to 2 replicas each |
 
-The five zeroed pods are the honest, measured saving. **The dollar figure is not
-measured here** — the epic's ~$143 → ~$90 estimate needs a running cluster and a
-month of billing to confirm, and quoting it as measured when it is modelled
-would be the same class of error as the
+The six pods `solo` drops are the honest, measured saving. **The dollar figure
+is not measured here** — the epic's ~$143 → ~$90 estimate needs a running
+cluster and a month of billing to confirm, and quoting it as measured when it
+is modelled would be the same class of error as the
 [provider-cost drift](memql-cloud-billing.md#provider-costs-feed-the-margins)
 this epic already had to fix.
 

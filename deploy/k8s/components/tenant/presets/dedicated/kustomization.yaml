@@ -22,11 +22,6 @@
 # inherited in one place and stated in another is a structural difference
 # wearing a number's clothes, and the day these two diverge -- three replicas at
 # the top tier, say -- the diff should be one integer, not a refactor.
-#
-# THE VOICE LANE runs two transports here against Mesh's 5,000 included minutes;
-# voice-agent stays at one for the dispatcher reason recorded in the `standard`
-# preset, and LiveKit gets a second server because at this volume it is a
-# request-serving component rather than a convenience.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
@@ -35,9 +30,6 @@ patches:
     patch: |
       - { op: replace, path: /spec/replicas, value: 2 }
   - target: { kind: Deployment, name: bff }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 2 }
-  - target: { kind: Deployment, name: cognition }
     patch: |
       - { op: replace, path: /spec/replicas, value: 2 }
   - target: { kind: Deployment, name: agent }
@@ -53,14 +45,5 @@ patches:
     patch: |
       - { op: replace, path: /spec/replicas, value: 2 }
   - target: { kind: Deployment, name: edge }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 2 }
-  - target: { kind: Deployment, name: voice }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 2 }
-  - target: { kind: Deployment, name: voice-agent }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 1 }
-  - target: { kind: Deployment, name: livekit }
     patch: |
       - { op: replace, path: /spec/replicas, value: 2 }

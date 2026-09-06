@@ -41,7 +41,7 @@ A seed's scope is stamped with `@scope`:
   exactly one row, scoped instance-wide rather than per-user (there is no
   physical partition column backing this -- `@scope` is a materialization
   strategy, not a storage location). Used for catalog rows such as agent
-  roles and avatar personas.
+  roles and skills.
 - **`@scope("perUser")`**: the seed fans out to one row per
   `v1:identity:user`. The materializer computes the row id as
   `<seedName>-<userId>` and stamps `ownerUserId=<userId>` automatically.

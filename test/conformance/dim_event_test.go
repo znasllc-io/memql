@@ -32,27 +32,38 @@ func eventTriggerCheck() check {
 }
 
 func runEventTrigger(t *testing.T, e *Env) {
-	pid := "participant-evt-" + uniqueSuffix("evt")
-	sid := "space-evt-" + uniqueSuffix("evt")
+	noteId := "v1:notes:note:evt-" + uniqueSuffix("evt")
+	title := "evt-title-" + uniqueSuffix("evt")
 
-	// Fire the bootstrapSession AUTOMATION with a representative
-	// participant.created event. The decide logic reads event.payload.id; the
-	// gated createSession step binds event.payload.id + event.payload.partitionId.
-	fireForgeAutomation(t, e, "bootstrapSession", "node.created", events.KindNodeCreated, map[string]any{
-		"id":              pid,
-		"partitionId":     sid,
-		"participantType": "human",
-	})
+	// Fire indexNoteOnCreate with a representative note.created event. Its one
+	// step is a nested createArtifact whose every argument is bound from the
+	// event payload (id, title, body, ownerUserId), so an artifact carrying
+	// THIS title proves the payload threaded into the nested step's scope --
+	// an unbound arg would write the "Untitled note" default instead.
+	//
+	// Chosen because it is builtin-free: the vehicle must not depend on a Go
+	// integration the conformance harness does not register. It replaced
+	// bootstrapSession, which asserted the identical property over a cognition
+	// participant and went with that concept (epic memql#4988).
+	fireForgeAutomation(t, e, "indexNoteOnCreate", "graph.node.created.v1:notes:note",
+		events.KindNodeCreated, map[string]any{
+			"id":          noteId,
+			"title":       title,
+			"body":        "body-" + noteId,
+			"ownerUserId": ownerUID,
+		})
 
-	// Read back by the event's participant id. A non-empty result proves
-	// event.payload.id threaded through both the decide query AND the create step.
-	rows := asArray(t, e.runQuery(t, "participantSession", map[string]any{"participantId": pid}))
-	if len(rows) == 0 {
-		t.Fatalf("#1706: no session bound to event participant %q -- event payload did not thread into the create", pid)
+	rows := asArray(t, e.runQuery(t, "libraryArtifacts", map[string]any{}))
+	for _, r := range rows {
+		row, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		if row["title"] == title {
+			t.Logf("#1706: event-triggered automation bound event.payload into nested step scope (artifact titled %q)", title)
+			return
+		}
 	}
-	// Strengthen: the session's participantId must echo the event payload.
-	if got := rowID(rows[0]); got == "" {
-		t.Logf("#1706: session row has no id field (shape omits it); presence already proves binding")
-	}
-	t.Logf("#1706: event-triggered automation bound event.payload into nested step scope (session created for %s)", pid)
+	t.Fatalf("#1706: no library artifact titled %q among %d rows -- event.payload.title did not thread "+
+		"into the nested createArtifact step (an unbound arg writes the \"Untitled note\" default)", title, len(rows))
 }

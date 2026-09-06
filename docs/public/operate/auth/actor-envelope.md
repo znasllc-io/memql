@@ -18,7 +18,7 @@ owner: znas
 
 When a request hits the gRPC stream, the auth interceptor
 (`component/grpc/auth_session_middleware.go`) validates the JWT (or
-the API-key bearer / Worker token / Guest invite, per the identity
+the API-key bearer / Worker token, per the identity
 shape) and builds an `auth.Identity` struct. The engine binds that
 identity onto the request context; resolver code reads it back via
 `auth.UserIdentityFromContext`.
@@ -49,11 +49,11 @@ is the vocabulary top to bottom -- there is no leftover `caller.` /
 
 | Field | Type | Meaning | Per-identity-shape behavior |
 |---|---|---|---|
-| `actor.userId` | string | Canonical `v1:identity:user.id` for the user behind the request | **user (magic-link / OAuth)**: the user's id. **PAT**: the user who owns the PAT. **worker token**: the user who issued the worker token. **guest invite**: empty -- guests have no `userId`. **system**: empty -- system actor; `actor.role == "system"`. |
-| `actor.role` | string | Cluster-wide role: `owner` / `admin` / `developer` / `writer` / `reader` (plus `system` for the seed-materializer / automation actor and `guest` for guest invites) | Re-fetched from `v1:identity:user.role` at each request -- a role demotion takes effect at the next call, not on the next token refresh. |
+| `actor.userId` | string | Canonical `v1:identity:user.id` for the user behind the request | **user (magic-link / OAuth)**: the user's id. **PAT**: the user who owns the PAT. **worker token**: the user who issued the worker token. **system**: empty -- system actor; `actor.role == "system"`. |
+| `actor.role` | string | Cluster-wide role: `owner` / `admin` / `developer` / `writer` / `reader` (plus `system` for the seed-materializer / automation actor) | Re-fetched from `v1:identity:user.role` at each request -- a role demotion takes effect at the next call, not on the next token refresh. |
 | `actor.identityId` | string | `v1:identity:identity.id` of the credential the request was authenticated with (distinct from `userId`: one user can own many credentials) | **user (magic-link)**: the `magic_link` identity row's id. **PAT**: the `api_key` identity row's id. **worker token**: the `worker_token` identity row's id. |
 | `actor.isClusterOwner` | bool | True iff `actor.userId` is the registered cluster owner | Re-resolved per request via the cluster-settings lookup. |
-| `actor.primaryEmail` | string | The user's primary email | Empty for guest / system / worker shapes. |
+| `actor.primaryEmail` | string | The user's primary email | Empty for system / worker shapes. |
 | `actor.now` | string | RFC3339 timestamp captured at request start | Same for every field reference within the request -- the clock is captured once. |
 | `actor.config.<key>` | string | Allow-listed config value (whitelist in `component/config/policy_exposable.go`) | Reading an unlisted key is a parse-time error. |
 
@@ -70,14 +70,12 @@ caller authenticated, but the underlying behavior differs:
 | **user (PAT)** | API key bearer | owner's id | owner's role | the `api_key` identity | full stream |
 | **worker token** | `Authorization: Worker mql_wkr_<token>` | registering user's id | `system` | the `worker_token` identity | only `WorkerService.Stream`; everything else 401 |
 | **badge operator grant** | short-lived class="badge" JWT minted by `POST /auth/badge/grant` (memql#2513), rotated onto the stream via RotateAuth | the OPERATOR's id | operator's row role clamped to the terminal's role at grant time (`role_ceiling`) | empty | stream EXCEPT credential/session/cluster management (rejected `badge_grant_restricted` while live); after the grant's exp every envelope but the recovery control frames is rejected `badge_grant_expired` |
-| **guest invite** | `Authorization: Guest <token>`, the `guest` WebSocket subprotocol pair (`new WebSocket(url, ["guest", token])`), or the deprecated `?guest_token=<token>` on WS | empty | `guest` | empty | only the explicitly-scoped reads on the invitation |
 | **system** | `systemActorContext(ctx)` -- internal-only | empty | `system` | empty | seed materializer, automations -- never reachable from a network request |
 
 The auth interceptor (`component/grpc/auth_session_middleware.go`)
-+ the worker / guest interceptors (`worker_stream_interceptor.go` /
-`guest_stream_interceptor.go`) build the right envelope based on
-which token shape arrived. The engine never re-classifies; it just
-reads through the envelope.
++ the worker interceptor (`worker_stream_interceptor.go`) builds the
+right envelope based on which token shape arrived. The engine never
+re-classifies; it just reads through the envelope.
 
 ## What the envelope is NOT
 

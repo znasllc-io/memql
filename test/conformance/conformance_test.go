@@ -19,7 +19,7 @@ func allChecks() []check {
 		systemIDCheck(),     // #1712
 		deadLogicCheck(),    // #2216
 
-		literalEvalCheck(),  // #1705
+		literalEvalCheck(), // #1705
 		// DB-backed dimensions (run in the CI conformance job).
 		lifecycleCheck(),               // #1715 contract
 		filterCheck(),                  // #1708
@@ -32,7 +32,6 @@ func allChecks() []check {
 		automationLogicFullBodyCheck(), // #1847
 		forgeAuditShortIdCheck(),       // #1859
 		libraryIndexPromotionCheck(),   // #2235
-		cognitionDecidePersistCheck(),  // #2271
 		objectLiteralReturnCheck(),     // #2274
 	}
 }

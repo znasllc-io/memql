@@ -481,8 +481,8 @@ func payloadString(p map[string]any, key string) string {
 
 // nodeTypeModuleRows builds one row per node type the graph knows
 // (v1:cluster:nodeType), with live health from v1:cluster:node, replicas
-// from the newest v1:cluster:deploymentNodeSpec per node type, and the
-// voice-style credential gate evaluated from the manifest's per-node-type
+// from the newest v1:cluster:deploymentNodeSpec per node type, and a
+// credential gate evaluated from the manifest's per-node-type
 // requiredness against the ANSWERING node's env -- honest because every
 // Deployment shares the memql-secrets envFrom by deploy convention, and
 // labeled node-scope-derived in the detail because that sharing is a
@@ -578,9 +578,11 @@ func (e *MemQLEngine) nodeTypeModuleRows(ctx context.Context, manifest *envregis
 				"required env unset (evaluated on the answering node): %s",
 				strings.Join(missingCreds, ", ")))
 			if state == "scaled_to_zero" {
-				// The voice case: the deploy layer holds the lane at zero
-				// BECAUSE the credentials are absent (memql#2416). Report the
-				// mechanism, keep it where it lives.
+				// A lane pinned to zero replicas WITH required env unset is
+				// almost always pinned BECAUSE the credentials are absent
+				// (memql#2416, first seen on the voice lane). Both facts stay
+				// in StateDetail; the state names the cause rather than the
+				// symptom, so the reader is pointed at the thing to fix.
 				state = "credential_gated"
 			}
 		}
@@ -594,12 +596,15 @@ func (e *MemQLEngine) nodeTypeModuleRows(ctx context.Context, manifest *envregis
 			Scope:       ModuleScopeCluster,
 			// A node type HAS an environment surface, and until memql#4488
 			// this field was left empty -- so moduleEnvSurface returned nil
-			// immediately and the portal's detail page for `voice` showed ZERO
-			// environment variables, while manifest.yaml carried
-			// MEMQL_POLYPHON_LIVEKIT_API_KEY and _SECRET under component:
-			// voice, both required for it. The page reported "no configuration"
-			// about the module whose missing configuration was the reason it
-			// was off.
+			// immediately and a node type's detail page showed ZERO
+			// environment variables while manifest.yaml carried entries under
+			// its own component, required for it. The page reported "no
+			// configuration" about the module whose missing configuration was
+			// the reason it was off. (The case that found this was `voice`,
+			// gated on its LiveKit pair; the node type and both variables were
+			// retired in epic memql#4988, and `identity` -- component:
+			// identity, MEMQL_IDENTITY_BASE_URL required for it -- is the same
+			// shape in the shipped manifest today.)
 			EnvComponents: envComponentsForNodeType(manifest, name),
 			CodeReference: payloadString(t.Payload, "codeReference"),
 		})
@@ -618,7 +623,8 @@ func (e *MemQLEngine) nodeTypeModuleRows(ctx context.Context, manifest *envregis
 // it.
 //
 // The same-name component is included because that is how the manifest models
-// a node type's own subsystem (component: voice for the voice node type), and
+// a node type's own subsystem (component: identity for the identity node
+// type), and
 // an entry that is merely OPTIONAL for it would otherwise be invisible even
 // though it is the module's own knob.
 func envComponentsForNodeType(manifest *envregistry.Manifest, nodeType string) []string {

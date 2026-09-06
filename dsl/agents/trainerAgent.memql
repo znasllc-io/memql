@@ -20,7 +20,6 @@ seed agent trainerAgent {
   role:        "specialist"
   roleSlug:    "system-trainer"
   kind:        "system"
-  gender:      "female"
 
   providerConfig {
     llm {
@@ -29,20 +28,7 @@ seed agent trainerAgent {
   }
 
   capabilities {
-    avatar:       false
-    lipSync:      false
-    vision:       false
-    voiceToVoice: false
-    claw:         false
     keywords:     []
   }
 
-  triggerBehavior {
-    autoJoin:    false
-    greetOnJoin: false
-    speakWhen:   "asked"
-  }
-
-  audioControl: "always_off"
-  videoControl: "always_off"
 }

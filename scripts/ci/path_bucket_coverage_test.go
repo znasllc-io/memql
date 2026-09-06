@@ -175,11 +175,8 @@ var coverageAllowList = map[string]exemption{
 	// The only .sh sweeps in the tree (scripts/lib/capability_contract_test.go)
 	// walk `scripts/` and the four `scripts/{k3d,deploy,staging,release}`
 	// directories. Nothing sweeps shell elsewhere, so these reach no gate.
-	"infra/polyphon/*.sh": {
-		reason: "shell outside scripts/; the only .sh gates (scripts/lib/capability_contract_test.go) are scoped to scripts/",
-	},
 	"deploy/k8s/base/tls/*.sh": {
-		reason: "shell outside scripts/; same scope limit as infra/polyphon/*.sh. " +
+		reason: "shell outside scripts/; the only .sh gates (scripts/lib/capability_contract_test.go) are scoped to scripts/. " +
 			"scripts/k3d/seed-secrets.sh invokes gen-internal-ca.sh, but that is `make up` " +
 			"on a developer's machine, not a lane -- which is why scripts/** is not in the " +
 			"mention corpus",

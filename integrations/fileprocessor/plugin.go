@@ -1,4 +1,4 @@
-//go:build !cognition && !planner
+//go:build !planner
 
 package fileprocessor
 

@@ -110,7 +110,6 @@ var timeoutMedianMinutes = map[string]float64{
 	"go-checks":        6.3,
 	"db-tests":         5.8,
 	"vscode-extension": 4.0,
-	"build-voice":      2.5,
 	"build-node-tags":  1.9,
 	"conformance":      1.6,
 	"sdk-ts-typecheck": 0.3,

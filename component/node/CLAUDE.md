@@ -357,4 +357,4 @@ producer, and REFUSED by the receiver when it cannot be proven. Read
 before touching a forward.
 
 Concept ownership is decided by routing rules plus build tags, not by a
-forwarding registry -- see `docs/internal/design/extension-points.md`.
+forwarding registry.

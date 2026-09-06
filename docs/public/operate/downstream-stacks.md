@@ -38,8 +38,8 @@ copies. What must NOT land in the engine's `clients/` is a *product's*
 surface; that boundary is enforced by `clients_allowlist_test.go`
 (memql#3326), not by convention.
 
-The engine ships **every** node type (identity, bff, cognition, agent,
-planner, voice, workbench, mcp) as a **product-agnostic image** from this
+The engine ships **every** node type (identity, bff, agent, planner,
+workbench, mcp, edge) as a **product-agnostic image** from this
 repo's Dockerfile; nothing product-specific is compiled in. Product DSL is
 delivered at **runtime**: the data-only bundle image is run as an
 init-container -- the `deploy/k8s/components/dsl-bundle` kustomize component --
@@ -67,7 +67,7 @@ product.
 ## What `make up` does here (engine-only)
 
 In this repo, `make up` brings up a fully-running **engine** cluster: every
-app node type (identity, voice, mcp, cognition, agent, planner, workbench)
+app node type (identity, bff, mcp, agent, planner, workbench, edge)
 builds from this repo's Dockerfile as a product-agnostic image tagged
 `memql-<type>:local`. No product bundle is mounted, so each node runs only
 the engine's own embedded DSL tree. Point the same image at a product's

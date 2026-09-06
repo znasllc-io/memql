@@ -53,7 +53,7 @@ func (f *fakeStream) SetTrailer(md metadata.MD)       {}
 func (f *fakeStream) Context() context.Context        { return f.ctx }
 
 // TestHandleEventForward_PublishesLocally is the regression guard for the
-// shipped "cognition receives the utterance event but handleUtteranceFor
+// shipped "a peer receives the graph event but the handler
 // Cognition never runs" bug. Peer events arrived at nodeService.handle
 // EventForward, were logged and ACKed, and never republished on the local
 // bus -- so no local subscriber (integration handler, automation trigger,
@@ -77,14 +77,14 @@ func TestHandleEventForward_PublishesLocally(t *testing.T) {
 	// Subscribe to the local bus. The handler should be invoked once the
 	// peer event is bridged.
 	received := make(chan events.Event, 1)
-	bus.Subscribe("graph.node.created.v1:cognition:utterance", func(e events.Event) {
+	bus.Subscribe("graph.node.created.v1:library:artifact", func(e events.Event) {
 		received <- e
 	})
 
 	payload, _ := structpb.NewStruct(map[string]any{"partitionId": "space-1"})
 	svc.handleEventForward("peer-bff", &nodev1.EventForward{
 		EventId:      "evt-abc",
-		Topic:        "graph.node.created.v1:cognition:utterance",
+		Topic:        "graph.node.created.v1:library:artifact",
 		Kind:         int32(events.KindNodeCreated),
 		Ts:           timestamppb.New(time.Now()),
 		Payload:      payload,
@@ -118,7 +118,7 @@ func TestHandleEventForward_NoInboundDoesNotPanic(t *testing.T) {
 	stream := newFakeStream()
 	svc.handleEventForward("peer", &nodev1.EventForward{
 		EventId: "evt-x",
-		Topic:   "graph.node.created.v1:cognition:utterance",
+		Topic:   "graph.node.created.v1:library:artifact",
 		Ttl:     3,
 	}, stream)
 
@@ -151,7 +151,7 @@ func TestHandleEventForward_SendsAck(t *testing.T) {
 	stream := newFakeStream()
 	svc.handleEventForward("peer", &nodev1.EventForward{
 		EventId: "evt-ack",
-		Topic:   "graph.node.created.v1:cognition:utterance",
+		Topic:   "graph.node.created.v1:library:artifact",
 		Ttl:     3,
 	}, stream)
 

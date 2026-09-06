@@ -121,7 +121,6 @@ func toolDeclToTool(decl *ast.ToolDecl, origin string) ([]*Tool, error) {
 		Description:        languageParser.EffectiveDescription(decl.DocComment, decl.Description),
 		InputSchema:        json.RawMessage(schemaJSON),
 		AutoInjectedFields: autoInjected,
-		ClientExecution:    decl.ClientExecution,
 		MCPExposed:         decl.MCPExposed,
 		Origin:             origin,
 	}

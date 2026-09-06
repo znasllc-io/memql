@@ -30,36 +30,6 @@ provider anthropic {
 // Provider clients read MEMQL_AI_OPENAI_PROJECT_ID directly via
 // os.Getenv and attach the OpenAI-Project header only when present.
 
-// ---- providers/v1/openai/audio15.memql ----
-
-/// OpenAI gpt-audio-1.5 - unified audio in/out single-shot model. Placeholder type until the real
-/// client lands.
-@extends("openai")
-@type("OpenAIAudio")
-@model("gpt-audio-1.5")
-@modality("audio")
-provider audio15 {
-  params {
-    voice  "alloy"
-    format "pcm16"
-  }
-}
-
-// ---- providers/v1/openai/audioMini.memql ----
-
-/// OpenAI gpt-audio-mini - smaller unified audio in/out model. Placeholder type until the real
-/// client lands.
-@extends("openai")
-@type("OpenAIAudio")
-@model("gpt-audio-mini")
-@modality("audio")
-provider audioMini {
-  params {
-    voice  "alloy"
-    format "pcm16"
-  }
-}
-
 // ---- providers/v1/openai/chat53Latest.memql ----
 
 /// OpenAI gpt-5.3-chat-latest - auto-updated chat-tuned alias (non-streaming); use for dev/preview
@@ -297,36 +267,6 @@ provider moderationOmni {
 provider openai {
   auth {
     apiKey     env("MEMQL_AI_OPENAI_API_KEY")
-  }
-}
-
-// ---- providers/v1/openai/realtime15.memql ----
-
-/// OpenAI gpt-realtime-1.5 - bidirectional audio + text over WebSocket; used by Polyphon for
-/// low-latency voice chat. Placeholder type until the real client lands.
-@extends("openai")
-@type("OpenAIRealtime")
-@model("gpt-realtime-1.5")
-@modality("realtime")
-provider realtime15 {
-  params {
-    voice              "alloy"
-    transcriptionModel "whisper-1"
-  }
-}
-
-// ---- providers/v1/openai/realtimeMini.memql ----
-
-/// OpenAI gpt-realtime-mini - smaller/cheaper realtime model; preferred for high-volume voice
-/// sessions where peak capability isn't required. Placeholder type until the real client lands.
-@extends("openai")
-@type("OpenAIRealtime")
-@model("gpt-realtime-mini")
-@modality("realtime")
-provider realtimeMini {
-  params {
-    voice              "alloy"
-    transcriptionModel "whisper-1"
   }
 }
 
@@ -671,37 +611,6 @@ provider transcribeDiarize {
   params {
     format     "wav"
     sampleRate 16000
-  }
-}
-
-// ---- providers/v1/openai/tts1Hd.memql ----
-
-/// OpenAI tts-1-hd - classic high-definition text-to-speech; reliable fallback when gpt-4o-mini-tts
-/// is unavailable
-@extends("openai")
-@type("OpenAITTS")
-@model("tts-1-hd")
-@modality("tts")
-provider tts1Hd {
-  params {
-    voice  "nova"
-    format "wav"
-    speed  1.0
-  }
-}
-
-// ---- providers/v1/openai/tts4oMini.memql ----
-
-/// OpenAI gpt-4o-mini-tts - newest natural-sounding text-to-speech model
-@extends("openai")
-@type("OpenAITTS")
-@model("gpt-4o-mini-tts")
-@modality("tts")
-provider tts4oMini {
-  params {
-    voice  "alloy"
-    format "wav"
-    speed  1.0
   }
 }
 

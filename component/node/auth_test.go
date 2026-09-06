@@ -101,7 +101,7 @@ func TestNodeClassStreamInterceptor_AdmitsNodeClassToken(t *testing.T) {
 
 	tok, _, err := iss.IssueNodeAccessToken(identity.NodeIssueInput{
 		IdentityId: "v1:identity:identity:node-cog-1",
-		NodeId:     "v1:cluster:node:cognition-1",
+		NodeId:     "v1:cluster:node:workbench-1",
 		NodeType:   "cognition",
 	}, time.Now().UTC())
 	require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestNodeClassStreamInterceptor_AdmitsNodeClassToken(t *testing.T) {
 
 	gotId, gotType, ok := node.NodeBindingFromContext(observed)
 	require.True(t, ok, "binding not on handler ctx")
-	assert.Equal(t, "v1:cluster:node:cognition-1", gotId)
+	assert.Equal(t, "v1:cluster:node:workbench-1", gotId)
 	assert.Equal(t, "cognition", gotType)
 }
 

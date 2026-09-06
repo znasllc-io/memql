@@ -23,18 +23,29 @@ package clustere2e
 // invocation would be a gate nobody dares run. The probe therefore names an
 // automation that does not exist. That is not a weaker test: the hop being
 // exercised is the RELAY, and a relayed refusal proves every link of it. The
-// request has to reach the cognition node, that node has to consult its own
+// request has to reach the planner node, that node has to consult its own
 // registry, and its answer has to travel back and terminate the caller's
 // stream. The only thing that does not happen is the automation body, which is
 // the only thing this test does not want to happen.
 //
 // The failure signatures are distinct and that is the whole design:
 //
-//	NOT_FOUND    (5)  from executed_on_node_type=cognition -> the hop worked
-//	UNAVAILABLE (14)  with no executing node             -> the hop did NOT
+//	NOT_FOUND    (5)  from executed_on_node_type=planner -> the hop worked
+//	UNAVAILABLE (14)  with no executing node            -> the hop did NOT
 //
 // A missing routing rule produces the second, every time, because cross-node
 // event delivery is default-deny in component/node.
+//
+// THE TARGET NODE TYPE CHANGED, THE HOP DID NOT (memql#4988). This probe
+// targeted `cognition` until that node type was deleted. `planner` replaces it
+// on the two properties the assertion actually needs: the local and cloud
+// overlays both run it (deploy/k8s/overlays/local/kustomization.yaml), and it
+// is never the node type serving this stream -- that is bff -- so the run
+// cannot satisfy itself locally and call it a hop. Every node type carries an
+// automation scheduler (app/engine.go is untagged) and therefore a run relay
+// (app/automation_run.go, "no build tag" by design), so `planner` can answer
+// from its own registry, which is what makes NOT_FOUND the positive signal
+// rather than a second flavour of unreachable.
 
 import (
 	"context"
@@ -75,11 +86,11 @@ func TestAutomationRunCrossesTheMesh(t *testing.T) {
 				RequestId: requestId,
 				// Deliberately not a real automation -- see the file header.
 				Automation: "e2eCrossNodeProbe" + id.NewShortId(),
-				// The hop under test. cognition is a node type the local and
-				// staging overlays both run, and it is never the node type
+				// The hop under test. planner is a node type the local and
+				// cloud overlays both run, and it is never the node type
 				// serving this stream (that is bff), so the run cannot
 				// accidentally satisfy itself locally.
-				TargetNodeType: "cognition",
+				TargetNodeType: "planner",
 				TimeoutMs:      60000,
 			},
 		},
@@ -137,16 +148,16 @@ func TestAutomationRunCrossesTheMesh(t *testing.T) {
 			"This is what a MISSING ROUTING RULE looks like in the real mesh. "+
 			"Cross-node event delivery is default-deny in component/node; without the "+
 			"automationrun.# forward rule (component/node/routing_automation_run.go) the "+
-			"relay request never leaves the bff replica that took it and no cognition node "+
-			"ever sees it. Also check that a cognition Deployment is actually running "+
+			"relay request never leaves the bff replica that took it and no planner node "+
+			"ever sees it. Also check that a planner Deployment is actually running "+
 			"(kubectl -n memql get deploy).", done.GetErrorMessage())
 	}
 	if done.GetErrorCode() != codeNotFound {
-		t.Fatalf("want NOT_FOUND from the cognition node's own registry, got [%d] %s (status %q)",
+		t.Fatalf("want NOT_FOUND from the planner node's own registry, got [%d] %s (status %q)",
 			done.GetErrorCode(), done.GetErrorMessage(), done.GetStatus())
 	}
-	if done.GetExecutedOnNodeType() != "cognition" {
-		t.Fatalf("the run must have been answered by a cognition node, got %q/%q",
+	if done.GetExecutedOnNodeType() != "planner" {
+		t.Fatalf("the run must have been answered by a planner node, got %q/%q",
 			done.GetExecutedOnNodeType(), done.GetExecutedOnNodeId())
 	}
 	if done.GetExecutedOnNodeId() == "" {
@@ -168,7 +179,7 @@ func TestAutomationRunCrossesTheMesh(t *testing.T) {
 
 // A LOCAL run (no target node type) must answer from the node that took the
 // request. This is the control for the test above: if it also reported a
-// cognition node, the target routing would be doing nothing and the hop
+// planner node, the target routing would be doing nothing and the hop
 // assertion would be meaningless.
 func TestAutomationRunWithoutTargetStaysLocal(t *testing.T) {
 	tok := token(t)

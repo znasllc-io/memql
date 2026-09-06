@@ -132,7 +132,7 @@ func TestKeysetPagination_ClusteredVersionsFirstPageIsFull(t *testing.T) {
 
 	base := time.Date(2026, 6, 24, 12, 0, 0, 0, time.UTC)
 	for i := 0; i < distinct; i++ {
-		id := fmt.Sprintf("v1:cognition:utterance:%s-%02d", sfx, i)
+		id := fmt.Sprintf(keysetConcept+":%s-%02d", sfx, i)
 		for v := 0; v < versions; v++ {
 			// Clustered: all versions of id i occupy a contiguous createdAt run.
 			seedKeysetRow(t, ctx, db, id, base.Add(time.Duration(i*versions+v)*time.Second), owner)
@@ -165,7 +165,7 @@ func TestKeysetPagination_ClusteredVersionsWalkFullSet(t *testing.T) {
 	base := time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
 	want := make([]string, 0, distinct)
 	for i := 0; i < distinct; i++ {
-		id := fmt.Sprintf("v1:cognition:utterance:%s-%02d", sfx, i)
+		id := fmt.Sprintf(keysetConcept+":%s-%02d", sfx, i)
 		want = append(want, id)
 		for v := 0; v < versions; v++ {
 			seedKeysetRow(t, ctx, db, id, base.Add(time.Duration(i*versions+v)*time.Second), owner)
@@ -205,9 +205,9 @@ func TestKeysetPagination_CursorResumesFromScanPosition(t *testing.T) {
 	owner := "kb:" + sfx
 	base := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 
-	idX := fmt.Sprintf("v1:cognition:utterance:%s-X", sfx)
-	idY := fmt.Sprintf("v1:cognition:utterance:%s-Y", sfx)
-	idZ := fmt.Sprintf("v1:cognition:utterance:%s-Z", sfx)
+	idX := fmt.Sprintf(keysetConcept+":%s-X", sfx)
+	idY := fmt.Sprintf(keysetConcept+":%s-Y", sfx)
+	idZ := fmt.Sprintf(keysetConcept+":%s-Z", sfx)
 
 	seedKeysetRow(t, ctx, db, idX, base.Add(1*time.Second), owner)
 	seedKeysetRow(t, ctx, db, idY, base.Add(2*time.Second), owner)
@@ -239,9 +239,9 @@ func TestKeysetPagination_MixedUpdateFrequencyDescendingNoDuplicate(t *testing.T
 	owner := "kb:" + sfx
 	base := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 
-	idX := fmt.Sprintf("v1:cognition:utterance:%s-X", sfx)
-	idY := fmt.Sprintf("v1:cognition:utterance:%s-Y", sfx)
-	idZ := fmt.Sprintf("v1:cognition:utterance:%s-Z", sfx)
+	idX := fmt.Sprintf(keysetConcept+":%s-X", sfx)
+	idY := fmt.Sprintf(keysetConcept+":%s-Y", sfx)
+	idZ := fmt.Sprintf(keysetConcept+":%s-Z", sfx)
 
 	seedKeysetRow(t, ctx, db, idX, base.Add(1*time.Second), owner)
 	seedKeysetRow(t, ctx, db, idY, base.Add(2*time.Second), owner)
@@ -277,7 +277,7 @@ func TestKeysetPagination_DescendingVersionedWalkTerminates(t *testing.T) {
 	base := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
 	want := make([]string, 0, distinct)
 	for i := 0; i < distinct; i++ {
-		id := fmt.Sprintf("v1:cognition:utterance:%s-%02d", sfx, i)
+		id := fmt.Sprintf(keysetConcept+":%s-%02d", sfx, i)
 		want = append(want, id)
 		for v := 0; v < versions; v++ {
 			seedKeysetRow(t, ctx, db, id, base.Add(time.Duration(i*versions+v)*time.Second), owner)
@@ -318,7 +318,7 @@ func TestKeysetPagination_PagedWalkEqualsUnpagedRead(t *testing.T) {
 	base := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	tick := 0
 	for i := 0; i < distinct; i++ {
-		id := fmt.Sprintf("v1:cognition:utterance:%s-%02d", sfx, i)
+		id := fmt.Sprintf(keysetConcept+":%s-%02d", sfx, i)
 		for v := 0; v <= i%5; v++ {
 			seedKeysetRow(t, ctx, db, id, base.Add(time.Duration(tick)*time.Second), owner)
 			tick++

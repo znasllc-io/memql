@@ -7,8 +7,8 @@
 /// cross-vendor fallback, Claude Haiku as tertiary safety net. Was previously Mini-primary, which
 /// produced too many hedged + un-cited replies (the LLM smoothed RAG'd specifics into generic
 /// platitudes); the floor for agent replies is now Sonnet-class regardless of role. Use
-/// cheapestCapable / lowLatencyVoice for paths that legitimately need Mini-class speed/cost
-/// tradeoffs (batch, voice).
+/// cheapestCapable for paths that legitimately need Mini-class speed/cost
+/// tradeoffs (batch, background).
 @primary("streamClaudeSonnet")
 @fallback("stream54Pro")
 @fallback("streamClaudeHaiku")
@@ -37,18 +37,6 @@ policy cheapestCapable { }
 @fallback("streamClaudeHaiku")
 @maxLatencyMs(20000)
 policy fastCoding { }
-
-// ---- policies/v1/lowLatencyVoice.memql ----
-
-/// Low latency voice -- turn-taking in multi-party voice conversations. GPT-5.4 Mini leads on
-/// first-token latency within the supported vendors; GPT-5.4 Nano and Claude Haiku back it up
-/// inside the target TTFT envelope.
-@primary("stream54Mini")
-@fallback("stream54Nano")
-@fallback("streamClaudeHaiku")
-@maxTimeToFirstTokenMs(800)
-@maxLatencyMs(10000)
-policy lowLatencyVoice { }
 
 // ---- policies/v1/strongReasoning.memql ----
 

@@ -91,7 +91,7 @@ concept codeMetric {
 @displayCard(primary="message", secondary="component", tertiary="node", status="level")
 concept logLine {
   occurredAt      datetime!  @description("When the line was written. The hypertable time column; createdAt on the wire.")
-  nodeType        enum("identity", "bff", "cognition", "agent", "planner", "voice", "workbench", "mcp", "edge", "os")!  @description("Which kind of process wrote it. `os` is the MemQL OS front end, whose lines arrive through logsRecordClient.")
+  nodeType        enum("identity", "bff", "agent", "planner", "workbench", "mcp", "edge", "os")!  @description("Which kind of process wrote it. `os` is the MemQL OS front end, whose lines arrive through logsRecordClient.")
   node            string  @description("MEMQL_NODE_ID of the writing replica (the pod name). Blank for an OS line, which has no node.")
   level           enum("debug", "info", "warn", "error")!  @description("The slog level. `debug` persists only on a node whose MEMQL_LOGS_LEVEL says so.")
   component       string!  @description("The logger's component attribute, dotted parent.child (`edge`, `packages.pipeline`). An OS line carries `os.<app>` or `os.shell`.")

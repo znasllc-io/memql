@@ -63,7 +63,7 @@ func TestRegisterTree_MountsOverlayAlongsideEmbedded(t *testing.T) {
 
 	// Embedded domains must still appear.
 	assert.Contains(t, names, "agents", "embedded domain missing after RegisterTree")
-	assert.Contains(t, names, "cognition", "embedded domain missing after RegisterTree")
+	assert.Contains(t, names, "library", "embedded domain missing after RegisterTree")
 	// Plugin overlay must appear.
 	assert.Contains(t, names, domain, "plugin overlay missing from root listing")
 }

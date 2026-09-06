@@ -31,10 +31,10 @@ standard and it is the thing this document exists to prevent.
 
 These are the same everywhere. Changing them for one install is a bug.
 
-- **Node topology** — the product-agnostic engine mesh (identity / bff /
-  cognition / agent / planner / workbench / voice / mcp) + Postgres. Engine-only
-  clusters opt into the `bff` via `deploy/k8s/components/engine-bff`; products
-  add their own `bff-<product>` + DSL bundle. Same node graph everywhere.
+- **Node topology** — the product-agnostic engine mesh (identity / bff / agent /
+  planner / workbench / mcp / edge) + Postgres. Engine-only clusters opt into
+  the `bff` via `deploy/k8s/components/engine-bff`; products add their own
+  `bff-<product>` + DSL bundle. Same node graph everywhere.
 - **The deployment process** — GitOps: one `deploy/k8s/base` composed by one
   overlay (`local`, `cloud` or `cloud-entry`), reconciled by ArgoCD. `make up` locally applies the same
   manifests ArgoCD applies in the cloud. A release is `{engine version, bundle

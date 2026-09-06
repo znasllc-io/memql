@@ -101,7 +101,7 @@ logic deployGatePassed {
 @description("The engine cluster node types the deployment bundle manages.")
 logic engineNodeTypes {
   body {
-    return ["identity", "cognition", "voice", "agent", "planner", "workbench", "mcp", "voice-agent"]
+    return ["identity", "bff", "agent", "planner", "workbench", "mcp", "edge"]
   }
 }
 

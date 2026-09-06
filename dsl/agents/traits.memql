@@ -7,8 +7,7 @@
 // trace viewer surfaces specialists per Plan via `kind=specialist`,
 // and the system bucket is filtered OUT of every user-facing
 // surface via the same predicate consumed from the negative side
-// (NOT agentKindSystem at the cognition dispatch layer ->
-// `cognition_handler.go:1572`, factory dedupe ->
+// (NOT agentKindSystem at the dispatch layer; factory dedupe ->
 // `factory.go:226`, and integration registration ->
 // `integration.go:251`).
 //

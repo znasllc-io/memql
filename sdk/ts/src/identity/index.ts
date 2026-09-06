@@ -1,20 +1,4 @@
 export {
-  sendGuestInvite,
-  resolveGuestInvite,
-  joinSpaceAsGuest,
-  cancelGuestInvite,
-  resendGuestInviteEmail,
-  type SendGuestInviteArgs,
-  type SendGuestInviteResult,
-  type ResolveGuestInviteResult,
-  type GuestInviteStatus,
-  type JoinSpaceAsGuestArgs,
-  type JoinSpaceAsGuestResult,
-  type CancelGuestInviteResult,
-  type ResendGuestInviteEmailArgs,
-  type ResendGuestInviteEmailResult,
-} from "./guest.js";
-export {
   revokeCurrentSession,
   revokeAllSessions,
   revokeSession,

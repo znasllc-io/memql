@@ -17,18 +17,18 @@ owner: znas
 what kind they are.** No `query*`, `mutation*`, `logic*`, `spec*`, `trait*`
 or `seed*` prefix.
 
-- Queries: what they return -- `activeHumanParticipants`,
-  `audioOverridesForSpace`, `userById`
-- Mutations: the verb -- `addAgentToSpace`, `createGreetingUtterance`,
+- Queries: what they return -- `libraryArtifactsByKind`,
+  `workRunsForGoal`, `userById`
+- Mutations: the verb -- `createLibraryFolder`, `moveArtifactToFolder`,
   `archiveUser`. (Note the declaration keyword is `mutate`, while the
   invocation verb inside a logic body is `mutation` -- the parser's tests
   call that pair "the canonical footgun distance". Neither belongs in the
   name.)
-- Logic: the verb -- `bootstrapSession`, `generateResponse`
-- Specs and traits: the predicate they express -- `isHumanParticipant`,
+- Logic: the verb -- `indexArtifact`, `generateResponse`
+- Specs and traits: the predicate they express -- `isNotArchived`,
   `isActiveRecord`, `requiresOwnerOrAdmin`
-- Automations: verb-first -- `bootstrapSession`, `autoJoinSI`
-- Shapes: `<concept><Projection>` -- `participantFull`, `spaceCard`
+- Automations: verb-first -- `indexArtifact`, `releaseWorkspaceOnPlanTerminal`
+- Shapes: `<concept><Projection>` -- `artifactFull`, `folderCard`
 - Seeds: the thing being seeded -- `sofia`, `plannerAgent`
 
 ### Why
@@ -38,8 +38,8 @@ userById { ... }` -- so a prefix restates in the name what the grammar
 states one token earlier. Call sites read better without it:
 
 ```memql fragment
-filter  spaceId == args.spaceId && isActiveRecord
-step decide { logic bootstrapSession ( event: event ) }
+filter  folderId == args.folderId && isActiveRecord
+step decide { logic indexArtifact ( event: event ) }
 ```
 
 This is also what the codebase has always done. Measured across the shipped
@@ -61,11 +61,10 @@ reported 1081 (blind to the 10 terse `automation X @trigger(...) => logic X`
 declarations, which carry no brace at all). The measurement and the enforcement
 are the same code path, which is the only way the number stays true.
 
-Declarations, precisely: a handful of *call sites* still name prefixed
-constructs that do not exist in this tree (`dsl/cognition/logic.memql` calls
-`mutation mutationCreateCanvasState(...)`, which is supplied by a product
-bundle at runtime, not declared here). Those are out of scope for the gate,
-which walks the embedded tree.
+Declarations, precisely: a call site may still name a prefixed construct that
+does not exist in this tree, because a product bundle supplies it at runtime
+rather than declaring it here. Those are out of scope for the gate, which walks
+the embedded tree.
 
 > **History.** This page previously mandated `query*` / `mutation*` /
 > `logic*`. #2806 corrected the spec/trait entries, which were worse than
@@ -101,8 +100,8 @@ mutate user archiveUser {
   }
 }
 
-spec space spaceIsPublic {
-  return visibility == "public"
+spec folder folderIsShared {
+  return visibility == "shared"
 }
 
 trait isActiveRecord {
@@ -115,8 +114,8 @@ Constructs live in one consolidated file per kind per namespace
 ...), so file names never carry an individual construct's name.
 
 An automation step references a logic construct by the same name the
-file-top import names -- `step decide { logic bootstrapSession ( event )
-}` resolves through `use cognition.logic.{ bootstrapSession }`. There is
+file-top import names -- `step decide { logic indexArtifact ( event )
+}` resolves through `use library.logic.{ indexArtifact }`. There is
 no prefixed/bare split between the two.
 
 

@@ -13,10 +13,10 @@ import (
 // load-bearing (they appear in the expected JSON below), so keep edits to the
 // end of the buffer or update the expectation with them.
 //
-//	line 0: use cognition.concepts.{ participant }
+//	line 0: use worker.concepts.{ registration }
 //	line 3: query participant spaceParticipants {
 //	line 14: automation sweepStalePlans {
-const runnableDoc = `use cognition.concepts.{ participant }
+const runnableDoc = `use worker.concepts.{ registration }
 
 @description("Get space participants")
 query participant spaceParticipants {

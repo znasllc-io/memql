@@ -10,7 +10,7 @@
 # its bundleRef is file:///app/portal, memql#3711 -- component/portal, which
 # used to serve it from the bff, is retired). A Dockerfile has no conditional
 # COPY, so the alternatives were: build the SPA in every node image (a Node
-# toolchain + npm install + vite build on all nine, for bytes eight of them
+# toolchain + npm install + vite build on all seven, for bytes six of them
 # never serve), or add a second runtime target and duplicate the runtime
 # stage. Naming the SOURCE stage instead costs one indirection and leaves
 # both runtime stages identical for every node type.
@@ -37,20 +37,10 @@ FROM golang:1.26.6@sha256:640a234f4bea3e399c056b7b8f9c667c4939befae8db2f14e9785e
 # Usage:
 #   docker build .                                    # bff (default)
 #   docker build --build-arg BUILD_TAGS=bff .         # bff (explicit)
-#   docker build --build-arg BUILD_TAGS=cognition .   # cognition
 #   docker build --build-arg BUILD_TAGS=agent .       # agent
 #   docker build --build-arg BUILD_TAGS=planner .     # planner
-#   docker build --build-arg BUILD_TAGS=voice .       # voice (CGO + libopus)
 #   docker build --build-arg BUILD_TAGS=edge --build-arg PORTAL_DIST_STAGE=portal-build .   # edge (serves hosted sites, including the portal, site #1)
 ARG BUILD_TAGS=""
-
-# CGO_ENABLED selects the build mode. The default node types build CGO-free
-# (static binaries, distroless runtime). The voice node is the exception:
-# the Go voice-agent joins LiveKit rooms via server-sdk-go/v2 + its media-sdk,
-# which pull a CGO libopus/opusfile/soxr dependency (see docs/voice/
-# 451-livekit-go-room-participation.md, Caveat 1). The voice compose service
-# passes CGO_ENABLED=1 alongside BUILD_TAGS=voice.
-ARG CGO_ENABLED=0
 
 # MEMQL_RELEASE is the release tag this image is being cut at -- e.g. "v0.18.1".
 # It is linked into the binary (core/buildinfo) and is the ONLY way a node can
@@ -80,17 +70,6 @@ ARG MEMQL_RELEASE=""
 ARG MEMQL_COMMIT=""
 
 WORKDIR /app
-
-# When CGO is on (the voice node) we need the C toolchain headers for libopus,
-# opusfile, and soxr at build time. The base golang image already carries gcc.
-# This apt step is a no-op cost for the CGO-free node types (the conditional
-# keeps it from running unless CGO_ENABLED=1).
-RUN if [ "${CGO_ENABLED}" = "1" ]; then \
-        apt-get update && \
-        apt-get install -y --no-install-recommends \
-            libopus-dev libopusfile-dev libsoxr-dev && \
-        rm -rf /var/lib/apt/lists/*; \
-    fi
 
 COPY go.mod go.sum ./
 # The `wire` tier is a set of NESTED modules that the root go.mod `replace`s by
@@ -137,7 +116,6 @@ COPY component/node/gen/go.* ./component/node/gen/
 COPY component/observe/go.* ./component/observe/
 COPY component/outbound/go.* ./component/outbound/
 COPY component/planner/go.* ./component/planner/
-COPY component/polyphon/go.* ./component/polyphon/
 COPY component/provenance/go.* ./component/provenance/
 COPY component/router/go.* ./component/router/
 COPY component/safety/go.* ./component/safety/
@@ -218,22 +196,18 @@ RUN bash scripts/identity/build-css.sh
 # freshly re-stamped on each build so it looked deliberate. The binary no longer
 # reads a VERSION file at all, so neither runtime stage copies one.
 #
-# The CGO-free node types keep -ldflags="-s -w" for a stripped static binary.
-# The voice node links against libopus dynamically; -s -w still applies. The
-# healthcheck is always CGO-free -- and takes no release stamp, because it is a
-# probe that never introduces itself to a client.
+# Every node type is CGO-free and keeps -ldflags="-s -w" for a stripped static
+# binary. The healthcheck takes no release stamp, because it is a probe that
+# never introduces itself to a client.
 #
 # GOARCH follows TARGETARCH (the BuildKit-provided target-platform arch) rather
-# than a hardcoded amd64, so the CGO voice node builds NATIVELY for the host:
-# amd64 under staging's `az acr build --platform linux/amd64`, arm64 on an
-# Apple-Silicon dev machine running the local parity cluster. A hardcoded
-# amd64 cross-compile from arm64 fails the CGO voice build (gcc: unrecognized
-# '-m64'); the CGO-free nodes cross-compile either way. Defaults to amd64 if
-# TARGETARCH is somehow unset (preserves the prior behaviour).
+# than a hardcoded amd64, so an image built on an Apple-Silicon dev machine is
+# an arm64 image and one built by the build server is amd64. Defaults to amd64
+# if TARGETARCH is somehow unset (preserves the prior behaviour).
 ARG TARGETARCH
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -tags "${BUILD_TAGS}" -ldflags="-s -w -X github.com/znasllc-io/memql/core/buildinfo.release=${MEMQL_RELEASE} -X github.com/znasllc-io/memql/core/buildinfo.commit=${MEMQL_COMMIT}" -o /app/bin/memql .
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -tags "${BUILD_TAGS}" -ldflags="-s -w -X github.com/znasllc-io/memql/core/buildinfo.release=${MEMQL_RELEASE} -X github.com/znasllc-io/memql/core/buildinfo.commit=${MEMQL_COMMIT}" -o /app/bin/memql .
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -ldflags="-s -w" -o /app/bin/healthcheck ./cmd/healthcheck
@@ -294,36 +268,6 @@ RUN mkdir -p /portal-dist /os-dist
 
 FROM ${PORTAL_DIST_STAGE} AS portal-dist
 
-# --- Runtime: CGO-free node types (default) use distroless. ---------------
-FROM gcr.io/distroless/base-debian12@sha256:76b3162a31477bca4a245b836c624f4c4a1a3705e99b9003907d992bec2c4bca AS runtime
-
-# Environment variables are injected by Cloud Run via service.yaml
-# No ENV block needed here - Cloud Run overrides at the service level
-
-WORKDIR /app
-
-COPY --from=builder /app/bin/memql ./memql
-COPY --from=builder /app/bin/healthcheck ./healthcheck
-# DSL files (concepts, mutations, queries, specs, automations, prompts,
-# providers, shapes, tools, policies) are //go:embed-baked into the
-# binary at compile time. The on-disk copy is only needed if
-# MEMQL_DSL_PATH is set at runtime to override the embedded tree
-# (dev/per-deploy patches). Cloud Run runs from the embedded copy.
-#
-# The MemQL Portal bundle is the opposite: NEVER embedded, always a directory,
-# because embedding it would put a Node build in front of every Go build (see
-# component/edge/doc.go). /app/portal is the directory the site #1 seed's
-# bundleRef names (file:///app/portal, dsl/platform/seeds.memql, memql#3711).
-# Empty for every node type except the edge -- a site whose bundle directory
-# is missing on disk 404s asset-by-asset rather than failing boot
-# (component/edge/handler.go resolves against whatever os.DirFS finds there).
-COPY --from=portal-dist /portal-dist ./portal
-COPY --from=portal-dist /os-dist ./os
-
-EXPOSE 8085 50051
-
-ENTRYPOINT ["./memql"]
-
 # --- Runtime: workbench node -- the only image that RUNS SOMEBODY ELSE'S CODE.
 #
 # The workbench builds packages (epic memql#4900), and a package's build
@@ -379,26 +323,42 @@ EXPOSE 8085 50051
 
 ENTRYPOINT ["./memql"]
 
-# --- Runtime: voice node (CGO) needs the libopus shared libraries. --------
-# The voice binary links libopus/opusfile/soxr dynamically, so distroless
-# (no libc package manager, no shared libs) cannot run it. This stage uses
-# debian-slim with the runtime shared libraries installed. Select it with
-# `--target voice-runtime` (the voice compose service does so).
-FROM debian:12-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS voice-runtime
+# --- Runtime: the default for every node type except the workbench.
+#
+# gcr.io/distroless/base-debian12: no shell, no package manager, glibc and a CA
+# bundle and nothing else. Several places in the tree reason from that fact
+# (component/deploycontrol/k8sapi.go, integrations/customdomain/provision.go,
+# deploy/k8s/base/custom-domain-rbac.yaml), so it is a property of the image
+# rather than an incidental choice.
+#
+# IT IS LAST IN THE FILE ON PURPOSE. A build with no --target resolves to the
+# last stage, and this is the one that should win that race. It used to be a
+# CGO/libopus `voice-runtime` stage instead, which is how every released image
+# came to be debian-slim while every locally built one was distroless. The
+# release workflow now also names `target: runtime` explicitly, so the ordering
+# is a second line of defence rather than the mechanism.
+FROM gcr.io/distroless/base-debian12@sha256:76b3162a31477bca4a245b836c624f4c4a1a3705e99b9003907d992bec2c4bca AS runtime
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        libopus0 libopusfile0 libsoxr0 ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+# Environment variables are injected by Cloud Run via service.yaml
+# No ENV block needed here - Cloud Run overrides at the service level
 
 WORKDIR /app
 
 COPY --from=builder /app/bin/memql ./memql
 COPY --from=builder /app/bin/healthcheck ./healthcheck
-# Same portal copy as the distroless runtime above. Present in BOTH stages
-# deliberately: the release workflow builds the CGO-free node types with no
-# --target, which resolves to the LAST stage -- this one -- so a copy only in
-# the distroless stage would ship no portal in the images that actually run.
+# DSL files (concepts, mutations, queries, specs, automations, prompts,
+# providers, shapes, tools, policies) are //go:embed-baked into the
+# binary at compile time. The on-disk copy is only needed if
+# MEMQL_DSL_PATH is set at runtime to override the embedded tree
+# (dev/per-deploy patches). Cloud Run runs from the embedded copy.
+#
+# The MemQL Portal bundle is the opposite: NEVER embedded, always a directory,
+# because embedding it would put a Node build in front of every Go build (see
+# component/edge/doc.go). /app/portal is the directory the site #1 seed's
+# bundleRef names (file:///app/portal, dsl/platform/seeds.memql, memql#3711).
+# Empty for every node type except the edge -- a site whose bundle directory
+# is missing on disk 404s asset-by-asset rather than failing boot
+# (component/edge/handler.go resolves against whatever os.DirFS finds there).
 COPY --from=portal-dist /portal-dist ./portal
 COPY --from=portal-dist /os-dist ./os
 

@@ -64,7 +64,7 @@
 // its own `participantRow` @row shape locally rather than importing one --
 // see that section for why.
 
-use cognition.concepts.{ participant }
+use worker.concepts.{ registration }
 use common.shapes.{ actorEnvelope }
 use agents.concepts.{ agent }
 
@@ -111,7 +111,7 @@ spec actorEnvelope isClusterOwner {
 // `row.createdBy` to the flattened key `createdBy`; the spec reads it bare.
 //
 // `participantRow` is declared HERE, illustratively, for this example only
-// -- it is not imported from `dsl/cognition/shapes.memql` (the real tree's
+// -- it is not imported from `dsl/worker/shapes.memql` (the real tree's
 // participant projection there is `participantFull`, which does not project
 // createdBy). `participant` itself is imported in the file-top preamble
 // above.
@@ -210,8 +210,8 @@ spec agent richPredicate {
 //   - From a query's filter clause: list the spec/trait name alongside
 //     other predicates, joined with `&&`:
 //
-//         use cognition.shapes.{ participantFull }
-//         use cognition.specs.{ isHumanParticipant }
+//         use worker.shapes.{ registrationFull }
+//         use worker.specs.{ isOnlineRegistration }
 //
 //         query participant activeHumanParticipants {
 //           args { partitionId string @required }

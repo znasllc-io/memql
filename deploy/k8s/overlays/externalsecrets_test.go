@@ -57,10 +57,8 @@ var deployRoot = filepath.Join("..", "..")
 // Adding one here is not the job -- the walk already covers a new object. This
 // list exists so that the walk failing to SEE anything is itself a failure.
 var knownExternalSecrets = []string{
-	"livekit-secrets",
 	"memql-secrets",
 	"memql-secrets-identity",
-	"telephony-secrets",
 }
 
 // externalSecret is the slice of a manifest these gates reason about.
@@ -277,169 +275,24 @@ func sortedNames(found []foundExternalSecret) []string {
 	return out
 }
 
-// voiceExternalSecrets are the two base objects the voice-off hold removes,
-// mapped to the file that declares them. Listed, not discovered, for the same
-// reason voiceOffLoadBalancers is: the failure worth catching is a third
-// voice-only ExternalSecret arriving in base and nobody extending the hold,
-// which discovery would wave through as "all of them are handled".
-var voiceExternalSecrets = map[string]string{
-	"livekit-secrets":   filepath.Join("..", "base", "externalsecret-livekit.yaml"),
-	"telephony-secrets": filepath.Join("..", "base", "externalsecret-telephony.yaml"),
-}
-
-// deletePatch is the strategic-merge `$patch: delete` body an overlay uses to
-// take a base resource out of the render. It is NOT a JSON 6902 op list, which
-// is why this cannot reuse servicePatchOps.
-type deletePatch struct {
-	Patch      string `yaml:"$patch"`
-	APIVersion string `yaml:"apiVersion"`
-	Kind       string `yaml:"kind"`
-	Metadata   struct {
-		Name string `yaml:"name"`
-	} `yaml:"metadata"`
-}
-
-// externalSecretDeletePatch returns the overlay's delete patch for the named
-// ExternalSecret, or nil if it declares none.
-func externalSecretDeletePatch(t *testing.T, overlay, name string) *deletePatch {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(overlay, "kustomization.yaml"))
-	if err != nil {
-		t.Fatalf("reading the %s kustomization: %v", overlay, err)
-	}
-	var k kustomizationPatches
-	if err := yaml.Unmarshal(raw, &k); err != nil {
-		t.Fatalf("parsing the %s kustomization: %v", overlay, err)
-	}
-	for _, p := range k.Patches {
-		if p.Target.Kind != "ExternalSecret" || p.Target.Name != name {
-			continue
-		}
-		var body deletePatch
-		if err := yaml.Unmarshal([]byte(p.Patch), &body); err != nil {
-			t.Fatalf("the %s patch targeting ExternalSecret %s does not parse: %v\n%s", overlay, name, err, p.Patch)
-		}
-		return &body
-	}
-	return nil
-}
-
-// baseAPIVersion reads the apiVersion the base manifest actually declares.
-func baseAPIVersion(t *testing.T, file, name string) string {
-	t.Helper()
-	raw, err := os.ReadFile(file)
-	if err != nil {
-		t.Fatalf("reading %s: %v", file, err)
-	}
-	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
-	for {
-		var doc struct {
-			APIVersion string `yaml:"apiVersion"`
-			Kind       string `yaml:"kind"`
-			Metadata   struct {
-				Name string `yaml:"name"`
-			} `yaml:"metadata"`
-		}
-		err := dec.Decode(&doc)
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			t.Fatalf("decoding %s: %v", file, err)
-		}
-		if doc.Kind == "ExternalSecret" && doc.Metadata.Name == name {
-			return doc.APIVersion
-		}
-	}
-	t.Fatalf("%s declares no ExternalSecret named %s", file, name)
-	return ""
-}
-
-// TestCloudEntryDeletesTheVoiceExternalSecrets is the memql#4487 gate.
+// moduleExternalSecrets are ExternalSecrets belonging to an OPTIONAL module --
+// rendered where the module is on, held off with a `$patch: delete` where it is
+// off. It is EMPTY today and that is a fact, not an oversight: the only two
+// entries it ever had were livekit-secrets and telephony-secrets, and both left
+// with the voice node type.
 //
-// cloud-entry holds voice off -- replicas 0 on the voice Deployments, ClusterIP
-// on the LiveKit Services -- but base's two voice ExternalSecrets were never
-// removed from the render. They resolve Key Vault entries that, for a voice-off
-// install, DELIBERATELY do not exist, so ESO reported SecretSyncedError on both
-// and the Application was `Degraded` on every entry install ever made.
+// It stays, empty, because it is half the classification ratchet below. Deleting
+// it would leave a new module ExternalSecret with nowhere to be declared, which
+// is the hole memql#4488 exists to close.
 //
-// Voice-off is one decision, and this is the third thing it means.
-func TestCloudEntryDeletesTheVoiceExternalSecrets(t *testing.T) {
-	for name, baseFile := range voiceExternalSecrets {
-		body := externalSecretDeletePatch(t, entryOverlay, name)
-		if body == nil {
-			t.Errorf("cloud-entry declares no patch for ExternalSecret %s; with voice off its Key Vault entries do not exist, so ESO reports SecretSyncedError and the Application is Degraded forever (memql#4487)", name)
-			continue
-		}
-		if body.Patch != "delete" {
-			t.Errorf("cloud-entry's patch on ExternalSecret %s is $patch=%q, want delete -- holding voice off means the object is not rendered, not that it is rendered differently", name, body.Patch)
-		}
-		if body.Metadata.Name != name {
-			t.Errorf("cloud-entry's delete patch targeting %s names %q in its body", name, body.Metadata.Name)
-		}
-		// A delete patch whose apiVersion has drifted from base does not fail:
-		// kustomize selects on `target`, so the body's GVK is not consulted,
-		// and the drift sits there looking authoritative until something makes
-		// it load-bearing. overlays/local carried `v1beta1` against a base of
-		// `v1` for exactly that reason.
-		if want := baseAPIVersion(t, baseFile, name); body.APIVersion != want {
-			t.Errorf("cloud-entry's delete patch for %s says apiVersion %q; %s declares %q", name, body.APIVersion, baseFile, want)
-		}
-	}
-}
-
-// TestLocalDeletesTheVoiceExternalSecretsToo covers the other overlay that
-// removes them, for a different reason (no ESO and no Key Vault locally) but
-// under the same rule. It is here rather than under overlays/local because the
-// apiVersion-drift assertion is the point, and that drift was found there.
-func TestLocalDeletesTheVoiceExternalSecretsToo(t *testing.T) {
-	for name, baseFile := range voiceExternalSecrets {
-		body := externalSecretDeletePatch(t, "local", name)
-		if body == nil {
-			t.Errorf("overlays/local declares no delete patch for ExternalSecret %s; ESO and Key Vault do not exist locally", name)
-			continue
-		}
-		if body.Patch != "delete" {
-			t.Errorf("overlays/local's patch on ExternalSecret %s is $patch=%q, want delete", name, body.Patch)
-		}
-		if want := baseAPIVersion(t, baseFile, name); body.APIVersion != want {
-			t.Errorf("overlays/local's delete patch for %s says apiVersion %q; %s declares %q", name, body.APIVersion, baseFile, want)
-		}
-	}
-}
-
-// TestCloudKeepsTheVoiceExternalSecrets is the reachable positive for the two
-// gates above. Voice is ON in overlays/cloud, so its Key Vault entries exist
-// and the objects belong in the render. If base simply stopped declaring them,
-// the cloud-entry gate would pass for a reason that has nothing to do with the
-// hold.
-func TestCloudKeepsTheVoiceExternalSecrets(t *testing.T) {
-	for name := range voiceExternalSecrets {
-		if body := externalSecretDeletePatch(t, cloudOverlay, name); body != nil {
-			t.Errorf("overlays/cloud deletes ExternalSecret %s; voice stays on there and the hold belongs to cloud-entry alone", name)
-		}
-	}
-	found := walkExternalSecrets(t)
-	for name, file := range voiceExternalSecrets {
-		var saw bool
-		for _, f := range found {
-			if f.Metadata.Name == name {
-				saw = true
-			}
-		}
-		if !saw {
-			t.Errorf("%s no longer declares ExternalSecret %s; the cloud-entry hold is written against it", file, name)
-		}
-	}
-}
+// Mapped to the file that declares them, matching engineCoreExternalSecrets, so
+// the classification reads as one table split by owner.
+var moduleExternalSecrets = map[string]string{}
 
 // engineCoreExternalSecrets are the ExternalSecrets every install renders no
 // matter which modules are enabled. They belong to the engine itself, so no
 // overlay holds them off and an overlay that did would be broken rather than
 // minimal.
-//
-// Mapped to the file that declares them, matching voiceExternalSecrets, so the
-// classification below reads as one table split by owner.
 var engineCoreExternalSecrets = map[string]string{
 	// BOTH live in deploy/external-secrets/, not deploy/k8s/base/ -- they are
 	// wired onto an instance by scripts/deploy/wire-external-secrets.sh rather
@@ -450,28 +303,26 @@ var engineCoreExternalSecrets = map[string]string{
 }
 
 // TestEveryExternalSecretIsClassified is the memql#4488 ratchet: the thing that
-// makes voiceExternalSecrets COMPLETE rather than merely correct.
+// makes moduleExternalSecrets COMPLETE rather than merely correct.
 //
-// The hold gates above are keyed on voiceExternalSecrets, and that list is
-// hand-maintained ON PURPOSE -- its own comment explains why discovery is the
-// wrong instrument here, and it is right. "Which ExternalSecrets are voice's?"
-// cannot be answered by scanning, because a third voice object arriving under a
-// component name nobody thought of (app.kubernetes.io/name: sip, say) is not
-// recognisable as voice's to any rule written today. Discovery would report it
-// as not-voice and wave it through.
+// A module's object list is hand-maintained ON PURPOSE -- "which
+// ExternalSecrets belong to module X?" cannot be answered by scanning, because
+// an object arriving under a component name nobody thought of is not
+// recognisable as that module's to any rule written today. Discovery would
+// report it as not-the-module's and wave it through.
 //
 // But that leaves the list with a hole of exactly that shape. A new
 // ExternalSecret in base is:
 //
 //   - walked by walkExternalSecrets, so it appears in the corpus;
-//   - absent from voiceExternalSecrets, so NO gate requires a hold for it;
-//   - therefore rendered by cloud-entry, resolving a Key Vault entry that a
-//     voice-off install deliberately does not have.
+//   - absent from moduleExternalSecrets, so NO gate requires a hold for it;
+//   - therefore rendered by every overlay, resolving a Key Vault entry that a
+//     module-off install deliberately does not have.
 //
 // Which is ESO reporting SecretSyncedError, the Application reading Degraded
 // forever on a correctly installed cluster, and the runbook eventually writing
-// it down as expected noise. That is memql#4487 returning by the one route
-// memql#4487's own gates cannot see.
+// it down as expected noise. That is memql#4487 returning by the one route its
+// own gates cannot see.
 //
 // So this does not try to classify anything. It requires that SOMEBODY has:
 // every ExternalSecret the walk finds must be listed as engine-core (rendered
@@ -485,20 +336,20 @@ var engineCoreExternalSecrets = map[string]string{
 //     every optional module off". If that is not true of the object, this is
 //     the wrong bucket and the install it breaks is the minimal one nobody
 //     tests.
-//   - module-owned means the module's hold must ALSO learn about it, which is
-//     the cloud-entry delete patch the gates above then require.
+//   - module-owned means the module's hold must ALSO learn about it -- a
+//     `$patch: delete` in every overlay that runs with the module off.
 func TestEveryExternalSecretIsClassified(t *testing.T) {
 	classified := map[string]string{}
 	for name := range engineCoreExternalSecrets {
 		classified[name] = "engine-core"
 	}
-	for name := range voiceExternalSecrets {
+	for name := range moduleExternalSecrets {
 		if owner, dup := classified[name]; dup {
-			t.Errorf("ExternalSecret %q is classified as both %s and voice-owned; it can only be one, "+
-				"and the two buckets have opposite consequences for a voice-off render", name, owner)
+			t.Errorf("ExternalSecret %q is classified as both %s and module-owned; it can only be one, "+
+				"and the two buckets have opposite consequences for a module-off render", name, owner)
 			continue
 		}
-		classified[name] = "voice"
+		classified[name] = "module"
 	}
 
 	found := walkExternalSecrets(t)
@@ -520,16 +371,16 @@ func TestEveryExternalSecretIsClassified(t *testing.T) {
 		t.Errorf("ExternalSecret %q (%s) is classified by nothing.\n"+
 			"Every ExternalSecret must be declared either engine-core -- rendered on EVERY install, "+
 			"including one with every optional module off -- by adding it to engineCoreExternalSecrets, "+
-			"or as belonging to a module, by adding it to that module's map (voiceExternalSecrets today), "+
+			"or as belonging to a module, by adding it to moduleExternalSecrets, "+
 			"which then requires the module's overlay hold to remove it.\n"+
-			"Unclassified means no gate requires a hold, so a voice-off install renders it, ESO cannot "+
+			"Unclassified means no gate requires a hold, so a module-off install renders it, ESO cannot "+
 			"resolve the Key Vault entry that deliberately does not exist, and the Application is "+
 			"Degraded forever on a correctly installed cluster -- memql#4487 returning by the one route "+
 			"its own gates cannot see (memql#4488).", name, f.file)
 	}
 
 	// The reverse direction: a classification naming an object the walk cannot
-	// find is a stale entry, and a stale entry in voiceExternalSecrets silently
+	// find is a stale entry, and a stale entry in moduleExternalSecrets silently
 	// weakens the hold gates -- they iterate the map, so a name that no longer
 	// exists in base simply stops being checked while still looking covered.
 	for name, owner := range classified {
@@ -555,8 +406,8 @@ func TestEveryExternalSecretIsClassified(t *testing.T) {
 		}
 	}
 
-	t.Logf("classified %d ExternalSecret(s): %d engine-core, %d voice-owned",
-		len(seen), len(engineCoreExternalSecrets), len(voiceExternalSecrets))
+	t.Logf("classified %d ExternalSecret(s): %d engine-core, %d module-owned",
+		len(seen), len(engineCoreExternalSecrets), len(moduleExternalSecrets))
 }
 
 // allClassifiedFiles merges the two classification maps into one name -> file
@@ -566,7 +417,7 @@ func allClassifiedFiles() map[string]string {
 	for name, file := range engineCoreExternalSecrets {
 		out[name] = file
 	}
-	for name, file := range voiceExternalSecrets {
+	for name, file := range moduleExternalSecrets {
 		out[name] = file
 	}
 	return out

@@ -122,9 +122,9 @@ func NewAnonymousStreamInterceptor(base grpc.StreamServerInterceptor, enabled bo
 // property 2 above. Any non-empty authorization value, of any scheme, means
 // this stream is somebody's and belongs to the chain.
 //
-// The guest query-parameter dial (?guest_token=) arrives as an
-// `Authorization: Guest` header by the time it reaches this stream: the WS
-// bridge rewrites it in metadataFromRequest. So there is no second shape to
+// Every transport that carries a credential to this stream normalises it
+// into that one header -- the WS bridge rewrites its subprotocol pair in
+// metadataFromRequest before the gRPC hop. So there is no second shape to
 // check here, and adding a speculative one would be a claim about a
 // transport this file cannot see.
 func streamCarriesCredential(ctx context.Context) bool {

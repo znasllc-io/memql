@@ -11,10 +11,14 @@ import (
 // executor_mutation_run3_db_test.go is the real-engine reproduction + fix guard
 // for the run-3 MCP QA write-path failures rolled up under memql#1672:
 //
-//   - #1678  read-merge not applied to touchSession / updateSessionDevices /
-//            updateSessionStreams / deleteKnowledgeDomain (full-record
-//            replacement wiped omitted fields / required a full payload).
 //   - #1686  updateClusterSettings wiped internalDomains when omitted.
+//            #1678 was the same defect on touchSession / updateSessionDevices /
+//            updateSessionStreams / deleteKnowledgeDomain; all four went with
+//            the legacy cognition tree, and #1686 is now this file's read-merge
+//            case. The engine-level proof that a partial write onto an existing
+//            id merges rather than replaces lives in
+//            executor_mutation_readmerge_db_test.go, which asserts it on the
+//            raw insert() surface as well as through named mutations.
 //   - #1673  calendar create blocked: reserved field createdBy/createdAt in the
 //            insert payload.
 //   - #1676  createDelegation wrote the literal string 'nil' into the
@@ -140,39 +144,6 @@ func TestRun3_TodosCreate_OmittedDueAt(t *testing.T) {
 		require.NotEqual(t, "null", v, "omitted dueAt must not become the literal string 'null' (#1683)")
 	}
 	require.Equal(t, false, p["done"])
-}
-
-// TestRun3_TouchSession_ReadMerge covers #1678: a minimal touchSession (id +
-// the one changed field) must succeed and preserve the omitted required
-// discriminators (subject / tokenHash / source / expiresAt).
-func TestRun3_TouchSession_ReadMerge(t *testing.T) {
-	eng, db, ctx := sharedReadMergeEngine(t)
-	const conceptName = "v1:identity:authSession"
-
-	sessionId := "sess-" + uniqueSuffix("touch")
-	// Seed a full session row first. Reuse the canonical stored id the engine
-	// returns for both the touch arg and the read-back (ids may be canonicalized).
-	storedId := runMutation(t, ctx, eng, "createAuthSession", map[string]any{
-		"sessionId": sessionId,
-		"subject":   "user:touch-test",
-		"tokenHash": "hash-touch-1",
-		"source":    "bff_exchange",
-		"expiresAt": "2026-12-31T00:00:00Z",
-	})
-	before := latestPayload(t, ctx, db, conceptName, storedId)
-
-	// MINIMAL touch: only the changed field in payload.
-	runMutation(t, ctx, eng, "touchSession", map[string]any{
-		"sessionId": storedId,
-		"payload":   map[string]any{"lastActivityAt": "2026-06-18T12:00:00Z"},
-	})
-	after := latestPayload(t, ctx, db, conceptName, storedId)
-
-	require.Equal(t, "2026-06-18T12:00:00Z", after["lastActivityAt"], "touch must apply the changed field")
-	require.Equal(t, before["subject"], after["subject"], "subject preserved (#1678)")
-	require.Equal(t, before["tokenHash"], after["tokenHash"], "tokenHash preserved (#1678)")
-	require.Equal(t, before["source"], after["source"], "source preserved (#1678)")
-	require.Equal(t, before["expiresAt"], after["expiresAt"], "expiresAt preserved (#1678)")
 }
 
 // TestRun3_UpdateClusterSettings_PreservesInternalDomains covers #1686: a

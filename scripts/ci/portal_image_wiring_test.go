@@ -108,17 +108,16 @@ func TestDockerfileDeclaresThePortalStageSelector(t *testing.T) {
 	}
 }
 
-// EVERY runtime stage must copy the bundle. The release build of the
-// CGO-free node types passes no --target, which resolves to the LAST stage --
-// so a copy present only in the distroless stage ships no portal in the
-// images that actually run, which is exactly the kind of asymmetry nobody
-// notices in review.
+// EVERY runtime stage must copy the bundle. A build that passes no --target
+// resolves to the LAST stage -- so a copy present only in one runtime stage
+// ships no portal in the images that actually run, which is exactly the kind
+// of asymmetry nobody notices in review.
 func TestEveryRuntimeStageCopiesThePortal(t *testing.T) {
 	body := readRepoFile(t, "Dockerfile")
 
 	// Split the file into stages and inspect the ones that ENTRYPOINT the
 	// memql binary -- that is what makes a stage a runtime rather than a
-	// builder, and it survives a rename of `runtime` / `voice-runtime`.
+	// builder, and it survives a rename of any runtime stage.
 	blocks := regexp.MustCompile(`(?mi)^FROM\s`).Split(body, -1)
 	names := regexp.MustCompile(`(?mi)^FROM\s+(.*)$`).FindAllStringSubmatch(body, -1)
 

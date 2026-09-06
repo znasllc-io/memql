@@ -16,9 +16,6 @@ import (
 type NodeType string
 
 const (
-	// NodeTypeCognition handles voice turn-taking and conversation management.
-	NodeTypeCognition NodeType = "cognition"
-
 	// NodeTypeAgent performs task execution and AI work.
 	NodeTypeAgent NodeType = "agent"
 
@@ -28,9 +25,6 @@ const (
 	// NodeTypeBFF serves domain-specific frontends.
 	// Default when no build tag is specified.
 	NodeTypeBFF NodeType = "bff"
-
-	// NodeTypeVoice handles the audio I/O pipeline (ASR, TTS, LiveKit).
-	NodeTypeVoice NodeType = "voice"
 
 	// NodeTypeWorkbench hosts the sandboxed per-Plan Linux working
 	// environment. Receives WorkbenchForwardRequest envelopes on
@@ -56,11 +50,9 @@ const (
 
 // ValidNodeTypes is the set of recognized node types.
 var ValidNodeTypes = map[NodeType]bool{
-	NodeTypeCognition: true,
 	NodeTypeAgent:     true,
 	NodeTypePlanner:   true,
 	NodeTypeBFF:       true,
-	NodeTypeVoice:     true,
 	NodeTypeWorkbench: true,
 	NodeTypeMCP:       true,
 }

@@ -1,7 +1,7 @@
 # Instance profile: STANDARD -- the full mesh (epic memql#3852, task memql#3853).
 #
-# Two replicas of every mesh node, and the voice lane on. Used by the Graph
-# tier; see ../../README.md for the tier -> profile table.
+# Two replicas of every mesh node. Used by the Graph tier; see ../../README.md
+# for the tier -> profile table.
 #
 # TWO OF EVERYTHING IS THE TIER, not a capacity guess. Graph's price includes
 # high availability, and "HA" for a mesh means every service replicated -- a
@@ -12,12 +12,6 @@
 # that only appears at two replicas -- state living on one node while another
 # handles the request -- is one a paying customer should never be the first to
 # find.
-#
-# THE VOICE LANE IS ON, at one replica each. Graph includes 1,000 voice minutes,
-# so the capability has to exist. One rather than two because voice-agent is a
-# room DISPATCHER rather than a request-serving mesh node (one replica serves up
-# to MEMQL_VOICE_MAX_ROOMS rooms concurrently), and because a second LiveKit
-# server is a capacity decision rather than an availability one at this tier.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
@@ -26,9 +20,6 @@ patches:
     patch: |
       - { op: replace, path: /spec/replicas, value: 2 }
   - target: { kind: Deployment, name: bff }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 2 }
-  - target: { kind: Deployment, name: cognition }
     patch: |
       - { op: replace, path: /spec/replicas, value: 2 }
   - target: { kind: Deployment, name: agent }
@@ -46,12 +37,3 @@ patches:
   - target: { kind: Deployment, name: edge }
     patch: |
       - { op: replace, path: /spec/replicas, value: 2 }
-  - target: { kind: Deployment, name: voice }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 2 }
-  - target: { kind: Deployment, name: voice-agent }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 1 }
-  - target: { kind: Deployment, name: livekit }
-    patch: |
-      - { op: replace, path: /spec/replicas, value: 1 }

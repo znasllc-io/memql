@@ -18,7 +18,7 @@ There are two run modes:
 
 | Mode | What it is | How |
 |------|-----------|-----|
-| **Local dev** | k3d + ArgoCD cluster on one machine — Postgres, the mesh, LiveKit. Throwaway. | `make up` (primary local path, memql#2061). See [Reproduce the cloud locally](reproduce-the-cloud-locally.md). |
+| **Local dev** | k3d + ArgoCD cluster on one machine — Postgres and the mesh. Throwaway. | `make up` (primary local path, memql#2061). See [Reproduce the cloud locally](reproduce-the-cloud-locally.md). |
 | **Real deployment** (any installation) | A Kubernetes mesh against **self-hosted CloudNativePG** (PostgreSQL + TimescaleDB Community + pgvector), in-cluster. | The rest of this page. |
 
 Everything below is **target-agnostic by design**: the architecture is
@@ -76,7 +76,7 @@ Provisioning detail, alerts, and the failover/restore drills:
 
 ### Why two endpoints? — the connection model
 
-The whole mesh (≈10 node-types × replicas) shares **one** database.
+The whole mesh (7 node-types × replicas) shares **one** database.
 
 `max_connections` is now **ours to set** — 200 for a local cluster, 400 for a
 cloud one — so the ceiling is a sizing decision rather than a tier limit. It
@@ -90,11 +90,11 @@ breaking session state*, not about Tiger:
 
 - **Bulk traffic** (the bun pool — all queries and mutations, every mesh pod)
   rides `MEMQL_DATABASE_DSN`.
-- **Session-stateful work** — session-scoped advisory locks (cognition
-  dispatch/greet/feedback gates, cron leader, topology reconciler, planner
-  admission) **and migrations** — rides `MEMORY_NODES_DATABASE_DIRECT_DSN`. A
-  transaction-mode pooler recycles a server backend *between statements*, which
-  would silently drop a held session lock.
+- **Session-stateful work** — session-scoped advisory locks (cron leader,
+  topology reconciler, planner admission) **and migrations** — rides
+  `MEMORY_NODES_DATABASE_DIRECT_DSN`. A transaction-mode pooler recycles a
+  server backend *between statements*, which would silently drop a held
+  session lock.
 
 So when a pooler is eventually enabled (`cnpg-db/optional/pooler`, ready but
 not composed), only the first DSN moves. (This paragraph used to add that
@@ -137,12 +137,11 @@ Full detail, the budget formula, the pre-deploy gate, and the monitor:
   It wants a dedicated node pool: Postgres is memory- and IO-sensitive, so a
   noisy neighbour costs latency on every query.
 - The engine mesh node-types (each a `Deployment`, 2 replicas for HA):
-  `identity`, `cognition`, `voice`, `agent`, `planner`, `workbench`, `mcp`,
-  plus `livekit` and the `voice-agent`. Manifests: `deploy/k8s/base`. A
-  product stack adds a `bff` -- a plain, product-agnostic engine node that
-  fronts the product's DSL bundle -- plus the product client (SPA), both
-  layered in from the product's own overlay -- see
-  [Downstream product stacks](downstream-stacks.md).
+  `identity`, `agent`, `planner`, `workbench`, `mcp`, `edge`. Manifests:
+  `deploy/k8s/base`. A product stack adds a `bff` -- a plain,
+  product-agnostic engine node that fronts the product's DSL bundle -- plus
+  the product client (SPA), both layered in from the product's own overlay --
+  see [Downstream product stacks](downstream-stacks.md).
 - Rough small-installation footprint: ~4 × 2-vCPU nodes. Right-size per workload.
 - **Argo CD** for GitOps (+ **Argo Rollouts** when a product stack runs a
   blue-green `bff`; the controller install lives in `deploy/rollouts/install`).
@@ -166,9 +165,10 @@ Every DB-connecting pod mounts the `memql-secrets` Secret via `envFrom`. The
   shared `MEMQL_IDENTITY_SIGNING_KEY_B64` (Ed25519 seed) in the envelope — every
   replica derives the same key/JWKS. See [Identity Service](auth/identity-service.md)
   and the [Access Model](auth/access-model.md).
-- **AI providers:** an `MEMQL_OPENAI_API_KEY` is required (cascade voice = OpenAI
-  ASR/TTS); Anthropic optional. See [Environment Variables](env-vars.md) for the
-  full env surface and the bootstrap-envelope vs concept-stored split.
+- **AI providers:** an `MEMQL_OPENAI_API_KEY` is required (streaming
+  transcription = OpenAI ASR); Anthropic optional. See
+  [Environment Variables](env-vars.md) for the full env surface and the
+  bootstrap-envelope vs concept-stored split.
 
 ---
 
@@ -178,7 +178,7 @@ Deployable images are built on **GitHub Actions → OIDC → ACR `acrmemql`**, n
 hand-built locally (local Docker is dev-only):
 
 - `memql` (this repo) → **every** node-type image — `identity`, `bff`,
-  `cognition`, `agent`, `planner`, `voice`, `workbench`, `mcp` — as a
+  `agent`, `planner`, `workbench`, `mcp`, `edge` — as a
   **product-agnostic engine image**
   (`.github/workflows/build-engine-images.yml`). There are no per-product node
   images: a plain engine node runs a product's DSL at runtime, so it does

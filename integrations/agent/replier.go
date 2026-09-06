@@ -295,21 +295,11 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	}
 
 	operatorEnabled, _ := data["operatorEnabled"].(bool)
-	// voiceMode: cognition flips this hint on Polyphon voice turns.
-	// Used to swap the default policy from balancedChat to
-	// lowLatencyVoice -- trades Sonnet-class quality for first-token
-	// latency (GPT-5.4 Mini primary) on the voice path. Only kicks
-	// in when the agent has NOT explicitly pinned a policy on its
-	// stored providerConfig, so user choice always wins.
-	voiceMode := strings.TrimSpace(msg.Hints["voice_mode"]) == "true"
 	policyName := agentPolicyName
 	if policyName == "" {
-		switch {
-		case operatorEnabled:
+		if operatorEnabled {
 			policyName = "strongReasoning"
-		case voiceMode:
-			policyName = "lowLatencyVoice"
-		default:
+		} else {
 			policyName = "balancedChat"
 		}
 	}

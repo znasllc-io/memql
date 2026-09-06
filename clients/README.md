@@ -9,7 +9,7 @@ the platform's outward faces and they point in opposite directions:
 
 | Directory | Direction | What lives there |
 |-----------|-----------|------------------|
-| `integrations/` | MemQL → the world | Go code the engine calls out through (AI providers, email, storage, knowledge, voice) |
+| `integrations/` | MemQL → the world | Go code the engine calls out through (AI providers, email, storage, knowledge, commerce) |
 | `clients/` | the world → MemQL | Applications that connect *in*, over gRPC or the `/memql/ws` bridge |
 | `sdk/` | the wire itself | Libraries clients are built *with* (`sdk/go`, `sdk/ts`, `sdk/ts-viewkit`) |
 

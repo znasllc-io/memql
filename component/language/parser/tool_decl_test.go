@@ -207,24 +207,37 @@ func TestParseToolDecl_RejectsMissingName(t *testing.T) {
 	}
 }
 
-// TestParseToolDecl_ClientExecution locks @clientExecution as a flag
-// annotation that flips ToolDecl.ClientExecution. The operator UI
-// primitives (uiClick / uiNavigate / etc.) carry this so the agent's
-// tool loop dispatches to the browser via ClientToolCall instead of
-// trying to execute server-side.
-func TestParseToolDecl_ClientExecution(t *testing.T) {
+// TestParseToolDecl_ClientExecutionIsRetired locks @clientExecution as a
+// REFUSAL. It used to put a tool's body in the connected browser, reached
+// over the client-tool relay, which went with the conversational product
+// (epic memql#4988). Every tool now carries a server-side handler, so an
+// author writing the annotation has declared something the engine cannot
+// honour -- and the parse error names it, which a silently-ignored flag
+// would not: the tool would load, be advertised to the model, and fail on
+// the one call that reached it.
+func TestParseToolDecl_ClientExecutionIsRetired(t *testing.T) {
 	source := `@clientExecution
 @description("Click a UI element in the browser")
 tool uiClick {
   selector  string  @required
 }`
 
-	got, err := ParseToolDecl(source)
-	if err != nil {
-		t.Fatalf("ParseToolDecl: %v", err)
+	_, err := ParseToolDecl(source)
+	if err == nil {
+		t.Fatal("ParseToolDecl accepted @clientExecution; the annotation is retired and must be refused")
 	}
-	if !got.ClientExecution {
-		t.Error("ClientExecution = false, want true")
+	if !strings.Contains(err.Error(), "clientExecution") {
+		t.Errorf("error should name the annotation the author wrote, got %v", err)
+	}
+	// A migration hint, not "unknown annotation". The annotation was real
+	// last month, so the generic arm would tell an author they had made a
+	// typo -- the house pattern for a retired form (see @default and
+	// @description on an args field) is to say it is retired and what to do.
+	if !strings.Contains(err.Error(), "retired") {
+		t.Errorf("a retired form must say so rather than read as a typo, got %v", err)
+	}
+	if strings.Contains(err.Error(), "unknown annotation") {
+		t.Errorf("@clientExecution fell through to the unknown-annotation arm, got %v", err)
 	}
 }
 
@@ -319,11 +332,10 @@ tool operatorTool {
 	}
 }
 
-// TestParseToolDecl_AllThreeAnnotations locks the realistic operator-UI
-// authoring shape: every operator primitive will carry all three.
-func TestParseToolDecl_AllThreeAnnotations(t *testing.T) {
-	source := `@clientExecution
-@allowedRoles("assistant", "specialist")
+// TestParseToolDecl_RoleAndScopeAnnotations locks the realistic authoring
+// shape: a gated tool carries both.
+func TestParseToolDecl_RoleAndScopeAnnotations(t *testing.T) {
+	source := `@allowedRoles("assistant", "specialist")
 @scopes("operator")
 @description("Operator UI: click a target element")
 tool uiClick {
@@ -333,9 +345,6 @@ tool uiClick {
 	got, err := ParseToolDecl(source)
 	if err != nil {
 		t.Fatalf("ParseToolDecl: %v", err)
-	}
-	if !got.ClientExecution {
-		t.Error("ClientExecution = false, want true")
 	}
 	if !reflect.DeepEqual(got.AllowedRoles, []string{"assistant", "specialist"}) {
 		t.Errorf("AllowedRoles = %v, want [assistant specialist]", got.AllowedRoles)

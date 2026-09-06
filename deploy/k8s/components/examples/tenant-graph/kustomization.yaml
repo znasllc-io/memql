@@ -1,8 +1,8 @@
 # Composition example for the tenant component -- the GRAPH tier (epic
 # memql#3852, task memql#3853).
 #
-# The featured tier: the full mesh at two replicas of everything, the voice lane
-# on, and the `mid` database preset. HA is not composed as an add-on here
+# The featured tier: the full mesh at two replicas of everything, and the `mid`
+# database preset. HA is not composed as an add-on here
 # because at Graph it is not one -- the `standard` profile already carries it,
 # and composing `optional/ha` on top would be a no-op that implies the tier's
 # replication were optional.

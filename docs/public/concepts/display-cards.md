@@ -20,9 +20,9 @@ tab, the VS Code concept panel, anything built on
 same declaration.
 
 The point of putting it on the concept is that **a concept renders the
-day it is declared**. No renderer learns about `v1:telephony:number`;
-the concept says `primary="e164"` and every view already knows what to
-do. Concept-specific rendering code is the failure mode this whole
+day it is declared**. No renderer learns about
+`v1:library:watchedFolder`; the concept says `primary="localPath"` and
+every view already knows what to do. Concept-specific rendering code is the failure mode this whole
 mechanism exists to prevent.
 
 ---
@@ -30,13 +30,13 @@ mechanism exists to prevent.
 ## 1. Declaring a card
 
 ```memql
-/// A phone number owned by the cluster.
-@displayCard(primary="e164", secondary="carrier", tertiary="purpose", status="status")
-concept number {
-  e164     string!  @description("E.164 number, e.g. +14155550123.")
-  carrier  string
-  purpose  enum("inbound", "outbound", "both")
-  status   enum("active", "releasing", "released")
+/// A folder on one of the owner's machines, kept arriving in the Library.
+@displayCard(primary="localPath", secondary="workerId", tertiary="lastSweepAt", status="status")
+concept watchedFolder {
+  localPath    string!  @description("Absolute path on that machine, e.g. /Users/ana/Clients/2026.")
+  workerId     string
+  lastSweepAt  datetime
+  status       enum("active", "paused")
 }
 ```
 

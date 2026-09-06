@@ -27,7 +27,7 @@ import (
 // There is no `a.httpTransport()` helper in this codebase; the site-serving
 // handler mounts here, between transportBase and createHTTPServer, the way
 // transportBFF mounts its domain endpoints (mountInboundEndpoints,
-// mountAttachmentEndpoints, ...) between the same two calls.
+// resolveBlobStore, ...) between the same two calls.
 func (a *App) transportEdge() {
 	a.transportBase()
 	a.mountEdgeEndpoints()

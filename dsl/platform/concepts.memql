@@ -106,7 +106,7 @@ concept partitionVariable {
 
 /// A capability the platform itself cannot yet provide -- a missing tool, missing integration,
 /// missing liveSource connector kind, missing knowledge domain category, etc. Distinct from
-/// v1:cognition:unmetCapability which fires when the chat router can't find a specialist for an
+/// the capability-gap signal raised when no agent in the catalog can serve an
 /// utterance: missingCapability fires when even creating the right specialist wouldn't solve the
 /// problem because the underlying platform surface doesn't exist. Logged by the Planner Agent
 /// during its capability-gap detection step before agent creation. Becomes the product backlog --

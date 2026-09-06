@@ -78,13 +78,6 @@ type Dispatcher struct {
 	recvErrMu sync.Mutex
 	recvErr   error
 
-	// clientTools holds the registered inbound ClientToolCall
-	// handler (memql#174). One handler at a time -- callers route
-	// per-tool inside their handler body. nil-handler envelopes are
-	// dropped + warned; the server-side agent loop times out per
-	// the deadline it ships with each call.
-	clientTools *clientToolHandlerRegistry
-
 	// unrouted counts server frames that carried a request_id, matched no
 	// pending request and no registered stream, and therefore fell through
 	// to the uncorrelated event channel. Keyed by the MemqlServerMessage
@@ -116,7 +109,6 @@ func newDispatcher(stream memqlv1.MemqlService_StreamClient, logger *slog.Logger
 		eventCh:         make(chan *memqlv1.MemqlServerMessage, 256),
 		stopCh:          make(chan struct{}),
 		unexpectedCh:    make(chan struct{}),
-		clientTools:     &clientToolHandlerRegistry{},
 		unrouted:        make(map[string]int),
 	}
 }
@@ -275,18 +267,6 @@ func (d *Dispatcher) Run() {
 		}
 
 		// Inbound client-tool dispatch (memql#174). The server's
-		// agent loop pushes ClientToolCall envelopes when it resolves
-		// a tool marked client_execution=true. Hand off to the
-		// registered handler (if any); the result ships back as a
-		// ClientToolResult correlated by call_id from inside
-		// dispatchClientToolCall's goroutine. Always handled here --
-		// these are not surfaced on the Events() channel because the
-		// dispatch contract is "exactly one handler" rather than the
-		// fan-out semantics Events() carries.
-		if call := msg.GetClientToolCall(); call != nil {
-			d.dispatchClientToolCall(call)
-			continue
-		}
 
 		// Streaming-session routing: messages on multi-frame protocols
 		// (AiTranscribeStream*, streaming chat, agent / voice-agent turns,
@@ -580,21 +560,6 @@ func streamRequestId(msg *memqlv1.MemqlServerMessage) string {
 	case *memqlv1.MemqlServerMessage_AgentGenerateTurnComplete:
 		return p.AgentGenerateTurnComplete.GetRequestId()
 
-	// Voice-agent turn streaming (VoiceAgentTurnRequest). Deltas then one
-	// complete. The shipped voice-agent runs its own read loop in
-	// integrations/voice/agent/grpc_client.go rather than this dispatcher, so
-	// nothing changes for it -- this is here so the next SDK consumer of the
-	// family does not rediscover memql#3414.
-	case *memqlv1.MemqlServerMessage_VoiceAgentTurnDelta:
-		return p.VoiceAgentTurnDelta.GetRequestId()
-	case *memqlv1.MemqlServerMessage_VoiceAgentTurnComplete:
-		return p.VoiceAgentTurnComplete.GetRequestId()
-
-	// Query results. The engine emits exactly one QueryResultChunk per query
-	// today, but `done` is a chunked contract and the name says so; the day it
-	// emits two, the second must not vanish. Costless for today's callers:
-	// executeRaw uses SendAndWait, so the frame is served by correlate_to and
-	// never reaches here.
 	case *memqlv1.MemqlServerMessage_QueryResult:
 		return p.QueryResult.GetRequestId()
 

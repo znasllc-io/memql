@@ -55,8 +55,8 @@ func TestNoAIVariableIsRequiredByAnyNodeType(t *testing.T) {
 	}
 
 	nodeTypes := []string{
-		"identity", "bff", "cognition", "agent", "planner",
-		"voice", "workbench", "mcp", "edge",
+		"identity", "bff", "agent", "planner",
+		"workbench", "mcp", "edge",
 	}
 
 	checked := 0
@@ -155,15 +155,10 @@ func TestMinimalEnvelopeIsWhatTheDocSays(t *testing.T) {
 			why:      "plus its own public origin, which becomes the JWT issuer -- a value nothing can derive for it",
 		},
 		{
-			nodeType: "voice",
-			want: []string{
-				"MEMQL_DATABASE_DSN", "MEMQL_GRPC_ADDRESS",
-				"MEMQL_POLYPHON_LIVEKIT_API_KEY", "MEMQL_POLYPHON_LIVEKIT_API_SECRET",
-				"MEMQL_POLYPHON_LIVEKIT_URL",
-			},
-			why: "plus LiveKit's three. OUT OF SCOPE for this epic and stated as such: the voice lane " +
-				"is already gated to zero replicas without its own credentials, and that gating is " +
-				"LiveKit's transport requirement rather than an AI one",
+			nodeType: "edge",
+			want:     []string{"MEMQL_DATABASE_DSN", "MEMQL_GRPC_ADDRESS"},
+			why: "the edge resolves a request Host to a site row and serves its bundle, so its " +
+				"whole configuration is graph state; it needs no envelope of its own",
 		},
 	}
 

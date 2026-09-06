@@ -65,31 +65,6 @@ func renderedCallSites() []struct {
 		args map[string]any
 	}{
 		// guest_handlers.go. The three update-shaped call sites carry only the
-		// fields they CHANGE: the mutations read-merge the persisted row
-		// (memql#1628), and re-supplying discriminators the mutation does not
-		// declare was both a lost-update hazard and silently discarded
-		// (memql#4258). Keep these in step with the handlers: the construct
-		// name is checked by TestRenderedStatementsResolve and the argument
-		// names by TestRenderedArgumentsAreDeclared below.
-		{"markGuestInvitationKicked", map[string]any{
-			"invitationId": "inv-1",
-		}},
-		{"createGuestInvitation", map[string]any{
-			"invitationId": "inv-1", "partitionId": "p-1", "spaceName": awkwardName,
-			"inviterId": "u-1", "inviterName": awkwardName,
-			"inviteeEmail": "guest+tag@example.com", "inviteeName": awkwardName,
-			"tokenHash": hash, "expiresAt": expires,
-		}},
-		{"markGuestInvitationAccepted", map[string]any{
-			"invitationId": "inv-1", "inviteeName": awkwardName,
-		}},
-		{"createGuestParticipant", map[string]any{
-			"participantId": "part-1", "partitionId": "p-1", "displayName": awkwardName,
-		}},
-		{"rotateGuestInvitationToken", map[string]any{
-			"invitationId": "inv-1", "tokenHash": strings.Repeat("cd", 32),
-			"previousTokenHash": hash,
-		}},
 		// auth_session_handlers.go
 		{"revokeAuthSession", map[string]any{
 			"sessionId": "sess-1", "revokedReason": "user_action",

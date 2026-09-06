@@ -59,15 +59,10 @@ func TestDryRunCompileResolvesLogicConstructUseImports(t *testing.T) {
 		"indexGeneratedOutputOnCreate": false,
 		"indexNoteOnCreate":            false, "indexTodoOnCreate": false,
 		"indexCalendarEventOnCreate": false, "indexMemoryOnCreate": false,
-		// v1:cognition:logic family (session). The daily-space automations
-		// (ensureDailySpaceOnAuthSession / provisionDailySpaceOnUserCreate /
-		// rolloverDailySpace) moved to the product pack in #1976, and
-		// autoJoinAI / purgeExpiredArchivedSpaces moved in B2 (#2038) with the
-		// `space` concept; the remaining cognition `.logic.{ }` importers still
-		// exercise the branch.
-		"bootstrapSession":            false,
-		"generateResponse":            false,
-		"voiceMigrationOnSecondHuman": false,
+		// The cognition `.logic.{ }` importers (bootstrapSession /
+		// generateResponse / voiceMigrationOnSecondHuman) went with the
+		// cognition namespace in epic memql#4988; the library and
+		// per-namespace importers below still exercise the branch.
 		// the remaining per-namespace logic concepts
 		"consolidateMemory": false, "conflictDetection": false,
 		"killSwitchSuspendsRunningPlans": false, "onDelegationCreated": false,

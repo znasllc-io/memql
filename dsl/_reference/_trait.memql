@@ -78,9 +78,9 @@ trait isLive {
 // These are engine-stamped intrinsics, not payload fields; the resolver
 // keeps them bare (a non-intrinsic bare name resolves to payload.<name>).
 
-@description("Matches rows from the cognition:participant concept.")
+@description("Matches rows from the worker:registration concept.")
 trait isParticipantRow {
-  return concept == "v1:cognition:participant"
+  return concept == "v1:worker:registration"
 }
 
 @description("Matches rows authored by a specific known identity.")
