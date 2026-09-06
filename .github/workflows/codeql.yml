@@ -67,17 +67,35 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           config-file: ./.github/codeql/codeql-config.yml
-          # SECURITY QUERIES, EXTENDED -- not `security-and-quality`, and the
-          # difference is the whole of this workflow's reliability.
+          # SECURITY QUERIES, EXTENDED -- not `security-and-quality`.
           #
-          # `security-and-quality` is the largest suite CodeQL ships: every
-          # security query PLUS the entire maintainability set. On this
-          # codebase the quality half produces a result set the analysis
-          # cannot hold, and `codeql database run-queries` dies with
+          # CORRECTION (memql#5016). This comment previously said the quality
+          # half produced a result set the analysis could not hold, and that
+          # narrowing the suite was "the whole of this workflow's
+          # reliability". THAT WAS WRONG, and it is left here stated rather
+          # than quietly rewritten, because the wrong reason is the more
+          # instructive one.
           #
-          #     Result set is larger than the limit of 2GiB
+          # The narrowing worked as a narrowing -- 57 queries became 36 -- and
+          # changed the crash not at all. `Analyze (go)` still died with
           #
-          # It fails SELECTIVELY, which is what made it hard to see (#5016).
+          #     [36/36 eval 13m34s] Query failed:
+          #       codeql/go-queries/Security/CWE-601/BadRedirectCheck.ql
+          #       (Result set is larger than the limit of 2GiB).
+          #
+          # ONE query is the load, not the accumulation: the failure is
+          # attributed by name, the other 35 wrote their results successfully,
+          # and it ran LONGER after the narrowing (13m34s against 9m10s) --
+          # with less competing for the same `--ram --threads`, it took more of
+          # the box. That query is excluded by rule id in
+          # .github/codeql/codeql-config.yml, which is what actually fixed
+          # this; the reasoning lives there, beside the exclusion.
+          #
+          # The narrowing is KEPT on its own merits, which are real but
+          # smaller: the maintainability half is already computed on every
+          # commit by GitHub's Code Quality product (`dynamic/github-code-
+          # quality/codeql`, green throughout), so running it here bought a
+          # duplicate.
           # GitHub disables diff-informed analysis past ~300 changed files, so
           # a small pull request never reaches the crashing step and a large
           # one always does -- along with every push to main, which is always
@@ -86,19 +104,30 @@ jobs:
           # ones sailed through, and a red `Analyze (go)` blocked the owner
           # merge path (scripts/dev/merge-as-owner.sh) on those and only those.
           #
-          # WHY DROPPING THE QUALITY HALF COSTS NOTHING NOW. The matrix comment
+          # WHY DROPPING THE QUALITY HALF COSTS NOTHING. The matrix comment
           # above says GitHub's Code Quality product "was retired because it is
           # the ONLY billable line item on this org". That is no longer true:
           # Code Quality runs on every pull request, every push to main and on
           # a schedule (16 runs in the last 100 workflow runs at the time of
           # writing, all green), under `dynamic/github-code-quality/codeql`.
-          # So the maintainability queries are covered by the very product this
-          # suite was widened to replace -- and covered by the run that does
-          # NOT crash. Keeping them here bought a duplicate and a broken lane.
+          #
+          # BEWARE when reading a rollup: that product emits a check named
+          # `Analyze (go)` TOO, and its run is always green. Two checks, one
+          # name. Discriminate on the run's `path` -- `.github/workflows/
+          # codeql.yml` is this workflow, `dynamic/github-code-quality/codeql`
+          # is the other product.
           #
           # `security-extended` rather than plain `security`: it keeps more
           # security queries than the default set, so this narrowing loses no
           # SECURITY coverage at all. Only the quality half goes.
+          #
+          # THE NEGATIVE CONTROL for any future change to this line or to the
+          # config's filters is the query count the log prints as
+          # `[N/N eval ...]`. It is 36 with this suite and 35 with the
+          # exclusion. A filter naming an id that does not exist excludes
+          # nothing and is indistinguishable from one that works -- both leave
+          # a green check once the crash stops, and the crash only stops if
+          # the count actually drops.
           queries: security-extended
       # autobuild is only meaningful for the compiled language. python and
       # javascript-typescript are interpreted -- CodeQL extracts them without
