@@ -199,6 +199,26 @@ readonly DB_GATED_TREES=(
 # executor rather than against a database -- so neither belongs in
 # DB_GATED_TREES above, and adding one there would move real coverage out of
 # every lane that runs without Postgres.
+# epic memql#4966 added `component/work`, the work spine's PURE decision layer
+# (compile order, symptom rules, postconditions, ceilings, replay modes). What
+# the complement now means, having looked -- and MEASURED rather than assumed,
+# because this is the question the entry exists to make somebody answer:
+# `go list github.com/znasllc-io/memql/...` runs in workspace mode and DOES
+# enumerate `component/work`, so its tests run in this lane and it needs no lane
+# of its own. Confirmed by `make test` reporting
+# `ok github.com/znasllc-io/memql/component/work`. It is ADDITIONALLY built and
+# vetted with GOWORK=off by `module-boundaries`, which is where the boundary
+# itself is enforced.
+#
+# It is a module rather than a package because it must stay a LEAF: it is
+# imported by both `integrations/work` and `integrations/planner`, and its whole
+# value is that it reaches no engine, no provider and no database -- which is
+# what lets the spec's headline claims be proved as properties of a function
+# over values. A go.mod with no internal requires is what keeps that true under
+# GOWORK=off rather than by convention.
+#
+# `integrations/work` is NOT here and must not be: it is a package inside the
+# existing `integrations` module, not a module.
 readonly KNOWN_GO_MOD_DIRS=(
 	"."
 	"component/actions"
@@ -213,6 +233,7 @@ readonly KNOWN_GO_MOD_DIRS=(
 	"component/events"
 	"component/fileprocessor"
 	"component/frontdoor"
+	"component/work"
 	"component/envregistry"
 	"component/grpc"
 	"component/grpc/gen"
