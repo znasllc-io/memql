@@ -261,6 +261,7 @@ Two consequences worth knowing:
 | Tokens | Every personal access token and node credential, with revoke | admin |
 | Keys | The published JWKS keyset, whether the replicas agree on it, and the rotation history | admin |
 | Integrations | What this cluster can talk to and what each one needs | owner or developer |
+| Benchmarks | What the platform measures about itself across releases, and what it does not | admin |
 | Diagnostics | Connection and permission facts, and a report to paste into a thread | none |
 | Logs | This app's own lines | admin |
 
