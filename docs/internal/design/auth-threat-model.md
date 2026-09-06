@@ -68,7 +68,7 @@ Worker tokens are revoked by flipping `active=false` on the identity row; expiry
 | `/spaces/{id}/attachments` | POST | Bearer + explicit space-owner check (F10) | file upload; ownership re-enforced by DSL mutation |
 | `/api/concepts` | GET | Bearer | concept schema feed (intentionally readable to any authenticated caller) |
 | `/automations/{name}/trigger` | POST | Bearer + **owner/admin** (memql#2937) | runs an automation's action chain server-side; returns `executionId` |
-| `/automations/resume` | POST | Bearer + **owner/admin** (memql#2908) | re-executes a checkpoint's remaining steps under the automation's system actor |
+| `/automations/resume` | POST | Bearer + **owner/admin** (memql#2908) | re-executes a run's remaining steps, read back from its work journal (`v1:work:run` + `v1:work:step`), under the automation's system actor |
 
 Both automation routes were **absent from this inventory** until memql#2908/#2937,
 and were unauthorized in code the whole time. The omission is plausibly why: a

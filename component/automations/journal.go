@@ -132,7 +132,19 @@ var stepIdUnsafe = regexp.MustCompile(`[^A-Za-z0-9_-]`)
 
 // workStepId is the step row's short id: the run id and the step key,
 // joined so a parallel branch id like `layer0.sales` stays a legal short
-// id. Deterministic, so a retry writes a NEW VERSION of the SAME row.
+// id. Deterministic, so a retry writes a NEW VERSION of the SAME row --
+// which is what makes "the latest version of each step decides its status"
+// true, and therefore what makes resume work.
+//
+// Composed rather than hashed, and that is a departure from
+// docs/public/concepts/identifiers.md's "use MustFromMap" guidance, taken
+// deliberately. A hash satisfies determinism just as well and destroys the
+// one property that matters to whoever is reading a broken run:
+// `v1:work:step:run-1-layer0-sales` names the run and the step, while
+// `v1:work:step:<64 hex>` names nothing. The rule the composition must not
+// break is the one identifiers.md is actually about -- no concept name in
+// the shortId, and no other row's canonical id glued in -- and neither the
+// run id nor a step key is either.
 func workStepId(runId, stepKey string) string {
 	return runId + "-" + stepIdUnsafe.ReplaceAllString(stepKey, "-")
 }
