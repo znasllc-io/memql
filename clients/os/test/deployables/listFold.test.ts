@@ -85,9 +85,9 @@ const PENDING = siteFromRow(
   siteRow({ id: "site-ci", hostname: "ci.memql.example.com", status: "draft", bundleRef: "blob://sites/site-ci/pending/" }),
 );
 
-/** The seeded portal: baked into the image, which is none of the three sources. */
-const PORTAL = siteFromRow(
-  siteRow({ id: "site-portal", ownerUserId: "", hostname: "portal.memql.example.com", bundleRef: "file:///app/portal", systemOwned: true }),
+/** The seeded platform site: baked into the image, none of the three sources. */
+const PLATFORM_SITE = siteFromRow(
+  siteRow({ id: "site-os", ownerUserId: "", hostname: "os.memql.example.com", bundleRef: "file:///app/os", systemOwned: true }),
 );
 
 const ARCHIVED = siteFromRow(siteRow({ id: "site-old", hostname: "old.memql.example.com", status: "archived" }));
@@ -143,10 +143,10 @@ describe("one row per thing that serves or will, grouped under its source", () =
   });
 
   it("orders groups by their first address", () => {
-    const groups = fold([SHOP, STORE, ADMIN, PORTAL], [ACME]);
+    const groups = fold([SHOP, STORE, ADMIN, PLATFORM_SITE], [ACME]);
     expect(groups.map((g) => g.rows[0]?.hostname)).toEqual([
       "admin.memql.example.com",
-      "portal.memql.example.com",
+      "os.memql.example.com",
       "shop.memql.example.com",
     ]);
   });
@@ -248,8 +248,8 @@ describe("the facets are client-side folds over the seeded snapshot", () => {
     expect(sourceOf({ site: siteFromRow(siteRow({ id: "s", bundleRef: "blob://sites/s/v3/" })), pkg: null })).toBe("ci");
     // Baked into the image is none of the three: it matches no source facet
     // rather than being described as something it is not.
-    expect(sourceOf({ site: PORTAL, pkg: null })).toBe("");
-    const ci = fold([STORE, SHOP, PENDING, PORTAL], [ACME], [], { ...DEFAULT_LIST_FILTER, source: "ci" });
+    expect(sourceOf({ site: PLATFORM_SITE, pkg: null })).toBe("");
+    const ci = fold([STORE, SHOP, PENDING, PLATFORM_SITE], [ACME], [], { ...DEFAULT_LIST_FILTER, source: "ci" });
     expect(ci.map((g) => g.id)).toEqual(["site:site-ci"]);
   });
 

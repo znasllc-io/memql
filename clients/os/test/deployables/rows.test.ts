@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BAKED_PLATFORM_REF,
+  SITE_STATUSES,
   bundleForm,
   bundleFormLabel,
   domainOf,
@@ -9,14 +11,13 @@ import {
   ownerLabel,
   siteFromRow,
   siteIsClusterOwned,
-  SITE_STATUSES,
   siteIsCurrent,
   siteName,
   statusDotTone,
   statusTone,
   storefrontBinding,
 } from "../../src/apps/deployables/rows";
-import { APEX, DELETED, DOCS, PORTAL, SHOP, siteRow } from "./harness";
+import { APEX, DELETED, DOCS, PLATFORM_SITE, SHOP, siteRow } from "./harness";
 
 // The projections, on fixtures. Pure functions, so the list, the detail and the
 // map are all checked against the same answers -- which is what stops the three
@@ -52,13 +53,13 @@ describe("absent booleans take the concept's own default", () => {
 
   it("keeps an explicit true", () => {
     expect(siteFromRow(DELETED).deleted).toBe(true);
-    expect(siteFromRow(PORTAL).systemOwned).toBe(true);
+    expect(siteFromRow(PLATFORM_SITE).systemOwned).toBe(true);
   });
 });
 
 describe("ownership", () => {
-  it("labels an EMPTY ownerUserId cluster-owned -- the seeded portal is the case", () => {
-    const portal = siteFromRow(PORTAL);
+  it("labels an EMPTY ownerUserId cluster-owned -- the seeded platform site is the case", () => {
+    const portal = siteFromRow(PLATFORM_SITE);
     expect(siteIsClusterOwned(portal)).toBe(true);
     expect(ownerLabel(portal, "u-me")).toBe("cluster-owned");
   });
@@ -106,7 +107,7 @@ describe("status", () => {
 
 describe("the bundle reference's three usage forms", () => {
   it("names each one", () => {
-    expect(bundleForm("file:///app/portal")).toBe("baked-portal");
+    expect(bundleForm("file:///app/os")).toBe("baked-platform");
     expect(bundleForm("file:///app/sites/docs")).toBe("baked-site");
     expect(bundleForm("blob://sites/site-shop/v1/")).toBe("uploaded");
     expect(bundleForm("")).toBe("none");
@@ -119,12 +120,32 @@ describe("the bundle reference's three usage forms", () => {
     expect(bundleFormLabel("other")).toBe("unrecognised reference");
   });
 
-  it("does not mistake a path that merely starts like the portal's", () => {
-    expect(bundleForm("file:///app/portalish")).toBe("other");
+  it("does not mistake a path that merely starts like the platform site's", () => {
+    expect(bundleForm("file:///app/osier")).toBe("other");
+  });
+
+  // THE DRIFT THIS FILE EXISTS TO CATCH (epic memql#4984). The match is
+  // EXACT, and the value it matches is written by a seed in another language
+  // and another tree -- dsl/platform/seeds.memql, `bundleRef:
+  // "file:///app/os"`. When that seed said `file:///app/portal` and the
+  // constant here still did too, they agreed by coincidence of nobody having
+  // changed either. The moment the portal was retired the seed moved and this
+  // constant did not, and the platform's own site began rendering as
+  // "unrecognised reference": no test failed, because every test asserted the
+  // constant against itself.
+  //
+  // So this asserts the LITERAL the seed writes, not the constant. Spelling
+  // it out is the whole point -- `bundleForm(BAKED_PLATFORM_REF)` would pass
+  // against any value at all, including the wrong one.
+  it("classifies the reference the platform-site seed actually writes", () => {
+    expect(bundleForm("file:///app/os")).toBe("baked-platform");
+    expect(BAKED_PLATFORM_REF).toBe("file:///app/os");
   });
 
   it("labels each form for a reader", () => {
-    expect(bundleFormLabel(bundleForm(PORTAL["bundleRef"] as string))).toBe("baked portal");
+    expect(bundleFormLabel(bundleForm(PLATFORM_SITE["bundleRef"] as string))).toBe(
+      "baked platform site",
+    );
     expect(bundleFormLabel(bundleForm(DOCS["bundleRef"] as string))).toBe("baked site");
     expect(bundleFormLabel(bundleForm(SHOP["bundleRef"] as string))).toBe("uploaded bundle");
   });

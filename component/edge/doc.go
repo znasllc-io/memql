@@ -3,11 +3,14 @@
 // (resolve.go) and serves the bundle that row names (bundle.go, blob.go),
 // with the same headers for every one of them (csp.go, handler.go).
 //
-// The MemQL Portal is site #1 -- its row's bundleRef is file:///app/portal,
-// the directory the image has always shipped -- and it takes no special path
-// through this package to get served; see
-// TestPortalHasNoSpecialCaseInTheServingPath in dogfood_test.go, which fails
-// the build the day that stops being true.
+// MemQL OS is the platform's own site -- its row's bundleRef is
+// file:///app/os, the directory the image ships -- and it takes no special
+// path through this package to get served; see
+// TestPlatformSiteHasNoSpecialCaseInTheServingPath in dogfood_test.go, which
+// fails the build the day that stops being true. (It was the MemQL Portal at
+// file:///app/portal until epic memql#4984; the gate is the same one, and it
+// still bans the old name as well as the new so a special case cannot return
+// under either.)
 //
 // It is component/portal generalized (component/portal is retired; this
 // package absorbed its serving responsibility, memql#3711). That package

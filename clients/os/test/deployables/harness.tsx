@@ -544,15 +544,15 @@ export function siteRow(over: Partial<Row> & { id: string }): Row {
 }
 
 /** The seeded platform row: cluster-owned, system-owned, baked into the image. */
-export const PORTAL = siteRow({
-  id: "site-portal",
+export const PLATFORM_SITE = siteRow({
+  id: "site-os",
   ownerUserId: "",
-  hostname: "portal.memql.example.com",
+  hostname: "os.memql.example.com",
   kind: "spa",
   status: "live",
-  bundleRef: "file:///app/portal",
+  bundleRef: "file:///app/os",
   systemOwned: true,
-  title: "MemQL Portal",
+  title: "MemQL OS",
 });
 
 /** A storefront, published from the Library. */

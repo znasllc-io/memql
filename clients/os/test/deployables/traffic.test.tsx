@@ -33,7 +33,7 @@ import {
   toSettingsMap,
 } from "../../src/apps/deployables/settings-editor";
 import {
-  PORTAL,
+  PLATFORM_SITE,
   SHOP,
   click,
   fakeConnection,
@@ -451,7 +451,7 @@ describe("a deployable's readings, rendered", () => {
   });
 
   it("says nothing about a system-owned surface's traffic, and accounts for the absence", async () => {
-    const { connection, page } = await openDeployable({ sites: [PORTAL] }, "portal.memql.example.com");
+    const { connection, page } = await openDeployable({ sites: [PLATFORM_SITE] }, "os.memql.example.com");
     // ONE note covering every absence on the stop, rather than one per
     // missing control -- and it names the traffic among them, so the missing
     // figure reads as a decision rather than as something unbuilt.
@@ -460,7 +460,7 @@ describe("a deployable's readings, rendered", () => {
     // AND NOTHING WAS ASKED FOR. The cluster's own surfaces are excluded from
     // the request log by construction, so a read would have been a call whose
     // answer is known in advance.
-    expect(connection.callsNamed("siteTrafficInWindow").filter((c) => c.includes("site-portal"))).toHaveLength(0);
+    expect(connection.callsNamed("siteTrafficInWindow").filter((c) => c.includes("site-os"))).toHaveLength(0);
   });
 
   it("reports a refused read in the server's own words", async () => {
@@ -516,7 +516,7 @@ describe("a deployable's readings, rendered", () => {
   });
 
   it("renders no settings controls at all on a system-owned row", async () => {
-    const { page } = await openDeployable({ sites: [PORTAL] }, "portal.memql.example.com");
+    const { page } = await openDeployable({ sites: [PLATFORM_SITE] }, "os.memql.example.com");
     await waitFor(() => expect(within(page).getByText(/traffic is not recorded/i)).toBeTruthy());
     expect(within(page).queryByRole("button", { name: /add a setting/i })).toBeNull();
     expect(within(page).queryByRole("button", { name: /save settings/i })).toBeNull();
