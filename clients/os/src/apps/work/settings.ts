@@ -50,20 +50,15 @@ export interface WorkSettings {
    * -- so it is the choice, not the default.
    */
   showFinishedRuns: boolean;
-  /**
-   * Whether decided approvals stay in the inbox. OFF by default: the inbox's
-   * standing question is what is waiting for you, and a queue padded with
-   * decisions already made hides the ones that are not.
-   *
-   * A FILTER OVER ROWS ALREADY HERE, not a second read.
-   * `workApprovalsForOwner` already carries `decision==""`, so this toggle
-   * cannot reveal a decided approval the feed never seeded -- which is
-   * exactly what the surface says when it is switched on. Stating that is the
-   * honest move; silently showing nothing extra would read as a broken
-   * preference.
-   */
-  showDecidedApprovals: boolean;
 }
+
+// THERE IS NO "SHOW DECIDED APPROVALS" PREFERENCE, and its absence is a
+// decision rather than an omission. `workApprovalsForOwner` carries
+// `decision==""` in the DSL, so a toggle over the rows this app holds could
+// only ever reveal approvals decided WHILE THE WINDOW WAS OPEN -- a list that
+// filled up as you worked and was empty again on reload. Showing decided
+// approvals properly needs a second read, and offering a switch that half
+// works is worse than not offering one.
 
 export const WORK_SETTINGS_KEY = "memql-os-work-v1";
 
@@ -74,7 +69,6 @@ export const DEFAULT_WORK_SETTINGS: WorkSettings = {
   // in an array" would move with an unrelated edit to that array.
   defaultSection: "goals",
   showFinishedRuns: true,
-  showDecidedApprovals: false,
 };
 
 /**
@@ -104,10 +98,6 @@ export function sanitizeWorkSettings(raw: unknown): WorkSettings {
       typeof doc.showFinishedRuns === "boolean"
         ? doc.showFinishedRuns
         : DEFAULT_WORK_SETTINGS.showFinishedRuns,
-    showDecidedApprovals:
-      typeof doc.showDecidedApprovals === "boolean"
-        ? doc.showDecidedApprovals
-        : DEFAULT_WORK_SETTINGS.showDecidedApprovals,
   };
 }
 

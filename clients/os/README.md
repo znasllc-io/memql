@@ -1434,3 +1434,120 @@ all. Today they ship in the bundle or arrive as a file somebody drops on the
 drawer; the cluster's own Library is the productized next step, and the
 commerce cut is recorded in
 `docs/superpowers/specs/2026-09-01-os-voice-themes-handoff-design.md`.
+
+## Work, the tenth app (the work spine, sub-project A)
+
+`src/apps/work/` is the human surface of the work spine: a person's goals, the
+runs that carry them out, the steps each run took, and the places it had to
+stop and ask. Design record:
+[2026-09-05-work-spine-design.md](../../docs/superpowers/specs/2026-09-05-work-spine-design.md)
+(sections B, D, E and I). Five things about it are new rules rather than
+repetitions of the nine apps before it.
+
+- **THE SPINE'S WEIGHT IS THE PRODUCT'S CLAIM, AND IT IS DRAWN IN INK RATHER
+  THAN IN HUE.** The system works a goal out once and replays it afterwards
+  without a model unless reasoning is genuinely needed. Nobody can check that
+  from a table of forty-seven rows that all look alike -- they would have to
+  read every row to find the three that cost something. So a run has a thread
+  down its left edge: a deterministic step is a hollow node on a hairline (a
+  hundred of them read as TEXTURE, not as a hundred things to read) and a
+  reasoning step is a filled node on a segment of solid ink, with the cost
+  readout on that row and nowhere else. The eye finds where the machine thought
+  before a word is read.
+
+  Hue was the wrong axis and the reason is this shell's own vocabulary: amber
+  is `warn`, red is `error`, and the accent is live/primary/yes-here, so a
+  colour-per-kind legend would put status hues on a partition that has nothing
+  to do with status and a reasoning step in accent would read as "this step is
+  fine". A weight axis survives greyscale, survives every theme pack, and is a
+  SECOND channel rather than the only one -- the kind is also a word on the row
+  and in its accessible name.
+
+- **ABSENT IS NOT ZERO, AND HERE THAT IS THE HEADLINE RATHER THAN A DETAIL.**
+  The SDK's `rowNumber` answers `0` for a missing key, which is right for a
+  count and wrong for every figure on a run's `spent`. Epic A1 writes none of
+  them, so `runSpend` reports each as `null` and the panel renders an em dash:
+  "0 model calls" on a run that made three is the single most damaging thing
+  this surface could say, because *it reached no model* is the claim the
+  product makes. The same rule governs `kind == ""` -- A1 leaves `function`
+  steps unclassified, and reading a blank as `deterministic` would put "no
+  model was called" on a step that may well have called one. Unclassified is
+  its own band slice and its own count, never folded into the free half.
+
+- **A HEARTBEAT IS NOT NEWS, AND THIS IS THE SHARPEST CASE IN THE SHELL SO
+  FAR.** Fleet's heartbeat moves every fifteen seconds and the Domains sweep
+  every two minutes; a running run writes `heartbeatAt` at EVERY STEP BOUNDARY
+  and broadcasts the whole row each time. Naming it in `runFingerprint` would
+  ring hardest for the run somebody is already watching move. `spent` is out
+  for the campaigns app's second reason instead: the counters must RE-RENDER
+  live -- that is the point of watching a run spend -- and must not RING, and
+  the fingerprint is the only thing separating those. `test/work/rows.test.ts`
+  pins both directions.
+
+  The counterpart is that **a parked run wears a STANDING MARK**, not a cue: a
+  run can wait for days, and a ring that decays on the clock would be seen only
+  by whoever happened to be looking when it parked. That pairing is the
+  Deployables update chip's.
+
+- **APPROVALS ARE THE APP'S REASON TO EXIST, AND THE DECISION IS MADE BESIDE
+  THE EVIDENCE.** Every human gate in the spine is one `v1:work:approval` row
+  and the run does not move until somebody decides it -- the defect the design
+  record names about the old planner is that its gates were canvas cards on a
+  cognition space, and an engine-only cluster registers no canvas concept, so
+  those approvals were already invisible. A one-click Approve in the list is
+  the obvious design and the wrong one: `artifactHash` is over the exact
+  command, patch, message or draft, and the builtin refuses a decision whose
+  artifact moved. So the inbox is a triage list (oldest first -- a queue is
+  answered from the front, and there is deliberately no sort control) and the
+  acts are on one bar beside the classifier's evidence, rendered in the data
+  voice and never paraphrased: the rule id is where somebody goes to change the
+  policy.
+
+  **`answer` is the one contract this window guesses at.** It is declared
+  `object` on both the concept and the builtin and epic A2 owns the executor
+  that reads it, so `answerPayload` sends back the option the approval itself
+  offered (`{value, label}`) or `{text}` for a question with none -- written
+  down in one function rather than spread through the surface.
+
+- **THE JOURNAL IS NOT LIVE AND SAYS SO; THE STEPS FEED BELONGS TO THE PAGE.**
+  `v1:work:goal`, `run`, `step` and `approval` broadcast; `modelCall` and
+  `observation` deliberately do not, on volume grounds (one row per model
+  request, one per tool result). A `useLiveCollection` over either would render
+  "Loading from the cluster" and then a list that silently never moved, which
+  is worse than a plain read because the caption would claim wiring that is not
+  there -- so the journal reads when asked, prints when it looked, and says
+  what that costs. And the STEPS feed is retained by the run page rather than
+  by the app root: a per-run timeline at the root would subscribe a window to
+  every step of every run this person owns to draw one of them, which is the
+  rule the Deployables app wrote down about deployment timelines.
+
+  **`workStepsForOwnerRun` carries `@unbounded`, which excludes `sort`**, so
+  the timeline is ordered by `seq` client-side. A timeline drawn in fold order
+  reshuffles itself the moment any step updates -- exactly when somebody is
+  watching it.
+
+### What the browser found that the suite could not
+
+The whole suite was green over every one of these, because jsdom lays nothing
+out. They came out of a rendered pass in both modes, which is the acceptance
+DESIGN.md asks for.
+
+- **A flex item's default `min-width: auto` refuses to shrink below its
+  content.** A goal statement is a SENTENCE rather than a name, so it pushed
+  `.os-row` to 856px inside a 664px column and the list scrolled sideways --
+  `white-space: nowrap` on the text inside does nothing, because the item
+  around it is what will not give. It is scoped rather than added to
+  `.os-row-name` in the kit: every other list in this shell names a thing, and
+  letting those start truncating would change eight apps to fix one.
+- **The hairline was invisible, so there was no thread.** At `--os-rail` (ink
+  at 14%) a 1px line does not render against the dark ground, and the spine
+  appeared only where a reasoning step drew it in ink -- four unrelated marks
+  rather than one thread thickening.
+- **An empty aside reserved half the window** on both Goals and Approvals to
+  say what a clickable row already says (rule 9). It is absent when there is
+  nothing in it, which is the shape Bin already had.
+- **A button centres its own text**, so a goal statement long enough to wrap
+  drew its second line centred inside a left-aligned paragraph.
+- **The context outlived the identifier.** `flex: 1 1 auto` on the run row's
+  "what it is for" line and a shrinkable name meant the NAME lost first, so a
+  narrow column drew "re..." beside the whole of the goal it belongs to.

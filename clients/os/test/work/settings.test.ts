@@ -11,7 +11,7 @@ import {
 
 describe("the settings document", () => {
   it("repairs each field independently, so one bad value costs nothing else", () => {
-    // A garbage `defaultSection` must not cost somebody their approvals
+    // A garbage `defaultSection` must not cost somebody their finished-runs
     // preference. A wrong VERSION is wholesale, because then the field names
     // cannot be trusted at all.
     expect(
@@ -19,13 +19,11 @@ describe("the settings document", () => {
         version: 1,
         defaultSection: "nowhere",
         showFinishedRuns: false,
-        showDecidedApprovals: true,
       }),
     ).toEqual({
       version: 1,
       defaultSection: DEFAULT_WORK_SETTINGS.defaultSection,
       showFinishedRuns: false,
-      showDecidedApprovals: true,
     });
     expect(sanitizeWorkSettings({ version: 2, showFinishedRuns: false })).toEqual(
       DEFAULT_WORK_SETTINGS,

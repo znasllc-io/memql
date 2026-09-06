@@ -277,6 +277,12 @@ export function answerPayload(
 ): Record<string, unknown> {
   const option = approval.options.find((o) => o.value === choice);
   if (option !== undefined) return { value: option.value, label: option.label };
+  // A CHOICE WHOSE OPTION IS GONE STILL SENDS THE CHOICE. The row can change
+  // under an open panel -- a live feed is what this app is built on -- and
+  // falling through to the free-text branch would send `{text: ""}`, which
+  // the engine accepts (it only checks the map is non-empty) and records as a
+  // blank answer to a question somebody did answer.
+  if (choice !== "") return { value: choice };
   return { text: freeText.trim() };
 }
 

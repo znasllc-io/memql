@@ -253,6 +253,14 @@ describe("the answer payload", () => {
     const approval = approvalFromRow({ id: "a1" });
     expect(answerPayload(approval, "", "  September  ")).toEqual({ text: "September" });
   });
+
+  it("still sends a choice whose option left the row under an open panel", () => {
+    // The engine only checks the answer map is non-empty, so falling through
+    // to the free-text branch would record `{text: ""}` as a blank answer to
+    // a question somebody did answer.
+    const approval = approvalFromRow({ id: "a1", options: [{ label: "Yes", value: "yes" }] });
+    expect(answerPayload(approval, "gone", "")).toEqual({ value: "gone" });
+  });
 });
 
 describe("the queue is live", () => {
