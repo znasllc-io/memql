@@ -248,6 +248,8 @@ func (s *store) createRunRow(ctx context.Context, r runSeed) error {
 		"inputFingerprint":    r.InputFingerprint,
 		"triggeredBy":         r.TriggeredBy,
 		"mode":                r.Mode,
+		"replayPolicy":        r.ReplayPolicy,
+		"variables":           optMap(r.Variables),
 		"forkedFromRunId":     r.ForkedFromRunId,
 		"forkAtStepKey":       r.ForkAtStepKey,
 		"status":              r.Status,
@@ -330,11 +332,18 @@ type runSeed struct {
 	InputFingerprint    string
 	TriggeredBy         string
 	Mode                string
-	ForkedFromRunId     string
-	ForkAtStepKey       string
-	Status              string
-	NodeId              string
-	StartedAt           time.Time
+	// ReplayPolicy is "strict" or "permissive"; empty takes the concept's
+	// own default, which is strict.
+	ReplayPolicy string
+	// Variables are the bound args a compiled template runs with. The run
+	// row carries them so a fork can override them and a replay can prove it
+	// ran the same ones.
+	Variables       map[string]any
+	ForkedFromRunId string
+	ForkAtStepKey   string
+	Status          string
+	NodeId          string
+	StartedAt       time.Time
 	// OwnerUserId is NOT written as an argument -- createWorkRun stamps it
 	// from actor.userId. It is carried here so the caller can build the
 	// borrowed-authority context from the same value it read off the goal.
