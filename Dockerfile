@@ -337,7 +337,7 @@ ENTRYPOINT ["./memql"]
 # came to be debian-slim while every locally built one was distroless. The
 # release workflow now also names `target: runtime` explicitly, so the ordering
 # is a second line of defence rather than the mechanism.
-FROM gcr.io/distroless/base-debian12@sha256:76b3162a31477bca4a245b836c624f4c4a1a3705e99b9003907d992bec2c4bca AS runtime
+FROM gcr.io/distroless/base-debian12@sha256:fabbf1c0c357a3d42550111351daed089b20a2c954df13ee2fcff60602515e84 AS runtime
 
 # Environment variables are injected by Cloud Run via service.yaml
 # No ENV block needed here - Cloud Run overrides at the service level
