@@ -155,6 +155,9 @@ export function Rail({
   /** Standing in the Bin's own root -- where the Head and the list are
    *  already naming and counting this place. */
   const inBin = !searching && filter.place === "bin" && filter.folderId === "";
+  /** ...and the same, for the place whose list also carries its empty line. */
+  const inMaterializer =
+    !searching && filter.place === "materializer" && filter.folderId === "";
   const flip = (key: string) =>
     setOpenBinFolders((prev) => {
       const next = new Set(prev);
@@ -322,11 +325,21 @@ export function Rail({
         countTitle={`${materializedRail.total} ${
           materializedRail.total === 1 ? "file" : "files"
         } made in the Materializer`}
-        current={!searching && filter.place === "materializer" && filter.folderId === ""}
+        current={inMaterializer}
         expanded={expanded.materializer}
         onToggle={() => toggle("materializer")}
         onSelect={() => go("materializer", "")}
-        emptyText="Nothing has been materialized yet."
+        emptyText={
+          materializedRail.total > 0
+            ? // THE PLACE HAS FILES AND NO FOLDER HOLDS ONE. Saying "nothing
+              // has been materialized" here would be the Bin's original
+              // falsehood, rebuilt in the new place: the list beside it is
+              // showing those files at that moment.
+              "None of these are in a folder."
+            : inMaterializer
+              ? ""
+              : "Nothing has been materialized yet."
+        }
         empty={materializedRail.folders.length === 0}
       >
         {materializedRail.folders.map((entry) => (

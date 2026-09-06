@@ -90,6 +90,38 @@ describe("the Materializer place", () => {
     ).toBeTruthy();
   });
 
+  it("never says nothing was materialized while it is showing files", async () => {
+    // THE BIN'S ORIGINAL FALSEHOOD, which this epic exists to remove, is easy
+    // to rebuild in a new place: the rail lists FOLDERS, so its emptiness is
+    // about folders, and an output filed at the Library root leaves the group
+    // empty while the place is full. Three states, three honest answers.
+    h.connection = fakeConnection({
+      artifacts: [outputArtifact({ id: "a-1", title: "loose.md", fileId: "f-1" })],
+      compositions: [compositionRow({ id: "c-1", outputFileId: "f-1" })],
+    });
+    await renderFiles();
+
+    await click(screen.getByRole("button", { name: /^Materializer/ }));
+    expect(within(railGroup()).queryByText("Nothing has been materialized yet.")).toBeNull();
+    expect(within(railGroup()).getByText("None of these are in a folder.")).toBeTruthy();
+    // ...and the file is there to prove the line was about folders.
+    expect(screen.getByRole("button", { name: /loose\.md/ })).toBeTruthy();
+  });
+
+  it("says nothing was materialized only where nobody else is saying it", async () => {
+    h.connection = fakeConnection({ artifacts: [artifactRow({ id: "a-1", title: "plain.txt" })] });
+    await renderFiles();
+
+    // Peeking in from the Library: the rail's line is the whole answer.
+    await click(screen.getByRole("button", { name: "Expand Materializer" }));
+    expect(within(railGroup()).getByText("Nothing has been materialized yet.")).toBeTruthy();
+
+    // Standing in it, the list carries the sentence with the part that
+    // matters, so the rail stands down (DESIGN.md rule 7).
+    await click(screen.getByRole("button", { name: /^Materializer/ }));
+    expect(within(railGroup()).queryByText("Nothing has been materialized yet.")).toBeNull();
+  });
+
   it("holds the files a composition produced, and nothing else", async () => {
     h.connection = fakeConnection({
       artifacts: [
