@@ -15,14 +15,14 @@ func makeFatSpecialist(id string, embeddingDims int) map[string]any {
 		emb[i] = 0.123456789 // realistic float width
 	}
 	return map[string]any{
-		"id":           id,
-		"name":         "Birdwatcher Bot",
-		"role":         "Research Specialist",
-		"roleSlug":     "research",
-		"kind":         "specialist",
-		"description":  strings.Repeat("Knows a great deal about ornithology and field guides. ", 20),
-		"capabilities": map[string]any{"skillIds": []any{"research-baseline"}, "toolSlugs": []any{"workbenchHost"}},
-		"lineage":      map[string]any{"originatingPlanId": "v1:planner:plan:x", "createdBy": "planner", "history": strings.Repeat("y", 500)},
+		"id":            id,
+		"name":          "Birdwatcher Bot",
+		"role":          "Research Specialist",
+		"roleSlug":      "research",
+		"kind":          "specialist",
+		"description":   strings.Repeat("Knows a great deal about ornithology and field guides. ", 20),
+		"capabilities":  map[string]any{"skillIds": []any{"research-baseline"}, "toolSlugs": []any{"workbenchHost"}},
+		"lineage":       map[string]any{"originatingPlanId": "v1:planner:plan:x", "createdBy": "planner", "history": strings.Repeat("y", 500)},
 		"roleEmbedding": emb,
 	}
 }

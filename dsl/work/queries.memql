@@ -221,3 +221,18 @@ query observation workObservationsForOwnerRun {
   filter  runId==args.runId && ownerUserId==actor.userId
   shape   workObservationFull
 }
+
+/// Every run at a non-terminal status, whoever owns it -- the wait-and-abandon sweep's read.
+/// Server-only AND cluster-owner: the sweep must see EVERY owner's parked runs, because a person
+/// whose run is stranded on a replica that has gone cannot resume it themselves, which is the whole
+/// reason the sweep exists. Scoping to actor.userId is not merely wrong here, it is the failure
+/// mode: under the automation's default actor the owned branch matches nothing, the read answers
+/// ZERO ROWS AND NO ERROR, and a sweep that resumes nothing is indistinguishable from a cluster
+/// with nothing parked. The automation runs under the maintenance principal for that reason.
+@serverOnly
+@actor
+@unbounded("every in-flight run cluster-wide -- the sweep must see all of them, and the set is bounded by what is actually running")
+query run workRunsInFlight {
+  filter  status in ["compiling", "running", "waiting"] && actor.isClusterOwner==true
+  shape   workRunFull
+}

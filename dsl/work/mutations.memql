@@ -42,6 +42,8 @@ mutate run createWorkRun {
     triggerEvent           object
     callerSuppliedPayload  bool
     mode                   string
+    replayPolicy           string
+    variables              object
     forkedFromRunId        string
     forkAtStepKey          string
     status                 string!
@@ -50,13 +52,13 @@ mutate run createWorkRun {
     startedAt              string!
   }
   insert {
-    accept { goalId, automationName, templateFingerprint, input, inputFingerprint, triggeredBy, triggerEvent, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, startedAt }
+    accept { goalId, automationName, templateFingerprint, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, startedAt }
     stamp {
       id: args.runId
       ownerUserId: actor.userId
       mode: args.mode ?? "live"
       callerSuppliedPayload: args.callerSuppliedPayload ?? false
-      replayPolicy: "strict"
+      replayPolicy: args.replayPolicy ?? "strict"
       cancelRequested: false
     }
   }
@@ -71,6 +73,10 @@ mutate run updateWorkRun {
   args {
     runId            string!
     status           string
+    automationName   string
+    templateConstructId  string
+    templateVersion  string
+    variables        object
     heartbeatAt      string
     chainHead        string
     stepOrder        []string
@@ -86,7 +92,7 @@ mutate run updateWorkRun {
     summary          object
   }
   update {
-    accept { status, heartbeatAt, chainHead, stepOrder, waitingOn, spent, outcome, errorCode, errorMessage, finishedAt, cancelRequested, cancelledBy, actualFootprint, summary }
+    accept { status, automationName, templateConstructId, templateVersion, variables, heartbeatAt, chainHead, stepOrder, waitingOn, spent, outcome, errorCode, errorMessage, finishedAt, cancelRequested, cancelledBy, actualFootprint, summary }
     stamp {
       id: args.runId
     }
@@ -324,6 +330,30 @@ mutate approval decideWorkApproval {
     accept { decision, decidedBy, decidedAt, answer }
     stamp {
       id: args.approvalId
+    }
+  }
+}
+
+/// Close a goal, or move it to active when its first run starts. Server-only for the same reason
+/// the run writers are: the goal's lifecycle is the ENGINE's account of what happened to the work,
+/// and a caller who could write `status` directly could mark a goal closed while its runs are still
+/// in flight, or re-open one the system finished. Scoping to actor.userId is not the missing piece
+/// -- the row is already owner-stamped and a caller reaches only their own goals -- but a person
+/// closing a goal does it through the cancelGoal builtin, which requests cancellation of the live
+/// runs FIRST and only then closes the row. That ordering is the whole guarantee, and a
+/// client-reachable status write is exactly what would bypass it.
+@serverOnly
+mutate goal closeWorkGoal {
+  args {
+    goalId       string!
+    status       string!
+    closedAt     string
+    closeReason  string
+  }
+  update {
+    accept { status, closedAt, closeReason }
+    stamp {
+      id: args.goalId
     }
   }
 }

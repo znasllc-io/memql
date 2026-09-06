@@ -123,7 +123,9 @@ type agentTurnResult struct {
 // executableViaApprovedPath reports whether a plan of this kind is executed by
 // forwarding its goal to the assigned agent's tool loop when it reaches
 // "running" (executeApprovedPlan). Two kinds use this path:
+//
 //   - scopeElevation: the user clicked Allow on a computer-use scope card.
+//
 //   - produceArtifact: the conversational "make me a file" delegation (#788),
 //     auto-started to running (#788) -- this is the executor that was missing,
 //     so the deliverable was never actually produced (memql#800).
