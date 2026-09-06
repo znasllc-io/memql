@@ -197,17 +197,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// and still not yours to write".
 		{Path: "authoring/mutations.memql", Name: "recordConstructGoalSignature"}: true,
 
-		// epic memql#4966. closeWorkGoal is the goal's lifecycle writer and
-		// workRunsInFlight is the wait-and-abandon sweep's read. Their
-		// arguments differ in direction and both are worth stating.
+		// epic memql#4966. workRunsInFlight is the wait-and-abandon sweep's
+		// read. (A2 briefly carried a closeWorkGoal beside it; epic A3's
+		// updateWorkGoal is the same write with a wider argument list, so
+		// there is one writer now and it carries A3's own entry.)
 		//
-		// The WRITE: a person closes a goal through the cancelGoal builtin,
-		// which requests cancellation of the live runs FIRST and only then
-		// closes the row. That ordering is the whole guarantee, and a
-		// client-reachable status write is precisely what would bypass it --
-		// marking a goal closed while its runs are still executing.
-		//
-		// The READ is the sharper case, because caller-scoping it would not
+		// Caller-scoping this read would not
 		// merely be wrong, it would be SILENT. The sweep must see every
 		// owner's parked runs: a person whose run is stranded on a replica
 		// that has gone cannot resume it themselves, which is the entire
@@ -215,7 +210,6 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// actor matches nothing, the read answers ZERO ROWS AND NO ERROR, and
 		// a sweep that resumes nothing is indistinguishable from a cluster
 		// with nothing parked.
-		{Path: "work/mutations.memql", Name: "closeWorkGoal"}:                   true,
 		{Path: "work/queries.memql", Name: "workRunsInFlight"}:                  true,
 		{Path: "authoring/mutations.memql", Name: "recordConstructReliability"}: true,
 

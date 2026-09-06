@@ -1981,6 +1981,28 @@ func CapabilityGrantBuild(args CapabilityGrantArgs) string {
 	return b.String()
 }
 
+// CataloguedConstructsForGoalSignature -- The caller's catalogued construct for one goal signature -- compile's EXACT-MATCH tier (epic memql#4966). Pushed down as a filter rather than folded in Go after a full catalog pull, because the exact tier is the one that must stay cheap: it is what makes a repeated goal reach no model at all, and paging an owner's whole catalog to find one row would put a cost on the free path that grows with how much the person has already automated.
+//
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["cataloguedConstructsForGoalSignature"] in generated_concepts.go).
+type CataloguedConstructsForGoalSignatureArgs struct {
+	GoalSignature string
+}
+
+// CataloguedConstructsForGoalSignature calls the engine query cataloguedConstructsForGoalSignature.
+func (qc *QueryClient) CataloguedConstructsForGoalSignature(ctx context.Context, args CataloguedConstructsForGoalSignatureArgs) (*Result, error) {
+	call := CataloguedConstructsForGoalSignatureBuild(args)
+	return qc.executeNamed(ctx, "cataloguedConstructsForGoalSignature", call)
+}
+
+func CataloguedConstructsForGoalSignatureBuild(args CataloguedConstructsForGoalSignatureArgs) string {
+	var b strings.Builder
+	b.WriteString("query cataloguedConstructsForGoalSignature(")
+	b.WriteString("goalSignature: ")
+	b.WriteString(quoteMemQL(args.GoalSignature))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CataloguedConstructsForOwner -- The caller's cataloged (reusable) constructs. Backs the compose-first matcher (#957): the planner searches these before authoring a net-new dependency.
 //
 // Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["cataloguedConstructsForOwner"] in generated_concepts.go).
@@ -11518,6 +11540,28 @@ func WorkApprovalsForOwnerBuild(args WorkApprovalsForOwnerArgs) string {
 	return "query workApprovalsForOwner()"
 }
 
+// WorkGoalForOwner -- One of the caller's goals by id.
+//
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalForOwner"] in generated_concepts.go).
+type WorkGoalForOwnerArgs struct {
+	GoalId string
+}
+
+// WorkGoalForOwner calls the engine query workGoalForOwner.
+func (qc *QueryClient) WorkGoalForOwner(ctx context.Context, args WorkGoalForOwnerArgs) (*Result, error) {
+	call := WorkGoalForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workGoalForOwner", call)
+}
+
+func WorkGoalForOwnerBuild(args WorkGoalForOwnerArgs) string {
+	var b strings.Builder
+	b.WriteString("query workGoalForOwner(")
+	b.WriteString("goalId: ")
+	b.WriteString(quoteMemQL(args.GoalId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkGoalsForOwner -- The caller's goals, newest first. Owned: ownerUserId==actor.userId binds server-side.
 //
 // Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalsForOwner"] in generated_concepts.go).
@@ -11533,6 +11577,94 @@ func (qc *QueryClient) WorkGoalsForOwner(ctx context.Context, args WorkGoalsForO
 func WorkGoalsForOwnerBuild(args WorkGoalsForOwnerArgs) string {
 	_ = args
 	return "query workGoalsForOwner()"
+}
+
+// WorkModelCallsForOwnerRun -- Every model call of one of the caller's runs. An on-demand read: the concept does not broadcast, so the Work app shows when it last read this.
+//
+// Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsForOwnerRun"] in generated_concepts.go).
+type WorkModelCallsForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkModelCallsForOwnerRun calls the engine query workModelCallsForOwnerRun.
+func (qc *QueryClient) WorkModelCallsForOwnerRun(ctx context.Context, args WorkModelCallsForOwnerRunArgs) (*Result, error) {
+	call := WorkModelCallsForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workModelCallsForOwnerRun", call)
+}
+
+func WorkModelCallsForOwnerRunBuild(args WorkModelCallsForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workModelCallsForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkObservationsForOwnerRun -- Every observation of one of the caller's runs. On-demand, like the model calls.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workObservationsForOwnerRun"] in generated_concepts.go).
+type WorkObservationsForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkObservationsForOwnerRun calls the engine query workObservationsForOwnerRun.
+func (qc *QueryClient) WorkObservationsForOwnerRun(ctx context.Context, args WorkObservationsForOwnerRunArgs) (*Result, error) {
+	call := WorkObservationsForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workObservationsForOwnerRun", call)
+}
+
+func WorkObservationsForOwnerRunBuild(args WorkObservationsForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workObservationsForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkRunForOwner -- One of the caller's runs by id.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunForOwner"] in generated_concepts.go).
+type WorkRunForOwnerArgs struct {
+	RunId string
+}
+
+// WorkRunForOwner calls the engine query workRunForOwner.
+func (qc *QueryClient) WorkRunForOwner(ctx context.Context, args WorkRunForOwnerArgs) (*Result, error) {
+	call := WorkRunForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workRunForOwner", call)
+}
+
+func WorkRunForOwnerBuild(args WorkRunForOwnerArgs) string {
+	var b strings.Builder
+	b.WriteString("query workRunForOwner(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkRunsForGoal -- The runs of one of the caller's goals, newest first.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunsForGoal"] in generated_concepts.go).
+type WorkRunsForGoalArgs struct {
+	GoalId string
+}
+
+// WorkRunsForGoal calls the engine query workRunsForGoal.
+func (qc *QueryClient) WorkRunsForGoal(ctx context.Context, args WorkRunsForGoalArgs) (*Result, error) {
+	call := WorkRunsForGoalBuild(args)
+	return qc.executeNamed(ctx, "workRunsForGoal", call)
+}
+
+func WorkRunsForGoalBuild(args WorkRunsForGoalArgs) string {
+	var b strings.Builder
+	b.WriteString("query workRunsForGoal(")
+	b.WriteString("goalId: ")
+	b.WriteString(quoteMemQL(args.GoalId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkRunsForOwner -- The caller's runs, newest first. Owned: ownerUserId==actor.userId binds server-side, and the concept's tier admits the same rows on the SUBSCRIPTION, so a browser watching this feed is not handed anybody else's work the way an undeclared concept would.
@@ -11551,6 +11683,28 @@ func (qc *QueryClient) WorkRunsForOwner(ctx context.Context, args WorkRunsForOwn
 func WorkRunsForOwnerBuild(args WorkRunsForOwnerArgs) string {
 	_ = args
 	return "query workRunsForOwner()"
+}
+
+// WorkStepsForOwnerRun -- Every step of one of the caller's runs -- the run timeline. Bounded by the run; the client orders by seq, because @unbounded and sort cannot be combined.
+//
+// Bound concept: v1:work:step (machine-readable: BoundConcepts["workStepsForOwnerRun"] in generated_concepts.go).
+type WorkStepsForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkStepsForOwnerRun calls the engine query workStepsForOwnerRun.
+func (qc *QueryClient) WorkStepsForOwnerRun(ctx context.Context, args WorkStepsForOwnerRunArgs) (*Result, error) {
+	call := WorkStepsForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workStepsForOwnerRun", call)
+}
+
+func WorkStepsForOwnerRunBuild(args WorkStepsForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workStepsForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkerByIdentityId -- Look up the worker registration owned by an identity row.
