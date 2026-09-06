@@ -64,6 +64,7 @@
 // proof. Scene units, with +y DOWN as SVG has it.
 
 import {
+  approvalNodeId,
   approvalsOfRun,
   bindingNodeId,
   clusterNodeId,
@@ -76,7 +77,6 @@ import {
   stepsOfRun,
   templateNodeId,
   YOU_NODE_ID,
-  type ApprovalRow,
   type GoalWorld,
   stepThought,
   type NodeKind,
@@ -413,7 +413,7 @@ export function layout(world: GoalWorld, options: LayoutOptions = {}): LayoutRes
       columns.push({
         depth,
         x,
-        width: clustered ? COLUMN_WIDTH : COLUMN_WIDTH,
+        width: COLUMN_WIDTH,
         count: members.length,
         done,
         clustered,
@@ -511,7 +511,7 @@ export function layout(world: GoalWorld, options: LayoutOptions = {}): LayoutRes
     // drawing decision that must not make a question disappear.
     const ax = owner?.x ?? (lastX < COLUMN_X0 ? COLUMN_X0 : lastX);
     const ay = (owner?.y ?? 0) + LANE_OFFSET.asked;
-    const id = approvalNodeIdFor(approval);
+    const id = approvalNodeId(approval);
     put({
       id,
       kind: "approval",
@@ -580,10 +580,6 @@ function goalNode(rowId: string, statement: string, status: string, x: number): 
 
 function stepNodeIdForKey(runId: string, key: string): string {
   return nodeIdFor("step", `${runId}:${key}`);
-}
-
-function approvalNodeIdFor(approval: ApprovalRow): string {
-  return nodeIdFor("approval", approval.id);
 }
 
 /** Column order: `seq`, then key. Total and stable (world.ts's rule). */
