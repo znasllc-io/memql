@@ -115,8 +115,12 @@ arrangement system that WAS the portal's page system.
 
 These have no OS equivalent and no other home, and they are NOT operator-
 critical in the sense above: nothing about running a cluster stops working
-without them. They are filed against a follow-up epic rather than left as an
-undocumented hole.
+without them. They are filed as **epic memql#5009 (os-operator-parity)** with
+four tasks -- **#5010** (a Concepts app), **#5011** (Modules, Data origins,
+Agents, the Audit trail), **#5012** (the Shopify connector's operator surface)
+and **#5013** (four gaps inside apps that already exist) -- rather than left as
+an undocumented hole. The list below maps onto those four; the issue numbers
+are what makes this section checkable rather than a promise.
 
 - The concept browser: `/concepts`, `/concepts/:id`, its rows pane and schema
   pane. The VS Code extension's Constructs view covers the developer case.
@@ -184,8 +188,21 @@ Beyond the two trees, in the order the work had to happen:
 ## What a reader should NOT conclude
 
 - **`sdk/ts-viewkit` is not retired.** The portal was one of two consumers; the
-  VS Code extension imports it from 18 modules. Only the portal's `file:`
-  dependency on it went away.
+  VS Code extension still imports it. Only the portal's `file:` dependency on
+  it went away.
+
+  One PART of it is now unreachable, and that is filed separately as
+  **memql#5020**: `arrangement.ts` and `layout.ts` -- the arrangement grammar
+  the portal's page system ran on -- have no consumer left in this repo, and
+  the extension imports none of their exports. This issue first framed that as
+  "a breaking change to a published surface"; **that premise was wrong and is
+  corrected on the issue.** Nothing publishes `sdk/ts-viewkit` -- the only
+  `npm publish` in the repo is `publish-sdk-core.yml` for `sdk/ts` -- so no
+  external consumer can exist and the answer is removal, blocked on this PR
+  because the portal still imports those symbols until it lands. Worth stating
+  as its own lesson: **"is this a published surface" is answered by the release
+  pipeline, not by the package's own metadata**, and `publishConfig` in a
+  `package.json` is metadata.
 - **`v1:platform:site` did not change.** The OS is a site row like any other,
   and the edge still cannot tell it apart from a customer's SPA.
 - **`DeployControlService` did not change.** Deploy control was never the
