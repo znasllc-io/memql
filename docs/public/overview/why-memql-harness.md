@@ -1,5 +1,5 @@
 ---
-title: The Harness Module -- Why MemQL Ships One
+title: The Harness -- Why MemQL Ships One
 audience: public
 status: stable
 area: overview
@@ -7,138 +7,164 @@ sinceVersion: 0.9.0
 owner: znas
 ---
 
-# The Harness Module -- Why MemQL Ships One
+# The Harness -- Why MemQL Ships One
 
-MemQL is a platform, and the **harness is one of its modules**: the part
-that runs an agent turn after turn, remembers what happened, keeps a
-runaway loop from burning your budget, routes work across a fleet, and
-survives a restart. Most "AI frameworks" hand you parts -- a model
-client, a prompt template, a chain, maybe a tool interface -- and leave
-the harness for you to build. MemQL ships it as a running module of the
-platform, on the same memory substrate everything else uses.
+**MemQL is the AI platform where the harness is rows.** Every goal, run,
+step, model call, approval, skill and belief is a typed, authorized,
+replayable row in one time-series memory graph. Graph engineering with
+the ontology built in.
 
-This page is the proof, not the pitch. Every claim below points at the
-code that backs it. (For where the harness sits among the platform's
-other modules -- and what enabling or disabling a module means -- see
-[Modules](../concepts/modules.md).)
+Most "AI frameworks" hand you parts -- a model client, a prompt template,
+a chain, maybe a tool interface -- and leave the harness for you to
+build. The ones that do ship a harness keep its state somewhere else:
+in process memory, in a queue, in a side table nobody queries. MemQL
+ships the harness as the platform's own work spine, and its state is the
+same graph everything else lives in.
+
+This page is the proof, not the pitch. Every claim below either points at
+the test that backs it, or says plainly that it is not published yet and
+names the test that will. That rule is the point: a claim moves onto this
+page when its test is green on `main`, not when the design is agreed.
+
+Design record:
+[the work spine](../../superpowers/specs/2026-09-05-work-spine-design.md).
+
+## The frame: graph engineering
+
+The current stage of harness design is **graph engineering** -- treating
+an agent system as a graph of typed nodes and edges rather than a chain
+of prompts. The survey literature (arXiv 2608.21156) names the open
+problems that stage runs into: what SUBSTRATE the graph lives on, how it
+is GOVERNED, what the OS around it looks like, and whether a system may
+rewrite itself. "The Log is the Agent" (arXiv 2605.21997) argues the
+execution log is the primary artifact rather than a by-product.
+
+MemQL answers the first three by construction and gates the fourth
+behind a person:
+
+| Open problem | Where MemQL's answer is |
+|---|---|
+| **Substrate** | The work graph is not a record ABOUT the run kept somewhere else -- it IS the run. A run is `v1:work:run` and a step is `v1:work:step`: ordinary rows in the same time-series memory graph everything else lives in, read with the same DSL and gated by the same per-row authorization. |
+| **Governance** | Per-row authorization is the only gate, and the work rows declare a tier like any other concept. An approval is a row (`v1:work:approval`) bound to the hash of the exact artifact approved. |
+| **The OS** | Node types, identity, the fleet router, budgets and the event mesh are the platform, and the harness inherits them rather than reimplementing them. |
+| **Self-evolution** | GATED, deliberately. The platform can author and promote constructs, and every promotion passes a human gate. Nothing here rewrites itself unattended, and this page will not claim it does. |
 
 ## What a harness actually has to do
 
-An agent in a demo is a `while` loop around one model call. An agent
-in production has to:
+An agent in a demo is a `while` loop around one model call. An agent in
+production has to run a tool-calling loop that terminates and prove why;
+remember across turns, sessions and restarts; not bankrupt you when a
+model gets stuck; route work when it outgrows one process; and be
+inspectable afterwards -- what ran, what it cost, why it decided that.
 
-- run a **tool-calling loop** that terminates -- and prove it
-  terminated for the right reason;
-- **remember** across turns, sessions, and restarts, and tell episodic
-  noise from durable knowledge;
-- **not bankrupt you** when a model gets stuck repeating itself;
-- **route and coordinate** when the work outgrows one process;
-- be **inspectable** after the fact -- what ran, what it cost, why it
-  decided that.
-
-These are the things teams rebuild badly, over and over. MemQL makes
-them a module of the platform, on by default.
+Those are the things teams rebuild badly. MemQL makes them rows.
 
 ## The proof
 
-### 1. The agent loop is a running service, not your `for` loop
+### 1. Every execution is a run, and every step is a row
 
-The turn loop, the tool dispatch, and the reply contract are part of
-the engine. An agent ends every turn through a single structured
-envelope (`respondToUser` with `{response, citations[]}`), intercepted
-by name in the streaming tool loop -- see
-`integrations/agent/streaming.go` and `integrations/agent/envelope.go`.
-Tools a browser must execute are relayed across nodes through the graph
-event bus (`integrations/cognition/client_tool_relay.go`), so "call a
-client tool" works whether the agent and the browser are in the same
-binary or on different machines. You don't write the loop; you declare
-the tools and the reply shape.
+The automation executor opens a `v1:work:run` row before the first step,
+writes a `v1:work:step` row at `running` BEFORE each body and again at
+`done` / `failed` / `skipped` after, and closes the run with its terminal
+status. The intent-then-receipt shape is what makes a crash legible: a
+step written at `running` with no receipt is a run whose node died
+mid-step, and it is resumable from exactly there.
 
-### 2. A safety + cost spine that is on by default
+`component/automations/journal.go`. Tests:
+`TestExecutor_JournalsEveryStepBoundary` (the boundaries, in order),
+`TestJournal_DB_RowsWrittenAndResumed` and
+`TestJournal_DB_AnUnfinishedStepIsResumable` (against a real Postgres).
 
-This is where libraries leave you exposed and the platform does the
-unglamorous work:
+### 2. Resume reads the journal, on the same run
 
-- **A process-wide LLM rate ceiling** at the provider chokepoint --
-  `component/memql/ai_guard.go` -- so no code path, buggy or malicious,
-  can stampede a provider.
+A failed run is resumed from its own rows: the completed steps are served
+back from the journal and never re-run, and the failed one is retried on
+the SAME run id, so a reader asking what happened to run X gets one story
+rather than two executions sharing a prefix. There is no side-record --
+the 24-hour checkpoint this replaces is deleted, with no shim.
+
+The security rule the checkpoint carried carries here unchanged: internal
+origin on resume requires a trusted SOURCE and a trigger payload the
+caller did not supply, because otherwise a refused call is the thing that
+mints a resumable token (memql#2888, memql#2890).
+`component/automations/resume.go`. Tests:
+`TestJournal_DB_RowsWrittenAndResumed`,
+`TestRunRowCarriesTheCallerSuppliedFlag`,
+`TestWorkRunConceptDeclaresTheFlag`, and `TestDryRunWritesNoWorkJournal`
+-- a preview must leave nothing resumable.
+
+### 3. One log serves audit, replay and memory
+
+The same rows answer three questions that are usually three systems.
+`workTrace` renders a run's full timeline from every version of its run
+and step rows plus its observations, ordered by `createdAt`
+(`integrations/worktrace`). Resume replays from those rows (above).
+And `recall` reads `v1:work:observation` as episodic memory, blending
+semantic similarity with recency and consolidating into durable beliefs
+under `v1:memory:belief` rather than dumping everything into a vector
+store and hoping.
+
+Nothing is logged twice, because nothing is logged: the record is the
+state.
+
+### 4. A safety and cost spine that is on by default
+
+- **A process-wide LLM rate ceiling** at the provider chokepoint
+  (`component/memql/ai_guard.go`), so no code path can stampede a
+  provider.
 - **Per-plan token budgets** enforced *before* each call
-  (`component/planner/budget.go`, wired in
-  `integrations/planner/agent_loop_budget.go`): a plan parks instead of
-  making the next call when it would exceed a cumulative, persisted
-  ceiling that survives retries.
-- **Loop breakers**: repeat-failure and redelegation-refusal guards in
-  the agent tool loop stop the classic "model apologizes and tries the
-  same thing forever" failure.
-- **An up-front estimate + approval gate** and **model tiering** (cheap
-  by default, escalate only on an explicit stuck signal) from the
-  goal-resolution work (epic memql#836).
+  (`component/planner/budget.go`): work parks instead of making the next
+  call when it would exceed a cumulative, persisted ceiling that survives
+  retries.
+- **Loop breakers** -- repeat-failure and redelegation-refusal guards
+  stop the classic "model apologizes and tries the same thing forever".
+- **An up-front estimate and approval gate**, and model tiering that is
+  cheap by default and escalates only on an explicit stuck signal.
 
-A trivial request takes one cheap path; an expensive one is parked for
-approval before it spends. That is policy the runtime enforces, not a
-README suggestion.
+Read [LLM cost control](../ai/llm-cost-control.md) before touching any of
+it; it is defense in depth and every layer is load-bearing.
 
-### 3. Memory is the substrate, and it consolidates
+### 5. Behavior is declared, and the declaration is the authorization
 
-MemQL is built on an append-only, time-series **memory graph**
-(PostgreSQL + TimescaleDB). Every node carries its own history; the
-primary key is `(id, createdAt)`, so a write never overwrites its
-predecessor -- it adds a version alongside it. That means provenance and
-replay are free -- you can ask what was true at a point in time, not
-just what is true now. Retrieval blends semantic similarity with
-recency, and the harness consolidates episodic rows into durable
-semantic knowledge rather than dumping everything into a vector store
-and hoping. The harness did not bring its own storage: it runs on the
-platform's substrate, which is why its plans, steps, observations, and
-semantic memories are ordinary concepts you can query.
+The DSL declares a system's behavior as data -- `concept`, `query`,
+`mutation`, `automation`, `logic`, `tool`, `prompt`, `provider`, `spec`,
+`shape` -- and the same declarations drive validation, per-row
+authorization (classified and test-enforced in
+`test/dslconformance/conformance_test.go`) and the generated reference.
+The work rows are not special: they declare a tier and are gated by it
+like every other concept.
 
-### 4. Behavior is declared, not glued
+### 6. It is multi-node, authenticated and observable already
 
-The MemQL DSL lets you declare a system's behavior as data: `concept`
-(schema), `mutation`/`query` (writes/reads), `automation`
-(event -> side-effect), `logic` (procedures), `tool` (the AI-callable
-surface), `prompt`, `provider`, `spec`, `shape`. An event triggers an
-automation triggers a tool -- without you wiring callbacks in Go and
-redeploying. The same declarations drive validation, authorization
-(per-row, classified and test-enforced in `test/dslconformance/conformance_test.go`),
-and the generated reference. Capability grants (what an agent is even
-allowed to do -- `computer_use_*`, `workbench_use`) are declared and
-expanded centrally in `component/memql/worker_caps.go`.
+Those properties belong to the platform and the harness inherits them.
+The same code compiles by build tag into a mesh of node types that
+discover each other and bridge events with dedup and TTL; there is a real
+identity service (magic-link, passkeys, JWT, JWKS) and machine
+credentials for service-to-service calls; and the run, step, goal and
+approval rows carry broadcast routing rules, so a run's status flips on
+the replica executing it and reaches the person watching from a different
+one.
 
-### 5. It is multi-node, authenticated, and observable out of the box
+## Claims this page does NOT make yet
 
-Those properties belong to the platform, and the harness inherits them
-rather than reimplementing them. The same code compiles by build tag
-into a mesh of node types (bff, voice, cognition, agent, planner,
-workbench, identity) that discover each other and bridge events with
-dedup + TTL. There is a real identity service (magic-link + JWT + JWKS),
-per-node verifiers, and machine credentials for service-to-service
-calls. Every invocation can be recorded to a hypertable for per-FQN
-latency/error metrics that feed the Cockpit's topology view. You get
-the distributed, secured, observable version for free -- not as "an
-exercise for the reader."
+These are designed, specified and not shipped. They appear above when
+their tests are green on `main`, and not before.
+
+| Claim | Proven by | Lands in |
+|---|---|---|
+| A catalog-matched goal makes ZERO provider calls, and so does a replay | a counting fake provider over the compile pass and the three replay modes | epic A2 (compile and the loop) |
+| A failed run is repaired FROM the failed step, its prefix kept, and no edit is silent | the symptom classifier plus `planReview` approvals bound to an artifact hash | epic A2 |
+| Skill selection reads the capability graph structurally, not by vector match alone | typed `v1:skills:skillEdge` neighbours, proposed at compile and committed by a successful run | epic A3 |
 
 ## How developers use it
 
-1. **Declare** your concepts, tools, and automations in `.memql` files.
-2. **Drive** it from the **Cockpit** -- the terminal-native IDE + ops
-   console -- to author, run, and watch agents and the cluster, or from
-   the **MemQL Portal** in a browser.
-3. **Run** it as a single binary for local dev, or as the node mesh for
-   scale; same DSL, same behavior, only config changes per environment.
-4. **Extend** in Go only when you need to, via self-registering
-   packs with a narrow `PluginContext` -- the harness itself registers
-   through the same pack machinery it proves.
-
-## Why "it's real"
-
-The strongest proof that this is a shipped module and not a slide deck:
-a multi-agent, voice + canvas product is being built on MemQL right
-now, on the path to release. The breakers, the budgets, the memory
-consolidation, the cross-node tool relay described above exist because
-a shipping product needs them. MemQL is the extracted, open-source
-platform underneath -- and the harness is the module of it that this
-page just walked through.
+1. **Declare** your concepts, tools and automations in `.memql` files.
+2. **Drive** it from the **Cockpit** (terminal-native ops) or **MemQL OS**
+   in a browser.
+3. **Run** it as one binary locally or as the node mesh for scale; same
+   DSL, same behavior, only configuration changes.
+4. **Extend** in Go only when you need to, through self-registering
+   plug-ins with a narrow `PluginContext`.
 
 > Next: [MemQL vs. agent libraries](vs-other-harnesses.md) -- an honest
 > comparison with the Go and Python field, or

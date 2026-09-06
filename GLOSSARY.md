@@ -16,7 +16,7 @@ The complete map of MemQL documentation. Layout + rules:
 
 ### Overview (`overview/`)
 - [What Is MemQL](docs/public/overview/what-is-memql.md) — the platform: modules it runs, clients you build on it, the memory graph underneath.
-- [The Harness Module](docs/public/overview/why-memql-harness.md) — the proof-driven tour of the module that runs agents: loop, budgets, memory consolidation.
+- [The Harness](docs/public/overview/why-memql-harness.md) — the proof-driven tour of the work spine: the journal, resume, budgets, memory consolidation. Each claim names the test that backs it, and the ones not yet proven are listed as such.
 - [MemQL vs. Agent Libraries and Frameworks](docs/public/overview/vs-other-harnesses.md) — honest comparison with the Go + Python field.
 - [Quickstart](docs/public/overview/quickstart.md) — get running fast.
 - [Tech Stack & Practices](docs/public/overview/tech-stack.md) — the stack + engineering practices.
