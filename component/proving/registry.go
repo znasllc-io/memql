@@ -16,8 +16,6 @@ package proving
 import (
 	"context"
 	"fmt"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -273,32 +271,4 @@ func buildAutomation(s scenario.Scenario, name string) *automations.Automation {
 		auto.Steps = append(auto.Steps, step)
 	}
 	return auto
-}
-
-// scenarioSteps returns the scenario's step keys in order, for assertions that
-// have to talk about what should have run.
-func scenarioSteps(s scenario.Scenario) []string {
-	out := make([]string, 0, len(s.Steps))
-	for _, st := range s.Steps {
-		out = append(out, st.Key)
-	}
-	return out
-}
-
-// sortedStrings is a small helper the report paths share.
-func sortedStrings(in []string) []string {
-	out := append([]string(nil), in...)
-	sort.Strings(out)
-	return out
-}
-
-// joinNonEmpty joins the non-empty parts with "; ", for a compact detail line.
-func joinNonEmpty(parts ...string) string {
-	var keep []string
-	for _, p := range parts {
-		if strings.TrimSpace(p) != "" {
-			keep = append(keep, p)
-		}
-	}
-	return strings.Join(keep, "; ")
 }

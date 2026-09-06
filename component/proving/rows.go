@@ -10,8 +10,6 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/proving/figure"
-	"github.com/znasllc-io/memql/component/proving/scorecard"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -194,14 +192,4 @@ func scenarioCount(result SuiteResult) int {
 		seen[e.Scenario] = true
 	}
 	return len(seen)
-}
-
-// figureUnit is the unit a sample row carries, exported through this small
-// helper so the row writer and the OS surface agree on the spelling.
-func figureUnit(f figure.Figure) string { return string(f.Unit) }
-
-// entryKey names one published figure, for a failure message that has to be
-// specific about which of sixty-six rows was refused.
-func entryKey(e scorecard.Entry) string {
-	return e.Scenario + "/" + string(e.Arm) + "/" + string(e.Figure.Metric)
 }
