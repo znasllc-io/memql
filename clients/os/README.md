@@ -1637,8 +1637,10 @@ DESIGN.md asks for. Sub-project B's own pass is the second list, below A's.
   "what it is for" line and a shrinkable name meant the NAME lost first, so a
   narrow column drew "re..." beside the whole of the goal it belongs to.
 
-The map's pass (sub-project B, epic memql#4785) found nine more, and four of
-them were rules rather than pixels -- which is what a drawing costs.
+The map's pass (sub-project B, epic memql#4785) found twelve more, and four of
+them were rules rather than pixels -- which is what a drawing costs. The last
+three came from the EMPTY half of the pass, which is the half that is easy to
+skip and the half where copy goes wrong.
 
 - **`min-height: 100%` carried the acts off the bottom of the window.** A goal
   view is a map, a band, a rail and a receipt, so the page grew and the action
@@ -1686,3 +1688,18 @@ them were rules rather than pixels -- which is what a drawing costs.
   and beside the point: the run does not move until somebody decides the
   approval. `Answer it` is the primary act while it is parked, and the detail
   carries the classifier's own reason.
+- **The goal that needed a person was sorted LAST.** Newest-first put a goal
+  parked on somebody under two that wanted nothing, which was visible the first
+  time this rendered with three rows in it. Live work is its own band above the
+  rest, and the sort control orders inside each band -- so it still does what it
+  says and a goal never jumps the queue for being new. The view's key carries
+  the live SET rather than the runs, so `running` -> `waiting` re-baselines
+  nothing and the arrival cue stays off a heartbeat.
+- **`Rewind` was offered on a goal with nothing to scrub.** A goal with no runs
+  still dates its own creation, so a `count > 0` guard put the act on a picture
+  it would redraw unchanged. Rule 12 says an illegal act is absent, and "does
+  nothing" is illegal: the guard is `> 1`.
+- **The action bar told somebody to select from an empty list.** "Select an
+  automation to arm or retire it", under nothing. An absent control needs an
+  account of itself; an instruction for a list that does not exist is worse than
+  silence.

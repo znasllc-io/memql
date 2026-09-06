@@ -190,6 +190,21 @@ describe("density: a finished stretch folds and says how much it stands for", ()
 });
 
 describe("rewind", () => {
+  // "Does nothing" is illegal, and rule 12 says an illegal act is ABSENT. A
+  // goal with no runs still dates its own creation, so a `count > 0` guard
+  // offered Rewind on a goal there is nothing to scrub through.
+  it("is not offered when there is only one moment to stand at", async () => {
+    mount(seeded({ runs: [], steps: [] }));
+    // Opened WITHOUT waiting for the map: a goal with no runs draws none, so
+    // `openGoal`'s wait would never resolve.
+    fireEvent.click(
+      await screen.findByText("Reconcile last month's ledger against the bank export"),
+    );
+    await screen.findByRole("group", { name: "What you can do with this" });
+    expect(screen.queryByRole("button", { name: /^Rewind/ })).toBeNull();
+    expect(screen.getByText("no run to act on yet")).toBeTruthy();
+  });
+
   it("is offered, and says plainly that it spends nothing", async () => {
     mount(seeded());
     await openGoal();

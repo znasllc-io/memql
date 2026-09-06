@@ -174,7 +174,11 @@ export function GoalView({
       onAct: () => onOpenApproval(parked.id),
     });
   }
-  if (bounds.count > 0) {
+  // MORE THAN ONE MOMENT, not more than zero. A goal with no runs still dates
+  // its own creation, so `count > 0` offered Rewind on a goal there is nothing
+  // to scrub through -- an act that redraws the picture it is already showing.
+  // An illegal act is ABSENT (rule 12), and "does nothing" is illegal.
+  if (bounds.count > 1) {
     acts.push({
       label: rewound ? "Back to now" : "Rewind",
       icon: <History size={13} aria-hidden />,

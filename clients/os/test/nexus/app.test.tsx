@@ -85,6 +85,35 @@ describe("goals, the landing surface", () => {
     expect(screen.getAllByText("waiting for you")).toHaveLength(1);
   });
 
+  // The question a person opens this list with is "what is happening", and a
+  // goal whose run is in flight or waiting on them is the answer. A plain
+  // newest-first sort put the parked goal UNDER two that wanted nothing, which
+  // is what the first rendered pass showed.
+  it("puts work in flight above goals that want nothing, newest first inside each", async () => {
+    const conn = fakeConnection({
+      goals: [
+        goalRow({ id: "g1", statement: "Parked on you", createdAt: "2026-09-01T09:00:00Z" }),
+        goalRow({ id: "g2", statement: "Nothing running", createdAt: "2026-09-04T09:00:00Z" }),
+        goalRow({ id: "g3", statement: "Also nothing", createdAt: "2026-09-03T09:00:00Z" }),
+      ],
+      runs: [
+        runRow({
+          id: "r1",
+          goalId: "g1",
+          status: "waiting",
+          finishedAt: "",
+          waitingOn: { kind: "approval" },
+        }),
+      ],
+    });
+    mount(conn);
+    await screen.findByText("Parked on you");
+    const statements = [...document.querySelectorAll(".os-nexus-goal-statement")].map(
+      (el) => el.textContent,
+    );
+    expect(statements).toEqual(["Parked on you", "Nothing running", "Also nothing"]);
+  });
+
   // A goal now opens as a MAP, a rail and a receipt, which is taller than the
   // run page -- so it REPLACES the list (rule 11's `<- Goals` form) rather than
   // sitting beside it, and the list's own detail column went with the change.

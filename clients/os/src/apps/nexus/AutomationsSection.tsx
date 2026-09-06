@@ -253,11 +253,23 @@ export function AutomationsSection({ selectedId, onSelect }: AutomationsSectionP
       </div>
 
       <ActionBar
-        state={selected === null ? "Nothing selected" : statusWord(selected.status)}
+        state={
+          selected !== null
+            ? statusWord(selected.status)
+            : rows.length === 0
+              ? "Nothing yet"
+              : "Nothing selected"
+        }
         detail={
-          selected === null
-            ? "select an automation to arm or retire it"
-            : statusMeaning(selected.status)
+          selected !== null
+            ? statusMeaning(selected.status)
+            : rows.length === 0
+              ? // "Select an automation" on an empty list is an instruction for
+                // a list that does not exist. Say what IS true instead.
+                catalog.state === "loading"
+                  ? "reading the catalog"
+                  : "nothing to arm yet"
+              : "select an automation to arm or retire it"
         }
         tone={tone}
         acts={acts}

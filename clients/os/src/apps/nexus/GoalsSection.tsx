@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -86,15 +86,50 @@ export function GoalsSection({
   const [composing, setComposing] = useState(false);
   const now = useNow(30_000);
 
-  const viewKey = `goals:${ascending ? "asc" : "desc"}:${search.trim().toLowerCase()}`;
+  // ==========================================================================
+  // LIVE WORK ON TOP, THEN THE SORT
+  // ==========================================================================
+  // A plain newest-first sort put the goal that was PARKED ON A PERSON at the
+  // bottom of the list, under two that wanted nothing -- which was visible the
+  // first time this was rendered with three goals in it. The question a person
+  // opens this list with is "what is happening", and a goal whose run is in
+  // flight or waiting on them is the answer; how recently it was set is the
+  // tie-break, not the ordering.
+  //
+  // TWO BANDS, NOT A SCORE. Live work, then everything else, each band ordered
+  // by the sort control -- so the control still does what it says inside each
+  // band and a goal never jumps the queue for being new.
+  // The view caches its projection on the GOALS snapshot, so a sort that also
+  // reads the RUNS feed would go stale the moment a run parked -- the list
+  // would keep its old order until a goal row happened to change. The key
+  // carries the live SET, which moves only when a goal gains or loses work in
+  // flight; `running` -> `waiting` is inside the same set and re-baselines
+  // nothing, which is what keeps the arrival cue off a heartbeat.
+  const liveToken = useMemo(
+    () =>
+      runs
+        .filter(
+          (run) =>
+            run.status === "running" || run.status === "waiting" || run.status === "compiling",
+        )
+        .map((run) => idTail(run.goalId))
+        .sort()
+        .join(","),
+    [runs],
+  );
+  const viewKey = `goals:${ascending ? "asc" : "desc"}:${search.trim().toLowerCase()}:${liveToken}`;
   const view = useLiveView<Row, GoalRow>(goals, viewKey, (rows) => {
     const projected = rows
       .map(goalFromRow)
       .filter((goal) => goal.id !== "")
       .filter((goal) => goalMatches(goal, search));
-    projected.sort((a, b) =>
-      ascending ? a.createdAt.localeCompare(b.createdAt) : b.createdAt.localeCompare(a.createdAt),
-    );
+    projected.sort((a, b) => {
+      const band = Number(isLive(b, runs)) - Number(isLive(a, runs));
+      if (band !== 0) return band;
+      return ascending
+        ? a.createdAt.localeCompare(b.createdAt)
+        : b.createdAt.localeCompare(a.createdAt);
+    });
     return projected;
   });
 
@@ -177,6 +212,22 @@ export function GoalsSection({
       </div>
 
     </div>
+  );
+}
+
+/**
+ * Whether this goal is work in flight.
+ *
+ * Read off the RUNS rather than off the goal's own status, deliberately.
+ * `goal.status` is coarse -- `active` means "a run is in flight" and is not
+ * re-written when that run parks -- so a goal waiting on a person can be
+ * `active`, `open` or neither. The runs are what actually say.
+ */
+function isLive(goal: GoalRow, runs: readonly RunRow[]): boolean {
+  if (goal.status === "closed") return false;
+  const mine = runsOfGoal(runs, goal.id);
+  return mine.some(
+    (run) => run.status === "running" || run.status === "waiting" || run.status === "compiling",
   );
 }
 

@@ -82,6 +82,10 @@ describe("what the catalog lists", () => {
     // Deliberately NOT a "New automation" button: nobody authors one by hand
     // in this app, and offering it would be a control that cannot work.
     expect(screen.queryByText(/New automation/)).toBeNull();
+    // ...and the bar does not tell somebody to select from a list that has
+    // nothing in it.
+    expect(screen.queryByText("select an automation to arm or retire it")).toBeNull();
+    expect(screen.getByText("nothing to arm yet")).toBeTruthy();
   });
 });
 
