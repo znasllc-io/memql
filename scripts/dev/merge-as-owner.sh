@@ -219,8 +219,29 @@ function report_pr() {
 # lanes the ruleset does not require -- and this repository has two that are
 # red for reasons no pull request can fix: CodeQL's `Analyze (go)`, which
 # crashes on a 2GiB query result above roughly 300 changed files and is red on
-# pristine `main`, and `install-cluster-e2e`, which is documented as flaky and
-# installs a PINNED RELEASED STACK rather than the branch under test.
+# pristine `main`, and `install-cluster-e2e`, whose scheduled run on `main`
+# fails independently of anyone's branch.
+#
+# An earlier version of this comment said install-cluster-e2e "installs a
+# PINNED RELEASED STACK rather than the branch under test". That is wrong and
+# is corrected here rather than deleted, because it was load-bearing in the
+# argument. All three legs check the PR's own commit out, and the ArgoCD
+# Application the bring-up creates points at that SHA
+# (`memql-local (<sha> -> deploy/k8s/overlays/local)`); only the `upgrade` leg
+# additionally resolves DEFAULT_STACK_TAG, and that is its FROM version. So the
+# lane does test the branch, and a red here is not automatically somebody
+# else's problem.
+#
+# What justifies not blocking on it is one fact, not a story: it is not in
+# `required_status_checks`. The ruleset decides which lanes gate a merge, and
+# this is not one of them.
+#
+# Resist the temptation to add "and anyway it is broken upstream" -- that was
+# the second wrong claim here. `main`'s scheduled run on 2026-09-06 did go red,
+# but only its `upgrade` leg; `round-trip` and `repair` both PASSED there, and
+# those are the two legs that most often block a pull request. Whether a given
+# red is the lane's fault or the branch's is a question to answer per run, by
+# reading the log, and not one this comment can settle in advance.
 #
 # So the guard was strictest on exactly the pull requests it was written for --
 # large refactors, removal epics, regenerations -- and it named no way out. A
