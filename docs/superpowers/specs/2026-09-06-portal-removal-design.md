@@ -134,7 +134,14 @@ are what makes this section checkable rather than a promise.
 - Artifact LABELS — the filter and the editor. OS Files is folder-based.
 - `/fleet/apps` delegation policy and delegated-run transcripts. Fleet ->
   Machines already lists each machine's local apps.
-- Account credential issue / revoke and the one-time secret reveal.
+- Account credential issue / revoke and the one-time secret reveal. **These
+  gate on `v1:identity:account` -- the PAYING account of the isolation model
+  -- and NOT on `v1:accounts:account`, which the OS Accounts app lists. The
+  two share a word and no link field**, so a credentials surface hung on a
+  client-registry row is refused on every mint, with the engine's zero rows
+  as the only clue. Epic memql#5009 shipped it as its own Credentials
+  section over the accounts it actually binds to; the bare word here is what
+  cost that epic the discovery.
 - The first-run gate. Identity's `/setup` and the Accounts app's first-run card
   each cover part of it.
 
