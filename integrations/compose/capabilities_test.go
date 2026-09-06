@@ -1,13 +1,15 @@
 package compose
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"sort"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // TestCapabilityNamesMatchTheDSL is the gate that makes the five builtins in
@@ -199,8 +201,21 @@ func composableListsInDSL(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
 	root := filepath.Join(repoRoot(t), "dsl")
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || filepath.Base(path) != "concepts.memql" {
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		// THE SHARED SKIP LIST, not a local one. `.claude/` holds git
+		// WORKTREES -- full copies of this repo -- so a walk that
+		// descends into one counts every mark two or three times and
+		// fails naming a path nobody else has (memql#3678).
+		if d.IsDir() {
+			if repowalk.SkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Base(path) != "concepts.memql" {
 			return nil
 		}
 		raw, readErr := os.ReadFile(path)
@@ -236,8 +251,17 @@ func queryNamesInDSL(t *testing.T) map[string]bool {
 	t.Helper()
 	out := map[string]bool{}
 	root := filepath.Join(repoRoot(t), "dsl")
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || filepath.Base(path) != "queries.memql" {
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if repowalk.SkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Base(path) != "queries.memql" {
 			return nil
 		}
 		raw, readErr := os.ReadFile(path)
@@ -294,4 +318,3 @@ func packageDir(t *testing.T) string {
 	return filepath.Dir(self)
 }
 
-var _ = sort.Strings

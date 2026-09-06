@@ -26,9 +26,18 @@
 // A @serverOnly construct is reachable only from server-side Go under
 // INTERNAL ORIGIN (memql#3175); integrations/compose stamps it.
 
-/// Open the record for one materialization, at `draft`. @serverOnly: the row is opened by
-/// composeMaterialize together with the goal and the run it belongs to, and a caller-authored
-/// composition would be a provenance record whose subject never happened.
+/// Open the record for one materialization, at `draft`. The row is opened by composeMaterialize
+/// together with the goal and the run it belongs to, and a caller-authored composition would be a
+/// provenance record whose subject never happened.
+///
+/// SCOPING TO actor.userId IS NOT THE FIX HERE, and that is why the annotation is @serverOnly
+/// rather than a tighter filter. This row is ALREADY owner-scoped -- ownerUserId is stamped from
+/// actor.userId, so a caller can only ever create their own composition. The problem is not WHOSE
+/// row is being written, it is that a caller may not open one AT ALL: a composition is a claim
+/// that a materialization happened, and the goal id, the run id and the resolved sources on it are
+/// facts only the executor holds. A browser that wrote this row perfectly, owning it perfectly,
+/// would be recording a run that nothing ever performed -- and the Materialized list would show it
+/// beside real ones with nothing to tell them apart.
 @actor
 @serverOnly
 mutate composition createComposition {
@@ -57,8 +66,15 @@ mutate composition createComposition {
 }
 
 /// Move a composition through its lifecycle and, at the end, record what it produced.
-/// @serverOnly for the reason at the top of this file: every field here is either a claim about
-/// bytes that exist or a claim about which models thought, and both are the engine's to make.
+///
+/// SCOPING TO actor.userId IS NOT THE FIX HERE, and that is why the annotation is @serverOnly
+/// rather than a tighter filter. The row is ALREADY owner-scoped -- ownerUserId is stamped from
+/// actor.userId on every write, so a caller can only ever reach their own composition. The problem
+/// is that a caller may not make these CLAIMS at all, and two of the fields are the reason this
+/// concept exists: `provenanceEmbedded` and `modelsUsed` ARE the provenance, so a record a caller
+/// can author is a record that says nothing. A browser flipping a composition to `ready` with no
+/// bytes behind it, or stamping provenanceEmbedded=true on a CSV, desyncs the row from the file
+/// while owning it perfectly.
 ///
 /// MINIMAL ARGUMENTS ON PURPOSE. `update{}` has been a read-merge since memql#1628, so
 /// re-supplying every discriminator is dead weight that an undeclared-argument DISCARD hides
@@ -251,9 +267,15 @@ mutate recipe updateComposeRecipe {
   }
 }
 
-/// Record that a recipe ran. @serverOnly: `runCount` and `lastRunAt` are the evidence a recipe
-/// works, and evidence a caller can author is evidence that says nothing. Written by the
-/// materialize executor under the owner's borrowed authority.
+/// Record that a recipe ran.
+///
+/// SCOPING TO actor.userId IS NOT THE FIX HERE, and that is why the annotation is @serverOnly
+/// rather than a tighter filter. The row is ALREADY owner-scoped, so a caller can only ever reach
+/// their own recipe. The problem is that `runCount` and `lastRunAt` are EVIDENCE -- they are what
+/// the Templates section reads to say a recipe works and what a person checks before trusting one
+/// with a client's report -- and evidence a caller can author is evidence that says nothing. A
+/// browser incrementing its own count would be perfectly authorized and perfectly meaningless.
+/// Written by the materialize executor, after the composition it counts actually produced a file.
 @actor
 @serverOnly
 mutate recipe recordComposeRecipeRun {

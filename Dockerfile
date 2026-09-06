@@ -110,6 +110,7 @@ COPY component/auth/go.* ./component/auth/
 COPY component/automations/go.* ./component/automations/
 COPY component/bus/go.* ./component/bus/
 COPY component/bus/gen/go.* ./component/bus/gen/
+COPY component/compose/go.* ./component/compose/
 COPY component/config/go.* ./component/config/
 COPY component/database/go.* ./component/database/
 COPY component/deploycontrol/go.* ./component/deploycontrol/

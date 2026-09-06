@@ -9,6 +9,8 @@ import (
 	"html"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // Draft is what the compose step produced and the render step turns into
@@ -305,11 +307,25 @@ func cellString(v any) string {
 		}
 		return "false"
 	case float64:
-		// Integral floats render without a decimal tail: a JSON
-		// number arrives as float64, and "4" is what somebody expects
-		// in a spreadsheet cell rather than "4.000000".
-		if t == float64(int64(t)) {
-			return fmt.Sprintf("%d", int64(t))
+		// narrowing: GUARDED -- the bound is core/num's `WholeInt64`
+		// rather than an inline one (memql#4779).
+		//
+		// Integral floats render without a decimal tail: a JSON number
+		// arrives as float64, and "4" is what somebody expects in a
+		// spreadsheet cell rather than "4.000000". The obvious test for
+		// that is `t == float64(int64(t))`, which is UNDEFINED outside
+		// int64 -- the inner conversion is implementation-defined, so
+		// the comparison asks whether an arbitrary value equals the
+		// original.
+		//
+		// NONE OF THE THREE SATURATING ANSWERS IS RIGHT HERE, which is
+		// why this is guarded rather than clamped. A cell is a VALUE
+		// being written out verbatim, so a number too large for an
+		// int64 must render as the number it is; saturating would put
+		// 9223372036854775807 in a file somebody sends to a client,
+		// which is this writer silently changing their data.
+		if whole, ok := num.WholeInt64(t); ok {
+			return fmt.Sprintf("%d", whole)
 		}
 		return fmt.Sprintf("%g", t)
 	case int, int32, int64:

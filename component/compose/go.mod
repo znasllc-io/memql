@@ -17,4 +17,9 @@ go 1.26.1
 
 toolchain go1.26.6
 
-require github.com/go-pdf/fpdf v0.9.0
+require (
+	github.com/go-pdf/fpdf v0.9.0
+	github.com/znasllc-io/memql/core v0.0.0
+)
+
+replace github.com/znasllc-io/memql/core => ../../core
