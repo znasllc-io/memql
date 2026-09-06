@@ -206,6 +206,48 @@ test("a filename from the cluster is treated as input", () => {
   assert.equal(sanitizeArtifactFileName("x".repeat(400)).length, 120);
 });
 
+test("a filename the cluster supplies can never reach path.join as a path", () => {
+  // THE END-TO-END PROPERTY, and the one CodeQL's js/http-to-file-access alert
+  // (#1037) is really about. The unit test above proves sanitizeArtifactFileName
+  // strips a directory component; this proves the function that actually feeds
+  // `path.join(base, fileName)` in defaultSaveUri does so on BOTH of its
+  // branches -- the `file` kind, which reads meta.fileName, and every other
+  // kind, which renders one from meta.title.
+  //
+  // Both are values a CLUSTER produced. The save dialog is what finally decides
+  // where the bytes land, so a traversal here could at worst pre-fill the
+  // dialog somewhere alarming rather than write there unattended -- but a
+  // pre-filled path a person accepts without reading is a real way to lose,
+  // and the sanitiser being correct is not the same claim as every caller
+  // reaching it.
+  const hostile = [
+    "../../etc/passwd",
+    "..\\..\\windows\\system32\\drivers\\etc\\hosts",
+    "/etc/shadow",
+    "C:\\Users\\me\\.ssh\\id_rsa",
+    "..",
+    ".",
+    "....//....//etc/passwd",
+    `evil${String.fromCharCode(0)}/../../rc`,
+  ];
+  for (const nasty of hostile) {
+    for (const name of [
+      artifactFileName(meta({ kind: "file", fileName: nasty })),
+      // fileName empty, so the `file` branch falls through to the title.
+      artifactFileName(meta({ kind: "file", fileName: "", title: nasty })),
+      // A rendered export: a different branch, the same untrusted title.
+      artifactFileName(meta({ kind: "note", fileName: "", title: nasty })),
+    ]) {
+      assert.ok(!name.includes("/"), `${JSON.stringify(nasty)} produced ${JSON.stringify(name)}, which carries a forward slash`);
+      assert.ok(!name.includes("\\"), `${JSON.stringify(nasty)} produced ${JSON.stringify(name)}, which carries a backslash`);
+      assert.notEqual(name, "..", `${JSON.stringify(nasty)} produced ".."`);
+      assert.notEqual(name, ".", `${JSON.stringify(nasty)} produced "."`);
+      assert.ok(!name.startsWith("."), `${JSON.stringify(nasty)} produced ${JSON.stringify(name)}, which is hidden on unix`);
+      assert.notEqual(name, "", `${JSON.stringify(nasty)} produced an empty name`);
+    }
+  }
+});
+
 test("the language is set only where the metadata names one", () => {
   assert.equal(languageIdFor("markdown", ""), "markdown");
   assert.equal(languageIdFor("other", "application/json"), "json");

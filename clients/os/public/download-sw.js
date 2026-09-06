@@ -12,6 +12,11 @@
  * names and sizes, and nothing else. Registered with scope `__memql-dl/`, so
  * no other request on the site ever passes through here.
  *
+ * AND IT CHECKS WHO IS TALKING TO IT. The message handler verifies the
+ * sender's origin against this worker's own before it does anything. Service
+ * workers are same-origin by construction, so this is defense in depth -- but
+ * a handler that never looks is one nobody can audit by reading it.
+ *
  * Plain JS on purpose: this file is copied verbatim into the bundle root
  * (vite `public/`), outside the module graph and the typechecker. Keep it
  * small enough to review by reading.
@@ -31,6 +36,35 @@ self.addEventListener("activate", function (event) {
 });
 
 self.addEventListener("message", function (event) {
+  // WHO SENT THIS. A service worker is same-origin by construction -- no
+  // cross-origin page can obtain this registration, and none can reach this
+  // handler -- so the check below is defense in depth rather than the thing
+  // standing between a stranger and the worker. It is worth the two lines
+  // anyway: a postMessage handler that never looks at its sender is one
+  // nobody can audit by reading it, which is exactly what CodeQL's
+  // js/missing-origin-check objects to (alert #1035).
+  //
+  // The origin comparison tolerates an EMPTY origin rather than refusing it.
+  // The spec populates `origin` for a message from a client, but a download
+  // that silently stopped working in some embedding would be a worse bug than
+  // the one this guards against, and an empty origin cannot in any case name
+  // a cross-origin sender that the service worker security model would have
+  // let through.
+  if (event.origin && event.origin !== self.location.origin) return;
+  // The belt to that brace, and the stronger of the two: the sender is a
+  // Client, and its url is the page it is running. A client from another
+  // origin cannot be one of ours.
+  var source = event.source;
+  if (source && typeof source.url === "string" && source.url !== "") {
+    var senderOrigin;
+    try {
+      senderOrigin = new URL(source.url).origin;
+    } catch (err) {
+      return;
+    }
+    if (senderOrigin !== self.location.origin) return;
+  }
+
   var data = event.data || {};
   if (data.type !== "memql-download-open" || !event.ports || !event.ports[0]) return;
   var port = event.ports[0];
