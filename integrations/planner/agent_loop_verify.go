@@ -8,7 +8,7 @@
 //  1. Deterministic checks run first and cover the common cases for free:
 //     - the Task errored                       -> fail (feeds retry)
 //     - the Task produced a concrete artifact   -> pass (NO LLM)
-//       (a Library/Document/artifact id, a written file, non-empty output)
+//     (a Library/Document/artifact id, a written file, non-empty output)
 //     - a tool invocation returned ok / not-ok  -> pass / fail (NO LLM)
 //  2. An LLM verification is used ONLY when the result is inherently
 //     SUBJECTIVE and a deterministic check can't speak to it (e.g. "is

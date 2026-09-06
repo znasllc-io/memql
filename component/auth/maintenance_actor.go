@@ -111,6 +111,18 @@ var maintenanceAutomations = map[string]string{
 		"stranded, which is precisely the state it exists to end. It is also the ONE writer allowed to close a " +
 		"stranded row (abandonPackageDeployment), so a sweep that cannot see one is a permission granted to " +
 		"nobody",
+	"sweepWaitingWorkRuns": "the wait-and-abandon sweep over v1:work:run (epic memql#4966). It resumes " +
+		"runs whose timer wait is due and re-claims runs whose node died, across EVERY owner -- a person whose " +
+		"run is parked on a replica that has gone cannot resume it themselves, which is the whole reason the " +
+		"sweep exists. The run concept declares the composite owner tier, so under the default reader actor " +
+		"the owned branch matches nothing, the cluster-owner escape does not apply, and the read answers ZERO " +
+		"ROWS AND NO ERROR. A sweep that resumes nothing is indistinguishable from a cluster with nothing " +
+		"parked, and the symptom a person reports is that their goal simply stopped",
+	"workJournalRetentionSweep": "the nightly journal sweep over v1:work:modelCall and " +
+		"v1:work:observation (epic memql#4966), same tier and same silence as the row above. It is also the " +
+		"one writer that folds a run's summary onto the run row BEFORE deleting its detail, so a read that " +
+		"sees nothing does not merely skip the delete -- it skips the fold, and the detail then ages out of " +
+		"a run that never got its summary, which is the one failure here that destroys evidence",
 	"logsRetentionSweep": "the nightly log-store sweep (epic memql#4893), a retention sweep over every " +
 		"node's log lines. What it runs is builtin logsSweep, whose Go executor is floored at CLUSTER OWNER " +
 		"(design L3) -- the same floor an owner running it by hand clears, and the only floor the rows have, " +

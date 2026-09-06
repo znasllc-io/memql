@@ -144,6 +144,7 @@ COPY component/secret/go.* ./component/secret/
 COPY component/server/go.* ./component/server/
 COPY component/service/go.* ./component/service/
 COPY component/skills/go.* ./component/skills/
+COPY component/work/go.* ./component/work/
 COPY component/worker/go.* ./component/worker/
 COPY component/workjournal/go.* ./component/workjournal/
 COPY core/go.* ./core/

@@ -164,3 +164,18 @@ query dependencyEdge dependencyEdgesForOwner {
   paginate 50
   shape   dependencyEdgeFull
 }
+
+/// The caller's catalogued construct for one goal signature -- compile's EXACT-MATCH tier (epic
+/// memql#4966). Pushed down as a filter rather than folded in Go after a full catalog pull, because
+/// the exact tier is the one that must stay cheap: it is what makes a repeated goal reach no model
+/// at all, and paging an owner's whole catalog to find one row would put a cost on the free path
+/// that grows with how much the person has already automated.
+@actor
+@unbounded("one goal signature -- the catalog holds at most a handful of constructs per signature, and compile reads them all to rank by reliability")
+query construct cataloguedConstructsForGoalSignature {
+  args {
+    goalSignature  string!
+  }
+  filter  ownerUserId==actor.userId && catalogued==true && goalSignature==args.goalSignature
+  shape   constructFull
+}

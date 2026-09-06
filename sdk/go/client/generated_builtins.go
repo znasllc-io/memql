@@ -255,6 +255,36 @@ func CampaignTestSendBuild(args CampaignTestSendArgs) string {
 	return b.String()
 }
 
+// CancelGoal -- Close one of the caller's goals and ask every run of it to stop. Cancellation is REQUESTED rather than done: a run notices at its next step boundary, so a step already in flight finishes and is journaled rather than being abandoned mid-effect.
+type CancelGoalArgs struct {
+	// The v1:work:goal to close.
+	GoalId string
+	// Why it closed, in words a person can read.
+	Reason string
+}
+
+// CancelGoal calls the engine builtin cancelGoal.
+func (qc *QueryClient) CancelGoal(ctx context.Context, args CancelGoalArgs) (*Result, error) {
+	call := CancelGoalBuild(args)
+	return qc.executeNamed(ctx, "cancelGoal", call)
+}
+
+func CancelGoalBuild(args CancelGoalArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin cancelGoal(")
+	b.WriteString("goalId: ")
+	b.WriteString(quoteMemQL(args.GoalId))
+	if args.Reason != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reason: ")
+		b.WriteString(quoteMemQL(args.Reason))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CommerceCompany -- One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both.
 type CommerceCompanyArgs struct {
 	StoreId    string
@@ -418,6 +448,63 @@ func CommerceStockBuild(args CommerceStockArgs) string {
 		}
 		b.WriteString("threshold: ")
 		b.WriteString(fmt.Sprintf("%v", args.Threshold))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreateGoal -- Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all.
+type CreateGoalArgs struct {
+	// The goal in the person's own words.
+	Statement string
+	// The typed input object: the shape the chosen template's args declare.
+	Input map[string]any
+	// Optional account tags -- a record of who the work is for, never a visibility scope.
+	AccountIds []string
+	// {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents}. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'.
+	Ceilings map[string]any
+	// The surface the goal arrived through: api, ask, nexus, responsibility, library, materializer. Empty when unknown.
+	RequestedVia string
+}
+
+// CreateGoal calls the engine builtin createGoal.
+func (qc *QueryClient) CreateGoal(ctx context.Context, args CreateGoalArgs) (*Result, error) {
+	call := CreateGoalBuild(args)
+	return qc.executeNamed(ctx, "createGoal", call)
+}
+
+func CreateGoalBuild(args CreateGoalArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin createGoal(")
+	b.WriteString("statement: ")
+	b.WriteString(quoteMemQL(args.Statement))
+	if args.Input != nil {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("input: ")
+		b.WriteString(renderMemQLValue(args.Input))
+	}
+	if args.AccountIds != nil {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountIds: ")
+		b.WriteString(renderMemQLValue(args.AccountIds))
+	}
+	if args.Ceilings != nil {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ceilings: ")
+		b.WriteString(renderMemQLValue(args.Ceilings))
+	}
+	if args.RequestedVia != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("requestedVia: ")
+		b.WriteString(quoteMemQL(args.RequestedVia))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -593,6 +680,43 @@ func DatasyncStartBackfillBuild(args DatasyncStartBackfillArgs) string {
 	return b.String()
 }
 
+// DecideApproval -- Decide one of the caller's pending approvals and resume the run parked on it. The decision is refused if the artifact changed since it was approved -- an approval is a decision about a specific command, patch, message or draft, and it never carries to a modified one.
+type DecideApprovalArgs struct {
+	// The v1:work:approval to decide.
+	ApprovalId string
+	// approved, rejected, or answered (for a feedback question).
+	Decision string
+	// The person's answer, for a feedback approval.
+	Answer map[string]any
+}
+
+// DecideApproval calls the engine builtin decideApproval.
+func (qc *QueryClient) DecideApproval(ctx context.Context, args DecideApprovalArgs) (*Result, error) {
+	call := DecideApprovalBuild(args)
+	return qc.executeNamed(ctx, "decideApproval", call)
+}
+
+func DecideApprovalBuild(args DecideApprovalArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin decideApproval(")
+	b.WriteString("approvalId: ")
+	b.WriteString(quoteMemQL(args.ApprovalId))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("decision: ")
+	b.WriteString(quoteMemQL(args.Decision))
+	if args.Answer != nil {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("answer: ")
+		b.WriteString(renderMemQLValue(args.Answer))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // EditDocument -- Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. ownerUserId is threaded from the document row, never the caller. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231).
 type EditDocumentArgs struct {
 	DocumentId   string
@@ -691,6 +815,43 @@ func (qc *QueryClient) FleetModels(ctx context.Context, args FleetModelsArgs) (*
 func FleetModelsBuild(args FleetModelsArgs) string {
 	_ = args
 	return "builtin fleetModels()"
+}
+
+// ForkRun -- Fork one of the caller's runs at a step: a NEW run that serves the shared prefix from the journal and runs live from the fork step on. The source run is untouched. Returns {runId}.
+type ForkRunArgs struct {
+	// The run to fork.
+	RunId string
+	// The step key to diverge at. Steps before it are served from the journal; this step and everything after run live.
+	AtStepKey string
+	// Variables to override on the fork. Anything omitted is inherited from the source run.
+	Variables map[string]any
+}
+
+// ForkRun calls the engine builtin forkRun.
+func (qc *QueryClient) ForkRun(ctx context.Context, args ForkRunArgs) (*Result, error) {
+	call := ForkRunBuild(args)
+	return qc.executeNamed(ctx, "forkRun", call)
+}
+
+func ForkRunBuild(args ForkRunArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin forkRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 16 {
+		b.WriteString(", ")
+	}
+	b.WriteString("atStepKey: ")
+	b.WriteString(quoteMemQL(args.AtStepKey))
+	if args.Variables != nil {
+		if b.Len() > 16 {
+			b.WriteString(", ")
+		}
+		b.WriteString("variables: ")
+		b.WriteString(renderMemQLValue(args.Variables))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // GithubConnectBegin -- Begin GitHub Connect: answer the URL the browser navigates to, with a server-held state bound to the signed-in caller.
@@ -1929,6 +2090,36 @@ func ReleaseCutStatusBuild(args ReleaseCutStatusArgs) string {
 	b.WriteString("builtin releaseCutStatus(")
 	b.WriteString("version: ")
 	b.WriteString(quoteMemQL(args.Version))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReplayRun -- Replay one of the caller's runs: a NEW run that serves EVERY model call from the journal, so it reaches no provider. Under the default strict policy a request with no journaled match raises a divergence pinned to the first step that differs; permissive makes a fresh call and journals it. Returns {runId}.
+type ReplayRunArgs struct {
+	// The run to replay.
+	RunId string
+	// strict (default) raises a divergence on a journal miss; permissive makes a fresh call and journals it.
+	Policy string
+}
+
+// ReplayRun calls the engine builtin replayRun.
+func (qc *QueryClient) ReplayRun(ctx context.Context, args ReplayRunArgs) (*Result, error) {
+	call := ReplayRunBuild(args)
+	return qc.executeNamed(ctx, "replayRun", call)
+}
+
+func ReplayRunBuild(args ReplayRunArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin replayRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if args.Policy != "" {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("policy: ")
+		b.WriteString(quoteMemQL(args.Policy))
+	}
 	b.WriteString(")")
 	return b.String()
 }

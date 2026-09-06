@@ -105,4 +105,13 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/timeutil"
 	_ "github.com/znasllc-io/memql/integrations/voice"
 	_ "github.com/znasllc-io/memql/integrations/workbench"
+	// The work spine's entry points (epic memql#4966). Registered on every
+	// node type rather than gated to the planner: the seven builtins are
+	// declared in dsl/work/builtins.memql, which every binary loads, and a
+	// capability present in the DSL and absent from the registry is a
+	// boot-time resolution failure -- not a quiet no-op. Every handler
+	// carries its own gate (a person acts on their own goals; the two sweeps
+	// are cluster-owner floored), so registering it everywhere widens
+	// nothing.
+	_ "github.com/znasllc-io/memql/integrations/work"
 )

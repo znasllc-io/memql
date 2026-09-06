@@ -1985,6 +1985,28 @@ QueryClient.prototype.capabilityGrant = function (this: QueryClient, args: Capab
   return this.executeNamed("capabilityGrant", buildCapabilityGrant(args), opts);
 };
 
+/** The caller's catalogued construct for one goal signature -- compile's EXACT-MATCH tier (epic memql#4966). Pushed down as a filter rather than folded in Go after a full catalog pull, because the exact tier is the one that must stay cheap: it is what makes a repeated goal reach no model at all, and paging an owner's whole catalog to find one row would put a cost on the free path that grows with how much the person has already automated. */
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["cataloguedConstructsForGoalSignature"] in generated_concepts.ts).
+export interface CataloguedConstructsForGoalSignatureArgs {
+  goalSignature: string;
+}
+
+export function buildCataloguedConstructsForGoalSignature(args: CataloguedConstructsForGoalSignatureArgs): string {
+  const parts: string[] = [];
+  parts.push("goalSignature: " + renderMemQLValue(args.goalSignature));
+  return "query cataloguedConstructsForGoalSignature(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    cataloguedConstructsForGoalSignature(args: CataloguedConstructsForGoalSignatureArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.cataloguedConstructsForGoalSignature = function (this: QueryClient, args: CataloguedConstructsForGoalSignatureArgs = {} as CataloguedConstructsForGoalSignatureArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("cataloguedConstructsForGoalSignature", buildCataloguedConstructsForGoalSignature(args), opts);
+};
+
 /** The caller's cataloged (reusable) constructs. Backs the compose-first matcher (#957): the planner searches these before authoring a net-new dependency. */
 // Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["cataloguedConstructsForOwner"] in generated_concepts.ts).
 export interface CataloguedConstructsForOwnerArgs {
@@ -10870,6 +10892,28 @@ QueryClient.prototype.workApprovalsForOwner = function (this: QueryClient, args:
   return this.executeNamed("workApprovalsForOwner", buildWorkApprovalsForOwner(args), opts);
 };
 
+/** One of the caller's goals by id. */
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalForOwner"] in generated_concepts.ts).
+export interface WorkGoalForOwnerArgs {
+  goalId: string;
+}
+
+export function buildWorkGoalForOwner(args: WorkGoalForOwnerArgs): string {
+  const parts: string[] = [];
+  parts.push("goalId: " + renderMemQLValue(args.goalId));
+  return "query workGoalForOwner(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workGoalForOwner(args: WorkGoalForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workGoalForOwner = function (this: QueryClient, args: WorkGoalForOwnerArgs = {} as WorkGoalForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workGoalForOwner", buildWorkGoalForOwner(args), opts);
+};
+
 /** The caller's goals, newest first. Owned: ownerUserId==actor.userId binds server-side. */
 // Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalsForOwner"] in generated_concepts.ts).
 export interface WorkGoalsForOwnerArgs {
@@ -10888,6 +10932,94 @@ declare module "./query.js" {
 
 QueryClient.prototype.workGoalsForOwner = function (this: QueryClient, args: WorkGoalsForOwnerArgs = {} as WorkGoalsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workGoalsForOwner", buildWorkGoalsForOwner(args), opts);
+};
+
+/** Every model call of one of the caller's runs. An on-demand read: the concept does not broadcast, so the Work app shows when it last read this. */
+// Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsForOwnerRun"] in generated_concepts.ts).
+export interface WorkModelCallsForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkModelCallsForOwnerRun(args: WorkModelCallsForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workModelCallsForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workModelCallsForOwnerRun(args: WorkModelCallsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workModelCallsForOwnerRun = function (this: QueryClient, args: WorkModelCallsForOwnerRunArgs = {} as WorkModelCallsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workModelCallsForOwnerRun", buildWorkModelCallsForOwnerRun(args), opts);
+};
+
+/** Every observation of one of the caller's runs. On-demand, like the model calls. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workObservationsForOwnerRun"] in generated_concepts.ts).
+export interface WorkObservationsForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkObservationsForOwnerRun(args: WorkObservationsForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workObservationsForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workObservationsForOwnerRun(args: WorkObservationsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workObservationsForOwnerRun = function (this: QueryClient, args: WorkObservationsForOwnerRunArgs = {} as WorkObservationsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workObservationsForOwnerRun", buildWorkObservationsForOwnerRun(args), opts);
+};
+
+/** One of the caller's runs by id. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunForOwner"] in generated_concepts.ts).
+export interface WorkRunForOwnerArgs {
+  runId: string;
+}
+
+export function buildWorkRunForOwner(args: WorkRunForOwnerArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workRunForOwner(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workRunForOwner(args: WorkRunForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workRunForOwner = function (this: QueryClient, args: WorkRunForOwnerArgs = {} as WorkRunForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workRunForOwner", buildWorkRunForOwner(args), opts);
+};
+
+/** The runs of one of the caller's goals, newest first. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunsForGoal"] in generated_concepts.ts).
+export interface WorkRunsForGoalArgs {
+  goalId: string;
+}
+
+export function buildWorkRunsForGoal(args: WorkRunsForGoalArgs): string {
+  const parts: string[] = [];
+  parts.push("goalId: " + renderMemQLValue(args.goalId));
+  return "query workRunsForGoal(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workRunsForGoal(args: WorkRunsForGoalArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workRunsForGoal = function (this: QueryClient, args: WorkRunsForGoalArgs = {} as WorkRunsForGoalArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workRunsForGoal", buildWorkRunsForGoal(args), opts);
 };
 
 /** The caller's runs, newest first. Owned: ownerUserId==actor.userId binds server-side, and the concept's tier admits the same rows on the SUBSCRIPTION, so a browser watching this feed is not handed anybody else's work the way an undeclared concept would.
@@ -10909,6 +11041,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.workRunsForOwner = function (this: QueryClient, args: WorkRunsForOwnerArgs = {} as WorkRunsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workRunsForOwner", buildWorkRunsForOwner(args), opts);
+};
+
+/** Every step of one of the caller's runs -- the run timeline. Bounded by the run; the client orders by seq, because @unbounded and sort cannot be combined. */
+// Bound concept: v1:work:step (machine-readable: BoundConcepts["workStepsForOwnerRun"] in generated_concepts.ts).
+export interface WorkStepsForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkStepsForOwnerRun(args: WorkStepsForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workStepsForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workStepsForOwnerRun(args: WorkStepsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workStepsForOwnerRun = function (this: QueryClient, args: WorkStepsForOwnerRunArgs = {} as WorkStepsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workStepsForOwnerRun", buildWorkStepsForOwnerRun(args), opts);
 };
 
 /** Look up the worker registration owned by an identity row.

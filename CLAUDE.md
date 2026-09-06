@@ -2374,6 +2374,66 @@ with a record per sub-project:
 [the Campaigns OS app](docs/superpowers/specs/2026-09-01-campaigns-os-app-design.md),
 [event emails](docs/superpowers/specs/2026-09-01-event-emails-design.md).
 
+### The work spine -- goals, runs, steps (epic memql#4966)
+
+A person gives a goal; the system works it out once, records the steps as
+atomic variable-taking units, and from then on replays them without a model
+unless reasoning is genuinely needed. `v1:work:{goal,run,step,modelCall,
+approval,observation}` is that spine, every concept on the composite owner
+tier. Design record:
+[the work spine](docs/superpowers/specs/2026-09-05-work-spine-design.md).
+
+**The layer split is what makes the claims checkable.** `component/work` is a
+leaf module of PURE decisions -- the compile order, the symptom rules table,
+the derived step kind, postcondition derivation, the footprint union, the run
+ceilings, the approval builders, the three replay modes. No engine, no
+provider, no database. So the two headline claims are properties of a
+function over values rather than counts against a mock: an exact catalog hit
+returns `NeedsModel=false`, and a rules-classified symptom returns without
+reaching the classifier prompt. `integrations/work` is the wiring; only it
+touches rows.
+
+- **Compile runs cheapest-first, and the order IS the design.** Catalog exact
+  match on `GoalSignature` (the normalized statement plus the SORTED input arg
+  names), then near match at 0.82 with a gap list, then ONE triage call that
+  answers complexity and sectionability together. An exact hit reaches no model
+  at all -- not even triage. `GoalSignature` is a NEW key rather than the
+  existing `CatalogKey`, which hashes construct SOURCE per kind and refuses
+  `automation` outright -- the kind a compiled goal is.
+- **Rules classify before a model does.** `ClassifyByRules` returning
+  `ok=false` is the only path that costs a call. Order inside the table is
+  load-bearing: the stalled-step rule sits ABOVE the transient matchers,
+  because a repeated action that also looks transient must escalate rather
+  than retry forever.
+- **Repair beats resample.** A contract miss re-runs the failed step with the
+  violation as guidance; a plan miss re-plans from that step with the prefix
+  KEPT. Never from the start -- `replanGap` is shown the completed steps as
+  fixed evidence and never re-emits them.
+- **Never a silent edit (D5).** Healing proposes its four typed patches and a
+  person approves them as a `planReview` approval. Note that
+  `healing.precondition.missed` was already emitted and broadcast with NOTHING
+  subscribed to it, so this arm is wiring a subscriber, not building a loop.
+- **One approval concept for every human gate (D6).** `v1:work:approval`
+  replaces the plan's feedback fields, the canvas cards and the safety gate's
+  `v1:safety:approvalRequest` sink. **The artifact hash is the guarantee**: an
+  approval is a decision about one specific command, patch, message or draft,
+  and resume compares the hash, so it can never carry to a modified artifact.
+  The surface is the MemQL OS Work app -- without one, a human gate is
+  invisible, which is exactly what the planner's canvas cards already were in
+  an engine-only cluster.
+- **The three-counter split is inherited from the plan row and means the same
+  thing.** Dollar ceilings (`tokenBudget`, `costCeiling`) EXCLUDE subscription
+  and local spend; loop caps (`maxModelCalls`, `maxRetries`, `maxEvents`,
+  `wallClockMs`) INCLUDE every call. A ceiling of zero is UNSET, never
+  "nothing allowed".
+- **Both sweeps are in `maintenanceAutomations`, and that is not optional.**
+  The work concepts declare the composite owner tier, so under the default
+  reader actor these reads answer ZERO ROWS AND NO ERROR: a sweep that resumes
+  nothing is indistinguishable from a cluster with nothing parked.
+- **`v1:planner:plan`, `task` and `taskState` are NOT retired.** Spec section F
+  retires them, gated on epic A3 re-keying Training off them; until that lands
+  the planner concepts and `component/planner` stay exactly as they are.
+
 ### Planner / Knowledge / Validation
 
 The schema is stable, so new features add fields/automations without migrations.

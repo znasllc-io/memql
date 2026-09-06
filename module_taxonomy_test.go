@@ -133,6 +133,31 @@ var pluginKinds = map[string]moduleKind{
 	// relationship `database` has to Postgres rather than the one `shopify`
 	// has to Shopify.
 	"logs": kindComponent,
+	// The work spine's entry points (epic memql#4966). A COMPONENT by this
+	// table's own test: does turning it off remove a feature, or break the
+	// engine?
+	//
+	// It breaks it. The seven builtins are declared in dsl/work/builtins.memql,
+	// which EVERY binary loads, so a node without the executor fails boot
+	// resolution on every node type -- the same reason `release`,
+	// `customDomain` and `logs` register everywhere. The two sweep automations
+	// load everywhere too, and one of them is the ONLY writer allowed to close
+	// a run whose node died, which is a permission granted to nobody if the
+	// plug-in is absent.
+	//
+	// It is also not an integration: it calls nobody's API. It writes this
+	// cluster's own graph rows and reads this cluster's own database, which is
+	// the relationship `database` has to Postgres rather than the one `shopify`
+	// has to Shopify. The one outbound thing it touches is the cluster's own
+	// blob container for the journal archive, through the same client the
+	// `storage` integration wraps -- `logs` is classified a component on
+	// exactly that reading.
+	//
+	// And there is no coherent "off". A goal that reached no executor is not a
+	// feature withheld, it is a row nothing will ever advance; the safety
+	// gate's Ask sink now writes v1:work:approval, so switching this off would
+	// silently remove every human gate in the cluster.
+	"work": kindComponent,
 
 	// --- PACKS: product features with a coherent "off". ---
 	"chat":          kindPack,

@@ -80,10 +80,10 @@ func plannerReasoningProvider() string {
 // plannerAgent call at the given per-cycle iteration. It returns:
 //
 //   - ("", false)            -> stay on the cheap tier (no provider
-//                               override; the prompt's @defaultProvider
-//                               applies). This is the path for iter 0..N-1.
+//     override; the prompt's @defaultProvider
+//     applies). This is the path for iter 0..N-1.
 //   - (reasoningProvider, true) -> escalate to the reasoning tier for
-//                               this call (iter >= threshold).
+//     this call (iter >= threshold).
 //
 // Escalation is disabled (always cheap) when the threshold is <= 0.
 // Deterministic + side-effect-free so the tiering contract is

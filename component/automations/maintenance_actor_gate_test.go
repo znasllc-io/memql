@@ -74,11 +74,24 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 	// builtin logsSweep is reserved to a cluster owner in its Go handler
 	// (design L3), and the automation's default RoleReader actor would be
 	// refused by the sweep it exists to run.
+	// The work spine's two sweeps joined in epic memql#4966. Both are the
+	// ordinary reason rather than logsRetentionSweep's: v1:work:run,
+	// v1:work:modelCall and v1:work:observation all declare the composite
+	// owner tier, so under the default RoleReader actor the owned branch
+	// matches nothing, the cluster-owner escape does not apply, and the read
+	// answers ZERO ROWS AND NO ERROR. sweepWaitingWorkRuns must see EVERY
+	// owner's parked runs -- a person whose run is stranded on a replica that
+	// has gone cannot resume it themselves, which is the whole reason it
+	// exists -- and workJournalRetentionSweep must fold each run's summary
+	// before its detail ages out, so a read that sees nothing does not merely
+	// skip a delete, it destroys the evidence it was there to preserve.
 	want := []string{
 		"auditEventRetentionSweep",
 		"logsRetentionSweep",
 		"seedSelfAccount",
 		"sweepAbandonedPackageDeployments",
+		"sweepWaitingWorkRuns",
+		"workJournalRetentionSweep",
 		"workerInvocationRetentionSweep",
 	}
 	got := auth.MaintenanceAutomationNames()

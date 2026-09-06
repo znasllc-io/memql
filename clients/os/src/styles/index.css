@@ -7802,3 +7802,818 @@ a.os-button {
     display: none;
   }
 }
+
+/* ===========================================================================
+ * Work -- the human surface of the work spine (sub-project A)
+ * ===========================================================================
+ *
+ * ONE DEVICE IS THIS APP'S OWN AND EVERYTHING ELSE IS THE KIT: the spine down
+ * the left of a run timeline, whose WEIGHT is the product's whole claim.
+ *
+ * The system works a goal out once and replays it afterwards without a model
+ * unless reasoning is genuinely needed. A person cannot check that from a
+ * table of forty-seven rows that all look alike -- they would have to read
+ * every row to find the three that cost something. So a deterministic step is
+ * a hollow node on a hairline (a hundred of them read as TEXTURE, not as a
+ * hundred things to read) and a reasoning step is a filled node on a segment
+ * of solid ink. Scanning a long run, the eye finds where the machine thought
+ * before a word has been read.
+ *
+ * THE CONTRAST IS DRAWN IN INK, NOT IN HUE, and that is deliberate three
+ * times over. Amber is `warn` and red is `error` everywhere in this shell and
+ * the accent is live/primary/yes-here -- so a colour-per-kind legend would put
+ * status hues on a partition that has nothing to do with status, and a
+ * reasoning step in accent would read as "this step is fine". A weight axis
+ * also survives greyscale, survives every theme pack (a pack carries colour,
+ * and this contrast uses none to mean anything), and is a SECOND channel
+ * rather than the only one: the kind is a word on the row and in the row's
+ * accessible name.
+ * ======================================================================== */
+
+/* THE VIEW OWNS ITS SCROLL, so a bar can be pinned to the window's floor
+ * without `position: fixed` -- which would anchor to the CSS-transformed desk
+ * plate rather than to the window. Same arrangement as `.os-deploy-pane`; the
+ * negative margin cancels the window's own padding so the bar meets its edges
+ * and the scrolling half gives it back. */
+.os-work-goals,
+.os-work-list,
+.os-work-approvals,
+.os-work-run {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  gap: 10px;
+  margin: -18px -20px;
+  padding: 18px 20px 0;
+}
+.os-work-goals > .os-actbar,
+.os-work-approvals > .os-actbar,
+.os-work-run > .os-actbar {
+  margin: 0 -20px;
+}
+
+/* The quiet scope line: sort, or a sentence about the order (rule 3). */
+.os-work-scope {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+.os-work-scope .os-caption {
+  margin: 0;
+}
+
+/* A LIST AND ITS DETAIL NEVER SHARE A SCROLL COLUMN (rule 11). Two columns,
+ * each its own scroller; the Head above them does not scroll away from the
+ * list somebody is scrolling. */
+.os-work-split {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: stretch;
+}
+.os-work-column {
+  flex: 1 1 340px;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.os-work-aside {
+  flex: 1 1 320px;
+  max-width: 460px;
+  align-self: flex-start;
+  max-height: 100%;
+}
+
+/* ---- goals ------------------------------------------------------------
+ *
+ * THE STATEMENT IS THE LOUDEST THING ON THE ROW. A goal's own name is a
+ * sentence somebody wrote, and everything else about it is metadata about
+ * that sentence -- so the row leads with it at content size and the rest is
+ * quiet. It truncates to one line here because a list has to; the whole of it
+ * lives in the detail, which is the reason that panel exists. */
+/* A FLEX ITEM'S DEFAULT `min-width: auto` REFUSES TO SHRINK BELOW ITS
+ * CONTENT, so a goal statement -- which is a sentence rather than a name --
+ * pushed `.os-row` 856px wide inside a 664px column and the list scrolled
+ * SIDEWAYS. The truncation has to be enabled on the flex ITEM, not only on
+ * the text inside it. Found in a browser; jsdom lays nothing out and the
+ * whole suite was green over it.
+ *
+ * Scoped to this app rather than added to `.os-row-name` in the kit: every
+ * other list in the shell names a THING, and a rule that let those names
+ * start truncating would change eight apps to fix one. */
+.os-work-goals .os-row-name,
+.os-work-approvals .os-row-name {
+  min-width: 0;
+}
+/* TWO LINES, NOT ONE. A goal is a sentence somebody wrote, and sixty
+ * characters of it plus an ellipsis is a worse answer than the whole first
+ * clause. Two lines is where it stops being a list row. */
+.os-work-goal-statement,
+.os-work-approval-subject {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.os-work-goal-origin {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+/* A chip in a squeezed state cluster wrapped onto two lines and doubled the
+ * row's height. Nothing in the cluster is prose. */
+.os-work-goals .os-chip,
+.os-work-list .os-chip,
+.os-work-approvals .os-chip {
+  white-space: nowrap;
+}
+
+.os-work-goal-status,
+.os-work-run-status {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  white-space: nowrap;
+}
+/* Failure and loss are the two the eye must find; everything else stays
+ * quiet. `abandoned` is WARN and never ERROR: nothing failed. */
+.os-work-goal-status[data-status="active"],
+.os-work-run-status[data-status="running"],
+.os-work-run-status[data-status="compiling"] {
+  color: var(--os-ink);
+}
+.os-work-run-status[data-status="failed"] {
+  color: var(--os-error);
+}
+.os-work-run-status[data-status="abandoned"],
+.os-work-run-status[data-status="waiting"] {
+  color: var(--os-warn);
+}
+
+.os-work-goal-full {
+  margin: 0;
+  font-size: var(--os-text-md);
+  line-height: 1.5;
+  color: var(--os-ink);
+  /* A readable measure. The statement is prose and the panel is not. */
+  max-width: 56ch;
+}
+
+.os-work-runlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* THE CONTEXT YIELDS BEFORE THE NAME. `flex: 1 1 auto` on this and a
+ * shrinkable name meant the name lost first, so a narrow column drew
+ * "re..." beside the whole of the goal it belongs to -- the identifier gone
+ * and the context intact, which is backwards. `flex-basis: 0` makes this the
+ * item that gives way. */
+.os-work-run-for {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+
+/* A goal's runs, as marks. Each carries its own accessible name, so the strip
+ * reads as "run 1, done; run 2, waiting for you" rather than as decoration --
+ * the same contract the Deployables list row's compact rail has. */
+.os-work-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+}
+.os-work-mark {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--os-rail);
+  flex: none;
+}
+.os-work-mark[data-status="succeeded"] {
+  background: var(--os-rail-hover);
+}
+.os-work-mark[data-status="running"],
+.os-work-mark[data-status="compiling"] {
+  background: var(--os-ink);
+}
+.os-work-mark[data-status="failed"] {
+  background: var(--os-error);
+}
+.os-work-mark[data-status="abandoned"] {
+  background: var(--os-warn);
+}
+/* The one place the accent appears on a mark: something is stuck on YOU. */
+.os-work-mark[data-parked] {
+  background: var(--os-accent);
+  box-shadow: 0 0 0 2px var(--os-accent-soft);
+}
+
+/* ---- the new-goal box -------------------------------------------------
+ *
+ * PROSE, NOT MONO. The campaigns template editor's box is mono because it
+ * holds markup somebody will paste elsewhere; this holds a sentence somebody
+ * wrote, and setting it in the code face would tell them it is a value. */
+.os-work-statement {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-plate);
+  color: var(--os-ink);
+  font-family: var(--os-font);
+  font-size: var(--os-text-md);
+  line-height: 1.5;
+  resize: vertical;
+}
+.os-work-form-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---- the run page -----------------------------------------------------*/
+.os-work-run-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 12px;
+}
+/* WHAT THIS RUN IS FOR, FIRST. A run's own name is an automation name; the
+ * reason it exists is the goal's statement, and that is what somebody
+ * arriving from a notification needs before anything else. */
+.os-work-run-lede {
+  margin: 0;
+  max-width: 62ch;
+  font-size: var(--os-text-md);
+  line-height: 1.5;
+  color: var(--os-ink);
+}
+
+.os-work-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+.os-work-back:hover {
+  color: var(--os-ink);
+}
+/* A link inside prose: the accent carries it, and the underline carries it
+ * for anyone who cannot see the accent. */
+.os-work-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  /* A BUTTON CENTRES ITS OWN TEXT, so a goal statement long enough to wrap
+   * drew its second line centred inside a left-aligned paragraph. `inline`
+   * keeps it in the sentence it is part of. */
+  display: inline;
+  text-align: left;
+  color: var(--os-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---- the kind band ----------------------------------------------------
+ *
+ * One run's steps, divided by what each one cost. The send bar's mechanism
+ * (flex-grow segments, a floored minimum share, a spoken label) applied to a
+ * different partition -- and the WEIGHT axis rather than the hue one, for the
+ * reason stated at the top of this section. */
+.os-work-band {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 2px 0 8px;
+}
+.os-work-band-bar {
+  display: flex;
+  width: 100%;
+  height: 14px;
+  border-radius: var(--os-radius-xs);
+  overflow: hidden;
+  background: var(--os-rail);
+  border: 1px solid var(--os-line);
+}
+.os-work-band-bar[data-empty] {
+  background: transparent;
+}
+.os-work-band-seg {
+  display: block;
+  min-width: 2px;
+  flex-basis: 0;
+  transition: flex-grow var(--os-duration-med) var(--os-ease);
+}
+/* THE LADDER, from cheapest to most expensive. Deterministic is the rail's
+ * own tint -- the texture the run is mostly made of -- and reasoning is solid
+ * ink. Human is the accent because it is the slice that stops the run and
+ * waits for a person, which is the only thing on this band a reader can act
+ * on. Unclassified is a hatch rather than a shade: it is not a value between
+ * two others, it is an absent answer, and giving it a place on the ladder
+ * would put it somewhere on a scale it is not on. */
+/* The largest slice must still READ as a slice. At `--os-rail-hover` over the
+ * bar's own `--os-rail` ground it looked like the bar started with a gap,
+ * which reads as a rendering fault rather than as "most of this run was
+ * free". It stays the quietest step on the ladder, one rung up. */
+.os-work-band-seg[data-kind="deterministic"],
+.os-work-band-swatch[data-kind="deterministic"] {
+  background: color-mix(in oklab, var(--os-ink) 28%, transparent);
+}
+.os-work-band-seg[data-kind="decision"],
+.os-work-band-swatch[data-kind="decision"] {
+  background: color-mix(in oklab, var(--os-ink) 45%, transparent);
+}
+.os-work-band-seg[data-kind="subrun"],
+.os-work-band-swatch[data-kind="subrun"] {
+  background: color-mix(in oklab, var(--os-ink) 65%, transparent);
+}
+.os-work-band-seg[data-kind="loop"],
+.os-work-band-swatch[data-kind="loop"],
+.os-work-band-seg[data-kind="reasoning"],
+.os-work-band-swatch[data-kind="reasoning"] {
+  background: var(--os-ink);
+}
+.os-work-band-seg[data-kind="human"],
+.os-work-band-swatch[data-kind="human"] {
+  background: var(--os-accent);
+}
+.os-work-band-seg[data-kind="unclassified"],
+.os-work-band-swatch[data-kind="unclassified"] {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--os-rail) 0 3px,
+    transparent 3px 6px
+  );
+}
+
+.os-work-band-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.os-work-band-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--os-text-sm);
+}
+.os-work-band-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  transform: translateY(1px);
+  border: 1px solid var(--os-line);
+}
+.os-work-band-label {
+  color: var(--os-muted);
+}
+.os-work-band-count {
+  font-family: var(--os-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The spend line: the band's legend in figures, not four stat cards beside
+ * it. Every value can be ABSENT and renders as an em dash. */
+.os-work-spend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin: 4px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--os-line);
+  list-style: none;
+}
+.os-work-spend-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.os-work-spend-value {
+  font-size: var(--os-text-md);
+  font-variant-numeric: tabular-nums;
+}
+.os-work-spend-label {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+/* ---- the spine --------------------------------------------------------*/
+.os-work-timeline {
+  display: flex;
+  flex-direction: column;
+}
+.os-work-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.os-work-step-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.os-work-step {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--os-ink);
+  font: inherit;
+}
+.os-work-step:hover .os-work-step-body,
+.os-work-step[data-open] .os-work-step-body {
+  background: var(--os-raised);
+}
+
+/* THE GUTTER. Fixed width so every node in a run sits on one vertical line --
+ * a spine that wandered by a pixel per row would read as a list of unrelated
+ * marks rather than as one thread. */
+.os-work-step-spine {
+  position: relative;
+  flex: none;
+  width: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+/* THE HAIRLINE HAD TO BE VISIBLE TO BE A THREAD. At `--os-rail` (ink at
+ * 14%) a 1px line simply did not render against the dark ground, so the
+ * spine appeared only where a reasoning step drew it in ink -- which read as
+ * four unrelated marks rather than as one thread thickening. `--os-rail-hover`
+ * is the shell's own "this rail is present" tint and 1.5px carries it in both
+ * modes. Found in a browser; jsdom lays nothing out. */
+.os-work-step-line {
+  flex: 1 1 auto;
+  width: 1.5px;
+  min-height: 6px;
+  background: var(--os-rail-hover);
+}
+.os-work-step-node {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin: 2px 0;
+  border-radius: 50%;
+  box-sizing: border-box;
+  border: 1.5px solid var(--os-rail-hover);
+  background: var(--os-plate);
+}
+/* A STEP THAT THOUGHT. Solid ink, a wider thread, a filled and slightly
+ * larger node -- the three together are what makes a reasoning step findable
+ * at a glance in a run of fifty. Nothing here is a hue, so it reads the same
+ * under every theme pack and in greyscale. */
+.os-work-step[data-thought] .os-work-step-line {
+  width: 3px;
+  background: var(--os-ink);
+}
+.os-work-step[data-thought] .os-work-step-node {
+  width: 11px;
+  height: 11px;
+  border-color: var(--os-ink);
+  background: var(--os-ink);
+}
+/* A step that stops and asks somebody is the other one worth finding, and it
+ * is the accent for the reason the run mark is: it is the only thing on this
+ * page a reader can act on. */
+.os-work-step[data-kind="human"] .os-work-step-node {
+  border-color: var(--os-accent);
+  background: var(--os-accent);
+}
+.os-work-step[data-status="failed"] .os-work-step-node {
+  border-color: var(--os-error);
+  background: var(--os-error);
+}
+/* A step that has not run yet draws nothing: pending rows are the shape of
+ * the plan rather than a record of anything, and drawing them at full weight
+ * would make a run that has done nothing look busy. */
+.os-work-step[data-status="pending"] .os-work-step-node,
+.os-work-step[data-status="ready"] .os-work-step-node {
+  border-color: var(--os-rail);
+  background: transparent;
+}
+
+.os-work-step-seq {
+  flex: none;
+  width: 2.2ch;
+  padding-top: 7px;
+  font-family: var(--os-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  text-align: right;
+}
+
+.os-work-step-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  border-radius: var(--os-radius-xs);
+}
+.os-work-step-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.os-work-step-key {
+  font-size: var(--os-text-base);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-work-step-call {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-work-step-symptom {
+  font-size: var(--os-text-xs);
+  color: var(--os-warn);
+}
+.os-work-step-error {
+  font-size: var(--os-text-xs);
+  color: var(--os-error);
+  overflow-wrap: anywhere;
+}
+
+.os-work-step-state {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+/* THE COST SITS ONLY ON THE STEPS THAT COST SOMETHING, so the visual weight
+ * and the bill are in the same places. */
+.os-work-step-spend {
+  display: flex;
+  gap: 8px;
+  color: var(--os-ink);
+  font-variant-numeric: tabular-nums;
+}
+.os-work-step-kind,
+.os-work-step-duration {
+  white-space: nowrap;
+}
+.os-work-step-kind {
+  min-width: 8ch;
+  text-align: right;
+}
+.os-work-step-duration {
+  min-width: 6ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.os-work-step-status {
+  min-width: 6ch;
+  white-space: nowrap;
+}
+.os-work-step-status[data-status="failed"] {
+  color: var(--os-error);
+}
+.os-work-step-status[data-status="waiting"] {
+  color: var(--os-warn);
+}
+.os-work-step-status[data-status="running"] {
+  color: var(--os-ink);
+}
+/* `transform` does nothing to a non-replaced INLINE element, so a chevron
+ * that is not inline-block silently never turns -- and jsdom cannot see it. */
+.os-work-step-chevron {
+  display: inline-block;
+  color: var(--os-muted);
+  transition: transform var(--os-duration-fast) var(--os-ease);
+}
+.os-work-step[data-open] .os-work-step-chevron {
+  transform: rotate(90deg);
+}
+
+/* The step, opened: a disclosure UNDER the row rather than a second panel.
+ * It carries no Head and no acts, so it is the row saying more about itself
+ * -- which is what keeps rule 11 satisfied. The inset aligns it under the
+ * body rather than under the spine, so the thread stays unbroken. */
+.os-work-step-detail {
+  margin: 2px 0 10px 30px;
+  padding: 10px 12px;
+  /* The disclosure has to read as ATTACHED to the spine. At `--os-rail` the
+   * stub was invisible on dark and the panel floated free of the step it
+   * belongs to. */
+  border-left: 2px solid var(--os-rail-hover);
+  border-radius: 0 var(--os-radius-xs) var(--os-radius-xs) 0;
+  background: var(--os-raised);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.os-work-step-meaning {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-ink);
+}
+
+/* ---- the journal ------------------------------------------------------
+ *
+ * NOT LIVE, AND IT SAYS SO. `v1:work:modelCall` and `v1:work:observation`
+ * carry no broadcast routing rule -- one row per model request and one per
+ * tool result -- so this reads when asked and prints when it looked. A live
+ * list here would render "Loading from the cluster" and then a list that
+ * silently never moved, which is worse than a plain read. */
+.os-work-journal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+}
+.os-work-journal-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.os-work-journal-head .os-subhead {
+  margin: 0;
+}
+.os-work-journal-when {
+  margin-right: auto;
+}
+.os-work-journal-when .os-caption {
+  margin: 0;
+}
+.os-work-journal-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.os-work-journal-count {
+  margin: 0;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+.os-work-journal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.os-work-journal-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--os-radius-xs);
+  background: var(--os-raised);
+  font-size: var(--os-text-sm);
+}
+/* A call SERVED FROM THE JOURNAL is the headline of the whole product, so it
+ * is the one row state drawn in the accent: it is the call that cost nothing. */
+.os-work-journal-row[data-served="journal"] {
+  box-shadow: inset 2px 0 0 var(--os-accent);
+}
+.os-work-journal-model {
+  color: var(--os-ink);
+}
+.os-work-journal-served,
+.os-work-journal-obs-kind {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+.os-work-journal-figures {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+.os-work-journal-error {
+  flex: 1 1 100%;
+  color: var(--os-error);
+  font-size: var(--os-text-xs);
+  overflow-wrap: anywhere;
+}
+.os-work-journal-content {
+  flex: 1 1 100%;
+  min-width: 0;
+  color: var(--os-ink);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* ---- approvals --------------------------------------------------------*/
+.os-work-approval-run {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+/* THE QUESTION IS THE LOUDEST THING IN THE PANEL. A person opens an approval
+ * to answer it, not to read metadata about it, so it is set at content size
+ * with a readable measure and everything else is quiet beneath. */
+.os-work-approval-ask {
+  margin: 0;
+  max-width: 56ch;
+  font-size: var(--os-text-md);
+  line-height: 1.5;
+  color: var(--os-ink);
+}
+
+/* ---- the acts ---------------------------------------------------------*/
+/* THE CONFIRM SITS BESIDE ITS BUTTON, NOT ABOVE IT. `flex: 1 1` made the
+ * field grow until the danger button wrapped onto a second line, which reads
+ * as two unrelated controls -- and put the button under a field somebody has
+ * not filled in yet. */
+.os-work-confirm {
+  flex: 0 0 auto;
+  width: 24ch;
+}
+
+/* A run's name is a name and truncates on one line -- unlike a goal's
+ * statement, which is a sentence and clamps to two. Without the
+ * `overflow: hidden` the shrunken flex item simply SPILLS, drawing the name
+ * on top of the line beside it. */
+.os-work-run-name {
+  display: block;
+  /* A floor, so a long automation name shrinks but never vanishes. */
+  min-width: 10ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-work-goals .os-row-name,
+.os-work-list .os-row-name,
+.os-work-approvals .os-row-name {
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Elapsed time never wraps: "16h" over "ago" reads as two facts. */
+.os-work-goals .os-row-state .os-caption,
+.os-work-list .os-row-state .os-caption,
+.os-work-approvals .os-row-state .os-caption {
+  white-space: nowrap;
+}
+/* A REFUSAL RENDERS BESIDE THE CONTROL THAT PRODUCED IT, never as a toast.
+ * It takes its own line on the bar so the acts do not shuffle sideways when
+ * one arrives. */
+.os-work-act-error {
+  flex: 1 1 100%;
+  order: 1;
+  color: var(--os-error);
+  font-size: var(--os-text-xs);
+  overflow-wrap: anywhere;
+}

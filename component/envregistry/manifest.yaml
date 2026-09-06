@@ -3232,6 +3232,28 @@ variables:
     optional: true
     description: "Filesystem root under which each Plan's sandboxed workspace directory is lazily provisioned, as <root>/<planId>/. Point it at a project-local path for dev, or a mounted volume where the default is not durable. The directory tree IS the workspace state -- it persists across calls within a Plan so multi-Task agents share files, and is torn down on Plan terminal status -- so moving this on a running node abandons live workspaces rather than relocating them."
 
+  # --- the work spine's journal retention (epic memql#4966) ---
+
+  - name: MEMQL_WORK_MODELCALL_RETENTION_DAYS
+    component: work
+    scope: node
+    default: "90"
+    optional: true
+    description: "How many days of v1:work:modelCall detail a run keeps before the nightly workJournalRetentionSweep archives and deletes it. The run's summary is folded onto the run row FIRST, so a run stays readable after its detail is gone. A non-positive or unparseable value falls back to 90 rather than becoming zero, which would archive and delete the whole journal on the next pass. NO ARCHIVE MEANS NO DELETE: with no archive container configured (MEMQL_WORK_ARCHIVE_CONTAINER or MEMQL_AZURE_BLOB_CONTAINER) the sweep keeps every row and says so in its own log line every night."
+
+  - name: MEMQL_WORK_OBSERVATION_RETENTION_DAYS
+    component: work
+    scope: node
+    default: "180"
+    optional: true
+    description: "How many days of v1:work:observation detail a run keeps, on the same archive-then-delete rule as MEMQL_WORK_MODELCALL_RETENTION_DAYS. Twice the model-call window by default because observations are the episodic memory the recall builtin reads, while a model call is evidence about one request -- so this figure is how far back an agent's own recall can reach."
+
+  - name: MEMQL_WORK_ARCHIVE_CONTAINER
+    component: work
+    scope: node
+    optional: true
+    description: "The blob container the journal retention sweep archives expired rows into, as journal/<day>/<concept>.ndjson.gz. Defaults to the cluster's own container, MEMQL_AZURE_BLOB_CONTAINER. With neither set the sweep REFUSES to delete anything -- a cluster without object storage keeps its journal, which is why there is no TimescaleDB retention policy on these rows: a policy cannot be told to wait for an upload."
+
   # --- worker ---
 
   - name: MEMQL_WORKER_DIAL_ENDPOINT

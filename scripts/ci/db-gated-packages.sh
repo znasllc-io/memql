@@ -67,6 +67,21 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # happen to run beside a database they ignore. The tree took about two seconds
 # of the step's 180s budget when measured.
 #
+# epic memql#4966 added `integrations/work`. Every other test in that
+# package speaks to a recording executor, and render_test.go hands each
+# composed call to the real parser -- but a call that PARSES is not a row
+# that LANDS. Four things sit between the two and none is reachable without
+# Postgres: the concept's own type check (an optional object rendered as
+# null refuses the whole insert, which is one of the two defects this epic
+# fixed), @serverSet stamping of ownerUserId, row-authz admission -- whose
+# failure mode is ZERO ROWS AND NO ERROR, indistinguishable from "this
+# person has no goals" -- and whether the row exists afterwards at all.
+# goal_db_test.go asserts both directions: the owner reads the goal back
+# and a different actor does not. Without this entry that test runs on
+# developer machines and never in CI, which is the shape of gate the root
+# CLAUDE.md warns about: one skipped by default cannot be what stands
+# between a feature and the bug it prevents.
+#
 # memql#4389 added `integrations/shopify`. The Shopify connector's
 # customers/redact job rewrites the PII fields of every VERSION of every row
 # referencing a customer, through raw SQL, because "every version" is exactly
@@ -125,6 +140,7 @@ readonly DB_GATED_TREES=(
 	"integrations/embedding"
 	"integrations/planner"
 	"integrations/shopify"
+	"integrations/work"
 	"examples/referencepack"
 )
 
@@ -183,6 +199,26 @@ readonly DB_GATED_TREES=(
 # executor rather than against a database -- so neither belongs in
 # DB_GATED_TREES above, and adding one there would move real coverage out of
 # every lane that runs without Postgres.
+# epic memql#4966 added `component/work`, the work spine's PURE decision layer
+# (compile order, symptom rules, postconditions, ceilings, replay modes). What
+# the complement now means, having looked -- and MEASURED rather than assumed,
+# because this is the question the entry exists to make somebody answer:
+# `go list github.com/znasllc-io/memql/...` runs in workspace mode and DOES
+# enumerate `component/work`, so its tests run in this lane and it needs no lane
+# of its own. Confirmed by `make test` reporting
+# `ok github.com/znasllc-io/memql/component/work`. It is ADDITIONALLY built and
+# vetted with GOWORK=off by `module-boundaries`, which is where the boundary
+# itself is enforced.
+#
+# It is a module rather than a package because it must stay a LEAF: it is
+# imported by both `integrations/work` and `integrations/planner`, and its whole
+# value is that it reaches no engine, no provider and no database -- which is
+# what lets the spec's headline claims be proved as properties of a function
+# over values. A go.mod with no internal requires is what keeps that true under
+# GOWORK=off rather than by convention.
+#
+# `integrations/work` is NOT here and must not be: it is a package inside the
+# existing `integrations` module, not a module.
 readonly KNOWN_GO_MOD_DIRS=(
 	"."
 	"component/actions"
@@ -197,6 +233,7 @@ readonly KNOWN_GO_MOD_DIRS=(
 	"component/events"
 	"component/fileprocessor"
 	"component/frontdoor"
+	"component/work"
 	"component/envregistry"
 	"component/grpc"
 	"component/grpc/gen"

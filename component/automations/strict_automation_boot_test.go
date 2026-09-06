@@ -84,8 +84,11 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 46 -> 47 with logsRetentionSweep, the log store's nightly archive-then-delete
 // sweep (epic memql#4893); 47 -> 48 with sweepAbandonedPackageDeployments, the
 // two-minutely close of a deploy whose node stopped answering (epic
-// memql#4900).
-const shippedAutomationCount = 48
+// memql#4900); 48 -> 50 with the work spine's two sweeps --
+// sweepWaitingWorkRuns (resume a due timer wait or re-claim an abandoned run)
+// and workJournalRetentionSweep (fold the run summary, then archive-then-delete
+// the journal) -- epic memql#4966.
+const shippedAutomationCount = 50
 
 // TestStrictAutomationBoot_MalformedAutomationRefusesBoot is the core
 // acceptance test: a malformed automation injected as a throwaway domain (the
