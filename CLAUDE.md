@@ -316,6 +316,21 @@ DSL all live here.
    scripts/dev/merge-as-owner.sh --pr=<n>           # merge
    ```
 
+   **"A failing check" means a failing REQUIRED one** (memql#5016). The guard
+   counted every red lane, and this repo has two that no PR can turn green:
+   CodeQL's `Analyze (go)`, which crashes above ~300 changed files and is red on
+   pristine `main`, and `install-cluster-e2e`, which is flaky and installs a
+   PINNED RELEASED STACK rather than the branch under test. So the guard was
+   strictest on exactly the PRs it exists for -- removal epics, regenerations,
+   large refactors -- and named no way out, which is an invitation to reach for
+   `gh pr merge --admin` and skip the script entirely. It now refuses on a red
+   or pending check the RULESET REQUIRES (`ci-required`, an `if: always()`
+   aggregate, so its own green says everything required has settled) and REPORTS
+   the rest, marking each `FAILED (REQUIRED)` or `failed (not required)`.
+   **If the required-check list cannot be read it refuses on everything** --
+   an intersection against an unknown set is empty, and an empty intersection
+   would pass every red build.
+
    **Do not "fix" this by lowering `require_code_owner_review`** -- that removes
    the requirement for everyone, which is a different policy.
 3. **Pre-release -- no backwards-compat shims or deprecation windows.** When a
