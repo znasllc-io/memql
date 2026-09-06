@@ -845,7 +845,7 @@ QueryClient.prototype.githubConnectBegin = function (this: QueryClient, args: Gi
   return this.executeNamed("githubConnectBegin", buildGithubConnectBegin(args), opts);
 };
 
-/** Answer, in one row, whether this caller can get inference at all and through which of the three doors: a local model on their fleet, the Anthropic workload-identity federation, or a configured API key. Read from the SAME catalog and provider registry the router reads, so eligibility has exactly one implementation -- a second one drifts, and the drift lets a user through to a console whose features all refuse. Backs the portal's first-run gate. */
+/** Answer, in one row, whether this caller can get inference at all and through which of the three doors: a local model on their fleet, the Anthropic workload-identity federation, or a configured API key. Read from the SAME catalog and provider registry the router reads, so eligibility has exactly one implementation -- a second one drifts, and the drift lets a user through to a console whose features all refuse. Backs the shell's first-run gate. */
 export interface InferenceStatusArgs {
 }
 
@@ -1631,7 +1631,7 @@ QueryClient.prototype.providerVerify = function (this: QueryClient, args: Provid
   return this.executeNamed("providerVerify", buildProviderVerify(args), opts);
 };
 
-/** Re-resolve AI provider credentials from the graph on EVERY node, so a key seeded through the portal takes effect fleet-wide with no restart. Reloads this node synchronously and broadcasts the same request over the mesh; each node builds a replacement registry fully and swaps it in atomically, so in-flight calls are unaffected and a node that cannot build one keeps what it had. Writes a providers_reloaded audit line naming who asked. Owner-only. */
+/** Re-resolve AI provider credentials from the graph on EVERY node, so a key seeded through Settings -> AI providers takes effect fleet-wide with no restart. Reloads this node synchronously and broadcasts the same request over the mesh; each node builds a replacement registry fully and swaps it in atomically, so in-flight calls are unaffected and a node that cannot build one keeps what it had. Writes a providers_reloaded audit line naming who asked. Owner-only. */
 export interface ProvidersReloadArgs {
   /** Ties every node's log line back to one Apply. Generated when omitted. */
   requestId?: string;

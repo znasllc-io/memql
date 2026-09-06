@@ -4433,7 +4433,7 @@ QueryClient.prototype.nodeSpecsForDeployment = function (this: QueryClient, args
   return this.executeNamed("nodeSpecsForDeployment", buildNodeSpecsForDeployment(args), opts);
 };
 
-/** Every node_token identity across the cluster (active + revoked), in the credential-free nodeTokenSummary shape. Owner or admin only. Backs the portal's Tokens surface (memql#3324).
+/** Every node_token identity across the cluster (active + revoked), in the credential-free nodeTokenSummary shape. Owner or admin only. Backs Settings -> Tokens (memql#3324; the portal's Tokens surface until epic memql#4984).
 Why actor.userId scoping is not the alternative: a node_token row's `userId` is the synthetic bootstrap user rather than any reader, so `userId==actor.userId` returns nothing for the admin who consumes this. The gate that fits is the role, and it is stated here rather than left to a route. */
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["nodeTokenIdentitiesAdmin"] in generated_concepts.ts).
 export interface NodeTokenIdentitiesAdminArgs {
@@ -9453,7 +9453,7 @@ QueryClient.prototype.siteById = function (this: QueryClient, args: SiteByIdArgs
   return this.executeNamed("siteById", buildSiteById(args), opts);
 };
 
-/** The deployables this caller may see: their OWN sites, or every site in the cluster when the caller is a cluster owner. The portal's primary screen.
+/** The deployables this caller may see: their OWN sites, or every site in the cluster when the caller is a cluster owner. The Deployables app's primary screen.
 ARCHIVED ROWS ARE EXCLUDED HERE and listed by sitesArchived instead (epic memql#4794, D10). The exclusion is written out rather than folded into a trait, because it is the one conjunct whose counterpart query deliberately inverts it -- and a reader comparing the two needs to see the same term in both -- here `isNotArchived`, there `statusIsArchived`. The trait is `status != "archived"` rather than an allow-list of the other three: status is required, so every row carries one, and != is null-safe against a non-empty literal (memql#1685) -- while an allow-list would silently drop a row the day a fifth value is added.
 The name predates self-serve deployables and is kept: it is the same read, and the composite tier is what decides how far "all" reaches for a given actor. The caller term is that tier's own predicate written out -- see siteByHostname for why the bare admin gate it replaced would now collapse the read to cluster owners alone. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesAll"] in generated_concepts.ts).

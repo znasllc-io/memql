@@ -2462,7 +2462,8 @@ query identity nodeTokenIdentities {
 // see.
 
 /// Every node_token identity across the cluster (active + revoked), in the credential-free
-/// nodeTokenSummary shape. Owner or admin only. Backs the portal's Tokens surface (memql#3324).
+/// nodeTokenSummary shape. Owner or admin only. Backs Settings -> Tokens (memql#3324;
+/// the portal's Tokens surface until epic memql#4984).
 ///
 /// Why actor.userId scoping is not the alternative: a node_token row's `userId` is the synthetic
 /// bootstrap user rather than any reader, so `userId==actor.userId` returns nothing for the admin
