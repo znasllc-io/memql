@@ -60,17 +60,23 @@ type MemQLEngine struct {
 	// resolves every allow-listed key to its zero value (sensitive
 	// -> false, non-sensitive -> ""). Wired via SetConfigSnapshot
 	// from app bootstrap.
-	configSnapshot          interface{} // *busv1.ConfigSnapshot, kept as interface{} to avoid an import cycle through engine.go itself.
-	shapes                  *ShapeRegistry
-	schemaIdx               *schemaIndex
-	db                      *bun.DB
-	dbGetter                func() *bun.DB // Function that returns current DB (handles reconnection)
-	dbMu                    sync.RWMutex
-	initialized             bool
-	config                  engineConfig
-	aiCacheConfig           aiCacheConfig
-	cache                   *resultCache
-	aiRuntime               *aiRuntime
+	configSnapshot interface{} // *busv1.ConfigSnapshot, kept as interface{} to avoid an import cycle through engine.go itself.
+	shapes         *ShapeRegistry
+	schemaIdx      *schemaIndex
+	db             *bun.DB
+	dbGetter       func() *bun.DB // Function that returns current DB (handles reconnection)
+	dbMu           sync.RWMutex
+	initialized    bool
+	config         engineConfig
+	aiCacheConfig  aiCacheConfig
+	cache          *resultCache
+	aiRuntime      *aiRuntime
+	// modelSeam records model calls for a work run and serves them back on
+	// a replay (memql#4999). Its journal is nil until app/ wires one, and
+	// nil is a working configuration: the engine then runs every call live
+	// and journals nothing, which is what every binary that does not host
+	// the work integration does.
+	modelSeam               *modelSeam
 	eventBus                *events.Bus
 	serviceVersion          string
 	builtinExecutorHandlers map[string]builtinExecutorHandler
@@ -249,7 +255,11 @@ func New(db *bun.DB, args ...component.Arg) (*MemQLEngine, error) {
 		aiCacheConfig: aiCacheCfg,
 		cache:         cache,
 		integrations:  newIntegrationRegistry(),
+		// Always non-nil, so no call site has to nil-check the seam itself.
+		// Its JOURNAL is what stays nil until app/ wires one.
+		modelSeam: &modelSeam{},
 	}
+	memql.modelSeam.logger = memql.Logger
 
 	if err := memql.Component.ConfigureLifecycle(
 		component.WithRunHook(memql.run),

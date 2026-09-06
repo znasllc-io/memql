@@ -156,11 +156,22 @@ K3D_AGENTS="${MEMQL_K3D_AGENTS:-0}"
 # needs more than a couple of minutes on a cold image cache -- default high.
 ARGOCD_TIMEOUT="${MEMQL_K3D_ARGOCD_TIMEOUT:-300}"
 
+# Timeout for ArgoCD to produce a COMPARISON for the registered Application
+# (seconds). Not a sync and not a rollout -- only "has ArgoCD managed to look
+# at the source at all". A repo it cannot fetch, a path that is not there and
+# an AppProject that refuses the source all answer within seconds; this is the
+# budget for the fetch itself. See wait_for_app_comparison (memql#5029).
+APP_COMPARE_TIMEOUT="${MEMQL_K3D_APP_COMPARE_TIMEOUT:-180}"
+
 # Outcome tracking (result envelope + idempotency reporting).
 CLUSTER_CREATED=false
 ARGOCD_READY=false
 OPERATOR_STACK_READY=false
 WORKLOADS_READY=false
+# WORKLOADS_REASON -- why WORKLOADS_READY is false, in this script's own words.
+# It rides the result envelope so the install graph's verify can say WHAT went
+# wrong instead of naming the JSON path that did not hold (memql#5029).
+WORKLOADS_REASON=""
 IMAGE_REGISTRY=""
 IMAGE_TAG=""
 DB_IMAGE_TAG=""
@@ -395,8 +406,15 @@ function install_argocd() {
 
     if kubectl get namespace "${ARGOCD_NAMESPACE}" &>/dev/null; then
         if kubectl get deployment argocd-server -n "${ARGOCD_NAMESPACE}" &>/dev/null; then
-            info "ArgoCD already installed in namespace '${ARGOCD_NAMESPACE}' -- skipping."
-            ARGOCD_READY=true
+            # PRESENT IS NOT READY (memql#5029). This used to set ARGOCD_READY
+            # and return, so a re-run against a cluster whose argocd-server was
+            # restarting -- which is every `repair`, and the second clusterUp of
+            # every `upgrade` -- reported the reconciler ready and went straight
+            # on to register an Application nothing was there to sync. The wait
+            # is idempotent and returns immediately when it really is ready, so
+            # the only thing skipping it ever bought was the wrong answer.
+            info "ArgoCD already installed in namespace '${ARGOCD_NAMESPACE}' -- skipping the apply."
+            wait_for_argocd
             return 0
         fi
     fi
@@ -518,6 +536,7 @@ function wait_for_workloads() {
     if [[ -z "$(all_deployments)" ]]; then
         warn "no Deployments in ${NAMESPACE} yet -- ArgoCD may not have applied them."
         WORKLOADS_READY=false
+        WORKLOADS_REASON="ArgoCD applied no Deployments to ${NAMESPACE} at all. The Application was registered and its source compared, so this is a sync that produced nothing rather than a workload that will not start: $(argocd_app_state)"
         return 0
     fi
 
@@ -529,6 +548,7 @@ function wait_for_workloads() {
         # exists to end.
         warn "every Deployment in ${NAMESPACE} is scaled to 0 -- nothing is running."
         WORKLOADS_READY=false
+        WORKLOADS_REASON="every Deployment in ${NAMESPACE} is scaled to 0, so nothing is running"
         return 0
     fi
 
@@ -563,6 +583,7 @@ function wait_for_workloads() {
     done
 
     WORKLOADS_READY=false
+    WORKLOADS_REASON="not every workload became Available within ${deadline}s: $(what_is_not_ready | tr '\n' '; ')"
     warn "not every workload that is scaled up became Available within ${deadline}s."
     # The REASON, on stderr, where the operator is already looking. A pod stuck
     # on a missing Secret and a pod that cannot pull its image are different
@@ -831,8 +852,19 @@ function _wait_for_operator() {
             sleep 3
         done
     done
+    # ONE BUDGET FOR THE WHOLE CALL, not one per Deployment (memql#5029).
+    # `deadline` above is computed once, but this loop used to hand each
+    # Deployment a fresh full `--timeout`, so cert-manager's three plus CNPG's
+    # two could consume 5 x 480s = 2400s against a step the install graph caps
+    # at 1800s. The kill then arrived as an executor timeout with no envelope
+    # at all -- "the script produced no result envelope" -- which names neither
+    # the namespace nor the Deployment. Each wait now gets what is LEFT.
     for d in "$@"; do
-        kubectl rollout status "deployment/${d}" -n "$ns" --timeout="${timeout}s" >&2 \
+        local remaining=$((deadline - SECONDS))
+        if ((remaining <= 0)); then
+            cap_fail 5 "ran out of the ${timeout}s operator budget before deployment/${d} in ${ns} became available"
+        fi
+        kubectl rollout status "deployment/${d}" -n "$ns" --timeout="${remaining}s" >&2 \
             || cap_fail 5 "deployment/${d} in ${ns} did not become available"
     done
     info "  ${ns}: $* ready"
@@ -923,6 +955,108 @@ YAML
     info "ArgoCD will begin syncing from ${REPO_URL}@${TARGET_REVISION}."
     info "Note: if this is a new branch, ensure it is pushed to GitHub before"
     info "      ArgoCD fetches it (ArgoCD cannot access local filesystem branches)."
+
+    wait_for_app_comparison
+}
+
+# argocd_app_state -- the Application's own account of itself, on one line.
+#
+# Used in a failure message and in WORKLOADS_REASON, so it must never fail:
+# every read falls back to a literal rather than an empty string, because an
+# empty diagnosis reads as "nothing was wrong" to whoever gets the message.
+function argocd_app_state() {
+    local sync health conds
+    sync="$(kubectl get application "${APP_NAME}" -n "${ARGOCD_NAMESPACE}" \
+        -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
+    health="$(kubectl get application "${APP_NAME}" -n "${ARGOCD_NAMESPACE}" \
+        -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
+    conds="$(kubectl get application "${APP_NAME}" -n "${ARGOCD_NAMESPACE}" \
+        -o jsonpath='{range .status.conditions[*]}{.type}: {.message}{"; "}{end}' 2>/dev/null || true)"
+    printf 'Application %s sync=%s health=%s%s' \
+        "${APP_NAME}" "${sync:-<none>}" "${health:-<none>}" \
+        "${conds:+ conditions: ${conds}}"
+}
+
+# argocd_app_error -- the Application's terminal error conditions, if any.
+#
+# ONLY the three ArgoCD calls "error" conditions. SyncError is deliberately
+# absent: a sync can fail once and succeed on the retry, whereas a source that
+# cannot be fetched, a spec that cannot be admitted, or a comparison that
+# cannot be made will not fix itself.
+function argocd_app_error() {
+    kubectl get application "${APP_NAME}" -n "${ARGOCD_NAMESPACE}" -o jsonpath='
+{range .status.conditions[?(@.type=="ComparisonError")]}{.message}{"\n"}{end}
+{range .status.conditions[?(@.type=="InvalidSpecError")]}{.message}{"\n"}{end}
+{range .status.conditions[?(@.type=="UnknownError")]}{.message}{"\n"}{end}' 2>/dev/null |
+        tr -s '\n' ' ' | sed 's/^ *//; s/ *$//'
+}
+
+# wait_for_app_comparison -- FAIL WHERE IT WENT WRONG (memql#5029).
+#
+# WHY THIS EXISTS. apply_argocd_app used to end at "Application registered",
+# and nothing anywhere in this script ever read the Application back. So a
+# source ArgoCD cannot fetch, a path that is not in the repo, or an AppProject
+# that refuses the source all produced the same run: every step green, the
+# namespace empty, wait_for_workloads recording workloadsReady=false, the
+# "Bootstrap complete" banner printed over it, `cap_ok`, exit 0 -- and the only
+# line saying anything was wrong arriving from the install graph, one assertion
+# later, as `result.workloadsReady did not satisfy resultTrue`. That names a
+# JSON path where a diagnosis belongs, and it points at the workloads, which
+# were never the fault.
+#
+# So this reads the Application's own conditions and fails HERE, with ArgoCD's
+# own message.
+#
+# WHAT IT DOES NOT WAIT FOR: a successful sync, or healthy workloads. Only that
+# ArgoCD managed to COMPARE the source at all -- which is the fetch, the path
+# and the AppProject, and which every healthy install clears in seconds. The
+# workload wait keeps its deliberate non-fatality (see wait_for_workloads); a
+# cluster that is merely slow must still leave the operator something to
+# inspect. A source that cannot be read is not slow.
+#
+# WHY AN ERROR MUST PERSIST. ArgoCD publishes a ComparisonError while its first
+# fetch is still in flight and clears it moments later, so a single poll would
+# make a healthy install fail intermittently -- the exact flakiness this issue
+# is about. The condition has to survive APP_ERROR_CONFIRMATIONS consecutive
+# polls before it is believed.
+function wait_for_app_comparison() {
+    local deadline=$((SECONDS + APP_COMPARE_TIMEOUT)) sync="" err="" confirmations=0 tick=5
+    local -r APP_ERROR_CONFIRMATIONS=3
+
+    info "Waiting up to ${APP_COMPARE_TIMEOUT}s for ArgoCD to compare '${APP_NAME}' against its source..."
+    while :; do
+        err="$(argocd_app_error)"
+        if [[ -n "$err" ]]; then
+            confirmations=$((confirmations + 1))
+            if ((confirmations >= APP_ERROR_CONFIRMATIONS)); then
+                error "ArgoCD cannot read the source this Application names."
+                error "  repo:     ${REPO_URL}"
+                error "  revision: ${TARGET_REVISION}"
+                error "  path:     ${OVERLAY_PATH}"
+                error "  project:  ${APP_PROJECT}"
+                cap_fail 5 "ArgoCD refused the Application source and will not sync it: ${err}"
+            fi
+        else
+            confirmations=0
+            sync="$(kubectl get application "${APP_NAME}" -n "${ARGOCD_NAMESPACE}" \
+                -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
+            if [[ -n "$sync" ]]; then
+                info "ArgoCD compared '${APP_NAME}' (sync=${sync}); reconciliation is under way."
+                return 0
+            fi
+        fi
+        if ((SECONDS >= deadline)); then
+            break
+        fi
+        sleep "$tick"
+    done
+
+    # NOT FATAL. A comparison that has not finished is a slow fetch, which is
+    # the same class as a slow image pull -- and this script does not abort a
+    # developer's cluster over slow. It is recorded instead, so the reason
+    # travels even if the namespace turns out empty.
+    warn "ArgoCD produced no comparison for '${APP_NAME}' within ${APP_COMPARE_TIMEOUT}s."
+    warn "  $(argocd_app_state)"
 }
 
 #=============================================================================
@@ -984,7 +1118,17 @@ function refuse_domain_change() {
 #=============================================================================
 
 function print_summary() {
-    section "Bootstrap complete"
+    # THE BANNER MUST NOT OUTRANK THE VERDICT (memql#5029). This printed
+    # "Bootstrap complete" unconditionally, so a run whose namespace ArgoCD
+    # never populated ended on those two words and a list of entry points that
+    # answer nothing -- and the transcript's last line about the install said
+    # it worked. A summary is allowed to be optimistic about what happens next;
+    # it is not allowed to contradict what this script already measured.
+    if [[ "$WORKLOADS_READY" == "true" ]]; then
+        section "Bootstrap complete"
+    else
+        section "Bootstrap finished -- THE WORKLOADS ARE NOT READY"
+    fi
 
     {
         echo ""
@@ -993,9 +1137,19 @@ function print_summary() {
         echo "  Application:    ${APP_NAME} (${TARGET_REVISION} -> ${OVERLAY_PATH})"
         echo "  Namespace:      ${NAMESPACE}"
         echo ""
+        if [[ "$WORKLOADS_READY" != "true" ]]; then
+            echo "  NOT READY: ${WORKLOADS_REASON:-the workload wait did not succeed}"
+            echo ""
+            echo "  The cluster is left standing so it can be inspected:"
+            echo "    kubectl get pods -n ${NAMESPACE}"
+            echo "    kubectl -n ${ARGOCD_NAMESPACE} get application ${APP_NAME} -o yaml"
+            echo ""
+            echo "  The entry points below will not answer until the workloads are Available."
+            echo ""
+        fi
         echo "  Entry points (front door on 443; *.memql.localhost resolves to 127.0.0.1):"
         echo "    https://identity.memql.localhost         identity (web UI + JWKS)"
-        echo "    https://api.memql.localhost/portal/      MemQL Portal (graphical ops console)"
+        echo "    https://os.memql.localhost               MemQL OS (the desktop shell + ops console)"
         echo "    localhost:5432                           postgres (debug)"
         echo ""
         echo "  Client edge (Cockpit / SDKs), on demand:"
@@ -1200,6 +1354,10 @@ function main() {
     cap_result_set_raw operatorStack  "$OPERATOR_STACK_READY"
     cap_result_set_raw workloadsReady "$WORKLOADS_READY"
     cap_result_set_raw secretsSeeded  "$SECRETS_SEEDED"
+    # `reason` is the envelope's general "why a verify on this step will not
+    # hold" field (memql#5029). Absent when there is nothing to say, so a
+    # reader can tell "no reason recorded" from "the reason is empty".
+    [[ -n "$WORKLOADS_REASON" ]] && cap_result_set reason "$WORKLOADS_REASON"
     cap_ok
 }
 

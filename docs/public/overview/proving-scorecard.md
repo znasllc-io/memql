@@ -17,7 +17,7 @@ commit and date it came from. A figure that was not measured says so, in
 its own words, rather than reporting a zero -- an absent figure and a zero
 are different answers.
 
-- **Scorecard** `2026-09-06` at commit `6de33d89c`
+- **Scorecard** `2026-09-06` at commit `2d001309a`
 - **Corpus** `6d36d1420dc4ad89` -- two scorecards with different corpus fingerprints measured different things and are not a trend
 
 ## The two tiers
@@ -72,10 +72,10 @@ CI and stay that way until the live tier fills them.
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.providerCalls` | platform | 1 (1-1, N=1) |
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.stepsServedFromJournal` | baseline | 5 (5-5, N=1) |
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.stepsServedFromJournal` | platform | 5 (5-5, N=1) |
-| `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.tokensPerGoal` | baseline | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
-| `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.tokensPerGoal` | platform | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
-| `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.usdPerGoal` | baseline | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
-| `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.usdPerGoal` | platform | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
+| `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.tokensPerGoal` | baseline | -- (a replayed run's tokens are the cassette's recorded tokens, not this run's) |
+| `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.tokensPerGoal` | platform | -- (a replayed run's tokens are the cassette's recorded tokens, not this run's) |
+| `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.usdPerGoal` | baseline | -- (a replayed run spends nothing; the recorded cost belongs to the capture) |
+| `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.usdPerGoal` | platform | -- (a replayed run spends nothing; the recorded cost belongs to the capture) |
 
 Platform against the bare-loop baseline:
 
@@ -96,8 +96,8 @@ Platform against the bare-loop baseline:
 | `reliability.an-unrecoverable-failure-stays-failed` | `reliability.passRate` | platform | 100.0% (100.0%-100.0%, N=1) |
 | `reliability.the-same-goal-run-repeatedly` | `reliability.passRate` | baseline | 100.0% (100.0%-100.0%, N=1) |
 | `reliability.the-same-goal-run-repeatedly` | `reliability.passRate` | platform | 100.0% (100.0%-100.0%, N=1) |
-| `reliability.the-same-goal-run-repeatedly` | `reliability.passVariance` | baseline | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
-| `reliability.the-same-goal-run-repeatedly` | `reliability.passVariance` | platform | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
+| `reliability.the-same-goal-run-repeatedly` | `reliability.passVariance` | baseline | -- (a replay is deterministic, so its variance is zero by construction rather than by measurement) |
+| `reliability.the-same-goal-run-repeatedly` | `reliability.passVariance` | platform | -- (a replay is deterministic, so its variance is zero by construction rather than by measurement) |
 
 Platform against the bare-loop baseline:
 
@@ -131,8 +131,8 @@ Platform against the bare-loop baseline:
 | `recovery.a-transient-failure-is-retried` | `recovery.stepsReExecuted` | platform | 0 (0-0, N=1) |
 | `recovery.repair-runs-from-the-failed-step` | `recovery.stepsReExecuted` | baseline | 3 (3-3, N=1) |
 | `recovery.repair-runs-from-the-failed-step` | `recovery.stepsReExecuted` | platform | 0 (0-0, N=1) |
-| `recovery.repair-runs-from-the-failed-step` | `recovery.wallClockMs` | baseline | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
-| `recovery.repair-runs-from-the-failed-step` | `recovery.wallClockMs` | platform | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
+| `recovery.repair-runs-from-the-failed-step` | `recovery.wallClockMs` | baseline | -- (wall-clock on a shared CI runner belongs to the runner) |
+| `recovery.repair-runs-from-the-failed-step` | `recovery.wallClockMs` | platform | -- (wall-clock on a shared CI runner belongs to the runner) |
 
 Platform against the bare-loop baseline:
 
@@ -187,8 +187,8 @@ Platform against the bare-loop baseline:
 | `learningCurve.a-deterministic-plan-needs-no-model-at-all` | `learningCurve.catalogServedFraction` | platform | 100.0% (100.0%-100.0%, N=1) |
 | `learningCurve.a-sequence-of-related-goals` | `learningCurve.catalogServedFraction` | baseline | 83.3% (83.3%-83.3%, N=1) |
 | `learningCurve.a-sequence-of-related-goals` | `learningCurve.catalogServedFraction` | platform | 83.3% (83.3%-83.3%, N=1) |
-| `learningCurve.a-sequence-of-related-goals` | `learningCurve.usdPerGoal` | baseline | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
-| `learningCurve.a-sequence-of-related-goals` | `learningCurve.usdPerGoal` | platform | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
+| `learningCurve.a-sequence-of-related-goals` | `learningCurve.usdPerGoal` | baseline | -- (dollars per goal need a live provider; a replay spends nothing) |
+| `learningCurve.a-sequence-of-related-goals` | `learningCurve.usdPerGoal` | platform | -- (dollars per goal need a live provider; a replay spends nothing) |
 
 Platform against the bare-loop baseline:
 
@@ -202,13 +202,13 @@ Platform against the bare-loop baseline:
 
 | Scenario | Metric | Arm | Figure |
 |---|---|---|---|
-| `speed.a-first-run-against-a-replay` | `speed.firstRunVsReplayRatio` | baseline | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
-| `speed.a-first-run-against-a-replay` | `speed.firstRunVsReplayRatio` | platform | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
-| `speed.what-the-journal-costs-per-step` | `speed.journalPerStepOverheadMs` | platform | 25ms (25ms-25ms, N=1) |
-| `speed.a-first-run-against-a-replay` | `speed.wallClockPerGoalMs` | baseline | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
-| `speed.a-first-run-against-a-replay` | `speed.wallClockPerGoalMs` | platform | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
-| `speed.what-the-journal-costs-per-step` | `speed.wallClockPerGoalMs` | baseline | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
-| `speed.what-the-journal-costs-per-step` | `speed.wallClockPerGoalMs` | platform | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
+| `speed.a-first-run-against-a-replay` | `speed.firstRunVsReplayRatio` | baseline | -- (the first run and the replay would both be replays here) |
+| `speed.a-first-run-against-a-replay` | `speed.firstRunVsReplayRatio` | platform | -- (the first run and the replay would both be replays here) |
+| `speed.what-the-journal-costs-per-step` | `speed.journalPerStepOverheadMs` | platform | 20ms (20ms-20ms, N=1) |
+| `speed.a-first-run-against-a-replay` | `speed.wallClockPerGoalMs` | baseline | -- (wall-clock on a shared CI runner belongs to the runner) |
+| `speed.a-first-run-against-a-replay` | `speed.wallClockPerGoalMs` | platform | -- (wall-clock on a shared CI runner belongs to the runner) |
+| `speed.what-the-journal-costs-per-step` | `speed.wallClockPerGoalMs` | baseline | -- (wall-clock on a shared CI runner belongs to the runner) |
+| `speed.what-the-journal-costs-per-step` | `speed.wallClockPerGoalMs` | platform | -- (wall-clock on a shared CI runner belongs to the runner) |
 
 Platform against the bare-loop baseline:
 
@@ -225,7 +225,7 @@ Platform against the bare-loop baseline:
 |---|---|---|---|
 | `governance.an-approval-does-not-carry-to-a-changed-artifact` | `governance.approvalsBoundToArtifactHash` | platform | 100.0% (100.0%-100.0%, N=1) |
 | `governance.every-side-effect-leaves-a-receipt` | `governance.effectsWithReceipts` | platform | 100.0% (100.0%-100.0%, N=1) |
-| `governance.an-approval-does-not-carry-to-a-changed-artifact` | `governance.modelCallsJournaled` | platform | -- (the code that would produce this is not built yet) |
+| `governance.an-approval-does-not-carry-to-a-changed-artifact` | `governance.modelCallsJournaled` | platform | -- (the CI tier's model responses come from a cassette through a fake step registry, so no call reaches the journal seam; the live tier calls a provider down the real path and can count it) |
 
 Platform against the bare-loop baseline:
 

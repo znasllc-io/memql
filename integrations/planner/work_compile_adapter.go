@@ -20,8 +20,10 @@ package planner
 
 import (
 	"context"
+	"errors"
 	"time"
 
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workintegration "github.com/znasllc-io/memql/integrations/work"
 )
 
@@ -123,9 +125,20 @@ func (c *WorkCompiler) failRun(ctx context.Context, req workintegration.CompileR
 	if c.loop.logger != nil {
 		c.loop.logger.Warn("work compile failed", "goalId", req.GoalId, "runId", req.RunId, "error", err)
 	}
+	// A DIVERGENCE IS NOT A COMPILE FAILURE (memql#4999). A strict replay
+	// whose journal has no match for a request stops on purpose -- the
+	// compile ran, the model seam refused to substitute a live call, and the
+	// run has a step key naming exactly where the two runs parted. Recording
+	// that as `compile_failed` would send the reader at the compiler, and the
+	// Nexus run page could not tell the two apart to say otherwise.
+	code := "compile_failed"
+	var diverged *memqlengine.DivergenceError
+	if errors.As(err, &diverged) {
+		code = memqlengine.ErrorCodeReplayDiverged
+	}
 	c.record(ctx, req.OwnerUserId, req.RunId, map[string]any{
 		"status":       "failed",
-		"errorCode":    "compile_failed",
+		"errorCode":    code,
 		"errorMessage": err.Error(),
 		"finishedAt":   time.Now().UTC().Format(time.RFC3339Nano),
 	})

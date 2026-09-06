@@ -306,25 +306,58 @@ func (e *MemQLEngine) InvokeAIStructured(
 		e.Logger.Info("prompt @defaultProvider unavailable; falling back to default structured provider",
 			"template", templateId, "requestedProvider", providerName)
 	}
-	if structured != nil {
-		result, err = structured.CallChatStructured(ctx, messages, spec)
-	} else if structured := e.StructuredChatProvider(); structured != nil {
-		result, err = structured.CallChatStructured(ctx, messages, spec)
-	} else {
-		chat := e.DefaultChatProvider()
-		if chat == nil {
-			return "", fmt.Errorf("no chat provider available for structured invocation")
-		}
-		result, err = chat.CallChat(ctx, structuredFallbackMessages(rendered, schema))
-		if err == nil {
-			// A chat model asked for "ONLY JSON" wraps it in a markdown
-			// fence often enough that the wrapper is the common case, not
-			// the exception (claude-sonnet-4-6, prod 2026-08-26: perfect
-			// JSON inside ```json, parse failed on the backtick). The
-			// structured paths above return verbatim JSON and skip this.
-			result = stripJSONFences(result)
-		}
+
+	// THE JOURNAL SEAM (memql#4999). The three branches below are unchanged;
+	// what wraps them is serveModelCall, which decides -- once, via
+	// work.DecideServe -- whether this run may be answered from its journal,
+	// and records what happened either way. Outside a work run it costs one
+	// context lookup and calls straight through.
+	//
+	// resolvedProvider is the name the request ACTUALLY ran on, not the one
+	// the prompt asked for: a fallback that lands on a different provider is
+	// a different request, and hashing the requested name would let a replay
+	// serve one provider's answer for another's.
+	resolvedProvider := providerName
+	if structured == nil {
+		resolvedProvider = e.DefaultProviderName()
 	}
+	req := common.ModelRequest{
+		Provider: resolvedProvider,
+		Model:    e.providerModel(resolvedProvider),
+		Settings: e.answerAffectingSettings(resolvedProvider),
+		Messages: messages,
+		Schema:   spec,
+	}
+
+	result, err = e.modelSeam.serveText(ctx, req, templateId, func(ctx context.Context) (modelCallOutcome, error) {
+		var out modelCallOutcome
+		var text string
+		var callErr error
+		switch {
+		case structured != nil:
+			text, out.Usage, callErr = callStructuredWithUsage(ctx, structured, messages, spec)
+		default:
+			if fallback := e.StructuredChatProvider(); fallback != nil {
+				text, out.Usage, callErr = callStructuredWithUsage(ctx, fallback, messages, spec)
+				break
+			}
+			chat := e.DefaultChatProvider()
+			if chat == nil {
+				return out, fmt.Errorf("no chat provider available for structured invocation")
+			}
+			text, callErr = chat.CallChat(ctx, structuredFallbackMessages(rendered, schema))
+			if callErr == nil {
+				// A chat model asked for "ONLY JSON" wraps it in a markdown
+				// fence often enough that the wrapper is the common case, not
+				// the exception (claude-sonnet-4-6, prod 2026-08-26: perfect
+				// JSON inside ```json, parse failed on the backtick). The
+				// structured paths above return verbatim JSON and skip this.
+				text = stripJSONFences(text)
+			}
+		}
+		out.Value = text
+		return out, callErr
+	})
 	if err != nil {
 		return "", err
 	}

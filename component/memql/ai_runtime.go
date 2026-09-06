@@ -3,12 +3,14 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 type aiRuntime struct {
@@ -18,6 +20,11 @@ type aiRuntime struct {
 	cache     *aiResponseCache
 	cacheCfg  aiCacheConfig
 	eventBus  *events.Bus
+
+	// seam is the shared model-call journal seam (memql#4999), the same
+	// value the engine holds. Nil-safe: a runtime built without one calls
+	// straight through.
+	seam *modelSeam
 
 	// semantic is the optional vector (similarity) cache layer (5.9). It
 	// sits AFTER the exact-hash cache: exact-hash check first (cheap),
@@ -169,8 +176,41 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 		"provider":   providerName,
 	})
 
-	result, err := entry.Client.Call(ctx, text)
+	// THE JOURNAL SEAM (memql#4999). This is how a WORK RUN reaches a model:
+	// a DSL `ai(...)` inside an automation step, through the step registry and
+	// the shape evaluator, neither of which knows what a run is. The seam
+	// reads the run off the context, asks work.DecideServe once, and either
+	// serves the journaled answer without calling the provider at all or
+	// calls through and records what came back.
+	//
+	// IT SITS BELOW BOTH CACHES DELIBERATELY. The exact-hash and semantic
+	// caches above are a within-process optimisation and a cache hit is not a
+	// model call; journaling one would record a call that never happened, and
+	// serving a replay from a cache that may be cold is exactly the
+	// nondeterminism a replay exists to remove.
+	//
+	// `fleet:` providers answer on the user's own machine and MemQL is not
+	// billed, which is what `served: "local"` records -- the scorecard counts
+	// subscription and local spend separately from the dollar ceiling.
+	_, isFleet := IsFleetReference(providerName)
+	req := common.ModelRequest{
+		Provider: providerName,
+		Model:    entry.Config.Model,
+		Settings: answerAffectingParams(entry.Config.Params),
+		Messages: []common.ChatMessage{{Role: "user", Content: text}},
+	}
+	result, err := r.seam.serve(ctx, req, invocation.TemplateId, func(ctx context.Context) (modelCallOutcome, error) {
+		v, callErr := entry.Client.Call(ctx, text)
+		return modelCallOutcome{Value: v, Local: isFleet}, callErr
+	})
 	if err != nil {
+		// A strict replay that could not be served is NOT an ai() failure and
+		// must not be reported as one: the provider was never asked, and
+		// wrapping it here would bury the step key the divergence names.
+		var diverged *DivergenceError
+		if errors.As(err, &diverged) {
+			return nil, err
+		}
 		// Emit completion error event
 		r.publishEvent(events.TopicAICompletionError, events.KindAICompletionError, map[string]any{
 			"templateId": invocation.TemplateId,

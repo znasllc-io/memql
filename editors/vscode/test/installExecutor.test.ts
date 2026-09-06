@@ -324,6 +324,66 @@ test("a step whose verify fails is a failure even though the script exited 0", a
   assert.equal(report.outcomes.find((o) => o.id === "b")!.status, "skipped");
 });
 
+// memql#5029. A capability script that finishes its work but cannot assert the
+// outcome exits 0 with error:null -- cap_ok has no other shape -- so the only
+// thing left to print was the predicate name. `k3d.up` printed "Bootstrap
+// complete" and a list of entry points, and the one line saying otherwise was
+// `result.workloadsReady did not satisfy resultTrue`: a JSON path where a
+// diagnosis belongs, pointing at the workloads, which were never the fault.
+test("a failing verify prefers the script's own reason over the predicate name", async () => {
+  const g = graphOf([{ id: "a", readOnly: false, verify: { kind: "resultTrue", field: "result.workloadsReady" } }]);
+  const runner = fakeRunner(() => ({
+    exitCode: 0,
+    envelope: {
+      ok: true,
+      capability: "k3d.up",
+      changed: true,
+      result: { workloadsReady: false, reason: "ArgoCD applied no Deployments to memql at all" },
+      error: null,
+    },
+  }));
+  const report = await executeGraph({ graph: g, scriptPath: () => "/bin/true", run: runner.run, plan: okPlan });
+  const a = report.outcomes[0]!;
+  assert.equal(a.status, "failed");
+  assert.match(a.reason ?? "", /ArgoCD applied no Deployments/);
+  // The predicate name is what it must NOT fall back to while a reason exists.
+  assert.doesNotMatch(a.reason ?? "", /did not satisfy/);
+});
+
+test("a real error still outranks result.reason", async () => {
+  const g = graphOf([{ id: "a", readOnly: false, verify: { kind: "resultTrue", field: "result.workloadsReady" } }]);
+  const runner = fakeRunner(() => ({
+    exitCode: 5,
+    envelope: {
+      ok: false,
+      capability: "k3d.up",
+      changed: false,
+      result: { workloadsReady: false, reason: "a softer aside" },
+      error: { code: 5, message: "ArgoCD refused the Application source" },
+    },
+  }));
+  const report = await executeGraph({ graph: g, scriptPath: () => "/bin/true", run: runner.run, plan: okPlan });
+  assert.match(report.outcomes[0]?.reason ?? "", /refused the Application source/);
+});
+
+// A blank or absent reason must not blank the message: describeVerify is still
+// what covers every script that sets none, which is all of them but one.
+test("a blank reason falls back to the predicate name rather than to nothing", async () => {
+  const g = graphOf([{ id: "a", readOnly: false, verify: { kind: "resultTrue", field: "result.installed" } }]);
+  const runner = fakeRunner(() => ({
+    exitCode: 0,
+    envelope: {
+      ok: true,
+      capability: "install.binary",
+      changed: false,
+      result: { installed: false, reason: "   " },
+      error: null,
+    },
+  }));
+  const report = await executeGraph({ graph: g, scriptPath: () => "/bin/true", run: runner.run, plan: okPlan });
+  assert.match(report.outcomes[0]?.reason ?? "", /did not satisfy/);
+});
+
 test("a step that printed no envelope fails, whatever its exit code says", async () => {
   const g = graphOf([{ id: "a" }]);
   const runner = fakeRunner(() => ({ exitCode: 0, envelope: null, parseError: "no envelope on stdout" }));

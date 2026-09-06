@@ -2,11 +2,11 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // appsession_store.go persists v1:worker:appSession rows (memql#4360).
@@ -174,11 +174,11 @@ func appSessionWriteContext(ctx context.Context, ownerUserId string) context.Con
 }
 
 func (s *EngineStore) executeMutation(ctx context.Context, name string, args map[string]any) error {
-	body, err := json.Marshal(args)
+	query, err := langparser.RenderCall(name, args)
 	if err != nil {
-		return fmt.Errorf("worker.store: marshal %s args: %w", name, err)
+		return fmt.Errorf("worker.store: render %s: %w", name, err)
 	}
-	if _, err := s.Engine.Execute(ctx, fmt.Sprintf("%s(%s)", name, string(body))); err != nil {
+	if _, err := s.Engine.Execute(ctx, query); err != nil {
 		return fmt.Errorf("worker.store: %s: %w", name, err)
 	}
 	return nil

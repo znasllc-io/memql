@@ -301,6 +301,12 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	e.providers = providerRegistry
 	e.policies = policyRegistry
 	e.aiRuntime = newAIRuntime(e.Logger, promptRegistry, providerRegistry, e.aiCacheConfig)
+	if e.aiRuntime != nil {
+		// The SAME seam value, not a copy: SetModelCallJournal is called
+		// from app/ after this runs, and a copy here would leave the ai()
+		// path journaling nothing while the structured path journals.
+		e.aiRuntime.seam = e.modelSeam
+	}
 
 	// ReloadAIProviders is exposed below so dev workflows that wipe
 	// the database before re-seeding (make dev-refresh) can refresh

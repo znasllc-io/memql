@@ -216,7 +216,22 @@ export function RunPage({
           )}
         </p>
 
-        {run.status === "failed" && run.errorMessage !== "" ? (
+        {/* A DIVERGED REPLAY IS NOT A FAILED RUN, and it took its own notice
+            to stop reading as one (memql#4999). Nothing broke: the compile
+            ran, the model seam found no journaled answer for a request, and
+            it refused to substitute a live call -- which is the whole of the
+            strict policy. The run even names where the two parted. Under the
+            generic failure notice it read as "this run failed" with a
+            sentence about a classifier that never saw it, and the reader went
+            looking for a fault. */}
+        {run.status === "failed" && run.errorCode === "replay_diverged" ? (
+          <Notice
+            tone="warn"
+            sentence="This replay diverged."
+            next="A request had no match in the journal, so it stopped rather than call a model and report a reproduction that did not happen. The step it parted at is below."
+            detail={run.errorMessage}
+          />
+        ) : run.status === "failed" && run.errorMessage !== "" ? (
           <Notice
             tone="error"
             sentence="This run failed."
@@ -233,13 +248,26 @@ export function RunPage({
           />
         ) : null}
 
-        {run.mode === "replay" ? (
+        {/* THE CAPTION MUST NOT OUTLIVE ITS TRUTH (memql#4999). It used to
+            print unconditionally, so a diverged replay carried the notice
+            above -- "this replay diverged" -- and, two lines below it,
+            "Every model call was served from the journal, so this run reached
+            no provider". Both sentences on one page, and only one of them
+            true of this run. On a divergence the notice has already said what
+            happened; the caption's job here is only to name the policy that
+            decided it. */}
+        {run.mode === "replay" && run.errorCode !== "replay_diverged" ? (
           <Caption>
             A replay. Every model call was served from the journal, so this run reached no provider
             -- under the {run.replayPolicy || "strict"} policy, a request with no journaled match
             {run.replayPolicy === "permissive"
               ? " is made fresh and journaled."
               : " raises a divergence at the first step that differs."}
+          </Caption>
+        ) : run.mode === "replay" ? (
+          <Caption>
+            A replay under the {run.replayPolicy || "strict"} policy. Everything before the step
+            above was served from the journal; nothing reached a provider.
           </Caption>
         ) : null}
         {run.mode === "fork" && run.forkAtStepKey !== "" ? (

@@ -8,6 +8,7 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -129,6 +130,20 @@ func (i *Integration) handleCreateGoal(ctx context.Context, args map[string]any,
 	}); err != nil {
 		return nil, err
 	}
+
+	// The RUN rides the context from here (memql#4999), so every model call
+	// the compile pass makes is journaled against this run. context.WithoutCancel
+	// inside dispatchCompile preserves values, so the stamp survives onto the
+	// detached goroutine along with the actor and the budget scopes.
+	//
+	// Mode is live: this run reads no journal. It WRITES one, which is what
+	// makes a later replay of it possible at all.
+	ctx = common.ContextWithRun(ctx, common.RunContext{
+		RunId:       runId,
+		GoalId:      goalId,
+		Mode:        common.RunModeLive,
+		OwnerUserId: owner,
+	})
 
 	dispatched := i.dispatchCompile(ctx, CompileRequest{
 		GoalId:      goalId,

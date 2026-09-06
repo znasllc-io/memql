@@ -1056,6 +1056,20 @@ jobs:
       - name: go test -tags bff (build-tagged suites)
         if: ${{ env.RUN_GO == 'true' }}
         run: go test -tags bff -timeout=300s ./app/ ./component/server/
+      # planner and workbench were the two node tags with NO test lane at all
+      # (memql#5003). build-node-tags COMPILES both, and scripts/citags would
+      # have gone red the moment somebody added a tagged test under either --
+      # so the gap was reported, not silent. But "reported" means a red build
+      # and a CI edit landing on whoever writes that test, which is the worst
+      # moment to ask for one. Both lanes pass today, so they exist now and the
+      # test can just be written. cognition was the third tag named in that
+      # issue and is not here: it went with epic memql#4988.
+      - name: go test -tags planner (build-tagged suites)
+        if: ${{ env.RUN_GO == 'true' }}
+        run: go test -tags planner -timeout=300s ./app/
+      - name: go test -tags workbench (build-tagged suites)
+        if: ${{ env.RUN_GO == 'true' }}
+        run: go test -tags workbench -timeout=300s ./app/
 
   # Node-tag compile lane (#1584). go-checks builds/tests with the DEFAULT
   # build tags, so a file gated behind a node build tag

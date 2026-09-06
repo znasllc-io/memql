@@ -393,12 +393,15 @@ func TestEngineStoreRefreshRegistration_WireShape(t *testing.T) {
 		t.Fatalf("expected 1 engine call, got %d", len(eng.queries))
 	}
 	q := eng.queries[0]
+	// Top-level arguments are spelled `k: v` since memql#5004; only values
+	// nested inside an object argument (displayServer, below) stay JSON. The
+	// prior spelling asserted the content of a statement the parser refused.
 	for _, want := range []string{
 		"refreshWorkerRegistration(",
-		`"registrationId":"reg-1"`,
+		`registrationId: "reg-1"`,
 		`"displayServer":"quartz"`,
-		`"version":"0.9.0"`,
-		`"buildTag":"computeruse"`,
+		`version: "0.9.0"`,
+		`buildTag: "computeruse"`,
 	} {
 		if !strings.Contains(q, want) {
 			t.Fatalf("query missing %q:\n%s", want, q)
@@ -411,7 +414,7 @@ func TestEngineStoreRefreshRegistration_WireShape(t *testing.T) {
 	if err := store.RefreshRegistration(context.Background(), row); err != nil {
 		t.Fatalf("refresh without descriptor: %v", err)
 	}
-	if !strings.Contains(eng.queries[1], `"capabilityDescriptor":null`) {
+	if !strings.Contains(eng.queries[1], `capabilityDescriptor: null`) {
 		t.Fatalf("nil descriptor must serialize as null:\n%s", eng.queries[1])
 	}
 }

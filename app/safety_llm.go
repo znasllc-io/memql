@@ -242,3 +242,36 @@ func (a *App) buildSafetyRecorder() safety.DecisionRecorder {
 		recorder.New(engineMutationRunner{engine: a.engine}, a.Logger),
 	)
 }
+
+// wireModelCallJournal installs the v1:work:modelCall journal on the engine
+// (memql#4999).
+//
+// WITHOUT THIS THE SEAM IS INERT, and inert in the way that is hardest to
+// notice: every model call runs live and returns the right answer, every run
+// completes, and the only symptom is that a replay finds nothing to serve --
+// which, under the strict policy that is the only one a derived run can carry
+// today, presents as a divergence. So the wiring is asserted rather than
+// assumed: a node with the work plug-in materialized logs that the journal is
+// on, and one without logs why it is not.
+//
+// Nil is a WORKING configuration, not a failure. A node that does not host the
+// work integration -- identity, edge, mcp -- has no runs to journal, and
+// SetModelCallJournal(nil) leaves the seam calling straight through.
+func (a *App) wireModelCallJournal() {
+	if a.engine == nil {
+		return
+	}
+	integ := a.lookupWorkIntegration()
+	if integ == nil {
+		a.Logger.Info("work: no model-call journal on this node (the work plug-in is not materialized here), so model calls run live and are not recorded",
+			"component", "work.journal")
+		return
+	}
+	journal := workspine.NewModelJournal(a.engine)
+	if journal == nil {
+		return
+	}
+	a.engine.SetModelCallJournal(journal)
+	a.Logger.Info("work: model-call journal enabled (v1:work:modelCall); a run in replay mode is served from it",
+		"component", "work.journal")
+}
