@@ -194,6 +194,15 @@ mutate goal createWorkGoal {
 /// run has finished reads as work still in progress on every surface that shows one, and the
 /// Library's analysis pass produces one of these per file -- so without this every file anybody
 /// ever uploaded would sit in a person's goal list, permanently open.
+///
+/// @serverOnly, and scoping to actor.userId is not the alternative. A goal's lifecycle is the
+/// ENGINE's account of work it is doing: the run opens the goal when it starts and closes it when
+/// it finishes, and both edges are facts about an execution rather than a person's intent. An
+/// actor.userId conjunct would narrow this to the goal's owner and change nothing that matters --
+/// the owner still could not honestly say a run had finished, and the system-origin goals the
+/// Library pass writes carry a present-and-empty owner that no caller matches at all, so the one
+/// population this construct exists for would be the population it could never reach. The
+/// client-reachable lifecycle act is cancelGoal, which epic A2 adds with its own gate.
 @serverOnly
 mutate goal updateWorkGoal {
   args {

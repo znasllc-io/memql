@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	skillgraph "github.com/znasllc-io/memql/component/skills"
 )
 
 // store.go -- the engine-backed reads and writes behind the composition.
@@ -54,13 +55,14 @@ const maxScriptFetchBytes = MaxVerifiableBytes + 1
 type EngineStore struct {
 	engine  Executor
 	fetcher BlobFetcher
+	writer  *skillgraph.Writer
 }
 
 func NewEngineStore(engine Executor, fetcher BlobFetcher) *EngineStore {
 	if engine == nil {
 		return nil
 	}
-	return &EngineStore{engine: engine, fetcher: fetcher}
+	return &EngineStore{engine: engine, fetcher: fetcher, writer: skillgraph.NewWriter(engine)}
 }
 
 // SkillScripts reads one skill's scripts.
@@ -98,17 +100,22 @@ func (s *EngineStore) SkillScripts(ctx context.Context, skillID string) (SkillSc
 }
 
 // SetScripts writes the merged list back.
+//
+// THROUGH component/skills's WRITER, not through the engine here.
+// `setSkillScripts` is @serverOnly, and origin defaults to CLIENT -- so the
+// write needs an internal-origin stamp, and the stamp is allowlisted per
+// package. This package also serves the caller-scoped Library reads runScript
+// makes, so an entry for it would put the stamp within reach of those; the
+// writer package exists for exactly these three writes and nothing else.
 func (s *EngineStore) SetScripts(ctx context.Context, skillID string, scripts []Script) error {
-	if s == nil || s.engine == nil {
-		return fmt.Errorf("skills: no engine")
+	if s == nil || s.writer == nil {
+		return fmt.Errorf("skills: no graph writer is wired, so a captured script cannot be recorded")
 	}
 	encoded, err := json.Marshal(scripts)
 	if err != nil {
 		return fmt.Errorf("skills: encode scripts: %w", err)
 	}
-	_, err = s.engine.Execute(ctx, fmt.Sprintf("mutation setSkillScripts(skillId: %s, scripts: %s)",
-		langparser.QuoteString(skillID), string(encoded)))
-	return err
+	return s.writer.SetScripts(ctx, skillID, encoded)
 }
 
 // ReadArtifact fetches a Library artifact's bytes.

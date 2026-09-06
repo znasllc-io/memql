@@ -77,7 +77,7 @@ query skillEdge skillEdgesForSkill {
 @unbounded("one skill by id -- bounded to a single row")
 query skill skillById {
   args {
-    skillId  string  @required
+    skillId  string!
   }
   filter  row.id==args.skillId
   shape   skillFull

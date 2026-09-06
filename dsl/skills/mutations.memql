@@ -205,10 +205,9 @@ mutate skill reinforceSkill {
     status          string
   }
   update {
-    id: args.skillId
-    args.reliability
-    args.reinforceCount
-    args.lastReinforced
-    args.status
+    accept { reliability, reinforceCount, lastReinforced, status }
+    stamp {
+      id: args.skillId
+    }
   }
 }

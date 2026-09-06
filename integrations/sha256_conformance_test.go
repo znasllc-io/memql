@@ -57,6 +57,18 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		// disagrees with every other producer and consumer of the field.
 		"library/analysis.go":             "v1:library:file.sha256 is a wire-format SHA-256 the one-shot route also computes; the chunked stamp must match it byte for byte (memql#4782)",
 		"library/analysis_sha256_test.go": "asserts the stamped digest equals crypto/sha256 over the streamed bytes -- the test for the entry above",
+		// runScript ADDRESSES a script by its content hash and verifies the
+		// far side against it, so the digest is a wire-format fact in the
+		// strongest sense this list has: it is compared against
+		// `v1:library:file.sha256` (the entry above, and therefore the same
+		// algorithm at the same byte width), it names the path the script is
+		// written to on somebody else's machine, and a person debugging a
+		// refusal compares it with `sha256sum`. A core/id fingerprint would
+		// be a value nothing else in the system computes, which is exactly
+		// what makes a hash mismatch unfalsifiable.
+		"skills/runscript.go":                     "runScript addresses a script by content hash and verifies the far side against it; the value is compared with v1:library:file.sha256 and with sha256sum (memql#4970)",
+		"skills/runscript_test.go":                "computes the expected digest for the entry above",
+		"agent/worker/script_forward_hop_test.go": "the cross-node script hop's fixture computes the same digest the far side is verified against",
 	}
 
 	type violation struct {

@@ -15,7 +15,6 @@
 // machine that has never heard of this executes it correctly on the day
 // it lands.
 
-@enabled
 @description("Run a skill's script. Ships the bytes from the Library by content hash, verifies them on the far side by reading them back, and only then executes -- a script that cannot be verified is refused rather than run. The workbench is the default; a label requirement or an environment need it structurally lacks moves the call to a fleet machine.")
 @executor("integration.skills.runScript")
 @args(profile="object")
@@ -33,7 +32,6 @@ builtin runScript {
   timeoutSec        integer  @description("Exec timeout. Absent takes the surface's own default.")
 }
 
-@enabled
 @description("Copy a script a run discovered on a surface into the Library, and record it on the skill as a scripts[] entry naming the artifact rather than the path. Idempotent by content hash: capturing the same bytes twice changes nothing, and a re-capture replaces the entry for that platform without deleting the artifact a pinned template may still name.")
 @executor("integration.skills.captureScript")
 @args(profile="object")

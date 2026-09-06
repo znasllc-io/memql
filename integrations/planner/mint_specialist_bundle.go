@@ -161,46 +161,45 @@ func (l *PlannerAgentLoop) MintSpecialistBundle(ctx context.Context, planId stri
 
 // writeBundleEdges writes one committed dependsOn edge per component.
 //
+// THROUGH component/skills's WRITER. `createSkillEdge` and `commitSkillEdge`
+// are @serverOnly, so they need an internal-origin stamp, and the stamp is
+// allowlisted per package -- this one is large and full of request-derived
+// paths, which is precisely the shape that list refuses an entry to.
+//
 // The edge ids are DERIVED from the pair, so re-minting a bundle over the
 // same components re-versions the same rows rather than accumulating
 // duplicates -- the singleton-id reasoning memql#4766 settled for the cluster
 // rows, applied to a relation.
 func (l *PlannerAgentLoop) writeBundleEdges(ctx context.Context, skillId string, bundle SpecialistBundle, planId string) error {
+	writer := skills.NewWriter(engineWriter{engine: l.engine})
 	components := append([]string(nil), bundle.ComponentSkillIds...)
 	sort.Strings(components)
-	evidence := []map[string]any{{"runId": firstNonBlank(bundle.MintedByRunId, planId), "stepKey": "mintSpecialistBundle"}}
+	evidence := []skills.Evidence{{RunID: firstNonBlank(bundle.MintedByRunId, planId), StepKey: "mintSpecialistBundle"}}
+
+	edges := make([]skills.EdgeWrite, 0, len(components))
 	for _, component := range components {
 		component = strings.TrimSpace(component)
 		if component == "" || component == skillId {
 			continue
 		}
-		edgeId := bundleEdgeId(skillId, component)
-		create := map[string]any{
-			"edgeId":      edgeId,
-			"fromSkillId": skillId,
-			"toSkillId":   component,
-			"edgeType":    string(skills.EdgeDependsOn),
-			"evidence":    evidence,
-			"proposedBy":  "system",
-		}
-		payload, err := json.Marshal(create)
-		if err != nil {
-			return err
-		}
-		if _, err := l.engine.Execute(systemActorContext(ctx),
-			fmt.Sprintf("mutation createSkillEdge(%s)", string(payload))); err != nil {
-			return err
-		}
-		commit, err := json.Marshal(map[string]any{"edgeId": edgeId, "evidence": evidence})
-		if err != nil {
-			return err
-		}
-		if _, err := l.engine.Execute(systemActorContext(ctx),
-			fmt.Sprintf("mutation commitSkillEdge(%s)", string(commit))); err != nil {
-			return err
-		}
+		edges = append(edges, skills.EdgeWrite{
+			EdgeID:     bundleEdgeId(skillId, component),
+			From:       skillId,
+			To:         component,
+			Type:       skills.EdgeDependsOn,
+			Evidence:   evidence,
+			ProposedBy: "system",
+		})
 	}
-	return nil
+	return writer.Commit(ctx, edges)
+}
+
+// engineWriter adapts the loop's engine to the writer's seam. The engine's
+// Execute returns a concrete result type and the writer reads none of it.
+type engineWriter struct{ engine Engine }
+
+func (e engineWriter) Execute(ctx context.Context, query string) (any, error) {
+	return e.engine.Execute(ctx, query)
 }
 
 // bundleEdgeId is stable for a (bundle, component) pair.
