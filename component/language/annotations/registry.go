@@ -39,7 +39,7 @@ var ByReceiver = map[string][]string{
 		"description", "enabled", "disabled", "eventField", "actor", "requiresRank",
 	},
 	"Automation": {
-		"description", "enabled", "disabled", "trigger", "filter", "mcp", "actor", "schedule",
+		"description", "enabled", "disabled", "trigger", "filter", "mcp", "actor", "schedule", "template",
 	},
 	"Action": {
 		"description", "enabled", "disabled", "kind", "sideEffect",
@@ -103,6 +103,7 @@ var Docs = map[string]string{
 	// Automation.
 	"trigger":  "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*.v1:ns:concept\") or @trigger(schedule=\"0 0 * * * *\").",
 	"filter":   "Filter expression for automation triggers.",
+	"template": "On an automation: this is a work-spine TEMPLATE, invoked by a v1:work:run that named it rather than fired by the graph (memql#5048). It is the third way an automation can be reachable, alongside an event trigger and a schedule. A @template automation must carry NEITHER @trigger nor @schedule -- the load-time gate refuses both combinations, so \"called\" and \"triggered\" stay distinct.",
 	"schedule": "Cron schedule for a scheduled automation. Format: @schedule(cron=\"0 0 * * * *\"). Synonym for @trigger(schedule=...); folds to the same scheduler field (#2712).",
 	// Action (memql#2218, behavioral-constructs ADR §2.3).
 	"kind":       "On an action: the action kind. @kind(\"primitive\") = one external capability rendered from params (the only kind today; composites collapse into automations, ADR §2.2).",

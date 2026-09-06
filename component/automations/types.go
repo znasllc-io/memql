@@ -129,6 +129,19 @@ type Automation struct {
 	// generic run_automation dispatcher (epic memql#1529 Phase 4 #1534).
 	MCPPromoted bool `json:"mcpPromoted,omitempty"`
 
+	// Template is true when the automation carries @template: it is invoked
+	// by a v1:work:run that named it, and is never fired by the graph
+	// (memql#5048).
+	//
+	// It is the THIRD way an automation can be reachable. validateTriggerWiring
+	// refuses an automation with no event trigger and no schedule, because one
+	// that silently never runs is indistinguishable from one that works until
+	// the day you need it -- and that reasoning is unchanged. A template is
+	// reachable; it is just reachable by being NAMED rather than by being
+	// subscribed. The same gate therefore refuses a template that ALSO carries
+	// a trigger, so the two classes cannot blur into one.
+	Template bool `json:"template,omitempty"`
+
 	// Origin tracks where this automation was loaded from (file path).
 	Origin string `json:"-"`
 }
@@ -206,6 +219,12 @@ type ArgsField struct {
 // IsEventTriggered returns true if this automation has an event trigger.
 func (a *Automation) IsEventTriggered() bool {
 	return a != nil && a.Trigger != nil && a.Trigger.Event != ""
+}
+
+// IsTemplate reports whether this automation is invoked by a run rather than
+// fired by the graph.
+func (a *Automation) IsTemplate() bool {
+	return a != nil && a.Template
 }
 
 // IsEnabled returns whether the automation should run.

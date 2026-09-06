@@ -62,6 +62,8 @@ package work
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
@@ -331,4 +333,102 @@ func (i *Integration) FailRun(ctx context.Context, ownerUserId, runId, code, mes
 		"errorMessage": message,
 		"finishedAt":   rfc(i.now()),
 	})
+}
+
+// DirectGoal is a goal whose template is already known.
+type DirectGoal struct {
+	OwnerUserId string
+	// Statement is the goal in the requester's words -- the prompt, or what
+	// the deliverable is. It is what a person sees in Nexus.
+	Statement string
+	// AutomationName is the template to run. It must name a @template
+	// automation; the run dispatcher refuses anything it cannot resolve.
+	AutomationName string
+	// Input binds into that template's declared args at fire time.
+	Input map[string]any
+	// RequestedVia records the surface it arrived through.
+	RequestedVia string
+	// TriggeredBy is recorded on the run.
+	TriggeredBy string
+}
+
+// OpenDirectGoal opens a goal whose template the caller already knows, and
+// starts its run immediately.
+//
+// # Why this exists rather than going through compile
+//
+// Compile's job is to DECIDE which template a goal needs, cheapest tier first:
+// exact catalog match, near match, then one triage call. Here there is nothing
+// to decide -- `agent()` means "run this agent" and `produceArtifact` means
+// "produce this deliverable", and each already names its template.
+//
+// Routing them through compile anyway would cost a model call PER INVOCATION,
+// and always the most expensive tier: the catalog matches on a normalized
+// goal STATEMENT, the statement here IS the user's prompt, and no two prompts
+// are alike -- so the exact and near tiers could never hit and every call
+// would reach triage. That is exactly the "no EXTRA model call versus today"
+// line in memql#5048's acceptance, and it is why the Plan path these replace
+// did not decompose either (`startPlanDirect`, memql#816).
+//
+// # The run opens at `running`, not `compiling`
+//
+// `compiling` means "a template has not been chosen yet", and one has. Opening
+// there and immediately updating would emit two run events and leave a window
+// in which the abandoned sweep sees a run in `compiling` -- which it
+// deliberately does not touch, so a crash in that window strands the run
+// forever.
+func (i *Integration) OpenDirectGoal(ctx context.Context, g DirectGoal) (goalId, runId string, err error) {
+	if i == nil {
+		return "", "", fmt.Errorf("work: no integration")
+	}
+	owner := strings.TrimSpace(g.OwnerUserId)
+	statement := strings.TrimSpace(g.Statement)
+	automation := strings.TrimSpace(g.AutomationName)
+	if owner == "" || statement == "" || automation == "" {
+		return "", "", fmt.Errorf("work: a direct goal needs an owner, a statement and an automation name")
+	}
+	if g.TriggeredBy == "" {
+		g.TriggeredBy = "direct"
+	}
+
+	st := i.store()
+	now := i.clock().UTC()
+	goalId = newRowId(goalConcept)
+	runId = newRowId(runConcept)
+	scoped := ownerActor(ctx, owner)
+
+	if err := st.createGoalRow(scoped, goalSeed{
+		GoalId:       goalId,
+		Statement:    statement,
+		Origin:       "user",
+		Input:        g.Input,
+		RequestedVia: g.RequestedVia,
+	}); err != nil {
+		return "", "", err
+	}
+	if err := st.createRunRow(scoped, runSeed{
+		RunId:          runId,
+		GoalId:         goalId,
+		AutomationName: automation,
+		Input:          g.Input,
+		Variables:      g.Input,
+		TriggeredBy:    g.TriggeredBy,
+		Mode:           modeLive,
+		Status:         runStatusRunning,
+		NodeId:         selfNodeId(),
+		StartedAt:      now,
+		OwnerUserId:    owner,
+	}); err != nil {
+		return "", "", err
+	}
+
+	// NOTHING IS DISPATCHED FROM HERE, and that is the design rather than an
+	// omission. The run row's own `running` event is what reaches the agent
+	// replicas, exactly one of which claims it -- see HandleRunEvent. Calling
+	// the dispatcher directly would run the work on whichever node happened to
+	// serve the builtin, which for `produceArtifact` is a bff.
+	i.log().Info("work: opened a direct goal",
+		"component", "work.direct", "goal", goalId, "run", runId,
+		"automation", automation, "owner", owner)
+	return goalId, runId, nil
 }

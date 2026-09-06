@@ -43,7 +43,7 @@
 
 @executor("integration.agents.invoke")
 @args(profile="object")
-@description("Async-invoke a DSL-registered agent by name. Creates a queued v1:planner:plan (kind=agentInvocation) and returns its id. Use ai() for blocking LLM calls; agent() is for agent-orchestrated work that runs through the planner.")
+@description("Async-invoke a DSL-registered agent by name. Opens a v1:work:goal naming the invokeAgent template and returns {goalId, runId}; the run dispatcher claims it on an agent node and runs the turn. Use ai() for blocking LLM calls; agent() is for agent-orchestrated work that runs in the background.")
 builtin agent {
   name     string!
   prompt   string!
@@ -127,7 +127,7 @@ builtin ensureAgentForGoal {
 
 @executor("integration.agents.produceArtifact")
 @args(profile="object")
-@description("Delegate a produce-an-artifact request to the planner. Mints a v1:planner:plan (kind=produceArtifact, triggerSource=user.implicit) carrying the goal + desired format/filename in Plan.input, and returns {status:\"delegated\", planId, ack}. The plan auto-runs; the deliverable lands in the Library asynchronously.")
+@description("Delegate a produce-an-artifact request. Opens a v1:work:goal naming the produceArtifact template, carrying the goal + desired format/filename as its input, and returns {status:\"delegated\", goalId, runId, ack}. The run executes on an agent node; the deliverable lands in the Library asynchronously.")
 builtin produceArtifact {
   goal         string!
   format       string

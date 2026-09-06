@@ -10,21 +10,23 @@
 // Contract (async):
 //
 // The handler resolves the requested agent name against the
-// AgentRegistry, mints a v1:planner:plan row with kind="agentInvocation"
-// in `queued` status, and returns the planId immediately. The
-// dispatch side -- actually running the agent's tool loop -- is owned
-// by the planner integration's agent loop (which subscribes to
-// graph.node.created.v1:planner:plan and handles the agentInvocation
-// kind in a follow-up commit). For now the Plan sits in queued state
-// until that wiring lands; the contract this builtin exposes is
-// already correct so callers can write against it.
+// AgentRegistry, opens a v1:work:goal naming the `invokeAgent` template
+// with the agent and the prompt as its input, and returns {goalId, runId}
+// immediately. The run opens at `running`, its graph event reaches every
+// agent replica, exactly one claims it, and that one executes the turn
+// (memql#5048 / memql#5054).
 //
-// DSL callers consume the planId by:
+// It used to mint a v1:planner:plan in `queued` and rely on the planner's
+// orchestration loop to notice. The comment that stood here recorded, in its
+// own words, that the dispatch side would land "in a follow-up commit" and
+// that "for now the Plan sits in queued state until that wiring lands".
+//
+// DSL callers consume the ids by:
 //
 //   - Fire-and-forget (automation case): ignore the return.
-//   - Subscribe to graph.node.updated.v1:planner:plan filtered by
-//     id==<planId> for lifecycle progression.
-//   - Direct query via planById to read current state + output.
+//   - Subscribe to graph.node.updated.v1:work:run filtered by
+//     id==<runId> for lifecycle progression.
+//   - Direct query via workRunsForGoal to read current state + outcome.
 //
 // For blocking AI work from DSL, use `ai("promptName", args)` -- the
 // synchronous structured-output path. `agent()` is for agent-
@@ -36,13 +38,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/core/id"
 )
 
 // Integration owns the AgentRegistry + Engine pointers and implements
@@ -61,6 +63,11 @@ type Integration struct {
 	// turnSeam carries the agent runtime, which exists only on an
 	// agent-tagged build (memql#5048). See agent_turn.go.
 	turnSeam
+
+	// workGoals opens a work goal. See goals.go -- this package cannot write
+	// the @serverOnly work rows itself.
+	mu        sync.RWMutex
+	workGoals WorkGoals
 }
 
 // New constructs the agents integration. Returns nil if the
@@ -88,7 +95,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
 			Name:        "invoke",
-			Description: "Async-invoke a DSL-registered agent. Mints a v1:planner:plan row with kind=agentInvocation in queued status and returns the planId. The planner agent loop picks the Plan up and drives the agent's tool loop.",
+			Description: "Async-invoke a DSL-registered agent. Opens a v1:work:goal naming the invokeAgent template and returns {goalId, runId}. The run dispatcher claims the run on an agent node and runs the turn.",
 			Handler:     i.handleInvoke,
 			ArgsSchema: map[string]string{
 				"name":        "string",
@@ -147,7 +154,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "produceArtifact",
-			Description: "Delegate a produce-an-artifact request to the planner. Mints a v1:planner:plan (kind=produceArtifact, triggerSource=user.implicit) carrying the goal + desired format/filename, and returns {status:\"delegated\", planId, ack}. The plan auto-runs; the deliverable lands in the Library asynchronously.",
+			Description: "Delegate a produce-an-artifact request. Opens a v1:work:goal naming the produceArtifact template, carrying the goal + desired format/filename, and returns {status:\"delegated\", goalId, runId, ack}. The run executes on an agent node; the deliverable lands in the Library asynchronously.",
 			Handler:     i.handleProduceArtifact,
 			ArgsSchema: map[string]string{
 				"goal":        "string (required) -- the deliverable to produce, phrased as a concrete artifact",
@@ -161,13 +168,6 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	}
 }
 
-// produceArtifactKind is the v1:planner:plan.kind the produceArtifact
-// handler stamps. The planner agent loop does NOT decompose this kind: it
-// starts the plan directly and dispatches a single agent turn to the plan's
-// ownerAgentId (the requesting assistant), avoiding the heavyweight
-// plannerAgent decompose loop that spammed the LLM into a 429 (memql#816).
-const produceArtifactKind = "produceArtifact"
-
 // envelopeConcept is the namespace used for the MemoryNode this
 // handler returns. Distinct from any concept-row concept -- this is
 // an in-flight integration result, never persisted to a row.
@@ -178,10 +178,6 @@ const envelopeConcept = "integration:agents:envelope"
 // nodes -- the concrete value is informational; downstream consumers
 // don't permission-check on it.
 const systemActorId = "system:integration:agents"
-
-// agentInvocationKind is the v1:planner:plan.kind the handler stamps.
-// The planner integration's agent loop dispatches on this value.
-const agentInvocationKind = "agentInvocation"
 
 // handleInvoke is the DSL-callable executor.
 //
@@ -227,13 +223,34 @@ func (i *Integration) handleInvoke(ctx context.Context, args map[string]any, _ i
 		return nil, fmt.Errorf("agent(%q): no agent registered with that name (loaded names: %v)", name, i.agents.NamesFor(ownerUserId))
 	}
 
-	planId, err := i.createInvocationPlan(ctx, def, prompt, partitionId)
+	goals := i.workGoalsRef()
+	if goals == nil {
+		// REFUSED rather than acked. This handler's whole job is to get work
+		// STARTED, and the Plan path it replaces spent its life doing the
+		// opposite -- returning a plan id for work nothing executed. An ack
+		// for a goal that was never opened is that failure with a new name.
+		return nil, fmt.Errorf("agent(%q): no work-goal surface on this node, so the invocation cannot be started", name)
+	}
+
+	owner := resolveGoalOwner(ownerUserId, def.OwnerUserId)
+	goalId, runId, err := goals.OpenDirectGoal(ctx, DirectGoal{
+		OwnerUserId:    owner,
+		Statement:      prompt,
+		AutomationName: templateInvokeAgent,
+		Input: map[string]any{
+			"agentId": def.Id,
+			"prompt":  prompt,
+		},
+		RequestedVia: "agent",
+		TriggeredBy:  "agent.dsl",
+	})
 	if err != nil {
-		return nil, fmt.Errorf("agent(%q): create plan: %w", name, err)
+		return nil, fmt.Errorf("agent(%q): open goal: %w", name, err)
 	}
 
 	payload := map[string]any{
-		"planId": planId,
+		"goalId": goalId,
+		"runId":  runId,
 		"agent": map[string]any{
 			"name":     def.Name,
 			"role":     def.Role,
@@ -483,15 +500,17 @@ func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[st
 	}}, nil
 }
 
-// handleProduceArtifact delegates a "produce an artifact" request to the
-// planner. It mints a v1:planner:plan (kind=produceArtifact,
-// triggerSource=user.implicit) via the single createPlan write path,
-// carrying the goal + desired format/filename in Plan.input, and returns a
-// small ack {status:"delegated", planId, ack}. The plan auto-runs (the planner
-// agent loop auto-starts produceArtifact plans), so the deliverable is
-// produced + landed in the Library asynchronously while the Assistant just
-// acks and ends its turn. Mirrors createInvocationPlan + the
-// requestUserFeedback ack shape.
+// handleProduceArtifact delegates a "produce an artifact" request to the work
+// spine. It opens a v1:work:goal naming the produceArtifact template, carrying
+// the goal + desired format/filename as its input, and returns a small ack
+// {status:"delegated", goalId, runId, message} so the Assistant acks and ends
+// its turn while the deliverable is produced and landed in the Library
+// asynchronously. Mirrors the agent() handler + the requestUserFeedback ack
+// shape.
+//
+// The ack SHAPE is deliberately unchanged apart from the ids -- memql#5048's
+// acceptance names it, because the Assistant's prompt reads `message` and a
+// reworded ack changes what a model says to a person.
 func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if i == nil {
 		return nil, fmt.Errorf("produceArtifact: agents integration not initialized")
@@ -520,61 +539,51 @@ func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string
 	// -- NO planner-agent decompose loop (which spammed the LLM, memql#816).
 	agentId := strings.TrimSpace(asString(args["agentId"]))
 
-	planId := id.NewShortId()
-	// Plan.input is the per-kind input shape the executing agent reads to
-	// know WHAT to write + in what format. goal is also the Plan.goal, but
-	// keep it in input too so a downstream consumer that only reads input
-	// has the full picture.
+	goals := i.workGoalsRef()
+	if goals == nil {
+		return nil, fmt.Errorf("produceArtifact: no work-goal surface on this node, so the deliverable cannot be started")
+	}
+	if ownerUserId == "" {
+		// The Plan path defaulted this and the deliverable still landed --
+		// under nobody. Refused here: a goal, its run and every observation of
+		// it are owner-scoped, so an unowned deliverable is one the requester
+		// cannot see in their own Library.
+		return nil, fmt.Errorf("produceArtifact: no owning user resolved; the deliverable would be produced for nobody")
+	}
+
 	input := map[string]any{
-		"kind":   produceArtifactKind,
-		"goal":   goal,
-		"format": format,
+		"agentId": agentId,
+		"goal":    goal,
+		"format":  format,
 	}
 	if filename != "" {
 		input["filename"] = filename
 	}
-	inputJSON, err := json.Marshal(input)
+
+	goalId, runId, err := goals.OpenDirectGoal(ctx, DirectGoal{
+		OwnerUserId:    ownerUserId,
+		Statement:      goal,
+		AutomationName: templateProduceArtifact,
+		Input:          input,
+		RequestedVia:   "agent",
+		TriggeredBy:    "user.implicit",
+	})
 	if err != nil {
-		return nil, fmt.Errorf("produceArtifact: marshal Plan.input: %w", err)
-	}
-
-	if i.engine == nil {
-		return nil, fmt.Errorf("produceArtifact: engine handle missing")
-	}
-
-	// requestedBy is the OWNING USER so the planner's specialist lookup
-	// (activeAgentsForUser{ownerUserId: requestedBy}) sees the user's
-	// agents, and the produced artifact is owned by the user. The mutation
-	// runs under a synthetic user actor for the same reason
-	// requestUserFeedback does -- the per-tool context doesn't carry the
-	// user's JWT.
-	mutationCtx := withUserActor(ctx, ownerUserId)
-	var qb strings.Builder
-	fmt.Fprintf(&qb,
-		`mutation createPlan(planId: %s, partitionId: %s, kind: %s, goal: %s, requestedBy: %s, triggerSource: "user.implicit", authorizedBy: %s, input: %s`,
-		langparser.QuoteString(planId), langparser.QuoteString(partitionId), langparser.QuoteString(produceArtifactKind), langparser.QuoteString(goal), langparser.QuoteString(ownerUserId), langparser.QuoteString(ownerUserId), string(inputJSON),
-	)
-	if agentId != "" {
-		// Dispatch the production turn straight to the requesting assistant
-		// (no planner-agent decompose loop -- memql#816).
-		fmt.Fprintf(&qb, `, ownerAgentId: %s`, langparser.QuoteString(agentId))
-	}
-	qb.WriteString(`)`)
-	if _, err := i.engine.Execute(mutationCtx, qb.String()); err != nil {
-		return nil, fmt.Errorf("produceArtifact: createPlan failed: %w", err)
+		return nil, fmt.Errorf("produceArtifact: open goal: %w", err)
 	}
 
 	payload, err := json.Marshal(map[string]any{
 		"status":  "delegated",
-		"planId":  planId,
+		"goalId":  goalId,
+		"runId":   runId,
 		"format":  format,
-		"message": "Delegated to the planner; the deliverable will be produced asynchronously and land in the Library. Reply with a SHORT acknowledgement (e.g. naming what you're making and that it'll be in their Library) and END YOUR TURN -- do NOT author the deliverable yourself.",
+		"message": "Delegated; the deliverable will be produced asynchronously and land in the Library. Reply with a SHORT acknowledgement (e.g. naming what you're making and that it'll be in their Library) and END YOUR TURN -- do NOT author the deliverable yourself.",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("produceArtifact: marshal ack: %w", err)
 	}
 	return []memorynodes.MemoryNode{{
-		ID:        fmt.Sprintf("produceArtifact-envelope:%s:%d", planId, time.Now().UnixNano()),
+		ID:        fmt.Sprintf("produceArtifact-envelope:%s:%d", runId, time.Now().UnixNano()),
 		Concept:   envelopeConcept,
 		Type:      memorynodes.NodeTypeObject,
 		CreatedAt: time.Now().UTC(),
@@ -603,41 +612,4 @@ func asString(v any) string {
 		return s
 	}
 	return ""
-}
-
-// createInvocationPlan mints the v1:planner:plan row. The planner
-// integration's agent loop will pick this Plan up on its
-// graph.node.created subscription, dispatch the agent (using the
-// agent's systemPrompt + the prompt arg as the user turn), and
-// transition status queued -> running -> succeeded with output set
-// to the agent's reply. Owner attribution lives on ownerAgentId.
-//
-// requestedBy/authorizedBy default to the system actor today; a
-// future iteration will plumb the calling actor through so audit
-// tracks the user-on-whose-behalf the agent ran.
-func (i *Integration) createInvocationPlan(ctx context.Context, def *memql.AgentDefinition, prompt, partitionId string) (string, error) {
-	planId := id.NewShortId()
-	// Build the input object the planner agent loop reads when
-	// dispatching: agentName + prompt are the essential signal;
-	// agentRoleSlug is included so the dispatcher doesn't have to
-	// re-resolve the registry entry.
-	input := map[string]any{
-		"kind":          agentInvocationKind,
-		"agentName":     def.Name,
-		"agentRoleSlug": def.RoleSlug,
-		"prompt":        prompt,
-	}
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		return "", fmt.Errorf("marshal Plan.input: %w", err)
-	}
-
-	query := fmt.Sprintf(
-		`mutation createPlan(planId: %s, partitionId: %s, kind: %s, goal: %s, requestedBy: %s, triggerSource: "agent.dsl", authorizedBy: %s, input: %s)`,
-		langparser.QuoteString(planId), langparser.QuoteString(partitionId), langparser.QuoteString(agentInvocationKind), langparser.QuoteString(prompt), langparser.QuoteString(systemActorId), langparser.QuoteString(systemActorId), string(inputJSON),
-	)
-	if _, err := i.engine.Execute(ctx, query); err != nil {
-		return "", fmt.Errorf("execute createPlan: %w", err)
-	}
-	return planId, nil
 }

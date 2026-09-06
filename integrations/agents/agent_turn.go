@@ -6,11 +6,16 @@ package agents
 // ===========================================================================
 // WHY THIS EXISTS
 // ===========================================================================
-// `agent(name, prompt)` mints a v1:planner:plan and returns its id. The Plan
-// is not the work -- it is the planner loop's INPUT: the loop picks it up off
-// a graph event and plan_execution.go builds an AgentGenerateTurnMsg and
-// forwards it. So retiring the Plan (memql#5000) means the work spine has to
+// `agent(name, prompt)` used to mint a v1:planner:plan and return its id. The
+// Plan was not the work -- it was the planner loop's INPUT: the loop picked it
+// up off a graph event and plan_execution.go built an AgentGenerateTurnMsg and
+// forwarded it. So retiring the Plan (memql#5000) meant the work spine had to
 // be able to run an agent turn without one, and that is this builtin.
+//
+// It has a caller now: the `invokeAgent` template in
+// dsl/agents/automations.memql is one step, and that step is this. `agent()`
+// opens a goal naming that template and the run dispatcher executes it
+// (memql#5048).
 //
 // ===========================================================================
 // WHY IT DISPATCHES LOCALLY RATHER THAN FORWARDING

@@ -6,7 +6,9 @@ package automations
 // An automation that silently never runs is indistinguishable from one that
 // works until the day you need it. Two shapes produced exactly that:
 //
-//   - No reachable trigger at all. A typo'd kwarg (`@trigger(evnt=...)`), a
+//   - No reachable trigger at all. (A @template automation is the ONE
+//     exception, added in memql#5048: it is reachable by being NAMED by a
+//     v1:work:run rather than by being subscribed. See the branch below.) A typo'd kwarg (`@trigger(evnt=...)`), a
 //     bare `@trigger()`, or no `@trigger` line whatsoever all compiled to
 //     `topic="" schedule="" enabled=true`. `Scheduler.run` then filed the
 //     automation in `s.automations` and registered NEITHER a cron entry nor a
@@ -57,6 +59,26 @@ func (l *Loader) validateTriggerWiring(automation *Automation) error {
 
 	scheduled := automation.IsScheduled()
 	evented := automation.IsEventTriggered()
+
+	// A TEMPLATE is reachable by being NAMED (memql#5048): a v1:work:run
+	// carries automationName, and the run dispatcher resolves and executes it.
+	// So the premise above -- "nothing can ever run it" -- is false for one,
+	// and the gate has to know about the third way in.
+	//
+	// The mirror rule is enforced rather than assumed: a template that ALSO
+	// declares a trigger would run BOTH ways, once per matching event and once
+	// per run that named it. That is the double-execution the whole spine is
+	// careful about, and it would look like a template that works.
+	if automation.IsTemplate() {
+		if scheduled || evented {
+			return fmt.Errorf("automation %q is declared @template but also carries a trigger or a schedule. "+
+				"A template is invoked by the work run that names it; adding a trigger would make it run BOTH ways -- "+
+				"once per matching event AND once per run -- which presents as a template that works. "+
+				"Remove the @trigger/@schedule, or drop @template and let it be an ordinary automation",
+				automation.Name)
+		}
+		return nil
+	}
 
 	if !scheduled && !evented {
 		return fmt.Errorf("automation %q has neither an event trigger nor a schedule, so nothing can ever run it. "+
