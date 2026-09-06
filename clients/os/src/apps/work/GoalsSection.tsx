@@ -2,6 +2,9 @@ import { useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { accountNameFrom } from "../accounts/rows";
+import { useAccountOptions } from "../accounts/tie";
+
 import {
   Button,
   Caption,
@@ -314,6 +317,10 @@ function GoalDetail({
   onOpenRun: (runId: string) => void;
 }) {
   const ceilings = goal.ceilings;
+  // The account roster, for resolving this goal's tags to names. A live
+  // collection keyed on a CONSTANT -- keying it on anything async-resolved
+  // would re-subscribe as that value arrived.
+  const accounts = useAccountOptions();
   return (
     <>
       <Panel label="This goal">
@@ -347,9 +354,16 @@ function GoalDetail({
                 sentence. */}
             <Subhead>Who this work is for</Subhead>
             <Chips label="Who this work is for">
+              {/* RESOLVED TO A NAME, and an id that resolves to nothing KEEPS
+                  its id rather than rendering blank -- an account can be
+                  archived, or owned by somebody whose rows this caller cannot
+                  read, and "tied to something you cannot see" is a more useful
+                  thing to show than nothing. accountNameFrom is the same
+                  resolver Files, Deployables, Users and Training use, so a
+                  client is called one thing across the shell. */}
               {goal.accountIds.map((accountId) => (
                 <Chip key={accountId} tone="muted">
-                  {accountId}
+                  {accountNameFrom(accounts, accountId)}
                 </Chip>
               ))}
             </Chips>

@@ -66,6 +66,7 @@ export interface FakeSeed {
   goals?: Row[];
   runs?: Row[];
   approvals?: Row[];
+  accounts?: Row[];
   steps?: Row[] | Error;
   modelCalls?: Row[] | Error;
   observations?: Row[] | Error;
@@ -104,6 +105,14 @@ export function fakeConnection(seed: FakeSeed = {}) {
       ),
       workApprovalsForOwner: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
         rowsResult(seed.approvals ?? []),
+      ),
+      // The account roster the goal detail resolves tags through and the
+      // create form offers. Seeded EMPTY by default -- which is the state
+      // most tests want -- but present, because a read this surface issues
+      // and the fake does not answer is one whose absence looks like a
+      // feature that works.
+      clientAccountsAll: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
+        rowsResult(seed.accounts ?? []),
       ),
       workStepsForOwnerRun: read(seed.steps),
       workModelCallsForOwnerRun: read(seed.modelCalls),

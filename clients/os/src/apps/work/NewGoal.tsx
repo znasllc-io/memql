@@ -1,6 +1,8 @@
 import { useState } from "react";
 
 import { Button, Caption, Notice, Panel, Subhead } from "../../kit";
+import { AccountLabelPicker } from "../accounts/AccountPicker";
+import { useAccountOptions } from "../accounts/tie";
 import type { CreateGoalState } from "./actions";
 
 // THE ONE INPUT IN THE PRODUCT: a person says what they want done.
@@ -36,11 +38,14 @@ export function NewGoal({
   onCancel: () => void;
 }) {
   const [statement, setStatement] = useState("");
+  const [accountIds, setAccountIds] = useState<string[]>([]);
+  const accounts = useAccountOptions();
 
   async function submit() {
-    const id = await create.create({ statement, accountIds: [] });
+    const id = await create.create({ statement, accountIds });
     if (id === "") return;
     setStatement("");
+    setAccountIds([]);
     onCreated(id);
   }
 
@@ -63,10 +68,26 @@ export function NewGoal({
           run and starts working it out, which is a thing that can cost money.
           A form whose button said only "Create" would leave somebody to find
           that out from the bill. */}
+      {/* THE TAG IS A RECORD, NOT A SCOPE, and the label has to say so. An
+          account tag on a goal is who the work is FOR; it narrows no read and
+          grants no access, and somebody who read it as permissions would tag
+          defensively and wrongly. AccountLabelPicker rather than the single
+          picker because `accountIds` is a list on the concept -- the same
+          control the Library index uses for the same shape of field. */}
+      {accounts.length === 0 ? null : (
+        <AccountLabelPicker
+          selected={accountIds}
+          onChange={setAccountIds}
+          accounts={accounts}
+          label="Who this work is for (optional)"
+        />
+      )}
+
       <Caption>
         It works this out once -- matching what it already knows how to do first, and reaching a
         model only for the parts it has not seen before -- then records the steps so the next run
-        of the same thing replays them.
+        of the same thing replays them. It runs under this deployment's default limits; a goal's
+        ceilings are set when it is accepted and there is no verb to change them afterwards.
       </Caption>
 
       {create.error === "" ? null : (

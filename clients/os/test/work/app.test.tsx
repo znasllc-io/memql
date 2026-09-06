@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -142,6 +143,40 @@ describe("a new goal", () => {
       // submitted.
       requestedVia: "nexus",
     });
+  });
+
+  it("tags the goal with the accounts the person picked", async () => {
+    // The tag is a RECORD of who the work is for. It narrows no read and
+    // grants no access -- so the test asserts it reaches createGoal, and the
+    // label asserts it does not read as permissions.
+    const conn = fakeConnection({
+      createReply: { goalId: "g9", runId: "r9" },
+      accounts: [{ id: "v1:accounts:account:acme", name: "Acme Ltd", status: "active" } as Row],
+    });
+    mount(conn);
+    fireEvent.click(await screen.findByText("New goal"));
+    fireEvent.change(screen.getByLabelText("The goal, in your own words"), {
+      target: { value: "Reconcile the ledger" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Acme Ltd" }));
+    fireEvent.click(screen.getByText("Start work"));
+    await waitFor(() => expect(conn.query.createGoal).toHaveBeenCalled());
+    expect(conn.query.createGoal.mock.calls[0]?.[0]).toMatchObject({
+      statement: "Reconcile the ledger",
+      accountIds: ["v1:accounts:account:acme"],
+    });
+  });
+
+  it("offers no account control at all when the person has no accounts", async () => {
+    // An empty picker is a control that cannot be used, and a label reading
+    // "Who this work is for" over nothing is a question with no answers.
+    const conn = fakeConnection({ createReply: { goalId: "g9", runId: "r9" } });
+    mount(conn);
+    fireEvent.click(await screen.findByText("New goal"));
+    expect(screen.queryByRole("group", { name: "Who this work is for (optional)" })).toBeNull();
+    // And not the picker's own empty-state either: an input the person cannot
+    // use is worse than no input on the one form in the product.
+    expect(screen.queryByText("No clients yet. The Accounts app is where they are added.")).toBeNull();
   });
 
   it("refuses an empty statement without a round trip", async () => {
