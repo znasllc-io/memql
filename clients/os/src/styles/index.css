@@ -10709,3 +10709,155 @@ a.os-button {
 .os-fleet-session {
   min-height: 100%;
 }
+
+/* ---- accounts: credentials on behalf of a billing account (memql#5013) ---- */
+
+/* ===========================================================================
+ * The Accounts app's credentials panel (epic memql#5009, memql#5013),
+ * pending fold-in to index.css
+ * ===========================================================================
+ *
+ * Every rule here uses the existing --os-* tokens and introduces no colour of
+ * its own. It is all `.os-account-*`: this app's own vocabulary, in the sense
+ * the kit's header states -- what is genuinely about ITS subject, after every
+ * generic control has come from `kit/controls.tsx`.
+ *
+ * NOT HERE, deliberately: the panel, the subhead, the field, the notice, the
+ * row and the chip. Those are all kit, index.css already carries them, and a
+ * second copy in this file is a copy that would drift the moment either side
+ * is touched. `.os-account-form-actions` is likewise reused from the archive
+ * confirm rather than respelled -- the revoke confirm's button pair is the
+ * same object.
+ */
+
+/* ---------------------------------------------------------------------------
+ * The one-time reveal
+ * ------------------------------------------------------------------------- */
+
+/* The credential, its copy control and the Done that discards it, on one
+ * line where there is room and wrapping where there is not. The VALUE takes
+ * the whole width when it wraps: it is one unbreakable token and the reason
+ * this notice exists, so it is never the thing that gets squeezed. */
+.os-account-secret {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* `user-select: all` so one click takes the whole credential. A clipboard can
+ * refuse -- an insecure origin, a permission the browser declined -- and when
+ * it does, selecting by hand is the only way the value gets out, so it has to
+ * be one gesture rather than a careful drag across 50 characters. */
+.os-account-secret-value {
+  flex: 1 1 24ch;
+  min-width: 0;
+  padding: 6px 9px;
+  font-size: var(--os-text-xs);
+  color: var(--os-ink);
+  background: var(--os-raised);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* ---------------------------------------------------------------------------
+ * The list of credentials
+ * ------------------------------------------------------------------------- */
+
+.os-account-credentials {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * The revoke confirm
+ * ------------------------------------------------------------------------- */
+
+/* Indented under the row it belongs to, so which credential is about to be
+ * revoked is answered by POSITION as well as by the name in the sentence. A
+ * confirm that floated free of its row would be the generic "are you sure"
+ * that the in-surface confirm exists to avoid. */
+.os-account-credential-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 6px 26px;
+  padding: 10px 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+}
+
+.os-account-credential-confirm-line {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-ink);
+}
+
+/* ---------------------------------------------------------------------------
+ * The Credentials section (memql#5013)
+ * ------------------------------------------------------------------------- */
+
+/*
+ * THE DISAMBIGUATION, AS PROSE. Body ink at the small size rather than a
+ * muted caption or a bordered notice, for `.os-bin-lede`'s reason: it is not
+ * a warning about something going wrong, it is the one fact that makes the
+ * list mean anything -- these are billing accounts, not the clients the
+ * Accounts section lists. A notice would read as an error about the surface;
+ * a caption would read as an aside. It is the app talking, so it takes body
+ * ink and a readable measure.
+ */
+.os-credentials-lede {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--os-ink);
+  font-size: var(--os-text-sm);
+  line-height: 1.55;
+}
+
+/* The concept id inside that sentence. It is the one thing a reader can
+ * actually check the claim against, so it is set as code and dimmed -- read
+ * when wanted, skipped when not, and never mistaken for the account's name. */
+.os-credentials-lede code {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+
+/* The billing accounts. Same shape as `.os-account-credentials` one level
+ * down -- a plain column of kit Rows -- rather than a LiveList: this read is
+ * not a feed (the routing table carries no update rule for the concept), and
+ * a LiveList would draw arrival cues over a list that cannot receive
+ * arrivals. */
+.os-credentials-accounts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* DESIGN.md rule 9: real estate belongs to CONTENT, and prose is content that
+ * stops being readable past about 90 characters. The panel now stands in a
+ * full-window section rather than in a client's detail stack, so these two
+ * sentences ran the whole width of the window -- 170-odd characters a line,
+ * measured. The list rows below them still take the window, because a row is
+ * scanned rather than read. */
+.os-account-credential-note {
+  max-width: 92ch;
+}
+
+/* The empty answer takes the lede's measure, for the lede's reason: it is a
+ * sentence to be READ, not a row to be scanned, and at a full window it ran to
+ * about 200 characters a line. */
+.os-credentials-empty {
+  max-width: 62ch;
+}

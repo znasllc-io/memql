@@ -66,23 +66,40 @@ test("a promoted construct is offered no cluster source -- there is no file to s
 });
 
 // -----------------------------------------------------------------------------
-// the retired browse-rows button (memql#4252, removed by epic memql#4984)
+// the browse-rows button (memql#4252; removed by epic memql#4984, restored
+// pointed at MemQL OS by epic memql#5009)
 // -----------------------------------------------------------------------------
 
 const BROWSE_ROWS = 'data-act="browseRows"';
 
-// A concept used to offer "Browse rows in portal", which opened the portal's
-// `/concepts/<id>` page. The portal is retired and MemQL OS has no concept
-// browser, so there is no page to open and the button was REMOVED rather than
-// pointed somewhere that answers 404.
+// THE PREDICTION IN THE PREVIOUS VERSION OF THIS TEST CAME TRUE, AND THE
+// CONDITION IT ATTACHED CAME TRUE FIRST.
 //
-// The test is kept, inverted, rather than deleted: `renderConstructPage` still
-// takes a `kind` and still branches on it, so "a concept draws no browse-rows
-// button" is a claim that can become false again -- and the natural way for it
-// to become false is somebody restoring the button when a concept browser
-// lands, without noticing there is nothing at the far end yet.
-test("no kind offers to browse rows -- the button went with the portal", () => {
-  for (const kind of ["concept", "query", "mutation", "automation", "tool", "spec", "shape", "prompt", "provider"]) {
+// A concept used to offer "Browse rows in portal", opening the portal's
+// `/concepts/<id>`. The portal was retired, no page answered that route, and
+// the button was REMOVED rather than pointed at a 404. The test was kept and
+// inverted, with a note saying the natural way for it to become false again
+// was "somebody restoring the button when a concept browser lands, without
+// noticing there is nothing at the far end yet."
+//
+// The far end was checked. MemQL OS has a Concepts app (memql#5010), it
+// serves `?concept=<id>` through a boot-time reader that turns the marker
+// into an open intent, and `consoleConceptUrl` composes exactly that. So the
+// button is back, and this test is re-inverted.
+//
+// BOTH HALVES STILL MATTER, which is why the loop stayed a loop: rows are a
+// thing only a concept has, so every other kind must still draw nothing. The
+// absence is the statement there, the same way it is for the run button.
+test("a concept offers to browse its rows, and no other kind does", () => {
+  const conceptHtml = renderConstructPage({
+    construct: construct({ kind: "concept" }),
+    fileInWorkspace: false,
+    offerClusterSource: false,
+    error: "",
+  });
+  assert.equal(conceptHtml.includes(BROWSE_ROWS), true, "a concept drew no browse-rows button");
+
+  for (const kind of ["query", "mutation", "automation", "tool", "spec", "shape", "prompt", "provider"]) {
     const html = renderConstructPage({
       construct: construct({ kind }),
       fileInWorkspace: false,

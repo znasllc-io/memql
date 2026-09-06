@@ -24,13 +24,17 @@ vi.mock("@znasllc-io/memql-sdk-core/identity", () => ({
 
 const { AccountsApp } = await import("../../src/apps/accounts/AccountsApp");
 const { LocalAccountsSettingsStore } = await import("../../src/apps/accounts/settings");
-const { accountRow, accountTokenRow, fakeConnection, rowsResult, withSession } = await import(
-  "./harness"
-);
+const { accountTokenRow, billingAccountRow, fakeConnection, rowsResult, withSession } =
+  await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
-const ACCOUNT_ID = "v1:accounts:account:a1";
+// A BILLING account (`v1:identity:account`), which is what `mintAccountToken`
+// gates on. It was a `v1:accounts:account` -- a CLIENT -- while this panel
+// lived in the client detail, and every mint against one of those resolves
+// ZERO ROWS through `query accountById`, which IS the refusal (memql#5013).
+const ACCOUNT_ID = "v1:identity:account:b1";
+const ACCOUNT_NAME = "Northwind Trading";
 const SUBJECT = "v1:identity:user:me";
 const CREDENTIAL_ID = "v1:identity:identity:tok1";
 
@@ -54,7 +58,7 @@ function mount(connection: Conn) {
   return render(
     withSession(
       <AccountsApp
-        sectionId="accounts"
+        sectionId="credentials"
         navigate={vi.fn()}
         askContext={() => {}}
         store={memoryStore()}
@@ -63,16 +67,19 @@ function mount(connection: Conn) {
   );
 }
 
-/** Open the one client and wait for its credentials panel. */
+/** Open the one billing account and wait for its credentials panel. */
 async function openCredentials(connection: Conn): Promise<HTMLElement> {
   mount(connection);
-  fireEvent.click(await screen.findByText("Acme Consulting"));
+  fireEvent.click(await screen.findByText(ACCOUNT_NAME));
   return screen.findByLabelText("Credentials");
 }
 
 function connectionWith(over: Partial<Parameters<typeof fakeConnection>[0]> = {}) {
   return fakeConnection({
-    clientAccountsAll: [accountRow({ id: ACCOUNT_ID })],
+    // `accounts`, NOT `clientAccountsAll`. The Credentials section reads
+    // `v1:identity:account`; the client registry is a different concept that
+    // happens to share the word.
+    accounts: [billingAccountRow({ id: ACCOUNT_ID, name: ACCOUNT_NAME })],
     ...over,
   });
 }
@@ -130,7 +137,7 @@ beforeEach(() => {
 });
 
 describe("issuing a credential", () => {
-  it("mints against this client, under the label the operator typed", async () => {
+  it("mints against this billing account, under the label the operator typed", async () => {
     const conn = connectionWith();
     const panel = await openCredentials(conn);
     await issue(panel, "Nightly export job");
@@ -251,9 +258,9 @@ describe("issuing a credential", () => {
 });
 
 describe("what the surface says this credential IS", () => {
-  it("names the operator's own user as the authenticated subject, and never the client", async () => {
-    // The server echoes `subjectUserId` back precisely so a client cannot
-    // render "signed in as this client" without contradicting a field it was
+  it("names the operator's own user as the authenticated subject, and never the account", async () => {
+    // The server echoes `subjectUserId` back precisely so a browser cannot
+    // render "signed in as this account" without contradicting a field it was
     // handed. It is shown on the reveal and on every listed row.
     const conn = connectionWith({
       accountTokensForAccount: [accountTokenRow({ id: CREDENTIAL_ID })],
@@ -262,7 +269,7 @@ describe("what the surface says this credential IS", () => {
 
     expect(await within(panel).findByText(SUBJECT)).toBeTruthy();
     expect(
-      within(panel).getByText(/Nothing authenticates as a client/),
+      within(panel).getByText(/Nothing authenticates as a billing account/),
     ).toBeTruthy();
 
     await issue(panel, "Nightly export job");
@@ -356,7 +363,7 @@ describe("revoking", () => {
 });
 
 describe("the read", () => {
-  it("asks about this client", async () => {
+  it("asks about this billing account", async () => {
     const conn = connectionWith();
     await openCredentials(conn);
     await waitFor(() =>
@@ -376,19 +383,23 @@ describe("the read", () => {
     const panel = await openCredentials(conn);
 
     expect(
-      await within(panel).findByText("The credentials for this client were not returned."),
+      await within(panel).findByText(
+        "The credentials for this billing account were not returned.",
+      ),
     ).toBeTruthy();
     expect(within(panel).getByText("reading credentials is not permitted here")).toBeTruthy();
     expect(
-      within(panel).queryByText("No credentials have been issued for this client."),
+      within(panel).queryByText("No credentials have been issued for this billing account."),
     ).toBeNull();
   });
 
-  it("says so when a client has none", async () => {
+  it("says so when a billing account has none", async () => {
     const conn = connectionWith({ accountTokensForAccount: [] });
     const panel = await openCredentials(conn);
     expect(
-      await within(panel).findByText("No credentials have been issued for this client."),
+      await within(panel).findByText(
+        "No credentials have been issued for this billing account.",
+      ),
     ).toBeTruthy();
   });
 });

@@ -4,7 +4,8 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { useOsConnection } from "../../live/connection";
 import { accountTokenFromRow, sortAccountTokens, type AccountTokenRow } from "./credentials";
 
-// The credentials issued on behalf of one client, read on open.
+// The credentials issued on behalf of one BILLING account
+// (`v1:identity:account`, never the client registry), read on open.
 //
 // ===========================================================================
 // AN ON-DEMAND READ, AND HERE THAT IS NOT A CHOICE
@@ -31,7 +32,8 @@ import { accountTokenFromRow, sortAccountTokens, type AccountTokenRow } from "./
 // and never a colleague's. The `accountId` conjunct narrows an
 // already-authorized set; it is not the gate. Nothing here decides any of it.
 
-/** One client's credentials, and the state of the read that fetched them. */
+/** One billing account's credentials, and the state of the read that fetched
+ *  them. */
 export interface AccountTokenFeed {
   tokens: AccountTokenRow[];
   state: "idle" | "loading" | "ready" | "error";

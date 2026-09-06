@@ -184,9 +184,8 @@ export function domainState(over: Partial<Row> & { concept: string }): Row {
     lastAppliedAt: "",
     lastReconciledAt: "",
     driftLast: 0,
-    driftTotal: 0,
-    staleWrites: 0,
-    tombstoned: 0,
+    lagSeconds: 0,
+    outboxDepth: 0,
     lastError: "",
     ...over,
   } as unknown as Row;

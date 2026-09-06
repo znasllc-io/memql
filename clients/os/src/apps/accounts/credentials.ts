@@ -2,8 +2,8 @@ import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { boolOr, flatten } from "../../kit/rows";
 
-// The credentials an operator has issued on behalf of one client, projected
-// out of the wire rows `accountTokensForAccount` returns.
+// The credentials an operator has issued on behalf of one BILLING account,
+// projected out of the wire rows `accountTokensForAccount` returns.
 //
 // PURE, and separate from the panel, for the reason rows.ts is: a projection
 // asserted through render() is asserted through three layers that can each
@@ -12,15 +12,18 @@ import { boolOr, flatten } from "../../kit/rows";
 // ===========================================================================
 // WHAT THIS CREDENTIAL IS -- AND THE THING THE VOCABULARY MUST NOT IMPLY
 // ===========================================================================
-// It is issued TO A USER ON BEHALF OF A CLIENT. Its authenticated subject is
-// the operator's own `v1:identity:user` row -- which is why the field below
-// is called `subjectUserId` rather than `ownerUserId` or, worst of all,
-// `accountUserId`. `accountId` is a BINDING, carried so a credential can be
-// attributed to the work it was issued for and revoked as a group. Nothing
-// authenticates as a client, and no field here should ever be read as though
-// something did (component/grpc/account_token_handlers.go states the same
-// rule at the other end of the wire, and the server echoes the subject back
-// on the mint reply precisely so a client cannot render otherwise).
+// It is issued TO A USER ON BEHALF OF A BILLING ACCOUNT -- a
+// `v1:identity:account`, the paying subject of the account-isolation model, and
+// NOT the `v1:accounts:account` client registry this app also lists. The two
+// share the word and nothing else. Its authenticated subject is the operator's
+// own `v1:identity:user` row -- which is why the field below is called
+// `subjectUserId` rather than `ownerUserId` or, worst of all, `accountUserId`.
+// `accountId` is a BINDING, carried so a credential can be attributed to the
+// work it was issued for and revoked as a group. Nothing authenticates as a
+// billing account, and no field here should ever be read as though something
+// did (component/grpc/account_token_handlers.go states the same rule at the
+// other end of the wire, and the server echoes the subject back on the mint
+// reply precisely so a browser cannot render otherwise).
 //
 // THE PROJECTION CARRIES NO SECRET, and that is a property of the shape
 // rather than of this file: `accountTokenSummary` names the credential's
@@ -33,7 +36,7 @@ export interface AccountTokenRow {
   id: string;
   /**
    * The credential's authenticated SUBJECT -- the operator's user row, never
-   * the client. `userId` on the wire; renamed here because `userId` beside an
+   * the account. `userId` on the wire; renamed here because `userId` beside an
    * `accountId` invites exactly the misreading this whole surface avoids.
    */
   subjectUserId: string;
@@ -41,7 +44,7 @@ export interface AccountTokenRow {
   label: string;
   /** False once revoked. See `accountTokenIsRevoked` for the absent case. */
   active: boolean;
-  /** The client this credential is bound to, for attribution. */
+  /** The billing account this credential is bound to, for attribution. */
   accountId: string;
   /** Who minted it (`credentials.mintedBy`). */
   mintedBy: string;

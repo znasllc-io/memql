@@ -213,3 +213,35 @@ describe("a concept's rows", () => {
     expect(await screen.findByText(/conceptBrowse: permission denied/)).toBeTruthy();
   });
 });
+
+describe("the walk starts once", () => {
+  // A BROWSER FOUND THIS AND THE SUITE COULD NOT (epic memql#5009). Under
+  // StrictMode the restart effect and the walk effect both ran on mount, the
+  // restart bumped `attempt`, and the walk ran a SECOND time and APPENDED its
+  // page to the first one's -- three rows rendered as six, under a footer
+  // confidently reporting "All 6 readable rows loaded". A wrong total stated
+  // with confidence is the worst shape this surface can take, because the
+  // whole point of its four footer states is that "that is all of them" can
+  // be trusted.
+  //
+  // THIS ASSERTS THE CALL COUNT RATHER THAN THE RENDERED ROWS, and that is
+  // the difference between a test that catches it and one that does not. The
+  // first version of this case rendered under `<StrictMode>` and asserted two
+  // `.os-rows-row` elements -- and PASSED with the fix reverted, because
+  // jsdom's effect timing lets the duplicate page land before the assertion
+  // in a way the browser's does not. The symptom is not reproducible here;
+  // the mechanism is. One mount of one concept is ONE browse.
+  it("issues exactly one browse per concept, however the effects settle", async () => {
+    const connection = fakeConnection({
+      pages: [{ rows: [nodeOf("a", { total: 1 }), nodeOf("b", { total: 2 })], cursor: "" }],
+    });
+    mount(connection, "v1:shopify:order");
+    await snapshot(connection);
+    await screen.findByText(/All 2 readable rows loaded/);
+
+    const browses = connection.query.executeNamed.mock.calls.filter(
+      (call) => call[0] === "conceptBrowse",
+    );
+    expect(browses.length).toBe(1);
+  });
+});

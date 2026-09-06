@@ -119,14 +119,39 @@ export function composeConsoleUrl(cluster: ClusterConfig): string {
   return "";
 }
 
-// THERE IS NO CONCEPT DEEP-LINK ANY MORE, and that is a removal rather than an
-// oversight. `portalConceptUrl` composed `<root>/concepts/<id>` for the "Browse
-// rows" action on a construct, and MemQL OS has no concept browser -- the
-// portal's was retired with it in epic memql#4984 and the replacement is filed
-// as a follow-up. `encodePortalSegment`, the path-segment escaping that link
-// needed, went with it: its ONE caller was that composition.
-//
-// The action was removed from the extension rather than pointed at the console
-// root. A menu item that opens a page which does not answer is worse than an
-// absent one -- the person clicks, gets a 404, and has learnt nothing about
-// where the rows are.
+/**
+ * The console's address for ONE concept's rows.
+ *
+ * THE FOLLOW-UP THIS FILE ASKED FOR (epic memql#5009, memql#5010). The note
+ * that stood here said there was no concept deep-link, because
+ * `portalConceptUrl` composed `<root>/concepts/<id>` and epic memql#4984 left
+ * no page answering that route. MemQL OS now has a Concepts app, so the link
+ * is back -- as an ADD pointed at the surface that answers, never as a revert
+ * of that removal. The reasoning it recorded still holds and is the reason
+ * this was not restored earlier: a menu item that opens a page which does not
+ * answer is worse than an absent one.
+ *
+ * A QUERY PARAMETER RATHER THAN A PATH SEGMENT, and that is the shell's shape
+ * rather than a preference. MemQL OS is a desktop shell with no router: a
+ * window carries an app and a section, not a path, so `/concepts/<id>` would
+ * be served the shell's own index by the edge and land on the desk with the
+ * marker lost. `?concept=<id>` is read once at boot, scrubbed from the address
+ * bar, and turned into an open intent
+ * (`clients/os/src/apps/concepts/openConcept.ts`).
+ *
+ * `URLSearchParams` does the escaping, which is also why the old
+ * `encodePortalSegment` has no successor here: it existed to restore `%3A` to
+ * `:` inside a PATH segment, and a query value has no such convention to
+ * mirror. A concept id's colons survive either way; the difference is only
+ * how they are spelled.
+ *
+ * Empty in, empty out: `consoleTarget` returns "" when no address can be
+ * worked out, and composing a link onto nothing would open `https:///?...`.
+ */
+export function consoleConceptUrl(root: string, conceptId: string): string {
+  const id = conceptId.trim();
+  if (root === "" || id === "") return "";
+  const base = root.endsWith("/") ? root : `${root}/`;
+  const params = new URLSearchParams({ concept: id });
+  return `${base}?${params.toString()}`;
+}

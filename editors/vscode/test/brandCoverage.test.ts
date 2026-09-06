@@ -304,9 +304,7 @@ const CONSTRUCT: CatalogConstruct = {
   source: "",
 };
 
-const DEPS = {
-  viewSourceFromCluster: () => Promise.resolve(),
-};
+const DEPS = { viewSourceFromCluster: () => Promise.resolve(), browseRows: () => Promise.resolve() };
 
 const CONTEXT = { subscriptions: [] as { dispose(): unknown }[] } as unknown as ExtensionContext;
 

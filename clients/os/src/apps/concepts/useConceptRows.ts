@@ -82,11 +82,31 @@ export function useConceptRows(conceptId: string, pageSize: number): ConceptRows
     setAttempt((n) => n + 1);
   }, []);
 
-  // Restart whenever the concept or the page size changes: both change what
-  // the walk IS, and continuing a cursor across either would page one
-  // concept with another's continuation.
+  // Restart when the concept or the page size CHANGES -- both change what the
+  // walk is, and continuing a cursor across either would page one concept
+  // with another's continuation.
+  //
+  // NOT ON MOUNT, and the ref is what makes that true. A browser found this
+  // (epic memql#5009): on the first render this effect and the walk effect
+  // below both ran, the reload bumped `attempt`, and the walk ran a SECOND
+  // time and APPENDED its page to the first one's -- three rows rendered as
+  // six, under a footer confidently reporting "All 6 readable rows loaded".
+  //
+  // The suite could not see it. Every test renders without StrictMode, where
+  // the two effects settle in an order that happens to hide it; the shell
+  // mounts under StrictMode, where it does not. So the guard is a ref rather
+  // than a dependency-list change: what has to be expressed is "the walk this
+  // hook already started IS the walk for these arguments", and only state
+  // that survives a re-render can say so.
+  const walking = useRef("");
   useEffect(() => {
-    reload();
+    const key = `${conceptId}\u0000${pageSize}`;
+    if (walking.current === key) return;
+    // The first run adopts the walk the mount already started rather than
+    // restarting it -- reloading here would be the duplication above.
+    const first = walking.current === "";
+    walking.current = key;
+    if (!first) reload();
   }, [conceptId, pageSize, reload]);
 
   // ---- the walk --------------------------------------------------------

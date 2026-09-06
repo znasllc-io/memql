@@ -18,30 +18,38 @@ import {
 } from "../../kit";
 import { useAccountTokenActions } from "./actions";
 import { accountTokenIsRevoked, accountTokenLabel, type AccountTokenRow } from "./credentials";
-import { accountName, type AccountRow } from "./rows";
 import { useAccountTokens } from "./useAccountTokens";
 
-// Credentials issued on behalf of one client: issue, reveal once, revoke.
+// Credentials issued on behalf of one BILLING account: issue, reveal once,
+// revoke.
 //
 // ===========================================================================
-// PER-CLIENT, IN THE CLIENT'S OWN DETAIL
+// WHICH "ACCOUNT" THIS PANEL IS ABOUT -- THE DEFECT THIS PLACEMENT FIXES
 // ===========================================================================
-// A credential is minted AGAINST one client and listed BY one client, so a
-// top-level Credentials section would have to ask "which client" before it
-// could do anything -- which is the question this panel is already standing
-// inside the answer to. It sits between the ledger (what is theirs) and the
-// archive (the exit), because it is the third thing an operator has about a
-// client: what they are, what is theirs, and what can act on their behalf.
+// It is `v1:identity:account`, the PAYING account of the account-isolation
+// model. It is NOT `v1:accounts:account`, the client registry the rest of this
+// app lists; `dsl/accounts/concepts.memql` puts it in one line -- "they share
+// a word and nothing else -- no field, no reference, no lifecycle."
+//
+// This panel was first hung inside the CLIENT detail (AccountDetail), which is
+// the obvious-looking home and is refused on every mint. `mintAccountToken`
+// gates on `query accountById`, which binds `v1:identity:account`
+// (component/grpc/account_token_handlers.go), so a client-registry id resolves
+// ZERO ROWS -- and zero rows IS the refusal. It now stands under a billing
+// account chosen from the `accounts` read, and takes an ID AND A LABEL rather
+// than a row, so there is no longer a row type it could be handed the wrong
+// one of.
 //
 // ===========================================================================
 // WHAT THIS CREDENTIAL IS, AND THE SENTENCE THE COPY MUST NOT WRITE
 // ===========================================================================
-// It is issued TO A USER ON BEHALF OF A CLIENT. The authenticated subject is
-// the operator's own user row -- the server echoes `subjectUserId` back on
-// the mint reply precisely so a client cannot render "signed in as this
-// client" without contradicting a field it was handed -- so the subject is
-// shown, on the reveal and on every listed row. Nothing authenticates as a
-// client; `accountId` is a binding for attribution and grouped revocation.
+// It is issued TO A USER ON BEHALF OF A BILLING ACCOUNT. The authenticated
+// subject is the operator's own user row -- the server echoes `subjectUserId`
+// back on the mint reply precisely so a client cannot render "signed in as
+// this account" without contradicting a field it was handed -- so the subject
+// is shown, on the reveal and on every listed row. Nothing authenticates as a
+// billing account; `accountId` is a binding for attribution and grouped
+// revocation.
 //
 // And nothing on this cluster admits one of these yet. That is stated where
 // somebody is about to issue one, because a credential that grants nothing is
@@ -62,8 +70,16 @@ import { useAccountTokens } from "./useAccountTokens";
 // them no way to discover otherwise. So the control stands and the refusal is
 // the server's own sentence, rendered beside it.
 
-export function CredentialsPanel({ account }: { account: AccountRow }) {
-  const feed = useAccountTokens(account.id);
+export function CredentialsPanel({
+  accountId,
+  accountLabel,
+}: {
+  /** The `v1:identity:account` row id. Never a client-registry id. */
+  accountId: string;
+  /** What to call it in the panel's own sentence -- `billingAccountName`. */
+  accountLabel: string;
+}) {
+  const feed = useAccountTokens(accountId);
   const actions = useAccountTokenActions();
   const [label, setLabel] = useState("");
   // SHOWN ONCE. It exists nowhere else -- the cluster kept only its SHA-256
@@ -77,13 +93,13 @@ export function CredentialsPanel({ account }: { account: AccountRow }) {
   const [copied, setCopied] = useState("");
   const [confirming, setConfirming] = useState("");
 
-  const inputId = `os-account-credential-${account.id}`;
+  const inputId = `os-account-credential-${accountId}`;
   const minting = actions.busyKey === "mint";
 
   async function issue(): Promise<void> {
     const wanted = label.trim();
     if (wanted === "" || minting) return;
-    const result = await actions.mint(account.id, wanted);
+    const result = await actions.mint(accountId, wanted);
     if (result === null) return;
     setMinted(result);
     setLabel("");
@@ -119,12 +135,12 @@ export function CredentialsPanel({ account }: { account: AccountRow }) {
     <Panel label="Credentials">
       <Subhead>Credentials</Subhead>
 
-      <p className="os-caption">
+      <p className="os-caption os-account-credential-note">
         A credential issued here authenticates as <strong>you</strong>, on behalf of{" "}
-        {accountName(account)}. Nothing authenticates as a client: the client is recorded on the
+        {accountLabel}. Nothing authenticates as a billing account: the account is recorded on the
         credential so it can be attributed to the work it was issued for, and revoked as a group.
       </p>
-      <p className="os-caption">
+      <p className="os-caption os-account-credential-note">
         Nothing on this cluster accepts one of these yet. It is a real credential with a real
         revoke, and no endpoint admits it -- so issuing one now grants nothing until something
         does.
@@ -179,7 +195,8 @@ export function CredentialsPanel({ account }: { account: AccountRow }) {
           {copied === "" ? null : <p className="os-caption">{copied}</p>}
           <Facts>
             {/* THE SUBJECT, on the server's own word for it. This is what
-                stops the surface implying the client is the principal. */}
+                stops the surface implying the billing account is the
+                principal. */}
             <Fact label="Authenticates as" value={minted.subjectUserId} mono />
             <Fact label="On behalf of" value={minted.accountId} mono />
             <Fact label="Credential" value={minted.identityId} mono />
@@ -232,7 +249,7 @@ function CredentialList({
     return (
       <Notice
         tone="error"
-        sentence="The credentials for this client were not returned."
+        sentence="The credentials for this billing account were not returned."
         next="This is not the same as there being none -- nothing below was read."
         detail={feed.error}
       />
@@ -244,12 +261,17 @@ function CredentialList({
   }
 
   if (feed.tokens.length === 0) {
-    return <p className="os-caption">No credentials have been issued for this client.</p>;
+    return (
+      <p className="os-caption">No credentials have been issued for this billing account.</p>
+    );
   }
 
   return (
     <>
-      <ul className="os-account-credentials" aria-label="Credentials issued for this client">
+      <ul
+        className="os-account-credentials"
+        aria-label="Credentials issued for this billing account"
+      >
         {feed.tokens.map((token) => (
           <li key={token.id}>
             <CredentialRow

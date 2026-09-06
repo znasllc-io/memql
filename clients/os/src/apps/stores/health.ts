@@ -30,35 +30,18 @@ import { absent, figureFrom, figureOf, type Figure } from "../../cluster/figure"
 // "nothing has ever reconciled". `domains` being empty is the evidence for
 // that, and it is where the absence is reintroduced.
 
-/**
- * One mirrored concept's sync state, as the health report carries it.
+/*
+ * THE REPORT'S KEYS NAME WHAT THEY CARRY, and three of them did not until
+ * epic memql#5009. `shopifyStoreHealth` sent `staleWrites` carrying
+ * syncState's `lagSeconds`, `tombstoned` carrying its `outboxDepth`, and
+ * `driftTotal` carrying the same value as `driftLast` -- so a surface
+ * rendering "n / total" always printed "n / n" and claimed a cumulative
+ * figure nothing measures.
  *
- * ===========================================================================
- * THREE OF THE REPORT'S KEYS DO NOT NAME WHAT THEY CARRY
- * ===========================================================================
- * `handleStoreHealth` (integrations/shopify/capabilities.go) builds this
- * block from `v1:platform:syncState`, and three of its keys are wired to a
- * DIFFERENT field from the one they are named after:
- *
- *   report key      syncState field   what the field actually is
- *   --------------  ----------------  ------------------------------------
- *   staleWrites     lagSeconds        SECONDS between the origin's version
- *                                     of the last applied write and when
- *                                     MemQL applied it. Not a count.
- *   tombstoned      outboxDepth       pending + failed OUTBOX entries for
- *                                     this (concept, connector). Not a
- *                                     count of tombstones.
- *   driftTotal      driftCount        the SAME value as driftLast.
- *
- * So the fields here are named for what the numbers ARE, and the wire keys
- * they are read from are the mislabelled ones. `driftTotal` is not carried
- * at all, because a second copy of `driftLast` under another name is a
- * column that always reads `n / n`.
- *
- * DO NOT "FIX" THIS BY RENAMING THESE BACK. A number under the wrong name is
- * the same class of error as a zero standing in for an absent measurement,
- * one level up -- and this side is the one that reaches a person. The repair
- * belongs in the Go handler; until it lands, the surface tells the truth.
+ * They were repaired in `integrations/shopify/capabilities.go` rather than
+ * renamed here, because this surface is the only consumer and a rename at
+ * the render leaves the next reader of the builtin to make the same mistake.
+ * `driftTotal` was dropped rather than renamed: there was no second number.
  */
 export interface DomainState {
   concept: string;
@@ -68,9 +51,9 @@ export interface DomainState {
   lastAppliedAt: string;
   lastReconciledAt: string;
   driftLast: Figure;
-  /** Seconds of mirror staleness. Read from the report's `staleWrites`. */
+  /** Seconds of mirror staleness. */
   lagSeconds: Figure;
-  /** Pending + failed outbox entries. Read from the report's `tombstoned`. */
+  /** Pending + failed outbox entries. */
   outboxDepth: Figure;
   lastError: string;
 }
@@ -195,8 +178,8 @@ function toDomainState(value: unknown): DomainState {
     lastReconciledAt: str(r["lastReconciledAt"]),
     driftLast: figureFrom(r, "driftLast"),
     // The wire keys are the mislabelled ones -- see DomainState's header.
-    lagSeconds: figureFrom(r, "staleWrites"),
-    outboxDepth: figureFrom(r, "tombstoned"),
+    lagSeconds: figureFrom(r, "lagSeconds"),
+    outboxDepth: figureFrom(r, "outboxDepth"),
     lastError: str(r["lastError"]),
   };
 }

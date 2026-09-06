@@ -365,12 +365,15 @@ function DomainsBand({
         <div className="os-stores-tablewrap">
           <table className="os-stores-table">
             <thead>
-              {/* TWO COLUMNS ARE NAMED FOR WHAT THEY CARRY RATHER THAN FOR
-                  THE REPORT KEY THEY ARRIVE UNDER. `staleWrites` is
-                  syncState's `lagSeconds` and `tombstoned` is its
-                  `outboxDepth` -- see health.ts. Drawing them as "Stale" and
-                  "Tombstoned" would put a latency and a queue depth under two
-                  names that mean something else entirely. */}
+              {/* EVERY COLUMN IS NAMED FOR WHAT IT CARRIES, and for two of
+                  them that used to require disagreeing with the report. It
+                  sent `staleWrites` carrying syncState's `lagSeconds` and
+                  `tombstoned` carrying its `outboxDepth`, so drawing the keys
+                  would have put a latency and a queue depth under two names
+                  meaning something else. Epic memql#5009 repaired the names
+                  in the Go handler instead -- this surface was the only
+                  consumer -- so the columns and the wire agree now, and this
+                  note is here so nobody "restores" the old spellings. */}
               <tr>
                 <th scope="col">Domain</th>
                 <th scope="col">Phase</th>

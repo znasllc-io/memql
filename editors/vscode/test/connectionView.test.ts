@@ -20,7 +20,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { connectionView, formatExpiry } from "../src/clusters/connectionView.js";
 import type { ClusterConfig } from "../src/clusters/model.js";
-import { composeConsoleUrl, consoleTarget } from "../src/clusters/consoleUrl.js";
+import { composeConsoleUrl, consoleConceptUrl, consoleTarget } from "../src/clusters/consoleUrl.js";
 import type { ConnectionState } from "../src/connection/manager.js";
 
 const NOW = Date.parse("2026-08-14T12:00:00Z");
@@ -413,4 +413,38 @@ test("with no recorded checkout, neither row appears", () => {
     view.connection.some((f) => f.key === "image source"),
     false,
   );
+});
+
+// -----------------------------------------------------------------------------
+// the concept deep-link (epic memql#5009, memql#5010)
+// -----------------------------------------------------------------------------
+
+// A QUERY PARAMETER, NOT A PATH SEGMENT, and the difference is the shell's
+// shape rather than taste: MemQL OS has no router, so `/concepts/<id>` would
+// be served the shell's own index and the marker would be lost on the desk.
+test("composes the console's address for one concept's rows", () => {
+  assert.equal(
+    consoleConceptUrl("https://os.example.com/", "v1:library:artifact"),
+    "https://os.example.com/?concept=v1%3Alibrary%3Aartifact",
+  );
+});
+
+// The root arrives from `consoleTarget`, which may or may not end in a slash
+// depending on whether a site row or the composition supplied it. Both have
+// to produce the same address, or the same concept opens at two URLs.
+test("does not double the slash, and adds one when the root has none", () => {
+  assert.equal(
+    consoleConceptUrl("https://os.example.com", "v1:work:goal"),
+    consoleConceptUrl("https://os.example.com/", "v1:work:goal"),
+  );
+});
+
+// EMPTY IN, EMPTY OUT. `consoleTarget` answers "" when no address can be
+// worked out at all, and composing a link onto that would open `https:///?...`
+// -- a browser tab at nothing, which reads as the extension being broken
+// rather than as the cluster having no domain recorded.
+test("composes nothing when there is no console address or no concept", () => {
+  assert.equal(consoleConceptUrl("", "v1:library:artifact"), "");
+  assert.equal(consoleConceptUrl("https://os.example.com/", ""), "");
+  assert.equal(consoleConceptUrl("https://os.example.com/", "   "), "");
 });

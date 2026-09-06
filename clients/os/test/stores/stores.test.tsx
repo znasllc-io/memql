@@ -61,7 +61,7 @@ async function openStore(domain: string) {
 const LIVE = storeHealth({
   storeId: "acme-widgets",
   domains: [
-    domainState({ concept: "v1:shopify:order", phase: "idle", driftLast: 12, driftTotal: 40, lastAppliedAt: "2026-09-05T09:00:00Z" }),
+    domainState({ concept: "v1:shopify:order", phase: "idle", driftLast: 12, lastAppliedAt: "2026-09-05T09:00:00Z" }),
     domainState({ concept: "v1:shopify:product", phase: "idle", driftLast: 0 }),
   ],
   driftLast: 12,
@@ -409,9 +409,11 @@ describe("the mirror sync table", () => {
   const DRIFTING = storeHealth({
     storeId: "busy-shop",
     domains: [
-      // The WIRE keys, verbatim: `staleWrites` carries syncState's
-      // `lagSeconds` and `tombstoned` carries its `outboxDepth`.
-      domainState({ concept: "v1:shopify:order", driftLast: 40, staleWrites: 45, tombstoned: 3 }),
+      // The WIRE keys, verbatim. They NAME what they carry now: three of
+      // them did not (`staleWrites` carried lagSeconds, `tombstoned` carried
+      // outboxDepth, `driftTotal` duplicated driftLast), and epic memql#5009
+      // repaired that in the Go handler rather than renaming at the render.
+      domainState({ concept: "v1:shopify:order", driftLast: 40, lagSeconds: 45, outboxDepth: 3 }),
       domainState({ concept: "v1:shopify:product", driftLast: 2 }),
       domainState({ concept: "v1:shopify:customer", driftLast: 9 }),
     ],
