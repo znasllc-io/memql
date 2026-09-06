@@ -8,6 +8,7 @@ import (
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/integrations/agent"
+	"github.com/znasllc-io/memql/integrations/agents"
 )
 
 // integrationsAgent registers integration providers for an agent node.
@@ -54,6 +55,17 @@ func (a *App) setupAgentReplier() {
 		a.fatal("grpc server not constructed before agent replier setup")
 	}
 	a.grpcServer.SetAgentTurnHandler(&agentReplierHandlerAdapter{replier: replier})
+
+	// The same Replier, reachable from a DSL builtin (memql#5048). A work
+	// step calling runAgentTurn runs on THIS node -- design record section H
+	// puts step execution on the agent node -- and there is no AiForwardRouter
+	// here to forward with, so it dispatches locally through the entry point
+	// the gRPC server already uses.
+	//
+	// WITHOUT THIS CALL THE BUILTIN IS INERT, and inert in the way that costs
+	// an afternoon: the seam is nil, every runAgentTurn refuses, and the
+	// refusal reads like a topology problem rather than a missing wiring line.
+	a.wireAgentTurnRunner(replier)
 	// Cooperative preemption signal (epic memql#902 / #906): the planner's
 	// cross-node AgentPreemptTurn lands here and flags the in-flight turn to
 	// pause at its next checkpoint. component/grpc can't import
@@ -129,3 +141,53 @@ func (a *agentSinkBridge) ToolCall(id, name, argumentsJSON string) {
 func (a *agentSinkBridge) ToolResult(id, resultJSON, errMsg string) {
 	a.grpcSink.ToolResult(id, resultJSON, errMsg)
 }
+
+// wireAgentTurnRunner hands the Replier to the agents plug-in.
+//
+// The plug-in is CORE -- it loads on identity, edge, mcp and every other node
+// type, none of which builds integrations/agent at all. So the seam is an
+// interface it declares and this file, which exists only under the agent build
+// tag, is the one place that can fill it.
+func (a *App) wireAgentTurnRunner(replier *agent.Replier) {
+	if a.engine == nil || replier == nil {
+		return
+	}
+	provider := a.engine.IntegrationByName("agents")
+	if provider == nil {
+		a.Logger.Warn("agent turn runner not wired: the agents plug-in did not materialize on this agent node; runAgentTurn will refuse and a work run that invokes an agent will fail",
+			"component", "agents")
+		return
+	}
+	integ, ok := provider.(*agents.Integration)
+	if !ok || integ == nil {
+		a.Logger.Warn("agent turn runner not wired: the agents provider is not the expected type", "component", "agents")
+		return
+	}
+	integ.SetAgentTurnRunner(&replierTurnRunner{replier: replier})
+	a.Logger.Info("agent turn runner wired; runAgentTurn dispatches locally on this node", "component", "agents")
+}
+
+// replierTurnRunner adapts agent.Replier onto the narrow interface
+// integrations/agents declares.
+//
+// A DISCARDING SINK, deliberately. The deltas are the interactive path's --
+// a browser streaming a reply. A work step wants the finished text, and the
+// run's own journal is where the record of the call belongs.
+type replierTurnRunner struct{ replier *agent.Replier }
+
+func (r *replierTurnRunner) RunTurn(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg) (string, error) {
+	result, err := r.replier.Handle(ctx, msg, discardDeltas{})
+	if err != nil {
+		return "", err
+	}
+	if result == nil {
+		return "", nil
+	}
+	return result.FinalText, nil
+}
+
+type discardDeltas struct{}
+
+func (discardDeltas) TextDelta(string)                  {}
+func (discardDeltas) ToolCall(string, string, string)   {}
+func (discardDeltas) ToolResult(string, string, string) {}

@@ -24,8 +24,15 @@ func TestIntegrationName(t *testing.T) {
 func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 	i := New(memql.NewAgentRegistry(), nil)
 	caps := i.Capabilities()
-	if len(caps) != 5 {
-		t.Fatalf("Capabilities count: got %d want 5 (invoke + ensureForGoal + askSpecialist + requestUserFeedback + produceArtifact)", len(caps))
+	// A COUNT PLUS THE NAMES, and the count is the half that catches a
+	// capability arriving under a name nobody thought to assert.
+	want := []string{"invoke", "runAgentTurn", "ensureForGoal", "askSpecialist", "requestUserFeedback", "produceArtifact"}
+	if len(caps) != len(want) {
+		got := make([]string, 0, len(caps))
+		for _, c := range caps {
+			got = append(got, c.Name)
+		}
+		t.Fatalf("Capabilities count: got %d %v, want %d %v", len(caps), got, len(want), want)
 	}
 	byName := make(map[string]bool, len(caps))
 	for _, c := range caps {
@@ -71,6 +78,11 @@ func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 					t.Errorf("produceArtifact ArgsSchema missing %q", key)
 				}
 			}
+		}
+	}
+	for _, name := range want {
+		if !byName[name] {
+			t.Errorf("missing %q capability", name)
 		}
 	}
 	if !byName["invoke"] {

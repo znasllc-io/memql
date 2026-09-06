@@ -111,39 +111,24 @@ func TestDerivedRunInheritsTheSourcesOwnerNotTheCallers(t *testing.T) {
 	}
 }
 
-// TestForkAndReplayRefuseWhatTheyCannotRecord.
+// TestForkAndReplayRefuseWhatTheyCannotRecord -- what is left of it.
 //
-// The refusals are the point. createWorkRun accepts neither `variables` nor
-// `replayPolicy` today, so accepting either would run the derived work on
-// values the caller did not ask for while telling them otherwise. A silent
-// drop of an argument that changes what the work DOES is exactly the class of
-// bug these refusals exist to prevent.
+// This used to refuse `variables` and a permissive `policy` as well, because
+// createWorkRun accepted neither and a silent drop of an argument that changes
+// what the work DOES is the class of bug the refusals existed to prevent. The
+// mutation gained both in 3a189cbe2 and the Go seed never passed them, so the
+// guards outlived their reason and turned a closed gap into a permanent
+// restriction (memql#5000). Both are carried now; see the two tests below.
+//
+// The two that remain are refusals of things still genuinely unrecordable: a
+// policy outside the enum, and a fork with no divergence point -- which is not
+// a fork, it is a replay.
 func TestForkAndReplayRefuseWhatTheyCannotRecord(t *testing.T) {
 	cases := []struct {
 		name     string
 		run      func(i *Integration) error
 		wantWord string
 	}{
-		{
-			name: "fork with variable overrides",
-			run: func(i *Integration) error {
-				_, err := i.handleForkRun(callerContext("u-alice"), map[string]any{
-					"runId": "v1:work:run:r-source", "atStepKey": "s", "variables": map[string]any{"x": 1},
-				}, 0)
-				return err
-			},
-			wantWord: "variables",
-		},
-		{
-			name: "replay with a permissive policy",
-			run: func(i *Integration) error {
-				_, err := i.handleReplayRun(callerContext("u-alice"), map[string]any{
-					"runId": "v1:work:run:r-source", "policy": "permissive",
-				}, 0)
-				return err
-			},
-			wantWord: "replayPolicy",
-		},
 		{
 			name: "replay with an unknown policy",
 			run: func(i *Integration) error {
@@ -195,4 +180,93 @@ func TestForkRefusesARunTheCallerCannotRead(t *testing.T) {
 	if n := len(eng.callsTo("createWorkRun")); n != 0 {
 		t.Errorf("a run was derived anyway (%d creates)", n)
 	}
+}
+
+// createWorkRun gained `variables` and `replayPolicy` in 3a189cbe2 and the Go
+// seed never passed them, so forkRun and replayRun went on refusing both --
+// each citing a limitation that had been closed underneath it (memql#5000).
+// These are the tests that keep the arguments carried rather than merely
+// accepted, which is the failure mode the old refusals were right to fear.
+
+func TestForkCarriesVariableOverridesOntoTheNewRun(t *testing.T) {
+	i, eng := newTestIntegration(t)
+	src := sourceRun("u-alice")
+	src["variables"] = map[string]any{"month": "2026-09", "region": "emea"}
+	eng.reply("workRunForOwner", src)
+
+	if _, err := i.handleForkRun(callerContext("u-alice"), map[string]any{
+		"runId": "v1:work:run:r-source", "atStepKey": "step-4",
+		"variables": map[string]any{"month": "2026-10"},
+	}, 0); err != nil {
+		t.Fatalf("forkRun: %v", err)
+	}
+
+	args := createRunArgs(t, eng)
+	vars, _ := args["variables"].(map[string]any)
+	if vars == nil {
+		t.Fatal("the fork wrote no variables at all -- the override was accepted and dropped, which is " +
+			"exactly what the old refusal existed to prevent")
+	}
+	if vars["month"] != "2026-10" {
+		t.Errorf("the override did not reach the row: month = %v", vars["month"])
+	}
+	// PER KEY, not wholesale: a fork changes one thing and holds the rest
+	// fixed, so replacing the set would silently drop every value the caller
+	// did not restate.
+	if vars["region"] != "emea" {
+		t.Errorf("the source's other variables were dropped: %+v", vars)
+	}
+}
+
+func TestForkWithNoOverridesCarriesTheSourcesVariables(t *testing.T) {
+	i, eng := newTestIntegration(t)
+	src := sourceRun("u-alice")
+	src["variables"] = map[string]any{"month": "2026-09"}
+	eng.reply("workRunForOwner", src)
+
+	if _, err := i.handleForkRun(callerContext("u-alice"), map[string]any{
+		"runId": "v1:work:run:r-source", "atStepKey": "step-4",
+	}, 0); err != nil {
+		t.Fatalf("forkRun: %v", err)
+	}
+	vars, _ := createRunArgs(t, eng)["variables"].(map[string]any)
+	if vars["month"] != "2026-09" {
+		t.Errorf("an ordinary fork must run on the source's variables, got %+v", vars)
+	}
+}
+
+func TestReplayRecordsThePolicyItWasAskedFor(t *testing.T) {
+	for _, tc := range []struct{ asked, want string }{
+		{"", "strict"},
+		{"strict", "strict"},
+		{"permissive", "permissive"},
+	} {
+		t.Run("policy="+tc.asked, func(t *testing.T) {
+			i, eng := newTestIntegration(t)
+			eng.reply("workRunForOwner", sourceRun("u-alice"))
+			args := map[string]any{"runId": "v1:work:run:r-source"}
+			if tc.asked != "" {
+				args["policy"] = tc.asked
+			}
+			if _, err := i.handleReplayRun(callerContext("u-alice"), args, 0); err != nil {
+				t.Fatalf("replayRun: %v", err)
+			}
+			if got := createRunArgs(t, eng)["replayPolicy"]; got != tc.want {
+				t.Errorf("asked for %q, the row records %v, want %q -- a permissive request served "+
+					"strictly raises a divergence the caller did not ask for", tc.asked, got, tc.want)
+			}
+		})
+	}
+}
+
+// createRunArgs pulls the arguments of the one createWorkRun the call made.
+func createRunArgs(t *testing.T, eng *recordingEngine) map[string]any {
+	t.Helper()
+	for _, c := range eng.recorded() {
+		if c.Name() == "createWorkRun" {
+			return c.Args(t)
+		}
+	}
+	t.Fatal("no createWorkRun was recorded")
+	return nil
 }

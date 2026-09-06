@@ -51,15 +51,14 @@ func (i *Integration) handleForkRun(ctx context.Context, args map[string]any, _ 
 		return nil, fmt.Errorf("work: forkRun needs an atStepKey -- a fork with no divergence point is a replay")
 	}
 
-	// REFUSED RATHER THAN DROPPED. createWorkRun does not accept `variables`
-	// today, so an override would be accepted here, written nowhere, and the
-	// fork would run on the source's values while the caller believed
-	// otherwise. Silently dropping an argument that changes what the work
-	// DOES is the class of bug this refusal exists to prevent; the residual
-	// is recorded in goal.go's gaps note.
-	if len(argMap(args, "variables")) > 0 {
-		return nil, fmt.Errorf("work: forkRun cannot carry variable overrides yet -- createWorkRun does not accept `variables`, so an override would be dropped silently; fork without them, or add the argument to the mutation")
-	}
+	// VARIABLE OVERRIDES ARE CARRIED NOW (memql#5000). This refused them,
+	// on the grounds that "createWorkRun does not accept `variables`, so an
+	// override would be dropped silently" -- which stopped being true in
+	// 3a189cbe2, when the mutation gained the argument. The Go seed simply
+	// never passed it, so the refusal outlived its reason and turned a
+	// closed gap into a permanent restriction. That is the shape worth
+	// naming: a guard citing a limitation nobody re-checks.
+	overrides := argMap(args, "variables")
 
 	source, err := i.readOwnRun(ctx, sourceRunId)
 	if err != nil {
@@ -70,6 +69,7 @@ func (i *Integration) handleForkRun(ctx context.Context, args map[string]any, _ 
 		ForkedFromRunId: sourceRunId,
 		ForkAtStepKey:   atStepKey,
 		TriggeredBy:     "fork:" + sourceRunId,
+		Variables:       overrides,
 	})
 	if err != nil {
 		return nil, err
@@ -92,20 +92,20 @@ func (i *Integration) handleReplayRun(ctx context.Context, args map[string]any, 
 		return nil, fmt.Errorf("work: replayRun needs a runId")
 	}
 
-	// strict is the concept's default and the only policy a new run can
-	// carry, because createWorkRun does not accept `replayPolicy`.
+	// BOTH POLICIES ARE RECORDABLE NOW (memql#5000). This refused
+	// `permissive` because "createWorkRun does not accept `replayPolicy`" --
+	// true when it was written, and not since 3a189cbe2. The refusal was
+	// right to exist: serving a permissive request strictly would raise a
+	// divergence the caller did not ask for and could not explain. It is the
+	// REASON that expired, not the caution.
 	//
-	// A permissive request is REFUSED rather than quietly served strictly,
-	// and the direction of the refusal matters: a strict replay of a changed
-	// prompt raises a divergence and stops, so the caller would see a
-	// failure they did not ask for and could not explain. Saying so costs
-	// one error; guessing costs an investigation.
+	// strict stays the default, because a replay that quietly calls a
+	// provider on a miss reports a reproduction that did not happen.
 	policy := argString(args, "policy")
 	switch policy {
-	case "", "strict":
+	case "":
 		policy = "strict"
-	case "permissive":
-		return nil, fmt.Errorf("work: replayRun cannot record a permissive policy yet -- createWorkRun does not accept `replayPolicy`, so the new run would be strict and a journal miss would raise a divergence you did not ask for")
+	case "strict", "permissive":
 	default:
 		return nil, fmt.Errorf("work: replay policy %q is not strict or permissive", policy)
 	}
@@ -122,6 +122,7 @@ func (i *Integration) handleReplayRun(ctx context.Context, args map[string]any, 
 		// nothing could find the journal it must read.
 		ForkedFromRunId: sourceRunId,
 		TriggeredBy:     "replay:" + sourceRunId,
+		ReplayPolicy:    policy,
 	})
 	if err != nil {
 		return nil, err
@@ -158,6 +159,12 @@ type derivation struct {
 	ForkedFromRunId string
 	ForkAtStepKey   string
 	TriggeredBy     string
+	// ReplayPolicy is the new run's, empty for the concept default.
+	ReplayPolicy string
+	// Variables OVERRIDE the source's, per key, rather than replacing the
+	// set. A fork that changed one input and silently dropped the rest would
+	// not be a fork of anything.
+	Variables map[string]any
 }
 
 // deriveRun opens the new run, inheriting the source's template identity and
@@ -185,6 +192,8 @@ func (i *Integration) deriveRun(ctx context.Context, source map[string]any, d de
 		InputFingerprint:    rowString(source, "inputFingerprint"),
 		TriggeredBy:         d.TriggeredBy,
 		Mode:                d.Mode,
+		ReplayPolicy:        d.ReplayPolicy,
+		Variables:           mergedVariables(source, d.Variables),
 		ForkedFromRunId:     d.ForkedFromRunId,
 		ForkAtStepKey:       d.ForkAtStepKey,
 		Status:              runStatusCompiling,
@@ -263,4 +272,28 @@ func rowStringSlice(row map[string]any, key string) []string {
 	default:
 		return nil
 	}
+}
+
+// mergedVariables layers a fork's overrides over the source run's variables.
+//
+// PER KEY, not wholesale. A fork exists to change one thing and hold the rest
+// fixed, so replacing the whole set would make every override silently drop
+// every value the caller did not restate -- which is the failure the old
+// refusal was protecting against, kept now that the override is real.
+//
+// nil overrides return the source's own map, so an ordinary fork carries the
+// same variables and a replay is byte-identical.
+func mergedVariables(source map[string]any, overrides map[string]any) map[string]any {
+	base := rowMap(source, "variables")
+	if len(overrides) == 0 {
+		return base
+	}
+	out := make(map[string]any, len(base)+len(overrides))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range overrides {
+		out[k] = v
+	}
+	return out
 }
