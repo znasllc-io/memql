@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { Button, Caption, Chip, Head, Notice, Panel, Row, Subhead } from "../../kit";
+import { Button, Caption, Chip, formatFreshness, Head, Notice, Panel, Row, Subhead, useNow } from "../../kit";
 import { useSession } from "../../chrome/access";
 import type { RoleRequirement } from "../../system/roles";
 import { useTokenFacts, MAX_PEOPLE_SCANNED, type NodeTokenRow, type TokenRow } from "./tokenFacts";
@@ -44,6 +44,10 @@ export function TokensSection() {
   const facts = useTokenFacts(true);
   const writes = useSettingsWrites();
   const [asking, setAsking] = useState("");
+  // Elapsed, not an ISO string. A raw `2026-09-05T18:22:00Z` is the value the
+  // row carries and not the answer to the question somebody opens this section
+  // with, which is "is anything still using it".
+  const now = useNow();
 
   const live = facts.tokens.filter((t) => t.active).length;
   const liveNodes = facts.nodeTokens.filter((t) => t.active).length;
@@ -104,6 +108,7 @@ export function TokensSection() {
               <li key={token.id}>
                 <TokenLine
                   token={token}
+                  now={now}
                   asking={asking === token.id}
                   busy={writes.busyKey === token.id}
                   onAsk={() => {
@@ -141,6 +146,7 @@ export function TokensSection() {
               <li key={token.id}>
                 <NodeTokenLine
                   token={token}
+                  now={now}
                   asking={asking === token.id}
                   busy={writes.busyKey === token.id}
                   onAsk={() => {
@@ -175,6 +181,7 @@ export function TokensSection() {
 
 function TokenLine({
   token,
+  now,
   asking,
   busy,
   onAsk,
@@ -182,6 +189,7 @@ function TokenLine({
   onConfirm,
 }: {
   token: TokenRow;
+  now: Date;
   asking: boolean;
   busy: boolean;
   onAsk: () => void;
@@ -194,12 +202,17 @@ function TokenLine({
         name={token.label}
         current={token.active}
         dim={!token.active}
+        // ONE STATE AND ONE ACT, and the count is the point. Two chips plus a
+        // button in the trailing cluster wrapped "In use" onto two lines and
+        // "Agents may use it" onto three at the measure a Settings section
+        // actually renders at, which left three rows at three different
+        // heights. Everything that is a FACT rather than a state moved into
+        // the quiet middle below, where facts live.
         state={
           <>
             <Chip tone={token.active ? "accent" : "muted"}>
               {token.active ? "In use" : "Revoked"}
             </Chip>
-            {token.usableByAgents ? <Chip tone="muted">Agents may use it</Chip> : null}
             {/* ABSENT, not disabled, on a revoked row. */}
             {token.active ? (
               <Button tone="danger" onClick={onAsk} busy={busy} busyLabel="Revoking" ariaLabel={`Revoke ${token.label}`}>
@@ -209,15 +222,30 @@ function TokenLine({
           </>
         }
       >
-        <span className="os-mono">{token.owner}</span> -- last used{" "}
-        {token.lastUsedAt || "never"}
+        {/* ONE ELEMENT, not a fragment. `Row` renders its children as direct
+            siblings inside a flex row with a gap, so a fragment of four pieces
+            becomes four flex items -- the sentence arrives as columns with
+            gutters between them and the trailing chip loses the width it needs
+            to stay on one line. Every other caller in the shell passes one
+            span; this is why. */}
+        <span className="os-caption" title={token.lastUsedAt || undefined}>
+          <span className="os-mono">{token.owner}</span> -- last used{" "}
+          {formatFreshness(token.lastUsedAt, now)}
+          {token.usableByAgents ? " -- agents may use it" : ""}
+        </span>
       </Row>
       {asking ? (
-        <Notice
-          tone="warn"
-          sentence={`Revoke ${token.label}, held by ${token.owner}?`}
-          next="Anything using it stops working on its next request. A replacement is a new token, minted from the CLI."
-        >
+        // THE CONSEQUENCE IS ABOVE THE ACTS, not below them. `Notice` renders
+        // `children` before `next`, so putting the buttons in `children` and
+        // the consequence in `next` gave the reading order question -> buttons
+        // -> what happens, and somebody who has already decided by the time
+        // they reach the sentence has not been told anything. Seen in a
+        // browser; jsdom has no reading order to get wrong.
+        <Notice tone="warn" sentence={`Revoke ${token.label}, held by ${token.owner}?`}>
+          <p className="os-caption">
+            Anything using it stops working on its next request. A replacement
+            is a new token, minted from the CLI.
+          </p>
           <div className="os-refresh-row">
             <Button tone="danger" onClick={onConfirm}>
               Revoke it
@@ -232,6 +260,7 @@ function TokenLine({
 
 function NodeTokenLine({
   token,
+  now,
   asking,
   busy,
   onAsk,
@@ -239,6 +268,7 @@ function NodeTokenLine({
   onConfirm,
 }: {
   token: NodeTokenRow;
+  now: Date;
   asking: boolean;
   busy: boolean;
   onAsk: () => void;
@@ -251,12 +281,13 @@ function NodeTokenLine({
         name={token.node}
         current={token.active}
         dim={!token.active}
+        // Same one-state-one-act rule as the personal half above. The node
+        // TYPE is a fact and reads below.
         state={
           <>
             <Chip tone={token.active ? "accent" : "muted"}>
               {token.active ? "In use" : "Revoked"}
             </Chip>
-            <Chip tone="neutral">{token.nodeType}</Chip>
             {token.active ? (
               <Button
                 tone="danger"
@@ -271,16 +302,19 @@ function NodeTokenLine({
           </>
         }
       >
-        minted by {token.mintedBy} -- last connected{" "}
-        {token.lastConnectAt || "never"}
-        {token.expiresAt ? ` -- expires ${token.expiresAt}` : ""}
+        <span className="os-caption" title={token.lastConnectAt || undefined}>
+          <span className="os-mono">{token.nodeType}</span>, minted by {token.mintedBy} -- last
+          connected {formatFreshness(token.lastConnectAt, now)}
+          {token.expiresAt ? ` -- expires ${token.expiresAt}` : ""}
+        </span>
       </Row>
       {asking ? (
-        <Notice
-          tone="warn"
-          sentence={`Revoke the credential for ${token.node}?`}
-          next="That node loses its place in the mesh on its next connect and cannot rejoin until it is re-bootstrapped. If it is serving traffic now, it will stop."
-        >
+        <Notice tone="warn" sentence={`Revoke the credential for ${token.node}?`}>
+          <p className="os-caption">
+            That node loses its place in the mesh on its next connect and cannot
+            rejoin until it is re-bootstrapped. If it is serving traffic now, it
+            will stop.
+          </p>
           <div className="os-refresh-row">
             <Button tone="danger" onClick={onConfirm}>
               Revoke it

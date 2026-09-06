@@ -49,7 +49,14 @@ export function KeysSection() {
         <Notice tone="warn" sentence="The feed could not be read." detail={facts.error} />
       ) : (
         <Notice
-          tone={agreement.tone === "diverged" ? "error" : "info"}
+          // THREE TONES FOR THREE ANSWERS. `unknown` is not `info`: "no read
+          // answered" is an outage, and rendering it in the same voice as
+          // "they agree" puts the reassuring colour on the one reading that
+          // guarantees nothing. Seen only in a browser -- jsdom resolves no
+          // custom property, so the left bar has no colour to be wrong in.
+          tone={
+            agreement.tone === "diverged" ? "error" : agreement.tone === "unknown" ? "warn" : "info"
+          }
           sentence={agreement.sentence}
           next={
             agreement.tone === "diverged"
@@ -74,7 +81,14 @@ export function KeysSection() {
           <ul className="os-hidden-list" aria-label="Distinct keysets">
             {facts.probe.distinct.map((print, i) => (
               <li key={print}>
-                <Row name={`Keyset ${i + 1}`} state={<Chip tone="muted">{print.split(" ").length} keys</Chip>}>
+                <Row
+                  name={`Keyset ${i + 1}`}
+                  state={
+                    <Chip tone="muted">
+                      {print.split(" ").length} {print.split(" ").length === 1 ? "key" : "keys"}
+                    </Chip>
+                  }
+                >
                   <CopyValue value={print} label="keyset" />
                 </Row>
               </li>
@@ -110,17 +124,20 @@ export function KeysSection() {
                     </>
                   }
                 >
-                  {key.kty}
-                  {key.crv ? ` ${key.crv}` : ""}
+                  {/* One element -- see the note in TokensSection. */}
+                  <span className="os-caption">
+                    {key.kty}
+                    {key.crv ? ` ${key.crv}` : ""}
+                  </span>
                 </Row>
               </li>
             ))}
           </ul>
         )}
         <Caption>
-          Every key here is one a verifier will accept a signature from. More
-          than one is normal during a rotation overlap; the feed itself does not
-          say which is being minted with.
+          {facts.probe.distinct.length > 1
+            ? "ONE READ'S ANSWER, not the cluster's. The reads disagreed, so there is no single published set to show -- this is what the first read that came back returned, and the panel above is the whole picture."
+            : "Every key here is one a verifier will accept a signature from. More than one is normal during a rotation overlap; the feed itself does not say which is being minted with."}
         </Caption>
       </Panel>
 
