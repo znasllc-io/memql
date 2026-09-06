@@ -207,6 +207,25 @@ describe("acts follow the state", () => {
     expect(acts.filter((a) => a.tone === "primary")).toHaveLength(1);
   });
 
+  // A PACKAGE'S NEXT STEP IS A DEPLOY, and the three-act limit forces a
+  // real choice rather than an arbitrary trim: a document's repeatability
+  // is a recipe, a deployable's is the Deployables pipeline's own redeploy.
+  it("offers the deploy hand-off on a package, and drops Save as recipe for it", () => {
+    const pkg = compositionFromRow(compositionRow({ deployableKind: "shopify_storefront" }));
+    const acts = actsFor(pkg, ready);
+    expect(acts.map((a) => a.id)).toEqual(["archive", "openFile", "openDeployables"]);
+    expect(acts[acts.length - 1]?.tone).toBe("primary");
+    expect(acts.map((a) => a.id)).not.toContain("saveRecipe");
+  });
+
+  // The reachable positive: an ordinary document does NOT get the deploy
+  // act, so the assertion above is about `deployableKind` rather than
+  // about the function returning a constant.
+  it("does not offer the deploy hand-off on an ordinary document", () => {
+    const acts = actsFor(compositionFromRow(compositionRow()), ready);
+    expect(acts.map((a) => a.id)).not.toContain("openDeployables");
+  });
+
   it("does not offer Save as recipe on a composition that came from one", () => {
     const acts = actsFor(compositionFromRow(compositionRow({ recipeId: "r1" })), ready);
     expect(acts.map((a) => a.id)).not.toContain("saveRecipe");

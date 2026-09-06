@@ -8,7 +8,13 @@ import { ComposerSection } from "./ComposerSection";
 import { MaterializedSection } from "./MaterializedSection";
 import { TemplatesSection } from "./TemplatesSection";
 import { MATERIALIZER_APP_ID, MATERIALIZER_LOG_CONCEPTS } from "./concepts";
-import { GOAL_APP_ID, GOAL_APP_SECTION, goalIntent } from "./handoff";
+import {
+  DEPLOY_APP_ID,
+  DEPLOY_APP_SECTION,
+  GOAL_APP_ID,
+  GOAL_APP_SECTION,
+  goalIntent,
+} from "./handoff";
 import {
   useCompositionActs,
   useMaterialize,
@@ -246,6 +252,18 @@ export function MaterializerApp({
             break;
           case "openGoal":
             os?.actions.openApp(GOAL_APP_ID, GOAL_APP_SECTION, goalIntent(open.goalId));
+            break;
+          case "openDeployables":
+            // THE HAND-OFF IS A DESTINATION, NOT A SEEDED FLOW, and the
+            // difference is stated on the page rather than papered over.
+            // Deployables' compose flow takes an artifact at its Source
+            // stop, and seeding it from here would mean this app writing
+            // into another app's flow -- so this opens the list, and the
+            // Target column says the zip is in the Library and Source is
+            // where it goes. A control that claimed to carry the artifact
+            // across and then did not would be worse than one that says
+            // what it does.
+            os?.actions.openApp(DEPLOY_APP_ID, DEPLOY_APP_SECTION, {});
             break;
           case "startOver":
             setOpenCompositionId("");

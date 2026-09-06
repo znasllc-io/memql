@@ -26,3 +26,18 @@ export const GOAL_APP_SECTION = "goals";
 export function goalIntent(goalId: string): Record<string, unknown> {
   return { goalId };
 }
+
+/**
+ * The app that deploys a package source, and the section its list is on.
+ *
+ * The SECOND hand-off, and it carries no payload on purpose. Deployables'
+ * compose flow takes an artifact at its Source stop; seeding it from here
+ * would mean this app writing into another app's flow, and that app spent
+ * two epics making that rail the one place a deploy is composed. So this
+ * opens the list and the Materializer's own copy says the zip is in the
+ * Library and Source is where it goes -- a control that claimed to carry
+ * the artifact across and then did not would be worse than one that says
+ * plainly what it does.
+ */
+export const DEPLOY_APP_ID = "deployables";
+export const DEPLOY_APP_SECTION = "deployables";

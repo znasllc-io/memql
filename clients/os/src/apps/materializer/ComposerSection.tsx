@@ -553,7 +553,7 @@ function TargetColumn({
       {deployableKind ? (
         <p className="os-caption">
           This makes a package your Library holds and Deployables can deploy unchanged. It arrives as
-          a zip, not as a {formatWord(format)}.
+          a zip, not as a {formatWord(format)} — pick it at the Source stop of a new deployable.
         </p>
       ) : null}
 

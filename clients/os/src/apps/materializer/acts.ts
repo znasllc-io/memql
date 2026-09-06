@@ -26,6 +26,7 @@ export type ActId =
   | "stop"
   | "openFile"
   | "openGoal"
+  | "openDeployables"
   | "saveRecipe"
   | "archive"
   | "restore"
@@ -75,10 +76,26 @@ export function actsFor(c: CompositionRow | null, draft: DraftState): ActSpec[] 
   switch (c.status) {
     case "ready":
       // PRIMARY LAST, because that is where the eye lands -- and the primary
-      // act on a finished materialization is opening the thing it made.
-      // Archive is the quiet one: filing a record away is housekeeping, and
-      // it is the act somebody reaches for least often from this state.
+      // act on a finished materialization is the next thing somebody does
+      // with what it made. Archive is the quiet one: filing a record away is
+      // housekeeping, and it is the act somebody reaches for least often
+      // from this state.
       acts.push({ id: "archive", label: "Archive", tone: "quiet" });
+      if (c.deployableKind) {
+        // A PACKAGE'S NEXT STEP IS A DEPLOY, NOT A DOWNLOAD. The zip is in
+        // the Library and openFile still reaches it, quietly -- but nobody
+        // materializes a package source in order to read it.
+        //
+        // SAVE AS RECIPE IS ABSENT HERE, and that is the three-act limit
+        // forcing a real choice rather than an arbitrary trim. A document's
+        // repeatability is a recipe; a deployable's is the Deployables
+        // pipeline's own redeploy, which rebuilds from the SOURCE and is
+        // what that app exists to do. Offering both would be two answers to
+        // one question, in the app that owns neither.
+        if (c.outputFileId) acts.push({ id: "openFile", label: "Open the file", tone: "quiet" });
+        acts.push({ id: "openDeployables", label: "Deploy it", tone: "primary" });
+        break;
+      }
       if (!c.recipeId) acts.push({ id: "saveRecipe", label: "Save as recipe", tone: "default" });
       if (c.outputFileId) acts.push({ id: "openFile", label: "Open the file", tone: "primary" });
       break;
