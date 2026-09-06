@@ -304,7 +304,7 @@ async function runStep(
   // THE VERIFY: read off result{}, never off the exit code.
   base.verified = evaluateVerify(step.verify, envelope);
   if (!base.verified) {
-    const detail = envelope.error?.message ?? describeVerify(step);
+    const detail = envelope.error?.message ?? scriptReason(envelope) ?? describeVerify(step);
     const withStatus: StepOutcome = {
       ...base,
       reason:
@@ -336,6 +336,31 @@ function skipped(step: Step, startedAt: string, reason: string, satisfied: boole
     startedAt,
     finishedAt: new Date().toISOString(),
   };
+}
+
+/**
+ * The script's own account of why its verify will not hold (memql#5029).
+ *
+ * A capability script that finishes its work but cannot assert the outcome
+ * exits 0 with `error: null` -- `cap_ok` has no other shape. So the only thing
+ * left to print was describeVerify, which names the JSON path that did not
+ * hold and says nothing about the fault: `result.workloadsReady did not
+ * satisfy resultTrue`, printed directly under the script's own "Bootstrap
+ * complete" banner. Every reader of that transcript went to the workloads,
+ * which were never the cause.
+ *
+ * `result.reason` is the envelope's optional field for that sentence. It is
+ * read only on the failing branch, and only when there is no real `error`, so
+ * a script that fails properly is unaffected. ABSENT rather than empty when a
+ * script has nothing to say -- so "no reason recorded" and "the reason is
+ * blank" stay different answers, and describeVerify still covers the scripts
+ * that set none.
+ */
+function scriptReason(envelope: CapabilityEnvelope): string | undefined {
+  const raw = (envelope.result as Record<string, unknown> | undefined)?.reason;
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  return trimmed === "" ? undefined : trimmed;
 }
 
 function describeVerify(step: Step): string {

@@ -302,6 +302,33 @@ function looks_like_an_elevation_failure() {
     return 1
 }
 
+# replay_mkcert_output <text> -- mkcert's own output, with ONE line demoted.
+#
+# mkcert writes `ERROR: no Firefox and/or Chrome/Chromium security databases
+# found` to stderr when it finds no NSS profile to install the CA into, and
+# then EXITS 0 -- because on a machine with no browser profile there is nothing
+# to install into and nothing has gone wrong. We replayed it verbatim, so the
+# word ERROR appeared under `[localCA]` and again under `[clusterUp]` on every
+# headless run, green ones included (memql#5029). When a later step then failed
+# for an unrelated reason, that adjacency is what sent the next investigation
+# at the certificate authority -- twice, across two sessions.
+#
+# NOT SUPPRESSED, and not conditioned on "is a browser present": the message is
+# true and occasionally useful, and the "no certutil at all" decision is
+# already owned by require_browser_trust_tooling above. Only its SEVERITY was
+# wrong. Everything else mkcert says is replayed unchanged, because this
+# function must not become a filter on output nobody has read.
+function replay_mkcert_output() {
+    local line
+    while IFS= read -r line; do
+        if [[ "$line" == *"security databases found"* ]]; then
+            cap_info "mkcert: ${line#ERROR: } (no browser profile on this machine -- mkcert exits 0 and the CA is still installed for command-line clients)"
+            continue
+        fi
+        printf '%s\n' "$line" >&2
+    done <<<"$1"
+}
+
 # ensure_ca_trusted <mkcert-bin> <caroot> <cert> <key> <confirm>
 #
 # Runs `mkcert -install`, which is idempotent: it creates a CA only when none
@@ -331,14 +358,14 @@ function ensure_ca_trusted() {
 
     if out="$(CAROOT="$caroot" "$bin" -install 2>&1)"; then
         elevate_end
-        [[ -n "$out" ]] && printf '%s\n' "$out" >&2
+        [[ -n "$out" ]] && replay_mkcert_output "$out"
         if [[ ! -f "${caroot}/rootCA.pem" ]]; then
             cap_fail 5 "mkcert -install reported success but ${caroot}/rootCA.pem is missing"
         fi
         return 0
     fi
     elevate_end
-    printf '%s\n' "$out" >&2
+    replay_mkcert_output "$out"
 
     if looks_like_an_elevation_failure "$out"; then
         # NOT `sudo <this script>`: run as root, mkcert would resolve CAROOT

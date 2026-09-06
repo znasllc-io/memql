@@ -142,6 +142,32 @@ verifies the outcome (ADR: "pin the procedure, capture the variance"). Outputs
 that legitimately vary (image `@sha256`, live metrics) belong in `result`, not
 in the exit code.
 
+### `result.reason` -- one reserved key (memql#5029)
+
+`result.reason` is the script's own sentence for **why a verify over this
+step's result will not hold**. It is the one reserved key in an otherwise
+capability-specific object, and it exists because of a gap the envelope
+otherwise cannot express.
+
+A script that completes its work but cannot assert the OUTCOME exits 0 with
+`error: null` -- `cap_ok` has no other shape, and the outcome belongs in
+`result` by the rule directly above. So when the graph's `verify` then fails,
+the executor has nothing to print but the predicate: `k3d.up` ended on its own
+`Bootstrap complete` banner and the only line saying otherwise was
+`result.workloadsReady did not satisfy resultTrue` -- a JSON path where a
+diagnosis belongs, naming the workloads, which were not the fault.
+
+Rules:
+
+- **Optional, and ABSENT rather than empty.** A script with nothing to say sets
+  nothing, so "no reason recorded" stays distinguishable from "the reason is
+  blank". `describeVerify` still covers every script that sets none.
+- **It is not an error.** A real `error` outranks it, so a script that fails
+  properly is unaffected. It is only read on the failing branch of a verify.
+- **It does not change the exit code.** A script that should fail must still
+  `cap_fail`; `reason` is for the deliberate exit-0-but-unverified case, not a
+  way to report a failure quietly.
+
 ## Standard exit codes
 
 | code | meaning                                                        |
