@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
 func testLogger() *slog.Logger {
@@ -28,11 +29,12 @@ func testLogger() *slog.Logger {
 // actually SAW, which is the only place that fact is observable.
 func TestEveryWorkWriteStampsInternalOrigin(t *testing.T) {
 	writeConstructs := map[string]bool{
-		"createWorkGoal":     true,
-		"createWorkRun":      true,
-		"updateWorkRun":      true,
-		"createWorkApproval": true,
-		"decideWorkApproval": true,
+		"createWorkGoal":      true,
+		"createWorkRun":       true,
+		"updateWorkRun":       true,
+		"createWorkApproval":  true,
+		"decideWorkApproval":  true,
+		"createWorkModelCall": true,
 	}
 
 	cases := []struct {
@@ -101,6 +103,28 @@ func TestEveryWorkWriteStampsInternalOrigin(t *testing.T) {
 			},
 		},
 	}
+
+	cases = append(cases, struct {
+		name string
+		run  func(t *testing.T, i *Integration, eng *recordingEngine, ctx context.Context)
+	}{
+		// The model-call journal (memql#4999). Its writer does not go through
+		// a builtin handler -- the engine's model seam calls it directly
+		// through an interface -- so it would have been invisible to the
+		// table above, which is exactly how a @serverOnly writer ships
+		// refused-at-runtime with one WARN and nothing above it hearing.
+		name: "journal a model call",
+		run: func(t *testing.T, i *Integration, eng *recordingEngine, ctx context.Context) {
+			j := &ModelJournal{store: i.store()}
+			if err := j.Record(ctx, "u1", memqlengine.JournaledCall{
+				RunId: "v1:work:run:r1", StepKey: "s1", RequestHash: "abc",
+				Provider: "chat54Mini", Model: "gpt-5.4-mini", Served: "live",
+				Response: map[string]any{"text": "answer"},
+			}); err != nil {
+				t.Fatalf("Record: %v", err)
+			}
+		},
+	})
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

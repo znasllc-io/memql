@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // fork.go -- forkRun and replayRun (design record section D, "Replay has
@@ -191,12 +191,38 @@ func (i *Integration) deriveRun(ctx context.Context, source map[string]any, d de
 		return "", err
 	}
 
-	// The derived run gets its OWN budget scope. Sharing the source's would
-	// make a replay spend against a budget that is already accounted for,
-	// and a fork of a nearly exhausted run would be dead on arrival.
-	_ = memql.ContextWithBudgetScope(ctx,
-		memql.BudgetScopeId("run", runId),
-		memql.BudgetScopeId("goal", goalId))
+	// The derived run gets its OWN budget scope, and dispatchCompile is what
+	// stamps it -- from compileBudgetScopes(req), off the run and goal ids in
+	// the request built below. This used to re-derive the same two scopes
+	// here and assign the result to `_`, which read as though it did
+	// something and did not: sharing the source's budget would make a replay
+	// spend against a ceiling already accounted for, and the line that
+	// prevented it was dead.
+	//
+	// THE RUN CONTEXT IS WHAT THIS PATH DOES NEED TO STAMP (memql#4999), and
+	// it is what turns this row from a record of intent into a replay. The
+	// engine's model seam reads it, asks work.DecideServe, and serves the
+	// source run's journaled answers instead of calling a provider.
+	// context.WithoutCancel inside dispatchCompile preserves values, so it
+	// survives onto the detached goroutine.
+	ctx = common.ContextWithRun(ctx, common.RunContext{
+		RunId:  runId,
+		GoalId: goalId,
+		Mode:   d.Mode,
+		// strict is the only policy a derived run can carry today --
+		// createWorkRun does not accept replayPolicy, and handleReplayRun
+		// refuses a permissive request rather than recording it as strict.
+		ReplayPolicy: common.ReplayStrict,
+		SourceRunId:  d.ForkedFromRunId,
+		// The source's goal, so the cross-goal rule has something to compare.
+		// deriveRun copies goalId off the source row, so these agree by
+		// construction -- and asserting it here is what would catch the day
+		// they stop agreeing.
+		SourceGoalId:  goalId,
+		ForkAtStepKey: d.ForkAtStepKey,
+		StepOrder:     rowStringSlice(source, "stepOrder"),
+		OwnerUserId:   owner,
+	})
 
 	if dispatched := i.dispatchCompile(ctx, CompileRequest{
 		GoalId:      goalId,
@@ -209,4 +235,27 @@ func (i *Integration) deriveRun(ctx context.Context, source map[string]any, d de
 			"component", "work.fork", "run", runId, "mode", d.Mode, "from", d.ForkedFromRunId)
 	}
 	return runId, nil
+}
+
+// rowStringSlice reads a []string field off a decoded row.
+//
+// Payload arrays decode as []any, so the []string arm is the one that never
+// fires against a real row and the []any arm is the one that does. Both are
+// here because a test that builds a row in Go writes the typed form, and a
+// helper that works only in tests is worse than none.
+func rowStringSlice(row map[string]any, key string) []string {
+	switch v := row[key].(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }

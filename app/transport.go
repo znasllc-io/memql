@@ -39,6 +39,13 @@ func (a *App) transportBase() {
 	// persisting recorder).
 	a.wireOutputGate()
 
+	// Model-call journal (memql#4999). Wired here, beside the other two
+	// engine-level seams, and for the same reason: it has to be installed
+	// before any handler can dispatch, or the first run on a freshly started
+	// node journals nothing and a later replay of it reports a divergence
+	// that blames the prompt.
+	a.wireModelCallJournal()
+
 	// === gRPC Server ===
 	memqlGRPCAddr := strings.TrimSpace(os.Getenv("MEMQL_GRPC_ADDRESS"))
 	a.grpcServer = memqlgrpc.NewServer(memqlGRPCAddr, a.Logger)

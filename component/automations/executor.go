@@ -12,6 +12,7 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/provenance"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -984,7 +985,8 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 	// drift, and so the untrusted branch stamps CLIENT rather than inheriting
 	// whatever the parent carried -- see that function's comment.
 	trusted := stepCtx != nil && stepCtx.Execution != nil && stepCtx.Execution.SourceTrusted
-	result, err := e.stepRegistry.Execute(originForSource(ctx, trusted), step, stepCtx)
+	stepExecCtx := e.withRunContext(originForSource(ctx, trusted), stepCtx, step)
+	result, err := e.stepRegistry.Execute(stepExecCtx, step, stepCtx)
 
 	// Publish step completed/failed event
 	var stepTopic string
@@ -1005,6 +1007,44 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 	})
 
 	return result, err
+}
+
+// withRunContext stamps the work run this step belongs to (memql#4999), so a
+// model call the step makes is journaled against the run and can be served
+// back on a replay.
+//
+// IT IS THE SAME RUN THE JOURNAL ALREADY OPENS. component/automations/journal.go
+// writes v1:work:run at exec.ID and v1:work:step at the step's key; this puts
+// those two ids where the engine's model seam can read them, because the path
+// between here and a provider -- the step registry, the shape evaluator, the
+// prompt renderer -- has no business carrying a run id in its signatures.
+//
+// A SANDBOXED RUN IS NOT STAMPED. A dry-run writes no journal at all
+// (memql#2932), so stamping one would have its model calls looked up against a
+// run whose rows do not exist and, worse, recorded into a run the preview was
+// never supposed to leave behind.
+//
+// The mode is always live here. A replay is not driven from this executor: it
+// is a derived run whose context integrations/work stamps at the point it
+// dispatches the compile.
+func (e *Executor) withRunContext(ctx context.Context, stepCtx *StepContext, step *Step) context.Context {
+	if e == nil || e.sandboxRun || stepCtx == nil || stepCtx.Execution == nil || step == nil {
+		return ctx
+	}
+	// Already stamped by a caller that knows more than this one does -- a
+	// derived run being compiled, say. Its mode and lineage must win.
+	if _, ok := common.RunFromContext(ctx); ok {
+		return ctx
+	}
+	return common.ContextWithRun(ctx, common.RunContext{
+		RunId:   stepCtx.Execution.ID,
+		StepKey: step.ID,
+		Mode:    common.RunModeLive,
+		// No owner: an automation's run is the DEPLOYMENT's, which is what
+		// journalContext's Synthetic actor already makes true of its run and
+		// step rows. The journal reads a blank-owner run through the
+		// cluster-owner query for exactly this reason.
+	})
 }
 
 // saveCheckpointOnFailure persists a checkpoint when an automation fails.

@@ -224,6 +224,69 @@ describe("what a run's bar offers", () => {
     expect(await screen.findByText("no executor registered for replayRun")).toBeTruthy();
   });
 
+  // memql#4999. A strict replay that finds no journaled match STOPS -- the
+  // model seam refuses to substitute a live call, because a replay that
+  // quietly called a provider would report a reproduction that did not
+  // happen. Nothing broke, and the page must not say something did: under the
+  // generic failure notice this read as "This run failed" followed by a
+  // sentence about a classifier that never saw it.
+  it("calls a diverged replay a divergence, not a failure", async () => {
+    const conn = fakeConnection({
+      runs: [
+        runRow({
+          id: "run-1",
+          mode: "replay",
+          status: "failed",
+          errorCode: "replay_diverged",
+          errorMessage: "replay diverged at step classify of run v1:work:run:run-0",
+        }),
+      ],
+      steps: fiveSteps(),
+    });
+    await openRun(conn);
+    expect(screen.getByText("This replay diverged.")).toBeTruthy();
+    expect(screen.queryByText("This run failed.")).toBeNull();
+    // The step it parted at has to be reachable, or the divergence names
+    // nothing the reader can act on.
+    expect(
+      screen.getByText(/replay diverged at step classify of run v1:work:run:run-0/),
+    ).toBeTruthy();
+    // AND IT MUST NOT CONTRADICT ITSELF two lines down. The replay caption
+    // used to print unconditionally, so this page carried "This replay
+    // diverged" and "Every model call was served from the journal, so this
+    // run reached no provider" together -- only one of them true of this run.
+    // Caught by looking at it rendered, which is what DESIGN.md asks for.
+    expect(screen.queryByText(/Every model call was served from the journal/)).toBeNull();
+    expect(screen.getByText(/A replay under the strict policy/)).toBeTruthy();
+  });
+
+  it("keeps the full replay caption on a replay that did not diverge", async () => {
+    const conn = fakeConnection({
+      runs: [runRow({ id: "run-1", mode: "replay", status: "succeeded" })],
+      steps: fiveSteps(),
+    });
+    await openRun(conn);
+    expect(screen.getByText(/Every model call was served from the journal/)).toBeTruthy();
+  });
+
+  // The other direction, so the fix cannot be "never say failed".
+  it("still calls an ordinary failure a failure", async () => {
+    const conn = fakeConnection({
+      runs: [
+        runRow({
+          id: "run-1",
+          status: "failed",
+          errorCode: "compile_failed",
+          errorMessage: "the authoring pass produced no template",
+        }),
+      ],
+      steps: fiveSteps(),
+    });
+    await openRun(conn);
+    expect(screen.getByText("This run failed.")).toBeTruthy();
+    expect(screen.queryByText("This replay diverged.")).toBeNull();
+  });
+
   it("calls a lost run lost, and says nothing failed", async () => {
     const conn = fakeConnection({
       runs: [runRow({ id: "run-1", status: "abandoned" })],
