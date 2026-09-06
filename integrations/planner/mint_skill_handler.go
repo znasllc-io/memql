@@ -2,12 +2,12 @@ package planner
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -266,11 +266,10 @@ func (l *PlannerAgentLoop) executeMintSkill(ctx context.Context, d plannerDecisi
 		"tier":              d.Tier,
 		"originatingGoalId": planId,
 	}
-	payload, err := json.Marshal(args)
+	call, err := langparser.RenderCall("mintSkill", args)
 	if err != nil {
-		return "", fmt.Errorf("marshal mint args: %w", err)
+		return "", fmt.Errorf("render mint args: %w", err)
 	}
-	call := fmt.Sprintf(`mintSkill(%s)`, string(payload))
 	if _, err := l.engine.Execute(systemActorContext(ctx), call); err != nil {
 		return "", err
 	}
@@ -326,11 +325,10 @@ func (l *PlannerAgentLoop) writeMintApprovalCard(ctx context.Context, plan map[s
 			"agentId": ownerAgentId,
 		},
 	}
-	payload, err := json.Marshal(args)
+	call, err := langparser.RenderCall("mutationCreateCanvasState", args)
 	if err != nil {
-		return fmt.Errorf("marshal card args: %w", err)
+		return fmt.Errorf("render card args: %w", err)
 	}
-	call := fmt.Sprintf(`mutationCreateCanvasState(%s)`, string(payload))
 	_, err = l.engine.Execute(systemActorContext(ctx), call)
 	return err
 }

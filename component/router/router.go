@@ -2,7 +2,6 @@ package router
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
@@ -363,13 +363,12 @@ func (r *Router) recordCall(rec CallRecord) {
 		})
 
 		args := buildRouterCallArgs(rec, id.NewShortId())
-		payload, err := json.Marshal(args)
+		query, err := langparser.RenderCall("recordRouterCall", args)
 		if err != nil {
 			r.recordsDropped.Add(1)
-			r.logger.Warn("router: marshal record args failed", "error", err, "requestId", rec.RequestId)
+			r.logger.Warn("router: rendering the record call failed", "error", err, "requestId", rec.RequestId)
 			return
 		}
-		query := fmt.Sprintf("recordRouterCall(%s)", string(payload))
 		if _, err := r.engine.Execute(ctx, query); err != nil {
 			r.recordsDropped.Add(1)
 			r.logger.Warn("router: failed to write v1:router:call row",

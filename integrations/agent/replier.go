@@ -1584,17 +1584,16 @@ func latestUserQuery(msg *memqlv1.AgentGenerateTurnMsg) string {
 // removed.
 func (r *Replier) retrieveKnowledgeChunks(ctx context.Context, query string, domains []string) []map[string]any {
 	const wantK = 5
-	args, err := json.Marshal(map[string]any{
+	dsl, err := langparser.RenderCall("similarTo", map[string]any{
 		"text":    query,
 		"concept": "v1:knowledge:documentChunk",
 		"domains": domains,
 		"limit":   wantK,
 	})
 	if err != nil {
-		r.logger.Warn("agentReply RAG: json marshal failed", "error", err)
+		r.logger.Warn("agentReply RAG: rendering the similarTo call failed", "error", err)
 		return nil
 	}
-	dsl := fmt.Sprintf("similarTo(%s)", string(args))
 	result, execErr := r.engine.Execute(ctx, dsl)
 	if execErr != nil {
 		r.logger.Warn("agentReply RAG: similarTo execute failed", "error", execErr, "dsl", truncateForLog(dsl, 200))

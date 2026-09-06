@@ -224,11 +224,11 @@ func invocationWriteCall(ctx context.Context, row workerservice.InvocationRow) (
 		"outputPreview": row.OutputPreview,
 		"routing":       row.Routing,
 	}
-	body, err := json.Marshal(args)
+	call, err := langparser.RenderCall("createWorkerInvocation", args)
 	if err != nil {
-		return nil, "", fmt.Errorf("agent.worker store: marshal invocation: %w", err)
+		return nil, "", fmt.Errorf("agent.worker store: render invocation: %w", err)
 	}
-	return writeCtx, fmt.Sprintf("createWorkerInvocation(%s)", string(body)), nil
+	return writeCtx, call, nil
 }
 
 // -- the fleet reads (memql#4351) --------------------------------------------

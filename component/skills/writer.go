@@ -2,7 +2,6 @@ package skills
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -113,30 +112,32 @@ func (w *Writer) write(ctx context.Context, edges []EdgeWrite, commit bool) erro
 		if evidence == nil {
 			evidence = []Evidence{}
 		}
-		create, err := json.Marshal(map[string]any{
+		createArgs := map[string]any{
 			"edgeId":      edge.EdgeID,
 			"fromSkillId": edge.From,
 			"toSkillId":   edge.To,
 			"edgeType":    string(edge.Type),
 			"evidence":    evidence,
 			"proposedBy":  firstNonBlank(edge.ProposedBy, "system"),
-		})
+		}
+		createCall, err := langparser.RenderCall("createSkillEdge", createArgs)
 		if err != nil {
 			return err
 		}
 		if _, err := w.engine.Execute(auth.ContextWithInternalOrigin(ctx),
-			fmt.Sprintf("mutation createSkillEdge(%s)", string(create))); err != nil {
+			"mutation "+createCall); err != nil {
 			return err
 		}
 		if !commit {
 			continue
 		}
-		promote, err := json.Marshal(map[string]any{"edgeId": edge.EdgeID, "evidence": evidence})
+		promoteCall, err := langparser.RenderCall("commitSkillEdge",
+			map[string]any{"edgeId": edge.EdgeID, "evidence": evidence})
 		if err != nil {
 			return err
 		}
 		if _, err := w.engine.Execute(auth.ContextWithInternalOrigin(ctx),
-			fmt.Sprintf("mutation commitSkillEdge(%s)", string(promote))); err != nil {
+			"mutation "+promoteCall); err != nil {
 			return err
 		}
 	}
