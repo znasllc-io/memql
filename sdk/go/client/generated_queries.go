@@ -11595,6 +11595,24 @@ func WorkGoalsForOwnerBuild(args WorkGoalsForOwnerArgs) string {
 	return "query workGoalsForOwner()"
 }
 
+// WorkRunsForOwner -- The caller's runs, newest first. Owned: ownerUserId==actor.userId binds server-side, and the concept's tier admits the same rows on the SUBSCRIPTION, so a browser watching this feed is not handed anybody else's work the way an undeclared concept would.
+// DELIBERATELY NOT NARROWED BY TEMPLATE. A caller that wants one kind of run filters `automationName` itself: the MemQL OS Training app shows analyses and reads `libraryAnalyzeFile`, and Nexus (sub-project B) wants every run of a goal. Narrowing here would make this query one surface's, and the second surface would add a second query that drifts.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunsForOwner"] in generated_concepts.go).
+type WorkRunsForOwnerArgs struct {
+}
+
+// WorkRunsForOwner calls the engine query workRunsForOwner.
+func (qc *QueryClient) WorkRunsForOwner(ctx context.Context, args WorkRunsForOwnerArgs) (*Result, error) {
+	call := WorkRunsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workRunsForOwner", call)
+}
+
+func WorkRunsForOwnerBuild(args WorkRunsForOwnerArgs) string {
+	_ = args
+	return "query workRunsForOwner()"
+}
+
 // WorkerByIdentityId -- Look up the worker registration owned by an identity row.
 // The `ownerUserId==actor.userId` conjunct is not redundant with the concept's tier -- it is what makes this read's result set the SAME before and after enforcement, which TestRowAuthzEnforcementLandGate is the gate for. It is satisfied at runtime because the only caller, component/worker's register handshake, runs under auth.ContextWithUserActor for the owner the worker_token's identity row named. A worker authenticates as worker:<id>, so without that stamp this read returns nothing at all -- which is the failure that reads as "this machine has never registered" and silently creates a duplicate row on every reconnect.
 //

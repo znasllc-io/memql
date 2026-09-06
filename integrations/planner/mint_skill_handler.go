@@ -92,7 +92,7 @@ func (l *PlannerAgentLoop) handleMintSkill(ctx context.Context, planId string, d
 	}
 
 	// Step 3a: in-envelope -- execute the mutation.
-	skillId, err := l.executeMintSkill(ctx, d, planId, ownerAgentId)
+	skillId, err := l.executeMintSkill(ctx, d, planId)
 	if err != nil {
 		return fmt.Errorf("mintSkill: execute mutation: %w", err)
 	}
@@ -241,11 +241,18 @@ func (l *PlannerAgentLoop) checkMintAuthority(ctx context.Context, ownerAgentId,
 // executeMintSkill invokes mintSkill with the decision
 // payload + the Phase 3 provenance triad. Returns the new skill's id
 // on success.
-func (l *PlannerAgentLoop) executeMintSkill(ctx context.Context, d plannerDecision, planId, ownerAgentId string) (string, error) {
+func (l *PlannerAgentLoop) executeMintSkill(ctx context.Context, d plannerDecision, planId string) (string, error) {
 	skillId := strings.TrimSpace(d.Slug)
 	if skillId == "" {
 		skillId = id.NewShortId()
 	}
+	// PROVENANCE POINTS AT THE SPINE (epic memql#4970, spec section C).
+	// `originatingGoalId` / `mintedByRunId` replaced `originatingPlanId` /
+	// `mintedByAgentId` outright -- pre-release, so a rename rather than a
+	// second pair. The planner still speaks in plans here, so the plan id
+	// travels in the goal slot until epic A2 re-points this loop; the agent
+	// id has no slot at all, because work never routes to an agent row (D3)
+	// and there is no longer an executor for that field to name.
 	args := map[string]any{
 		"skillId":           skillId,
 		"slug":              d.Slug,
@@ -257,8 +264,7 @@ func (l *PlannerAgentLoop) executeMintSkill(ctx context.Context, d plannerDecisi
 		"toolSlugs":         d.ToolSlugs,
 		"liveSourceIds":     d.LiveSourceIds,
 		"tier":              d.Tier,
-		"originatingPlanId": planId,
-		"mintedByAgentId":   ownerAgentId,
+		"originatingGoalId": planId,
 	}
 	payload, err := json.Marshal(args)
 	if err != nil {

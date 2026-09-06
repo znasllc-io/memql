@@ -6879,6 +6879,13 @@ type CreateSkillArgs struct {
 	PredefinedSet bool // set true to send predefined; required because zero-value bool is ambiguous
 	Active        bool
 	ActiveSet     bool // set true to send active; required because zero-value bool is ambiguous
+	Instructions  map[string]any
+	Scripts       []any
+	Resources     []any
+	ConstructRefs []any
+	Effects       map[string]any
+	Version       int
+	Status        string
 }
 
 // CreateSkill calls the engine mutation createSkill.
@@ -6964,6 +6971,55 @@ func CreateSkillBuild(args CreateSkillArgs) string {
 		}
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
+	}
+	if args.Instructions != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("instructions: ")
+		b.WriteString(renderMemQLValue(args.Instructions))
+	}
+	if args.Scripts != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("scripts: ")
+		b.WriteString(renderMemQLValue(args.Scripts))
+	}
+	if args.Resources != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("resources: ")
+		b.WriteString(renderMemQLValue(args.Resources))
+	}
+	if args.ConstructRefs != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("constructRefs: ")
+		b.WriteString(renderMemQLValue(args.ConstructRefs))
+	}
+	if args.Effects != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("effects: ")
+		b.WriteString(renderMemQLValue(args.Effects))
+	}
+	if args.Version != 0 {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("version: ")
+		b.WriteString(fmt.Sprintf("%v", args.Version))
+	}
+	if args.Status != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -9634,8 +9690,13 @@ type MintSkillArgs struct {
 	ToolSlugs         []any
 	LiveSourceIds     []any
 	Tier              string
-	OriginatingPlanId string
-	MintedByAgentId   string
+	Instructions      map[string]any
+	Scripts           []any
+	Resources         []any
+	ConstructRefs     []any
+	Effects           map[string]any
+	OriginatingGoalId string
+	MintedByRunId     string
 }
 
 // MintSkill calls the engine mutation mintSkill.
@@ -9708,19 +9769,54 @@ func MintSkillBuild(args MintSkillArgs) string {
 	}
 	b.WriteString("tier: ")
 	b.WriteString(quoteMemQL(args.Tier))
-	if args.OriginatingPlanId != "" {
+	if args.Instructions != nil {
 		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
-		b.WriteString("originatingPlanId: ")
-		b.WriteString(quoteMemQL(args.OriginatingPlanId))
+		b.WriteString("instructions: ")
+		b.WriteString(renderMemQLValue(args.Instructions))
 	}
-	if args.MintedByAgentId != "" {
+	if args.Scripts != nil {
 		if b.Len() > 19 {
 			b.WriteString(", ")
 		}
-		b.WriteString("mintedByAgentId: ")
-		b.WriteString(quoteMemQL(args.MintedByAgentId))
+		b.WriteString("scripts: ")
+		b.WriteString(renderMemQLValue(args.Scripts))
+	}
+	if args.Resources != nil {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("resources: ")
+		b.WriteString(renderMemQLValue(args.Resources))
+	}
+	if args.ConstructRefs != nil {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("constructRefs: ")
+		b.WriteString(renderMemQLValue(args.ConstructRefs))
+	}
+	if args.Effects != nil {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("effects: ")
+		b.WriteString(renderMemQLValue(args.Effects))
+	}
+	if args.OriginatingGoalId != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("originatingGoalId: ")
+		b.WriteString(quoteMemQL(args.OriginatingGoalId))
+	}
+	if args.MintedByRunId != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("mintedByRunId: ")
+		b.WriteString(quoteMemQL(args.MintedByRunId))
 	}
 	b.WriteString(")")
 	return b.String()

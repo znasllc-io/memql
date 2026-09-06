@@ -19,14 +19,23 @@ shape skill skillSummary {
   category
   predefined
   active
+  status
+  reliability
 }
 
-/// Full skill projection: the catalog row plus its bundle composition + Phase 3 mint provenance.
-/// Backs the Skills admin detail view, the Planner Agent's mintSkill candidate read, the trace
-/// viewer's mint-event detail, and the agent factory's attach path (Phase 2). Keeps domainIds /
-/// toolSlugs / liveSourceIds inline so a single read fully describes what attaching the skill will
-/// do to an agent. originatingPlanId / mintedByAgentId are empty for predefined catalog rows and
-/// populated for planner-minted ones.
+/// Full skill projection: the catalog row, its bundle composition, everything epic A3 grew it with,
+/// and its mint provenance. Backs the Skills admin detail view, the mint candidate read, the agent
+/// factory's attach path, structural retrieval's candidate load and runScript's script resolution.
+///
+/// KEEPS EVERYTHING INLINE, deliberately: a single read fully describes what binding this skill
+/// will do -- which domains and tools it grants, which scripts it can run, which constructs it
+/// contributes, what it declares it touches, and how far it has earned trust. `skillSummary` is
+/// the projection for a list; this is the one for a decision, and a decision made from half the
+/// row is what a second read would be for.
+///
+/// `instructions` is projected WHOLE rather than tier by tier. The three-tier disclosure is a
+/// rule about what a PROMPT carries, not about what a read returns -- splitting it here would put
+/// the tiering in two places, and the one that mattered would be the one nobody updated.
 @row
 shape skill skillFull {
   row.id
@@ -41,8 +50,18 @@ shape skill skillFull {
   tier
   predefined
   active
-  originatingPlanId
-  mintedByAgentId
+  instructions
+  scripts
+  resources
+  constructRefs
+  effects
+  version
+  reliability
+  reinforceCount
+  lastReinforced
+  status
+  originatingGoalId
+  mintedByRunId
   row.createdAt
   row.createdBy
 }

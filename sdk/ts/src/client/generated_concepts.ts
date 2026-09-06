@@ -1064,6 +1064,7 @@ export const BoundConcepts = {
   warmupStateForIdentity: "v1:campaigns:warmupState",
   workApprovalsForOwner: "v1:work:approval",
   workGoalsForOwner: "v1:work:goal",
+  workRunsForOwner: "v1:work:run",
   workerByIdentityId: "v1:worker:registration",
   workerPairingCodeByHash: "v1:identity:workerPairingCode",
   workerTokenByKeyHash: "v1:identity:identity",

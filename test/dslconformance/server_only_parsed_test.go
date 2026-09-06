@@ -943,6 +943,8 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// provenance, never a scope.
 		{Path: "skills/mutations.memql", Name: "createSkillEdge"}: true,
 		{Path: "skills/mutations.memql", Name: "commitSkillEdge"}: true,
+		{Path: "skills/mutations.memql", Name: "setSkillScripts"}: true,
+		{Path: "skills/mutations.memql", Name: "reinforceSkill"}:  true,
 	}
 	for k := range want {
 		if !set[k] {

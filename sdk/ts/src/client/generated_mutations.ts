@@ -3692,6 +3692,13 @@ export interface CreateSkillArgs {
   tier: string;
   predefined?: boolean;
   active?: boolean;
+  instructions?: Record<string, unknown>;
+  scripts?: unknown[];
+  resources?: unknown[];
+  constructRefs?: unknown[];
+  effects?: Record<string, unknown>;
+  version?: number;
+  status?: string;
 }
 
 export function buildCreateSkill(args: CreateSkillArgs): string {
@@ -3708,6 +3715,13 @@ export function buildCreateSkill(args: CreateSkillArgs): string {
   parts.push("tier: " + renderMemQLValue(args.tier));
   if (args.predefined !== undefined) parts.push("predefined: " + renderMemQLValue(args.predefined));
   if (args.active !== undefined) parts.push("active: " + renderMemQLValue(args.active));
+  if (args.instructions !== undefined) parts.push("instructions: " + renderMemQLValue(args.instructions));
+  if (args.scripts !== undefined) parts.push("scripts: " + renderMemQLValue(args.scripts));
+  if (args.resources !== undefined) parts.push("resources: " + renderMemQLValue(args.resources));
+  if (args.constructRefs !== undefined) parts.push("constructRefs: " + renderMemQLValue(args.constructRefs));
+  if (args.effects !== undefined) parts.push("effects: " + renderMemQLValue(args.effects));
+  if (args.version !== undefined) parts.push("version: " + renderMemQLValue(args.version));
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
   return "mutation createSkill(" + parts.join(", ") + ")";
 }
 
@@ -5213,8 +5227,13 @@ export interface MintSkillArgs {
   toolSlugs?: unknown[];
   liveSourceIds?: unknown[];
   tier: string;
-  originatingPlanId?: string;
-  mintedByAgentId?: string;
+  instructions?: Record<string, unknown>;
+  scripts?: unknown[];
+  resources?: unknown[];
+  constructRefs?: unknown[];
+  effects?: Record<string, unknown>;
+  originatingGoalId?: string;
+  mintedByRunId?: string;
 }
 
 export function buildMintSkill(args: MintSkillArgs): string {
@@ -5229,8 +5248,13 @@ export function buildMintSkill(args: MintSkillArgs): string {
   if (args.toolSlugs !== undefined) parts.push("toolSlugs: " + renderMemQLValue(args.toolSlugs));
   if (args.liveSourceIds !== undefined) parts.push("liveSourceIds: " + renderMemQLValue(args.liveSourceIds));
   parts.push("tier: " + renderMemQLValue(args.tier));
-  if (args.originatingPlanId !== undefined) parts.push("originatingPlanId: " + renderMemQLValue(args.originatingPlanId));
-  if (args.mintedByAgentId !== undefined) parts.push("mintedByAgentId: " + renderMemQLValue(args.mintedByAgentId));
+  if (args.instructions !== undefined) parts.push("instructions: " + renderMemQLValue(args.instructions));
+  if (args.scripts !== undefined) parts.push("scripts: " + renderMemQLValue(args.scripts));
+  if (args.resources !== undefined) parts.push("resources: " + renderMemQLValue(args.resources));
+  if (args.constructRefs !== undefined) parts.push("constructRefs: " + renderMemQLValue(args.constructRefs));
+  if (args.effects !== undefined) parts.push("effects: " + renderMemQLValue(args.effects));
+  if (args.originatingGoalId !== undefined) parts.push("originatingGoalId: " + renderMemQLValue(args.originatingGoalId));
+  if (args.mintedByRunId !== undefined) parts.push("mintedByRunId: " + renderMemQLValue(args.mintedByRunId));
   return "mutation mintSkill(" + parts.join(", ") + ")";
 }
 
