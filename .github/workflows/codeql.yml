@@ -39,9 +39,11 @@ jobs:
         # go + python + javascript-typescript (memql#3157). GitHub Code
         # Quality used to cover these three; it was retired because it is the
         # ONLY billable line item on this org ($27.03 in 2026-07) while this
-        # workflow runs free on a public repo. Dropping a language here would
-        # be a real SAST regression, not a cleanup -- the repo genuinely
-        # contains Python (74 KB) and TypeScript (257 KB).
+        # workflow runs free on a public repo. It is BACK -- see the note on
+        # `queries:` below, which is why that suite narrowed -- but this matrix
+        # does not change: dropping a language here would be a real SAST
+        # regression, not a cleanup, and the repo genuinely contains Python
+        # (74 KB) and TypeScript (257 KB).
         language: [go, python, javascript-typescript]
 
     steps:
@@ -65,9 +67,39 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           config-file: ./.github/codeql/codeql-config.yml
-          # Richer suite: security queries + maintainability/quality
-          # queries, instead of the default security-only set.
-          queries: security-and-quality
+          # SECURITY QUERIES, EXTENDED -- not `security-and-quality`, and the
+          # difference is the whole of this workflow's reliability.
+          #
+          # `security-and-quality` is the largest suite CodeQL ships: every
+          # security query PLUS the entire maintainability set. On this
+          # codebase the quality half produces a result set the analysis
+          # cannot hold, and `codeql database run-queries` dies with
+          #
+          #     Result set is larger than the limit of 2GiB
+          #
+          # It fails SELECTIVELY, which is what made it hard to see (#5016).
+          # GitHub disables diff-informed analysis past ~300 changed files, so
+          # a small pull request never reaches the crashing step and a large
+          # one always does -- along with every push to main, which is always
+          # a full run. The lane was therefore broken for exactly the changes
+          # that most need it (refactors, removals, regenerations) while small
+          # ones sailed through, and a red `Analyze (go)` blocked the owner
+          # merge path (scripts/dev/merge-as-owner.sh) on those and only those.
+          #
+          # WHY DROPPING THE QUALITY HALF COSTS NOTHING NOW. The matrix comment
+          # above says GitHub's Code Quality product "was retired because it is
+          # the ONLY billable line item on this org". That is no longer true:
+          # Code Quality runs on every pull request, every push to main and on
+          # a schedule (16 runs in the last 100 workflow runs at the time of
+          # writing, all green), under `dynamic/github-code-quality/codeql`.
+          # So the maintainability queries are covered by the very product this
+          # suite was widened to replace -- and covered by the run that does
+          # NOT crash. Keeping them here bought a duplicate and a broken lane.
+          #
+          # `security-extended` rather than plain `security`: it keeps more
+          # security queries than the default set, so this narrowing loses no
+          # SECURITY coverage at all. Only the quality half goes.
+          queries: security-extended
       # autobuild is only meaningful for the compiled language. python and
       # javascript-typescript are interpreted -- CodeQL extracts them without
       # a build, so autobuild is at best a no-op and at worst a spurious
