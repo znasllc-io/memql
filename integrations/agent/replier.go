@@ -15,7 +15,6 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/component/memql/taskstamp"
 	"github.com/znasllc-io/memql/component/router"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/env"
@@ -47,7 +46,7 @@ func looksLikeCanonicalUserId(s string) bool {
 // writes a v1:router:call ledger row per call.
 type Replier struct {
 	engine  MemQLEngine
-	stamper *taskstamp.Stamper
+	stamper *toolRecorder
 	router  *router.Router
 	logger  *slog.Logger
 
@@ -99,7 +98,7 @@ func NewReplier(engine MemQLEngine, rtr *router.Router, log *slog.Logger) (*Repl
 	if log == nil {
 		log = logger.New(ComponentName, os.Stdout, resolveLoggerLevel())
 	}
-	stamper := taskstamp.New(engine, log)
+	stamper := newToolRecorder(engine, log)
 	return &Replier{engine: engine, stamper: stamper, router: rtr, logger: log}, nil
 }
 

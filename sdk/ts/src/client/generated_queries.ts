@@ -1314,28 +1314,6 @@ QueryClient.prototype.authoringBundleById = function (this: QueryClient, args: A
   return this.executeNamed("authoringBundleById", buildAuthoringBundleById(args), opts);
 };
 
-/** The bundle post-hoc captured from a given Plan (everyday-task capture path, #1161), scoped to the caller. Lets the capture orchestrator skip re-authoring a task it already captured (idempotency on a re-delivered terminal Plan event) and backs the per-task view/edit/export surface (#1162). */
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["authoringBundleForPlan"] in generated_concepts.ts).
-export interface AuthoringBundleForPlanArgs {
-  sourcePlanId: string;
-}
-
-export function buildAuthoringBundleForPlan(args: AuthoringBundleForPlanArgs): string {
-  const parts: string[] = [];
-  parts.push("sourcePlanId: " + renderMemQLValue(args.sourcePlanId));
-  return "query authoringBundleForPlan(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    authoringBundleForPlan(args: AuthoringBundleForPlanArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.authoringBundleForPlan = function (this: QueryClient, args: AuthoringBundleForPlanArgs = {} as AuthoringBundleForPlanArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("authoringBundleForPlan", buildAuthoringBundleForPlan(args), opts);
-};
-
 /** The bundle compiled from a given Responsibility, scoped to the caller. Lets the planner find the existing artifact when a Responsibility is edited (to supersede rather than duplicate). */
 // Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["authoringBundleForResponsibility"] in generated_concepts.ts).
 export interface AuthoringBundleForResponsibilityArgs {
@@ -1356,6 +1334,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.authoringBundleForResponsibility = function (this: QueryClient, args: AuthoringBundleForResponsibilityArgs = {} as AuthoringBundleForResponsibilityArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("authoringBundleForResponsibility", buildAuthoringBundleForResponsibility(args), opts);
+};
+
+/** The bundle post-hoc captured from a given run (the capture path, epic memql#1160), scoped to the caller. Lets the capture orchestrator skip re-authoring a run it already captured (idempotency on a re-delivered terminal run event) and backs the per-run view/edit/export surface. */
+// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["authoringBundleForRun"] in generated_concepts.ts).
+export interface AuthoringBundleForRunArgs {
+  sourceRunId: string;
+}
+
+export function buildAuthoringBundleForRun(args: AuthoringBundleForRunArgs): string {
+  const parts: string[] = [];
+  parts.push("sourceRunId: " + renderMemQLValue(args.sourceRunId));
+  return "query authoringBundleForRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    authoringBundleForRun(args: AuthoringBundleForRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.authoringBundleForRun = function (this: QueryClient, args: AuthoringBundleForRunArgs = {} as AuthoringBundleForRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("authoringBundleForRun", buildAuthoringBundleForRun(args), opts);
 };
 
 /** All authoring bundles owned by the caller, newest first. Backs the 'my authored capabilities' management list. */

@@ -74,6 +74,19 @@ func (a *App) setupAgentReplier() {
 	// an afternoon: the seam is nil, every runAgentTurn refuses, and the
 	// refusal reads like a topology problem rather than a missing wiring line.
 	a.wireAgentTurnRunner(replier)
+
+	// Tool calls are recorded as v1:work:observation rows against the run
+	// they happen inside (memql#5050), replacing the v1:planner:task rows
+	// component/memql/taskstamp used to write. Nil here is not a failure --
+	// a turn outside any run records nothing by design -- but a node with a
+	// work integration and no recorder installed would silently record
+	// nothing for runs too, so it is said out loud.
+	if work := a.lookupWorkIntegration(); work != nil {
+		replier.SetToolInvocationRecorder(work)
+	} else {
+		a.Logger.Warn("agent: no work integration on this node, so tool calls made inside a run will not be recorded",
+			"component", "work.observation")
+	}
 	// Cooperative preemption signal (epic memql#902 / #906): the planner's
 	// cross-node AgentPreemptTurn lands here and flags the in-flight turn to
 	// pause at its next checkpoint. component/grpc can't import

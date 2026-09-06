@@ -1283,28 +1283,6 @@ func AuthoringBundleByIdBuild(args AuthoringBundleByIdArgs) string {
 	return b.String()
 }
 
-// AuthoringBundleForPlan -- The bundle post-hoc captured from a given Plan (everyday-task capture path, #1161), scoped to the caller. Lets the capture orchestrator skip re-authoring a task it already captured (idempotency on a re-delivered terminal Plan event) and backs the per-task view/edit/export surface (#1162).
-//
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["authoringBundleForPlan"] in generated_concepts.go).
-type AuthoringBundleForPlanArgs struct {
-	SourcePlanId string
-}
-
-// AuthoringBundleForPlan calls the engine query authoringBundleForPlan.
-func (qc *QueryClient) AuthoringBundleForPlan(ctx context.Context, args AuthoringBundleForPlanArgs) (*Result, error) {
-	call := AuthoringBundleForPlanBuild(args)
-	return qc.executeNamed(ctx, "authoringBundleForPlan", call)
-}
-
-func AuthoringBundleForPlanBuild(args AuthoringBundleForPlanArgs) string {
-	var b strings.Builder
-	b.WriteString("query authoringBundleForPlan(")
-	b.WriteString("sourcePlanId: ")
-	b.WriteString(quoteMemQL(args.SourcePlanId))
-	b.WriteString(")")
-	return b.String()
-}
-
 // AuthoringBundleForResponsibility -- The bundle compiled from a given Responsibility, scoped to the caller. Lets the planner find the existing artifact when a Responsibility is edited (to supersede rather than duplicate).
 //
 // Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["authoringBundleForResponsibility"] in generated_concepts.go).
@@ -1323,6 +1301,28 @@ func AuthoringBundleForResponsibilityBuild(args AuthoringBundleForResponsibility
 	b.WriteString("query authoringBundleForResponsibility(")
 	b.WriteString("responsibilityId: ")
 	b.WriteString(quoteMemQL(args.ResponsibilityId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AuthoringBundleForRun -- The bundle post-hoc captured from a given run (the capture path, epic memql#1160), scoped to the caller. Lets the capture orchestrator skip re-authoring a run it already captured (idempotency on a re-delivered terminal run event) and backs the per-run view/edit/export surface.
+//
+// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["authoringBundleForRun"] in generated_concepts.go).
+type AuthoringBundleForRunArgs struct {
+	SourceRunId string
+}
+
+// AuthoringBundleForRun calls the engine query authoringBundleForRun.
+func (qc *QueryClient) AuthoringBundleForRun(ctx context.Context, args AuthoringBundleForRunArgs) (*Result, error) {
+	call := AuthoringBundleForRunBuild(args)
+	return qc.executeNamed(ctx, "authoringBundleForRun", call)
+}
+
+func AuthoringBundleForRunBuild(args AuthoringBundleForRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query authoringBundleForRun(")
+	b.WriteString("sourceRunId: ")
+	b.WriteString(quoteMemQL(args.SourceRunId))
 	b.WriteString(")")
 	return b.String()
 }

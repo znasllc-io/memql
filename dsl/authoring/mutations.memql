@@ -18,13 +18,13 @@ mutate bundle createAuthoringBundle {
     title               string!
     summary             string
     responsibilityId    string
-    sourcePlanId        string
+    sourceRunId         string
     version             int
     supersedesBundleId  string
     reusedConstructRefs []object
   }
   insert {
-    accept { title, summary, responsibilityId, sourcePlanId, supersedesBundleId, reusedConstructRefs }
+    accept { title, summary, responsibilityId, sourceRunId, supersedesBundleId, reusedConstructRefs }
     stamp {
       id: args.bundleId
       ownerUserId: actor.userId

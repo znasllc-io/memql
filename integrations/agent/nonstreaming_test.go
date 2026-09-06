@@ -8,11 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/znasllc-io/memql/component/memql/taskstamp"
 	"github.com/znasllc-io/memql/core/common"
 )
 
-// erroringExecutor is a taskstamp.Executor whose tool dispatch always
+// erroringExecutor is a toolExecutor whose tool dispatch always
 // fails, driving the loop's all-errored path (so the model-tiering
 // escalation can be exercised). Execute is a benign no-op so the stamper's
 // synthetic-plan materialization doesn't get in the way.
@@ -171,7 +170,7 @@ func TestRunNonStreamingToolLoop_HardErrorOnFirstStepFailsHonestly(t *testing.T)
 // rounds), the loop escalates to the stronger tier ONCE and lets it finish.
 func TestRunNonStreamingToolLoop_EscalatesToStrongerTierWhenStuck(t *testing.T) {
 	r := testReplier()
-	r.stamper = taskstamp.New(erroringExecutor{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r.stamper = newToolRecorder(erroringExecutor{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// Cheap tier keeps asking for a tool that always errors -> all-errored
 	// rounds accumulate. With the default escalate-after threshold of 2,
@@ -211,7 +210,7 @@ func TestRunNonStreamingToolLoop_EscalatesToStrongerTierWhenStuck(t *testing.T) 
 // breaker fires first inside the per-tool exec block, with a clearer error.)
 func TestRunNonStreamingToolLoop_NoEscalationProviderBreaksOnStuck(t *testing.T) {
 	r := testReplier()
-	r.stamper = taskstamp.New(erroringExecutor{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r.stamper = newToolRecorder(erroringExecutor{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	cheap := &scriptedToolProvider{steps: []scriptStep{
 		toolCallStep("workbenchHost"), toolCallStep("workbenchHost"),

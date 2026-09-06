@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/znasllc-io/memql/component/memql/taskstamp"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -122,7 +121,7 @@ func TestMaxRepeatFailures_Default(t *testing.T) {
 
 // --- loop integration tests ------------------------------------------------
 
-// scriptedExecutor is a taskstamp.Executor whose per-tool outcome is driven by
+// scriptedExecutor is a toolExecutor whose per-tool outcome is driven by
 // a function, so a test can model "fail twice then succeed", "always fail", or
 // per-tool-name behavior. Execute is a benign no-op so the stamper's
 // synthetic-plan materialization stays out of the way.
@@ -148,7 +147,7 @@ func workbenchStep() scriptStep {
 // fails the same way aborts the turn at the ceiling (3), NOT at maxIterations.
 func TestNonStreamingLoop_BreakerAbortsOnIdenticalFailures(t *testing.T) {
 	r := testReplier()
-	r.stamper = taskstamp.New(
+	r.stamper = newToolRecorder(
 		&scriptedExecutor{fn: func(_ int, _ string) (string, error) {
 			return "", errors.New("workbenchHost: tools are agent-only -- no acting agent on context")
 		}},
@@ -177,7 +176,7 @@ func TestNonStreamingLoop_BreakerAbortsOnIdenticalFailures(t *testing.T) {
 // turn finishes normally.
 func TestNonStreamingLoop_FailTwiceThenSucceedCompletes(t *testing.T) {
 	r := testReplier()
-	r.stamper = taskstamp.New(
+	r.stamper = newToolRecorder(
 		&scriptedExecutor{fn: func(call int, _ string) (string, error) {
 			if call < 2 {
 				return "", errors.New("workbenchHost: transient setup error")
@@ -210,7 +209,7 @@ func TestNonStreamingLoop_FailTwiceThenSucceedCompletes(t *testing.T) {
 // turn ends on the existing all-errored guard, not the breaker.
 func TestNonStreamingLoop_DifferentFailingCallsNotAborted(t *testing.T) {
 	r := testReplier()
-	r.stamper = taskstamp.New(
+	r.stamper = newToolRecorder(
 		&scriptedExecutor{fn: func(_ int, _ string) (string, error) {
 			return "", errors.New("validation: bad args")
 		}},
@@ -273,7 +272,7 @@ func (p *fakeStreamProvider) CallChatStreamWithTools(
 // on the interactive streaming lane.
 func TestStreamingLoop_BreakerAbortsOnIdenticalFailures(t *testing.T) {
 	r := testReplier()
-	r.stamper = taskstamp.New(
+	r.stamper = newToolRecorder(
 		&scriptedExecutor{fn: func(_ int, _ string) (string, error) {
 			return "", errors.New("workbenchHost: tools are agent-only -- no acting agent on context")
 		}},
@@ -307,7 +306,7 @@ func produceArtifactStep() scriptStep {
 // cap (~$13). This is the background lane the runaway actually ran on.
 func TestNonStreamingLoop_ProduceArtifactRedelegationAborts(t *testing.T) {
 	r := testReplier()
-	r.stamper = taskstamp.New(
+	r.stamper = newToolRecorder(
 		&scriptedExecutor{fn: func(_ int, _ string) (string, error) { return "{}", nil }},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
@@ -331,7 +330,7 @@ func TestNonStreamingLoop_ProduceArtifactRedelegationAborts(t *testing.T) {
 // Streaming-lane parity for memql#1138.
 func TestStreamingLoop_ProduceArtifactRedelegationAborts(t *testing.T) {
 	r := testReplier()
-	r.stamper = taskstamp.New(
+	r.stamper = newToolRecorder(
 		&scriptedExecutor{fn: func(_ int, _ string) (string, error) { return "{}", nil }},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)

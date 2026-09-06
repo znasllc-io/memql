@@ -2524,7 +2524,7 @@ type CreateAuthoringBundleArgs struct {
 	Title               string
 	Summary             string
 	ResponsibilityId    string
-	SourcePlanId        string
+	SourceRunId         string
 	Version             int
 	SupersedesBundleId  string
 	ReusedConstructRefs []map[string]any
@@ -2560,12 +2560,12 @@ func CreateAuthoringBundleBuild(args CreateAuthoringBundleArgs) string {
 		b.WriteString("responsibilityId: ")
 		b.WriteString(quoteMemQL(args.ResponsibilityId))
 	}
-	if args.SourcePlanId != "" {
+	if args.SourceRunId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
-		b.WriteString("sourcePlanId: ")
-		b.WriteString(quoteMemQL(args.SourcePlanId))
+		b.WriteString("sourceRunId: ")
+		b.WriteString(quoteMemQL(args.SourceRunId))
 	}
 	if args.Version != 0 {
 		if b.Len() > 31 {

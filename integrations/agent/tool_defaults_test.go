@@ -228,6 +228,23 @@ func TestAgentToolDefaultsOmitUnresolvedFields(t *testing.T) {
 // would come back on exactly one path and be invisible on the others.
 var bareDispatch = regexp.MustCompile(`ExecuteToolByName\(\s*ctx\s*,`)
 
+// toolRecorderFile is the ONE file this gate exempts, and the exemption is
+// narrow on purpose (memql#5050).
+//
+// toolrecord.go defines the wrapper the four dispatch sites call THROUGH --
+// `r.stamper.ExecuteToolByName(agentToolCallContext(...), ...)` -- and its
+// method forwards the context it was handed to the engine. So its single
+// `ExecuteToolByName(ctx,` is a pass-through of an ALREADY-wrapped context,
+// not a dispatch site that skipped the wrapping.
+//
+// It only came into this gate's scope because the wrapper moved into this
+// package: it used to live in component/memql/taskstamp, which this scan
+// never read. Renaming the parameter would have silenced the regex and taught
+// nothing, so the exemption is named and paired with
+// TestToolRecorderForwardsTheContextItWasGiven below, which is what actually
+// holds the pass-through honest.
+const toolRecorderFile = "toolrecord.go"
+
 func TestEveryAgentToolDispatchCarriesTheDefaultsContext(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -247,6 +264,11 @@ func TestEveryAgentToolDispatchCarriesTheDefaultsContext(t *testing.T) {
 		if strings.Contains(text, "ExecuteToolByName(agentToolCallContext(") {
 			found += strings.Count(text, "ExecuteToolByName(agentToolCallContext(")
 		}
+		if name == toolRecorderFile {
+			// See toolRecorderFile: a pass-through, held honest by its own
+			// test rather than by this regex.
+			continue
+		}
 		if loc := bareDispatch.FindStringIndex(text); loc != nil {
 			line := 1 + strings.Count(text[:loc[0]], "\n")
 			t.Errorf("%s:%d dispatches a tool with the bare turn context.\n\n"+
@@ -260,5 +282,40 @@ func TestEveryAgentToolDispatchCarriesTheDefaultsContext(t *testing.T) {
 		t.Error("found no agentToolCallContext-wrapped dispatch in this package. Either the " +
 			"dispatch moved, in which case this gate now passes vacuously, or the delivery " +
 			"was removed.")
+	}
+}
+
+// TestToolRecorderForwardsTheContextItWasGiven is the other half of
+// toolRecorderFile's exemption.
+//
+// The exemption is safe only while the recorder passes the caller's context
+// straight through. If it ever built its own -- context.Background(), a
+// stripped one, a fresh WithValue chain -- every @autoInjected field would be
+// dropped for every tool call in the product, and the gate above would be
+// looking at the wrong file to notice.
+//
+// A source assertion for the same reason the gate above is one: the failure is
+// structural, and reproducing it behaviourally means standing up the whole
+// dispatch stack for one line.
+func TestToolRecorderForwardsTheContextItWasGiven(t *testing.T) {
+	src, err := os.ReadFile(filepath.Clean(toolRecorderFile))
+	if err != nil {
+		t.Fatalf("read %s: %v", toolRecorderFile, err)
+	}
+	text := string(src)
+
+	const forward = "r.exec.ExecuteToolByName(ctx, toolName, args)"
+	if !strings.Contains(text, forward) {
+		t.Errorf("%s no longer contains %q.\n\n"+
+			"That call is what makes this file a pass-through, and a pass-through is the whole "+
+			"reason it is exempt from TestEveryAgentToolDispatchCarriesTheDefaultsContext. If the "+
+			"forward changed shape, re-read that exemption before updating this string.",
+			toolRecorderFile, forward)
+	}
+	for _, forbidden := range []string{"context.Background()", "context.TODO()"} {
+		if strings.Contains(text, forbidden) {
+			t.Errorf("%s builds its own context with %s. It must forward the caller's, or every "+
+				"@autoInjected field is stripped from every tool call.", toolRecorderFile, forbidden)
+		}
 	}
 }

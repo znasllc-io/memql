@@ -1556,7 +1556,7 @@ export interface CreateAuthoringBundleArgs {
   title: string;
   summary?: string;
   responsibilityId?: string;
-  sourcePlanId?: string;
+  sourceRunId?: string;
   version?: number;
   supersedesBundleId?: string;
   reusedConstructRefs?: Record<string, unknown>[];
@@ -1568,7 +1568,7 @@ export function buildCreateAuthoringBundle(args: CreateAuthoringBundleArgs): str
   parts.push("title: " + renderMemQLValue(args.title));
   if (args.summary !== undefined) parts.push("summary: " + renderMemQLValue(args.summary));
   if (args.responsibilityId !== undefined) parts.push("responsibilityId: " + renderMemQLValue(args.responsibilityId));
-  if (args.sourcePlanId !== undefined) parts.push("sourcePlanId: " + renderMemQLValue(args.sourcePlanId));
+  if (args.sourceRunId !== undefined) parts.push("sourceRunId: " + renderMemQLValue(args.sourceRunId));
   if (args.version !== undefined) parts.push("version: " + renderMemQLValue(args.version));
   if (args.supersedesBundleId !== undefined) parts.push("supersedesBundleId: " + renderMemQLValue(args.supersedesBundleId));
   if (args.reusedConstructRefs !== undefined) parts.push("reusedConstructRefs: " + renderMemQLValue(args.reusedConstructRefs));

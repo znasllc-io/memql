@@ -12,7 +12,7 @@ shape bundle bundleFull {
   row.id
   ownerUserId
   responsibilityId
-  sourcePlanId
+  sourceRunId
   title
   summary
   status

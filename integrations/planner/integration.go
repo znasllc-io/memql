@@ -426,14 +426,14 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 			p.intakeDispatch.HandleResponsibilityUpdated,
 			events.WithSubscriberName("planner:responsibility-intake-updated"),
 		))
-		// Everyday-task authoring capture (#1161). A user-facing one-off Plan
-		// (produceArtifact / adHocAction) reaching succeeded triggers an async
-		// post-hoc capture: design -> emit/Gate-1 -> persist a versioned
-		// v1:authoring:bundle -> Gate-2 dry-run. Best-effort + default-on; never
-		// affects the already-delivered result.
+		// Authoring capture (#1161, re-pointed in memql#5050). A RUN reaching
+		// succeeded triggers an async post-hoc transcription of the tool calls
+		// it recorded into a versioned v1:authoring:bundle. Best-effort +
+		// default-on; never affects the already-delivered result, and reaches
+		// no model.
 		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
-			"graph.node.updated.v1:planner:plan",
-			p.captureDispatch.HandlePlanUpdated,
+			"graph.node.updated.v1:work:run",
+			p.captureDispatch.HandleRunUpdated,
 			events.WithSubscriberName("planner:authoring-capture-updated"),
 		))
 		p.mu.Unlock()

@@ -9,7 +9,6 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/component/memql/taskstamp"
 	"github.com/znasllc-io/memql/component/router"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/env"
@@ -231,15 +230,15 @@ func (r *Replier) runNonStreamingToolLoop(
 	requestId string,
 	turnCtx turnContext,
 ) (*TurnResult, error) {
-	// Same engine-side auto-stamping of v1:planner:task rows the streaming
-	// loop installs. On a post-approval Plan dispatch turnCtx.PlanId is set,
-	// so tool calls attach to a semantic wrapper under that Plan.
-	ctx = taskstamp.WithPlanContext(ctx, taskstamp.PlanContext{
-		PlanId:      turnCtx.PlanId,
-		AgentId:     turnCtx.AgentId,
-		OwnerUserId: turnCtx.OwnerUserId,
-		PartitionId: turnCtx.PartitionId,
-	})
+	// NOTHING IS INSTALLED HERE ANY MORE (memql#5050). This used to stamp a
+	// taskstamp.PlanContext so every tool call wrote a v1:planner:task row,
+	// minting a synthetic ad-hoc Plan when turnCtx.PlanId was empty -- which
+	// it was for every chat-driven turn.
+	//
+	// Tool calls are recorded against the RUN now, and a run context is
+	// stamped by whoever opened the run (component/automations' executor per
+	// step, integrations/work at dispatch). A turn that no run asked for
+	// carries none, and records nothing rather than inventing a parent.
 
 	// Tag the lane so every model HTTP call this loop makes counts against
 	// the background si_guard rate bucket, not the interactive one

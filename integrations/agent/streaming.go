@@ -13,7 +13,6 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/component/memql/taskstamp"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/env"
 	"github.com/znasllc-io/memql/core/id"
@@ -295,20 +294,10 @@ func (r *Replier) runStreamingToolLoop(
 	requestId string,
 	turnCtx turnContext,
 ) (*TurnResult, error) {
-	// Install the PlanContext that drives engine-side auto-stamping of
-	// v1:planner:task rows on every tool call (Phase 2 of the
-	// planner-redesign work). When turnCtx.PlanId is empty (chat-driven
-	// turn with no user-initiated Plan), the stamper materializes a
-	// synthetic kind='adHocAction' Plan + semantic Task wrapper on the
-	// first tool call. When turnCtx.PlanId is set (post-approval Plan
-	// dispatch), the stamper attaches tool calls to a freshly-created
-	// semantic wrapper under that Plan. See component/memql/taskstamp/.
-	ctx = taskstamp.WithPlanContext(ctx, taskstamp.PlanContext{
-		PlanId:      turnCtx.PlanId,
-		AgentId:     turnCtx.AgentId,
-		OwnerUserId: turnCtx.OwnerUserId,
-		PartitionId: turnCtx.PartitionId,
-	})
+	// NOTHING IS INSTALLED HERE ANY MORE (memql#5050) -- see the same note in
+	// nonstreaming.go. Tool calls are recorded against the run in context,
+	// and a turn with no run records nothing rather than minting an ad-hoc
+	// Plan to parent them to.
 
 	// Charge this turn's LLM calls against the per-conversation + per-plan
 	// cumulative budgets (memql#1144) so a single space or plan-lineage that
