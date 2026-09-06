@@ -30,7 +30,14 @@ import (
 //
 // Postgres-gated: skips when no DB is reachable, reusing sharedReadMergeEngine.
 
-const keysetConcept = "v1:cognition:utterance"
+// keysetConcept is the concept the fixtures write under. Nothing about keyset
+// pagination is specific to it -- any append-only, ungated concept proves the
+// same property -- but two things about the choice ARE load-bearing:
+// v1:planner:plan declares no @rowAuthz tier, so a read is not narrowed by the
+// actor before the cursor is even consulted, and the fixtures write RAW rows
+// straight through bun, so the planner never sees a plan.created event and no
+// agent loop is armed by anything seeded here.
+const keysetConcept = "v1:planner:plan"
 
 // seedKeysetRow inserts ONE append-only row directly at a fixed createdAt so
 // the test controls the exact (createdAt, id) ordering. Bypasses the mutation
@@ -92,7 +99,7 @@ func TestKeysetPagination_WalksFullSetNoOverlapNoGap(t *testing.T) {
 	want := make([]string, 0, total)
 	for i := 0; i < total; i++ {
 		// Descending createdAt order: newest (i=total-1) first.
-		id := fmt.Sprintf("v1:cognition:utterance:%s-%02d", sfx, i)
+		id := fmt.Sprintf(keysetConcept+":%s-%02d", sfx, i)
 		seedKeysetRow(t, ctx, db, id, base.Add(time.Duration(i)*time.Second), owner)
 		want = append([]string{id}, want...) // prepend -> newest-first
 	}
@@ -145,7 +152,7 @@ func TestKeysetPagination_StableUnderConcurrentHeadInsert(t *testing.T) {
 	const total = 20
 	original := make([]string, 0, total) // newest-first
 	for i := 0; i < total; i++ {
-		id := fmt.Sprintf("v1:cognition:utterance:%s-%02d", sfx, i)
+		id := fmt.Sprintf(keysetConcept+":%s-%02d", sfx, i)
 		seedKeysetRow(t, ctx, db, id, base.Add(time.Duration(i)*time.Second), owner)
 		original = append([]string{id}, original...)
 	}
@@ -161,7 +168,7 @@ func TestKeysetPagination_StableUnderConcurrentHeadInsert(t *testing.T) {
 	require.NotEmpty(t, cursor1, "a full first page must mint a nextCursor")
 
 	// CONCURRENT INSERT at the head: a newer row than anything seen so far.
-	newHead := fmt.Sprintf("v1:cognition:utterance:%s-NEWHEAD", sfx)
+	newHead := fmt.Sprintf(keysetConcept+":%s-NEWHEAD", sfx)
 	seedKeysetRow(t, ctx, db, newHead, base.Add(time.Duration(total+5)*time.Second), owner)
 
 	// Continue the walk from cursor1. The remaining ids must be EXACTLY the
@@ -186,7 +193,7 @@ func TestKeysetPagination_PushesSQLPredicate(t *testing.T) {
 	eng, _, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-keyset-sql")
 
-	pos := keysetPosition{createdAt: time.Now().UTC(), id: "v1:cognition:utterance:cursor-anchor"}
+	pos := keysetPosition{createdAt: time.Now().UTC(), id: keysetConcept + ":cursor-anchor"}
 	keyCtx := contextWithKeyset(ctx, pos)
 
 	sorter, err := compileSortFields([]SortField{{Field: "createdAt", Direction: SortDirectionDesc}})
@@ -225,7 +232,7 @@ func TestKeysetPagination_SortMismatchRejected(t *testing.T) {
 
 	base := time.Date(2026, 6, 22, 8, 0, 0, 0, time.UTC)
 	for i := 0; i < 6; i++ {
-		id := fmt.Sprintf("v1:cognition:utterance:%s-%02d", sfx, i)
+		id := fmt.Sprintf(keysetConcept+":%s-%02d", sfx, i)
 		seedKeysetRow(t, ctx, db, id, base.Add(time.Duration(i)*time.Second), owner)
 	}
 
@@ -269,7 +276,7 @@ func TestKeysetPagination_EqualCreatedAtTieBreak(t *testing.T) {
 	low := time.Date(2026, 6, 22, 18, 0, 0, 0, time.UTC)
 
 	mk := func(tag string, n int) string {
-		return fmt.Sprintf("v1:cognition:utterance:%s-%s-%d", sfx, tag, n)
+		return fmt.Sprintf(keysetConcept+":%s-%s-%d", sfx, tag, n)
 	}
 
 	// Seed (insertion order deliberately scrambled to prove ORDER BY, not
@@ -325,8 +332,8 @@ func TestKeysetPagination_FallbackOrderByEndsWithIdAsc(t *testing.T) {
 
 // TestKeysetPagination_LoadBoundedFirstPageWalksFullSet is the
 // realistic-row-count load proof for the epic-5 verification (5.11 / memql#1975):
-// seed 500 append-only rows (the shape of a busy space's message history, a hot
-// per-user token list, or a long spaces list) and confirm the hot-path read does
+// seed 500 append-only rows (the shape of a long plan history, a hot per-user
+// token list, or a full Library listing) and confirm the hot-path read does
 // NOT pull the universe. It asserts:
 //
 //   - the FIRST page is BOUNDED to the page size (50 -- the production `paginate
@@ -336,8 +343,8 @@ func TestKeysetPagination_FallbackOrderByEndsWithIdAsc(t *testing.T) {
 //   - every non-final page is exactly the page size (a full window each time the
 //     cursor advances -- no short reads that would signal a broken predicate).
 //
-// 500 rows at pageSize 50 mirrors spaceUtterances / queryActiveSpaces /
-// workerTokensForUser, all of which carry `sort "createdAt","desc"` +
+// 500 rows at pageSize 50 mirrors libraryArtifacts / todos /
+// workerTokensForUser, all of which carry `sort "row.createdAt","desc"` +
 // `paginate 50` on main. Postgres-gated (skips without a reachable DB) like its
 // siblings in this file.
 func TestKeysetPagination_LoadBoundedFirstPageWalksFullSet(t *testing.T) {
@@ -351,7 +358,7 @@ func TestKeysetPagination_LoadBoundedFirstPageWalksFullSet(t *testing.T) {
 	const pageSize = 50 // the production `paginate 50` default
 	want := make([]string, 0, total)
 	for i := 0; i < total; i++ {
-		id := fmt.Sprintf("v1:cognition:utterance:%s-%04d", sfx, i)
+		id := fmt.Sprintf(keysetConcept+":%s-%04d", sfx, i)
 		seedKeysetRow(t, ctx, db, id, base.Add(time.Duration(i)*time.Second), owner)
 		want = append([]string{id}, want...) // prepend -> newest-first
 	}

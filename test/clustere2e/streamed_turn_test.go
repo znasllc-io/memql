@@ -12,13 +12,21 @@
 // The live token stream is an LLM reply delta (component/memql CallStream),
 // which needs AI provider keys and is non-deterministic. The gate instead
 // drives the SAME substrate streaming path with synthetic, ordered chunks:
-// each chunk is a v1:cognition:utterance row whose id ENCODES its sequence
+// each chunk is a v1:planner:plan row whose id ENCODES its sequence
 // (`...:<runID>-NNNN`), so ordering is observable from the graph event alone
-// via utteranceIDFor (reused from delivery_test.go) -- no LLM, no provider
-// keys, fully deterministic. The streamed chunks traverse the exact
+// via planIDFor (reused from delivery_test.go) -- no LLM, no provider
+// keys, fully deterministic. The synthetic chunks traverse the exact
 // component/node delivery substrate (#1263/#1264) + ordered streaming
 // contract (#1266) that the live token stream rides, so a reorder/drop/dup
-// in that path fails here the same way it would in a live chat turn.
+// in that path fails here the same way it would in a live turn.
+//
+// THE CARRIER ROW CHANGED, THE SEQUENCE TRICK DID NOT (memql#4988). This
+// file always encoded its chunk sequence into an ordinary graph row's ID
+// rather than using a real chunk concept -- when cognition existed the
+// carrier was a v1:cognition:utterance, and its header said so. Cognition is
+// deleted; the carrier is now a v1:planner:plan, minted with kind
+// "adHocAction" so nothing claims it (see probePlanArgs in delivery_test.go).
+// The encoding, the split, and every assertion below are untouched.
 //
 // WHAT IT ASSERTS (the #1266 acceptance: "cluster test covers a streamed turn")
 //  1. EXACTLY-ONCE per chunk on EVERY connection -- no lost, no duplicated
@@ -70,12 +78,12 @@ const streamChunkCount = 16
 // test run); the zero-padded suffix is the sequence. Padding keeps the ids
 // lexically sortable too, but we parse the integer to be exact.
 func chunkID(runID string, seq int) string {
-	return fmt.Sprintf("v1:cognition:utterance:%s-%04d", runID, seq)
+	return fmt.Sprintf("v1:planner:plan:%s-%04d", runID, seq)
 }
 
 // seqFromChunkID recovers the sequence from a chunk id minted by chunkID for
 // THIS run (runID match), or -1 if the id isn't one of our chunks. It tolerates
-// ids carrying the full `v1:cognition:utterance:` prefix or just the
+// ids carrying the full `v1:planner:plan:` prefix or just the
 // `<runID>-NNNN` tail.
 func seqFromChunkID(runID, uid string) int {
 	marker := runID + "-"
@@ -115,18 +123,16 @@ func TestClusterStreamedTurn(t *testing.T) {
 	producerA := conns[0]
 	producerB := conns[len(conns)-1]
 
-	spaceID, participantID := newSpaceWithHuman(ctx, t, producerA, userIDFromToken(t, tok))
-	t.Logf("opened %d connections (%d subscribers + 2 producers, round-robined across bff replicas); space %s",
-		len(conns), connCount-1, spaceID)
+	userID := userIDFromToken(t, tok)
+	scope := newProbeScope()
+	t.Logf("opened %d connections (%d subscribers + 2 producers, round-robined across bff replicas); scope %s",
+		len(conns), connCount-1, scope)
 
-	// Every connection OPENS the space (the SPA's join/create-session
-	// sequence -- the memql#1316 space-interest signal for its replica) and
-	// subscribes before producing, then the subscriptions settle so we don't
-	// race the first chunk.
+	// Every connection subscribes before producing, then the subscriptions
+	// settle so we don't race the first chunk.
 	chans := make([]<-chan string, len(conns))
 	for i, c := range conns {
-		openSpaceOnConn(ctx, t, c, spaceID, userIDFromToken(t, tok))
-		chans[i] = subscribeUtterances(ctx, t, c, spaceID)
+		chans[i] = subscribePlans(ctx, t, c)
 	}
 	time.Sleep(1500 * time.Millisecond)
 
@@ -147,13 +153,8 @@ func TestClusterStreamedTurn(t *testing.T) {
 			who = "B(mid-stream switch)"
 		}
 		cid := chunkID(runID, seq)
-		if _, err := qc.SendTextUtterance(ctx, memqlclient.SendTextUtteranceArgs{
-			UtteranceId:     cid,
-			PartitionId:     spaceID,
-			ParticipantId:   participantID,
-			ParticipantType: "human",
-			Text:            fmt.Sprintf("clustere2e streamed-turn chunk seq=%d", seq),
-		}); err != nil {
+		if _, err := qc.CreatePlan(ctx, probePlanArgs(scope, cid,
+			fmt.Sprintf("clustere2e streamed-turn chunk seq=%d", seq), userID)); err != nil {
 			t.Fatalf("send chunk seq=%d from producer %s: %v", seq, who, err)
 		}
 	}
@@ -250,14 +251,14 @@ func dedupComplete(arr []int) bool {
 // otherwise a human-readable description of the first fault (missing,
 // duplicated, or reordered-within-a-producer).
 //
-// Ordering contract (owner decision on memql#1316): chat-reply GRAPH-EVENT
-// delivery promises exactly-once per subscriber and in-order delivery of each
+// Ordering contract (owner decision on memql#1316): GRAPH-EVENT delivery
+// promises exactly-once per subscriber and in-order delivery of each
 // producer's own events; it does NOT promise a total cross-producer arrival
 // order. A subscriber co-located with producer B receives B's rows instantly
 // off the local bus while A's rows arrive via the durable pull, so the two
-// segments may interleave. Clients are order-insensitive at this layer (the
-// SPA sorts by createdAt at render), and the live token-stream path has its
-// own totally-ordered substrate stream channel (#1266,
+// segments may interleave. Clients are order-insensitive at this layer (they
+// sort by createdAt at render), and the live token-stream path has its own
+// totally-ordered substrate stream channel (#1266,
 // stream_lifecycle_test.go). So: chunks 0..switchAt-1 (producer A) must arrive
 // ascending among themselves, chunks switchAt.. (producer B) ascending among
 // themselves.

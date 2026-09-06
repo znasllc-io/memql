@@ -741,7 +741,7 @@ sets; unknown annotations are rejected at load time:
   prefix one binds to the property ABOVE it (memql#3692). A bare
   `object` field with no sub-fields is already free-form and is
   unaffected by the closure.
-- **Tools**: `@allowedRoles`, `@clientExecution`, `@description`,
+- **Tools**: `@allowedRoles`, `@description`,
   `@destructive`, `@disabled`, `@enabled`, `@executionTime`, `@handler`,
   `@rateLimit(maxCalls=N, periodSeconds=N)`, `@requiresConfirmation`,
   `@scopes` (`component/language/parser/tool_decl.go`).

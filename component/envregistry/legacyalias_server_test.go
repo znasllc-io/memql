@@ -5,7 +5,13 @@ import (
 	"testing"
 )
 
-// The SERVER_* / SERVICE_* bridge (memql#3892) and the voice-agent's five (memql#3834).
+// The SERVER_* / SERVICE_* bridge (memql#3892), plus the two POLYPHON_ aliases
+// that outlived the voice node type.
+//
+// It used to carry the voice-agent's five pre-convention names (memql#3834) as
+// its second half. Epic memql#4988 deleted the voice node type and every
+// variable those five pointed at, so an alias to any of them now leads
+// nowhere; they are gone from LegacyAliases and from here.
 //
 // Moved here from component/genesis with its subject (memql#3963): the
 // registry half of that package -- the manifest, boot validation, domain
@@ -40,13 +46,14 @@ func TestServerServiceLegacyAliasesBridge(t *testing.T) {
 		{"SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL", "MEMQL_SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL", "debug"},
 		{"SERVICE_LOGGER_LEVEL", "MEMQL_SERVICE_LOGGER_LEVEL", "warn"},
 		{"SERVICE_LOG_LEVEL", "MEMQL_SERVICE_LOG_LEVEL", "error"},
-		// The voice-agent's five (memql#3834). Same vintage, found by the same
-		// kind of blind spot: an injected getter rather than a struct field.
-		{"ANAM_DEFAULT_PERSONA_ID", "MEMQL_ANAM_DEFAULT_PERSONA_ID", "persona-1"},
-		{"ANAM_DEFAULT_AVATAR_ID", "MEMQL_ANAM_DEFAULT_AVATAR_ID", "avatar-1"},
-		{"ANAM_DEFAULT_PERSONA_NAME", "MEMQL_ANAM_DEFAULT_PERSONA_NAME", "Assistant"},
-		{"POLYPHON_VOICE_LANGUAGE", "MEMQL_POLYPHON_VOICE_LANGUAGE", "en"},
-		{"VOICE_AGENT_LOG_LEVEL", "MEMQL_VOICE_AGENT_LOG_LEVEL", "DEBUG"},
+		// The two POLYPHON_ aliases epic memql#4988 kept. They are Epic 7.3
+		// entries (memql#2106) rather than memql#3834's vintage, and they
+		// survived because their targets did: both configure the OpenAI
+		// Realtime ASR session behind AiTranscribeStream*, which the agent
+		// node serves. Asserted here because an operator who set the bare
+		// spelling years ago still has it set.
+		{"POLYPHON_OPENAI_ASR_MODEL", "MEMQL_POLYPHON_OPENAI_ASR_MODEL", "gpt-4o-transcribe"},
+		{"POLYPHON_OPENAI_VAD_SILENCE_MS", "MEMQL_POLYPHON_OPENAI_VAD_SILENCE_MS", "600"},
 	}
 
 	for _, tc := range cases {

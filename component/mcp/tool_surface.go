@@ -177,7 +177,7 @@ func listMCPTools(eng Engine, role string, tier Tier) []map[string]any {
 				}
 			}
 			for _, t := range all {
-				if t == nil || t.ClientExecution {
+				if t == nil {
 					continue
 				}
 				if curated && !t.MCPExposed {

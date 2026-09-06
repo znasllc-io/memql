@@ -86,18 +86,6 @@ secrets:
     kind: oauth_secret
     description: "Azure Graph API client secret used by the email integration. (Legacy name `AZURE_CLIENT_SECRET` is still accepted as a fallback by integrations/email; remove the old row from the running MemQL once everyone has re-seeded.)"
 
-  - name: MEMQL_ANAM_API_KEY
-    component: avatar
-    scope: global
-    kind: integration
-    description: "Anam avatar API key (server-side). Used by the voice-agent and the direct/Guide avatar path to mint/resolve Anam personas."
-
-  - name: MEMQL_SIMLI_API_KEY
-    component: avatar
-    scope: global
-    kind: integration
-    description: "Simli avatar API key (server-side). Used by the voice-agent and the direct/Guide avatar path to mint/resolve Simli faces."
-
   # --- cluster ---
 
   - name: MEMQL_NODE_BOOTSTRAP_TOKEN
@@ -153,24 +141,6 @@ secrets:
     kind: vendor_api_key
     optional: true
     description: "Instance-wide OpenAI API key for chat, TTS, STT, and Realtime providers."
-
-  # --- voice ---
-
-  - name: MEMQL_POLYPHON_LIVEKIT_API_KEY
-    component: voice
-    scope: global
-    kind: integration
-    required: ["voice"]
-    optional: true
-    description: "LiveKit API key the Polyphon voice transport uses to mint room join tokens."
-
-  - name: MEMQL_POLYPHON_LIVEKIT_API_SECRET
-    component: voice
-    scope: global
-    kind: integration
-    required: ["voice"]
-    optional: true
-    description: "LiveKit API secret the Polyphon voice transport uses to sign room join tokens."
 
   # --- shopify ---
 
@@ -233,13 +203,6 @@ secrets:
     optional: true
     description: "DEPRECATED legacy alias for MEMQL_AI_OPENAI_API_KEY; resolved via the boot-time alias shim. Remove after operators migrate."
 
-  - name: ANAM_API_KEY
-    component: avatar
-    scope: global
-    kind: integration
-    optional: true
-    description: "DEPRECATED legacy alias for MEMQL_ANAM_API_KEY; resolved via the boot-time alias shim. Remove after operators migrate."
-
   - name: ANTHROPIC_API_KEY
     component: ai
     scope: global
@@ -295,27 +258,6 @@ secrets:
     kind: vendor_api_key
     optional: true
     description: "DEPRECATED legacy alias for MEMQL_OPENAI_API_KEY; resolved via the boot-time alias shim. Remove after operators migrate."
-
-  - name: POLYPHON_LIVEKIT_API_KEY
-    component: voice
-    scope: global
-    kind: integration
-    optional: true
-    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_LIVEKIT_API_KEY; resolved via the boot-time alias shim. Remove after operators migrate."
-
-  - name: POLYPHON_LIVEKIT_API_SECRET
-    component: voice
-    scope: global
-    kind: integration
-    optional: true
-    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_LIVEKIT_API_SECRET; resolved via the boot-time alias shim. Remove after operators migrate."
-
-  - name: SIMLI_API_KEY
-    component: avatar
-    scope: global
-    kind: integration
-    optional: true
-    description: "DEPRECATED legacy alias for MEMQL_SIMLI_API_KEY; resolved via the boot-time alias shim. Remove after operators migrate."
 
   # --- release cutting (epic memql#4434) ---
 
@@ -1563,122 +1505,33 @@ variables:
     optional: true
     description: "Filesystem directory of app-profile markdown files that overrides the embedded profiles baked into the binary when set."
 
-  # --- voice ---
+  # --- streaming transcription (epic memql#4988) ---
+  #
+  # All that survives the voice / polyphon retirement. The POLYPHON_ spelling
+  # is kept deliberately -- renaming a live variable silently drops whatever an
+  # operator already set -- but nothing here configures a voice transport any
+  # more. These three configure the OpenAI Realtime ASR session behind the
+  # AiTranscribeStream* messages, which the AGENT node serves.
 
   - name: MEMQL_OPENAI_REALTIME_MODEL
-    component: voice
+    component: ai
     scope: node
     optional: true
-    description: "OpenAI realtime model id for the voice path; falls back to MEMQL_POLYPHON_OPENAI_ASR_MODEL when empty."
-
-  # The voice-agent's own configuration (memql#3834). Every entry below was
-  # LIVE and UNREGISTERED for its whole life, and for one reason: the agent
-  # reads through an injected getter -- a local closure over a caller-supplied
-  # `Getenv`, so tests can drive config resolution without touching the process
-  # environment. The keys were plain string literals at every call site; what
-  # the drift gate could not see was that the closure reads the environment at
-  # all. envscan learned that shape in memql#3834 step 3, and these are what it
-  # found.
-
-  - name: MEMQL_VOICE_AGENT_LOG_LEVEL
-    component: voice
-    scope: node
-    default: "INFO"
-    optional: true
-    description: "Log level for the voice-agent process (DEBUG / INFO / WARN / ERROR; upper-cased on read). Legacy alias: VOICE_AGENT_LOG_LEVEL (memql#3834)."
-
-  - name: MEMQL_POLYPHON_VOICE_LANGUAGE
-    component: voice
-    scope: node
-    default: "en"
-    optional: true
-    description: "Language the voice-agent pins its speech pipeline to. Legacy alias: POLYPHON_VOICE_LANGUAGE (memql#3834)."
-
-  - name: MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL
-    component: voice
-    scope: node
-    optional: true
-    description: "Publicly reachable LiveKit URL advertised to clients for the Polyphon voice path."
-
-  - name: MEMQL_POLYPHON_LIVEKIT_URL
-    component: voice
-    scope: node
-    required: ["voice"]
-    optional: true
-    description: "LiveKit server URL the Polyphon voice transport connects to."
-
-  # --- avatar ---
-
-  # The voice-agent's avatar selection + Anam defaults (memql#3834), invisible
-  # until the injected-getter pass; see the voice block above.
-
-  - name: MEMQL_ANAM_DEFAULT_PERSONA_ID
-    component: avatar
-    scope: node
-    optional: true
-    description: "Anam persona id used when an agent carries none of its own. Empty falls through to the ephemeral avatar path. Legacy alias: ANAM_DEFAULT_PERSONA_ID (memql#3834)."
-
-  - name: MEMQL_ANAM_DEFAULT_AVATAR_ID
-    component: avatar
-    scope: node
-    optional: true
-    description: "Anam avatar id for the ephemeral path, used when no persona id is available. Legacy alias: ANAM_DEFAULT_AVATAR_ID (memql#3834)."
-
-  - name: MEMQL_ANAM_DEFAULT_PERSONA_NAME
-    component: avatar
-    scope: node
-    default: "Assistant"
-    optional: true
-    description: "Display name given to an ephemeral Anam persona. Vendor-cosmetic. Legacy alias: ANAM_DEFAULT_PERSONA_NAME (memql#3834)."
-
-  - name: MEMQL_DEV_DEFAULT_AVATAR_PERSONA
-    component: avatar
-    scope: node
-    optional: true
-    description: "DEV-ONLY convenience: set to a catalog persona NAME (e.g. \"Ava\") and the seed materializer stamps avatarVendor + avatarPersonaId onto each user's Assistant when it is first materialized, so a freshly-provisioned assistant renders an avatar with no manual step. The persona id is resolved from the v1:agents:avatarPersona catalog at materialization time rather than hardcoded, because minted ids differ per vendor account. Touches only the `assistant` seed and never overrides an avatar the seed body already carries. Unset is the production default and changes nothing."
-
-  # --- polyphon ---
+    description: "OpenAI Realtime model id for the streaming-transcription session (AiTranscribeStream*); falls back to MEMQL_POLYPHON_OPENAI_ASR_MODEL when empty."
 
   - name: MEMQL_POLYPHON_OPENAI_ASR_MODEL
-    component: polyphon
+    component: ai
     scope: node
     default: "gpt-4o-transcribe"
     optional: true
-    description: "OpenAI ASR model for the Polyphon /memql/audio path."
-
-  - name: MEMQL_POLYPHON_OPENAI_TTS_MODEL
-    component: polyphon
-    scope: node
-    default: "gpt-4o-mini-tts"
-    optional: true
-    description: "OpenAI TTS model for the Polyphon /memql/audio path."
-
-  - name: MEMQL_POLYPHON_OPENAI_TTS_VOICE
-    component: polyphon
-    scope: node
-    default: "alloy"
-    optional: true
-    description: "OpenAI TTS voice for the Polyphon /memql/audio path."
+    description: "OpenAI ASR model for the streaming-transcription session (AiTranscribeStream*). Legacy alias: POLYPHON_OPENAI_ASR_MODEL."
 
   - name: MEMQL_POLYPHON_OPENAI_VAD_SILENCE_MS
-    component: polyphon
+    component: ai
     scope: node
     default: "600"
     optional: true
-    description: "Trailing-silence window in milliseconds the OpenAI server VAD requires before declaring end-of-utterance."
-
-  - name: MEMQL_POLYPHON_PREDICTION_ENGINE_URL
-    component: polyphon
-    scope: node
-    optional: true
-    description: "URL of an external Polyphon prediction engine; absent uses the embedded engine."
-
-  - name: MEMQL_POLYPHON_VOICE_PROVIDER
-    component: polyphon
-    scope: node
-    default: "openai"
-    optional: true
-    description: "Voice provider for the Polyphon /memql/audio WebSocket path."
+    description: "Trailing-silence window in milliseconds the OpenAI server VAD requires before declaring end-of-utterance in the streaming-transcription session. Legacy alias: POLYPHON_OPENAI_VAD_SILENCE_MS."
 
   # --- agent turn + tool-loop guards ---
   #
@@ -3524,53 +3377,17 @@ variables:
     optional: true
     description: "DEPRECATED legacy alias for MEMQL_OPERATOR_APP_PROFILES_DIR; resolved via the boot-time alias shim. Remove after operators migrate."
 
-  - name: POLYPHON_LIVEKIT_PUBLIC_URL
-    component: voice
-    scope: node
-    optional: true
-    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL; resolved via the boot-time alias shim. Remove after operators migrate."
-
-  - name: POLYPHON_LIVEKIT_URL
-    component: voice
-    scope: node
-    optional: true
-    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_LIVEKIT_URL; resolved via the boot-time alias shim. Remove after operators migrate."
-
   - name: POLYPHON_OPENAI_ASR_MODEL
-    component: polyphon
+    component: ai
     scope: node
     optional: true
     description: "DEPRECATED legacy alias for MEMQL_POLYPHON_OPENAI_ASR_MODEL; resolved via the boot-time alias shim. Remove after operators migrate."
 
-  - name: POLYPHON_OPENAI_TTS_MODEL
-    component: polyphon
-    scope: node
-    optional: true
-    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_OPENAI_TTS_MODEL; resolved via the boot-time alias shim. Remove after operators migrate."
-
-  - name: POLYPHON_OPENAI_TTS_VOICE
-    component: polyphon
-    scope: node
-    optional: true
-    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_OPENAI_TTS_VOICE; resolved via the boot-time alias shim. Remove after operators migrate."
-
   - name: POLYPHON_OPENAI_VAD_SILENCE_MS
-    component: polyphon
+    component: ai
     scope: node
     optional: true
     description: "DEPRECATED legacy alias for MEMQL_POLYPHON_OPENAI_VAD_SILENCE_MS; resolved via the boot-time alias shim. Remove after operators migrate."
-
-  - name: POLYPHON_PREDICTION_ENGINE_URL
-    component: polyphon
-    scope: node
-    optional: true
-    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_PREDICTION_ENGINE_URL; resolved via the boot-time alias shim. Remove after operators migrate."
-
-  - name: POLYPHON_VOICE_PROVIDER
-    component: polyphon
-    scope: node
-    optional: true
-    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_VOICE_PROVIDER; resolved via the boot-time alias shim. Remove after operators migrate."
 
   # --- release cutting (epic memql#4434) ---
 

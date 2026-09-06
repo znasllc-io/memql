@@ -109,16 +109,26 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 				}
 				decl.RateLimitPeriod = n
 			}
-		case "clientExecution":
-			decl.ClientExecution = true
 		case "allowedRoles":
 			decl.AllowedRoles = attrStringListValue(attr)
 		case "scopes":
 			decl.Scopes = attrStringListValue(attr)
 		case "mcp":
 			decl.MCPExposed = true
+
+		// --- Retired (recognised only to emit a migration hint) ---
+		//
+		// @clientExecution put a tool's body in the connected browser and
+		// reached it over the client-tool relay, both of which went with the
+		// conversational product (epic memql#4988). Falling through to the
+		// unknown-annotation arm below would tell an author who wrote this
+		// last month that they had made a typo. They had not: the annotation
+		// was real, and it is gone.
+		case "clientExecution":
+			return nil, newParseErrorf(&p.current, "tool %q: @clientExecution is retired -- it dispatched the tool to the connected browser over the client-tool relay, which was removed with the cognition node (epic memql#4988). Every tool now needs a server-side @handler", decl.Name)
+
 		default:
-			return nil, newParseErrorf(&p.current, "tool %q: unknown annotation @%s -- supported: @allowedRoles, @clientExecution, @description, @destructive, @disabled, @enabled, @executionTime, @handler, @mcp, @rateLimit, @requiresConfirmation, @scopes", decl.Name, attr.Name)
+			return nil, newParseErrorf(&p.current, "tool %q: unknown annotation @%s -- supported: @allowedRoles, @description, @destructive, @disabled, @enabled, @executionTime, @handler, @mcp, @rateLimit, @requiresConfirmation, @scopes", decl.Name, attr.Name)
 		}
 	}
 

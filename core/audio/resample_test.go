@@ -7,7 +7,7 @@ import (
 )
 
 func TestNewPCM16Resampler(t *testing.T) {
-	r, err := NewPCM16Resampler(PolyphonSampleRate, OpenAISampleRate)
+	r, err := NewPCM16Resampler(WireSampleRate, OpenAISampleRate)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -17,7 +17,7 @@ func TestNewPCM16Resampler(t *testing.T) {
 }
 
 func TestPCM16Resampler_EmptyInput(t *testing.T) {
-	r, err := NewPCM16Resampler(PolyphonSampleRate, OpenAISampleRate)
+	r, err := NewPCM16Resampler(WireSampleRate, OpenAISampleRate)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestPCM16Resampler_EmptyInput(t *testing.T) {
 }
 
 func TestPCM16Resampler_Upsample16kTo24k(t *testing.T) {
-	r, err := NewPCM16Resampler(PolyphonSampleRate, OpenAISampleRate)
+	r, err := NewPCM16Resampler(WireSampleRate, OpenAISampleRate)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestPCM16Resampler_Upsample16kTo24k(t *testing.T) {
 
 	// At 1.5x ratio (16k->24k), expect approximately 2400 samples = 4800 bytes.
 	// gomplerate may produce slightly different counts due to filter state.
-	expectedSamples := int(float64(numSamples) * float64(OpenAISampleRate) / float64(PolyphonSampleRate))
+	expectedSamples := int(float64(numSamples) * float64(OpenAISampleRate) / float64(WireSampleRate))
 	expectedBytes := expectedSamples * 2
 	tolerance := 100 // Allow some variance from filter.
 
@@ -66,7 +66,7 @@ func TestPCM16Resampler_Upsample16kTo24k(t *testing.T) {
 }
 
 func TestPCM16Resampler_Downsample24kTo16k(t *testing.T) {
-	r, err := NewPCM16Resampler(OpenAISampleRate, PolyphonSampleRate)
+	r, err := NewPCM16Resampler(OpenAISampleRate, WireSampleRate)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestPCM16Resampler_Downsample24kTo16k(t *testing.T) {
 	}
 
 	// At 2/3 ratio (24k->16k), expect approximately 1600 samples = 3200 bytes.
-	expectedSamples := int(float64(numSamples) * float64(PolyphonSampleRate) / float64(OpenAISampleRate))
+	expectedSamples := int(float64(numSamples) * float64(WireSampleRate) / float64(OpenAISampleRate))
 	expectedBytes := expectedSamples * 2
 	tolerance := 100
 
@@ -99,11 +99,11 @@ func TestPCM16Resampler_Downsample24kTo16k(t *testing.T) {
 func TestPCM16Resampler_RoundTrip(t *testing.T) {
 	// Upsample 16k -> 24k, then downsample 24k -> 16k.
 	// Result should be similar in length to original.
-	up, err := NewPCM16Resampler(PolyphonSampleRate, OpenAISampleRate)
+	up, err := NewPCM16Resampler(WireSampleRate, OpenAISampleRate)
 	if err != nil {
 		t.Fatalf("unexpected error creating upsampler: %v", err)
 	}
-	down, err := NewPCM16Resampler(OpenAISampleRate, PolyphonSampleRate)
+	down, err := NewPCM16Resampler(OpenAISampleRate, WireSampleRate)
 	if err != nil {
 		t.Fatalf("unexpected error creating downsampler: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestPCM16Resampler_RoundTrip(t *testing.T) {
 	numSamples := 1600
 	input := make([]byte, numSamples*2)
 	for i := 0; i < numSamples; i++ {
-		sample := int16(8000 * math.Sin(2*math.Pi*440*float64(i)/float64(PolyphonSampleRate)))
+		sample := int16(8000 * math.Sin(2*math.Pi*440*float64(i)/float64(WireSampleRate)))
 		binary.LittleEndian.PutUint16(input[i*2:], uint16(sample))
 	}
 

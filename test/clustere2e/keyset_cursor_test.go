@@ -12,13 +12,20 @@
 // ------------------------
 // nginx round-robins each new gRPC connection across the bff replicas, so two
 // separate connections (connA, connB) typically land on different replicas.
-// We seed an ordered set of utterances in a fresh space, take PAGE 1 (+ its
+// We seed an ordered set of rows in a fresh scope, take PAGE 1 (+ its
 // nextCursor) on connA, then replay that cursor on connB and assert PAGE 2:
 //   - does not overlap page 1 (no dup),
 //   - continues the descending-createdAt order from exactly where page 1 left
 //     off (no gap),
 //   - is reproducible regardless of which replica served the mint vs. the
 //     resolve.
+//
+// The rows are v1:planner:plan rather than the v1:cognition:utterance this
+// suite used to seed (memql#4988 deleted cognition). The cursor primitive is
+// concept-agnostic -- it keys on (createdAt, id) and a sort signature -- so
+// the swap costs the proof nothing; what it needs from a concept is only that
+// createdAt be strictly increasing across the seeded set, which the spacing
+// below still guarantees.
 //
 // RUN
 //
@@ -38,24 +45,12 @@ import (
 	memqlclient "github.com/znasllc-io/memql/sdk/go/client"
 )
 
-// keysetSpaceQuery pages a space's utterances newest-first. The space id is
-// already canonical (newSpaceWithHuman mints it so), so the comparison on
-// payload.partitionId matches the stored value. The cursor rides the
+// keysetScopeQuery pages a scope's plans newest-first. The cursor rides the
 // request via ExecutePaginated, not the query string.
-func keysetSpaceQuery(spaceID string, pageSize int) string {
+func keysetScopeQuery(scope string, pageSize int) string {
 	return fmt.Sprintf(
-		`sort(paginate(concept==v1:cognition:utterance;payload.partitionId==%q, %d), "createdAt", "desc")`,
-		spaceID, pageSize)
-}
-
-func utteranceRowIDs(rows []memqlclient.Row) []string {
-	ids := make([]string, 0, len(rows))
-	for _, r := range rows {
-		if pid := rowID(r); pid != "" {
-			ids = append(ids, pid)
-		}
-	}
-	return ids
+		`sort(paginate(concept==v1:planner:plan;payload.partitionId==%q, %d), "createdAt", "desc")`,
+		scope, pageSize)
 }
 
 // TestKeysetCursorCrossNode proves a cursor minted on one replica resolves on
@@ -79,26 +74,21 @@ func TestKeysetCursorCrossNode(t *testing.T) {
 	qcA := memqlclient.NewQueryClient(connA.Dispatcher())
 	qcB := memqlclient.NewQueryClient(connB.Dispatcher())
 
-	// Fresh space + human, seeded on connA.
-	spaceID, participantID := newSpaceWithHuman(ctx, t, connA, userID)
+	// Fresh scope, seeded on connA.
+	scope := newProbeScope()
 
-	// Seed an ordered set of utterances. Each send is its own row; the engine
+	// Seed an ordered set of rows. Each create is its own row; the engine
 	// stamps createdAt at insert, monotonically increasing, so the newest-first
 	// page order is deterministic by send order.
 	const total = 12
 	sent := make([]string, 0, total) // in send order (oldest first)
 	for i := 0; i < total; i++ {
-		uid := "v1:cognition:utterance:" + id.NewShortId()
-		if _, err := qcA.SendTextUtterance(ctx, memqlclient.SendTextUtteranceArgs{
-			UtteranceId:     uid,
-			PartitionId:     spaceID,
-			ParticipantId:   participantID,
-			ParticipantType: "human",
-			Text:            fmt.Sprintf("keyset cross-node probe %02d", i),
-		}); err != nil {
-			t.Fatalf("send utterance %d: %v", i, err)
+		pid := "v1:planner:plan:" + id.NewShortId()
+		if _, err := qcA.CreatePlan(ctx, probePlanArgs(scope, pid,
+			fmt.Sprintf("keyset cross-node probe %02d", i), userID)); err != nil {
+			t.Fatalf("seed plan %d: %v", i, err)
 		}
-		sent = append(sent, uid)
+		sent = append(sent, pid)
 		// Small spacing so createdAt is strictly increasing even at coarse
 		// timestamp resolution; keeps the (createdAt, id) order unambiguous.
 		time.Sleep(15 * time.Millisecond)
@@ -107,11 +97,11 @@ func TestKeysetCursorCrossNode(t *testing.T) {
 	const pageSize = 5
 
 	// PAGE 1 on connA (replica X mints the cursor).
-	page1, err := qcA.ExecutePaginated(ctx, keysetSpaceQuery(spaceID, pageSize), "")
+	page1, err := qcA.ExecutePaginated(ctx, keysetScopeQuery(scope, pageSize), "")
 	if err != nil {
 		t.Fatalf("page 1 (connA): %v", err)
 	}
-	page1IDs := utteranceRowIDs(page1.Rows)
+	page1IDs := rowIDs(page1.Rows)
 	if len(page1IDs) != pageSize {
 		t.Fatalf("page 1 returned %d rows, want %d", len(page1IDs), pageSize)
 	}
@@ -120,11 +110,11 @@ func TestKeysetCursorCrossNode(t *testing.T) {
 	}
 
 	// PAGE 2 on connB (replica Y resolves the cursor minted on X).
-	page2, err := qcB.ExecutePaginated(ctx, keysetSpaceQuery(spaceID, pageSize), page1.NextCursor)
+	page2, err := qcB.ExecutePaginated(ctx, keysetScopeQuery(scope, pageSize), page1.NextCursor)
 	if err != nil {
 		t.Fatalf("page 2 (connB, cursor from connA): %v", err)
 	}
-	page2IDs := utteranceRowIDs(page2.Rows)
+	page2IDs := rowIDs(page2.Rows)
 	if len(page2IDs) != pageSize {
 		t.Fatalf("page 2 returned %d rows, want %d", len(page2IDs), pageSize)
 	}

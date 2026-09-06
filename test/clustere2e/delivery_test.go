@@ -11,29 +11,50 @@
 // stream -- exactly once, no dup, no drop.
 //
 // It is a SYNTHETIC-EVENT test (memql#1261, owner decision): it injects
-// a v1:cognition:utterance row via sendTextUtterance and counts
-// cross-replica delivery, rather than driving a real LLM reply. That
-// exercises the same component/node EventBridge.forwardToPeers path as
-// the live chat reply, deterministically and without AI provider keys.
+// a v1:planner:plan row via createPlan and counts cross-replica delivery,
+// rather than driving a real agent turn. That exercises the same
+// component/node EventBridge.forwardToPeers path as any live graph write,
+// deterministically and without AI provider keys.
+//
+// THE ROW IS A VEHICLE, AND IT CHANGED (memql#4988). Every probe in this
+// suite used to write a v1:cognition:utterance into a space and watch it
+// cross replicas. Cognition, spaces and the chat-reply delivery half of
+// component/node are deleted, so the suite writes v1:planner:plan rows
+// instead. The invariant is unchanged and so is the substrate underneath it:
+// component/node/plan_delivery.go rides the same DeliverySubstrate the
+// deleted ChatReplyDelivery rode, and graph.node.created.v1:planner:* is a
+// broadcast forward rule in component/node/routing.go -- so a plan row
+// produced on one replica must reach a subscriber anchored on every other
+// replica exactly as an utterance had to.
+//
+// WHAT WENT AWAY WITH THE ROW, AND WHY NOTHING REPLACED IT. The old probes
+// opened each connection's space first (a join-as-human write) because the
+// chat-reply substrate subscribed a replica to a space's durable stream
+// lazily, on a per-space INTEREST signal (memql#1316). Plan delivery has no
+// per-key interest signal to send: PlanDelivery publishes to one fixed
+// logical key (plan:lifecycle), and the graph event itself is broadcast to
+// every node type by the routing rule. So that setup step is GONE rather than
+// ported, and the assertion below is unchanged -- a reader arriving from the
+// old file should not go looking for where the open-the-space step went.
 //
 // HOW IT REPRODUCED THE BUG (historical) AND HOW IT IS NOW GREEN
 // --------------------------------------------------------------
 // nginx round-robins each new gRPC connection across the bff replicas,
 // so a handful of subscriber connections spread across both. The producer
-// inserts one utterance on whichever replica its connection landed on;
+// inserts one row on whichever replica its connection landed on;
 // that replica fans the event out to its LOCAL subscribers and forwards
 // to peers. But bff replicas never dial each other (bff is the mesh root;
 // MEMQL_WORKER_PEERS lists only worker node types), so from the producer
 // replica every sibling bff is a peer with Connection==nil. Historically
 // the memql#1245 change SKIPPED those Connection==nil peers and DROPPED the
 // forward, so only the subscribers co-located with the producer observed
-// the utterance. The durable backbone in Phase 1 (memql#1263/#1264) makes
+// the write. The durable backbone in Phase 1 (memql#1263/#1264) makes
 // every replica converge regardless of the mesh fast-path, and Phase 4
 // (memql#1271) reverted the #1245 skip so the fast-path now BUFFERS (never
 // drops) to those Connection==nil sibling replicas -> this is green.
 //
 // The gate needs NO replica identification: it simply asserts that EVERY
-// subscriber observes the one utterance exactly once. On current main the
+// subscriber observes the one row exactly once. On current main the
 // cross-replica subscribers miss it, so the count is short.
 //
 // RUN
@@ -141,54 +162,50 @@ func userIDFromToken(t *testing.T, tok string) string {
 	return claims.Sub
 }
 
-// newSpaceWithHuman mints a fresh space id, joins the token's user to it as a
-// human participant, and returns the space id + the SERVER-assigned human
-// participant id (content-addressed on (space, user); we read it back rather
-// than guess it). The user can then send utterances and see the space's
-// graph events.
+// newProbeScope mints a fresh v1:planner:plan.partitionId for one test run.
 //
-// No space ROW is written, and that is deliberate (memql#4212). The `space`
-// concept and its mutations (createSpace, formerly mutationCreateSpace) are
-// product-pack DSL delivered at runtime through MEMQL_DSL_PATH: the engine
-// tree declares no `concept space`, and the parity cluster this suite runs
-// against (deploy/k8s/overlays/local -- the engine-bff component, no bundle)
-// loads no pack. Every engine-owned construct the suite drives --
-// joinSpaceAsHuman, sendTextUtterance, spaceUtterances, spaceParticipants,
-// emitTextChunk, updateParticipantPresence -- keys on partitionId with no
-// @relationship to a space row (see the comment above joinSpaceAsHuman in
-// dsl/cognition/mutations.memql), so a minted canonical id is all they need.
-// Naming the pack mutation here is what took ten tests down at once, and it is
-// what test/dslconformance/clustere2e_named_calls_test.go now refuses.
-func newSpaceWithHuman(ctx context.Context, t *testing.T, conn *memqlclient.Connection, userID string) (spaceID, participantID string) {
+// partitionId is a free-form product scope tag -- "the engine derives nothing
+// from it" (dsl/planner/concepts.memql) -- so a per-run value is all the
+// isolation these probes need: plansForSpace filters on it exactly, which is
+// what keeps one run's rows out of another run's page counts on a cluster
+// that accumulates them.
+func newProbeScope() string {
+	return "clustere2e-" + id.NewShortId()
+}
+
+// probePlanArgs builds the createPlan arguments every probe in this suite
+// writes with.
+//
+// kind is "adHocAction" DELIBERATELY, and it is the load-bearing field. A
+// v1:planner:plan row has three graph.node.created subscribers on a planner
+// node (integrations/planner/integration.go): the Planner Agent loop, the
+// trainSpecialist dispatcher and the embedDomainItems dispatcher. The latter
+// two gate on their own kind and ignore everything else; the first returns
+// early for adHocAction (integrations/planner/agent_loop.go), as does the
+// stranded-plan watchdog. So a probe row is decomposed by nobody, dispatched
+// by nobody, and costs no LLM call -- the same posture automation_run_test.go
+// records for naming an automation that does not exist. Any other kind would
+// make every one of these probes fire the real planner agent, which is a gate
+// nobody dares run.
+func probePlanArgs(scope, planID, goal, userID string) memqlclient.CreatePlanArgs {
+	return memqlclient.CreatePlanArgs{
+		PlanId:      planID,
+		PartitionId: scope,
+		Kind:        "adHocAction",
+		Goal:        goal,
+		RequestedBy: userID,
+		Input:       map[string]any{"probe": "clustere2e"},
+	}
+}
+
+// createProbePlan writes one probe plan on conn's replica, failing the test if
+// the write is refused.
+func createProbePlan(ctx context.Context, t *testing.T, conn *memqlclient.Connection, scope, planID, goal, userID string) {
 	t.Helper()
 	qc := memqlclient.NewQueryClient(conn.Dispatcher())
-	spaceID = "v1:cognition:space:" + id.NewShortId()
-	if _, err := qc.JoinSpaceAsHuman(ctx, memqlclient.JoinSpaceAsHumanArgs{
-		PartitionId: spaceID,
-		UserId:      userID,
-		DisplayName: "clustere2e probe",
-		Status:      "active",
-	}); err != nil {
-		t.Fatalf("join space as human: %v", err)
+	if _, err := qc.CreatePlan(ctx, probePlanArgs(scope, planID, goal, userID)); err != nil {
+		t.Fatalf("create probe plan %s in scope %s: %v", planID, scope, err)
 	}
-	// Read back the server-assigned participant id.
-	res, err := qc.SpaceParticipants(ctx, memqlclient.SpaceParticipantsArgs{
-		PartitionId:     spaceID,
-		ParticipantType: "human",
-	})
-	if err != nil {
-		t.Fatalf("query space participants: %v", err)
-	}
-	for _, row := range res.Rows() {
-		if pid := rowID(row); strings.HasPrefix(pid, "participant-") || strings.Contains(pid, ":participant:") || pid != "" {
-			participantID = pid
-			break
-		}
-	}
-	if participantID == "" {
-		t.Fatalf("no human participant found in space %s after join (rows=%d)", spaceID, len(res.Rows()))
-	}
-	return spaceID, participantID
 }
 
 // rowID pulls the row id out of a query row, tolerating a flat `id` or a
@@ -205,40 +222,24 @@ func rowID(row memqlclient.Row) string {
 	return ""
 }
 
-// openSpaceOnConn performs the client-side "open this space" sequence on one
-// connection, mirroring what the product SPA does on space open
-// (its join-as-human hook): an idempotent join-as-human write. The insert is
-// content-addressed on (space, user) -- a repeat join versions the SAME
-// participant row -- and executes on the engine of WHICHEVER bff replica owns
-// this connection, landing there as a LOCAL graph event: the space-interest
-// signal that subscribes that replica to the space's durable stream
-// (memql#1316). A subscriber that skips this models a client that never opened
-// the space, which is not a supported delivery contract (a graph SubscribeMsg
-// carries a concept + actions, not a space id).
-//
-// The SPA's every-open write is actually createSessionForParticipant
-// (callable from the Go SDK since memql#1319/#1321 were fixed); the join write
-// exercises the same participant-interest trigger.
-func openSpaceOnConn(ctx context.Context, t *testing.T, conn *memqlclient.Connection, spaceID, userID string) {
-	t.Helper()
-	qc := memqlclient.NewQueryClient(conn.Dispatcher())
-	if _, err := qc.JoinSpaceAsHuman(ctx, memqlclient.JoinSpaceAsHumanArgs{
-		PartitionId: spaceID,
-		UserId:      userID,
-		DisplayName: "clustere2e probe",
-		Status:      "active",
-	}); err != nil {
-		t.Fatalf("open space (join as human) on connection: %v", err)
+// rowIDs projects a result page down to its row ids, in page order.
+func rowIDs(rows []memqlclient.Row) []string {
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if pid := rowID(r); pid != "" {
+			ids = append(ids, pid)
+		}
 	}
+	return ids
 }
 
-// subscribeUtterances opens a graph-events subscription on conn and returns
-// a channel of created-utterance ids observed by THAT connection's replica.
-func subscribeUtterances(ctx context.Context, t *testing.T, conn *memqlclient.Connection, spaceID string) <-chan string {
+// subscribePlans opens a graph-events subscription on conn and returns a
+// channel of created-plan ids observed by THAT connection's replica.
+func subscribePlans(ctx context.Context, t *testing.T, conn *memqlclient.Connection) <-chan string {
 	t.Helper()
 	sm := memqlclient.NewSubscriptionManager(conn.Dispatcher())
 	// graph.node.created.# -- every node-created event; we filter to the
-	// utterance concept + our utterance id below. (A tighter server-side
+	// plan concept + our plan id below. (A tighter server-side
 	// filter risks masking a drop behind a filter mismatch, so we subscribe
 	// broad and assert narrow.) Structured graph subscribe (#2460): empty
 	// concept = all concepts, actions = created only.
@@ -251,31 +252,31 @@ func subscribeUtterances(ctx context.Context, t *testing.T, conn *memqlclient.Co
 	out := make(chan string, 64)
 	go func() {
 		for ev := range events {
-			if uid := utteranceIDFor(ev); uid != "" {
-				out <- uid
+			if pid := planIDFor(ev); pid != "" {
+				out <- pid
 			}
 		}
 	}()
 	return out
 }
 
-// utteranceIDFor returns the utterance id if the event is the creation of a
-// v1:cognition:utterance row, else "". Tolerates flat or node-nested payloads.
-func utteranceIDFor(ev memqlclient.Event) string {
+// planIDFor returns the plan id if the event is the creation of a
+// v1:planner:plan row, else "". Tolerates flat or node-nested payloads.
+func planIDFor(ev memqlclient.Event) string {
 	concept, _ := ev.Payload["concept"].(string)
 	node, _ := ev.Payload["node"].(map[string]any)
 	if concept == "" && node != nil {
 		concept, _ = node["concept"].(string)
 	}
-	if concept != "v1:cognition:utterance" {
+	if concept != "v1:planner:plan" {
 		return ""
 	}
-	if uid, _ := ev.Payload["id"].(string); uid != "" {
-		return uid
+	if pid, _ := ev.Payload["id"].(string); pid != "" {
+		return pid
 	}
 	if node != nil {
-		uid, _ := node["id"].(string)
-		return uid
+		pid, _ := node["id"].(string)
+		return pid
 	}
 	return ""
 }
@@ -284,7 +285,7 @@ func utteranceIDFor(ev memqlclient.Event) string {
 
 // TestClusterCrossReplicaDelivery is the permanent Phase-0 gate. It must be
 // RED on current main (subscribers on a non-producing bff replica miss the
-// utterance) and GREEN once the durable backbone lands (Phase 1).
+// row) and GREEN once the durable backbone lands (Phase 1).
 func TestClusterCrossReplicaDelivery(t *testing.T) {
 	tok := token(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -298,33 +299,22 @@ func TestClusterCrossReplicaDelivery(t *testing.T) {
 	}()
 	producer := conns[0]
 
-	spaceID, participantID := newSpaceWithHuman(ctx, t, producer, userIDFromToken(t, tok))
-	t.Logf("opened %d connections (round-robined across bff replicas); space %s", len(conns), spaceID)
+	userID := userIDFromToken(t, tok)
+	scope := newProbeScope()
+	t.Logf("opened %d connections (round-robined across bff replicas); scope %s", len(conns), scope)
 
-	// Every connection OPENS the space (the SPA's join/create-session sequence)
-	// and subscribes before producing, then the subscriptions settle so we
-	// don't race the insert. The open is what signals the connection's replica
-	// to pull the space's durable stream (memql#1316).
+	// Every connection subscribes before producing, then the subscriptions
+	// settle so we don't race the insert.
 	chans := make([]<-chan string, len(conns))
 	for i, c := range conns {
-		openSpaceOnConn(ctx, t, c, spaceID, userIDFromToken(t, tok))
-		chans[i] = subscribeUtterances(ctx, t, c, spaceID)
+		chans[i] = subscribePlans(ctx, t, c)
 	}
 	time.Sleep(1500 * time.Millisecond)
 
-	// Produce exactly one utterance from conns[0].
-	utteranceID := "v1:cognition:utterance:" + id.NewShortId()
-	qc := memqlclient.NewQueryClient(producer.Dispatcher())
-	if _, err := qc.SendTextUtterance(ctx, memqlclient.SendTextUtteranceArgs{
-		UtteranceId:     utteranceID,
-		PartitionId:     spaceID,
-		ParticipantId:   participantID,
-		ParticipantType: "human",
-		Text:            "clustere2e cross-replica delivery probe",
-	}); err != nil {
-		t.Fatalf("send utterance: %v", err)
-	}
-	t.Logf("produced utterance %s", utteranceID)
+	// Produce exactly one plan from conns[0].
+	planID := "v1:planner:plan:" + id.NewShortId()
+	createProbePlan(ctx, t, producer, scope, planID, "clustere2e cross-replica delivery probe", userID)
+	t.Logf("produced plan %s", planID)
 
 	// Collect for a generous window; every connection must observe it once.
 	seen := make([]int, len(conns))
@@ -337,11 +327,11 @@ func TestClusterCrossReplicaDelivery(t *testing.T) {
 			drained := false
 			for i, ch := range chans {
 				select {
-				case uid := <-ch:
+				case pid := <-ch:
 					// #2441: the wire now delivers BARE ids; compare on the
 					// bare form (idempotent -- also matches a pre-cutover
 					// canonical id).
-					if bareID(uid) == bareID(utteranceID) {
+					if bareID(pid) == bareID(planID) {
 						seen[i]++
 						drained = true
 					}
@@ -354,11 +344,11 @@ func TestClusterCrossReplicaDelivery(t *testing.T) {
 		}
 	}
 
-	// Sanity: the producer's OWN replica must observe its own utterance --
+	// Sanity: the producer's OWN replica must observe its own write --
 	// otherwise this is a subscription/authz fault, not the delivery bug.
 	if seen[0] == 0 {
-		t.Fatalf("producer connection did not observe its own utterance %s -- "+
-			"subscription/authz setup problem, not the cross-replica delivery bug", utteranceID)
+		t.Fatalf("producer connection did not observe its own plan %s -- "+
+			"subscription/authz setup problem, not the cross-replica delivery bug", planID)
 	}
 
 	var missed, duped []int
@@ -372,15 +362,15 @@ func TestClusterCrossReplicaDelivery(t *testing.T) {
 		}
 	}
 	sawCount := len(conns) - len(missed)
-	t.Logf("subscribers that observed the utterance exactly once: %d/%d", sawCount, len(conns))
+	t.Logf("subscribers that observed the plan exactly once: %d/%d", sawCount, len(conns))
 
 	if len(missed) > 0 || len(duped) > 0 {
-		t.Fatalf("cross-replica delivery FAILED: only %d/%d subscribers observed utterance %s "+
+		t.Fatalf("cross-replica delivery FAILED: only %d/%d subscribers observed plan %s "+
 			"(missed connections %v, duplicated on %v; per-conn counts %v).\n"+
 			"On a 2-replica cluster a subscriber anchored on a different bff replica than the "+
 			"producer never sees the event -- the memql#1259 delivery drop. Expected exactly-once "+
 			"on ALL %d connections.",
-			sawCount, len(conns), utteranceID, missed, duped, seen, len(conns))
+			sawCount, len(conns), planID, missed, duped, seen, len(conns))
 	}
 	t.Logf("exactly-once delivery confirmed on all %d connections", len(conns))
 }

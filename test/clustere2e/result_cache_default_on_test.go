@@ -15,15 +15,21 @@ package clustere2e
 //
 // notes carries NO @cache annotation, so it is cached purely by the 5.6
 // default. Its concept (v1:notes:note) is NOT denylisted, has NO per-concept
-// routing rule in component/node/routing.go (v1:cognition:* is forwarded
-// wholesale, which is why a space-keyed read could not prove this), and the
+// routing rule in component/node/routing.go (v1:planner:* IS forwarded
+// wholesale -- for the planner's own dispatch, not for the cache -- which is
+// why the scope-keyed read its sibling drives could not prove this), and the
 // query is owner-scoped (ownerUserId == actor.userId), so this also exercises
 // the actor-folded cache key (a stale read here would be BOTH a default-on
 // regression AND a cross-user-collision regression).
 //
 // The read used to be the product pack's queryActiveSpaces, which the engine
 // tree does not declare and the parity cluster does not load (memql#4212);
-// notes is the engine-owned owner-scoped read with the same shape.
+// notes is the engine-owned owner-scoped read with the same shape. Nothing in
+// THIS file changed when cognition was deleted (memql#4988) -- notes and
+// v1:notes:note both survive -- but the sibling it contrasts with,
+// result_cache_invalidation_test.go, moved from v1:cognition:utterance to
+// v1:planner:plan, so the parenthetical above names the concept that is
+// actually forwarded wholesale today.
 //
 // The deterministic, always-in-CI proof of the same wired path -- two
 // engines, two buses, the real EventBridge forward + inbound republish

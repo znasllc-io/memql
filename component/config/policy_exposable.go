@@ -21,7 +21,7 @@ import (
 // PolicyConfigField describes one exposed configuration entry.
 type PolicyConfigField struct {
 	// Key — the name under ctx.config (e.g. "openaiApiKey",
-	// "voiceProvider"). Camel-case; matches the policy authoring
+	// "sttProvider"). Camel-case; matches the policy authoring
 	// convention.
 	Key string
 	// FieldName — the matching field on busv1.ConfigSnapshot
@@ -61,16 +61,10 @@ var PolicyExposableConfig = []PolicyConfigField{
 		Description: "STT provider name (openai-realtime / openai-whisper).",
 	},
 	{
-		Key:         "voiceProvider",
-		FieldName:   "PolyphonVoiceProvider",
-		Sensitive:   false,
-		Description: "Voice provider for the /memql/audio path (openai / auto).",
-	},
-	{
 		Key:         "authEnabled",
 		FieldName:   "AuthEnabled",
 		Sensitive:   false,
-		Description: "True when MEMQL_IDENTITY_VERIFIER_BASE_URL is set; gates whether bff/voice/etc. enforce JWT verification.",
+		Description: "True when MEMQL_IDENTITY_VERIFIER_BASE_URL is set; gates whether bff/agent/etc. enforce JWT verification.",
 	},
 	{
 		Key:         "demoMode",
@@ -198,8 +192,6 @@ func readConfigField(snapshot *busv1.ConfigSnapshot, name string) any {
 		return snapshot.SiDefaultProvider
 	case "SttProvider":
 		return snapshot.SttProvider
-	case "PolyphonVoiceProvider":
-		return snapshot.PolyphonVoiceProvider
 	case "AuthEnabled":
 		return snapshot.AuthEnabled
 	case "DemoMode":

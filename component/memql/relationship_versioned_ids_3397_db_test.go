@@ -52,11 +52,17 @@ import (
 //
 // Postgres-gated: skips when no DB is reachable, reusing sharedReadMergeEngine.
 
+// The parent/child pair the fixtures traverse. v1:planner:task declares
+// `@relationship(type="parent", field="planId", target=plan)`, which is the
+// edge parentOf walks, and neither concept declares an @rowAuthz tier -- so a
+// parent that does not come back was DROPPED by the scan rather than withheld
+// from the actor, which is the only reading that makes the assertions below
+// mean what they say. task also declares a second parent edge on parentTaskId;
+// the fixtures leave that field unset and resolveParentOf skips a missing
+// pointer, so the traversal under test is the planId one.
 const (
-	participantConcept = "v1:cognition:participant"
-	// presence is @namespace("cognition:participant"), so its concept id
-	// nests under the participant namespace rather than under cognition.
-	presenceConcept = "v1:cognition:participant:presence"
+	relParentConcept = "v1:planner:plan"
+	relChildConcept  = "v1:planner:task"
 )
 
 // seedRawRow inserts ONE append-only row at a fixed createdAt, bypassing the
@@ -93,15 +99,14 @@ func seedRawRow(
 // TestRelationshipParentOf_ClusteredVersionsReachesEveryParent is the headline
 // memql#3397 regression, end to end through Execute.
 //
-// 10 presence rows, each naming a DISTINCT participant as its parent, each
-// participant carrying 10 clustered versions. `parentOf(...)` must return all
-// 10 parents.
+// 10 task rows, each naming a DISTINCT plan as its parent, each plan carrying
+// 10 clustered versions. `parentOf(...)` must return all 10 parents.
 //
 // Against the raw-scan engine it returned 2: resolveParentOf collected the 10
 // parent ids and asked fetchNodesByIds for them, the scan took `10 * 2 = 20`
 // RAW rows ordered `createdAt DESC` over `id IN (<the 10>)` -- the 20 newest
-// versions, all belonging to the two most-recently-written participants -- and
-// the other 8 were logged as missing references and dropped.
+// versions, all belonging to the two most-recently-written plans -- and the
+// other 8 were logged as missing references and dropped.
 func TestRelationshipParentOf_ClusteredVersionsReachesEveryParent(t *testing.T) {
 	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-rel-3397-parent")
@@ -117,26 +122,26 @@ func TestRelationshipParentOf_ClusteredVersionsReachesEveryParent(t *testing.T) 
 	wantParents := make([]string, 0, parents)
 	tick := 0
 	for i := 0; i < parents; i++ {
-		participantId := fmt.Sprintf("%s:%s-%02d", participantConcept, sfx, i)
-		wantParents = append(wantParents, participantId)
+		planId := fmt.Sprintf("%s:%s-%02d", relParentConcept, sfx, i)
+		wantParents = append(wantParents, planId)
 		for v := 0; v < versions; v++ {
-			// Clustered: every version of participant i occupies a
-			// contiguous createdAt run.
-			seedRawRow(t, ctx, db, participantConcept, participantId,
+			// Clustered: every version of plan i occupies a contiguous
+			// createdAt run.
+			seedRawRow(t, ctx, db, relParentConcept, planId,
 				base.Add(time.Duration(tick)*time.Second), owner,
-				map[string]any{"displayName": fmt.Sprintf("p-%02d-v%d", i, v)})
+				map[string]any{"goal": fmt.Sprintf("p-%02d-v%d", i, v)})
 			tick++
 		}
-		// One presence row per participant, single version, pointing at it.
-		seedRawRow(t, ctx, db, presenceConcept,
-			fmt.Sprintf("%s:%s-%02d", presenceConcept, sfx, i),
+		// One task row per plan, single version, pointing at it.
+		seedRawRow(t, ctx, db, relChildConcept,
+			fmt.Sprintf("%s:%s-%02d", relChildConcept, sfx, i),
 			base.Add(time.Duration(tick)*time.Second), owner,
-			map[string]any{"participantId": participantId})
+			map[string]any{"planId": planId})
 		tick++
 	}
 
 	res, err := eng.Execute(ctx, fmt.Sprintf(
-		`parentOf(concept==%s;createdBy==%q)`, presenceConcept, owner))
+		`parentOf(concept==%s;createdBy==%q)`, relChildConcept, owner))
 	require.NoError(t, err)
 
 	require.ElementsMatch(t, wantParents, pageIDs(t, res),
@@ -168,12 +173,12 @@ func TestExecuteFilterQuery_ClusteredVersionsFillsTheTarget(t *testing.T) {
 	ids := make([]string, 0, distinct)
 	tick := 0
 	for i := 0; i < distinct; i++ {
-		id := fmt.Sprintf("%s:%s-%02d", participantConcept, sfx, i)
+		id := fmt.Sprintf("%s:%s-%02d", relParentConcept, sfx, i)
 		ids = append(ids, id)
 		for v := 0; v < versions; v++ {
-			seedRawRow(t, ctx, db, participantConcept, id,
+			seedRawRow(t, ctx, db, relParentConcept, id,
 				base.Add(time.Duration(tick)*time.Second), owner,
-				map[string]any{"displayName": fmt.Sprintf("s-%02d-v%d", i, v)})
+				map[string]any{"goal": fmt.Sprintf("s-%02d-v%d", i, v)})
 			tick++
 		}
 	}
@@ -214,12 +219,12 @@ func TestExecuteFilterQuery_LatestVersionWinsUnderAsOf(t *testing.T) {
 	ids := make([]string, 0, distinct)
 	tick := 0
 	for i := 0; i < distinct; i++ {
-		id := fmt.Sprintf("%s:%s-%02d", participantConcept, sfx, i)
+		id := fmt.Sprintf("%s:%s-%02d", relParentConcept, sfx, i)
 		ids = append(ids, id)
 		for v := 0; v < versions; v++ {
-			seedRawRow(t, ctx, db, participantConcept, id,
+			seedRawRow(t, ctx, db, relParentConcept, id,
 				base.Add(time.Duration(tick)*time.Second), owner,
-				map[string]any{"displayName": fmt.Sprintf("%s-v%d", id, v)})
+				map[string]any{"goal": fmt.Sprintf("%s-v%d", id, v)})
 			tick++
 		}
 	}
@@ -233,7 +238,7 @@ func TestExecuteFilterQuery_LatestVersionWinsUnderAsOf(t *testing.T) {
 	for _, n := range nodes {
 		var payload map[string]any
 		require.NoError(t, json.Unmarshal(n.Payload, &payload))
-		require.Equal(t, fmt.Sprintf("%s-v%d", n.ID, versions-1), payload["displayName"],
+		require.Equal(t, fmt.Sprintf("%s-v%d", n.ID, versions-1), payload["goal"],
 			"without asOf, %s must resolve to its latest version", n.ID)
 	}
 
@@ -247,6 +252,6 @@ func TestExecuteFilterQuery_LatestVersionWinsUnderAsOf(t *testing.T) {
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal(nodes[0].Payload, &payload))
 	require.Equal(t, ids[0], nodes[0].ID)
-	require.Equal(t, fmt.Sprintf("%s-v2", ids[0]), payload["displayName"],
+	require.Equal(t, fmt.Sprintf("%s-v2", ids[0]), payload["goal"],
 		"under asOf, the collapse must pick the latest version AS OF that instant")
 }

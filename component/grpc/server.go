@@ -936,47 +936,6 @@ type streamSession struct {
 	credentialClass   string
 	credentialCeiling string
 
-	// uiAskUserRejectCount counts consecutive uiAskUser calls rejected
-	// by validateClientToolArgs for missing-options on this session.
-	// After the budget is spent we stop rejecting and soft-fallback
-	// by injecting default options so the walkthrough never stalls
-	// in a reject/retry loop. Reset to zero whenever a uiAskUser call
-	// passes validation.
-	uiAskUserMu          sync.Mutex
-	uiAskUserRejectCount int
-
-	// voiceTurns tracks one active VoiceAgentTurnRequest per
-	// (space, gaAgentId). When a second turn request arrives for
-	// the same key, the previous one is cancelled so its goroutine
-	// completes promptly instead of parking until the 30s wait
-	// timeout. Without this, the BFF accumulates orphan turn-reply
-	// subscribers that all match against the same
-	// `v1:cognition:utterance` events, racing each other and
-	// causing the "agent utterance landed in chat but no audio
-	// played" symptom (the loser's TurnDelta hits an LLMStream that
-	// LK Agents has already advanced past).
-	voiceTurnsMu       sync.Mutex
-	voiceTurns         map[string]context.CancelFunc
-	voiceTurnSentinels map[string]*struct{}
-
-	// voiceAgentSpeakSubMu protects the session-long speak subscriber
-	// state. A voice-agent stream binds to one (space, ga_agent_id)
-	// via VoiceAgentSessionStart; the subscriber forwards AI reply
-	// utterances as VoiceAgentSpeak messages so chat-typed user
-	// messages produce audible replies via AgentSession.say(). See
-	// startVoiceAgentSpeakSubscriber for the dedup against in-flight
-	// TurnRequests.
-	voiceAgentSpeakSubMu sync.Mutex
-	voiceAgentSpeakStop  func()
-	voiceAgentScopeId    string
-	voiceAgentGaAgentId  string
-	// voiceAgentGaRole is the scoped GA agent's role (e.g. "assistant"),
-	// resolved at SessionStart. handleCallTool gates tool execution on it for
-	// voice-agent sessions so GA-only (@allowedRoles) tools the model is allowed
-	// to SEE (#1467) are also allowed to RUN, instead of being rejected against
-	// the voice-agent caller's empty role.
-	voiceAgentGaRole string
-
 	// authoredSession is the owner-scoped authored-construct registry for this
 	// stream (issue #2128 / C1). It is the session-scoped, non-durable layer the
 	// AuthoringSessionDefineBundle op registers into: constructs defined here are
@@ -1039,7 +998,6 @@ func newStreamSession(svc *service, stream memqlv1.MemqlService_StreamServer, id
 		identity:   identity,
 		eventChan:  make(chan events.Event, 256),
 		closeChan:  make(chan struct{}),
-		voiceTurns: make(map[string]context.CancelFunc),
 	}
 
 	// Start event forwarding goroutine
@@ -2328,7 +2286,6 @@ func (s *streamSession) handleListTools(envelope *memqlv1.MemqlClientMessage, ms
 				Name:            tool.Name,
 				Description:     tool.Description,
 				InputSchema:     string(tool.InputSchema),
-				ClientExecution: tool.ClientExecution,
 				Scopes:          append([]string(nil), tool.Scopes...),
 			})
 		}
@@ -2382,17 +2339,10 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 
 	// Role gate: tools with AllowedRoles reject callers outside the allowed set.
 	callerRole := callerRoleFromMetadata(envelope)
-	// Voice-agent sessions present no caller role (empty -> "specialist"); gate
-	// EXECUTION on the scoped GA agent's role (assistant), the same role the
-	// ListTools scope gate uses (#1467). Without this, a GA-only tool the model
-	// was allowed to SEE (produceArtifact, the operator/uiClick Takeover surface)
-	// is rejected when it actually CALLS it -- the "not allowed for caller role"
-	// failure Sofia surfaces after acknowledging the action.
-	//
-	// On the agent node (the proxied receiver), the GA role arrives THREADED on
-	// the CallToolMsg (the bff stamped it -- handleCallTool runs on the agent
-	// node, whose local voiceAgentGaRole is empty). Prefer the threaded value;
-	// fall back to the local session role for in-process / non-proxied callers.
+	// The role arrives THREADED on the CallToolMsg: a bff stamps it before
+	// forwarding, because handleCallTool runs on the agent node, which has no
+	// local session for the originating caller. An empty role is "no declared
+	// role", which IsAllowedForRole reads as "specialist".
 	if !tool.IsAllowedForRole(callerRole) {
 		return s.sendCallToolResult(envelope.GetMessageId(), requestId, nil, true, fmt.Sprintf("tool %q is not allowed for caller role %q", toolName, callerRole))
 	}
@@ -2403,18 +2353,7 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 	// stamp the originating caller's provenance instead of a fresh
 	// per-tool default.
 	ctx = contextWithEnvelopeProvenance(ctx, envelope)
-	// Auto-inject the voice-path tool defaults (#1503). On the realtime
-	// voice CallTool proxy hop the agent-node session has no local voice
 	args := msg.GetArguments()
-
-	// Client-executed tools reached the browser over the client-tool relay,
-	// which went with the conversational product (epic memql#4988). The engine
-	// refuses the flag for the same reason; refusing here as well keeps the
-	// message the caller sees the same on both paths.
-	if tool.ClientExecution {
-		return s.sendCallToolResult(envelope.GetMessageId(), requestId, nil, true,
-			"tool declares client execution, which is no longer a supported handler")
-	}
 
 	// Attach the caller role so any nested engine.ExecuteTool call is gated
 	// against the same role this one was.
@@ -2429,26 +2368,8 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 	return s.sendCallToolResult(envelope.GetMessageId(), requestId, result, false, "")
 }
 
-// uiAskUserRejectBudget is the number of times we reject a
-// missing-options uiAskUser call before giving up and injecting
-// default options so the walkthrough keeps moving. Each rejection
-// costs one tool-loop iteration on the agent side (the model sees
-// the instructional error and retries); after the budget we decide
-// the agent is genuinely stuck on this question and would rather
-// see *some* card than none.
-const uiAskUserRejectBudget = 3
-
-// uiAskUserSoftFallbackOptions are the options we inject when the
-// retry budget is spent. Deliberately generic so they work for any
-// question: "Pick one for me" delegates back to the agent (it can
-// reasonably interpret that as "make up a value and proceed"), and
-// "Skip this question" lets the user bail out without abandoning
-// the whole takeover. allowFreeForm=true means the user can still
-// type a specific answer.
-var uiAskUserSoftFallbackOptions = []string{"Pick one for me", "Skip this question"}
-
 // callerRoleFromMetadata pulls the caller's agent role (if any) from
-// envelope metadata. Cognition attaches this when forwarding a
+// envelope metadata. An agent node attaches this when forwarding a
 // CallToolMsg on behalf of an agent. Empty string means "no declared
 // role" -- Tool.IsAllowedForRole treats that as "specialist".
 func callerRoleFromMetadata(envelope *memqlv1.MemqlClientMessage) string {

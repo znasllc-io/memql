@@ -62,9 +62,10 @@ type transcribeStream struct {
 }
 
 // handleAiTranscribeStreamStart opens a streaming transcription
-// session on the local STT provider (or proxies to a Voice worker when
-// running on a BFF) and keeps the session state in service.transcribeStreams.
-// Subsequent Chunk / End envelopes find the session by request_id.
+// session on the local STT provider (or proxies to the transcription node
+// when running on a BFF) and keeps the session state in
+// service.transcribeStreams. Subsequent Chunk / End envelopes find the
+// session by request_id.
 func (s *streamSession) handleAiTranscribeStreamStart(
 	envelope *memqlv1.MemqlClientMessage,
 	msg *memqlv1.AiTranscribeStreamStart,
@@ -76,7 +77,7 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
 
-	// BFF short-circuit: open a forwarded stream to a Voice worker.
+	// BFF short-circuit: open a forwarded stream to the transcription node.
 	// The Chunk/End envelopes will land on BFF later and flow through
 	// ForwardContinuation on the same inflight entry.
 	if s.shouldProxyAI(nodeTargetForTranscribe()) {

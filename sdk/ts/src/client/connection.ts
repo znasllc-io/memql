@@ -19,9 +19,6 @@ import { WS_OPEN } from "./wsReadyState.js";
 export interface ConnectionAuth {
   // Bearer JWT issued by the identity service.
   bearer?: string;
-  // Guest invitation token (used for the unauthenticated /join/<token>
-  // flow). Mutually exclusive with bearer.
-  guestToken?: string;
   // Worker token (mql_wkr_<...>) for worker-paired flows.
   workerToken?: string;
   // Called when a fresh bearer is needed. The hook should return a
@@ -31,7 +28,7 @@ export interface ConnectionAuth {
   // current bearer is no longer valid. Supplying this hook is all a
   // consumer needs for in-place WS re-auth -- the SDK owns the expiry
   // timer + rotateAuth round-trip (#1110); consumers no longer reimplement
-  // it. Guest/worker tokens don't carry an exp and are never auto-rotated.
+  // it. Worker tokens don't carry an exp and are never auto-rotated.
   onTokenExpired?: () => Promise<string | null>;
   // Lower bound on the auto-rotation timer, in milliseconds. Defaults to
   // DEFAULT_ROTATE_FLOOR_MS (30s). The floor is what stops a pathological
@@ -40,10 +37,10 @@ export interface ConnectionAuth {
   // Lower it only in a harness driving deliberately short-lived tokens;
   // lowering it in a browser re-opens the storm this floor exists to close.
   rotateFloorMs?: number;
-  // Legacy transport opt-in (#2524). When true, `bearer` / `guestToken` are
-  // stamped onto the dial URL as the deprecated `?bearer_token=` /
-  // `?guest_token=` query params instead of riding the WebSocket subprotocol
-  // channel. The credential then leaks into ingress/proxy access logs, so this
+  // Legacy transport opt-in (#2524). When true, `bearer` is stamped onto the
+  // dial URL as the deprecated `?bearer_token=` query param instead of riding
+  // the WebSocket subprotocol channel. The credential then leaks into
+  // ingress/proxy access logs, so this
   // is ONLY for talking to an older front door that doesn't negotiate the
   // subprotocol scheme; default (unset/false) is subprotocol carry. In-place
   // auto-rotation is unaffected -- it is driven by the auth source, not the
@@ -829,14 +826,13 @@ function resolveWsUrl(endpoint: string): URL {
 // resolveEndpoint resolves the dial URL. By default bearer and guest
 // credentials travel as WebSocket subprotocols (#2511, see wsauth.ts), NOT on
 // the query string -- the URL stays free of live tokens. The `legacyUrlToken`
-// opt-in (#2524) restores the deprecated `?bearer_token=` / `?guest_token=`
-// carry for older front doors that don't negotiate the subprotocol scheme.
+// opt-in (#2524) restores the deprecated `?bearer_token=` carry for older
+// front doors that don't negotiate the subprotocol scheme.
 // Worker tokens remain on the query string until the worker surface migrates.
 function resolveEndpoint(endpoint: string, auth: ConnectionAuth | undefined): string {
   const url = resolveWsUrl(endpoint);
   if (auth?.legacyUrlToken) {
     if (auth.bearer) url.searchParams.set("bearer_token", auth.bearer);
-    else if (auth.guestToken) url.searchParams.set("guest_token", auth.guestToken);
   }
   if (auth?.workerToken) url.searchParams.set("worker_token", auth.workerToken);
   return url.toString();

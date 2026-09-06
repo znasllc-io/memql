@@ -845,12 +845,13 @@ message ToolDefinition {
   string description = 2;
   // JSON Schema describing the tool's input parameters (as JSON string)
   string input_schema = 3;
-  // When true, the tool is executed by the connected client (not the
-  // backend). Client-executed tools were removed with the browser relay
-  // they rode on (epic memql#4988); the flag is reserved on the wire
-  // locally. Used by the product's Operator primitive (ui.*, space.*,
-  // agent.updateSelf) where the tool affects the browser UI.
-  bool client_execution = 4;
+  // Field 4 was client_execution. Client-executed tools ran in the
+  // connected browser and reached it over the client-tool relay, which
+  // went with the conversational product (epic memql#4988). Every tool
+  // now carries a server-side handler, so there is nothing for a client
+  // to execute and no flag to advertise.
+  reserved 4;
+  reserved "client_execution";
   // Optional scopes the tool requires (e.g. "read", "navigate",
   // "highlight", "create", "update", "delete", "identity", "billing").
   // The caller's granted scope set must be a superset before dispatch.

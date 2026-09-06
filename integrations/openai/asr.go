@@ -88,7 +88,7 @@ func (c *ASRClient) StartStream(ctx context.Context, config audio.ASRConfig) (au
 	conn.SetReadLimit(512 * 1024) // 512KB
 
 	// Create upsampler: Polyphon 16kHz -> OpenAI 24kHz.
-	upsampler, err := audio.NewPCM16Resampler(audio.PolyphonSampleRate, audio.OpenAISampleRate)
+	upsampler, err := audio.NewPCM16Resampler(audio.WireSampleRate, audio.OpenAISampleRate)
 	if err != nil {
 		conn.Close(websocket.StatusInternalError, "resampler init failed")
 		return nil, fmt.Errorf("openai asr: create upsampler: %w", err)
@@ -209,8 +209,8 @@ func (s *openaiASRStream) Close() error {
 //
 // Model selection: audio.input.transcription.model carries the transcription
 // model (whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe). Override via
-// MEMQL_OPENAI_REALTIME_MODEL on the voice node or MEMQL_POLYPHON_OPENAI_ASR_MODEL
-// on the bridge agent.
+// MEMQL_OPENAI_REALTIME_MODEL, falling back to MEMQL_POLYPHON_OPENAI_ASR_MODEL
+// -- see app/integrations_stt.go, which resolves the pair in that order.
 func (s *openaiASRStream) sendSessionConfig(ctx context.Context, config audio.ASRConfig) error {
 	lang := config.Language
 	if lang == "" {

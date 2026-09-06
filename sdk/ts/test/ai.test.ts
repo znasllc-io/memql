@@ -1,5 +1,5 @@
-// Mock-dispatcher tests for the SI surface (aiChat / aiSpeech /
-// aiTranscribe / aiSuggest + aiChatStream). The mock fakes
+// Mock-dispatcher tests for the SI surface (aiChat / aiChatStream /
+// aiSuggest). The mock fakes
 // Dispatcher's send / sendAndWait / registerStream paths so we can
 // drive replies into the SDK without spinning up a real WebSocket.
 //

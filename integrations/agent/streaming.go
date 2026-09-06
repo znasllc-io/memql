@@ -556,8 +556,6 @@ StreamLoop:
 		}
 
 		hadSuccess := false
-		wheelContested := false
-		clientToolUnreachable := false
 		for _, tc := range turnCalls {
 			args := parseToolArgs(tc.Arguments)
 			// Ensure args is a non-nil map BEFORE agent-context
@@ -622,16 +620,6 @@ StreamLoop:
 					"error", execErr)
 				content = se.JSON()
 				sink.ToolResult(tc.ID, "", execErr.Error())
-				if strings.Contains(execErr.Error(), wheelContestedMarker) {
-					wheelContested = true
-				}
-				// Interactive client-tool timeout (memql#1834): the browser is
-				// gone / unreachable. Like WHEEL_CONTESTED this is terminal --
-				// further UI tool calls will also strand -- so flag it for the
-				// fast break below instead of looping to the all-errored cap.
-				if strings.Contains(execErr.Error(), clientToolUnreachableMarker) {
-					clientToolUnreachable = true
-				}
 				// Repeated-identical-failure breaker (memql#1128): abort the
 				// whole turn rather than loop to maxIterations when the model
 				// is stuck re-issuing the same failing call.
@@ -689,14 +677,6 @@ StreamLoop:
 						"result", preview,
 					)
 				}
-				// Client-executed tools (uiClick, uiRequestControl, etc.)
-				// return their error payload as the tool's *content*
-				// rather than an execErr. We still need to detect the
-				// contested-wheel marker in that case so the loop can
-				// short-circuit instead of letting the model retry.
-				if strings.Contains(result, wheelContestedMarker) {
-					wheelContested = true
-				}
 			}
 			messages = append(messages, common.ChatMessage{
 				Role:       "tool",
@@ -704,50 +684,6 @@ StreamLoop:
 				ToolCallId: tc.ID,
 				Content:    content,
 			})
-		}
-
-		// WHEEL_CONTESTED is a terminal signal from the browser bridge:
-		// another space's agent already owns the frontend's UI-control
-		// widget and any further UI tool calls we make will be dropped.
-		// Break the loop immediately rather than let the model retry
-		// uiRequestControl in a hopeful spin -- the browser has already
-		// stopped obeying us, so every subsequent round just wastes
-		// tokens and keeps the user staring at "Thinking…" until the
-		// cognition TTL sweeper eventually times out every tool call.
-		//
-		// We emit a short user-facing text reply explaining the
-		// situation so the agent's stream isn't silent, then exit.
-		if wheelContested {
-			msg := "I can't start right now -- another agent is already driving the UI-control session. Close that session (Take back control) and ask me again."
-			// Only emit the message if the model didn't already say
-			// something sensible in this iteration; otherwise we'd
-			// double-speak. The model often replies with explanation
-			// text alongside the failing tool call.
-			if !hasMeaningfulTail(&fullText, 40) {
-				sink.TextDelta(msg)
-				fullText.WriteString(msg)
-				textChunks++
-			}
-			r.logger.Info("agent streaming: wheel contested -- breaking loop",
-				"iter", iter)
-			break
-		}
-
-		// CLIENT_TOOL_UNREACHABLE (memql#1834): an interactive client-executed
-		// UI tool timed out with no browser response -- the browser is gone or
-		// unreachable across nodes. Retrying just burns iterations against a
-		// browser that isn't answering, so break immediately and surface a
-		// concise, actionable message rather than stalling to the wallclock cap
-		// and surfacing a bare timeout.
-		if clientToolUnreachable {
-			if !hasMeaningfulTail(&fullText, 40) {
-				sink.TextDelta(clientToolUnreachableUserMessage)
-				fullText.WriteString(clientToolUnreachableUserMessage)
-				textChunks++
-			}
-			r.logger.Info("agent streaming: client tool unreachable -- breaking loop",
-				"iter", iter)
-			break
 		}
 
 		if !hadSuccess {
@@ -979,29 +915,6 @@ func needsIterationSeparator(b *strings.Builder) bool {
 	}
 	return true
 }
-
-// wheelContestedMarker is the substring the frontend's UI-control bridge
-// stamps on error responses when a tool call arrives for a space that
-// doesn't own the Control Session. The streaming tool loop looks for
-// this marker and breaks out immediately instead of letting the model
-// retry uiRequestControl against a widget that will keep refusing.
-// Kept in sync with the string the frontend's ClientToolRelayBridge +
-// requestControl primitive emit.
-const wheelContestedMarker = "WHEEL_CONTESTED"
-
-// clientToolUnreachableMarker mirrors the sentinel component/grpc stamps on the
-// typed error returned when an interactive client-executed UI tool
-// (uiRequestControl / uiClick / ...) times out with no browser response
-// (memql#1834). When the tool loop sees it, it breaks immediately and surfaces
-// clientToolUnreachableUserMessage instead of letting the model retry against a
-// browser that isn't answering -- the same shape as the WHEEL_CONTESTED break.
-// Kept in sync with component/grpc/client_tool_failfast.go.
-const clientToolUnreachableMarker = "CLIENT_TOOL_UNREACHABLE"
-
-// clientToolUnreachableUserMessage is the concise, actionable reply streamed to
-// the user when an interactive UI tool can't reach the browser. Kept in sync
-// with component/grpc/client_tool_failfast.go.
-const clientToolUnreachableUserMessage = "I couldn't reach the app to take control of the screen — please try again, and reload the page if it keeps happening."
 
 // hasMeaningfulTail reports whether the text the agent has streamed
 // so far contains at least `minTrailingChars` non-whitespace chars in

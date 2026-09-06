@@ -10,29 +10,25 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
-// tools.go -- MCP-shaped tool RPC surface + inbound client-tool
-// dispatch. memql#174.
+// tools.go -- the MCP-shaped tool RPC surface. memql#174.
 //
 // Hand-rolled (parallels concept_browser.go) because the MCP wire
-// messages -- ListToolsMsg / CallToolMsg / ClientToolCall /
-// ClientToolResult -- are not DSL queries / mutations. They're the
-// gRPC envelope for the tool-call portion of the agent loop, so
-// sdk-gen has no input to generate from. Every OTHER tool-shaped
-// call should reach for a typed generated method.
+// messages -- ListToolsMsg / CallToolMsg -- are not DSL queries /
+// mutations. They're the gRPC envelope for the tool-call portion of
+// the agent loop, so sdk-gen has no input to generate from. Every
+// OTHER tool-shaped call should reach for a typed generated method.
 //
-// Three surfaces ship here:
+// Two surfaces ship here:
 //
 //   1. ListTools / CallTool -- the outbound RPC pair the consumer
 //      uses to enumerate and invoke server-side tools.
-//   2. ClientToolHandler + RegisterClientToolHandler -- the inbound
-//      surface for client-executed tools. When the server's agent
-//      loop resolves a tool marked client_execution=true it emits
-//      a ClientToolCall; the SDK dispatches to the registered
-//      handler and ships the returned result back as a
-//      ClientToolResult correlated by call_id.
-//   3. SDK-owned types (ToolDefinition / ClientToolCall / etc.)
+//   2. SDK-owned types (ToolDefinition / CallToolResult / etc.)
 //      mirror the proto fields per the no-memqlv1-in-consumers
 //      rule (sdk/go/CLAUDE.md rule 2).
+//
+// There is no inbound half. Client-executed tools ran in the connected
+// browser and reached it over the client-tool relay, which went with
+// the conversational product (epic memql#4988).
 
 // -----------------------------------------------------------------
 // SDK-owned types -- wrappers over the proto so consumers never see
@@ -42,11 +38,10 @@ import (
 // ToolDefinition is one entry from a ListTools response. Mirrors
 // memqlv1.ToolDefinition.
 type ToolDefinition struct {
-	Name            string
-	Description     string
-	InputSchema     string // JSON Schema describing the tool's input args.
-	ClientExecution bool   // when true, the tool runs in the connected client (see RegisterClientToolHandler).
-	Scopes          []string
+	Name        string
+	Description string
+	InputSchema string // JSON Schema describing the tool's input args.
+	Scopes      []string
 }
 
 // ListToolsArgs is the optional argument shape for ListTools. Cursor
@@ -114,11 +109,10 @@ func (qc *QueryClient) ListTools(ctx context.Context, args ListToolsArgs) (*List
 	}
 	for _, t := range proto.GetTools() {
 		out.Tools = append(out.Tools, ToolDefinition{
-			Name:            t.GetName(),
-			Description:     t.GetDescription(),
-			InputSchema:     t.GetInputSchema(),
-			ClientExecution: t.GetClientExecution(),
-			Scopes:          append([]string(nil), t.GetScopes()...),
+			Name:        t.GetName(),
+			Description: t.GetDescription(),
+			InputSchema: t.GetInputSchema(),
+			Scopes:      append([]string(nil), t.GetScopes()...),
 		})
 	}
 	return out, nil
@@ -156,10 +150,6 @@ func (qc *QueryClient) CallTool(ctx context.Context, args CallToolArgs) (*CallTo
 		IsError: proto.GetIsError(),
 	}, nil
 }
-
-// -----------------------------------------------------------------
-// Inbound dispatch (ClientToolCall -> handler -> ClientToolResult)
-// -----------------------------------------------------------------
 
 // -----------------------------------------------------------------
 // proto <-> SDK content conversion

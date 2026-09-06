@@ -14,7 +14,7 @@
 //
 //   - NewSessionRevocationStreamInterceptor: wraps the gRPC stream
 //     chain similarly, after the base verifier / no-auth interceptor
-//     has set claims and before the guest-aware wrapper.
+//     has set claims.
 //
 // The HTTP middleware also runs on the WebSocket upgrade -- the
 // revocation check happens at connect time. Already-established
@@ -96,9 +96,7 @@ func NewSessionRevocationHTTPMiddleware(engine *memqlengine.MemQLEngine, logger 
 
 // NewSessionRevocationStreamInterceptor enforces session revocation
 // at gRPC stream-open time. Wrap AFTER the base verifier / no-auth
-// interceptor (so claims are set), BEFORE the guest-aware wrapper
-// (guest streams skip this check entirely -- they authenticate via
-// invitation token, not bearer token).
+// interceptor, so claims are set.
 func NewSessionRevocationStreamInterceptor(base grpc.StreamServerInterceptor, engine *memqlengine.MemQLEngine, logger *slog.Logger) grpc.StreamServerInterceptor {
 	if base == nil {
 		return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {

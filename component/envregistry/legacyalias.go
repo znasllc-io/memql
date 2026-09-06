@@ -7,8 +7,10 @@ import (
 )
 
 // LegacyAliases maps each NEW (MEMQL_-prefixed) env var name to the
-// LEGACY name it replaced in Epic 7 workstream 7.3 (memql#2106). It is
-// the inverse of scripts/rename/env_rename_rules.json (legacy -> new).
+// LEGACY name it replaced in Epic 7 workstream 7.3 (memql#2106). It began as
+// the inverse of scripts/rename/env_rename_rules.json (legacy -> new); that
+// file is a spent record of the campaign and this map has since diverged from
+// it in both directions, so THIS is the live map and that one is history.
 //
 // The boot-time shim ApplyLegacyEnvAliases consults this map to keep an
 // operator's pre-7.3 .env / sealed envelope / k8s Secret working: when a
@@ -67,31 +69,14 @@ var LegacyAliases = map[string]string{
 	"MEMQL_SERVICE_LOGGER_LEVEL":                   "SERVICE_LOGGER_LEVEL",
 	"MEMQL_SERVICE_LOG_LEVEL":                      "SERVICE_LOG_LEVEL",
 
-	// The voice-agent's pre-convention names (memql#3834). Same vintage as the
-	// six above and found the same way: they were INVISIBLE to the drift gate,
-	// here because the voice agent reads through an injected getter -- a local
-	// closure over a `Getenv` the caller supplies -- which memql#3818's helper
-	// discovery could not see one scope down. The keys were plain string
-	// literals at every call site the whole time.
-	//
-	// The LiveKit trio found beside them is NOT renamed and is not here: those
-	// are LiveKit's own convention rather than MemQL's name to change, which is
-	// why they sit in envscan's `external` list beside LIVEKIT_PUBLIC_URL.
-	"MEMQL_ANAM_DEFAULT_PERSONA_ID":   "ANAM_DEFAULT_PERSONA_ID",
-	"MEMQL_ANAM_DEFAULT_AVATAR_ID":    "ANAM_DEFAULT_AVATAR_ID",
-	"MEMQL_ANAM_DEFAULT_PERSONA_NAME": "ANAM_DEFAULT_PERSONA_NAME",
-	"MEMQL_POLYPHON_VOICE_LANGUAGE":   "POLYPHON_VOICE_LANGUAGE",
-	"MEMQL_VOICE_AGENT_LOG_LEVEL":     "VOICE_AGENT_LOG_LEVEL",
-
 	// Epic 7.3 (memql#2106).
 
-	"MEMQL_AI_ANTHROPIC_API_KEY":                            "MEMQL_SI_ANTHROPIC_API_KEY",
-	"MEMQL_AI_OPENAI_API_KEY":                               "MEMQL_SI_OPENAI_API_KEY",
-	"MEMQL_AI_OPENAI_PROJECT_ID":                            "MEMQL_SI_OPENAI_PROJECT_ID",
-	"MEMQL_ANAM_API_KEY":                                    "ANAM_API_KEY",
-	"MEMQL_ANTHROPIC_API_KEY":                               "ANTHROPIC_API_KEY",
-	"MEMQL_DATABASE_DSN":                                    "MEMORY_NODES_DATABASE_DSN",
-	"MEMQL_DEFAULT_AGENT_PROVIDER":                          "DEFAULT_AGENT_PROVIDER",
+	"MEMQL_AI_ANTHROPIC_API_KEY":   "MEMQL_SI_ANTHROPIC_API_KEY",
+	"MEMQL_AI_OPENAI_API_KEY":      "MEMQL_SI_OPENAI_API_KEY",
+	"MEMQL_AI_OPENAI_PROJECT_ID":   "MEMQL_SI_OPENAI_PROJECT_ID",
+	"MEMQL_ANTHROPIC_API_KEY":      "ANTHROPIC_API_KEY",
+	"MEMQL_DATABASE_DSN":           "MEMORY_NODES_DATABASE_DSN",
+	"MEMQL_DEFAULT_AGENT_PROVIDER": "DEFAULT_AGENT_PROVIDER",
 	// The blob-storage string every deployed secret actually carries
 	// (memql#4843): seed-secrets.sh seeds it locally and the cloud's ESO
 	// sync writes it into memql-secrets, but no Go reader was left after the
@@ -169,17 +154,8 @@ var LegacyAliases = map[string]string{
 	"MEMQL_OPENAI_API_KEY":                                  "OPENAI_API_KEY",
 	"MEMQL_OPERATOR_AGENT_PROVIDER":                         "OPERATOR_AGENT_PROVIDER",
 	"MEMQL_OPERATOR_APP_PROFILES_DIR":                       "OPERATOR_APP_PROFILES_DIR",
-	"MEMQL_POLYPHON_LIVEKIT_API_KEY":                        "POLYPHON_LIVEKIT_API_KEY",
-	"MEMQL_POLYPHON_LIVEKIT_API_SECRET":                     "POLYPHON_LIVEKIT_API_SECRET",
-	"MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL":                     "POLYPHON_LIVEKIT_PUBLIC_URL",
-	"MEMQL_POLYPHON_LIVEKIT_URL":                            "POLYPHON_LIVEKIT_URL",
 	"MEMQL_POLYPHON_OPENAI_ASR_MODEL":                       "POLYPHON_OPENAI_ASR_MODEL",
-	"MEMQL_POLYPHON_OPENAI_TTS_MODEL":                       "POLYPHON_OPENAI_TTS_MODEL",
-	"MEMQL_POLYPHON_OPENAI_TTS_VOICE":                       "POLYPHON_OPENAI_TTS_VOICE",
 	"MEMQL_POLYPHON_OPENAI_VAD_SILENCE_MS":                  "POLYPHON_OPENAI_VAD_SILENCE_MS",
-	"MEMQL_POLYPHON_PREDICTION_ENGINE_URL":                  "POLYPHON_PREDICTION_ENGINE_URL",
-	"MEMQL_POLYPHON_VOICE_PROVIDER":                         "POLYPHON_VOICE_PROVIDER",
-	"MEMQL_SIMLI_API_KEY":                                   "SIMLI_API_KEY",
 }
 
 // legacyByLegacyName is the reverse lookup (legacy name -> new name),

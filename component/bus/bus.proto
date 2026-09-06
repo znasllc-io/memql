@@ -262,6 +262,16 @@ message ConfigSnapshot {
   reserved 60;
   reserved "polyphon_bridge_agent_url";
 
+  // The voice-provider switch and the two TTS knobs went with the voice and
+  // cognition node types in epic memql#4988. Nothing constructs a TTS client
+  // in integrations/openai any more and there is no /memql/audio voice path to
+  // pick a provider for, so all three read env vars that no longer exist.
+  // Reserved for the same reason as 12 and 60: a rolling restart carries a
+  // ConfigSnapshot between binaries of different vintages, and reserving is
+  // what stops a later field silently reusing one of these numbers or names.
+  reserved 61, 63, 64;
+  reserved "polyphon_voice_provider", "polyphon_openai_tts_model", "polyphon_openai_tts_voice";
+
   // Database
   string db_dsn = 1;
   int32 db_max_open_conns = 2;
@@ -288,11 +298,8 @@ message ConfigSnapshot {
   bool auth_enabled = 50;
   bool delegation_enabled = 56;
 
-  // Polyphon
-  string polyphon_voice_provider = 61;
+  // Streaming transcription (AiTranscribeStream*)
   string polyphon_openai_asr_model = 62;
-  string polyphon_openai_tts_model = 63;
-  string polyphon_openai_tts_voice = 64;
 
   // Node
   string node_type = 70;

@@ -942,13 +942,12 @@ rules rather than repetitions of the five before it.
 ### What it deliberately does not do
 
 The Users bullet of the tie task asks for an optional account picker on the
-**guest-invite send flow**. There is no guest-invite send flow in this shell,
-or in the portal -- a guest invitation is space-scoped, and the OS has no
-space surface to send one from. So the field is threaded end to end (proto,
-handler, `createGuestInvitation`, and the TS SDK's `sendGuestInvite`) and the
-invitation list RENDERS the tie wherever a row carries one; the picker is a
-few lines the day a send flow exists to put it on. Building the flow itself
-to hang a picker from it would have been a different feature.
+**guest-invite send flow**. There is no guest-invite send flow anywhere: a
+guest invitation was space-scoped, and the space concept and the whole guest
+half of the invitation flow went with the conversational product (epic
+memql#4988). The field stays on the concept and the invitation list RENDERS
+the tie wherever a row carries one, which is how invitations already written
+keep reading back. Nothing writes one today.
 
 Training's domain tag is likewise render-and-filter only, which is what the
 design asks for: nothing about routing, attachment or agent behaviour

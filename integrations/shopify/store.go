@@ -307,9 +307,7 @@ func shortID(id string) string {
 // flat rows; a query with no shape clause falls back to the raw graph bundle,
 // whose rows are node ENVELOPES with the concept's fields under `payload`.
 // The generated mirror reads carry no shape (the default projection is the
-// whole concept), so both shapes reach this function in practice --
-// component/memql/seed_materializer.go's rowStringField makes the same probe
-// for the same reason.
+// whole concept), so both shapes reach this function in practice.
 func mapString(m map[string]any, key string) string {
 	if v, ok := rowValue(m, key).(string); ok {
 		return strings.TrimSpace(v)

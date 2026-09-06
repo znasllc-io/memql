@@ -49,23 +49,21 @@ import { Connection } from "@znasllc-io/memql-sdk-core";
 
 const conn = await Connection.dial({
   endpoint: "wss://staging.host/memql/ws",
-  auth: { bearer: jwt }, // or { guestToken } / { workerToken }
+  auth: { bearer: jwt }, // or { workerToken }
 });
 
 // conn.query         : QueryClient          (executeNamed / executeRaw / listConcepts / subscriptionCatalog / subscribeConceptRegistry / getMyAccess)
 // conn.subscriptions : SubscriptionManager  (subscribe(pattern, handler) -> unsubscribe)
 // conn.dispatcher    : Dispatcher           (low-level multiplexed stream)
 // conn.rotateAuth(jwt)                       (swap the bearer on a live stream)
-// conn.uploadAttachment({ partitionId, file, fileName, contentType })
 // conn.done() : Promise<void>               (resolves on stream close)
 // conn.close() : void
 ```
 
 Authentication travels as WebSocket subprotocols (browsers cannot set
 headers on the upgrade, and query params would leak the credential into
-access logs): `auth.bearer` dials with `["bearer", token]`,
-`auth.guestToken` with `["guest", token]` -- the server negotiates the
-scheme entry back on the 101. `auth.workerToken` still stamps
+access logs): `auth.bearer` dials with `["bearer", token]` -- the server
+negotiates the scheme entry back on the 101. `auth.workerToken` still stamps
 `worker_token` onto the URL until the worker surface migrates. Custom
 `webSocketFactory` implementations MUST forward the `protocols`
 argument to their WebSocket constructor. Pass `onTokenExpired` to
@@ -73,7 +71,7 @@ refresh without redialing.
 
 For an older front door that does not negotiate the subprotocol scheme,
 `auth.legacyUrlToken: true` opts back into the deprecated query-param
-carry (`?bearer_token=` / `?guest_token=`). This leaks the credential
+carry (`?bearer_token=`). This leaks the credential
 into request-line logs -- avoid it unless the target predates the
 subprotocol channel. In-place rotation is driven by the auth source
 (`onTokenExpired`), not the transport, so it works identically under
@@ -90,7 +88,7 @@ and `subscribe(pattern, ...)` throws for `graph_events` — use
 ```ts
 const unsubscribe = conn.subscriptions.subscribeGraph(
   (event) => render(event),
-  { concept: "v1:cognition:utterance", actions: ["created", "updated"] },
+  { concept: "v1:work:step", actions: ["created", "updated"] },
 );
 ```
 
@@ -240,38 +238,13 @@ const final = await pushToTalk(conn.dispatcher, audioStream, {
 });
 ```
 
-### Space attachments
-
-`uploadAttachment` uploads a file to a space over the front door's
-`POST /spaces/{partitionId}/attachments` endpoint (multipart, `file`
-field) and returns the created attachment reference. It is the one HTTP
-(non-WebSocket) helper in the core; everything else rides the stream.
-
-It is auth-consistent with the dialed connection: it targets the same
-origin the WebSocket dialed and sends the connection's CURRENT bearer,
-so an upload issued after an in-place rotation carries the rotated
-token. Only bearer-authenticated connections can upload.
-
-```ts
-const ref = await conn.uploadAttachment({
-  partitionId: "spc-1",
-  file: fileBlob,            // Blob | Uint8Array | ArrayBuffer
-  fileName: "report.pdf",
-  contentType: "application/pdf", // used when `file` is not a typed Blob
-});
-// ref.id is the new attachment id; ref.raw is the untouched server JSON.
-```
-
-The standalone `uploadAttachment(source, params)` is also exported for
-callers that hold a bearer + origin without a live `Connection`.
-
-### AI (chat / speech / transcribe / suggest)
+### AI (chat / suggest)
 
 One-shot AI ops on `MemqlService.Stream`. Each helper takes the
 connection's `Dispatcher` directly and returns a typed result.
 
 ```ts
-import { aiChat, aiChatStream, aiSpeech, aiTranscribe, aiSuggest }
+import { aiChat, aiChatStream, aiSuggest }
   from "@znasllc-io/memql-sdk-core/ai";
 
 // Non-streaming chat
@@ -288,112 +261,34 @@ for await (const delta of handle.deltas) {
 }
 const finalReply = await handle.result;
 
-// Text-to-speech
-const audio = await aiSpeech(conn.dispatcher, "Hello there", {
-  voice: "alto",
-  format: "wav",
-});
-
-// One-shot transcription (streaming STT lives in /voice)
-const transcript = await aiTranscribe(conn.dispatcher, audioBytes, {
-  mimeType: "audio/wav",
-});
-
-// Suggest (spaces / spaceTitle / agents / groups / *CardSummary / knowledge)
-const suggestion = await aiSuggest(conn.dispatcher, "spaceTitle", {
-  description: "a brainstorm session",
+// Suggest -- see the domain list in the engine's AiSuggest docs
+const suggestion = await aiSuggest(conn.dispatcher, "viewArrangement", {
+  description: "a fleet overview",
 });
 ```
 
-All five accept `{ signal }` for cancellation and throw on
+All three accept `{ signal }` for cancellation and throw on
 `QueryError` replies or transport failure.
 
-### Realtime media
-
-`polyphonRoomToken` rides the main dispatcher (sendAndWait) and
-mints a short-lived LiveKit room token for joining a space's voice
-room. `dialAudio` opens a SEPARATE WebSocket to `/memql/audio` for
-the older streaming-STT + streaming-TTS protocol used by the
-product SPA. The audio client carries auth the
-same way the main Connection does: bearer / guest via WebSocket
-subprotocols, worker tokens on the query string.
-
-```ts
-import { polyphonRoomToken, dialAudio } from "@znasllc-io/memql-sdk-core/realtime";
-
-// LiveKit room token (browser hands roomName + livekitUrl to the
-// LiveKit client SDK).
-const t = await polyphonRoomToken(conn.dispatcher, {
-  spaceId: "spc-1",
-  participantId: "ptp-1",
-  displayName: "Alice",
-});
-liveKitRoom.connect(t.livekitUrl, t.token);
-
-// Audio WS -- streaming STT.
-const audio = await dialAudio({
-  endpoint: "wss://app.example.com/memql/audio",
-  auth: { bearer: jwt },
-});
-const stt = audio.transcribe({
-  spaceId: "spc-1",
-  participantId: "ptp-1",
-  format: "opus",
-  sampleRate: 48000,
-  channels: 1,
-});
-mediaRecorder.ondataavailable = (ev) => stt.pushBytes(new Uint8Array(await ev.data.arrayBuffer()));
-for await (const ev of stt.events) {
-  if (ev.isFinal) finalize(ev.text, ev.utteranceId);
-  else renderPartial(ev.text);
-}
-
-// Audio WS -- streaming TTS.
-const tts = audio.synthesize({ text: "Hello", voice: "nova", format: "wav" });
-for await (const ev of tts.events) {
-  if (ev.kind === "chunk") playChunk(ev.audioBase64);
-  if (ev.kind === "ended") finalize();
-}
-audio.close();
-```
+Speech synthesis and one-shot transcription are gone: they rode the
+conversational product (epic memql#4988). Streaming transcription
+survives as `pushToTalk` above.
 
 ### Identity & access
 
-Guest invites, worker tokens, session revocation, and policy
-evaluation. The five guest-invite ops, both session-revoke ops, and
-the two worker-token ops mirror their proto shapes 1:1. Typed
-`errorCode` strings (e.g. `invalid_email`, `unauthenticated`,
-`POLICY_NOT_FRONTEND_VISIBLE`) ride the returned object so callers
-can branch without a try/catch; `QueryError` on the dispatcher path
-still throws.
+Session revocation, sign-in policy, worker tokens, account tokens and
+badges. Each mirrors its proto shape 1:1. Typed `errorCode` strings
+(e.g. `invalid_email`, `unauthenticated`) ride the returned object so
+callers can branch without a try/catch; `QueryError` on the dispatcher
+path still throws.
 
 ```ts
 import {
-  sendGuestInvite, resolveGuestInvite, joinSpaceAsGuest,
-  cancelGuestInvite, resendGuestInviteEmail,
-  revokeCurrentSession, revokeAllSessions,
+  revokeCurrentSession, revokeAllSessions, revokeSession, setSignInPolicy,
   createWorkerToken, revokeWorkerToken,
-  evaluatePolicy,
+  mintAccountToken, revokeAccountToken,
+  createBadge, revokeBadge,
 } from "@znasllc-io/memql-sdk-core/identity";
-
-// Guest invites
-const invite = await sendGuestInvite(conn.dispatcher, {
-  spaceId: "spc-1",
-  spaceName: "Brainstorm",
-  inviterName: "Alice",
-  email: "guest@example.com",
-  joinUrlBase: "https://app.example.com",
-  expiresInMinutes: 15,
-});
-
-// Unauthenticated /join/<token> lookup
-const lookup = await resolveGuestInvite(conn.dispatcher, token);
-if (lookup.status === "ok") {
-  await joinSpaceAsGuest(conn.dispatcher, {
-    participantId: newShortId(),
-    displayName: "Guesty",
-  });
-}
 
 // Per-device + cross-device sign-out
 await revokeCurrentSession(conn.dispatcher);
@@ -402,28 +297,18 @@ await revokeAllSessions(conn.dispatcher);
 // Worker tokens -- plainToken is shown ONCE; capture it now
 const token = await createWorkerToken(conn.dispatcher, { name: "macbook" });
 await revokeWorkerToken(conn.dispatcher, token.identityId);
-
-// Policy evaluation -- frontend-visible bff-tier policies only
-const decision = await evaluatePolicy(conn.dispatcher, {
-  policyName: "canArchiveSpace",
-  args: { spaceId: "spc-1" },
-  returnTrace: true,
-});
-if (decision.errorCode) handleRejection(decision.errorCode);
-else applyResult(decision.result);
 ```
 
-### Tools (MCP) + inbound client-tool dispatch
+### Tools (MCP)
 
 `listTools` / `callTool` enumerate and invoke server-side tools (the
-MCP request/reply pair). `registerClientToolHandler` is the inbound
-side: when the server's agent loop resolves a tool marked
-`client_execution=true` it pushes a `ClientToolCall`; the SDK runs
-the registered handler locally and ships the result back as a
-`ClientToolResult` correlated by `callId`.
+MCP request/reply pair). Every tool carries a server-side handler;
+there is no inbound half, because client-executed tools ran in the
+connected browser over the client-tool relay, which went with the
+conversational product (epic memql#4988).
 
 ```ts
-import { listTools, callTool, registerClientToolHandler }
+import { listTools, callTool }
   from "@znasllc-io/memql-sdk-core/tools";
 
 // Enumerate
@@ -431,20 +316,11 @@ const { tools, nextCursor } = await listTools(conn.dispatcher);
 
 // Invoke
 const r = await callTool(conn.dispatcher, {
-  name: "createSpace",
-  arguments: { title: "Brainstorm", architecture: "polyphon" },
+  name: "workbenchHost",
+  arguments: { action: "fs_list", path: "." },
 });
 if (r.isError) handleFailure(r.content);
 else applyResult(r.content);
-
-// Inbound dispatch (one handler per dispatcher).
-const unregister = registerClientToolHandler(conn.dispatcher, async (call, signal) => {
-  // call.toolName, call.argumentsJson (raw JSON), call.timeoutMs
-  // signal aborts after timeoutMs so cooperative handlers can bail.
-  const args = JSON.parse(call.argumentsJson || "{}");
-  return runLocally(call.toolName, args, signal);
-});
-// later: unregister() to detach.
 ```
 
 ## Exports
@@ -456,26 +332,25 @@ const unregister = registerClientToolHandler(conn.dispatcher, async (call, signa
   `newShortId`, `renderMemQLValue`, and the shared types (`Concept`,
   `Event`, `Role`, `SubscriptionKind`, `AccessSummary`, `Row`,
   `LiveState`, `LiveSnapshot`, `ConnectionStatus`, `ReconnectOptions`).
-  Also re-exports `identity`, `realtime`, `ai`, `tools`, and `voice` as
-  namespace objects.
+  Also re-exports `authoring`, `constructs`, `identity`, `deploy`,
+  `ai`, `automation`, `tools`, `voice` and `pack` as namespace objects.
 - `./client` -- the same client surface.
-- `./identity` -- the 10 identity & access methods listed above.
-- `./realtime` -- `polyphonRoomToken` (LiveKit token mint via the
-  main stream) + `AudioClient` / `dialAudio` (separate WS for
-  streaming STT + TTS on `/memql/audio`).
-- `./ai` -- `aiChat`, `aiChatStream`, `aiSpeech`, `aiTranscribe`,
-  `aiSuggest` and their types.
-- `./tools` -- `listTools` / `callTool` (MCP outbound) and
-  `registerClientToolHandler` (inbound `ClientToolCall` ->
-  `ClientToolResult` dispatch).
-- `./voice` -- `pushToTalk` and its types.
+- `./identity` -- session revocation, sign-in policy, worker tokens,
+  account tokens, badges.
+- `./identityadmin` -- the owner/admin identity operations.
+- `./ai` -- `aiChat`, `aiChatStream`, `aiSuggest` and their types.
+- `./tools` -- `listTools` / `callTool` (MCP outbound).
+- `./voice` -- `pushToTalk` and its types (streaming transcription).
+- `./authoring`, `./constructs`, `./automation`, `./deploy`, `./pack`
+  -- the authoring, construct-registry, automation, deploy-control and
+  package surfaces.
 
 ## Build & test
 
 ```
 npm run build     # tsc -> dist
 npm run typecheck # tsc --noEmit
-npm test          # compile + run node:test against the identity/AI/voice surface
+npm test          # compile + run node:test against the identity/AI/tools surface
 ```
 
 ESM only, strict TypeScript, browser-targeted (`lib: ES2022 + DOM`).

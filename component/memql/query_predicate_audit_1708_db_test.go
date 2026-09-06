@@ -23,8 +23,10 @@ import (
 //   queryDocumentsForDomain    -- joined `attachedDomains==domainId` (a []string
 //                                 compared to a scalar -> never matched). Fixed
 //                                 to `domainId in attachedDomains`.
-//   avatarPersonas        -- hardcoded `vendor=="simli"` dropped every other
-//                                 vendor's personas. Fixed to an optional vendor arg.
+//   avatarPersonas             -- hardcoded `vendor=="simli"` dropped every other
+//                                 vendor's personas. Fixed to an optional vendor
+//                                 arg: `isActiveRecord && when(args.vendor)
+//                                 { vendor==args.vendor }`.
 //   usersScheduledForDeletion / usersInDeletionCooldown -- must return
 //                                 ONLY users with deletionScheduledAt set, not
 //                                 every active user.
@@ -33,53 +35,85 @@ import (
 //                                 consumedAt!="" so unspent-but-expired codes are
 //                                 excluded.
 //
+// avatarPersona went with the legacy cognition tree, so the shape that case
+// pinned -- an unconditional conjunct ANDed with an optional equality guard --
+// is now asserted over `todos`, whose filter is that shape exactly
+// (`ownerUserId==actor.userId && when(args.done) { done==args.done }`). The
+// property was never about avatars: it is that an omitted optional arg must
+// not silently narrow the read, and that supplying it must still narrow.
+//
 // Postgres-gated: skips when no DB is reachable, reusing sharedReadMergeEngine
 // (component/memql/executor_mutation_readmerge_db_test.go).
 
 // --- #1708: queryDocumentsForDomain joins on attachedDomains membership ------
 
-// --- #1708: avatarPersonas no longer hardcodes vendor==simli ------------
+// --- #1708: an optional equality guard neither narrows when omitted --------
+// --- nor stops narrowing when supplied ------------------------------------
 
-func TestQueryAvatarPersonas_VendorOptionalNotHardcoded(t *testing.T) {
+// TestQueryTodos_OptionalDoneFilterNotHardcoded is the surviving statement of
+// the avatarPersonas case. `todos` carries the same two-part filter the fixed
+// avatarPersonas carried -- one unconditional conjunct ANDed with
+// `when(args.done) { done==args.done }` -- so the same three questions have the
+// same three answers here:
+//
+//   - omitted, the guard drops and BOTH values of the discriminator come back
+//     (the half that failed: a hardcoded vendor==simli returned no anam row);
+//   - supplied, it still narrows, in both directions;
+//   - the unconditional conjunct keeps applying either way, so a row it
+//     excludes is never admitted by the optional half being absent.
+//
+// The exclusion control is a to-do belonging to somebody ELSE, which is
+// stronger than the inactive-persona row it replaces: it is refused by the
+// filter's ownerUserId conjunct AND, independently, by the concept's
+// @rowAuthz(owner="ownerUserId") tier. Both halves have to fail for it to
+// appear, and either failing is a bug worth this test.
+//
+// A present `false` is deliberately one of the cases: the when-guard drops on
+// ABSENCE and keeps a present false, so `todos(done: false)` must NARROW to the
+// open item rather than widen to everything.
+func TestQueryTodos_OptionalDoneFilterNotHardcoded(t *testing.T) {
 	eng, _, _ := sharedReadMergeEngine(t)
-	ctx := clusterOwnerCtx("u-persona-1708")
-	sfx := uniqueSuffix("persona")
+	sfx := uniqueSuffix("todo-optional")
+	ctx := clusterOwnerCtx("u-todo-1708-" + sfx)
+	strangerCtx := clusterOwnerCtx("u-todo-1708-other-" + sfx)
 
-	simliID := fmt.Sprintf("v1:agents:avatarPersona:simli-%s", sfx)
-	anamID := fmt.Sprintf("v1:agents:avatarPersona:anam-%s", sfx)
-	inactiveID := fmt.Sprintf("v1:agents:avatarPersona:inactive-%s", sfx)
-
-	runMutation(t, ctx, eng, "createAvatarPersona", map[string]any{
-		"avatarPersonaId": simliID, "vendor": "simli", "personaId": "face-simli-" + sfx,
-		"name": "Simli One", "gender": "female", "active": true,
+	openID := runMutation(t, ctx, eng, "createTodo", map[string]any{
+		"todoId": fmt.Sprintf("v1:todos:todo:open-%s", sfx), "title": "Still open",
 	})
-	runMutation(t, ctx, eng, "createAvatarPersona", map[string]any{
-		"avatarPersonaId": anamID, "vendor": "anam", "personaId": "face-anam-" + sfx,
-		"name": "Anam One", "gender": "male", "active": true,
+	doneID := runMutation(t, ctx, eng, "createTodo", map[string]any{
+		"todoId": fmt.Sprintf("v1:todos:todo:done-%s", sfx), "title": "Already done",
 	})
-	runMutation(t, ctx, eng, "createAvatarPersona", map[string]any{
-		"avatarPersonaId": inactiveID, "vendor": "simli", "personaId": "face-inactive-" + sfx,
-		"name": "Inactive One", "gender": "female", "active": false,
+	// completeTodo is authored as a partial insert{}, so the engine read-merge
+	// carries title/priority forward and only `done` changes.
+	runMutation(t, ctx, eng, "completeTodo", map[string]any{
+		"todoId": doneID, "payload": map[string]any{"done": true},
+	})
+	strangerID := runMutation(t, strangerCtx, eng, "createTodo", map[string]any{
+		"todoId": fmt.Sprintf("v1:todos:todo:stranger-%s", sfx), "title": "Not yours",
 	})
 
-	// Default (no vendor arg): every ACTIVE persona regardless of vendor.
-	// The headline #1708 assertion -- the anam persona used to be silently
-	// dropped by the hardcoded vendor==simli predicate.
-	all := queryIds(t, ctx, eng, "avatarPersonas()")
-	require.True(t, contains(all, simliID), "active simli persona MUST be listed, got %v", all)
-	require.True(t, contains(all, anamID),
-		"active anam persona MUST be listed -- the vendor filter is no longer hardcoded (#1708), got %v", all)
-	require.False(t, contains(all, inactiveID),
-		"inactive persona MUST be excluded (isActiveRecord), got %v", all)
+	// Default (no done arg): every to-do the caller owns, whatever its state.
+	// The headline #1708 assertion -- the completed item used to be the one a
+	// hardcoded predicate silently dropped.
+	all := queryIds(t, ctx, eng, "todos()")
+	require.True(t, contains(all, openID), "the open to-do MUST be listed, got %v", all)
+	require.True(t, contains(all, doneID),
+		"the completed to-do MUST be listed -- an omitted optional arg drops its guard and must "+
+			"not narrow the read (#1708), got %v", all)
+	require.False(t, contains(all, strangerID),
+		"another user's to-do MUST be excluded -- the unconditional ownerUserId conjunct still "+
+			"applies when the optional guard drops, got %v", all)
 
-	// Optional vendor scoping still works: vendor=simli excludes anam.
-	simliOnly := queryIds(t, ctx, eng, `avatarPersonas(vendor:"simli")`)
-	require.True(t, contains(simliOnly, simliID), "vendor=simli MUST include the simli persona, got %v", simliOnly)
-	require.False(t, contains(simliOnly, anamID), "vendor=simli MUST exclude the anam persona, got %v", simliOnly)
+	// Supplied, the guard still narrows -- in both directions.
+	doneOnly := queryIds(t, ctx, eng, "todos(done: true)")
+	require.True(t, contains(doneOnly, doneID), "done=true MUST include the completed to-do, got %v", doneOnly)
+	require.False(t, contains(doneOnly, openID), "done=true MUST exclude the open to-do, got %v", doneOnly)
+	require.False(t, contains(doneOnly, strangerID), "done=true MUST exclude another user's to-do, got %v", doneOnly)
 
-	anamOnly := queryIds(t, ctx, eng, `avatarPersonas(vendor:"anam")`)
-	require.True(t, contains(anamOnly, anamID), "vendor=anam MUST include the anam persona, got %v", anamOnly)
-	require.False(t, contains(anamOnly, simliID), "vendor=anam MUST exclude the simli persona, got %v", anamOnly)
+	openOnly := queryIds(t, ctx, eng, "todos(done: false)")
+	require.True(t, contains(openOnly, openID), "done=false MUST include the open to-do, got %v", openOnly)
+	require.False(t, contains(openOnly, doneID), "done=false MUST exclude the completed to-do, got %v", openOnly)
+	require.False(t, contains(openOnly, strangerID), "done=false MUST exclude another user's to-do, got %v", openOnly)
 }
 
 // --- #1708: user-deletion queries gate on deletionScheduledAt ---------------

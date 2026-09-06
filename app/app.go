@@ -146,10 +146,6 @@ type App struct {
 	// never a standalone node type.
 	router *router.Router
 
-	// Phase 3b: polyphon score engine (set by initPolyphonScoreEngine in cognition+standalone builds)
-	// Stored as any to avoid importing component/polyphon in all builds.
-	polyphonScoreEngine any
-
 	// Phase 4: integrations
 	// Stored as any to avoid importing integrations/stt (pulls in go-openai SDK) in all builds.
 	sttProvider any
@@ -191,24 +187,16 @@ type App struct {
 
 	// deliverySubstrate is the durable outbox+cursor mesh delivery substrate
 	// (memql#1263), constructed once in the cluster phase and shared by every
-	// path migrated onto it: chat-reply (memql#1264) and the client-tool RPC
-	// return leg (memql#1265). Nil on single-node / non-mesh binaries.
+	// path migrated onto it -- Plan delivery (memql#1264) is the one that
+	// survives. Nil on single-node / non-mesh binaries.
 	deliverySubstrate node.DeliverySubstrate
 
-	// cognitionIntegration is stashed here so cluster.go can inject
-	// the agent-turn forwarder after creating it. Stored as `any` to
-	// avoid importing integrations/cognition in all builds; the
-	// cognition-tagged helper in integrations_cognition_init.go reads
-	// it back via type assertion.
-	cognitionIntegration any
-
-	// plannerIntegration is the planner-node analog of
-	// cognitionIntegration: same cluster.go-injects-forwarder
-	// pattern, but on planner-tagged binaries. Owns Plan / Task
-	// lifecycle dispatch (separate from cognition's chat-turn
-	// routing). Stored as `any` for the same import-isolation
-	// reason; the planner-tagged helper in
-	// integrations_planner_init.go reads it back.
+	// plannerIntegration is stashed here so cluster.go can inject the
+	// task-dispatch forwarder after creating it, on planner-tagged
+	// binaries. Owns Plan / Task lifecycle dispatch. Stored as `any` to
+	// avoid importing integrations/planner in all builds; the
+	// planner-tagged helper in integrations_planner_init.go reads it
+	// back via type assertion.
 	plannerIntegration any
 
 	// identityService is the in-house identity provider that owns

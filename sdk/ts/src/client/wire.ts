@@ -84,42 +84,11 @@ export interface AiTranscribeStreamEndPayload {
   cancel?: boolean;
 }
 
-// Identity + access envelopes. Guest invites, worker tokens, and
-// session revoke. Mirror MemqlClientMessage oneof slots 46..54
+// Identity + access envelopes. Session revoke, sign-in policy, worker
+// tokens, account tokens and badges. The session + worker-token four
+// mirror MemqlClientMessage oneof slots 51..54; the two self-service
+// ones (revoke a named session, set sign-in policy) are 112..113
 // (proto schema: component/grpc/memql.proto).
-
-export interface SendGuestInvitePayload {
-  requestId: string;
-  spaceId: string;
-  spaceName: string;
-  inviterName: string;
-  email: string;
-  guestName?: string;
-  joinUrlBase: string;
-  expiresInMinutes?: number;
-}
-
-export interface ResolveGuestInvitePayload {
-  requestId: string;
-  token: string;
-}
-
-export interface JoinSpaceAsGuestPayload {
-  requestId: string;
-  participantId: string;
-  displayName: string;
-}
-
-export interface CancelGuestInvitePayload {
-  requestId: string;
-  invitationId: string;
-}
-
-export interface ResendGuestInviteEmailPayload {
-  requestId: string;
-  invitationId: string;
-  joinUrlBase: string;
-}
 
 export interface RevokeCurrentSessionPayload {
   requestId: string;
@@ -504,21 +473,11 @@ export interface ReadPackFilePayload {
   path: string;
 }
 
-// Polyphon -- LiveKit room token request. The room name + LiveKit
-// URL come back in the reply so the consumer can hand them to the
-// LiveKit client SDK without a separate config call.
-export interface PolyphonRoomTokenPayload {
-  requestId: string;
-  scopeId: string;
-  participantId: string;
-  displayName: string;
-}
-
-// MCP-shaped tool RPC + client-execution dispatch envelopes.
-// memql#174. ListTools / CallTool are outbound (consumer -> server);
-// ClientToolCall is inbound (server -> consumer) for tools marked
-// client_execution=true; ClientToolResult is the consumer's reply
-// correlated by callId.
+// MCP-shaped tool RPC envelopes. memql#174. ListTools / CallTool are
+// outbound (consumer -> server). There is no inbound half: client-
+// executed tools ran in the connected browser and reached it over the
+// client-tool relay, which went with the conversational product
+// (epic memql#4988).
 
 export interface ListToolsPayload {
   requestId: string;
@@ -531,13 +490,6 @@ export interface CallToolPayload {
   arguments?: Record<string, unknown>; // google.protobuf.Struct -> plain object
 }
 
-export interface ClientToolResultPayload {
-  callId: string;
-  content: ToolResultContentWire[];
-  isError: boolean;
-  errorMessage?: string;
-}
-
 export interface ToolResultContentWire {
   type: string; // "text" | "image" | "resource"
   text?: string;
@@ -546,11 +498,11 @@ export interface ToolResultContentWire {
   uri?: string;
 }
 
-// One-shot SI envelopes (chat / speech / transcribe / suggest).
-// Mirror MemqlClientMessage oneof slots 18..21 (proto schema:
-// component/grpc/memql.proto::AiChatMsg .. AiSuggestMsg). Replies
-// are correlated to the originating envelope's messageId via
-// correlateTo, not via the per-payload requestId.
+// One-shot SI envelopes (chat / suggest). Mirror MemqlClientMessage
+// oneof slots 18 and 21 (proto schema:
+// component/grpc/memql.proto::AiChatMsg, AiSuggestMsg). Replies are
+// correlated to the originating envelope's messageId via correlateTo,
+// not via the per-payload requestId.
 
 export interface AiChatMessageWire {
   role: string;
@@ -563,20 +515,6 @@ export interface AiChatPayload {
   messages: AiChatMessageWire[];
   provider?: string;
   stream?: boolean;
-}
-
-export interface AiSpeechPayload {
-  requestId: string;
-  input: string;
-  voice?: string;
-  format?: string; // "wav" | "mp3" | "ogg" | ...
-  provider?: string;
-}
-
-export interface AiTranscribePayload {
-  requestId: string;
-  audio: string; // base64-encoded bytes
-  mimeType?: string;
 }
 
 export interface AiSuggestPayload {
@@ -608,17 +546,10 @@ type ClientPayload =
   | { moduleDetail: ModuleDetailPayload }
   | { setPackEnabled: SetPackEnabledPayload }
   | { aiChat: AiChatPayload }
-  | { aiSpeech: AiSpeechPayload }
-  | { aiTranscribe: AiTranscribePayload }
   | { aiSuggest: AiSuggestPayload }
   | { aiTranscribeStreamStart: AiTranscribeStreamStartPayload }
   | { aiTranscribeStreamChunk: AiTranscribeStreamChunkPayload }
   | { aiTranscribeStreamEnd: AiTranscribeStreamEndPayload }
-  | { sendGuestInvite: SendGuestInvitePayload }
-  | { resolveGuestInvite: ResolveGuestInvitePayload }
-  | { joinSpaceAsGuest: JoinSpaceAsGuestPayload }
-  | { cancelGuestInvite: CancelGuestInvitePayload }
-  | { resendGuestInviteEmail: ResendGuestInviteEmailPayload }
   | { revokeCurrentSession: RevokeCurrentSessionPayload }
   | { revokeAllSessions: RevokeAllSessionsPayload }
   | { revokeSession: RevokeSessionPayload }
@@ -629,7 +560,6 @@ type ClientPayload =
   | { revokeWorkerToken: RevokeWorkerTokenPayload }
   | { createBadge: CreateBadgePayload }
   | { revokeBadge: RevokeBadgePayload }
-  | { polyphonRoomToken: PolyphonRoomTokenPayload }
   | { deployControl: DeployControlPayload }
   | { identityAdmin: IdentityAdminPayload }
   | { runAutomation: RunAutomationPayload }
@@ -643,8 +573,7 @@ type ClientPayload =
   | { listPackFiles: ListPackFilesPayload }
   | { readPackFile: ReadPackFilePayload }
   | { listTools: ListToolsPayload }
-  | { callTool: CallToolPayload }
-  | { clientToolResult: ClientToolResultPayload };
+  | { callTool: CallToolPayload };
 
 // Server-side payloads. Untyped `any`-shaped fields appear where the
 // engine returns `google.protobuf.Struct` -- those decode to plain
@@ -841,17 +770,6 @@ export interface AiChatResultPayload {
   message?: AiChatMessageWire | null;
 }
 
-export interface AiSpeechResultPayload {
-  requestId: string;
-  audio?: string; // base64-encoded bytes (protojson encoding of `bytes`)
-  format?: string;
-}
-
-export interface AiTranscribeResultPayload {
-  requestId: string;
-  text?: string;
-}
-
 export interface AiSuggestResultPayload {
   requestId: string;
   domain?: string;
@@ -875,53 +793,6 @@ export interface AiStreamChunkPayload {
 // Identity + access reply envelopes. errorCode carries a short
 // machine-readable tag on partial failures (empty = success); see
 // memql.proto for the per-message tag set.
-
-export interface SendGuestInviteResultPayload {
-  requestId: string;
-  success?: boolean;
-  invitationId?: string;
-  errorCode?: string;
-  errorMessage?: string;
-}
-
-export interface ResolveGuestInviteResultPayload {
-  requestId: string;
-  // "ok" | "invalid" | "expired" | "already_accepted" | "cancelled"
-  status?: string;
-  invitationId?: string;
-  spaceId?: string;
-  spaceName?: string;
-  inviterName?: string;
-  inviteeEmail?: string;
-  inviteeName?: string;
-  expiresAt?: string; // protojson timestamp -> ISO8601 string
-  errorMessage?: string;
-}
-
-export interface JoinSpaceAsGuestResultPayload {
-  requestId: string;
-  success?: boolean;
-  participantId?: string;
-  spaceId?: string;
-  errorCode?: string;
-  errorMessage?: string;
-}
-
-export interface CancelGuestInviteResultPayload {
-  requestId: string;
-  success?: boolean;
-  invitationId?: string;
-  errorCode?: string;
-  errorMessage?: string;
-}
-
-export interface ResendGuestInviteEmailResultPayload {
-  requestId: string;
-  success?: boolean;
-  invitationId?: string;
-  errorCode?: string;
-  errorMessage?: string;
-}
 
 export interface RevokeCurrentSessionResultPayload {
   requestId: string;
@@ -1428,24 +1299,12 @@ export interface ReadPackFileResultPayload {
   found?: boolean;
 }
 
-// expiresAt is int64 unix seconds -- protojson encodes int64 as
-// either string or number depending on the runtime. We accept both.
-export interface PolyphonRoomTokenResultPayload {
-  requestId: string;
-  token?: string;
-  roomName?: string;
-  livekitUrl?: string;
-  expiresAt?: string | number;
-}
-
-// MCP tool reply envelopes + the inbound ClientToolCall the server
-// pushes for client-execution tools.
+// MCP tool reply envelopes.
 
 export interface ToolDefinitionWire {
   name?: string;
   description?: string;
   inputSchema?: string; // JSON Schema (string)
-  clientExecution?: boolean;
   scopes?: string[];
 }
 
@@ -1459,20 +1318,6 @@ export interface CallToolResultPayload {
   requestId: string;
   content?: ToolResultContentWire[];
   isError?: boolean;
-}
-
-// ClientToolCall is INBOUND on the server message envelope. Carries
-// a per-call callId the consumer must echo back on its
-// ClientToolResult. timeoutMs is the budget the server is willing
-// to wait; the consumer should reply with isError=true rather than
-// timing out silently so the agent reasoning trace stays coherent.
-export interface ClientToolCallPayload {
-  callId: string;
-  turnId?: string;
-  agentId?: string;
-  toolName: string;
-  argumentsJson?: string;
-  timeoutMs?: number;
 }
 
 export interface GraphBundleWire {
@@ -1632,17 +1477,10 @@ type ServerPayload =
   | { setPackEnabledResult: SetPackEnabledResultPayload }
   | { rotateAuthResult: RotateAuthResultPayload }
   | { aiChatResult: AiChatResultPayload }
-  | { aiSpeechResult: AiSpeechResultPayload }
-  | { aiTranscribeResult: AiTranscribeResultPayload }
   | { aiSuggestResult: AiSuggestResultPayload }
   | { aiChunk: AiStreamChunkPayload }
   | { aiTranscribeStreamDelta: AiTranscribeStreamDeltaPayload }
   | { aiTranscribeStreamComplete: AiTranscribeStreamCompletePayload }
-  | { sendGuestInviteResult: SendGuestInviteResultPayload }
-  | { resolveGuestInviteResult: ResolveGuestInviteResultPayload }
-  | { joinSpaceAsGuestResult: JoinSpaceAsGuestResultPayload }
-  | { cancelGuestInviteResult: CancelGuestInviteResultPayload }
-  | { resendGuestInviteEmailResult: ResendGuestInviteEmailResultPayload }
   | { revokeCurrentSessionResult: RevokeCurrentSessionResultPayload }
   | { revokeAllSessionsResult: RevokeAllSessionsResultPayload }
   | { revokeSessionResult: RevokeSessionResultPayload }
@@ -1653,7 +1491,6 @@ type ServerPayload =
   | { revokeWorkerTokenResult: RevokeWorkerTokenResultPayload }
   | { createBadgeResult: CreateBadgeResultPayload }
   | { revokeBadgeResult: RevokeBadgeResultPayload }
-  | { polyphonRoomTokenResult: PolyphonRoomTokenResultPayload }
   | { deployControlResult: DeployControlResultPayload }
   | { identityAdminResult: IdentityAdminResultPayload }
   | { automationRunEvent: AutomationRunEventPayload }
@@ -1667,8 +1504,7 @@ type ServerPayload =
   | { listPackFilesResult: ListPackFilesResultPayload }
   | { readPackFileResult: ReadPackFileResultPayload }
   | { listToolsResult: ListToolsResultPayload }
-  | { callToolResult: CallToolResultPayload }
-  | { clientToolCall: ClientToolCallPayload };
+  | { callToolResult: CallToolResultPayload };
 
 // Narrow a ServerMessage to its single payload entry. Returns the
 // first present payload key + its value, or null when the envelope
@@ -1688,17 +1524,10 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "setPackEnabledResult"; value: SetPackEnabledResultPayload }
   | { kind: "rotateAuthResult"; value: RotateAuthResultPayload }
   | { kind: "aiChatResult"; value: AiChatResultPayload }
-  | { kind: "aiSpeechResult"; value: AiSpeechResultPayload }
-  | { kind: "aiTranscribeResult"; value: AiTranscribeResultPayload }
   | { kind: "aiSuggestResult"; value: AiSuggestResultPayload }
   | { kind: "aiChunk"; value: AiStreamChunkPayload }
   | { kind: "aiTranscribeStreamDelta"; value: AiTranscribeStreamDeltaPayload }
   | { kind: "aiTranscribeStreamComplete"; value: AiTranscribeStreamCompletePayload }
-  | { kind: "sendGuestInviteResult"; value: SendGuestInviteResultPayload }
-  | { kind: "resolveGuestInviteResult"; value: ResolveGuestInviteResultPayload }
-  | { kind: "joinSpaceAsGuestResult"; value: JoinSpaceAsGuestResultPayload }
-  | { kind: "cancelGuestInviteResult"; value: CancelGuestInviteResultPayload }
-  | { kind: "resendGuestInviteEmailResult"; value: ResendGuestInviteEmailResultPayload }
   | { kind: "revokeCurrentSessionResult"; value: RevokeCurrentSessionResultPayload }
   | { kind: "revokeAllSessionsResult"; value: RevokeAllSessionsResultPayload }
   | { kind: "revokeSessionResult"; value: RevokeSessionResultPayload }
@@ -1709,7 +1538,6 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "revokeWorkerTokenResult"; value: RevokeWorkerTokenResultPayload }
   | { kind: "createBadgeResult"; value: CreateBadgeResultPayload }
   | { kind: "revokeBadgeResult"; value: RevokeBadgeResultPayload }
-  | { kind: "polyphonRoomTokenResult"; value: PolyphonRoomTokenResultPayload }
   | { kind: "deployControlResult"; value: DeployControlResultPayload }
   | { kind: "identityAdminResult"; value: IdentityAdminResultPayload }
   | { kind: "automationRunEvent"; value: AutomationRunEventPayload }
@@ -1724,7 +1552,6 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "readPackFileResult"; value: ReadPackFileResultPayload }
   | { kind: "listToolsResult"; value: ListToolsResultPayload }
   | { kind: "callToolResult"; value: CallToolResultPayload }
-  | { kind: "clientToolCall"; value: ClientToolCallPayload }
   | null {
   const m = msg as unknown as Record<string, unknown>;
   if (m.serverHello) return { kind: "serverHello", value: m.serverHello as ServerHelloPayload };
@@ -1756,10 +1583,6 @@ export function readServerPayload(msg: ServerMessage):
     return { kind: "rotateAuthResult", value: m.rotateAuthResult as RotateAuthResultPayload };
   if (m.aiChatResult)
     return { kind: "aiChatResult", value: m.aiChatResult as AiChatResultPayload };
-  if (m.aiSpeechResult)
-    return { kind: "aiSpeechResult", value: m.aiSpeechResult as AiSpeechResultPayload };
-  if (m.aiTranscribeResult)
-    return { kind: "aiTranscribeResult", value: m.aiTranscribeResult as AiTranscribeResultPayload };
   if (m.aiSuggestResult)
     return { kind: "aiSuggestResult", value: m.aiSuggestResult as AiSuggestResultPayload };
   if (m.aiChunk)
@@ -1773,19 +1596,6 @@ export function readServerPayload(msg: ServerMessage):
     return {
       kind: "aiTranscribeStreamComplete",
       value: m.aiTranscribeStreamComplete as AiTranscribeStreamCompletePayload,
-    };
-  if (m.sendGuestInviteResult)
-    return { kind: "sendGuestInviteResult", value: m.sendGuestInviteResult as SendGuestInviteResultPayload };
-  if (m.resolveGuestInviteResult)
-    return { kind: "resolveGuestInviteResult", value: m.resolveGuestInviteResult as ResolveGuestInviteResultPayload };
-  if (m.joinSpaceAsGuestResult)
-    return { kind: "joinSpaceAsGuestResult", value: m.joinSpaceAsGuestResult as JoinSpaceAsGuestResultPayload };
-  if (m.cancelGuestInviteResult)
-    return { kind: "cancelGuestInviteResult", value: m.cancelGuestInviteResult as CancelGuestInviteResultPayload };
-  if (m.resendGuestInviteEmailResult)
-    return {
-      kind: "resendGuestInviteEmailResult",
-      value: m.resendGuestInviteEmailResult as ResendGuestInviteEmailResultPayload,
     };
   if (m.revokeCurrentSessionResult)
     return {
@@ -1816,11 +1626,6 @@ export function readServerPayload(msg: ServerMessage):
     return { kind: "createBadgeResult", value: m.createBadgeResult as CreateBadgeResultPayload };
   if (m.revokeBadgeResult)
     return { kind: "revokeBadgeResult", value: m.revokeBadgeResult as RevokeBadgeResultPayload };
-  if (m.polyphonRoomTokenResult)
-    return {
-      kind: "polyphonRoomTokenResult",
-      value: m.polyphonRoomTokenResult as PolyphonRoomTokenResultPayload,
-    };
   if (m.deployControlResult)
     return { kind: "deployControlResult", value: m.deployControlResult as DeployControlResultPayload };
   if (m.identityAdminResult)
@@ -1876,8 +1681,6 @@ export function readServerPayload(msg: ServerMessage):
     return { kind: "listToolsResult", value: m.listToolsResult as ListToolsResultPayload };
   if (m.callToolResult)
     return { kind: "callToolResult", value: m.callToolResult as CallToolResultPayload };
-  if (m.clientToolCall)
-    return { kind: "clientToolCall", value: m.clientToolCall as ClientToolCallPayload };
   return null;
 }
 
@@ -1927,13 +1730,11 @@ export function streamRequestId(msg: ServerMessage): string {
   // request_id -- accepted, then one per step, then exactly one complete --
   // so it routes here rather than through the single-reply `pending` map.
   if (m.automationRunEvent?.requestId) return m.automationRunEvent.requestId;
-  // Agent / voice-agent turn streaming: deltas then one complete. No browser
-  // consumer today; listed so the tables stay identical and the next consumer
-  // does not rediscover memql#3414 in this language too.
+  // Agent turn streaming: deltas then one complete. No browser consumer
+  // today; listed so the tables stay identical and the next consumer does
+  // not rediscover memql#3414 in this language too.
   if (m.agentGenerateTurnDelta?.requestId) return m.agentGenerateTurnDelta.requestId;
   if (m.agentGenerateTurnComplete?.requestId) return m.agentGenerateTurnComplete.requestId;
-  if (m.voiceAgentTurnDelta?.requestId) return m.voiceAgentTurnDelta.requestId;
-  if (m.voiceAgentTurnComplete?.requestId) return m.voiceAgentTurnComplete.requestId;
   // QueryResultChunk carries `done`: a chunked contract even though the engine
   // emits exactly one frame today. Costless for current callers, which use
   // sendAndWait and are served by correlateTo.

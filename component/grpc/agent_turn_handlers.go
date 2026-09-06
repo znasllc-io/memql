@@ -177,7 +177,7 @@ func (s *streamSession) handleAgentGenerateTurn(envelope *memqlv1.MemqlClientMes
 	// loop writes (utterances, tool side-effects) stamps the caller's
 	// provenance instead of a fresh agent-side default.
 	ctx = contextWithEnvelopeProvenance(ctx, envelope)
-	// engine.ExecuteTool can round-trip client_execution tools back to
+	// engine.ExecuteTool can round-trip tool calls back to
 	// the originating browser. Also attach the acting agent's
 	// guardrail role so engine.ExecuteTool can enforce
 	// Tool.AllowedRoles without re-reading envelope metadata.

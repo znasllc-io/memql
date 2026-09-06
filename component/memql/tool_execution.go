@@ -614,19 +614,9 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 		return nil, fmt.Errorf("tool %q is not allowed for caller role %q", tool.Name, callerRole)
 	}
 
-	// Client-executed tools declared their body in the connected browser and
-	// reached it over the client-tool relay. That relay went with the
-	// conversational product (epic memql#4988), so the flag can no longer be
-	// honoured -- and a tool that cannot run must say so rather than fall
-	// through to the no-handler branch below, whose message would blame a
-	// missing handler the author never owed.
-	if tool.ClientExecution {
-		return nil, fmt.Errorf("tool %q declares client execution, which is no longer a supported handler: the browser client-tool relay was removed with the cognition node", tool.Name)
-	}
-
-	// No handler and not client-executed: the tool cannot run. ValidateTool
-	// now refuses this at load (memql#3625), so reaching here means a tool
-	// built in Go rather than declared in `.memql`.
+	// No handler: the tool cannot run. ValidateTool refuses this at load
+	// (memql#3625), so reaching here means a tool built in Go rather than
+	// declared in `.memql`.
 	//
 	// IsError was FALSE here, which is the part that mattered: the streaming
 	// tool loop hands a non-error result to the model as the tool's
@@ -637,7 +627,7 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 		return &ToolCallResult{
 			IsError: true,
 			Content: []ToolResultContent{
-				{Type: "text", Text: fmt.Sprintf("Tool %q has no handler defined and is not client-executed -- it cannot be invoked", tool.Name)},
+				{Type: "text", Text: fmt.Sprintf("Tool %q has no handler defined -- it cannot be invoked", tool.Name)},
 			},
 		}, nil
 	}

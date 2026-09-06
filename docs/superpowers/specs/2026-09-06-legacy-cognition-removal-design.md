@@ -144,6 +144,79 @@ all go; `POST /artifacts` and its chunked-session family are untouched.
 "assets referenced by utterances", space-scoped and read by nothing -- does
 not.
 
+### D6 -- `@clientExecution` is REFUSED at parse, not ignored at runtime
+
+A client-executed tool declared its body in the connected browser and reached
+it over the client-tool relay (`integrations/cognition/client_tool_relay.go`),
+which went with the rest of cognition. The flag itself had four homes that
+outlived the relay: the parser, the AST, the runtime `Tool`, and
+`ToolDefinition.client_execution` on the wire.
+
+The first shape of this fix left the flag in place and refused it at CALL time
+on both paths. That is the wrong seam. The load gate's whole purpose is that
+"a tool must carry a handler" -- and `@clientExecution` was its ONE exemption,
+so a tool declaring the flag and no handler still loaded, was still advertised
+to the model, and failed only on the one call that reached it. The exemption
+is now gone and the annotation is an unknown one, which the parser already
+refuses by name. An author is told at boot instead of a user being told
+mid-turn.
+
+The wire field is `reserved 4; reserved "client_execution";` on
+`ToolDefinition`, and both SDKs lose their inbound halves --
+`registerClientToolHandler` in `sdk/ts` and the `ClientToolCall` dispatch
+documented in `sdk/go/client/tools.go`. **This is a wire-contract change the
+frontend can see**: `ToolDefinition.clientExecution` no longer appears in a
+`ListTools` reply. Nothing in this repo read it except the SDK mirrors.
+
+Two terminal markers in the agent tool loops went with it, in both the
+streaming and non-streaming loops: `CLIENT_TOOL_UNREACHABLE`, whose only
+emitter was the deleted `component/grpc/client_tool_failfast.go`, and
+`WHEEL_CONTESTED`, which its own comment sourced to "the frontend's
+ClientToolRelayBridge + requestControl primitive" for "a space that doesn't own
+the Control Session" -- a bridge, a primitive and a concept that are all gone.
+Both were substring matches against arbitrary tool output, so neither would
+ever have failed a test; they would simply never have fired again.
+
+### D7 -- The `guest` WebSocket credential scheme goes, because nothing can mint one
+
+D4 removed the guest invitation. The TRANSPORT that carried a guest token
+outlived it in five places: the `guest` subprotocol scheme and its negotiation
+in `component/auth/ws_subprotocol.go`, the `?guest_token=` query parameter and
+the subprotocol branch in `component/server/memqlws/handler.go`, and the
+`auth.guestToken` dial option in `sdk/ts`.
+
+It failed CLOSED -- no interceptor validated `Authorization: Guest`, so such a
+stream reached the identity verifier and was rejected -- which is precisely why
+it survived a green build. What it cost was honesty: an SDK dial option and a
+negotiated subprotocol advertise a credential the cluster stopped accepting,
+and a browser offering an unnegotiated subprotocol aborts the handshake with no
+usable error.
+
+`v1:identity:invitation.kind` also moved its `@default` from `guest` to `user`.
+The enum keeps both values so rows already written read back, but `guest` is
+now a value nothing writes and no redeem path finds, and a default is a
+statement about what the next row should be.
+
+### D8 -- One DSL-visible `config.` key goes, and it is the only contract here a product bundle could hold
+
+`config.voiceProvider` was in `PolicyExposableConfig`, so any `.memql` body
+could read it. Every other removal in this epic is either engine-internal or a
+wire message a client would have to have been sent; this one is a name a
+product DSL bundle mounted at `MEMQL_DSL_PATH` could reference without this
+repository ever seeing it, and the failure would land at that bundle's strict
+boot rather than here.
+
+It goes anyway. It answered "which voice provider serves `/memql/audio`", a
+route and a decision that no longer exist, so keeping the key would mean
+keeping a value nothing computes -- and a config read that resolves to a stale
+constant is worse than one that refuses. `MEMQL_POLYPHON_VOICE_PROVIDER`, the
+env var behind it, and `ConfigSnapshot.polyphon_voice_provider`, the bus field,
+go with it (the field number and name `reserved`, following
+`polyphon_bridge_agent_url` in the same message).
+
+No other `config.` key is removed, and no reader exists anywhere in this repo,
+`examples/` included.
+
 ---
 
 ## 2. What was deliberately left alone

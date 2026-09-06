@@ -8,10 +8,18 @@ import (
 
 // Audio pipeline sample rate constants.
 const (
-	// PolyphonSampleRate is the standard sample rate used by the Polyphon pipeline
-	// (LiveKit audio tracks, ASR providers, TTS consumers). All providers must
-	// convert to/from this rate.
-	PolyphonSampleRate = 16000
+	// WireSampleRate is the PCM16 rate the engine's audio wire carries: what a
+	// browser sends on AiTranscribeStreamChunk and what an ASR provider is
+	// handed. Providers convert to/from this rate.
+	//
+	// It was PolyphonSampleRate, after the voice transport that set it. That
+	// transport went with the voice node (epic memql#4988) and streaming
+	// transcription outlived it, so the rate is now named for the wire rather
+	// than for a pipeline nothing runs. The operator-facing env vars keep
+	// their MEMQL_POLYPHON_* spelling deliberately -- those are set in live
+	// deployments and renaming them would be a breaking change for a cosmetic
+	// gain, which is the opposite trade to this one.
+	WireSampleRate = 16000
 
 	// OpenAISampleRate is PCM16 24kHz mono (OpenAI Realtime API).
 	OpenAISampleRate = 24000

@@ -1,15 +1,10 @@
-// Mock-dispatcher tests for the tools surface: listTools / callTool
-// (outbound) and registerClientToolHandler (inbound dispatch).
+// Mock-dispatcher tests for the outbound tools surface: listTools /
+// callTool.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import { listTools, callTool } from "../src/tools/outbound.js";
-import {
-  registerClientToolHandler,
-  type ClientToolCall,
-  type ClientToolResult,
-} from "../src/tools/inbound.js";
 import type { Dispatcher } from "../src/client/dispatcher.js";
 import type { ClientMessage, ServerMessage } from "../src/client/wire.js";
 
@@ -102,8 +97,8 @@ test("listTools -- happy path returns the catalog + cursor", async () => {
     listToolsResult: {
       requestId: mock.lastRequestId(),
       tools: [
-        { name: "uiClick", description: "Click", inputSchema: "{}", clientExecution: true, scopes: ["highlight"] },
-        { name: "createSpace", description: "Make a space", inputSchema: "{}", clientExecution: false, scopes: ["create"] },
+        { name: "uiClick", description: "Click", inputSchema: "{}", scopes: ["highlight"] },
+        { name: "createSpace", description: "Make a space", inputSchema: "{}", scopes: ["create"] },
       ],
       nextCursor: "page-2",
     },
@@ -111,7 +106,6 @@ test("listTools -- happy path returns the catalog + cursor", async () => {
   const r = await promise;
   assert.equal(r.tools.length, 2);
   assert.equal(r.tools[0]!.name, "uiClick");
-  assert.equal(r.tools[0]!.clientExecution, true);
   assert.deepEqual(r.tools[0]!.scopes, ["highlight"]);
   assert.equal(r.nextCursor, "page-2");
 });
@@ -180,7 +174,3 @@ test("callTool -- rejects missing name", async () => {
   const mock = new MockDispatcher();
   await assert.rejects(() => callTool(mock.asDispatcher(), { name: "" }), /name is required/);
 });
-
-// ---------------------------------------------------------------------
-// registerClientToolHandler -- inbound dispatch
-// ---------------------------------------------------------------------

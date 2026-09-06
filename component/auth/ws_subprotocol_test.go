@@ -28,10 +28,12 @@ func TestWebSocketSubprotocolCredential(t *testing.T) {
 			wantCred:   "eyJhbGciOiJSUzI1NiJ9.e30.sig",
 		},
 		{
-			name:       "guest pair",
-			req:        reqWithProtocols("guest, invite-token-abc"),
-			wantScheme: "guest",
-			wantCred:   "invite-token-abc",
+			// `guest` carried an invitation token and went with the
+			// conversational product (epic memql#4988). It is now an unknown
+			// scheme, and this case is here so a re-added one is a decision
+			// rather than an accident.
+			name: "retired guest pair reads as unknown",
+			req:  reqWithProtocols("guest, invite-token-abc"),
 		},
 		{
 			name:       "pair split across two header lines",
@@ -75,7 +77,7 @@ func TestWebSocketSubprotocolCredential(t *testing.T) {
 
 func TestWSNegotiableSubprotocols(t *testing.T) {
 	got := WSNegotiableSubprotocols()
-	if len(got) != 2 || got[0] != WSCredentialSchemeBearer || got[1] != WSCredentialSchemeGuest {
-		t.Errorf("WSNegotiableSubprotocols() = %v, want [bearer guest]", got)
+	if len(got) != 1 || got[0] != WSCredentialSchemeBearer {
+		t.Errorf("WSNegotiableSubprotocols() = %v, want [bearer]", got)
 	}
 }

@@ -125,13 +125,13 @@ export interface InvitationRow {
    * The client this invitation is on behalf of (epic memql#4800, D5), or ""
    * for an invitation nobody tied.
    *
-   * Written by the GUEST path -- `SendGuestInviteMsg` threads it to
-   * `createGuestInvitation` -- so a `kind=="user"` row, which is what this
-   * app's list holds, does not carry one today. It is projected and rendered
-   * anyway rather than left out: `invitationAdminSummary` is the shape BOTH
-   * kinds are read through, the field is on the concept for both, and a
-   * surface that displayed it only after somebody remembered to add it is a
-   * surface that would have quietly shown nothing.
+   * Written by the GUEST path, which went with the conversational product
+   * (epic memql#4988), so nothing writes one today and every row this app's
+   * list holds is `kind=="user"`. It is projected and rendered anyway rather
+   * than left out: guest rows already written still read back through
+   * `invitationAdminSummary`, the field is on the concept, and a surface that
+   * displayed it only after somebody remembered to add it is a surface that
+   * would have quietly shown nothing.
    */
   accountId: string;
   createdAt: string;

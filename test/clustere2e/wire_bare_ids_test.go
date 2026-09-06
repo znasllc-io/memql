@@ -2,7 +2,7 @@
 
 // Cross-node bare-ids contract (#2441, WS-A A2).
 //
-// Seam 3 (event egress) crosses the node mesh: an utterance created on the bff
+// Seam 3 (event egress) crosses the node mesh: a row created on the bff
 // replica a producer connection landed on is fanned out (durable backbone) to
 // subscribers anchored on OTHER replicas. The bare-ids invariant says the
 // canonical `{concept}:{shortId}` id stays inside the process boundary and
@@ -11,6 +11,12 @@
 // subscriber (very likely on a different replica than the producer, since
 // connCount connections round-robin across replicas) receives the created-row
 // event carrying a BARE id, never a canonical one.
+//
+// The row is a v1:planner:plan rather than the v1:cognition:utterance this
+// suite used to drive, because cognition is deleted (memql#4988). The seam is
+// concept-agnostic by construction -- bare-ification happens on egress, not
+// per concept -- so the swap costs the assertion nothing; see the package
+// comment in delivery_test.go.
 //
 // Gated on MEMQL_E2E_TOKEN like the rest of the suite -- runs under
 // `make cluster-e2e`, skips otherwise.
@@ -24,7 +30,6 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/core/id"
-	memqlclient "github.com/znasllc-io/memql/sdk/go/client"
 )
 
 // bareID strips a canonical `{concept}:` prefix to the trailing bare short id,
@@ -64,32 +69,23 @@ func TestClusterCrossReplicaBareIds(t *testing.T) {
 	}()
 	producer := conns[0]
 
-	spaceID, participantID := newSpaceWithHuman(ctx, t, producer, userIDFromToken(t, tok))
-	t.Logf("opened %d connections (round-robined across bff replicas); space %s", len(conns), spaceID)
+	userID := userIDFromToken(t, tok)
+	scope := newProbeScope()
+	t.Logf("opened %d connections (round-robined across bff replicas); scope %s", len(conns), scope)
 
-	// Every connection opens the space + subscribes before producing, then the
-	// subscriptions settle so the insert isn't raced.
+	// Every connection subscribes before producing, then the subscriptions
+	// settle so the insert isn't raced.
 	chans := make([]<-chan string, len(conns))
 	for i, c := range conns {
-		openSpaceOnConn(ctx, t, c, spaceID, userIDFromToken(t, tok))
-		chans[i] = subscribeUtterances(ctx, t, c, spaceID)
+		chans[i] = subscribePlans(ctx, t, c)
 	}
 	time.Sleep(1500 * time.Millisecond)
 
-	// Produce one utterance with a BARE mint (the bare-ids client contract:
+	// Produce one plan with a BARE mint (the bare-ids client contract:
 	// clients send bare shortIds; the engine resolves them server-side).
 	shortID := id.NewShortId()
-	qc := memqlclient.NewQueryClient(producer.Dispatcher())
-	if _, err := qc.SendTextUtterance(ctx, memqlclient.SendTextUtteranceArgs{
-		UtteranceId:     shortID,
-		PartitionId:     spaceID,
-		ParticipantId:   participantID,
-		ParticipantType: "human",
-		Text:            "clustere2e cross-replica bare-id probe",
-	}); err != nil {
-		t.Fatalf("send utterance: %v", err)
-	}
-	t.Logf("produced utterance with bare mint %s", shortID)
+	createProbePlan(ctx, t, producer, scope, shortID, "clustere2e cross-replica bare-id probe", userID)
+	t.Logf("produced plan with bare mint %s", shortID)
 
 	// Collect observations. EVERY id a subscriber receives -- including one
 	// anchored on a different replica than the producer -- must be bare, and
@@ -104,12 +100,12 @@ func TestClusterCrossReplicaBareIds(t *testing.T) {
 			drained := false
 			for _, ch := range chans {
 				select {
-				case uid := <-ch:
+				case pid := <-ch:
 					drained = true
-					if isCanonicalID(uid) {
-						t.Errorf("cross-node subscriber received a CANONICAL id %q -- seam 3 must deliver bare shortIds to clients", uid)
+					if isCanonicalID(pid) {
+						t.Errorf("cross-node subscriber received a CANONICAL id %q -- seam 3 must deliver bare shortIds to clients", pid)
 					}
-					if uid == shortID {
+					if pid == shortID {
 						observations++
 					}
 				default:
@@ -122,7 +118,7 @@ func TestClusterCrossReplicaBareIds(t *testing.T) {
 	}
 
 	if observations == 0 {
-		t.Fatalf("no subscriber observed the bare-id utterance %s -- delivery or bare-ification regressed", shortID)
+		t.Fatalf("no subscriber observed the bare-id plan %s -- delivery or bare-ification regressed", shortID)
 	}
 	t.Logf("cross-replica bare-id delivery confirmed: %d observations, all bare", observations)
 }

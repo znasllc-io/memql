@@ -287,10 +287,13 @@ func TestMetadataFromRequest_CredentialPrecedence(t *testing.T) {
 	r.Header.Set("Sec-WebSocket-Protocol", "bearer, fromsubprotocol")
 	require.Equal(t, "Bearer fromsubprotocol", get(metadataFromRequest(r)))
 
-	// Subprotocol guest maps to the Guest scheme.
+	// `guest` was the invitation-token scheme and went with the
+	// conversational product (epic memql#4988). An offer naming it is now an
+	// unknown scheme, and an unknown scheme carries nothing -- rather than
+	// falling through to a header the chain would then have to reject.
 	r = httptest.NewRequest(http.MethodGet, "/memql/ws", nil)
 	r.Header.Set("Sec-WebSocket-Protocol", "guest, invite-abc")
-	require.Equal(t, "Guest invite-abc", get(metadataFromRequest(r)))
+	require.Equal(t, "", get(metadataFromRequest(r)))
 
 	// Deprecated query params still work when nothing else is present.
 	r = httptest.NewRequest(http.MethodGet, "/memql/ws?bearer_token=fromquery", nil)
@@ -298,7 +301,7 @@ func TestMetadataFromRequest_CredentialPrecedence(t *testing.T) {
 	r = httptest.NewRequest(http.MethodGet, "/memql/ws?token=legacy", nil)
 	require.Equal(t, "Bearer legacy", get(metadataFromRequest(r)))
 	r = httptest.NewRequest(http.MethodGet, "/memql/ws?guest_token=ginvite", nil)
-	require.Equal(t, "Guest ginvite", get(metadataFromRequest(r)))
+	require.Equal(t, "", get(metadataFromRequest(r)))
 }
 
 // TestHandlerNegotiatesBearerSubprotocol dials the bridge the way a browser

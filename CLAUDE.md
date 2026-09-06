@@ -1750,8 +1750,12 @@ tool searchUsers {
   `method`) and `type` is required. `@rateLimit` is closed the same way, and a
   non-integer value is refused.
 - **The handler is validated at load** -- unknown type, missing function name /
-  query / URL -- and a tool must carry a handler at all unless it is
-  `@clientExecution` (whose body lives in the browser).
+  query / URL -- and a tool must carry a handler at all. There is no
+  exception: `@clientExecution` put a tool's body in the connected browser and
+  reached it over the client-tool relay, and both went with the conversational
+  product (epic memql#4988). The annotation is now REFUSED at parse, so an
+  author who writes it is told, rather than getting a tool that loads, is
+  advertised to the model, and fails on the one call that reaches it.
 - **The handler's TARGET is resolved** against the function + builtin registry
   at boot (`tool_handler_resolution.go`), so a handler naming a function that
   does not exist is a load problem strict boot refuses, not a mid-turn failure.

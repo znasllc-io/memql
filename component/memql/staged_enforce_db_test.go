@@ -22,9 +22,9 @@ package memql
 // marked and the unmarked reading. The marker is in-memory engine state, and
 // the first test clears it in normal flow rather than in a t.Cleanup, so on a
 // shared engine one mid-test assertion failure would strand the mark and hide
-// v1:cognition:utterance rows from every borrower after it. Skips when no DB
-// is reachable, like every other _db_ test in this package. Each test carries
-// a per-process unique createdBy scope so concurrent runs never collide, and
+// v1:planner:task rows from every borrower after it. Skips when no DB is
+// reachable, like every other _db_ test in this package. Each test carries a
+// per-process unique createdBy scope so concurrent runs never collide, and
 // nothing truncates.
 
 import (
@@ -43,9 +43,12 @@ import (
 // The two concepts the fixtures move rows between. Both are real, registered
 // concepts -- the read-isolation check in compileConceptComparison rejects an
 // unregistered concept on the `==` arm, so a made-up name could not be queried.
+// Both are also ungated (neither declares an @rowAuthz tier), so a row that
+// does not come back was withheld for the reason under test rather than
+// because the actor was never admitted to it in the first place.
 const (
-	stagedDBConceptStaged = "v1:cognition:utterance"
-	stagedDBConceptLive   = "v1:cognition:participant"
+	stagedDBConceptStaged = "v1:planner:task"
+	stagedDBConceptLive   = "v1:planner:plan"
 )
 
 // seedStagedRow inserts ONE append-only version directly, so the fixture

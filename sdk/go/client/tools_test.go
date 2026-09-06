@@ -51,17 +51,15 @@ func TestListTools_RoundTrip(t *testing.T) {
 				NextCursor: "page-3",
 				Tools: []*memqlv1.ToolDefinition{
 					{
-						Name:            "uiClick",
-						Description:     "click a DOM element",
-						InputSchema:     `{"type":"object"}`,
-						ClientExecution: true,
-						Scopes:          []string{"interact"},
+						Name:        "uiClick",
+						Description: "click a DOM element",
+						InputSchema: `{"type":"object"}`,
+						Scopes:      []string{"interact"},
 					},
 					{
-						Name:            "queryActiveSpaces",
-						Description:     "server-side query",
-						InputSchema:     `{"type":"object"}`,
-						ClientExecution: false,
+						Name:        "queryActiveSpaces",
+						Description: "server-side query",
+						InputSchema: `{"type":"object"}`,
 					},
 				},
 			},
@@ -79,14 +77,14 @@ func TestListTools_RoundTrip(t *testing.T) {
 		if len(got.res.Tools) != 2 {
 			t.Fatalf("tools: want 2, got %d", len(got.res.Tools))
 		}
-		if got.res.Tools[0].Name != "uiClick" || !got.res.Tools[0].ClientExecution {
+		if got.res.Tools[0].Name != "uiClick" {
 			t.Errorf("tool[0] mismatched: %+v", got.res.Tools[0])
 		}
 		if got.res.Tools[0].Scopes[0] != "interact" {
 			t.Errorf("scopes not carried: %+v", got.res.Tools[0].Scopes)
 		}
-		if got.res.Tools[1].ClientExecution {
-			t.Errorf("tool[1] should be server-executed")
+		if got.res.Tools[1].Name != "queryActiveSpaces" {
+			t.Errorf("tool[1] mismatched: %+v", got.res.Tools[1])
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for ListTools to return")

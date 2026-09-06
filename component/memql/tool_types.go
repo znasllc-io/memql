@@ -34,12 +34,6 @@ type Tool struct {
 	// Annotations provides hints about tool behavior.
 	Annotations *ToolAnnotations `json:"annotations,omitempty"`
 
-	// ClientExecution, when true, tells the server to emit a
-	// ClientToolCall envelope on the stream and await a matching
-	// ClientToolResult instead of executing the handler locally. Used
-	// by tools that affect browser UI (the pack's operator primitives).
-	ClientExecution bool `json:"clientExecution,omitempty"`
-
 	// MCPExposed, when true, opts this tool into the curated MCP
 	// connector surface (memql#1596). The MCP node's tools/list reflects
 	// only MCPExposed tools once ANY tool carries the flag; with zero
@@ -161,7 +155,6 @@ func (t *Tool) clone() *Tool {
 	cloned := &Tool{
 		Name:            t.Name,
 		Description:     t.Description,
-		ClientExecution: t.ClientExecution,
 		MCPExposed:      t.MCPExposed,
 		Origin:          t.Origin,
 	}
@@ -409,20 +402,17 @@ func ValidateTool(tool *Tool) error {
 		return fmt.Errorf("tool %q: inputSchema is not valid JSON: %w", tool.Name, err)
 	}
 
-	// A tool needs SOMETHING to execute (memql#3625). The one exception is
-	// a client-executed tool: its body lives in the connected browser, and
-	// ExecuteTool routes to the ClientToolInvoker before it ever reads
-	// tool.Handler.
+	// A tool needs SOMETHING to execute (memql#3625). There is no longer an
+	// exception: @clientExecution put a tool's body in the connected browser
+	// and reached it over the client-tool relay, which went with the
+	// conversational product (epic memql#4988).
 	//
 	// Without this, a tool declaring no handler at all registered fine and
 	// was advertised to the model, which then received
 	// `Tool %q has no handler defined` as its RESULT -- see the
 	// IsError:true fix at the same call site.
 	if tool.Handler == nil {
-		if tool.ClientExecution {
-			return nil
-		}
-		return fmt.Errorf("tool %q: a handler is required (@handler(type=...)) unless the tool is @clientExecution -- a tool with neither has no way to execute, but is still advertised to the model", tool.Name)
+		return fmt.Errorf("tool %q: a handler is required (@handler(type=...)) -- a tool without one has no way to execute, but is still advertised to the model", tool.Name)
 	}
 
 	return validateToolHandler(tool.Name, tool.Handler)

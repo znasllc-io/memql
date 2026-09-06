@@ -121,8 +121,6 @@ func (a *App) transportBase() {
 	//   pair-aware    -- Authorization: Pair <code> redeems a
 	//                   worker pairing code without an existing
 	//                   JWT. Falls through on any other scheme.
-	//   guest-aware   -- Authorization: Guest <token> admits an
-	//                   invitation-bearing visitor.
 	//   session-revocation -- looks up the bearer's tokenHash in
 	//                   v1:identity:authSession and rejects
 	//                   revoked tokens.

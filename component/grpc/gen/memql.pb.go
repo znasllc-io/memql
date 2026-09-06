@@ -4155,12 +4155,6 @@ type ToolDefinition struct {
 	Description string `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
 	// JSON Schema describing the tool's input parameters (as JSON string)
 	InputSchema string `protobuf:"bytes,3,opt,name=input_schema,json=inputSchema,proto3" json:"input_schema,omitempty"`
-	// When true, the tool is executed by the connected client (not the
-	// backend). Client-executed tools were removed with the browser relay
-	// they rode on (epic memql#4988); the flag is reserved on the wire
-	// locally. Used by the product's Operator primitive (ui.*, space.*,
-	// agent.updateSelf) where the tool affects the browser UI.
-	ClientExecution bool `protobuf:"varint,4,opt,name=client_execution,json=clientExecution,proto3" json:"client_execution,omitempty"`
 	// Optional scopes the tool requires (e.g. "read", "navigate",
 	// "highlight", "create", "update", "delete", "identity", "billing").
 	// The caller's granted scope set must be a superset before dispatch.
@@ -4220,13 +4214,6 @@ func (x *ToolDefinition) GetInputSchema() string {
 		return x.InputSchema
 	}
 	return ""
-}
-
-func (x *ToolDefinition) GetClientExecution() bool {
-	if x != nil {
-		return x.ClientExecution
-	}
-	return false
 }
 
 func (x *ToolDefinition) GetScopes() []string {
@@ -17448,13 +17435,12 @@ const file_memql_proto_rawDesc = "" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x126\n" +
 	"\x05tools\x18\x02 \x03(\v2 .znasllc.memql.v1.ToolDefinitionR\x05tools\x12\x1f\n" +
 	"\vnext_cursor\x18\x03 \x01(\tR\n" +
-	"nextCursor\"\xac\x01\n" +
+	"nextCursor\"\x99\x01\n" +
 	"\x0eToolDefinition\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12!\n" +
-	"\finput_schema\x18\x03 \x01(\tR\vinputSchema\x12)\n" +
-	"\x10client_execution\x18\x04 \x01(\bR\x0fclientExecution\x12\x16\n" +
-	"\x06scopes\x18\x05 \x03(\tR\x06scopes\"w\n" +
+	"\finput_schema\x18\x03 \x01(\tR\vinputSchema\x12\x16\n" +
+	"\x06scopes\x18\x05 \x03(\tR\x06scopesJ\x04\b\x04\x10\x05R\x10client_execution\"w\n" +
 	"\vCallToolMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x12\n" +

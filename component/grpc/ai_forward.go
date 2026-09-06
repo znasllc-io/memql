@@ -859,6 +859,13 @@ func nodeTargetForCallTool() node.NodeType  { return node.NodeTypeAgent }
 // caller of the streaming-transcription family that survives.
 func nodeTargetForTranscribe() node.NodeType { return node.NodeTypeAgent }
 
+// TranscriptionNodeType exports the streaming-transcription target so app/ can
+// assert that the node it names is the one whose transport wires an
+// stt.StreamingProvider. The two halves live in packages that cannot import
+// each other, and when they disagree the mic opens and no transcript arrives
+// with nothing in the logs naming a cause (epic memql#4988).
+func TranscriptionNodeType() node.NodeType { return nodeTargetForTranscribe() }
+
 // shouldProxyAI reports whether an AI handler should short-circuit
 // to the forwarder rather than executing locally. True when:
 //   - an AiForwardRouter is installed (BFF binary with at least one
@@ -874,11 +881,36 @@ func (s *streamSession) shouldProxyAI(target node.NodeType) bool {
 	if node.CompiledNodeType() != node.NodeTypeBFF {
 		return false
 	}
-	// Don't engage the forwarder if no peer of the target type is
-	// visible yet. Let the local handler produce its usual
-	// "provider unavailable" error instead of a less-friendly
-	// "no X node available" proxy error.
-	return len(s.service.aiForwarder.peerMgr.ByType(target)) > 0
+	// Don't engage the forwarder if no peer of the target type can actually
+	// be dispatched to. Let the local handler produce its usual "provider
+	// unavailable" error instead of a less-friendly "no X node available"
+	// proxy error.
+	//
+	// DISPATCHABLE, not merely present (epic memql#4988). This counted rows in
+	// the peer table, which selectPeer then rejects for Connection==nil -- dead
+	// pods left there after a rollout keep a HEALTHY status from their last DB
+	// heartbeat (#1056). In that window the check passed, the forward failed,
+	// and the caller got the topology sentence this function exists to avoid.
+	// It is a narrow window and it lands on the worst surface: streaming
+	// transcription is a person holding a key down to dictate, and "no agent
+	// node available" names neither what failed for them nor a fix.
+	return s.service.aiForwarder.hasDispatchablePeer(target)
+}
+
+// hasDispatchablePeer reports whether selectPeer would find a target -- a peer
+// of this type with a LIVE outbound connection. Kept beside selectPeer so the
+// two answers cannot drift; a predicate that disagreed with the selector would
+// reintroduce exactly the window it exists to close.
+func (r *AiForwardRouter) hasDispatchablePeer(targetType node.NodeType) bool {
+	if r == nil || r.peerMgr == nil {
+		return false
+	}
+	for _, p := range r.peerMgr.ByType(targetType) {
+		if p != nil && p.Info != nil && p.Connection != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // proxyAI forwards the original envelope to a worker peer and streams

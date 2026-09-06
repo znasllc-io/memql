@@ -159,7 +159,6 @@ func TestUpdateMyPreferences_RefusesOutOfContractValues(t *testing.T) {
 		{"rollover action outside its enum", map[string]any{"dailySpaceRolloverAction": "shred"}},
 		{"takeover mode outside its enum", map[string]any{"takeoverMode": "strobe"}},
 		{"interactive pace outside its enum", map[string]any{"interactivePace": "instant"}},
-		{"voice mode outside its enum", map[string]any{"voiceMode": "telepathy"}},
 		{"cursor tween below the range", map[string]any{"cursorTweenMs": 10}},
 		{"cursor tween above the range", map[string]any{"cursorTweenMs": 9999}},
 		{"retention below the documented window", map[string]any{"archiveRetentionDays": 7}},

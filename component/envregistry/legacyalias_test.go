@@ -35,8 +35,8 @@ func TestApplyLegacyEnvAliases_NewWins(t *testing.T) {
 }
 
 func TestApplyLegacyEnvAliases_Idempotent(t *testing.T) {
-	const newName = "MEMQL_ANAM_API_KEY"
-	const legacy = "ANAM_API_KEY"
+	const newName = "MEMQL_ANTHROPIC_API_KEY"
+	const legacy = "ANTHROPIC_API_KEY"
 	os.Unsetenv(newName)
 	t.Setenv(legacy, "k1")
 

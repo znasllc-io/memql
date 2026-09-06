@@ -61,14 +61,14 @@ func runObjectLiteralReturn(t *testing.T, e *Env) {
 	src := `logic objLitReturnProbe {
   args { event object @required }
   body {
-    found := query participantSession(participantId: args.event.payload.id)
+    found := query workspaceForPlan(planId: args.event.payload.id)
     return { wasEmpty: found.empty(), pid: args.event.payload.id, lit: "constant" }
   }
 }`
 	body := parseLogicForTest(t, src)
 	runner := automations.NewLogicRunner(e.Eng, automationSteps.NewRegistry(), e.Eng.Logger)
 	out, err := runner.RunLogic(e.Ctx, "objLitReturnProbe", body,
-		map[string]any{"event": map[string]any{"payload": map[string]any{"id": "v1:cognition:participant:objlit-2274"}}})
+		map[string]any{"event": map[string]any{"payload": map[string]any{"id": "v1:planner:plan:objlit-2274"}}})
 	if err != nil {
 		t.Fatalf("#2274: RunLogic failed (object-literal return not handled): %v", err)
 	}
@@ -79,7 +79,7 @@ func runObjectLiteralReturn(t *testing.T, e *Env) {
 	if m["lit"] != "constant" {
 		t.Errorf("#2274: lit = %#v, want \"constant\"", m["lit"])
 	}
-	if m["pid"] != "v1:cognition:participant:objlit-2274" {
+	if m["pid"] != "v1:planner:plan:objlit-2274" {
 		t.Errorf("#2274: pid = %#v, want the event id (arg ref did not resolve)", m["pid"])
 	}
 	if m["wasEmpty"] != true {

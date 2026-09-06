@@ -348,8 +348,9 @@ func TestReadMerge_DeleteRecord_PreservesOmittedFields(t *testing.T) {
 	p := latestPayload(t, ctx, db, conceptName, storedId)
 	require.Equal(t, false, p["active"], "delete must flip active=false")
 	// Omitted required fields inherited from the prior row (the #1628 fix).
-	// Compare against the before-snapshot so engine-side canonicalization of
-	// FK fields (partitionId -> v1:cognition:space:...) doesn't trip the test.
+	// Compare against the before-snapshot rather than against the literals
+	// passed in, so that any engine-side normalization of a field on the way in
+	// is compared like with like instead of tripping the test.
 	require.Equal(t, before["label"], p["label"])
 	require.Equal(t, before["recordType"], p["recordType"])
 	require.Equal(t, before["partitionId"], p["partitionId"])
@@ -425,58 +426,17 @@ func TestReadMerge_UpdateNodeHealth_PreservesAddress(t *testing.T) {
 // insert{} to update{}). #1709 moves the read-merge into the ONE engine
 // chokepoint (executeWrite, shared by executeInsert + executeUpdate) so a
 // write onto an existing id read-merges REGARDLESS of whether the mutation
-// was authored as insert{} or update{}. The two regressions the issue lists
-// (leaveSpace, revokeDelegation) are still authored as
-// insert{} with a partial payload -- they are NOT hand-converted; the engine
-// change is the canonical fix. Plus a concept-agnostic proof that a raw
-// insert() onto an existing id now read-merges.
+// was authored as insert{} or update{} -- the mutations are NOT hand-converted;
+// the engine change is the canonical fix.
+//
+// The issue listed two regressions, leaveSpace and revokeDelegation. leaveSpace
+// went with the legacy cognition tree, so what remains is revokeDelegation
+// plus -- and this is the load-bearing half -- the concept-agnostic proof that
+// a RAW insert() onto an existing id read-merges. That one is what covers the
+// authored-as-insert{} arm now: it reaches the same executeWrite chokepoint a
+// named insert{} mutation does, without depending on any particular mutation
+// staying in the tree.
 // ---------------------------------------------------------------------------
-
-// TestReadMerge_LeaveSpace_PreservesParticipantFields is the Run-4 regression
-// for leaveSpace (dsl/cognition/mutations.memql): authored as
-// `insert { id: args.participantId; args.payload }`. A minimal leave payload
-// (status=left + leftAt) used to reject with
-// `” does not validate ... missing 'displayName','participantType','partitionId'`.
-// With the engine-level read-merge (memql#1709) the partial merges onto the
-// stored participant row: status flips to left while displayName /
-// participantType / partitionId / agentId / forUserId are inherited.
-func TestReadMerge_LeaveSpace_PreservesParticipantFields(t *testing.T) {
-	eng, db, ctx := sharedReadMergeEngine(t)
-	const conceptName = "v1:cognition:participant"
-
-	// Seed an AI participant under the elevated system actor. The id is
-	// content-addressed on (agentId, partitionId), so capture the stored id the
-	// create returns and target the leave at exactly that row.
-	storedId := runMutation(t, ctx, eng, "joinSpaceAsAI", map[string]any{
-		"partitionId": "space-" + uniqueSuffix("leave"),
-		"agentId":     "agent-" + uniqueSuffix("leave"),
-		"displayName": "Faye",
-		"forUserId":   "user-1709",
-	})
-	before := latestPayload(t, ctx, db, conceptName, storedId)
-	require.Equal(t, "active", before["status"], "seed participant starts active")
-
-	// The fix: MINIMAL leave -- only status + leftAt, NO displayName /
-	// participantType / partitionId. Before #1709 this rejected as
-	// "missing properties"; now it read-merges.
-	runMutation(t, ctx, eng, "leaveSpace", map[string]any{
-		"participantId": storedId,
-		"payload": map[string]any{
-			"status": "left",
-			"leftAt": "2026-06-18T01:00:00Z",
-		},
-	})
-
-	p := latestPayload(t, ctx, db, conceptName, storedId)
-	require.Equal(t, "left", p["status"], "status must flip to left")
-	require.Equal(t, "2026-06-18T01:00:00Z", p["leftAt"], "leftAt must be stamped")
-	// Omitted required + identity fields inherited from the prior row.
-	require.Equal(t, before["displayName"], p["displayName"], "displayName preserved (memql#1709)")
-	require.Equal(t, before["participantType"], p["participantType"], "participantType preserved (memql#1709)")
-	require.Equal(t, before["partitionId"], p["partitionId"], "partitionId preserved (memql#1709)")
-	require.Equal(t, before["agentId"], p["agentId"], "agentId preserved (memql#1709)")
-	require.Equal(t, before["forUserId"], p["forUserId"], "forUserId preserved (memql#1709)")
-}
 
 // TestReadMerge_RevokeDelegation_PreservesFields is the regression for
 // revokeDelegation (dsl/identity/mutations.memql). The mutation is
@@ -529,17 +489,19 @@ func TestReadMerge_RevokeDelegation_PreservesFields(t *testing.T) {
 // TestReadMerge_RawInsertOntoExistingId_ReadMerges is the concept-agnostic
 // systemic proof: a RAW insert() (not a named mutation) whose id already names
 // a stored row now read-merges. This is the engine behaviour that makes the
-// whole non-create class safe -- it is what fixes leaveSpace / revokeDelegation
-// without touching their DSL. The partial insert omits BOTH required node
-// fields (nodeType + address); before memql#1709 it rejected as
-// "missing properties", after it inherits them and only flips health.
+// whole non-create class safe -- it is what fixed revokeDelegation (and, while
+// it was in the tree, leaveSpace) without touching their DSL, and it is the
+// arm of memql#1709 that survives any individual mutation being retired. The
+// partial insert omits BOTH required node fields (nodeType + address); before
+// memql#1709 it rejected as "missing properties", after it inherits them and
+// only flips health.
 func TestReadMerge_RawInsertOntoExistingId_ReadMerges(t *testing.T) {
 	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:cluster:node"
 
 	storedId := runMutation(t, ctx, eng, "createNode", map[string]any{
 		"id":       "node-" + uniqueSuffix("rawmerge"),
-		"nodeType": "cognition",
+		"nodeType": "planner",
 		"address":  "10.0.0.9:50051",
 		"health":   "healthy",
 	})
