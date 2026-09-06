@@ -3930,7 +3930,7 @@ func CreateDeviceCodeBuild(args CreateDeviceCodeArgs) string {
 	return b.String()
 }
 
-// CreateDocumentChunk -- Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.
+// CreateDocumentChunk -- Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.
 //
 // Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["createDocumentChunk"] in generated_concepts.go).
 type CreateDocumentChunkArgs struct {

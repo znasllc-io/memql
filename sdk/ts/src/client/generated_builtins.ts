@@ -910,62 +910,6 @@ QueryClient.prototype.integrationStatus = function (this: QueryClient, args: Int
   return this.executeNamed("integrationStatus", buildIntegrationStatus(args), opts);
 };
 
-/** Decide whether a chat exchange's topic warrants augmenting one of an agent's knowledge domains. Returns {outcome, domainId, topic, reasoning, confidence}. Drives the chat 'Analyze for training' button preflight. */
-export interface KnowledgeAugmentDomainAnalyzeArgs {
-  userQuestion: string;
-  agentResponse: string;
-  domains: Record<string, unknown>[];
-  retrieved?: Record<string, unknown>[];
-}
-
-export function buildKnowledgeAugmentDomainAnalyze(args: KnowledgeAugmentDomainAnalyzeArgs): string {
-  const parts: string[] = [];
-  parts.push("userQuestion: " + renderMemQLValue(args.userQuestion));
-  parts.push("agentResponse: " + renderMemQLValue(args.agentResponse));
-  parts.push("domains: " + renderMemQLValue(args.domains));
-  if (args.retrieved !== undefined) parts.push("retrieved: " + renderMemQLValue(args.retrieved));
-  return "builtin knowledgeAugmentDomainAnalyze(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    knowledgeAugmentDomainAnalyze(args: KnowledgeAugmentDomainAnalyzeArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.knowledgeAugmentDomainAnalyze = function (this: QueryClient, args: KnowledgeAugmentDomainAnalyzeArgs = {} as KnowledgeAugmentDomainAnalyzeArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("knowledgeAugmentDomainAnalyze", buildKnowledgeAugmentDomainAnalyze(args), opts);
-};
-
-/** Generate + embed + persist topic-focused chunks for a knowledge domain. Inserts a Plan row for audit. Returns {planId, chunksAdded, domainId, domainName, topic}. */
-export interface KnowledgeAugmentDomainGenerateArgs {
-  domainId: string;
-  topic: string;
-  sourceAgentId?: string;
-  partitionId: string;
-  requestedBy: string;
-}
-
-export function buildKnowledgeAugmentDomainGenerate(args: KnowledgeAugmentDomainGenerateArgs): string {
-  const parts: string[] = [];
-  parts.push("domainId: " + renderMemQLValue(args.domainId));
-  parts.push("topic: " + renderMemQLValue(args.topic));
-  if (args.sourceAgentId !== undefined) parts.push("sourceAgentId: " + renderMemQLValue(args.sourceAgentId));
-  parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  parts.push("requestedBy: " + renderMemQLValue(args.requestedBy));
-  return "builtin knowledgeAugmentDomainGenerate(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    knowledgeAugmentDomainGenerate(args: KnowledgeAugmentDomainGenerateArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.knowledgeAugmentDomainGenerate = function (this: QueryClient, args: KnowledgeAugmentDomainGenerateArgs = {} as KnowledgeAugmentDomainGenerateArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("knowledgeAugmentDomainGenerate", buildKnowledgeAugmentDomainGenerate(args), opts);
-};
-
 /** Add a label to a Library artifact index row. Idempotent -- a label already present is left alone and nothing is written. artifactId is the v1:library:artifact row id; the load + write-back run under a synthetic actor derived from the row's own ownerUserId, so a caller can only ever label an artifact they own. */
 export interface LibraryAddArtifactLabelArgs {
   artifactId: string;

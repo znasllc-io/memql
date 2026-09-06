@@ -1874,11 +1874,13 @@ type citationFormatter func(domain map[string]any, sourceRef string) string
 
 // citationRegistry holds the per-source formatter. Sources without an
 // explicit entry fall back to citeAsDomainName.
-// "augment" chunks are produced by the augmentDomainContent prompt
-// from the Analyze-for-training flow. They live in the same
-// knowledgeDomain row as the original llmSeeded chunks (just generated
-// later, in response to a specific user-flagged gap), so they cite +
-// link identically. Without an explicit entry the source falls through
+// "augment" chunks came from the chat Analyze-for-training flow, which is
+// RETIRED -- the surface went with the chat epic (memql#4988) and its two
+// builtins with memql#5049, so nothing writes this source any more. The
+// entry stays because rows already carry it: those chunks live in the same
+// knowledgeDomain row as the original llmSeeded ones (just generated later,
+// in response to a specific user-flagged gap), so they cite + link
+// identically and must keep doing so. Without an explicit entry the source falls through
 // to citeAsTraining via the default branch -- correct for the human
 // label, but isLinkableSource also defaulted to false, which dropped
 // the [citationId=...] marker from the prompt template so the agent

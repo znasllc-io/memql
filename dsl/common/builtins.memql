@@ -173,58 +173,6 @@ builtin help {
   name  string!
 }
 
-// ---- queries/v1/common/builtin/builtinKnowledgeAugmentDomainAnalyze.memql ----
-
-// builtinKnowledgeAugmentDomainAnalyze
-// ====================================
-//
-// Preflight analyser for the chat 'Analyze for training' action. Takes
-// the user's question, the agent's response, the agent's attached
-// knowledge domains, and the RAG retrieval pool the agent saw, and
-// returns a structured outcome (addable / alreadyCovered / outOfScope)
-// with a best-fit domainId + topic + reasoning + confidence. The
-// frontend uses the outcome to decide whether to surface a Confirm
-// step before paying for the heavier augmentDomainGenerate call.
-
-@executor("integration.knowledge.augmentDomainAnalyze")
-@sdk
-@args(profile="object", additionalProperties="true")
-@description("Decide whether a chat exchange's topic warrants augmenting one of an agent's knowledge domains. Returns {outcome, domainId, topic, reasoning, confidence}. Drives the chat 'Analyze for training' button preflight.")
-builtin knowledgeAugmentDomainAnalyze {
-  userQuestion   string!
-  agentResponse  string!
-  domains        []object!
-  retrieved      []object
-}
-
-// ---- queries/v1/common/builtin/builtinKnowledgeAugmentDomainGenerate.memql ----
-
-// builtinKnowledgeAugmentDomainGenerate
-// =====================================
-//
-// Topic-focused chunk generator. Runs the augmentDomainContent prompt
-// to produce ~10 dense chunks targeted at a specific topic within a
-// knowledge domain, embeds each + writes them with source='augment'
-// and provenance back-pointers (sourceUtteranceId, sourceAgentId,
-// sourceTopic). Inserts an audit Plan row (kind='augmentDomain') so
-// the work shows up in the Tasks panel + the canvas plan-completed
-// card lifecycle.
-//
-// Synchronous in v1 (~30s for the full AI + embed + write path);
-// the frontend shows a "training queued" state until it returns.
-
-@executor("integration.knowledge.augmentDomainGenerate")
-@sdk
-@args(profile="object", additionalProperties="true")
-@description("Generate + embed + persist topic-focused chunks for a knowledge domain. Inserts a Plan row for audit. Returns {planId, chunksAdded, domainId, domainName, topic}.")
-builtin knowledgeAugmentDomainGenerate {
-  domainId           string!
-  topic              string!
-  sourceAgentId      string
-  partitionId            string!
-  requestedBy        string!
-}
-
 // ---- queries/v1/common/builtin/builtinKnowledgeIngest.memql ----
 
 // builtinKnowledgeIngest - Knowledge Base Document Ingestion
