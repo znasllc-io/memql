@@ -362,11 +362,19 @@ written element took its place in a composed arrangement with no change to the
 composer. Its own page went with the portal; the metadata stayed, because it
 costs nothing and it is what a replacement would read.
 
-That rule is mechanical, not editorial.
+That rule was mechanical, not editorial.
 `portal_view_composition_test.go` (repo root, so weakening it edited Go)
-scans the view tree and fails on row markup (`<table>`, `<tr>`, `<ul>`,
+scanned the view tree and failed on row markup (`<table>`, `<tr>`, `<ul>`,
 svg primitives), on iteration that could produce a row (`.map`,
 `.forEach`), on a second VNode-to-React bridge, and on reading
-`displayCard` directly. It cannot tell whether the element a view chose
-is the *right* one, and it does not police a single field read off one
-object -- its own header says so at length.
+`displayCard` directly. It could not tell whether the element a view chose
+was the *right* one, and it did not police a single field read off one
+object -- its own header said so at length.
+
+**That gate is GONE, deleted with the view bodies it scanned (epic
+memql#4984), and nothing enforces this rule today.** It is written in the
+past tense deliberately: a document that describes a retired check in the
+present tense is worse than one that omits it, because a reader plans
+against protection that is not there. A future surface over these elements
+would need to bring its own equivalent -- the rule is still right, it just
+has no enforcer.

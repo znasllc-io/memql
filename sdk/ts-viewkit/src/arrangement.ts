@@ -47,7 +47,10 @@
 // because order within a band is a real choice. The deterministic proposal
 // emits at most one entry per band; nothing else is limited to that.
 //
-// See docs/public/concepts/composed-views.md.
+// See docs/public/concepts/view-elements.md. (composed-views.md was the
+// other half of this account and went with the portal in epic
+// memql#4984; view-elements.md carries the element and fitness contract,
+// which is the part this file depends on.)
 
 import { SCENE_ELEMENT_ID, VIEW_KIT_ELEMENTS, WIDGET_ELEMENT_ID } from "./elements.js";
 import {

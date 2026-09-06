@@ -8,15 +8,17 @@
 #
 # WHY A SCRIPT AND NOT FIVE MAKEFILE RECIPES
 #
-# The portal consumes sdk/ts and sdk/ts-viewkit as `file:` dependencies, and a
-# `file:` dependency is a SOURCE tree, not a published tarball -- npm links the
-# directory, so `import ... from "@znasllc-io/memql-sdk-core"` resolves through
-# that package's own `exports` map to ./dist. If dist is absent the portal's
-# typecheck, its tests and `vite build` all fail with a resolution error that
-# names the package but not the cause.
+# The OS consumes sdk/ts as a `file:` dependency, and a `file:` dependency is a
+# SOURCE tree, not a published tarball -- npm links the directory, so
+# `import ... from "@znasllc-io/memql-sdk-core"` resolves through that
+# package's own `exports` map to ./dist. If dist is absent the OS's typecheck,
+# its tests and `vite build` all fail with a resolution error that names the
+# package but not the cause. (It is also the failure a stale dist gives you,
+# which is subtler: it resolves, and reports a missing export for whatever the
+# SDK has generated since -- so a mismatch reads as a defect in the CALLER.)
 #
-# So EVERY portal command has the same prerequisite: build the two workspace
-# packages first. Encoding that as `cd sdk/ts && npm install && npm run build`
+# So EVERY OS command has the same prerequisite: build the workspace package
+# first. Encoding that as `cd sdk/ts && npm install && npm run build`
 # repeated across five Makefile recipes is how the sixth one gets it wrong; and
 # encoding it as an npm script inside clients/os would only work when
 # invoked from that directory. One script, called from one-line Makefile
@@ -86,11 +88,11 @@ function install_os() {
 }
 
 # build_workspace_deps builds the `file:` dependency so its dist/ exists
-# before anything resolves against it (same shape as scripts/portal/build.sh:
-# a file: dep is a linked source tree, so the OS's typecheck, tests and vite
-# build all resolve @znasllc-io/memql-sdk-core through sdk/ts's exports map
-# into ./dist). `npm ci` because the lockfile is committed; idempotent, and a
-# no-op rebuild when the portal half of the Docker stage already built it.
+# before anything resolves against it: a file: dep is a linked source tree, so
+# the OS's typecheck, tests and vite build all resolve
+# @znasllc-io/memql-sdk-core through sdk/ts's exports map into ./dist.
+# `npm ci` because the lockfile is committed; idempotent, and a no-op rebuild
+# when the SPA stage of the Docker build already built it.
 function build_workspace_deps() {
     info "Building @znasllc-io/memql-sdk-core (sdk/ts)..."
     ( cd "${SDK_CORE_DIR}" && npm ci "${NPM_FLAGS[@]}" && npm run build )
