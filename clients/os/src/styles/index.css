@@ -8630,12 +8630,30 @@ a.os-button {
  * light mode is not a second drawing.
  */
 
-.os-nexus-goalview {
+/* THE ACTS STAY ON SCREEN. The goal view is tall -- a map, a band, a rail and
+ * a receipt -- so the page is the window's height with a scrolling BODY and the
+ * bar as its floor, exactly as the run page is. Written as `min-height: 100%`
+ * first, which let the whole page grow and carried the bar off the bottom of
+ * the window: the acts were then below a forty-seven-step rail, which is the
+ * same as not having them. Found by looking at it. */
+.os-nexus-goalview,
+.os-nexus-automations {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
+  gap: 10px;
+  margin: -18px -20px;
+  padding: 18px 20px 0;
+}
+.os-nexus-goalview > .os-actbar,
+.os-nexus-automations > .os-actbar {
+  margin: 0 -20px;
 }
 .os-nexus-goalview-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -8665,7 +8683,13 @@ a.os-button {
 
 .os-nexus-map-canvas {
   width: 100%;
-  height: clamp(240px, 42vh, 520px);
+  /* SHORTER THAN THE DEPLOYABLES CANVAS, and the reason is the shape rather
+   * than the subject. A goal's world is a wide, flat band -- a road with stops
+   * on it -- so `fitTo` fits it by WIDTH and centres the slack vertically. At
+   * the taller clamp that left nearly half the canvas empty above and below
+   * the road in a desktop window, which reads as a picture that failed to
+   * load rather than as a road with room around it. */
+  height: clamp(190px, 30vh, 380px);
   border: 1px solid var(--os-line);
   border-radius: var(--os-radius-sm);
   /* A GROUND RATHER THAN A PLATE. The map is a place, not a card: the darker
@@ -8806,6 +8830,12 @@ a.os-button {
   stroke: var(--os-line);
   stroke-width: 1;
 }
+.os-nexus-fold-count {
+  fill: var(--os-muted);
+  font-size: var(--os-text-xs);
+  font-family: var(--os-font-mono);
+  pointer-events: none;
+}
 
 /* What ran it, above the road; what it had to ask, below. Small marks, quiet
  * until they matter -- an approval waiting on a person is the one thing on
@@ -8886,10 +8916,6 @@ a.os-button {
 .os-nexus-beacon[data-compiling] .os-nexus-beacon-ring {
   stroke-dasharray: 4 5;
 }
-.os-nexus-beacon-label {
-  fill: var(--os-ink);
-  font-size: var(--os-text-md);
-}
 .os-nexus-beacon-count {
   fill: var(--os-muted);
   font-size: var(--os-text-xs);
@@ -8933,6 +8959,20 @@ a.os-button {
   flex-direction: column;
   min-height: 100%;
 }
+/* The catalog is a PLAIN list, not a LiveList: `v1:authoring:construct` has no
+ * routing rule to subscribe to. So it needs the reset every list in this shell
+ * gets from `.os-livelist-rows` and does not inherit here -- without it the
+ * browser draws its own bullets and indent, which no other list in the OS
+ * does. Found by looking at it; jsdom applies no stylesheet at all. */
+.os-nexus-catalog {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .os-nexus-row-sub {
   color: var(--os-muted);
   font-size: var(--os-text-xs);

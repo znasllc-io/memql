@@ -17,7 +17,7 @@ import {
 } from "../../kit";
 import { ActionBar, type Act, type ActionBarTone } from "../../kit/ActionBar";
 import { events, timelineBounds, type SceneEvent } from "../../nexus/scene/events";
-import { NOW, goalProgress, scene } from "../../nexus/scene/scene";
+import { NOW, existedAt, goalProgress, scene, stepStatusAt } from "../../nexus/scene/scene";
 import { formatElapsed, receipt } from "../../nexus/scene/receipt";
 import { BeaconMap } from "./BeaconMap";
 import { KindBand } from "./KindBand";
@@ -122,19 +122,33 @@ export function GoalView({
   // The rail reads the app's own step projection, which carries the readings
   // the spine draws in ink; the map reads the scene library's. Both are folded
   // from the same rows -- see `world.ts` on why there are two narrowings.
-  const railSteps: StepRow[] = useMemo(
-    () =>
-      stepsInOrder(
-        stepRows
-          .map(stepFromRow)
-          .filter((step) => step.key !== "" && idTail(step.runId) === idTail(openRunId)),
-      ),
-    [stepRows, openRunId],
-  );
+  //
+  // AND BOTH FOLLOW THE SAME MOMENT. A rewound map beside a live rail is a page
+  // showing two moments at once, which is worse than not offering rewind: the
+  // map says three steps have landed and the list beside it says eleven. The
+  // narrowing is the scene library's own, applied to this projection.
+  const railSteps: StepRow[] = useMemo(() => {
+    const mine = stepRows
+      .map(stepFromRow)
+      .filter((step) => step.key !== "" && idTail(step.runId) === idTail(openRunId));
+    const moment = at === "" ? NOW : at;
+    const shown =
+      moment === NOW
+        ? mine
+        : mine
+            .filter((step) => existedAt(step.createdAt, moment))
+            .map((step) => ({ ...step, status: stepStatusAt(step, moment) }));
+    return stepsInOrder(shown);
+  }, [stepRows, openRunId, at]);
   const breakdown = useMemo(() => kindBreakdown(railSteps), [railSteps]);
 
   const run = world.run;
   const openStep = railSteps.find((step) => step.key === selectedStepKey) ?? null;
+  // THE THING THIS PAGE MOST NEEDS TO OFFER. A run parked on a person does not
+  // move until somebody answers it, and a goal view that drew the pause without
+  // offering the answer would be a picture of being stuck.
+  const parked = world.approvals.find((approval) => approval.decision === "") ?? null;
+  const waitingOnYou = run !== null && run.status === "waiting" && parked !== null;
 
   // A run this window cannot draw is a selection the person did not make.
   // Reset the step when the run changes rather than carrying a key that names
@@ -152,6 +166,14 @@ export function GoalView({
   // The acts, and an illegal one is ABSENT rather than disabled (rule 12)
   // -------------------------------------------------------------------------
   const acts: Act[] = [];
+  if (waitingOnYou && parked !== null) {
+    acts.push({
+      label: "Answer it",
+      tone: "primary",
+      ariaLabel: `Answer the ${parked.kind === "" ? "approval" : parked.kind} this run is parked on`,
+      onAct: () => onOpenApproval(parked.id),
+    });
+  }
   if (bounds.count > 0) {
     acts.push({
       label: rewound ? "Back to now" : "Rewind",
@@ -349,11 +371,18 @@ export function GoalView({
             ? "rewound -- nothing here runs, and nothing is spent"
             : run === null
               ? "no run to act on yet"
-              : terminal
-                ? openStep === null
-                  ? "select a step to fork from there"
-                  : ""
-                : "replay and fork wait until the run finishes"
+              : waitingOnYou
+                ? // The reason, in the classifier's own words where it gave
+                  // one: "waiting" alone does not say whether somebody is
+                  // needed or a timer is.
+                  parked?.reason !== undefined && parked.reason !== ""
+                    ? `parked on you: ${parked.reason}`
+                    : "parked on you -- it does not move until you answer"
+                : terminal
+                  ? openStep === null
+                    ? "select a step to fork from there"
+                    : ""
+                  : "replay and fork wait until the run finishes"
         }
         tone={tone}
         acts={acts}

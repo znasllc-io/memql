@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from "react";
 import type { LiveState } from "@znasllc-io/memql-sdk-core/client";
 
-import { Caption } from "../../kit";
+import { Caption, formatMoment } from "../../kit";
 import { transformOf } from "../../kit/viewport";
 import { usePanZoom } from "../../kit/usePanZoom";
 import { layout, type LayoutNode, type LayoutResult } from "../../nexus/scene/layout";
@@ -100,6 +100,11 @@ export function BeaconMap({
     width,
     height,
     ready: model.nodes.size > 1,
+    // FILLS THE CANVAS RATHER THAN SITTING IN THE MIDDLE OF IT. A short run is
+    // a thin road with four stops, and at scale 1 it drew as a small band with
+    // empty canvas all round -- which reads as a picture that failed to load.
+    // Capped, so a one-step run does not become a diagram of one circle.
+    maxFit: 1.8,
   });
 
   // A DEGRADED FEED MUST NOT READ AS A LIVE RUN. A map is a picture of now;
@@ -217,7 +222,10 @@ export function BeaconMap({
         {behind
           ? "Not connected to the cluster, so this is the last picture it sent."
           : at !== ""
-            ? `As it stood at ${at}.`
+            ? // THE PERSON'S FORMAT, not the wire's. The scrubber a few lines
+              // below prints the same instant through `formatMoment`, and two
+              // renderings of one moment on one screen read as two moments.
+              `As it stood at ${formatMoment(at)}.`
             : legend(progress)}
       </p>
     </div>
@@ -277,10 +285,12 @@ function Beacon({
         />
       )}
       <circle className="os-nexus-beacon-core" cx={cx} cy={cy} r={BEACON_R / 3} />
-      <text className="os-nexus-beacon-label" x={cx} y={cy + BEACON_R + 18} textAnchor="middle">
-        {truncate(node.label, 34)}
-      </text>
-      <text className="os-nexus-beacon-count" x={cx} y={cy + BEACON_R + 32} textAnchor="middle">
+      {/* NO STATEMENT UNDER THE RING. The page's own title is that sentence,
+          in full and untruncated, four lines above -- and a second, elided copy
+          of it under the beacon is the same thing said twice, worse. The
+          beacon's <title> above still carries it for a reader who cannot see
+          which page they are on. */}
+      <text className="os-nexus-beacon-count" x={cx} y={cy + BEACON_R + 20} textAnchor="middle">
         {compiling ? "working it out" : total === 0 ? "" : `${completed} of ${total}`}
       </text>
     </g>
@@ -322,9 +332,11 @@ function MapNode({
     >
       <title>{spoken}</title>
       {shapeFor(node, cx, cy)}
-      <text className="os-nexus-node-label" x={cx} y={cy - STEP_R - 7} textAnchor="middle">
-        {truncate(node.label, node.kind === "template" ? 26 : 18)}
-      </text>
+      {node.kind === "fold" ? null : (
+        <text className="os-nexus-node-label" x={cx} y={cy - STEP_R - 7} textAnchor="middle">
+          {truncate(node.label, node.kind === "template" ? 26 : 18)}
+        </text>
+      )}
     </g>
   );
 }
@@ -352,15 +364,23 @@ function shapeFor(node: LayoutNode, cx: number, cy: number) {
         />
       );
     case "fold":
+      // THE COUNT SITS INSIDE THE PILL. Drawn outside like every other node's
+      // label it left an empty capsule on the road with a number floating
+      // above it, which reads as a gap rather than as a stretch.
       return (
-        <rect
-          className="os-nexus-fold"
-          x={cx - 26}
-          y={cy - 9}
-          width={52}
-          height={18}
-          rx={9}
-        />
+        <>
+          <rect
+            className="os-nexus-fold"
+            x={cx - 30}
+            y={cy - 10}
+            width={60}
+            height={20}
+            rx={10}
+          />
+          <text className="os-nexus-fold-count" x={cx} y={cy + 4} textAnchor="middle">
+            {node.label}
+          </text>
+        </>
       );
     case "cluster":
       return <circle className="os-nexus-cluster" cx={cx} cy={cy} r={STEP_R + 5} />;
@@ -393,8 +413,14 @@ function describe(node: LayoutNode): string {
       return "You, where the goal was set";
     case "template":
       return `Automation ${node.label}, ${node.status}`;
-    case "fold":
-      return `${node.standsFor} finished steps, folded. Open to see them.`;
+    case "fold": {
+      const thought = node.thoughtful ?? 0;
+      const cost =
+        thought === 0
+          ? ""
+          : ` ${thought} of them ${thought === 1 ? "is a step" : "are steps"} the machine had to think about.`;
+      return `${node.standsFor} finished steps, folded.${cost} Open to see them.`;
+    }
     case "cluster":
       return `${node.standsFor} steps running together. Open to see them.`;
     case "binding":
@@ -420,7 +446,9 @@ function mapDescription(
   at: string,
 ): string {
   const statement = world.goal?.statement ?? "a goal";
-  const when = at === "" ? "" : `, as it stood at ${at}`;
+  // THE PERSON'S FORMAT HERE TOO. This string is read aloud, and an RFC3339
+  // stamp spoken out is a worse answer than no answer.
+  const when = at === "" ? "" : `, as it stood at ${formatMoment(at)}`;
   if (progress.compiling) return `Map of ${statement}: working out how to do it${when}`;
   return `Map of ${statement}: ${progress.completed} of ${progress.total} steps done${when}`;
 }

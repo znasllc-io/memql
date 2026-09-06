@@ -111,6 +111,8 @@ export interface LayoutNode {
    * plain node carrying a count would read as "this node is really several".
    */
   standsFor: number;
+  /** Of those, how many the machine had to think about. Zero elsewhere. */
+  thoughtful?: number;
 }
 
 /**
@@ -379,6 +381,7 @@ export function layout(world: GoalWorld, options: LayoutOptions = {}): LayoutRes
         folded: true,
         throughDepth: group.depths[group.depths.length - 1] ?? 0,
       });
+      const thoughtful = members.filter(stepThought).length;
       put({
         id: foldNodeId(run.id, group.depths[0] ?? 0, group.depths[group.depths.length - 1] ?? 0),
         kind: "fold",
@@ -386,6 +389,10 @@ export function layout(world: GoalWorld, options: LayoutOptions = {}): LayoutRes
         x,
         y: 0,
         label: `${members.length} done`,
+        // A FOLD THAT HID THINKING SAYS SO. The thick road already carries the
+        // fact, but somebody reading the fold itself -- or a screen reader,
+        // which sees no road at all -- would otherwise be told only a count.
+        thoughtful,
         rowId: "",
         conceptId: "",
         stepKey: "",

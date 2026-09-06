@@ -66,6 +66,8 @@ export interface FitRequest {
   height: number;
   /** False for an empty map: the fit is forgotten so the next one opens framed. */
   ready: boolean;
+  /** How far the first fit may zoom IN. See `fitTo` on why this is per-map. */
+  maxFit?: number;
 }
 
 export function usePanZoom(fit: FitRequest): PanZoom {
@@ -79,6 +81,14 @@ export function usePanZoom(fit: FitRequest): PanZoom {
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ distance: number; midX: number; midY: number } | null>(null);
   const travelled = useRef(0);
+  /**
+   * Whether a person has steered this map yet.
+   *
+   * It is what the re-fit rule below is really about: a map must not move under
+   * somebody who put it where they wanted it, and until they do there is
+   * nobody to be rude to.
+   */
+  const touched = useRef(false);
 
   const localPoint = useCallback((clientX: number, clientY: number) => {
     const box = frameRef.current?.getBoundingClientRect();
@@ -86,6 +96,7 @@ export function usePanZoom(fit: FitRequest): PanZoom {
   }, []);
 
   const onPointerDown = useCallback((e: PointerEvent<SVGSVGElement>) => {
+    touched.current = true;
     // A PRIMARY pointer down starts a fresh gesture, so anything still in the
     // map is stale -- a pointerup that landed outside the element in a browser
     // with no pointer capture. Without this, the next press would see two live
@@ -145,6 +156,7 @@ export function usePanZoom(fit: FitRequest): PanZoom {
 
   const onWheel = useCallback(
     (e: WheelEvent<SVGSVGElement>) => {
+      touched.current = true;
       // deltaY < 0 is a scroll UP, which is a zoom IN everywhere else in every
       // map anybody has used.
       const factor = e.deltaY < 0 ? KEY_ZOOM_STEP : 1 / KEY_ZOOM_STEP;
@@ -155,6 +167,7 @@ export function usePanZoom(fit: FitRequest): PanZoom {
   );
 
   const onKeyDown = useCallback((e: KeyboardEvent<SVGSVGElement>) => {
+    touched.current = true;
     // The keyboard steers the same viewport the pointer does. It is not a
     // fallback: a map you can only reach with a mouse is a map somebody cannot
     // read at all, and on both surfaces this is the app's signature picture.
@@ -197,35 +210,44 @@ export function usePanZoom(fit: FitRequest): PanZoom {
   }, []);
 
   // ==========================================================================
-  // FIT ONCE, THEN NEVER AGAIN
+  // FIT UNTIL SOMEBODY STEERS, THEN NEVER AGAIN
   // ==========================================================================
   // A map that opens clipped is a map somebody has to discover they can pan
   // before they can read it, and a real one is wider than any window it draws
   // in. So the first paint frames the whole thing.
   //
-  // ONCE is the whole rule. A row set that changes shape must NOT re-fit:
-  // somebody who panned into a corner to read one node would be thrown back to
-  // the origin because a step landed somewhere else on the map -- the same
-  // class of rudeness as a list that scrolls itself. An empty map resets
-  // instead, so the next one that opens starts framed.
-  const fitted = useRef(false);
-  const { width, height, ready } = fit;
+  // THE RULE USED TO BE "ONCE" AND ONCE IS WRONG FOR A MAP THAT FILLS IN.
+  // Fitting once means fitting whatever the layout was on the first render
+  // that could measure -- and on a live feed that is the EMPTY world, before
+  // the rows arrive. The Nexus map then framed three nodes at 1.8x and kept
+  // that view while a road, a fan-out and a beacon grew off the right edge,
+  // which reads as a map that is broken rather than as one that has been
+  // steered.
+  //
+  // What the old rule was really protecting is somebody who PUT THE MAP WHERE
+  // THEY WANTED IT -- being thrown back to the origin because a step landed
+  // elsewhere is the same rudeness as a list that scrolls itself. So the fit
+  // now follows the layout's extent until the first gesture and stops dead
+  // after it. Until somebody steers, there is nobody to be rude to.
+  //
+  // An empty map resets and forgets the gesture, so the next one that opens
+  // starts framed.
+  const { width, height, ready, maxFit = 1 } = fit;
   useEffect(() => {
     if (!ready) {
-      fitted.current = false;
+      touched.current = false;
       setView(IDENTITY);
       return;
     }
-    if (fitted.current) return;
+    if (touched.current) return;
     const box = frameRef.current?.getBoundingClientRect();
     // An unmeasured frame -- a window mid-open, a hidden desk, jsdom, which
     // measures everything as zero -- is not a fit of zero; it is no answer yet,
     // so the attempt is left for a later render rather than being spent on a
     // viewport nobody has laid out.
     if (!box || box.width <= 0 || box.height <= 0) return;
-    fitted.current = true;
-    setView(fitTo(width, height, box.width, box.height));
-  }, [ready, width, height]);
+    setView(fitTo(width, height, box.width, box.height, maxFit));
+  }, [ready, width, height, maxFit]);
 
   return {
     view,

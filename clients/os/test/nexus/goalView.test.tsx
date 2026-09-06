@@ -232,11 +232,62 @@ describe("rewind", () => {
       payload: { goalId: "g1", at: "2026-09-01T09:00:11Z" },
     });
     const map = await screen.findByRole("application");
-    expect(map.getAttribute("aria-label")).toContain("as it stood at 2026-09-01T09:00:11Z");
+    // The moment is spoken in a PERSON'S format, not the wire's: this string
+    // is read aloud, and an RFC3339 stamp spoken out is worse than no answer.
+    expect(map.getAttribute("aria-label")).toContain("as it stood at");
+    expect(map.getAttribute("aria-label")).not.toContain("2026-09-01T09:00:11Z");
+  });
+
+  // THE PAGE SHOWS ONE MOMENT. A rewound map beside a live rail says three
+  // steps have landed while the list under it says eleven, which is worse than
+  // not offering rewind at all.
+  it("rewinds the rail with the map, not just the map", async () => {
+    mount(seeded(), {
+      id: "i1",
+      // After `read` was created and before `decide` finished.
+      payload: { goalId: "g1", at: "2026-09-01T09:00:11Z" },
+    });
+    await screen.findByRole("application");
+    const rail = screen.getAllByRole("button", { name: /^Step \d+, / });
+    // Every rail row agrees with the map: nothing is `done` at a moment when
+    // the run had not finished a step.
+    for (const row of rail) {
+      expect(row.getAttribute("aria-label")).not.toContain("done");
+    }
   });
 });
 
 describe("the acts legal from the run's state", () => {
+  // A goal view that drew the pause without offering the answer would be a
+  // picture of being stuck.
+  it("offers the answer when the run is parked on a person, and says why", async () => {
+    mount(
+      seeded({
+        runs: [
+          runRow({
+            id: "r1",
+            goalId: "g1",
+            status: "waiting",
+            finishedAt: "",
+            waitingOn: { kind: "approval", subject: "a1" },
+          }),
+        ],
+        approvals: [
+          approvalRow({
+            id: "a1",
+            runId: "r1",
+            stepKey: "decide",
+            evidence: { tier: "B", reason: "sends mail outside the cluster" },
+          }),
+        ],
+      }),
+    );
+    await openGoal();
+    const bar = screen.getByRole("group", { name: "What you can do with this" });
+    expect(within(bar).getByText("Answer it")).toBeTruthy();
+    expect(screen.getByText(/parked on you: sends mail outside the cluster/)).toBeTruthy();
+  });
+
   it("offers no Replay while the run is still going, and says why", async () => {
     mount(seeded());
     await openGoal();

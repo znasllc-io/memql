@@ -151,7 +151,7 @@ export function AutomationsSection({ selectedId, onSelect }: AutomationsSectionP
             />
           ) : null}
 
-          <ul className="os-list" aria-label="Automations this instance can replay">
+          <ul className="os-nexus-catalog" aria-label="Automations this instance can replay">
             {rows.map((automation) => (
               <li key={automation.id}>
                 <KitRow

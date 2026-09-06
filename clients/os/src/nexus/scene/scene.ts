@@ -41,9 +41,15 @@ import { latestAttempts } from "./world";
  */
 export const NOW = "";
 
-/** The presence rule, in one place. See the header on why an undated row is
- *  present. */
-function existedAt(createdAt: string, at: string): boolean {
+/**
+ * The presence rule, in one place. See the header on why an undated row is
+ * present.
+ *
+ * EXPORTED because the goal view's RAIL is drawn from the app's own row
+ * projection rather than from this library's, and a page whose map is rewound
+ * and whose rail is not is a page showing two moments at once.
+ */
+export function existedAt(createdAt: string, at: string): boolean {
   const stamp = createdAt.trim();
   if (stamp === "") return true;
   return stamp <= at;
@@ -60,7 +66,15 @@ function happenedBy(stamp: string, at: string): boolean {
   return moment !== "" && moment <= at;
 }
 
-export function stepStatusAt(step: StepRow, at: string): string {
+/**
+ * Structural, not `StepRow`, for the reason `existedAt` is exported: the app's
+ * rail holds its own projection of the same rows, and both readings of a
+ * moment have to come from one function.
+ */
+export function stepStatusAt(
+  step: Pick<StepRow, "status" | "startedAt" | "finishedAt">,
+  at: string,
+): string {
   if (at === NOW) return step.status;
   if (happenedBy(step.finishedAt, at)) return step.status;
   if (happenedBy(step.startedAt, at)) return "running";
@@ -119,7 +133,18 @@ export function scene(world: GoalWorld, at: string): GoalWorld {
     runs,
     steps: world.steps
       .filter((step) => existedAt(step.createdAt, at))
-      .map((step) => ({ ...step, status: stepStatusAt(step, at) })),
+      .map((step) => ({
+        ...step,
+        status: stepStatusAt(step, at),
+        // A BINDING IS RECORDED AT DISPATCH, so a step that had not started by
+        // `at` had no binding then either. Carrying the live one back would
+        // draw a machine and a model above a step nothing had yet chosen one
+        // for -- the same fabrication as un-deciding an approval guards
+        // against, on the other lane of the map.
+        binding: happenedBy(step.startedAt, at)
+          ? step.binding
+          : { ...step.binding, present: false },
+      })),
     approvals: world.approvals
       .filter((approval) => existedAt(approval.createdAt, at))
       .map((approval) => ({ ...approval, decision: approvalDecisionAt(approval, at) })),

@@ -66,8 +66,6 @@ builtin replayRun {
 /// refused if the artifact changed since it was approved -- an approval is a decision about a
 /// specific command, patch, message or draft, and it never carries to a modified one.
 @sdk
-/// Resume every run whose timer wait is due and every run whose node died mid-flight. Cron-leader
-/// gated through its scheduled automation, so it runs on one replica cluster-wide.
 @executor("integration.work.decideApproval")
 builtin decideApproval {
   approvalId  string!  @description("The v1:work:approval to decide.")
@@ -75,15 +73,17 @@ builtin decideApproval {
   answer      object   @description("The person's answer, for a feedback approval.")
 }
 
-/// Archive then delete journal rows past their retention window: v1:work:modelCall at
-/// MEMQL_WORK_MODELCALL_RETENTION_DAYS and v1:work:observation at
-/// MEMQL_WORK_OBSERVATION_RETENTION_DAYS. The run's summary is folded onto the run row BEFORE its
-/// detail goes, so a run stays readable after. No archive means no delete.
+/// Resume every run whose timer wait is due and every run whose node died mid-flight. Cron-leader
+/// gated through its scheduled automation, so it runs on one replica cluster-wide.
 @executor("integration.work.sweepWaiting")
 builtin workSweepWaiting {
   olderThanSeconds  int  @description("How long a run must have been silent before it counts as abandoned. Defaults to twice the heartbeat interval.")
 }
 
+/// Archive then delete journal rows past their retention window: v1:work:modelCall at
+/// MEMQL_WORK_MODELCALL_RETENTION_DAYS and v1:work:observation at
+/// MEMQL_WORK_OBSERVATION_RETENTION_DAYS. The run's summary is folded onto the run row BEFORE its
+/// detail goes, so a run stays readable after. No archive means no delete.
 @executor("integration.work.retentionSweep")
 builtin workRetentionSweep {
   dryRun  bool  @description("Report what would be archived and deleted without doing either.")
