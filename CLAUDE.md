@@ -2283,9 +2283,16 @@ touches rows.
   The work concepts declare the composite owner tier, so under the default
   reader actor these reads answer ZERO ROWS AND NO ERROR: a sweep that resumes
   nothing is indistinguishable from a cluster with nothing parked.
-- **`v1:planner:plan`, `task` and `taskState` are NOT retired.** Spec section F
-  retires them, gated on epic A3 re-keying Training off them; until that lands
-  the planner concepts and `component/planner` stay exactly as they are.
+- **`v1:planner:plan`, `task` and `taskState` are NOT retired YET, and the
+  reason is no longer the one written here.** A3 landed and the Training app is
+  already re-pointed, so the gate that sentence named is gone; what remains is
+  the size (memql#5000). Roughly forty production files still WRITE those rows
+  -- `integrations/planner`'s whole orchestration loop, the `agent()` and
+  `produceArtifact()` builtins, and the taskstamp that fires on every agent
+  tool call -- and FOUR of those paths fail OPEN, so a partial retirement
+  removes bounds silently rather than breaking loudly. It ships replacement
+  first: the reactive loop opens a `v1:work:goal` for a due responsibility
+  rather than a Plan, and `component/planner` stays until the loop does.
 
 ### The proving suite -- what the platform measures about itself (epic memql#4993)
 
