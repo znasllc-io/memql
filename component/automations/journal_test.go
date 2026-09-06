@@ -368,4 +368,20 @@ func TestJournalArgs_RendersNamedArgsAndDropsNils(t *testing.T) {
 	if got, err := journalArgs("x", map[string]any{"a": nil}); err != nil || got != "x()" {
 		t.Fatalf("all-nil args = %q, %v; want x()", got, err)
 	}
+
+	// A TYPED nil inside an `any` is not `== nil` -- the interface carries a
+	// type -- but it still marshals to `null`, so the drop has to be decided
+	// on the rendered bytes. exec.Input is an `any` and is exactly this shape
+	// when a query result comes back empty.
+	var typedNil map[string]any
+	if got, err := journalArgs("x", map[string]any{"input": typedNil, "runId": "r"}); err != nil || got != `x(runId: "r")` {
+		t.Fatalf("typed-nil arg = %q, %v; want x(runId: \"r\") -- a typed nil marshals to null and refuses the row", got, err)
+	}
+
+	// And the mirror-image bug: an EMPTY object is a VALUE, not an absence.
+	// `{}` means "this field, empty", which is a different row from one where
+	// the field was never written.
+	if got, err := journalArgs("x", map[string]any{"outcome": map[string]any{}}); err != nil || got != "x(outcome: {})" {
+		t.Fatalf("empty-object arg = %q, %v; want x(outcome: {})", got, err)
+	}
 }

@@ -454,6 +454,13 @@ var idBearingFieldExemptions = map[string]string{
 	"deployment/deploymentNodeSpec.deploymentId": "plain-fk-by-design; hashed into the composite concept id (#2885)",
 	"cluster/node.deploymentId":                  "plain-fk-by-design (@description declares plain string FK)",
 	"library/documentVersion.documentId":         "plain-fk-by-design; cross-concept content-history grouping key (@description declares NOT an @relationship)",
+	// The action's provenance pair pointed at v1:harness:plan / step, which the
+	// work spine's epic A1 retired. The FIELDS stay (the concept's capture-only
+	// fields are declared and unwritten until epic A3 reshapes it) and their
+	// targets do not exist, so there is no relationship to declare -- and
+	// pointing them at v1:work:run today would canonicalize on a write nothing
+	// makes. A3 re-points them with the writer.
+	"actions/action.provenancePlanId": "plain-fk-by-design until epic A3; its v1:harness:plan target is retired (work spine A1) and the concept has no writer",
 	// --- bare by construction: a virtual projection nothing writes ---
 	// v1:observability:siteTraffic is a declaration of a RELATION's shape, the
 	// invocation / codeMetric precedent: its rows live in the edge_request

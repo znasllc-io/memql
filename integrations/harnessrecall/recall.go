@@ -8,11 +8,11 @@
 // `MemoryNodes` hypertable, recall scores recency x relevance in ONE
 // SQL statement against ONE table -- no app-side merge.
 //
-// DSL surface (dsl/harness/queries.memql -> builtin recall):
+// DSL surface (dsl/memory/builtins.memql -> builtin recall):
 //
 //	recall({
 //	  text:     "<free-form query, embedded server-side>",
-//	  concept:  "v1:harness:observation",  // recall source (default)
+//	  concept:  "v1:work:observation",  // recall source (default)
 //	  window:   86400,    // seconds; time-window for hypertable pruning
 //	  k:        10,        // top-k
 //	  halfLife: 3600,      // recency half-life (seconds)
@@ -36,6 +36,14 @@
 // stepId, planId, kind) rides back on every recalled row, alongside
 // the computed _score / _similarity / _recency components for
 // auditability.
+// THE PACKAGE AND PLUGIN NAMES STAY `harnessRecall`, deliberately. The
+// harness spine is retired (work spine A1) and this reads v1:work:observation
+// now, but the name is the EXECUTOR the DSL names
+// (@executor("integration.harnessRecall.recall") in dsl/memory/builtins.memql)
+// and renaming it is a coordinated change across the declaration, the
+// registration and every product bundle that declares its own recall. Epic A3
+// makes that change with the skills work; until then a rename here would be a
+// silent no-handler at boot.
 package harnessrecall
 
 import (
@@ -57,7 +65,7 @@ import (
 const (
 	// defaultConcept is the primary recall source. Observations carry
 	// `content` embedded into node_vectors keyed by the observation id.
-	defaultConcept = memorynodes.ConceptHarnessObservation
+	defaultConcept = memorynodes.ConceptWorkObservation
 	// defaultProvider matches the embedding write-path + similarTo.
 	defaultProvider = "embedding3Small"
 	// defaultK is the top-k when the caller omits it.
@@ -122,7 +130,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Handler:     i.recallHandler,
 			ArgsSchema: map[string]string{
 				"text":     "string (required) - free-text query embedded server-side and matched by cosine similarity",
-				"concept":  "string (optional) - recall source concept id (default v1:harness:observation)",
+				"concept":  "string (optional) - recall source concept id (default v1:work:observation)",
 				"window":   "number (optional) - time window in seconds; only memories with createdAt >= now()-window are scanned (hypertable partition pruning). 0/omitted = all history",
 				"k":        "int (optional) - top-k to return (default 10, or the target param)",
 				"halfLife": "number (optional) - recency half-life in seconds (default 3600); the recency term halves every halfLife of age",

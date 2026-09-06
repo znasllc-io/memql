@@ -16,7 +16,6 @@ require (
 	github.com/uptrace/bun/driver/pgdriver v1.2.18
 	github.com/znasllc-io/memql/component/events v0.0.0
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0
-	github.com/znasllc-io/memql/component/harness v0.0.0
 	github.com/znasllc-io/memql/component/observe v0.0.0-00010101000000-000000000000
 	github.com/znasllc-io/memql/component/polyphon v0.0.0
 	golang.org/x/sync v0.22.0
@@ -259,7 +258,6 @@ replace github.com/znasllc-io/memql/component/language => ./component/language
 
 replace github.com/znasllc-io/memql/component/database => ./component/database
 
-replace github.com/znasllc-io/memql/component/harness => ./component/harness
 
 replace github.com/znasllc-io/memql/docs => ./docs
 

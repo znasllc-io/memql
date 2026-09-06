@@ -22,8 +22,9 @@ import (
 // and the MCP `define` tool all use -- refused 45 constructs across 10+ files
 // with:
 //
-//	concept resolution: signature concept "plan":
-//	ambiguous concept name "plan" matches 2 concepts: v1:planner:plan, v1:harness:plan
+//	concept resolution: signature concept "invocation":
+//	ambiguous concept name "invocation" matches 2 concepts:
+//	v1:worker:invocation, v1:observability:invocation
 //
 // Nothing was wrong with the tree or the language. The resolution rule already
 // handled ambiguity in both directions: an unimported bare name is admitted when
@@ -221,19 +222,27 @@ func TestAuthoringPathValidatesEveryDslFile(t *testing.T) {
 // TestAuthoringOriginSuppliesTheAmbientDomain is the mechanism, isolated.
 //
 // The same source, validated with and without an origin. WITH one, an
-// unimported bare `plan` resolves ambiently to the file's own domain. WITHOUT
-// one there is no domain and the documented dir=="" degrade runs -- which is
-// correct for an untitled buffer and is what the sandbox was doing for every
-// document.
+// unimported bare `invocation` resolves ambiently to the file's own domain.
+// WITHOUT one there is no domain and the documented dir=="" degrade runs --
+// which is correct for an untitled buffer and is what the sandbox was doing
+// for every document.
+//
+// THE SUBJECT HAD TO MOVE, AND THE REASON IS THE POINT OF THE TEST. This used
+// dsl/planner/queries.memql and its bare `plan`, which stopped being ambiguous
+// when the work spine's epic A1 retired v1:harness:plan. An unambiguous name
+// resolves with or without a domain, so the no-origin half would have gone on
+// passing while asserting nothing. dsl/worker/queries.memql carries a bare
+// `invocation`, still ambiguous against v1:observability:invocation, so the
+// mechanism is measured rather than assumed.
 func TestAuthoringOriginSuppliesTheAmbientDomain(t *testing.T) {
 	loadFullDSLForParity(t)
 
-	src, err := os.ReadFile(filepath.Join(authoringParityRoot, "planner", "queries.memql"))
+	src, err := os.ReadFile(filepath.Join(authoringParityRoot, "worker", "queries.memql"))
 	if err != nil {
-		t.Skipf("dsl/planner/queries.memql not present: %v", err)
+		t.Skipf("dsl/worker/queries.memql not present: %v", err)
 	}
 
-	withOrigin := ValidateBundle(string(src), "planner/queries.memql")
+	withOrigin := ValidateBundle(string(src), "worker/queries.memql")
 	if !withOrigin.OK {
 		var first string
 		for _, d := range withOrigin.Diagnostics {
@@ -242,10 +251,10 @@ func TestAuthoringOriginSuppliesTheAmbientDomain(t *testing.T) {
 				break
 			}
 		}
-		t.Errorf("dsl/planner/queries.memql does not validate with its own origin: %s\n"+
-			"`plan` is ambiguous (v1:planner:plan, v1:harness:plan) and this file is IN "+
-			"dsl/planner/, so the ambient rule should admit v1:planner:plan without an import "+
-			"(memql#3800).", first)
+		t.Errorf("dsl/worker/queries.memql does not validate with its own origin: %s\n"+
+			"`invocation` is ambiguous (v1:worker:invocation, v1:observability:invocation) and "+
+			"this file is IN dsl/worker/, so the ambient rule should admit v1:worker:invocation "+
+			"without an import (memql#3800).", first)
 	}
 
 	// And the no-origin case still behaves as it always did, so an untitled

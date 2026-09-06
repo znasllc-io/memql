@@ -27,14 +27,6 @@ const (
 	ConceptDataLog    = "v1:data:log"
 )
 
-// Harness domain concepts (v1:harness:*) -- the MemQL-native agent
-// harness working-state spine (epic #590, foundational issue #582).
-const (
-	ConceptHarnessPlan        = "v1:harness:plan"
-	ConceptHarnessStep        = "v1:harness:step"
-	ConceptHarnessObservation = "v1:harness:observation"
-)
-
 // Action-library concepts (v1:actions:*) -- the reusable, replayable
 // action library (epic #1734). `action.intent` is embedded into
 // node_vectors (vectorField='intent') so the planner can cosine-search

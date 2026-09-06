@@ -296,4 +296,13 @@ var ownerGateExemptions = map[string]string{
 		"threads ownerUserId from the promoting automation's SOURCE row because an event-triggered " +
 		"automation's actor is the system principal, not the owner. The write-as-the-owner redesign " +
 		"is memql#2803's recorded blocker and is tracked there.",
+	"v1:actions:action": "memql#4965 -- the concept has NO WRITER in this build. The action " +
+		"CAPTURE library that minted these rows (mintAction and its ladder) is retired with the " +
+		"work spine's epic A1; the AUTHORED action primitive that survives is a DSL construct, " +
+		"not a graph row, and bumpActionVersion is an update() that read-merges and never names " +
+		"the owner field. So this is not a tier asserting a guarantee nothing provides -- there " +
+		"is nothing to guarantee it about. The tier is kept rather than dropped because epic A3 " +
+		"reshapes this concept and gives it a writer, and THAT is when the stamp becomes " +
+		"required; this entry self-expires, since the gate errors on an exemption that starts " +
+		"passing.",
 }

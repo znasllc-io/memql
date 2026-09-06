@@ -55,17 +55,21 @@ func TestResolveBareConceptName_NamespaceHintDisambiguates(t *testing.T) {
 	}
 	resolver := NewConceptResolver(memoryNodes.DefaultRegistry())
 
-	if _, err := resolver.resolveBareConceptName("plan"); err == nil {
-		t.Fatal("resolveBareConceptName(\"plan\") with no hint: expected ambiguity error, got nil")
+	// `invocation` is the live ambiguity: v1:worker:invocation and
+	// v1:observability:invocation share the trailing segment. It was `plan`
+	// until the work spine's epic A1 retired v1:harness:plan; the rule is
+	// unchanged, only the pair that demonstrates it.
+	if _, err := resolver.resolveBareConceptName("invocation"); err == nil {
+		t.Fatal("resolveBareConceptName(\"invocation\") with no hint: expected ambiguity error, got nil")
 	}
-	if id, err := resolver.resolveBareConceptNameWithNamespace("plan", "planner"); err != nil || id != "v1:planner:plan" {
-		t.Fatalf("resolveBareConceptNameWithNamespace(\"plan\", \"planner\") = (%q, %v), want (v1:planner:plan, nil)", id, err)
+	if id, err := resolver.resolveBareConceptNameWithNamespace("invocation", "worker"); err != nil || id != "v1:worker:invocation" {
+		t.Fatalf("resolveBareConceptNameWithNamespace(\"invocation\", \"worker\") = (%q, %v), want (v1:worker:invocation, nil)", id, err)
 	}
-	if id, err := resolver.resolveBareConceptNameWithNamespace("plan", "harness"); err != nil || id != "v1:harness:plan" {
-		t.Fatalf("resolveBareConceptNameWithNamespace(\"plan\", \"harness\") = (%q, %v), want (v1:harness:plan, nil)", id, err)
+	if id, err := resolver.resolveBareConceptNameWithNamespace("invocation", "observability"); err != nil || id != "v1:observability:invocation" {
+		t.Fatalf("resolveBareConceptNameWithNamespace(\"invocation\", \"observability\") = (%q, %v), want (v1:observability:invocation, nil)", id, err)
 	}
 	// An unhelpful hint (matches neither) stays ambiguous.
-	if _, err := resolver.resolveBareConceptNameWithNamespace("plan", "nope"); err == nil {
-		t.Fatal("resolveBareConceptNameWithNamespace(\"plan\", \"nope\"): expected ambiguity error, got nil")
+	if _, err := resolver.resolveBareConceptNameWithNamespace("invocation", "nope"); err == nil {
+		t.Fatal("resolveBareConceptNameWithNamespace(\"invocation\", \"nope\"): expected ambiguity error, got nil")
 	}
 }

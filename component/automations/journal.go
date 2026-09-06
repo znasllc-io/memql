@@ -211,11 +211,27 @@ func journalArgs(name string, args map[string]any) (string, error) {
 	// with "expected object, but got null". The refusal was invisible, because
 	// call() logs a Warn and lets the run continue: every step row landed and
 	// no run row ever did.
+	// Marshal first, then decide, because the test for "absent" is on the
+	// RENDERED value rather than on the Go one. `v == nil` is false for a
+	// TYPED nil inside an any -- a `map[string]any(nil)` in an `any` field
+	// carries a type, so the interface is non-nil while the JSON is `null` --
+	// and exec.Input is exactly that shape. Checking the marshalled bytes
+	// catches both spellings with one rule.
+	//
+	// An EMPTY object or array is NOT absent and must survive: `{}` marshals
+	// to "{}", passes this test, and means "this field, empty", which is a
+	// different row from one where the field was never written.
+	rendered := make(map[string]string, len(args))
 	keys := make([]string, 0, len(args))
 	for k, v := range args {
-		if v == nil {
+		encoded, err := json.Marshal(v)
+		if err != nil {
+			return "", fmt.Errorf("work journal: marshal %s arg %q: %w", name, k, err)
+		}
+		if string(encoded) == "null" {
 			continue
 		}
+		rendered[k] = string(encoded)
 		keys = append(keys, k)
 	}
 	if len(keys) == 0 {
@@ -229,13 +245,9 @@ func journalArgs(name string, args map[string]any) (string, error) {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		v, err := json.Marshal(args[k])
-		if err != nil {
-			return "", fmt.Errorf("work journal: marshal %s arg %q: %w", name, k, err)
-		}
 		b.WriteString(k)
 		b.WriteString(": ")
-		b.Write(v)
+		b.WriteString(rendered[k])
 	}
 	b.WriteByte(')')
 	return b.String(), nil

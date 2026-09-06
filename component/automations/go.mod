@@ -20,7 +20,6 @@ require (
 	github.com/znasllc-io/memql/component/deploycontrol v0.0.0
 	github.com/znasllc-io/memql/component/events v0.0.0
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0
-	github.com/znasllc-io/memql/component/harness v0.0.0
 	github.com/znasllc-io/memql/component/healing v0.0.0
 	github.com/znasllc-io/memql/component/language v0.0.0
 	github.com/znasllc-io/memql/component/language/ast v0.0.0
@@ -108,7 +107,6 @@ replace github.com/znasllc-io/memql/component/envregistry => ../envregistry
 
 replace github.com/znasllc-io/memql/component/grpc/gen => ../grpc/gen
 
-replace github.com/znasllc-io/memql/component/harness => ../harness
 
 replace github.com/znasllc-io/memql/component/healing => ../healing
 

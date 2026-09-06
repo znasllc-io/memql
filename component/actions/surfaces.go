@@ -3,7 +3,7 @@ package actions
 import (
 	"strings"
 
-	"github.com/znasllc-io/memql/component/harness/surfaceresolver"
+	"github.com/znasllc-io/memql/component/actions/surfaceresolver"
 )
 
 // Execution-surface registry (memql#2220, action-library §7).
