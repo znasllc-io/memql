@@ -444,14 +444,14 @@ func TestAMalformedMarkerIsAnErrorRatherThanASkip(t *testing.T) {
 }
 
 func TestAnLteClaimAllowsABetterNumber(t *testing.T) {
-	claims, _ := ParseClaims("f.md", "Under 5% overhead.\n<!-- proving: metric=speed.journalPerStepOverheadRatio arm=platform op=lte value=0.05 -->\n")
-	s := card(t, entry(t, "sp.j", figure.FamilySpeed, figure.ArmPlatform, measured(t, figure.MetricJournalOverhead, 0.031)))
+	claims, _ := ParseClaims("f.md", "Under 5ms per step.\n<!-- proving: metric=speed.journalPerStepOverheadMs arm=platform op=lte value=5 -->\n")
+	s := card(t, entry(t, "sp.j", figure.FamilySpeed, figure.ArmPlatform, measured(t, figure.MetricJournalOverhead, 3.1)))
 	if f := CheckClaims(claims, s, true); len(f) != 0 {
-		t.Fatalf("3.1%% failed a claim of at most 5%%: %v", f)
+		t.Fatalf("3.1ms failed a claim of at most 5ms: %v", f)
 	}
-	worse := card(t, entry(t, "sp.j", figure.FamilySpeed, figure.ArmPlatform, measured(t, figure.MetricJournalOverhead, 0.09)))
+	worse := card(t, entry(t, "sp.j", figure.FamilySpeed, figure.ArmPlatform, measured(t, figure.MetricJournalOverhead, 9)))
 	if f := CheckClaims(claims, worse, true); len(f) != 1 {
-		t.Fatalf("9%% passed a claim of at most 5%%: %v", f)
+		t.Fatalf("9ms passed a claim of at most 5ms: %v", f)
 	}
 }
 

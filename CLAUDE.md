@@ -2493,6 +2493,15 @@ never a best case" is unrepresentable rather than merely discouraged.
   `component/proving` itself is deliberately DATABASE-FREE, so no db-gated lane
   changes; the database-touching verification is the binary running end to end
   in the `proving` job.
+- **The journal's per-step cost is MILLISECONDS, not a ratio**, and two wrong
+  instruments came first -- platform-over-baseline wall-clock (published
+  34,000: the cost of having a database at all) and the same automation
+  journal-on over journal-off (published 12,907: a speed scenario's steps are
+  trivial, so the denominator is degenerate). Both were arithmetically correct
+  and measured something other than their name. The instrument that is right is
+  the same automation run twice in one process with `Engine` set and nil --
+  `newWorkJournal` returns nil for a nil executor, so the only difference is
+  whether journal rows are written.
 - Rows: `v1:bench:run` and `v1:bench:sample`, `@rowAuthz(clusterOwner)`,
   broadcast, every mutation `@serverOnly` -- a client-reachable write here is a
   primitive for forging the numbers the README rests on. Surfaced at MemQL OS

@@ -259,10 +259,29 @@ scorecard rather than restated there.
 | **Recovery** | recovery rate, model calls, steps re-run after each injected failure kind, repair-from-failed-step against re-run-from-start (all measured) | the same, plus wall-clock |
 | **Durability** | duplicated side effects after a mid-run kill -- **measured, and fully honest in CI**; resume on another node | the same |
 | **Learning curve** | fraction of steps served from the catalog across a related sequence (measured); cost per goal `notMeasurableOnReplay` | cost per goal falling as the catalog fills |
-| **Speed** | the journal's own per-step overhead as a same-process ratio (measured); wall-clock per goal `notMeasurableOnReplay` | wall-clock per goal, first run against replay |
+| **Speed** | the journal's own per-step cost in MILLISECONDS, measured in one process with the journal on and off (measured); wall-clock per goal `notMeasurableOnReplay` | wall-clock per goal, first run against replay |
 
 Two of the six are fully answerable in CI. That is not a weakness of the
 design; it is the design refusing to dress four recordings as measurements.
+
+**The speed figure is an ABSOLUTE per-step cost, and getting there took two
+wrong instruments.** Both were arithmetically correct and measured something
+other than their name, which is the failure this suite exists to catch, produced
+by the suite:
+
+1. *Platform wall-clock over baseline wall-clock* published **34,000**. The
+   baseline touches no database and the platform writes to Postgres, so the
+   figure was the cost of having a database at all, wearing the journal's label.
+2. *The same automation with the journal on and off, as a ratio* published
+   **12,907**. The instrument was right -- same steps, same executor, same
+   process, `newWorkJournal` returning nil for a nil engine -- but a speed
+   scenario's steps are deliberately trivial, so the journal is essentially all
+   of the time and the denominator is degenerate.
+
+What ships is milliseconds per step from that same instrument, which is a
+number a reader can act on whatever the steps do, and which the epic asks to be
+published even where it costs the platform. It currently reads about
+**25 ms per step**: three row writes to Postgres per step boundary.
 
 **Governance is pass-or-fail, in both tiers**, and it is the part with no
 statistics at all:

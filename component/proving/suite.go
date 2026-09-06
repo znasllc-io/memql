@@ -60,7 +60,21 @@ func (r *Runner) Run(ctx context.Context, corpus scenario.Corpus) (SuiteResult, 
 				fmt.Sprintf("%s: %s", s.Id, strings.Join(p.Failures, "; ")))
 		}
 
-		entries, props, err := Figures(s, results, r.Prov)
+		// The journal-overhead measurement is its own instrument -- the same
+		// automation run twice in one process, journal on and journal off --
+		// so it runs only for the scenario that claims it and costs nothing
+		// for the other seventeen.
+		var overhead *Overhead
+		for _, m := range s.Claims {
+			if m != figure.MetricJournalOverhead {
+				continue
+			}
+			ratio, ok, reason := r.MeasureJournalOverhead(ctx, s)
+			overhead = &Overhead{Ratio: ratio, OK: ok, Reason: reason}
+			break
+		}
+
+		entries, props, err := Figures(s, results, overhead, r.Prov)
 		if err != nil {
 			return SuiteResult{}, err
 		}

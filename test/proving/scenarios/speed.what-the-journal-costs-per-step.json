@@ -83,7 +83,7 @@
     }
   ],
   "claims": [
-    "speed.journalPerStepOverheadRatio",
+    "speed.journalPerStepOverheadMs",
     "speed.wallClockPerGoalMs"
   ]
 }

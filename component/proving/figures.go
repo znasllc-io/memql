@@ -23,7 +23,14 @@ import (
 // benchmark that reported "zero provider calls" because nothing in the path
 // calls a provider would have told a lie that reads exactly like the headline
 // result, so those figures name the missing code instead.
-func Figures(s scenario.Scenario, results map[figure.Arm]ArmResult, prov figure.Provenance) ([]scorecard.Entry, []scorecard.Property, error) {
+// Overhead is the journal-overhead measurement, or the reason there is none.
+type Overhead struct {
+	Ratio  float64
+	OK     bool
+	Reason string
+}
+
+func Figures(s scenario.Scenario, results map[figure.Arm]ArmResult, overhead *Overhead, prov figure.Provenance) ([]scorecard.Entry, []scorecard.Property, error) {
 	var (
 		entries []scorecard.Entry
 		props   []scorecard.Property
@@ -213,37 +220,29 @@ func Figures(s scenario.Scenario, results map[figure.Arm]ArmResult, prov figure.
 		}
 	}
 
-	// The journal's per-step overhead is a SAME-PROCESS RATIO: the platform
-	// arm (journaled, through the real executor) over the baseline arm
-	// (unjournaled, the same steps in the same process on the same runner).
-	// That is the one speed figure a CI run can state honestly, because both
-	// halves carry the runner's noise equally and it cancels.
+	// The journal's per-step overhead is measured by MeasureJournalOverhead,
+	// which runs the SAME automation twice in one process -- once with an
+	// engine and once without -- so the only difference between the two
+	// timings is whether journal rows were written.
+	//
+	// It is NOT the platform arm's wall-clock over the baseline arm's. That
+	// was the first instrument here and it published a ratio of 34,000: the
+	// baseline touches no database and the platform writes to Postgres, so
+	// the figure measured the cost of having a database at all while carrying
+	// the journal's name. Arithmetically correct, and about something else.
 	if claims[figure.MetricJournalOverhead] {
-		p, hasP := results[figure.ArmPlatform]
-		b, hasB := results[figure.ArmBaseline]
-		switch {
-		case !hasP || !hasB:
+		if overhead == nil {
 			if err := absent(figure.ArmPlatform, figure.MetricJournalOverhead, figure.ReasonBelowFloor,
-				"the overhead ratio needs both arms and only one ran"); err != nil {
+				"the overhead measurement did not run"); err != nil {
 				return nil, nil, err
 			}
-		case len(s.Inject) > 0:
-			// With an injection the two arms do different amounts of work, so
-			// the ratio would measure the recovery rather than the journal.
+		} else if !overhead.OK {
 			if err := absent(figure.ArmPlatform, figure.MetricJournalOverhead, figure.ReasonBelowFloor,
-				"the scenario injects a failure, so the two arms do different work and the ratio would not be the journal's"); err != nil {
+				overhead.Reason); err != nil {
 				return nil, nil, err
 			}
-		case b.WallClock <= 0:
-			if err := absent(figure.ArmPlatform, figure.MetricJournalOverhead, figure.ReasonBelowFloor,
-				"the unjournaled arm was too fast to time"); err != nil {
-				return nil, nil, err
-			}
-		default:
-			ratio := (p.WallClock.Seconds() - b.WallClock.Seconds()) / b.WallClock.Seconds()
-			if err := measured(figure.ArmPlatform, figure.MetricJournalOverhead, ratio); err != nil {
-				return nil, nil, err
-			}
+		} else if err := measured(figure.ArmPlatform, figure.MetricJournalOverhead, overhead.Ratio); err != nil {
+			return nil, nil, err
 		}
 	}
 

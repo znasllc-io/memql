@@ -17,8 +17,8 @@ commit and date it came from. A figure that was not measured says so, in
 its own words, rather than reporting a zero -- an absent figure and a zero
 are different answers.
 
-- **Scorecard** `2026-09-06` at commit `9e91625b8`
-- **Corpus** `53866faa63b0fd5c` -- two scorecards with different corpus fingerprints measured different things and are not a trend
+- **Scorecard** `2026-09-06` at commit `6de33d89c`
+- **Corpus** `6d36d1420dc4ad89` -- two scorecards with different corpus fingerprints measured different things and are not a trend
 
 ## The two tiers
 
@@ -54,7 +54,7 @@ CI and stay that way until the live tier fills them.
 | learningCurve | `learningCurve.catalogServedFraction` | no | Steps served by the catalog, across a sequence of related goals. |
 | learningCurve | `learningCurve.usdPerGoal` | no | Dollars per goal as the catalog fills across a related sequence. |
 | speed | `speed.firstRunVsReplayRatio` | no | A replayed run's wall-clock over the first run's. |
-| speed | `speed.journalPerStepOverheadRatio` | no | What the journal itself adds per step, measured in one process against the same steps unjournaled. |
+| speed | `speed.journalPerStepOverheadMs` | no | Milliseconds the journal itself adds per step, measured in one process against the same steps unjournaled. |
 | speed | `speed.wallClockPerGoalMs` | no | Wall-clock for one goal, end to end. |
 | governance | `governance.approvalsBoundToArtifactHash` | **yes** | Approvals carrying the hash of the artifact approved. Must be 1. |
 | governance | `governance.effectsWithReceipts` | **yes** | Side-effecting steps that left a receipt. Must be 1. |
@@ -204,7 +204,7 @@ Platform against the bare-loop baseline:
 |---|---|---|---|
 | `speed.a-first-run-against-a-replay` | `speed.firstRunVsReplayRatio` | baseline | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
 | `speed.a-first-run-against-a-replay` | `speed.firstRunVsReplayRatio` | platform | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
-| `speed.what-the-journal-costs-per-step` | `speed.journalPerStepOverheadRatio` | platform | 3402277.8% (3402277.8%-3402277.8%, N=1) |
+| `speed.what-the-journal-costs-per-step` | `speed.journalPerStepOverheadMs` | platform | 25ms (25ms-25ms, N=1) |
 | `speed.a-first-run-against-a-replay` | `speed.wallClockPerGoalMs` | baseline | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
 | `speed.a-first-run-against-a-replay` | `speed.wallClockPerGoalMs` | platform | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
 | `speed.what-the-journal-costs-per-step` | `speed.wallClockPerGoalMs` | baseline | -- (not measurable on a replay -- a replay is deterministic, so only the live tier can answer this) |
@@ -215,7 +215,7 @@ Platform against the bare-loop baseline:
 | Scenario | Metric | Platform vs baseline |
 |---|---|---|
 | `speed.a-first-run-against-a-replay` | `speed.firstRunVsReplayRatio` | undecidable (the earlier figure is notMeasurableOnReplay) |
-| `speed.what-the-journal-costs-per-step` | `speed.journalPerStepOverheadRatio` | not comparable: the baseline arm produced no figure |
+| `speed.what-the-journal-costs-per-step` | `speed.journalPerStepOverheadMs` | not comparable: the baseline arm produced no figure |
 | `speed.a-first-run-against-a-replay` | `speed.wallClockPerGoalMs` | undecidable (the earlier figure is notMeasurableOnReplay) |
 | `speed.what-the-journal-costs-per-step` | `speed.wallClockPerGoalMs` | undecidable (the earlier figure is notMeasurableOnReplay) |
 

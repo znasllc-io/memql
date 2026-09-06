@@ -185,7 +185,15 @@ const (
 	MetricUSDPerGoalInSequence  Metric = "learningCurve.usdPerGoal"
 
 	// Speed.
-	MetricJournalOverhead  Metric = "speed.journalPerStepOverheadRatio"
+	//
+	// The journal figure is an ABSOLUTE per-step cost, not a ratio. The first
+	// version was a ratio against the same steps unjournaled and it published
+	// 12,907: a speed scenario's steps are deliberately trivial, so the
+	// journal is essentially all of the time and the denominator is
+	// degenerate. The arithmetic was right and the figure meant nothing.
+	// "The journal's own per-step overhead" is milliseconds per step, and
+	// that is a number a reader can act on whatever the steps do.
+	MetricJournalOverhead  Metric = "speed.journalPerStepOverheadMs"
 	MetricWallClockPerGoal Metric = "speed.wallClockPerGoalMs"
 	MetricReplaySpeedup    Metric = "speed.firstRunVsReplayRatio"
 
@@ -233,7 +241,7 @@ var metrics = map[Metric]Spec{
 	MetricCatalogServedFraction: {MetricCatalogServedFraction, FamilyLearningCurve, UnitRatio, HigherIsBetter, "Steps served by the catalog, across a sequence of related goals.", false},
 	MetricUSDPerGoalInSequence:  {MetricUSDPerGoalInSequence, FamilyLearningCurve, UnitUSD, LowerIsBetter, "Dollars per goal as the catalog fills across a related sequence.", false},
 
-	MetricJournalOverhead:  {MetricJournalOverhead, FamilySpeed, UnitRatio, LowerIsBetter, "What the journal itself adds per step, measured in one process against the same steps unjournaled.", false},
+	MetricJournalOverhead:  {MetricJournalOverhead, FamilySpeed, UnitMillis, LowerIsBetter, "Milliseconds the journal itself adds per step, measured in one process against the same steps unjournaled.", false},
 	MetricWallClockPerGoal: {MetricWallClockPerGoal, FamilySpeed, UnitMillis, LowerIsBetter, "Wall-clock for one goal, end to end.", false},
 	MetricReplaySpeedup:    {MetricReplaySpeedup, FamilySpeed, UnitRatio, LowerIsBetter, "A replayed run's wall-clock over the first run's.", false},
 
