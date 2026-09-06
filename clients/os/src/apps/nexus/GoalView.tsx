@@ -313,8 +313,8 @@ export function GoalView({
               onOpenApproval={onOpenApproval}
               expandedColumns={expandedColumns}
               expandedFolds={expandedFolds}
-              onToggleColumn={(depth) => setExpandedColumns(toggled(expandedColumns, depth))}
-              onToggleFold={(depth) => setExpandedFolds(toggled(expandedFolds, depth))}
+              onToggleColumn={(depth) => setExpandedColumns((held) => toggled(held, depth))}
+              onToggleFold={(depth) => setExpandedFolds((held) => toggled(held, depth))}
               at={at}
             />
 
@@ -542,6 +542,19 @@ function lastIndexAtOrBefore(moments: readonly SceneEvent[], at: string): number
   return 0;
 }
 
+/**
+ * A set with one member flipped.
+ *
+ * ALWAYS APPLIED THROUGH AN UPDATER, never as `setX(toggled(x, n))`. Two
+ * expanders opened against ONE render both read the same set from that
+ * render's closure, so the second write lands over the first and one of them
+ * silently does nothing. Every test in this suite clicked once per render,
+ * which is exactly why a suite is green over it -- the failing case is two
+ * clicks inside one `act`, which is what the test beside this pins.
+ *
+ * (The same defect was found independently in `apps/files/Rail.tsx` by the
+ * files-places session, on the same shape of state.)
+ */
 function toggled(set: ReadonlySet<number>, value: number): ReadonlySet<number> {
   const next = new Set(set);
   if (next.has(value)) next.delete(value);

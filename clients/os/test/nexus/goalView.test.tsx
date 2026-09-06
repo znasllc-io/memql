@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -186,6 +186,56 @@ describe("density: a finished stretch folds and says how much it stands for", ()
     fireEvent.click(fold);
     expect(screen.getByLabelText("Step s0, done")).toBeTruthy();
     expect(screen.queryByLabelText("6 finished steps, folded. Open to see them.")).toBeNull();
+  });
+});
+
+describe("two expanders against one render", () => {
+  // THE FAILING CASE IS TWO CLICKS INSIDE ONE `act`. A value-taking setter
+  // reads the set from the render's closure, so the second write lands over
+  // the first and one expander silently does nothing -- and every other case
+  // in this file clicks once per render, which is why a green suite says
+  // nothing about it. Both handles come from ONE render on purpose.
+  it("keeps both open", async () => {
+    const long: Row[] = [];
+    for (let i = 0; i < 6; i += 1) {
+      long.push(
+        stepRow({
+          id: `a${i}`,
+          key: `a${i}`,
+          seq: i,
+          runId: "r1",
+          status: "done",
+          dependsOn: i === 0 ? [] : [`a${i - 1}`],
+        }),
+      );
+    }
+    // A second, separate finished stretch after a step that is still running.
+    long.push(
+      stepRow({ id: "mid", key: "mid", seq: 6, runId: "r1", status: "running", dependsOn: ["a5"], finishedAt: "" }),
+    );
+    for (let i = 0; i < 4; i += 1) {
+      long.push(
+        stepRow({
+          id: `b${i}`,
+          key: `b${i}`,
+          seq: 7 + i,
+          runId: "r1",
+          status: "done",
+          dependsOn: [i === 0 ? "mid" : `b${i - 1}`],
+        }),
+      );
+    }
+    mount(seeded({ steps: long }));
+    await openGoal();
+
+    const folds = screen.getAllByLabelText(/finished steps, folded/);
+    expect(folds).toHaveLength(2);
+    // BOTH HANDLES FROM ONE RENDER, clicked inside a single act.
+    act(() => {
+      fireEvent.click(folds[0]!);
+      fireEvent.click(folds[1]!);
+    });
+    expect(screen.queryAllByLabelText(/finished steps, folded/)).toHaveLength(0);
   });
 });
 
