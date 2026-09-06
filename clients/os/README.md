@@ -1151,6 +1151,15 @@ question each of them answers.
   `viewKey`, because a composition landing reveals rows the browser already
   held -- the desk-shortcut lesson, applied to a second id set.
 
+- **Its empty line has THREE states, because the rail lists folders and the
+  place holds files.** No folder holds an output while the place is full is a
+  real state -- every output filed at the Library root -- and "Nothing has been
+  materialized yet." there is the Bin's own original falsehood rebuilt in the
+  new place, with the list beside it showing those files. So: files but no
+  folder says "None of these are in a folder."; nothing at all says so, and
+  only from somewhere else, because standing in the place the list already
+  carries the sentence with the part that matters.
+
 **A FOURTH DEFECT CAME OUT OF THE RENDERED PASS HERE, and it predates this
 epic**: two place chevrons flipped against one rendered `expanded` both read
 the same value, so the second applied over the first and one place silently
