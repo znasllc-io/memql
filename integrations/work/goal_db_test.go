@@ -42,6 +42,15 @@ import (
 // DIFFERENT actor cannot see it. That last assertion is the one that would
 // catch a tier that silently admits everybody.
 
+// ownerUserId is stored CANONICALIZED. Epic A1 declared
+// @relationship(field="ownerUserId", target=user) on the work concepts, and
+// canonicalizeRelationshipFields rewrites a bare id to {concept}:{shortId} on
+// write. So the stamped value comes back as "v1:identity:user:<id>", not as
+// the bare id the actor carried -- the row is right and a bare-equality
+// assertion is what is wrong. The client contract is bare ids at the WIRE
+// seam; this is an in-process engine read, which is the other side of it.
+func canonicalUser(id string) string { return "v1:identity:user:" + id }
+
 func openWorkTestEngine(t *testing.T) *memqlengine.MemQLEngine {
 	t.Helper()
 	dsn := dbtest.DSN()
@@ -110,8 +119,8 @@ func TestCreateGoal_DB_WritesARowTheOwnerCanReadAndAStrangerCannot(t *testing.T)
 	if found == nil {
 		t.Fatalf("the goal did not come back for its owner (%d rows). A call that PARSES is not a row that LANDS: check the concept's type check and @serverSet stamping.", len(rows))
 	}
-	if got, _ := found["ownerUserId"].(string); got != owner {
-		t.Errorf("ownerUserId = %q, want %q stamped from the actor", got, owner)
+	if got, _ := found["ownerUserId"].(string); got != canonicalUser(owner) {
+		t.Errorf("ownerUserId = %q, want %q stamped from the actor", got, canonicalUser(owner))
 	}
 	if got, _ := found["origin"].(string); got != "user" {
 		t.Errorf("origin = %q, want user", got)
@@ -168,8 +177,8 @@ func TestCreateGoal_DB_OpensARunTheOwnerCanRead(t *testing.T) {
 	for _, r := range memqlengine.MaterializeRows(res) {
 		id, _ := r["id"].(string)
 		if strings.HasSuffix(id, runId) {
-			if got, _ := r["ownerUserId"].(string); got != owner {
-				t.Errorf("run ownerUserId = %q, want %q -- the run is written under the goal owner's borrowed authority", got, owner)
+			if got, _ := r["ownerUserId"].(string); got != canonicalUser(owner) {
+				t.Errorf("run ownerUserId = %q, want %q -- the run is written under the goal owner's borrowed authority", got, canonicalUser(owner))
 			}
 			if got, _ := r["status"].(string); got != "compiling" {
 				t.Errorf("run status = %q, want compiling", got)
@@ -211,4 +220,82 @@ func digString(m map[string]any, key string) string {
 		}
 	}
 	return ""
+}
+
+// THE ROW-DERIVED OWNER PATH, which no other test here reaches.
+//
+// createGoal takes its owner from the ACTOR (a bare id). cancelGoal, forkRun,
+// replayRun, decideApproval and both sweeps take it from a ROW instead -- and
+// epic A1 made ownerUserId a relationship field, so a row hands back
+// "v1:identity:user:<id>" where the actor carried "<id>". That value is then
+// passed straight to ContextWithUserActor as the borrowed authority.
+//
+// If canonical-vs-bare does not reconcile on that comparison, every one of
+// those writes runs as an actor the owned tier does not match, and the failure
+// is the worst shape available: the mutation is accepted, the row is not
+// written, and nothing errors. cancelGoal would report runs asked and a goal
+// closed while neither happened.
+func TestCancelGoal_DB_BorrowsAuthorityFromARowDerivedOwner(t *testing.T) {
+	eng := openWorkTestEngine(t)
+	i := New(eng, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	owner := "dbtest-work-cancel-" + time.Now().UTC().Format("20060102150405.000000000")
+	statement := "Reconcile the ledger for " + owner
+
+	created, err := i.handleCreateGoal(actorCtx(owner), map[string]any{
+		"statement": statement, "requestedVia": "api",
+	}, 0)
+	if err != nil {
+		t.Fatalf("handleCreateGoal: %v", err)
+	}
+	goalId := replyField(t, created, "goalId")
+	if goalId == "" {
+		t.Fatal("createGoal reported no goalId")
+	}
+
+	// cancelGoal reads the goal, takes ownerUserId OFF THAT ROW, and writes
+	// both the run flag and the goal close under it.
+	replyNodes, err := i.handleCancelGoal(actorCtx(owner), map[string]any{
+		"goalId": goalId, "reason": "no longer needed",
+	}, 0)
+	if err != nil {
+		t.Fatalf("handleCancelGoal: %v", err)
+	}
+	if got := replyField(t, replyNodes, "goalId"); got == "" {
+		t.Fatal("cancelGoal reported no goal")
+	}
+
+	// The reply is not evidence -- the ROWS are. Read them back as the owner.
+	var goal map[string]any
+	for _, g := range queryGoals(t, eng, owner) {
+		if s, _ := g["statement"].(string); s == statement {
+			goal = g
+		}
+	}
+	if goal == nil {
+		t.Fatal("the goal is no longer readable by its owner after cancelGoal")
+	}
+	if got, _ := goal["status"].(string); got != "closed" {
+		t.Fatalf("goal status = %q, want closed. A row-derived owner that does not reconcile against actor.userId would leave this OPEN with no error anywhere.", got)
+	}
+	if got, _ := goal["closeReason"].(string); got != "no longer needed" {
+		t.Errorf("closeReason = %q", got)
+	}
+
+	res, err := eng.Execute(actorCtx(owner), "query workRunsForOwner()")
+	if err != nil {
+		t.Fatalf("workRunsForOwner: %v", err)
+	}
+	askedAny := false
+	for _, r := range memqlengine.MaterializeRows(res) {
+		if gid, _ := r["goalId"].(string); !strings.HasSuffix(gid, goalId) {
+			continue
+		}
+		if b, _ := r["cancelRequested"].(bool); b {
+			askedAny = true
+		}
+	}
+	if !askedAny {
+		t.Fatal("no run of the goal carries cancelRequested -- the run write ran under an actor the owned tier did not match, and said nothing")
+	}
 }
