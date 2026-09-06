@@ -225,11 +225,10 @@ func (l *PlannerAgentLoop) writeSpecialistApprovalCard(ctx context.Context, plan
 			"agentId": ownerAgentId,
 		},
 	}
-	payload, err := json.Marshal(args)
+	call, err := langparser.RenderCall("mutationCreateCanvasState", args)
 	if err != nil {
-		return fmt.Errorf("marshal card args: %w", err)
+		return fmt.Errorf("render card args: %w", err)
 	}
-	call := fmt.Sprintf(`mutationCreateCanvasState(%s)`, string(payload))
 	_, err = l.engine.Execute(systemActorContext(ctx), call)
 	return err
 }

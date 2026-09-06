@@ -228,11 +228,10 @@ func (d *EmbedDomainItemsDispatcher) embedDomain(ctx context.Context, domainId, 
 	if provider != "" {
 		args["provider"] = provider
 	}
-	argsJSON, err := json.Marshal(args)
+	q, err := langparser.RenderCall("embedDomainItems", args)
 	if err != nil {
 		return map[string]any{"domainId": domainId, "error": err.Error()}
 	}
-	q := fmt.Sprintf("embedDomainItems(%s)", string(argsJSON))
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return map[string]any{"domainId": domainId, "error": err.Error()}

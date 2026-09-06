@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/secret"
 )
@@ -117,11 +118,10 @@ func (i *Integration) handleSetApiKey(ctx context.Context, args map[string]any, 
 		"addedBy":        addedBy,
 		"active":         true,
 	}
-	argsJSON, err := json.Marshal(mutArgs)
+	query, err := langparser.RenderCall("setPartitionSecret", mutArgs)
 	if err != nil {
-		return nil, fmt.Errorf("integration.router.setApiKey: marshal mutation args: %w", err)
+		return nil, fmt.Errorf("integration.router.setApiKey: render mutation: %w", err)
 	}
-	query := fmt.Sprintf("setPartitionSecret(%s)", string(argsJSON))
 	if _, err := i.engine.Execute(ctx, query); err != nil {
 		return nil, fmt.Errorf("integration.router.setApiKey: execute mutation: %w", err)
 	}

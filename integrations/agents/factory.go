@@ -454,13 +454,12 @@ func (i *Integration) extendAgent(ctx context.Context, ownerUserId string, exist
 	netNew := diffStrings(mergedSkills, preExtendSkills)
 	for _, skillId := range netNew {
 		evArgs := buildSkillChangeEventArgs(id.NewShortId(), target.Id, skillId, ownerUserId, planId, before, after)
-		evJSON, merr := json.Marshal(evArgs)
+		evQuery, merr := langparser.RenderCall("createSkillChangeEvent", evArgs)
 		if merr != nil {
-			slog.Default().Warn("agents factory: marshal skillChangeEvent args failed; skipping audit row",
+			slog.Default().Warn("agents factory: rendering the skillChangeEvent call failed; skipping audit row",
 				"component", "agents-factory", "agentId", target.Id, "skillId", skillId, "error", merr)
 			continue
 		}
-		evQuery := fmt.Sprintf(`createSkillChangeEvent(%s)`, string(evJSON))
 		if _, eerr := i.engine.Execute(ctx, evQuery); eerr != nil {
 			slog.Default().Warn("agents factory: write skillChangeEvent failed; agent update already committed",
 				"component", "agents-factory", "agentId", target.Id, "skillId", skillId, "error", eerr)
@@ -635,11 +634,10 @@ func (i *Integration) createAgent(ctx context.Context, ownerUserId string, decis
 	agentId := id.NewShortId()
 	insertArgs := buildCreateAgentArgs(agentId, ownerUserId, decision, role, planId)
 	skillIds, _ := insertArgs["capabilities"].(map[string]any)["skillIds"].([]string)
-	argsJSON, err := json.Marshal(insertArgs)
+	query, err := langparser.RenderCall("createAgent", insertArgs)
 	if err != nil {
-		return agentSnapshot{}, fmt.Errorf("marshal create args: %w", err)
+		return agentSnapshot{}, fmt.Errorf("render createAgent: %w", err)
 	}
-	query := fmt.Sprintf(`createAgent(%s)`, string(argsJSON))
 	if _, err := i.engine.Execute(ctx, query); err != nil {
 		return agentSnapshot{}, fmt.Errorf("execute createAgent: %w", err)
 	}

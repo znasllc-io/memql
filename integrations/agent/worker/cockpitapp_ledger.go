@@ -4,12 +4,12 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/planner"
 	workerservice "github.com/znasllc-io/memql/component/worker"
@@ -83,9 +83,9 @@ func (w *LedgerWriter) RecordAppSession(ctx context.Context, result workerservic
 		"billing":            result.Billing,
 		"executionSurface":   planner.BackendCockpitApp + ":" + spec.App,
 	}
-	body, err := json.Marshal(args)
+	call, err := langparser.RenderCall("recordRouterCall", args)
 	if err != nil {
-		return fmt.Errorf("cockpit-app ledger: marshal args: %w", err)
+		return fmt.Errorf("cockpit-app ledger: render recordRouterCall: %w", err)
 	}
 	// The ledger insert needs an actor. Borrow the OWNER's, the same
 	// way the campaign sender does, rather than stamping a system
@@ -94,7 +94,7 @@ func (w *LedgerWriter) RecordAppSession(ctx context.Context, result workerservic
 	writeCtx, cancel := context.WithTimeout(
 		auth.ContextWithUserActor(context.WithoutCancel(ctx), spec.OwnerUserId), 10*time.Second)
 	defer cancel()
-	if _, err := w.Engine.Execute(writeCtx, fmt.Sprintf("recordRouterCall(%s)", string(body))); err != nil {
+	if _, err := w.Engine.Execute(writeCtx, call); err != nil {
 		return fmt.Errorf("cockpit-app ledger: record call: %w", err)
 	}
 	return nil

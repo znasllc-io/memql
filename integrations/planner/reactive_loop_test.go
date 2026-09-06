@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"errors"
 	cron "github.com/robfig/cron/v3"
+	workintegration "github.com/znasllc-io/memql/integrations/work"
 )
 
 // testLogger returns a discard slog logger satisfying plannerLogger so
@@ -90,36 +92,124 @@ func TestReactiveLoop_StandingNeverDueOnHeartbeat(t *testing.T) {
 
 // --- C1: dedup -------------------------------------------------------------
 
-func TestReactiveLoop_HasLivePlan(t *testing.T) {
-	eng := &fakeEngine{
-		execResponder: func(q string) (any, error) {
-			if strings.Contains(q, "plansForResponsibility") {
-				return rowsEnvelope(map[string]any{"id": "p1", "status": "running"}), nil
-			}
-			return nil, nil
-		},
+// fakeGoals is the work spine's seam (memql#5000). It records what it was
+// asked, because the loop's whole contract with the spine is which questions
+// it asks and with whose id.
+type fakeGoals struct {
+	live      bool
+	liveErr   error
+	openErr   error
+	askedFor  []string
+	askedUser []string
+	opened    []workintegration.ResponsibilityGoal
+}
+
+func (f *fakeGoals) HasLiveGoalForResponsibility(_ context.Context, ownerUserId, respId string) (bool, error) {
+	f.askedFor = append(f.askedFor, respId)
+	f.askedUser = append(f.askedUser, ownerUserId)
+	return f.live, f.liveErr
+}
+
+func (f *fakeGoals) OpenResponsibilityGoal(_ context.Context, g workintegration.ResponsibilityGoal) (string, string, error) {
+	if f.openErr != nil {
+		return "", "", f.openErr
 	}
-	r := NewReactiveLoop(eng, testLogger())
-	if !r.hasLivePlan(context.Background(), "r1") {
-		t.Fatalf("a running plan for the responsibility must count as live")
+	f.opened = append(f.opened, g)
+	return "v1:work:goal:g1", "v1:work:run:r1", nil
+}
+
+func TestReactiveLoop_HasLiveGoal(t *testing.T) {
+	g := &fakeGoals{live: true}
+	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r.SetWorkGoals(g)
+	if !r.hasLiveGoal(context.Background(), "u1", "r1") {
+		t.Fatalf("a live goal for the responsibility must count as live")
+	}
+	if len(g.askedUser) != 1 || g.askedUser[0] != "u1" {
+		t.Errorf("the dedup read must name the OWNER, or it runs under nobody's actor and answers zero rows: %v", g.askedUser)
 	}
 }
 
-func TestReactiveLoop_NoLivePlan_AllTerminal(t *testing.T) {
-	eng := &fakeEngine{
-		execResponder: func(q string) (any, error) {
-			if strings.Contains(q, "plansForResponsibility") {
-				return rowsEnvelope(
-					map[string]any{"id": "p1", "status": "succeeded"},
-					map[string]any{"id": "p2", "status": "cancelled"},
-				), nil
-			}
-			return nil, nil
-		},
+func TestReactiveLoop_NoLiveGoal(t *testing.T) {
+	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r.SetWorkGoals(&fakeGoals{live: false})
+	if r.hasLiveGoal(context.Background(), "u1", "r1") {
+		t.Fatalf("no live goal exists")
 	}
-	r := NewReactiveLoop(eng, testLogger())
-	if r.hasLivePlan(context.Background(), "r1") {
-		t.Fatalf("only terminal plans exist -> no live plan")
+}
+
+// The fail-open direction is unchanged from the Plan version, and it is worth
+// pinning rather than inheriting: failing toward NOT-spawning would wedge the
+// responsibility forever on a transient read error, while failing toward
+// spawning risks one duplicate the respawn guard then suppresses.
+func TestReactiveLoop_ALiveGoalReadErrorFailsTowardSpawning(t *testing.T) {
+	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r.SetWorkGoals(&fakeGoals{liveErr: errors.New("database unreachable")})
+	if r.hasLiveGoal(context.Background(), "u1", "r1") {
+		t.Fatalf("a read error must answer 'no live goal' so the responsibility is not wedged")
+	}
+}
+
+// A node with no work spine spawns NOTHING, and says so where the spawn is
+// attempted rather than answering "a goal already exists" from the dedup read
+// -- which would be a silent stop with a wrong reason.
+func TestReactiveLoop_WithNoWorkSpineTheSpawnSaysSo(t *testing.T) {
+	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	if r.hasLiveGoal(context.Background(), "u1", "r1") {
+		t.Fatalf("with no spine there are no goals to be live")
+	}
+	_, err := r.openResponsibilityGoal(context.Background(), "u1",
+		map[string]any{"id": "r1", "statement": "do the thing"}, "a1")
+	if err == nil {
+		t.Fatal("a due responsibility on a node with no work spine reported success and opened nothing")
+	}
+	if !strings.Contains(err.Error(), "work spine") {
+		t.Errorf("the error does not name what is missing: %v", err)
+	}
+}
+
+// The goal carries the responsibility as a FIRST-CLASS field, which is what
+// workGoalsForResponsibility reads. The Plan carried it inside input, matched
+// by plansForResponsibility.
+func TestReactiveLoop_TheGoalCarriesTheResponsibilityAndTheOwner(t *testing.T) {
+	g := &fakeGoals{}
+	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r.SetWorkGoals(g)
+	if _, err := r.openResponsibilityGoal(context.Background(), "u1", map[string]any{
+		"id": "r1", "statement": "summarize last week", "trigger": "recurring", "successCriteria": "one paragraph",
+	}, "a1"); err != nil {
+		t.Fatalf("openResponsibilityGoal: %v", err)
+	}
+	if len(g.opened) != 1 {
+		t.Fatalf("expected one goal, got %d", len(g.opened))
+	}
+	got := g.opened[0]
+	if got.OwnerUserId != "u1" {
+		t.Errorf("the goal is owned by %q, want the responsibility's owner", got.OwnerUserId)
+	}
+	if got.ResponsibilityId != "r1" {
+		t.Errorf("the goal does not name its responsibility: %+v", got)
+	}
+	if got.Statement != "summarize last week" {
+		t.Errorf("statement = %q", got.Statement)
+	}
+	if got.Input["successCriteria"] != "one paragraph" {
+		t.Errorf("the input lost successCriteria: %+v", got.Input)
+	}
+}
+
+// A responsibility with no statement still gets one, because the goal's is
+// @required and a blank would be refused at the mutation with an error the
+// loop would log and drop.
+func TestReactiveLoop_ABlankStatementGetsASyntheticOne(t *testing.T) {
+	g := &fakeGoals{}
+	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r.SetWorkGoals(g)
+	if _, err := r.openResponsibilityGoal(context.Background(), "u1", map[string]any{"id": "r1"}, ""); err != nil {
+		t.Fatalf("openResponsibilityGoal: %v", err)
+	}
+	if got := g.opened[0].Statement; !strings.Contains(got, "r1") {
+		t.Errorf("a blank statement must still name the responsibility, got %q", got)
 	}
 }
 
@@ -211,9 +301,10 @@ func TestReactiveLoop_RouteSpecialistAlreadyBound_Idempotent(t *testing.T) {
 
 // --- C3: honor -------------------------------------------------------------
 
-func TestReactiveLoop_HonorRecurring_CreatesPlan(t *testing.T) {
-	eng := &fakeEngine{}
-	r := NewReactiveLoop(eng, testLogger())
+func TestReactiveLoop_HonorRecurring_OpensAGoal(t *testing.T) {
+	g := &fakeGoals{}
+	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r.SetWorkGoals(g)
 	row := map[string]any{
 		"id":        "v1:planner:responsibility:r1",
 		"trigger":   "recurring",
@@ -223,26 +314,33 @@ func TestReactiveLoop_HonorRecurring_CreatesPlan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("honor recurring: %v", err)
 	}
-	if !strings.Contains(res, "Plan") {
-		t.Fatalf("recurring honor should report a spawned Plan, got %q", res)
+	if !strings.Contains(res, "goal") {
+		t.Fatalf("recurring honor should report an opened goal, got %q", res)
 	}
-	exec, _, _ := eng.snapshot()
-	if countContains(exec, "createPlan") == 0 {
-		t.Fatalf("recurring honor must create a Plan")
+	if len(g.opened) != 1 {
+		t.Fatalf("recurring honor must open exactly one goal, got %d", len(g.opened))
 	}
-	// The plan must carry the responsibilityId back-pointer for dedup.
-	found := false
-	for _, c := range exec {
-		if strings.Contains(c, "createPlan") && strings.Contains(c, "responsibilityId") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("created plan must stamp input.responsibilityId for the dedup query")
+	// The responsibility is a FIRST-CLASS field on the goal, not a key
+	// buried in input the way the Plan carried it -- which is what
+	// workGoalsForResponsibility reads for the dedup guard.
+	if g.opened[0].ResponsibilityId != "v1:planner:responsibility:r1" {
+		t.Fatalf("the opened goal must name its responsibility for the dedup query: %+v", g.opened[0])
 	}
 }
 
-func TestReactiveLoop_HonorStanding_InjectsContextNoPlan(t *testing.T) {
+// A recurring row on a node with no work spine must FAIL rather than report a
+// success it did not have: honorResponsibility's result becomes lastResult on
+// the responsibility, and "opened goal " with nothing after it is what a
+// person would read.
+func TestReactiveLoop_HonorRecurring_WithNoSpineIsAnError(t *testing.T) {
+	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	row := map[string]any{"id": "r1", "trigger": "recurring", "statement": "x"}
+	if _, err := r.honorResponsibility(ownerActorContext(context.Background(), "u1"), "u1", row, "a1"); err == nil {
+		t.Fatal("a recurring row honored with no work spine reported success")
+	}
+}
+
+func TestReactiveLoop_HonorStanding_InjectsContextNoGoal(t *testing.T) {
 	eng := &fakeEngine{
 		execResponder: func(q string) (any, error) {
 			if strings.Contains(q, "agentById") {
@@ -338,8 +436,8 @@ func TestReactiveLoop_ProcessStanding_InjectsNoPlanNoDueCheck(t *testing.T) {
 	if countContains(exec, "createPlan") != 0 {
 		t.Fatalf("standing row must not create a Plan")
 	}
-	if countContains(exec, "plansForResponsibility") != 0 {
-		t.Fatalf("standing row must not run the live-plan dedup query (not Plan-driven)")
+	if countContains(exec, "workGoalsForResponsibility") != 0 {
+		t.Fatalf("standing row must not run the live-goal dedup query (it opens no work)")
 	}
 	if countContains(exec, "updateAgent") == 0 {
 		t.Fatalf("standing row must inject via updateAgent")
@@ -379,14 +477,18 @@ func TestParseConvergence_FencedAction(t *testing.T) {
 }
 
 func TestReactiveLoop_ConvergenceLowConfidenceDropped(t *testing.T) {
-	eng := &fakeEngine{}
-	r := NewReactiveLoop(eng, testLogger())
+	// Counted on the SEAM, not on the engine. The spawn goes through
+	// integrations/work now (memql#5000), so an engine-side count of
+	// "createPlan" is zero whatever happens and the test would pass having
+	// checked nothing.
+	g := &fakeGoals{}
+	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r.SetWorkGoals(g)
 	r.dispatchConvergenceAction(ownerActorContext(context.Background(), "u1"), "u1",
 		convergenceAction{Kind: "createPlan", Statement: "x", Confidence: 0.4},
 		time.Now().UTC())
-	exec, _, _ := eng.snapshot()
-	if countContains(exec, "createPlan") != 0 {
-		t.Fatalf("low-confidence convergence actions must be dropped (quiet guard)")
+	if len(g.opened) != 0 {
+		t.Fatalf("low-confidence convergence actions must be dropped (quiet guard), opened %d", len(g.opened))
 	}
 }
 
@@ -399,14 +501,15 @@ func TestReactiveLoop_ConvergenceDedup(t *testing.T) {
 			return nil, nil
 		},
 	}
+	g := &fakeGoals{}
 	r := NewReactiveLoop(eng, testLogger())
+	r.SetWorkGoals(g)
 	now := time.Now().UTC()
 	act := convergenceAction{Kind: "createPlan", ResponsibilityId: "r1", Statement: "x", Confidence: 0.9}
 	r.dispatchConvergenceAction(ownerActorContext(context.Background(), "u1"), "u1", act, now)
 	r.dispatchConvergenceAction(ownerActorContext(context.Background(), "u1"), "u1", act, now.Add(time.Minute))
-	exec, _, _ := eng.snapshot()
-	if countContains(exec, "createPlan") != 1 {
-		t.Fatalf("the dedup guard should let the same action fire exactly once within the guard window, got %d", countContains(exec, "createPlan"))
+	if len(g.opened) != 1 {
+		t.Fatalf("the dedup guard should let the same action fire exactly once within the guard window, got %d", len(g.opened))
 	}
 }
 

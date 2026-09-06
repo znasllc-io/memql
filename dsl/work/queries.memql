@@ -115,6 +115,23 @@ query goal workGoalsForOwner {
   shape   workGoalFull
 }
 
+/// The goals opened for one responsibility, newest first. Owned.
+///
+/// The reactive loop's dedup guard (C1: one live goal per continuous responsibility), replacing
+/// plansForResponsibility. Owner-scoped rather than cluster-owner: a responsibility belongs to one
+/// person, the loop already knows which, and the read runs under that person's borrowed authority
+/// -- so this needs neither @serverOnly nor a cluster-owner conjunct, and the same construct
+/// answers the Nexus surface asking "what has this responsibility produced".
+@actor
+query goal workGoalsForResponsibility {
+  args {
+    responsibilityId  string!
+  }
+  filter  ownerUserId==actor.userId && responsibilityId==args.responsibilityId
+  sort    "row.createdAt", "desc"
+  shape   workGoalFull
+}
+
 /// The caller's pending approvals, newest first. Owned. decision=="" is the pending state, and it
 /// matches because createWorkApproval STAMPS the empty string rather than leaving the key absent.
 @actor

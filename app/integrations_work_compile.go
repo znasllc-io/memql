@@ -50,4 +50,14 @@ func (a *App) wireWorkCompiler() {
 	}
 	work.SetCompiler(compiler)
 	a.Logger.Info("work compile wired to the planner's authoring pipeline", "component", "work")
+
+	// The OTHER direction, wired in the same breath (memql#5000): the
+	// reactive loop opens a work GOAL for a due responsibility now, instead
+	// of a Plan, and it cannot write one itself for the reason above. Without
+	// this call a due responsibility opens nothing at all -- which the loop
+	// reports as an error per spawn rather than silently, but the place to
+	// prevent it is here.
+	pi.SetWorkGoals(work)
+	a.Logger.Info("the reactive loop wired to the work spine; a due responsibility opens a goal",
+		"component", "work")
 }

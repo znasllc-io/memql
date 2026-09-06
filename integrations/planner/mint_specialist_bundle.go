@@ -2,11 +2,11 @@ package planner
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/skills"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -137,11 +137,11 @@ func (l *PlannerAgentLoop) MintSpecialistBundle(ctx context.Context, planId stri
 	if bundle.MintedByRunId != "" {
 		args["mintedByRunId"] = bundle.MintedByRunId
 	}
-	payload, err := json.Marshal(args)
+	call, err := langparser.RenderCall("mintSkill", args)
 	if err != nil {
-		return "", fmt.Errorf("mintSpecialistBundle: marshal args: %w", err)
+		return "", fmt.Errorf("mintSpecialistBundle: render mintSkill: %w", err)
 	}
-	if _, err := l.engine.Execute(systemActorContext(ctx), fmt.Sprintf("mintSkill(%s)", string(payload))); err != nil {
+	if _, err := l.engine.Execute(systemActorContext(ctx), call); err != nil {
 		return "", fmt.Errorf("mintSpecialistBundle: mint: %w", err)
 	}
 

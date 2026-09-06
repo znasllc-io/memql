@@ -10488,6 +10488,29 @@ QueryClient.prototype.workGoalsForOwner = function (this: QueryClient, args: Wor
   return this.executeNamed("workGoalsForOwner", buildWorkGoalsForOwner(args), opts);
 };
 
+/** The goals opened for one responsibility, newest first. Owned.
+The reactive loop's dedup guard (C1: one live goal per continuous responsibility), replacing plansForResponsibility. Owner-scoped rather than cluster-owner: a responsibility belongs to one person, the loop already knows which, and the read runs under that person's borrowed authority -- so this needs neither @serverOnly nor a cluster-owner conjunct, and the same construct answers the Nexus surface asking "what has this responsibility produced". */
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalsForResponsibility"] in generated_concepts.ts).
+export interface WorkGoalsForResponsibilityArgs {
+  responsibilityId: string;
+}
+
+export function buildWorkGoalsForResponsibility(args: WorkGoalsForResponsibilityArgs): string {
+  const parts: string[] = [];
+  parts.push("responsibilityId: " + renderMemQLValue(args.responsibilityId));
+  return "query workGoalsForResponsibility(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workGoalsForResponsibility(args: WorkGoalsForResponsibilityArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workGoalsForResponsibility = function (this: QueryClient, args: WorkGoalsForResponsibilityArgs = {} as WorkGoalsForResponsibilityArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workGoalsForResponsibility", buildWorkGoalsForResponsibility(args), opts);
+};
+
 /** Every model call of one of the caller's runs. An on-demand read: the concept does not broadcast, so the Work app shows when it last read this. */
 // Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsForOwnerRun"] in generated_concepts.ts).
 export interface WorkModelCallsForOwnerRunArgs {

@@ -283,6 +283,20 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 // SetAgentForwarder installs the agent-turn forwarder. Called from
 // app.cluster after the AiForwardRouter is constructed. Without a
 // forwarder, plan-execution dispatches log a warning and skip.
+// SetWorkGoals hands the reactive loop the work spine (memql#5000).
+//
+// SEPARATE FROM SetCompiler even though both are wired in the same breath and
+// take the same object: the compiler is what the work spine asks OF the
+// planner, and this is what the planner asks of the work spine. Collapsing
+// them would make a node that has one and not the other unrepresentable, and
+// the warning that names which half is missing impossible to write.
+func (p *PlannerIntegration) SetWorkGoals(g responsibilityGoals) {
+	if p == nil || p.reactiveLoop == nil {
+		return
+	}
+	p.reactiveLoop.SetWorkGoals(g)
+}
+
 func (p *PlannerIntegration) SetAgentForwarder(fwd AgentForwarder) {
 	if p == nil {
 		return

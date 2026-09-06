@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -305,12 +304,19 @@ BackgroundLoop:
 		// Cooperative preemption checkpoint (memql#906). The boundary
 		// between tool rounds is the only safe place to pause -- a model
 		// call can't be interrupted mid-token. If this turn was "passed",
-		// persist the in-progress working state (so #907 can resume the
-		// thread) and stop cleanly without burning more tokens. The
-		// planner-side "pass" action already marked the Plan paused (which
-		// frees its slot via #905), so the loop just needs to stop + persist.
+		// stop cleanly without burning more tokens. The planner-side "pass"
+		// action already marked the Plan paused (which frees its slot via
+		// #905), so the loop just needs to stop.
+		//
+		// IT NO LONGER PERSISTS WORKING STATE, because it never did
+		// (memql#5000). persistTaskStateOnPause rendered
+		// `persistTaskState({...})` -- the object-literal form the parser has
+		// refused since memql#2335 -- so every write was rejected, the error
+		// was logged at WARN and swallowed by design, and no row was ever
+		// created. Nothing in the tree read v1:planner:taskState either, so
+		// the resume it was written for never had anything to resume from.
+		// Two independent reasons it was doing nothing.
 		if PauseRequested(requestId) {
-			r.persistTaskStateOnPause(ctx, turnCtx, messages, allToolCalls, fullText.String())
 			r.logger.Info("agent background: preempted at checkpoint -- pausing",
 				"iter", iter, "toolCalls", len(allToolCalls), "requestId", requestId)
 			paused = true
@@ -640,73 +646,4 @@ BackgroundLoop:
 		Citations:  citations,
 		Paused:     paused,
 	}, nil
-}
-
-// persistTaskStateOnPause writes a v1:planner:taskState row capturing the
-// turn's in-progress working state when it's preempted at a checkpoint
-// (memql#906), so a later resume (memql#907) can pick up the thread. Best-
-// effort: every failure is logged and swallowed -- a persistence miss must
-// never turn a clean pause into a crash.
-//
-// taskId contract (flagged for Session B on #906): the background turn is
-// plan-scoped today (one executeApprovedPlan turn per Plan; per-task
-// fan-out is memql#899, not yet live-wired), so the state is keyed to the
-// Plan's execution unit via turnCtx.PlanId. If resume needs a semantic
-// v1:planner:task.id instead, thread it through turnContext and swap here.
-func (r *Replier) persistTaskStateOnPause(ctx context.Context, turnCtx turnContext, messages []common.ChatMessage, toolCalls []common.ToolCall, reasoning string) {
-	if r.engine == nil {
-		return
-	}
-	taskId := strings.TrimSpace(turnCtx.PlanId)
-	if taskId == "" {
-		// No plan-scoped unit to key the state to -- nothing to resume.
-		return
-	}
-
-	// Replayable tool-call history: {toolName, args, result} per call,
-	// matching each result back to its call by tool-call id.
-	resultByID := make(map[string]string)
-	for _, m := range messages {
-		if m.Role == "tool" && m.ToolCallId != "" {
-			resultByID[m.ToolCallId] = m.Content
-		}
-	}
-	history := make([]map[string]any, 0, len(toolCalls))
-	var lastResult string
-	for _, tc := range toolCalls {
-		entry := map[string]any{"toolName": tc.Name, "args": tc.Arguments}
-		if res, ok := resultByID[tc.ID]; ok {
-			entry["result"] = res
-			lastResult = res
-		}
-		history = append(history, entry)
-	}
-
-	stateId := "taskstate-" + string(genOutputIdEngine.MustFromMap(map[string]any{
-		"taskId": taskId,
-		"kind":   "pause",
-	}))[:16]
-
-	args := map[string]any{
-		"stateId":         stateId,
-		"taskId":          taskId,
-		"reasoningChain":  strings.TrimSpace(reasoning),
-		"toolCallHistory": history,
-		"workingMemory": map[string]any{
-			"pausedAtCheckpoint": true,
-			"toolCallCount":      len(history),
-			"lastToolResult":     lastResult,
-		},
-	}
-	payload, err := json.Marshal(args)
-	if err != nil {
-		r.logger.Warn("agent background: marshal taskState on pause failed",
-			"error", err, "task_id", taskId)
-		return
-	}
-	call := fmt.Sprintf("persistTaskState(%s)", string(payload))
-	if _, err := r.engine.Execute(withUserActor(ctx, turnCtx.OwnerUserId), call); err != nil {
-		r.logger.Warn("agent background: persist taskState on pause failed",
-			"error", err, "task_id", taskId)
-	}
 }

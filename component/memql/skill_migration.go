@@ -8,6 +8,7 @@ import (
 	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/provenance"
 )
 
@@ -200,11 +201,10 @@ func (e *MemQLEngine) writeMigratedAgent(ctx context.Context, agentId string, pa
 		"agentId": agentId,
 		"payload": payload,
 	}
-	payloadJSON, err := json.Marshal(args)
+	call, err := langparser.RenderCall("updateAgent", args)
 	if err != nil {
-		return fmt.Errorf("marshal args: %w", err)
+		return fmt.Errorf("render updateAgent: %w", err)
 	}
-	call := fmt.Sprintf(`updateAgent(%s)`, string(payloadJSON))
 	ctx = provenance.ContextWithProvenance(systemActorContext(ctx), provenance.System("migration:phase2:skill-cut"))
 	_, err = e.Execute(ctx, call)
 	return err
@@ -223,11 +223,10 @@ func (e *MemQLEngine) writeSkillChangeEvent(ctx context.Context, agentId, skillI
 		"after":              after,
 		"actorUserId":        "system:migration:phase2",
 	}
-	payloadJSON, err := json.Marshal(args)
+	call, err := langparser.RenderCall("createSkillChangeEvent", args)
 	if err != nil {
-		return fmt.Errorf("marshal event args: %w", err)
+		return fmt.Errorf("render createSkillChangeEvent: %w", err)
 	}
-	call := fmt.Sprintf(`createSkillChangeEvent(%s)`, string(payloadJSON))
 	ctx = provenance.ContextWithProvenance(systemActorContext(ctx), provenance.System("migration:phase2:skill-cut"))
 	_, err = e.Execute(ctx, call)
 	return err

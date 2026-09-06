@@ -1047,11 +1047,10 @@ func (l *PlannerAgentLoop) insertDispatchedTask(ctx context.Context, planId stri
 		"executorBackend":  decision.Backend,
 		"delegationReason": decision.Reason,
 	}
-	argsJSON, err := json.Marshal(args)
+	q, err := langparser.RenderCall("createSemanticTask", args)
 	if err != nil {
-		return fmt.Errorf("marshal task args: %w", err)
+		return fmt.Errorf("render createSemanticTask: %w", err)
 	}
-	q := fmt.Sprintf("createSemanticTask(%s)", string(argsJSON))
 	if _, err := l.engine.Execute(systemActorContext(ctx), q); err != nil {
 		l.logger.Warn("planner agent loop: insertDispatchedTask query rejected",
 			"planId", planId, "query", q, "error", err)

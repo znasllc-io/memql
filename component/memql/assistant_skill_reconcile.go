@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/provenance"
 )
 
@@ -263,11 +264,10 @@ func (m *SeedMaterializer) writeReconciledAssistantSkills(ctx context.Context, a
 			"capabilities": capabilities,
 		},
 	}
-	payloadJSON, err := json.Marshal(args)
+	call, err := langparser.RenderCall("updateAgent", args)
 	if err != nil {
-		return fmt.Errorf("marshal args: %w", err)
+		return fmt.Errorf("render updateAgent: %w", err)
 	}
-	call := fmt.Sprintf(`updateAgent(%s)`, string(payloadJSON))
 	ctx = provenance.ContextWithProvenance(systemActorContext(ctx), provenance.System("reconcile:assistant-skillids"))
 	_, err = m.engine.Execute(ctx, call)
 	return err
