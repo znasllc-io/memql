@@ -563,12 +563,10 @@ smoke("every webview surface opens without throwing", async () => {
       viewSourceFromCluster: () => {
         throw new Error("no cluster source in the smoke lane");
       },
-      // Same reasoning, and doubly unreachable here: the fixture's kind is
-      // "logic", so the page draws no browse-rows button to click in the
-      // first place (memql#4252).
-      browseRowsInPortal: () => {
-        throw new Error("no portal browse in the smoke lane");
-      },
+      // `browseRowsInPortal` was the second dep here and is GONE with the
+      // portal (epic memql#4984). It opened the portal's /concepts/<id> page
+      // for a concept; MemQL OS has no concept browser, so the button was
+      // removed rather than pointed at a page that answers 404.
     },
     // The cluster this record was "read from" (memql#4253). The smoke lane has
     // no connection, so "" is the honest answer -- and it is the value that
