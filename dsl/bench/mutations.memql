@@ -1,0 +1,89 @@
+// Writes over the proving suite's published record.
+//
+// BOTH ARE @serverOnly, and that is the point rather than a precaution. These
+// rows are what the README's published claims rest on: the claims gate
+// (component/proving/scorecard/claims.go) fails the build when a marked claim
+// names a figure the committed scorecard does not carry. A client-reachable
+// write here would therefore be a primitive for forging the numbers the
+// product is sold on.
+//
+// The Go writer stamps internal origin (component/proving) and holds an entry
+// in call_origin_conformance_test.go's allowlist stating that reason. Without
+// the stamp the function validator refuses the write with ONE WARN and
+// nothing above it hears -- the run would report itself complete and the rows
+// would silently never land.
+
+/// Open a benchmark run.
+///
+/// @serverOnly, and scoping to actor.userId is NOT the fix here. A benchmark is
+/// a fact about the DEPLOYMENT rather than about a person: the concept declares
+/// @rowAuthz(clusterOwner) and carries no owner field at all, so there is no
+/// actor.userId for a filter to compare against. Making one up -- stamping the
+/// caller as the run's owner -- would turn a cluster-wide measurement into a
+/// per-person one and give every signed-in account a private set of numbers.
+///
+/// What barring it from the wire buys is the thing the numbers are FOR. These
+/// rows are what the README's published claims rest on, checked by
+/// TestPublishedClaimsRestOnAScorecardNumber, so a client-reachable write is a
+/// primitive for forging them.
+@serverOnly
+mutate run createBenchRun {
+  args {
+    benchRunId         string!
+    tier               string!
+    commit             string!
+    corpusFingerprint  string!
+    scenarioCount      int!
+    verdict            string!
+    modelIds           []string
+    costUsd            float
+    runner             string
+    blockingFailures   []string
+    startedAt          string!
+    finishedAt         string
+  }
+  insert {
+    accept { tier, commit, corpusFingerprint, scenarioCount, verdict, modelIds, costUsd, runner, blockingFailures, startedAt, finishedAt }
+    stamp {
+      id:                args.benchRunId
+    }
+  }
+}
+
+/// Publish one figure, or one absence, against a benchmark run.
+///
+/// @serverOnly for its parent's reason: a sample belongs to the deployment, not
+/// to a caller, so there is no actor.userId to scope it to -- and a sample is
+/// the row a published claim is checked against, so a forged one is a forged
+/// claim.
+@serverOnly
+mutate sample createBenchSample {
+  args {
+    benchSampleId  string!
+    benchRunId     string!
+    family         string!
+    scenarioId     string!
+    arm            string!
+    metric         string!
+    unit           string!
+    n              int
+    median         float
+    p10            float
+    p90            float
+    minimum        float
+    maximum        float
+    mad            float
+    absentReason   string
+    detail         string
+    tier           string!
+    commit         string!
+    measuredOn     string!
+  }
+  insert {
+    accept { benchRunId, family, scenarioId, arm, metric, unit, n, median, p10, p90, minimum, maximum, mad, detail, tier, commit, measuredOn }
+    stamp {
+      id:           args.benchSampleId
+      absentReason: args.absentReason ?? ""
+    }
+  }
+}

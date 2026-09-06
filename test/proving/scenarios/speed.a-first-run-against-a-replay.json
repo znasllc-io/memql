@@ -1,0 +1,53 @@
+{
+  "id": "speed.a-first-run-against-a-replay",
+  "family": "speed",
+  "title": "A first run against a replay of the same plan",
+  "goal": "Run the {{account}} close once and again",
+  "variables": [
+    {
+      "account": "acme"
+    }
+  ],
+  "steps": [
+    {
+      "key": "plan",
+      "type": "function",
+      "target": "planClose",
+      "reasoning": true
+    },
+    {
+      "key": "file",
+      "type": "function",
+      "target": "fileClosePack",
+      "dependsOn": [
+        "plan"
+      ],
+      "effect": "mailbox"
+    }
+  ],
+  "world": {
+    "mailbox": {
+      "addresses": [
+        "ops@example.test"
+      ]
+    }
+  },
+  "inject": [],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "succeeded"
+      },
+      "count": 1
+    },
+    {
+      "effects": "mailbox.sent",
+      "count": 1
+    }
+  ],
+  "claims": [
+    "speed.firstRunVsReplayRatio",
+    "speed.wallClockPerGoalMs"
+  ]
+}

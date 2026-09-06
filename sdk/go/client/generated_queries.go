@@ -1580,6 +1580,97 @@ func BadgesForSelfBuild(args BadgesForSelfArgs) string {
 	return "query badgesForSelf()"
 }
 
+// BenchRunById -- One benchmark run by id.
+//
+// Bound concept: v1:bench:run (machine-readable: BoundConcepts["benchRunById"] in generated_concepts.go).
+type BenchRunByIdArgs struct {
+	BenchRunId string
+}
+
+// BenchRunById calls the engine query benchRunById.
+func (qc *QueryClient) BenchRunById(ctx context.Context, args BenchRunByIdArgs) (*Result, error) {
+	call := BenchRunByIdBuild(args)
+	return qc.executeNamed(ctx, "benchRunById", call)
+}
+
+func BenchRunByIdBuild(args BenchRunByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query benchRunById(")
+	b.WriteString("benchRunId: ")
+	b.WriteString(quoteMemQL(args.BenchRunId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// BenchRuns -- Every benchmark run, newest first. The trend across releases is read from this.
+//
+// Bound concept: v1:bench:run (machine-readable: BoundConcepts["benchRuns"] in generated_concepts.go).
+type BenchRunsArgs struct {
+}
+
+// BenchRuns calls the engine query benchRuns.
+func (qc *QueryClient) BenchRuns(ctx context.Context, args BenchRunsArgs) (*Result, error) {
+	call := BenchRunsBuild(args)
+	return qc.executeNamed(ctx, "benchRuns", call)
+}
+
+func BenchRunsBuild(args BenchRunsArgs) string {
+	_ = args
+	return "query benchRuns()"
+}
+
+// BenchSamplesForMetric -- One metric's figures across runs, which is how a trend is drawn.
+//
+// Bound concept: v1:bench:sample (machine-readable: BoundConcepts["benchSamplesForMetric"] in generated_concepts.go).
+type BenchSamplesForMetricArgs struct {
+	Metric string
+	Arm    string
+}
+
+// BenchSamplesForMetric calls the engine query benchSamplesForMetric.
+func (qc *QueryClient) BenchSamplesForMetric(ctx context.Context, args BenchSamplesForMetricArgs) (*Result, error) {
+	call := BenchSamplesForMetricBuild(args)
+	return qc.executeNamed(ctx, "benchSamplesForMetric", call)
+}
+
+func BenchSamplesForMetricBuild(args BenchSamplesForMetricArgs) string {
+	var b strings.Builder
+	b.WriteString("query benchSamplesForMetric(")
+	b.WriteString("metric: ")
+	b.WriteString(quoteMemQL(args.Metric))
+	if args.Arm != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("arm: ")
+		b.WriteString(quoteMemQL(args.Arm))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// BenchSamplesForRun -- Every published figure for one benchmark run.
+//
+// Bound concept: v1:bench:sample (machine-readable: BoundConcepts["benchSamplesForRun"] in generated_concepts.go).
+type BenchSamplesForRunArgs struct {
+	BenchRunId string
+}
+
+// BenchSamplesForRun calls the engine query benchSamplesForRun.
+func (qc *QueryClient) BenchSamplesForRun(ctx context.Context, args BenchSamplesForRunArgs) (*Result, error) {
+	call := BenchSamplesForRunBuild(args)
+	return qc.executeNamed(ctx, "benchSamplesForRun", call)
+}
+
+func BenchSamplesForRunBuild(args BenchSamplesForRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query benchSamplesForRun(")
+	b.WriteString("benchRunId: ")
+	b.WriteString(quoteMemQL(args.BenchRunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // BookingById -- One booking by id, gated to the host. Owned.
 //
 // Bound concept: v1:calendar:booking (machine-readable: BoundConcepts["bookingById"] in generated_concepts.go).

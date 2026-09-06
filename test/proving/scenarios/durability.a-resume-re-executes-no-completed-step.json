@@ -1,0 +1,75 @@
+{
+  "id": "durability.a-resume-re-executes-no-completed-step",
+  "family": "durability",
+  "title": "A resumed run re-executes none of the steps that already completed",
+  "goal": "Close the {{account}} period in four steps, stopping at the third",
+  "variables": [
+    {
+      "account": "acme"
+    }
+  ],
+  "steps": [
+    {
+      "key": "one",
+      "type": "function",
+      "target": "stepOne"
+    },
+    {
+      "key": "two",
+      "type": "function",
+      "target": "stepTwo",
+      "dependsOn": [
+        "one"
+      ]
+    },
+    {
+      "key": "three",
+      "type": "function",
+      "target": "stepThree",
+      "dependsOn": [
+        "two"
+      ]
+    },
+    {
+      "key": "four",
+      "type": "function",
+      "target": "stepFour",
+      "dependsOn": [
+        "three"
+      ]
+    }
+  ],
+  "world": {},
+  "inject": [
+    {
+      "at": "three",
+      "kind": "kill",
+      "once": true
+    }
+  ],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "succeeded"
+      },
+      "count": 1
+    },
+    {
+      "rows": "v1:work:step",
+      "where": {
+        "status": "reExecuted"
+      },
+      "count": 0
+    },
+    {
+      "check": "journalIsCompleteForEveryStep",
+      "count": 1
+    }
+  ],
+  "claims": [
+    "durability.resumedStepsReExecuted",
+    "durability.resumedOnAnotherNode"
+  ],
+  "negativeControlFor": "durability.resumedStepsReExecuted"
+}

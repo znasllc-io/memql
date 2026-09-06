@@ -1,0 +1,72 @@
+{
+  "scenario": "amortizedCost.a-resume-does-not-recall-the-model",
+  "arm": "platform",
+  "modelId": "synthetic",
+  "recordedAt": "2026-09-06",
+  "turns": [
+    {
+      "requestHash": "3ff5864f1c8cb2f5efa8d4e8",
+      "prompt": "step=plan target=planReconciliation attempt=1",
+      "response": "placeholder answer for plan (attempt 1)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "27098170eadd709f9a144f08",
+      "prompt": "step=plan target=planReconciliation attempt=2",
+      "response": "placeholder answer for plan (attempt 2)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "74402ed9f259579afc0742a7",
+      "prompt": "step=plan target=planReconciliation attempt=3",
+      "response": "placeholder answer for plan (attempt 3)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "b93536dd6f77d689f4153672",
+      "prompt": "step=plan target=planReconciliation attempt=4",
+      "response": "placeholder answer for plan (attempt 4)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "7e0c6aeac2d2b5f29bf65e83",
+      "prompt": "step=plan target=planReconciliation attempt=5",
+      "response": "placeholder answer for plan (attempt 5)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "f54ca47936796ee839db78da",
+      "prompt": "step=plan target=planReconciliation attempt=6",
+      "response": "placeholder answer for plan (attempt 6)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "9d9827794f2a1b4c6f103f20",
+      "prompt": "step=plan target=planReconciliation attempt=7",
+      "response": "placeholder answer for plan (attempt 7)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "80b1299e997f8207990af426",
+      "prompt": "step=plan target=planReconciliation attempt=8",
+      "response": "placeholder answer for plan (attempt 8)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    }
+  ]
+}

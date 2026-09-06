@@ -1,0 +1,59 @@
+{
+  "id": "recovery.an-environment-failure-is-classified-by-rules",
+  "family": "recovery",
+  "title": "A permission denial reads as an environment symptom without a model call",
+  "goal": "Write the {{account}} audit note to a location the actor may not reach",
+  "variables": [
+    {
+      "account": "acme"
+    }
+  ],
+  "steps": [
+    {
+      "key": "prepare",
+      "type": "function",
+      "target": "prepareAuditNote"
+    },
+    {
+      "key": "write",
+      "type": "function",
+      "target": "writeAuditNote",
+      "dependsOn": [
+        "prepare"
+      ],
+      "effect": "mailbox"
+    }
+  ],
+  "world": {
+    "mailbox": {
+      "addresses": [
+        "ops@example.test"
+      ]
+    }
+  },
+  "inject": [
+    {
+      "at": "write",
+      "kind": "environment",
+      "message": "permission denied: not authorized to write here",
+      "once": true
+    }
+  ],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "succeeded"
+      },
+      "count": 1
+    },
+    {
+      "effects": "mailbox.duplicates",
+      "count": 0
+    }
+  ],
+  "claims": [
+    "recovery.rate",
+    "recovery.modelCalls"
+  ]
+}

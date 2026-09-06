@@ -1,0 +1,1505 @@
+{
+  "version": 1,
+  "date": "2026-09-06",
+  "commit": "6de33d89c",
+  "corpusFingerprint": "6d36d1420dc4ad89",
+  "tiers": {
+    "ci": {
+      "lastRun": "2026-09-06",
+      "armed": true,
+      "note": "replayed on every pull request; it reaches no provider. Responses come from synthetic."
+    },
+    "live": {
+      "armed": false,
+      "note": "dispatched by hand from proving-live.yml; it has not been run, so every live figure reads `tierNotRun`"
+    }
+  },
+  "entries": [
+    {
+      "scenario": "amortizedCost.a-catalog-hit-makes-no-model-call",
+      "family": "amortizedCost",
+      "arm": "platform",
+      "figure": {
+        "metric": "amortizedCost.compileCallsOnCatalogHit",
+        "unit": "calls",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "amortizedCost.control-a-catalog-miss-reaches-a-model",
+      "family": "amortizedCost",
+      "arm": "platform",
+      "figure": {
+        "metric": "amortizedCost.compileCallsOnCatalogHit",
+        "unit": "calls",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      },
+      "control": true
+    },
+    {
+      "scenario": "amortizedCost.a-resume-does-not-recall-the-model",
+      "family": "amortizedCost",
+      "arm": "baseline",
+      "figure": {
+        "metric": "amortizedCost.providerCalls",
+        "unit": "calls",
+        "stat": {
+          "n": 1,
+          "median": 2,
+          "p10": 2,
+          "p90": 2,
+          "min": 2,
+          "max": 2,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      },
+      "control": true
+    },
+    {
+      "scenario": "amortizedCost.a-resume-does-not-recall-the-model",
+      "family": "amortizedCost",
+      "arm": "platform",
+      "figure": {
+        "metric": "amortizedCost.providerCalls",
+        "unit": "calls",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      },
+      "control": true
+    },
+    {
+      "scenario": "amortizedCost.a-resume-does-not-recall-the-model",
+      "family": "amortizedCost",
+      "arm": "baseline",
+      "figure": {
+        "metric": "amortizedCost.stepsServedFromJournal",
+        "unit": "steps",
+        "stat": {
+          "n": 1,
+          "median": 5,
+          "p10": 5,
+          "p90": 5,
+          "min": 5,
+          "max": 5,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "amortizedCost.a-resume-does-not-recall-the-model",
+      "family": "amortizedCost",
+      "arm": "platform",
+      "figure": {
+        "metric": "amortizedCost.stepsServedFromJournal",
+        "unit": "steps",
+        "stat": {
+          "n": 1,
+          "median": 5,
+          "p10": 5,
+          "p90": 5,
+          "min": 5,
+          "max": 5,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "amortizedCost.a-resume-does-not-recall-the-model",
+      "family": "amortizedCost",
+      "arm": "baseline",
+      "figure": {
+        "metric": "amortizedCost.tokensPerGoal",
+        "unit": "tokens",
+        "absent": "notMeasurableOnReplay",
+        "detail": "a replayed run's tokens are the cassette's recorded tokens, not this run's",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "amortizedCost.a-resume-does-not-recall-the-model",
+      "family": "amortizedCost",
+      "arm": "platform",
+      "figure": {
+        "metric": "amortizedCost.tokensPerGoal",
+        "unit": "tokens",
+        "absent": "notMeasurableOnReplay",
+        "detail": "a replayed run's tokens are the cassette's recorded tokens, not this run's",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "amortizedCost.a-resume-does-not-recall-the-model",
+      "family": "amortizedCost",
+      "arm": "baseline",
+      "figure": {
+        "metric": "amortizedCost.usdPerGoal",
+        "unit": "usd",
+        "absent": "notMeasurableOnReplay",
+        "detail": "a replayed run spends nothing; the recorded cost belongs to the capture",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "amortizedCost.a-resume-does-not-recall-the-model",
+      "family": "amortizedCost",
+      "arm": "platform",
+      "figure": {
+        "metric": "amortizedCost.usdPerGoal",
+        "unit": "usd",
+        "absent": "notMeasurableOnReplay",
+        "detail": "a replayed run spends nothing; the recorded cost belongs to the capture",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "durability.a-script-step-on-a-machine-survives-a-stop",
+      "family": "durability",
+      "arm": "baseline",
+      "figure": {
+        "metric": "durability.duplicatedSideEffects",
+        "unit": "count",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "durability.a-script-step-on-a-machine-survives-a-stop",
+      "family": "durability",
+      "arm": "platform",
+      "figure": {
+        "metric": "durability.duplicatedSideEffects",
+        "unit": "count",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "durability.a-stopped-run-resumes-with-no-duplicated-effect",
+      "family": "durability",
+      "arm": "baseline",
+      "figure": {
+        "metric": "durability.duplicatedSideEffects",
+        "unit": "count",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      },
+      "control": true
+    },
+    {
+      "scenario": "durability.a-stopped-run-resumes-with-no-duplicated-effect",
+      "family": "durability",
+      "arm": "platform",
+      "figure": {
+        "metric": "durability.duplicatedSideEffects",
+        "unit": "count",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      },
+      "control": true
+    },
+    {
+      "scenario": "durability.a-resume-re-executes-no-completed-step",
+      "family": "durability",
+      "arm": "platform",
+      "figure": {
+        "metric": "durability.resumedOnAnotherNode",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "durability.a-stopped-run-resumes-with-no-duplicated-effect",
+      "family": "durability",
+      "arm": "platform",
+      "figure": {
+        "metric": "durability.resumedOnAnotherNode",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "durability.a-resume-re-executes-no-completed-step",
+      "family": "durability",
+      "arm": "baseline",
+      "figure": {
+        "metric": "durability.resumedStepsReExecuted",
+        "unit": "steps",
+        "stat": {
+          "n": 1,
+          "median": 2,
+          "p10": 2,
+          "p90": 2,
+          "min": 2,
+          "max": 2,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      },
+      "control": true
+    },
+    {
+      "scenario": "durability.a-resume-re-executes-no-completed-step",
+      "family": "durability",
+      "arm": "platform",
+      "figure": {
+        "metric": "durability.resumedStepsReExecuted",
+        "unit": "steps",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      },
+      "control": true
+    },
+    {
+      "scenario": "durability.a-script-step-on-a-machine-survives-a-stop",
+      "family": "durability",
+      "arm": "baseline",
+      "figure": {
+        "metric": "durability.resumedStepsReExecuted",
+        "unit": "steps",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "durability.a-script-step-on-a-machine-survives-a-stop",
+      "family": "durability",
+      "arm": "platform",
+      "figure": {
+        "metric": "durability.resumedStepsReExecuted",
+        "unit": "steps",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "durability.a-stopped-run-resumes-with-no-duplicated-effect",
+      "family": "durability",
+      "arm": "baseline",
+      "figure": {
+        "metric": "durability.resumedStepsReExecuted",
+        "unit": "steps",
+        "stat": {
+          "n": 1,
+          "median": 2,
+          "p10": 2,
+          "p90": 2,
+          "min": 2,
+          "max": 2,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "durability.a-stopped-run-resumes-with-no-duplicated-effect",
+      "family": "durability",
+      "arm": "platform",
+      "figure": {
+        "metric": "durability.resumedStepsReExecuted",
+        "unit": "steps",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "governance.an-approval-does-not-carry-to-a-changed-artifact",
+      "family": "governance",
+      "arm": "platform",
+      "figure": {
+        "metric": "governance.approvalsBoundToArtifactHash",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "governance.every-side-effect-leaves-a-receipt",
+      "family": "governance",
+      "arm": "platform",
+      "figure": {
+        "metric": "governance.effectsWithReceipts",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "governance.an-approval-does-not-carry-to-a-changed-artifact",
+      "family": "governance",
+      "arm": "platform",
+      "figure": {
+        "metric": "governance.modelCallsJournaled",
+        "unit": "ratio",
+        "absent": "seamNotBuilt",
+        "detail": "nothing writes v1:work:modelCall: the concept, shape, query and @serverOnly mutation exist and the Go writer is the remaining half of epic A2",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "learningCurve.a-deterministic-plan-needs-no-model-at-all",
+      "family": "learningCurve",
+      "arm": "baseline",
+      "figure": {
+        "metric": "learningCurve.catalogServedFraction",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "learningCurve.a-deterministic-plan-needs-no-model-at-all",
+      "family": "learningCurve",
+      "arm": "platform",
+      "figure": {
+        "metric": "learningCurve.catalogServedFraction",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "learningCurve.a-sequence-of-related-goals",
+      "family": "learningCurve",
+      "arm": "baseline",
+      "figure": {
+        "metric": "learningCurve.catalogServedFraction",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 0.8333333333333334,
+          "p10": 0.8333333333333334,
+          "p90": 0.8333333333333334,
+          "min": 0.8333333333333334,
+          "max": 0.8333333333333334,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "learningCurve.a-sequence-of-related-goals",
+      "family": "learningCurve",
+      "arm": "platform",
+      "figure": {
+        "metric": "learningCurve.catalogServedFraction",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 0.8333333333333334,
+          "p10": 0.8333333333333334,
+          "p90": 0.8333333333333334,
+          "min": 0.8333333333333334,
+          "max": 0.8333333333333334,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "learningCurve.a-sequence-of-related-goals",
+      "family": "learningCurve",
+      "arm": "baseline",
+      "figure": {
+        "metric": "learningCurve.usdPerGoal",
+        "unit": "usd",
+        "absent": "notMeasurableOnReplay",
+        "detail": "dollars per goal need a live provider; a replay spends nothing",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "learningCurve.a-sequence-of-related-goals",
+      "family": "learningCurve",
+      "arm": "platform",
+      "figure": {
+        "metric": "learningCurve.usdPerGoal",
+        "unit": "usd",
+        "absent": "notMeasurableOnReplay",
+        "detail": "dollars per goal need a live provider; a replay spends nothing",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.a-transient-failure-is-retried",
+      "family": "recovery",
+      "arm": "baseline",
+      "figure": {
+        "metric": "recovery.modelCalls",
+        "unit": "calls",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.a-transient-failure-is-retried",
+      "family": "recovery",
+      "arm": "platform",
+      "figure": {
+        "metric": "recovery.modelCalls",
+        "unit": "calls",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.an-environment-failure-is-classified-by-rules",
+      "family": "recovery",
+      "arm": "baseline",
+      "figure": {
+        "metric": "recovery.modelCalls",
+        "unit": "calls",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.an-environment-failure-is-classified-by-rules",
+      "family": "recovery",
+      "arm": "platform",
+      "figure": {
+        "metric": "recovery.modelCalls",
+        "unit": "calls",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.repair-runs-from-the-failed-step",
+      "family": "recovery",
+      "arm": "baseline",
+      "figure": {
+        "metric": "recovery.modelCalls",
+        "unit": "calls",
+        "stat": {
+          "n": 1,
+          "median": 2,
+          "p10": 2,
+          "p90": 2,
+          "min": 2,
+          "max": 2,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.repair-runs-from-the-failed-step",
+      "family": "recovery",
+      "arm": "platform",
+      "figure": {
+        "metric": "recovery.modelCalls",
+        "unit": "calls",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.a-stalled-loop-escalates-instead-of-retrying",
+      "family": "recovery",
+      "arm": "baseline",
+      "figure": {
+        "metric": "recovery.rate",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.a-stalled-loop-escalates-instead-of-retrying",
+      "family": "recovery",
+      "arm": "platform",
+      "figure": {
+        "metric": "recovery.rate",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.a-transient-failure-is-retried",
+      "family": "recovery",
+      "arm": "baseline",
+      "figure": {
+        "metric": "recovery.rate",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.a-transient-failure-is-retried",
+      "family": "recovery",
+      "arm": "platform",
+      "figure": {
+        "metric": "recovery.rate",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.an-environment-failure-is-classified-by-rules",
+      "family": "recovery",
+      "arm": "baseline",
+      "figure": {
+        "metric": "recovery.rate",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.an-environment-failure-is-classified-by-rules",
+      "family": "recovery",
+      "arm": "platform",
+      "figure": {
+        "metric": "recovery.rate",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.repair-runs-from-the-failed-step",
+      "family": "recovery",
+      "arm": "baseline",
+      "figure": {
+        "metric": "recovery.rate",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.repair-runs-from-the-failed-step",
+      "family": "recovery",
+      "arm": "platform",
+      "figure": {
+        "metric": "recovery.rate",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.repair-runs-from-the-failed-step",
+      "family": "recovery",
+      "arm": "baseline",
+      "figure": {
+        "metric": "recovery.repairStepsVsRestartSteps",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1.8,
+          "p10": 1.8,
+          "p90": 1.8,
+          "min": 1.8,
+          "max": 1.8,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.repair-runs-from-the-failed-step",
+      "family": "recovery",
+      "arm": "platform",
+      "figure": {
+        "metric": "recovery.repairStepsVsRestartSteps",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1.2,
+          "p10": 1.2,
+          "p90": 1.2,
+          "min": 1.2,
+          "max": 1.2,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.a-transient-failure-is-retried",
+      "family": "recovery",
+      "arm": "baseline",
+      "figure": {
+        "metric": "recovery.stepsReExecuted",
+        "unit": "steps",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.a-transient-failure-is-retried",
+      "family": "recovery",
+      "arm": "platform",
+      "figure": {
+        "metric": "recovery.stepsReExecuted",
+        "unit": "steps",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.repair-runs-from-the-failed-step",
+      "family": "recovery",
+      "arm": "baseline",
+      "figure": {
+        "metric": "recovery.stepsReExecuted",
+        "unit": "steps",
+        "stat": {
+          "n": 1,
+          "median": 3,
+          "p10": 3,
+          "p90": 3,
+          "min": 3,
+          "max": 3,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      },
+      "control": true
+    },
+    {
+      "scenario": "recovery.repair-runs-from-the-failed-step",
+      "family": "recovery",
+      "arm": "platform",
+      "figure": {
+        "metric": "recovery.stepsReExecuted",
+        "unit": "steps",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      },
+      "control": true
+    },
+    {
+      "scenario": "recovery.repair-runs-from-the-failed-step",
+      "family": "recovery",
+      "arm": "baseline",
+      "figure": {
+        "metric": "recovery.wallClockMs",
+        "unit": "ms",
+        "absent": "notMeasurableOnReplay",
+        "detail": "wall-clock on a shared CI runner belongs to the runner",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "recovery.repair-runs-from-the-failed-step",
+      "family": "recovery",
+      "arm": "platform",
+      "figure": {
+        "metric": "recovery.wallClockMs",
+        "unit": "ms",
+        "absent": "notMeasurableOnReplay",
+        "detail": "wall-clock on a shared CI runner belongs to the runner",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "reliability.an-unrecoverable-failure-stays-failed",
+      "family": "reliability",
+      "arm": "baseline",
+      "figure": {
+        "metric": "reliability.passRate",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "reliability.an-unrecoverable-failure-stays-failed",
+      "family": "reliability",
+      "arm": "platform",
+      "figure": {
+        "metric": "reliability.passRate",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "reliability.the-same-goal-run-repeatedly",
+      "family": "reliability",
+      "arm": "baseline",
+      "figure": {
+        "metric": "reliability.passRate",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "reliability.the-same-goal-run-repeatedly",
+      "family": "reliability",
+      "arm": "platform",
+      "figure": {
+        "metric": "reliability.passRate",
+        "unit": "ratio",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "reliability.the-same-goal-run-repeatedly",
+      "family": "reliability",
+      "arm": "baseline",
+      "figure": {
+        "metric": "reliability.passVariance",
+        "unit": "ratio",
+        "absent": "notMeasurableOnReplay",
+        "detail": "a replay is deterministic, so its variance is zero by construction rather than by measurement",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "reliability.the-same-goal-run-repeatedly",
+      "family": "reliability",
+      "arm": "platform",
+      "figure": {
+        "metric": "reliability.passVariance",
+        "unit": "ratio",
+        "absent": "notMeasurableOnReplay",
+        "detail": "a replay is deterministic, so its variance is zero by construction rather than by measurement",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "speed.a-first-run-against-a-replay",
+      "family": "speed",
+      "arm": "baseline",
+      "figure": {
+        "metric": "speed.firstRunVsReplayRatio",
+        "unit": "ratio",
+        "absent": "notMeasurableOnReplay",
+        "detail": "the first run and the replay would both be replays here",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "speed.a-first-run-against-a-replay",
+      "family": "speed",
+      "arm": "platform",
+      "figure": {
+        "metric": "speed.firstRunVsReplayRatio",
+        "unit": "ratio",
+        "absent": "notMeasurableOnReplay",
+        "detail": "the first run and the replay would both be replays here",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "speed.what-the-journal-costs-per-step",
+      "family": "speed",
+      "arm": "platform",
+      "figure": {
+        "metric": "speed.journalPerStepOverheadMs",
+        "unit": "ms",
+        "stat": {
+          "n": 1,
+          "median": 25.341695375,
+          "p10": 25.341695375,
+          "p90": 25.341695375,
+          "min": 25.341695375,
+          "max": 25.341695375,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "speed.a-first-run-against-a-replay",
+      "family": "speed",
+      "arm": "baseline",
+      "figure": {
+        "metric": "speed.wallClockPerGoalMs",
+        "unit": "ms",
+        "absent": "notMeasurableOnReplay",
+        "detail": "wall-clock on a shared CI runner belongs to the runner",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "speed.a-first-run-against-a-replay",
+      "family": "speed",
+      "arm": "platform",
+      "figure": {
+        "metric": "speed.wallClockPerGoalMs",
+        "unit": "ms",
+        "absent": "notMeasurableOnReplay",
+        "detail": "wall-clock on a shared CI runner belongs to the runner",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "speed.what-the-journal-costs-per-step",
+      "family": "speed",
+      "arm": "baseline",
+      "figure": {
+        "metric": "speed.wallClockPerGoalMs",
+        "unit": "ms",
+        "absent": "notMeasurableOnReplay",
+        "detail": "wall-clock on a shared CI runner belongs to the runner",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "speed.what-the-journal-costs-per-step",
+      "family": "speed",
+      "arm": "platform",
+      "figure": {
+        "metric": "speed.wallClockPerGoalMs",
+        "unit": "ms",
+        "absent": "notMeasurableOnReplay",
+        "detail": "wall-clock on a shared CI runner belongs to the runner",
+        "provenance": {
+          "commit": "6de33d89c",
+          "date": "2026-09-06",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    }
+  ],
+  "governance": [
+    {
+      "name": "approvalsBoundToArtifactHash",
+      "scenario": "governance.an-approval-does-not-carry-to-a-changed-artifact",
+      "passed": true
+    },
+    {
+      "name": "everyEffectHasAReceipt",
+      "scenario": "governance.every-side-effect-leaves-a-receipt",
+      "passed": true
+    }
+  ]
+}

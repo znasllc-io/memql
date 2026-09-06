@@ -1,0 +1,107 @@
+# The proving suite's LIVE tier: the corpus against real providers.
+#
+# IT SHIPS DISARMED. `workflow_dispatch` only, no `schedule` -- design decision
+# P3, taken by the owner on 2026-09-06. The consequence is written into the
+# published artifact rather than hidden: the scorecard's tier table says the
+# live lane is not armed and has never run, and every figure only a real
+# provider can measure reads `tierNotRun` with that reason attached. A reader
+# is never left to infer why a column is empty.
+#
+# Arming it is two deliberate acts: add a `schedule:` block here, and configure
+# a provider credential. Nothing else in the suite changes -- the runner, the
+# corpus and the scorecard are the same, and a live run simply fills the
+# figures a replay cannot.
+#
+# WHY THE CEILING IS REQUIRED AND HAS NO DEFAULT. A defaulted spend ceiling is
+# one nobody chose, and the first person to notice it is whoever reads the
+# bill. `--ceiling-usd` is checked BEFORE every model call, not after, and the
+# run refuses (exit 3, a RESULT rather than a crash) rather than crossing it.
+# It sits ABOVE the process-wide guards in component/memql/ai_guard.go, never
+# instead of them.
+name: proving-live
+
+on:
+  workflow_dispatch:
+    inputs:
+      ceiling-usd:
+        description: 'Hard per-run dollar ceiling. The run refuses rather than exceeding it.'
+        required: true
+        default: '2.00'
+      models:
+        description: 'Provider tiers to run, comma-separated: cheap, mid, strong.'
+        required: true
+        default: 'cheap'
+      write:
+        description: 'Commit the dated scorecard and regenerate the page.'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # One live run at a time, cluster-wide. Two concurrent runs would spend two
+  # ceilings and write two scorecards for the same date.
+  group: proving-live
+  cancel-in-progress: false
+
+jobs:
+  proving-live:
+    name: proving-live
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: ghcr.io/znasllc-io/ci-timescaledb@sha256:d8336a5c9cc49bdbf1e935234e8c87ab64b6d6d195fd2ecedff7b00185557631
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_USER: memql
+          POSTGRES_PASSWORD: memql_dev
+          POSTGRES_DB: memql
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U memql"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      MEMQL_DATABASE_DSN: postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.6'
+          cache: true
+      - uses: ./.github/actions/identity-css
+      - name: create required Postgres extensions
+        run: |
+          for i in $(seq 1 30); do
+            PGPASSWORD=memql_dev pg_isready -h localhost -U memql && break
+            echo "waiting for postgres ($i)"; sleep 2
+          done
+          PGPASSWORD=memql_dev psql -h localhost -U memql -d memql -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+          CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+          CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+          CREATE EXTENSION IF NOT EXISTS vector;
+          SQL
+      # This step REFUSES today, with exit 4 and a sentence naming what is
+      # missing. That is the honest shape: the live tier is designed, its
+      # arguments are declared, and running it needs a provider credential
+      # nobody has configured. Quietly falling through to the replay path and
+      # reporting a "live" scorecard is the failure this whole suite exists to
+      # prevent, so the refusal is deliberate and the exit code is the
+      # contract's "prerequisite missing" rather than a crash.
+      - name: proving suite (live tier)
+        run: |
+          go run ./cmd/memql-bench \
+            --do=run \
+            --tier=live \
+            --runner=ubuntu-latest \
+            --ceiling-usd='${{ inputs.ceiling-usd }}' \
+            --models='${{ inputs.models }}' \
+            --write='${{ inputs.write }}'

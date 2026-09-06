@@ -35,6 +35,19 @@ A cookie-flush on a second headless process is a **confounder**, not
 a fail. Evidence never includes local paths, secrets, vulnerability
 detail, PII, or customer data.
 
+## The scorecard is a different artifact
+
+This page is a HUMAN walkthrough log: what a person exercised by hand, on
+what overlay, with what result. Beside it sits
+[the proving scorecard](proving-scorecard.md), which is machine-generated
+from the proving suite's own runs -- amortized cost, reliability, recovery,
+durability, learning curve and speed, measured against the same model in a
+bare tool loop.
+
+Neither replaces the other. A scorecard cannot tell you that a person opened
+the console and found a control that does nothing; a walkthrough cannot tell
+you whether a resumed run re-delivers.
+
 ## Days (newest first)
 
 - [2026-08-20](proving/2026-08-20.md) — owner walkthrough started on overlay `2aaa768`

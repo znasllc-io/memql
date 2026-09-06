@@ -26,6 +26,15 @@ the test that backs it, or says plainly that it is not published yet and
 names the test that will. That rule is the point: a claim moves onto this
 page when its test is green on `main`, not when the design is agreed.
 
+**And the rule is now enforced rather than observed.** A claim that rests on
+a NUMBER carries a marker naming the figure it rests on, and
+`TestPublishedClaimsRestOnAScorecardNumber` fails the build when the newest
+committed scorecard does not carry that figure, reports it as unmeasured, or
+measures it differently. The mirror half fails when something in the
+"does NOT make yet" table below has quietly become measurable. The figures
+come from [the proving scorecard](proving-scorecard.md), which the proving
+suite regenerates on every pull request.
+
 Design record:
 [the work spine](../../superpowers/specs/2026-09-05-work-spine-design.md).
 
@@ -107,6 +116,36 @@ store and hoping.
 Nothing is logged twice, because nothing is logged: the record is the
 state.
 
+### 3a. A resumed run re-executes nothing it had already finished
+
+A run stopped mid-plan is resumed from its own journal, and the steps that
+had already completed are served back rather than run again.
+<!-- proving: metric=durability.resumedStepsReExecuted arm=platform value=0 -->
+
+The same run's side effects are not delivered twice.
+<!-- proving: metric=durability.duplicatedSideEffects arm=platform value=0 -->
+
+Both are measured, not asserted: the proving corpus stops a run mid-plan
+against a fake external world that counts every delivery and records
+duplicates rather than refusing them, then resumes it. And both come with a
+NEGATIVE CONTROL on the same scenario -- the bare-loop arm, which has no
+journal, restarts from the beginning and does re-deliver. A counter that
+never rises on any path reads as zero forever, so the suite fails if the
+control ever reads zero.
+
+`cmd/memql-bench`, `test/proving/scenarios/durability.*`. The figures are on
+[the scorecard](proving-scorecard.md).
+
+### 3b. A goal the catalog already holds is compiled without a model
+
+An exact catalog match returns from `component/work.Decide` with
+`NeedsModel` false and `NeedsTriage` false, so the compile pass reaches no
+provider at all -- not even the cheap triage classifier.
+<!-- proving: metric=amortizedCost.compileCallsOnCatalogHit arm=platform value=0 -->
+
+Its control is a scenario whose goal the catalog does not hold, which must
+reach one.
+
 ### 4. A safety and cost spine that is on by default
 
 - **A process-wide LLM rate ceiling** at the provider chokepoint
@@ -120,6 +159,10 @@ state.
   stop the classic "model apologizes and tries the same thing forever".
 - **An up-front estimate and approval gate**, and model tiering that is
   cheap by default and escalates only on an explicit stuck signal.
+
+Every side-effecting step is performed under an idempotency key, and the
+proving suite checks it as a pass-or-fail property rather than scoring it.
+<!-- proving: metric=governance.effectsWithReceipts arm=platform value=1 -->
 
 Read [LLM cost control](../ai/llm-cost-control.md) before touching any of
 it; it is defense in depth and every layer is load-bearing.
@@ -152,8 +195,8 @@ their tests are green on `main`, and not before.
 
 | Claim | Proven by | Lands in |
 |---|---|---|
-| A catalog-matched goal makes ZERO provider calls, and so does a replay | a counting fake provider over the compile pass and the three replay modes | epic A2 (compile and the loop) |
-| A failed run is repaired FROM the failed step, its prefix kept, and no edit is silent | the symptom classifier plus `planReview` approvals bound to an artifact hash | epic A2 |
+| Every model call a run makes is journaled | a `v1:work:modelCall` row per request, counted against the calls actually made. THE WRITER DOES NOT EXIST: the concept, the shape, the query and the `@serverOnly` mutation are all in place and no Go code writes one, so the proving suite reports this figure as `seamNotBuilt` NAMING that gap rather than as a passing ratio. Reporting 1.0 here would be reporting that every model call was journaled because none was made and none was recorded. <!-- proving-pending: metric=governance.modelCallsJournaled arm=platform value=1 --> | the remaining half of epic A2 |
+| A REPLAY serves every model call from the journal | `component/work.DecideServe` exists and is pure; its one caller -- the executor's model-call seam -- does not, so a run opened in replay mode records its intent and serves nothing. What the suite measures today is the adjacent and genuinely-built claim above: a RESUME re-executes no completed step | the remaining half of epic A2 |
 | Skill selection reads the capability graph structurally, not by vector match alone | typed `v1:skills:skillEdge` neighbours, proposed at compile and committed by a successful run | epic A3 |
 
 ## How developers use it

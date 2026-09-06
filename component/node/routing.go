@@ -212,6 +212,25 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.created.v1:work:approval", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:work:approval", TargetType: ""},
 		{Pattern: "graph.node.deleted.v1:work:approval", TargetType: ""},
+
+		// THE PROVING SUITE (design record
+		// docs/superpowers/specs/2026-09-06-proving-suite-design.md, section
+		// G). A benchmark run and its samples broadcast so MemQL OS charts
+		// the trend across releases without polling: the rows are written by
+		// `memql-bench` on whichever machine ran the suite, and read on the
+		// Settings page a bff serves, which is the cross-replica shape every
+		// block here exists for.
+		//
+		// Volume is not the concern it is for v1:work:modelCall or
+		// v1:worker:invocation. A bench run writes tens of rows on a lane
+		// that runs once per pull request, not one per tool result on a busy
+		// run.
+		{Pattern: "graph.node.created.v1:bench:run", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:bench:run", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:bench:run", TargetType: ""},
+		{Pattern: "graph.node.created.v1:bench:sample", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:bench:sample", TargetType: ""},
+		{Pattern: "graph.node.deleted.v1:bench:sample", TargetType: ""},
 		// THE MATERIALIZER (epic memql#4977, design record
 		// docs/superpowers/specs/2026-09-05-compose-materializer-design.md,
 		// section I). All three compose concepts broadcast: they are one

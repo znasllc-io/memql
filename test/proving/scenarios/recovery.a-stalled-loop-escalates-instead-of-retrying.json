@@ -1,0 +1,46 @@
+{
+  "id": "recovery.a-stalled-loop-escalates-instead-of-retrying",
+  "family": "recovery",
+  "title": "A repeated action escalates to a person rather than retrying forever",
+  "goal": "Reconcile {{account}} against a source that keeps answering the same way",
+  "variables": [
+    {
+      "account": "acme"
+    }
+  ],
+  "steps": [
+    {
+      "key": "read",
+      "type": "function",
+      "target": "ledgerLines"
+    },
+    {
+      "key": "post",
+      "type": "function",
+      "target": "postReconciliation",
+      "dependsOn": [
+        "read"
+      ]
+    }
+  ],
+  "world": {},
+  "inject": [
+    {
+      "at": "post",
+      "kind": "human",
+      "message": "the same action has been repeated with the same result"
+    }
+  ],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "failed"
+      },
+      "count": 1
+    }
+  ],
+  "claims": [
+    "recovery.rate"
+  ]
+}

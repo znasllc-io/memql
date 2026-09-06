@@ -1,0 +1,40 @@
+{
+  "id": "amortizedCost.a-catalog-hit-makes-no-model-call",
+  "family": "amortizedCost",
+  "title": "A goal that exactly matches the catalog is compiled without reaching a model",
+  "goal": "Produce the weekly ledger reconciliation for {{account}}",
+  "variables": [
+    {
+      "account": "acme"
+    }
+  ],
+  "steps": [
+    {
+      "key": "read",
+      "type": "function",
+      "target": "ledgerLines"
+    },
+    {
+      "key": "close",
+      "type": "function",
+      "target": "closeLedger",
+      "dependsOn": [
+        "read"
+      ]
+    }
+  ],
+  "world": {},
+  "inject": [],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "succeeded"
+      },
+      "count": 1
+    }
+  ],
+  "claims": [
+    "amortizedCost.compileCallsOnCatalogHit"
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "id": "learningCurve.a-sequence-of-related-goals",
+  "family": "learningCurve",
+  "title": "Across a sequence of related goals, most steps are served without a model",
+  "goal": "Produce the {{period}} close pack for {{account}}",
+  "variables": [
+    {
+      "account": "acme",
+      "period": "2026-06"
+    },
+    {
+      "account": "acme",
+      "period": "2026-07"
+    },
+    {
+      "account": "acme",
+      "period": "2026-08"
+    }
+  ],
+  "steps": [
+    {
+      "key": "plan",
+      "type": "function",
+      "target": "planClose",
+      "reasoning": true
+    },
+    {
+      "key": "gather",
+      "type": "function",
+      "target": "gatherDocuments",
+      "dependsOn": [
+        "plan"
+      ]
+    },
+    {
+      "key": "total",
+      "type": "function",
+      "target": "checkTotals",
+      "dependsOn": [
+        "gather"
+      ]
+    },
+    {
+      "key": "draft",
+      "type": "function",
+      "target": "draftSummary",
+      "dependsOn": [
+        "total"
+      ]
+    },
+    {
+      "key": "file",
+      "type": "function",
+      "target": "fileClosePack",
+      "dependsOn": [
+        "draft"
+      ],
+      "effect": "mailbox"
+    },
+    {
+      "key": "close",
+      "type": "function",
+      "target": "closeLedger",
+      "dependsOn": [
+        "file"
+      ]
+    }
+  ],
+  "world": {
+    "mailbox": {
+      "addresses": [
+        "ops@example.test"
+      ]
+    }
+  },
+  "inject": [],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "succeeded"
+      },
+      "count": 1
+    },
+    {
+      "effects": "mailbox.sent",
+      "count": 1
+    }
+  ],
+  "claims": [
+    "learningCurve.catalogServedFraction",
+    "learningCurve.usdPerGoal"
+  ]
+}

@@ -33,6 +33,34 @@ It replaces the integration glue AI-native teams typically hand-write — vector
 
 Agent and voice deployments today are integration-heavy. Most of the engineering effort is plumbing — keeping state consistent across a vector store, an orchestrator, a tool registry, and a model provider. MemQL collapses that plumbing: concepts and queries live in the same place; tools, automations, and workflows reference them directly; the engine handles consistency, time-series storage, and execution.
 
+## Does it work?
+
+The platform measures itself, and publishes what it did **not** measure with
+the same prominence as what it did. Every figure carries a median, its spread,
+its N, and the commit it came from; a figure nothing measured says so in words
+rather than reporting a zero.
+
+Measured on every pull request, against the same model in a bare tool loop with
+the platform's machinery switched off:
+
+- A run stopped mid-plan resumes from its own journal and re-executes **no step
+  that already completed**.
+  <!-- proving: metric=durability.resumedStepsReExecuted arm=platform value=0 -->
+- Its side effects are **not delivered twice**.
+  <!-- proving: metric=durability.duplicatedSideEffects arm=platform value=0 -->
+- A goal the catalog already holds is compiled **without reaching a model** --
+  not even the cheap triage classifier.
+  <!-- proving: metric=amortizedCost.compileCallsOnCatalogHit arm=platform value=0 -->
+
+Each zero ships with a negative control that must produce a non-zero, because
+a counter that never rises on any path reads as zero forever. Full figures,
+including everything a replay cannot honestly answer: **[the proving
+scorecard](docs/public/overview/proving-scorecard.md)**.
+
+These three sentences are checked against the committed scorecard by
+`TestPublishedClaimsRestOnAScorecardNumber`. A claim here cannot outlive its
+number.
+
 ## Example
 
 A concept (schema), a query over it, and an LLM-callable tool wired to that query — the same shape every real domain in `dsl/` uses (this one is trimmed from `dsl/todos/`). The one thing a real file would omit is `@namespace("todos")`: a concept's namespace DEFAULTS to its containing `dsl/<domain>/` directory, and you write it only for a colon-scoped sub-namespace or a pinned divergence. It is spelled out here because this block is validated standalone by the docs snippet gate, where there is no directory to default from:
@@ -289,6 +317,35 @@ reflex `go test` invocation resolves inside one module only -- silently
 skipping the engine's own modules and reporting a false "ok". See
 [CLAUDE.md's Testing section](CLAUDE.md#testing) for the full explanation
 and the `MEMQL_REQUIRE_DB=1` / db-gated-lane details.
+
+The **proving suite** is a separate lane and a separate question: not "does
+the code do what it says" but "how well does the platform work, measured
+against a model on its own". It runs the corpus in
+`test/proving/scenarios/` on both arms against a real Postgres.
+
+```bash
+# ?sslmode=disable is required: the local Postgres has no SSL, and the driver
+# refuses rather than downgrading. This is the DSN the CI lane uses.
+export MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable'
+
+# what CI runs on every pull request
+go run ./cmd/memql-bench --do=gate --runner=local
+
+# run the corpus and publish the dated scorecard and its page
+go run ./cmd/memql-bench --do=run --tier=ci --write
+
+# what the binary takes, machine-readably
+go run ./cmd/memql-bench --print-spec
+```
+
+The DSN is required and there is no default: a benchmark that silently picked a
+database is one whose numbers came from somewhere nobody chose. It migrates a
+fresh database itself, so an empty one with the four extensions is enough.
+
+Structural regressions block a merge -- a scenario that stops passing, a
+duplicated side effect, a governance property that fails, or a negative
+control that reads zero. Cost and speed movements are published and never
+red.
 
 ---
 

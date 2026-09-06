@@ -1617,6 +1617,94 @@ QueryClient.prototype.badgesForSelf = function (this: QueryClient, args: BadgesF
   return this.executeNamed("badgesForSelf", buildBadgesForSelf(args), opts);
 };
 
+/** One benchmark run by id. */
+// Bound concept: v1:bench:run (machine-readable: BoundConcepts["benchRunById"] in generated_concepts.ts).
+export interface BenchRunByIdArgs {
+  benchRunId: string;
+}
+
+export function buildBenchRunById(args: BenchRunByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("benchRunId: " + renderMemQLValue(args.benchRunId));
+  return "query benchRunById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    benchRunById(args: BenchRunByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.benchRunById = function (this: QueryClient, args: BenchRunByIdArgs = {} as BenchRunByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("benchRunById", buildBenchRunById(args), opts);
+};
+
+/** Every benchmark run, newest first. The trend across releases is read from this. */
+// Bound concept: v1:bench:run (machine-readable: BoundConcepts["benchRuns"] in generated_concepts.ts).
+export interface BenchRunsArgs {
+}
+
+export function buildBenchRuns(args: BenchRunsArgs): string {
+  void args;
+  return "query benchRuns()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    benchRuns(args?: BenchRunsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.benchRuns = function (this: QueryClient, args: BenchRunsArgs = {} as BenchRunsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("benchRuns", buildBenchRuns(args), opts);
+};
+
+/** One metric's figures across runs, which is how a trend is drawn. */
+// Bound concept: v1:bench:sample (machine-readable: BoundConcepts["benchSamplesForMetric"] in generated_concepts.ts).
+export interface BenchSamplesForMetricArgs {
+  metric: string;
+  arm?: string;
+}
+
+export function buildBenchSamplesForMetric(args: BenchSamplesForMetricArgs): string {
+  const parts: string[] = [];
+  parts.push("metric: " + renderMemQLValue(args.metric));
+  if (args.arm !== undefined) parts.push("arm: " + renderMemQLValue(args.arm));
+  return "query benchSamplesForMetric(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    benchSamplesForMetric(args: BenchSamplesForMetricArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.benchSamplesForMetric = function (this: QueryClient, args: BenchSamplesForMetricArgs = {} as BenchSamplesForMetricArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("benchSamplesForMetric", buildBenchSamplesForMetric(args), opts);
+};
+
+/** Every published figure for one benchmark run. */
+// Bound concept: v1:bench:sample (machine-readable: BoundConcepts["benchSamplesForRun"] in generated_concepts.ts).
+export interface BenchSamplesForRunArgs {
+  benchRunId: string;
+}
+
+export function buildBenchSamplesForRun(args: BenchSamplesForRunArgs): string {
+  const parts: string[] = [];
+  parts.push("benchRunId: " + renderMemQLValue(args.benchRunId));
+  return "query benchSamplesForRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    benchSamplesForRun(args: BenchSamplesForRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.benchSamplesForRun = function (this: QueryClient, args: BenchSamplesForRunArgs = {} as BenchSamplesForRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("benchSamplesForRun", buildBenchSamplesForRun(args), opts);
+};
+
 /** One booking by id, gated to the host. Owned. */
 // Bound concept: v1:calendar:booking (machine-readable: BoundConcepts["bookingById"] in generated_concepts.ts).
 export interface BookingByIdArgs {

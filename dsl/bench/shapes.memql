@@ -1,0 +1,44 @@
+// Row projections for the proving suite's published record.
+
+/// Everything about one benchmark run.
+@row
+shape run benchRunFull {
+  row.id
+  tier
+  commit
+  corpusFingerprint
+  scenarioCount
+  verdict
+  modelIds
+  costUsd
+  runner
+  blockingFailures
+  startedAt
+  finishedAt
+  row.createdAt
+}
+
+/// One published figure, or one published absence.
+@row
+shape sample benchSampleFull {
+  row.id
+  benchRunId
+  family
+  scenarioId
+  arm
+  metric
+  unit
+  n
+  median
+  p10
+  p90
+  minimum
+  maximum
+  mad
+  absentReason
+  detail
+  tier
+  commit
+  measuredOn
+  row.createdAt
+}

@@ -73,6 +73,10 @@ describe("the settings-section contract", () => {
   // windows that consume it, because a credential is not a campaigns record.
   // Eight since Logs (epic memql#4895): every app carries a Logs section,
   // and this app has no settings section to put it before, so it is last.
+  // Nine since Benchmarks (epic memql#4993), which sits BESIDE Diagnostics
+  // rather than inside it: Diagnostics is three panels about this session,
+  // and folding a fact about the deployment across releases into it would
+  // change what its "copy diagnostics" button means.
   it("Settings itself declares its sections", () => {
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
     expect(settings?.sections?.map((s) => s.id)).toEqual([
@@ -82,10 +86,16 @@ describe("the settings-section contract", () => {
       "apps",
       "cluster",
       "diagnostics",
+      "benchmarks",
       "integrations",
       "logs",
     ]);
     expect(settings?.sections?.find((s) => s.id === "cluster")?.roles).toEqual({ min: "admin" });
+    // Benchmarks is a MINIMUM and matches Cluster: v1:bench:run and
+    // v1:bench:sample declare @rowAuthz(clusterOwner), so a reader below the
+    // floor would be shown an empty section with no explanation. The gate here
+    // is presentation over one the engine already holds.
+    expect(settings?.sections?.find((s) => s.id === "benchmarks")?.roles).toEqual({ min: "admin" });
     // THE TWO GATE FORMS ARE PINNED SEPARATELY, because they are different
     // statements and the difference is the point. Cluster is a ladder MINIMUM
     // (admin and above). Integrations is a SET, and it deliberately excludes

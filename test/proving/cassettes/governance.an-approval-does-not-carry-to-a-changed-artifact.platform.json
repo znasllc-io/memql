@@ -1,0 +1,72 @@
+{
+  "scenario": "governance.an-approval-does-not-carry-to-a-changed-artifact",
+  "arm": "platform",
+  "modelId": "synthetic",
+  "recordedAt": "2026-09-06",
+  "turns": [
+    {
+      "requestHash": "9c32fd6efc10992fceadb402",
+      "prompt": "step=propose target=proposeCommand attempt=1",
+      "response": "placeholder answer for propose (attempt 1)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "e7380e5919a7a8ab0d62729a",
+      "prompt": "step=propose target=proposeCommand attempt=2",
+      "response": "placeholder answer for propose (attempt 2)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "e086c7d4efb322f82a2eef49",
+      "prompt": "step=propose target=proposeCommand attempt=3",
+      "response": "placeholder answer for propose (attempt 3)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "f6ae86573e02a8b616b71ab3",
+      "prompt": "step=propose target=proposeCommand attempt=4",
+      "response": "placeholder answer for propose (attempt 4)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "43a23d58db5e7cf44dd43ab4",
+      "prompt": "step=propose target=proposeCommand attempt=5",
+      "response": "placeholder answer for propose (attempt 5)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "7d36170ec1e7544ef52465d4",
+      "prompt": "step=propose target=proposeCommand attempt=6",
+      "response": "placeholder answer for propose (attempt 6)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "4b773522192db9ea3e82290e",
+      "prompt": "step=propose target=proposeCommand attempt=7",
+      "response": "placeholder answer for propose (attempt 7)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "requestHash": "d5272ba7ba29b9cb59fd6a98",
+      "prompt": "step=propose target=proposeCommand attempt=8",
+      "response": "placeholder answer for propose (attempt 8)",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    }
+  ]
+}

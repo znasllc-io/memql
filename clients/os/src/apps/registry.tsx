@@ -64,6 +64,16 @@ const settings: OsAppManifest = {
     // tier -- so this is a line the flip fixes rather than one it endangers.
     { id: "cluster", name: "Cluster", roles: { min: "admin" } },
     { id: "diagnostics", name: "Diagnostics" },
+    // Benchmarks (epic memql#4993). BESIDE Diagnostics rather than inside it:
+    // Diagnostics is three panels about THIS SESSION, and folding a fact about
+    // the deployment across releases into it would change what its "copy
+    // diagnostics" button means.
+    //
+    // { min: "admin" } matches Cluster and Logs, and it is presentation over a
+    // gate the engine already holds: v1:bench:run and v1:bench:sample declare
+    // @rowAuthz(clusterOwner), so a reader below the floor would see an empty
+    // section with no explanation rather than a refusal.
+    { id: "benchmarks", name: "Benchmarks", roles: { min: "admin" } },
     // OWNER OR DEVELOPER, AND EXPLICITLY NOT ADMIN (program decision P6).
     // This is the first section in the shell whose gate a ladder MINIMUM
     // cannot express: `{ min: "developer" }` would admit admin, and the

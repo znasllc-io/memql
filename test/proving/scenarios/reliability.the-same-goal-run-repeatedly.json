@@ -1,0 +1,80 @@
+{
+  "id": "reliability.the-same-goal-run-repeatedly",
+  "family": "reliability",
+  "title": "One goal, run with different variables, reaches the same outcome every time",
+  "goal": "Reconcile {{account}} for the period ending {{period}}",
+  "variables": [
+    {
+      "account": "acme",
+      "period": "2026-08"
+    },
+    {
+      "account": "globex",
+      "period": "2026-08"
+    },
+    {
+      "account": "initech",
+      "period": "2026-08"
+    },
+    {
+      "account": "hooli",
+      "period": "2026-08"
+    },
+    {
+      "account": "vehement",
+      "period": "2026-08"
+    }
+  ],
+  "steps": [
+    {
+      "key": "read",
+      "type": "function",
+      "target": "ledgerLines"
+    },
+    {
+      "key": "post",
+      "type": "function",
+      "target": "postReconciliation",
+      "dependsOn": [
+        "read"
+      ],
+      "effect": "mailbox"
+    },
+    {
+      "key": "close",
+      "type": "function",
+      "target": "closeLedger",
+      "dependsOn": [
+        "post"
+      ]
+    }
+  ],
+  "world": {
+    "mailbox": {
+      "addresses": [
+        "ops@example.test"
+      ]
+    }
+  },
+  "inject": [],
+  "verify": [
+    {
+      "rows": "v1:work:run",
+      "where": {
+        "status": "succeeded"
+      },
+      "count": 1
+    },
+    {
+      "effects": "mailbox.sent",
+      "count": 1
+    }
+  ],
+  "claims": [
+    "reliability.passRate",
+    "reliability.passVariance"
+  ],
+  "floors": {
+    "reliability.passRate": 5
+  }
+}
