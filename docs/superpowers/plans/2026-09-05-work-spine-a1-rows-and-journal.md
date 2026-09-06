@@ -30,13 +30,13 @@
   Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/session_01LXdTWPHNiDZUUgyggSAaoT
   ```
-- **Branch discipline:** three PRs, sequential, each from its own branch off the previous PR's merged `main`: `feat/work-spine-a1-rows`, `feat/work-spine-a1-journal`, `feat/work-spine-a1-retire`. Enqueue with the bare `gh pr merge <n> --repo znasllc-io/memql`; the owner merges their own PRs with `scripts/dev/merge-as-owner.sh --pr=<n>`.
+- **Branch discipline (the owner's rule: at most two PRs per epic, because PRs are the bottleneck):** two PRs, sequential. PR 1 of 2 is tasks 1-13 on branch `feat/work-spine-a1-rows-and-journal` and closes #4963 and #4964; PR 2 of 2 is tasks 14-21 on branch `feat/work-spine-a1-retire` off the merged `main` and closes #4965. Enqueue with the bare `gh pr merge <n> --repo znasllc-io/memql`; the owner merges their own PRs with `scripts/dev/merge-as-owner.sh --pr=<n>`.
 
 ---
 
 ## File structure
 
-**PR 1 -- rows (`feat/work-spine-a1-rows`)**
+**PR 1 of 2, first half -- rows (branch `feat/work-spine-a1-rows-and-journal`)**
 
 | Path | Responsibility |
 |---|---|
@@ -54,7 +54,7 @@
 | ten Go files, three TS files (listed in Task 6) | `v1:agents:skill` becomes `v1:skills:skill` |
 | `sdk/go/client/generated_*.go`, `sdk/ts/src/generated/*` | regenerated |
 
-**PR 2 -- journal (`feat/work-spine-a1-journal`)**
+**PR 1 of 2, second half -- journal (the same branch)**
 
 | Path | Responsibility |
 |---|---|
@@ -70,7 +70,7 @@
 | `component/database/memory-nodes/concept_ids.go` | `ConceptMemQLCheckpoint` removed |
 | `docs/public/language/memql.md` | the resume paragraph re-pointed |
 
-**PR 3 -- retire (`feat/work-spine-a1-retire`)**
+**PR 2 of 2 -- retire (`feat/work-spine-a1-retire`)**
 
 | Path | Responsibility |
 |---|---|
@@ -100,7 +100,7 @@ Two things the tree settled differently from the spec's wording. Task 1 writes t
 
 ---
 
-## PR 1 -- rows
+## PR 1 of 2, first half -- rows
 
 ### Task 1: Amend the spec
 
@@ -110,7 +110,7 @@ Two things the tree settled differently from the spec's wording. Task 1 writes t
 - [ ] **Step 1: Branch**
 
 ```bash
-git switch main && git pull --ff-only && git switch -c feat/work-spine-a1-rows
+git switch main && git pull --ff-only && git switch -c feat/work-spine-a1-rows-and-journal
 ```
 
 - [ ] **Step 2: Replace the action-library bullet in section F**
@@ -175,7 +175,7 @@ git commit -m "docs: amend the work spine record for the action boundary and the
 // every automation execution. goal, modelCall and approval gain their
 // writers in epic A2. observation gains the executor as its writer in
 // A2 as well; in A1 it is the destination the harness observation
-// concept moves to (PR 3 of A1).
+// concept moves to (PR 2 of A1).
 //
 // TIER. Every concept here declares the composite owner tier. A row
 // written by a synthetic cluster actor (the journal in A1, the seed
@@ -1185,7 +1185,9 @@ git commit -m "dsl: the skills namespace, moved from agents, with skillEdge"
 ```
 (`git status --short` must show nothing unstaged from another session; if it does, stage only the files this task touched by name.)
 
-### Task 7: PR 1
+### Task 7: Checkpoint before the journal
+
+The rows half is complete; the same branch continues into the journal half, and one PR ships both (the owner's two-PR rule).
 
 - [ ] **Step 1: Regenerate the architecture model and run every gate once more**
 
@@ -1195,37 +1197,19 @@ make test
 go test -count=1 .
 ```
 
-- [ ] **Step 2: Push and open the PR**
+- [ ] **Step 2: Commit and continue**
 
 ```bash
-git push -u origin feat/work-spine-a1-rows
-gh pr create --repo znasllc-io/memql --title "work spine A1, PR 1 of 3: the work and skills namespaces" --body-file - <<'EOF'
-The work namespace (goal, run, step, modelCall, approval, observation) with the composite tier, its server-only reads and writes, broadcast routing rules for the four concepts the OS draws live, and the skills namespace moved out of agents with the skillEdge concept.
-
-Design record: docs/superpowers/specs/2026-09-05-work-spine-design.md (sections A, B, D, I; decision D4 and the two A1 amendments).
-
-Ships in PR 1 of 3 of epic A1. PR 2 (the journal writer and resume) and PR 3 (the retirements and the portal Nexus deletion) follow sequentially.
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-https://claude.ai/code/session_01LXdTWPHNiDZUUgyggSAaoT
-EOF
+git add component/architecture
+git commit -m "arch: regenerate after the work and skills namespaces"
 ```
-
-- [ ] **Step 3: Wait for CI, then enqueue**
-
-```bash
-gh pr checks <n> --repo znasllc-io/memql --watch
-gh pr merge <n> --repo znasllc-io/memql
-```
-A queued PR that goes `DIRTY` after a sibling lands must be rebased on `origin/main` and force-pushed; the queue does not resolve it.
-
+Stay on `feat/work-spine-a1-rows-and-journal` and continue with Task 8. Do not open a PR here.
 
 ---
 
-## PR 2 -- journal
+## PR 1 of 2, second half -- journal
 
-Branch `feat/work-spine-a1-journal` off `main` after PR 1 merged.
+The same branch, continuing from Task 7.
 
 ### Task 8: The journal writer
 
@@ -2418,7 +2402,7 @@ git add component/automations/journal_db_test.go
 git commit -m "automations: db-gated journal and resume tests"
 ```
 
-### Task 13: Docs and PR 2
+### Task 13: Docs and PR 1 of 2
 
 - [ ] **Step 1: Re-point the resume paragraph**
 
@@ -2435,13 +2419,13 @@ make test
 go test -count=1 .
 git add -u docs CLAUDE.md component/CLAUDE.md component/architecture
 git commit -m "docs: resume reads the work journal"
-git push -u origin feat/work-spine-a1-journal
-gh pr create --repo znasllc-io/memql --title "work spine A1, PR 2 of 3: the journal replaces the checkpoint" --body-file - <<'EOF'
-Every automation execution now writes a v1:work:run row and one v1:work:step row per step at each boundary, under a synthetic cluster actor; resume loads those rows instead of the 24-hour checkpoint side-record, under the same source-trust rule; the checkpoint concept and its files are gone. An automation that reacts to work rows is not journaled, so the graph cannot feed the journal back into itself.
+git push -u origin feat/work-spine-a1-rows-and-journal
+gh pr create --repo znasllc-io/memql --title "work spine A1, PR 1 of 2: the work and skills namespaces, and the journal replaces the checkpoint" --body-file - <<'EOF'
+The work namespace (goal, run, step, modelCall, approval, observation) with the composite tier, its server-only reads and writes and broadcast routing rules; the skills namespace moved out of agents with skillEdge; and the journal: every automation execution now writes a v1:work:run row and one v1:work:step row per step at each boundary, under a synthetic cluster actor; resume loads those rows instead of the 24-hour checkpoint side-record, under the same source-trust rule; the checkpoint concept and its files are gone. An automation that reacts to work rows is not journaled, so the graph cannot feed the journal back into itself.
 
 Design record: docs/superpowers/specs/2026-09-05-work-spine-design.md (section D).
 
-Ships in PR 2 of 3 of epic A1, after PR 1.
+Ships in PR 1 of 2 of epic A1. Closes #4963, #4964. PR 2 (the retirements and the portal Nexus deletion) follows.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
@@ -2454,9 +2438,9 @@ gh pr merge <n> --repo znasllc-io/memql
 
 ---
 
-## PR 3 -- retire
+## PR 2 of 2 -- retire
 
-Branch `feat/work-spine-a1-retire` off `main` after PR 2 merged. This PR is mostly deletion. Every "delete" below is `git rm`; every "move" is `git mv` followed by import edits. After each task, `go build ./... && go vet ./...` from the repo root is the check that nothing dangling remains, and the named tests are the check that nothing that mattered went with it.
+Branch `feat/work-spine-a1-retire` off `main` after PR 1 merged. This PR is mostly deletion. Every "delete" below is `git rm`; every "move" is `git mv` followed by import edits. After each task, `go build ./... && go vet ./...` from the repo root is the check that nothing dangling remains, and the named tests are the check that nothing that mattered went with it.
 
 ### Task 14: Move the authored-action helpers out of the harness module
 
@@ -2799,7 +2783,7 @@ git add -A clients/os/src/nexus clients/os/test/nexus clients/portal/src clients
 git status --short | grep -v '^[MDRA] ' ; git commit -m "portal: delete Nexus; the pure scene library moves to the OS (D7)"
 ```
 
-### Task 21: PR 3
+### Task 21: PR 2 of 2
 
 - [ ] **Step 1: Every gate**
 
@@ -2819,12 +2803,12 @@ Commit the regenerated architecture model (`git add component/architecture && gi
 
 ```bash
 git push -u origin feat/work-spine-a1-retire
-gh pr create --repo znasllc-io/memql --title "work spine A1, PR 3 of 3: retire the harness spine and the capture library; Nexus leaves the portal" --body-file - <<'EOF'
+gh pr create --repo znasllc-io/memql --title "work spine A1, PR 2 of 2: retire the harness spine and the capture library; Nexus leaves the portal" --body-file - <<'EOF'
 The authored-action helpers move into component/actions; the action capture library, the harness reconciler, its planner, its pack and its CI lane are deleted; beliefs, the cursor, consolidation and recall move to the memory namespace with recall reading v1:work:observation; workTrace replaces harnessTrace over work rows; the portal's Nexus pages are deleted and the pure scene library moves to clients/os (decision D7).
 
 Design record: docs/superpowers/specs/2026-09-05-work-spine-design.md (sections F, I, K; decision D7 and the action-boundary amendment).
 
-Ships in PR 3 of 3 of epic A1, after PR 2.
+Ships in PR 2 of 2 of epic A1, after PR 1. Closes #4965.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
@@ -2838,7 +2822,7 @@ gh pr merge <n> --repo znasllc-io/memql
 
 ## Plan self-review
 
-- **Spec coverage.** Section A (three graphs): Tasks 2-6. Section B (goal, run, step, derived kind, footprint declared once): Tasks 2, 8; the loader rule for `function` steps and `@effects` on builtins are epic A2 and the plan says so where `kind` is written. Section D (journal, replay modes, side effects, approval, observation, waits, retention, feeds): Tasks 2-5, 8-12 for what A1 owns; modelCall serving, approvals, waits and retention are epic A2 by section K. Section F (retired, moved, re-pointed): Tasks 11, 14-18. Section I (tiers, routing, generated artifacts, CLAUDE.md): Tasks 5, 6, 19. Section J (tests): Tasks 8-10, 12, 20. Section K (three PRs): Tasks 7, 13, 21. D7: Task 20. D8: no migration anywhere.
+- **Spec coverage.** Section A (three graphs): Tasks 2-6. Section B (goal, run, step, derived kind, footprint declared once): Tasks 2, 8; the loader rule for `function` steps and `@effects` on builtins are epic A2 and the plan says so where `kind` is written. Section D (journal, replay modes, side effects, approval, observation, waits, retention, feeds): Tasks 2-5, 8-12 for what A1 owns; modelCall serving, approvals, waits and retention are epic A2 by section K. Section F (retired, moved, re-pointed): Tasks 11, 14-18. Section I (tiers, routing, generated artifacts, CLAUDE.md): Tasks 5, 6, 19. Section J (tests): Tasks 8-10, 12, 20. Section K (two PRs, the owner's rule): Tasks 13 and 21; Task 7 is a checkpoint on the first branch. D7: Task 20. D8: no migration anywhere.
 - **Placeholders.** None: every DSL file is written out, every Go file that is new is written out, every deletion names its files, and every edit of an existing file names the anchor.
 - **Type consistency.** `journalExecutor.Execute` returns `(*memql.ExecuteResult, error)`, the engine's signature (component/memql/engine.go:592). `LoadRunJournal` takes a `journalExecutor` so the db test passes the engine and the unit test a fake. `ResumeFrom` takes `*RunJournal` in Task 10 and the scheduler passes one in the same task. `workStepId` is used by both `stepRunning` and `stepFinished`. The constants added in Task 5 are the ones Task 16 leaves in place and Task 17 reads (`ConceptWorkObservation`).
 - **Two facts to re-verify at execution, because they were read at df33cef4b and the tree moves:** the exact line anchors in `executor.go` (Task 9) and the tests that name the checkpoint (Task 10 step 4). Both tasks give the grep that finds them.

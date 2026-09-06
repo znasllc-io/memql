@@ -671,15 +671,16 @@ observation carry the "read at" timestamp the OS shows for on-demand reads.
 
 ## K. Delivery
 
-Three epics, at most three PRs each, each PR closing several issues, the
+Three epics, at most TWO PRs each (the owner's rule, 2026-09-05: PRs are
+the bottleneck), each PR closing several issues, the
 grouping stated in the epic body and on every child, the issues carrying the
 `claude` label.
 
 | Epic | Contents | PRs |
 |---|---|---|
-| A1, rows and journal | work, skills and memory concepts with tiers and routing rules; step versions, modelCall, approval, observation; resume from the journal; retire checkpoint, the harness spine and the action library; move the scene library out of the portal and delete the portal's Nexus (D7) | 3, sequential |
-| A2, compile and the loop | `createGoal`; compile with the three prompts; postconditions; the symptom classifier; healing wired to approvals; promote; budgets and the safety gate; in-line capture; responsibilities re-pointed; the planner agent retired | 3, after A1 |
-| A3, skills and Training | skill grown, skillEdge, structural retrieval, `runScript`, bindings and the mint gates; Training re-keyed and the OS app updated | 3, after A1, parallel with A2 |
+| A1, rows and journal | work, skills and memory concepts with tiers and routing rules; step versions, modelCall, approval, observation; resume from the journal; retire checkpoint, the harness spine and the action library; move the scene library out of the portal and delete the portal's Nexus (D7) | 2, sequential |
+| A2, compile and the loop | `createGoal`; compile with the three prompts; postconditions; the symptom classifier; healing wired to approvals; promote; budgets and the safety gate; in-line capture; responsibilities re-pointed; the planner agent retired | 2, after A1 |
+| A3, skills and Training | skill grown, skillEdge, structural retrieval, `runScript`, bindings and the mint gates; Training re-keyed and the OS app updated | 2, after A1, parallel with A2 |
 
 ---
 
