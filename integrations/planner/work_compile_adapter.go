@@ -32,19 +32,39 @@ type compileEngine interface {
 	authoringSandbox
 }
 
-// WorkCompiler satisfies workintegration.Compiler.
-type WorkCompiler struct {
-	loop *PlannerAgentLoop
+// runWriter is how compile records its outcome. The planner does NOT write
+// the work rows itself, and that is not a style choice: the writes land on
+// @serverOnly constructs, `auth.OriginFromContext` returns OriginClient for
+// any context nobody stamped, and an unstamped write is REFUSED with one WARN
+// that nothing above it hears -- the run would never leave `compiling`, which
+// reads as a goal accepted and then ignored.
+//
+// The stamp cannot move here. Stamping is allowlisted per PACKAGE
+// (call_origin_conformance_test.go) and integrations/planner is large and
+// request-derived; admitting it would put every @serverOnly construct in the
+// tree behind one of its many request paths. So the write stays in
+// integrations/work, which already holds the allowlist entry and exactly one
+// stamping site, and this delegates.
+type runWriter interface {
+	RecordCompileOutcome(ctx context.Context, ownerUserId, runId string, fields map[string]any) error
 }
 
-// NewWorkCompiler returns nil when there is no loop, so app wiring can call
-// SetCompiler unconditionally and a node that runs no planner installs
-// nothing.
-func NewWorkCompiler(loop *PlannerAgentLoop) *WorkCompiler {
-	if loop == nil {
+// WorkCompiler satisfies workintegration.Compiler.
+type WorkCompiler struct {
+	loop   *PlannerAgentLoop
+	writer runWriter
+}
+
+// NewWorkCompiler returns nil without a loop OR without a writer, so app
+// wiring can call SetCompiler unconditionally and a node that runs no planner
+// installs nothing. A nil writer is refused rather than defaulted: a compiler
+// that decides correctly and cannot record the decision is worse than none,
+// because the run still moves to `running` in the log and never in the graph.
+func NewWorkCompiler(loop *PlannerAgentLoop, writer runWriter) *WorkCompiler {
+	if loop == nil || writer == nil {
 		return nil
 	}
-	return &WorkCompiler{loop: loop}
+	return &WorkCompiler{loop: loop, writer: writer}
 }
 
 // Compile runs the compile order and records what it chose on the run.
@@ -86,7 +106,7 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 	if len(req.Input) > 0 {
 		args["variables"] = req.Input
 	}
-	c.write(ctx, req.OwnerUserId, "updateWorkRun", args)
+	c.record(ctx, req.OwnerUserId, req.RunId, args)
 
 	if c.loop.logger != nil {
 		c.loop.logger.Info("work compile decided",
@@ -103,8 +123,7 @@ func (c *WorkCompiler) failRun(ctx context.Context, req workintegration.CompileR
 	if c.loop.logger != nil {
 		c.loop.logger.Warn("work compile failed", "goalId", req.GoalId, "runId", req.RunId, "error", err)
 	}
-	c.write(ctx, req.OwnerUserId, "updateWorkRun", map[string]any{
-		"runId":        req.RunId,
+	c.record(ctx, req.OwnerUserId, req.RunId, map[string]any{
 		"status":       "failed",
 		"errorCode":    "compile_failed",
 		"errorMessage": err.Error(),
@@ -112,17 +131,13 @@ func (c *WorkCompiler) failRun(ctx context.Context, req workintegration.CompileR
 	})
 }
 
-// write renders a @serverOnly work mutation under the goal owner's borrowed
-// authority. The owner arrives on the request, copied from a goal row the
-// caller had already read under their own actor, so it can never name a user
-// the caller could not act as.
-func (c *WorkCompiler) write(ctx context.Context, ownerUserId, name string, args map[string]any) {
-	if c.loop.engine == nil {
-		return
-	}
-	call := name + "(" + encodeArgs(args) + ")"
-	if _, err := c.loop.engine.Execute(ownerActorContext(ctx, ownerUserId), call); err != nil && c.loop.logger != nil {
-		c.loop.logger.Warn("work compile: journal write failed; the run continues", "mutation", name, "error", err)
+// record hands the outcome to the work integration, which stamps internal
+// origin at its one site and borrows the owner's authority.
+func (c *WorkCompiler) record(ctx context.Context, ownerUserId, runId string, fields map[string]any) {
+	delete(fields, "runId")
+	if err := c.writer.RecordCompileOutcome(ctx, ownerUserId, runId, fields); err != nil && c.loop.logger != nil {
+		c.loop.logger.Warn("work compile: recording the outcome failed; the run keeps its previous status",
+			"runId", runId, "error", err)
 	}
 }
 
@@ -141,9 +156,9 @@ func (c *WorkCompiler) seams() (authoringNearMatcher, authoringSandbox) {
 // WorkCompiler returns the compile surface this integration offers the work
 // spine, or nil on an integration with no agent loop. app wiring installs it
 // on the work integration with SetCompiler.
-func (p *PlannerIntegration) WorkCompiler() *WorkCompiler {
+func (p *PlannerIntegration) WorkCompiler(writer runWriter) *WorkCompiler {
 	if p == nil {
 		return nil
 	}
-	return NewWorkCompiler(p.agentLoop)
+	return NewWorkCompiler(p.agentLoop, writer)
 }

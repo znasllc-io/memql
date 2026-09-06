@@ -40,7 +40,10 @@ func (a *App) wireWorkCompiler() {
 		a.Logger.Warn("work compile not wired: the stashed planner integration is not the expected type", "component", "work")
 		return
 	}
-	compiler := pi.WorkCompiler()
+	// The work integration is BOTH the seam compile is installed on and the
+	// writer it records through -- the planner is not in the call-origin
+	// allowlist and must not write @serverOnly constructs itself.
+	compiler := pi.WorkCompiler(work)
 	if compiler == nil {
 		a.Logger.Warn("work compile not wired: the planner integration has no agent loop", "component", "work")
 		return

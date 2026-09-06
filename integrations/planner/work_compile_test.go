@@ -2,6 +2,7 @@ package planner
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -207,4 +208,14 @@ func TestCompileGoalForRun_ExactTierRendersTheNamedArgsForm(t *testing.T) {
 	if !strings.Contains(found, "goalSignature: ") {
 		t.Fatalf("expected the named-args form `goalSignature: \"...\"`, got %s", found)
 	}
+}
+
+// readSource reads a file in this package for the source-level assertions.
+func readSource(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(b)
 }

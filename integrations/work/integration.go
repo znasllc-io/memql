@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -385,4 +386,82 @@ func argInt(args map[string]any, key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+// ---------------------------------------------------------------------------
+// The compile writer's surface
+// ---------------------------------------------------------------------------
+//
+// Compile runs in integrations/planner, because everything it does the work
+// with -- the design pass, the emit-and-repair loop, the triage classifier,
+// the catalog read -- is unexported there. But its WRITES land on
+// @serverOnly work constructs, and `auth.OriginFromContext` returns
+// OriginClient for any context nobody stamped, so an unstamped write is
+// REFUSED with one WARN and nothing above it hears: the run never leaves
+// `compiling`, which reads as a goal accepted and then ignored.
+//
+// The stamp cannot simply move to the planner. Stamping is allowlisted per
+// package (call_origin_conformance_test.go) and integrations/planner is
+// large and request-derived -- admitting it would put every @serverOnly
+// construct in the tree behind one of its many request paths. So the write
+// stays HERE, where the allowlist entry and the single stamping site already
+// are, and the planner delegates through these two methods.
+
+// RecordCompileOutcome advances a run with what compile decided: the
+// template it chose, the variables it bound, and the status to move to.
+// Fields not named keep their prior value.
+func (i *Integration) RecordCompileOutcome(ctx context.Context, ownerUserId, runId string, fields map[string]any) error {
+	if i == nil {
+		return fmt.Errorf("work: no integration")
+	}
+	if strings.TrimSpace(runId) == "" {
+		return fmt.Errorf("work: RecordCompileOutcome needs a run id")
+	}
+	// The run is the goal owner's, so the write borrows their authority --
+	// the owner arrives from a goal row the caller already read under their
+	// own actor, so it can never name somebody they could not act as.
+	return i.store().updateRun(ownerActor(ctx, ownerUserId), runId, fields)
+}
+
+// RaiseApproval writes one human gate and returns its id. Used by the
+// healing subscriber, whose typed patches must reach a person as a
+// planReview approval rather than being applied (design decision D5: never a
+// silent edit, even to the run's own draft template).
+func (i *Integration) RaiseApproval(ctx context.Context, ownerUserId string, a ApprovalSeed) (string, error) {
+	if i == nil {
+		return "", fmt.Errorf("work: no integration")
+	}
+	if strings.TrimSpace(a.RunId) == "" {
+		// An approval with no run is a question nobody can answer.
+		return "", fmt.Errorf("work: RaiseApproval needs a run id")
+	}
+	if strings.TrimSpace(a.ApprovalId) == "" {
+		a.ApprovalId = newRowId(approvalConcept)
+	}
+	if a.RequestedAt.IsZero() {
+		a.RequestedAt = i.clock().UTC()
+	}
+	seed := approvalSeed(a)
+	if err := i.store().createApprovalRow(ownerActor(ctx, ownerUserId), seed); err != nil {
+		return "", err
+	}
+	return a.ApprovalId, nil
+}
+
+// ApprovalSeed is the exported shape of one human gate. It mirrors the
+// unexported seed exactly; the conversion in RaiseApproval is what keeps the
+// two from drifting, because a field added to one and not the other will not
+// compile.
+type ApprovalSeed struct {
+	ApprovalId   string
+	RunId        string
+	StepKey      string
+	Kind         string
+	Subject      map[string]any
+	ArtifactHash string
+	Question     string
+	Options      []map[string]any
+	Evidence     map[string]any
+	RequestedAt  time.Time
+	ExpiresAt    time.Time
 }

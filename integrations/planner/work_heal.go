@@ -29,7 +29,7 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/healing"
 	"github.com/znasllc-io/memql/component/work"
-	"github.com/znasllc-io/memql/core/id"
+	workintegration "github.com/znasllc-io/memql/integrations/work"
 )
 
 // patchProposer is the seam onto component/healing. An interface rather
@@ -40,16 +40,20 @@ type patchProposer interface {
 	Propose(ctx context.Context, miss healing.PreconditionMiss, base map[string]any) ([]healing.Patch, error)
 }
 
-// approvalWriter is the narrow write seam. Kept separate from the engine
-// so the subscriber can be exercised against a recorder.
-type approvalWriter interface {
-	Execute(ctx context.Context, query string) (any, error)
+// approvalRaiser is the narrow write seam. The planner does NOT write the
+// approval row itself: createWorkApproval is @serverOnly, an unstamped write
+// is refused with one WARN nothing above it hears, and stamping is allowlisted
+// per PACKAGE -- integrations/planner is large and request-derived and must
+// not be admitted. integrations/work holds the allowlist entry and exactly one
+// stamping site, so the row is raised there and this delegates.
+type approvalRaiser interface {
+	RaiseApproval(ctx context.Context, ownerUserId string, a workintegration.ApprovalSeed) (string, error)
 }
 
 // WorkHealer turns a precondition miss into a planReview approval.
 type WorkHealer struct {
 	proposer patchProposer
-	writer   approvalWriter
+	raiser   approvalRaiser
 	loop     *PlannerAgentLoop
 	// ttl is how long a proposed repair stays answerable. A patch set
 	// proposed against a world that has since moved is worse than none,
@@ -60,14 +64,14 @@ type WorkHealer struct {
 // NewWorkHealer builds the subscriber. A nil proposer or writer yields a
 // nil healer, and every method on a nil healer is a no-op, so the caller
 // can wire it unconditionally.
-func NewWorkHealer(proposer patchProposer, writer approvalWriter, loop *PlannerAgentLoop, ttl time.Duration) *WorkHealer {
-	if proposer == nil || writer == nil {
+func NewWorkHealer(proposer patchProposer, raiser approvalRaiser, loop *PlannerAgentLoop, ttl time.Duration) *WorkHealer {
+	if proposer == nil || raiser == nil {
 		return nil
 	}
 	if ttl <= 0 {
 		ttl = 24 * time.Hour
 	}
-	return &WorkHealer{proposer: proposer, writer: writer, loop: loop, ttl: ttl}
+	return &WorkHealer{proposer: proposer, raiser: raiser, loop: loop, ttl: ttl}
 }
 
 // HandlePreconditionMissed is the events.TopicPreconditionMissed handler.
@@ -168,49 +172,34 @@ func patchObjects(patches []healing.Patch) []map[string]any {
 }
 
 func (h *WorkHealer) writeApproval(ctx context.Context, req work.ApprovalRequest) error {
-	args := map[string]any{
-		"approvalId":   id.NewShortId(),
-		"runId":        req.RunId,
-		"stepKey":      req.StepKey,
-		"kind":         req.Kind,
-		"subject":      req.Subject,
-		"artifactHash": req.ArtifactHash,
-		"evidence": map[string]any{
+	// THE OWNER IS DELIBERATELY EMPTY, and it is right for the only path that
+	// reaches here today. `healing.precondition.missed` is emitted by the
+	// automation executor, whose runs are the DEPLOYMENT's -- their
+	// ownerUserId is present-and-empty -- so an approval raised under no
+	// actor lands on the same row tier the run itself did, readable through
+	// the composite tier's cluster-owner escape.
+	//
+	// A GOAL-OWNED run reaching this path would put its approval on the
+	// deployment rather than on the person, which is visible to an operator
+	// and not to them. The miss event carries no owner, so closing that needs
+	// the owner threaded onto the event or looked up from the run -- named
+	// here rather than papered over, because the failure is quiet.
+	_, err := h.raiser.RaiseApproval(ctx, "", workintegration.ApprovalSeed{
+		RunId:        req.RunId,
+		StepKey:      req.StepKey,
+		Kind:         req.Kind,
+		Subject:      req.Subject,
+		ArtifactHash: req.ArtifactHash,
+		Question:     req.Question,
+		Options:      req.Options,
+		Evidence: map[string]any{
 			"tier":   req.Evidence.Tier,
 			"reason": req.Evidence.Reason,
 			"ruleId": req.Evidence.RuleId,
 			"source": req.Evidence.Source,
 		},
-		"requestedAt": req.RequestedAt.Format(time.RFC3339Nano),
-	}
-	if !req.ExpiresAt.IsZero() {
-		args["expiresAt"] = req.ExpiresAt.Format(time.RFC3339Nano)
-	}
-	// Named-args form, and every nil argument DROPPED rather than rendered.
-	// Both halves are load-bearing and both fail silently: the parser refuses
-	// `name({...})` outright (#2335), and an optional `object` field given
-	// `null` fails the concept's type check, which refuses the WHOLE row --
-	// so an approval nobody can see reads as "the healer never fired".
-	_, err := h.writer.Execute(ctx, "createWorkApproval("+encodeArgs(dropNil(args))+")")
+		RequestedAt: req.RequestedAt,
+		ExpiresAt:   req.ExpiresAt,
+	})
 	return err
-}
-
-// dropNil removes absent values so they are never rendered as `null`.
-// json.Marshal(nil) is "null", and a concept's optional object field
-// refuses it, taking the whole insert with it.
-func dropNil(args map[string]any) map[string]any {
-	out := make(map[string]any, len(args))
-	for k, v := range args {
-		if v == nil {
-			continue
-		}
-		if s, ok := v.(string); ok && s == "" {
-			// An empty string is a real value for a string field, but for
-			// the optional ones here it is indistinguishable from absent
-			// and costs nothing to omit.
-			continue
-		}
-		out[k] = v
-	}
-	return out
 }
