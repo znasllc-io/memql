@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ComponentProps } from "react";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Caption, Check, Head, Panel } from "../../kit";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { ApprovalsSection } from "./ApprovalsSection";
+import { AutomationsSection } from "./AutomationsSection";
 import { GoalsSection } from "./GoalsSection";
+import { GoalView } from "./GoalView";
 import { RunPage } from "./RunPage";
 import { RunsSection } from "./RunsSection";
-import { WORK_APP_ID, WORK_LOG_CONCEPTS } from "./concepts";
+import { defaultRunId } from "./world";
+import { NEXUS_APP_ID, NEXUS_LOG_CONCEPTS } from "./concepts";
 import {
   useCancelGoal,
   useCreateGoal,
@@ -26,13 +31,13 @@ import {
   type RunRow,
 } from "./rows";
 import {
-  DEFAULT_WORK_SETTINGS,
-  LocalWorkSettingsStore,
-  WORK_SECTIONS,
-  type WorkSettings,
-  type WorkSettingsStore,
+  DEFAULT_NEXUS_SETTINGS,
+  LocalNexusSettingsStore,
+  NEXUS_SECTIONS,
+  type NexusSettings,
+  type NexusSettingsStore,
 } from "./settings";
-import { useApprovals, useGoals, useJournal, useRunSteps, useRuns } from "./useWork";
+import { useApprovals, useGoals, useJournal, useRunSteps, useRuns } from "./useNexus";
 
 // WORK: what you asked the system to do, what it did about it, and the places
 // it had to stop and ask you.
@@ -62,20 +67,20 @@ import { useApprovals, useGoals, useJournal, useRunSteps, useRuns } from "./useW
 // they were.
 
 /** The concepts this app owns, for its Logs section's subject scope. */
-const LOG_CONCEPTS = WORK_LOG_CONCEPTS;
+const LOG_CONCEPTS = NEXUS_LOG_CONCEPTS;
 
-export function WorkApp({
+export function NexusApp({
   sectionId,
   navigate,
   askContext,
   intent,
   consumeIntent,
   store,
-}: OsAppProps & { store?: WorkSettingsStore }) {
+}: OsAppProps & { store?: NexusSettingsStore }) {
   // Injectable for tests, which is the whole reason the parameter exists --
   // nothing in the shell passes one.
-  const settingsStore = useMemo(() => store ?? new LocalWorkSettingsStore(), [store]);
-  const [settings, setSettings] = useState<WorkSettings>(() => settingsStore.load());
+  const settingsStore = useMemo(() => store ?? new LocalNexusSettingsStore(), [store]);
+  const [settings, setSettings] = useState<NexusSettings>(() => settingsStore.load());
 
   const goals = useGoals();
   const runs = useRuns();
@@ -87,8 +92,15 @@ export function WorkApp({
   const decide = useDecideApproval();
 
   const [selectedGoalId, setSelectedGoalId] = useState("");
+  const [openGoalId, setOpenGoalId] = useState("");
   const [openRunId, setOpenRunId] = useState("");
   const [selectedApprovalId, setSelectedApprovalId] = useState("");
+  const [selectedAutomationId, setSelectedAutomationId] = useState("");
+  // Which run of the open goal the map draws, and the moment it is rewound to.
+  // Both are the GOAL VIEW's, held here so leaving the view for an approval and
+  // coming back lands somebody exactly where they were.
+  const [mapRunId, setMapRunId] = useState("");
+  const [openAt, setOpenAt] = useState("");
 
   // The two feeds every surface reads as PLAIN ROWS rather than as a live
   // source: the goal a run is for, and the approvals a run is parked on. They
@@ -114,13 +126,16 @@ export function WorkApp({
   function openRun(runId: string) {
     if (runId.trim() === "") return;
     setOpenRunId(runId);
-    askContext(`work run:${idTail(runId)}`);
+    askContext(`nexus run:${idTail(runId)}`);
     navigate("runs");
   }
 
   function openGoal(goalId: string) {
     if (goalId.trim() === "") return;
     setSelectedGoalId(goalId);
+    setOpenGoalId(goalId);
+    setMapRunId(defaultRunId(runs.snapshot.rows, goalId));
+    askContext(`nexus goal:${idTail(goalId)}`);
     navigate("goals");
   }
 
@@ -141,15 +156,23 @@ export function WorkApp({
     const runId = typeof payload["runId"] === "string" ? payload["runId"] : "";
     const goalId = typeof payload["goalId"] === "string" ? payload["goalId"] : "";
     const approvalId = typeof payload["approvalId"] === "string" ? payload["approvalId"] : "";
+    // A MOMENT, so a rewound goal is shareable. The OS has no per-window URL --
+    // this is the shell's deep-link primitive, and an opener that hands one in
+    // gets the goal drawn as it stood. Ignored on a run or approval payload,
+    // because neither of those surfaces is rewindable.
+    const at = typeof payload["at"] === "string" ? payload["at"] : "";
     if (runId === "" && goalId === "" && approvalId === "") return;
     handled.current = intent.id;
     if (runId !== "") openRun(runId);
     else if (approvalId !== "") openApproval(approvalId);
-    else openGoal(goalId);
+    else {
+      setOpenAt(at);
+      openGoal(goalId);
+    }
     consumeIntent?.(intent.id);
   }, [intent]);
 
-  function update(patch: Partial<WorkSettings>) {
+  function update(patch: Partial<NexusSettings>) {
     const next = { ...settings, ...patch, version: 1 as const };
     setSettings(next);
     settingsStore.save(next);
@@ -165,7 +188,7 @@ export function WorkApp({
   useEffect(() => {
     if (applied.current) return;
     applied.current = true;
-    const shellDefault = WORK_SECTIONS[0]?.id ?? "";
+    const shellDefault = NEXUS_SECTIONS[0]?.id ?? "";
     if (sectionId !== shellDefault) return;
     if (settings.defaultSection && settings.defaultSection !== sectionId) {
       navigate(settings.defaultSection);
@@ -174,16 +197,21 @@ export function WorkApp({
   }, []);
 
   if (sectionId === "settings") {
-    return <WorkSettingsSection settings={settings} update={update} />;
+    return <NexusSettingsSection settings={settings} update={update} />;
   }
   if (sectionId === "logs") {
     return (
       <AppLogsSection
-        app={WORK_APP_ID}
+        app={NEXUS_APP_ID}
         subjectConcepts={LOG_CONCEPTS}
         intent={intent}
         consumeIntent={consumeIntent}
       />
+    );
+  }
+  if (sectionId === "automations") {
+    return (
+      <AutomationsSection selectedId={selectedAutomationId} onSelect={setSelectedAutomationId} />
     );
   }
   if (sectionId === "approvals") {
@@ -224,16 +252,70 @@ export function WorkApp({
     );
   }
 
+  // THE GOAL VIEW REPLACES THE LIST (rule 11's `<- Goals` form). It is a map, a
+  // rail and a detail -- taller than the run page, which already took this
+  // form -- and two Heads in one scroller is the tell that neither happened.
+  const openGoalRow =
+    openGoalId === ""
+      ? null
+      : (goals.snapshot.rows.find((row) => idTail(rowId(row)) === idTail(openGoalId)) ?? null);
+  const openGoalProjected = goalRows.find((goal) => idTail(goal.id) === idTail(openGoalId)) ?? null;
+  if (openGoalRow !== null && openGoalProjected !== null) {
+    return (
+      <GoalViewHost
+        goal={openGoalProjected}
+        goalRow={openGoalRow}
+        runRows={runs.snapshot.rows}
+        approvalRows={approvals.snapshot.rows}
+        openRunId={mapRunId === "" ? defaultRunId(runs.snapshot.rows, openGoalId) : mapRunId}
+        onPickRun={setMapRunId}
+        cancel={cancel}
+        derive={derive}
+        onBack={() => {
+          setOpenGoalId("");
+          setOpenAt("");
+        }}
+        onOpenRun={openRun}
+        onOpenApproval={openApproval}
+        openAt={openAt}
+      />
+    );
+  }
+
   return (
     <GoalsSection
       goals={goals.source}
       runs={runRows}
       create={create}
       cancel={cancel}
-      onOpenRun={openRun}
+      onOpenGoal={openGoal}
       selectedGoalId={selectedGoalId}
-      onSelectGoal={setSelectedGoalId}
     />
+  );
+}
+
+/** The row id, read the way `idTail` expects it. */
+function rowId(row: Row): string {
+  const value = row["id"];
+  return typeof value === "string" ? value : "";
+}
+
+/**
+ * The goal view, with the one feed that belongs to it and to nothing else.
+ *
+ * IT EXISTS ONLY WHILE A GOAL IS OPEN, which is the whole point: the steps
+ * subscription is the page's, so closing the page closes it and opening a
+ * different goal is a different collection with its own baseline -- the
+ * previous run's steps are not rows this one is missing. Same rule the run page
+ * takes, and the same reason: subscribing a window to every step of every run
+ * this person owns in order to draw one of them is what it forbids.
+ */
+function GoalViewHost(
+  props: Omit<ComponentProps<typeof GoalView>, "stepRows" | "stepsState">,
+) {
+  const steps = useRunSteps(props.openRunId);
+  return (
+    <GoalView {...props} stepRows={steps.snapshot.rows} stepsState={steps.snapshot.state} />
   );
 }
 
@@ -295,21 +377,21 @@ function RunView({
   );
 }
 
-function WorkSettingsSection({
+function NexusSettingsSection({
   settings,
   update,
 }: {
-  settings: WorkSettings;
-  update: (patch: Partial<WorkSettings>) => void;
+  settings: NexusSettings;
+  update: (patch: Partial<NexusSettings>) => void;
 }) {
   return (
     <div className="os-settings">
-      <Head title="Work settings" />
-      <Panel label="Work settings">
+      <Head title="Nexus settings" />
+      <Panel label="Nexus settings">
         <fieldset className="os-field-group">
-          <legend>Open Work on</legend>
+          <legend>Open Nexus on</legend>
           <div className="os-choice-row" role="radiogroup" aria-label="Default section">
-            {WORK_SECTIONS.map((section) => (
+            {NEXUS_SECTIONS.map((section) => (
               <button
                 key={section.id}
                 type="button"
@@ -323,7 +405,7 @@ function WorkSettingsSection({
             ))}
           </div>
           <p className="os-caption">
-            Applies the next time a Work window opens; it does not move the window you are looking
+            Applies the next time a Nexus window opens; it does not move the window you are looking
             at. Approvals is the one worth choosing if you spend the day here -- a run parked on a
             question does not move until somebody answers it.
           </p>
@@ -372,7 +454,7 @@ function WorkSettingsSection({
         <p className="os-caption">
           These are kept in this browser, separately from your desktop, so an app learning a
           checkbox can never cost you your desks. The defaults are{" "}
-          {DEFAULT_WORK_SETTINGS.defaultSection} with finished runs listed.
+          {DEFAULT_NEXUS_SETTINGS.defaultSection} with finished runs listed.
         </p>
       </Panel>
       <Caption>

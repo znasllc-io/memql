@@ -26,10 +26,10 @@ import {
   stepThought,
   stepsInOrder,
   stepsOfRun,
-} from "../../src/apps/work/rows";
-import { kindCalledAModel, runStatusWord, stepKindWord } from "../../src/apps/work/words";
+} from "../../src/apps/nexus/rows";
+import { kindCalledAModel, runStatusWord, stepKindWord } from "../../src/apps/nexus/words";
 
-// The pure half of the Work app. Everything asserted here is a function of a
+// The pure half of the Nexus app. Everything asserted here is a function of a
 // row, so nothing below needs a browser, a cluster or React -- which is the
 // point of keeping the projections out of the components.
 

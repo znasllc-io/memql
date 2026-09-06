@@ -90,7 +90,7 @@ export function StepSpineRow({ step, position, last, open, onOpen }: StepSpineRo
   return (
     <button
       type="button"
-      className="os-work-step"
+      className="os-nexus-step"
       data-kind={kind}
       data-thought={thought || undefined}
       data-status={step.status}
@@ -99,55 +99,55 @@ export function StepSpineRow({ step, position, last, open, onOpen }: StepSpineRo
       aria-label={spoken}
       onClick={onOpen}
     >
-      <span className="os-work-step-spine" aria-hidden>
-        <span className="os-work-step-line" data-head />
-        <span className="os-work-step-node" />
-        {last ? null : <span className="os-work-step-line" data-tail />}
+      <span className="os-nexus-step-spine" aria-hidden>
+        <span className="os-nexus-step-line" data-head />
+        <span className="os-nexus-step-node" />
+        {last ? null : <span className="os-nexus-step-line" data-tail />}
       </span>
 
-      <span className="os-work-step-seq" aria-hidden>
+      <span className="os-nexus-step-seq" aria-hidden>
         {position}
       </span>
 
-      <span className="os-work-step-body">
-        <span className="os-work-step-name">
-          <span className="os-work-step-key os-mono">{step.key}</span>
+      <span className="os-nexus-step-body">
+        <span className="os-nexus-step-name">
+          <span className="os-nexus-step-key os-mono">{step.key}</span>
           {step.attempt > 1 ? (
             <Chip tone="muted" title={`This is attempt ${step.attempt} of this step`}>
               attempt {step.attempt}
             </Chip>
           ) : null}
         </span>
-        <span className="os-work-step-call">{stepCallLine(step)}</span>
+        <span className="os-nexus-step-call">{stepCallLine(step)}</span>
         {/* The symptom is the classifier's answer and belongs UNDER the step
             it is about, not in a column: it is a sentence, and a sentence in a
             column is a sentence nobody can read. */}
         {failed && step.symptom !== "" ? (
-          <span className="os-work-step-symptom" title={symptomMeaning(step.symptom)}>
+          <span className="os-nexus-step-symptom" title={symptomMeaning(step.symptom)}>
             {symptomWord(step.symptom)}
           </span>
         ) : null}
         {failed && step.errorMessage !== "" ? (
-          <span className="os-work-step-error os-mono">{step.errorMessage}</span>
+          <span className="os-nexus-step-error os-mono">{step.errorMessage}</span>
         ) : null}
       </span>
 
-      <span className="os-work-step-state">
+      <span className="os-nexus-step-state">
         {/* THE COST SITS ONLY ON THE STEPS THAT COST SOMETHING. A dash on
             forty-four rows to say "free" is forty-four things to read past;
             silence says it better, and the band above has already said how
             many of each there are. */}
         {thought ? (
-          <span className="os-work-step-spend os-mono">
+          <span className="os-nexus-step-spend os-mono">
             {step.tokens === null ? null : <span>{formatTokens(step.tokens)} tok</span>}
             {step.cost === null ? null : <span>{formatMoney(step.cost)}</span>}
           </span>
         ) : null}
-        <span className="os-work-step-kind">{stepKindWord(step.kind)}</span>
-        <span className="os-work-step-duration os-mono">
+        <span className="os-nexus-step-kind">{stepKindWord(step.kind)}</span>
+        <span className="os-nexus-step-duration os-mono">
           {step.durationMs === null ? "" : formatDuration(step.durationMs)}
         </span>
-        <span className="os-work-step-status" data-status={step.status}>
+        <span className="os-nexus-step-status" data-status={step.status}>
           {stepStatusWord(step.status)}
         </span>
         {/* Postcondition: three answers, and the third is not "false".
@@ -161,7 +161,7 @@ export function StepSpineRow({ step, position, last, open, onOpen }: StepSpineRo
           </Chip>
         ) : null}
         {waiting ? <Chip tone="accent">waiting</Chip> : null}
-        <ChevronRight size={13} className="os-work-step-chevron" aria-hidden />
+        <ChevronRight size={13} className="os-nexus-step-chevron" aria-hidden />
       </span>
     </button>
   );

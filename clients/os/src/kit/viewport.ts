@@ -1,11 +1,17 @@
 // Pan and zoom, as arithmetic.
 //
-// Extracted from the component for the reason `layout.ts` is: a viewport
+// Extracted from the component for the reason a layout module is: a viewport
 // asserted through a rendered SVG is asserted through React, the DOM and a
 // transform string. These are four functions over four numbers, and they are
 // where the one genuinely fiddly rule lives -- a wheel zoom has to keep the
 // point under the cursor under the cursor, which is the difference between a
 // map you can steer and one that runs away from you.
+//
+// IN `kit/` RATHER THAN IN AN APP, since epic memql#4785. It was written for
+// the Deployables map and the Nexus map needs exactly the same four functions;
+// a copy would be a second implementation of a rule whose whole value is that
+// it is written down ONCE, and the day one of them learned something the other
+// would not. Nothing in here knows what is being panned.
 
 export interface Viewport {
   /** Translation in SCREEN pixels, applied before the scale. */
@@ -67,17 +73,30 @@ export function zoomAt(view: Viewport, factor: number, px: number, py: number): 
  * The view that fits a layout of `width` x `height` into a `vw` x `vh`
  * viewport, centred.
  *
- * Never zooms IN past 1: a two-site cluster blown up to fill a window reads as
- * a diagram of nothing, and the point of the map is the shape of the whole
- * deployment rather than the size of its boxes.
+ * `maxFit` is how far it may zoom IN, and it is per-map because the right
+ * answer depends on what is being drawn.
+ *
+ *   - The Deployables map defaults to 1. A two-site cluster blown up to fill a
+ *     window reads as a diagram of nothing, and the point there is the shape of
+ *     the whole deployment rather than the size of its boxes.
+ *   - The Nexus map passes more. Its content is a thin road with stops on it,
+ *     so at 1 a short run sits as a small band in the middle of a wide canvas
+ *     with nothing around it -- small is not more legible when the subject is
+ *     sparse, and the road IS the subject.
  *
  * A zero or negative dimension -- a window mid-open, a hidden desk, jsdom,
  * which measures everything as zero -- returns the identity rather than a
  * division by zero, so an unmeasured map is simply unscaled.
  */
-export function fitTo(width: number, height: number, vw: number, vh: number): Viewport {
+export function fitTo(
+  width: number,
+  height: number,
+  vw: number,
+  vh: number,
+  maxFit = 1,
+): Viewport {
   if (width <= 0 || height <= 0 || vw <= 0 || vh <= 0) return IDENTITY;
-  const scale = clampScale(Math.min(1, Math.min(vw / width, vh / height)));
+  const scale = clampScale(Math.min(maxFit, Math.min(vw / width, vh / height)));
   return {
     scale,
     x: (vw - width * scale) / 2,

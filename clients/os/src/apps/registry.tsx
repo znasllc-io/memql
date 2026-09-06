@@ -15,6 +15,7 @@ import {
 
 import { AskSurface } from "../ask/AskSurface";
 import { useAsk } from "../ask/AskProvider";
+import { useMakeGoal } from "../ask/useMakeGoal";
 import type { OsAppManifest, OsRegistry, OsWidgetManifest } from "../system/registry";
 import { AccountsApp } from "./accounts/AccountsApp";
 import { ACCOUNTS_SECTIONS } from "./accounts/settings";
@@ -35,8 +36,8 @@ import { TrainingApp } from "./training/TrainingApp";
 import { TRAINING_SECTIONS } from "./training/settings";
 import { UsersApp } from "./users/UsersApp";
 import { USERS_SECTIONS } from "./users/settings";
-import { WorkApp } from "./work/WorkApp";
-import { WORK_SECTIONS } from "./work/settings";
+import { NexusApp } from "./nexus/NexusApp";
+import { NEXUS_SECTIONS } from "./nexus/settings";
 
 // The installed roster (spec D12). Every app is real now -- Files (epic
 // #4721) replaced the last stub, and the `stub` helper and StubApp went with
@@ -368,17 +369,27 @@ const bin: OsAppManifest = {
   component: BinApp,
 };
 
-// Work, in full (the work spine, sub-project A). What you asked the system to
-// do, what it did about it, and the places it had to stop and ask you.
+// Nexus, in full (epic memql#4785, sub-project B of the work spine). THE GOAL
+// SURFACE: what you asked the system to do, drawn as a place the work arrives
+// at -- and the places it had to stop and ask you.
 //
-// GOALS IS FIRST and is therefore the section a window opens on: a goal is
-// what this app is for, and runs, steps and approvals are all things a goal
+// IT REPLACES THE WORK APP RATHER THAN SITTING BESIDE IT (design record D1,
+// owner-decided 2026-09-05). Sub-project A shipped a Work app over the same
+// `v1:work:*` rows; two apps both listing goals and both holding an approvals
+// queue is the shape ten manifests in this file write down against, and here
+// it would be worse than a stale label -- an approvals inbox two windows
+// disagree about is a run somebody thinks they unparked. Everything the Work
+// app earned is kept; what changed is that the GOAL, rather than the run, is
+// what the app is about.
+//
+// GOALS IS FIRST and is therefore the section a window opens on: a goal is what
+// this app is for, and runs, automations and approvals are all things a goal
 // produced. The app's own settings can point a window at Approvals instead,
 // which is the choice somebody who lives in this app all day makes -- a run
 // parked on a question does not move until a person answers it.
 //
-// The section list is WORK_SECTIONS rather than a literal, for the reason its
-// nine siblings are: the gear and the manifest must offer the same set, and a
+// The section list is NEXUS_SECTIONS rather than a literal, for the reason its
+// ten siblings are: the gear and the manifest must offer the same set, and a
 // second copy of the list is one that can disagree.
 //
 // NO MANIFEST ROLE. Every `v1:work:*` concept declares the composite tier
@@ -387,25 +398,37 @@ const bin: OsAppManifest = {
 // reaches. Gating here would be presentation pretending to be authorization --
 // the same reading Files, Deployables and Campaigns record. The writes carry
 // their gate in the engine: each `integration.work.*` builtin repeats its own,
-// because a builtin's annotation set carries no `@requiresRank`.
+// because a builtin's annotation set carries no `@requiresRank`. The one floor
+// in the app is on its Logs section, and that one IS a mirror: every read on
+// the log store is admin-and-above in the Go handler.
 //
-// THE ICON IS A PATH WITH STOPS ON IT, which is what a run is and what this
-// app draws: the spine down the left of a run timeline, thin between the steps
-// that cost nothing and thick where the machine had to think.
-const work: OsAppManifest = {
-  id: "work",
-  name: "Work",
+// THE ICON IS A PATH WITH STOPS ON IT, which is what a run is and what this app
+// draws: the road from you to the goal, thin between the steps that cost
+// nothing and thick where the machine had to think.
+const nexus: OsAppManifest = {
+  id: "nexus",
+  name: "Nexus",
   icon: Waypoints,
-  sections: WORK_SECTIONS,
+  sections: NEXUS_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
-  component: WorkApp,
+  component: NexusApp,
 };
 
 function AskWidgetBody() {
   const { transport, voice, settings } = useAsk();
+  // The widget hands a prompt off exactly as the sheet does (epic memql#4785).
+  // One Ask, three entry points, and an act that exists on one of them is an
+  // act somebody learns and then cannot find.
+  const makeGoal = useMakeGoal();
   return (
-    <AskSurface transport={transport} voicePorts={voice} settings={settings} variant="widget" />
+    <AskSurface
+      transport={transport}
+      voicePorts={voice}
+      settings={settings}
+      variant="widget"
+      makeGoal={makeGoal}
+    />
   );
 }
 
@@ -418,6 +441,6 @@ const askWidget: OsWidgetManifest = {
 };
 
 export const OS_REGISTRY: OsRegistry = {
-  apps: [accounts, campaigns, files, deployables, fleet, logs, users, training, work, settings, bin],
+  apps: [accounts, campaigns, files, deployables, fleet, logs, users, training, nexus, settings, bin],
   widgets: [askWidget],
 };

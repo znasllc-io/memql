@@ -3,7 +3,7 @@ import { rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/clien
 import { flatten, stringsOf } from "../../kit/rows";
 import { kindCalledAModel, stepKindWord, waitsOnAPerson } from "./words";
 
-// The wire rows the Work app renders, and every reading derived from them.
+// The wire rows the Nexus app renders, and every reading derived from them.
 //
 // PURE, AND SEPARATE FROM EVERY COMPONENT, for the reason apps/accounts/rows.ts
 // is: a projection asserted through render() is asserted through three layers

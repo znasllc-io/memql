@@ -5,7 +5,7 @@ import { Result, type Row } from "@znasllc-io/memql-sdk-core/client";
 import { SessionProvider } from "../../src/chrome/access";
 import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/config";
 
-// The Work app's test harness: a connection-shaped double.
+// The Nexus app's test harness: a connection-shaped double.
 //
 // CONNECTION-SHAPED rather than a mocked hook per call site, for the reason
 // every harness in this suite records: every read goes through
@@ -78,6 +78,8 @@ export interface FakeSeed {
   createReply?: Row;
   /** What `forkRun` / `replayRun` answer with. */
   deriveReply?: Row;
+  /** The authoring catalog the Automations section reads. */
+  constructs?: Row[] | Error;
 }
 
 export function fakeConnection(seed: FakeSeed = {}) {
@@ -115,6 +117,10 @@ export function fakeConnection(seed: FakeSeed = {}) {
         rowsResult(seed.accounts ?? []),
       ),
       workStepsForOwnerRun: read(seed.steps),
+      // The authoring catalog. NOT a feed -- `v1:authoring:construct` carries
+      // no broadcast routing rule -- so the section reads it and dates itself.
+      cataloguedConstructsForOwner: read(seed.constructs),
+      setConstructStatus: write(),
       workModelCallsForOwnerRun: read(seed.modelCalls),
       workObservationsForOwnerRun: read(seed.observations),
       // TYPED ARGS, so `.mock.calls[0][0]` is a record rather than `never` --
@@ -214,6 +220,28 @@ export function stepRow(over: Partial<Row> & { id: string; key: string; seq: num
     errorCode: "",
     errorMessage: "",
     createdAt: "2026-09-01T09:00:11Z",
+    ...over,
+  };
+}
+
+export function constructRow(over: Partial<Row> & { id: string; name: string }): Row {
+  return {
+    ownerUserId: "v1:identity:user:me",
+    bundleId: "v1:authoring:bundle:b1",
+    // AUTOMATION BY DEFAULT, because that is the kind this app draws -- a test
+    // that wants the other kinds filtered out has to ASK for one.
+    kind: "automation",
+    targetNamespace: "owner.me",
+    source: "automation nightlyReconcile { }",
+    status: "active",
+    catalogued: true,
+    goalSignature: "sha256:goal-1",
+    reliability: 0.95,
+    reinforceCount: 12,
+    lastReinforced: "2026-09-04T09:00:00Z",
+    catalogedAt: "2026-08-20T09:00:00Z",
+    catalogedFromBundleId: "v1:authoring:bundle:b1",
+    createdAt: "2026-08-20T09:00:00Z",
     ...over,
   };
 }

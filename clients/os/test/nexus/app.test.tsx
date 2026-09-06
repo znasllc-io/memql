@@ -10,8 +10,8 @@ vi.mock("../../src/live/connection", () => ({
   osBridgePath: "/_memql/ws",
 }));
 
-const { WorkApp } = await import("../../src/apps/work/WorkApp");
-const { LocalWorkSettingsStore } = await import("../../src/apps/work/settings");
+const { NexusApp } = await import("../../src/apps/nexus/NexusApp");
+const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings");
 const { approvalRow, fakeConnection, goalRow, runRow, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
@@ -22,7 +22,7 @@ const APPROVAL = "v1:work:approval";
 
 function memoryStore(over: Record<string, unknown> = {}) {
   const bag = new Map<string, string>();
-  const store = new LocalWorkSettingsStore({
+  const store = new LocalNexusSettingsStore({
     getItem: (k: string) => bag.get(k) ?? null,
     setItem: (k: string, v: string) => void bag.set(k, v),
   });
@@ -35,7 +35,7 @@ function mount(connection: Conn, sectionId = "goals", settings: Record<string, u
   const navigate = vi.fn();
   const view = render(
     withSession(
-      <WorkApp
+      <NexusApp
         sectionId={sectionId}
         navigate={navigate}
         askContext={() => {}}
@@ -85,16 +85,62 @@ describe("goals, the landing surface", () => {
     expect(screen.getAllByText("waiting for you")).toHaveLength(1);
   });
 
-  it("opens a goal beside the list rather than under it", async () => {
+  // The question a person opens this list with is "what is happening", and a
+  // goal whose run is in flight or waiting on them is the answer. A plain
+  // newest-first sort put the parked goal UNDER two that wanted nothing, which
+  // is what the first rendered pass showed.
+  it("puts work in flight above goals that want nothing, newest first inside each", async () => {
+    const conn = fakeConnection({
+      goals: [
+        goalRow({ id: "g1", statement: "Parked on you", createdAt: "2026-09-01T09:00:00Z" }),
+        goalRow({ id: "g2", statement: "Nothing running", createdAt: "2026-09-04T09:00:00Z" }),
+        goalRow({ id: "g3", statement: "Also nothing", createdAt: "2026-09-03T09:00:00Z" }),
+      ],
+      runs: [
+        runRow({
+          id: "r1",
+          goalId: "g1",
+          status: "waiting",
+          finishedAt: "",
+          waitingOn: { kind: "approval" },
+        }),
+      ],
+    });
+    mount(conn);
+    await screen.findByText("Parked on you");
+    const statements = [...document.querySelectorAll(".os-nexus-goal-statement")].map(
+      (el) => el.textContent,
+    );
+    expect(statements).toEqual(["Parked on you", "Nothing running", "Also nothing"]);
+  });
+
+  // A goal now opens as a MAP, a rail and a receipt, which is taller than the
+  // run page -- so it REPLACES the list (rule 11's `<- Goals` form) rather than
+  // sitting beside it, and the list's own detail column went with the change.
+  it("opens a goal in place of the list, with a way back", async () => {
     const conn = fakeConnection({
       goals: [goalRow({ id: "g1", statement: "Reconcile the ledger" })],
       runs: [runRow({ id: "r1", goalId: "g1" })],
     });
     mount(conn);
     fireEvent.click(await screen.findByText("Reconcile the ledger"));
-    // The detail names the runs of THIS goal and the bar names its state.
     expect(await screen.findByRole("group", { name: "What you can do with this" })).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Runs of this goal" })).toBeTruthy();
+    // The list is gone rather than scrolled past: its one action is not here.
+    expect(screen.queryByText("New goal")).toBeNull();
+    expect(screen.getByRole("button", { name: "Goals" })).toBeTruthy();
+  });
+
+  it("draws the map, and says what it is a map OF", async () => {
+    const conn = fakeConnection({
+      goals: [goalRow({ id: "g1", statement: "Reconcile the ledger" })],
+      runs: [runRow({ id: "r1", goalId: "g1" })],
+    });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Reconcile the ledger"));
+    const map = await screen.findByRole("application");
+    // The accessible name carries the whole reading, because the picture
+    // itself is unreadable to a screen reader by construction.
+    expect(map.getAttribute("aria-label")).toContain("Reconcile the ledger");
   });
 
   it("asks for the goal's own words before it will close it", async () => {
@@ -332,7 +378,7 @@ describe("the section list", () => {
     const consumeIntent = vi.fn();
     render(
       withSession(
-        <WorkApp
+        <NexusApp
           sectionId="goals"
           navigate={navigate}
           askContext={() => {}}
@@ -352,7 +398,7 @@ describe("the section list", () => {
     const consumeIntent = vi.fn();
     render(
       withSession(
-        <WorkApp
+        <NexusApp
           sectionId="goals"
           navigate={navigate}
           askContext={() => {}}

@@ -1435,14 +1435,27 @@ drawer; the cluster's own Library is the productized next step, and the
 commerce cut is recorded in
 `docs/superpowers/specs/2026-09-01-os-voice-themes-handoff-design.md`.
 
-## Work, the tenth app (the work spine, sub-project A)
+## Nexus, the tenth app (the work spine, sub-projects A and B)
 
-`src/apps/work/` is the human surface of the work spine: a person's goals, the
-runs that carry them out, the steps each run took, and the places it had to
-stop and ask. Design record:
-[2026-09-05-work-spine-design.md](../../docs/superpowers/specs/2026-09-05-work-spine-design.md)
-(sections B, D, E and I). Five things about it are new rules rather than
-repetitions of the nine apps before it.
+`src/apps/nexus/` is the goal surface: what a person asked the system to do,
+drawn as a place the work arrives at, plus the runs that carry it out, the
+automations it learned, and the places it had to stop and ask. Design records:
+[the work spine](../../docs/superpowers/specs/2026-09-05-work-spine-design.md)
+(sections B, D, E and I) and
+[Nexus on MemQL OS](../../docs/superpowers/specs/2026-09-05-nexus-os-app-design.md).
+
+**IT WAS THE WORK APP UNTIL epic memql#4785, and the rename is a decision
+rather than a repaint** (that record's D1, owner-answered). Sub-project A
+shipped a Work app over the `v1:work:*` rows; sub-project B was specced to draw
+the same populations plus a map, Automations and Replay. Two apps both listing
+goals and both holding an approvals queue is the shape ten manifests in
+`registry.tsx` write down against, and here it would be worse than a stale
+label -- an approvals inbox that two windows disagree about is a run somebody
+thinks they unparked. Nothing the Work app earned was thrown away; what changed
+is that the GOAL, rather than the run, is what the app is about.
+
+Nine things about it are new rules rather than repetitions of the nine apps
+before it. The first five came with sub-project A and hold unchanged.
 
 - **THE SPINE'S WEIGHT IS THE PRODUCT'S CLAIM, AND IT IS DRAWN IN INK RATHER
   THAN IN HUE.** The system works a goal out once and replays it afterwards
@@ -1526,11 +1539,83 @@ repetitions of the nine apps before it.
   reshuffles itself the moment any step updates -- exactly when somebody is
   watching it.
 
+- **THE ROAD'S WEIGHT IS THE RAIL'S INK, AND THAT IS THE WHOLE MAP.** The
+  beacon map (`BeaconMap.tsx`, over the pure `src/nexus/scene/`) says the same
+  sentence as the step rail with the same marks: thin across the stretches that
+  cost nothing, thick where the machine had to think. A person learns the
+  vocabulary once and reads both drawings with it, which is why
+  `kindCalledAModel` was moved into the leaf -- the rail, the road and the
+  receipt are three surfaces reading one rule, and for a moment they disagreed
+  about whether a `decision` step called a model.
+
+  **The x axis is DEPENDENCY DEPTH, not `seq`.** Steps that can run at the same
+  time share a column, which is a fact about `dependsOn` rather than a
+  rendering convenience. A chain draws a straight road, which is the correct
+  picture of a chain. Two densities get two devices: a FOLD is horizontal (a
+  maximal stretch of finished columns, collapsed to one segment carrying its
+  count) and a CLUSTER is vertical (one column with more parallel steps than
+  the threshold). memql#4974 asks for that folding under the word "phases";
+  there is no phase ROW in the spine, so it is applied to the structure that
+  does exist.
+
+  **Nothing is drawn below the road except approvals, and that is a finding.**
+  The portal's map hung artifacts and authored constructs off the task that
+  made them. `v1:library:artifact.producedByPlanId` and
+  `v1:authoring:bundle.sourcePlanId` still name `v1:planner:plan`, so nothing
+  points a produced thing at a RUN until the spine's section F lands. Drawing
+  them would mean inventing a join, which is the one thing a picture read as
+  evidence must not do.
+
+  **No WebGL, and it is enforced rather than intended.** MemQL OS carries none
+  by owner requirement; `test/deployables/map.test.tsx` is the shell-wide guard
+  and it now names both maps, so an empty offender list is evidence about the
+  tree rather than about the regex.
+
+- **REWIND IS A MODE, AND IT IS NOT `replayRun`.** Rewind draws the goal at an
+  earlier moment out of rows this browser already holds; Replay opens a NEW run
+  served from the journal and costs money. A surface that used one word for
+  both would have people spending by dragging a slider. The moments come from
+  `events()`, which invents nothing -- a step that says it is done and never
+  says when produces no tick -- so the scrubber's ticks are evidence.
+
+  **A moment is addressable and it is NOT a URL.** memql#4975 asks for "a
+  moment as a URL" and this shell has none to give: a window's state is not in
+  the address bar, and the one module that touches `location`
+  (`deployables/sources/connectReturn.ts`) exists to SCRUB an OAuth return out
+  of it. The moment rides the shell's actual deep-link primitive instead --
+  `openApp("nexus", { goalId, at })`.
+
+- **AUTOMATIONS IS A READ, AND THE LADDER IS A WORD.**
+  `v1:authoring:construct` carries no broadcast routing rule -- checked in
+  `component/node/routing.go` rather than assumed, which is this README's own
+  standing rule -- so the section prints when it looked and offers to look
+  again. A live-looking list that silently never moves is worse than a read
+  that dates itself, because the caption would claim wiring that is not there.
+
+  `reliability` is 0..1 and it is NOT a probability of success: it climbs on a
+  matched-fingerprint success and decays on mismatch and on disuse. Printing
+  "62%" invites a reader to treat it as odds, so the rung is a word and four
+  ticks -- with **"not yet proven" kept distinct from "struggling"**, because a
+  template nobody has run has earned nothing and one that has been run and kept
+  missing has earned less than nothing.
+
+- **THE ROLE MIRROR IS AN ABSENT FLOOR WITH AN ACCOUNT OF ITSELF.** memql#4976
+  asks for `@requiresRank` on the constructs this app calls, mirrored by the
+  manifest. Doing that honestly produces no app-level floor: every `v1:work:*`
+  concept declares the composite owner tier, so a goal is yours and row
+  admission decides which rows a read reaches on both the query and the
+  subscription path -- a rank floor over "your own goals" would say a writer
+  may not read their own work. The builtins gate in their handlers, because a
+  builtin's annotation set carries no `@requiresRank`. The ONE floor in the app
+  is on its Logs section, and that one IS a mirror: every read on the log store
+  is admin-and-above in the Go handler. An absent control with nothing said
+  about it reads as something nobody got round to.
+
 ### What the browser found that the suite could not
 
 The whole suite was green over every one of these, because jsdom lays nothing
 out. They came out of a rendered pass in both modes, which is the acceptance
-DESIGN.md asks for.
+DESIGN.md asks for. Sub-project B's own pass is the second list, below A's.
 
 - **A flex item's default `min-width: auto` refuses to shrink below its
   content.** A goal statement is a SENTENCE rather than a name, so it pushed
@@ -1551,3 +1636,70 @@ DESIGN.md asks for.
 - **The context outlived the identifier.** `flex: 1 1 auto` on the run row's
   "what it is for" line and a shrinkable name meant the NAME lost first, so a
   narrow column drew "re..." beside the whole of the goal it belongs to.
+
+The map's pass (sub-project B, epic memql#4785) found twelve more, and four of
+them were rules rather than pixels -- which is what a drawing costs. The last
+three came from the EMPTY half of the pass, which is the half that is easy to
+skip and the half where copy goes wrong.
+
+- **`min-height: 100%` carried the acts off the bottom of the window.** A goal
+  view is a map, a band, a rail and a receipt, so the page grew and the action
+  bar went with it: the acts sat below a forty-seven-step rail, which is the
+  same as not having them. The page is the window's height with a scrolling
+  BODY and the bar as its floor, exactly as the run page already was.
+- **FITTING ONCE FITS THE EMPTY WORLD.** The rule was "frame the layout on the
+  first render that can measure, then never again", which protects somebody who
+  put the map where they wanted it. On a live feed that first render has no rows
+  yet -- so the map framed three nodes at maximum zoom and held that view while
+  a road, a fan-out and a beacon grew off the right edge. It now follows the
+  layout's extent UNTIL THE FIRST GESTURE and stops dead after it: until
+  somebody steers, there is nobody to be rude to.
+- **"Never zoom in past 1" is right for a dense map and wrong for a sparse
+  one.** The Deployables map has boxes and blowing them up reads as a diagram of
+  nothing; a goal's world is a thin road with four stops, and at 1 it drew as a
+  small band in the middle of a wide canvas with nothing around it. `fitTo`
+  takes a per-map ceiling now, defaulted to the old behaviour.
+- **A tall canvas is wrong for a wide, flat subject.** At the Deployables
+  clamp, nearly half the canvas was empty above and below the road -- which
+  reads as a picture that failed to load rather than as a road with room.
+- **An invented class gets the browser's own bullets.** `.os-list` does not
+  exist in this stylesheet, so the automations catalog drew a `<ul>` with the
+  UA's discs and indent. No other list in the shell has them; every one either
+  goes through `LiveList` or brings its own reset, and a plain read has to bring
+  its own.
+- **The beacon's label was the page title, said twice and truncated.** The goal
+  statement under the ring was the same sentence as the `<h3>` four lines above
+  it, elided. Cut; the count stays, and the beacon's `<title>` still carries the
+  statement for a reader who cannot see which page they are on.
+- **A count drawn outside a capsule leaves an empty capsule.** The fold's
+  "6 done" was rendered as a node label above the pill, like every other node's
+  -- so the road carried a blank lozenge with a number floating over it, which
+  reads as a gap. It sits inside.
+- **A rewound page showed two moments at once.** The map was drawn `at` the
+  scrub position and the RAIL beneath it was live, so the map said three steps
+  had landed while the list under it said eleven. Both narrowings now come from
+  the same two functions in `scene/`. In the same pass: the map's caption
+  printed a raw RFC3339 stamp directly above a scrubber printing the same
+  instant in a person's format, and a step that had not started yet still drew
+  the model that ran it -- a binding is recorded at dispatch, so a rewind has to
+  drop it.
+- **A goal parked on a person offered no way to answer it.** The bar drew the
+  pause and said "replay and fork wait until the run finishes", which is true
+  and beside the point: the run does not move until somebody decides the
+  approval. `Answer it` is the primary act while it is parked, and the detail
+  carries the classifier's own reason.
+- **The goal that needed a person was sorted LAST.** Newest-first put a goal
+  parked on somebody under two that wanted nothing, which was visible the first
+  time this rendered with three rows in it. Live work is its own band above the
+  rest, and the sort control orders inside each band -- so it still does what it
+  says and a goal never jumps the queue for being new. The view's key carries
+  the live SET rather than the runs, so `running` -> `waiting` re-baselines
+  nothing and the arrival cue stays off a heartbeat.
+- **`Rewind` was offered on a goal with nothing to scrub.** A goal with no runs
+  still dates its own creation, so a `count > 0` guard put the act on a picture
+  it would redraw unchanged. Rule 12 says an illegal act is absent, and "does
+  nothing" is illegal: the guard is `> 1`.
+- **The action bar told somebody to select from an empty list.** "Select an
+  automation to arm or retire it", under nothing. An absent control needs an
+  account of itself; an instruction for a list that does not exist is worse than
+  silence.

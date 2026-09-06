@@ -9,8 +9,8 @@ vi.mock("../../src/live/connection", () => ({
   osBridgePath: "/_memql/ws",
 }));
 
-const { WorkApp } = await import("../../src/apps/work/WorkApp");
-const { LocalWorkSettingsStore } = await import("../../src/apps/work/settings");
+const { NexusApp } = await import("../../src/apps/nexus/NexusApp");
+const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings");
 const { fakeConnection, goalRow, runRow, stepRow, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
@@ -23,12 +23,12 @@ function mount(connection: Conn, sectionId = "runs") {
   const navigate = vi.fn();
   const view = render(
     withSession(
-      <WorkApp
+      <NexusApp
         sectionId={sectionId}
         navigate={navigate}
         askContext={() => {}}
         store={
-          new LocalWorkSettingsStore({
+          new LocalNexusSettingsStore({
             getItem: (k: string) => bag.get(k) ?? null,
             setItem: (k: string, v: string) => void bag.set(k, v),
           })
