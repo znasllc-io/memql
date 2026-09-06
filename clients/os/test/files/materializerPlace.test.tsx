@@ -332,4 +332,23 @@ describe("the handoff to the Materializer", () => {
     const inspector = screen.getByRole("complementary", { name: "File details" });
     expect(within(inspector).queryByRole("button", { name: "Open in Materializer" })).toBeNull();
   });
+
+  it("reaches the REAL Materializer app, not only the fixture", async () => {
+    // The two cases above pin MY side of the seam from a fixture, so neither
+    // depends on when the sibling epic lands. This one is the integration:
+    // the app id in `materializer.ts` has to be the id the shell's own
+    // registry holds, or the act renders and opens nothing.
+    h.connection = fakeConnection({
+      artifacts: [outputArtifact({ id: "a-made", title: "Q3 report.pdf", fileId: "f-1" })],
+      compositions: [compositionRow({ id: "c-1", outputFileId: "f-1" })],
+    });
+    await renderFiles();
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /Q3 report\.pdf/ }));
+    expect(
+      within(screen.getByRole("menu", { name: "File" })).getByRole("menuitem", {
+        name: "Open in Materializer",
+      }),
+    ).toBeTruthy();
+  });
 });
