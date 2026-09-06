@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,7 +50,35 @@ const (
 	defaultCassettes = "test/proving/cassettes"
 	defaultScorecard = "docs/public/overview/proving/scorecard"
 	defaultPage      = "docs/public/overview/proving-scorecard.md"
+
+	// dsnEnv is the variable dbtest.EnsureSchema reads to find the database
+	// it migrates. Named here because openEngine WRITES it: the --dsn flag
+	// has to reach a helper that takes no argument.
+	dsnEnv = "MEMQL_DATABASE_DSN"
 )
+
+// redactDSN removes the password from a DSN so it can appear in an error.
+//
+// This matters more here than in a log line: a capability failure goes into
+// the JSON envelope on stdout, which CI publishes into a job summary. A DSN is
+// the one parameter this binary takes that carries a credential.
+//
+// It is deliberately conservative -- anything it cannot parse comes back as a
+// fixed string rather than as itself, because a DSN shape this does not
+// recognise is exactly the one whose password it would fail to find.
+func redactDSN(dsn string) string {
+	u, err := url.Parse(dsn)
+	if err != nil || u.Host == "" {
+		return "the configured DSN"
+	}
+	if u.User != nil {
+		if _, hasPassword := u.User.Password(); hasPassword {
+			u.User = url.UserPassword(u.User.Username(), "xxxxx")
+		}
+	}
+	u.RawQuery = ""
+	return u.String()
+}
 
 func main() {
 	// STDOUT CARRIES EXACTLY ONE ENVELOPE, and holding that line takes more
@@ -428,6 +457,22 @@ func openEngine(c *capability.Capability) (*memqlengine.MemQLEngine, func(), int
 			"no database: pass --dsn or set MEMQL_DATABASE_DSN. The proving suite runs against a real Postgres with "+
 				"TimescaleDB on purpose -- a speed claim that excluded the database would be measuring a different product")
 	}
+	// MAKE THE RESOLVED DSN AUTHORITATIVE FOR THE MIGRATION TOO.
+	//
+	// dbtest.EnsureSchema takes no argument: it reads MEMQL_DATABASE_DSN
+	// itself and falls back to a default compiled into that file. So --dsn
+	// used to migrate ONE database and query ANOTHER, and the run died later
+	// on `relation "MemoryNodes" does not exist` -- a Postgres error naming a
+	// table, saying nothing about migrations, and pointing at neither
+	// database.
+	//
+	// The capability contract puts flags ABOVE the environment, so the flag
+	// wins by being written back before anything reads it. This is also why
+	// the write happens here rather than next to the flag: everything below
+	// this line must see one DSN.
+	if err := os.Setenv(dsnEnv, dsn); err != nil {
+		return nil, nil, c.Fail(capability.ExitOpFailed, "publishing the resolved DSN: %v", err)
+	}
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 	// One context for the ping AND the migration. A migration on a fresh
 	// database applies the whole schema, so the budget is minutes rather than
@@ -455,9 +500,26 @@ func openEngine(c *capability.Capability) (*memqlengine.MemQLEngine, func(), int
 	// lock so two runs cannot migrate at once, and it is the same code path
 	// every db-gated package uses -- so the proving suite runs against the
 	// schema CI's other lanes run against, rather than one of its own.
-	if _, merr := dbtest.EnsureSchema(ctx); merr != nil {
+	reachable, merr := dbtest.EnsureSchema(ctx)
+	if merr != nil {
 		_ = db.Close()
 		return nil, nil, c.Fail(capability.ExitPrerequisite, "migrating the database: %v", merr)
+	}
+	if !reachable {
+		// EnsureSchema answers (false, nil) when it could not reach a
+		// database, because every db-gated TEST wants to skip in that case
+		// and a skip is green. A benchmark must not inherit that: skipping
+		// the migration leaves the schema absent, and the run then fails
+		// several steps later inside a scenario, naming a missing relation
+		// rather than a missing database.
+		//
+		// Reachable here is not redundant with the ping above. The ping
+		// proves THIS process can open the DSN; this proves the migration
+		// step actually ran against it.
+		_ = db.Close()
+		return nil, nil, c.Fail(capability.ExitPrerequisite,
+			"the database at %s could not be migrated because it was unreachable from the migration step; "+
+				"the schema is absent, so no figure this run produced would mean anything", redactDSN(dsn))
 	}
 	if _, err := memqlengine.LoadUnifiedConcepts(nil); err != nil {
 		_ = db.Close()
