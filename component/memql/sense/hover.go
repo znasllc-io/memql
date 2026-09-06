@@ -152,8 +152,9 @@ func (s *Service) Hover(source string, line, col int, filePath string) *HoverRes
 // resolveBareConcept maps a bare short name to a canonical concept id by
 // trailing segment, mirroring the loader's own resolution
 // (component/memql/concept_resolver.go:119-158). A single match wins
-// outright. An ambiguous one -- `plan` is both v1:planner:plan and
-// v1:harness:plan, and 46 bare names collide tree-wide -- is settled only
+// outright. An ambiguous one -- `invocation` is both v1:worker:invocation
+// and v1:observability:invocation, and bare names collide tree-wide -- is
+// settled only
 // by the file's own domain, and otherwise stays unresolved: hover says
 // nothing rather than naming the wrong concept.
 func (s *Service) resolveBareConcept(name, filePath string) (string, bool) {

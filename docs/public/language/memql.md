@@ -1108,22 +1108,22 @@ The dotted path maps to a file on disk (`cognition.concepts` → `dsl/cognition/
 An imported name can be bound to a different local name (memql#3802):
 
 ```memql fragment
-use harness.concepts.{ plan as harnessPlan }
+use observability.concepts.{ invocation as codeInvocation }
 
-query harnessPlan tasksForHarnessPlan { ... }   // the imported one
-query plan        activePlansForUser  { ... }   // ambient -> v1:planner:plan
+query codeInvocation slowCodeInvocations { ... }  // the imported one
+query invocation     invocationsForUser  { ... }  // ambient -> v1:worker:invocation
 ```
 
 This is what lets one file reference **two same-named concepts**. Four short
-names are ambiguous across domains today — `plan`, `request`, `call`,
-`invocation` — and without an alias, importing one of them captures *every*
+names are ambiguous across domains today — `account`, `call`, `invocation`
+and `request` — and without an alias, importing one of them captures *every*
 bare use of that name in the file, including the constructs that wanted their
 own domain's.
 
 Three rules, and the third is what makes the first two coherent:
 
-1. **The alias names the imported concept.** `harnessPlan` above is
-   `v1:harness:plan`.
+1. **The alias names the imported concept.** `codeInvocation` above is
+   `v1:observability:invocation`.
 2. **A bare name stays ambient** — it continues to mean this domain's concept.
    Aliasing therefore fixes the capture structurally rather than by adding a
    check.

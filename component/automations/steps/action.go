@@ -7,10 +7,10 @@ import (
 
 	"github.com/znasllc-io/memql/component/actions"
 	"github.com/znasllc-io/memql/component/automations"
-	"github.com/znasllc-io/memql/component/harness/actionpin"
-	"github.com/znasllc-io/memql/component/harness/actionreplay"
-	"github.com/znasllc-io/memql/component/harness/parambind"
-	"github.com/znasllc-io/memql/component/harness/surfaceresolver"
+	"github.com/znasllc-io/memql/component/actions/pin"
+	"github.com/znasllc-io/memql/component/actions/fingerprint"
+	"github.com/znasllc-io/memql/component/actions/bind"
+	"github.com/znasllc-io/memql/component/actions/surfaceresolver"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -55,7 +55,7 @@ func (e *ActionExecutor) Execute(ctx context.Context, step *automations.Step, st
 		return fail("action configuration is required")
 	}
 
-	ref, err := actionpin.Parse(step.Action.Ref)
+	ref, err := pin.Parse(step.Action.Ref)
 	if err != nil {
 		return fail(fmt.Sprintf("invalid action ref %q: %v", step.Action.Ref, err))
 	}
@@ -116,7 +116,7 @@ func (e *ActionExecutor) Execute(ctx context.Context, step *automations.Step, st
 // (the executor's injected registry, or the process-wide default). A pinned
 // ref resolves to its exact version; a floating ref to the latest. Returns
 // nil when no authored action matches (the caller falls through to replay).
-func (e *ActionExecutor) resolveAuthored(ref actionpin.Ref) *actions.Action {
+func (e *ActionExecutor) resolveAuthored(ref pin.Ref) *actions.Action {
 	reg := e.Registry
 	if reg == nil {
 		reg = actions.Default()
@@ -141,8 +141,8 @@ func (e *ActionExecutor) resolveAuthored(ref actionpin.Ref) *actions.Action {
 // single capability on the resolved surface, and fingerprint the result. The
 // result map is deterministic for a given input + backend, so an identical
 // input replays token-free with a matching resultFingerprint (reusing
-// component/harness/actionreplay.Fingerprint).
-func (e *ActionExecutor) executeAuthored(ctx context.Context, stepCtx *Context, a *actions.Action, ref actionpin.Ref, input map[string]any, explicitSurface string) (map[string]any, error) {
+// component/harness/fingerprint.Fingerprint).
+func (e *ActionExecutor) executeAuthored(ctx context.Context, stepCtx *Context, a *actions.Action, ref pin.Ref, input map[string]any, explicitSurface string) (map[string]any, error) {
 	// Surface resolution (action-library §7.2): explicit `surface:` binding >
 	// policy default (deploy pack -> cockpit/runner, so deploy actions run
 	// OUTSIDE the target cluster) > availability failover. An explicit binding
@@ -180,10 +180,10 @@ func (e *ActionExecutor) executeAuthored(ctx context.Context, stepCtx *Context, 
 
 	res := map[string]any{
 		"authored":          true,
-		"ref":               actionpin.Format(ref),
+		"ref":               pin.Format(ref),
 		"capability":        a.Capability,
 		"result":            out,
-		"resultFingerprint": actionreplay.Fingerprint(out),
+		"resultFingerprint": fingerprint.Fingerprint(out),
 	}
 	if surface != "" {
 		res["surface"] = surface
@@ -222,7 +222,7 @@ const maxCompositeDepth = 8
 // capability calls (re-bound from input); a composite walks its ordered child
 // steps, binds each child's input from the composite's argTemplate, and
 // recurses. Returns the concatenated child results.
-func (e *ActionExecutor) replayActionRef(ctx context.Context, stepCtx *Context, ref actionpin.Ref, input map[string]any, depth int) ([]any, error) {
+func (e *ActionExecutor) replayActionRef(ctx context.Context, stepCtx *Context, ref pin.Ref, input map[string]any, depth int) ([]any, error) {
 	if depth > maxCompositeDepth {
 		return nil, fmt.Errorf("composite action nesting exceeds %d (cycle?)", maxCompositeDepth)
 	}
@@ -235,7 +235,7 @@ func (e *ActionExecutor) replayActionRef(ctx context.Context, stepCtx *Context, 
 	}
 	payload, ok := resolveActionPayload(ctx, stepCtx, query)
 	if !ok {
-		return nil, fmt.Errorf("action %q not found", actionpin.Format(ref))
+		return nil, fmt.Errorf("action %q not found", pin.Format(ref))
 	}
 
 	if kind, _ := payload["kind"].(string); kind == "composite" {
@@ -245,17 +245,17 @@ func (e *ActionExecutor) replayActionRef(ctx context.Context, stepCtx *Context, 
 	// primitive: replay the captured calls, re-binding params from input.
 	calls := actionReplayCalls(payload)
 	if len(calls) == 0 {
-		return nil, fmt.Errorf("action %q has no replayable calls", actionpin.Format(ref))
+		return nil, fmt.Errorf("action %q has no replayable calls", pin.Format(ref))
 	}
-	rebound := make([]actionreplay.ReplayCall, 0, len(calls))
+	rebound := make([]fingerprint.ReplayCall, 0, len(calls))
 	for _, c := range calls {
-		rebound = append(rebound, actionreplay.ReplayCall{
+		rebound = append(rebound, fingerprint.ReplayCall{
 			Index:      c.Index,
 			Capability: c.Capability,
-			Args:       parambind.BindArgs(c, input),
+			Args:       bind.BindArgs(c, input),
 		})
 	}
-	results, _, rerr := actionreplay.Replay(ctx, stepCtx.Engine, rebound)
+	results, _, rerr := fingerprint.Replay(ctx, stepCtx.Engine, rebound)
 	return results, rerr
 }
 
@@ -280,7 +280,7 @@ func (e *ActionExecutor) replayComposite(ctx context.Context, stepCtx *Context, 
 		childInput := bindChildArgs(sm["argTemplate"], input)
 		res, err := e.replayActionRef(ctx, stepCtx, childRef, childInput, depth+1)
 		if err != nil {
-			return nil, fmt.Errorf("composite step %d (%s): %w", i, actionpin.Format(childRef), err)
+			return nil, fmt.Errorf("composite step %d (%s): %w", i, pin.Format(childRef), err)
 		}
 		all = append(all, res...)
 	}
@@ -290,15 +290,15 @@ func (e *ActionExecutor) replayComposite(ctx context.Context, stepCtx *Context, 
 // compositeChildRef builds a child action reference from a composite step
 // entry {actionId, version?}. A present version >= 1 pins it; otherwise the
 // child floats to the latest version.
-func compositeChildRef(sm map[string]any) (actionpin.Ref, error) {
+func compositeChildRef(sm map[string]any) (pin.Ref, error) {
 	id, _ := sm["actionId"].(string)
 	if id == "" {
-		return actionpin.Ref{}, fmt.Errorf("missing actionId")
+		return pin.Ref{}, fmt.Errorf("missing actionId")
 	}
 	if v, ok := sm["version"].(float64); ok && v >= 1 {
-		return actionpin.Ref{ID: id, Version: int(v)}, nil
+		return pin.Ref{ID: id, Version: int(v)}, nil
 	}
-	return actionpin.Ref{ID: id, Floating: true}, nil
+	return pin.Ref{ID: id, Floating: true}, nil
 }
 
 // bindChildArgs maps a composite step's argTemplate to the child's input. An
@@ -341,7 +341,7 @@ func resolveActionPayload(ctx context.Context, stepCtx *Context, query string) (
 // action payload. It prefers the parameterized paramBindings (so step args
 // re-bind on replay); when an action carries none, it falls back to the
 // literal recorded calls (all bindings literal).
-func actionReplayCalls(payload map[string]any) []parambind.Call {
+func actionReplayCalls(payload map[string]any) []bind.Call {
 	if pb, ok := payload["paramBindings"].([]any); ok && len(pb) > 0 {
 		return parseActionParamBindings(pb)
 	}
@@ -351,8 +351,8 @@ func actionReplayCalls(payload map[string]any) []parambind.Call {
 	return nil
 }
 
-func parseActionParamBindings(arr []any) []parambind.Call {
-	out := make([]parambind.Call, 0, len(arr))
+func parseActionParamBindings(arr []any) []bind.Call {
+	out := make([]bind.Call, 0, len(arr))
 	for i, e := range arr {
 		m, ok := e.(map[string]any)
 		if !ok {
@@ -363,7 +363,7 @@ func parseActionParamBindings(arr []any) []parambind.Call {
 		if f, ok := m["index"].(float64); ok {
 			idx = int(f)
 		}
-		call := parambind.Call{Index: idx, Capability: capability}
+		call := bind.Call{Index: idx, Capability: capability}
 		if barr, ok := m["bindings"].([]any); ok {
 			for _, be := range barr {
 				bm, ok := be.(map[string]any)
@@ -376,9 +376,9 @@ func parseActionParamBindings(arr []any) []parambind.Call {
 				frag, _ := bm["fragment"].(bool)
 				tmpl, _ := bm["template"].(string)
 				fragVal, _ := bm["fragmentValue"].(string)
-				call.Bindings = append(call.Bindings, parambind.Binding{
+				call.Bindings = append(call.Bindings, bind.Binding{
 					Name:          name,
-					Kind:          parambind.SourceKind(kind),
+					Kind:          bind.SourceKind(kind),
 					Ref:           ref,
 					Fragment:      frag,
 					Template:      tmpl,
@@ -392,8 +392,8 @@ func parseActionParamBindings(arr []any) []parambind.Call {
 	return out
 }
 
-func parseActionLiteralCalls(arr []any) []parambind.Call {
-	out := make([]parambind.Call, 0, len(arr))
+func parseActionLiteralCalls(arr []any) []bind.Call {
+	out := make([]bind.Call, 0, len(arr))
 	for i, e := range arr {
 		m, ok := e.(map[string]any)
 		if !ok {
@@ -404,12 +404,12 @@ func parseActionLiteralCalls(arr []any) []parambind.Call {
 		if f, ok := m["index"].(float64); ok {
 			idx = int(f)
 		}
-		call := parambind.Call{Index: idx, Capability: capability}
+		call := bind.Call{Index: idx, Capability: capability}
 		if args, ok := m["args"].(map[string]any); ok {
 			for name, v := range args {
-				call.Bindings = append(call.Bindings, parambind.Binding{
+				call.Bindings = append(call.Bindings, bind.Binding{
 					Name:    name,
-					Kind:    parambind.SourceLiteral,
+					Kind:    bind.SourceLiteral,
 					Literal: v,
 				})
 			}

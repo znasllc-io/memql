@@ -28,13 +28,13 @@ add your own guardrails, multi-process coordination, and observability.
   flows.
 
 MemQL is a different category: a **platform that runs**. The
-[harness module](why-memql-harness.md) (the agent runtime), the
+[harness](why-memql-harness.md) (the work spine), the
 persistent memory graph, the cost/safety enforcement, the multi-node
 mesh, the identity layer, and the observability are the product -- not
 things you assemble on top.
 
 A useful one-liner: *the others give you the pieces to build an agent
-runtime; MemQL is the platform whose harness module IS the agent
+runtime; MemQL is the platform whose harness IS the agent
 runtime.*
 
 ## Comparison
@@ -83,5 +83,5 @@ Choose MemQL when the **hard parts are the point**:
 
 And the standing proof that those are solved problems and not roadmap
 items: MemQL runs a **full production product** today. See
-[The Harness Module](why-memql-harness.md) for the code behind each
+[The Harness](why-memql-harness.md) for the code behind each
 claim, and [What is MemQL](what-is-memql.md) for the platform picture.

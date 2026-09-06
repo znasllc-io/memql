@@ -1899,11 +1899,11 @@ builtin cognitionScore {
 ```
 
 Available integrations (core, registered via the plug-in system):
-actionSearch, agents, auth, avatardirect, chat, dailyspace, database,
+agents, auth, avatardirect, chat, dailyspace, database,
 deployversion, email, embedding, files, azureblob (as `storage`),
-harnessRecall, harnessTrace, identity, knowledge, library, liveknowledge,
+harnessRecall, identity, knowledge, library, liveknowledge,
 openairealtime, rbac, router, shopify, similarity, telephony, timeutil,
-voice, workbench, plus node-type-scoped ones (cognition, agent, stt,
+voice, workbench, workTrace, plus node-type-scoped ones (cognition, agent, stt,
 openaiVoice) wired explicitly in `app/integrations_*.go` when their
 dependencies sit outside the stable `PluginContext` surface. `training` is a
 product-repo pack, not part of engine-only core.
@@ -2182,36 +2182,26 @@ does not come back.
 Design record:
 `docs/superpowers/specs/2026-08-26-views-layouts-personality-regeneration-design.md`.
 
-### Nexus -- the portal's living map of a goal (memql#4369)
+### Nexus -- being rebuilt on MemQL OS (sub-project B)
 
-`clients/portal/src/nexus/` is the console's one 3D surface: a `v1:planner:plan`
-and its world -- the planner, the specialists it raised, its semantic tasks by
-phase, the artifacts it produced and the constructs it authored -- materializing
-as the system works, then replayable from the rows' own timestamps. Three pages
-under one goal (Map, Constructs, Replay).
+Nexus is the living map of a goal: a run and its world -- the steps by
+phase, the artifacts it produced, the constructs it authored -- drawn as
+the system works and replayable from the rows' own timestamps. It is
+being rebuilt on **MemQL OS** over the work spine, and the portal's
+version was DELETED in epic A1 (decision D7), because the portal is
+deprecated and the rows it drew (`v1:planner:plan` / `task`) are not the
+ones the spine writes.
 
-- **`scene/` is pure and imports no three.js.** `layout(world)`, `events(world)`
-  and `scene(world, at)` are functions over rows, tested on fixtures with no
-  GPU, and shared by the Map and Replay. `events()` **invents nothing**: a
-  moment with no timestamp produces no event, because a scrubber is read as
-  evidence.
-- **The feed resolves EVERY live event through the authorized read**, payload or
-  `payload_omitted` alike, and drops it when the read refuses. One code path, so
-  the branch that would trust a payload does not exist to be forgotten.
-- **The scene is a lazy chunk.** Only `map/NexusCanvas.tsx` may import three.js /
-  fiber / drei, and `nexusMap.test.tsx` fails the build if anything else does.
-  The frame loop is `frameloop="demand"` and its governor evaluates the
-  predicate PER FRAME -- a boolean captured at render would either spin forever
-  or never wake.
-- **One goal at a time, YOURS, and part of that is client-side today.**
-  `v1:planner:plan` is undeclared (memql#4366), so `planById` answers for any
-  id; Nexus refuses to draw a goal whose `requestedBy` is not the caller's own
-  user id. That is a client-side filter, labelled as one everywhere it appears,
-  and the residual is recorded in
-  [per-row-authz-audit.md](docs/public/operate/auth/per-row-authz-audit.md).
+What survived the deletion is the PURE scene library --
+`clients/os/src/nexus/scene/` (`layout` / `events` / `scene` / `receipt`,
+functions over rows, tested on fixtures with no GPU). Sub-project B
+re-points `concepts.ts` at `v1:work:run` and `v1:work:step` and draws it
+in 2D: **the OS carries no WebGL** (epic memql#4785, owner requirement),
+so the portal's three.js renderer went with the pages and the Deployables
+app's 2D map is the shape to adapt.
 
-Operator doc: [portal.md](docs/public/operate/portal.md). Design:
-`docs/superpowers/specs/2026-08-22-nexus-living-map-of-a-goal-design.md`.
+Design record:
+`docs/superpowers/specs/2026-09-05-work-spine-design.md`.
 
 ### Invitations (Identity Primitive)
 
@@ -2397,6 +2387,17 @@ tiered-trust authorization), the `v1:knowledge:*` family (`document`,
 `spreadsheetRow` / `imageRegion`, the append-only `validationEvent`, and
 `domainEntitySchema` / `entityIndex` for cross-file dedup), plus
 `v1:common:knowledgeDomain` and `v1:common:documentChunk`.
+
+**Every automation execution is journaled** (epic memql#4962): the executor
+opens a `v1:work:run` row before the first step and writes a `v1:work:step`
+row at `running` before each body and again at `done` / `failed` / `skipped`
+after, under a synthetic cluster actor (`component/automations/journal.go`);
+resume reads those rows back instead of the retired 24-hour checkpoint
+side-record, on the SAME run id. A step at `running` with no receipt is a
+crash mid-step and resumes from there. A sandboxed dry-run holds no journal
+at all, so a preview leaves nothing resumable. The work rows are the spine
+`v1:planner:plan` / `task` are replaced BY -- that replacement is epic A2, and
+until it lands both models are live.
 
 **Analysis path.** The attachment HTTP handler creates the queued Plan +
 `plan.created` card synchronously, then runs extract + summarize +

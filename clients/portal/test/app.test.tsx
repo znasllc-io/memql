@@ -379,7 +379,6 @@ describe("the seven-item rail (memql#4655)", () => {
     await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
     expect(destinationLinks().map((a) => a.textContent)).toEqual([
       "Console",
-      "Nexus",
       "Views",
       "Concepts",
       "Fleet",
@@ -391,9 +390,9 @@ describe("the seven-item rail (memql#4655)", () => {
   it("carries no group captions at all", async () => {
     signedIn();
     await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
-    // Seven items need no grouping -- that is the whole argument for seven.
+    // Six items need no grouping -- that is the whole argument for six.
     expect(within(rail()).queryAllByRole("heading", { level: 2 })).toHaveLength(0);
-    for (const caption of ["Views", "Build", "Fleet", "Library", "Cluster", "Nexus"]) {
+    for (const caption of ["Views", "Build", "Fleet", "Library", "Cluster"]) {
       expect(within(rail()).queryByRole("heading", { name: caption })).toBeNull();
     }
   });
@@ -406,7 +405,6 @@ describe("the seven-item rail (memql#4655)", () => {
     );
     expect(hrefs).toEqual({
       Console: "/",
-      Nexus: "/nexus",
       Views: "/views",
       Concepts: "/concepts",
       // Areas with tabs open on the first tab their reader may see -- there is
@@ -446,7 +444,7 @@ describe("the seven-item rail (memql#4655)", () => {
       }),
     });
     await waitFor(() => expect(within(rail()).getByText("Ada Lovelace")).toBeTruthy());
-    expect(destinationLinks()).toHaveLength(7);
+    expect(destinationLinks()).toHaveLength(6);
     for (const gone of ["Churn watch", "Deploy health", "Compose", "Users", "Audit", "Modules"]) {
       expect(within(rail()).queryByRole("link", { name: gone })).toBeNull();
     }
@@ -464,10 +462,10 @@ describe("the seven-item rail (memql#4655)", () => {
   it("keeps every name in the collapsed icon rail", async () => {
     globalThis.localStorage.setItem("memql-portal-rail", "collapsed");
     signedIn();
-    await waitFor(() => expect(destinationLinks()).toHaveLength(7));
-    // Seven icons, and each still says what it is -- an icon column has no
+    await waitFor(() => expect(destinationLinks()).toHaveLength(6));
+    // Six icons, and each still says what it is -- an icon column has no
     // label, so the accessible name is the only one there is.
-    for (const label of ["Console", "Nexus", "Views", "Concepts", "Fleet", "Library", "Cluster"]) {
+    for (const label of ["Console", "Views", "Concepts", "Fleet", "Library", "Cluster"]) {
       expect(within(rail()).getByRole("link", { name: label }).getAttribute("title")).toBe(label);
     }
   });

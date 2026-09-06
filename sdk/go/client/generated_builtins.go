@@ -722,26 +722,6 @@ func GithubConnectBeginBuild(args GithubConnectBeginArgs) string {
 	return b.String()
 }
 
-// HarnessTrace -- Fetch a harness plan's full execution timeline (every plan/step version transition + all observations, ordered by createdAt) reconstructed from the append-only graph event stream. Returns one synthetic node carrying the rendered timeline string, a completion flag, and the step count. Owner-scoped to the caller's own plan. The history-over-gRPC contract for the cockpit `harness trace` CLI (memql-cockpit#142).
-type HarnessTraceArgs struct {
-	PlanId string
-}
-
-// HarnessTrace calls the engine builtin harnessTrace.
-func (qc *QueryClient) HarnessTrace(ctx context.Context, args HarnessTraceArgs) (*Result, error) {
-	call := HarnessTraceBuild(args)
-	return qc.executeNamed(ctx, "harnessTrace", call)
-}
-
-func HarnessTraceBuild(args HarnessTraceArgs) string {
-	var b strings.Builder
-	b.WriteString("builtin harnessTrace(")
-	b.WriteString("planId: ")
-	b.WriteString(quoteMemQL(args.PlanId))
-	b.WriteString(")")
-	return b.String()
-}
-
 // InferenceStatus -- Answer, in one row, whether this caller can get inference at all and through which of the three doors: a local model on their fleet, the Anthropic workload-identity federation, or a configured API key. Read from the SAME catalog and provider registry the router reads, so eligibility has exactly one implementation -- a second one drifts, and the drift lets a user through to a console whose features all refuse. Backs the portal's first-run gate.
 type InferenceStatusArgs struct {
 }
@@ -1837,7 +1817,7 @@ func ProvidersReloadBuild(args ProvidersReloadArgs) string {
 	return b.String()
 }
 
-// Recall -- Recall top-k memories of a concept (default v1:harness:observation) by a SINGLE hybrid recency x relevance score: pgvector cosine similarity + exponential time-decay over createdAt, scored and ordered server-side in one SQL statement against the MemoryNodes hypertable (no app-side merge). Owner-scoped (partition isolation); window prunes hypertable chunks; halfLife + wSem/wRec are tunable. Numeric tuning args ride additionalProperties.
+// Recall -- Recall top-k memories of a concept (default v1:work:observation) by a SINGLE hybrid recency x relevance score: pgvector cosine similarity + exponential time-decay over createdAt, scored and ordered server-side in one SQL statement against the MemoryNodes hypertable (no app-side merge). Owner-scoped (partition isolation); window prunes hypertable chunks; halfLife + wSem/wRec are tunable. Numeric tuning args ride additionalProperties.
 type RecallArgs struct {
 	Text     string
 	Concept  string
@@ -1982,42 +1962,6 @@ func RestoreDocumentVersionBuild(args RestoreDocumentVersionArgs) string {
 		}
 		b.WriteString("authorId: ")
 		b.WriteString(quoteMemQL(args.AuthorId))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// SearchActions wraps the builtin named "searchActions".
-type SearchActionsArgs struct {
-	Text     string
-	K        int
-	Provider string
-}
-
-// SearchActions calls the engine builtin searchActions.
-func (qc *QueryClient) SearchActions(ctx context.Context, args SearchActionsArgs) (*Result, error) {
-	call := SearchActionsBuild(args)
-	return qc.executeNamed(ctx, "searchActions", call)
-}
-
-func SearchActionsBuild(args SearchActionsArgs) string {
-	var b strings.Builder
-	b.WriteString("builtin searchActions(")
-	b.WriteString("text: ")
-	b.WriteString(quoteMemQL(args.Text))
-	if args.K != 0 {
-		if b.Len() > 22 {
-			b.WriteString(", ")
-		}
-		b.WriteString("k: ")
-		b.WriteString(fmt.Sprintf("%v", args.K))
-	}
-	if args.Provider != "" {
-		if b.Len() > 22 {
-			b.WriteString(", ")
-		}
-		b.WriteString("provider: ")
-		b.WriteString(quoteMemQL(args.Provider))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -2435,6 +2379,26 @@ func SourceRepositoriesBuild(args SourceRepositoriesArgs) string {
 		b.WriteString("page: ")
 		b.WriteString(fmt.Sprintf("%v", args.Page))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkTrace -- Fetch one run's full execution timeline: every run and step version and every observation, ordered by createdAt. The OS Nexus (sub-project B) reads the rows live; this is the one-call form the VS Code panel and the cockpit use. Replaces harnessTrace, which read the retired v1:harness:plan / step / observation stream -- same envelope, same @sdk surface, and `planId` becomes `runId`.
+type WorkTraceArgs struct {
+	RunId string
+}
+
+// WorkTrace calls the engine builtin workTrace.
+func (qc *QueryClient) WorkTrace(ctx context.Context, args WorkTraceArgs) (*Result, error) {
+	call := WorkTraceBuild(args)
+	return qc.executeNamed(ctx, "workTrace", call)
+}
+
+func WorkTraceBuild(args WorkTraceArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin workTrace(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
 	b.WriteString(")")
 	return b.String()
 }

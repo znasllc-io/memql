@@ -141,12 +141,25 @@ var pluginKinds = map[string]moduleKind{
 	"library":       kindPack,
 	"knowledge":     kindPack, // see the note below
 	"liveknowledge": kindPack,
-	"actionSearch":  kindPack,
 	"similarity":    kindPack,
 	"files":         kindPack,
 	"workbench":     kindPack, // see the note below
-	"harnessRecall": kindPack, // already BindPluginToPack("harness")
-	"harnessTrace":  kindPack, // already BindPluginToPack("harness")
+
+	// --- The two the harness pack left behind (work spine A1). ---
+	//
+	// Both were kindPack because BindPluginToPack("harness") made them
+	// switchable with that pack. The pack is retired: the harness spine is
+	// gone, what survived of its DSL is the ordinary embedded `memory` domain,
+	// and neither of these has a coherent "off" any more. They are COMPONENT
+	// rather than integration for the reason `database` is -- they call
+	// nobody's API, they read this cluster's own graph.
+	//
+	// harnessRecall keeps its NAME on purpose: it is the executor
+	// dsl/memory/builtins.memql declares, and renaming it is a coordinated
+	// change across the declaration, the registration and every product
+	// bundle that ships its own recall. Epic A3 makes that change.
+	"harnessRecall": kindComponent,
+	"workTrace":     kindComponent,
 }
 
 // The four the epic left open, and what decided each. Recorded here rather than

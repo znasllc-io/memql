@@ -22,9 +22,9 @@ import (
 // The staged-DATA tier withholds a promoted concept's rows from the ordinary
 // read path (memql#3980 for the state, memql#3983 for the DSL seams). memql#3983
 // covers everything that goes through the engine's parser and filter path. It
-// does NOT cover a hand-rolled `SELECT ... FROM "MemoryNodes"` in integrations/
-// or component/harness, because nothing is injected into a statement the engine
-// never parsed. Those sites are what this gate is about.
+// does NOT cover a hand-rolled `SELECT ... FROM "MemoryNodes"` in integrations/,
+// because nothing is injected into a statement the engine never parsed. Those
+// sites are what this gate is about.
 //
 // The issue that opened this task asked for the predicate at every such read.
 // The inventory measured the tree and found that instruction is a BUG REPORT at
@@ -97,11 +97,12 @@ import (
 //
 // component/database/memory-nodes/repository.go's ListRecentMemoryNodes,
 // LoadMemoryNode and FindMemoryNodes have ZERO in-tree callers, and
-// component/harness's BunAgentRoster has no in-tree constructor call either. A
-// gate that demanded the predicate everywhere would demand edits to code nothing
-// runs. Classification handles both honestly: the repository trio is
-// MUST-NOT-GATE (the storage module cannot see engine state, so a gate there
-// would necessarily be a SECOND source of truth), while the roster IS gated,
+// component/harness's BunAgentRoster had no in-tree constructor call either --
+// and that module is now retired outright (work spine A1), so only the first
+// half of this trap survives. A gate that demanded the predicate everywhere
+// would demand edits to code nothing runs. Classification handles it honestly:
+// the repository trio is MUST-NOT-GATE (the storage module cannot see engine
+// state, so a gate there would necessarily be a SECOND source of truth),
 // because its constructor is exported API a product wires and a required
 // parameter gives a downstream caller a compile error rather than a silent hole.
 

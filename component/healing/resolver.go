@@ -17,7 +17,7 @@
 // package is deliberately pure of engine/DB types: the caller supplies an
 // OverlayLookup (backed by the resolveValidOverride query) and a
 // BaseProvider (backed by the embedded construct), mirroring how
-// component/harness/actionreplay stays engine-free for unit-testability.
+// component/actions/fingerprint stays engine-free for unit-testability.
 //
 // Multi-node: the overlay lookup reads the shared Postgres, so every node
 // resolves the same newest-valid override; a graph write to the concept

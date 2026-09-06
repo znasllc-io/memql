@@ -111,8 +111,13 @@ type Executor struct {
 	stepRegistry      StepExecutorRegistry
 	automationTrigger AutomationTrigger
 
-	// sandboxRun suppresses checkpointing for Gate-2 dry-runs (memql#2932)
+	// sandboxRun suppresses journalling for Gate-2 dry-runs (memql#2932)
 	sandboxRun bool
+
+	// journal writes the run and step rows (journal.go). Nil under a
+	// sandboxed dry-run and when no engine is configured; every method on a
+	// nil journal is a no-op, so the loop below never branches on it.
+	journal *workJournal
 
 	// Chain tracking (enabled via ExecutorOptions.ChainTrackingEnabled)
 	chainTrackingEnabled bool
@@ -198,22 +203,23 @@ type ExecutorOptions struct {
 
 	// SandboxRun marks this executor as driving a Gate-2 behavioural dry-run.
 	//
-	// A sandboxed run mints NO resume checkpoint (memql#2932). A preview has
-	// nothing to resume, and the checkpoint escaped the sandbox: SaveCheckpoint
-	// goes straight to the engine, never through the interception layer, so a
-	// "dry-run" left a durable, RESUMABLE row in the live graph.
+	// A sandboxed run writes NO journal (memql#2932). A preview has nothing
+	// to resume, and the record escaped the sandbox: the journal writer goes
+	// straight to the engine, never through the interception layer, so a
+	// "dry-run" left durable, RESUMABLE rows in the live graph.
 	//
 	// It is not the only write that escapes -- sandbox_registry intercepts
 	// mutation / webhook / mutating-function steps and forwards everything else
 	// to the production executors, and executeInput bypasses the step registry
 	// entirely -- so dryrun.go's "zero rows land in the live graph" remains
-	// overstated after this change (tracked separately). The checkpoint is the
-	// one that mattered for #2890 / #2908, because it is the only escaping write
+	// overstated after this change (tracked separately). The journal is the
+	// one that matters for #2890 / #2908, because it is the only escaping write
 	// that is a RESUMABLE TOKEN.
 	//
-	// The failing preview was the one that wrote: saveCheckpointOnFailure
-	// fires on step failure, so the refusal a preview exists to REPORT was
-	// what produced the row.
+	// The failing preview was the one that wrote: the journal closes the run
+	// at `failed` on step failure, so the refusal a preview exists to REPORT
+	// was what produced the resumable row. NewExecutor holds no journal at all
+	// when this is set, which is the mechanical form of that rule.
 	SandboxRun bool
 
 	// ChainTrackingEnabled enables content-addressed chain tracking for executions.
@@ -265,6 +271,14 @@ func NewExecutor(opts ExecutorOptions) *Executor {
 		chainTrackingEnabled: opts.ChainTrackingEnabled,
 		dedupEnabled:         opts.DedupEnabled,
 		clusterGuard:         opts.ClusterGuard,
+	}
+
+	// The work journal (design record 2026-09-05-work-spine-design.md,
+	// section D). opts.Engine is a *memql.MemQLEngine, and a nil pointer in
+	// an interface is not a nil interface -- hence the explicit check rather
+	// than letting newWorkJournal decide.
+	if !opts.SandboxRun && opts.Engine != nil {
+		e.journal = newWorkJournal(opts.Engine, opts.Logger)
 	}
 
 	// Initialize dedup tracker if dedup is enabled
@@ -644,6 +658,20 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		}
 	}
 
+	// Open the run row before the first step, so every later write has a
+	// home. An automation whose trigger names a v1:work:* concept is NOT
+	// journaled: its own step rows would re-fire it, and a feedback loop
+	// through the graph is the failure an event-sourced substrate makes easy.
+	journal := e.journal
+	if journalSkipsAutomation(automation) {
+		journal = nil
+		if e.logger != nil {
+			e.logger.Debug("work journal skipped: the automation reacts to work rows",
+				"component", ComponentName, "automation", automation.Name)
+		}
+	}
+	journal.openRun(ctx, automation, exec, triggeringEvent)
+
 	// Execute steps
 	stepCtx := &StepContext{
 		Logger:               e.logger,
@@ -666,6 +694,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		select {
 		case <-ctx.Done():
 			exec.Cancel()
+			journal.closeRun(ctx, exec, chainHead)
 			return exec, ctx.Err()
 		default:
 		}
@@ -717,6 +746,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 				// not run, and here is the condition that decided that" is
 				// most of what a caller wants from a run that did nothing.
 				notifyStepObserver(ctx, skipResult)
+				journal.stepSkipped(ctx, exec, step, stepIndex)
 				continue
 			}
 		}
@@ -726,7 +756,10 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 			stepCtx.PreviousChainHead = chainHead
 		}
 
-		// Execute the step
+		// Execute the step. The intent row goes first: a step is written at
+		// `running` BEFORE its body so a crash mid-step leaves evidence the
+		// step was reached, which is what resume uses as its resume point.
+		journal.stepRunning(ctx, exec, step, stepIndex, 1)
 		result, err := e.executeStep(ctx, step, stepCtx)
 		if result != nil {
 			// Compute chain linkage if tracking enabled
@@ -743,6 +776,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 			exec.AddStepResult(result)
 			evaluator.SetStepResult(step.ID, result)
 			notifyStepObserver(ctx, result)
+			journal.stepFinished(ctx, exec, step, result, chainHead)
 		}
 
 		if err != nil {
@@ -768,6 +802,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 							"attempt", attempt,
 						)
 					}
+					journal.stepRunning(ctx, exec, step, stepIndex, attempt+1)
 					result, err = e.executeStep(ctx, step, stepCtx)
 					if err == nil {
 						// Compute chain linkage if tracking enabled
@@ -782,18 +817,22 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 						exec.AddStepResult(result)
 						evaluator.SetStepResult(step.ID, result)
 						notifyStepObserver(ctx, result)
+						journal.stepFinished(ctx, exec, step, result, chainHead)
 						retried = true
 					}
 				}
 				if !retried {
 					exec.Fail(err)
-					e.saveCheckpointOnFailure(ctx, automation, exec, step, stepIndex, chainHead, err, triggeringEvent)
+					// The last attempt's receipt, so the row does not sit at
+					// `running` forever when every retry was spent.
+					journal.stepFinished(ctx, exec, step, result, chainHead)
+					journal.closeRun(ctx, exec, chainHead)
 					e.handleAutomationError(ctx, automation, exec, triggeringEvent, err)
 					return exec, err
 				}
 			default: // ErrorStrategyStop
 				exec.Fail(err)
-				e.saveCheckpointOnFailure(ctx, automation, exec, step, stepIndex, chainHead, err, triggeringEvent)
+				journal.closeRun(ctx, exec, chainHead)
 				e.handleAutomationError(ctx, automation, exec, triggeringEvent, err)
 				return exec, err
 			}
@@ -812,6 +851,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	}
 
 	exec.Complete()
+	journal.closeRun(ctx, exec, chainHead)
 
 	// Finalize chain tracking
 	if e.chainTrackingEnabled {
@@ -980,99 +1020,7 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 // mutations that dropped the flag left the suite GREEN. Same reason
 // originForSource was extracted in #2800: a decision you cannot reach is a
 // decision you cannot defend.
-func newCheckpointFromExecution(
-	automation *Automation,
-	exec *AutomationExecution,
-	failedStep *Step,
-	stepIndex int,
-	chainHead string,
-	stepErr error,
-	triggeringEvent *events.Event,
-) *ExecutionCheckpoint {
-	checkpoint := &ExecutionCheckpoint{
-		ExecutionId:           exec.ID,
-		AutomationName:        automation.Name,
-		AutomationFingerprint: automation.DefinitionFingerprint(fingerprintEngine),
-		StepIndex:             stepIndex,
-		ChainHead:             chainHead,
-		InitialChainHead:      exec.InitialChainHead,
-		CallerSuppliedPayload: exec.CallerSuppliedPayload,
-		StepResults:           ToMinimalStepResults(exec.Steps),
-		StepOrder:             exec.StepOrder, // tracked order, not map iteration
-		FailedAt: &StepFailure{
-			StepId:    failedStep.ID,
-			Error:     stepErr.Error(),
-			Timestamp: time.Now().UTC(),
-		},
-		Input:            exec.Input,
-		InputFingerprint: exec.InputFingerprint,
-	}
-	if triggeringEvent != nil {
-		checkpoint.TriggerContext = &TriggerContext{
-			TriggeredBy: exec.TriggeredBy,
-			Event: map[string]any{
-				"topic":   triggeringEvent.Topic,
-				"kind":    triggeringEvent.Kind.String(),
-				"payload": triggeringEvent.Payload,
-			},
-		}
-	}
-	return checkpoint
-}
-
 // This enables resuming the automation from the failed step later.
-func (e *Executor) saveCheckpointOnFailure(
-	ctx context.Context,
-	automation *Automation,
-	exec *AutomationExecution,
-	failedStep *Step,
-	stepIndex int,
-	chainHead string,
-	stepErr error,
-	triggeringEvent *events.Event,
-) {
-	if e.engine == nil {
-		return
-	}
-	// A sandboxed dry-run mints no checkpoint (memql#2932). Nothing resumes a
-	// preview, and this write bypasses the sandbox's interception layer --
-	// straight to the engine, landing a durable RESUMABLE row in the live
-	// graph. (Other writes escape the sandbox too; this is the only one that is
-	// a resumable token. See the ExecutorOptions.SandboxRun doc.)
-	//
-	// Returning here also removes the token entirely rather than merely making
-	// it unpromotable, which is the stronger half of memql#2890: that fix marks
-	// a dry-run checkpoint caller-supplied so resume cannot restore internal
-	// origin; this one means there is nothing to resume at all.
-	if e.sandboxRun {
-		return
-	}
-
-	checkpoint := newCheckpointFromExecution(automation, exec, failedStep, stepIndex, chainHead, stepErr, triggeringEvent)
-
-	if err := SaveCheckpoint(ctx, e.engine, checkpoint); err != nil {
-		if e.logger != nil {
-			e.logger.Warn("failed to save checkpoint",
-				"component", ComponentName,
-				"automation", automation.Name,
-				"executionId", exec.ID,
-				"error", err,
-			)
-		}
-		return
-	}
-
-	if e.logger != nil {
-		e.logger.Info("checkpoint saved for failed automation",
-			"component", ComponentName,
-			"automation", automation.Name,
-			"executionId", exec.ID,
-			"failedStep", failedStep.ID,
-			"stepIndex", stepIndex,
-		)
-	}
-}
-
 // handleAutomationError runs the onError hook and publishes failure event.
 func (e *Executor) handleAutomationError(ctx context.Context, automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, err error) {
 	// Execute onError hook if defined

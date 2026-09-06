@@ -664,13 +664,15 @@ func (s *loopIdempotencyStore) Put(key, result string) {
 
 // ToolLoopObservationSink is the optional hook the loop uses to record
 // observations (context-trim notes, stop reasons, structured errors) into
-// the harness graph. It is consumed behind this interface so this PR builds
-// standalone while #582 (observation persistence) is built in parallel:
-// when no sink is wired, observations stay loop-local (logs only).
+// the graph. It is consumed behind this interface so the loop builds
+// standalone: when no sink is wired, observations stay loop-local (logs
+// only).
 //
-// TODO(#582): provide a concrete implementation that writes
-// v1:harness:observation rows of the given kind, and wire it through
-// ToolLoopOptions.Observations from the replier / planner dispatch.
+// TODO: provide a concrete implementation that writes v1:work:observation
+// rows of the given kind, and wire it through ToolLoopOptions.Observations
+// from the replier / planner dispatch. That is epic A2 of the work spine --
+// the executor is the writer, and an observation is a row of the run's own
+// journal rather than a side-record.
 type ToolLoopObservationSink interface {
 	// RecordObservation persists a single observation. kind is the
 	// observation kind ("note", "error", "stop", ...); text is the body;

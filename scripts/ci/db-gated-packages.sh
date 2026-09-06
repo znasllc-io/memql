@@ -200,7 +200,6 @@ readonly KNOWN_GO_MOD_DIRS=(
 	"component/envregistry"
 	"component/grpc"
 	"component/grpc/gen"
-	"component/harness"
 	"component/healing"
 	"component/identity"
 	"component/identity/admin"

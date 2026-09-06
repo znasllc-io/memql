@@ -35,27 +35,6 @@ export const GUIDE_ENTRIES: readonly GuideEntry[] = [
     },
   },
   {
-    id: "nexus",
-    title: "Nexus",
-    body:
-      "One goal of yours, seen whole. Nexus shows a single piece of work -- what is " +
-      "running on it, the specialists it raised, what it produced, and how it got " +
-      "there -- as a map you can watch build itself and then replay.",
-    how: [
-      "Start from Goals: each card is one goal you asked for, with its phase and its state.",
-      "Map draws the goal's world; Constructs lists what it authored; Replay walks the same world back through its own timestamps.",
-      "The replay is built from the rows' recorded times, so a moment with no timestamp produces no event -- nothing here is invented to fill a gap.",
-      "The map needs WebGL. Without it the page still reads the goal out in text rather than showing you a blank canvas.",
-    ],
-    technical: {
-      concepts: ["v1:planner:plan", "v1:planner:task", "v1:agents:agent", "v1:authoring:construct"],
-      docs: ["docs/public/operate/portal.md"],
-      notes: [
-        "A goal is filtered to the caller's own requestedBy in the client today; the residual is recorded in docs/public/operate/auth/per-row-authz-audit.md.",
-      ],
-    },
-  },
-  {
     id: "views",
     title: "Views",
     body:

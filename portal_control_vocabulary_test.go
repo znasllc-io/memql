@@ -115,7 +115,6 @@ var rawControlExemptions = map[string]string{
 	// in the kit on the SECOND caller; promoting a single-use control would
 	// mean designing an API from one example.
 	"clients/portal/src/modules/ObservabilitySection.tsx": "segmented control (1m/1h), single consumer, sized h-control-sm",
-	"clients/portal/src/nexus/replay/Scrubber.tsx":        "native <input type=range>: a drawn track would re-implement keyboard scrubbing",
 
 	// Two: a link-styled search result, and a file input the drop zone needs
 	// direct access to (drag handlers, and the <label> Field renders is what

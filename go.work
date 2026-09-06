@@ -47,7 +47,6 @@ use (
 	./component/frontdoor
 	./component/grpc
 	./component/grpc/gen
-	./component/harness
 	./component/healing
 	./component/identity
 	./component/identity/admin

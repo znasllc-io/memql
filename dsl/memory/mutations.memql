@@ -1,0 +1,115 @@
+// mutations.memql
+//
+// Writes over the memory namespace, moved from the harness pack in epic
+// A1 of the work spine. Every construct kept its BEHAVIOUR and changed
+// its NAME, so the Go callers in component/memql/memory_consolidation.go
+// render the new names; the concept ids moved with them.
+
+/// Create a v1:memory:belief -- a new distilled belief. ownerUserId stamped from
+/// actor.userId (owned tier). sourceEpisodes records provenance back to the episodic nodes it was
+/// distilled from. confidence/reinforceCount/lastReinforced seed the decay clock. content is the
+/// embedding source for similarTo dedup + recall (#585).
+@actor
+mutate belief createMemoryBelief {
+  args {
+    memoryId        string
+    kind            enum("fact", "preference", "outcome")!
+    content         string!
+    sourceEpisodes  []string!
+    confidence      float
+    lastReinforced  datetime
+  }
+  insert {
+    accept { kind, content, sourceEpisodes }
+    stamp {
+      id: args.memoryId
+      ownerUserId: actor.userId
+      confidence: args.confidence ?? 0.5
+      reinforceCount: 1
+      lastReinforced: args.lastReinforced ?? now
+      status: "active"
+      provenanceMutation: "createMemoryBelief"
+    }
+  }
+}
+
+/// Reinforce an existing v1:memory:belief (dedup path): take the engine-computed bumped
+/// confidence + reinforceCount, reset lastReinforced to now, and replace sourceEpisodes with the
+/// merged/deduped provenance. No new belief row -- this is why re-running over the same episodes
+/// does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).
+@actor
+mutate belief reinforceMemoryBelief {
+  args {
+    memoryId        string!
+    confidence      float!
+    reinforceCount  int!
+    sourceEpisodes  []string!
+  }
+  update {
+    accept { confidence, reinforceCount, sourceEpisodes }
+    stamp {
+      id: args.memoryId
+      ownerUserId: actor.userId
+      lastReinforced: now
+      provenanceMutation: "reinforceMemoryBelief"
+    }
+  }
+}
+
+/// Decay an unreinforced v1:memory:belief: lower confidence to the engine-computed decayed
+/// value. lastReinforced is intentionally NOT reset (decay keeps measuring age from the last real
+/// reinforcement). ownerUserId re-stamped from actor.userId (owned tier). A belief that decays
+/// below the prune floor is then retired via pruneMemoryBelief.
+@actor
+mutate belief decayMemoryBelief {
+  args {
+    memoryId    string!
+    confidence  float!
+  }
+  update {
+    id: args.memoryId
+    ownerUserId: actor.userId
+    args.confidence
+    provenanceMutation: "decayMemoryBelief"
+  }
+}
+
+/// Prune a decayed v1:memory:belief: status -> 'pruned' (soft-delete; the append-only
+/// model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a
+/// pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from
+/// actor.userId (owned tier).
+@actor
+mutate belief pruneMemoryBelief {
+  args {
+    memoryId  string!
+  }
+  update {
+    id: args.memoryId
+    ownerUserId: actor.userId
+    status: "pruned"
+    provenanceMutation: "pruneMemoryBelief"
+  }
+}
+
+/// Advance the per-owner v1:memory:consolidationCursor watermark to the engine-computed
+/// max(createdAt) of the batch just consolidated -- the incremental-cost mechanism (next run reads
+/// only episodes newer than this). Upserts on a stable per-owner id so it creates the cursor on
+/// first run and advances it thereafter. episodesSeen takes the engine-computed running total.
+/// ownerUserId stamped from actor.userId (owned tier).
+@actor
+mutate consolidationCursor advanceMemoryConsolidationCursor {
+  args {
+    cursorId      string
+    watermark     datetime!
+    episodesSeen  int
+  }
+  insert {
+    accept { watermark, episodesSeen }
+    stamp {
+      id: args.cursorId
+      ownerUserId: actor.userId
+      lastRunAt: now
+      provenanceMutation: "advanceMemoryConsolidationCursor"
+    }
+  }
+}

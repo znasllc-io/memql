@@ -11,10 +11,17 @@ import (
 )
 
 // #2617: constructs of a file's own domain are ambient -- in scope with
-// no `use` line. The plan concept is the live ambiguity in the tree
-// (v1:planner:plan AND v1:harness:plan share the trailing segment), so
-// it exercises every branch: the domain hint disambiguates where the
-// unhinted resolution errors, and an explicit import still wins.
+// no `use` line. The `invocation` concept is the live ambiguity in the
+// tree (v1:worker:invocation AND v1:observability:invocation share the
+// trailing segment), so it exercises every branch: the domain hint
+// disambiguates where the unhinted resolution errors, and an explicit
+// import still wins.
+//
+// This used `plan` until the work spine's epic A1 retired v1:harness:plan
+// and left the name unambiguous. The RULE is unchanged; only the pair that
+// still demonstrates it moved. If `invocation` ever stops being ambiguous
+// too, pick another live pair rather than deleting these -- an ambiguity
+// test with no ambiguity passes while measuring nothing.
 
 func TestDomainFromFilePath(t *testing.T) {
 	cases := map[string]string{
@@ -41,26 +48,26 @@ func TestResolveCanonicalIdConceptRefs_AmbientDomain(t *testing.T) {
 	}
 	resolver := NewConceptResolver(memoryNodes.DefaultRegistry())
 
-	src := `mutate plan probe {
+	src := `mutate invocation probe {
   insert {
-    id: canonicalId(args.planId, plan)
+    id: canonicalId(args.invocationId, invocation)
   }
 }`
 	// Ambient: the file's own domain resolves the bare name with no import.
-	got, err := resolver.ResolveCanonicalIdConceptRefsInDomain(src, "planner")
+	got, err := resolver.ResolveCanonicalIdConceptRefsInDomain(src, "worker")
 	if err != nil {
 		t.Fatalf("ambient same-domain canonicalId: %v", err)
 	}
-	if !strings.Contains(got, `canonicalId(args.planId, "v1:planner:plan")`) {
-		t.Errorf("ambient resolution: got %q, want the v1:planner:plan string form", got)
+	if !strings.Contains(got, `canonicalId(args.invocationId, "v1:worker:invocation")`) {
+		t.Errorf("ambient resolution: got %q, want the v1:worker:invocation string form", got)
 	}
-	// The same source in the harness domain binds the harness concept.
-	got, err = resolver.ResolveCanonicalIdConceptRefsInDomain(src, "harness")
+	// The same source in the observability domain binds the other concept.
+	got, err = resolver.ResolveCanonicalIdConceptRefsInDomain(src, "observability")
 	if err != nil {
-		t.Fatalf("ambient harness canonicalId: %v", err)
+		t.Fatalf("ambient observability canonicalId: %v", err)
 	}
-	if !strings.Contains(got, `"v1:harness:plan"`) {
-		t.Errorf("harness ambient resolution: got %q", got)
+	if !strings.Contains(got, `"v1:observability:invocation"`) {
+		t.Errorf("observability ambient resolution: got %q", got)
 	}
 
 	// No domain, no import: the pre-#2617 hard error stands.
@@ -75,18 +82,18 @@ func TestResolveCanonicalIdConceptRefs_AmbientDomain(t *testing.T) {
     id: canonicalId(args.spaceId, space)
   }
 }`
-	if _, err := resolver.ResolveCanonicalIdConceptRefsInDomain(cross, "planner"); err == nil {
+	if _, err := resolver.ResolveCanonicalIdConceptRefsInDomain(cross, "worker"); err == nil {
 		t.Error("cross-domain concept without import: want error, got nil")
 	}
 
 	// An explicit import wins over the ambient domain: the file sits in
-	// planner/ but imports the harness plan explicitly.
-	imported := "use harness.concepts.{ plan }\n" + src
-	got, err = resolver.ResolveCanonicalIdConceptRefsInDomain(imported, "planner")
+	// worker/ but imports the observability invocation explicitly.
+	imported := "use observability.concepts.{ invocation }\n" + src
+	got, err = resolver.ResolveCanonicalIdConceptRefsInDomain(imported, "worker")
 	if err != nil {
 		t.Fatalf("explicit import beside ambient domain: %v", err)
 	}
-	if !strings.Contains(got, `"v1:harness:plan"`) {
+	if !strings.Contains(got, `"v1:observability:invocation"`) {
 		t.Errorf("explicit import must win over ambient domain: got %q", got)
 	}
 }
@@ -99,14 +106,14 @@ func TestResolveFileWithSignatureConcepts_AmbientDomain(t *testing.T) {
 
 	// The resolver consumes only file.Uses + the signature-concept list,
 	// so a bare File models "no imports" directly.
-	// Without the domain the bare `plan` signature is ambiguous.
-	if err := resolver.ResolveFileWithSignatureConceptsInDomain(&languageParser.File{}, "v1", []string{"plan"}, "", ""); err == nil {
+	// Without the domain the bare `invocation` signature is ambiguous.
+	if err := resolver.ResolveFileWithSignatureConceptsInDomain(&languageParser.File{}, "v1", []string{"invocation"}, "", ""); err == nil {
 		t.Error("ambiguous signature concept with no domain: want error, got nil")
 	}
-	// The ambient domain disambiguates. `planner` carries no namespace.pin, so
+	// The ambient domain disambiguates. `worker` carries no namespace.pin, so
 	// its declared namespace IS the directory -- the two arguments coincide for
 	// an unpinned domain, and memql#3084's scope gate wants both stated.
-	if err := resolver.ResolveFileWithSignatureConceptsInDomain(&languageParser.File{}, "v1", []string{"plan"}, "planner", "planner"); err != nil {
+	if err := resolver.ResolveFileWithSignatureConceptsInDomain(&languageParser.File{}, "v1", []string{"invocation"}, "worker", "worker"); err != nil {
 		t.Errorf("ambient domain must disambiguate the signature concept: %v", err)
 	}
 }

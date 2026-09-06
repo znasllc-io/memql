@@ -69,7 +69,6 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
-	github.com/znasllc-io/memql/component/harness v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/metrics v0.0.0
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
@@ -104,7 +103,6 @@ replace github.com/znasllc-io/memql/component/envregistry => ../envregistry
 
 replace github.com/znasllc-io/memql/component/grpc/gen => ../grpc/gen
 
-replace github.com/znasllc-io/memql/component/harness => ../harness
 
 replace github.com/znasllc-io/memql/component/language => ../language
 

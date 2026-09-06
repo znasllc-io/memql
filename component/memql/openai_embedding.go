@@ -22,7 +22,7 @@ const defaultOpenAIEmbeddingsURL = "https://api.openai.com/v1/embeddings"
 //
 // No error returned by this client may contain any byte of the upstream response
 // body. The text this client submits for embedding is user content (e.g.
-// v1:harness:observation.content, v1:actions:action.intent), and errors from here
+// v1:work:observation.content), and errors from here
 // propagate unbroken into log sinks that log them verbatim. Whether the vendor
 // echoes the submitted input back in an error body is a vendor behaviour MemQL
 // neither controls nor is notified about when it changes -- so the bound is held

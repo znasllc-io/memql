@@ -78,64 +78,6 @@ func AddAgentToSpaceBuild(args AddAgentToSpaceArgs) string {
 	return b.String()
 }
 
-// AddHarnessStep -- Add a v1:harness:step to a plan, status='pending', attempt=0. ownerUserId is stamped from actor.userId (owned tier). Creating the step emits graph.node.created.*.v1:harness:step automatically on insert.
-//
-// Bound concept: v1:harness:step (machine-readable: BoundConcepts["addHarnessStep"] in generated_concepts.go).
-type AddHarnessStepArgs struct {
-	StepId         string
-	PlanId         string
-	Title          string
-	IdempotencyKey string
-	DependsOn      []string
-	Input          map[string]any
-}
-
-// AddHarnessStep calls the engine mutation addHarnessStep.
-func (qc *QueryClient) AddHarnessStep(ctx context.Context, args AddHarnessStepArgs) (*Result, error) {
-	call := AddHarnessStepBuild(args)
-	return qc.executeNamed(ctx, "addHarnessStep", call)
-}
-
-func AddHarnessStepBuild(args AddHarnessStepArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation addHarnessStep(")
-	if args.StepId != "" {
-		b.WriteString("stepId: ")
-		b.WriteString(quoteMemQL(args.StepId))
-	}
-	if b.Len() > 24 {
-		b.WriteString(", ")
-	}
-	b.WriteString("planId: ")
-	b.WriteString(quoteMemQL(args.PlanId))
-	if b.Len() > 24 {
-		b.WriteString(", ")
-	}
-	b.WriteString("title: ")
-	b.WriteString(quoteMemQL(args.Title))
-	if b.Len() > 24 {
-		b.WriteString(", ")
-	}
-	b.WriteString("idempotencyKey: ")
-	b.WriteString(quoteMemQL(args.IdempotencyKey))
-	if args.DependsOn != nil {
-		if b.Len() > 24 {
-			b.WriteString(", ")
-		}
-		b.WriteString("dependsOn: ")
-		b.WriteString(renderMemQLValue(args.DependsOn))
-	}
-	if args.Input != nil {
-		if b.Len() > 24 {
-			b.WriteString(", ")
-		}
-		b.WriteString("input: ")
-		b.WriteString(renderMemQLValue(args.Input))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // AddRecipient -- Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert.
 //
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.go).
@@ -194,35 +136,35 @@ func AddRecipientBuild(args AddRecipientArgs) string {
 	return b.String()
 }
 
-// AdvanceHarnessConsolidationCursor -- Advance the per-owner v1:harness:consolidationCursor watermark to the engine-computed max(createdAt) of the batch just consolidated -- the incremental-cost mechanism (next run reads only episodes newer than this). Upserts on a stable per-owner id so it creates the cursor on first run and advances it thereafter. episodesSeen takes the engine-computed running total. ownerUserId stamped from actor.userId (owned tier).
+// AdvanceMemoryConsolidationCursor -- Advance the per-owner v1:memory:consolidationCursor watermark to the engine-computed max(createdAt) of the batch just consolidated -- the incremental-cost mechanism (next run reads only episodes newer than this). Upserts on a stable per-owner id so it creates the cursor on first run and advances it thereafter. episodesSeen takes the engine-computed running total. ownerUserId stamped from actor.userId (owned tier).
 //
-// Bound concept: v1:harness:consolidationCursor (machine-readable: BoundConcepts["advanceHarnessConsolidationCursor"] in generated_concepts.go).
-type AdvanceHarnessConsolidationCursorArgs struct {
+// Bound concept: v1:memory:consolidationCursor (machine-readable: BoundConcepts["advanceMemoryConsolidationCursor"] in generated_concepts.go).
+type AdvanceMemoryConsolidationCursorArgs struct {
 	CursorId     string
 	Watermark    string
 	EpisodesSeen int
 }
 
-// AdvanceHarnessConsolidationCursor calls the engine mutation advanceHarnessConsolidationCursor.
-func (qc *QueryClient) AdvanceHarnessConsolidationCursor(ctx context.Context, args AdvanceHarnessConsolidationCursorArgs) (*Result, error) {
-	call := AdvanceHarnessConsolidationCursorBuild(args)
-	return qc.executeNamed(ctx, "advanceHarnessConsolidationCursor", call)
+// AdvanceMemoryConsolidationCursor calls the engine mutation advanceMemoryConsolidationCursor.
+func (qc *QueryClient) AdvanceMemoryConsolidationCursor(ctx context.Context, args AdvanceMemoryConsolidationCursorArgs) (*Result, error) {
+	call := AdvanceMemoryConsolidationCursorBuild(args)
+	return qc.executeNamed(ctx, "advanceMemoryConsolidationCursor", call)
 }
 
-func AdvanceHarnessConsolidationCursorBuild(args AdvanceHarnessConsolidationCursorArgs) string {
+func AdvanceMemoryConsolidationCursorBuild(args AdvanceMemoryConsolidationCursorArgs) string {
 	var b strings.Builder
-	b.WriteString("mutation advanceHarnessConsolidationCursor(")
+	b.WriteString("mutation advanceMemoryConsolidationCursor(")
 	if args.CursorId != "" {
 		b.WriteString("cursorId: ")
 		b.WriteString(quoteMemQL(args.CursorId))
 	}
-	if b.Len() > 43 {
+	if b.Len() > 42 {
 		b.WriteString(", ")
 	}
 	b.WriteString("watermark: ")
 	b.WriteString(quoteMemQL(args.Watermark))
 	if args.EpisodesSeen != 0 {
-		if b.Len() > 43 {
+		if b.Len() > 42 {
 			b.WriteString(", ")
 		}
 		b.WriteString("episodesSeen: ")
@@ -1229,36 +1171,6 @@ func CloseCallBuild(args CloseCallArgs) string {
 	return b.String()
 }
 
-// CompleteHarnessStep -- Record a running step's result (running -> done). done is terminal. The engine step guard rejects the transition when the prior status is not 'running'.
-//
-// Bound concept: v1:harness:step (machine-readable: BoundConcepts["completeHarnessStep"] in generated_concepts.go).
-type CompleteHarnessStepArgs struct {
-	StepId string
-	Result map[string]any
-}
-
-// CompleteHarnessStep calls the engine mutation completeHarnessStep.
-func (qc *QueryClient) CompleteHarnessStep(ctx context.Context, args CompleteHarnessStepArgs) (*Result, error) {
-	call := CompleteHarnessStepBuild(args)
-	return qc.executeNamed(ctx, "completeHarnessStep", call)
-}
-
-func CompleteHarnessStepBuild(args CompleteHarnessStepArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation completeHarnessStep(")
-	b.WriteString("stepId: ")
-	b.WriteString(quoteMemQL(args.StepId))
-	if args.Result != nil {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("result: ")
-		b.WriteString(renderMemQLValue(args.Result))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // CompleteTodo -- Mark a to-do complete (or re-open it) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so the operation re-enforces ownership and can never transfer the row. The caller threads the full updated payload (with done flipped); the complete tool builds it from the current row + done=true.
 //
 // Bound concept: v1:todos:todo (machine-readable: BoundConcepts["completeTodo"] in generated_concepts.go).
@@ -1335,28 +1247,6 @@ func CompleteToolInvocationBuild(args CompleteToolInvocationArgs) string {
 		b.WriteString("completedAt: ")
 		b.WriteString(quoteMemQL(args.CompletedAt))
 	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// ConfirmAction -- Confirm a candidate v1:actions:action, promoting it to active so it is offered for replay (Phase 4 #1739, the human gate for real-machine side effects).
-//
-// Bound concept: v1:actions:action (machine-readable: BoundConcepts["confirmAction"] in generated_concepts.go).
-type ConfirmActionArgs struct {
-	ActionId string
-}
-
-// ConfirmAction calls the engine mutation confirmAction.
-func (qc *QueryClient) ConfirmAction(ctx context.Context, args ConfirmActionArgs) (*Result, error) {
-	call := ConfirmActionBuild(args)
-	return qc.executeNamed(ctx, "confirmAction", call)
-}
-
-func ConfirmActionBuild(args ConfirmActionArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation confirmAction(")
-	b.WriteString("actionId: ")
-	b.WriteString(quoteMemQL(args.ActionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -4573,99 +4463,6 @@ func CreateGreetingUtteranceBuild(args CreateGreetingUtteranceArgs) string {
 	return b.String()
 }
 
-// CreateHarnessPlan -- Create a v1:harness:plan in status='open'. ownerUserId is stamped from actor.userId (owned tier). Single write path for plan creation.
-//
-// Bound concept: v1:harness:plan (machine-readable: BoundConcepts["createHarnessPlan"] in generated_concepts.go).
-type CreateHarnessPlanArgs struct {
-	PlanId string
-	Goal   string
-	Input  map[string]any
-}
-
-// CreateHarnessPlan calls the engine mutation createHarnessPlan.
-func (qc *QueryClient) CreateHarnessPlan(ctx context.Context, args CreateHarnessPlanArgs) (*Result, error) {
-	call := CreateHarnessPlanBuild(args)
-	return qc.executeNamed(ctx, "createHarnessPlan", call)
-}
-
-func CreateHarnessPlanBuild(args CreateHarnessPlanArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation createHarnessPlan(")
-	if args.PlanId != "" {
-		b.WriteString("planId: ")
-		b.WriteString(quoteMemQL(args.PlanId))
-	}
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("goal: ")
-	b.WriteString(quoteMemQL(args.Goal))
-	if args.Input != nil {
-		if b.Len() > 27 {
-			b.WriteString(", ")
-		}
-		b.WriteString("input: ")
-		b.WriteString(renderMemQLValue(args.Input))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// CreateHarnessSemanticMemory -- Create a v1:harness:semanticMemory -- a new distilled belief. ownerUserId stamped from actor.userId (owned tier). sourceEpisodes records provenance back to the episodic nodes it was distilled from. confidence/reinforceCount/lastReinforced seed the decay clock. content is the embedding source for similarTo dedup + recall (#585).
-//
-// Bound concept: v1:harness:semanticMemory (machine-readable: BoundConcepts["createHarnessSemanticMemory"] in generated_concepts.go).
-type CreateHarnessSemanticMemoryArgs struct {
-	MemoryId string
-	// Enum: fact | preference | outcome
-	Kind           string
-	Content        string
-	SourceEpisodes []string
-	Confidence     float64
-	LastReinforced string
-}
-
-// CreateHarnessSemanticMemory calls the engine mutation createHarnessSemanticMemory.
-func (qc *QueryClient) CreateHarnessSemanticMemory(ctx context.Context, args CreateHarnessSemanticMemoryArgs) (*Result, error) {
-	call := CreateHarnessSemanticMemoryBuild(args)
-	return qc.executeNamed(ctx, "createHarnessSemanticMemory", call)
-}
-
-func CreateHarnessSemanticMemoryBuild(args CreateHarnessSemanticMemoryArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation createHarnessSemanticMemory(")
-	if args.MemoryId != "" {
-		b.WriteString("memoryId: ")
-		b.WriteString(quoteMemQL(args.MemoryId))
-	}
-	if b.Len() > 37 {
-		b.WriteString(", ")
-	}
-	b.WriteString("kind: ")
-	b.WriteString(quoteMemQL(args.Kind))
-	if b.Len() > 37 {
-		b.WriteString(", ")
-	}
-	b.WriteString("content: ")
-	b.WriteString(quoteMemQL(args.Content))
-	if b.Len() > 37 {
-		b.WriteString(", ")
-	}
-	b.WriteString("sourceEpisodes: ")
-	b.WriteString(renderMemQLValue(args.SourceEpisodes))
-	if b.Len() > 37 {
-		b.WriteString(", ")
-	}
-	b.WriteString("confidence: ")
-	b.WriteString(renderMemQLValue(args.Confidence))
-	if b.Len() > 37 {
-		b.WriteString(", ")
-	}
-	b.WriteString("lastReinforced: ")
-	b.WriteString(quoteMemQL(args.LastReinforced))
-	b.WriteString(")")
-	return b.String()
-}
-
 // CreateIdentity -- Create a new identity (credential set owned by a user).
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createIdentity"] in generated_concepts.go).
@@ -5211,6 +5008,61 @@ func CreateMemoryBuild(args CreateMemoryArgs) string {
 		b.WriteString("sourceUtteranceId: ")
 		b.WriteString(quoteMemQL(args.SourceUtteranceId))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreateMemoryBelief -- Create a v1:memory:belief -- a new distilled belief. ownerUserId stamped from actor.userId (owned tier). sourceEpisodes records provenance back to the episodic nodes it was distilled from. confidence/reinforceCount/lastReinforced seed the decay clock. content is the embedding source for similarTo dedup + recall (#585).
+//
+// Bound concept: v1:memory:belief (machine-readable: BoundConcepts["createMemoryBelief"] in generated_concepts.go).
+type CreateMemoryBeliefArgs struct {
+	MemoryId string
+	// Enum: fact | preference | outcome
+	Kind           string
+	Content        string
+	SourceEpisodes []string
+	Confidence     float64
+	LastReinforced string
+}
+
+// CreateMemoryBelief calls the engine mutation createMemoryBelief.
+func (qc *QueryClient) CreateMemoryBelief(ctx context.Context, args CreateMemoryBeliefArgs) (*Result, error) {
+	call := CreateMemoryBeliefBuild(args)
+	return qc.executeNamed(ctx, "createMemoryBelief", call)
+}
+
+func CreateMemoryBeliefBuild(args CreateMemoryBeliefArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createMemoryBelief(")
+	if args.MemoryId != "" {
+		b.WriteString("memoryId: ")
+		b.WriteString(quoteMemQL(args.MemoryId))
+	}
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kind: ")
+	b.WriteString(quoteMemQL(args.Kind))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("content: ")
+	b.WriteString(quoteMemQL(args.Content))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("sourceEpisodes: ")
+	b.WriteString(renderMemQLValue(args.SourceEpisodes))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("confidence: ")
+	b.WriteString(renderMemQLValue(args.Confidence))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("lastReinforced: ")
+	b.WriteString(quoteMemQL(args.LastReinforced))
 	b.WriteString(")")
 	return b.String()
 }
@@ -8209,54 +8061,26 @@ func DeactivateRoutingPolicyBuild(args DeactivateRoutingPolicyArgs) string {
 	return b.String()
 }
 
-// DecayAction -- Set a v1:actions:action decayed reliability from the consolidation sweep (Phase 4 #1739; value computed engine-side).
+// DecayMemoryBelief -- Decay an unreinforced v1:memory:belief: lower confidence to the engine-computed decayed value. lastReinforced is intentionally NOT reset (decay keeps measuring age from the last real reinforcement). ownerUserId re-stamped from actor.userId (owned tier). A belief that decays below the prune floor is then retired via pruneMemoryBelief.
 //
-// Bound concept: v1:actions:action (machine-readable: BoundConcepts["decayAction"] in generated_concepts.go).
-type DecayActionArgs struct {
-	ActionId    string
-	Reliability float64
-}
-
-// DecayAction calls the engine mutation decayAction.
-func (qc *QueryClient) DecayAction(ctx context.Context, args DecayActionArgs) (*Result, error) {
-	call := DecayActionBuild(args)
-	return qc.executeNamed(ctx, "decayAction", call)
-}
-
-func DecayActionBuild(args DecayActionArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation decayAction(")
-	b.WriteString("actionId: ")
-	b.WriteString(quoteMemQL(args.ActionId))
-	if b.Len() > 21 {
-		b.WriteString(", ")
-	}
-	b.WriteString("reliability: ")
-	b.WriteString(renderMemQLValue(args.Reliability))
-	b.WriteString(")")
-	return b.String()
-}
-
-// DecayHarnessSemanticMemory -- Decay an unreinforced v1:harness:semanticMemory: lower confidence to the engine-computed decayed value. lastReinforced is intentionally NOT reset (decay keeps measuring age from the last real reinforcement). ownerUserId re-stamped from actor.userId (owned tier). A belief that decays below the prune floor is then retired via pruneHarnessSemanticMemory.
-//
-// Bound concept: v1:harness:semanticMemory (machine-readable: BoundConcepts["decayHarnessSemanticMemory"] in generated_concepts.go).
-type DecayHarnessSemanticMemoryArgs struct {
+// Bound concept: v1:memory:belief (machine-readable: BoundConcepts["decayMemoryBelief"] in generated_concepts.go).
+type DecayMemoryBeliefArgs struct {
 	MemoryId   string
 	Confidence float64
 }
 
-// DecayHarnessSemanticMemory calls the engine mutation decayHarnessSemanticMemory.
-func (qc *QueryClient) DecayHarnessSemanticMemory(ctx context.Context, args DecayHarnessSemanticMemoryArgs) (*Result, error) {
-	call := DecayHarnessSemanticMemoryBuild(args)
-	return qc.executeNamed(ctx, "decayHarnessSemanticMemory", call)
+// DecayMemoryBelief calls the engine mutation decayMemoryBelief.
+func (qc *QueryClient) DecayMemoryBelief(ctx context.Context, args DecayMemoryBeliefArgs) (*Result, error) {
+	call := DecayMemoryBeliefBuild(args)
+	return qc.executeNamed(ctx, "decayMemoryBelief", call)
 }
 
-func DecayHarnessSemanticMemoryBuild(args DecayHarnessSemanticMemoryArgs) string {
+func DecayMemoryBeliefBuild(args DecayMemoryBeliefArgs) string {
 	var b strings.Builder
-	b.WriteString("mutation decayHarnessSemanticMemory(")
+	b.WriteString("mutation decayMemoryBelief(")
 	b.WriteString("memoryId: ")
 	b.WriteString(quoteMemQL(args.MemoryId))
-	if b.Len() > 36 {
+	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
@@ -8418,28 +8242,6 @@ func DenyDeviceCodeBuild(args DenyDeviceCodeArgs) string {
 	b.WriteString("mutation denyDeviceCode(")
 	b.WriteString("deviceCodeId: ")
 	b.WriteString(quoteMemQL(args.DeviceCodeId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// DeprecateAction -- Deprecate a v1:actions:action (reliability below floor or superseded), removing it from replay (Phase 4 #1739).
-//
-// Bound concept: v1:actions:action (machine-readable: BoundConcepts["deprecateAction"] in generated_concepts.go).
-type DeprecateActionArgs struct {
-	ActionId string
-}
-
-// DeprecateAction calls the engine mutation deprecateAction.
-func (qc *QueryClient) DeprecateAction(ctx context.Context, args DeprecateActionArgs) (*Result, error) {
-	call := DeprecateActionBuild(args)
-	return qc.executeNamed(ctx, "deprecateAction", call)
-}
-
-func DeprecateActionBuild(args DeprecateActionArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation deprecateAction(")
-	b.WriteString("actionId: ")
-	b.WriteString(quoteMemQL(args.ActionId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -8770,36 +8572,6 @@ func ExpireAccessRequestBuild(args ExpireAccessRequestArgs) string {
 	b.WriteString("mutation expireAccessRequest(")
 	b.WriteString("requestId: ")
 	b.WriteString(quoteMemQL(args.RequestId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// FailHarnessStep -- Mark a running step failed (running -> failed). Stamps errorMessage + completedAt. The engine step guard rejects the transition when the prior status is not 'running'. Retry (failed -> ready, attempt++) is a separate write.
-//
-// Bound concept: v1:harness:step (machine-readable: BoundConcepts["failHarnessStep"] in generated_concepts.go).
-type FailHarnessStepArgs struct {
-	StepId       string
-	ErrorMessage string
-}
-
-// FailHarnessStep calls the engine mutation failHarnessStep.
-func (qc *QueryClient) FailHarnessStep(ctx context.Context, args FailHarnessStepArgs) (*Result, error) {
-	call := FailHarnessStepBuild(args)
-	return qc.executeNamed(ctx, "failHarnessStep", call)
-}
-
-func FailHarnessStepBuild(args FailHarnessStepArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation failHarnessStep(")
-	b.WriteString("stepId: ")
-	b.WriteString(quoteMemQL(args.StepId))
-	if args.ErrorMessage != "" {
-		if b.Len() > 25 {
-			b.WriteString(", ")
-		}
-		b.WriteString("errorMessage: ")
-		b.WriteString(quoteMemQL(args.ErrorMessage))
-	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -9540,142 +9312,6 @@ func MarkStoreRedactedBuild(args MarkStoreRedactedArgs) string {
 	return b.String()
 }
 
-// MintAction -- Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1, #1736). ownerUserId stamped from actor.userId (owned tier). Stores the replayable capability calls keyed by inputFingerprint.
-//
-// Bound concept: v1:actions:action (machine-readable: BoundConcepts["mintAction"] in generated_concepts.go).
-type MintActionArgs struct {
-	ActionId            string
-	Slug                string
-	Intent              string
-	Capability          string
-	SideEffectClass     string
-	Status              string
-	InputFingerprint    string
-	Calls               []map[string]any
-	ResourceEdges       []map[string]any
-	ParamBindings       []map[string]any
-	TemplateFingerprint string
-	RecordedResult      map[string]any
-	ResultFingerprint   string
-	RecordedSurface     string
-	ProvenancePlanId    string
-	ProvenanceStepId    string
-}
-
-// MintAction calls the engine mutation mintAction.
-func (qc *QueryClient) MintAction(ctx context.Context, args MintActionArgs) (*Result, error) {
-	call := MintActionBuild(args)
-	return qc.executeNamed(ctx, "mintAction", call)
-}
-
-func MintActionBuild(args MintActionArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation mintAction(")
-	if args.ActionId != "" {
-		b.WriteString("actionId: ")
-		b.WriteString(quoteMemQL(args.ActionId))
-	}
-	if b.Len() > 20 {
-		b.WriteString(", ")
-	}
-	b.WriteString("slug: ")
-	b.WriteString(quoteMemQL(args.Slug))
-	if b.Len() > 20 {
-		b.WriteString(", ")
-	}
-	b.WriteString("intent: ")
-	b.WriteString(quoteMemQL(args.Intent))
-	if args.Capability != "" {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("capability: ")
-		b.WriteString(quoteMemQL(args.Capability))
-	}
-	if args.SideEffectClass != "" {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("sideEffectClass: ")
-		b.WriteString(quoteMemQL(args.SideEffectClass))
-	}
-	if args.Status != "" {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("status: ")
-		b.WriteString(quoteMemQL(args.Status))
-	}
-	if b.Len() > 20 {
-		b.WriteString(", ")
-	}
-	b.WriteString("inputFingerprint: ")
-	b.WriteString(quoteMemQL(args.InputFingerprint))
-	if b.Len() > 20 {
-		b.WriteString(", ")
-	}
-	b.WriteString("calls: ")
-	b.WriteString(renderMemQLValue(args.Calls))
-	if args.ResourceEdges != nil {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("resourceEdges: ")
-		b.WriteString(renderMemQLValue(args.ResourceEdges))
-	}
-	if args.ParamBindings != nil {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("paramBindings: ")
-		b.WriteString(renderMemQLValue(args.ParamBindings))
-	}
-	if args.TemplateFingerprint != "" {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("templateFingerprint: ")
-		b.WriteString(quoteMemQL(args.TemplateFingerprint))
-	}
-	if args.RecordedResult != nil {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("recordedResult: ")
-		b.WriteString(renderMemQLValue(args.RecordedResult))
-	}
-	if args.ResultFingerprint != "" {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("resultFingerprint: ")
-		b.WriteString(quoteMemQL(args.ResultFingerprint))
-	}
-	if args.RecordedSurface != "" {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("recordedSurface: ")
-		b.WriteString(quoteMemQL(args.RecordedSurface))
-	}
-	if args.ProvenancePlanId != "" {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("provenancePlanId: ")
-		b.WriteString(quoteMemQL(args.ProvenancePlanId))
-	}
-	if args.ProvenanceStepId != "" {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("provenanceStepId: ")
-		b.WriteString(quoteMemQL(args.ProvenanceStepId))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // MintSkill -- Mint a new v1:skills:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/agents/skills/*.memql. originatingPlanId + mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check.
 //
 // Bound concept: v1:skills:skill (machine-readable: BoundConcepts["mintSkill"] in generated_concepts.go).
@@ -10053,104 +9689,24 @@ func ProvisionWorkspaceBuild(args ProvisionWorkspaceArgs) string {
 	return b.String()
 }
 
-// PruneHarnessSemanticMemory -- Prune a decayed v1:harness:semanticMemory: status -> 'pruned' (soft-delete; the append-only model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from actor.userId (owned tier).
+// PruneMemoryBelief -- Prune a decayed v1:memory:belief: status -> 'pruned' (soft-delete; the append-only model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from actor.userId (owned tier).
 //
-// Bound concept: v1:harness:semanticMemory (machine-readable: BoundConcepts["pruneHarnessSemanticMemory"] in generated_concepts.go).
-type PruneHarnessSemanticMemoryArgs struct {
+// Bound concept: v1:memory:belief (machine-readable: BoundConcepts["pruneMemoryBelief"] in generated_concepts.go).
+type PruneMemoryBeliefArgs struct {
 	MemoryId string
 }
 
-// PruneHarnessSemanticMemory calls the engine mutation pruneHarnessSemanticMemory.
-func (qc *QueryClient) PruneHarnessSemanticMemory(ctx context.Context, args PruneHarnessSemanticMemoryArgs) (*Result, error) {
-	call := PruneHarnessSemanticMemoryBuild(args)
-	return qc.executeNamed(ctx, "pruneHarnessSemanticMemory", call)
+// PruneMemoryBelief calls the engine mutation pruneMemoryBelief.
+func (qc *QueryClient) PruneMemoryBelief(ctx context.Context, args PruneMemoryBeliefArgs) (*Result, error) {
+	call := PruneMemoryBeliefBuild(args)
+	return qc.executeNamed(ctx, "pruneMemoryBelief", call)
 }
 
-func PruneHarnessSemanticMemoryBuild(args PruneHarnessSemanticMemoryArgs) string {
+func PruneMemoryBeliefBuild(args PruneMemoryBeliefArgs) string {
 	var b strings.Builder
-	b.WriteString("mutation pruneHarnessSemanticMemory(")
+	b.WriteString("mutation pruneMemoryBelief(")
 	b.WriteString("memoryId: ")
 	b.WriteString(quoteMemQL(args.MemoryId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// ReadyHarnessStep -- Promote a step to ready (pending -> ready when dependsOn is satisfied, or blocked -> ready when the blocker finishes). Read-merges the prior row so owned-tier fields are preserved. The engine step guard validates the transition and rejects an illegal source status. Without this mutation the state machine is stuck at 'pending' (#1635).
-//
-// Bound concept: v1:harness:step (machine-readable: BoundConcepts["readyHarnessStep"] in generated_concepts.go).
-type ReadyHarnessStepArgs struct {
-	StepId string
-}
-
-// ReadyHarnessStep calls the engine mutation readyHarnessStep.
-func (qc *QueryClient) ReadyHarnessStep(ctx context.Context, args ReadyHarnessStepArgs) (*Result, error) {
-	call := ReadyHarnessStepBuild(args)
-	return qc.executeNamed(ctx, "readyHarnessStep", call)
-}
-
-func ReadyHarnessStepBuild(args ReadyHarnessStepArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation readyHarnessStep(")
-	b.WriteString("stepId: ")
-	b.WriteString(quoteMemQL(args.StepId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// RecordActionCandidate -- Record a v1:actions:candidate trace (the captured capability sequence + value/resource provenance for one LLM step, #1735). ownerUserId is stamped from actor.userId (owned tier). status is always 'candidate' on insert.
-//
-// Bound concept: v1:actions:candidate (machine-readable: BoundConcepts["recordActionCandidate"] in generated_concepts.go).
-type RecordActionCandidateArgs struct {
-	CandidateId   string
-	PlanId        string
-	StepId        string
-	Calls         []map[string]any
-	ResourceEdges []map[string]any
-	CallCount     int
-}
-
-// RecordActionCandidate calls the engine mutation recordActionCandidate.
-func (qc *QueryClient) RecordActionCandidate(ctx context.Context, args RecordActionCandidateArgs) (*Result, error) {
-	call := RecordActionCandidateBuild(args)
-	return qc.executeNamed(ctx, "recordActionCandidate", call)
-}
-
-func RecordActionCandidateBuild(args RecordActionCandidateArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation recordActionCandidate(")
-	if args.CandidateId != "" {
-		b.WriteString("candidateId: ")
-		b.WriteString(quoteMemQL(args.CandidateId))
-	}
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("planId: ")
-	b.WriteString(quoteMemQL(args.PlanId))
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("stepId: ")
-	b.WriteString(quoteMemQL(args.StepId))
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("calls: ")
-	b.WriteString(renderMemQLValue(args.Calls))
-	if args.ResourceEdges != nil {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("resourceEdges: ")
-		b.WriteString(renderMemQLValue(args.ResourceEdges))
-	}
-	if args.CallCount != 0 {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("callCount: ")
-		b.WriteString(fmt.Sprintf("%v", args.CallCount))
-	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -10714,65 +10270,6 @@ func RecordDependencyEdgeBuild(args RecordDependencyEdgeArgs) string {
 	}
 	b.WriteString("toSource: ")
 	b.WriteString(quoteMemQL(args.ToSource))
-	b.WriteString(")")
-	return b.String()
-}
-
-// RecordHarnessObservation -- Append a v1:harness:observation for a step (tool_result / error / note / decision). ownerUserId stamped from actor.userId (owned tier). content is the embedding source for semantic recall (#585).
-//
-// Bound concept: v1:harness:observation (machine-readable: BoundConcepts["recordHarnessObservation"] in generated_concepts.go).
-type RecordHarnessObservationArgs struct {
-	ObservationId string
-	StepId        string
-	PlanId        string
-	// Enum: tool_result | error | note | decision
-	Kind    string
-	Content string
-	Data    map[string]any
-}
-
-// RecordHarnessObservation calls the engine mutation recordHarnessObservation.
-func (qc *QueryClient) RecordHarnessObservation(ctx context.Context, args RecordHarnessObservationArgs) (*Result, error) {
-	call := RecordHarnessObservationBuild(args)
-	return qc.executeNamed(ctx, "recordHarnessObservation", call)
-}
-
-func RecordHarnessObservationBuild(args RecordHarnessObservationArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation recordHarnessObservation(")
-	if args.ObservationId != "" {
-		b.WriteString("observationId: ")
-		b.WriteString(quoteMemQL(args.ObservationId))
-	}
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("stepId: ")
-	b.WriteString(quoteMemQL(args.StepId))
-	if args.PlanId != "" {
-		if b.Len() > 34 {
-			b.WriteString(", ")
-		}
-		b.WriteString("planId: ")
-		b.WriteString(quoteMemQL(args.PlanId))
-	}
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("kind: ")
-	b.WriteString(quoteMemQL(args.Kind))
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("content: ")
-	b.WriteString(quoteMemQL(args.Content))
-	if args.Data != nil {
-		if b.Len() > 34 {
-			b.WriteString(", ")
-		}
-		b.WriteString("data: ")
-		b.WriteString(renderMemQLValue(args.Data))
-	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -11910,72 +11407,38 @@ func RegisterSurfaceBuild(args RegisterSurfaceArgs) string {
 	return b.String()
 }
 
-// ReinforceAction -- Reinforce a v1:actions:action after a verified replay: set the engine-computed reliability + reinforceCount and reset the decay clock (Phase 1 #1736; surface-aware decay lands in Phase 4 #1739).
+// ReinforceMemoryBelief -- Reinforce an existing v1:memory:belief (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now, and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).
 //
-// Bound concept: v1:actions:action (machine-readable: BoundConcepts["reinforceAction"] in generated_concepts.go).
-type ReinforceActionArgs struct {
-	ActionId       string
-	Reliability    float64
-	ReinforceCount int
-}
-
-// ReinforceAction calls the engine mutation reinforceAction.
-func (qc *QueryClient) ReinforceAction(ctx context.Context, args ReinforceActionArgs) (*Result, error) {
-	call := ReinforceActionBuild(args)
-	return qc.executeNamed(ctx, "reinforceAction", call)
-}
-
-func ReinforceActionBuild(args ReinforceActionArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation reinforceAction(")
-	b.WriteString("actionId: ")
-	b.WriteString(quoteMemQL(args.ActionId))
-	if b.Len() > 25 {
-		b.WriteString(", ")
-	}
-	b.WriteString("reliability: ")
-	b.WriteString(renderMemQLValue(args.Reliability))
-	if b.Len() > 25 {
-		b.WriteString(", ")
-	}
-	b.WriteString("reinforceCount: ")
-	b.WriteString(fmt.Sprintf("%v", args.ReinforceCount))
-	b.WriteString(")")
-	return b.String()
-}
-
-// ReinforceHarnessSemanticMemory -- Reinforce an existing v1:harness:semanticMemory (dedup path): take the engine-computed bumped confidence + reinforceCount, reset lastReinforced to now, and replace sourceEpisodes with the merged/deduped provenance. No new belief row -- this is why re-running over the same episodes does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).
-//
-// Bound concept: v1:harness:semanticMemory (machine-readable: BoundConcepts["reinforceHarnessSemanticMemory"] in generated_concepts.go).
-type ReinforceHarnessSemanticMemoryArgs struct {
+// Bound concept: v1:memory:belief (machine-readable: BoundConcepts["reinforceMemoryBelief"] in generated_concepts.go).
+type ReinforceMemoryBeliefArgs struct {
 	MemoryId       string
 	Confidence     float64
 	ReinforceCount int
 	SourceEpisodes []string
 }
 
-// ReinforceHarnessSemanticMemory calls the engine mutation reinforceHarnessSemanticMemory.
-func (qc *QueryClient) ReinforceHarnessSemanticMemory(ctx context.Context, args ReinforceHarnessSemanticMemoryArgs) (*Result, error) {
-	call := ReinforceHarnessSemanticMemoryBuild(args)
-	return qc.executeNamed(ctx, "reinforceHarnessSemanticMemory", call)
+// ReinforceMemoryBelief calls the engine mutation reinforceMemoryBelief.
+func (qc *QueryClient) ReinforceMemoryBelief(ctx context.Context, args ReinforceMemoryBeliefArgs) (*Result, error) {
+	call := ReinforceMemoryBeliefBuild(args)
+	return qc.executeNamed(ctx, "reinforceMemoryBelief", call)
 }
 
-func ReinforceHarnessSemanticMemoryBuild(args ReinforceHarnessSemanticMemoryArgs) string {
+func ReinforceMemoryBeliefBuild(args ReinforceMemoryBeliefArgs) string {
 	var b strings.Builder
-	b.WriteString("mutation reinforceHarnessSemanticMemory(")
+	b.WriteString("mutation reinforceMemoryBelief(")
 	b.WriteString("memoryId: ")
 	b.WriteString(quoteMemQL(args.MemoryId))
-	if b.Len() > 40 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("confidence: ")
 	b.WriteString(renderMemQLValue(args.Confidence))
-	if b.Len() > 40 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("reinforceCount: ")
 	b.WriteString(fmt.Sprintf("%v", args.ReinforceCount))
-	if b.Len() > 40 {
+	if b.Len() > 31 {
 		b.WriteString(", ")
 	}
 	b.WriteString("sourceEpisodes: ")
@@ -15027,36 +14490,6 @@ func StampNodeTokenBootstrapBuild(args StampNodeTokenBootstrapArgs) string {
 	}
 	b.WriteString("bootstrappedFrom: ")
 	b.WriteString(quoteMemQL(args.BootstrappedFrom))
-	b.WriteString(")")
-	return b.String()
-}
-
-// StartHarnessStep -- Claim a ready step (ready -> running). Stamps assignedAgent + startedAt. The engine step guard rejects the transition when the prior status is not 'ready'.
-//
-// Bound concept: v1:harness:step (machine-readable: BoundConcepts["startHarnessStep"] in generated_concepts.go).
-type StartHarnessStepArgs struct {
-	StepId        string
-	AssignedAgent string
-}
-
-// StartHarnessStep calls the engine mutation startHarnessStep.
-func (qc *QueryClient) StartHarnessStep(ctx context.Context, args StartHarnessStepArgs) (*Result, error) {
-	call := StartHarnessStepBuild(args)
-	return qc.executeNamed(ctx, "startHarnessStep", call)
-}
-
-func StartHarnessStepBuild(args StartHarnessStepArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation startHarnessStep(")
-	b.WriteString("stepId: ")
-	b.WriteString(quoteMemQL(args.StepId))
-	if args.AssignedAgent != "" {
-		if b.Len() > 26 {
-			b.WriteString(", ")
-		}
-		b.WriteString("assignedAgent: ")
-		b.WriteString(quoteMemQL(args.AssignedAgent))
-	}
 	b.WriteString(")")
 	return b.String()
 }

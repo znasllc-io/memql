@@ -669,13 +669,14 @@ func (l *PlannerAgentLoop) dispatchDecision(ctx context.Context, planId string, 
 		// phases set but no Tasks created.
 		return l.invokeAndDispatchIter(ctx, planId, iter+1, conv)
 	case "dispatchTask":
-		// Action-library emission (#1758, epic #1734): before dispatching the
-		// LLM task, see if a reusable library action already accomplishes this
-		// sub-goal; on a REUSE/ADAPT verdict the task is rewritten to an
-		// action-typed step the harness replays token-free. No-op unless
-		// MEMQL_ACTION_REPLAY_ENABLED is set.
-		task := l.maybeSubstituteActionStep(ctx, d.Task)
-		if err := l.insertDispatchedTask(ctx, planId, task); err != nil {
+		// The action-library substitution seam that sat here (#1758, epic
+		// #1734) is retired with the capture library (work spine A1): it
+		// rewrote a task into an action-typed step when a recorded action
+		// looked reusable, behind MEMQL_ACTION_REPLAY_ENABLED. The AUTHORED
+		// action primitive is untouched -- an `action("name@1")` step still
+		// runs -- and reuse returns in epic A3 as skill selection over the
+		// capability graph, decided at compile rather than guessed per task.
+		if err := l.insertDispatchedTask(ctx, planId, d.Task); err != nil {
 			return err
 		}
 		// Re-invoke so the planner can emit the next task (or

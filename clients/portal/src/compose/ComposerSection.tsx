@@ -12,7 +12,7 @@ import { Empty } from "../components/StatusMessage";
 import { ErrorNotice, Skeleton } from "../ui";
 import { ArrangementLayout } from "./ArrangementLayout";
 import { ComposeButton, PopulationMeta, SectionHeader } from "./ComposeLayout";
-import { SCENE_IDS } from "../nexus/scene/registry";
+import { SCENE_IDS } from "../scenes/registry";
 import { WIDGET_IDS } from "../widgets/registry";
 import { Inspector } from "./Inspector";
 import type { ComposerAction, ComposerDraft } from "./composerState";

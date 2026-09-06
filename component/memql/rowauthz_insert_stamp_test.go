@@ -127,7 +127,7 @@ func TestRawInsertStampsAnAbsentOwner(t *testing.T) {
 // AC 2: the stamp is driven by the DECLARATION, not by a hand-maintained
 // concept list.
 //
-// This is the difference between this fix and the nine per-concept
+// This is the difference between this fix and the per-concept
 // guards it sits beside. Those guards each cite a different incident and
 // cover exactly the concept that incident named; this walks every concept
 // the loader reports as owned-tier and asserts each one stamps its OWN
@@ -385,7 +385,7 @@ func TestSelfOwnedConceptsHaveNoFieldToStamp(t *testing.T) {
 	}
 }
 
-// AC 4: the nine per-concept guards are DEFENCE IN DEPTH, not something
+// AC 4: the per-concept guards are DEFENCE IN DEPTH, not something
 // this replaced.
 //
 // Each cites its own incident (#403, #2070, #2072, #2140, #2143, #2513,
@@ -404,7 +404,6 @@ func TestThePerConceptGuardsStillFire(t *testing.T) {
 		"conceptRbacRole":                         {"validateRbacBaseRoleImmutable(", "validateRbacCustomRoleRankBound("},
 		"conceptIdentityIdentity":                 {"validateIdentityCredentialActorScope("},
 		"conceptHealingOverride":                  {"validateHealingBaseImmutable(", "validateHealingValidationRankBound("},
-		"memorynodes.ConceptHarnessStep":          {"validateHarnessStepTransition("},
 		"conceptPlannerPlan":                      {"validateFeedbackIntakeTransition("},
 		"conceptForgeRequest":                     {"validateForgeRequestTransition("},
 	}
@@ -415,7 +414,7 @@ func TestThePerConceptGuardsStillFire(t *testing.T) {
 	sort.Strings(names)
 	for _, conceptConst := range names {
 		if !strings.Contains(source, "conceptMeta.Name == "+conceptConst) {
-			t.Errorf("executeWrite no longer dispatches on %s. The nine per-concept guards "+
+			t.Errorf("executeWrite no longer dispatches on %s. These per-concept guards "+
 				"are defence in depth and the generic owner stamp did NOT replace them: "+
 				"they enforce state machines, role ranks and credential kinds, none of "+
 				"which is 'who owns this row' (memql#3175 AC 4).", conceptConst)

@@ -242,7 +242,7 @@ func automationNamed(t *testing.T, all []*Automation, name string) *Automation {
 // tests drive ExecuteWithEvent and nothing drove ResumeFrom.
 //
 // The failure it guards is the same closed-looking-but-broken shape as the
-// original defect: a checkpointed kill-switch automation resumes,
+// original defect: a journalled kill-switch automation resumes,
 // SourceTrusted is false, executeStep does not stamp, runningPlansForUser is
 // refused as a client call, and the resumed run silently suspends nothing.
 func TestResumedAutomationReachesDispatchTrusted(t *testing.T) {
@@ -261,27 +261,26 @@ func TestResumedAutomationReachesDispatchTrusted(t *testing.T) {
 	e := NewExecutor(ExecutorOptions{Logger: logger, StepRegistry: reg})
 	defer e.Close()
 
-	// AutomationFingerprint is left empty on purpose: ValidateCheckpoint only
+	// TemplateFingerprint is left empty on purpose: ValidateRunJournal only
 	// compares it when set, and pinning a fingerprint here would couple this
 	// origin test to the definition-hashing scheme.
-	checkpoint := &ExecutionCheckpoint{
-		ExecutionId:    "exec-resume-probe",
+	journal := &RunJournal{
+		RunId:          "exec-resume-probe",
 		AutomationName: automation.Name,
-		StepIndex:      1,
-		FailedAt:       &StepFailure{StepId: "s2"},
+		FailedStep:     "s2",
 	}
 
-	if _, err := e.ResumeFrom(context.Background(), checkpoint, automation, &ResumeOptions{AllowSideEffects: true}); err != nil {
+	if _, err := e.ResumeFrom(context.Background(), journal, automation, &ResumeOptions{AllowSideEffects: true}); err != nil {
 		t.Logf("ResumeFrom returned %v (fine -- the origin is what is under test)", err)
 	}
 	if !reg.called {
 		t.Fatal("resume dispatched no step, so this test asserted nothing about origin. " +
-			"Check the checkpoint fixture against ValidateCheckpoint rather than deleting this guard")
+			"Check the RunJournal fixture against ValidateRunJournal rather than deleting this guard")
 	}
 	if !reg.got.IsInternal() {
 		t.Fatalf("a RESUMED tree-loaded automation dispatched with origin %v, want internal. "+
 			"resume.go's `exec.SourceTrusted = automation.Trusted` is the link; without it a "+
-			"checkpointed kill-switch run silently suspends nothing.", reg.got)
+			"journalled kill-switch run silently suspends nothing.", reg.got)
 	}
 }
 
@@ -488,7 +487,7 @@ func TestExecuteWithClientEventOnUntrustedSourceIsStillClient(t *testing.T) {
 //
 //  1. MCP run_automation with a chosen payload -> client origin. Correct.
 //  2. The body reaches a @serverOnly construct -> refused -> the step errors.
-//  3. ErrorStrategyStop saves a CHECKPOINT, and the checkpoint persists
+//  3. ErrorStrategyStop closes the RUN ROW at failed, and that row persists
 //     TriggerContext.Event -- the attacker's payload.
 //  4. POST /automations/resume replays it. resume.go read automation.Trusted
 //     alone and restored SourceTrusted = true.
@@ -496,7 +495,7 @@ func TestExecuteWithClientEventOnUntrustedSourceIsStillClient(t *testing.T) {
 //     and the resume loop runs to the end, so the WRITE step executes too.
 //
 // So the refusal produced in (2) is what mints the token used in (3). The
-// checkpoint now carries CallerSuppliedPayload and resume applies the same rule
+// run row now carries callerSuppliedPayload and resume applies the same rule
 // as the live path.
 func TestResumeDoesNotLaunderClientOriginBackToInternal(t *testing.T) {
 	reg := &originCapturingRegistry{}
@@ -510,20 +509,17 @@ func TestResumeDoesNotLaunderClientOriginBackToInternal(t *testing.T) {
 		Steps:   []*Step{{ID: "s1", Name: "decide", Type: StepTypeFunction}},
 	}
 
-	// A checkpoint written by a run whose payload the CALLER supplied.
-	cp := &ExecutionCheckpoint{
-		ExecutionId:           "exec-1",
+	// A run row written by a run whose payload the CALLER supplied.
+	cp := &RunJournal{
+		RunId:                 "exec-1",
 		AutomationName:        auto.Name,
-		AutomationFingerprint: auto.DefinitionFingerprint(fingerprintEngine),
-		StepIndex:             0,
+		TemplateFingerprint:   auto.DefinitionFingerprint(fingerprintEngine),
 		CallerSuppliedPayload: true,
-		FailedAt:              &StepFailure{StepId: "s1", Error: "refused: @serverOnly"},
-		StepResults:           map[string]*MinimalStepResult{},
-		TriggerContext: &TriggerContext{
-			Event: map[string]any{
-				"topic":   "mcp.run.zzTreeLoadedAutomation",
-				"payload": map[string]any{"node": map[string]any{"id": "v1:identity:user:victim"}},
-			},
+		FailedStep:            "s1",
+		Steps:                 map[string]*MinimalStepResult{},
+		TriggerEvent: map[string]any{
+			"topic":   "mcp.run.zzTreeLoadedAutomation",
+			"payload": map[string]any{"node": map[string]any{"id": "v1:identity:user:victim"}},
 		},
 	}
 
@@ -536,14 +532,14 @@ func TestResumeDoesNotLaunderClientOriginBackToInternal(t *testing.T) {
 	if reg.got.IsInternal() {
 		t.Fatalf("RESUME re-granted INTERNAL origin (%v) to a run whose payload the caller "+
 			"supplied.\n\nThat makes the whole origin downgrade bypassable, and the fix supplies "+
-			"the bypass: the @serverOnly refusal is what causes the checkpoint to be written, and "+
-			"the checkpoint carries the attacker's payload straight back in through "+
+			"the bypass: the @serverOnly refusal is what causes the run row to be closed at "+
+			"failed, and that row carries the attacker's payload straight back in through "+
 			"POST /automations/resume (memql#2888).", reg.got)
 	}
 }
 
 // TestResumeStillGrantsInternalOriginToAServerOriginatedRun is the other
-// direction. A checkpoint from a graph-event or cron run must resume at
+// direction. A run row from a graph-event or cron run must resume at
 // internal origin, or every legitimate retry silently loses access to the
 // @serverOnly constructs its body reads.
 func TestResumeStillGrantsInternalOriginToAServerOriginatedRun(t *testing.T) {
@@ -557,14 +553,13 @@ func TestResumeStillGrantsInternalOriginToAServerOriginatedRun(t *testing.T) {
 		Trusted: true,
 		Steps:   []*Step{{ID: "s1", Name: "decide", Type: StepTypeFunction}},
 	}
-	cp := &ExecutionCheckpoint{
-		ExecutionId:           "exec-2",
+	cp := &RunJournal{
+		RunId:                 "exec-2",
 		AutomationName:        auto.Name,
-		AutomationFingerprint: auto.DefinitionFingerprint(fingerprintEngine),
-		StepIndex:             0,
+		TemplateFingerprint:   auto.DefinitionFingerprint(fingerprintEngine),
 		CallerSuppliedPayload: false, // graph event / cron
-		FailedAt:              &StepFailure{StepId: "s1", Error: "transient"},
-		StepResults:           map[string]*MinimalStepResult{},
+		FailedStep:            "s1",
+		Steps:                 map[string]*MinimalStepResult{},
 	}
 
 	if _, err := e.ResumeFrom(context.Background(), cp, auto, &ResumeOptions{FromStep: "s1"}); err != nil {
@@ -580,33 +575,24 @@ func TestResumeStillGrantsInternalOriginToAServerOriginatedRun(t *testing.T) {
 	}
 }
 
-// TestCheckpointCarriesTheCallerSuppliedFlag pins the SAVE half, through the
-// real constructor AND the real concept schema.
+// TestRunRowCarriesTheCallerSuppliedFlag pins the SAVE half, through the
+// real writer AND the real concept schema.
 //
-// Two rounds of this test were green for the wrong reason:
+// Two rounds of this test were green for the wrong reason, and both traps
+// survive the move from the checkpoint to the journal:
 //
-//  1. it round-tripped a hand-built ExecutionCheckpoint through JSON, so both
-//     mutations that drop the flag on the real save path left the suite green.
-//     Fixed by extracting newCheckpointFromExecution.
-//  2. it then round-tripped the CONSTRUCTOR's output through encoding/json --
-//     which is still not the persistence layer. Checkpoints are stored as
-//     v1:memql:checkpoint graph rows, and every concept schema is CLOSED
-//     (noAdditional defaults true). The field was not declared, so
-//     Concept.Create REJECTED the row.
-//
-// The second one was almost invisible, because `omitempty` drops the field
-// when false: a server-originated checkpoint saved fine and only the
-// SECURITY-CRITICAL one was refused, leaving a WARN and no checkpoint. The
-// posture happened to be closed -- no checkpoint, nothing to resume -- but by
-// schema rejection, not by the mechanism, and the mechanism never ran.
-//
-// So the schema declaration is asserted here directly. It is the input the
-// persistence layer actually validates against, and a future edit that drops
-// the field silently reopens the laundering path with everything else green.
-func TestCheckpointCarriesTheCallerSuppliedFlag(t *testing.T) {
+//  1. it round-tripped a hand-built record through JSON, so both mutations
+//     that drop the flag on the real save path left the suite green. The fix
+//     was to go through the real constructor -- which is now
+//     workJournal.openRun, asserted on the MemQL call it renders.
+//  2. it then round-tripped the constructor's output through encoding/json --
+//     which is still not the persistence layer. Every concept schema is
+//     CLOSED (noAdditional defaults true), so an undeclared field does not
+//     merely fail to round-trip: the write is REJECTED. The schema half is
+//     TestWorkRunConceptDeclaresTheFlag below.
+func TestRunRowCarriesTheCallerSuppliedFlag(t *testing.T) {
 	auto := &Automation{Name: "zzAuto", Trusted: true,
 		Steps: []*Step{{ID: "s1", Name: "decide", Type: StepTypeFunction}}}
-	step := auto.Steps[0]
 	ev := &events.Event{Topic: "mcp.run.zzAuto", Payload: map[string]any{"node": "victim"}}
 
 	for _, tc := range []struct {
@@ -620,17 +606,26 @@ func TestCheckpointCarriesTheCallerSuppliedFlag(t *testing.T) {
 			exec := NewExecution(auto.Name, "mcp")
 			exec.CallerSuppliedPayload = tc.callerPayload
 
-			cp := newCheckpointFromExecution(auto, exec, step, 0, "", errTestStepFailed, ev)
-			if cp.CallerSuppliedPayload != tc.callerPayload {
-				t.Fatalf("checkpoint.CallerSuppliedPayload = %v, want %v.\n\nResume reads this "+
-					"field to decide whether internal origin may be restored, so a checkpoint "+
+			rec := &recordingJournalExecutor{}
+			newWorkJournal(rec, nil).openRun(context.Background(), auto, exec, ev)
+			if len(rec.calls) != 1 {
+				t.Fatalf("openRun rendered %d calls, want 1", len(rec.calls))
+			}
+			name, args := argsOf(t, rec.calls[0])
+			if name != "createWorkRun" {
+				t.Fatalf("openRun rendered %q", name)
+			}
+			if got, _ := args["callerSuppliedPayload"].(bool); got != tc.callerPayload {
+				t.Fatalf("run row callerSuppliedPayload = %v, want %v.\n\nResume reads this "+
+					"field to decide whether internal origin may be restored, so a run row "+
 					"that drops it hands a caller-parameterised run full trust on replay "+
-					"(memql#2888).", cp.CallerSuppliedPayload, tc.callerPayload)
+					"(memql#2888).", args["callerSuppliedPayload"], tc.callerPayload)
 			}
 			// The attacker payload really is captured -- which is why the flag
 			// has to be too.
-			if cp.TriggerContext == nil || cp.TriggerContext.Event["payload"] == nil {
-				t.Error("the checkpoint did not capture the trigger payload; if that ever stops " +
+			trigger, _ := args["triggerEvent"].(map[string]any)
+			if trigger == nil || trigger["payload"] == nil {
+				t.Error("the run row did not capture the trigger payload; if that ever stops " +
 					"being true this laundering path closes for a different reason and these " +
 					"tests should be revisited rather than deleted")
 			}
@@ -638,12 +633,12 @@ func TestCheckpointCarriesTheCallerSuppliedFlag(t *testing.T) {
 	}
 }
 
-// TestCheckpointConceptDeclaresTheFlag is the persistence half.
+// TestWorkRunConceptDeclaresTheFlag is the persistence half.
 //
-// v1:memql:checkpoint is a CLOSED schema (noAdditional defaults to true for
-// every concept), so an undeclared field does not merely fail to round-trip --
-// Concept.Create REJECTS the whole row. Combined with `omitempty`, that meant
-// only the caller-supplied case was refused: the mechanism was dead in
+// v1:work:run is a CLOSED schema (noAdditional defaults to true for every
+// concept), so an undeclared field does not merely fail to round-trip --
+// the write is REJECTED. Under the checkpoint that combined with `omitempty`
+// so only the caller-supplied case was refused: the mechanism was dead in
 // production and no test could see it, because encoding/json is not the
 // validator.
 //
@@ -651,7 +646,7 @@ func TestCheckpointCarriesTheCallerSuppliedFlag(t *testing.T) {
 // version grepped the file for the property name, and its doc claimed that was
 // "the input the persistence layer actually validates against". It is not --
 // the validator reads the LOADER-GENERATED schema. Measured consequences of
-// that gap, and it is the third green-for-the-wrong-reason on this change:
+// that gap, and it was the third green-for-the-wrong-reason on this change:
 //
 //	field deleted       -> grep RED     (the only case it caught)
 //	field COMMENTED OUT -> grep PASSES, whole suite green, defect fully back
@@ -659,43 +654,42 @@ func TestCheckpointCarriesTheCallerSuppliedFlag(t *testing.T) {
 //
 // Going through the registry catches all three, because it asks the same
 // question the persistence layer does.
-func TestCheckpointConceptDeclaresTheFlag(t *testing.T) {
+func TestWorkRunConceptDeclaresTheFlag(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	if _, err := memql.LoadUnifiedConcepts(logger); err != nil {
 		t.Fatalf("loading concepts: %v", err)
 	}
-	cm, err := memoryNodes.DefaultRegistry().Get(memoryNodes.ConceptMemQLCheckpoint)
+	cm, err := memoryNodes.DefaultRegistry().Get(memoryNodes.ConceptWorkRun)
 	if err != nil {
-		t.Fatalf("v1:memql:checkpoint is not registered -- the loader DROPPED it, which is what a "+
+		t.Fatalf("v1:work:run is not registered -- the loader DROPPED it, which is what a "+
 			"bad property type does (a `boolean` instead of `bool` takes the whole concept out "+
 			"and every query bound to it fails at runtime): %v", err)
 	}
 	raw, err := cm.SchemaVariant("definition")
 	if err != nil {
-		t.Fatalf("checkpoint schema: %v", err)
+		t.Fatalf("run schema: %v", err)
 	}
 	var schema struct {
 		Properties map[string]any `json:"properties"`
 		Required   []string       `json:"required"`
 	}
 	if err := json.Unmarshal(raw, &schema); err != nil {
-		t.Fatalf("parse checkpoint schema: %v", err)
+		t.Fatalf("parse run schema: %v", err)
 	}
 	if _, ok := schema.Properties["callerSuppliedPayload"]; !ok {
-		t.Fatalf("the LOADED v1:memql:checkpoint schema has no callerSuppliedPayload.\n\n"+
-			"Concept schemas are closed, so SaveCheckpoint's Concept.Create rejects the whole "+
-			"row -- and because the field is `omitempty`, that happens only for a "+
-			"CALLER-SUPPLIED run. Resume then has no checkpoint for exactly the case the flag "+
-			"exists to mark, and the laundering guard never runs (memql#2888).\n\n"+
+		t.Fatalf("the LOADED v1:work:run schema has no callerSuppliedPayload.\n\n"+
+			"Concept schemas are closed, so createWorkRun's write is rejected outright -- and "+
+			"the run then has no row for exactly the case the flag exists to mark. Resume finds "+
+			"nothing, and the laundering guard never runs (memql#2888).\n\n"+
 			"declared properties: %v", keysOf(schema.Properties))
 	}
-	// Must stay OPTIONAL: `omitempty` drops it on a server-originated run, and
-	// every checkpoint written before this change has no such field.
+	// Must stay OPTIONAL. createWorkRun stamps it (`?? false`) so every row
+	// written by the journal carries it, but rows written before that stamp
+	// existed do not, and requiring it would refuse them on a read-merge.
 	for _, r := range schema.Required {
 		if r == "callerSuppliedPayload" {
-			t.Error("callerSuppliedPayload is REQUIRED. It must not be: omitempty drops it for a " +
-				"server-originated run, and pre-existing rows do not carry it, so requiring it " +
-				"breaks both.")
+			t.Error("callerSuppliedPayload is REQUIRED. It must not be: a row written before " +
+				"the stamp existed does not carry it, so requiring it refuses the read-merge.")
 		}
 	}
 }

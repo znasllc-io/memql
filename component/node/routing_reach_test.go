@@ -85,7 +85,7 @@ func TestBrowserFacingConceptsForwardWithTheVerbsTheirSurfacesSubscribeTo(t *tes
 		surface string
 	}{
 		{"v1:portalviews:view", []string{"created", "updated", "deleted"}, "the saved-views rail (compose/useSavedViews.ts)"},
-		{"v1:agents:agent", []string{"created", "updated", "deleted"}, "the Agents view and Nexus (nexus/feed/useGoalWorld.ts)"},
+		{"v1:agents:agent", []string{"created", "updated", "deleted"}, "the Agents view"},
 		{"v1:library:artifact", []string{"created", "updated", "deleted"}, "the Artifacts page and Nexus's artifact slot"},
 		{"v1:library:file", []string{"created", "updated"}, "the Artifacts page's backing file row"},
 		{"v1:authoring:bundle", []string{"created", "updated", "deleted"}, "Nexus Constructs"},

@@ -39,7 +39,7 @@ const sdkControlByteFixture = "boom \x00 \a \v \t\n end"
 // builder with a control byte in a required string arg. Against %q this fails
 // with `invalid escape character 'x'`.
 func TestGeneratedBuilder_ControlByteStringArgParses(t *testing.T) {
-	call := HarnessTraceBuild(HarnessTraceArgs{PlanId: sdkControlByteFixture})
+	call := WorkTraceBuild(WorkTraceArgs{RunId: sdkControlByteFixture})
 
 	parsed, err := langparser.ParseExpression(call)
 	if err != nil {
@@ -49,8 +49,8 @@ func TestGeneratedBuilder_ControlByteStringArgParses(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *FunctionCallExpr, got %T", parsed)
 	}
-	if fn.Args["planId"] != sdkControlByteFixture {
-		t.Errorf("planId did not round-trip: %#v", fn.Args["planId"])
+	if fn.Args["runId"] != sdkControlByteFixture {
+		t.Errorf("runId did not round-trip: %#v", fn.Args["runId"])
 	}
 }
 
@@ -58,13 +58,19 @@ func TestGeneratedBuilder_ControlByteStringArgParses(t *testing.T) {
 // the emitter renders as string literals: several required strings, plus the
 // []string and object args that route through renderMemQLValue in support.go.
 func TestGeneratedBuilder_ControlByteAcrossArgKinds(t *testing.T) {
-	call := AddHarnessStepBuild(AddHarnessStepArgs{
-		StepId:         "v1:harness:step:s1",
-		PlanId:         "v1:harness:plan:p1",
-		Title:          sdkControlByteFixture,
-		IdempotencyKey: "k\x00ey",
-		DependsOn:      []string{"a\vb"},
-		Input:          map[string]any{"note": "r\ax"},
+	// Was AddHarnessStepBuild until the work spine's epic A1 retired the
+	// harness spine. createSemanticTask is the replacement because it has the
+	// same ARG SHAPES, which is what this test is about: several required
+	// strings, a []string, and an object routed through renderMemQLValue.
+	// (createWorkStep would be the closer analogue by meaning, but it is
+	// @serverOnly and therefore generates no builder at all.)
+	call := CreateSemanticTaskBuild(CreateSemanticTaskArgs{
+		TaskId:        "v1:planner:task:t1",
+		PlanId:        "v1:planner:plan:p1",
+		Kind:          "execute",
+		LogicalStepId: sdkControlByteFixture,
+		DependsOn:     []string{"a\vb"},
+		Input:         map[string]any{"note": "r\ax"},
 	})
 
 	parsed, err := langparser.ParseExpression(call)
@@ -75,8 +81,8 @@ func TestGeneratedBuilder_ControlByteAcrossArgKinds(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *FunctionCallExpr, got %T", parsed)
 	}
-	if fn.Args["title"] != sdkControlByteFixture {
-		t.Errorf("title did not round-trip: %#v", fn.Args["title"])
+	if fn.Args["logicalStepId"] != sdkControlByteFixture {
+		t.Errorf("logicalStepId did not round-trip: %#v", fn.Args["logicalStepId"])
 	}
 	if deps, ok := fn.Args["dependsOn"].([]any); !ok || len(deps) != 1 || deps[0] != "a\vb" {
 		t.Errorf("dependsOn did not round-trip: %#v", fn.Args["dependsOn"])

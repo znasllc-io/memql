@@ -138,9 +138,14 @@ func TestOnlyUserIdRefusesOnTheFilterPath(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // ownedTierMutation loads a REAL shipped mutation whose concept declares
-// `@rowAuthz(owner="ownerUserId")` and whose insert stamps that field from
-// actor.userId -- so this measures the shipped corpus, not a fixture that
-// merely resembles it.
+// an owner tier and whose insert stamps that field from actor.userId -- so
+// this measures the shipped corpus, not a fixture that merely resembles it.
+//
+// It was `mintAction` until the work spine's epic A1 retired the action
+// capture library. `createWorkRun` is the replacement and is a strictly
+// better subject: it is @serverOnly, so the empty-owner case below is the
+// one that actually happens in production -- the journal writes it under a
+// synthetic cluster actor -- rather than a hypothetical about a caller.
 func ownedTierMutation(t *testing.T) (*MemQLEngine, *FunctionMutationTemplate) {
 	t.Helper()
 	if _, err := LoadUnifiedConcepts(nil); err != nil {
@@ -150,8 +155,8 @@ func ownedTierMutation(t *testing.T) (*MemQLEngine, *FunctionMutationTemplate) {
 	if _, _, err := LoadUnifiedFunctions(nil, fnRegistry, concept.DefaultRegistry()); err != nil {
 		t.Fatalf("LoadUnifiedFunctions: %v", err)
 	}
-	fn, err := fnRegistry.Get("mintAction")
-	require.NoError(t, err, "mintAction must load from dsl/actions/mutations.memql")
+	fn, err := fnRegistry.Get("createWorkRun")
+	require.NoError(t, err, "createWorkRun must load from dsl/work/mutations.memql")
 	require.NotNil(t, fn.MutationTemplate)
 	return &MemQLEngine{}, fn.MutationTemplate
 }
@@ -169,11 +174,11 @@ func payloadField(t *testing.T, node MutationNode, field string) string {
 
 func mintArgs() map[string]any {
 	return map[string]any{
-		"actionId":         "act-3620",
-		"slug":             "probe",
-		"intent":           "probe the owner stamp",
-		"inputFingerprint": "fp-3620",
-		"calls":            []any{},
+		"runId":               "run-3620",
+		"automationName":      "probe",
+		"templateFingerprint": "fp-3620",
+		"status":              "running",
+		"startedAt":           "2026-09-05T12:00:00Z",
 	}
 }
 
