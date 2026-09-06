@@ -59,6 +59,7 @@ import (
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/workjournal"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/knowledge"
 )
@@ -174,6 +175,23 @@ func (i *Integration) SetArtifactPoll(attempts int, interval time.Duration) {
 	i.artifactPollInterval = interval
 }
 
+// SetWorkJournal wires the work spine's journal (spec section G). OPTIONAL:
+// a nil journal is the same shape as no journal, so a node without one runs
+// the pass exactly as it did before the spine existed.
+//
+// The journal is what makes this pass VISIBLE. Before it, the only account
+// of an analysis was the file row's own `status` flickering
+// stored -> analyzing -> ready, which says that something happened and
+// nothing about what: which stage cost the time, whether the summariser was
+// reached, how many chunks embedded. Those are steps of a run, and the
+// Training app reads them as one.
+func (i *Integration) SetWorkJournal(j *workjournal.Journal) {
+	if i == nil {
+		return
+	}
+	i.journal = j
+}
+
 func (i *Integration) log() *slog.Logger {
 	if i.logger != nil {
 		return i.logger
@@ -208,7 +226,7 @@ func (i *Integration) StartFileAnalysis(params AnalyzeFileParams) {
 // function takes writes status=failed with a reason a person can act on
 // FIRST; the error is what the caller logs, the row is what the owner
 // sees.
-func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams) error {
+func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams) (err error) {
 	if i == nil || i.engine == nil {
 		return fmt.Errorf("library.analyzeFile: integration not initialized")
 	}
@@ -225,6 +243,50 @@ func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams)
 		return fmt.Errorf("library.analyzeFile: ownerUserId is required -- the pass runs as the file's owner")
 	}
 	ctx = withUserActor(ctx, owner)
+
+	// --- the pass as a system-origin goal and run (spec section G) ---
+	//
+	// Opened here, after the owner is resolved and before anything is read,
+	// so every later write has a home and the Training app's feed shows the
+	// work from the moment it starts rather than when it finishes.
+	//
+	// THE STEPS ARE THREE, NOT FOUR. The design names the stages as
+	// "extract, chunk, embed, summarize", and chunking and embedding are one
+	// step here because the loop below interleaves them -- it writes a chunk
+	// row and embeds that chunk before moving to the next. Recording them as
+	// two sequential steps would assert an ordering this code does not have,
+	// and a journal that says the chunk stage finished before the embed
+	// stage began would be describing a different program.
+	run, runErr := i.journal.Begin(ctx, workjournal.Work{
+		OwnerUserID:  owner,
+		Template:     AnalysisTemplate,
+		Statement:    analysisStatement(params.Name),
+		GoalKey:      fileId,
+		Input:        analysisInput(params),
+		RequestedVia: "library",
+		Steps: []workjournal.StepDecl{
+			{Key: "extract", Kind: workjournal.KindDeterministic},
+			// REASONING, because it reaches the docSummary prompt. That is
+			// the derived-kind rule of spec section B, and recording it
+			// honestly is what lets a later reader ask which stages cost a
+			// model call without re-deriving it from the code.
+			{Key: "summarize", Kind: workjournal.KindReasoning},
+			{Key: "index", Kind: workjournal.KindDeterministic},
+		},
+	})
+	if runErr != nil {
+		// The journal is a record of the work, not the work. An analysis
+		// that cannot be journalled still runs.
+		i.log().Warn("library: the analysis run could not be opened", "fileId", fileId, "error", runErr)
+	}
+	outcome := map[string]any{}
+	defer func() {
+		if err != nil {
+			run.Failed(ctx, "analysis_failed", err.Error())
+			return
+		}
+		run.Succeeded(ctx, outcome)
+	}()
 
 	// --- the chunked case: fetch what the handler never held (memql#4782) ---
 	//
@@ -269,6 +331,16 @@ func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams)
 			return fmt.Errorf("library.analyzeFile: mark opaque file ready: %w", err)
 		}
 		i.restampArtifact(ctx, fileId)
+		// SKIPPED, not omitted. A step the template declares and this run did
+		// not need is written as skipped so the run's steps still add up to
+		// its declared order -- a missing row and a skipped one look
+		// identical to a reader, and only one of them is true.
+		skipped := "this file type is stored and downloadable, and there is no text in it to read"
+		run.Step(ctx, "extract").Skipped(ctx, skipped)
+		run.Step(ctx, "summarize").Skipped(ctx, skipped)
+		run.Step(ctx, "index").Skipped(ctx, skipped)
+		outcome["readable"] = false
+		outcome["chunks"] = 0
 		return nil
 	}
 
@@ -276,12 +348,15 @@ func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams)
 		return fmt.Errorf("library.analyzeFile: mark analyzing: %w", err)
 	}
 
-	text, err := i.extractor.Extract(ctx, params.MimeType, data)
-	if err != nil {
+	extractStep := run.Step(ctx, "extract")
+	text, extractErr := i.extractor.Extract(ctx, params.MimeType, data)
+	if extractErr != nil {
+		extractStep.Failed(ctx, "extract_failed", extractErr.Error())
 		return i.failFile(ctx, fileId, fmt.Sprintf(
-			"could not read the contents of this %s file: %v", params.MimeType, err))
+			"could not read the contents of this %s file: %v", params.MimeType, extractErr))
 	}
 	if strings.TrimSpace(text) == "" {
+		extractStep.Failed(ctx, "no_text", "the file yielded no text")
 		// A type we CAN read that yielded nothing is the
 		// password-protected-PDF / image-only-scan case design 3.1 names
 		// as the model failure ("could not extract text from a
@@ -290,10 +365,18 @@ func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams)
 		return i.failFile(ctx, fileId,
 			"no text could be extracted from this file -- it may be image-only, empty or password-protected")
 	}
+	extractStep.Done(ctx, map[string]any{"characters": len(text)})
 
 	// Best-effort, never fatal: a summariser outage must not cost the
 	// owner their chunks. An empty summary is simply not written.
+	//
+	// The step records which of those happened. A summary that is absent
+	// because no provider answered and one that is absent because the
+	// document had nothing to say are the same empty string on the file row,
+	// and only the step can tell them apart.
+	summarizeStep := run.Step(ctx, "summarize")
 	summary := i.summarize(ctx, params.Name, text)
+	summarizeStep.Done(ctx, map[string]any{"summarized": summary != "", "characters": len(summary)})
 
 	// The chunk rows carry artifactId so a similarity hit folds straight
 	// up to the Library row. That id comes from the promotion the
@@ -301,10 +384,12 @@ func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams)
 	// respect to this pass -- so when the caller has not already resolved
 	// it, wait, bounded, rather than doing a single read that races on a
 	// fast upload.
+	indexStep := run.Step(ctx, "index")
 	artifactId := strings.TrimSpace(params.ArtifactId)
 	if artifactId == "" {
 		resolved, ok := i.awaitArtifactId(ctx, fileId)
 		if !ok {
+			indexStep.Failed(ctx, "artifact_not_indexed", "the Library index row did not appear in time")
 			return i.failFile(ctx, fileId,
 				"this file was stored but has not appeared in the Library index yet, so it could not be indexed for search")
 		}
@@ -323,6 +408,7 @@ func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams)
 			text:       chunkText,
 		})
 		if err != nil {
+			indexStep.Failed(ctx, "chunk_write_failed", fmt.Sprintf("chunk %d of %d failed to save", seq+1, len(chunks)))
 			return i.failFile(ctx, fileId, fmt.Sprintf(
 				"this file could not be indexed for search (chunk %d of %d failed to save)", seq+1, len(chunks)))
 		}
@@ -338,6 +424,8 @@ func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams)
 		embedded++
 	}
 
+	indexStep.Done(ctx, map[string]any{"chunks": len(chunks), "embedded": embedded})
+
 	if err := i.setFileStatus(ctx, fileId, fileStatusUpdate{
 		status:          "ready",
 		summary:         summary,
@@ -346,11 +434,52 @@ func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams)
 		return fmt.Errorf("library.analyzeFile: mark ready: %w", err)
 	}
 	i.restampArtifact(ctx, fileId)
+	outcome["readable"] = true
+	outcome["chunks"] = len(chunks)
+	outcome["embedded"] = embedded
+	outcome["summarized"] = summary != ""
+	outcome["artifactId"] = artifactId
 
 	i.log().Info("library: file analysis complete",
 		"fileId", fileId, "artifactId", artifactId,
 		"chunks", len(chunks), "embedded", embedded, "summarized", summary != "")
 	return nil
+}
+
+// AnalysisTemplate is the run's `automationName` -- the deterministic
+// template this pass IS. It is exported because it is a CONTRACT with the
+// Training app, which filters its feed by it: every run this pass writes
+// carries this value and no other run does, so the app shows analyses
+// without narrowing a query somebody else owns.
+const AnalysisTemplate = "libraryAnalyzeFile"
+
+// analysisStatement is the goal in a person's words. It names the file
+// because that is what the goal is about, and it is the only place the name
+// appears on the spine -- the run keys by id.
+func analysisStatement(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "Read an uploaded file"
+	}
+	return "Read " + name
+}
+
+// analysisInput is the run's input envelope, and the key the Training app
+// reads. `fileId` is always present; `artifactId` is present only when the
+// caller already resolved it, because the index row is promoted
+// asynchronously and an empty string is not an answer.
+func analysisInput(params AnalyzeFileParams) map[string]any {
+	in := map[string]any{"fileId": strings.TrimSpace(params.FileId)}
+	if name := strings.TrimSpace(params.Name); name != "" {
+		in["name"] = name
+	}
+	if mime := strings.TrimSpace(params.MimeType); mime != "" {
+		in["mimeType"] = mime
+	}
+	if artifact := strings.TrimSpace(params.ArtifactId); artifact != "" {
+		in["artifactId"] = artifact
+	}
+	return in
 }
 
 // fetchAndHash streams the stored blob ONCE: the whole stream feeds the
