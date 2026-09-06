@@ -1,78 +1,109 @@
 // queries.memql
 //
-// Reads over the work namespace. The @serverOnly ones are what resume
-// (component/automations/resume.go) and the epic A2 executor read under
-// the journal's synthetic cluster actor; they carry no owner conjunct
-// because the rows they read are the deployment's and the caller's
-// admission is the tier's cluster-owner escape. The two @actor lists are
-// the owner-facing reads Nexus (sub-project B) seeds from.
+// Reads over the work namespace. Same-domain constructs are ambient, so
+// there is no `use work.*` line here (#2617).
+//
+// WHY THE RUN-SCOPED READS ARE @serverOnly. The journal writes under a
+// SYNTHETIC cluster actor (component/automations/journal.go), whose rows
+// have their owner blanked to present-and-empty by
+// rowauthz_nonprincipal_owner.go -- they are the deployment's. So an
+// `ownerUserId==actor.userId` conjunct would match ZERO of them, and the
+// reads resume needs would return nothing on exactly the runs resume
+// exists for. Caller-scoping is not a narrower version of these reads; it
+// is a different read that answers about a person's own goals, and that
+// read is the two @actor lists at the bottom of this file. Admission for
+// the server-only ones is the composite tier's cluster-owner escape, and
+// WHO may resume is decided by the caller's own handler before any of
+// this runs.
+//
+// EACH ONE SPELLS THE CLUSTER-OWNER DISJUNCT OUT.
+// TestRowAuthzEnforcementLandGate (component/memql) refuses a read over a
+// tiered concept that no top-level conjunct narrows, and it has no exemption
+// list on purpose. `actor.isClusterOwner==true` is that conjunct, and it
+// narrows NOTHING that reaches these constructs: @serverOnly means the only
+// caller is server-side Go under internal origin, and the one such caller is
+// journalContext's synthetic actor, whose Role is auth.RoleOwner -- which is
+// precisely what AccessContext.IsClusterOwner() tests. So the filter now says
+// out loud what the tier already implied, and the gate can see it.
 
-use work.concepts.{ goal, run, step, modelCall, approval, observation }
-use work.shapes.{ workGoalFull, workRunFull, workStepFull, workModelCallFull, workApprovalFull, workObservationFull }
-
-/// One run by id, for resume. Server-only: read under the journal's cluster actor.
+/// One run by id, for resume. @serverOnly: the run may be the deployment's, with a
+/// present-and-empty owner, so an actor.userId conjunct would refuse the writer its own record.
 @serverOnly
 @unbounded("one run by id -- bounded to a single row")
+@actor
 query run workRunById {
   args {
-    runId  string  @required
+    runId  string!
   }
-  filter  row.id==args.runId
+  filter  row.id==args.runId && actor.isClusterOwner==true
   shape   workRunFull
 }
 
-/// Every step of one run, for resume and for the OS run rail. Bounded by the run.
+/// Every step of one run, for resume and for the OS run rail. Bounded by the run. @serverOnly for
+/// workRunById's reason: a system run's steps carry no owner, so actor.userId scoping returns an
+/// empty journal and resume would silently re-run completed steps.
 @serverOnly
 @unbounded("every step of ONE run -- bounded by the run, and resume needs all of them")
+@actor
 query step workStepsForRun {
   args {
-    runId  string  @required
+    runId  string!
   }
-  filter  runId==args.runId
+  filter  runId==args.runId && actor.isClusterOwner==true
   shape   workStepFull
 }
 
-/// Runs of one automation, newest first, for the operator's run list.
+/// Runs of one automation, newest first, for the operator's run list. @serverOnly: an automation is
+/// the cluster's, not a person's, so there is no actor.userId to scope to -- every row this returns
+/// has a present-and-empty owner by construction.
 @serverOnly
+@actor
 query run workRunsForAutomation {
   args {
-    automationName  string  @required
+    automationName  string!
   }
-  filter  automationName==args.automationName
+  filter  automationName==args.automationName && actor.isClusterOwner==true
   sort    "row.createdAt", "desc"
   shape   workRunFull
 }
 
-/// Every model call of one run, for replay. Bounded by the run.
+/// Every model call of one run, for replay. Bounded by the run. @serverOnly: replay reads the
+/// journal as the engine, and the rows of a system run have no owner for actor.userId to match.
 @serverOnly
 @unbounded("every model call of ONE run -- bounded by the run, and replay needs all of them")
+@actor
 query modelCall workModelCallsForRun {
   args {
-    runId  string  @required
+    runId  string!
   }
-  filter  runId==args.runId
+  filter  runId==args.runId && actor.isClusterOwner==true
   shape   workModelCallFull
 }
 
-/// Every observation of one run. Bounded by the run.
+/// Every observation of one run. Bounded by the run. @serverOnly for the same reason as the model
+/// calls: consolidation and recall read these as the engine, where actor.userId is synthetic.
 @serverOnly
 @unbounded("every observation of ONE run -- bounded by the run")
+@actor
 query observation workObservationsForRun {
   args {
-    runId  string  @required
+    runId  string!
   }
-  filter  runId==args.runId
+  filter  runId==args.runId && actor.isClusterOwner==true
   shape   workObservationFull
 }
 
-/// One approval by id, for resume's artifact-hash check.
+/// One approval by id, for resume's artifact-hash check. @serverOnly: resume compares the hash
+/// BEFORE it knows whose decision it is, so it cannot scope to actor.userId; the person-facing
+/// read of the same rows is workApprovalsForOwner below, which does.
 @serverOnly
 @unbounded("one approval by id -- bounded to a single row")
+@actor
 query approval workApprovalById {
   args {
-    approvalId  string  @required
+    approvalId  string!
   }
-  filter  row.id==args.approvalId
+  filter  row.id==args.approvalId && actor.isClusterOwner==true
   shape   workApprovalFull
 }
 
@@ -84,7 +115,8 @@ query goal workGoalsForOwner {
   shape   workGoalFull
 }
 
-/// The caller's pending approvals, newest first. Owned.
+/// The caller's pending approvals, newest first. Owned. decision=="" is the pending state, and it
+/// matches because createWorkApproval STAMPS the empty string rather than leaving the key absent.
 @actor
 query approval workApprovalsForOwner {
   filter  ownerUserId==actor.userId && decision==""

@@ -10891,6 +10891,46 @@ QueryClient.prototype.warmupStateForIdentity = function (this: QueryClient, args
   return this.executeNamed("warmupStateForIdentity", buildWarmupStateForIdentity(args), opts);
 };
 
+/** The caller's pending approvals, newest first. Owned. decision=="" is the pending state, and it matches because createWorkApproval STAMPS the empty string rather than leaving the key absent. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwner"] in generated_concepts.ts).
+export interface WorkApprovalsForOwnerArgs {
+}
+
+export function buildWorkApprovalsForOwner(args: WorkApprovalsForOwnerArgs): string {
+  void args;
+  return "query workApprovalsForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workApprovalsForOwner(args?: WorkApprovalsForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workApprovalsForOwner = function (this: QueryClient, args: WorkApprovalsForOwnerArgs = {} as WorkApprovalsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workApprovalsForOwner", buildWorkApprovalsForOwner(args), opts);
+};
+
+/** The caller's goals, newest first. Owned: ownerUserId==actor.userId binds server-side. */
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalsForOwner"] in generated_concepts.ts).
+export interface WorkGoalsForOwnerArgs {
+}
+
+export function buildWorkGoalsForOwner(args: WorkGoalsForOwnerArgs): string {
+  void args;
+  return "query workGoalsForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workGoalsForOwner(args?: WorkGoalsForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workGoalsForOwner = function (this: QueryClient, args: WorkGoalsForOwnerArgs = {} as WorkGoalsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workGoalsForOwner", buildWorkGoalsForOwner(args), opts);
+};
+
 /** Look up the worker registration owned by an identity row.
 The `ownerUserId==actor.userId` conjunct is not redundant with the concept's tier -- it is what makes this read's result set the SAME before and after enforcement, which TestRowAuthzEnforcementLandGate is the gate for. It is satisfied at runtime because the only caller, component/worker's register handshake, runs under auth.ContextWithUserActor for the owner the worker_token's identity row named. A worker authenticates as worker:<id>, so without that stamp this read returns nothing at all -- which is the failure that reads as "this machine has never registered" and silently creates a duplicate row on every reconnect. */
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["workerByIdentityId"] in generated_concepts.ts).

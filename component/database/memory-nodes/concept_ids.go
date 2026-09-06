@@ -43,6 +43,20 @@ const (
 	ConceptActionsAction = "v1:actions:action"
 )
 
+// Work-spine concepts (v1:work:*) -- the execution model's spine
+// (docs/superpowers/specs/2026-09-05-work-spine-design.md). Constants
+// rather than literals because the journal (component/automations),
+// the routing rules and the resume path all have to agree on the
+// spelling.
+const (
+	ConceptWorkGoal        = "v1:work:goal"
+	ConceptWorkRun         = "v1:work:run"
+	ConceptWorkStep        = "v1:work:step"
+	ConceptWorkModelCall   = "v1:work:modelCall"
+	ConceptWorkApproval    = "v1:work:approval"
+	ConceptWorkObservation = "v1:work:observation"
+)
+
 // Authoring domain concepts (v1:authoring:*) -- the graph-stored
 // substrate for planner-authored DSL bundles (epic #954). The construct
 // row is the per-construct member of a bundle and the catalog's reuse

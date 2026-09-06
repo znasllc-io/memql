@@ -1,19 +1,33 @@
 // mutations.memql
 //
-// Writes over the work namespace. ALL @serverOnly in epic A1: the journal
-// writes them from component/automations/journal.go under internal
-// origin, and nothing client-reachable writes a run. Epic A2 adds the
-// client-reachable createGoal / cancelGoal / decideApproval on top.
+// Writes over the work namespace. Same-domain constructs are ambient, so
+// there is no `use work.*` line here (#2617).
+//
+// WHY EVERY WRITE HERE IS @serverOnly. These rows are the engine's own
+// record of what it executed -- the journal is an audit log, and a
+// client-reachable insert is a forged execution: a caller could claim a
+// run that never happened, or a `done` step for work never done, and
+// resume would then serve that forgery back as fact. Scoping to
+// actor.userId does not address that; it would make the forgery
+// correctly attributed and no less a forgery. The second half of the
+// same answer is that the real writer has no actor.userId to scope BY:
+// component/automations/journal.go writes under a synthetic cluster
+// actor whose stamped owner is blanked to present-and-empty by
+// rowauthz_nonprincipal_owner.go, so an owner conjunct would refuse the
+// engine its own rows. Epic A2 adds the client-reachable createGoal /
+// cancelGoal / decideApproval, which are person-owned and therefore
+// caller-scoped rather than server-only.
 //
 // The insert blocks use accept/stamp: accept names the caller-provided
-// args copied verbatim, stamp names what the engine decides. ownerUserId
-// is stamped from actor.userId; under the journal's synthetic cluster
-// actor the engine then blanks it to present-and-empty, which is the
-// deployment's row (component/memql/rowauthz_nonprincipal_owner.go).
-
-use work.concepts.{ goal, run, step, modelCall, approval, observation }
+// args copied verbatim, stamp names what the engine decides. Every
+// optional field carrying a @default is STAMPED with that default here,
+// because @default is documentation and `??` is the only mechanism that
+// writes a value (memql#3038) -- and for approval.decision it is
+// load-bearing, since workApprovalsForOwner filters decision=="".
 
 /// Open a run. status is an argument rather than a stamp so epic A2 can open a run in `compiling`.
+/// @serverOnly: a caller who can open a run can fabricate an execution record, and the writer is a
+/// synthetic cluster actor with no actor.userId to scope to.
 @serverOnly
 @actor
 mutate run createWorkRun {
@@ -36,16 +50,22 @@ mutate run createWorkRun {
     startedAt              string!
   }
   insert {
-    accept { goalId, automationName, templateFingerprint, input, inputFingerprint, triggeredBy, triggerEvent, callerSuppliedPayload, mode, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, startedAt }
+    accept { goalId, automationName, templateFingerprint, input, inputFingerprint, triggeredBy, triggerEvent, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, startedAt }
     stamp {
       id: args.runId
       ownerUserId: actor.userId
+      mode: args.mode ?? "live"
+      callerSuppliedPayload: args.callerSuppliedPayload ?? false
+      replayPolicy: "strict"
+      cancelRequested: false
     }
   }
 }
 
 /// Advance a run: a heartbeat, the chain head, or the terminal status. Read-merge, so every field
-/// not named keeps its prior value.
+/// not named keeps its prior value. @serverOnly: only the executor knows a run's true status, and
+/// actor.userId scoping would let a caller close somebody's run as succeeded so long as it was
+/// their own.
 @serverOnly
 mutate run updateWorkRun {
   args {
@@ -74,7 +94,9 @@ mutate run updateWorkRun {
 }
 
 /// Write a step's intent: the `running` version before the body executes. A retry writes this
-/// again for the same stepId with attempt incremented.
+/// again for the same stepId with attempt incremented. @serverOnly for createWorkRun's reason: a
+/// step row is a claim about what the engine ran, which no caller may make about itself, so
+/// actor.userId scoping narrows the wrong axis.
 @serverOnly
 @actor
 mutate step createWorkStep {
@@ -93,15 +115,19 @@ mutate step createWorkStep {
     startedAt       string
   }
   insert {
-    accept { runId, key, seq, stepType, kind, call, dependsOn, status, attempt, idempotencyKey, startedAt }
+    accept { runId, key, seq, stepType, call, dependsOn, status, attempt, idempotencyKey, startedAt }
     stamp {
       id: args.stepId
       ownerUserId: actor.userId
+      kind: args.kind ?? ""
+      symptom: ""
     }
   }
 }
 
 /// Write a step's receipt: the done / failed / skipped version after the body. Read-merge.
+/// @serverOnly: the receipt is the engine's testimony about its own execution; a caller scoped to
+/// actor.userId could still mark their own failed step done, which is the whole failure mode.
 @serverOnly
 mutate step updateWorkStep {
   args {
@@ -132,7 +158,9 @@ mutate step updateWorkStep {
   }
 }
 
-/// Create a goal. Server-only in A1; epic A2 adds the client-reachable createGoal.
+/// Create a goal. @serverOnly in A1 because nothing client-reachable exists to call it yet and a
+/// half-built create is worse than none: epic A2 adds the caller-facing createGoal, and THAT one is
+/// scoped to actor.userId, which is exactly why this one does not have to pretend to be.
 @serverOnly
 @actor
 mutate goal createWorkGoal {
@@ -147,16 +175,19 @@ mutate goal createWorkGoal {
     requestedVia      string
   }
   insert {
-    accept { statement, origin, responsibilityId, accountIds, input, ceilings, requestedVia }
+    accept { statement, origin, responsibilityId, accountIds, input, ceilings }
     stamp {
       id: args.goalId
       ownerUserId: actor.userId
       status: "open"
+      requestedVia: args.requestedVia ?? ""
     }
   }
 }
 
-/// Journal one model call.
+/// Journal one model call. @serverOnly: the row records what a PROVIDER was asked and answered, and
+/// replay serves later calls from it -- a caller-written row is a poisoned cache. There is also no
+/// actor.userId at the call site: the router runs inside the engine.
 @serverOnly
 @actor
 mutate modelCall createWorkModelCall {
@@ -187,7 +218,9 @@ mutate modelCall createWorkModelCall {
   }
 }
 
-/// Journal one observation.
+/// Journal one observation. @serverOnly: observations are the embedding source recall reads back as
+/// episodic memory, so a client-reachable write is memory injection -- and scoping to actor.userId
+/// would only mean the caller poisons their own recall, which is still the defect.
 @serverOnly
 @actor
 mutate observation createWorkObservation {
@@ -208,7 +241,9 @@ mutate observation createWorkObservation {
   }
 }
 
-/// Raise a human gate.
+/// Raise a human gate. @serverOnly: only the run knows it needs approval and what artifact hash it
+/// parked on, and a caller-raised approval scoped to actor.userId would let somebody manufacture a
+/// gate against their own run and then answer it.
 @serverOnly
 @actor
 mutate approval createWorkApproval {
@@ -230,11 +265,16 @@ mutate approval createWorkApproval {
     stamp {
       id: args.approvalId
       ownerUserId: actor.userId
+      decision: ""
     }
   }
 }
 
-/// Record a decision. Server-only in A1; the client-reachable form arrives in epic A2 with its gate.
+/// Record a decision. @serverOnly in A1: decidedBy is the authority the row carries, and a mutation
+/// argument is whatever the caller typed, so a client-reachable version lets anyone write a
+/// colleague's name into an approval. Scoping to actor.userId asserts the row is the caller's,
+/// which is true and beside the point -- what must hold is that decidedBy IS the verified actor,
+/// and epic A2's caller-facing form stamps it from the envelope rather than accepting it.
 @serverOnly
 mutate approval decideWorkApproval {
   args {

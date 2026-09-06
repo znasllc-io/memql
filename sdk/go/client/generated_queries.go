@@ -11539,6 +11539,40 @@ func WarmupStateForIdentityBuild(args WarmupStateForIdentityArgs) string {
 	return b.String()
 }
 
+// WorkApprovalsForOwner -- The caller's pending approvals, newest first. Owned. decision=="" is the pending state, and it matches because createWorkApproval STAMPS the empty string rather than leaving the key absent.
+//
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwner"] in generated_concepts.go).
+type WorkApprovalsForOwnerArgs struct {
+}
+
+// WorkApprovalsForOwner calls the engine query workApprovalsForOwner.
+func (qc *QueryClient) WorkApprovalsForOwner(ctx context.Context, args WorkApprovalsForOwnerArgs) (*Result, error) {
+	call := WorkApprovalsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workApprovalsForOwner", call)
+}
+
+func WorkApprovalsForOwnerBuild(args WorkApprovalsForOwnerArgs) string {
+	_ = args
+	return "query workApprovalsForOwner()"
+}
+
+// WorkGoalsForOwner -- The caller's goals, newest first. Owned: ownerUserId==actor.userId binds server-side.
+//
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalsForOwner"] in generated_concepts.go).
+type WorkGoalsForOwnerArgs struct {
+}
+
+// WorkGoalsForOwner calls the engine query workGoalsForOwner.
+func (qc *QueryClient) WorkGoalsForOwner(ctx context.Context, args WorkGoalsForOwnerArgs) (*Result, error) {
+	call := WorkGoalsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workGoalsForOwner", call)
+}
+
+func WorkGoalsForOwnerBuild(args WorkGoalsForOwnerArgs) string {
+	_ = args
+	return "query workGoalsForOwner()"
+}
+
 // WorkerByIdentityId -- Look up the worker registration owned by an identity row.
 // The `ownerUserId==actor.userId` conjunct is not redundant with the concept's tier -- it is what makes this read's result set the SAME before and after enforcement, which TestRowAuthzEnforcementLandGate is the gate for. It is satisfied at runtime because the only caller, component/worker's register handshake, runs under auth.ContextWithUserActor for the owner the worker_token's identity row named. A worker authenticates as worker:<id>, so without that stamp this read returns nothing at all -- which is the failure that reads as "this machine has never registered" and silently creates a duplicate row on every reconnect.
 //

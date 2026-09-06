@@ -4,8 +4,6 @@
 // default projection so a later credential-adjacent field cannot leak
 // by being added to the concept (the Users app lesson, clients/os/README.md).
 
-use work.concepts.{ goal, run, step, modelCall, approval, observation }
-
 /// Every goal field the OS and the SDK read.
 @row
 shape goal workGoalFull {

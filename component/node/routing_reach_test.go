@@ -117,6 +117,18 @@ func TestBrowserFacingConceptsForwardWithTheVerbsTheirSurfacesSubscribeTo(t *tes
 		{"v1:campaigns:template", []string{"created", "updated"}, "the OS Campaigns app's Templates section"},
 		{"v1:campaigns:senderIdentity", []string{"created", "updated"}, "the sender-identity picker and its verification state"},
 		{"v1:campaigns:emailRule", []string{"created", "updated"}, "the event-email rules surface"},
+
+		// THE WORK SPINE (design record 2026-09-05-work-spine-design.md,
+		// section D "Live feeds"). Like the campaigns rows above, these
+		// rules land ahead of their surface: sub-project B builds the OS
+		// Nexus over them, and without an entry here a cleanup could
+		// delete them in between with nothing to notice. modelCall and
+		// observation are deliberately absent -- on-demand reads,
+		// excluded on volume grounds exactly as v1:worker:invocation is.
+		{"v1:work:goal", []string{"created", "updated", "deleted"}, "the OS Nexus goal list (sub-project B) is a live feed"},
+		{"v1:work:run", []string{"created", "updated", "deleted"}, "a run's status flips on the node that runs it, and the person watching is on the bff"},
+		{"v1:work:step", []string{"created", "updated", "deleted"}, "the run rail is one LiveList over step rows"},
+		{"v1:work:approval", []string{"created", "updated", "deleted"}, "a person must see an approval arrive without polling"},
 	}
 
 	for _, c := range cases {

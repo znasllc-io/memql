@@ -19,7 +19,9 @@
 // written under a person's borrowed authority (epic A2) is theirs. That
 // is why ownerUserId is @serverSet and NOT required.
 
+use authoring.concepts.{ construct }
 use identity.concepts.{ user }
+use planner.concepts.{ responsibility }
 
 /// The intent, owned by a person. Execution state does not live here: it lives on the run, so a
 /// goal that has been re-run, forked or repaired still reads as one thing.
@@ -37,6 +39,9 @@ concept goal {
   requestedVia      enum("", "api", "ask", "nexus", "responsibility", "library", "materializer")  @default("")  @description("The surface the goal arrived through. Empty when unknown.")
   closedAt          datetime  @description("When status reached closed.")
   closeReason       string  @description("Why it closed, in words a person can read.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forResponsibility", field="responsibilityId", target=responsibility, direction="outgoing")
 }
 
 /// One execution against a goal, or -- in epic A1 -- one automation execution with no goal.
@@ -80,7 +85,9 @@ concept run {
   finishedAt             datetime  @description("When status reached a terminal value.")
   summary                object  @description("Folded from the journal before its retention window closes (epic A2).")
 
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="goalId", target=goal, direction="outgoing")
+  @relationship(type="references", as="compiledFrom", field="templateConstructId", target=construct, direction="outgoing")
 }
 
 /// A node of a run. A retry is a NEW VERSION of the same row with attempt incremented; the intent is
@@ -121,6 +128,7 @@ concept step {
   errorCode          string  @description("A catalogued code when the step failed.")
   errorMessage       string  @description("The failure in words.")
 
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="runId", target=run, direction="outgoing")
 }
 
@@ -146,6 +154,7 @@ concept modelCall {
   response      object  @description("The response, structured output or text.")
   error         string  @description("The provider's error, when there was one.")
 
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="runId", target=run, direction="outgoing")
 }
 
@@ -170,6 +179,7 @@ concept approval {
   answer        object  @description("The person's answer, for kind feedback.")
   expiresAt     datetime  @description("When a pending approval lapses.")
 
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="runId", target=run, direction="outgoing")
 }
 
@@ -186,5 +196,6 @@ concept observation {
   content      string!  @description("The text rendering -- the embedding source, so observations are recall-able.")
   embedding    []float  @description("The embedding vector for content, populated lazily by the embed hook.")
 
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="runId", target=run, direction="outgoing")
 }

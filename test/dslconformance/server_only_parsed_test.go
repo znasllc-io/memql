@@ -879,6 +879,52 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// and by construction cannot gate a builtin.
 		{Path: "cluster/mutations.memql", Name: "createReleaseCut"}:       true,
 		{Path: "cluster/mutations.memql", Name: "updateReleaseCutStatus"}: true,
+
+		// THE WORK JOURNAL (work spine A1, design record
+		// docs/superpowers/specs/2026-09-05-work-spine-design.md section D).
+		// Fifteen constructs, and they earn the annotation twice over.
+		//
+		// The WRITES are the engine's testimony about its own execution. A
+		// run row, a step receipt, a model-call record and an approval are
+		// each a claim about what the platform DID, and resume, replay and
+		// recall consume them as fact. A client-reachable insert is a forged
+		// execution, and caller-scoping does not touch that: an
+		// `ownerUserId==actor.userId` conjunct makes the forgery correctly
+		// attributed and no less a forgery -- a caller could still mark
+		// their own failed step `done`, or write a `served: journal`
+		// model-call row that replay then hands to a model-free run.
+		//
+		// The READS are server-only for a mechanical reason rather than a
+		// judgement. The journal writes under a SYNTHETIC cluster actor
+		// (component/automations/journal.go), and
+		// rowauthz_nonprincipal_owner.go blanks the owner such an actor
+		// would stamp -- so these rows have a present-and-empty owner and
+		// an actor.userId conjunct matches ZERO of them. Scoping the reads
+		// would return an empty journal on exactly the runs resume exists
+		// for, which is worse than refusing: resume would re-run completed
+		// steps and call it a clean resume. Admission is the composite
+		// tier's cluster-owner escape; WHO may resume is decided by the
+		// caller's handler before LoadRunJournal runs.
+		//
+		// The person-facing reads of the same rows are NOT here, and that
+		// is the check on this block: workGoalsForOwner and
+		// workApprovalsForOwner are @actor and caller-scoped, because a
+		// goal and a decision ARE somebody's.
+		{Path: "work/queries.memql", Name: "workRunById"}:             true,
+		{Path: "work/queries.memql", Name: "workStepsForRun"}:         true,
+		{Path: "work/queries.memql", Name: "workRunsForAutomation"}:   true,
+		{Path: "work/queries.memql", Name: "workModelCallsForRun"}:    true,
+		{Path: "work/queries.memql", Name: "workObservationsForRun"}:  true,
+		{Path: "work/queries.memql", Name: "workApprovalById"}:        true,
+		{Path: "work/mutations.memql", Name: "createWorkRun"}:         true,
+		{Path: "work/mutations.memql", Name: "updateWorkRun"}:         true,
+		{Path: "work/mutations.memql", Name: "createWorkStep"}:        true,
+		{Path: "work/mutations.memql", Name: "updateWorkStep"}:        true,
+		{Path: "work/mutations.memql", Name: "createWorkGoal"}:        true,
+		{Path: "work/mutations.memql", Name: "createWorkModelCall"}:   true,
+		{Path: "work/mutations.memql", Name: "createWorkObservation"}: true,
+		{Path: "work/mutations.memql", Name: "createWorkApproval"}:    true,
+		{Path: "work/mutations.memql", Name: "decideWorkApproval"}:    true,
 	}
 	for k := range want {
 		if !set[k] {
