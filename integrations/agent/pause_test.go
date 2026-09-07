@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/znasllc-io/memql/component/memql/taskstamp"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -33,7 +32,7 @@ func TestPauseRegistry(t *testing.T) {
 	}
 }
 
-// successExecutor is a taskstamp.Executor whose tool dispatch always
+// successExecutor is a toolExecutor whose tool dispatch always
 // succeeds, so the loop completes a tool round and advances to the next
 // iteration (where the pause checkpoint is then observed).
 type successExecutor struct{}
@@ -83,7 +82,7 @@ func TestRunNonStreamingToolLoop_PauseBeforeStart(t *testing.T) {
 // of starting another model call.
 func TestRunNonStreamingToolLoop_PauseAtCheckpointMidTurn(t *testing.T) {
 	r := testReplier()
-	r.stamper = taskstamp.New(successExecutor{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r.stamper = newToolRecorder(successExecutor{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	const reqID = "req-pause-mid"
 	ClearPause(reqID)
 

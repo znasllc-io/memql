@@ -367,7 +367,7 @@ func buildEventEnvelope(triggeringEvent *events.Event, triggeredBy, trigger stri
 // automation's source decides whether its steps reach the engine with internal
 // origin.
 func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation, triggeredBy string, triggeringEvent *events.Event) (*AutomationExecution, error) {
-	return e.executeWithEvent(ctx, automation, triggeredBy, triggeringEvent, false)
+	return e.executeWithEvent(ctx, automation, triggeredBy, triggeringEvent, false, nil)
 }
 
 // ExecuteWithClientEvent runs an automation whose TRIGGER PAYLOAD came from a
@@ -399,10 +399,14 @@ func (e *Executor) ExecuteWithEvent(ctx context.Context, automation *Automation,
 // So the rule is: internal origin requires BOTH a trusted source AND a trigger
 // payload the caller did not supply.
 func (e *Executor) ExecuteWithClientEvent(ctx context.Context, automation *Automation, triggeredBy string, triggeringEvent *events.Event) (*AutomationExecution, error) {
-	return e.executeWithEvent(ctx, automation, triggeredBy, triggeringEvent, true)
+	return e.executeWithEvent(ctx, automation, triggeredBy, triggeringEvent, true, nil)
 }
 
-func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation, triggeredBy string, triggeringEvent *events.Event, callerSuppliedPayload bool) (*AutomationExecution, error) {
+// adopt is nil for every trigger-driven run (the overwhelmingly common
+// case) and non-nil only when a caller is executing an automation ONTO an
+// existing v1:work:run row -- see adopt.go and memql#5054. Where it changes
+// behaviour, the branch says why at the site.
+func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation, triggeredBy string, triggeringEvent *events.Event, callerSuppliedPayload bool, adopt *RunAdoption) (*AutomationExecution, error) {
 	if automation == nil {
 		return nil, fmt.Errorf("automation is nil")
 	}
@@ -451,6 +455,14 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	// alone is not enough (memql#2888).
 	exec.SourceTrusted = automation.Trusted && !callerSuppliedPayload
 	exec.CallerSuppliedPayload = callerSuppliedPayload
+
+	// THE EXECUTION *IS* THE EXISTING RUN (memql#5054). Taking the id here,
+	// before anything reads exec.ID, is what makes every downstream write --
+	// the journal's step rows, its heartbeats, its terminal close -- land on
+	// the run the caller is already watching, with no second row.
+	if adopt != nil {
+		exec.ID = adopt.RunId
+	}
 
 	// Global execution budget (memql#1142). The storm WARN above is a
 	// SIGNAL; this is the STOP. A process-global, cross-executor ceiling
@@ -628,7 +640,19 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		// Check for duplicate execution (only when dedup is explicitly enabled)
 		// Dedup should only be used for event-triggered automations where
 		// idempotency matters. Scheduled/manual runs should NOT use dedup.
-		if e.dedupEnabled && e.dedup != nil && e.dedup.isDuplicate(automation.Name, exec.InitialChainHead) {
+		// AN ADOPTED RUN IS EXEMPT FROM BOTH DEDUP GATES, and this is not an
+		// optimisation. Both key on the initial chain head, which is a hash of
+		// (automation, triggeredBy, event, input) -- so two DIFFERENT goals
+		// that compile to the same template with the same input produce the
+		// SAME key. The per-process gate would skip the second as a duplicate
+		// and the cluster guard's once-ever claim would skip every later one
+		// cluster-wide, leaving those goals' runs at `running` with no
+		// heartbeat until the abandoned sweep closed them. Two people asking
+		// for the same thing is not a double-fire. An adopted run's identity
+		// is its run id, and its claim is held by the caller (the work
+		// integration's Postgres-backed ClusterExecutionGuard, keyed on that
+		// id), which is both stronger and the right grain.
+		if adopt == nil && e.dedupEnabled && e.dedup != nil && e.dedup.isDuplicate(automation.Name, exec.InitialChainHead) {
 			if e.logger != nil {
 				e.logger.Info("skipping duplicate execution",
 					"component", ComponentName,
@@ -648,7 +672,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		// than one; the cluster guard claims the (automation, chain-head) in
 		// the DB so exactly one replica executes. Only the event path carries
 		// a guard (scheduled runs are gated by the cron leader instead).
-		if e.clusterGuard != nil && exec.InitialChainHead != "" {
+		if adopt == nil && e.clusterGuard != nil && exec.InitialChainHead != "" {
 			if !e.clusterGuard.Claim(ctx, automation.Name, exec.InitialChainHead) {
 				exec.Status = "skipped"
 				exec.Error = "duplicate execution (cluster guard -- claimed by another replica)"
@@ -671,7 +695,11 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 				"component", ComponentName, "automation", automation.Name)
 		}
 	}
-	journal.openRun(ctx, automation, exec, triggeringEvent)
+	if adopt != nil {
+		journal.adoptRun(ctx, automation, exec)
+	} else {
+		journal.openRun(ctx, automation, exec, triggeringEvent)
+	}
 
 	// Execute steps
 	stepCtx := &StepContext{

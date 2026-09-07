@@ -2524,7 +2524,7 @@ type CreateAuthoringBundleArgs struct {
 	Title               string
 	Summary             string
 	ResponsibilityId    string
-	SourcePlanId        string
+	SourceRunId         string
 	Version             int
 	SupersedesBundleId  string
 	ReusedConstructRefs []map[string]any
@@ -2560,12 +2560,12 @@ func CreateAuthoringBundleBuild(args CreateAuthoringBundleArgs) string {
 		b.WriteString("responsibilityId: ")
 		b.WriteString(quoteMemQL(args.ResponsibilityId))
 	}
-	if args.SourcePlanId != "" {
+	if args.SourceRunId != "" {
 		if b.Len() > 31 {
 			b.WriteString(", ")
 		}
-		b.WriteString("sourcePlanId: ")
-		b.WriteString(quoteMemQL(args.SourcePlanId))
+		b.WriteString("sourceRunId: ")
+		b.WriteString(quoteMemQL(args.SourceRunId))
 	}
 	if args.Version != 0 {
 		if b.Len() > 31 {
@@ -3930,7 +3930,7 @@ func CreateDeviceCodeBuild(args CreateDeviceCodeArgs) string {
 	return b.String()
 }
 
-// CreateDocumentChunk -- Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.
+// CreateDocumentChunk -- Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers.
 //
 // Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["createDocumentChunk"] in generated_concepts.go).
 type CreateDocumentChunkArgs struct {

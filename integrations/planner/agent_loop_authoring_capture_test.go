@@ -44,219 +44,85 @@ func (f *fakeCaptureEngine) dryRunCalls() int {
 	return f.dryRunN
 }
 
-// capturePlanRow is the planById result for a completed task plan.
-func capturePlanRow(planId, owner, goal string) map[string]any {
-	return map[string]any{
-		"id":          planId,
-		"status":      "succeeded",
-		"requestedBy": owner,
-		"goal":        goal,
-	}
-}
-
-// newCaptureFixture builds a capture engine + dispatcher whose:
-//   - planById returns the given plan row,
-//   - authoringBundleForPlan returns existingBundle rows (nil = none),
-//   - authoringDesign yields a one-author-dep design (the digest spec),
-//   - authoringEmit / authoringRepair yield the automation + spec constructs,
-//   - Gate-1 returns the scripted reports, Gate-2 returns dryRun.
-func newCaptureFixture(t *testing.T, plan map[string]any, existingBundle []any, reports []memql.SandboxReport, dryRun memql.BundleDryRunReport) (*fakeCaptureEngine, *AuthoringCaptureDispatcher) {
+// newRunCaptureFixture builds a dispatcher over a fake engine that answers the
+// two reads transcription makes.
+func newRunCaptureFixture(t *testing.T, obs []any) (*fakeEngine, *AuthoringCaptureDispatcher) {
 	t.Helper()
-	deps := []designDependency{
-		{Kind: "spec", Name: "specDigestItemActive", Purpose: "active items", CandidateSource: specCandidateSource},
-	}
-	emitOut := emitJSON(t, []memql.SandboxConstruct{automationCon, specCon})
-	repairOut := emitJSON(t, []memql.SandboxConstruct{automationCon, specCon})
-	designOut := designJSON(t, deps)
-
 	fe := &fakeEngine{
-		aiResponder: func(templateId string, _ map[string]any) (any, error) {
-			switch templateId {
-			case "authoringDesign":
-				return designOut, nil
-			case "authoringEmit":
-				return emitOut, nil
-			case "authoringRepair":
-				return repairOut, nil
-			}
-			return nil, nil
-		},
 		execResponder: func(query string) (any, error) {
 			switch {
-			case strings.Contains(query, "authoringBundleForPlan"):
-				return map[string]any{"output": existingBundle}, nil
-			case strings.Contains(query, "planById"):
-				return map[string]any{"output": []any{plan}}, nil
-			case strings.Contains(query, "cataloguedConstructsForOwner"):
+			case strings.Contains(query, "authoringBundleForRun"):
 				return map[string]any{"output": []any{}}, nil
+			case strings.Contains(query, "workObservationsForOwnerRun"):
+				return map[string]any{"output": obs}, nil
 			}
-			// mutations + anything else
 			return nil, nil
 		},
 	}
-	ce := &fakeCaptureEngine{fakeEngine: fe, sandbox: &fakeSandbox{reports: reports}, dryRun: dryRun}
-	loop := &PlannerAgentLoop{engine: ce, logger: authoringTestLogger()}
-	d := NewAuthoringCaptureDispatcher(loop, ce, authoringTestLogger())
-	return ce, d
+	loop := &PlannerAgentLoop{engine: fe, logger: authoringTestLogger()}
+	return fe, NewAuthoringCaptureDispatcher(loop, fe, authoringTestLogger())
 }
 
-// TestRunCapture_CleanPath: a completed produceArtifact plan whose bundle
-// compiles clean and dry-runs clean is persisted as a bundle + its constructs +
-// a validated Gate-1 record + a dryRunPassed Gate-2 record, stamping
-// sourcePlanId so the capture is reproducible + idempotent.
-func TestRunCapture_CleanPath(t *testing.T) {
+// TestHandleRunUpdated_IgnoresNonTerminal: a run that has not SUCCEEDED is
+// filtered out before any claim or dispatch.
+//
+// The kind allow-list this test used to carry is gone with the Plan kinds it
+// named (memql#5050): a run's template already says what it is, and the
+// internal-machinery kinds it excluded were Plan kinds that no longer exist.
+func TestHandleRunUpdated_IgnoresNonTerminal(t *testing.T) {
 	t.Setenv("MEMQL_AUTHORING_CAPTURE_ENABLED", "1")
-	plan := capturePlanRow("p-capture", "user-7", "Make me a CSV of last week's signups")
-	ce, d := newCaptureFixture(t, plan, nil,
-		[]memql.SandboxReport{okReport(automationCon, specCon)},
-		memql.BundleDryRunReport{OK: true})
+	_, d := newRunCaptureFixture(t, nil)
 
-	if err := d.runCapture(context.Background(), "p-capture", "produceArtifact"); err != nil {
-		t.Fatalf("runCapture: %v", err)
-	}
-
-	exec, _, _ := ce.snapshot()
-	if n := countContains(exec, "createAuthoringBundle"); n != 1 {
-		t.Fatalf("want exactly 1 create-bundle, got %d (exec=%v)", n, exec)
-	}
-	if !anyCallContainsAll(exec, `createAuthoringBundle`, `sourcePlanId: "p-capture"`) {
-		t.Fatalf("create-bundle must stamp sourcePlanId; exec=%v", exec)
-	}
-	if n := countContains(exec, "createAuthoringConstruct"); n != 2 {
-		t.Fatalf("want 2 construct rows (automation + spec), got %d", n)
-	}
-	if !anyCallContainsAll(exec, "recordBundleValidation", `status: "validated"`) {
-		t.Fatalf("clean Gate-1 must record status=validated; exec=%v", exec)
-	}
-	if !anyCallContainsAll(exec, "recordBundleDryRun", `status: "dryRunPassed"`) {
-		t.Fatalf("clean Gate-2 must record status=dryRunPassed; exec=%v", exec)
-	}
-	if got := ce.dryRunCalls(); got != 1 {
-		t.Fatalf("Gate-2 dry-run should run exactly once, got %d", got)
-	}
-}
-
-// TestRunCapture_Gate1FailMarksFailedNoDryRun: a bundle that never compiles
-// clean (Gate-1 keeps failing through the repair budget) is recorded failed and
-// NEVER handed to Gate-2 -- you cannot behaviorally dry-run a non-compiling
-// bundle.
-func TestRunCapture_Gate1FailMarksFailedNoDryRun(t *testing.T) {
-	t.Setenv("MEMQL_AUTHORING_CAPTURE_ENABLED", "1")
-	t.Setenv("MEMQL_AUTHORING_MAX_REPAIRS", "1") // bound the repair loop
-	plan := capturePlanRow("p-fail", "user-7", "Do the impossible thing")
-	fail := failReport("spec", "specDigestItemActive", "unknown field payload.nope", automationCon, specCon)
-	ce, d := newCaptureFixture(t, plan, nil,
-		[]memql.SandboxReport{fail}, // every CompileBundle call fails
-		memql.BundleDryRunReport{OK: true})
-
-	if err := d.runCapture(context.Background(), "p-fail", "produceArtifact"); err != nil {
-		t.Fatalf("runCapture: %v", err)
-	}
-
-	exec, _, _ := ce.snapshot()
-	if !anyCallContainsAll(exec, "recordBundleValidation", `status: "failed"`) {
-		t.Fatalf("unclean Gate-1 must record status=failed; exec=%v", exec)
-	}
-	if countContains(exec, "recordBundleDryRun") != 0 {
-		t.Fatalf("a non-compiling bundle must NOT be dry-run; exec=%v", exec)
-	}
-	if got := ce.dryRunCalls(); got != 0 {
-		t.Fatalf("Gate-2 must not run on an unclean bundle, got %d", got)
-	}
-}
-
-// TestRunCapture_IdempotentSkip: a Plan already captured (a bundle exists for
-// its sourcePlanId) authors nothing on a re-delivered terminal event.
-func TestRunCapture_IdempotentSkip(t *testing.T) {
-	t.Setenv("MEMQL_AUTHORING_CAPTURE_ENABLED", "1")
-	plan := capturePlanRow("p-dup", "user-7", "Already captured task")
-	existing := []any{map[string]any{"id": "bundle-existing"}}
-	ce, d := newCaptureFixture(t, plan, existing,
-		[]memql.SandboxReport{okReport(automationCon, specCon)},
-		memql.BundleDryRunReport{OK: true})
-
-	if err := d.runCapture(context.Background(), "p-dup", "produceArtifact"); err != nil {
-		t.Fatalf("runCapture: %v", err)
-	}
-
-	exec, si, _ := ce.snapshot()
-	if countContains(exec, "createAuthoringBundle") != 0 {
-		t.Fatalf("idempotent skip must author nothing; exec=%v", exec)
-	}
-	if countContains(si, "authoringDesign") != 0 {
-		t.Fatalf("idempotent skip must not even run the design pass; si=%v", si)
-	}
-}
-
-// TestHandlePlanUpdated_IgnoresNonCapturable: a non-capturable kind, an
-// internal-machinery kind, or a non-succeeded status is filtered out BEFORE any
-// claim/dispatch (these spawn no capture goroutine).
-func TestHandlePlanUpdated_IgnoresNonCapturable(t *testing.T) {
-	t.Setenv("MEMQL_AUTHORING_CAPTURE_ENABLED", "1")
-	_, d := newCaptureFixture(t, capturePlanRow("x", "u", "g"), nil,
-		[]memql.SandboxReport{okReport()}, memql.BundleDryRunReport{OK: true})
-
-	cases := []struct{ name, kind, status string }{
-		{"running produceArtifact", "produceArtifact", "running"},
-		{"trainSpecialist succeeded", "trainSpecialist", "succeeded"},
-		{"failed produceArtifact", "produceArtifact", "failed"},
-		{"embedDomainItems succeeded", "embedDomainItems", "succeeded"},
-	}
-	for _, c := range cases {
-		d.HandlePlanUpdated(events.Event{Payload: map[string]any{
-			"id":      "plan-" + c.name,
-			"payload": map[string]any{"kind": c.kind, "status": c.status},
+	for _, status := range []string{"compiling", "running", "waiting", "failed", "cancelled", "abandoned"} {
+		id := "run-" + status
+		d.HandleRunUpdated(events.Event{Payload: map[string]any{
+			"id":      id,
+			"payload": map[string]any{"status": status, "ownerUserId": "u1", "automationName": "demo"},
 		}})
 		d.mu.Lock()
-		_, claimed := d.claimed["plan-"+c.name]
+		_, claimed := d.claimed[id]
 		d.mu.Unlock()
 		if claimed {
-			t.Errorf("%s: must not be claimed/captured", c.name)
+			t.Errorf("a run at %q must not be claimed/captured", status)
 		}
 	}
 }
 
-// TestHandlePlanUpdated_DispatchesOnSucceededTask: a succeeded capturable task
-// is claimed and runs the full async capture (one goroutine), persisting a
-// bundle stamped with the source plan id.
-func TestHandlePlanUpdated_DispatchesOnSucceededTask(t *testing.T) {
+// TestHandleRunUpdated_DispatchesOnSucceededRun: a succeeded run is claimed
+// and transcribed asynchronously, persisting a bundle stamped with the source
+// run id.
+func TestHandleRunUpdated_DispatchesOnSucceededRun(t *testing.T) {
 	t.Setenv("MEMQL_AUTHORING_CAPTURE_ENABLED", "1")
-	// This test exercises the LLM author path's async dispatch; the default is
-	// now deterministic transcription (#1188), so pin the mode explicitly.
-	t.Setenv("MEMQL_AUTHORING_CAPTURE_MODE", "author")
-	plan := capturePlanRow("plan-async", "user-9", "Summarize the quarterly numbers")
-	ce, d := newCaptureFixture(t, plan, nil,
-		[]memql.SandboxReport{okReport(automationCon, specCon)},
-		memql.BundleDryRunReport{OK: true})
+	obs := []any{observationRow("o1", "workbenchHost", 0, false, map[string]any{"path": "x.md"})}
+	fe, d := newRunCaptureFixture(t, obs)
 
-	d.HandlePlanUpdated(events.Event{Payload: map[string]any{
-		"id":      "plan-async",
-		"payload": map[string]any{"kind": "produceArtifact", "status": "succeeded"},
+	d.HandleRunUpdated(events.Event{Payload: map[string]any{
+		"id":      "run-async",
+		"payload": map[string]any{"status": "succeeded", "ownerUserId": "user-9", "automationName": "analyzeFile"},
 	}})
 
 	waitFor(t, func() bool {
-		exec, _, _ := ce.snapshot()
+		exec, _, _ := fe.snapshot()
 		return countContains(exec, "createAuthoringBundle") == 1
 	})
-	exec, _, _ := ce.snapshot()
-	if !anyCallContainsAll(exec, "createAuthoringBundle", `sourcePlanId: "plan-async"`) {
-		t.Fatalf("async capture must stamp sourcePlanId; exec=%v", exec)
+	exec, _, _ := fe.snapshot()
+	if !anyCallContainsAll(exec, "createAuthoringBundle", `sourceRunId: "run-async"`) {
+		t.Fatalf("async capture must stamp sourceRunId; exec=%v", exec)
 	}
 }
 
-// TestHandlePlanUpdated_DisabledGate: with the kill-switch off, a matching
-// succeeded task is NOT claimed (capture is globally suppressed).
-func TestHandlePlanUpdated_DisabledGate(t *testing.T) {
+// TestHandleRunUpdated_DisabledGate: with the kill-switch off, a succeeded run
+// is NOT claimed (capture is globally suppressed).
+func TestHandleRunUpdated_DisabledGate(t *testing.T) {
 	t.Setenv("MEMQL_AUTHORING_CAPTURE_ENABLED", "0")
-	_, d := newCaptureFixture(t, capturePlanRow("x", "u", "g"), nil,
-		[]memql.SandboxReport{okReport()}, memql.BundleDryRunReport{OK: true})
+	_, d := newRunCaptureFixture(t, nil)
 
-	d.HandlePlanUpdated(events.Event{Payload: map[string]any{
-		"id":      "plan-disabled",
-		"payload": map[string]any{"kind": "produceArtifact", "status": "succeeded"},
+	d.HandleRunUpdated(events.Event{Payload: map[string]any{
+		"id":      "run-disabled",
+		"payload": map[string]any{"status": "succeeded", "ownerUserId": "u1", "automationName": "demo"},
 	}})
 	d.mu.Lock()
-	_, claimed := d.claimed["plan-disabled"]
+	_, claimed := d.claimed["run-disabled"]
 	d.mu.Unlock()
 	if claimed {
 		t.Fatalf("disabled kill-switch must suppress capture (no claim)")

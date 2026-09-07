@@ -88,17 +88,17 @@ query bundle authoringBundleForResponsibility {
   shape   bundleFull
 }
 
-/// The bundle post-hoc captured from a given Plan (everyday-task capture path, #1161), scoped to
-/// the caller. Lets the capture orchestrator skip re-authoring a task it already captured
-/// (idempotency on a re-delivered terminal Plan event) and backs the per-task view/edit/export
-/// surface (#1162).
-@unbounded("the authoring bundle for one source plan -- bounded to a single row")
+/// The bundle post-hoc captured from a given run (the capture path, epic memql#1160), scoped to
+/// the caller. Lets the capture orchestrator skip re-authoring a run it already captured
+/// (idempotency on a re-delivered terminal run event) and backs the per-run view/edit/export
+/// surface.
+@unbounded("the authoring bundle for one source run -- bounded to a single row")
 @actor
-query bundle authoringBundleForPlan {
+query bundle authoringBundleForRun {
   args {
-    sourcePlanId  string!
+    sourceRunId  string!
   }
-  filter  ownerUserId==actor.userId && sourcePlanId==args.sourcePlanId
+  filter  ownerUserId==actor.userId && sourceRunId==args.sourceRunId
   shape   bundleFull
 }
 

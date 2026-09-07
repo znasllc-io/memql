@@ -36,7 +36,7 @@ concept goal {
   input             object  @description("The typed input object, the shape the chosen template's args declare.")
   ceilings          object  @description("{tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents} -- inherited by every run of this goal.")
   status            enum("open", "active", "closed")!  @default("open")  @description("Coarse lifecycle. open = accepted, no run finished; active = a run is in flight; closed = the person or the system closed it.")
-  requestedVia      enum("", "api", "ask", "nexus", "responsibility", "library", "materializer")  @default("")  @description("The surface the goal arrived through. Empty when unknown.")
+  requestedVia      enum("", "api", "ask", "nexus", "responsibility", "library", "materializer", "agent")  @default("")  @description("The surface the goal arrived through. Empty when unknown. `agent` is a goal an agent opened for itself -- the agent() builtin or the produceArtifact tool (memql#5048).")
   closedAt          datetime  @description("When status reached closed.")
   closeReason       string  @description("Why it closed, in words a person can read.")
 

@@ -132,27 +132,20 @@ func TestSanitizeChunkTitle(t *testing.T) {
 	}
 }
 
-// TestSanitizeChunkTitle_AppliedAtAugmentSite is a structural lint
-// that pins the augment indexer to use the sanitizer. If a future
-// refactor removes the SanitizeChunkTitle call from
-// storeAugmentChunk, the test goes red so the regression surfaces
-// at PR time instead of inside the retrieval pool.
+// TestSanitizeChunkTitle_AppliedAtSeedSite is a structural lint pinning the
+// seed indexer to the sanitizer: if a refactor drops the SanitizeChunkTitle
+// call from the seed path, this goes red at PR time instead of inside the
+// retrieval pool.
 //
-// Implemented as a source-string check rather than a behavioral
-// test because the indexer's side-effects involve the engine +
-// embedding provider; mocking that stack for one assertion is
-// overkill when the rule is "this function must call this other
-// function."
-func TestSanitizeChunkTitle_AppliedAtAugmentSite(t *testing.T) {
-	const want = "SanitizeChunkTitle(c.Title)"
-	src := readFile(t, "augment_domain.go")
-	if !strings.Contains(src, want) {
-		t.Errorf("augment_domain.go does not contain %q -- the indexer must sanitize chunk titles before they hit the retrieval pool", want)
-	}
-}
-
-// TestSanitizeChunkTitle_AppliedAtSeedSite mirrors the augment-site
-// lint for the seed path.
+// Implemented as a source-string check rather than a behavioural test because
+// the indexer's side effects involve the engine and the embedding provider,
+// and mocking that stack for one assertion is overkill when the rule is
+// "this function must call this other function".
+//
+// It had a twin covering the augment indexer. That went with augment_domain.go
+// in memql#5049 -- the chat surface it served is retired, and a lint reading a
+// file nobody ships is a failing test with nothing behind it. The seed path is
+// now the only writer of chunk titles.
 func TestSanitizeChunkTitle_AppliedAtSeedSite(t *testing.T) {
 	const want = "SanitizeChunkTitle(c.Title)"
 	src := readFile(t, "seed_domain_content.go")

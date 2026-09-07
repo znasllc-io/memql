@@ -10,27 +10,32 @@ package planner
 // ~$0.27/session producing ZERO bundles.
 //
 // This is the replacement the owner asked for: capture the LITERAL MemQL of
-// what ACTUALLY ran. Every tool call an agent makes is already recorded as a
-// v1:planner:task row (category='toolInvocation', carrying toolName + toolArgs)
-// by the taskstamp Stamper. So on a completed task we just READ those rows and
-// render them as a MemQL automation -- one step per call. No LLM: it's
-// transcription, not generation. Reliable, free, and it is genuinely "the MemQL
-// that ran", which is exactly what the task surface (#1162 cockpit / #1187
-// frontend) should show.
+// what ACTUALLY ran. Every tool call an agent makes is already recorded, so on
+// a completed RUN we just read those records and render them as a MemQL
+// automation -- one step per call. No LLM: it's transcription, not generation.
+// Reliable, free, and it is genuinely "the MemQL that ran".
+//
+// # What it reads changed with memql#5050
+//
+// It used to read v1:planner:task rows with category='toolInvocation', written
+// by component/memql/taskstamp. Those are gone: a tool call is now a
+// v1:work:observation with kind='tool_result', carrying the tool name and
+// arguments in `data` and ordered by `data.seq`.
+//
+// That is not a rename, it is a change of SUBJECT. A task belonged to a Plan;
+// an observation belongs to a RUN. So capture is triggered by a run reaching
+// `succeeded` rather than a Plan, and the bundle records sourceRunId rather
+// than sourcePlanId.
 //
 // The rendered automation is stored as the same v1:authoring:bundle +
-// v1:authoring:construct the viewers already read (linked by sourcePlanId), so
-// the surfaces work unchanged. Status is recorded 'validated' with a
-// transcript marker -- it is a faithful record, not a Gate-1-compiled artifact.
-//
-// The LLM author path is kept behind MEMQL_AUTHORING_CAPTURE_MODE=author (off
-// by default) for anyone who wants to experiment with re-authoring.
+// v1:authoring:construct the viewers already read, so those surfaces work
+// unchanged. Status is recorded 'validated' with a transcript marker -- it is
+// a faithful record, not a Gate-1-compiled artifact.
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -38,15 +43,6 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
-
-// captureMode selects the capture engine: "transcript" (default -- record the
-// literal calls that ran) or "author" (the legacy LLM re-authoring path).
-func captureMode() string {
-	if strings.ToLower(strings.TrimSpace(os.Getenv("MEMQL_AUTHORING_CAPTURE_MODE"))) == "author" {
-		return "author"
-	}
-	return "transcript"
-}
 
 // toolCall is one recorded call: the tool name + its argument object as a JSON
 // string (already valid MemQL object-literal syntax) + ordering key.
@@ -58,48 +54,47 @@ type toolCall struct {
 
 // runCaptureTranscript records the literal MemQL of what a completed task ran.
 // It loads the plan, reads its succeeded toolInvocation rows, renders them as a
-// MemQL automation, and persists the bundle + construct (sourcePlanId-linked).
+// MemQL automation, and persists the bundle + construct (sourceRunId-linked).
 // Owned writes run under the task owner's envelope. Best-effort: any failure
 // logs and returns; it never affects the delivered result.
-func (d *AuthoringCaptureDispatcher) runCaptureTranscript(ctx context.Context, planId, kind string) error {
-	plan, err := d.loop.loadPlan(ctx, planId)
-	if err != nil {
-		return fmt.Errorf("load plan: %w", err)
-	}
-	ownerUserId := getString(plan, "requestedBy")
-	goal := strings.TrimSpace(getString(plan, "goal"))
+func (d *AuthoringCaptureDispatcher) runCaptureTranscript(ctx context.Context, runId, ownerUserId, goal string) error {
+	ownerUserId = strings.TrimSpace(ownerUserId)
+	goal = strings.TrimSpace(goal)
 	if ownerUserId == "" {
-		d.logger.Info("authoring transcript: plan missing owner; skipping", "planId", planId)
+		// A run with a present-and-empty owner is the DEPLOYMENT's own -- a
+		// system run nobody asked for. Capturing it would write an authored
+		// bundle owned by nobody, readable by nobody, and the surfaces would
+		// show a capability with no author.
+		d.logger.Info("authoring transcript: run has no owner; skipping", "runId", runId)
 		return nil
 	}
 
-	if existing, err := d.existingBundleForPlan(ctx, ownerUserId, planId); err != nil {
-		d.logger.Warn("authoring transcript: idempotency lookup failed; proceeding", "planId", planId, "error", err)
+	if existing, err := d.existingBundleForRun(ctx, ownerUserId, runId); err != nil {
+		d.logger.Warn("authoring transcript: idempotency lookup failed; proceeding", "runId", runId, "error", err)
 	} else if existing != "" {
-		d.logger.Info("authoring transcript: bundle already exists for plan; skipping", "planId", planId, "bundleId", existing)
+		d.logger.Info("authoring transcript: bundle already exists for run; skipping", "runId", runId, "bundleId", existing)
 		return nil
 	}
 
-	calls, err := d.loadToolCalls(ctx, planId)
+	calls, err := d.loadToolCalls(ctx, ownerUserId, runId)
 	if err != nil {
 		return fmt.Errorf("load tool calls: %w", err)
 	}
 	if len(calls) == 0 {
 		// Nothing concrete ran (no recorded tool calls) -- nothing to transcribe.
-		d.logger.Info("authoring transcript: no tool calls recorded for plan; skipping",
-			"planId", planId, "kind", kind)
+		d.logger.Info("authoring transcript: no tool calls recorded for run; skipping", "runId", runId)
 		return nil
 	}
 
-	autoName := transcriptAutomationName(planId)
+	autoName := transcriptAutomationName(runId)
 	source := renderTranscriptAutomation(autoName, goal, calls)
 
 	bundleId := id.NewShortId()
 	title := goal
 	if title == "" {
-		title = fmt.Sprintf("Transcript of %s", kind)
+		title = "Transcript of a completed run"
 	}
-	if err := d.persistTranscriptBundle(ctx, ownerUserId, bundleId, planId, title, len(calls)); err != nil {
+	if err := d.persistTranscriptBundle(ctx, ownerUserId, bundleId, runId, title, len(calls)); err != nil {
 		return fmt.Errorf("persist transcript bundle: %w", err)
 	}
 	construct := memql.SandboxConstruct{Kind: "automation", Name: autoName, Source: source}
@@ -128,39 +123,77 @@ func (d *AuthoringCaptureDispatcher) runCaptureTranscript(ctx context.Context, p
 		return fmt.Errorf("record transcript status: %w", err)
 	}
 
-	d.logger.Info("authoring transcript: captured", "planId", planId, "bundleId", bundleId,
+	d.logger.Info("authoring transcript: captured", "runId", runId, "bundleId", bundleId,
 		"calls", len(calls), "gate1Ran", gate1Ran, "reRunnable", reRunnable)
 	return nil
 }
 
-// loadToolCalls reads the plan's succeeded toolInvocation tasks (the literal
-// calls the agent made) in seq order.
-func (d *AuthoringCaptureDispatcher) loadToolCalls(ctx context.Context, planId string) ([]toolCall, error) {
-	q := fmt.Sprintf(`query tasksForPlan(planId:%s)`, langparser.QuoteString(planId))
-	res, err := d.engine.Execute(systemActorContext(ctx), q)
+// loadToolCalls reads the run's recorded tool calls, in the order they were
+// made.
+//
+// The rows are v1:work:observation with kind='tool_result' (memql#5050); the
+// tool name and its arguments ride in `data`, because an observation's own
+// columns are deliberately generic. Read under the OWNER's actor through
+// workObservationsForOwnerRun -- the cluster-owner variant of the same query
+// exists for the sweeps, and using it here would let capture read a run that
+// is not the caller's.
+//
+// Ordering is `data.seq`, not the row timestamp. Two calls in one turn can
+// share a createdAt, and a transcript whose order is unstable reproduces a
+// different automation every time it is captured.
+func (d *AuthoringCaptureDispatcher) loadToolCalls(ctx context.Context, ownerUserId, runId string) ([]toolCall, error) {
+	q := fmt.Sprintf(`query workObservationsForOwnerRun(runId:%s)`, langparser.QuoteString(runId))
+	res, err := d.engine.Execute(ownerActorContext(ctx, ownerUserId), q)
 	if err != nil {
 		return nil, err
 	}
 	rows := memql.MaterializeRows(res)
 	calls := make([]toolCall, 0, len(rows))
 	for _, r := range rows {
-		if getString(r, "category") != "toolInvocation" {
+		if getString(r, "kind") != "tool_result" {
 			continue
 		}
-		if st := getString(r, "status"); st != "succeeded" && st != "" {
-			continue // a failed/running call isn't part of the reproducible path
+		data := mapField(r, "data")
+		if data == nil {
+			continue
 		}
-		name := getString(r, "toolName")
-		if name == "" {
-			name = getString(r, "kind")
+		// A FAILED call is not part of the reproducible path. The task rows
+		// this replaced were filtered on status for the same reason; the
+		// observation records it as data.isError.
+		if isErr, ok := data["isError"].(bool); ok && isErr {
+			continue
 		}
+		name := getString(data, "tool")
 		if name == "" {
 			continue
 		}
-		calls = append(calls, toolCall{Name: name, Args: toolArgsJSON(r), Seq: intFromAny(r["seq"])})
+		calls = append(calls, toolCall{
+			Name: name,
+			Args: observationArgsJSON(data),
+			Seq:  intFromAny(data["seq"]),
+		})
 	}
 	sort.SliceStable(calls, func(i, j int) bool { return calls[i].Seq < calls[j].Seq })
 	return calls, nil
+}
+
+// observationArgsJSON returns the recorded argument object as the raw JSON the
+// renderer writes verbatim into the MemQL call.
+//
+// A TRUNCATED argument set is dropped rather than rendered. data.args is cut
+// at a byte bound when a call carried a large payload, and a cut JSON object
+// does not parse -- rendering it would produce a bundle that cannot compile,
+// which Gate 1 would then report as an authoring failure rather than as the
+// missing evidence it actually is.
+func observationArgsJSON(data map[string]any) string {
+	if truncated, ok := data["argsTruncated"].(bool); ok && truncated {
+		return "{}"
+	}
+	args, _ := data["args"].(string)
+	if strings.TrimSpace(args) == "" {
+		return "{}"
+	}
+	return args
 }
 
 // renderTranscriptAutomation builds the MemQL automation that reproduces the
@@ -171,9 +204,9 @@ func renderTranscriptAutomation(name, goal string, calls []toolCall) string {
 	var b strings.Builder
 	desc := goal
 	if desc == "" {
-		desc = fmt.Sprintf("Transcript of %d call(s) this task ran.", len(calls))
+		desc = fmt.Sprintf("Transcript of %d call(s) this run made.", len(calls))
 	} else {
-		desc = "Transcript of the calls this task ran for: " + desc
+		desc = "Transcript of the calls this run made for: " + desc
 	}
 	fmt.Fprintf(&b, "@description(%q)\n", truncate(desc, 200))
 	fmt.Fprintf(&b, "automation %s {\n", name)
@@ -192,12 +225,12 @@ func renderTranscriptAutomation(name, goal string, calls []toolCall) string {
 
 // --- persistence (transcript-specific) ------------------------------------
 
-func (d *AuthoringCaptureDispatcher) persistTranscriptBundle(ctx context.Context, ownerUserId, bundleId, planId, title string, callCount int) error {
+func (d *AuthoringCaptureDispatcher) persistTranscriptBundle(ctx context.Context, ownerUserId, bundleId, runId, title string, callCount int) error {
 	args := map[string]any{
-		"bundleId":     bundleId,
-		"title":        truncate(title, 120),
-		"summary":      fmt.Sprintf("Verbatim transcript of the %d call(s) this task ran.", callCount),
-		"sourcePlanId": planId,
+		"bundleId":    bundleId,
+		"title":       truncate(title, 120),
+		"summary":     fmt.Sprintf("Verbatim transcript of the %d call(s) this run made.", callCount),
+		"sourceRunId": runId,
 	}
 	q := fmt.Sprintf(`createAuthoringBundle(%s)`, encodeArgs(args))
 	_, err := d.engine.Execute(ownerActorContext(ctx, ownerUserId), q)
@@ -245,11 +278,11 @@ func (d *AuthoringCaptureDispatcher) recordTranscriptValidated(ctx context.Conte
 // --- helpers --------------------------------------------------------------
 
 // transcriptAutomationName derives a valid camelCase automation name from the
-// plan id suffix so the construct is uniquely + deterministically named.
-func transcriptAutomationName(planId string) string {
-	short := planId
-	if i := strings.LastIndex(planId, ":"); i >= 0 {
-		short = planId[i+1:]
+// run id suffix so the construct is uniquely + deterministically named.
+func transcriptAutomationName(runId string) string {
+	short := runId
+	if i := strings.LastIndex(runId, ":"); i >= 0 {
+		short = runId[i+1:]
 	}
 	var b strings.Builder
 	b.WriteString("reproduce")
@@ -275,18 +308,4 @@ func upper(r rune) rune {
 		return r - 32
 	}
 	return r
-}
-
-// toolArgsJSON extracts the recorded toolArgs object as a JSON string suitable
-// for verbatim rendering into a MemQL call. Falls back to "{}" when absent.
-func toolArgsJSON(row map[string]any) string {
-	v, ok := row["toolArgs"]
-	if !ok || v == nil {
-		return "{}"
-	}
-	b, err := json.Marshal(v)
-	if err != nil {
-		return "{}"
-	}
-	return string(b)
 }

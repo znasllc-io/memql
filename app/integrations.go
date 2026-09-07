@@ -18,5 +18,10 @@ func (a *App) integrationsCore() {
 	// The deploy pipeline's build surface, after materialization because it
 	// joins two plug-ins that each register themselves (epic memql#4900).
 	a.wirePackageBuildSurface()
+	// agent() and the produceArtifact tool open a work goal rather than
+	// minting a Plan (memql#5048). Both plug-ins are core, so this is core
+	// too -- produceArtifact is called from an Assistant's tool loop, which
+	// runs on a bff.
+	a.wireAgentWorkGoals()
 	a.Logger.Info("core integration providers registered")
 }

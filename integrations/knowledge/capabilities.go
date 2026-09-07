@@ -149,44 +149,6 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
-			// Preflight analyser for the chat 'Analyze for training'
-			// action. Decides whether a chat exchange's topic warrants
-			// augmenting one of the agent's domains with new chunks.
-			// Synchronous + cheap (~1-2k token prompt). Frontend uses
-			// the structured outcome to decide whether to surface a
-			// Confirm step before paying for the heavier generate call.
-			Name:        "augmentDomainAnalyze",
-			Description: "Analyse a chat exchange + an agent's attached domains and return one of {addable, alreadyCovered, outOfScope} with a best-fit domainId + topic + reasoning. Drives the chat 'Analyze for training' action's preflight check; the heavier augmentDomainGenerate runs only when this returns addable + the user confirms.",
-			Handler:     i.augmentDomainAnalyzeHandler,
-			ArgsSchema: map[string]string{
-				"userQuestion":  "string (required) - the user message that prompted the agent's reply.",
-				"agentResponse": "string (required) - the agent's reply text. Used as the SIGNAL of a coverage gap, never as content to train on.",
-				"domains":       "array of object (required) - the agent's attached domains. Each: {id, name, description}.",
-				"retrieved":     "array of object (optional) - the RAG pool the agent saw before replying. Each: {domainId, similarity, titleHint}.",
-			},
-		},
-		{
-			// Topic-focused chunk generator for the same action. Runs
-			// the augmentDomainContent prompt to produce ~10 dense
-			// chunks targeted at one topic, embeds + writes them, and
-			// inserts a Plan row for audit + Tasks-panel visibility.
-			// Synchronous in v1 (~30s for the full AI + embed + write
-			// path); the frontend shows a "training queued" state
-			// until it returns. Pulls in a follow-up Plan-completed
-			// canvas card via the existing Plan transition flow.
-			Name:        "augmentDomainGenerate",
-			Description: "Generate ~10 topic-focused chunks for a knowledge domain, embed + write each with source='augment' + provenance back-pointers, insert a Plan row for audit. Synchronous in v1 (~30s). Returns {planId, chunksAdded, domainId, domainName, topic}.",
-			Handler:     i.augmentDomainGenerateHandler,
-			ArgsSchema: map[string]string{
-				"domainId":          "string (required) - target domain (must be one the agent has attached).",
-				"topic":             "string (required) - narrow topic the chunks should focus on.",
-				"sourceUtteranceId": "string (optional) - bare id of the utterance that triggered the augment; persisted on each chunk for provenance.",
-				"sourceAgentId":     "string (optional) - bare id of the agent whose retrieval gap surfaced this; provenance.",
-				"partitionId":       "string (required) - space the Plan row scopes to.",
-				"requestedBy":       "string (required) - user id requesting the augment; Plan ownership + audit.",
-			},
-		},
-		{
 			// Trainer Agent tool (Q3 / Q9). STUB: no web-search
 			// provider wired in-repo; returns an empty result set.
 			// See integrations/knowledge/trainer_tools.go.
@@ -225,9 +187,10 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			// Bulk domain-warm path (#645). Embeds every unembedded
 			// retrievable chunk in a domain (optionally scoped to one
 			// Document) and drives the parent Document's embeddingStatus
-			// none -> partial -> complete. Driven by the planner's
-			// EmbedDomainItemsDispatcher on a kind='embedDomainItems' Plan
-			// (after a domain is seeded or a user uploads a file).
+			// none -> partial -> complete. Driven by the embedDomainItems
+			// work template (memql#5051), which a goal opens after a domain
+			// is seeded or a user uploads a file. It used to be a Plan and a
+			// graph-event dispatcher.
 			Name:        capEmbedDomainItems,
 			Description: "Embed every unembedded validated chunk attached to a knowledge domain (optionally scoped to one Document), then recompute the parent Document's embeddingStatus (none -> partial -> complete). Idempotent. Returns {domainId, documentId, total, embedded, already, failed, documentsRolledUp}.",
 			Handler:     i.embedDomainItemsHandler,
@@ -235,6 +198,23 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"domainId":   "string (required) - the knowledge domain whose chunks to embed.",
 				"documentId": "string (optional) - scope the run to one Document's chunks. Empty = the whole domain.",
 				"provider":   "string (optional) - embedding provider name (default embedding3Small).",
+			},
+		},
+		{
+			// The Trainer Agent's bounded tool loop, as a builtin a work run
+			// can call (memql#5051). It replaces the trainSpecialist Plan and
+			// its graph-event dispatcher: a run is dispatched by the spine
+			// already, so the claim, the subscription and the plan-status
+			// machine all go with it.
+			Name:        "trainSpecialist",
+			Description: "Run the Trainer Agent's bounded tool loop over one knowledge domain, writing (and in refresh mode superseding) knowledge chunks. Synchronous -- the asynchrony belongs to the work run that calls it. Returns {domainId, specialistId, topic, mode, summary}.",
+			Handler:     i.handleTrainSpecialist,
+			ArgsSchema: map[string]string{
+				"domainId":     "string (required) - the knowledge domain to train.",
+				"specialistId": "string (optional) - the specialist the corpus is tailored for; absent loses the role-tailoring nuance but still trains the domain.",
+				"topic":        "string (optional) - narrow the corpus to one topic.",
+				"mode":         "string (optional) - 'initial' (default) or 'refresh'. Refresh hands the Trainer the existing corpus so it can supersede stale chunks, and resets the domain's stale signal afterwards.",
+				"partition":    "string (optional) - carried into the prompt.",
 			},
 		},
 	}

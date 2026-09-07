@@ -142,8 +142,6 @@ var integrationClass = map[string]string{
 	"knowledge.seedAllDomainContent":    ClassWrite,
 	"knowledge.embedChunk":              ClassWrite,
 	"knowledge.embedDomainItems":        ClassWrite,
-	"knowledge.augmentDomainGenerate":   ClassWrite,
-	"knowledge.augmentDomainAnalyze":    ClassWrite,
 	"knowledge.ensureKnowledgeBridge":   ClassWrite,
 	"cognition.trackPresence":           ClassWrite,
 	"telephony.buyNumber":               ClassWrite,

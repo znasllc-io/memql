@@ -486,6 +486,12 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	// promotes the automation into its own first-class MCP tool. It may sit on
 	// either the FunctionDef wrapper or the AutomationDef body, so check both.
 	output["mcpPromoted"] = attributeFlagPresent(def.Attributes, "mcp") || attributeFlagPresent(automation.Attributes, "mcp")
+	// @template (memql#5048): this automation is INVOKED BY A RUN that named
+	// it, never fired by the graph. It is the third way an automation can be
+	// reachable, alongside an event trigger and a schedule, and it exists
+	// because the work spine's compiled templates are called rather than
+	// triggered.
+	output["template"] = attributeFlagPresent(def.Attributes, "template") || attributeFlagPresent(automation.Attributes, "template")
 
 	// If there's a return statement, add it as final computation metadata.
 	// The return expression must go through the SAME reference rewrites as

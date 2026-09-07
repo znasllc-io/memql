@@ -131,8 +131,7 @@ type PlannerIntegration struct {
 	entitlements     *EntitlementResolver
 	admission        *AdmissionController
 	agentLoop        *PlannerAgentLoop
-	trainDispatch    *TrainSpecialistDispatcher
-	embedDispatch    *EmbedDomainItemsDispatcher
+	workGoals        responsibilityGoals
 	intakeDispatch   *ResponsibilityIntakeDispatcher
 	captureDispatch  *AuthoringCaptureDispatcher
 	refreshCron      *RefreshCron
@@ -253,8 +252,6 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 	}
 	p.admission = NewAdmissionController(admissionGetter, p.logger)
 	p.agentLoop = NewPlannerAgentLoop(p.engine, p.logger)
-	p.trainDispatch = NewTrainSpecialistDispatcher(p.engine, p.logger)
-	p.embedDispatch = NewEmbedDomainItemsDispatcher(p.engine, p.logger)
 	p.intakeDispatch = NewResponsibilityIntakeDispatcher(p.engine, p.logger)
 	// Everyday-task authoring capture (epic memql#1160 / #1161): authors a
 	// stored, versioned v1:authoring:bundle for every user-facing one-off task
@@ -291,10 +288,36 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 // them would make a node that has one and not the other unrepresentable, and
 // the warning that names which half is missing impossible to write.
 func (p *PlannerIntegration) SetWorkGoals(g responsibilityGoals) {
-	if p == nil || p.reactiveLoop == nil {
+	if p == nil {
 		return
 	}
-	p.reactiveLoop.SetWorkGoals(g)
+	// Held on the integration as well as handed to the loop: the refresh
+	// cadence and the approved-training gate open goals too (memql#5051), and
+	// they are not the reactive loop.
+	p.mu.Lock()
+	if p.workGoals == nil {
+		p.workGoals = g
+	}
+	p.mu.Unlock()
+	if p.reactiveLoop != nil {
+		p.reactiveLoop.SetWorkGoals(g)
+	}
+	if p.agentLoop != nil {
+		p.agentLoop.SetWorkGoals(g)
+	}
+	if p.refreshCron != nil {
+		p.refreshCron.SetWorkGoals(g)
+	}
+}
+
+// workGoalsRef is the goal opener, or nil on a node without the work spine.
+func (p *PlannerIntegration) workGoalsRef() responsibilityGoals {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.workGoals
 }
 
 func (p *PlannerIntegration) SetAgentForwarder(fwd AgentForwarder) {
@@ -375,32 +398,12 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 		// 'planning' (cron / stale-signal path) AND one flipped to
 		// 'running' (startPlan) both dispatch; the dispatcher's
 		// own claim guard dedups the double-fire.
-		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
-			"graph.node.created.v1:planner:plan",
-			p.trainDispatch.HandlePlanCreated,
-			events.WithSubscriberName("planner:train-specialist-created"),
-		))
-		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
-			"graph.node.updated.v1:planner:plan",
-			p.trainDispatch.HandlePlanUpdated,
-			events.WithSubscriberName("planner:train-specialist-updated"),
-		))
 		// embedDomainItems dispatcher (#645). Claims kind=embedDomainItems
 		// Plans -- the agent loop skips that kind so the two don't race.
 		// Subscribes to both created + updated so a Plan spawned in
 		// 'planning' (seed / upload path) AND one flipped to 'running'
 		// both dispatch; the dispatcher's own claim guard dedups the
 		// double-fire.
-		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
-			"graph.node.created.v1:planner:plan",
-			p.embedDispatch.HandlePlanCreated,
-			events.WithSubscriberName("planner:embed-domain-items-created"),
-		))
-		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
-			"graph.node.updated.v1:planner:plan",
-			p.embedDispatch.HandlePlanUpdated,
-			events.WithSubscriberName("planner:embed-domain-items-updated"),
-		))
 		// Event-driven stale-signal refresh (#644). When a domain's
 		// staleSignalCount crosses the threshold (Planner Agent bumped
 		// it via markKnowledgeDomainStale), spawn an immediate refresh
@@ -426,14 +429,14 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 			p.intakeDispatch.HandleResponsibilityUpdated,
 			events.WithSubscriberName("planner:responsibility-intake-updated"),
 		))
-		// Everyday-task authoring capture (#1161). A user-facing one-off Plan
-		// (produceArtifact / adHocAction) reaching succeeded triggers an async
-		// post-hoc capture: design -> emit/Gate-1 -> persist a versioned
-		// v1:authoring:bundle -> Gate-2 dry-run. Best-effort + default-on; never
-		// affects the already-delivered result.
+		// Authoring capture (#1161, re-pointed in memql#5050). A RUN reaching
+		// succeeded triggers an async post-hoc transcription of the tool calls
+		// it recorded into a versioned v1:authoring:bundle. Best-effort +
+		// default-on; never affects the already-delivered result, and reaches
+		// no model.
 		p.unsubscribes = append(p.unsubscribes, p.eventBus.Subscribe(
-			"graph.node.updated.v1:planner:plan",
-			p.captureDispatch.HandlePlanUpdated,
+			"graph.node.updated.v1:work:run",
+			p.captureDispatch.HandleRunUpdated,
 			events.WithSubscriberName("planner:authoring-capture-updated"),
 		))
 		p.mu.Unlock()

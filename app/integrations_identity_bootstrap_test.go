@@ -30,6 +30,7 @@ func (s *retryGuardStore) IsClusterBootstrappedE(_ context.Context) (bool, error
 	}
 	return false, nil
 }
+
 // HasClaimedOwner, not HasOwnerUser (memql#3591): the guard asks whether the
 // owner has ever authenticated, since an owner ROW is now written by the env
 // bootstrap and is not proof of a claim.

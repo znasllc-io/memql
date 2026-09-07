@@ -9,7 +9,6 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/component/memql/taskstamp"
 )
 
 // roleCapturingExecutor records the acting-agent role visible on ctx each
@@ -113,7 +112,7 @@ func TestStampActingAgentRoleIfMissing_EmptyRole(t *testing.T) {
 func TestStampedCtxReachesToolExecutor_BackgroundLoop(t *testing.T) {
 	exec := &roleCapturingExecutor{}
 	r := &Replier{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	r.stamper = taskstamp.New(exec, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r.stamper = newToolRecorder(exec, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// The provider dispatches a real (non-sentinel) tool, then ends the turn
 	// with a respondToUser envelope so the loop terminates.

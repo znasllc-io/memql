@@ -1556,7 +1556,7 @@ export interface CreateAuthoringBundleArgs {
   title: string;
   summary?: string;
   responsibilityId?: string;
-  sourcePlanId?: string;
+  sourceRunId?: string;
   version?: number;
   supersedesBundleId?: string;
   reusedConstructRefs?: Record<string, unknown>[];
@@ -1568,7 +1568,7 @@ export function buildCreateAuthoringBundle(args: CreateAuthoringBundleArgs): str
   parts.push("title: " + renderMemQLValue(args.title));
   if (args.summary !== undefined) parts.push("summary: " + renderMemQLValue(args.summary));
   if (args.responsibilityId !== undefined) parts.push("responsibilityId: " + renderMemQLValue(args.responsibilityId));
-  if (args.sourcePlanId !== undefined) parts.push("sourcePlanId: " + renderMemQLValue(args.sourcePlanId));
+  if (args.sourceRunId !== undefined) parts.push("sourceRunId: " + renderMemQLValue(args.sourceRunId));
   if (args.version !== undefined) parts.push("version: " + renderMemQLValue(args.version));
   if (args.supersedesBundleId !== undefined) parts.push("supersedesBundleId: " + renderMemQLValue(args.supersedesBundleId));
   if (args.reusedConstructRefs !== undefined) parts.push("reusedConstructRefs: " + renderMemQLValue(args.reusedConstructRefs));
@@ -2218,7 +2218,7 @@ QueryClient.prototype.createDeviceCode = function (this: QueryClient, args: Crea
   return this.executeNamed("createDeviceCode", buildCreateDeviceCode(args), opts);
 };
 
-/** Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, augmentDomainGenerate, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers. */
+/** Create a document chunk linked to a knowledge domain. Called by every chunk-writing integration (seedDomainContent, ensureKnowledgeBridge, the product UI corpus ingest). source is REQUIRED and tags the chunk's provenance class -- the dev-refresh cache filter and the citation registry both read it as the source of truth. Optional sourceAgentId / sourceTopic carry chat-driven augment provenance back-pointers. */
 // Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["createDocumentChunk"] in generated_concepts.ts).
 export interface CreateDocumentChunkArgs {
   chunkId: string;

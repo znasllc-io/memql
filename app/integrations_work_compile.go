@@ -58,6 +58,6 @@ func (a *App) wireWorkCompiler() {
 	// reports as an error per spawn rather than silently, but the place to
 	// prevent it is here.
 	pi.SetWorkGoals(work)
-	a.Logger.Info("the reactive loop wired to the work spine; a due responsibility opens a goal",
+	a.Logger.Info("the planner wired to the work spine; a due responsibility, the refresh cadence and an approved training request all open goals",
 		"component", "work")
 }

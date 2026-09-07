@@ -1,11 +1,7 @@
 package planner
 
 import (
-	"context"
-	"strings"
 	"testing"
-
-	"github.com/znasllc-io/memql/component/memql"
 )
 
 // TestExtractJSONObject_StripsProseWrapper: the exact failure from the live
@@ -86,71 +82,5 @@ func TestFlattenToSingleDeliverable_MergesPhases(t *testing.T) {
 	single := designPlan{AutomationName: "x", Dependencies: []resolvedDependency{dep("spec", "s")}}
 	if out := flattenToSingleDeliverable(single); out.isMultiPhase() || len(out.Dependencies) != 1 {
 		t.Errorf("single-phase plan should be unchanged, got %+v", out)
-	}
-}
-
-// TestRunCapture_FlattensMultiPhaseDesign: the capture path forces a single-
-// automation bundle even when the design pass came back multi-phase -- proving
-// the over-decomposition fix is wired into runCapture (no parallel/headline
-// constructs, exactly one automation).
-func TestRunCapture_FlattensMultiPhaseDesign(t *testing.T) {
-	t.Setenv("MEMQL_AUTHORING_CAPTURE_ENABLED", "1")
-	plan := capturePlanRow("p-flat", "user-7", "Write a list of birds")
-	// Design returns a 2-phase decomposition; emit echoes one automation + a
-	// spec per authoringEmit call.
-	designOut := `{
-      "automationName": "birdList",
-      "automationPurpose": "Make a bird list.",
-      "phases": [
-        {"name": "birdListPhase0", "purpose": "gather", "dependencies": [
-          {"kind":"spec","name":"specA","purpose":"p","candidateSource":"spec activeRowTrait specA {\n  return active == true\n}"}]},
-        {"name": "birdListPhase1", "purpose": "render", "dependencies": [
-          {"kind":"spec","name":"specB","purpose":"p","candidateSource":"spec activeRowTrait specB {\n  return active == true\n}"}]}
-      ]
-    }`
-	fe := &fakeEngine{
-		aiResponder: func(templateId string, data map[string]any) (any, error) {
-			switch templateId {
-			case "authoringDesign":
-				return designOut, nil
-			case "authoringEmit":
-				name, _ := data["automationName"].(string)
-				auto := memql.SandboxConstruct{Kind: "automation", Name: name, Source: "automation " + name + " { }"}
-				spec := memql.SandboxConstruct{Kind: "spec", Name: "specA", Source: "spec activeRowTrait specA {\n  return active == true\n}"}
-				return emitJSON(t, []memql.SandboxConstruct{auto, spec}), nil
-			}
-			return nil, nil
-		},
-		execResponder: func(query string) (any, error) {
-			switch {
-			case strings.Contains(query, "authoringBundleForPlan"):
-				return map[string]any{"output": []any{}}, nil
-			case strings.Contains(query, "planById"):
-				return map[string]any{"output": []any{plan}}, nil
-			case strings.Contains(query, "cataloguedConstructsForOwner"):
-				return map[string]any{"output": []any{}}, nil
-			}
-			return nil, nil
-		},
-	}
-	ce := &fakeCaptureEngine{fakeEngine: fe, sandbox: &fakeSandbox{reports: []memql.SandboxReport{okReport()}}, dryRun: memql.BundleDryRunReport{OK: true}}
-	loop := &PlannerAgentLoop{engine: ce, logger: authoringTestLogger()}
-	d := NewAuthoringCaptureDispatcher(loop, ce, authoringTestLogger())
-
-	if err := d.runCapture(context.Background(), "p-flat", "produceArtifact"); err != nil {
-		t.Fatalf("runCapture: %v", err)
-	}
-
-	// Exactly ONE automation construct persisted (the flat headline) -- no phase
-	// sub-automations, no synthesized chaining headline.
-	exec, _, _ := ce.snapshot()
-	autos := 0
-	for _, q := range exec {
-		if strings.Contains(q, "createAuthoringConstruct") && strings.Contains(q, `kind: "automation"`) {
-			autos++
-		}
-	}
-	if autos != 1 {
-		t.Fatalf("flattened capture must persist exactly 1 automation, got %d (exec=%v)", autos, exec)
 	}
 }

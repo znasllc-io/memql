@@ -313,18 +313,3 @@ func advertisableAutomations(all []*automations.Automation) []*automations.Autom
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
-
-// automationRunRefusal is the #2605 analogue for automations
-// (memql#2681): a @disabled automation is not runnable, on the manual MCP
-// path as anywhere else. Dropping it from the advertised surface alone
-// would leave it RUNNABLE by name -- worse than the function case, which
-// at least refused at call time. Returns nil when the automation may run.
-func automationRunRefusal(auto *automations.Automation) error {
-	if auto == nil {
-		return nil
-	}
-	if !auto.IsEnabled() {
-		return fmt.Errorf("automation %q is @disabled and cannot be run; remove the @disabled annotation to re-enable it", auto.Name)
-	}
-	return nil
-}

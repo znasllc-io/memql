@@ -28,11 +28,12 @@ func newTestLoop(fe *fakeEngine) *PlannerAgentLoop {
 	return &PlannerAgentLoop{engine: fe, logger: slog.New(slog.NewTextHandler(discardWriter{}, nil))}
 }
 
-// TestMintApprovedTrainingPlan_MintsAndSucceeds is the memql#852 Gap 2
-// happy path: an approved spawnTrainingPlan whose specialist has an
-// attached domain mints a kind=trainSpecialist child Plan (carrying the
-// resolved domainId) and marks the parent Plan succeeded.
-func TestMintApprovedTrainingPlan_MintsAndSucceeds(t *testing.T) {
+// TestMintApprovedTrainingPlan_OpensAGoalAndSucceeds is the memql#852 Gap 2
+// happy path, re-pointed onto the work spine (memql#5051): an approved
+// spawnTrainingPlan whose specialist has an attached domain OPENS A GOAL
+// naming the trainSpecialist template (carrying the resolved domainId) and
+// marks the parent Plan succeeded.
+func TestMintApprovedTrainingPlan_OpensAGoalAndSucceeds(t *testing.T) {
 	parent := map[string]any{
 		"id": "plan-1", "kind": "userGoal", "status": "running",
 		"goal":        "become an expert on French employment law",
@@ -49,27 +50,66 @@ func TestMintApprovedTrainingPlan_MintsAndSucceeds(t *testing.T) {
 	}
 	fe := trainingFakeEngine(parent, agent, skills)
 	l := newTestLoop(fe)
+	goals := &fakeWorkGoals{}
+	l.SetWorkGoals(goals)
 
 	d := plannerDecision{Action: "spawnTrainingPlan", SpecialistId: "v1:agents:agent:spec-1", Topic: "French employment law", Mode: "initial"}
 	if err := l.mintApprovedTrainingPlan(context.Background(), "plan-1", d); err != nil {
 		t.Fatalf("mintApprovedTrainingPlan: %v", err)
 	}
-	exec, _, _ := fe.snapshot()
 
-	if countContains(exec, "createPlan") != 1 {
-		t.Fatalf("must mint exactly one Plan, got %d createPlan calls", countContains(exec, "createPlan"))
+	opened := goals.opened()
+	if len(opened) != 1 {
+		t.Fatalf("must open exactly one goal, got %d", len(opened))
 	}
-	if countContains(exec, "trainSpecialist") < 1 {
-		t.Fatalf("minted Plan must be kind=trainSpecialist")
+	g := opened[0]
+	if g.AutomationName != "trainSpecialist" {
+		t.Errorf("goal named %q, want trainSpecialist", g.AutomationName)
 	}
-	if countContains(exec, "v1:knowledge:knowledgeDomain:fr-law") < 1 {
-		t.Fatalf("minted Plan input must carry the resolved domainId from the specialist's skill")
+	if g.Input["domainId"] != "v1:knowledge:knowledgeDomain:fr-law" {
+		t.Errorf("goal input must carry the domainId resolved from the specialist's skill, got %v", g.Input["domainId"])
+	}
+	if g.OwnerUserId != "v1:identity:user:u1" {
+		t.Errorf("goal owner %q, want the approving Plan's requestedBy", g.OwnerUserId)
+	}
+
+	exec, _, _ := fe.snapshot()
+	if countContains(exec, "createPlan") != 0 {
+		t.Errorf("no Plan may be minted any more; got %d createPlan calls", countContains(exec, "createPlan"))
 	}
 	if countContains(exec, `"succeeded"`) != 1 {
-		t.Fatalf("parent Plan must be marked succeeded after dispatching the training child, got %d", countContains(exec, `"succeeded"`))
+		t.Fatalf("parent Plan must be marked succeeded after opening the training goal, got %d", countContains(exec, `"succeeded"`))
 	}
 	if countContains(exec, "awaitingFeedback") != 0 {
 		t.Fatalf("an approved + resolvable training request must not escalate")
+	}
+}
+
+// TestMintApprovedTrainingPlan_RefusesWithNoGoalSurface: without the work
+// spine the approval cannot start anything, and saying so beats marking the
+// parent succeeded for training that never began.
+func TestMintApprovedTrainingPlan_RefusesWithNoGoalSurface(t *testing.T) {
+	parent := map[string]any{
+		"id": "plan-1", "kind": "userGoal", "status": "running",
+		"goal": "x", "partitionId": "p", "requestedBy": "v1:identity:user:u1",
+	}
+	agent := map[string]any{
+		"id":           "v1:agents:agent:spec-1",
+		"capabilities": map[string]any{"skillIds": []any{"v1:skills:skill:law-1"}},
+	}
+	skills := []map[string]any{{"id": "v1:skills:skill:law-1", "domainIds": []any{"v1:knowledge:knowledgeDomain:fr-law"}}}
+	fe := trainingFakeEngine(parent, agent, skills)
+	l := newTestLoop(fe)
+	// deliberately no SetWorkGoals
+
+	d := plannerDecision{Action: "spawnTrainingPlan", SpecialistId: "v1:agents:agent:spec-1", Topic: "t", Mode: "initial"}
+	err := l.mintApprovedTrainingPlan(context.Background(), "plan-1", d)
+	if err == nil {
+		t.Fatal("mintApprovedTrainingPlan reported success with no goal surface installed")
+	}
+	exec, _, _ := fe.snapshot()
+	if countContains(exec, `"succeeded"`) != 0 {
+		t.Error("the parent Plan was marked succeeded for training that never started")
 	}
 }
 

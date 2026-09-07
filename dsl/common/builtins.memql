@@ -173,58 +173,6 @@ builtin help {
   name  string!
 }
 
-// ---- queries/v1/common/builtin/builtinKnowledgeAugmentDomainAnalyze.memql ----
-
-// builtinKnowledgeAugmentDomainAnalyze
-// ====================================
-//
-// Preflight analyser for the chat 'Analyze for training' action. Takes
-// the user's question, the agent's response, the agent's attached
-// knowledge domains, and the RAG retrieval pool the agent saw, and
-// returns a structured outcome (addable / alreadyCovered / outOfScope)
-// with a best-fit domainId + topic + reasoning + confidence. The
-// frontend uses the outcome to decide whether to surface a Confirm
-// step before paying for the heavier augmentDomainGenerate call.
-
-@executor("integration.knowledge.augmentDomainAnalyze")
-@sdk
-@args(profile="object", additionalProperties="true")
-@description("Decide whether a chat exchange's topic warrants augmenting one of an agent's knowledge domains. Returns {outcome, domainId, topic, reasoning, confidence}. Drives the chat 'Analyze for training' button preflight.")
-builtin knowledgeAugmentDomainAnalyze {
-  userQuestion   string!
-  agentResponse  string!
-  domains        []object!
-  retrieved      []object
-}
-
-// ---- queries/v1/common/builtin/builtinKnowledgeAugmentDomainGenerate.memql ----
-
-// builtinKnowledgeAugmentDomainGenerate
-// =====================================
-//
-// Topic-focused chunk generator. Runs the augmentDomainContent prompt
-// to produce ~10 dense chunks targeted at a specific topic within a
-// knowledge domain, embeds each + writes them with source='augment'
-// and provenance back-pointers (sourceUtteranceId, sourceAgentId,
-// sourceTopic). Inserts an audit Plan row (kind='augmentDomain') so
-// the work shows up in the Tasks panel + the canvas plan-completed
-// card lifecycle.
-//
-// Synchronous in v1 (~30s for the full AI + embed + write path);
-// the frontend shows a "training queued" state until it returns.
-
-@executor("integration.knowledge.augmentDomainGenerate")
-@sdk
-@args(profile="object", additionalProperties="true")
-@description("Generate + embed + persist topic-focused chunks for a knowledge domain. Inserts a Plan row for audit. Returns {planId, chunksAdded, domainId, domainName, topic}.")
-builtin knowledgeAugmentDomainGenerate {
-  domainId           string!
-  topic              string!
-  sourceAgentId      string
-  partitionId            string!
-  requestedBy        string!
-}
-
 // ---- queries/v1/common/builtin/builtinKnowledgeIngest.memql ----
 
 // builtinKnowledgeIngest - Knowledge Base Document Ingestion
@@ -415,11 +363,37 @@ builtin embedChunk {
 
 @executor("integration.knowledge.embedDomainItems")
 @args(profile="object", additionalProperties="true")
-@description("Embed every unembedded validated chunk attached to a knowledge domain (optionally scoped to one Document), then recompute the parent Document's embeddingStatus none -> partial -> complete (#645). Materializes vectors into node_vectors so seeded + uploaded knowledge becomes semantically retrievable. Idempotent. Driven by the planner's embedDomainItems Plan dispatcher. Returns {domainId, documentId, total, embedded, already, failed, documentsRolledUp}.")
+@description("Embed every unembedded validated chunk attached to a knowledge domain (optionally scoped to one Document), then recompute the parent Document's embeddingStatus none -> partial -> complete (#645). Materializes vectors into node_vectors so seeded + uploaded knowledge becomes semantically retrievable. Idempotent. Driven by the embedDomainItems work template. Returns {domainId, documentId, total, embedded, already, failed, documentsRolledUp}.")
 builtin embedDomainItems {
   domainId    string!
   documentId  string
   provider    string
+}
+
+// ---- queries/v1/common/builtin/builtinTrainSpecialist.memql ----
+
+// builtinTrainSpecialist - Trainer Agent tool loop
+// ================================================
+//
+// Runs the Trainer Agent's bounded tool loop over one knowledge domain,
+// writing (and in refresh mode superseding) knowledge chunks (memql#5051).
+//
+// It replaces the trainSpecialist Plan and its graph-event dispatcher. A work
+// run is dispatched by the spine already, so the dispatcher's subscription,
+// its in-process claim (which arbitrated within one pod and not at all between
+// two) and its plan-status machine all went with it.
+//
+// SYNCHRONOUS -- the asynchrony belongs to the run that calls it.
+
+@executor("integration.knowledge.trainSpecialist")
+@args(profile="object", additionalProperties="true")
+@description("Run the Trainer Agent's bounded tool loop over one knowledge domain. mode='refresh' hands it the existing corpus so it can supersede stale chunks and resets the domain's stale signal afterwards. Synchronous. Returns {domainId, specialistId, topic, mode, summary}.")
+builtin trainSpecialist {
+  domainId      string!
+  specialistId  string
+  topic         string
+  mode          string
+  partition     string
 }
 
 // ---- queries/v1/common/builtin/builtinServiceVersion.memql ----

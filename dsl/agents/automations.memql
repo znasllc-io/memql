@@ -1,14 +1,92 @@
 // automations.memql
 //
-// (Empty.) Per-user agent provisioning is no longer an automation --
-// the SeedMaterializer (component/memql/seed_materializer.go) walks
-// the `seed` declarations in plannerAgent.memql / trainerAgent.memql
-// at engine startup, and subscribes to graph.node.created.v1:identity:user
-// for runtime fanout. The declarations themselves are the source of
-// truth; the materializer turns them into v1:agents:agent rows.
+// The two deterministic templates a compiled work goal routes to when the
+// caller already knows what it wants done (memql#5048).
 //
-// Historical:
-//   provisionPlannerAgentOnUserCreate -- replaced by plannerAgent.memql
-//   provisionTrainerAgentOnUserCreate -- replaced by trainerAgent.memql
-//   (provisionAssistantOnUserCreate lived in the product pack and is
-//    deleted there in the companion commit.)
+// # Why these are automations rather than Go
+//
+// `agent()` and `produceArtifact()` used to mint a v1:planner:plan that the
+// planner's orchestration loop picked up off a graph event and executed. The
+// work spine's unit is a run, and a run executes an AUTOMATION -- so the
+// replacement for "the loop knows how to run a produceArtifact Plan" is a
+// template that says how, in the same grammar every other template uses.
+//
+// # These are NOT reached through the compile pass
+//
+// Compile exists to DECIDE which template a goal needs. Here the caller
+// already knows -- `agent()` means "run this agent", `produceArtifact` means
+// "produce this deliverable" -- so the goal is opened naming its automation
+// and its run starts at `running`, and the run dispatcher (memql#5054) picks
+// it up.
+//
+// That is what keeps #5048's acceptance true: the happy path makes no EXTRA
+// model call versus the Plan path it replaces. Routing these through compile
+// would cost a triage call per invocation, because the goal statement IS the
+// user's prompt and no two are alike, so the catalog's exact-match tier could
+// never hit.
+//
+// # @template, not @trigger
+//
+// A trigger is how an automation is FIRED BY the graph. These are fired by a
+// run that NAMED them, which is the dispatcher's job -- so they declare
+// @template instead, the third way an automation is reachable. The load-time
+// gate refuses a @template that also carries a trigger: it would run both
+// ways, once per matching event and once per run, which presents as a template
+// that works.
+
+/// Run one agent turn for a goal that named an agent and a prompt. Backs the `agent(name, prompt)`
+/// DSL builtin, which opens a goal naming this template instead of minting a Plan.
+@template
+automation invokeAgent {
+  args {
+    /// The agent to run, as a bare v1:agents:agent id.
+    agentId  string!
+    /// The user turn to give it.
+    prompt   string!
+    /// Optional scope the turn runs in.
+    scopeId  string
+  }
+
+  step turn {
+    runAgentTurn (
+      agentId: args.agentId,
+      prompt: args.prompt,
+      scopeId: args.scopeId ?? ""
+    )
+  }
+}
+
+/// Produce a deliverable and land it in the Library. Backs the `produceArtifact` TOOL a model can
+/// call in its own tool loop.
+///
+/// The production instruction is composed HERE rather than in Go, so what the agent is asked to do
+/// is readable in the same place as the rest of the template -- and changing it is a DSL edit
+/// rather than a release.
+@template
+automation produceArtifact {
+  args {
+    /// The agent that produces the deliverable.
+    agentId   string!
+    /// What to produce, in the requester's words.
+    goal      string!
+    /// The deliverable's format (markdown, csv, ...).
+    format    string
+    /// A filename to use, when the requester named one.
+    filename  string
+  }
+
+  step produce {
+    runAgentTurn (
+      agentId: args.agentId,
+      prompt: concat(
+        "Produce the following deliverable and save it to the Library. Do not reply with the ",
+        "content itself -- write it to a file and confirm what you saved.\n\nDeliverable: ",
+        args.goal,
+        "\nFormat: ",
+        args.format ?? "markdown",
+        "\nFilename: ",
+        args.filename ?? "(choose a sensible one)"
+      )
+    )
+  }
+}

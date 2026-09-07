@@ -39,10 +39,10 @@ import (
 	"sync"
 	"time"
 
+	workintegration "github.com/znasllc-io/memql/integrations/work"
+
 	"github.com/znasllc-io/memql/component/events"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/core/num"
 )
 
@@ -97,6 +97,33 @@ type RefreshCron struct {
 	mu          sync.Mutex
 	lastSpawned map[string]time.Time // domainId -> when we last spawned a refresh
 	startedOnce sync.Once
+
+	// goals opens the refresh work. Nil on a node without the work spine,
+	// which is REPORTED rather than silently skipped -- a cadence that finds
+	// due domains and opens nothing looks exactly like a cadence with nothing
+	// due.
+	goals responsibilityGoals
+}
+
+// SetWorkGoals installs the goal opener (memql#5051).
+func (c *RefreshCron) SetWorkGoals(g responsibilityGoals) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.goals == nil {
+		c.goals = g
+	}
+}
+
+func (c *RefreshCron) goalsRef() responsibilityGoals {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.goals
 }
 
 // NewRefreshCron constructs a cron poller pinned to the planner
@@ -302,45 +329,54 @@ func (c *RefreshCron) markSpawned(domainId string, now time.Time) {
 	c.mu.Unlock()
 }
 
-// spawnRefreshPlan inserts a trainSpecialist Plan with mode='refresh'
-// for the domain. The trainSpecialist dispatcher (same process) picks
-// it up off the plan-created event. requestedBy uses the domain's
-// ownerId when set (a user-owned private domain), else the system
-// sentinel.
+// spawnRefreshPlan opens a work goal that runs the trainSpecialist template
+// with mode='refresh' for the domain (memql#5051).
+//
+// It used to insert a trainSpecialist Plan for the dispatcher in this same
+// process to pick up off a graph event. Now it opens a goal, whose run is
+// claimed and executed by an agent replica -- which also means the refresh
+// stops being pinned to whichever node happened to run the cadence.
+//
+// The owner is the domain's ownerId when set (a user-owned private domain),
+// else the system sentinel, exactly as requestedBy was.
+//
+// The NAME is kept even though it no longer spawns a Plan, because
+// `lastSpawned`, `markSpawned` and `refreshRespawnGuard` all speak of
+// spawning, and renaming one of five would read as two mechanisms.
 func (c *RefreshCron) spawnRefreshPlan(ctx context.Context, row map[string]any) error {
+	goals := c.goalsRef()
+	if goals == nil {
+		return fmt.Errorf("refresh cron: no work-goal surface on this node, so a due domain cannot be refreshed")
+	}
+
 	domainId := getString(row, "id")
 	domainName := getString(row, "name")
-	requestedBy := getString(row, "ownerId")
-	if requestedBy == "" {
-		requestedBy = refreshSystemRequester
+	owner := getString(row, "ownerId")
+	if owner == "" {
+		owner = refreshSystemRequester
 	}
+	name := domainNameOrId(domainName, domainId)
 
-	planId := id.NewSystemNodeShortId("refresh", domainId)
-	goal := fmt.Sprintf("Refresh knowledge domain %q (cadence backstop)", domainNameOrId(domainName, domainId))
-
-	input := map[string]any{
-		"domainId":     domainId,
-		"mode":         "refresh",
-		"specialistId": "", // domain-level refresh -- no single specialist
-		"topic":        domainNameOrId(domainName, domainId),
-	}
-	inputJSON := mustJSONObject(input)
-
-	// mode lives on input.mode (the dispatcher reads it there); the Plan
-	// concept's top-level `mode` field is set by createPlan only
-	// when wired -- createPlan's arg surface doesn't carry mode,
-	// so we don't pass it. The dispatcher branches on input.mode.
-	call := fmt.Sprintf(
-		`mutation createPlan(planId: %s, partitionId: %s, kind: "trainSpecialist", goal: %s, requestedBy: %s, triggerSource: "system", input: %s)`,
-		langparser.QuoteString(planId), langparser.QuoteString(refreshSystemPartitionId), langparser.QuoteString(goal), langparser.QuoteString(requestedBy), inputJSON,
-	)
-	_, err := c.engine.Execute(systemActorContext(ctx), call)
+	goalId, runId, err := goals.OpenDirectGoal(ctx, workintegration.DirectGoal{
+		OwnerUserId:    owner,
+		Statement:      fmt.Sprintf("Refresh knowledge domain %q (cadence backstop)", name),
+		AutomationName: "trainSpecialist",
+		Input: map[string]any{
+			"domainId": domainId,
+			"mode":     "refresh",
+			// Domain-level refresh: no single specialist to tailor for.
+			"specialistId": "",
+			"topic":        name,
+		},
+		RequestedVia: "api",
+		TriggeredBy:  "refresh.cadence",
+	})
 	if err != nil {
 		return err
 	}
 	if c.logger != nil {
-		c.logger.Info("planner refresh cron: spawned trainSpecialist(refresh)",
-			"planId", planId, "domainId", domainId, "requestedBy", requestedBy)
+		c.logger.Info("planner refresh cron: opened a refresh goal",
+			"goalId", goalId, "runId", runId, "domainId", domainId, "owner", owner)
 	}
 	return nil
 }

@@ -133,7 +133,7 @@ integrations/
 ├── harnessrecall/     # recall -- the harness memory-recall operator
 ├── harnesstrace/      # trace -- harness trace writes
 ├── identity/          # Delegation lifecycle -- createDelegation, resolveDelegation, revokeDelegation, validateScope
-├── knowledge/         # Corpus seed + augment-domain pipeline -- ingest, seedStandardDomains, augmentDomainAnalyze/Generate, ensureKnowledgeBridge
+├── knowledge/         # Corpus seed + ingest -- ingest, seedStandardDomains, embedDomainItems, ensureKnowledgeBridge
 ├── library/           # Library document version history: the user / assistant / restore appends (memql#1228-1231)
 ├── liveknowledge/     # query -- Live Knowledge dispatch to a registered connector
 ├── openai/            # Polyphon ASR/TTS via OpenAI (Realtime transcription + /v1/audio/speech) -- synthesize

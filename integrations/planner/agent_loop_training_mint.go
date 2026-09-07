@@ -20,12 +20,12 @@ package planner
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/core/id"
+
+	workintegration "github.com/znasllc-io/memql/integrations/work"
 )
 
 // mintApprovedTrainingPlan handles an approved spawnTrainingPlan decision.
@@ -64,41 +64,42 @@ func (l *PlannerAgentLoop) mintApprovedTrainingPlan(ctx context.Context, planId 
 		topic = getString(plan, "goal")
 	}
 
-	input := map[string]any{
-		"domainId":     domainId,
-		"specialistId": specialistId,
-		"topic":        topic,
-		"mode":         mode,
-	}
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		return fmt.Errorf("marshal trainSpecialist input: %w", err)
+	// A deterministic goal id is no longer minted here: OpenDirectGoal mints
+	// its own, and the idempotency that id bought is now the approval itself
+	// -- this path runs once per approved decision because the parent Plan is
+	// terminated below.
+	goals := l.workGoals()
+	if goals == nil {
+		return fmt.Errorf("mint trainSpecialist: no work-goal surface on this node, so approved training cannot start")
 	}
 
-	// Deterministic child id keyed on the approving Plan -- one training
-	// run per approval (idempotent if the loop re-dispatches the same
-	// approved decision). SystemNodeShortId stays deterministic (no
-	// uniqueness token) so the idempotency holds, while guaranteeing a
-	// colon-free bare id the engine accepts (issue #1712).
-	trainPlanId := id.SystemNodeShortId("train", planId)
-	goal := fmt.Sprintf("Train specialist on %q (user-approved)", topic)
-	call := fmt.Sprintf(
-		`mutation createPlan(planId: %s, partitionId: %s, parentPlanId: %s, kind: "trainSpecialist", goal: %s, requestedBy: %s, triggerSource: "user.approved", input: %s)`,
-		langparser.QuoteString(trainPlanId), langparser.QuoteString(getString(plan, "partitionId")), langparser.QuoteString(planId), langparser.QuoteString(goal),
-		langparser.QuoteString(getString(plan, "requestedBy")), string(inputJSON),
-	)
-	if _, err := l.engine.Execute(systemActorContext(ctx), call); err != nil {
-		return fmt.Errorf("mint trainSpecialist plan: %w", err)
+	owner := getString(plan, "requestedBy")
+	goalId, runId, err := goals.OpenDirectGoal(ctx, workintegration.DirectGoal{
+		OwnerUserId:    owner,
+		Statement:      fmt.Sprintf("Train specialist on %q (user-approved)", topic),
+		AutomationName: "trainSpecialist",
+		Input: map[string]any{
+			"domainId":     domainId,
+			"specialistId": specialistId,
+			"topic":        topic,
+			"mode":         mode,
+		},
+		RequestedVia: "api",
+		TriggeredBy:  "user.approved",
+	})
+	if err != nil {
+		return fmt.Errorf("open trainSpecialist goal: %w", err)
 	}
-	l.logger.Info("planner agent loop: minted trainSpecialist plan on approval",
-		"planId", planId, "trainPlanId", trainPlanId, "specialistId", specialistId,
+	l.logger.Info("planner agent loop: opened a trainSpecialist goal on approval",
+		"planId", planId, "goalId", goalId, "runId", runId, "specialistId", specialistId,
 		"domainId", domainId, "mode", mode)
 
 	// The parent Plan's job -- decide + trigger training -- is complete;
 	// the training itself runs as the dispatched child. Terminate the
 	// parent so the loop doesn't re-emit spawnTrainingPlan.
 	return l.markPlanSucceeded(ctx, planId, map[string]any{
-		"trainingPlanId": trainPlanId,
+		"trainingGoalId": goalId,
+		"trainingRunId":  runId,
 		"specialistId":   specialistId,
 		"domainId":       domainId,
 		"mode":           mode,
