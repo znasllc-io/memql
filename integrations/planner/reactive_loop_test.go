@@ -96,12 +96,13 @@ func TestReactiveLoop_StandingNeverDueOnHeartbeat(t *testing.T) {
 // asked, because the loop's whole contract with the spine is which questions
 // it asks and with whose id.
 type fakeGoals struct {
-	live      bool
-	liveErr   error
-	openErr   error
-	askedFor  []string
-	askedUser []string
-	opened    []workintegration.ResponsibilityGoal
+	live         bool
+	liveErr      error
+	openErr      error
+	askedFor     []string
+	askedUser    []string
+	opened       []workintegration.ResponsibilityGoal
+	openedDirect []workintegration.DirectGoal
 }
 
 func (f *fakeGoals) HasLiveGoalForResponsibility(_ context.Context, ownerUserId, respId string) (bool, error) {
@@ -115,6 +116,17 @@ func (f *fakeGoals) OpenResponsibilityGoal(_ context.Context, g workintegration.
 		return "", "", f.openErr
 	}
 	f.opened = append(f.opened, g)
+	return "v1:work:goal:g1", "v1:work:run:r1", nil
+}
+
+// OpenDirectGoal is on the seam because a node either has the work spine or it
+// does not (memql#5051). The reactive loop never calls it; the refresh cadence
+// and the approved-training gate do.
+func (f *fakeGoals) OpenDirectGoal(_ context.Context, g workintegration.DirectGoal) (string, string, error) {
+	if f.openErr != nil {
+		return "", "", f.openErr
+	}
+	f.openedDirect = append(f.openedDirect, g)
 	return "v1:work:goal:g1", "v1:work:run:r1", nil
 }
 

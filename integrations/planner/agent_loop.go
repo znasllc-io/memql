@@ -49,6 +49,11 @@ import (
 type PlannerAgentLoop struct {
 	engine Engine
 	logger *slog.Logger
+
+	// goals is the work spine's goal opener (memql#5051). The approved-
+	// training gate opens a goal through it instead of minting a Plan.
+	goalsMu sync.Mutex
+	goals   responsibilityGoals
 	// handled dedups plan-created events per planId so a re-delivered created
 	// event (cross-node mesh re-delivery, memql#1155) does not re-run
 	// decompose/dispatch for the same plan and feed a storm.
@@ -439,6 +444,29 @@ const systemPlannerActor = "system:planner"
 // uniformly by loadPlan / loadTasks / loadSpecialists / the mutation
 // helpers so every engine roundtrip from this file sees the same
 // system identity.
+// workGoals is the loop's handle on the work spine's goal opener, threaded
+// from the integration (memql#5051). Nil on a node without the work spine.
+func (l *PlannerAgentLoop) workGoals() responsibilityGoals {
+	if l == nil {
+		return nil
+	}
+	l.goalsMu.Lock()
+	defer l.goalsMu.Unlock()
+	return l.goals
+}
+
+// SetWorkGoals installs it.
+func (l *PlannerAgentLoop) SetWorkGoals(g responsibilityGoals) {
+	if l == nil {
+		return
+	}
+	l.goalsMu.Lock()
+	defer l.goalsMu.Unlock()
+	if l.goals == nil {
+		l.goals = g
+	}
+}
+
 func systemActorContext(ctx context.Context) context.Context {
 	return auth.ContextWithToken(ctx, &auth.TokenInfo{
 		Subject: systemPlannerActor,

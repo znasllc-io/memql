@@ -1,24 +1,80 @@
 // automations.memql
 //
-// Knowledge-domain lifecycle automations. EMPTY on purpose, and the
-// emptiness is the finished state of a migration rather than a gap.
+// The work-spine TEMPLATE that replaces the trainSpecialist Plan dispatcher
+// (memql#5051).
 //
-// This file used to hold the refresh-cadence cron from Q9 of the
-// planner-redesign work: a nightly 02:30 automation firing
-// logicRefreshDueKnowledgeDomains, which returned a candidate COUNT and
-// did nothing else. memql#644 replaced it with an in-process Go poller,
-// integrations/planner/refresh_cron.go, and removed the automation --
-// this header kept claiming to house it (memql#4115).
+// # What they replace
 //
-// Why Go and not DSL: the elapsed-time check is arithmetic on datetime
-// fields, which the MemQL grammar has no form for, and an in-process
-// poller cannot depend on the engine's automation scheduler reaching the
-// planner node-type binary. The poller runs hourly rather than nightly
-// for that reason, with a per-domain "spawned recently" guard so a due
-// domain gets exactly one refresh Plan. refresh_cron.go's own header
-// carries the full contract.
+// Training and embedding were the last two Plan producers, and unlike the
+// others they were internal: the planner loop minted the Plan and a dispatcher
+// picked it up off a graph event.
 //
-// The other lifecycle duties the earlier header promised -- auto-archive
-// of zero-citation domains, supersession rollup -- are unbuilt. They land
-// here if they land as automations at all; the split above is the thing to
-// weigh first, since anything needing date arithmetic belongs in Go.
+//   - agent_loop_training_mint.go minted kind:"trainSpecialist"
+//   - train_specialist_dispatch.go subscribed and claimed it
+//   - refresh_cron.go re-minted on a cadence and on a stale signal
+//
+// # There is no embedDomainItems template, and that is a finding
+//
+// EmbedDomainItemsDispatcher subscribed for kind='embedDomainItems' Plans and
+// NOTHING IN THE TREE EVER MINTED ONE -- checked against a working control, since
+// trainSpecialist Plans are minted at agent_loop_training_mint.go:86 and the
+// same search finds no producer for this kind. So it was deleted rather than
+// ported, and adding a template nothing opens would have carried the same
+// emptiness into the new shape. The `embedDomainItems` BUILTIN is real and
+// stays reachable; what is gone is a dispatcher waiting on a row nobody wrote.
+//
+// The issue said to reconsider the claim-on-a-graph-event pattern rather than
+// port it, and reconsidering removes it: a work run is dispatched by the spine
+// already, so the mint sites open a goal naming one of these and the run
+// carries it. That deletes a subscription, a claim and a status machine per
+// dispatcher.
+//
+// The old claim was an in-process map under a mutex, which arbitrates within
+// one pod and not at all between two -- so at two planner replicas one
+// training Plan ran twice. The run dispatcher's claim is Postgres-backed.
+//
+// # @template, not @trigger
+//
+// These are fired by a run that NAMED them, not by the graph. Declaring a
+// trigger would make them ALSO run on their own, which the load-time gate
+// refuses by name.
+//
+// # What is still NOT here, and why (carried forward from memql#4115)
+//
+// The refresh CADENCE stays in Go. This file used to hold a nightly 02:30
+// automation firing logicRefreshDueKnowledgeDomains, which returned a
+// candidate COUNT and did nothing else; memql#644 replaced it with an
+// in-process poller. The reason is unchanged by this epic: the elapsed-time
+// check is arithmetic on datetime fields, which the MemQL grammar has no form
+// for. So the poller keeps deciding WHEN, and what it opens is now a goal
+// naming trainSpecialist above rather than a Plan.
+//
+// The other lifecycle duties an older header promised -- auto-archive of
+// zero-citation domains, supersession rollup -- are still unbuilt. They land
+// here if they land as automations at all, and the date-arithmetic split above
+// is the thing to weigh first.
+
+/// Train one knowledge domain's corpus. Opened as a goal by the specialist-training gate and by the
+/// refresh cadence; mode='refresh' supersedes stale chunks rather than only adding.
+@template
+automation trainSpecialist {
+  args {
+    /// The knowledge domain to train.
+    domainId      string!
+    /// The specialist the corpus is tailored for.
+    specialistId  string
+    /// Narrow the corpus to one topic.
+    topic         string
+    /// "initial" (the default) or "refresh".
+    mode          string
+  }
+
+  step train {
+    trainSpecialist (
+      domainId: args.domainId,
+      specialistId: args.specialistId ?? "",
+      topic: args.topic ?? "",
+      mode: args.mode ?? "initial"
+    )
+  }
+}

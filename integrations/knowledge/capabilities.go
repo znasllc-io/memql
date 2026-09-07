@@ -187,9 +187,10 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			// Bulk domain-warm path (#645). Embeds every unembedded
 			// retrievable chunk in a domain (optionally scoped to one
 			// Document) and drives the parent Document's embeddingStatus
-			// none -> partial -> complete. Driven by the planner's
-			// EmbedDomainItemsDispatcher on a kind='embedDomainItems' Plan
-			// (after a domain is seeded or a user uploads a file).
+			// none -> partial -> complete. Driven by the embedDomainItems
+			// work template (memql#5051), which a goal opens after a domain
+			// is seeded or a user uploads a file. It used to be a Plan and a
+			// graph-event dispatcher.
 			Name:        capEmbedDomainItems,
 			Description: "Embed every unembedded validated chunk attached to a knowledge domain (optionally scoped to one Document), then recompute the parent Document's embeddingStatus (none -> partial -> complete). Idempotent. Returns {domainId, documentId, total, embedded, already, failed, documentsRolledUp}.",
 			Handler:     i.embedDomainItemsHandler,
@@ -197,6 +198,23 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"domainId":   "string (required) - the knowledge domain whose chunks to embed.",
 				"documentId": "string (optional) - scope the run to one Document's chunks. Empty = the whole domain.",
 				"provider":   "string (optional) - embedding provider name (default embedding3Small).",
+			},
+		},
+		{
+			// The Trainer Agent's bounded tool loop, as a builtin a work run
+			// can call (memql#5051). It replaces the trainSpecialist Plan and
+			// its graph-event dispatcher: a run is dispatched by the spine
+			// already, so the claim, the subscription and the plan-status
+			// machine all go with it.
+			Name:        "trainSpecialist",
+			Description: "Run the Trainer Agent's bounded tool loop over one knowledge domain, writing (and in refresh mode superseding) knowledge chunks. Synchronous -- the asynchrony belongs to the work run that calls it. Returns {domainId, specialistId, topic, mode, summary}.",
+			Handler:     i.handleTrainSpecialist,
+			ArgsSchema: map[string]string{
+				"domainId":     "string (required) - the knowledge domain to train.",
+				"specialistId": "string (optional) - the specialist the corpus is tailored for; absent loses the role-tailoring nuance but still trains the domain.",
+				"topic":        "string (optional) - narrow the corpus to one topic.",
+				"mode":         "string (optional) - 'initial' (default) or 'refresh'. Refresh hands the Trainer the existing corpus so it can supersede stale chunks, and resets the domain's stale signal afterwards.",
+				"partition":    "string (optional) - carried into the prompt.",
 			},
 		},
 	}

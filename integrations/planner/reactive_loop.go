@@ -126,6 +126,13 @@ const (
 type responsibilityGoals interface {
 	HasLiveGoalForResponsibility(ctx context.Context, ownerUserId, responsibilityId string) (bool, error)
 	OpenResponsibilityGoal(ctx context.Context, g workintegration.ResponsibilityGoal) (string, string, error)
+	// OpenDirectGoal opens a goal whose template is already known -- what the
+	// refresh cadence and the approved-training gate use (memql#5051). It is
+	// on this interface rather than a second one because a node either has the
+	// work spine or it does not; splitting them would make "has the reactive
+	// loop's half but not training's" representable, and nothing can be in
+	// that state.
+	OpenDirectGoal(ctx context.Context, g workintegration.DirectGoal) (string, string, error)
 }
 
 type ReactiveLoop struct {
