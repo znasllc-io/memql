@@ -99,14 +99,19 @@ func (s *Server) hasValidSession(r *http.Request) bool {
 // A signed, unexpired token stays usable when the row cannot be read, because
 // the alternative is a database blip signing everybody out.
 func (s *Server) sessionClaims(r *http.Request) *identity.AccessTokenClaims {
-	if s == nil || s.meTokens == nil || s.meTokens.Issuer == nil {
+	// userIssuer, not meTokens alone: a binary may wire only the passkey
+	// /me surface (memql#3409), and a signed-in probe that ignores that
+	// issuer would send an already-authenticated browser through the
+	// login form -- the same snap-back this handoff exists to close.
+	issuer := s.userIssuer()
+	if issuer == nil {
 		return nil
 	}
 	raw := extractUserToken(r)
 	if raw == "" {
 		return nil
 	}
-	claims, err := s.meTokens.Issuer.VerifyAccessToken(raw, time.Now().UTC())
+	claims, err := issuer.VerifyAccessToken(raw, time.Now().UTC())
 	if err != nil {
 		return nil
 	}
@@ -131,10 +136,14 @@ func (s *Server) sessionClaims(r *http.Request) *identity.AccessTokenClaims {
 //     so the relying-party SPA exchanges it via /oauth/token. The
 //     user never sees the email-entry form -- one click from
 //     "AuthPortal" to "signed in to the product SPA".
-//  4. Session + return_to that doesn't match any registered client
-//     -> wrapped handler runs (form renders). The relying party
-//     isn't trusted for SSO; user must confirm via the email round
-//     trip.
+//  4. Session + return_to that is a same-origin path (/me/devices,
+//     /device, ...) -> redirect there. First-party destinations are
+//     not OAuth clients; showing the login form to somebody who is
+//     already signed in is the snap-back that broke passkey setup.
+//  5. Session + return_to that doesn't match any registered client
+//     and is not a same-origin path -> wrapped handler runs (form
+//     renders). The relying party isn't trusted for SSO; user must
+//     confirm via the email round trip.
 //
 // Use this wrapper for any GET endpoint that presents an
 // "authenticate yourself" affordance (login form, setup wizard,
@@ -177,11 +186,18 @@ func (s *Server) redirectIfAuthenticated(target string, next http.HandlerFunc) h
 		}
 		// SSO short-circuit. Try to match the OAuth params (or the
 		// legacy return_to) against a registered client. Same
-		// predicate the magic-link flow uses; matched=false means
-		// no relying party in scope, so we fall through to the form
-		// for the user to confirm.
+		// predicate the magic-link flow uses.
 		clientId, redirectURI, state, matched := s.pickOAuthCtx(r.Context(), urlClientId, urlRedirectURI, urlReturnTo, urlState)
 		if !matched || s.mintSSOAuthCode == nil {
+			// FIRST-PARTY PATH: a signed-in browser on
+			// /login?return_to=/me/devices (or /device, ...) must go
+			// there, not see the email form again. Absolute OAuth
+			// return_to values fail SafeRelativeRedirect and still
+			// fall through to the form when no client matched.
+			if dest := identity.SafeRelativeRedirect(urlReturnTo); dest != "" {
+				http.Redirect(w, r, dest, http.StatusSeeOther)
+				return
+			}
 			next(w, r)
 			return
 		}

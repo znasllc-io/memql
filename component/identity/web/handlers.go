@@ -72,6 +72,16 @@ func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/invitation?code="+url.QueryEscape(token), http.StatusSeeOther)
 		return
 	}
+	// FIRST-PARTY return_to IS NOT AN OAUTH CLIENT (memql#3410, passkey
+	// registration handoff). /login?return_to=/me/devices arrives from
+	// requireUser and from the /me shell's client-side 401 bounce. The
+	// magic-link row has no slot for a non-relying-party destination, so
+	// park it in the post-login cookie here too -- covering the client
+	// bounce that cannot set an HttpOnly cookie itself. Absolute OAuth
+	// return_to values fail SafeRelativeRedirect and are left alone.
+	if dest := identity.SafeRelativeRedirect(strings.TrimSpace(r.URL.Query().Get("return_to"))); dest != "" {
+		identity.SetPostLoginRedirect(w, dest, s.cookieSecure())
+	}
 	settings := s.snapshotSettings(r)
 	data := webtempl.LoginData{
 		// passkey-login.js reveals the "Sign in with a passkey" control
