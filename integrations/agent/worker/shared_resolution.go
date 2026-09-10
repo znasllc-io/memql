@@ -97,28 +97,51 @@ func (r *Router) PlanUserModelWithShared(
 		return own, nil
 	}
 
-	ownIds := map[string]bool{}
+	// ownSeen is every registration the owner-scoped plan already judged --
+	// kept OR ruled out. A machine in Rejected must not be re-admitted through
+	// the shared list (that would route around the own plan's reasoning). A
+	// machine the own plan never returned at all is different: share is for a
+	// DIFFERENT account, and recovering the caller's own hardware must not
+	// wait on cluster consent.
+	ownSeen := map[string]bool{}
 	for _, c := range own.Candidates {
-		ownIds[c.RegistrationId] = true
+		ownSeen[c.RegistrationId] = true
+	}
+	for id := range own.Rejected {
+		ownSeen[id] = true
 	}
 
 	now := r.clock()
+	ownRecovered := make([]Candidate, 0)
 	sharedKept := make([]Candidate, 0, len(all))
 	rejected := map[string]string{}
 	for id, why := range own.Rejected {
 		rejected[id] = why
 	}
 	for _, c := range all {
-		if ownIds[c.RegistrationId] {
-			// Already in the own half. Skipping rather than de-duplicating
-			// later keeps the own-first boundary exact: a machine cannot appear
-			// in both groups and be tried twice.
+		if ownSeen[c.RegistrationId] {
+			// Already judged by the own plan -- kept or ruled out. Skipping
+			// rather than de-duplicating later keeps the own-first boundary exact.
 			continue
 		}
 		if sameSubjectId(c.OwnerUserId, actingUserId) {
-			// The caller's own machine that the OWN plan already ruled out --
-			// offline, revoked, missing the model. Re-admitting it through the
-			// shared list would route around their own plan's reasoning.
+			// The caller's own machine the owner-scoped read never returned.
+			// Still THEIR hardware: evaluate without ServesCluster. Pairing a
+			// machine must unlock Ask / Materialize / Nexus for that user without
+			// Fleet share + inference.serve:cluster (those consents are only for
+			// a different account).
+			switch {
+			case !workerservice.IsOnline(c.LastSeenAt, c.RevokedAt, now):
+				if !c.RevokedAt.IsZero() {
+					rejected[c.RegistrationId] = "revoked"
+				} else {
+					rejected[c.RegistrationId] = "offline"
+				}
+			case !c.SupportsCapability(workerservice.ModelCapability):
+				rejected[c.RegistrationId] = "missing capability " + workerservice.ModelCapability
+			default:
+				ownRecovered = append(ownRecovered, c)
+			}
 			continue
 		}
 		switch {
@@ -137,6 +160,17 @@ func (r *Router) PlanUserModelWithShared(
 		}
 	}
 
+	// Recovered own machines follow the caller's routing policy, same as PlanModel.
+	recoveredPlan := narrowToModel(RoutePlan{
+		Policy:     own.Policy,
+		Candidates: ownRecovered,
+		Rejected:   map[string]string{},
+		Total:      len(ownRecovered),
+	}, modelId, needs)
+	for id, why := range recoveredPlan.Rejected {
+		rejected[id] = why
+	}
+
 	// The shared half is narrowed to the model and ordered under the DEFAULT
 	// policy, never the caller's -- see the doc comment.
 	sharedPlan := narrowToModel(RoutePlan{
@@ -149,14 +183,15 @@ func (r *Router) PlanUserModelWithShared(
 		rejected[id] = why
 	}
 
-	// OWN FIRST. A stable concatenation rather than a sort, so each half keeps
-	// the order its own policy gave it.
+	// OWN FIRST (plan + recovered), then shared. Stable concatenation so each
+	// half keeps the order its own policy gave it.
 	out := own
-	out.Candidates = append(append([]Candidate{}, own.Candidates...), sharedPlan.Candidates...)
+	out.Candidates = append(append(append([]Candidate{}, own.Candidates...), recoveredPlan.Candidates...), sharedPlan.Candidates...)
 	out.Rejected = rejected
 	out.Total = own.Total + len(all)
 	return out, nil
 }
+
 
 // OwnMachineFirst reports whether a candidate belongs to the acting user.
 //
