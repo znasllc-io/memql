@@ -260,6 +260,16 @@ func (s *server) upsertRegistration(
 	if err != nil {
 		return RegistrationRow{}, fmt.Errorf("worker lookup: %w", err)
 	}
+	// Reclaim by stable machine key when the token is new (re-pair / rotate)
+	// but the physical install already has an unrevoked registration. Lookup
+	// by identityId alone is what minted the e18ce→6ec52e→0ba471→6aa926
+	// duplicate lineage for one Mac.
+	if existing == nil {
+		existing, err = s.findRegistrationByMachineKey(ctx, identity.OwnerUserId, register)
+		if err != nil {
+			return RegistrationRow{}, err
+		}
+	}
 
 	apps := AppsFromProto(register.GetApps())
 	descriptors := AppDescriptorsFromProto(register.GetAppDescriptors())
@@ -323,6 +333,37 @@ func (s *server) upsertRegistration(
 		return RegistrationRow{}, fmt.Errorf("worker refresh registration: %w", err)
 	}
 	return registration, nil
+}
+
+
+// findRegistrationByMachineKey returns the owner's unrevoked registration that
+// matches the Register message's stable machine key, or nil when none match.
+// Newest lastSeenAt wins when more than one row shares a key (should not
+// happen once reclaim is live; still deterministic).
+func (s *server) findRegistrationByMachineKey(ctx context.Context, ownerUserId string, register *memqlv1.Register) (*RegistrationRow, error) {
+	want := MachineKeyFromRegister(register)
+	if want == "" {
+		return nil, nil
+	}
+	rows, err := s.store.WorkersForUser(ctx, ownerUserId)
+	if err != nil {
+		return nil, fmt.Errorf("worker machine-key lookup: %w", err)
+	}
+	var best *RegistrationRow
+	for i := range rows {
+		row := rows[i]
+		if !row.RevokedAt.IsZero() {
+			continue
+		}
+		if MachineKeyFromRow(row) != want {
+			continue
+		}
+		if best == nil || row.LastSeenAt.After(best.LastSeenAt) {
+			cp := row
+			best = &cp
+		}
+	}
+	return best, nil
 }
 
 // streamSession is the server-side state for one connected worker.

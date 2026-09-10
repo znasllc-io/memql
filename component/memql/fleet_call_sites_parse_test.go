@@ -83,7 +83,7 @@ func fleetCallSites() []struct {
 			"registeredAt", "lastSeenAt", "lastConnectedFromIP", "connectedNodeId",
 		}, "component/worker/store.go CreateRegistration"},
 		{"refreshWorkerRegistration", []string{
-			"registrationId", "name", "capabilities", "capabilityDescriptor", "labels",
+			"registrationId", "identityId", "name", "capabilities", "capabilityDescriptor", "labels",
 			"concurrency", "platformInfo", "permissions", "version", "buildTag",
 			"lastSeenAt", "lastConnectedFromIP", "connectedNodeId",
 		}, "component/worker/store.go RefreshRegistration"},

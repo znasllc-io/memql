@@ -18,6 +18,8 @@ import (
 // the server wrote for new vs. existing registrations.
 type fakeRegistrationStore struct {
 	existing *RegistrationRow
+	// byUser is scanned for machine-key reclaim when identity lookup misses.
+	byUser []RegistrationRow
 
 	created     []RegistrationRow
 	refreshed   []RegistrationRow
@@ -165,7 +167,13 @@ func (f *fakeRegistrationStore) WorkerByIdentityId(ctx context.Context, identity
 }
 
 func (f *fakeRegistrationStore) WorkersForUser(ctx context.Context, ownerUserId string) ([]RegistrationRow, error) {
-	return nil, nil
+	out := make([]RegistrationRow, 0, len(f.byUser))
+	for _, row := range f.byUser {
+		if row.OwnerUserId == ownerUserId {
+			out = append(out, row)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeRegistrationStore) CreateInvocation(ctx context.Context, row InvocationRow) error {
@@ -456,5 +464,70 @@ func TestEngineStoreRefreshRegistration_WireShape(t *testing.T) {
 	}
 	if !strings.Contains(eng.queries[1], `capabilityDescriptor: null`) {
 		t.Fatalf("nil descriptor must serialize as null:\n%s", eng.queries[1])
+	}
+}
+
+
+func TestUpsertRegistration_ReclaimsSameMachineByMachineId(t *testing.T) {
+	// Re-pair mints a new worker token (new identityId). Without reclaim that
+	// inserts a second registration for the same Mac -- the prod duplicate
+	// lineage. A stable machineId label must refresh the existing row and
+	// rebind identityId instead.
+	old := existingRow(nil)
+	old.IdentityId = "ident-old"
+	old.Labels = map[string]string{LabelMachineId: "install-uuid-1"}
+	old.Platform = map[string]any{"hostname": "MacBook.local", "os": "darwin", "arch": "arm64"}
+	store := &fakeRegistrationStore{byUser: []RegistrationRow{*old}}
+
+	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	srv := newUpsertTestServer(store, now)
+	register := &memqlv1.Register{
+		Name:         "MacBook.local",
+		Capabilities: []string{CapabilityHeadless},
+		Labels:       map[string]string{LabelMachineId: "install-uuid-1"},
+		Platform:     &memqlv1.PlatformInfo{Hostname: "MacBook.local", Os: "darwin", Arch: "arm64"},
+		Concurrency:  map[string]uint32{CapabilityHeadless: 1},
+	}
+	identity := &WorkerIdentity{IdentityId: "ident-new", OwnerUserId: "user-1", Active: true}
+	descriptor, err := validateRegister(register)
+	if err != nil {
+		t.Fatalf("validateRegister: %v", err)
+	}
+	row, err := srv.upsertRegistration(context.Background(), identity, register, descriptor, now, "10.0.0.1:9")
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if len(store.created) != 0 || len(store.refreshed) != 1 {
+		t.Fatalf("want reclaim refresh, got create=%d refresh=%d", len(store.created), len(store.refreshed))
+	}
+	if row.ID != "reg-1" {
+		t.Fatalf("row id = %q, want reg-1", row.ID)
+	}
+	if row.IdentityId != "ident-new" {
+		t.Fatalf("identityId = %q, want rebound ident-new", row.IdentityId)
+	}
+	if store.refreshed[0].IdentityId != "ident-new" {
+		t.Fatalf("refresh did not rebind identityId: %+v", store.refreshed[0])
+	}
+}
+
+func TestUpsertRegistration_DoesNotReclaimRevokedMachine(t *testing.T) {
+	old := existingRow(nil)
+	old.IdentityId = "ident-old"
+	old.RevokedAt = time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	old.Labels = map[string]string{LabelMachineId: "install-uuid-1"}
+	store := &fakeRegistrationStore{byUser: []RegistrationRow{*old}}
+	row := runUpsert(t, store, &memqlv1.Register{
+		Name:         "mbp",
+		Capabilities: []string{CapabilityHeadless},
+		Labels:       map[string]string{LabelMachineId: "install-uuid-1"},
+		Platform:     &memqlv1.PlatformInfo{Hostname: "MacBook.local", Os: "darwin", Arch: "arm64"},
+		Concurrency:  map[string]uint32{CapabilityHeadless: 1},
+	})
+	if len(store.created) != 1 {
+		t.Fatalf("revoked row must not be reclaimed; create=%d", len(store.created))
+	}
+	if row.ID == "reg-1" {
+		t.Fatal("new registration must not reuse the revoked id")
 	}
 }

@@ -46,6 +46,11 @@ export function useSession(): SessionFacts {
   return value;
 }
 
+/** Null outside SessionProvider -- for feeds that must not throw in harnesses. */
+export function useSessionIfPresent(): SessionFacts | null {
+  return useContext(Ctx);
+}
+
 export function SessionProvider({ value, children }: { value: SessionFacts; children: ReactNode }) {
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

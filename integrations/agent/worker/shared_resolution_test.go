@@ -224,3 +224,43 @@ func TestOwnerMachineAlreadyRuledOutIsNotReadmittedViaSharedList(t *testing.T) {
 	}
 }
 
+
+func TestOwnerPrivateMachineWithEmptyOwnerUserIdIsNotShareRefusal(t *testing.T) {
+	// Residual #5270: if the shared row lacks OwnerUserId, recovery cannot
+	// match ownership -- but it must not dress that as "Neither consent".
+	orphan := privateMachine("orphan", "")
+	store := &sharedFleet{
+		fakeFleet: &fakeFleet{machines: nil, owner: "alice"},
+		all:       []Candidate{orphan},
+	}
+	plan, err := modelRouter(t, store).PlanUserModelWithShared(context.Background(), "alice", smallModel, ModelNeeds{})
+	if err != nil {
+		t.Fatalf("PlanUserModelWithShared: %v", err)
+	}
+	why := plan.Rejected["orphan"]
+	if why != "registration missing ownerUserId" {
+		t.Fatalf("rejected[orphan] = %q, want missing ownerUserId (not a share refusal)", why)
+	}
+	if strings.Contains(why, "consent") || strings.Contains(why, "inference.serve") {
+		t.Fatalf("must not look like a cluster-share refusal: %q", why)
+	}
+}
+
+func TestOwnerActiveMachinePreferredOverForeignPrivateShareNoise(t *testing.T) {
+	// Prod shape: passkey user owns an active machine; shared list also has
+	// another account's private (or revoked) registration. Owner Ask must
+	// admit the active own machine without cluster-share.
+	mine := privateMachine("mine-active", "v1:identity:user:alice")
+	theirs := privateMachine("theirs", "v1:identity:user:bob")
+	store := &sharedFleet{
+		fakeFleet: &fakeFleet{machines: []Candidate{mine}, owner: "alice"},
+		all:       []Candidate{mine, theirs},
+	}
+	plan, err := modelRouter(t, store).PlanUserModelWithShared(context.Background(), "alice", smallModel, ModelNeeds{})
+	if err != nil {
+		t.Fatalf("PlanUserModelWithShared: %v", err)
+	}
+	if got := ids(plan.Candidates); len(got) != 1 || got[0] != "mine-active" {
+		t.Fatalf("candidates = %v, want only the owner's active machine", got)
+	}
+}

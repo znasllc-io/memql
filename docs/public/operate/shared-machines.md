@@ -174,3 +174,13 @@ because a read about somebody else's machine went wrong.
 - [Workers runbook](workers-runbook.md) — pairing a machine, tokens, scope
 - [AI routing](ai-routing.md) — levels, policies and rules; where a shared
   machine sits in a chain
+
+
+## Re-pairing the same machine
+
+Each cockpit install keeps a stable `machineId` (under its state directory) and
+sends it on every Register. When you mint a new worker token for a machine that
+is already registered, the cluster **rebinds** that registration to the new
+token instead of creating a second row for the same install. Display names and
+hostnames are not the identity — two MacBooks can share a hostname.
+

@@ -170,13 +170,20 @@ mutate registration createWorkerRegistration {
 // Omission semantics: a registration that OMITS the capability
 // descriptor clears the persisted one (coalesce to {}) -- the worker
 // no longer advertises a descriptor, so the row must not keep the
-// old one. Identity / lifecycle fields (id, ownerUserId, identityId,
-// registeredAt, revoked*) are never touched here.
+// old one. Identity / lifecycle fields (id, ownerUserId, registeredAt,
+// revoked*) stay untouched -- except identityId, which IS rewritten when
+// a re-pair presents a new worker token for the same physical machine
+// (stable machineId label). That is how rotated tokens stamp a new
+// identity row without minting a duplicate registration.
 
 /// Refresh registration-authoritative fields on worker reconnect.
 mutate registration refreshWorkerRegistration {
   args {
     registrationId       string!
+    /// When set, rebinds the registration to a new worker_token identity
+    /// (re-pair / rotate on the same physical machine). Empty leaves the
+    /// existing identityId alone via read-merge omission.
+    identityId           string
     name                 string!
     capabilities         array!
     capabilityDescriptor object
@@ -208,6 +215,7 @@ mutate registration refreshWorkerRegistration {
   }
   update {
     id: args.registrationId
+    args.identityId
     args.name
     args.capabilities
     capabilityDescriptor: args.capabilityDescriptor ?? {}
