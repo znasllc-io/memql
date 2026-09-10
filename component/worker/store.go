@@ -161,6 +161,7 @@ func (s *EngineStore) RefreshRegistration(ctx context.Context, row RegistrationR
 	}
 	args := map[string]any{
 		"registrationId":       row.ID,
+		"identityId":           row.IdentityId,
 		"name":                 row.Name,
 		"capabilities":         row.Capabilities,
 		"capabilityDescriptor": row.CapabilityDescriptor.AsMap(),

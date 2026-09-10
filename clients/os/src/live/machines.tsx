@@ -36,6 +36,7 @@ import {
 import type { MachinePresence } from "../items/provenance";
 import { isWorkerOnline } from "../apps/fleet/online";
 import { machineFromRow, machineName, type MachineRow } from "../apps/fleet/rows";
+import { useSessionIfPresent } from "../chrome/access";
 import { useOsConnection } from "./connection";
 
 export const WORKER_REGISTRATION_CONCEPT = "v1:worker:registration";
@@ -68,6 +69,14 @@ interface MachinesValue {
    * routinely different and a name match would report failure on a success.
    */
   count: number;
+  /**
+   * Feed readiness for setup / Fleet empty copy. `seeding` and a null
+   * collection are NOT "no machines" -- they are "we have not finished asking".
+   * Only `live` (or degraded-with-rows) may drive an empty-state sentence.
+   */
+  feedState: "absent" | "seeding" | "live" | "degraded" | "disconnected";
+  /** True once the seed has completed for the signed-in user. */
+  settled: boolean;
   /** Re-run the seed. The one caller is an explicit operator refresh; the
    *  feed keeps itself current without it. */
   reload: () => void;
@@ -77,6 +86,8 @@ const Ctx = createContext<MachinesValue>({
   collection: null,
   presence: () => null,
   count: 0,
+  feedState: "absent",
+  settled: false,
   reload: () => {},
 });
 
@@ -86,6 +97,8 @@ export function useMachines(): MachinesValue {
 
 export function MachinesProvider({ children }: { children: ReactNode }) {
   const connection = useOsConnection();
+  const session = useSessionIfPresent();
+  const userId = session?.access?.userId ?? "";
 
   const collection = useMemo(() => {
     if (!connection) return null;
@@ -114,7 +127,10 @@ export function MachinesProvider({ children }: { children: ReactNode }) {
       // Linger briefly so a window close/reopen does not tear the feed down.
       5_000,
     );
-  }, [connection]);
+    // userId is part of identity: after passkey, the signed-in subject can
+    // change while the websocket stays up. Rebuilding the collection reseeds
+    // myWorkersWithStatus under the actor that owns (or does not own) the fleet.
+  }, [connection, userId]);
 
   // The presence map folds the same snapshot the list renders.
   const [version, setVersion] = useState(0);
@@ -151,10 +167,11 @@ export function MachinesProvider({ children }: { children: ReactNode }) {
     };
   }, [collection]);
 
-  const { presence, count } = useMemo(() => {
+  const { presence, count, feedState, settled } = useMemo(() => {
     void version;
+    const snapshot = collection?.snapshot;
     const byId = new Map<string, MachinePresence>();
-    const rows = collection ? collection.snapshot.rows.map(machineFromRow) : [];
+    const rows = snapshot ? snapshot.rows.map(machineFromRow) : [];
     for (const row of rows) {
       if (row.id === "") continue;
       const bare = row.id.includes(":") ? row.id.slice(row.id.lastIndexOf(":") + 1) : row.id;
@@ -162,9 +179,12 @@ export function MachinesProvider({ children }: { children: ReactNode }) {
       byId.set(row.id, entry);
       byId.set(bare, entry);
     }
+    const state = !collection ? "absent" : snapshot?.state ?? "seeding";
     return {
       presence: (workerId: string) => byId.get(workerId) ?? null,
       count: rows.length,
+      feedState: state as MachinesValue["feedState"],
+      settled: state === "live" || state === "degraded",
     };
   }, [collection, version]);
 
@@ -173,9 +193,12 @@ export function MachinesProvider({ children }: { children: ReactNode }) {
       collection,
       presence,
       count,
+      feedState,
+      settled,
       reload: () => collection?.reseed(),
     }),
-    [collection, presence, count],
+    [collection, presence, count, feedState, settled],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
+

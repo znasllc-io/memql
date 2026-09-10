@@ -48,6 +48,10 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 			RegistrationId: id,
 			Name:           rowString(row, "name"),
 			DisplayName:    rowString(row, "displayName"),
+			// Stamp the scoped owner so PlanUserModelWithShared recovery and
+			// OwnMachineFirst agree with WorkersForOwner even when a later
+			// shared-list row is missing ownerUserId.
+			OwnerUserId:    ownerUserId,
 			Capabilities:   rowStringList(row, "capabilities"),
 			// The merge happens HERE, once, on the way out of the store --
 			// so no caller can accidentally match on the cockpit's map alone

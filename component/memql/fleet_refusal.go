@@ -74,7 +74,12 @@ func (e *FleetUnavailable) Error() string {
 		b.WriteString(" (no machines are paired)")
 	}
 	for _, k := range e.consideredKeys() {
-		fmt.Fprintf(&b, "; %s: %s", k, e.Considered[k])
+		if why, ok := e.Considered[k]; ok {
+			fmt.Fprintf(&b, "; %s: %s", k, why)
+			continue
+		}
+		// Synthetic summary keys from consideredKeysForDisplay.
+		fmt.Fprintf(&b, "; %s", k)
 	}
 	if e.LastError != "" {
 		fmt.Fprintf(&b, "; last attempt: %s", e.LastError)
@@ -83,12 +88,65 @@ func (e *FleetUnavailable) Error() string {
 }
 
 func (e *FleetUnavailable) consideredKeys() []string {
-	keys := make([]string, 0, len(e.Considered))
-	for k := range e.Considered {
-		keys = append(keys, k)
+	return e.consideredKeysForDisplay(true)
+}
+
+// consideredKeysForDisplay orders machine ids for the refusal text and card.
+// When omitNoise is true, revoked registrations are dropped from the operator
+// surface (they drown Ask after re-pair lineages) and a single summary line is
+// appended when any were omitted. The full map stays on Considered for logs.
+func (e *FleetUnavailable) consideredKeysForDisplay(omitNoise bool) []string {
+	if e == nil {
+		return nil
 	}
-	sort.Strings(keys)
-	return keys
+	if !omitNoise {
+		keys := make([]string, 0, len(e.Considered))
+		for k := range e.Considered {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		return keys
+	}
+	actionable := make([]string, 0, len(e.Considered))
+	revoked := 0
+	foreignPrivate := 0
+	foreignKeys := make([]string, 0)
+	for k, why := range e.Considered {
+		switch {
+		case why == "revoked":
+			revoked++
+		case isForeignPrivateShareNoise(why):
+			foreignPrivate++
+			foreignKeys = append(foreignKeys, k)
+		default:
+			actionable = append(actionable, k)
+		}
+	}
+	sort.Strings(actionable)
+	// When EVERY machine was a foreign private share refusal, keep those
+	// lines -- they are the only repair the operator has (system work / empty
+	// own fleet). When something actionable remains, summarise the noise.
+	if len(actionable) == 0 && foreignPrivate > 0 {
+		sort.Strings(foreignKeys)
+		actionable = foreignKeys
+		foreignPrivate = 0
+	}
+	if revoked > 0 {
+		actionable = append(actionable, fmt.Sprintf("(%d revoked registration(s) omitted)", revoked))
+	}
+	if foreignPrivate > 0 {
+		actionable = append(actionable, fmt.Sprintf("(%d other private machine(s) omitted)", foreignPrivate))
+	}
+	return actionable
+}
+
+
+func isForeignPrivateShareNoise(why string) bool {
+	why = strings.ToLower(why)
+	return strings.Contains(why, "both are needed") ||
+		strings.Contains(why, "has not shared") ||
+		strings.Contains(why, "policy.yaml") ||
+		strings.Contains(why, "inference.serve")
 }
 
 // Unwrap makes errors.Is(err, ErrFleetUnavailable) true, so a caller that only
@@ -104,7 +162,11 @@ func (e *FleetUnavailable) AsMap() map[string]any {
 	}
 	considered := make([]map[string]any, 0, len(e.Considered))
 	for _, k := range e.consideredKeys() {
-		considered = append(considered, map[string]any{"machine": k, "reason": e.Considered[k]})
+		if why, ok := e.Considered[k]; ok {
+			considered = append(considered, map[string]any{"machine": k, "reason": why})
+			continue
+		}
+		considered = append(considered, map[string]any{"machine": k, "reason": "omitted"})
 	}
 	out := map[string]any{
 		"code":             RefusalCodeNoLocalModel,

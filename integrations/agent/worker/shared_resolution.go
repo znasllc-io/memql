@@ -144,6 +144,14 @@ func (r *Router) PlanUserModelWithShared(
 			}
 			continue
 		}
+		// A shared-list row with no ownerUserId cannot be attributed. Do not
+		// dress that as a cluster-share refusal -- that sentence sent owners
+		// to turn on share for a machine that may already be theirs under a
+		// different session identity (prod: passkey user vs email user).
+		if strings.TrimSpace(c.OwnerUserId) == "" {
+			rejected[c.RegistrationId] = "registration missing ownerUserId"
+			continue
+		}
 		switch {
 		case !c.ServesCluster():
 			rejected[c.RegistrationId] = c.SharingRefusal()

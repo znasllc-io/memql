@@ -17,10 +17,10 @@ type Candidate struct {
 	RegistrationId string
 	Name           string
 	DisplayName    string
-	// OwnerUserId is populated only on the cross-owner read
-	// (SharedInferenceWorkers). On the user-scoped path it is redundant --
-	// every machine belongs to the owner the query was scoped to -- and is
-	// left blank rather than restated.
+	// OwnerUserId is always stamped when known: SharedInferenceWorkers reads
+	// it from the row; WorkersForOwner stamps the scoped owner so recovery in
+	// PlanUserModelWithShared can still attribute a machine if a later shared
+	// list row omits the field.
 	OwnerUserId  string
 	Capabilities []string
 	// Labels is the MERGE: the cockpit's `labels` overlaid by the owner's

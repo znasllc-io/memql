@@ -5324,6 +5324,8 @@ QueryClient.prototype.redeemWorkerPairingCode = function (this: QueryClient, arg
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["refreshWorkerRegistration"] in generated_concepts.ts).
 export interface RefreshWorkerRegistrationArgs {
   registrationId: string;
+  /** When set, rebinds the registration to a new worker_token identity (re-pair / rotate on the same physical machine). Empty leaves the existing identityId alone via read-merge omission. */
+  identityId?: string;
   name: string;
   capabilities: unknown[];
   capabilityDescriptor?: Record<string, unknown>;
@@ -5347,6 +5349,7 @@ export interface RefreshWorkerRegistrationArgs {
 export function buildRefreshWorkerRegistration(args: RefreshWorkerRegistrationArgs): string {
   const parts: string[] = [];
   parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  if (args.identityId !== undefined) parts.push("identityId: " + renderMemQLValue(args.identityId));
   parts.push("name: " + renderMemQLValue(args.name));
   parts.push("capabilities: " + renderMemQLValue(args.capabilities));
   if (args.capabilityDescriptor !== undefined) parts.push("capabilityDescriptor: " + renderMemQLValue(args.capabilityDescriptor));
