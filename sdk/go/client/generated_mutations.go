@@ -9879,7 +9879,9 @@ func RedeemWorkerPairingCodeBuild(args RedeemWorkerPairingCodeArgs) string {
 //
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["refreshWorkerRegistration"] in generated_concepts.go).
 type RefreshWorkerRegistrationArgs struct {
-	RegistrationId       string
+	RegistrationId string
+	// When set, rebinds the registration to a new worker_token identity (re-pair / rotate on the same physical machine). Empty leaves the existing identityId alone via read-merge omission.
+	IdentityId           string
 	Name                 string
 	Capabilities         []any
 	CapabilityDescriptor map[string]any
@@ -9911,6 +9913,13 @@ func RefreshWorkerRegistrationBuild(args RefreshWorkerRegistrationArgs) string {
 	b.WriteString("mutation refreshWorkerRegistration(")
 	b.WriteString("registrationId: ")
 	b.WriteString(quoteMemQL(args.RegistrationId))
+	if args.IdentityId != "" {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("identityId: ")
+		b.WriteString(quoteMemQL(args.IdentityId))
+	}
 	if b.Len() > 35 {
 		b.WriteString(", ")
 	}
