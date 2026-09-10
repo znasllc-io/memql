@@ -27,8 +27,9 @@ it("keeps draft while unavailable, explains disabled Send and opens Fleet", () =
   send(); expect(w.ask).toHaveBeenCalledOnce();
 });
 it("blocks loading before readiness is known", () => {
-  const w = wire(); render(<AskSurface {...{ transport: w.transport, variant: "widget" as const, availability: { ...ready, state: "checking" as const, message: "Checking whether chat is available." } }} />);
+  const w = wire(); render(<AskSurface {...{ transport: w.transport, variant: "widget" as const, availability: { ...ready, state: "checking" as const, message: "" } }} />);
   typePrompt(); send(); expect(w.ask).not.toHaveBeenCalled();
+  expect(screen.queryByText(/Checking whether chat/)).toBeNull();
 });
 it("shows waiting and Stop, preserves partial text, and retries a stopped reply", () => {
   const w = wire(); render(<AskSurface {...{ transport: w.transport, variant: "sheet" as const, availability: ready }} />);
@@ -62,7 +63,9 @@ it("rejects empty completion and ignores callbacks after termination", () => {
 });
 it("defaults to checking when a caller has no authoritative readiness", () => {
   const w = wire(); render(<AskSurface transport={w.transport} variant="sheet" />); typePrompt(); send();
-  expect(w.ask).not.toHaveBeenCalled(); expect(screen.getByText(/Checking whether chat/)).toBeTruthy();
+  expect(w.ask).not.toHaveBeenCalled();
+  expect(screen.queryByText(/Checking whether chat/)).toBeNull();
+  expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
 });
 it("keeps a long diagnostic in details and leaves a readable failure and recovery actions", () => {
   const w = wire(); const diagnostic = "every_door_shut " + "internal-provider-decision ".repeat(30);

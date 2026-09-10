@@ -42,7 +42,7 @@ import { LOGS_SECTIONS, LOGS_REQUIRES, LOGS_WANTS } from "./logs/settings";
 import { MaterializerApp } from "./materializer/MaterializerApp";
 import { MATERIALIZER_SECTIONS, MATERIALIZER_REQUIRES, MATERIALIZER_WANTS } from "./materializer/settings";
 import { SettingsApp } from "./settings/SettingsApp";
-import { setupWidget } from "./setup/manifest";
+import { SETUP_WIDGET_SIZE, setupWidget } from "./setup/manifest";
 import { StoresApp } from "./stores/StoresApp";
 import { STORES_SECTIONS } from "./stores/settings";
 import { TrainingApp } from "./training/TrainingApp";
@@ -693,10 +693,11 @@ const askWidget: OsWidgetManifest = {
   name: "Ask",
   // The widget has no sections and no settings of its own, so an unmet
   // requirement renders the setup sentence in its own body rather than the
-  // whole surface -- a desktop widget is too small to carry a headline.
+  // whole surface.
   requires: ["ai"] as const,
   icon: Mark,
-  size: { w: 3, h: 2 },
+  // Same desk footprint as Set up -- a smaller Ask card looked unfinished beside it.
+  size: SETUP_WIDGET_SIZE,
   component: AskWidgetBody,
 };
 
