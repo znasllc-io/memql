@@ -10,8 +10,8 @@ import templruntime "github.com/a-h/templ/runtime"
 
 import "time"
 
-// MeDevicesData drives /me/devices. Sessions are populated client-side
-// from /me/devices.json by app.js.
+// MeDevicesData drives /me/devices. Passkeys and sessions are both
+// server-rendered; the page does not set data-me (see me_devices.templ).
 //
 // The passkey half (memql#3409) is server-rendered instead, and that is
 // a deliberate difference from the sessions half rather than an

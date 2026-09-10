@@ -94,8 +94,25 @@
     accessToken: null,
   };
 
+  // Break the /me → /login → /me refresh loop that happens when the
+  // browser holds a valid memql_admin cookie but no memql_refresh
+  // (historical first-party sessions before refresh minting). Without
+  // this latch, redirectIfAuthenticated sends a signed-in browser
+  // straight back to /me/*, meBootstrap 401s again, and the page
+  // refreshes forever -- the passkey registration symptom after #5272.
+  var ME_REFRESH_FAIL_KEY = "memql.identity.me.refresh_failed";
+
   function meBootstrap() {
     if (!document.body.hasAttribute("data-me")) return;
+
+    var here = window.location.pathname + window.location.search;
+    var priorFail = "";
+    try { priorFail = window.sessionStorage.getItem(ME_REFRESH_FAIL_KEY) || ""; } catch (e) { /* private mode */ }
+    if (priorFail === here) {
+      try { window.sessionStorage.removeItem(ME_REFRESH_FAIL_KEY); } catch (e2) { /* ignore */ }
+      paintMeBootstrapError("Your session could not be restored. Sign in again to continue.");
+      return;
+    }
 
     fetch("/auth/refresh", {
       method: "POST",
@@ -104,21 +121,26 @@
       body: "{}",
     }).then(function (resp) {
       if (resp.status === 401 || resp.status === 403) {
-        var here = window.location.pathname + window.location.search;
+        try { window.sessionStorage.setItem(ME_REFRESH_FAIL_KEY, here); } catch (e3) { /* ignore */ }
         window.location.replace("/login?return_to=" + encodeURIComponent(here));
         return null;
       }
+      try { window.sessionStorage.removeItem(ME_REFRESH_FAIL_KEY); } catch (e4) { /* ignore */ }
       return resp.json();
     }).then(function (data) {
       if (!data || !data.access_token) return;
       window.IdentityMe.accessToken = data.access_token;
       runLoaders();
     }).catch(function () {
-      var zones = document.querySelectorAll("[data-content]");
-      for (var i = 0; i < zones.length; i++) {
-        zones[i].textContent = "Could not load this page. Please refresh.";
-      }
+      paintMeBootstrapError("Could not load this page. Please refresh.");
     });
+  }
+
+  function paintMeBootstrapError(message) {
+    var zones = document.querySelectorAll("[data-content]");
+    for (var i = 0; i < zones.length; i++) {
+      zones[i].textContent = message;
+    }
   }
 
   function runLoaders() {

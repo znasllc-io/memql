@@ -56,6 +56,10 @@ func (e *sessionEngine) Execute(_ context.Context, q string) (*memqlengine.Execu
 	case strings.HasPrefix(q, "mutation createAuthSession("):
 		e.sessions = append(e.sessions, parseArgs(q))
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
+	case strings.HasPrefix(q, "mutation rotateAuthSession("):
+		// First-party sessions now mint a refresh token and stamp its hash
+		// on the row so /auth/refresh can succeed after magic-link finish.
+		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
 	case strings.HasPrefix(q, "mutation createAuditEvent("):
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
 	}
@@ -161,15 +165,33 @@ func TestBrowserSessionCreatesARow(t *testing.T) {
 		t.Error("session row has no expiresAt; the list would render a session that never ends")
 	}
 
-	// The cookie is still set -- the row is an addition, not a replacement.
-	var admin bool
+	// Cookies: memql_admin for requireUser/SSO, memql_refresh + marker so
+	// /me/* bootstrap and passkey enrolment can call /auth/refresh.
+	var admin, refresh, marker bool
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == adminCookieName && c.Value != "" {
-			admin = true
+		switch c.Name {
+		case adminCookieName:
+			if c.Value != "" {
+				admin = true
+			}
+		case refreshCookieName:
+			if c.Value != "" {
+				refresh = true
+			}
+		case sessionMarkerCookieName:
+			if c.Value != "" {
+				marker = true
+			}
 		}
 	}
 	if !admin {
 		t.Error("no memql_admin cookie was set; the row must not have replaced the session")
+	}
+	if !refresh {
+		t.Error("no memql_refresh cookie was set; /me/* app.js and me-passkeys.js call /auth/refresh and would loop or report a false session expiry without it")
+	}
+	if !marker {
+		t.Error("no memql_session marker cookie was set; it must travel with memql_refresh")
 	}
 
 	// And one notice went out, for the one session.
