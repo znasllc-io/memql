@@ -36,7 +36,6 @@ import {
 import type { MachinePresence } from "../items/provenance";
 import { isWorkerOnline } from "../apps/fleet/online";
 import { machineFromRow, machineName, type MachineRow } from "../apps/fleet/rows";
-import { useSession } from "../chrome/access";
 import { useSessionIfPresent } from "../chrome/access";
 import { useOsConnection } from "./connection";
 
@@ -202,3 +201,4 @@ export function MachinesProvider({ children }: { children: ReactNode }) {
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
+
