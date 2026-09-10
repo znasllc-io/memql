@@ -126,12 +126,17 @@ it is offered, rather than in this document.
 
 Two properties, both security-load-bearing, and they are different rules:
 
-- **A call carrying a person's prompts routes only to THEIR machines.** The
-  read that finds candidates is caller-scoped, so another user's machine is
-  never in the result to begin with. Sharing does not change this.
+- **The pairing user reaches their own machine without share.** Adding a
+  machine to Fleet unlocks local inference on it for that user's Ask,
+  Materialize, and Nexus work. Both consents (`sharing.mode = cluster` and
+  `inference.serve: cluster`) are required only when a *different* account
+  uses the machine. The owner-scoped read is caller-scoped; share is not a
+  gate on your own hardware.
+- **Another account needs both consents.** A call for user B never lands on
+  user A's private machine. Machines with both consents may serve other users'
+  calls, with the caller's own machines always preferred first.
 - **System work** — automations and cluster maintenance, with no acting user
-  — is what sharing is for, and it reaches only machines where both consents
-  are present.
+  — reaches only machines where both consents are present.
 
 When a person's own machines and a shared one could both serve a call, **the
 person's own machines come first, always**, and it is not a preference an

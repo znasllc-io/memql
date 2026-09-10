@@ -6,6 +6,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	workerservice "github.com/znasllc-io/memql/component/worker"
 )
@@ -175,3 +176,51 @@ func TestOwnMachineFirstToleratesTheBareCanonicalSplit(t *testing.T) {
 		t.Fatal("an unowned machine must not match anybody")
 	}
 }
+
+func TestOwnerPrivateMachineWorksWithoutShareWhenOwnReadMisses(t *testing.T) {
+	// Product lock: pairing unlocks Ask/Materialize/Nexus for THAT user without
+	// Fleet share + inference.serve:cluster. Those consents are only for a
+	// different account.
+	//
+	// Regression: WorkersForOwner empty while the cross-owner read still listed
+	// the owner's private machine. PlanUserModelWithShared used to continue on
+	// sameSubjectId and drop it, then surface SharingRefusal for other private
+	// machines -- the owner Ask "Neither consent… Both are needed" symptom.
+	mine := privateMachine("mine", "v1:identity:user:alice")
+	store := &sharedFleet{
+		fakeFleet: &fakeFleet{machines: nil, owner: "alice"},
+		all:       []Candidate{mine},
+	}
+	plan, err := modelRouter(t, store).PlanUserModelWithShared(context.Background(), "alice", smallModel, ModelNeeds{})
+	if err != nil {
+		t.Fatalf("PlanUserModelWithShared: %v", err)
+	}
+	if got := ids(plan.Candidates); len(got) != 1 || got[0] != "mine" {
+		t.Fatalf("candidates = %v, want the owner's private machine without share", got)
+	}
+	for id, why := range plan.Rejected {
+		if strings.Contains(why, "consent") || strings.Contains(why, "inference.serve") {
+			t.Fatalf("owner machine must not be refused for cluster share: %s: %s", id, why)
+		}
+	}
+}
+
+func TestOwnerMachineAlreadyRuledOutIsNotReadmittedViaSharedList(t *testing.T) {
+	mine := privateMachine("mine", "alice")
+	mine.LastSeenAt = fleetNow().Add(-24 * time.Hour)
+	store := &sharedFleet{
+		fakeFleet: &fakeFleet{machines: []Candidate{mine}, owner: "alice"},
+		all:       []Candidate{mine},
+	}
+	plan, err := modelRouter(t, store).PlanUserModelWithShared(context.Background(), "alice", smallModel, ModelNeeds{})
+	if err != nil {
+		t.Fatalf("PlanUserModelWithShared: %v", err)
+	}
+	if got := ids(plan.Candidates); len(got) != 0 {
+		t.Fatalf("candidates = %v, want none -- own plan already ruled it offline", got)
+	}
+	if why := plan.Rejected["mine"]; why != "offline" {
+		t.Fatalf("rejected[mine] = %q, want offline from the own plan", why)
+	}
+}
+
