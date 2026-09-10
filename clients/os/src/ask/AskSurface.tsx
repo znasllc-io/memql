@@ -310,7 +310,6 @@ export function AskSurface({
                 >
                   {makeGoal.busy ? "Making it a goal" : "Make this a goal"}
                 </button>
-                <span className="os-caption"> — the system works out how, once.</span>
               </p>
             ) : null}
           </div>
@@ -321,11 +320,14 @@ export function AskSurface({
           {makeGoal.error}
         </p>
       ) : null}
-      {!ready ? (
+      {/* Quiet while checking: a transient "checking connectivity" line shifts
+          the composer and is not actionable. Real refusals (unavailable /
+          disconnected / error / reconnecting) still say so under the input. */}
+      {!ready && availability.state !== "checking" ? (
         <div className="os-caption os-ask-micnote">
           <p id={readinessId} role="status">{availability.message}</p>
           {onOpenFleet ? <button type="button" className="os-link" onClick={onOpenFleet}>Open Fleet</button> : null}{" "}
-          {availability.state !== "checking" && availability.state !== "disconnected" && availability.state !== "reconnecting" ? <button type="button" className="os-link" onClick={availability.refresh}>Check again</button> : null}
+          {availability.state !== "disconnected" && availability.state !== "reconnecting" ? <button type="button" className="os-link" onClick={availability.refresh}>Check again</button> : null}
         </div>
       ) : null}
       <form className="os-ask-input" onSubmit={onSubmit}>
@@ -400,7 +402,7 @@ export function AskSurface({
           type="submit"
           className="os-ask-send"
           aria-label={live ? "Finish" : "Send"}
-          aria-describedby={!ready ? readinessId : undefined}
+          aria-describedby={!ready && availability.state !== "checking" ? readinessId : undefined}
           disabled={!live && (!ready || busy || !draft.trim())}
         >
           <ArrowUp size={15} aria-hidden />

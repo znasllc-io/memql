@@ -13,7 +13,7 @@ export interface AskAvailability {
 
 // Both entry points default to checking until the authoritative read lands.
 export const READY_ASK: AskAvailability = { state: "ready", message: "", refresh: () => {} };
-export const CHECKING_ASK: AskAvailability = { state: "checking", message: "Checking whether chat is available.", refresh: () => {} };
+export const CHECKING_ASK: AskAvailability = { state: "checking", message: "", refresh: () => {} };
 
 /**
  * Dock connection-dot tone from transport + inference readiness.
