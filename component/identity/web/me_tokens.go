@@ -238,9 +238,18 @@ func (s *Server) handleMeTokensRevoke(w http.ResponseWriter, r *http.Request) {
 // the memql_admin cookie -- same cookie name as admin since both
 // flows live on the same origin) and returns the validated claims.
 //
-// On no-token / invalid-token: redirects browsers to /login with a
-// return-to query. The PAT page's CSRF surface is the form-only POST
-// handlers; we don't accept JSON XHR here.
+// On no-token / invalid-token: redirects browsers to /login and parks a
+// first-party post-login cookie so the magic-link finish lands back on
+// THIS page. return_to alone cannot do that -- /me/* paths are not
+// registered OAuth redirect URIs, so the magic-link flow classifies the
+// sign-in as an admin session and DefaultPostLoginLanding sends the
+// browser to the OS shell. That is the broken passkey-registration
+// handoff: the OS setup widget flashes, then the OS sign-in form, and
+// /me/devices (where the ceremony lives) is never reached. Same seam
+// bounceToLoginForDevice uses for /device (memql#3410).
+//
+// The PAT page's CSRF surface is the form-only POST handlers; we don't
+// accept JSON XHR here.
 func (s *Server) requireUser(w http.ResponseWriter, r *http.Request) (*identity.AccessTokenClaims, error) {
 	issuer := s.userIssuer()
 	if issuer == nil {
@@ -249,12 +258,12 @@ func (s *Server) requireUser(w http.ResponseWriter, r *http.Request) (*identity.
 	}
 	raw := extractUserToken(r)
 	if raw == "" {
-		http.Redirect(w, r, "/login?return_to="+url.QueryEscape(r.URL.Path), http.StatusSeeOther)
+		s.bounceToLoginForMe(w, r, "", "")
 		return nil, errors.New("no token")
 	}
 	claims, err := issuer.VerifyAccessToken(raw, time.Now().UTC())
 	if err != nil {
-		http.Redirect(w, r, "/login?flash=Your+session+expired&flash_kind=error&return_to="+url.QueryEscape(r.URL.Path), http.StatusSeeOther)
+		s.bounceToLoginForMe(w, r, "Your session expired", "error")
 		return nil, err
 	}
 	// A REVOKED SESSION IS NOT A VALID ONE, even though its JWT still
@@ -271,10 +280,38 @@ func (s *Server) requireUser(w http.ResponseWriter, r *http.Request) (*identity.
 	// mesh nodes enforce revocation by the epoch claim instead; this is the
 	// identity node's own cookie surface.
 	if s.sessionRevoked(r, raw) {
-		http.Redirect(w, r, "/login?flash=That+session+was+signed+out&flash_kind=error&return_to="+url.QueryEscape(r.URL.Path), http.StatusSeeOther)
+		s.bounceToLoginForMe(w, r, "That session was signed out", "error")
 		return nil, errors.New("session revoked")
 	}
 	return claims, nil
+}
+
+// bounceToLoginForMe sends a signed-out /me/* visitor through magic-link
+// login and arranges for them to come back here.
+//
+// A GET can be resumed exactly; the destination is the request path (plus
+// query when present) so a flash or cursor on the original URL survives the
+// round trip the same way /device keeps its user_code.
+func (s *Server) bounceToLoginForMe(w http.ResponseWriter, r *http.Request, flash, flashKind string) {
+	dest := "/"
+	if r != nil && r.URL != nil {
+		dest = r.URL.Path
+		if dest == "" {
+			dest = "/"
+		}
+		if q := r.URL.RawQuery; q != "" {
+			dest = dest + "?" + q
+		}
+	}
+	identity.SetPostLoginRedirect(w, dest, s.cookieSecure())
+	target := "/login?return_to=" + url.QueryEscape(dest)
+	if flash != "" {
+		target += "&flash=" + url.QueryEscape(flash)
+		if flashKind != "" {
+			target += "&flash_kind=" + url.QueryEscape(flashKind)
+		}
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 // sessionRevoked reports whether the presented bearer's session row has been

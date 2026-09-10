@@ -320,6 +320,10 @@ func TestThePageShowsBackupPostureAndAuthenticatorModel(t *testing.T) {
 // TestUnauthenticatedVisitorIsSentToSignIn. The page carries per-user
 // credential rows now, so it is auth-gated server-side like /me/tokens
 // rather than rendered as a shell that hydrates later.
+//
+// The post-login cookie is the load-bearing half: /me/devices is
+// first-party, so return_to alone would send the magic-link finish to
+// the OS shell and the visitor would never reach passkey registration.
 func TestUnauthenticatedVisitorIsSentToSignIn(t *testing.T) {
 	s, _, _ := passkeyServer(t, aliceOwnsOnePasskey())
 
@@ -329,7 +333,23 @@ func TestUnauthenticatedVisitorIsSentToSignIn(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("status %d, want 303 to /login", rec.Code)
 	}
-	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, "/login") {
-		t.Errorf("Location = %q, want a /login redirect", loc)
+	loc := rec.Header().Get("Location")
+	if !strings.HasPrefix(loc, "/login") {
+		t.Fatalf("Location = %q, want a /login redirect", loc)
+	}
+	if !strings.Contains(loc, "return_to=%2Fme%2Fdevices") && !strings.Contains(loc, "return_to=/me/devices") {
+		t.Errorf("Location = %q, want return_to=/me/devices", loc)
+	}
+	var postLogin string
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == identity.PostLoginCookieName {
+			postLogin = c.Value
+		}
+	}
+	if postLogin != "/me/devices" {
+		t.Fatalf("post-login cookie = %q, want /me/devices; without it the magic-link finish lands on the OS shell", postLogin)
+	}
+	if identity.SafeRelativeRedirect(postLogin) != "/me/devices" {
+		t.Fatalf("the stashed destination does not survive same-origin validation: %q", postLogin)
 	}
 }
