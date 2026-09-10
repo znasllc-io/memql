@@ -1,4 +1,4 @@
-//go:build agent || planner
+//go:build agent
 
 package worker
 
@@ -223,3 +223,4 @@ func TestOwnerMachineAlreadyRuledOutIsNotReadmittedViaSharedList(t *testing.T) {
 		t.Fatalf("rejected[mine] = %q, want offline from the own plan", why)
 	}
 }
+
