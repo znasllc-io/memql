@@ -353,3 +353,26 @@ func TestUnauthenticatedVisitorIsSentToSignIn(t *testing.T) {
 		t.Fatalf("the stashed destination does not survive same-origin validation: %q", postLogin)
 	}
 }
+
+// TestDevicesPageDoesNotBootstrapSPARefresh pins the refresh-loop
+// defense on /me/devices: the page is fully server-rendered, so it must
+// not set data-me. app.js meBootstrap POSTs /auth/refresh whenever
+// data-me is present; a browser with memql_admin but no memql_refresh
+// then redirect-loops through /login with redirectIfAuthenticated.
+func TestDevicesPageDoesNotBootstrapSPARefresh(t *testing.T) {
+	s, _, signIn := passkeyServer(t, aliceOwnsOnePasskey())
+	r := httptest.NewRequest(http.MethodGet, "/me/devices", nil)
+	signIn(r, aliceId)
+	rec := httptest.NewRecorder()
+	s.handleMeDevices(rec, r)
+	body := rec.Body.String()
+	if strings.Contains(body, ` data-me`) || strings.Contains(body, `data-me>`) || strings.Contains(body, `data-me `) {
+		t.Fatalf("/me/devices body carries data-me; app.js would probe /auth/refresh and can redirect-loop.\nbody snippet around body tag needed")
+	}
+	if !strings.Contains(body, "me-passkeys.js") {
+		t.Fatal("expected me-passkeys.js on the page for the Add a passkey ceremony")
+	}
+	if !strings.Contains(body, "Add a passkey") {
+		t.Fatal("expected the Add a passkey control on a stable devices page")
+	}
+}

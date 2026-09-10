@@ -120,8 +120,13 @@ func (s *Server) handleMeDevicesPasskeys(w http.ResponseWriter, r *http.Request)
 // other way in" -- a transport blip must not be presented as a security
 // finding.
 func (s *Server) meDevicesData(r *http.Request, claims *identity.AccessTokenClaims) webtempl.MeDevicesData {
+	// dataMe=false: passkeys + sessions are server-rendered here.
+	// me-passkeys.js mints its own bearer at click time via /auth/refresh.
+	// Leaving data-me on would run app.js meBootstrap on every load; a
+	// browser with memql_admin but no memql_refresh (legacy first-party
+	// sessions) then redirect-loops through /login forever.
 	data := webtempl.MeDevicesData{
-		Layout:          s.LayoutData(r, "Devices", true, s.meDevicesNavLinks(), []string{s.assetURL("/static/me-passkeys.js")}),
+		Layout:          s.LayoutData(r, "Devices", false, s.meDevicesNavLinks(), []string{s.assetURL("/static/me-passkeys.js")}),
 		PasskeysEnabled: true,
 	}
 	actorCtx := callerActorCtx(r, claims)

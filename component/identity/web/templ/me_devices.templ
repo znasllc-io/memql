@@ -2,15 +2,16 @@ package webtempl
 
 import "time"
 
-// MeDevicesData drives /me/devices. Sessions are populated client-side
-// from /me/devices.json by app.js.
+// MeDevicesData drives /me/devices. Passkeys and sessions are both
+// server-rendered (memql#3409, memql#4306). The page does not set
+// data-me: app.js meBootstrap would POST /auth/refresh on every load,
+// and a first-party session missing memql_refresh used to redirect-loop
+// through /login. me-passkeys.js still refreshes at click time for the
+// WebAuthn ceremony.
 //
-// The passkey half (memql#3409) is server-rendered instead, and that is
-// a deliberate difference from the sessions half rather than an
-// inconsistency: revoking a credential is the one action on this page
-// that can lock somebody out, so the warning that precedes it has to be
-// produced by the same code that performs it, not by a script that can
-// be skipped.
+// Revoking a credential is the one action on this page that can lock
+// somebody out, so the warning that precedes it has to be produced by
+// the same code that performs it, not by a script that can be skipped.
 type MeDevicesData struct {
 	Layout LayoutData
 	Flash  *Flash

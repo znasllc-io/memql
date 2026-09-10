@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/refresh"
 )
 
 // adminCookieName mirrors component/identity/admin.adminCookieName.
@@ -67,15 +68,19 @@ type browserSessionSubject struct {
 	lookup func(context.Context) (*identity.UserRow, error)
 }
 
-// startBrowserSession stamps the memql_admin cookie for an authenticated
-// user, whatever factor authenticated them (memql#3920).
+// startBrowserSession stamps the first-party session cookies for an
+// authenticated user, whatever factor authenticated them (memql#3920).
+//
+// It sets memql_admin (access JWT for requireUser / SSO) AND memql_refresh
+// (plus the memql_session marker) so /me/* bootstrap and passkey enrolment
+// can call POST /auth/refresh the same way an OAuth token exchange does.
 //
 // WHY THIS IS FACTOR-AGNOSTIC. Identity has an SSO fast-path at
-// /authorize -- `hasValidSession` reads this cookie and mints an auth code
-// without a second ceremony -- and only ONE login factor was leaving the
-// cookie behind. Magic-link set it; `handleWebAuthnLoginFinish` minted an
-// auth code and returned, so a browser that had just proved possession of
-// a passkey held nothing, and the next first-party client to reach
+// /authorize -- `hasValidSession` reads the admin cookie and mints an auth
+// code without a second ceremony -- and only ONE login factor was leaving
+// the cookie behind. Magic-link set it; `handleWebAuthnLoginFinish` minted
+// an auth code and returned, so a browser that had just proved possession
+// of a passkey held nothing, and the next first-party client to reach
 // /authorize prompted for the passkey again.
 //
 // The result was backwards: the STRONGER, phishing-resistant factor got
@@ -133,7 +138,22 @@ func (s *Server) startBrowserSession(
 	if err != nil {
 		return fmt.Errorf("startBrowserSession: session id mint: %w", err)
 	}
-	jwt, accessExp, err := s.Issuer.IssueAccessToken(identity.IssueInput{
+	// FIRST-PARTY BROWSER SESSIONS NEED A REFRESH TOKEN TOO.
+	//
+	// /me/* pages (and me-passkeys.js) bootstrap via POST /auth/refresh,
+	// which reads memql_refresh. Until this mint matched issueSessionForUser,
+	// magic-link / passkey web login stamped only memql_admin. requireUser
+	// then rendered /me/devices successfully, app.js got 401 from refresh,
+	// bounced to /login?return_to=/me/devices, and redirectIfAuthenticated
+	// sent the still-valid memql_admin cookie straight back -- a refresh
+	// loop that made passkey registration unreachable after the #5272 handoff
+	// fix landed the browser on the right page.
+	live := s.effectiveTokenSettings(r.Context())
+	refreshPlain, refreshHash, err := refresh.NewRefreshToken()
+	if err != nil {
+		return fmt.Errorf("startBrowserSession: mint refresh token: %w", err)
+	}
+	jwt, _, err := s.Issuer.IssueAccessToken(identity.IssueInput{
 		UserId:          subject.UserId,
 		SessionId:       sessionId,
 		Email:           email,
@@ -143,16 +163,17 @@ func (s *Server) startBrowserSession(
 		Role:            role,
 		Internal:        internal,
 		RevocationEpoch: revocationEpoch,
+		TTLOverride:     live.AccessTokenTTL,
 	}, now)
 	if err != nil {
 		return fmt.Errorf("startBrowserSession: mint token: %w", err)
 	}
 
-	// expiresAt MIRRORS THE BEARER, not the 30-day refresh window
-	// issueSessionForUser uses. This session has no refresh token: the
-	// cookie holds the access token and nothing rotates it, so a row
-	// claiming a longer life would render a session in /me/devices that had
-	// already stopped working.
+	refreshTTL := live.RefreshTokenTTL
+	if refreshTTL <= 0 {
+		refreshTTL = time.Duration(identity.DefaultRefreshTokenTTLSeconds) * time.Second
+	}
+	expiresAt := now.Add(refreshTTL).Format(time.RFC3339Nano)
 	// FATAL, not best-effort. A cookie with no row is a session nobody can
 	// see or revoke -- precisely the state memql#4303 exists to remove -- so
 	// failing the sign-in is safer than minting one silently.
@@ -164,11 +185,20 @@ func (s *Server) startBrowserSession(
 		TokenHash:   hashCode(jwt),
 		Source:      "oidc_cookie",
 		ClientLabel: r.Header.Get("User-Agent"),
-		ExpiresAt:   accessExp.UTC().Format(time.RFC3339Nano),
+		ExpiresAt:   expiresAt,
 		Email:       email,
 		Now:         now,
 	}); err != nil {
 		return fmt.Errorf("startBrowserSession: persist session: %w", err)
+	}
+	// Stamp the refresh hash so the first /auth/refresh has something to
+	// compare against -- same non-fatal posture as issueSessionForUser.
+	if s.Store != nil {
+		if err := s.Store.RotateAuthSession(r.Context(), sessionId, refreshHash, "", expiresAt); err != nil {
+			if s.Logger != nil {
+				s.Logger.Warn("startBrowserSession: initial refresh rotate failed", "error", err.Error())
+			}
+		}
 	}
 
 	secure := strings.HasPrefix(strings.ToLower(s.Cfg.BaseURL), "https://")
@@ -180,6 +210,10 @@ func (s *Server) startBrowserSession(
 		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
+	// memql_refresh (+ memql_session marker) so /me/* bootstrap and the
+	// passkey ceremony can exchange the cookie for a bearer without a
+	// false "session expired" / login redirect loop.
+	setRefreshCookie(w, refreshPlain, s.Cfg.BaseURL, live.RefreshCookieSameSite)
 	if s.Audit != nil {
 		s.Audit.Log(r.Context(), identity.AuditEvent{
 			Category:    identity.AuditCategoryAuth,
