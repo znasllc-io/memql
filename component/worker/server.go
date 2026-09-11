@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -503,7 +504,10 @@ func (s *streamSession) close(cause error) {
 	s.closeOnce.Do(func() {
 		s.cancel()
 		if s.server != nil && s.server.registry != nil {
-			s.server.registry.Remove(s.worker.RegistrationId)
+			// Session-scoped: only drop THIS worker pointer. Unconditional
+			// Remove(registrationId) deletes a successor already Add'ed on
+			// reclaim/reconnect while the DB connectedNodeId stamp remains.
+			s.server.registry.RemoveSession(s.worker)
 		}
 		s.mu.Lock()
 		pendingCount := len(s.pending)
@@ -618,6 +622,12 @@ func (s *streamSession) close(cause error) {
 // node and a router forwards a dispatch to a replica that will refuse it --
 // which reads as a mesh fault rather than as an offline laptop.
 //
+// SUCCESSOR GUARD: if another replica already re-stamped connectedNodeId
+// during our teardown (same machine re-attach after a roll / sticky rebind),
+// do NOT blank their hold. Prod tip windows showed clear→new-holder races that
+// left Ask forwarding to a dead replica while StreamHeld still read true, or
+// wiped a live hold and flapped readiness.
+//
 // THE CONTEXT COMES FROM Background(), NOT from the session. By the time close
 // runs, s.cancel has already fired and s.ctx is done, so a write on it would
 // be cancelled before it left the process -- and the failure would be silent,
@@ -630,6 +640,45 @@ func (s *streamSession) clearConnectedNode() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	// SAME-POD SUCCESSOR (prod dump: Ask on holder pszjr). Reclaim/reconnect
+	// Add's a new Worker under the same registration id before this close runs.
+	// RemoveSession keeps that pointer; blanking connectedNodeId here would
+	// leave StreamHeld false OR — if a later flush re-stamps — Connected with
+	// no registry entry if Remove raced. Never clear while a different Worker
+	// pointer still owns this registration in the local registry.
+	if s.server.registry != nil && s.worker != nil {
+		if live := s.server.registry.WorkerById(s.worker.RegistrationId); live != nil && live != s.worker {
+			if s.server.logger != nil {
+				s.server.logger.Info("worker: skip clear connectedNodeId; local successor holds stream",
+					"registration_id", s.worker.RegistrationId,
+					"self_node_id", strings.TrimSpace(s.server.nodeId),
+				)
+			}
+			return
+		}
+	}
+	self := strings.TrimSpace(s.server.nodeId)
+	if self != "" {
+		if rows, err := s.server.store.WorkersForUser(ctx, s.worker.OwnerUserId); err == nil {
+			for _, row := range rows {
+				if row.ID != s.worker.RegistrationId {
+					continue
+				}
+				holder := strings.TrimSpace(row.ConnectedNodeId)
+				if holder != "" && holder != self {
+					if s.server.logger != nil {
+						s.server.logger.Info("worker: skip clear connectedNodeId; successor holds stream",
+							"registration_id", s.worker.RegistrationId,
+							"self_node_id", self,
+							"holder_node_id", holder,
+						)
+					}
+					return
+				}
+				break
+			}
+		}
+	}
 	if err := s.server.store.ClearConnectedNode(ctx, s.worker.RegistrationId, s.worker.OwnerUserId); err != nil {
 		if s.server.logger != nil {
 			s.server.logger.Warn("worker: clear connectedNodeId failed",

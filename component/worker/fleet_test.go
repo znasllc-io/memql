@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -499,5 +500,64 @@ func TestEngineStoreCreateInvocation_BorrowsTheOwnersAuthority(t *testing.T) {
 	}
 	if len(eng.queries) != 1 {
 		t.Fatalf("the refused call still reached the engine (%d queries)", len(eng.queries))
+	}
+}
+
+func TestClearConnectedNodeSkipsWhenSuccessorHolds(t *testing.T) {
+	store := &fakeRegistrationStore{}
+	store.byUser = []RegistrationRow{{
+		ID: "reg-1", OwnerUserId: "owner", ConnectedNodeId: "agent-successor",
+	}}
+	srv := &server{store: store, logger: slog.Default(), nodeId: "agent-dying", registry: NewRegistry(slog.Default(), time.Now)}
+	w := &Worker{RegistrationId: "reg-1", OwnerUserId: "owner"}
+	session := newStreamSession(srv, nil, w, context.Background(), func() {})
+	session.clearConnectedNode()
+	if len(store.cleared) != 0 {
+		t.Fatalf("cleared = %v, want skip when successor holds", store.cleared)
+	}
+}
+
+func TestClearConnectedNodeStillClearsWhenWeHold(t *testing.T) {
+	store := &fakeRegistrationStore{}
+	store.byUser = []RegistrationRow{{
+		ID: "reg-1", OwnerUserId: "owner", ConnectedNodeId: "agent-dying",
+	}}
+	srv := &server{store: store, logger: slog.Default(), nodeId: "agent-dying", registry: NewRegistry(slog.Default(), time.Now)}
+	w := &Worker{RegistrationId: "reg-1", OwnerUserId: "owner"}
+	session := newStreamSession(srv, nil, w, context.Background(), func() {})
+	session.clearConnectedNode()
+	if len(store.cleared) != 1 || store.cleared[0] != "reg-1" {
+		t.Fatalf("cleared = %v, want clear when self still named", store.cleared)
+	}
+}
+
+
+func TestStreamSessionClose_DoesNotRemoveSuccessor(t *testing.T) {
+	store := &fakeRegistrationStore{}
+	store.byUser = []RegistrationRow{{
+		ID: "c938433d", OwnerUserId: "owner", ConnectedNodeId: "agent-pszjr",
+	}}
+	reg := NewRegistry(slog.Default(), time.Now)
+	srv := &server{store: store, logger: slog.Default(), nodeId: "agent-pszjr", registry: reg}
+
+	old := &Worker{RegistrationId: "c938433d", OwnerUserId: "owner", Name: "old"}
+	oldSession := newStreamSession(srv, nil, old, context.Background(), func() {})
+	reg.Add(old)
+
+	successor := &Worker{RegistrationId: "c938433d", OwnerUserId: "owner", Name: "new"}
+	newSession := newStreamSession(srv, nil, successor, context.Background(), func() {})
+	reg.Add(successor)
+
+	oldSession.close(nil)
+	if got := reg.WorkerById("c938433d"); got != successor {
+		t.Fatalf("dying session close removed successor from registry: got %v", got)
+	}
+	if len(store.cleared) != 0 {
+		t.Fatalf("dying session must not clear connectedNodeId when successor holds: %v", store.cleared)
+	}
+
+	newSession.close(nil)
+	if got := reg.WorkerById("c938433d"); got != nil {
+		t.Fatalf("live session close must remove itself, got %v", got)
 	}
 }
