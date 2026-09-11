@@ -265,7 +265,7 @@ const STOP_FOR_CODE: Readonly<Record<string, StopId>> = {
   deployable_hostname_unchosen: "whereItLives",
   dsl_domain_reserved: "whatItIs",
   dsl_refuses_boot: "whatItIs",
-  dsl_requires_cluster_owner: "whatItIs",
+  dsl_requires_authoring: "whatItIs",
   deployable_build_failed: "build",
   deployable_publish_failed: "live",
 };

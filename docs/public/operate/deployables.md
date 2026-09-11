@@ -482,9 +482,10 @@ Consequences worth stating plainly, because they are surprising:
 
 Writes need rank 200 and above (`{admin, developer, owner}` under the one
 ladder). A client's own domain and a CI-pushed source are **cluster-owner
-acts** and are offered to nobody else. A source that ships MemQL DSL says on
-its What-it-is stop that deploying it is a cluster owner's decision, stated
-before the click rather than refused after it.
+acts** and are offered to nobody else. A source that ships MemQL DSL needs an
+actor who may author constructs -- an owner or a developer -- and is refused
+with `dsl_requires_authoring` at the start of the run; see
+[who may deploy what](packages.md#who-may-deploy-what).
 
 ---
 

@@ -328,3 +328,93 @@ func TestTheCatalogIsTheLadder(t *testing.T) {
 func TestCatalogSatisfiesTheAuthInterface(t *testing.T) {
 	var _ auth.CapabilityCatalog = buildRbacCatalog(nil, nil)
 }
+
+// TestACatalogWithNoRoleRowsCountsZero pins the predicate
+// ReloadCapabilityCatalog's empty-catalog guard tests.
+//
+// The guard is `cat == nil || cat.roleCount == 0`. If roleCount ever came to
+// mean something else -- aliases included, inactive roles excluded -- the
+// guard would stop firing on the state it exists for, silently, and the next
+// fresh-database boot would install an empty catalog again. Capability rows
+// without roles still count zero: a grant naming a role that is not there is
+// not a readable catalog.
+func TestACatalogWithNoRoleRowsCountsZero(t *testing.T) {
+	if got := buildRbacCatalog(nil, nil).roleCount; got != 0 {
+		t.Fatalf("no rows: roleCount = %d, want 0", got)
+	}
+
+	orphan := buildRbacCatalog(nil, capabilityNodes(capabilityRow{
+		id: "cap-owner-create-construct", roleSlug: "owner",
+		verb: "create", resource: "construct", effect: "allow", active: true,
+	}))
+	if got := orphan.roleCount; got != 0 {
+		t.Fatalf("capabilities but no roles: roleCount = %d, want 0", got)
+	}
+
+	real := buildRbacCatalog(roleNodes(roleRow{id: "owner", slug: "owner", rank: 400, active: true}), nil)
+	if got := real.roleCount; got != 1 {
+		t.Fatalf("one role row: roleCount = %d, want 1", got)
+	}
+
+	// A DEACTIVATED role still counts: the catalog carries it (D8 is
+	// deactivate-never-delete), so this is not the empty state and the guard
+	// must not fire on it.
+	off := buildRbacCatalog(roleNodes(roleRow{id: "owner", slug: "owner", rank: 400, active: false}), nil)
+	if got := off.roleCount; got != 1 {
+		t.Fatalf("one deactivated role row: roleCount = %d, want 1", got)
+	}
+}
+
+// TestAnEmptyCatalogIsRefusedRatherThanInstalled is the guard itself.
+//
+// Installing a snapshot with no roles is a cluster-wide authoring lockout --
+// component/auth's roleHasCapability short-circuits the compiled mirror the
+// moment a catalog is installed, so an empty one answers false for every role
+// including the owner. A fresh-database boot reaches this state on every
+// start, because the catalog loads before the seed materializer writes
+// v1:rbac:role.
+func TestAnEmptyCatalogIsRefusedRatherThanInstalled(t *testing.T) {
+	t.Cleanup(func() { auth.SetCapabilityCatalog(nil) })
+
+	e := &MemQLEngine{}
+
+	if err := e.installCapabilityCatalog(nil); err != errCatalogHasNoRoles {
+		t.Fatalf("nil catalog: err = %v, want errCatalogHasNoRoles", err)
+	}
+	if err := e.installCapabilityCatalog(buildRbacCatalog(nil, nil)); err != errCatalogHasNoRoles {
+		t.Fatalf("empty catalog: err = %v, want errCatalogHasNoRoles", err)
+	}
+	if auth.InstalledCapabilityCatalog() != nil {
+		t.Fatal("a refused catalog was installed anyway -- the mirror is no longer answering")
+	}
+	// The owner must still answer from the mirror, which is the whole point.
+	if !auth.Capable(auth.RoleOwner, auth.VerbCreate, auth.ResourceConstruct) {
+		t.Fatal("owner lost create x construct after a refused install")
+	}
+
+	// A ROLE-ONLY SNAPSHOT IS THE LIKELIER HALF. The reload fires on four
+	// topics, so the first role row to land triggers a read that sees roles
+	// and no capabilities yet -- and a catalog with roles but no grants
+	// answers false for every pair of every role, owner included.
+	roleOnly := buildRbacCatalog(roleNodes(roleRow{id: "owner", slug: "owner", rank: 400, active: true}), nil)
+	if err := e.installCapabilityCatalog(roleOnly); err != errCatalogHasNoRoles {
+		t.Fatalf("a catalog with roles but NO capabilities was installed: err = %v", err)
+	}
+	if auth.InstalledCapabilityCatalog() != nil {
+		t.Fatal("a role-only catalog was installed -- every role now holds nothing")
+	}
+
+	real := buildRbacCatalog(
+		roleNodes(roleRow{id: "owner", slug: "owner", rank: 400, active: true}),
+		capabilityNodes(capabilityRow{
+			id: "cap-owner-create-construct", roleSlug: "owner",
+			verb: "create", resource: "construct", effect: "allow", active: true,
+		}),
+	)
+	if err := e.installCapabilityCatalog(real); err != nil {
+		t.Fatalf("a catalog with a role AND a capability was refused: %v", err)
+	}
+	if auth.InstalledCapabilityCatalog() == nil {
+		t.Fatal("a valid catalog was not installed")
+	}
+}

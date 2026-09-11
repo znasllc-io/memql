@@ -26,7 +26,7 @@ import "fmt"
 // nobody anticipated, not a place to land a rename.
 //
 // This package owns the whole catalogue, INCLUDING the code it does not
-// itself raise (dsl_requires_cluster_owner). The pipeline raises that one, and
+// itself raise (dsl_requires_authoring). The pipeline raises that one, and
 // it is declared here because a catalogue split across packages is a catalogue
 // that grows a fourth ad-hoc string the first time somebody cannot find it.
 const (
@@ -173,7 +173,7 @@ const (
 	// The connect callback runs in component/identity and its refusal
 	// reaches a person through the same OS copy table every code above
 	// does, so it is catalogued here for the same reason
-	// dsl_requires_cluster_owner is: a catalogue split across packages
+	// dsl_requires_authoring is: a catalogue split across packages
 	// grows a fourth ad-hoc string.
 
 	// CodeConnectStateInvalid: the connect state was expired, replayed,
@@ -310,9 +310,15 @@ const (
 
 	// -- raised outside this package, catalogued here --
 
-	// CodeDslRequiresClusterOwner (D9): raised by the pipeline at deploy
-	// start, before any build or stage.
-	CodeDslRequiresClusterOwner = "dsl_requires_cluster_owner"
+	// CodeDslRequiresAuthoring (D9): raised by the pipeline at deploy start,
+	// before any build or stage, and by Rollback for the same reason.
+	//
+	// It was dsl_requires_cluster_owner until developers were admitted. The
+	// code is renamed rather than kept for compatibility because this repo is
+	// pre-release and carries no shims: a code whose name says cluster owner,
+	// answering a gate that admits developers, is a message that tells the
+	// caller most likely to see it exactly the wrong thing.
+	CodeDslRequiresAuthoring = "dsl_requires_authoring"
 )
 
 // Refusal is an analysis or pipeline failure carrying a stable Code.

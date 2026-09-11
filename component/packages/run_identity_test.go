@@ -45,7 +45,7 @@ func TestConfirmingAParkedRunAdvancesItRatherThanMintingANewOne(t *testing.T) {
 
 	out, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:    "v1:platform:package:abc",
-		Actor:        clusterOwner(),
+		Actor:        mayDeployDsl(),
 		Confirmed:    true,
 		DeploymentId: parked,
 		Placements:   firstDeployPlacements(),
@@ -77,7 +77,7 @@ func TestTwoFreshDeploysAreStillTwoRuns(t *testing.T) {
 	h := newHarness(t, spaOnlyPackage(), ownerPackage())
 	req := DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: firstDeployPlacements(),
 	}
@@ -107,7 +107,7 @@ func TestARunInFlightIsNotResumed(t *testing.T) {
 
 	_, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:    "v1:platform:package:abc",
-		Actor:        clusterOwner(),
+		Actor:        mayDeployDsl(),
 		Confirmed:    true,
 		DeploymentId: running,
 		Placements:   firstDeployPlacements(),
@@ -132,7 +132,7 @@ func TestAParkedRunOfADifferentPackageIsRefused(t *testing.T) {
 
 	_, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:    "v1:platform:package:abc",
-		Actor:        clusterOwner(),
+		Actor:        mayDeployDsl(),
 		Confirmed:    true,
 		DeploymentId: "v1:platform:packageDeployment:other",
 		Placements:   firstDeployPlacements(),
@@ -162,7 +162,7 @@ func TestConfirmingAResumedRunReadsItsOwnSnapshotRatherThanFetchingAgain(t *test
 	// parked with a lost run's bytes could not be resumed on them.
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: firstDeployPlacements(),
 	}); err != nil {
@@ -184,7 +184,7 @@ func TestConfirmingAResumedRunReadsItsOwnSnapshotRatherThanFetchingAgain(t *test
 
 	out, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:    "v1:platform:package:abc",
-		Actor:        clusterOwner(),
+		Actor:        mayDeployDsl(),
 		Confirmed:    true,
 		DeploymentId: parked,
 		Placements:   firstDeployPlacements(),
@@ -220,7 +220,7 @@ func TestAScopedRunRecordsWhichDeployablesItIsFor(t *testing.T) {
 
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: placements,
 	}); err != nil {
@@ -248,7 +248,7 @@ func TestAWholeSourceRunRecordsNoScope(t *testing.T) {
 
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: firstDeployPlacements(),
 	}); err != nil {
@@ -279,7 +279,7 @@ func TestConfirmingRestampsTheScope(t *testing.T) {
 
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:    "v1:platform:package:abc",
-		Actor:        clusterOwner(),
+		Actor:        mayDeployDsl(),
 		Confirmed:    true,
 		DeploymentId: parked,
 		Placements:   placements,

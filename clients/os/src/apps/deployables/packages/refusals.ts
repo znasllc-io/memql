@@ -121,8 +121,14 @@ const COPY: Record<string, RefusalCopy> = {
     title: "The Go pack was not deployed",
     next: "",
   },
-  dsl_requires_cluster_owner: {
-    title: "Deploying MemQL is a cluster owner's decision",
+  dsl_requires_authoring: {
+    // Owner or developer, and admin deliberately NOT: admin is
+    // user-management authority, developer is engineering authority, and
+    // deploying a DSL domain is authoring constructs. Naming both roles
+    // rather than "you may not" is what tells a reader whether to ask for a
+    // role or ask somebody else to deploy. The server's sentence names the
+    // domains, so it renders verbatim and this supplies only the headline.
+    title: "Deploying MemQL needs the owner or developer role",
     next: "",
   },
   archive_confirmation_mismatch: {

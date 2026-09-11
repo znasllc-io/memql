@@ -432,6 +432,16 @@ func (e *MemQLEngine) loadRbacCatalog(ctx context.Context) (*rbacCatalog, error)
 // failure, so the boot line says "mirror" rather than "error".
 var errNoDatabaseForCatalog = catalogError("no database")
 
+// errCatalogHasNoRoles is a catalog that READ CLEANLY and carried no role
+// rows.
+//
+// Distinct from errNoDatabaseForCatalog because the two produce identical
+// behaviour from different causes, and the boot line has to name which: no
+// database is a node type built without one, whereas no roles is the seeds not
+// having landed yet -- or having failed to land, which is the case an operator
+// needs to go and look at.
+var errCatalogHasNoRoles = catalogError("catalog carried no roles")
+
 type catalogError string
 
 func (e catalogError) Error() string { return string(e) }
@@ -454,6 +464,48 @@ func (e *MemQLEngine) ReloadCapabilityCatalog(ctx context.Context) error {
 	cat, err := e.loadRbacCatalog(ctx)
 	if err != nil {
 		return err
+	}
+	// A CATALOG CARRYING NO ROLES IS NOT A CLUSTER WITH NO ROLES -- it is the
+	// rows not being readable yet, and installing it is a cluster-wide
+	// authoring lockout for as long as that window lasts.
+	//
+	// StartCapabilityCatalog runs from the engine's Start while the seed
+	// materializer that WRITES v1:rbac:role is gated on <-engine.Ready()
+	// (app/engine.go), so every fresh-database boot reaches here with zero
+	// rows. component/auth's roleHasCapability short-circuits the compiled
+	// mirror the moment a catalog is installed -- `if held, answered :=
+	// catalogHolds(...); answered { return held }` -- so an empty catalog
+	// ANSWERS false for every role, the OWNER INCLUDED, at every Capable call
+	// site. That is six gates at once, the D9 DSL-deploy gate among them, all
+	// refusing under messages that name a role the caller already holds.
+	//
+	// Refusing to install it is the same answer this file already gives a
+	// failed read (see the header): keep the last good snapshot, or let the
+	// mirror answer at boot. Only the sentence the operator is told differs,
+	// which is why this is its own error rather than a silent skip.
+	//
+	// It deliberately does NOT cover a catalog that carries roles with `owner`
+	// DEACTIVATED. "A deactivated role answers nothing, everywhere" is the
+	// intended semantics component/auth's Active() states, and deactivating a
+	// base role is a deliberate act rather than a boot-order accident.
+	return e.installCapabilityCatalog(cat)
+}
+
+// installCapabilityCatalog publishes a snapshot, or refuses it.
+//
+// Split out of ReloadCapabilityCatalog so the refusal above is reachable in a
+// test without a database: loadRbacCatalog needs one, and the guard is the
+// half worth pinning.
+func (e *MemQLEngine) installCapabilityCatalog(cat *rbacCatalog) error {
+	// capabilityCount is guarded for the SAME reason as roleCount, and it is
+	// the likelier of the two: the reload fires on FOUR topics -- role and
+	// capability, created and updated -- so the first role row to land
+	// triggers a reload that reads the roles it can see and NO capability
+	// rows at all. A role-only snapshot installs cleanly and then answers
+	// false for every (verb, resource) pair of every role, which is the
+	// authoring lockout again wearing a different number.
+	if cat == nil || cat.roleCount == 0 || cat.capabilityCount == 0 {
+		return errCatalogHasNoRoles
 	}
 	e.rbacCatalog.Store(cat)
 	auth.SetCapabilityCatalog(cat)
@@ -496,10 +548,15 @@ func (e *MemQLEngine) StartCapabilityCatalog(ctx context.Context) {
 		// and completely different behaviour for a base one, so an operator
 		// reading this needs to be told which they have.
 		if e.Component != nil && e.Logger != nil {
-			e.Logger.Warn("rbac catalog unreadable -- base roles answer from the compiled mirror "+
+			reason := "unreadable"
+			if err == errCatalogHasNoRoles {
+				reason = "empty"
+			}
+			e.Logger.Warn("rbac catalog "+reason+" -- base roles answer from the compiled mirror "+
 				"and custom roles hold nothing until the rows load",
 				"component", "memql.engine",
 				"mode", "mirror",
+				"reason", reason,
 				"err", err.Error())
 		}
 	} else if e.Component != nil && e.Logger != nil {

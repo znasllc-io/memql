@@ -1,0 +1,37 @@
+# The mesh nodes that load product DSL, LABELLED -- a layer of its own, and
+# that is the whole point (memql#4933).
+#
+# `memql/product-dsl: "true"` is what the DSL components' patches select on,
+# and a kustomization's label transformer runs AFTER its `components:`. So
+# labelling in the same kustomization that composes them selects NOTHING,
+# silently: it renders, it applies, every pod comes up healthy, and not one has
+# an init container or MEMQL_DSL_PATH. Labelling in an inner layer the outer
+# one consumes as a RESOURCE puts the label on before the selector reads it.
+#
+# The set is the four mesh node types and NOT a blanket label: a blanket one
+# reaches `redis`, which has no `volumes:` key, and fails the first JSON6902 op
+# with `doc is missing path`.
+#
+# KEEP THIS SET EQUAL to MEMQL_PACKAGES_ROLL_TARGETS and to the
+# packages-roll-rbac Role's resourceNames. Nothing checks that for you.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../../base
+
+components:
+  # Before the patch, because engine-bff ADDS the bff Deployment and it has to
+  # exist to be labelled. Moved here from the outer overlay for that reason;
+  # domain-derive still follows it, because this whole layer is a RESOURCE of
+  # the outer one and so resolves first.
+  - ../../../components/engine-bff
+
+patches:
+  - target:
+      kind: Deployment
+      name: "^(bff|agent|planner|workbench)$"
+    patch: |
+      - op: add
+        path: /metadata/labels/memql~1product-dsl
+        value: "true"
