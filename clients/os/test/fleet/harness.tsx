@@ -252,6 +252,7 @@ export function machineRow(over: Partial<Row> & { id: string }): Row {
     concurrency: { HEADLESS: 4 },
     activeCount: 0,
     registeredAt: "2026-08-01T00:00:00Z",
+    connectedNodeId: "agent-test",
     lastSeenAt: new Date().toISOString(),
     ...over,
   };
