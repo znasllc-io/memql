@@ -23,7 +23,6 @@ package worker
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -423,48 +422,22 @@ func (f *FleetInference) attemptLocal(
 		return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart, err
 	}
 
-	var (
-		wg        sync.WaitGroup
-		delivered sync.Mutex
-		gotDelta  bool
-	)
+	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for d := range handle.Deltas() {
 			if req.OnDelta != nil && d.Content != "" {
-				delivered.Lock()
-				gotDelta = true
-				delivered.Unlock()
 				req.OnDelta(d.Content)
 			}
 		}
 	}()
 	outcome, waitErr := handle.Wait(ctx)
 	wg.Wait()
-	delivered.Lock()
-	hadDelta := gotDelta
-	delivered.Unlock()
 	if waitErr != nil {
-		// Holder pod death mid-call (prod: disconnect then Ask error ~14ms later).
-		// With no content delivered, refuse-before-start so Call retries / rebinds
-		// to the successor holder instead of hard-failing the turn.
-		if errors.Is(waitErr, workerservice.ErrWorkerDisconnected) && !hadDelta {
-			if rebound := f.rebindAfterDisconnect(ctx, req, cand, start); rebound != nil {
-				return rebound.res, rebound.outcome, rebound.err
-			}
-			return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart, waitErr
-		}
 		return memqlengine.FleetCallResult{}, ForwardCompleted, waitErr
 	}
 	if outcome.Error != "" {
-		if (outcome.ErrorCode == "worker_disconnected" || outcome.Error == "worker_disconnected") && !hadDelta && strings.TrimSpace(outcome.Content) == "" {
-			if rebound := f.rebindAfterDisconnect(ctx, req, cand, start); rebound != nil {
-				return rebound.res, rebound.outcome, rebound.err
-			}
-			return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart,
-				fmt.Errorf("%s: %s", cand.Label(), outcome.Error)
-		}
 		return memqlengine.FleetCallResult{}, ForwardCompleted,
 			fmt.Errorf("%s: %s", cand.Label(), outcome.Error)
 	}
@@ -480,78 +453,6 @@ func (f *FleetInference) attemptLocal(
 		ExecutionSurface: FleetSurfacePrefix + cand.RegistrationId,
 		MachineLabel:     cand.Label(),
 	}, ForwardCompleted, nil
-}
-
-type reboundAttempt struct {
-	res     memqlengine.FleetCallResult
-	outcome ForwardOutcome
-	err     error
-}
-
-// rebindAfterDisconnect refreshes the machine's connectedNodeId after the
-// local holder dropped mid-call with no content, and forwards to the successor
-// when one already holds the stream. Nil means Call should refuse-before-start
-// and try the next planned candidate.
-func (f *FleetInference) rebindAfterDisconnect(
-	ctx context.Context,
-	req memqlengine.FleetCallRequest,
-	cand Candidate,
-	start *memqlv1.ModelCallStart,
-) *reboundAttempt {
-	if f == nil || f.store == nil || f.forward == nil {
-		return nil
-	}
-	owner := strings.TrimSpace(req.ActingUserId)
-	if owner == "" {
-		owner = strings.TrimSpace(cand.OwnerUserId)
-	}
-	if owner == "" {
-		return nil
-	}
-	rows, err := f.store.WorkersForOwner(ctx, owner)
-	if err != nil {
-		return nil
-	}
-	var holder string
-	for _, row := range rows {
-		if sameSubject(row.RegistrationId, cand.RegistrationId) {
-			holder = strings.TrimSpace(row.ConnectedNodeId)
-			break
-		}
-	}
-	if holder == "" || holder == f.selfNodeId {
-		return nil
-	}
-	if f.logger != nil {
-		f.logger.Info("fleet inference: rebinding mid-call after holder disconnect",
-			"machine", cand.RegistrationId,
-			"from", f.selfNodeId,
-			"to", holder,
-			"model", req.ModelId,
-		)
-	}
-	out, ferr := f.forward.ForwardModelCall(ctx, holder, cand.RegistrationId,
-		req.ActingUserId, start, workerservice.ModelCallTimeoutDefault, deltaSink(req.OnDelta))
-	if ferr != nil {
-		outcome := ForwardCompleted
-		if out.RefusedBeforeStart {
-			outcome = ForwardRefusedBeforeStart
-		}
-		return &reboundAttempt{outcome: outcome, err: ferr}
-	}
-	if out.RefusedBeforeStart {
-		return &reboundAttempt{
-			outcome: ForwardRefusedBeforeStart,
-			err:     fmt.Errorf("%s refused before start: %s %s", cand.Label(), out.ErrorCode, out.ErrorMessage),
-		}
-	}
-	if !out.Ok() {
-		return &reboundAttempt{
-			outcome: ForwardCompleted,
-			err:     fmt.Errorf("%s: %s %s", cand.Label(), out.ErrorCode, out.ErrorMessage),
-		}
-	}
-	return &reboundAttempt{res: resultFromEnd(cand, out.End), outcome: ForwardCompleted}
 }
 
 // FleetSurfacePrefix is how a fleet-served call names its machine on the

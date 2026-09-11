@@ -99,12 +99,12 @@ describe("the online rule the fleet renders", () => {
   const now = new Date("2026-08-30T12:00:00Z");
   const secondsAgo = (n: number) => new Date(now.getTime() - n * 1000).toISOString();
 
-  it("is online while a replica holds the stream, even with a fresh heartbeat", () => {
+  it("is online while a heartbeat is inside the window", () => {
     expect(isWorkerOnline({ connectedNodeId: "agent-1", lastSeenAt: secondsAgo(ONLINE_WINDOW_SECONDS - 1) }, now)).toBe(true);
   });
 
-  it("stays online when lastSeen lags behind a held stream (persist storm)", () => {
-    expect(isWorkerOnline({ connectedNodeId: "agent-1", lastSeenAt: secondsAgo(ONLINE_WINDOW_SECONDS + 1) }, now)).toBe(true);
+  it("goes offline past the window", () => {
+    expect(isWorkerOnline({ connectedNodeId: "agent-1", lastSeenAt: secondsAgo(ONLINE_WINDOW_SECONDS + 1) }, now)).toBe(false);
   });
 
   it("is NEVER online once revoked, whatever the heartbeat says", () => {
@@ -115,8 +115,8 @@ describe("the online rule the fleet renders", () => {
     ).toBe(false);
   });
 
-  it("treats a machine with no holder as offline; stream hold wins over bad lastSeen", () => {
+  it("treats a machine that never checked in, and an unreadable timestamp, as offline", () => {
     expect(isWorkerOnline({}, now)).toBe(false);
-    expect(isWorkerOnline({ connectedNodeId: "agent-1", lastSeenAt: "soon" }, now)).toBe(true);
+    expect(isWorkerOnline({ connectedNodeId: "agent-1", lastSeenAt: "soon" }, now)).toBe(false);
   });
 });

@@ -38,30 +38,28 @@ it.each(["sheet", "widget"])("keeps %s input visible but blocks Send until the s
   expect(screen.queryByRole("status")).toBeNull();
   expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.queryByRole("button", { name: "Open Fleet" })).toBeNull();
-  view.rerender(tree({ ...READY_ASK, state: "unavailable", message: "" }));
+  view.rerender(tree({ ...READY_ASK, state: "unavailable", message: "No chat model is available." }));
   expect((screen.getByRole("textbox", { name: "Ask" }) as HTMLInputElement).value).toBe("Keep my question");
-  expect(screen.queryByText(/No chat model/)).toBeNull();
-  expect(screen.queryByRole("button", { name: "Open Fleet" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
+  expect(screen.getByText("No chat model is available.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Open Fleet" })).toBeTruthy();
   fireEvent.submit(input.closest("form")!); expect(ask).not.toHaveBeenCalled();
   view.rerender(tree(READY_ASK));
   fireEvent.click(screen.getByRole("button", { name: "Send" })); expect(ask).toHaveBeenCalledOnce();
 });
 
-it("keeps the sheet draft while unavailable without readiness chatter", () => {
-  function OpenButton() { const { openAsk, closeAsk } = useAsk(); return <><button onClick={() => openAsk()}>Return to Ask</button><button onClick={() => closeAsk()}>Leave Ask</button></>; }
+it("keeps the sheet draft when opening Fleet and returning to Ask", () => {
+  function OpenButton() { const { openAsk } = useAsk(); return <button onClick={() => openAsk()}>Return to Ask</button>; }
   const unavailable: AskAvailability = {
     ...READY_ASK,
     state: "unavailable",
-    message: "",
+    message: "No chat model is available.",
   };
   render(withSession(withOs(
     <AskProvider transport={{ ask: vi.fn(() => ({ cancel: vi.fn() })) }} availability={unavailable}>
       <OpenOnMount /><OpenButton /><AskSheet />
     </AskProvider>, "owner")));
   fireEvent.change(screen.getByRole("textbox", { name: "Ask" }), { target: { value: "Save this question while I connect a machine" } });
-  expect(screen.queryByRole("button", { name: "Open Fleet" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Leave Ask" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open Fleet" }));
   expect(screen.queryByRole("dialog", { name: "Ask" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Return to Ask" }));
   expect((screen.getByRole("textbox", { name: "Ask" }) as HTMLInputElement).value).toBe("Save this question while I connect a machine");

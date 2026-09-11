@@ -12,17 +12,16 @@ function wire() {
 }
 function typePrompt(text = "Can my machine answer?") { fireEvent.change(screen.getByRole("textbox", { name: "Ask" }), { target: { value: text } }); }
 function send() { fireEvent.click(screen.getByRole("button", { name: "Send" })); }
-it("keeps draft while unavailable and only disables Send — no readiness chatter", () => {
+it("keeps draft while unavailable, explains disabled Send and opens Fleet", () => {
   const w = wire(); const open = vi.fn();
-  const availability = { ...ready, state: "unavailable" as const, message: "" };
+  const availability = { ...ready, state: "unavailable" as const, message: "No chat model is available. Open Fleet to connect a machine or check its models." };
   const props = { transport: w.transport, variant: "sheet" as const, availability, onOpenFleet: open };
   const view = render(<AskSurface {...props} />); typePrompt();
   const button = screen.getByRole("button", { name: "Send" }) as HTMLButtonElement;
-  expect(button.disabled).toBe(true);
-  expect(screen.queryByText(/No chat model/)).toBeNull();
-  expect(screen.queryByRole("button", { name: "Open Fleet" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
+  expect(button.disabled).toBe(true); expect(button.getAttribute("aria-describedby")).toBeTruthy();
+  expect(screen.getByText(availability.message)).toBeTruthy();
   fireEvent.submit(button.closest("form")!); expect(w.ask).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Open Fleet" })); expect(open).toHaveBeenCalledOnce();
   view.rerender(<AskSurface {...props} availability={ready} />);
   expect((screen.getByRole("textbox", { name: "Ask" }) as HTMLInputElement).value).toBe("Can my machine answer?");
   send(); expect(w.ask).toHaveBeenCalledOnce();
@@ -46,7 +45,7 @@ it("shows waiting and Stop, preserves partial text, and retries a stopped reply"
 it("ends waiting visibly on disconnect and preserves a new draft", () => {
   const w = wire(); const props = { transport: w.transport, variant: "sheet" as const, availability: ready };
   const view = render(<AskSurface {...props} />); typePrompt(); send(); typePrompt("next question");
-  view.rerender(<AskSurface {...props} availability={{ ...ready, state: "disconnected", message: "" }} />);
+  view.rerender(<AskSurface {...props} availability={{ ...ready, state: "disconnected", message: "Connection to the cluster was lost." }} />);
   expect(screen.getByRole("alert").textContent).toMatch(/connection|Connection/);
   expect(screen.queryByRole("button", { name: "Stop reply" })).toBeNull(); expect(w.cancel).toHaveBeenCalledOnce();
   expect((screen.getByRole("textbox", { name: "Ask" }) as HTMLInputElement).value).toBe("next question");
