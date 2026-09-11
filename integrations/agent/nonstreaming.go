@@ -300,6 +300,10 @@ func (r *Replier) runNonStreamingToolLoop(
 	// the plan fails cleanly instead of burning the whole iteration budget.
 	produceArtifactRefusals := 0
 	const maxProduceArtifactRefusals = 2
+	// Context-window handoffs used by this turn (see context_handoff.go).
+	// Background work is the lane that actually reaches the window, being the
+	// one that runs the long journaled steps of a goal.
+	contextHandoffs := 0
 	// paused is set when the loop stops at a checkpoint because the turn was
 	// preempted ("passed", memql#906). Surfaced on TurnResult.Paused.
 	paused := false
@@ -312,7 +316,7 @@ func (r *Replier) runNonStreamingToolLoop(
 	escalateAt := backgroundEscalateAfterErroredRounds()
 
 	maxIter := maxStreamingToolLoopIterations()
-	wallclock := maxTurnWallclock()
+	wallclock := turnWallclockFor(turnCtx)
 
 BackgroundLoop:
 	for iter := 0; iter < maxIter; iter++ {
@@ -342,8 +346,9 @@ BackgroundLoop:
 
 		// Wallclock cap across the whole turn (every step + retry). Surfaces
 		// a typed error so the caller renders a fail-with-what-we-have
-		// fallback instead of an indefinite wait.
-		if elapsed := time.Since(start); elapsed >= wallclock {
+		// fallback instead of an indefinite wait. Zero is UNBOUNDED -- see
+		// turnWallclockFor for why a work-execution turn gets zero.
+		if elapsed := time.Since(start); wallclock > 0 && elapsed >= wallclock {
 			r.logger.Warn("agent background: turn wallclock exceeded",
 				"iter", iter, "elapsed", elapsed.String(),
 				"wallclock", wallclock.String(), "requestId", requestId)
@@ -376,6 +381,10 @@ BackgroundLoop:
 			// Parent cancellation is terminal -- propagate, don't retry.
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
+			}
+			if next, ok := r.handOffContext(stepErr, messages, &contextHandoffs, iter, requestId); ok {
+				messages = next
+				continue
 			}
 			if isTransientStreamError(stepErr) && attempt < streamTransientMaxRetries {
 				attempt++

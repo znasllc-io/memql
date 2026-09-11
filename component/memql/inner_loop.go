@@ -406,6 +406,44 @@ func (b ContextBudget) Exceeded(contents ...string) bool {
 	return total > b.MaxTokens
 }
 
+// contextOverflowMarkers are the ways a provider says the request no longer
+// fits the model's context window.
+//
+// They are matched as TEXT because neither vendor SDK surfaces the condition
+// as a typed error the provider interface could carry, and the alternative --
+// counting tokens ourselves and predicting the limit -- is a second opinion
+// about a number only the far side knows, wrong in both directions: refusing
+// work that would have fit, and letting through work that does not.
+//
+// DELIBERATELY NARROW. Every entry names the window specifically; none of them
+// is a generic size or limit word. A loose matcher here would read an ordinary
+// request error as an overflow and compress a conversation that was fine,
+// throwing away the earlier turns for nothing.
+var contextOverflowMarkers = []string{
+	"context_length_exceeded",
+	"context length exceeded",
+	"maximum context length",
+	"exceeds the context window",
+	"prompt is too long",
+	"reduce the length of the messages",
+}
+
+// IsContextOverflow reports whether err is the provider refusing a request
+// because it no longer fits the model's context window.
+//
+// This is the ONE model-call failure whose right answer is neither a retry nor
+// a failure. The same bytes will overflow forever, so retrying is pointless;
+// but the work is not wrong and the run is not over -- there is simply more
+// conversation than window, and the remedy is to carry what matters into the
+// next window and go on. PlanContextTrim below is that remedy; this predicate
+// is how a loop knows to reach for it.
+func IsContextOverflow(err error) bool {
+	if err == nil {
+		return false
+	}
+	return containsAny(strings.ToLower(err.Error()), contextOverflowMarkers...)
+}
+
 // TrimPlan describes how many leading (oldest) message slots to drop and a
 // human-readable summary line to insert in their place. Pure data so the
 // loop can apply it however its message representation requires.

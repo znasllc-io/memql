@@ -110,6 +110,12 @@ const streamIdleSentinel = "stream idle timeout"
 // well under 30s. 180s gives 2x headroom over the worst legitimate
 // case while still catching genuine pathological cases.
 //
+// READ THE SENTENCE THIS CAP IS ABOUT: "staring at Replying...". It is a
+// budget for a PERSON'S ATTENTION, not for the work -- which is why
+// turnWallclockFor lifts it entirely on a work-execution turn, where nobody
+// is watching a spinner and the turn is a journaled step of a goal that may
+// legitimately run for hours. See that function.
+//
 // Override via MEMQL_TURN_WALLCLOCK_TIMEOUT_SECONDS for ops.
 const defaultMaxTurnWallclockSeconds = 180
 
@@ -131,6 +137,33 @@ func maxTurnWallclock() time.Duration {
 		}
 	})
 	return cachedWallclock
+}
+
+// turnWallclockFor is the wallclock this turn gets. Zero means UNBOUNDED, and
+// a work-execution turn always gets zero.
+//
+// The interactive cap exists because a person is watching an indicator and a
+// three-minute wait with nothing on screen is worse than a partial answer. A
+// work-execution turn has no such person: it is a journaled step of a goal,
+// dispatched to this node by the work spine, and how long the goal takes
+// cannot be estimated before it runs -- new steps appear as earlier ones
+// finish, and hours or days is a legitimate answer. Applying an attention
+// budget to it killed exactly the work it was never measuring: a long
+// composition reached through composeFile died at 180 seconds, and the run
+// that had to explain it read the words "turn wallclock timeout" and told a
+// person a blip had happened.
+//
+// NOTHING ELSE IS LIFTED WITH IT, and that is the point. The iteration cap,
+// the repeat-failure breaker, the all-errored guard, the produceArtifact
+// refusal cap and the per-scope spend latch all still bound this turn. Every
+// one of them counts WORK -- calls, repeats, failures, money -- and a runaway
+// is a thing that does too much of those, not a thing that takes too long. A
+// clock cannot tell an infinite loop from a large job; those guards can.
+func turnWallclockFor(turnCtx turnContext) time.Duration {
+	if turnCtx.IsWorkExecution {
+		return 0
+	}
+	return maxTurnWallclock()
 }
 
 var (
@@ -349,9 +382,15 @@ func (r *Replier) runStreamingToolLoop(
 	// abort after a small N so the plan fails cleanly instead of looping.
 	produceArtifactRefusals := 0
 	const maxProduceArtifactRefusals = 2
+	// Context-window handoffs used by this turn (see context_handoff.go). A
+	// long piece of work walks into the model's window; compressing the
+	// history and sending the same iteration again continues the work in the
+	// next window instead of ending the turn on a limit that is the model's
+	// property rather than the task's.
+	contextHandoffs := 0
 
 	maxIter := maxStreamingToolLoopIterations()
-	wallclock := maxTurnWallclock()
+	wallclock := turnWallclockFor(turnCtx)
 StreamLoop:
 	for iter := 0; iter < maxIter; iter++ {
 		iterations++
@@ -362,7 +401,11 @@ StreamLoop:
 		// many of them the user sees only a "Replying..." indicator;
 		// this caps the worst-case wait. The error path below the loop
 		// renders a short fallback reply.
-		if elapsed := time.Since(start); elapsed >= wallclock {
+		//
+		// A ZERO WALLCLOCK IS UNBOUNDED, which is what a work-execution
+		// turn gets: there is no indicator to cap the wait for, and the
+		// work's own bounds are the iteration cap and the breakers below.
+		if elapsed := time.Since(start); wallclock > 0 && elapsed >= wallclock {
 			r.logger.Warn("agent streaming: turn wallclock exceeded",
 				"iter", iter, "elapsed", elapsed.String(),
 				"wallclock", wallclock.String(), "requestId", requestId)
@@ -403,6 +446,10 @@ StreamLoop:
 		for {
 			chunks, err = provider.CallChatStreamWithTools(ctx, messages, tools)
 			if err != nil {
+				if next, ok := r.handOffContext(err, messages, &contextHandoffs, iter, requestId); ok {
+					messages = next
+					continue
+				}
 				if isTransientStreamError(err) && attempt < streamTransientMaxRetries {
 					attempt++
 					backoff := transientRetryBackoff(attempt)
@@ -428,6 +475,10 @@ StreamLoop:
 
 			turnText, turnCalls, streamErr = r.consumeStreamingTurn(ctx, chunks, sink, &textChunks, &fullText, turnStart, iter, requestId, &ttftLogged)
 			if streamErr != nil {
+				if next, ok := r.handOffContext(streamErr, messages, &contextHandoffs, iter, requestId); ok {
+					messages = next
+					continue
+				}
 				if isTransientStreamError(streamErr) && attempt < streamTransientMaxRetries {
 					attempt++
 					backoff := transientRetryBackoff(attempt)
