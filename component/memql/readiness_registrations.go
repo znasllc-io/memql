@@ -64,12 +64,13 @@ func (e *MemQLEngine) readInferenceRegistrations(ctx context.Context) ([]readine
 			continue
 		}
 		var row struct {
-			OwnerUserId    string                      `json:"ownerUserId"`
-			Labels         map[string]string           `json:"labels"`
-			OperatorLabels map[string]string           `json:"operatorLabels"`
-			Apps           []readiness.RegistrationApp `json:"apps"`
-			LastSeenAt     string                      `json:"lastSeenAt"`
-			RevokedAt      string                      `json:"revokedAt"`
+			OwnerUserId     string                      `json:"ownerUserId"`
+			Labels          map[string]string           `json:"labels"`
+			OperatorLabels  map[string]string           `json:"operatorLabels"`
+			Apps            []readiness.RegistrationApp `json:"apps"`
+			ConnectedNodeId string                      `json:"connectedNodeId"`
+			LastSeenAt      string                      `json:"lastSeenAt"`
+			RevokedAt       string                      `json:"revokedAt"`
 		}
 		// A row this cannot decode is SKIPPED rather than failing the read.
 		// One malformed registration must not take the whole verdict with it;
@@ -78,12 +79,13 @@ func (e *MemQLEngine) readInferenceRegistrations(ctx context.Context) ([]readine
 			continue
 		}
 		out = append(out, readiness.RegistrationFacts{
-			OwnerUserId:    row.OwnerUserId,
-			Labels:         row.Labels,
-			OperatorLabels: row.OperatorLabels,
-			Apps:           row.Apps,
-			LastSeenAt:     parseReadinessTime(row.LastSeenAt),
-			RevokedAt:      parseReadinessTime(row.RevokedAt),
+			OwnerUserId:     row.OwnerUserId,
+			Labels:          row.Labels,
+			OperatorLabels:  row.OperatorLabels,
+			Apps:            row.Apps,
+			ConnectedNodeId: row.ConnectedNodeId,
+			LastSeenAt:      parseReadinessTime(row.LastSeenAt),
+			RevokedAt:       parseReadinessTime(row.RevokedAt),
 		})
 	}
 	return out, nil
@@ -99,9 +101,12 @@ func parseReadinessTime(s string) time.Time {
 	if s == "" {
 		return time.Time{}
 	}
-	t, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		return time.Time{}
+	// Worker rows write RFC3339Nano; RFC3339 alone rejects fractional seconds
+	// and left Setup reading a connected machine as never seen.
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC()
+		}
 	}
-	return t.UTC()
+	return time.Time{}
 }

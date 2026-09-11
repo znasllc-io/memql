@@ -205,6 +205,7 @@ func TestPerModelCapDoesNotMutateTheCandidatesOtherCaps(t *testing.T) {
 
 func TestOfflineAndRevokedMachinesAreRuledOutWithTheirReason(t *testing.T) {
 	stale := modelMachine("stale", map[string]ModelAttributes{smallModel: {}})
+	stale.ConnectedNodeId = ""
 	stale.LastSeenAt = fleetNow().Add(-time.Hour)
 	revoked := modelMachine("revoked", map[string]ModelAttributes{smallModel: {}})
 	revoked.RevokedAt = fleetNow().Add(-time.Minute)

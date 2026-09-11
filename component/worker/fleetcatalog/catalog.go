@@ -73,7 +73,10 @@ func (r *Reader) Catalog(ctx context.Context, owner string) ([]memqlengine.Fleet
 func Project(machines []Candidate, now time.Time) []memqlengine.FleetModel {
 	byModel := map[string]*memqlengine.FleetModel{}
 	for _, m := range machines {
-		online := workerservice.IsOnline(m.LastSeenAt, m.RevokedAt, now)
+		// Ask / Setup / catalog "online" means a replica holds the stream now
+		// (connectedNodeId), not merely that a heartbeat was seen recently and
+		// never that activeCount > 0.
+		online := workerservice.StreamHeld(m.ConnectedNodeId, m.RevokedAt)
 		runtimes := m.Runtimes()
 		for _, modelId := range m.ModelsOffered() {
 			attrs, _ := m.ModelAttributesFor(modelId)

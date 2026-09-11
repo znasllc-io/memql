@@ -36,8 +36,9 @@ func liveSlot(t *testing.T, l LaneReport) bool {
 // whole of D3: configuration opens the OS, presence decides a call.
 func TestAQualifyingModelIsConfiguredEvenWhenAsleep(t *testing.T) {
 	machine := RegistrationFacts{
-		Labels:     map[string]string{"model:llama3.1:8b": "ctx=8192,structured=true"},
-		LastSeenAt: ago(OnlineWindow + time.Minute),
+		ConnectedNodeId: "agent-1",
+		Labels:          map[string]string{"model:llama3.1:8b": "ctx=8192,structured=true"},
+		LastSeenAt:      ago(OnlineWindow + time.Minute),
 	}
 	lanes := InferenceLanes(InferenceInput{Registrations: []RegistrationFacts{machine}, Now: fixedNow})
 	local := laneNamed(t, lanes, InferenceLaneLocal)
@@ -78,8 +79,9 @@ func TestAModelBelowTheFloorIsNotADoor(t *testing.T) {
 	} {
 		lanes := InferenceLanes(InferenceInput{
 			Registrations: []RegistrationFacts{{
-				Labels:     map[string]string{"model:m": value},
-				LastSeenAt: fixedNow,
+				Labels:          map[string]string{"model:m": value},
+				ConnectedNodeId: "agent-1",
+				LastSeenAt:      fixedNow,
 			}},
 			Now: fixedNow,
 		})
@@ -94,8 +96,9 @@ func TestAModelBelowTheFloorIsNotADoor(t *testing.T) {
 func TestTheFloorIsInclusive(t *testing.T) {
 	lanes := InferenceLanes(InferenceInput{
 		Registrations: []RegistrationFacts{{
-			Labels:     map[string]string{"model:m": "ctx=8192,structured=1"},
-			LastSeenAt: fixedNow,
+			Labels:          map[string]string{"model:m": "ctx=8192,structured=1"},
+			ConnectedNodeId: "agent-1",
+			LastSeenAt:      fixedNow,
 		}},
 		Now: fixedNow,
 	})
@@ -114,9 +117,10 @@ func TestARevokedMachineIsNoDoor(t *testing.T) {
 				"model:llama3.1:8b": "ctx=8192,structured=true",
 				"app:claude-code":   "2.1",
 			},
-			Apps:       []RegistrationApp{{Id: "claude-code", SignedIn: true, Allowed: true}},
-			LastSeenAt: fixedNow,
-			RevokedAt:  ago(time.Hour),
+			Apps:            []RegistrationApp{{Id: "claude-code", SignedIn: true, Allowed: true}},
+			ConnectedNodeId: "agent-1",
+			LastSeenAt:      fixedNow,
+			RevokedAt:       ago(time.Hour),
 		}},
 		Now: fixedNow,
 	})
@@ -136,8 +140,9 @@ func TestARevokedMachineIsNoDoor(t *testing.T) {
 func TestTheAppDoorReadsTheDerivedLabel(t *testing.T) {
 	lanes := InferenceLanes(InferenceInput{
 		Registrations: []RegistrationFacts{{
-			Labels:     map[string]string{"app:claude-code": "2.1"},
-			LastSeenAt: fixedNow,
+			Labels:          map[string]string{"app:claude-code": "2.1"},
+			ConnectedNodeId: "agent-1",
+			LastSeenAt:      fixedNow,
 		}},
 		Now: fixedNow,
 	})
@@ -148,8 +153,9 @@ func TestTheAppDoorReadsTheDerivedLabel(t *testing.T) {
 	// and reading it as one would open the door on a malformed row.
 	lanes = InferenceLanes(InferenceInput{
 		Registrations: []RegistrationFacts{{
-			Labels:     map[string]string{"app:": "2.1"},
-			LastSeenAt: fixedNow,
+			Labels:          map[string]string{"app:": "2.1"},
+			ConnectedNodeId: "agent-1",
+			LastSeenAt:      fixedNow,
 		}},
 		Now: fixedNow,
 	})
@@ -174,7 +180,7 @@ func TestTheAppInventoryFallbackNeedsKnownAllowedAndSignedIn(t *testing.T) {
 	}
 	for _, c := range cases {
 		lanes := InferenceLanes(InferenceInput{
-			Registrations: []RegistrationFacts{{Apps: []RegistrationApp{c.app}, LastSeenAt: fixedNow}},
+			Registrations: []RegistrationFacts{{Apps: []RegistrationApp{c.app}, ConnectedNodeId: "agent-1", LastSeenAt: fixedNow}},
 			Now:           fixedNow,
 		})
 		if got := laneNamed(t, lanes, InferenceLaneApp).Complete; got != c.want {
@@ -227,9 +233,10 @@ func TestThreeLanesAlwaysInChainOrder(t *testing.T) {
 func TestOperatorLabelsAreMergedOverReported(t *testing.T) {
 	lanes := InferenceLanes(InferenceInput{
 		Registrations: []RegistrationFacts{{
-			Labels:         map[string]string{"model:m": "ctx=1024"},
-			OperatorLabels: map[string]string{"model:m": "ctx=8192,structured=true"},
-			LastSeenAt:     fixedNow,
+			Labels:          map[string]string{"model:m": "ctx=1024"},
+			OperatorLabels:  map[string]string{"model:m": "ctx=8192,structured=true"},
+			ConnectedNodeId: "agent-1",
+			LastSeenAt:      fixedNow,
 		}},
 		Now: fixedNow,
 	})
@@ -244,8 +251,8 @@ func TestOperatorLabelsAreMergedOverReported(t *testing.T) {
 func TestOneAwakeMachineMakesTheLaneLive(t *testing.T) {
 	lanes := InferenceLanes(InferenceInput{
 		Registrations: []RegistrationFacts{
-			{Labels: map[string]string{"model:m": "ctx=8192,structured=true"}, LastSeenAt: ago(time.Hour)},
-			{Labels: map[string]string{"model:m": "ctx=8192,structured=true"}, LastSeenAt: fixedNow},
+			{Labels: map[string]string{"model:m": "ctx=8192,structured=true"}, ConnectedNodeId: "", LastSeenAt: ago(time.Hour)},
+			{Labels: map[string]string{"model:m": "ctx=8192,structured=true"}, ConnectedNodeId: "agent-1", LastSeenAt: fixedNow},
 		},
 		Now: fixedNow,
 	})
@@ -282,12 +289,43 @@ func TestAMachineNeverHeardFromIsNotLive(t *testing.T) {
 func TestClockSkewDoesNotHideALiveMachine(t *testing.T) {
 	lanes := InferenceLanes(InferenceInput{
 		Registrations: []RegistrationFacts{{
-			Labels:     map[string]string{"model:m": "ctx=8192,structured=true"},
-			LastSeenAt: fixedNow.Add(time.Minute),
+			Labels:          map[string]string{"model:m": "ctx=8192,structured=true"},
+			ConnectedNodeId: "agent-1",
+			LastSeenAt:      fixedNow.Add(time.Minute),
 		}},
 		Now: fixedNow,
 	})
 	if !liveSlot(t, laneNamed(t, lanes, InferenceLaneLocal)) {
 		t.Error("a lastSeenAt a minute in the future read as offline")
+	}
+}
+
+func TestHeartbeatAloneIsNotLive(t *testing.T) {
+	lanes := InferenceLanes(InferenceInput{
+		Registrations: []RegistrationFacts{{
+			Labels:     map[string]string{"model:m": "ctx=8192,structured=true"},
+			LastSeenAt: fixedNow,
+		}},
+		Now: fixedNow,
+	})
+	local := laneNamed(t, lanes, InferenceLaneLocal)
+	if !local.Complete {
+		t.Fatal("labels still configure the door")
+	}
+	if liveSlot(t, local) {
+		t.Fatal("lastSeenAt without connectedNodeId must not mark the lane live")
+	}
+}
+
+func TestConnectedNodeIdWithoutBeatIsLive(t *testing.T) {
+	lanes := InferenceLanes(InferenceInput{
+		Registrations: []RegistrationFacts{{
+			Labels:          map[string]string{"model:m": "ctx=8192,structured=true"},
+			ConnectedNodeId: "agent-ddwcc",
+		}},
+		Now: fixedNow,
+	})
+	if !liveSlot(t, laneNamed(t, lanes, InferenceLaneLocal)) {
+		t.Fatal("connectedNodeId with no lastSeenAt flush yet must still read live")
 	}
 }

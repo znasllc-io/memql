@@ -404,9 +404,9 @@ func TestSelectMachineFindsTheAppMachine(t *testing.T) {
 	// every fixture invisible and the test pass for the wrong reason.
 	now := time.Now().UTC()
 	store := fakeFleetStore{candidates: []Candidate{
-		{RegistrationId: "reg-plain", LastSeenAt: now,
+		{RegistrationId: "reg-plain", ConnectedNodeId: "agent-test", LastSeenAt: now,
 			Capabilities: []string{workerservice.CapabilityHeadless}},
-		{RegistrationId: "reg-app", LastSeenAt: now,
+		{RegistrationId: "reg-app", ConnectedNodeId: "agent-test", LastSeenAt: now,
 			Capabilities: []string{workerservice.CapabilityHeadless},
 			Labels:       map[string]string{workerservice.AppLabelKey(workerservice.AppIdClaudeCode): "2.1"}},
 	}}

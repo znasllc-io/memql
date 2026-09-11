@@ -58,6 +58,7 @@ func TestCatalogTakesTheUnionOfMachineCapabilities(t *testing.T) {
 // answers it with silence.
 func TestOfflineMachinesStayVisibleInTheCatalog(t *testing.T) {
 	asleep := modelMachine("asleep", map[string]ModelAttributes{smallModel: {}})
+	asleep.ConnectedNodeId = ""
 	asleep.LastSeenAt = fleetNow().Add(-time.Hour)
 
 	models := catalogOf(t, []Candidate{asleep})
