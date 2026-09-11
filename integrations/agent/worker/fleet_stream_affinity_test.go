@@ -1,4 +1,4 @@
-//go:build agent || planner
+//go:build agent
 
 package worker
 
