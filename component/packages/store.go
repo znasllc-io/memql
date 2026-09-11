@@ -170,6 +170,40 @@ func (s *store) deploymentsInFlight(ctx context.Context) ([]map[string]any, erro
 	return s.queryAll(ctx, "query packageDeploymentsInFlight()")
 }
 
+// resolveRole reads a user's cluster role.
+//
+// THE SECOND STAMPED READ, and it is stamped for the same reason
+// sourceCredentialSealedById is: userByIdSystem is @serverOnly because it
+// projects the full user row -- every @pii field -- keyed on a caller-supplied
+// id, so without the stamp the engine cannot reach the construct at all. The
+// stamp admits the CONSTRUCT and does not widen the ROWS.
+//
+// Only the role slug leaves this function. The rest of that row is PII the
+// pipeline has no business carrying, and returning the whole map would put it
+// one field access away from a log line.
+//
+// It exists for the auto-deploy feed, which has no request actor to resolve an
+// authority from -- see Deps.Roles. userById is the caller-facing alternative
+// and is NOT usable here: it is gated by @requiresCapability("read",
+// "principal"), which the feed's borrowed rankless writer does not hold, so it
+// would refuse every automatic run regardless of the owner's real role.
+func (s *store) resolveRole(ctx context.Context, userId string) (auth.Role, error) {
+	if userId == "" {
+		return "", nil
+	}
+	rows, err := s.executeInternal(ctx,
+		fmt.Sprintf("query userByIdSystem(userId: %s)", langparser.QuoteString(userId)))
+	if err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		// Not an error: a package whose owner no longer exists is refused by
+		// the gate, which is the same answer as an owner who may not author.
+		return "", nil
+	}
+	return auth.Role(rowString(rows[0], "role")), nil
+}
+
 // ---------------------------------------------------------------------------
 // Writes (stamped internal origin)
 // ---------------------------------------------------------------------------

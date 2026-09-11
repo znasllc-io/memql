@@ -35,7 +35,7 @@ func TestRollbackExecutesTheReversedOrder(t *testing.T) {
 	res, err := Rollback(context.Background(), h.deps, RollbackRequest{
 		PackageId:    "v1:platform:package:abc",
 		DeploymentId: "v1:platform:packageDeployment:old",
-		Actor:        clusterOwner(),
+		Actor:        mayDeployDsl(),
 	})
 	if err != nil {
 		t.Fatalf("rollback: %v", err)
@@ -66,13 +66,13 @@ func TestRollbackRefusesADeploymentThatWasNeverLive(t *testing.T) {
 	if _, err := Rollback(context.Background(), h.deps, RollbackRequest{
 		PackageId:    "v1:platform:package:abc",
 		DeploymentId: "v1:platform:packageDeployment:bad",
-		Actor:        clusterOwner(),
+		Actor:        mayDeployDsl(),
 	}); err == nil {
 		t.Fatal("a refused deployment carries no state to restore")
 	}
 }
 
-func TestRollbackToADslVersionNeedsClusterOwner(t *testing.T) {
+func TestRollbackToADslVersionNeedsAuthoring(t *testing.T) {
 	h := newHarness(t, validPackage(), ownerPackage())
 	h.engine.rows["query packageDeploymentById"] = []map[string]any{{
 		"id":         "v1:platform:packageDeployment:old",
@@ -85,9 +85,9 @@ func TestRollbackToADslVersionNeedsClusterOwner(t *testing.T) {
 		DeploymentId: "v1:platform:packageDeployment:old",
 		Actor:        plainUser(),
 	})
-	if RefusalCode(err) != CodeDslRequiresClusterOwner {
+	if RefusalCode(err) != CodeDslRequiresAuthoring {
 		t.Fatalf("putting a DSL version back changes what the cluster can do; want %s, got %v",
-			CodeDslRequiresClusterOwner, err)
+			CodeDslRequiresAuthoring, err)
 	}
 	// Nothing may have moved.
 	if len(h.publisher.repointed) != 0 || h.stager.written != 0 || h.roller.rolls != 0 {

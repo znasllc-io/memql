@@ -63,9 +63,9 @@ func Rollback(ctx context.Context, d *Deps, req RollbackRequest) (*RestoredState
 
 	// The D9 gate applies to a rollback for the same reason it applies to a
 	// deploy: putting a DSL version back is changing what the cluster can do.
-	if dslVersion != "" && !req.Actor.IsClusterOwner {
-		return nil, refuse(CodeDslRequiresClusterOwner,
-			"this deployment carried MemQL DSL, so rolling back to it changes what the whole cluster can do -- which is reserved to a cluster owner.")
+	if dslVersion != "" && !req.Actor.MayDeployDsl {
+		return nil, refuse(CodeDslRequiresAuthoring,
+			"this deployment carried MemQL DSL, so rolling back to it changes what the whole cluster can do -- which is owner or developer only.")
 	}
 
 	restored := &RestoredState{DeploymentId: req.DeploymentId, DslVersion: dslVersion}

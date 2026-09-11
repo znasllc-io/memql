@@ -889,6 +889,7 @@ func (i *Integration) resolve() (*Deps, error) {
 			Publisher:       newEnginePublisher(i.engine, s, i.logger),
 			Auditor:         &engineAuditor{engine: i.engine, logger: i.logger},
 			Credentials:     s.resolveCredential,
+			Roles:           s.resolveRole,
 			PeekCredentials: s.peekCredential,
 			GitHubApp:       gh,
 			Logger:          i.logger,

@@ -211,3 +211,56 @@ func TestCanonicalSlugResolvesAnAlias(t *testing.T) {
 			"IsValidRole must accept an alias or the whole cluster becomes unrankable")
 	}
 }
+
+// TestAnEmptyCatalogWouldLockOutTheOwner is the reason
+// component/memql's ReloadCapabilityCatalog refuses to install a catalog
+// carrying no roles.
+//
+// The engine installs the catalog from its Start while the seed materializer
+// that writes v1:rbac:role is gated on <-engine.Ready(), so a fresh-database
+// boot has a window with zero rows. If that snapshot were installed,
+// roleHasCapability's short-circuit would answer false for EVERY role rather
+// than deferring to the compiled mirror -- and the role it refuses first is
+// the owner, under a message telling them they lack authority they hold.
+//
+// This test asserts the failure mode rather than the guard, because the guard
+// lives in another module and the failure is the thing that must stay true:
+// delete the guard and this test still passes, but it tells the next reader
+// exactly what they have re-enabled.
+func TestAnEmptyCatalogWouldLockOutTheOwner(t *testing.T) {
+	for _, role := range []Role{RoleOwner, RoleDeveloper} {
+		if !Capable(role, VerbCreate, ResourceConstruct) {
+			t.Fatalf("precondition: %s must hold create x construct in the compiled mirror", role)
+		}
+	}
+
+	installFake(t, &fakeCatalog{})
+
+	for _, role := range []Role{RoleOwner, RoleDeveloper} {
+		if Capable(role, VerbCreate, ResourceConstruct) {
+			t.Fatalf("an empty catalog answered TRUE for %s -- the short-circuit at "+
+				"roleHasCapability is gone, and the empty-catalog guard in "+
+				"component/memql.ReloadCapabilityCatalog is now guarding nothing", role)
+		}
+	}
+}
+
+// TestAdminHoldsNoAuthoringGrant pins the line the D9 DSL-deploy gate rests
+// on. auth.CanAuthor is create x construct, and the whole point of routing the
+// gate through it is that admin does not hold it (#1529 section 4). If a seed
+// or a mirror edit ever grants admin that pair, the DSL-deploy gate silently
+// widens to admin and no test in component/packages would notice.
+func TestAdminHoldsNoAuthoringGrant(t *testing.T) {
+	if Capable(RoleAdmin, VerbCreate, ResourceConstruct) {
+		t.Fatal("admin holds create x construct -- the D9 gate and every CanAuthor site just widened to admin")
+	}
+	if !Capable(RoleAdmin, VerbRead, ResourceConstruct) {
+		t.Fatal("admin lost read x construct -- expected admin to keep exactly the read grant")
+	}
+	if !CanAuthor(UserContext{Role: RoleDeveloper}) || !CanAuthor(UserContext{Role: RoleOwner}) {
+		t.Fatal("CanAuthor refused owner or developer")
+	}
+	if CanAuthor(UserContext{Role: RoleAdmin}) {
+		t.Fatal("CanAuthor admitted admin")
+	}
+}

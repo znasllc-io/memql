@@ -151,7 +151,7 @@ func TestARunningDeployWritesItsHeartbeat(t *testing.T) {
 	h := newHarness(t, spaOnlyPackage(), ownerPackage())
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 	}); err != nil {
@@ -171,7 +171,7 @@ func TestARetryReadsTheStoredSnapshotInsteadOfFetching(t *testing.T) {
 	// The earlier run: succeeded once, so its snapshot is stored.
 	first, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 	})
@@ -195,7 +195,7 @@ func TestARetryReadsTheStoredSnapshotInsteadOfFetching(t *testing.T) {
 
 	out, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:        "v1:platform:package:abc",
-		Actor:            clusterOwner(),
+		Actor:            mayDeployDsl(),
 		Confirmed:        true,
 		FromDeploymentId: first.DeploymentId,
 		// The harness's recording engine answers no sites for the package, so
@@ -234,7 +234,7 @@ func TestARetryOfARunThatKeptNoSnapshotSaysSo(t *testing.T) {
 
 	_, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:        "v1:platform:package:abc",
-		Actor:            clusterOwner(),
+		Actor:            mayDeployDsl(),
 		Confirmed:        true,
 		FromDeploymentId: "v1:platform:packageDeployment:ancient",
 	})

@@ -42,5 +42,26 @@ func actorFromContext(ctx context.Context) Actor {
 	if !ok {
 		return Actor{}
 	}
-	return Actor{UserId: ac.UserId, IsClusterOwner: ac.IsClusterOwner()}
+	return Actor{
+		UserId: ac.UserId,
+		// auth.CanAuthor IS this decision, already named, with the policy in
+		// its own doc comment: "Engineering power: owner or developer only --
+		// admin does NOT gain authoring (#1529 section 4)". Five other sites
+		// call it (the MCP define surface, the MCP tool tiers, arming an
+		// event-email rule, arming a routing rule), and a sixth hand-rolled
+		// copy of its body is how those five come to disagree.
+		//
+		// Deploying a DSL domain IS authoring constructs -- it is authoring a
+		// whole domain of them at once -- so this is the same authority
+		// question, asked at a coarser grain.
+		//
+		// No IsClusterOwner disjunct. An empty installed catalog would answer
+		// false here for every role including the owner, but that is fixed
+		// where it happens -- component/memql's ReloadCapabilityCatalog
+		// refuses to install a catalog with no roles -- rather than papered
+		// over at this one gate, which would leave the owner able to deploy a
+		// whole DSL DOMAIN while refused a single construct at the five
+		// sibling sites.
+		MayDeployDsl: auth.CanAuthor(auth.UserContext{Role: ac.Role}),
+	}
 }
