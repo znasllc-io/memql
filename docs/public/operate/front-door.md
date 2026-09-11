@@ -355,6 +355,28 @@ No priority is needed either way: traefik ranks by rule length and nginx by
 prefix length, so the longer prefix outranks `/` for exactly the reason every
 generated HTTP path does.
 
+### WorkerService idle, stickiness, and Azure LB
+
+Prod evidence (Jose): `api-front-door-grpc` answered **HTTP 408 at exactly
+60.000s** four times while a cockpit held `WorkerService.Stream` — ingress-nginx
+defaults `proxy-read-timeout` / `proxy-send-timeout` to 60s. The generated
+Ingress therefore sets both to **14400** (4h), well above the ~30s gRPC
+keepalive the SDK dial and agent `grpc.NewServer` share.
+
+Stickiness: agent runs **2 replicas**. Without affinity a reconnect after drain
+can land on the other pod and flap `connectedNodeId`. The Ingress uses
+`upstream-hash-by: $binary_remote_addr`; the `agent` Service also sets
+`sessionAffinity: ClientIP` (gRPC-go has no cookie jar; MCP's cookie affinity
+remains the HTTP prior art).
+
+**Azure Load Balancer idle (DevOps):** Standard LB / public IP defaults idle
+timeout to **4 minutes**. Raise the frontend TCP idle timeout to ≥30 minutes on
+the api ingress Public IP (or set
+`service.beta.kubernetes.io/azure-load-balancer-tcp-idle-timeout` on the
+ingress controller Service) so the LB does not cut a quiet held stream before
+nginx/gRPC keepalive. Follow-up: soak hours-idle without 408.
+
+
 ## What is generated
 
 Two things in the front door are derived rather than authored, by two

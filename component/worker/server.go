@@ -114,7 +114,8 @@ func (s *server) Stream(stream memqlv1.WorkerService_StreamServer) error {
 		})
 		return status.Error(codes.PermissionDenied, err.Error())
 	}
-	defer session.close()
+	var streamErr error
+	defer func() { session.close(streamErr) }()
 	// The RegisterAck is on the wire; from here the cluster pings the
 	// machine for the life of the stream (epic memql#5218, D11).
 	session.startPinger()
@@ -122,6 +123,7 @@ func (s *server) Stream(stream memqlv1.WorkerService_StreamServer) error {
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
+			streamErr = err
 			if errors.Is(err, io.EOF) {
 				return nil
 			}
@@ -186,6 +188,7 @@ func (s *server) admitRegistration(
 	streamCtx, cancel := context.WithCancel(stream.Context())
 	session := newStreamSession(s, stream, w, streamCtx, cancel)
 	w.SetDispatchFunc(session.dispatch, cancel)
+	w.SetDrainFunc(session.requestDrain)
 	w.SetAppSessionFunc(session.openAppSession)
 	w.SetModelCallFunc(session.openModelCall)
 	w.SetModelPullFunc(session.openModelPull)
@@ -435,8 +438,13 @@ type streamSession struct {
 	// handleHeartbeat, both on the recv goroutine, so like lastPersistedAt
 	// they need no lock. A zero rttAt is NOT MEASURED and the flush leaves
 	// both out of the write.
+	// both out of the write.
 	rttMs int
 	rttAt time.Time
+	// drainReason, when non-empty, was set by requestDrain before the stream
+	// ended. disconnectCodeReason prefers it so roll logs say server_drain
+	// rather than a bare Canceled from context cancel.
+	drainReason string
 }
 
 func newStreamSession(
@@ -461,7 +469,37 @@ func newStreamSession(
 	}
 }
 
-func (s *streamSession) close() {
+func (s *streamSession) requestDrain(reason string) {
+	if s == nil {
+		return
+	}
+	if reason == "" {
+		reason = DisconnectReasonServerDrain
+	}
+	s.mu.Lock()
+	if s.drainReason == "" {
+		s.drainReason = reason
+	}
+	s.mu.Unlock()
+	_ = s.send(&memqlv1.WorkerServerMessage{
+		Payload: &memqlv1.WorkerServerMessage_Drain{
+			Drain: &memqlv1.Drain{},
+		},
+	})
+	// Grace then cancel: cockpit finishes in-flight work on Drain, then the
+	// stream must not block SIGTERM / GracefulStop forever.
+	go func() {
+		t := time.NewTimer(3 * time.Second)
+		defer t.Stop()
+		select {
+		case <-t.C:
+			s.cancel()
+		case <-s.ctx.Done():
+		}
+	}()
+}
+
+func (s *streamSession) close(cause error) {
 	s.closeOnce.Do(func() {
 		s.cancel()
 		if s.server != nil && s.server.registry != nil {
@@ -544,6 +582,14 @@ func (s *streamSession) close() {
 			if len(liveSessions) > 0 {
 				fields = append(fields, "app_sessions_aborted", len(liveSessions))
 			}
+			if len(liveCalls) > 0 {
+				fields = append(fields, "model_calls_aborted", len(liveCalls))
+			}
+			s.mu.Lock()
+			drainReason := s.drainReason
+			s.mu.Unlock()
+			code, reason := disconnectCodeReason(cause, drainReason)
+			fields = append(fields, "code", code, "reason", reason)
 			s.server.logger.Info("worker disconnected", fields...)
 		}
 		// Emit an audit event mirroring "worker_registered" so downstream

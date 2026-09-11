@@ -243,6 +243,29 @@ func apiGRPCIngress(domain string) string {
 		"  namespace: memql\n" +
 		"  annotations:\n" +
 		"    nginx.ingress.kubernetes.io/backend-protocol: \"GRPC\"\n" +
+		"    # WORKER STREAM IDLE (Jose 408@60.000s). ingress-nginx defaults\n" +
+		"    # proxy-read-timeout / proxy-send-timeout to 60s. A held WorkerService\n" +
+		"    # bidi with no DATA frame for a minute is then answered HTTP 408 from\n" +
+		"    # the proxy, not the agent -- four times in the prod tip window.\n" +
+		"    # Lift both well above the gRPC keepalive ping (~30s) so hours of idle\n" +
+		"    # registration survive. 4h matches a long Ask / computer-use session\n" +
+		"    # with slack; the keepalive is what keeps Azure LB / nginx from\n" +
+		"    # treating the stream as dead in the first place.\n" +
+		"    nginx.ingress.kubernetes.io/proxy-read-timeout: \"14400\"\n" +
+		"    nginx.ingress.kubernetes.io/proxy-send-timeout: \"14400\"\n" +
+		"    # STICKY TO THE HOLDER POD. Agent runs 2 replicas; without affinity a\n" +
+		"    # reconnect after drain can land on the other pod and flap\n" +
+		"    # connectedNodeId. Cookie stickiness is the MCP prior art\n" +
+		"    # (deploy/k8s/base/mcp.yaml); for gRPC we also pin the agent Service\n" +
+		"    # with ClientIP sessionAffinity. upstream-hash-by remote address is\n" +
+		"    # belt-and-suspenders for clients that do not echo cookies.\n" +
+		"    nginx.ingress.kubernetes.io/upstream-hash-by: \"$binary_remote_addr\"\n" +
+		"    # AZURE LOAD BALANCER IDLE (DevOps). Public IP / Standard LB defaults\n" +
+		"    # idle timeout to 4 minutes. Raise the frontend idle timeout to >=\n" +
+		"    # keepalive + slack (recommended 30 minutes) on the api ingress\n" +
+		"    # Public IP -- this annotation documents the knob; apply it on the\n" +
+		"    # Azure resource if the cluster's ingress Service does not already\n" +
+		"    # set service.beta.kubernetes.io/azure-load-balancer-tcp-idle-timeout.\n" +
 		"spec:\n" +
 		"  ingressClassName: " + ingressClass + "\n" +
 		tlsBlock(host) +

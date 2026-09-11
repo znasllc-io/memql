@@ -1,7 +1,13 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { rowsResult } from "../cluster/harness";
-import { connectionDotTone, useAskReadiness } from "../../src/ask/useAskReadiness";
+import {
+  ASK_READINESS_MAX_PROBES,
+  connectionDotTone,
+  connectionDotTooltip,
+  probeDelayMs,
+  useAskReadiness,
+} from "../../src/ask/useAskReadiness";
 
 const mock = vi.hoisted(() => ({
   query: vi.fn(), connected: "connected" as "connected" | "reconnecting" | "disconnected", userId: "owner", moduleState: "unconfigured",
@@ -19,48 +25,64 @@ it.each([false, undefined, "true"])("never treats aggregate eligible or catalog 
   mock.query.mockResolvedValue(rowsResult([{ eligible: true, fleetCatalogInstalled: true, streamingChatEligible }]));
   const view = renderHook(useAskReadiness);
   expect(view.result.current.state).toBe("checking");
-  await waitFor(() => expect(view.result.current.state).toBe(streamingChatEligible === false ? "unavailable" : "error"));
+  await waitFor(() => expect(view.result.current.state).toBe("checking"));
+  expect(view.result.current.message).toBe("");
 });
 it("accepts an authoritative streaming route on a BFF without local dispatch or module readiness", async () => {
   mock.query.mockResolvedValue(rowsResult([{ eligible: true, streamingChatEligible: true, fleetInferenceInstalled: false }]));
   const view = renderHook(useAskReadiness);
   await waitFor(() => expect(view.result.current.state).toBe("ready"));
+  expect(view.result.current.message).toBe("");
 });
 it("discards a prior owner's pending response and rechecks after disconnect", async () => {
   let resolve!: (r: ReturnType<typeof rowsResult>) => void;
   mock.query.mockReturnValueOnce(new Promise((r) => { resolve = r; })).mockResolvedValue(rowsResult([{ streamingChatEligible: false }]));
   const view = renderHook(useAskReadiness);
   mock.userId = "another-owner"; view.rerender();
-  await waitFor(() => expect(view.result.current.state).toBe("unavailable"));
+  await waitFor(() => expect(view.result.current.state).toBe("checking"));
   await act(async () => resolve(rowsResult([{ streamingChatEligible: true }])));
-  expect(view.result.current.state).toBe("unavailable");
-  // SDK reconnecting is not a hard lost-connection banner.
-  mock.connected = "reconnecting"; view.rerender(); expect(view.result.current.state).toBe("reconnecting");
+  expect(view.result.current.state).not.toBe("ready");
+  mock.connected = "reconnecting"; view.rerender();
+  expect(view.result.current.message).toBe("");
   mock.query.mockResolvedValue(rowsResult([{ streamingChatEligible: true }]));
   mock.connected = "connected"; view.rerender(); expect(view.result.current.state).toBe("checking");
   await waitFor(() => expect(view.result.current.state).toBe("ready"));
 });
-it("offers a fresh read after failure and checks shared route changes without heartbeat refetches", async () => {
-  vi.useFakeTimers(); mock.query.mockRejectedValueOnce(new Error("offline")).mockResolvedValue(rowsResult([{ streamingChatEligible: true }]));
+it("stays ready across brief BFF reconnecting so GoingAway does not yellow-flap Ask", async () => {
+  mock.query.mockResolvedValue(rowsResult([{ streamingChatEligible: true }]));
   const view = renderHook(useAskReadiness);
-  await act(async () => {}); expect(view.result.current.state).toBe("error");
-  await act(async () => view.result.current.refresh()); expect(view.result.current.state).toBe("ready");
-  view.rerender(); expect(mock.query).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(view.result.current.state).toBe("ready"));
+  mock.connected = "reconnecting"; view.rerender();
+  expect(view.result.current.state).toBe("ready");
+  expect(connectionDotTone("reconnecting", view.result.current)).toBe("reachable");
+});
+it("goes red and stops probing after the bounded budget with increasing backoff", async () => {
+  vi.useFakeTimers();
   mock.query.mockResolvedValue(rowsResult([{ streamingChatEligible: false }]));
-  await act(async () => vi.advanceTimersByTime(30_000)); expect(view.result.current.state).toBe("unavailable");
-});
-it("renders a retryable readiness error when the connection rejects the query synchronously", async () => {
-  mock.query.mockImplementation(() => { throw new Error("Connection is closed"); });
   const view = renderHook(useAskReadiness);
-  await waitFor(() => expect(view.result.current.state).toBe("error"));
+  for (let i = 0; i < ASK_READINESS_MAX_PROBES; i++) {
+    await act(async () => { await vi.advanceTimersByTimeAsync(probeDelayMs(i + 1)); });
+  }
+  expect(view.result.current.state).toBe("unavailable");
+  expect(view.result.current.message).toBe("");
+  const calls = mock.query.mock.calls.length;
+  await act(async () => { await vi.advanceTimersByTimeAsync(probeDelayMs(ASK_READINESS_MAX_PROBES) * 3); });
+  expect(mock.query.mock.calls.length).toBe(calls);
+  expect(connectionDotTone("connected", view.result.current)).toBe("failed");
 });
-
-it("connectionDotTone reflects inference readiness, not bare WebSocket status", () => {
+it("probeDelayMs increases then caps", () => {
+  expect(probeDelayMs(1)).toBeLessThan(probeDelayMs(3));
+  expect(probeDelayMs(10)).toBe(probeDelayMs(8));
+});
+it("connectionDotTone and tooltip reflect yellow/blue/red without banners", () => {
   expect(connectionDotTone("disconnected", { state: "ready" })).toBe("off");
-  expect(connectionDotTone("reconnecting", { state: "ready" })).toBe("unreachable");
+  expect(connectionDotTone("reconnecting", { state: "ready" })).toBe("reachable");
+  expect(connectionDotTone("reconnecting", { state: "checking" })).toBe("unreachable");
   expect(connectionDotTone("connected", { state: "ready" })).toBe("reachable");
-  expect(connectionDotTone("connected", { state: "unavailable" })).toBe("unreachable");
+  expect(connectionDotTone("connected", { state: "unavailable" })).toBe("failed");
   expect(connectionDotTone("connected", { state: "checking" })).toBe("unreachable");
-  expect(connectionDotTone("connected", { state: "error" })).toBe("unreachable");
-  expect(connectionDotTone("connected", { state: "reconnecting" })).toBe("unreachable");
+  expect(connectionDotTooltip("reachable")).toMatch(/ready/i);
+  expect(connectionDotTooltip("unreachable")).toMatch(/Connecting/i);
+  expect(connectionDotTooltip("failed")).toMatch(/Fleet/i);
+  expect(connectionDotTooltip("off")).toMatch(/Not connected/i);
 });

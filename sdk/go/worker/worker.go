@@ -33,10 +33,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -50,6 +52,14 @@ import (
 // detail). Bumping at the SDK keeps every consumer aligned without
 // each one having to re-discover the failure mode.
 const DefaultMaxMessageSize = 32 * 1024 * 1024
+
+// Dial keepalive must beat the common 60s idle cut on L7 proxies (Jose: four
+// HTTP 408s at exactly 60.000s on api-front-door-grpc → agent:50051). Time is
+// well under that idle; Timeout is how long we wait for a ping ACK.
+const (
+	DefaultKeepaliveTime    = 30 * time.Second
+	DefaultKeepaliveTimeout = 10 * time.Second
+)
 
 // DialConfig describes how to dial a memql cluster's WorkerService.
 // Only Endpoint + Token are required; the rest fall back to safe
@@ -126,6 +136,15 @@ func Dial(ctx context.Context, cfg DialConfig) (*Connection, error) {
 			grpc.MaxCallRecvMsgSize(maxMsg),
 			grpc.MaxCallSendMsgSize(maxMsg),
 		),
+		// PermitWithoutStream: the WorkerService bidi is opened immediately
+		// after Dial, but keepalives must still fire across quiet periods of
+		// that held stream -- and across any future dial that parks before
+		// Stream. Matched by server EnforcementPolicy on the agent.
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                DefaultKeepaliveTime,
+			Timeout:             DefaultKeepaliveTimeout,
+			PermitWithoutStream: true,
+		}),
 	}
 	if cfg.UseTLS {
 		tlsCfg, err := BuildTLSConfig(cfg.Endpoint, cfg.Logger)

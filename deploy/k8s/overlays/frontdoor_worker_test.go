@@ -167,3 +167,74 @@ func TestTheWorkerStreamReachesTheAgentInEveryGeneratedOverlay(t *testing.T) {
 		})
 	}
 }
+
+
+// TestTheWorkerStreamIngressIdleTimeoutsAndSticky gates the annotations that
+// stop Jose's 408@60.000s on api-front-door-grpc and keep reconnects on one
+// of the two agent pods. Read/send must be hours (well above the ~30s gRPC
+// keepalive); upstream-hash-by pins by client address (MCP cookie affinity is
+// the HTTP prior art; gRPC-go has no cookie jar).
+func TestTheWorkerStreamIngressIdleTimeoutsAndSticky(t *testing.T) {
+	const grpcIngress = "api-front-door-grpc"
+	want := map[string]string{
+		"nginx.ingress.kubernetes.io/backend-protocol":    "GRPC",
+		"nginx.ingress.kubernetes.io/proxy-read-timeout":  "14400",
+		"nginx.ingress.kubernetes.io/proxy-send-timeout":  "14400",
+		"nginx.ingress.kubernetes.io/upstream-hash-by":    "$binary_remote_addr",
+	}
+	for _, overlay := range generatedOverlays {
+		t.Run(overlay, func(t *testing.T) {
+			anns := apiHostIngressAnnotations(t, render(t, overlay))[grpcIngress]
+			if anns == nil {
+				t.Fatalf("no annotations on %s", grpcIngress)
+			}
+			for k, v := range want {
+				if got := anns[k]; got != v {
+					t.Errorf("%s: annotation %q = %q, want %q (WorkerService idle/sticky)", grpcIngress, k, got, v)
+				}
+			}
+			readSec := anns["nginx.ingress.kubernetes.io/proxy-read-timeout"]
+			if readSec == "60" || readSec == "" {
+				t.Fatalf("proxy-read-timeout still default-ish %q; Jose saw HTTP 408 at exactly 60.000s", readSec)
+			}
+		})
+	}
+}
+
+// apiHostIngressAnnotations returns annotation maps keyed by Ingress name for
+// every Ingress that declares a rule on the api host.
+func apiHostIngressAnnotations(t *testing.T, rendered string) map[string]map[string]string {
+	t.Helper()
+	apiHost := frontdoor.RoleHost(frontdoor.RoleAPI, committedDomain)
+	out := map[string]map[string]string{}
+	dec := yaml.NewDecoder(strings.NewReader(rendered))
+	for i := 0; ; i++ {
+		var doc struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name        string            `yaml:"name"`
+				Annotations map[string]string `yaml:"annotations"`
+			} `yaml:"metadata"`
+			Spec struct {
+				Rules []struct {
+					Host string `yaml:"host"`
+				} `yaml:"rules"`
+			} `yaml:"spec"`
+		}
+		err := dec.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			return out
+		}
+		if err != nil {
+			t.Fatalf("decoding document %d: %v", i+1, err)
+		}
+		if doc.Kind != "Ingress" {
+			continue
+		}
+		for _, rule := range doc.Spec.Rules {
+			if rule.Host == apiHost {
+				out[doc.Metadata.Name] = doc.Metadata.Annotations
+			}
+		}
+	}
+}

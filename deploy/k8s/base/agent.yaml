@@ -194,6 +194,15 @@ metadata:
     app.kubernetes.io/part-of: memql
 spec:
   type: ClusterIP
+  # Sticky holder for WorkerService streams (2 replicas). Without this a
+  # cockpit reconnect after drain/roll can hop the other agent pod and flap
+  # connectedNodeId. ClientIP matches gRPC-go (no cookie jar); MCP's cookie
+  # affinity remains the prior art for HTTP session heads. timeoutSeconds is
+  # hours so a quiet registration keeps its hash between heartbeats.
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
   selector:
     app.kubernetes.io/name: agent
   ports:

@@ -302,6 +302,29 @@ metadata:
   namespace: memql
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+    # WORKER STREAM IDLE (Jose 408@60.000s). ingress-nginx defaults
+    # proxy-read-timeout / proxy-send-timeout to 60s. A held WorkerService
+    # bidi with no DATA frame for a minute is then answered HTTP 408 from
+    # the proxy, not the agent -- four times in the prod tip window.
+    # Lift both well above the gRPC keepalive ping (~30s) so hours of idle
+    # registration survive. 4h matches a long Ask / computer-use session
+    # with slack; the keepalive is what keeps Azure LB / nginx from
+    # treating the stream as dead in the first place.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "14400"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "14400"
+    # STICKY TO THE HOLDER POD. Agent runs 2 replicas; without affinity a
+    # reconnect after drain can land on the other pod and flap
+    # connectedNodeId. Cookie stickiness is the MCP prior art
+    # (deploy/k8s/base/mcp.yaml); for gRPC we also pin the agent Service
+    # with ClientIP sessionAffinity. upstream-hash-by remote address is
+    # belt-and-suspenders for clients that do not echo cookies.
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$binary_remote_addr"
+    # AZURE LOAD BALANCER IDLE (DevOps). Public IP / Standard LB defaults
+    # idle timeout to 4 minutes. Raise the frontend idle timeout to >=
+    # keepalive + slack (recommended 30 minutes) on the api ingress
+    # Public IP -- this annotation documents the knob; apply it on the
+    # Azure resource if the cluster's ingress Service does not already
+    # set service.beta.kubernetes.io/azure-load-balancer-tcp-idle-timeout.
 spec:
   ingressClassName: nginx
   tls:

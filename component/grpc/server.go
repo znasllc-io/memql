@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	grpcMetadata "google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -307,10 +308,28 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 	// what a helper would have returned if called. See
 	// TestPrepareForRunInstallsTheClientOriginWrapper.
 	s.installedInterceptor = s.installedStreamInterceptor()
+	// gRPC keepalive matched to the SDK dial (sdk/go/worker). Time ≪ 60s so
+	// L7 proxies that idle-cut at a minute (prod: HTTP 408 @ 60.000s on
+	// WorkerService) see activity. EnforcementPolicy.MinTime is half the
+	// client Time so a well-behaved cockpit is never punished; PermitWithoutStream
+	// matches the client so quiet held streams still ping.
+	const (
+		serverKeepaliveTime    = 30 * time.Second
+		serverKeepaliveTimeout = 10 * time.Second
+		serverKeepaliveMinTime = 15 * time.Second
+	)
 	serverOpts := []grpc.ServerOption{
 		grpc.StreamInterceptor(s.installedInterceptor),
 		grpc.MaxRecvMsgSize(maxWorkerMessageSize),
 		grpc.MaxSendMsgSize(maxWorkerMessageSize),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    serverKeepaliveTime,
+			Timeout: serverKeepaliveTimeout,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             serverKeepaliveMinTime,
+			PermitWithoutStream: true,
+		}),
 	}
 	// TLS opt-in via MEMQL_GRPC_TLS_CERT_FILE + KEY_FILE. When
 	// unset, the server stays insecure (the legacy default suitable
