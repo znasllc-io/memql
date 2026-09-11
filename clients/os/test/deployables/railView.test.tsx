@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { Rail } from "../../src/apps/deployables/page/Rail";
+import { Rail } from "../../src/apps/deployables/page/RailView";
 import type { RailInput, StandingInput } from "../../src/apps/deployables/page/rail";
 import type { DeploymentRow } from "../../src/apps/deployables/packages/rows";
 

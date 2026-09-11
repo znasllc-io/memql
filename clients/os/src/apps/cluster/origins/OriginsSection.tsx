@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Button, Caption, Chip, Head, Notice, Panel, Subhead } from "../../../kit";
-import { Measure } from "../../../kit/Measure";
+import { Measure } from "../../../kit/MeasureView";
 import { useOsConnection } from "../../../live/connection";
 import { useReading } from "../../../cluster/reading";
 import { DeadLetterBand } from "./DeadLetters";

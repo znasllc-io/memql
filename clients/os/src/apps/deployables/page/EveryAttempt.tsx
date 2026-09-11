@@ -8,7 +8,7 @@ import type { LiveView } from "../../../live/liveView";
 import { usePackageActions } from "../packages/actions";
 import { BuildLog, ProblemNotice } from "../packages/ReportView";
 import { deploymentFingerprint, shortVersion, type DeploymentRow, type PackageRow } from "../packages/rows";
-import { Rail } from "./Rail";
+import { Rail } from "./RailView";
 
 // Every attempt: the append-only runs of this deployable's source, each with
 // its own rail (design section A).

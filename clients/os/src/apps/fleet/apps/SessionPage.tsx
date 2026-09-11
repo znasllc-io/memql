@@ -1,7 +1,7 @@
 import { ArrowLeft } from "lucide-react";
 
 import { Button, Chip, Fact, Facts, Head, Notice, Panel, Subhead, formatBytes, formatMoment } from "../../../kit";
-import { Measure } from "../../../kit/Measure";
+import { Measure } from "../../../kit/MeasureView";
 import {
   appLabel,
   sessionIsLive,

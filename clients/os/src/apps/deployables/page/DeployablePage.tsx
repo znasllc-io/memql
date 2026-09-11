@@ -16,7 +16,7 @@ import { liveUrlFor, ownerLabel, siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
 import { confirmationWordFor } from "../words";
 import { actsFor, runForApp, siblingRunInFlight, type ActName } from "./acts";
-import { Rail } from "./Rail";
+import { Rail } from "./RailView";
 import { openStopFor, refusalStopFor, type RailStage, type StandingInput } from "./rail";
 import { BuildStop } from "./stops/Build";
 import { LiveStop } from "./stops/Live";
