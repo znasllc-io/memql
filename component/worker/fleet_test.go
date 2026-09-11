@@ -2,12 +2,17 @@ package worker
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
-	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
 // -----------------------------------------------------------------------------
@@ -181,7 +186,7 @@ func TestStreamSessionClose_ClearsConnectedNode(t *testing.T) {
 	session := newHeartbeatTestSession(store, func() time.Time { return t0 })
 
 	session.cancel() // the disconnect path's real starting condition
-	session.close()
+	session.close(nil)
 
 	if len(store.cleared) != 1 || store.cleared[0] != "reg-1" {
 		t.Fatalf("close must clear connectedNodeId for the registration, got %v", store.cleared)
@@ -191,7 +196,7 @@ func TestStreamSessionClose_ClearsConnectedNode(t *testing.T) {
 	}
 
 	// close is once-only; a second call must not write again.
-	session.close()
+	session.close(nil)
 	if len(store.cleared) != 1 {
 		t.Fatalf("close must be idempotent, got %d clears", len(store.cleared))
 	}
@@ -499,5 +504,35 @@ func TestEngineStoreCreateInvocation_BorrowsTheOwnersAuthority(t *testing.T) {
 	}
 	if len(eng.queries) != 1 {
 		t.Fatalf("the refused call still reached the engine (%d queries)", len(eng.queries))
+	}
+}
+
+func TestDisconnectCodeReason(t *testing.T) {
+	code, reason := disconnectCodeReason(nil)
+	if code != "ok" || reason != "session_end" {
+		t.Fatalf("nil cause = %s/%s", code, reason)
+	}
+	code, reason = disconnectCodeReason(io.EOF)
+	if code != "eof" || reason != "client_eof" {
+		t.Fatalf("EOF = %s/%s", code, reason)
+	}
+	st := status.Error(codes.Unavailable, "transport is closing")
+	code, reason = disconnectCodeReason(st)
+	if code != codes.Unavailable.String() || reason != "transport is closing" {
+		t.Fatalf("status = %s/%s", code, reason)
+	}
+}
+
+func TestClearConnectedNodeSkipsWhenSuccessorHolds(t *testing.T) {
+	store := &fakeRegistrationStore{}
+	store.byUser = []RegistrationRow{{
+		ID: "reg-1", OwnerUserId: "owner", ConnectedNodeId: "agent-successor",
+	}}
+	srv := &server{store: store, logger: slog.Default(), nodeId: "agent-dying", registry: NewRegistry(slog.Default(), time.Now)}
+	w := &Worker{RegistrationId: "reg-1", OwnerUserId: "owner"}
+	session := newStreamSession(srv, nil, w, context.Background(), func() {})
+	session.clearConnectedNode()
+	if len(store.cleared) != 0 {
+		t.Fatalf("cleared = %v, want skip when successor holds", store.cleared)
 	}
 }
