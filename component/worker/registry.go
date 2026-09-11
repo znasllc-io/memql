@@ -65,6 +65,10 @@ type Worker struct {
 	modelPullFn  ModelPullFunc
 	modelProbeFn ModelProbeFunc
 	cancelStream func()
+	// drainFn, when set, sends a Drain envelope with a stable reason then
+	// cancels the stream. Prefer it over raw cancelStream on voluntary
+	// shutdown so cockpit + agent logs share code=canceled reason=server_drain.
+	drainFn func(reason string)
 
 	mu           sync.Mutex
 	activePerCap map[string]uint32
@@ -171,6 +175,10 @@ func (r *Registry) removeLocked(w *Worker) {
 
 // Drain marks the registry as draining and ends every active stream.
 // New workers are refused; in-flight calls finish naturally.
+//
+// Prefer notify-then-cancel: each stream gets a Drain message with
+// DisconnectReasonServerDrain so the cockpit logs one reconnect with that
+// reason instead of an unlabeled EOF during a roll.
 func (r *Registry) Drain() {
 	if r == nil {
 		return
@@ -179,6 +187,10 @@ func (r *Registry) Drain() {
 	defer r.mu.Unlock()
 	r.draining = true
 	for _, w := range r.byId {
+		if w.drainFn != nil {
+			w.drainFn(DisconnectReasonServerDrain)
+			continue
+		}
 		if w.cancelStream != nil {
 			w.cancelStream()
 		}
@@ -518,6 +530,15 @@ func (w *Worker) SetDispatchFunc(fn DispatchFunc, cancel func()) {
 	}
 	w.dispatchFn = fn
 	w.cancelStream = cancel
+}
+
+// SetDrainFunc wires the graceful drain notifier for this stream. Called once
+// alongside SetDispatchFunc when Register is admitted.
+func (w *Worker) SetDrainFunc(fn func(reason string)) {
+	if w == nil {
+		return
+	}
+	w.drainFn = fn
 }
 
 // TouchLastSeen bumps the in-memory last-seen timestamp.

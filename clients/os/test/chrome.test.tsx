@@ -199,8 +199,8 @@ describe("Ask (spec K bullet 5)", () => {
     fireEvent.click(within(sheet).getByRole("button", { name: "Send" }));
     expect((within(sheet).getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
     expect((input as HTMLInputElement).value).toBe("what is this cluster");
-    expect(within(sheet).getByText(/Not connected to the cluster/)).toBeTruthy();
-    expect(within(sheet).getByRole("button", { name: "Open Fleet" })).toBeTruthy();
+    expect(within(sheet).queryByText(/Not connected to the cluster/)).toBeNull();
+    expect(within(sheet).queryByRole("button", { name: "Open Fleet" })).toBeNull();
   });
 
   // The harness passes askVoice={null} (jsdom has no audio stack), which is

@@ -181,7 +181,7 @@ func TestStreamSessionClose_ClearsConnectedNode(t *testing.T) {
 	session := newHeartbeatTestSession(store, func() time.Time { return t0 })
 
 	session.cancel() // the disconnect path's real starting condition
-	session.close()
+	session.close(nil)
 
 	if len(store.cleared) != 1 || store.cleared[0] != "reg-1" {
 		t.Fatalf("close must clear connectedNodeId for the registration, got %v", store.cleared)
@@ -191,7 +191,7 @@ func TestStreamSessionClose_ClearsConnectedNode(t *testing.T) {
 	}
 
 	// close is once-only; a second call must not write again.
-	session.close()
+	session.close(nil)
 	if len(store.cleared) != 1 {
 		t.Fatalf("close must be idempotent, got %d clears", len(store.cleared))
 	}

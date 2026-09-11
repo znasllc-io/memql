@@ -17,7 +17,7 @@ import type { OsAppManifest } from "../system/registry";
 import type { AppId } from "../system/windows";
 import { useSession } from "./access";
 import { useConnectionStatus } from "./connection";
-import { connectionDotTone } from "../ask/useAskReadiness";
+import { connectionDotTone, connectionDotTooltip } from "../ask/useAskReadiness";
 import { ContextMenu, type MenuEntry } from "./ContextMenu";
 import { Mark } from "./Mark";
 import { useOs, type OsNotice } from "./state";
@@ -527,15 +527,8 @@ export function Dock({
           className="os-dot os-connection-dot"
           data-os-dot={connectionTone}
           role="img"
-          aria-label={
-            connectionTone === "reachable"
-              ? "Cluster ready for Ask"
-              : connectionTone === "unreachable"
-                ? connection === "reconnecting"
-                  ? "Reconnecting to the cluster"
-                  : "Connected, but Ask has no usable inference yet"
-                : "Not connected to the cluster"
-          }
+          title={connectionDotTooltip(connectionTone)}
+          aria-label={connectionDotTooltip(connectionTone)}
         />
         <Clock />
         <AvatarMenu onSignOut={onSignOut} />
