@@ -766,6 +766,15 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// (memql#1339); the default is top-level replacement, so a restated
 	// nested object still replaces wholesale and only OMITTED top-level
 	// fields are inherited.
+	// WHETHER THIS WRITE'S DELTA NAMED THE OWNER, captured before the
+	// read-merge below replaces `payload` with the merged prior row. After
+	// that point a stored owner and a freshly stamped one are the same map
+	// entry, and applySiteOwnerStamp has to tell them apart: the undo it
+	// applies for a deployment writer is for "the value createSite just
+	// stamped", and an update whose delta never mentioned the owner stamped
+	// nothing. See the pipeline case in site_owner_stamp_pipeline_update_test.go.
+	_, deltaNamedOwner := payload["ownerUserId"]
+
 	id := strings.TrimSpace(mutation.ID)
 	if id != "" {
 		priorPayload, existed, err := e.loadPriorPayload(ctx, conceptMeta, id)
@@ -931,7 +940,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		// fail-closed reading, since it means the stamp RUNS rather than being
 		// skipped.
 		siteActor, _ := mutationActor(ctx)
-		if err := applySiteOwnerStamp(ctx, payload, meta.priorExisted, siteActor); err != nil {
+		if err := applySiteOwnerStamp(ctx, payload, meta.priorExisted, siteActor, deltaNamedOwner); err != nil {
 			return nil, meta, err
 		}
 	}
