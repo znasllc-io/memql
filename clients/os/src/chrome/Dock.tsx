@@ -531,10 +531,10 @@ export function Dock({
             connectionTone === "reachable"
               ? "Cluster ready for Ask"
               : connectionTone === "unreachable"
-                ? connection === "reconnecting"
-                  ? "Reconnecting to the cluster"
-                  : "Connected, but Ask has no usable inference yet"
-                : "Not connected to the cluster"
+                ? "Connecting Ask to inference"
+                : connectionTone === "failed"
+                  ? "Ask has no usable inference"
+                  : "Not connected to the cluster"
           }
         />
         <Clock />
