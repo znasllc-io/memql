@@ -45,7 +45,7 @@ import {
   type ComposePhase,
 } from "./compose";
 import { everyOtherAppSkipped } from "../packages/calls";
-import { Rail } from "./Rail";
+import { Rail } from "./RailView";
 import { headActionFor, type ComposeInput, type HeadAction, type RailProblem, type RailStage } from "./rail";
 import { ManifestPreview } from "./stops/compose/ManifestPreview";
 import { ComposeSourceStop } from "./stops/compose/Source";

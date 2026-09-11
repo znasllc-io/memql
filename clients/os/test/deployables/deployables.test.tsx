@@ -546,13 +546,13 @@ describe("the Head's action, by state", () => {
       {
         ...WITH_PACKAGE,
         deployError:
-          "dsl_requires_cluster_owner: this package ships MemQL DSL (acme), and deploying DSL changes what this whole cluster can do -- so it is reserved to a cluster owner.",
+          "dsl_requires_authoring: this package ships MemQL DSL (acme), and deploying DSL changes what this whole cluster can do -- so it is owner or developer only.",
       },
       "store.memql.example.com",
     );
     await click(headAction(page));
-    expect(await within(page).findByText("Deploying MemQL is a cluster owner's decision")).toBeTruthy();
-    expect(within(page).getByText(/reserved to a cluster owner/)).toBeTruthy();
+    expect(await within(page).findByText("Deploying MemQL needs the owner or developer role")).toBeTruthy();
+    expect(within(page).getByText(/owner or developer only/)).toBeTruthy();
   });
 });
 

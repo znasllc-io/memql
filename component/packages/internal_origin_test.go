@@ -79,6 +79,10 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	// GitHub App grants (epic memql#4912): one more stamped read and two more
 	// stamped writes.
 	_, _ = s.githubAppGrantForCaller(ctx)
+
+	// The owner's authority for an automatic run (the D9 gate): one more
+	// stamped read.
+	_, _ = s.resolveRole(ctx, "v1:identity:user:someone")
 	_ = s.recordRefreshedGrantToken(ctx, grantTokenSeed{CredentialId: "c", EncryptedValue: "e", Fingerprint: "f"})
 	_ = s.recordGrantInstallations(ctx, "c", []string{"1"})
 
@@ -106,7 +110,14 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	// @serverOnly and the stamp is what lets the engine reach the construct;
 	// the read path has no internal-origin bypass, so the caller's own actor
 	// still decides the rows, and the query's filter is the owner term.
-	stampedReads := []string{"sourceCredentialSealedById", "githubAppGrantForCaller"}
+	// resolveRole is the third, and the LIMIT is what makes it safe: only the
+	// role SLUG leaves the function. userByIdSystem is @serverOnly because it
+	// projects every @pii field of a caller-supplied id, so the stamp is what
+	// lets the engine reach the construct -- and the read path has no
+	// internal-origin bypass, so the actor still decides the rows. It reads
+	// the PACKAGE OWNER's own row, under the owner's borrowed identity, which
+	// is the one row the auto-deploy feed is already acting for.
+	stampedReads := []string{"sourceCredentialSealedById", "githubAppGrantForCaller", "userByIdSystem"}
 	// THE CALLER-ACTOR WRITES. revokeSourceCredential is an ordinary owned
 	// mutation the write guard decides for the caller; stamping it internal
 	// would hand the guard its first escape and let anyone revoke anything.

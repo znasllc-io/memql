@@ -208,11 +208,19 @@ const (
 // resource T", and it agrees with the load-tested DSL capability catalog
 // (dsl/rbac/seeds.memql).
 //
-// The decision is pure: a lookup against the static capability sets, with no DB
-// access and no per-node state. That is what makes authorization decisions
-// CONSISTENT across nodes (E1.6 multi-node acceptance) -- the same role resolves
-// to the same decision on every replica, because the model carries no
-// node-local state to diverge.
+// THE DECISION IS CATALOG-FIRST, NOT PURE. roleHasCapability below resolves
+// through the INSTALLED ROW CATALOG and reaches the compiled capability sets
+// only when no catalog is installed. It was a pure lookup against the static
+// sets before epic memql#5166, and this comment went on saying so for long
+// enough to mislead: a reader who believes it concludes that a broken or empty
+// catalog cannot affect the answer, when in fact the short-circuit at
+// roleHasCapability skips the mirror the moment a catalog is installed.
+//
+// Consistency across nodes (E1.6 multi-node acceptance) still holds. It is now
+// a property of every replica installing the SAME rows and reloading on the
+// same graph events, rather than of there being no state to diverge --
+// component/memql's ReloadCapabilityCatalog is what keeps it true, and it
+// refuses to install a catalog carrying no roles for exactly this reason.
 //
 // Relational governance (who-can-manage-whom over (actor, target)) is a
 // separate, complementary primitive: GovernPrincipal / CanCreatePrincipal

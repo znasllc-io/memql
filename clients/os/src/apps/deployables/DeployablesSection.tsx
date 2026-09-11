@@ -43,7 +43,7 @@ import { runIsScopedToApp, sourceLabel, type DeploymentRow, type PackageRow } fr
 import { ComposePage } from "./page/ComposePage";
 import { DeployablePage } from "./page/DeployablePage";
 import { HistoryView } from "./page/HistoryView";
-import { Rail } from "./page/Rail";
+import { Rail } from "./page/RailView";
 import { SourceView } from "./page/SourceView";
 import { SITE_STATUSES, type SiteRow } from "./rows";
 import type { ListDensity } from "./settings";

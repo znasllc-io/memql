@@ -81,10 +81,16 @@ func PlanFingerprint(rep *Report) string {
 	for _, dd := range rep.DslDomains {
 		// The domain NAME and whether it is reserved. Not the construct
 		// counts: a domain that gained a query is a change to what the
-		// cluster can do, and it is the same DOMAIN being staged -- the
-		// cluster-owner gate that governs DSL already ran, and re-parking on
+		// cluster can do, and it is the same DOMAIN being staged -- the D9
+		// authoring gate that governs DSL runs on every automatic run
+		// (startAutoRun resolves the owner's authority), and re-parking on
 		// every construct edit would make the switch useless for exactly the
 		// packages that ship DSL.
+		//
+		// This comment used to say "the cluster-owner gate ... already ran".
+		// It never had: the Actor was a bare literal with no authority, so
+		// the gate refused every DSL-carrying automatic run, the cluster
+		// owner's included.
 		domains = append(domains, dd.Domain+"|"+boolWord(dd.Reserved, "reserved", "ok"))
 	}
 	sort.Strings(domains)
@@ -135,6 +141,17 @@ func (d *Deps) autoConfirm(ctx context.Context, req DeployRequest, rep *Report) 
 	return true, ""
 }
 
+// RoleResolver answers what cluster role a user currently holds.
+//
+// Declared HERE rather than beside Deps because pipeline.go imports no
+// component/auth -- Deps exists to keep the D6 state machine testable with no
+// cluster behind it, and a type alias would have dragged the import in for
+// nothing. CredentialResolver sits in credentials.go for the same reason.
+//
+// The zero Role is the fail-closed answer, and is what a user who no longer
+// exists resolves to.
+type RoleResolver func(ctx context.Context, userId string) (auth.Role, error)
+
 // startAutoRun is what the update feeds call when a source they watch moves
 // and its switch is on.
 //
@@ -178,6 +195,27 @@ func (d *Deps) startAutoRun(ctx context.Context, pkg map[string]any, version str
 			"component", "packages.autodeploy", "package", packageId, "live", len(live))
 		return false, nil
 	}
+	// THE AUTHORITY IS RESOLVED, NOT BORROWED. ownerCtx carries the owner's
+	// IDENTITY (auth.ContextWithUserActor stamps a rankless writer), so the
+	// D9 answer has to be read from the owner's role row instead -- otherwise
+	// every DSL-carrying automatic run is refused whatever the owner holds,
+	// which is what this path did until now for the cluster owner too.
+	//
+	// A resolution FAILURE refuses the run rather than deploying under a
+	// blank authority. A resolution that simply says no is not an error: the
+	// owner may not author constructs, and the gate's message is the right
+	// one to show.
+	mayDeployDsl := false
+	if d.Roles != nil {
+		role, rerr := d.Roles(ownerCtx, owner)
+		if rerr != nil {
+			return false, rerr
+		}
+		mayDeployDsl = auth.CanAuthor(auth.UserContext{Role: role})
+	} else {
+		d.log().Warn("packages: an auto-deploy cannot resolve its owner's authority, so a DSL-carrying run will be refused",
+			"component", "packages.autodeploy", "package", packageId, "owner", owner)
+	}
 	out, derr := Deploy(ownerCtx, d, DeployRequest{
 		PackageId: packageId,
 		// The DEPLOYMENT ID IS DERIVED FROM THE VERSION, so two feeds noticing
@@ -186,7 +224,7 @@ func (d *Deps) startAutoRun(ctx context.Context, pkg map[string]any, version str
 		// append-only guard refuses to reopen it, which is a refusal that
 		// means "already handled".
 		DeploymentId: autoDeploymentId(packageId, version),
-		Actor:        Actor{UserId: owner},
+		Actor:        Actor{UserId: owner, MayDeployDsl: mayDeployDsl},
 		Automatic:    true,
 	})
 	if derr != nil {

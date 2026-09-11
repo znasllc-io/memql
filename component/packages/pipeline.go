@@ -78,13 +78,23 @@ const (
 
 // Actor is what the pipeline knows about who asked.
 //
-// IsClusterOwner is carried as a resolved boolean rather than re-derived
-// inside each stage: the D9 gate has to answer it at deploy START, before any
-// build or stage, and a gate that re-asked later could pass a package whose
-// first stages had already run.
+// MayDeployDsl is carried as a resolved boolean rather than re-derived inside
+// each stage: the D9 gate has to answer it at deploy START, before any build
+// or stage, and a gate that re-asked later could pass a package whose first
+// stages had already run.
+//
+// It is resolved ONCE, at the actorFromContext seam in result.go, and that is
+// forced rather than stylistic -- this file and rollback.go import no
+// component/auth, because Deps exists to keep the D6 state machine testable
+// with no cluster behind it.
+//
+// == auth.CanAuthor: owner or developer, and admin deliberately NOT (#1529
+// section 4). The zero value is the fail-closed direction, which is what makes
+// the no-access-context branch in result.go correct with nothing further to
+// write.
 type Actor struct {
-	UserId         string
-	IsClusterOwner bool
+	UserId       string
+	MayDeployDsl bool
 }
 
 // Deps is the pipeline's whole outside world. Every field is an interface so
@@ -119,6 +129,22 @@ type Deps struct {
 	// on the other. Nil on a node that cannot resolve credentials; a package
 	// naming one is then refused rather than fetched anonymously.
 	Credentials CredentialResolver
+	// Roles resolves a user's current cluster role.
+	//
+	// Injected for the same reason Credentials is, and used by the same path:
+	// the auto-deploy feed runs on a schedule with nobody attached, so there
+	// is no request actor to take an authority from. It cannot take one from
+	// the context either -- the feed borrows the owner's IDENTITY through
+	// auth.ContextWithUserActor, which deliberately stamps a RANKLESS WRITER,
+	// so resolving the D9 answer from that context can only ever say no
+	// (see TestBorrowedAuthorityDoesNotCarryTheD9Authority).
+	//
+	// NIL IS THE ANSWER, NOT A GAP: a DSL-carrying automatic run on a node
+	// that cannot resolve roles is refused by the D9 gate rather than
+	// deployed under a blank authority. Manual deploys never reach this --
+	// they resolve through actorFromContext.
+	Roles RoleResolver
+
 	// PeekCredentials is the PROBE's resolver (epic memql#4885, D11): the
 	// same read, the same two refusals, and no lastUsedAt heartbeat -- a
 	// probe is a question, not a fetch, and it writes nothing. A separate
@@ -563,9 +589,9 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	// cluster fetch a tree, run its build, and only then be told no. The
 	// answer depends on the package's CONTENTS, which is why it cannot be
 	// asked before the analysis and must be asked immediately after it.
-	if len(rep.DslDomains) > 0 && !req.Actor.IsClusterOwner {
-		return refuse(CodeDslRequiresClusterOwner,
-			"this package ships MemQL DSL (%s), and deploying DSL changes what this whole cluster can do -- so it is reserved to a cluster owner. A package of web apps alone deploys under your own account.",
+	if len(rep.DslDomains) > 0 && !req.Actor.MayDeployDsl {
+		return refuse(CodeDslRequiresAuthoring,
+			"this package ships MemQL DSL (%s), and deploying DSL changes what this whole cluster can do -- so it is owner or developer only. A package of web apps alone deploys under your own account.",
 			describeDomains(rep.DslDomains))
 	}
 

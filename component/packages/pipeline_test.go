@@ -246,7 +246,10 @@ func ownerPackage() map[string]any {
 	}
 }
 
-func clusterOwner() Actor { return Actor{UserId: "v1:identity:user:owner", IsClusterOwner: true} }
+// mayDeployDsl is anyone auth.CanAuthor admits -- an owner or a developer.
+// The two are indistinguishable to the pipeline by design: it is handed a
+// resolved boolean, not a role.
+func mayDeployDsl() Actor { return Actor{UserId: "v1:identity:user:owner", MayDeployDsl: true} }
 func plainUser() Actor    { return Actor{UserId: "v1:identity:user:someone"} }
 
 // spaOnlyPackage is validPackage with the DSL removed -- the D6 fast path.
@@ -318,8 +321,8 @@ func TestTheD9GateRefusesADslDeployBeforeAnythingRuns(t *testing.T) {
 	if err == nil {
 		t.Fatalf("a DSL-carrying package must be refused for a non-cluster-owner: %+v", out)
 	}
-	if got := RefusalCode(err); got != CodeDslRequiresClusterOwner {
-		t.Fatalf("want %s, got %s (%v)", CodeDslRequiresClusterOwner, got, err)
+	if got := RefusalCode(err); got != CodeDslRequiresAuthoring {
+		t.Fatalf("want %s, got %s (%v)", CodeDslRequiresAuthoring, got, err)
 	}
 	// AT START is the whole requirement: nothing may have been built, staged,
 	// rolled or published. A gate that fired after the build would still
@@ -364,7 +367,7 @@ func TestAnSpaOnlyDeploySkipsStageAndRollEntirely(t *testing.T) {
 	h := newHarness(t, spaOnlyPackage(), ownerPackage())
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: firstDeployPlacements(),
 	}); err != nil {
@@ -390,7 +393,7 @@ func TestUnchangedDslSkipsTheRollAndPublishesAnyway(t *testing.T) {
 	h := newHarness(t, validPackage(), ownerPackage())
 	req := DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: firstDeployPlacements(),
 	}
@@ -422,7 +425,7 @@ func TestAFailedBuildLandsALogTailAndPublishesNothing(t *testing.T) {
 
 	out, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: firstDeployPlacements(),
 	})
@@ -456,7 +459,7 @@ func TestTheCredentialIsResolvedUnderThePackageOwnerAtFetchTimeAndReachesNoRow(t
 
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: firstDeployPlacements(),
 	}); err != nil {
@@ -469,7 +472,7 @@ func TestTheCredentialIsResolvedUnderThePackageOwnerAtFetchTimeAndReachesNoRow(t
 	if got, want := h.fetcher.sourceSeen.OwnerUserId, rowString(pkg, "ownerUserId"); got != want {
 		t.Fatalf("the fetch must be handed the PACKAGE owner to resolve under, got %q want %q -- the caller was a cluster owner, and resolving under them would be resolving under the wrong person", got, want)
 	}
-	if h.fetcher.sourceSeen.OwnerUserId == clusterOwner().UserId {
+	if h.fetcher.sourceSeen.OwnerUserId == mayDeployDsl().UserId {
 		t.Fatal("control failed: the package owner and the caller are the same id, so this test cannot tell them apart")
 	}
 	if len(h.fetcher.resolvedTokens) != 1 {
@@ -540,7 +543,7 @@ func TestPlacementsStampTheAccountAndBindTheDomainAfterTheSiteExists(t *testing.
 	h := newHarness(t, spaOnlyPackage(), ownerPackage())
 	out, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId: "v1:platform:package:abc",
-		Actor:     clusterOwner(),
+		Actor:     mayDeployDsl(),
 		Confirmed: true,
 		Placements: map[string]Placement{
 			"storefront": {Hostname: "shop.example.com", AccountId: "v1:accounts:account:acme", OwnDomain: "shop.acme.com"},
@@ -614,7 +617,7 @@ func TestARefusedDomainIsRecordedWithoutFailingThePublish(t *testing.T) {
 	}
 	out, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId: "v1:platform:package:abc",
-		Actor:     clusterOwner(),
+		Actor:     mayDeployDsl(),
 		Confirmed: true,
 		Placements: map[string]Placement{
 			"storefront": {Hostname: "shop.example.com", OwnDomain: "shop.acme.com"},
@@ -662,7 +665,7 @@ func TestARefusedDomainIsRecordedWithoutFailingThePublish(t *testing.T) {
 	h.engine.fail = map[string]error{"mutation updateSiteAccount": errors.New("row authz: not the owner")}
 	out, err = Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: map[string]Placement{"docs": {Hostname: "docs.example.com", AccountId: "v1:accounts:account:acme"}, "storefront": {Hostname: "shop.example.com"}},
 	})
@@ -684,7 +687,7 @@ func TestAPlacementWithNeitherIsExactlyAFirstDeploy(t *testing.T) {
 	h := newHarness(t, spaOnlyPackage(), ownerPackage())
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: firstDeployPlacements(),
 	}); err != nil {
@@ -702,7 +705,7 @@ func TestAPlacementWithNeitherIsExactlyAFirstDeploy(t *testing.T) {
 	h = newHarness(t, spaOnlyPackage(), ownerPackage())
 	_, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: map[string]Placement{"storefront": {AccountId: "v1:accounts:account:acme"}},
 	})
@@ -744,7 +747,7 @@ func TestBothOutcomesAudit(t *testing.T) {
 		h := newHarness(t, spaOnlyPackage(), ownerPackage())
 		if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 			PackageId:  "v1:platform:package:abc",
-			Actor:      clusterOwner(),
+			Actor:      mayDeployDsl(),
 			Confirmed:  true,
 			Placements: firstDeployPlacements(),
 		}); err != nil {
@@ -767,7 +770,7 @@ func TestBothOutcomesAudit(t *testing.T) {
 		if len(h.auditor.events) != 1 {
 			t.Fatalf("want one event, got %+v", h.auditor.events)
 		}
-		if got := h.auditor.events[0].FailureReason; got != CodeDslRequiresClusterOwner {
+		if got := h.auditor.events[0].FailureReason; got != CodeDslRequiresAuthoring {
 			t.Fatalf("the audit must carry the stable code, got %q", got)
 		}
 	})
@@ -777,7 +780,7 @@ func TestARetryIsANewRow(t *testing.T) {
 	h := newHarness(t, spaOnlyPackage(), ownerPackage())
 	req := DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: firstDeployPlacements(),
 	}
@@ -809,7 +812,7 @@ func TestEveryStatusTheMachineWritesIsInTheDeclaredEnum(t *testing.T) {
 	h := newHarness(t, validPackage(), ownerPackage())
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: firstDeployPlacements(),
 	}); err != nil {
@@ -844,7 +847,7 @@ func TestTheStageOrderIsTheD6Law(t *testing.T) {
 	h := newHarness(t, validPackage(), ownerPackage())
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: firstDeployPlacements(),
 	}); err != nil {
