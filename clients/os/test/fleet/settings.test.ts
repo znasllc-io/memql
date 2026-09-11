@@ -100,23 +100,23 @@ describe("the online rule the fleet renders", () => {
   const secondsAgo = (n: number) => new Date(now.getTime() - n * 1000).toISOString();
 
   it("is online while a heartbeat is inside the window", () => {
-    expect(isWorkerOnline({ lastSeenAt: secondsAgo(ONLINE_WINDOW_SECONDS - 1) }, now)).toBe(true);
+    expect(isWorkerOnline({ connectedNodeId: "agent-1", lastSeenAt: secondsAgo(ONLINE_WINDOW_SECONDS - 1) }, now)).toBe(true);
   });
 
   it("goes offline past the window", () => {
-    expect(isWorkerOnline({ lastSeenAt: secondsAgo(ONLINE_WINDOW_SECONDS + 1) }, now)).toBe(false);
+    expect(isWorkerOnline({ connectedNodeId: "agent-1", lastSeenAt: secondsAgo(ONLINE_WINDOW_SECONDS + 1) }, now)).toBe(false);
   });
 
   it("is NEVER online once revoked, whatever the heartbeat says", () => {
     // The case a fleet list gets wrong: a machine revoked seconds ago still
     // has a fresh lastSeenAt, and a clock-only rule renders it green.
     expect(
-      isWorkerOnline({ lastSeenAt: secondsAgo(1), revokedAt: "2026-08-30T11:59:59Z" }, now),
+      isWorkerOnline({ connectedNodeId: "agent-1", lastSeenAt: secondsAgo(1), revokedAt: "2026-08-30T11:59:59Z" }, now),
     ).toBe(false);
   });
 
   it("treats a machine that never checked in, and an unreadable timestamp, as offline", () => {
     expect(isWorkerOnline({}, now)).toBe(false);
-    expect(isWorkerOnline({ lastSeenAt: "soon" }, now)).toBe(false);
+    expect(isWorkerOnline({ connectedNodeId: "agent-1", lastSeenAt: "soon" }, now)).toBe(false);
   });
 });

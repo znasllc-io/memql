@@ -57,6 +57,7 @@ func TestPinnedFleetRefusesWithoutDispatchingAnAlternate(t *testing.T) {
 			selected := &h.store.machines[1]
 			switch why {
 			case "offline":
+				selected.ConnectedNodeId = ""
 				selected.LastSeenAt = fleetNow().Add(-time.Hour)
 			case "revoked":
 				selected.RevokedAt = fleetNow()

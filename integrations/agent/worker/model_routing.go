@@ -121,7 +121,6 @@ func (r *Router) PlanSharedModel(
 	// user's machine would let a preference travel across an ownership
 	// boundary the rest of this file exists to hold.
 	policy := DefaultPolicy()
-	now := r.clock()
 	kept := make([]Candidate, 0, len(all))
 	rejected := map[string]string{}
 	for _, c := range all {
@@ -132,12 +131,10 @@ func (r *Router) PlanSharedModel(
 			// machine's own disk; one sentence for both sends half the
 			// operators to the wrong machine.
 			rejected[c.RegistrationId] = c.SharingRefusal()
-		case !workerservice.IsOnline(c.LastSeenAt, c.RevokedAt, now):
-			if !c.RevokedAt.IsZero() {
-				rejected[c.RegistrationId] = "revoked"
-			} else {
-				rejected[c.RegistrationId] = "offline"
-			}
+		case !c.RevokedAt.IsZero():
+			rejected[c.RegistrationId] = "revoked"
+		case !workerservice.StreamHeld(c.ConnectedNodeId, c.RevokedAt):
+			rejected[c.RegistrationId] = "offline"
 		case !c.SupportsCapability(workerservice.ModelCapability):
 			rejected[c.RegistrationId] = "missing capability " + workerservice.ModelCapability
 		default:

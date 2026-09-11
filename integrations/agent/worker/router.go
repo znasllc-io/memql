@@ -309,17 +309,17 @@ func (r *Router) Plan(
 			fmt.Errorf("worker router: read fleet: %w", err)
 	}
 
-	now := r.clock()
 	kept := make([]Candidate, 0, len(all))
 	rejected := map[string]string{}
 	for _, c := range all {
 		switch {
-		case !workerservice.IsOnline(c.LastSeenAt, c.RevokedAt, now):
-			if !c.RevokedAt.IsZero() {
-				rejected[c.RegistrationId] = "revoked"
-			} else {
-				rejected[c.RegistrationId] = "offline"
-			}
+		case !c.RevokedAt.IsZero():
+			rejected[c.RegistrationId] = "revoked"
+		case !workerservice.StreamHeld(c.ConnectedNodeId, c.RevokedAt):
+			// No holding replica: not eligible for Ask/dispatch. A fresh
+			// lastSeenAt without connectedNodeId is exactly the false-ready
+			// shape StreamHeld exists to refuse.
+			rejected[c.RegistrationId] = "offline"
 		case !c.SupportsCapability(capability):
 			rejected[c.RegistrationId] = "missing capability " + capability
 		case !satisfiesLabels(c.Labels, merged):

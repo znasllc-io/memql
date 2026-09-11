@@ -1,6 +1,9 @@
 package worker
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // OnlineWindow is how stale a registration's lastSeenAt may be before the
 // machine reads as offline: two heartbeat flushes.
@@ -60,4 +63,38 @@ func IsOnline(lastSeenAt, revokedAt time.Time, now time.Time) bool {
 // rule above. Convenience for callers that already hold the row.
 func (r RegistrationRow) IsOnline(now time.Time) bool {
 	return IsOnline(r.LastSeenAt, r.RevokedAt, now)
+}
+
+// StreamHeld is the stream-affinity liveness test: a replica currently holds
+// this machine's WorkerService stream.
+//
+// ===========================================================================
+// WHY THIS IS NOT IsOnline
+// ===========================================================================
+// IsOnline answers "we heard a heartbeat recently". That is useful for least-
+// loaded rationing and for a page that wants to say a laptop was recently
+// awake. It is the WRONG answer for Ask / fleet dispatch / Setup readiness:
+// a call can only land on the replica named by connectedNodeId, and that
+// field is blanked the moment the stream closes (ClearConnectedNode) while
+// lastSeenAt deliberately is not. Treating a fresh lastSeenAt with an empty
+// connectedNodeId as "ready" is how Ask hit a sibling replica with no stream
+// and reported "no eligible machine" / "this replica no longer holds a
+// stream" for a machine the user could see was paired.
+//
+// activeCount is never consulted here. Zero in-flight calls is the idle
+// steady state of a healthy machine, not evidence it is offline; using it as
+// a readiness stub would flash every idle fleet as not set up.
+//
+// Revocation still wins: a revoked registration is never held, whatever the
+// node id column says.
+func StreamHeld(connectedNodeId string, revokedAt time.Time) bool {
+	if !revokedAt.IsZero() {
+		return false
+	}
+	return strings.TrimSpace(connectedNodeId) != ""
+}
+
+// StreamHeld reports whether this registration currently has a holding replica.
+func (r RegistrationRow) StreamHeld() bool {
+	return StreamHeld(r.ConnectedNodeId, r.RevokedAt)
 }

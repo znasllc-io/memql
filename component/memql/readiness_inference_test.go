@@ -37,8 +37,9 @@ func rowsResolver(rows ...readiness.RegistrationFacts) readinessResolvers {
 // surface, with nothing wrong anywhere.
 func TestEveryNodeTypeProducesTheSameInferenceReport(t *testing.T) {
 	r := rowsResolver(readiness.RegistrationFacts{
-		Labels:     map[string]string{"model:llama3.1:8b": "ctx=8192,structured=true"},
-		LastSeenAt: inferenceNow,
+		ConnectedNodeId: "agent-1",
+		Labels:          map[string]string{"model:llama3.1:8b": "ctx=8192,structured=true"},
+		LastSeenAt:      inferenceNow,
 	})
 	// The seven node types (root CLAUDE.md, Distributed Node Architecture).
 	types := []string{"identity", "bff", "agent", "planner", "workbench", "mcp", "edge"}
@@ -67,8 +68,9 @@ func TestEveryNodeTypeProducesTheSameInferenceReport(t *testing.T) {
 // does not change what a cluster is configured to do.
 func TestASleepingMachineIsConfiguredAndNotLive(t *testing.T) {
 	r := rowsResolver(readiness.RegistrationFacts{
-		Labels:     map[string]string{"model:llama3.1:8b": "ctx=8192,structured=true"},
-		LastSeenAt: inferenceNow.Add(-readiness.OnlineWindow - time.Minute),
+		Labels:          map[string]string{"model:llama3.1:8b": "ctx=8192,structured=true"},
+		ConnectedNodeId: "",
+		LastSeenAt:      inferenceNow.Add(-readiness.OnlineWindow - time.Minute),
 	})
 	got := evaluateModule(context.Background(), r, aiModule(), "bff-1", "bff", inferenceNow)
 	if got.State != readiness.Configured {

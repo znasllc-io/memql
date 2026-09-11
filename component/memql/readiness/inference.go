@@ -129,23 +129,32 @@ type RegistrationApp struct {
 // RegistrationFacts is the slice of a v1:worker:registration row this decision
 // reads. Rows in, lanes out: nothing here knows about an engine.
 type RegistrationFacts struct {
-	OwnerUserId    string
-	Labels         map[string]string
-	OperatorLabels map[string]string
-	Apps           []RegistrationApp
-	LastSeenAt     time.Time
-	RevokedAt      time.Time
+	OwnerUserId     string
+	Labels          map[string]string
+	OperatorLabels  map[string]string
+	Apps            []RegistrationApp
+	ConnectedNodeId string
+	LastSeenAt      time.Time
+	RevokedAt       time.Time
 }
 
-// online is component/worker.IsOnline's rule, restated over the window above.
+// online is stream-affinity liveness for Setup / readiness: a replica must
+// currently hold the worker stream (connectedNodeId). A recent lastSeenAt
+// alone is "saw a heartbeat somewhere" and must not mark the door live; nor
+// may activeCount stubs.
 //
-// A lastSeenAt in the FUTURE (clock skew between the agent replica that wrote
-// it and whoever is asking) yields a negative difference, which is inside the
-// window -- online. That is deliberate and matches IsOnline: a skewed clock
-// must not make a live machine disappear.
+// LastSeenAt remains a soft corroboration when present: a future timestamp
+// (clock skew) is treated as inside the window, matching IsOnline.
 func (r RegistrationFacts) online(now time.Time) bool {
-	if !r.RevokedAt.IsZero() || r.LastSeenAt.IsZero() {
+	if !r.RevokedAt.IsZero() {
 		return false
+	}
+	if strings.TrimSpace(r.ConnectedNodeId) == "" {
+		return false
+	}
+	if r.LastSeenAt.IsZero() {
+		// Stream held, beat not yet flushed -- still live for Setup.
+		return true
 	}
 	return now.Sub(r.LastSeenAt) <= OnlineWindow
 }

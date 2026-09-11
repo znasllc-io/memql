@@ -356,13 +356,22 @@ func (o ModelForwardOutcome) Ok() bool {
 }
 
 func (f *FleetInference) isLocal(cand Candidate) bool {
+	// Stream affinity: the in-memory registry is authoritative for "we hold
+	// this stream right now". A lagging connectedNodeId must not send a local
+	// call across a hop, and an empty selfNodeId must not pretend every
+	// machine is local when the registry does not hold it (prod: Ask on
+	// sibling pgdv6 while the stream lived on ddwcc).
+	if f.registry != nil && f.registry.WorkerById(cand.RegistrationId) != nil {
+		return true
+	}
 	if f.registry == nil {
 		return false
 	}
 	if f.selfNodeId == "" {
-		return true
+		// Single-node / unset identity: only local when we actually hold it.
+		return false
 	}
-	return cand.ConnectedNodeId == f.selfNodeId
+	return strings.TrimSpace(cand.ConnectedNodeId) != "" && cand.ConnectedNodeId == f.selfNodeId
 }
 
 func (f *FleetInference) attemptLocal(
@@ -373,8 +382,34 @@ func (f *FleetInference) attemptLocal(
 ) (memqlengine.FleetCallResult, ForwardOutcome, error) {
 	w := f.registry.WorkerById(cand.RegistrationId)
 	if w == nil {
+		// Affinity miss: prefer forward/retry, never a terminal wrong-pod error
+		target := strings.TrimSpace(cand.ConnectedNodeId)
+		if target != "" && target != f.selfNodeId && f.forward != nil {
+			out, err := f.forward.ForwardModelCall(ctx, target, cand.RegistrationId,
+				req.ActingUserId, start, workerservice.ModelCallTimeoutDefault, deltaSink(req.OnDelta))
+			if err != nil {
+				outcome := ForwardCompleted
+				if out.RefusedBeforeStart {
+					outcome = ForwardRefusedBeforeStart
+				}
+				return memqlengine.FleetCallResult{}, outcome, err
+			}
+			if out.RefusedBeforeStart {
+				return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart,
+					fmt.Errorf("%s refused before start: %s %s", cand.Label(), out.ErrorCode, out.ErrorMessage)
+			}
+			if !out.Ok() {
+				return memqlengine.FleetCallResult{}, ForwardCompleted,
+					fmt.Errorf("%s: %s %s", cand.Label(), out.ErrorCode, out.ErrorMessage)
+			}
+			return resultFromEnd(cand, out.End), ForwardCompleted, nil
+		}
+		// Refuse BEFORE START so Call retries another candidate / surfaces
+		// FleetUnavailable — never "this replica no longer holds a stream"
+		// as the operator-facing terminal for a wrong-pod Ask.
 		return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart,
-			fmt.Errorf("this replica no longer holds a stream for %s", cand.Label())
+			fmt.Errorf("no live worker stream on this replica for %s; forward or retry required (connectedNodeId=%q)",
+				cand.Label(), cand.ConnectedNodeId)
 	}
 	if err := w.Acquire(ctx, workerservice.ModelCapability); err != nil {
 		return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart, err

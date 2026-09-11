@@ -81,10 +81,27 @@ func (e *FleetUnavailable) Error() string {
 		// Synthetic summary keys from consideredKeysForDisplay.
 		fmt.Fprintf(&b, "; %s", k)
 	}
-	if e.LastError != "" {
-		fmt.Fprintf(&b, "; last attempt: %s", e.LastError)
+	if msg := displayLastError(e.LastError); msg != "" {
+		fmt.Fprintf(&b, "; last attempt: %s", msg)
 	}
 	return b.String()
+}
+
+// displayLastError keeps operator text free of wrong-pod stream-affinity
+// internals ("this replica no longer holds a stream for black") when the
+// refusal already names ruled-out machines. Prefer the considered map.
+func displayLastError(last string) string {
+	last = strings.TrimSpace(last)
+	if last == "" {
+		return ""
+	}
+	low := strings.ToLower(last)
+	if strings.Contains(low, "no longer holds a stream") ||
+		strings.Contains(low, "no live worker stream on this replica") ||
+		strings.Contains(low, "forward or retry required") {
+		return "holding replica missed; retry against connectedNodeId"
+	}
+	return last
 }
 
 func (e *FleetUnavailable) consideredKeys() []string {
@@ -140,7 +157,6 @@ func (e *FleetUnavailable) consideredKeysForDisplay(omitNoise bool) []string {
 	return actionable
 }
 
-
 func isForeignPrivateShareNoise(why string) bool {
 	why = strings.ToLower(why)
 	return strings.Contains(why, "both are needed") ||
@@ -174,8 +190,8 @@ func (e *FleetUnavailable) AsMap() map[string]any {
 		"machinesTotal":    e.Total,
 		"machinesRuledOut": considered,
 	}
-	if e.LastError != "" {
-		out["lastError"] = e.LastError
+	if msg := displayLastError(e.LastError); msg != "" {
+		out["lastError"] = msg
 	}
 	return out
 }

@@ -63,8 +63,10 @@ func TestAnotherUsersUNSHAREDMachineIsNotAvailableToMe(t *testing.T) {
 	if got := ids(plan.Candidates); len(got) != 1 || got[0] != "mine" {
 		t.Fatalf("candidates = %v, want only my own machine", got)
 	}
-	if why := plan.Rejected["theirs"]; !strings.Contains(why, "owner has not shared") {
-		t.Fatalf("the refusal must name the missing consent, got %q", why)
+	// Owner Ask with a live owned worker must not surface foreign SharingRefusal
+	// (prod: 24ad under jmendivil). The machine is simply absent from candidates.
+	if why, ok := plan.Rejected["theirs"]; ok {
+		t.Fatalf("foreign private share noise must be omitted when an own candidate exists, got %q", why)
 	}
 }
 
@@ -91,11 +93,10 @@ func TestEitherConsentMissingKeepsAMachineOutOfMyPlan(t *testing.T) {
 	if got := ids(plan.Candidates); len(got) != 1 || got[0] != "mine" {
 		t.Fatalf("candidates = %v, want only my own machine", got)
 	}
-	if why := plan.Rejected["owner-only"]; !strings.Contains(why, "policy.yaml") {
-		t.Fatalf("owner-only must be sent to the machine's own policy, got %q", why)
-	}
-	if why := plan.Rejected["cockpit-only"]; !strings.Contains(why, "Fleet") {
-		t.Fatalf("cockpit-only must be sent to the Fleet page, got %q", why)
+	for _, id := range []string{"owner-only", "cockpit-only"} {
+		if why, ok := plan.Rejected[id]; ok {
+			t.Fatalf("%s share noise must be omitted when an own candidate exists, got %q", id, why)
+		}
 	}
 }
 
@@ -207,6 +208,7 @@ func TestOwnerPrivateMachineWorksWithoutShareWhenOwnReadMisses(t *testing.T) {
 
 func TestOwnerMachineAlreadyRuledOutIsNotReadmittedViaSharedList(t *testing.T) {
 	mine := privateMachine("mine", "alice")
+	mine.ConnectedNodeId = ""
 	mine.LastSeenAt = fleetNow().Add(-24 * time.Hour)
 	store := &sharedFleet{
 		fakeFleet: &fakeFleet{machines: []Candidate{mine}, owner: "alice"},
@@ -223,7 +225,6 @@ func TestOwnerMachineAlreadyRuledOutIsNotReadmittedViaSharedList(t *testing.T) {
 		t.Fatalf("rejected[mine] = %q, want offline from the own plan", why)
 	}
 }
-
 
 func TestOwnerPrivateMachineWithEmptyOwnerUserIdIsNotShareRefusal(t *testing.T) {
 	// Residual #5270: if the shared row lacks OwnerUserId, recovery cannot
@@ -262,5 +263,22 @@ func TestOwnerActiveMachinePreferredOverForeignPrivateShareNoise(t *testing.T) {
 	}
 	if got := ids(plan.Candidates); len(got) != 1 || got[0] != "mine-active" {
 		t.Fatalf("candidates = %v, want only the owner's active machine", got)
+	}
+}
+
+func TestForeignShareRefusalSurfacesWhenNoOwnCandidate(t *testing.T) {
+	// When the owner has no live machine of their own, foreign private share
+	// refusals remain the actionable signal (system / empty own fleet).
+	foreign := privateMachine("24ad", "jmendivil")
+	store := &sharedFleet{fakeFleet: &fakeFleet{machines: nil, owner: "jose"}, all: []Candidate{foreign}}
+	plan, err := modelRouter(t, store).PlanUserModelWithShared(context.Background(), "jose", smallModel, ModelNeeds{})
+	if err != nil {
+		t.Fatalf("PlanUserModelWithShared: %v", err)
+	}
+	if len(plan.Candidates) != 0 {
+		t.Fatalf("candidates = %v, want none", ids(plan.Candidates))
+	}
+	if why := plan.Rejected["24ad"]; !strings.Contains(why, "owner has not shared") && !strings.Contains(why, "Both are needed") && !strings.Contains(strings.ToLower(why), "share") {
+		t.Fatalf("sole foreign private refusal must stay visible, got %q", why)
 	}
 }

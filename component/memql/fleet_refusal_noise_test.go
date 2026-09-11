@@ -45,3 +45,21 @@ func TestFleetUnavailableKeepsShareRefusalWhenOnlySignal(t *testing.T) {
 		t.Fatalf("sole share refusal must stay visible, got %q", msg)
 	}
 }
+
+func TestFleetUnavailableSanitizesWrongPodStreamLastError(t *testing.T) {
+	err := &FleetUnavailable{
+		ModelId:   "black",
+		Total:     1,
+		LastError: `this replica no longer holds a stream for black`,
+		Considered: map[string]string{
+			"v1:worker:registration:da0617": "offline",
+		},
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "no longer holds a stream") {
+		t.Fatalf("wrong-pod stream miss must not surface raw, got %q", msg)
+	}
+	if !strings.Contains(msg, "holding replica missed") {
+		t.Fatalf("want sanitized affinity hint, got %q", msg)
+	}
+}

@@ -239,6 +239,7 @@ func TestLastSelectedAtIsStampedOnlyOnAMachineThatRan(t *testing.T) {
 
 func TestNoCandidateMessageNamesTheMachinesAndTheReasons(t *testing.T) {
 	stale := machine("laptop")
+	stale.ConnectedNodeId = ""
 	stale.LastSeenAt = fleetNow().Add(-time.Hour)
 	store := &fakeStore{fakeFleet: &fakeFleet{machines: []Candidate{stale}}}
 	d := newTestDispatcher(t, store, workerservice.NewRegistry(testLogger(), fleetNow), "", nil)
@@ -370,6 +371,7 @@ func TestConsentCardNamesTheRequirementAndTheCurrentChoice(t *testing.T) {
 
 func TestConsentCardSaysSoWhenNothingIsOnline(t *testing.T) {
 	offline := machine("laptop")
+	offline.ConnectedNodeId = ""
 	offline.LastSeenAt = fleetNow().Add(-time.Hour)
 	store := &fakeStore{fakeFleet: &fakeFleet{machines: []Candidate{offline}}}
 	d := newTestDispatcher(t, store, workerservice.NewRegistry(testLogger(), fleetNow), "", nil)

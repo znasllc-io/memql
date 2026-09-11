@@ -111,10 +111,10 @@ func (r *Router) PlanUserModelWithShared(
 		ownSeen[id] = true
 	}
 
-	now := r.clock()
 	ownRecovered := make([]Candidate, 0)
 	sharedKept := make([]Candidate, 0, len(all))
 	rejected := map[string]string{}
+	pendingShareNoise := map[string]string{}
 	for id, why := range own.Rejected {
 		rejected[id] = why
 	}
@@ -131,12 +131,10 @@ func (r *Router) PlanUserModelWithShared(
 			// Fleet share + inference.serve:cluster (those consents are only for
 			// a different account).
 			switch {
-			case !workerservice.IsOnline(c.LastSeenAt, c.RevokedAt, now):
-				if !c.RevokedAt.IsZero() {
-					rejected[c.RegistrationId] = "revoked"
-				} else {
-					rejected[c.RegistrationId] = "offline"
-				}
+			case !c.RevokedAt.IsZero():
+				rejected[c.RegistrationId] = "revoked"
+			case !workerservice.StreamHeld(c.ConnectedNodeId, c.RevokedAt):
+				rejected[c.RegistrationId] = "offline"
 			case !c.SupportsCapability(workerservice.ModelCapability):
 				rejected[c.RegistrationId] = "missing capability " + workerservice.ModelCapability
 			default:
@@ -154,13 +152,15 @@ func (r *Router) PlanUserModelWithShared(
 		}
 		switch {
 		case !c.ServesCluster():
-			rejected[c.RegistrationId] = c.SharingRefusal()
-		case !workerservice.IsOnline(c.LastSeenAt, c.RevokedAt, now):
-			if !c.RevokedAt.IsZero() {
-				rejected[c.RegistrationId] = "revoked"
-			} else {
-				rejected[c.RegistrationId] = "offline"
-			}
+			// Record foreign share refusals only when we may need them as the
+			// sole signal. Owner Ask with a live owned worker must not drown in
+			// SharingRefusal lines for other private machines (24ad under a
+			// different identity).
+			pendingShareNoise[c.RegistrationId] = c.SharingRefusal()
+		case !c.RevokedAt.IsZero():
+			rejected[c.RegistrationId] = "revoked"
+		case !workerservice.StreamHeld(c.ConnectedNodeId, c.RevokedAt):
+			rejected[c.RegistrationId] = "offline"
 		case !c.SupportsCapability(workerservice.ModelCapability):
 			rejected[c.RegistrationId] = "missing capability " + workerservice.ModelCapability
 		default:
@@ -195,11 +195,25 @@ func (r *Router) PlanUserModelWithShared(
 	// half keeps the order its own policy gave it.
 	out := own
 	out.Candidates = append(append(append([]Candidate{}, own.Candidates...), recoveredPlan.Candidates...), sharedPlan.Candidates...)
+	// Prefer live owned connected workers: when any own candidate remains,
+	// drop foreign SharingRefusal noise from the rejected map so owner Ask
+	// never surfaces 24ad-under-jmendivil as if it were the user's machine.
+	hasOwnCandidate := false
+	for _, c := range out.Candidates {
+		if OwnMachineFirst(c, actingUserId) {
+			hasOwnCandidate = true
+			break
+		}
+	}
+	if !hasOwnCandidate {
+		for id, why := range pendingShareNoise {
+			rejected[id] = why
+		}
+	}
 	out.Rejected = rejected
 	out.Total = own.Total + len(all)
 	return out, nil
 }
-
 
 // OwnMachineFirst reports whether a candidate belongs to the acting user.
 //

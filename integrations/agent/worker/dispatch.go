@@ -361,14 +361,20 @@ func (d *Dispatcher) attempt(
 	return d.attemptRemote(ctx, req, capability, cand, timeout)
 }
 
-// isLocal reports whether this replica holds the machine's stream. An empty
-// SelfNodeId means single-node, where every machine that is connected at all
-// is connected here.
+// isLocal reports whether this replica holds the machine's stream.
+//
+// The in-memory registry is authoritative. An empty SelfNodeId used to mean
+// "treat every candidate as local", which made a wrong-pod Ask attempt a
+// machine whose stream lived on a sibling and surface worker_disconnected /
+// no eligible machine instead of forwarding to connectedNodeId.
 func (d *Dispatcher) isLocal(cand Candidate) bool {
-	if d.selfNodeId == "" {
+	if d.registry != nil && d.registry.WorkerById(cand.RegistrationId) != nil {
 		return true
 	}
-	return cand.ConnectedNodeId == d.selfNodeId
+	if d.selfNodeId == "" {
+		return false
+	}
+	return strings.TrimSpace(cand.ConnectedNodeId) != "" && cand.ConnectedNodeId == d.selfNodeId
 }
 
 func (d *Dispatcher) attemptLocal(

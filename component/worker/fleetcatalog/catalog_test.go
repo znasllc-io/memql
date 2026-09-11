@@ -34,7 +34,7 @@ func (f graphFixture) Execute(ctx context.Context, query string) (*memql.Execute
 	return memql.NewResultWithOutput(f.rows), nil
 }
 func machineRow(id, model string, now time.Time) map[string]any {
-	return map[string]any{"id": id, "name": id, "ownerUserId": "alice", "labels": map[string]any{"model:" + model: "ctx=8192,structured=1,params=27000000000,activeparams=3000000000,quant=Q8_0,max=2", "runtime:ollama": "1", "os": "linux"}, "lastSeenAt": now.Format(time.RFC3339Nano), "hardware": map[string]any{"gpu": map[string]any{"name": "RTX4090", "vramBytes": float64(24 << 30), "backend": "cuda"}}}
+	return map[string]any{"id": id, "name": id, "ownerUserId": "alice", "labels": map[string]any{"model:" + model: "ctx=8192,structured=1,params=27000000000,activeparams=3000000000,quant=Q8_0,max=2", "runtime:ollama": "1", "os": "linux"}, "connectedNodeId": "agent-1", "lastSeenAt": now.Format(time.RFC3339Nano), "hardware": map[string]any{"gpu": map[string]any{"name": "RTX4090", "vramBytes": float64(24 << 30), "backend": "cuda"}}}
 }
 func TestIndependentGraphReadersProjectTheSameOwnerCatalog(t *testing.T) {
 	now := time.Now().UTC()
@@ -83,7 +83,15 @@ func TestOfflineRevokedAndInvalidActiveCountsKeepProjectionSemantics(t *testing.
 	if len(got) != 1 || got[0].Online() || got[0].ActiveParams != 0 {
 		t.Fatalf("offline catalog = %+v", got)
 	}
+	// Heartbeat alone is not live: connectedNodeId required.
 	c.LastSeenAt = now
+	if Project([]Candidate{c}, now)[0].Online() {
+		t.Fatal("fresh lastSeenAt without connectedNodeId must not read online")
+	}
+	c.ConnectedNodeId = "agent-1"
+	if !Project([]Candidate{c}, now)[0].Online() {
+		t.Fatal("connectedNodeId + unrevoked must read online")
+	}
 	c.RevokedAt = now
 	if Project([]Candidate{c}, now)[0].Online() {
 		t.Fatal("revoked machine reported online")

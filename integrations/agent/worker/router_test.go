@@ -75,11 +75,12 @@ func fresh() time.Time    { return fleetNow().Add(-time.Second) }
 
 func machine(id string, opts ...func(*Candidate)) Candidate {
 	c := Candidate{
-		RegistrationId: id,
-		Name:           id,
-		Capabilities:   []string{workerservice.CapabilityHeadless},
-		LastSeenAt:     fresh(),
-		Labels:         map[string]string{},
+		RegistrationId:  id,
+		Name:            id,
+		Capabilities:    []string{workerservice.CapabilityHeadless},
+		ConnectedNodeId: "agent-test",
+		LastSeenAt:      fresh(),
+		Labels:          map[string]string{},
 	}
 	for _, o := range opts {
 		o(&c)
@@ -188,7 +189,12 @@ func TestLeastLoadedTieBreaksOnAbsoluteLoad(t *testing.T) {
 func TestOfflineRevokedAndCapabilityAreFilteredWithAReason(t *testing.T) {
 	f := &fakeFleet{machines: []Candidate{
 		machine("online"),
-		func() Candidate { c := machine("stale"); c.LastSeenAt = fleetNow().Add(-5 * time.Minute); return c }(),
+		func() Candidate {
+			c := machine("stale")
+			c.ConnectedNodeId = ""
+			c.LastSeenAt = fleetNow().Add(-5 * time.Minute)
+			return c
+		}(),
 		func() Candidate { c := machine("revoked"); c.RevokedAt = at(1); return c }(),
 		func() Candidate { c := machine("wrong-cap"); c.Capabilities = []string{"SOMETHING_ELSE"}; return c }(),
 	}}
