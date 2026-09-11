@@ -30,7 +30,15 @@ import {
   stepsInOrder,
   stepsOfRun,
 } from "../../src/apps/nexus/rows";
-import { kindCalledAModel, runStatusWord, stepKindWord } from "../../src/apps/nexus/words";
+import {
+  approvalKindMeaning,
+  approvalKindWord,
+  kindCalledAModel,
+  runStatusWord,
+  stepKindWord,
+  waitingWord,
+  waitsOnAPerson,
+} from "../../src/apps/nexus/words";
 
 // The pure half of the Nexus app. Everything asserted here is a function of a
 // row, so nothing below needs a browser, a cluster or React -- which is the
@@ -302,6 +310,46 @@ describe("run readings", () => {
     expect(goalTitle(goalFromRow({ id: "v1:work:goal:ab12", statement: "  " }))).toBe(
       "Untitled goal (ab12)",
     );
+  });
+
+  it("says what a run parked by the failure path is actually doing", () => {
+    // THE BUG: the three kinds the failure path writes -- retry, replan,
+    // repair -- had no words here, so all three fell to the default and read
+    // a bare "Waiting". Somebody watched one of those believing work was in
+    // flight, when what had happened was a step failing, a classifier
+    // deciding, and the system queueing its own next move. Each says so now.
+    expect(waitingWord("retry")).toBe("A step failed and it is going to try that step again");
+    expect(waitingWord("replan")).toBe(
+      "A step failed and the rest of the plan is being worked out again",
+    );
+    expect(waitingWord("repair")).toBe(
+      "A step did something other than what it promised, and it is being redone",
+    );
+
+    // NONE OF THE THREE IS A QUESTION FOR ANYBODY, so none of them may show
+    // up in the "waiting for you" count. That count is the app's one urgency
+    // signal; padding it with waits the system serves itself teaches people
+    // to ignore it.
+    for (const kind of ["retry", "replan", "repair"]) {
+      expect(waitsOnAPerson(kind)).toBe(false);
+      expect(runWaitsOnYou(runFromRow({ id: "r", status: "waiting", waitingOn: { kind } }))).toBe(
+        false,
+      );
+    }
+    expect(waitsOnAPerson("approval")).toBe(true);
+    expect(waitsOnAPerson("feedback")).toBe(true);
+  });
+
+  it("asks about money in words that are true of both ways money runs out", () => {
+    // Two things raise a `budget` approval: the run crossing a ceiling its
+    // goal declared, where approving raises it, and the balance behind paid
+    // calls running out, where approving raises nothing and somebody has to
+    // top it up first. The old sentence promised a button that does not exist
+    // in the second case.
+    const meaning = approvalKindMeaning("budget");
+    expect(meaning).toContain("paid model calls");
+    expect(meaning).not.toContain("Approving lets it carry on spending");
+    expect(approvalKindWord("budget")).toBe("Budget");
   });
 });
 
