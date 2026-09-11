@@ -68,10 +68,7 @@ resources:
   - mcp-front-door.yaml
   - os-front-door.yaml
   - edge-front-door.yaml
-  # BASE, WITH THE DSL-LOADING MESH NODES LABELLED. Not `../../base` directly:
-  # the DSL components below select on `memql/product-dsl`, and a label applied
-  # beside `components:` lands after them and selects nothing. See dsl-nodes/.
-  - dsl-nodes
+  - ../../base
   # Local-only infrastructure (absent in base and the cloud overlay)
   - azurite.yaml
 
@@ -275,17 +272,6 @@ patches:
     target:
       kind: Deployment
       name: "^(bff|agent)$"
-  # WHICH WORKLOADS A DSL DEPLOY ROLLS (memql#4933). Must equal the label set
-  # in dsl-nodes/ and the packages-roll-rbac Role's resourceNames.
-  - path: patches/packages-roll-local.yaml
-    target:
-      kind: Deployment
-      name: "^(bff|agent|planner|workbench)$"
-  # ...and the Role that permits it. The component ships agent/bff/planner.
-  - path: patches/packages-roll-role-local.yaml
-    target:
-      kind: Role
-      name: memql-packages-roll
 
   # -------------------------------------------------------------------------
   # DATABASE -- local VALUES over the cnpg-db component (memql#3846 / #3851)
@@ -368,19 +354,7 @@ images:
     newTag: local
 
 components:
-  # engine-bff now composes inside dsl-nodes/, because the label patch there
-  # has to see the `bff` Deployment it adds. It still resolves before every
-  # component here, since that whole layer is a RESOURCE of this one.
-  #
-  # PACKAGE DSL DELIVERY (memql#4933). dsl-mount owns the shared volume, the
-  # mount and MEMQL_DSL_PATH and is applied EXACTLY ONCE; dsl-packages adds the
-  # one init container that fetches the staged tree; packages-roll-rbac grants
-  # the pod ServiceAccount the `patch` on Deployments the roll needs. Without
-  # these three a DSL-carrying package deploy stages successfully and then
-  # refuses at the roll -- or rolls and mounts nothing.
-  - ../../components/dsl-mount
-  - ../../components/dsl-packages
-  - ../../components/packages-roll-rbac
+  - ../../components/engine-bff
   # THE DOMAIN, both halves (memql#4281). Must follow engine-bff, which
   # adds the `bff` Deployment this patches; components apply in order.
   - ../../components/domain-derive
