@@ -17,7 +17,7 @@ import { ActionBar, type Act } from "../../kit/ActionBar";
 import { AccountPicker } from "../accounts/AccountPicker";
 import type { AccountRow } from "../accounts/rows";
 import type { UsersActions } from "./actions";
-import { Grid } from "./Grid";
+import { Grid } from "./GridView";
 import { heldPairs } from "./grid";
 import { RefusalLine } from "./PersonPage";
 import type { RoleRow } from "./rows";

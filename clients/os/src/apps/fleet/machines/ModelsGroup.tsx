@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 
 import { useSession } from "../../../chrome/access";
-import { Measure } from "../../../kit/Measure";
+import { Measure } from "../../../kit/MeasureView";
 import { Button, Notice, Subhead } from "../../../kit";
 import { formatBytes, formatMoment } from "../../../kit/format";
 import { formatContext, formatParams } from "../models/ordering";

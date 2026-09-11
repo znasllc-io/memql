@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { Plus, RefreshCw, Store as StoreIcon } from "lucide-react";
 
 import { Button, Caption, Head, Notice, Panel, Row as ListRow } from "../../kit";
-import { Measure } from "../../kit/Measure";
+import { Measure } from "../../kit/MeasureView";
 import { isPositive } from "../../kit/measure";
 import { mirroredDomainCount, type StoreHealth } from "./health";
 import { AddStoreForm } from "./AddStoreForm";
