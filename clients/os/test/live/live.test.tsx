@@ -123,10 +123,10 @@ describe("the OS online rule", () => {
     const now = new Date("2026-08-27T00:10:00Z");
     const at = (secondsAgo: number) => new Date(now.getTime() - secondsAgo * 1000).toISOString();
     expect(isWorkerOnline({ connectedNodeId: "agent-1", lastSeenAt: at(ONLINE_WINDOW_SECONDS - 1) }, now)).toBe(true);
-    expect(isWorkerOnline({ connectedNodeId: "agent-1", lastSeenAt: at(ONLINE_WINDOW_SECONDS + 1) }, now)).toBe(true);
+    expect(isWorkerOnline({ connectedNodeId: "agent-1", lastSeenAt: at(ONLINE_WINDOW_SECONDS + 1) }, now)).toBe(false);
     expect(isWorkerOnline({ connectedNodeId: "agent-1", lastSeenAt: at(1), revokedAt: at(100) }, now)).toBe(false);
     expect(isWorkerOnline({}, now)).toBe(false);
-    expect(isWorkerOnline({ connectedNodeId: "agent-1", lastSeenAt: "not-a-time" }, now)).toBe(true);
+    expect(isWorkerOnline({ connectedNodeId: "agent-1", lastSeenAt: "not-a-time" }, now)).toBe(false);
   });
 });
 

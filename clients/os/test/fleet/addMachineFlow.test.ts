@@ -125,8 +125,7 @@ describe("steadiness", () => {
   });
 
   it("is not steady once the machine has gone silent, however many beats it had", () => {
-    // StreamHeld is authoritative: silence = no holding replica (not lastSeen alone).
-    expect(isSteady(machine({ connectedNodeId: "", lastSeenAt: ago(90) }), 5, NOW)).toBe(false);
+    expect(isSteady(machine({ lastSeenAt: ago(90) }), 5, NOW)).toBe(false);
   });
 });
 
@@ -144,7 +143,7 @@ describe("the checks", () => {
   });
 
   it("stops the connection check when the machine goes silent past the window, naming the log", () => {
-    const c = checksFor(MAC, machine({ connectedNodeId: "", lastSeenAt: ago(120) }), 3, NOW)[0]!;
+    const c = checksFor(MAC, machine({ lastSeenAt: ago(120) }), 3, NOW)[0]!;
     expect(c.state).toBe("stopped");
     expect(c.repair).toContain("~/.memql/state/worker.log");
   });
@@ -333,7 +332,7 @@ describe("the stops", () => {
   });
 
   it("marks the checks stopped when the machine went silent", () => {
-    const silent = machine({ connectedNodeId: "", lastSeenAt: ago(200) });
+    const silent = machine({ lastSeenAt: ago(200) });
     const stops = stopsFor(facts({ mint: MINT, machine: silent, beats: 1 }), checksFor(MAC, silent, 1, NOW));
     expect(stops[3]!.state).toBe("stopped");
     expect(openStopFor(stops)).toBe("checks");
@@ -406,7 +405,7 @@ describe("the action bar follows the state", () => {
   });
 
   it("names a problem in the state word when a check stopped", () => {
-    const silent = machine({ connectedNodeId: "", lastSeenAt: ago(200) });
+    const silent = machine({ lastSeenAt: ago(200) });
     const bar = barFor(facts({ mint: MINT, machine: silent, beats: 1 }), checksFor(MAC, silent, 1, NOW));
     expect(bar.state).toBe("Connected, with a problem");
     expect(bar.tone).toBe("paused");

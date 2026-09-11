@@ -100,9 +100,6 @@ button:not(:disabled):active {
 .os-dot[data-os-dot="unreachable"] {
   background: var(--os-warn);
 }
-.os-dot[data-os-dot="failed"] {
-  background: var(--os-error);
-}
 .os-dot[data-os-dot="off"] {
   background: transparent;
   border: 1px solid var(--os-muted);

@@ -327,7 +327,7 @@ func TestAppSessionEndsOnDisconnect(t *testing.T) {
 		done <- waitErr
 	}()
 
-	session.close(nil)
+	session.close()
 
 	select {
 	case waitErr := <-done:
