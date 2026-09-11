@@ -7,7 +7,6 @@ import (
 	"io"
 	"math"
 	"strings"
-	"time"
 
 	pure "github.com/znasllc-io/memql/component/compose"
 	"github.com/znasllc-io/memql/component/memql"
@@ -47,8 +46,24 @@ func (c materializerComposer) Compose(ctx context.Context, req composeint.Compos
 	if err != nil {
 		return out, fmt.Errorf("materializer: encode composition inputs: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-	defer cancel()
+	// NO DEADLINE IS IMPOSED HERE, and the absence is the decision.
+	//
+	// This call used to be wrapped in a fixed three-minute timeout. A page of
+	// prose returns well inside that; a site, a long report or a document with
+	// dozens of sources does not, and every one of them died at three minutes
+	// with "context deadline exceeded" -- a sentence that names a limit MemQL
+	// chose and says nothing about the work. How long a composition takes
+	// cannot be estimated before it runs, which is exactly why a fixed number
+	// was the wrong instrument.
+	//
+	// Nothing replaced it, and in particular no goal wall-clock cancel did. A
+	// goal runs until the work is done, which may be hours or longer. What
+	// stops this call is a person cancelling (the caller's ctx), the
+	// provider's own request limit -- which is theirs to enforce and fails
+	// honestly as theirs -- or the work-shaped bounds that already exist: the
+	// goal's maxModelCalls ceiling, the tool loop's iteration cap, and the
+	// per-scope spend latch in component/memql's LLM guard. Those bound how
+	// MUCH work a run may do. None of them bounds how long it may take.
 	result, err := c.engine.CallAIStructured(ctx, airoute.ResolveRequest{
 		Level: airoute.LevelStrong, Modality: airoute.ModalityStructured,
 		Needs: airoute.Needs{Structured: true},

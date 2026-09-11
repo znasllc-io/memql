@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	pure "github.com/znasllc-io/memql/component/compose"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/router"
+	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 	composeint "github.com/znasllc-io/memql/integrations/compose"
 )
@@ -126,6 +128,73 @@ func TestMaterializerComposerRefusesProseInPlaceOfGeneratedData(t *testing.T) {
 	if err == nil {
 		t.Fatal("a data file with no data or sources would appear successfully materialized")
 	}
+}
+
+// TestTheComposerImposesNoDeadlineOfItsOwn is the reported bug, pinned as the
+// property that fixes it.
+//
+// Compose used to wrap its one model call in `context.WithTimeout(ctx,
+// 3*time.Minute)`. A page of prose returns well inside that; a site, a long
+// report, or a document with dozens of sources does not, and every one of
+// them died at three minutes with "context deadline exceeded" -- a sentence
+// naming a limit MemQL chose that says nothing about the work.
+//
+// So the assertion is that the deadline the caller arrived with is the
+// deadline the model call gets, unchanged. A caller with none -- which is
+// what the work spine dispatches with, because a goal has no duration --
+// reaches the provider with none.
+func TestTheComposerImposesNoDeadlineOfItsOwn(t *testing.T) {
+	f := &materializerFleet{online: true, answer: `{"title":"Site","body":"Long document.","header":[],"rows":[]}`}
+	spy := &deadlineSpy{inner: materializerTestEngine(t, f)}
+	composer := materializerComposer{engine: spy}
+	ctx := auth.ContextWithUserActor(context.Background(), "alice")
+
+	if _, err := composer.Compose(ctx, composeint.ComposeRequest{Statement: "Build the site", Format: pure.FormatMarkdown}); err != nil {
+		t.Fatal(err)
+	}
+	if !spy.called {
+		t.Fatal("the composer never reached the model")
+	}
+	if spy.hadDeadline {
+		t.Fatalf("the composer set its own deadline (%s from the call); an hour-long composition dies on it, "+
+			"and the run that has to explain it reads words about a limit nobody asked for", spy.remaining)
+	}
+
+	// AND A CALLER'S OWN DEADLINE IS STILL HONOURED, which is the control
+	// that keeps this from reading as "deadlines are ignored here". A person
+	// cancelling, and a provider's own request limit, both still reach the
+	// call -- what is gone is the one this file invented.
+	spy.called, spy.hadDeadline = false, false
+	bounded, cancel := context.WithTimeout(ctx, time.Hour)
+	defer cancel()
+	if _, err := composer.Compose(bounded, composeint.ComposeRequest{Statement: "Build the site", Format: pure.FormatMarkdown}); err != nil {
+		t.Fatal(err)
+	}
+	if !spy.hadDeadline {
+		t.Fatal("the caller's deadline did not reach the model call")
+	}
+	if spy.remaining < 50*time.Minute {
+		t.Fatalf("remaining = %s, want close to the caller's hour: something shortened it", spy.remaining)
+	}
+}
+
+// deadlineSpy reports what deadline the structured call was given. It wraps a
+// real engine rather than faking one so the assertion is about the composer's
+// context handling and nothing else.
+type deadlineSpy struct {
+	inner       materializerAI
+	called      bool
+	hadDeadline bool
+	remaining   time.Duration
+}
+
+func (s *deadlineSpy) CallAIStructured(ctx context.Context, req airoute.ResolveRequest, msgs []common.ChatMessage, schema common.StructuredSchema) (memql.StructuredAIResult, error) {
+	s.called = true
+	if deadline, ok := ctx.Deadline(); ok {
+		s.hadDeadline = true
+		s.remaining = time.Until(deadline)
+	}
+	return s.inner.CallAIStructured(ctx, req, msgs, schema)
 }
 
 func TestComposeIntegrationIsWiredOnAgent(t *testing.T) {
