@@ -355,6 +355,62 @@ func TestMaterializeProviderFailureRecordsFailedComposition(t *testing.T) {
 	}
 }
 
+// TestAFailedCompositionSaysSoInAWordTheWorkSpineMatches is the RAISING END
+// of the contract component/work's TerminalFailureCode reads. The two modules
+// cannot see each other -- this one writes the terminal row and returns the
+// error, and the executor that decides what the run does about it sees only
+// the string the executor recorded -- so the code is a stable word carried in
+// the message, asserted at both ends. TestAComposedDocumentThatFailedDoesNot-
+// ParkAsWaiting is the matching end.
+//
+// Without it, this integration recorded the composition `failed` and then
+// handed back prose. "context deadline exceeded" matched transient.timeout,
+// the run parked at `waiting` on a retry, and a person watched a spinner over
+// a document the database had already given up on.
+func TestAFailedCompositionSaysSoInAWordTheWorkSpineMatches(t *testing.T) {
+	i, e, u := materializeFixture(t)
+	i.SetComposer(materializeComposerFunc(func(context.Context, ComposeRequest) (ComposeReply, error) {
+		return ComposeReply{}, fmt.Errorf("context deadline exceeded")
+	}))
+	_, err := i.materialize(nestedMaterializeContext(), "u-alice", "", materializeDraft())
+	if err == nil {
+		t.Fatal("the failure was swallowed")
+	}
+	if !strings.Contains(err.Error(), "composition_failed") {
+		t.Fatalf("error = %q, want it to lead with composition_failed: without the code the work spine "+
+			"reads the words \"deadline exceeded\" and parks the run on a retry against a failed row", err)
+	}
+	// THE ROW AND THE ERROR MUST AGREE. The code is only honest because the
+	// terminal record is written before it is returned.
+	for _, row := range e.compositions {
+		if row["status"] != "failed" {
+			t.Fatalf("composition status = %v, want failed alongside the coded error", row["status"])
+		}
+	}
+	if u.calls != 0 {
+		t.Fatal("failed generation uploaded a file")
+	}
+}
+
+// A CANCELLATION IS NOT THAT CODE. Somebody asked it to stop, which the work
+// spine has its own state for, and reporting a person's own click back to
+// them as a terminal fault sends them to debug a step that was fine.
+func TestACancelledCompositionIsNotReportedAsATerminalFailure(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	e.afterFile = func() {
+		for _, row := range e.compositions {
+			row["status"] = "cancelled"
+		}
+	}
+	_, err := i.materialize(nestedMaterializeContext(), "u-alice", "", materializeDraft())
+	if err == nil {
+		t.Fatal("late cancellation was overwritten by completion")
+	}
+	if strings.Contains(err.Error(), "composition_failed") {
+		t.Fatalf("error = %q: a cancellation must not carry the terminal-failure code", err)
+	}
+}
+
 func TestMaterializeCancelRequestsItsWorkGoalToStop(t *testing.T) {
 	i, e, _ := materializeFixture(t)
 	opener := &directMaterializeGoal{}

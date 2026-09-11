@@ -201,6 +201,44 @@ func TestContextBudget_Exceeded(t *testing.T) {
 	}
 }
 
+// A full context window is the one model-call failure whose right answer is
+// neither a retry nor a failure: the same bytes overflow forever, but the work
+// is not wrong. IsContextOverflow is how a loop tells that condition from the
+// two it looks like, so it has to be exact in both directions.
+func TestIsContextOverflow(t *testing.T) {
+	for _, msg := range []string{
+		"This model's maximum context length is 128000 tokens, however you requested 131000",
+		"error code: 400 - {'error': {'code': 'context_length_exceeded'}}",
+		"prompt is too long: 216000 tokens > 200000 maximum",
+		"Please reduce the length of the messages",
+		"input exceeds the context window for this model",
+	} {
+		if !IsContextOverflow(errors.New(msg)) {
+			t.Errorf("%q was not recognised as a context overflow, so the turn ends on a limit it could have compressed past", msg)
+		}
+	}
+
+	// EVERY ONE OF THESE MUST STAY UNRECOGNISED. Compressing a conversation
+	// that was fine throws away its earlier turns for nothing, and a loose
+	// matcher here would do that on any error mentioning a size.
+	for _, msg := range []string{
+		"context deadline exceeded",
+		"context canceled",
+		"429 Too Many Requests",
+		"insufficient_quota",
+		"request entity too large",
+		"max_tokens must be a positive integer",
+		"",
+	} {
+		if IsContextOverflow(errors.New(msg)) {
+			t.Errorf("%q was read as a context overflow", msg)
+		}
+	}
+	if IsContextOverflow(nil) {
+		t.Fatal("nil is not an overflow")
+	}
+}
+
 func TestPlanContextTrim(t *testing.T) {
 	// sizes: [system=5][a=10][b=10][c=10][tail1=3][tail2=3] = 41 tokens
 	sizes := []int{5, 10, 10, 10, 3, 3}

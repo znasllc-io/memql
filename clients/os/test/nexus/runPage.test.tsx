@@ -355,6 +355,57 @@ describe("what a run's bar offers", () => {
     expect(document.querySelector('.os-notice[data-tone="error"]')).toBeNull();
     expect(document.querySelector('.os-notice[data-tone="warn"]')).toBeTruthy();
   });
+
+  // THE REPORTED BUG, AS THE PAGE SAW IT. The Materializer wrapped its one
+  // model call in a fixed three-minute deadline; a long document blew through
+  // it, the composition row was written `failed`, and the error said "context
+  // deadline exceeded" -- which the symptom table read as a blip, so the run
+  // parked at "Waiting" over a document the database had already given up on.
+  // The deadline is gone and the run goes terminal now; this is what the
+  // person who was watching that spinner should read instead.
+  it("says the document was not made, rather than pointing at a classifier", async () => {
+    const conn = fakeConnection({
+      runs: [
+        runRow({
+          id: "run-1",
+          status: "failed",
+          errorCode: "composition_failed",
+          errorMessage: "composition_failed: compose: composing the draft failed",
+        }),
+      ],
+      steps: fiveSteps(),
+    });
+    await openRun(conn);
+    expect(screen.getByText("The document was not made.")).toBeTruthy();
+    expect(screen.queryByText("This run failed.")).toBeNull();
+    // The absent file is the headline, and the reader must not be sent to
+    // press retry: another attempt reads the same failed record.
+    expect(screen.getByText(/no file and no partial one/)).toBeTruthy();
+    expect(screen.getByText(/reads the same failed record/)).toBeTruthy();
+  });
+
+  // A limit we chose, said as ours. Goals carry no duration ceiling, so this
+  // notice appears only where somebody configured one -- and then it must keep
+  // the reader out of the network logs and keep their own number visible as
+  // the thing to change.
+  it("owns a self-imposed deadline instead of blaming the far side", async () => {
+    const conn = fakeConnection({
+      runs: [
+        runRow({
+          id: "run-1",
+          status: "failed",
+          errorCode: "self_timeout",
+          errorMessage: "agent: turn wallclock timeout after 3m0s",
+        }),
+      ],
+      steps: fiveSteps(),
+    });
+    await openRun(conn);
+    expect(screen.getByText("This stopped on a deadline this system set for itself.")).toBeTruthy();
+    expect(screen.queryByText("This run failed.")).toBeNull();
+    expect(screen.getByText(/Nothing on the far side failed/)).toBeTruthy();
+    expect(screen.getByText(/Goals carry no time limit of their own/)).toBeTruthy();
+  });
 });
 
 describe("the journal", () => {

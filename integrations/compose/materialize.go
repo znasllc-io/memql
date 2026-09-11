@@ -284,6 +284,23 @@ func compositionResult(compositionId string, row map[string]any) map[string]any 
 	return out
 }
 
+// terminalFailureCode is the word this integration puts at the head of the
+// error it returns once the composition row is terminally `failed`.
+//
+// IT IS A CONTRACT WITH component/work, which matches it in
+// TerminalFailureCode and takes the run terminal rather than parking it on a
+// retry. The two modules cannot see each other -- this one raises the failure,
+// and the executor that decides what the run does about it sees only the
+// string the executor recorded -- so the code is a stable word carried in the
+// message, asserted at both ends by their own tests. That is the same contract
+// component/router has with work.InferenceRefusalCode.
+//
+// Without it, the failure this integration already recorded as final arrived
+// at the symptom table as prose. "context deadline exceeded" matched
+// transient.timeout, the run parked at `waiting`, and a person watching it
+// waited on a composition the database had already given up on.
+const terminalFailureCode = "composition_failed"
+
 func (i *Integration) failComposition(ctx context.Context, compositionId string, cause error) (map[string]any, error) {
 	// Cancellation may invalidate ctx while the model is in flight. The terminal
 	// record still needs a bounded write under the same actor.
@@ -300,7 +317,13 @@ func (i *Integration) failComposition(ctx context.Context, compositionId string,
 	if err := i.store().updateCompositionState(cleanup, map[string]any{"compositionId": compositionId, "status": status, "failureReason": cause.Error()}); err != nil {
 		i.log().Error("compose: could not record composition failure", "compositionId", compositionId, "error", err)
 	}
-	return nil, cause
+	if status == "cancelled" {
+		// A CANCELLATION IS NOT THIS CODE. Somebody asked it to stop, which
+		// the work spine already has a state for, and calling it a terminal
+		// failure would report a person's own click back to them as a fault.
+		return nil, cause
+	}
+	return nil, fmt.Errorf("%s: %w", terminalFailureCode, cause)
 }
 
 func (i *Integration) checkCompositionCancellation(ctx context.Context, compositionId string) error {

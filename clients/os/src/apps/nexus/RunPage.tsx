@@ -266,6 +266,34 @@ export function RunPage({
             next="Its own gate refused the arguments it was given, so no step ran and nothing was changed. The reason is below; it is about what was asked for."
             detail={run.errorMessage}
           />
+        ) : run.status === "failed" && run.errorCode === "composition_failed" ? (
+          /* THE DOCUMENT DOES NOT EXIST, AND THAT IS THE HEADLINE. The
+             Materializer wrote its own terminal record and then reported the
+             failure, so by the time this run closed there was a `failed`
+             composition and no file. This used to park at `waiting` on a
+             retry instead -- the error said "deadline exceeded", the symptom
+             table called it a blip, and a person watched a spinner over work
+             the database had already given up on. The notice names the
+             absent file and says why another attempt is not the answer. */
+          <Notice
+            tone="error"
+            sentence="The document was not made."
+            next="The composition recorded its own failure, so there is no file and no partial one. Another attempt reads the same failed record -- start it again from the goal instead. The reason is below."
+            detail={run.errorMessage}
+          />
+        ) : run.status === "failed" && run.errorCode === "self_timeout" ? (
+          /* A LIMIT WE CHOSE, SAID AS OURS. Nothing on the far side timed
+             out: a deadline this system set for itself expired, and the work
+             was not given longer. Saying so keeps the reader out of the
+             network logs, and keeps the operator's own number visible as the
+             thing to change. A goal carries no duration ceiling, so seeing
+             this at all means somebody set one deliberately. */
+          <Notice
+            tone="error"
+            sentence="This stopped on a deadline this system set for itself."
+            next="Nothing on the far side failed and nothing was overrunning -- the work simply was not given longer. Goals carry no time limit of their own, so this is a configured one. Another attempt gets the same deadline."
+            detail={run.errorMessage}
+          />
         ) : run.status === "failed" && run.errorMessage !== "" ? (
           <Notice
             tone="error"

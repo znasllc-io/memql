@@ -234,6 +234,255 @@ func TestAnInferenceRefusalStillParksAndIsNotClassified(t *testing.T) {
 	}
 }
 
+// TestAComposedDocumentThatFailedDoesNotParkAsWaiting is the reported bug,
+// end to end through the path that produced it.
+//
+// The Materializer wrapped its one model call in a fixed three-minute
+// deadline. A long document blew through it, the compose pipeline wrote its
+// composition row terminally `failed`, and the error it handed back said
+// "context deadline exceeded". Those words matched transient.timeout, so this
+// path parked the run at `waiting` on a retry that would re-read a `failed`
+// row -- and Nexus showed a person "Waiting" over work the database had
+// already given up on.
+//
+// The deadline is gone (app/materializer_composer.go). This pins the other
+// half: even carrying the exact words that fooled the table, a failure the
+// system already recorded terminally closes the run.
+func TestAComposedDocumentThatFailedDoesNotParkAsWaiting(t *testing.T) {
+	c := &countingClassifier{symptom: work.SymptomTransient}
+	calls := closeWith(t, c, failedRun("v1:work:run:c1",
+		"composition_failed: compose: composing the draft failed: context deadline exceeded", 1, 3))
+
+	if c.calls != 0 {
+		t.Fatalf("the classifier was called %d time(s); a failure that is already over is not a symptom to classify", c.calls)
+	}
+	_, args := argsOf(t, lastCallNamed(t, calls, "updateWorkRun"))
+	if args["status"] != "failed" {
+		t.Fatalf("status = %v, want failed: the composition row is terminal and the file does not exist", args["status"])
+	}
+	if args["waitingOn"] != nil {
+		t.Fatalf("the run parked on %v as well as failing; the two readings contradict each other", args["waitingOn"])
+	}
+	if args["finishedAt"] == nil {
+		t.Error("a terminal run finishes; without it every terminal-run reader treats this as still in flight")
+	}
+	if args["errorCode"] != work.TerminalCompositionFailed {
+		t.Fatalf("errorCode = %v, want %q -- Nexus keys its run notice on that field", args["errorCode"], work.TerminalCompositionFailed)
+	}
+	outcome, _ := args["outcome"].(map[string]any)
+	if outcome["terminalReason"] != work.TerminalReason(work.TerminalCompositionFailed) {
+		t.Errorf("outcome.terminalReason = %v, want the reason in words", outcome["terminalReason"])
+	}
+	if args["errorMessage"] == nil || args["errorMessage"] == "" {
+		t.Error("the message a person reads must survive; it is the only place the underlying cause is written")
+	}
+}
+
+// A clock MemQL set for itself is not evidence about anything except the
+// number we chose, and the next attempt gets the same number. Long work
+// carries no such clock any more, so seeing this means one was configured
+// deliberately -- and then it must say so rather than impersonate a blip.
+func TestASelfImposedTimeoutFailsHonestlyRatherThanRetrying(t *testing.T) {
+	c := &countingClassifier{symptom: work.SymptomTransient}
+	calls := closeWith(t, c, failedRun("v1:work:run:c2",
+		"agent: turn wallclock timeout after 3m0s", 1, 3))
+
+	if c.calls != 0 {
+		t.Fatalf("the classifier was called %d time(s)", c.calls)
+	}
+	_, args := argsOf(t, lastCallNamed(t, calls, "updateWorkRun"))
+	if args["status"] != "failed" || args["errorCode"] != work.TerminalSelfTimeout {
+		t.Fatalf("status = %v errorCode = %v, want failed/%s", args["status"], args["errorCode"], work.TerminalSelfTimeout)
+	}
+}
+
+// A PROVIDER'S OWN TIMEOUT IS STILL A BLIP, and this is the control that
+// keeps the fix narrow. The terminal check runs first, so if it were loose it
+// would take every retryable timeout straight to a dead run and the retry
+// that would have fixed it would never happen.
+func TestAProviderTimeoutStillRetries(t *testing.T) {
+	c := &countingClassifier{symptom: work.SymptomHuman}
+	calls := closeWith(t, c, failedRun("v1:work:run:c3",
+		"Post \"https://api.example.com/v1/messages\": context deadline exceeded", 1, 3))
+
+	if c.calls != 0 {
+		t.Fatalf("the classifier was called %d time(s); transient.timeout classifies this", c.calls)
+	}
+	_, args := argsOf(t, lastCallNamed(t, calls, "updateWorkRun"))
+	if args["status"] != "waiting" {
+		t.Fatalf("status = %v, want waiting: the same call may well work again", args["status"])
+	}
+	waiting, _ := args["waitingOn"].(map[string]any)
+	if waiting["kind"] != WaitKindRetry {
+		t.Fatalf("waitingOn.kind = %v, want %q", waiting["kind"], WaitKindRetry)
+	}
+}
+
+// TestTheTerminalStepRowCarriesTheCodeAndNoSymptom pins what a replay or a
+// reader finds on the step afterwards.
+//
+// The code lands, because it is how anybody reading the journal later can
+// tell this failure from a retryable one. The SYMPTOM deliberately does not:
+// the five are a closed enum and none of them is true here, and Nexus renders
+// each as a promise -- `transient` promises a retry inside the budget,
+// `human` promises the run parked and asked -- so filling the field to avoid
+// a blank would put a false sentence on the row.
+func TestTheTerminalStepRowCarriesTheCodeAndNoSymptom(t *testing.T) {
+	calls := closeWith(t, &countingClassifier{}, failedRun("v1:work:run:c4",
+		"composition_failed: the model returned an empty document body", 1, 0))
+
+	_, step := argsOf(t, lastCallNamed(t, calls, "updateWorkStep"))
+	if step["errorCode"] != work.TerminalCompositionFailed {
+		t.Fatalf("step errorCode = %v, want %q", step["errorCode"], work.TerminalCompositionFailed)
+	}
+	if step["symptom"] != nil {
+		t.Fatalf("step symptom = %v; none of the five is true of a failure that is already over", step["symptom"])
+	}
+	if step["stepId"] == nil || step["stepId"] == "" {
+		t.Error("updateWorkStep takes a stepId; a write with none updates nothing and reports success")
+	}
+}
+
+// TestAnExhaustedBudgetAsksAboutMoneyRatherThanRetrying is the non-local
+// token-budget edge.
+//
+// OpenAI reports a spent balance as an HTTP 429 -- the same status as ordinary
+// rate limiting -- so before the budget rule this ran the full retry budget
+// against a balance nobody was topping up, sat at `waiting` the whole time,
+// and only then asked a person, with a symptom naming a blip. It parks on a
+// `budget` approval now, which is the kind whose sentence is about money.
+func TestAnExhaustedBudgetAsksAboutMoneyRatherThanRetrying(t *testing.T) {
+	c := &countingClassifier{symptom: work.SymptomTransient}
+	calls := closeWith(t, c, failedRun("v1:work:run:c5",
+		"429 You exceeded your current quota (insufficient_quota)", 1, 3))
+
+	if c.calls != 0 {
+		t.Fatalf("the classifier was called %d time(s); money is not a thing to ask a model about", c.calls)
+	}
+	if !anyCallNamed(calls, "createWorkApproval") {
+		t.Fatalf("no approval was raised, so nobody was told the money ran out: %v", calls)
+	}
+	_, approval := argsOf(t, lastCallNamed(t, calls, "createWorkApproval"))
+	if approval["kind"] != work.ApprovalKindBudget {
+		t.Fatalf("approval kind = %v, want %q", approval["kind"], work.ApprovalKindBudget)
+	}
+	_, args := argsOf(t, lastCallNamed(t, calls, "updateWorkRun"))
+	waiting, _ := args["waitingOn"].(map[string]any)
+	if waiting["kind"] != WaitKindApproval {
+		t.Fatalf("waitingOn.kind = %v, want %q: waiting on a person is a stated wait, not a silent one", waiting["kind"], WaitKindApproval)
+	}
+	if waiting["resumeAt"] != nil {
+		t.Error("a budget wait must carry no resumeAt: only a person changes a balance, and polling one burns a dispatch to rediscover the same number")
+	}
+	// THE ORDER IS LOAD-BEARING here too: a run parked on an approval id that
+	// does not exist waits on nothing.
+	if indexOfCall(calls, "createWorkApproval") > indexOfCall(calls, "updateWorkRun") {
+		t.Fatalf("the run parked before the approval existed: %v", calls)
+	}
+}
+
+// A context window that stayed full after the tool loop compressed it is a
+// real edge with a clear gate, not a timeout and not a retry. It reaches this
+// path only when compressing freed nothing (integrations/agent's handoff), at
+// which point the same bytes meet the same limit forever.
+func TestAFullContextWindowParksOnAPersonRatherThanRetrying(t *testing.T) {
+	c := &countingClassifier{symptom: work.SymptomTransient}
+	calls := closeWith(t, c, failedRun("v1:work:run:c6",
+		"prompt is too long: 216000 tokens > 200000 maximum", 1, 3))
+
+	if c.calls != 0 {
+		t.Fatalf("the classifier was called %d time(s)", c.calls)
+	}
+	_, approval := argsOf(t, lastCallNamed(t, calls, "createWorkApproval"))
+	if approval["kind"] != work.ApprovalKindFeedback {
+		t.Fatalf("approval kind = %v, want %q", approval["kind"], work.ApprovalKindFeedback)
+	}
+	_, step := argsOf(t, lastCallNamed(t, calls, "updateWorkStep"))
+	if step["symptom"] != string(work.SymptomHuman) {
+		t.Fatalf("step symptom = %v, want %q", step["symptom"], work.SymptomHuman)
+	}
+}
+
+// TestNoStatusTransitionIsEverBothWaitingAndTerminal is the invariant behind
+// every test above, asserted over all of them at once.
+//
+// The bug was not that one status was wrong. It was that two readers of the
+// same run disagreed about whether it was over, and the reader a person looks
+// at said the patient thing. So: whatever a failure classifies as, the run
+// ends up in exactly one of those two shapes -- parked with a stated wait and
+// no finishedAt, or terminal with a finishedAt and no wait. Never both, and
+// never a `waiting` row that also looks finished.
+func TestNoStatusTransitionIsEverBothWaitingAndTerminal(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		message string
+	}{
+		{"provider timeout", "context deadline exceeded"},
+		{"terminal composition", "composition_failed: nothing rendered"},
+		{"self-imposed clock", "agent: turn wallclock timeout after 3m0s"},
+		{"exhausted budget", "429 insufficient_quota"},
+		{"full context window", "context_length_exceeded"},
+		{"novel", "the vendor said something nobody has a rule for"},
+		{"permission", "permission denied"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &countingClassifier{symptom: work.SymptomPlan}
+			calls := closeWith(t, c, failedRun("v1:work:run:inv", tc.message, 1, 3))
+			_, args := argsOf(t, lastCallNamed(t, calls, "updateWorkRun"))
+			status, _ := args["status"].(string)
+			parked := status == "waiting"
+
+			if parked {
+				if args["waitingOn"] == nil {
+					t.Fatal("a waiting run with no waitingOn is the silent stuckness this epic is about")
+				}
+				if args["finishedAt"] != nil {
+					t.Fatal("a waiting run must not carry finishedAt: every terminal-run reader would treat it as done")
+				}
+				return
+			}
+			if status != "failed" {
+				t.Fatalf("status = %q, want waiting or failed", status)
+			}
+			if args["finishedAt"] == nil {
+				t.Fatal("a failed run finishes")
+			}
+			if args["waitingOn"] != nil {
+				t.Fatalf("a failed run also parked on %v", args["waitingOn"])
+			}
+		})
+	}
+}
+
+// TestATerminalFailureStaysJournaledAndReplayable pins that taking a failure
+// terminal does not cost the run its journal.
+//
+// Replay reads the run and its step rows (component/work's DecideServe over
+// the journaled model calls), so a terminal close has to leave both behind: a
+// run row that still names its chainHead and stepOrder, and the step row that
+// failed. Writing a bare status would make the run unreplayable and
+// unreadable at the same time.
+func TestATerminalFailureStaysJournaledAndReplayable(t *testing.T) {
+	run := failedRun("v1:work:run:c7", "composition_failed: nothing rendered", 1, 0)
+	// The executor records the order as it goes; the fixture above only
+	// records the failure, so the prefix is set here to be the thing under
+	// assertion rather than an accident of the helper.
+	run.StepOrder = []string{"gather", "compose"}
+	calls := closeWith(t, &countingClassifier{}, run)
+
+	if !anyCallNamed(calls, "updateWorkStep") {
+		t.Fatalf("the failed step was not journaled: %v", calls)
+	}
+	_, args := argsOf(t, lastCallNamed(t, calls, "updateWorkRun"))
+	order, _ := args["stepOrder"].([]any)
+	if len(order) != 2 || order[0] != "gather" || order[1] != "compose" {
+		t.Errorf("stepOrder = %v, want the journaled prefix: replay walks it", args["stepOrder"])
+	}
+	if _, ok := args["chainHead"]; !ok {
+		t.Error("the run's chainHead must survive a terminal close")
+	}
+}
+
 // TestTheClassifierRunsAtTheCheapestLevel asserts the tier from OUTSIDE the
 // implementation. It is on the interface because the cheapest tier is a
 // property of the design -- the answer is one of five words and the acts it
