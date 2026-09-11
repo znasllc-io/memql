@@ -140,8 +140,10 @@ func (r *Registry) Add(w *Worker) {
 	r.byOwner[w.OwnerUserId] = append(r.byOwner[w.OwnerUserId], w)
 }
 
-// Remove removes a worker from the registry. Called when its gRPC
-// stream closes.
+// Remove removes a worker from the registry by registration id.
+// Prefer RemoveSession on stream close: an unconditional Remove races a
+// reconnect Add and can delete the successor while connectedNodeId still
+// names this replica (prod: Ask on holder pszjr, WorkerById nil, StreamHeld).
 func (r *Registry) Remove(registrationId string) {
 	if r == nil || registrationId == "" {
 		return
@@ -150,6 +152,23 @@ func (r *Registry) Remove(registrationId string) {
 	defer r.mu.Unlock()
 	w, ok := r.byId[registrationId]
 	if !ok {
+		return
+	}
+	r.removeLocked(w)
+}
+
+// RemoveSession removes w only if it is still the live registry entry for
+// its registration id. A reconnect Add replaces the pointer first; the dying
+// session must not wipe the successor or Ask sees Connected with no dispatchable
+// worker on the holding pod.
+func (r *Registry) RemoveSession(w *Worker) {
+	if r == nil || w == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cur, ok := r.byId[w.RegistrationId]
+	if !ok || cur != w {
 		return
 	}
 	r.removeLocked(w)

@@ -96,6 +96,12 @@ func displayLastError(last string) string {
 		return ""
 	}
 	low := strings.ToLower(last)
+	if strings.Contains(low, "holding replica registry miss") ||
+		strings.Contains(low, "stream not dispatchable") {
+		// Ask was already on the named holder; peer-forward cannot fix a local
+		// registry hole. Do not tell the operator to "retry against connectedNodeId".
+		return "holding replica registry miss; reconnect required"
+	}
 	if strings.Contains(low, "no longer holds a stream") ||
 		strings.Contains(low, "no live worker stream on this replica") ||
 		strings.Contains(low, "forward or retry required") {

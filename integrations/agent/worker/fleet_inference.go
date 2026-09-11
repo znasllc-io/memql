@@ -382,7 +382,7 @@ func (f *FleetInference) attemptLocal(
 ) (memqlengine.FleetCallResult, ForwardOutcome, error) {
 	w := f.registry.WorkerById(cand.RegistrationId)
 	if w == nil {
-		// Affinity miss: prefer forward/retry, never a terminal wrong-pod error
+		// Affinity miss: prefer forward/retry when another replica is named.
 		target := strings.TrimSpace(cand.ConnectedNodeId)
 		if target != "" && target != f.selfNodeId && f.forward != nil {
 			out, err := f.forward.ForwardModelCall(ctx, target, cand.RegistrationId,
@@ -404,9 +404,16 @@ func (f *FleetInference) attemptLocal(
 			}
 			return resultFromEnd(cand, out.End), ForwardCompleted, nil
 		}
-		// Refuse BEFORE START so Call retries another candidate / surfaces
-		// FleetUnavailable — never "this replica no longer holds a stream"
-		// as the operator-facing terminal for a wrong-pod Ask.
+		// Holding-pod registry miss (prod dump: Ask already on holder pszjr,
+		// connectedNodeId==self, WorkerById nil). Forward cannot help — we ARE
+		// the named holder. Root cause is reconnect Remove racing successor Add;
+		// refuse-before-start without the misleading "retry against connectedNodeId".
+		if target != "" && target == f.selfNodeId {
+			return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart,
+				fmt.Errorf("holding replica registry miss for %s on %s; stream not dispatchable",
+					cand.Label(), target)
+		}
+		// Wrong-pod / unset self: refuse BEFORE START so Call retries.
 		return memqlengine.FleetCallResult{}, ForwardRefusedBeforeStart,
 			fmt.Errorf("no live worker stream on this replica for %s; forward or retry required (connectedNodeId=%q)",
 				cand.Label(), cand.ConnectedNodeId)
