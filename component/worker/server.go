@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -115,8 +114,7 @@ func (s *server) Stream(stream memqlv1.WorkerService_StreamServer) error {
 		})
 		return status.Error(codes.PermissionDenied, err.Error())
 	}
-	var recvErr error
-	defer func() { session.close(recvErr) }()
+	defer session.close()
 	// The RegisterAck is on the wire; from here the cluster pings the
 	// machine for the life of the stream (epic memql#5218, D11).
 	session.startPinger()
@@ -124,7 +122,6 @@ func (s *server) Stream(stream memqlv1.WorkerService_StreamServer) error {
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
-			recvErr = err
 			if errors.Is(err, io.EOF) {
 				return nil
 			}
@@ -338,6 +335,7 @@ func (s *server) upsertRegistration(
 	return registration, nil
 }
 
+
 // findRegistrationByMachineKey returns the owner's unrevoked registration that
 // matches the Register message's stable machine key, or nil when none match.
 // Newest lastSeenAt wins when more than one row shares a key (should not
@@ -463,7 +461,7 @@ func newStreamSession(
 	}
 }
 
-func (s *streamSession) close(cause error) {
+func (s *streamSession) close() {
 	s.closeOnce.Do(func() {
 		s.cancel()
 		if s.server != nil && s.server.registry != nil {
@@ -546,11 +544,6 @@ func (s *streamSession) close(cause error) {
 			if len(liveSessions) > 0 {
 				fields = append(fields, "app_sessions_aborted", len(liveSessions))
 			}
-			if len(liveCalls) > 0 {
-				fields = append(fields, "model_calls_aborted", len(liveCalls))
-			}
-			code, reason := disconnectCodeReason(cause)
-			fields = append(fields, "code", code, "reason", reason)
 			s.server.logger.Info("worker disconnected", fields...)
 		}
 		// Emit an audit event mirroring "worker_registered" so downstream
@@ -579,11 +572,6 @@ func (s *streamSession) close(cause error) {
 // node and a router forwards a dispatch to a replica that will refuse it --
 // which reads as a mesh fault rather than as an offline laptop.
 //
-// SUCCESSOR GUARD: if another replica already re-stamped connectedNodeId
-// during our teardown (same machineId re-attach after a roll), do NOT blank
-// their hold. Prod tip windows showed clear→new-holder races that flapped Ask
-// offline while the stream was live on the successor.
-//
 // THE CONTEXT COMES FROM Background(), NOT from the session. By the time close
 // runs, s.cancel has already fired and s.ctx is done, so a write on it would
 // be cancelled before it left the process -- and the failure would be silent,
@@ -596,28 +584,6 @@ func (s *streamSession) clearConnectedNode() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	self := strings.TrimSpace(s.server.nodeId)
-	if self != "" {
-		if rows, err := s.server.store.WorkersForUser(ctx, s.worker.OwnerUserId); err == nil {
-			for _, row := range rows {
-				if row.ID != s.worker.RegistrationId {
-					continue
-				}
-				holder := strings.TrimSpace(row.ConnectedNodeId)
-				if holder != "" && holder != self {
-					if s.server.logger != nil {
-						s.server.logger.Info("worker: skip clear connectedNodeId; successor holds stream",
-							"registration_id", s.worker.RegistrationId,
-							"self_node_id", self,
-							"holder_node_id", holder,
-						)
-					}
-					return
-				}
-				break
-			}
-		}
-	}
 	if err := s.server.store.ClearConnectedNode(ctx, s.worker.RegistrationId, s.worker.OwnerUserId); err != nil {
 		if s.server.logger != nil {
 			s.server.logger.Warn("worker: clear connectedNodeId failed",
@@ -626,22 +592,6 @@ func (s *streamSession) clearConnectedNode() {
 			)
 		}
 	}
-}
-
-// disconnectCodeReason extracts a stable code + reason for disconnect logs.
-// Prod tip windows had "worker disconnected" with no code/reason, which made
-// roll-induced holder death indistinguishable from clean client close.
-func disconnectCodeReason(cause error) (code, reason string) {
-	if cause == nil {
-		return "ok", "session_end"
-	}
-	if errors.Is(cause, io.EOF) {
-		return "eof", "client_eof"
-	}
-	if st, ok := status.FromError(cause); ok {
-		return st.Code().String(), st.Message()
-	}
-	return "unknown", cause.Error()
 }
 
 // dispatch is the hook the registry's dispatcher invokes when an

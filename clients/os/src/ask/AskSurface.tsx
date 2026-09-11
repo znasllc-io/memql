@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { ArrowUp, Mic } from "lucide-react";
 
 import type { AskHandle, AskTransport } from "./askController";
@@ -116,6 +116,7 @@ export function AskSurface({
   const setDraft = onDraftChange ?? setLocalDraft;
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
   const activeRef = useRef<{ handle: AskHandle | null; stop: (message: string) => void; abandon: () => void } | null>(null);
+  const readinessId = useId();
   const ready = availability.state === "ready";
   const busy = exchanges.some((e) => e.state === "streaming");
   const nextIdRef = useRef(1);
@@ -145,10 +146,8 @@ export function AskSurface({
   }, [autoFocus]);
 
   useEffect(() => {
-    if (availability.state === "disconnected") {
-      activeRef.current?.stop("Connection to the cluster was lost.");
-    }
-  }, [availability.state]);
+    if (availability.state === "disconnected") activeRef.current?.stop(availability.message);
+  }, [availability.state, availability.message]);
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
@@ -321,8 +320,16 @@ export function AskSurface({
           {makeGoal.error}
         </p>
       ) : null}
-      {/* Readiness is silent by design: when inference/fleet is not ready we
-          only disable Send. No bouncing banners, Open Fleet, or Check again. */}
+      {/* Quiet while checking: a transient "checking connectivity" line shifts
+          the composer and is not actionable. Real refusals (unavailable /
+          disconnected / error / reconnecting) still say so under the input. */}
+      {!ready && availability.state !== "checking" ? (
+        <div className="os-caption os-ask-micnote">
+          <p id={readinessId} role="status">{availability.message}</p>
+          {onOpenFleet ? <button type="button" className="os-link" onClick={onOpenFleet}>Open Fleet</button> : null}{" "}
+          {availability.state !== "disconnected" && availability.state !== "reconnecting" ? <button type="button" className="os-link" onClick={availability.refresh}>Check again</button> : null}
+        </div>
+      ) : null}
       <form className="os-ask-input" onSubmit={onSubmit}>
         <button
           ref={micRef}
@@ -395,6 +402,7 @@ export function AskSurface({
           type="submit"
           className="os-ask-send"
           aria-label={live ? "Finish" : "Send"}
+          aria-describedby={!ready && availability.state !== "checking" ? readinessId : undefined}
           disabled={!live && (!ready || busy || !draft.trim())}
         >
           <ArrowUp size={15} aria-hidden />
