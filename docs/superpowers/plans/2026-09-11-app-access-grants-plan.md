@@ -3,11 +3,11 @@
 - **Date:** 2026-09-11
 - **Design record:** `docs/superpowers/specs/2026-09-11-app-access-grants-design.md`
   (decisions D1 to D14; every task below cites its section).
-- **Status:** planned. Implementation has not started from this plan; the owner merges
-  this document and instructs separately.
+- **Status:** planned and filed (plan PR #5285). Implementation has not started from this
+  plan; the owner merges this document and instructs separately.
 - **Issues:** one GitHub issue per epic, labelled `epic`, `feature`, `claude` and
   `epic:<slug>`; one issue per task, labelled `task`, `claude` and `epic:<slug>`, each a
-  native sub-issue of its epic. Numbers are filled in below once filed.
+  native sub-issue of its epic. Filed 2026-09-12: epics #5286 to #5289, tasks #5290 to #5307.
 - **Local ccpm files:** `.claude/prds/app-access-grants.md` and `.claude/epics/<slug>/`
   on the planning machine. They are gitignored by repository rule (memql#3344) and are
   the working copies the GitHub sync was run from; this document is the tracked record.
@@ -37,14 +37,14 @@ below is repeated in each epic issue.
 
 ## Epic 1: Deployables ownership prerequisites
 
-Slug `deployables-ownership-prerequisites`. Epic issue: (filed after sync).
+Slug `deployables-ownership-prerequisites`. Epic issue: [#5286](https://github.com/znasllc-io/memql/issues/5286).
 
-| Task | Title | PR |
+| Issue | Title | PR |
 |---|---|---|
-| 1 | Owner erasure on the pipeline's internal-origin bind write (PR #5284, already open) | PR A = #5284 |
-| 2 | Bare-versus-canonical package id compare at the four sites | PR B |
-| 3 | Cloud repair: re-stamp the owner on sites blanked by the erasure | PR B |
-| 4 | Archive closes a source's parked runs; the upstream feed skips archived packages | PR B |
+| #5290 | Owner erasure on the pipeline's internal-origin bind write (PR #5284, already open) | PR A = #5284 |
+| #5291 | Bare-versus-canonical package id compare at the four sites | PR B |
+| #5292 | Cloud repair: re-stamp the owner on sites blanked by the erasure | PR B |
+| #5293 | Archive closes a source's parked runs; the upstream feed skips archived packages | PR B |
 
 PR A is #5284 as it stands. PR B carries tasks 2 to 4 together: they touch
 `component/packages` and its tests and are reviewed as one change to the pipeline's
@@ -52,45 +52,45 @@ identity handling.
 
 ## Epic 2: Access grants, the engine
 
-Slug `access-grants-engine`. Epic issue: (filed after sync).
+Slug `access-grants-engine`. Epic issue: [#5287](https://github.com/znasllc-io/memql/issues/5287).
 
-| Task | Title | PR |
+| Issue | Title | PR |
 |---|---|---|
-| 1 | The `v1:rbac:grant` concept: fields, derived id, tier, server-only mutations, snapshot | PR A |
-| 2 | The actor-shaped resolver: most specific wins, deny within a level, memoised per request | PR A |
-| 3 | Switch the seven `auth.Capable` call sites; database-gated enforcement tests | PR A |
-| 4 | Governance builtins `grantSet` and `grantRevoke` with the four rules, codes and audit | PR B |
-| 5 | The reads: `grantsForSubject`, `grantsForResource`, `effectiveCapabilitiesForActor` | PR B |
-| 6 | Documentation: access-model.md, CLAUDE.md pointer, record status | PR B |
+| #5294 | The `v1:rbac:grant` concept: fields, derived id, tier, server-only mutations, snapshot | PR A |
+| #5295 | The actor-shaped resolver: most specific wins, deny within a level, memoised per request | PR A |
+| #5296 | Switch the seven `auth.Capable` call sites; database-gated enforcement tests | PR A |
+| #5297 | Governance builtins `grantSet` and `grantRevoke` with the four rules, codes and audit | PR B |
+| #5298 | The reads: `grantsForSubject`, `grantsForResource`, `effectiveCapabilitiesForActor` | PR B |
+| #5299 | Documentation: access-model.md, CLAUDE.md pointer, record status | PR B |
 
 PR A makes the engine answer grants and proves it through the gates; PR B makes grants
 writable and readable. PR B depends on PR A.
 
 ## Epic 3: Access grants, apps as resources, Deployables first
 
-Slug `access-grants-app-vocabulary`. Epic issue: (filed after sync). Depends on epic 2
+Slug `access-grants-app-vocabulary`. Epic issue: [#5288](https://github.com/znasllc-io/memql/issues/5288). Depends on epic 2
 PR A.
 
-| Task | Title | PR |
+| Issue | Title | PR |
 |---|---|---|
-| 1 | Seed `read app:<id>` for every OS app on the roles the registry admits today | PR A |
-| 2 | The five Deployables parts: seeds and `@requiresCapability` on their constructs | PR A |
-| 3 | The registry-to-seeds parity gate | PR A |
-| 4 | The account tie on `package` and `packageDeployment`; compose defaults to the self account | PR B |
+| #5300 | Seed `read app:<id>` for every OS app on the roles the registry admits today | PR A |
+| #5301 | The five Deployables parts: seeds and `@requiresCapability` on their constructs | PR A |
+| #5302 | The registry-to-seeds parity gate | PR A |
+| #5303 | The account tie on `package` and `packageDeployment`; compose defaults to the self account | PR B |
 
 PR A is the vocabulary and its gate; PR B is the data-layer half and the recorded
 departure from the accounts rule. Independent of each other; PR B may land first.
 
 ## Epic 4: Access grants, the OS
 
-Slug `access-grants-os`. Epic issue: (filed after sync). Depends on epics 2 and 3.
+Slug `access-grants-os`. Epic issue: [#5289](https://github.com/znasllc-io/memql/issues/5289). Depends on epics 2 and 3.
 
-| Task | Title | PR |
+| Issue | Title | PR |
 |---|---|---|
-| 1 | The shell reads the effective set; registry moves from `roles:` to `requires:` | PR A |
-| 2 | Deployables controls declare their parts; hidden when missing; refusal copy | PR A |
-| 3 | Attribution: "deployed by", and the Sources group lists the viewer's own first | PR A |
-| 4 | Settings, Access: the by-person and by-app views over the grant builtins | PR B |
+| #5304 | The shell reads the effective set; registry moves from `roles:` to `requires:` | PR A |
+| #5305 | Deployables controls declare their parts; hidden when missing; refusal copy | PR A |
+| #5306 | Attribution: "deployed by", and the Sources group lists the viewer's own first | PR A |
+| #5307 | Settings, Access: the by-person and by-app views over the grant builtins | PR B |
 
 PR A is the switch nobody notices (parity gate keeps every desktop identical) plus the
 two presentation fixes the owner asked for; PR B is the new screen.
