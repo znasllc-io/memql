@@ -296,13 +296,36 @@ func siteWritePrivileged(ctx context.Context, actor string) bool {
 // direction too: the stamped value is still the BARE caller id here, which is
 // what the comparison below expects; after canonicalisation it would be
 // `v1:identity:user:<id>` and a raw comparison would stop matching.
-func applySiteOwnerStamp(ctx context.Context, payload map[string]any, priorExisted bool, actor string) error {
+func applySiteOwnerStamp(ctx context.Context, payload map[string]any, priorExisted bool, actor string, deltaNamedOwner bool) error {
 	if payload == nil {
 		return nil
 	}
 	stamped := strings.TrimSpace(stringFromAny(payload["ownerUserId"]))
 
 	if siteWritePrivileged(ctx, actor) {
+		if priorExisted && !deltaNamedOwner {
+			// A PRIVILEGED UPDATE WHOSE DELTA NEVER NAMED THE OWNER. The
+			// merged payload carries the STORED owner, not a fresh stamp, so
+			// there is nothing of the caller's to undo -- and deleting it
+			// would convert somebody's site into a cluster-owned row.
+			//
+			// This is the packages pipeline's own shape: createSite runs
+			// under the deploying developer and stamps them; the next write,
+			// recordSitePackageOrigin, names only packageId and
+			// packageDeployableName and goes through store.writeInternal,
+			// which stamps INTERNAL ORIGIN onto a context still carrying that
+			// developer's AccessContext. Privileged, and the merged owner
+			// equals the caller -- so the self-match below fired on a value
+			// nothing had just stamped, the developer's site became
+			// cluster-owned, and their Go-live updateSiteStatus was refused
+			// as "not this caller's" (memql#4344 follow-up).
+			//
+			// A cluster owner handing a site over or taking it back by
+			// re-running createSite on the id still arrives with the owner
+			// IN the delta (the template restates `ownerUserId:
+			// actor.userId`), so that path keeps working.
+			return nil
+		}
 		caller := strings.TrimSpace(rowAuthzActorUserId(ctx))
 		if caller == "" {
 			// A system actor whose AccessContext carries no user id. The
