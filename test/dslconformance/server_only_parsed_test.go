@@ -1155,6 +1155,21 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "bench/mutations.memql", Name: "createBenchRun"}:    true,
 		{Path: "bench/mutations.memql", Name: "createBenchSample"}: true,
 
+		// THE GRANT ROWS (epic memql#5294). Caller-scoping is worse than
+		// unavailable here, and that is the whole argument: the obvious owner
+		// field is `subjectId`, the person the grant is FOR, and an owned row
+		// admits its owner's INSERTS -- so a self-scoped writeGrant would hand
+		// every signed-in person a primitive for granting themselves an app,
+		// and a self-scoped deactivateGrant would let them revoke a deny that
+		// bars them. v1:rbac:grant therefore declares
+		// @rowAuthz(clusterOwner, rankFloor="admin") with no owner field at all
+		// (the groupMembership shape, D2), and the four relational checks a
+		// write needs -- update on principal, holds the capability granted,
+		// outranks the subject, is not the subject -- are Go, behind the
+		// guarded grantSet / grantRevoke builtins that stamp internal origin.
+		{Path: "rbac/mutations.memql", Name: "writeGrant"}:      true,
+		{Path: "rbac/mutations.memql", Name: "deactivateGrant"}: true,
+
 		// THE CAPABILITY GRAPH'S EDGES (work spine A1, spec section C). An
 		// edge is EVIDENCE that two skills relate, gathered from runs the
 		// engine executed and committed only by a run that succeeded -- so a

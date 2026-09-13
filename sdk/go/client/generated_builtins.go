@@ -1017,6 +1017,21 @@ func EditDocumentBuild(args EditDocumentArgs) string {
 	return b.String()
 }
 
+// EffectiveCapabilitiesForActor -- The CALLER's resolved capability set, with provenance: one entry per (verb, resource) the cluster knows -- every pair any role holds, plus every pair a grant naming the caller adds -- each `allow` or `deny` and `source` naming the level that answered: `role` (inherited), `group` (a group the caller is in) or `user` (a grant on the caller). Takes no subject, so nobody can name anybody else; every signed-in person reads their own, which is why it carries no admin floor. This is the one read MemQL OS decides its desktop from. Returns {ok, role, userId, entries: [{verb, resource, effect, source}]}.
+type EffectiveCapabilitiesForActorArgs struct {
+}
+
+// EffectiveCapabilitiesForActor calls the engine builtin effectiveCapabilitiesForActor.
+func (qc *QueryClient) EffectiveCapabilitiesForActor(ctx context.Context, args EffectiveCapabilitiesForActorArgs) (*Result, error) {
+	call := EffectiveCapabilitiesForActorBuild(args)
+	return qc.executeNamed(ctx, "effectiveCapabilitiesForActor", call)
+}
+
+func EffectiveCapabilitiesForActorBuild(args EffectiveCapabilitiesForActorArgs) string {
+	_ = args
+	return "builtin effectiveCapabilitiesForActor()"
+}
+
 // FleetModelProbe -- Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions.
 type FleetModelProbeArgs struct {
 	// v1:worker:registration.id of the machine to measure on. It must be one of the caller's own; another user's id answers exactly as a made-up one does.
@@ -1213,6 +1228,76 @@ func GithubConnectBeginBuild(args GithubConnectBeginArgs) string {
 		b.WriteString("returnPath: ")
 		b.WriteString(quoteMemQL(args.ReturnPath))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// GrantRevoke -- Revoke one grant by its id: writes active:false as a new version of the same row, so the decision and its reversal are both history. The same four rules a set applies, because lifting a deny is handing somebody the app and lifting an allow is barring them from it. An id naming no active grant is grant_not_found. Audited as grant_revoked. Returns {ok, grantId, code, message}.
+type GrantRevokeArgs struct {
+	// The grant's derived row id, as grantsForSubject / grantsForResource / grantSet report it.
+	GrantId string
+}
+
+// GrantRevoke calls the engine builtin grantRevoke.
+func (qc *QueryClient) GrantRevoke(ctx context.Context, args GrantRevokeArgs) (*Result, error) {
+	call := GrantRevokeBuild(args)
+	return qc.executeNamed(ctx, "grantRevoke", call)
+}
+
+func GrantRevokeBuild(args GrantRevokeArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin grantRevoke(")
+	b.WriteString("grantId: ")
+	b.WriteString(quoteMemQL(args.GrantId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// GrantSet -- Write one grant: a person's or a group's allow or deny over one (verb, resourceType), as a new version at the derived row id -- re-granting the same subject the same pair never mints a second row. Guards, in order: the caller holds `update` on `principal` (grant_caller_not_permitted); the caller holds the capability being granted, resolved for themselves (grant_capability_not_held); the subject ranks no higher than the caller -- a user as their role, a group as its highest-ranked active member, an empty group as zero, and an unresolvable rank refuses (grant_subject_outranks_caller); the subject is not the caller (grant_self). A subject that is not an active user or group is grant_unknown_subject. Audited as grant_set. Returns {ok, grantId, code, message}.
+type GrantSetArgs struct {
+	// `user` or `group`. A role is never a subject: a role's abilities are edited on the role.
+	SubjectKind string
+	// The v1:identity:user or v1:identity:group the grant is for, in either spelling; stored bare.
+	SubjectId string
+	// One of the five verbs. Opening an app is `read` on `app:<id>`; a named part is `execute` on `app:<id>/<part>`.
+	Verb string
+	// The resource, in the catalog's open vocabulary -- `app:deployables`, `app:deployables/publish`, or any kind a role can hold.
+	ResourceType string
+	// `allow` widens what the subject's role answers; `deny` narrows it. Both are legal at every level.
+	Effect string
+}
+
+// GrantSet calls the engine builtin grantSet.
+func (qc *QueryClient) GrantSet(ctx context.Context, args GrantSetArgs) (*Result, error) {
+	call := GrantSetBuild(args)
+	return qc.executeNamed(ctx, "grantSet", call)
+}
+
+func GrantSetBuild(args GrantSetArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin grantSet(")
+	b.WriteString("subjectKind: ")
+	b.WriteString(quoteMemQL(args.SubjectKind))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("subjectId: ")
+	b.WriteString(quoteMemQL(args.SubjectId))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("verb: ")
+	b.WriteString(quoteMemQL(args.Verb))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("resourceType: ")
+	b.WriteString(quoteMemQL(args.ResourceType))
+	if b.Len() > 17 {
+		b.WriteString(", ")
+	}
+	b.WriteString("effect: ")
+	b.WriteString(quoteMemQL(args.Effect))
 	b.WriteString(")")
 	return b.String()
 }

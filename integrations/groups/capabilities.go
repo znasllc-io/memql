@@ -116,7 +116,7 @@ func (i *Integration) handleGroupCreate(ctx context.Context, args map[string]any
 	if err != nil {
 		return nil, err
 	}
-	if err := c.requireCapability(auth.VerbCreate); err != nil {
+	if err := c.requireCapability(ctx, auth.VerbCreate); err != nil {
 		return nil, err
 	}
 	name := strings.TrimSpace(asString(args["name"]))
@@ -158,7 +158,7 @@ func (i *Integration) handleGroupUpdate(ctx context.Context, args map[string]any
 	if err != nil {
 		return nil, err
 	}
-	if err := c.requireCapability(auth.VerbUpdate); err != nil {
+	if err := c.requireCapability(ctx, auth.VerbUpdate); err != nil {
 		return nil, err
 	}
 	g, err := i.requireActiveGroup(ctx, asString(args["groupId"]))
@@ -188,7 +188,7 @@ func (i *Integration) handleGroupArchive(ctx context.Context, args map[string]an
 	if err != nil {
 		return nil, err
 	}
-	if err := c.requireCapability(auth.VerbUpdate); err != nil {
+	if err := c.requireCapability(ctx, auth.VerbUpdate); err != nil {
 		return nil, err
 	}
 	g, err := i.requireActiveGroup(ctx, asString(args["groupId"]))
@@ -225,7 +225,7 @@ func (i *Integration) handleGroupMemberAdd(ctx context.Context, args map[string]
 	if err != nil {
 		return nil, err
 	}
-	if err := c.requireCapability(auth.VerbUpdate); err != nil {
+	if err := c.requireCapability(ctx, auth.VerbUpdate); err != nil {
 		return nil, err
 	}
 	g, err := i.requireActiveGroup(ctx, asString(args["groupId"]))
@@ -286,7 +286,7 @@ func (i *Integration) handleGroupMemberRemove(ctx context.Context, args map[stri
 	// it. Leaving a group grants nobody anything, and the alternative is
 	// somebody who cannot get out of a group they were placed in.
 	if !self {
-		if err := c.requireCapability(auth.VerbUpdate); err != nil {
+		if err := c.requireCapability(ctx, auth.VerbUpdate); err != nil {
 			return nil, err
 		}
 		role, err := i.store.UserRole(ctx, target)

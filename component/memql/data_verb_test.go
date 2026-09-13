@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"context"
 	"sort"
 	"strings"
 	"testing"
@@ -83,7 +84,7 @@ func TestDataVerbForIsClassificationOnly(t *testing.T) {
 
 	// Precondition: reader genuinely lacks create-on-data, so if Execute were
 	// gated this actor-less call would be the one to fail.
-	if auth.Capable(auth.RoleReader, auth.VerbCreate, auth.ResourceData) {
+	if auth.CapableFor(context.Background(), auth.Subject{Role: auth.RoleReader}, auth.VerbCreate, auth.ResourceData) {
 		t.Fatal("precondition: reader must not hold create-on-data")
 	}
 

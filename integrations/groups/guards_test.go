@@ -89,7 +89,7 @@ func TestCapabilityGuardFollowsTheSeededGrants(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolveCaller(%s): %v", tc.role, err)
 		}
-		err = c.requireCapability(tc.verb)
+		err = c.requireCapability(context.Background(), tc.verb)
 		if tc.admit && err != nil {
 			t.Fatalf("%s holding %s on group: want admit, got %v", tc.role, tc.verb, err)
 		}

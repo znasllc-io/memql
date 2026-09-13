@@ -107,6 +107,50 @@ type recordingEngine struct {
 	statements []string
 	role       *roleRow
 	grants     []componentAuth.VerbResource
+
+	// The subject reads the grant builtins make (grants_test.go): a user
+	// directory (bare id -> role slug), a group directory, and at most one
+	// existing grant for the revoke cases.
+	users  map[string]string
+	groups map[string]testGroup
+	grant  *testGrant
+}
+
+type testGroup struct {
+	status  string
+	members []string
+}
+
+type testGrant struct {
+	id, kind, subject, verb, resource, effect string
+	active                                    bool
+}
+
+// bareTestId strips the canonical prefixes the handlers may pass, so the
+// directories above are keyed by the bare id alone.
+func bareTestId(id string) string {
+	for _, prefix := range []string{"v1:identity:user:", "v1:identity:group:", "v1:rbac:grant:"} {
+		id = strings.TrimPrefix(id, prefix)
+	}
+	return id
+}
+
+// quotedArg reads the first quoted argument value out of a rendered statement.
+func quotedArg(q, name string) string {
+	idx := strings.Index(q, name+": \"")
+	if idx < 0 {
+		return ""
+	}
+	rest := q[idx+len(name)+3:]
+	end := strings.Index(rest, "\"")
+	if end < 0 {
+		return ""
+	}
+	return rest[:end]
+}
+
+func stringNode(id string, fields map[string]*structpb.Value) *memqlv1.MemoryNode {
+	return &memqlv1.MemoryNode{Id: id, Payload: &structpb.Struct{Fields: fields}}
 }
 
 func (e *recordingEngine) Execute(_ context.Context, q string) (*memql.ExecuteResult, error) {
@@ -127,6 +171,48 @@ func (e *recordingEngine) Execute(_ context.Context, q string) (*memql.ExecuteRe
 				"predefined":  structpb.NewBoolValue(e.role.predefined),
 			}},
 		}}}}, nil
+	case strings.HasPrefix(q, "query userByIdSystem"):
+		id := bareTestId(quotedArg(q, "userId"))
+		role, ok := e.users[id]
+		if !ok {
+			return &memql.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
+		}
+		return &memql.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{
+			stringNode("v1:identity:user:"+id, map[string]*structpb.Value{"role": structpb.NewStringValue(role)}),
+		}}}, nil
+	case strings.HasPrefix(q, "query groupById"):
+		id := bareTestId(quotedArg(q, "groupId"))
+		g, ok := e.groups[id]
+		if !ok {
+			return &memql.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
+		}
+		return &memql.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{
+			stringNode("v1:identity:group:"+id, map[string]*structpb.Value{"status": structpb.NewStringValue(g.status)}),
+		}}}, nil
+	case strings.HasPrefix(q, "query membersOfGroup"):
+		id := bareTestId(quotedArg(q, "groupId"))
+		nodes := []*memqlv1.MemoryNode{}
+		for _, m := range e.groups[id].members {
+			nodes = append(nodes, stringNode("v1:identity:groupMembership:"+id+"-"+m, map[string]*structpb.Value{
+				"groupId": structpb.NewStringValue(id), "userId": structpb.NewStringValue(m),
+			}))
+		}
+		return &memql.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: nodes}}, nil
+	case strings.HasPrefix(q, "query grantById"):
+		id := bareTestId(quotedArg(q, "grantId"))
+		if e.grant == nil || e.grant.id != id {
+			return &memql.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
+		}
+		return &memql.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{
+			stringNode("v1:rbac:grant:"+id, map[string]*structpb.Value{
+				"subjectKind":  structpb.NewStringValue(e.grant.kind),
+				"subjectId":    structpb.NewStringValue(e.grant.subject),
+				"verb":         structpb.NewStringValue(e.grant.verb),
+				"resourceType": structpb.NewStringValue(e.grant.resource),
+				"effect":       structpb.NewStringValue(e.grant.effect),
+				"active":       structpb.NewBoolValue(e.grant.active),
+			}),
+		}}}, nil
 	case strings.HasPrefix(q, "query capabilitiesForRole"):
 		nodes := make([]*memqlv1.MemoryNode, 0, len(e.grants))
 		for idx, g := range e.grants {

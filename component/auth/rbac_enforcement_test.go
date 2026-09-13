@@ -1,15 +1,17 @@
 package auth
 
 import (
+	"context"
 	"sync"
 	"testing"
 )
 
 // TestCapableIsTheCanonicalPrimitive pins that the migrated Can* adapters are
-// exactly the Capable() decisions they claim to be -- i.e. the single
-// enforcement primitive (Capable) and the convenience adapters can never drift
-// apart. This is the E1.6 "consistent server-side" guard at the API level: one
-// definition of "may role R do verb V on resource T".
+// exactly the CapableFor() decisions they claim to be -- i.e. the single
+// enforcement primitive (CapableFor, asked about a role-only subject) and the
+// convenience adapters can never drift apart. This is the E1.6 "consistent
+// server-side" guard at the API level: one definition of "may role R do verb V
+// on resource T".
 func TestCapableIsTheCanonicalPrimitive(t *testing.T) {
 	for _, slug := range allSlugs {
 		u := UserContext{ID: "u", Role: slug}
@@ -18,15 +20,15 @@ func TestCapableIsTheCanonicalPrimitive(t *testing.T) {
 			capable bool
 			name    string
 		}{
-			{AtLeastAdmin(u), Capable(slug, VerbCreate, ResourcePrincipal), "AtLeastAdmin == create/principal"},
-			{IsPrivilegedUser(u), Capable(slug, VerbCreate, ResourcePrincipal), "IsPrivilegedUser == create/principal"},
-			{AtLeastDeveloper(u), Capable(slug, VerbExecute, ResourceDeployment), "AtLeastDeveloper == execute/deployment"},
-			{CanWrite(u), Capable(slug, VerbCreate, ResourceData), "CanWrite == create/data"},
-			{CanAuthor(u), Capable(slug, VerbCreate, ResourceConstruct), "CanAuthor == create/construct"},
-			{CanRunInline(u), Capable(slug, VerbExecute, ResourceConstruct), "CanRunInline == execute/construct"},
-			{CanRead(u), Capable(slug, VerbRead, ResourceData), "CanRead == read/data"},
-			{CanCreateAgent(u), Capable(slug, VerbCreate, ResourceAgent), "CanCreateAgent == create/agent"},
-			{CanManageGroup(u), Capable(slug, VerbCreate, ResourceGroup), "CanManageGroup == create/group"},
+			{AtLeastAdmin(u), CapableFor(context.Background(), Subject{Role: slug}, VerbCreate, ResourcePrincipal), "AtLeastAdmin == create/principal"},
+			{IsPrivilegedUser(u), CapableFor(context.Background(), Subject{Role: slug}, VerbCreate, ResourcePrincipal), "IsPrivilegedUser == create/principal"},
+			{AtLeastDeveloper(u), CapableFor(context.Background(), Subject{Role: slug}, VerbExecute, ResourceDeployment), "AtLeastDeveloper == execute/deployment"},
+			{CanWrite(u), CapableFor(context.Background(), Subject{Role: slug}, VerbCreate, ResourceData), "CanWrite == create/data"},
+			{CanAuthor(u), CapableFor(context.Background(), Subject{Role: slug}, VerbCreate, ResourceConstruct), "CanAuthor == create/construct"},
+			{CanRunInline(u), CapableFor(context.Background(), Subject{Role: slug}, VerbExecute, ResourceConstruct), "CanRunInline == execute/construct"},
+			{CanRead(u), CapableFor(context.Background(), Subject{Role: slug}, VerbRead, ResourceData), "CanRead == read/data"},
+			{CanCreateAgent(u), CapableFor(context.Background(), Subject{Role: slug}, VerbCreate, ResourceAgent), "CanCreateAgent == create/agent"},
+			{CanManageGroup(u), CapableFor(context.Background(), Subject{Role: slug}, VerbCreate, ResourceGroup), "CanManageGroup == create/group"},
 		}
 		for _, p := range pairs {
 			if p.adapter != p.capable {
@@ -65,7 +67,7 @@ func TestCapableNodeConsistency(t *testing.T) {
 	// Reference resolution (one "node").
 	want := make([]bool, len(queries))
 	for i, q := range queries {
-		want[i] = Capable(q.role, q.verb, q.resource)
+		want[i] = CapableFor(context.Background(), Subject{Role: q.role}, q.verb, q.resource)
 	}
 
 	// N concurrent "nodes" must all agree with the reference.
@@ -77,7 +79,7 @@ func TestCapableNodeConsistency(t *testing.T) {
 		go func(node int) {
 			defer wg.Done()
 			for i, q := range queries {
-				if got := Capable(q.role, q.verb, q.resource); got != want[i] {
+				if got := CapableFor(context.Background(), Subject{Role: q.role}, q.verb, q.resource); got != want[i] {
 					mismatch <- "node decision diverged for a (role,verb,resource)"
 				}
 			}

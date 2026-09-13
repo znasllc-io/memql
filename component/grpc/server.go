@@ -1925,11 +1925,12 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 	// it.
 
 	// Coarse data-resource capability gate (memql#3179, carrying memql#2802).
-	// The request-path caller for auth.Capable(role, verb, auth.ResourceData):
-	// it answers "may this actor read / write the data plane at all", which is
-	// what makes `reader` and `writer` distinguishable here -- before this,
-	// nothing consulted the data-plane capability and a reader could execute
-	// any mutation the DSL exposes.
+	// The request-path caller for auth.CapableFor(ctx, subject, verb,
+	// auth.ResourceData), the subject being the verified caller plus their
+	// groups (epic memql#5296): it answers "may this actor read / write the
+	// data plane at all", which is what makes `reader` and `writer`
+	// distinguishable here -- before this, nothing consulted the data-plane
+	// capability and a reader could execute any mutation the DSL exposes.
 	//
 	// It runs on the FULLY-BUILT ctx (origin + provenance + resolved
 	// AccessContext) on purpose: the classification it performs re-parses the

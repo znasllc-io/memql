@@ -83,3 +83,52 @@ builtin roleUpdate {
 builtin roleDeactivate {
   slug  string!  @description("The role to retire.")
 }
+
+// ---------------------------------------------------------------------------
+//   Grants to people and groups (app access grants record, section 3;
+//   epics memql#5297 and memql#5298).
+// ---------------------------------------------------------------------------
+//
+// Two builtins write a v1:rbac:grant and one reads the caller's resolved set
+// back. They are the CLIENT-REACHABLE path -- `writeGrant` and
+// `deactivateGrant` in mutations.memql are @serverOnly precisely so this is
+// the only way in -- and they are Go because every guard is relational or
+// set-valued: the caller holds `update` on `principal`; the caller holds the
+// capability being granted, resolved for THEMSELVES through the same rule
+// every gate uses; the subject ranks no higher than the caller (a group ranks
+// as its highest-ranked active member, an empty group ranks zero); never
+// yourself. An unresolvable rank denies.
+//
+// The write builtins return { ok, grantId, code, message }; `code` is empty on
+// success and otherwise one of grant_caller_not_permitted,
+// grant_capability_not_held, grant_subject_outranks_caller, grant_self,
+// grant_unknown_subject, grant_invalid, grant_not_found -- so a client renders
+// the refusal it got rather than parsing a sentence. Every write lands on
+// v1:identity:auditEvent with targetType `grant`.
+
+@description("Write one grant: a person's or a group's allow or deny over one (verb, resourceType), as a new version at the derived row id -- re-granting the same subject the same pair never mints a second row. Guards, in order: the caller holds `update` on `principal` (grant_caller_not_permitted); the caller holds the capability being granted, resolved for themselves (grant_capability_not_held); the subject ranks no higher than the caller -- a user as their role, a group as its highest-ranked active member, an empty group as zero, and an unresolvable rank refuses (grant_subject_outranks_caller); the subject is not the caller (grant_self). A subject that is not an active user or group is grant_unknown_subject. Audited as grant_set. Returns {ok, grantId, code, message}.")
+@sdk
+@args(profile="object")
+@executor("integration.rbac.grantSet")
+builtin grantSet {
+  subjectKind   string!  @description("`user` or `group`. A role is never a subject: a role's abilities are edited on the role.")
+  subjectId     string!  @description("The v1:identity:user or v1:identity:group the grant is for, in either spelling; stored bare.")
+  verb          string!  @description("One of the five verbs. Opening an app is `read` on `app:<id>`; a named part is `execute` on `app:<id>/<part>`.")
+  resourceType  string!  @description("The resource, in the catalog's open vocabulary -- `app:deployables`, `app:deployables/publish`, or any kind a role can hold.")
+  effect        string!  @description("`allow` widens what the subject's role answers; `deny` narrows it. Both are legal at every level.")
+}
+
+@description("Revoke one grant by its id: writes active:false as a new version of the same row, so the decision and its reversal are both history. The same four rules a set applies, because lifting a deny is handing somebody the app and lifting an allow is barring them from it. An id naming no active grant is grant_not_found. Audited as grant_revoked. Returns {ok, grantId, code, message}.")
+@sdk
+@args(profile="object")
+@executor("integration.rbac.grantRevoke")
+builtin grantRevoke {
+  grantId  string!  @description("The grant's derived row id, as grantsForSubject / grantsForResource / grantSet report it.")
+}
+
+@description("The CALLER's resolved capability set, with provenance: one entry per (verb, resource) the cluster knows -- every pair any role holds, plus every pair a grant naming the caller adds -- each `allow` or `deny` and `source` naming the level that answered: `role` (inherited), `group` (a group the caller is in) or `user` (a grant on the caller). Takes no subject, so nobody can name anybody else; every signed-in person reads their own, which is why it carries no admin floor. This is the one read MemQL OS decides its desktop from. Returns {ok, role, userId, entries: [{verb, resource, effect, source}]}.")
+@sdk
+@args(profile="object")
+@executor("integration.rbac.effectiveCapabilities")
+builtin effectiveCapabilitiesForActor {
+}

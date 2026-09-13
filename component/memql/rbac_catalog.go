@@ -541,6 +541,11 @@ func (e *MemQLEngine) StartCapabilityCatalog(ctx context.Context) {
 		return
 	}
 
+	// The grant and membership sources beside the catalog (epic memql#5296).
+	// No load and no reload: grants are read per request, so installing the
+	// reader is the whole of it.
+	e.InstallGrantResolution()
+
 	if err := e.ReloadCapabilityCatalog(ctx); err != nil {
 		// THE BOOT LINE, and it says which mode is in force rather than only
 		// that something failed. "The catalog is unreadable" and "the catalog

@@ -11,6 +11,7 @@ package deploypack_test
 // the deploy effect chain or the role gate fails here.
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -83,7 +84,7 @@ func TestDeployPackRBACRoleGate(t *testing.T) {
 		auth.RoleReader:    false,
 	}
 	for role, want := range forwardDeploy {
-		if got := auth.Capable(role, auth.VerbExecute, auth.ResourceDeployment); got != want {
+		if got := auth.CapableFor(context.Background(), auth.Subject{Role: role}, auth.VerbExecute, auth.ResourceDeployment); got != want {
 			t.Errorf("Capable(%s, execute, deployment) = %v, want %v (forward-deploy gate)", role, got, want)
 		}
 	}
@@ -108,9 +109,9 @@ func TestDeployPackRBACRoleGate(t *testing.T) {
 // many times -- a node-local-state regression (a cache that diverges per
 // replica) would surface as a flaky decision.
 func TestDeployPackRBACDecisionIsNodeConsistent(t *testing.T) {
-	first := auth.Capable(auth.RoleDeveloper, auth.VerbExecute, auth.ResourceDeployment)
+	first := auth.CapableFor(context.Background(), auth.Subject{Role: auth.RoleDeveloper}, auth.VerbExecute, auth.ResourceDeployment)
 	for i := 0; i < 1000; i++ {
-		if got := auth.Capable(auth.RoleDeveloper, auth.VerbExecute, auth.ResourceDeployment); got != first {
+		if got := auth.CapableFor(context.Background(), auth.Subject{Role: auth.RoleDeveloper}, auth.VerbExecute, auth.ResourceDeployment); got != first {
 			t.Fatalf("Capable is non-deterministic (iter %d): got %v, first %v -- a per-node cache would diverge in the mesh", i, got, first)
 		}
 	}

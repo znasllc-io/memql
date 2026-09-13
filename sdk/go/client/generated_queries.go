@@ -3555,6 +3555,79 @@ func GlobalVariablesBuild(args GlobalVariablesArgs) string {
 	return b.String()
 }
 
+// GrantById -- One grant by its derived row id -- what grantRevoke reads before it acts, and the Access screen's detail read. Answers the newest version whether active or revoked; `active` says which.
+//
+// Bound concept: v1:rbac:grant (machine-readable: BoundConcepts["grantById"] in generated_concepts.go).
+type GrantByIdArgs struct {
+	GrantId string
+}
+
+// GrantById calls the engine query grantById.
+func (qc *QueryClient) GrantById(ctx context.Context, args GrantByIdArgs) (*Result, error) {
+	call := GrantByIdBuild(args)
+	return qc.executeNamed(ctx, "grantById", call)
+}
+
+func GrantByIdBuild(args GrantByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query grantById(")
+	b.WriteString("grantId: ")
+	b.WriteString(quoteMemQL(args.GrantId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// GrantsForResource -- Every active grant over one resource -- the by-app view: who currently holds it, or is barred.
+//
+// Bound concept: v1:rbac:grant (machine-readable: BoundConcepts["grantsForResource"] in generated_concepts.go).
+type GrantsForResourceArgs struct {
+	ResourceType string
+}
+
+// GrantsForResource calls the engine query grantsForResource.
+func (qc *QueryClient) GrantsForResource(ctx context.Context, args GrantsForResourceArgs) (*Result, error) {
+	call := GrantsForResourceBuild(args)
+	return qc.executeNamed(ctx, "grantsForResource", call)
+}
+
+func GrantsForResourceBuild(args GrantsForResourceArgs) string {
+	var b strings.Builder
+	b.WriteString("query grantsForResource(")
+	b.WriteString("resourceType: ")
+	b.WriteString(quoteMemQL(args.ResourceType))
+	b.WriteString(")")
+	return b.String()
+}
+
+// GrantsForSubject -- Every active grant naming one subject -- the by-person / by-group view of the Access screen.
+//
+// Bound concept: v1:rbac:grant (machine-readable: BoundConcepts["grantsForSubject"] in generated_concepts.go).
+type GrantsForSubjectArgs struct {
+	// Enum: user | group
+	SubjectKind string
+	SubjectId   string
+}
+
+// GrantsForSubject calls the engine query grantsForSubject.
+func (qc *QueryClient) GrantsForSubject(ctx context.Context, args GrantsForSubjectArgs) (*Result, error) {
+	call := GrantsForSubjectBuild(args)
+	return qc.executeNamed(ctx, "grantsForSubject", call)
+}
+
+func GrantsForSubjectBuild(args GrantsForSubjectArgs) string {
+	var b strings.Builder
+	b.WriteString("query grantsForSubject(")
+	b.WriteString("subjectKind: ")
+	b.WriteString(quoteMemQL(args.SubjectKind))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("subjectId: ")
+	b.WriteString(quoteMemQL(args.SubjectId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // GroupById -- One group by id, for its page.
 //
 // Bound concept: v1:identity:group (machine-readable: BoundConcepts["groupById"] in generated_concepts.go).

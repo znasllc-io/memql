@@ -678,6 +678,15 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// report an age in the first place.
 	defer func() { out.startedAt(startTime) }()
 
+	// ONE MEMBERSHIP READ AND ONE GRANT READ PER REQUEST (epic memql#5295,
+	// D9). The requires-capability gates run BEFORE the plan and mutation
+	// executors install their scope memos, so without this a gated mutation
+	// paid the membership read twice -- once for the gate, once for the
+	// account scope. Installing both holders here is idempotent: every later
+	// install finds them and hands the same resolution down.
+	ctx = contextWithAccountScopeMemo(ctx, e)
+	ctx = auth.ContextWithGrantMemo(ctx)
+
 	if !e.canResolve() {
 		return nil, ErrEngineNotInitialized
 	}
@@ -723,6 +732,41 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 
 	plan, err := e.parseWithFunctionsAmbient(query, fns, specOverlay, allowInline, origin, ambient, stagedScope)
 	if err != nil {
+		return nil, err
+	}
+
+	// SURFACE AUTHORIZATION (epic memql#4832, D6; epic memql#5166, D11).
+	// Every construct this call expanded that declares an actor-rank floor
+	// or a capability grant is checked against the live caller, HERE rather
+	// than at expansion, because the plan is cached and shared and "this
+	// caller cleared the floor" is not a property of a plan. Both, because a
+	// construct may declare both and they compose; both at the PLAN level,
+	// because a query that expands a gated construct must clear its gate
+	// exactly as a direct call does.
+	//
+	// DIRECTLY AFTER THE PARSE, BEFORE ANY EARLY RETURN (epic memql#5296).
+	// These two gates used to sit on the query path further down, below
+	// seven branches that return without reaching it: a top-level builtin, a
+	// literal, a collection method, a dot access, an arithmetic or comparison
+	// fold, a date builtin. A SINGLE-STATEMENT logic -- `return cond(...)`,
+	// `return someBuiltin({...})` -- expands to exactly one of those at
+	// plan.Root and never hoists to plan.LogicCall (that needs LogicSteps),
+	// so a `@requiresRank` or `@requiresCapability` on it was recorded on the
+	// plan and read by nothing. The grant enforcement probe found it: the
+	// plan-expansion path refused and the "direct" single-statement path
+	// admitted everybody. The multi-step logic and mutation dispatches below
+	// carry their own direct-call gates, and record nothing here, so this is
+	// a no-op for them rather than a second check.
+	//
+	// It refuses the call outright rather than narrowing it. A floor is a
+	// statement about who may call, not about which rows come back -- and
+	// an empty result would be indistinguishable from "there is nothing
+	// here", which is exactly the answer a caller who may not reach the
+	// surface should not be handed.
+	if err := e.refusePlanBelowRequiredRank(ctx, plan); err != nil {
+		return nil, err
+	}
+	if err := e.refusePlanBelowRequiredCapability(ctx, plan); err != nil {
 		return nil, err
 	}
 
@@ -971,27 +1015,10 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		return nil, err
 	}
 
-	// SURFACE AUTHORIZATION (epic memql#4832, D6). Every construct this
-	// read expanded that declares an actor-rank floor is checked against
-	// the live caller, HERE rather than at expansion, because the plan is
-	// cached and shared and "this caller cleared the floor" is not a
-	// property of a plan.
-	//
-	// It refuses the READ outright rather than narrowing it. A floor is a
-	// statement about who may call, not about which rows come back -- and
-	// an empty result would be indistinguishable from "there is nothing
-	// here", which is exactly the answer a caller who may not reach the
-	// surface should not be handed.
-	if err := e.refusePlanBelowRequiredRank(ctx, plan); err != nil {
-		return nil, err
-	}
-	// The capability GRANT beside the rank FLOOR (epic memql#5166, D11). Both,
-	// because a construct may declare both and they compose -- and both at the
-	// PLAN level, because a query that expands a gated construct must clear its
-	// gate exactly as a direct call does.
-	if err := e.refusePlanBelowRequiredCapability(ctx, plan); err != nil {
-		return nil, err
-	}
+	// The surface floors -- @requiresRank and @requiresCapability -- were
+	// checked HERE until memql#5296 and are now checked directly after the
+	// parse above, before the seven early-return branches this line sits
+	// below. See the comment there for what the old placement missed.
 
 	// ANONYMOUS READS (epic memql#4541, D4). The row gate is what makes the
 	// public tier correct -- it denies every row a non-public read could

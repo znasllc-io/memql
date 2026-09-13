@@ -3,17 +3,20 @@ package memql
 // data_capability_gate.go -- the request-path caller for the coarse
 // data-resource capability check (memql#3179, carrying memql#2802).
 //
-// WHAT THIS IS. auth.Capable(role, verb, auth.ResourceData) is one of the
-// seven resource types in the consolidated RBAC model (epic memql#2062). Three
-// of them had request-path callers; `data` had none -- auth.CanRead and
-// auth.CanWrite existed with zero non-test callers, so nothing consulted the
-// data-plane capability before executing a query or a mutation, and `reader`
-// and `writer` were indistinguishable at the data plane: a reader could
-// execute any mutation the DSL exposes. This file is the caller that stops
-// that being true.
+// WHAT THIS IS. `data` is one of the seven resource types in the consolidated
+// RBAC model (epic memql#2062). Three of them had request-path callers; `data`
+// had none -- auth.CanRead and auth.CanWrite existed with zero non-test
+// callers, so nothing consulted the data-plane capability before executing a
+// query or a mutation, and `reader` and `writer` were indistinguishable at the
+// data plane: a reader could execute any mutation the DSL exposes. This file
+// is the caller that stops that being true. The question is the ACTOR-SHAPED
+// one, auth.CapableFor(ctx, subject, verb, auth.ResourceData) (epic
+// memql#5296): the subject is the verified caller plus their groups, so a
+// grant naming them widens or narrows the answer exactly as it does at every
+// other gate.
 //
 // WHAT THIS IS NOT -- READ THIS BEFORE TREATING THE ROW-VISIBILITY GAP AS
-// CLOSED. This is the COARSE half. auth.Capable(role, auth.VerbRead,
+// CLOSED. This is the COARSE half. CapableFor(ctx, subject, auth.VerbRead,
 // auth.ResourceData) answers "may this actor read call records" -- never
 // "WHICH call records". Row visibility is a separate, unrelated question,
 // still answered only by whatever the DSL author wrote in the filter (see
@@ -122,17 +125,25 @@ func (s *streamSession) allowDataPlaneAccess(ctx context.Context, query string) 
 	access, _ := auth.AccessFromContext(ctx)
 	role := dataPlaneRole(access)
 
+	// The subject is built FROM THE VERIFIED CALLER: role and id off the
+	// AccessContext the interceptor resolved, groups from the installed
+	// membership source. The role is the coerced one above -- an absent or
+	// unrecognised role reads as reader here, and the subject must ask about
+	// the role this gate decides on.
+	subject, _ := auth.SubjectFromContext(ctx)
+	subject.Role = role
+
 	// The read half. Every role in the shipped model holds read-on-data, so
 	// this refuses nobody today; it is here because "may this actor read at
 	// all" is a real question the model answers, and a role authored without
 	// the grant (custom roles, v1:rbac:role) must be refused here rather than
 	// read silently.
-	if !auth.Capable(role, auth.VerbRead, auth.ResourceData) {
+	if !auth.CapableFor(ctx, subject, auth.VerbRead, auth.ResourceData) {
 		return false, fmt.Sprintf("permission denied: role %q holds no read capability on the data plane", role)
 	}
 
 	// The write half -- the reason this file exists.
-	if auth.Capable(role, auth.VerbCreate, auth.ResourceData) {
+	if auth.CapableFor(ctx, subject, auth.VerbCreate, auth.ResourceData) {
 		return true, ""
 	}
 	if s.service == nil || s.service.engine == nil {

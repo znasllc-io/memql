@@ -117,6 +117,38 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name: "grantSet",
+			Description: "Write one v1:rbac:grant -- a person's or a group's allow or deny over one " +
+				"(verb, resourceType) -- under the four governance rules: update on principal, the " +
+				"capability held by the caller, the subject ranking no higher, never yourself. " +
+				"Returns {ok, grantId, code, message}.",
+			Handler: i.handleGrantSet,
+			ArgsSchema: map[string]string{
+				"subjectKind":  "string (required) - user | group",
+				"subjectId":    "string (required) - the user's or group's id",
+				"verb":         "string (required) - read | create | update | delete | execute",
+				"resourceType": "string (required) - the resource, e.g. app:deployables or app:deployables/publish",
+				"effect":       "string (required) - allow | deny",
+			},
+		},
+		{
+			Name: "grantRevoke",
+			Description: "Revoke one v1:rbac:grant by id, writing active:false as a new version under the " +
+				"same four rules a set applies. Returns {ok, grantId, code, message}.",
+			Handler: i.handleGrantRevoke,
+			ArgsSchema: map[string]string{
+				"grantId": "string (required) - the grant's derived row id",
+			},
+		},
+		{
+			Name: "effectiveCapabilities",
+			Description: "The CALLER's resolved capability set with provenance: one entry per (verb, resource) " +
+				"the cluster knows, each allow or deny and which level answered (role, group or user). " +
+				"Takes no subject; every signed-in person reads their own. Returns {ok, role, userId, entries}.",
+			Handler:    i.handleEffectiveCapabilities,
+			ArgsSchema: map[string]string{},
+		},
+		{
 			Name:        "canCreatePrincipal",
 			Description: "The create != edit split: may an actor at actorRank create a principal at newRank? Returns {allowed: bool}.",
 			Handler:     i.handleCanCreatePrincipal,

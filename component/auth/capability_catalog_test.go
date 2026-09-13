@@ -1,6 +1,9 @@
 package auth
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // fakeCatalog is a hand-built catalog for the read-through tests. It answers
 // exactly what it is given and nothing else, which is the property under test:
@@ -51,11 +54,11 @@ func TestCapableReadsTheCatalogWhenInstalled(t *testing.T) {
 		},
 	})
 
-	if !Capable(Role("support-lead"), VerbRead, ResourcePrincipal) {
+	if !CapableFor(context.Background(), Subject{Role: Role("support-lead")}, VerbRead, ResourcePrincipal) {
 		t.Fatal("a custom role holding read-on-principal must be Capable of it -- " +
 			"this is the whole point of the epic: a role is data the engine enforces")
 	}
-	if Capable(Role("support-lead"), VerbDelete, ResourcePrincipal) {
+	if CapableFor(context.Background(), Subject{Role: Role("support-lead")}, VerbDelete, ResourcePrincipal) {
 		t.Fatal("a custom role must hold exactly the pairs the catalog gives it and no others")
 	}
 	if got := RoleRank(Role("support-lead")); got != 150 {
@@ -79,7 +82,7 @@ func TestUnknownSlugHoldsNothingAndRanksZero(t *testing.T) {
 	}
 	for _, verb := range verbs {
 		for _, res := range resources {
-			if Capable(Role("ghost"), verb, res) {
+			if CapableFor(context.Background(), Subject{Role: Role("ghost")}, verb, res) {
 				t.Fatalf("an unknown slug held %s on %s", verb, res)
 			}
 		}
@@ -96,7 +99,7 @@ func TestUnknownSlugHoldsNothingAndRanksZero(t *testing.T) {
 func TestAnInstalledCatalogDoesNotFallBackToTheMirror(t *testing.T) {
 	installFake(t, &fakeCatalog{ranks: map[string]int{"owner": 400}})
 
-	if Capable(RoleAdmin, VerbCreate, ResourcePrincipal) {
+	if CapableFor(context.Background(), Subject{Role: RoleAdmin}, VerbCreate, ResourcePrincipal) {
 		t.Fatal("an installed catalog that does not carry `admin` must answer that admin holds " +
 			"nothing. Falling back to the compiled mirror would make the rows advisory")
 	}
@@ -108,7 +111,7 @@ func TestAnInstalledCatalogDoesNotFallBackToTheMirror(t *testing.T) {
 func TestMirrorAnswersBeforeACatalogIsInstalled(t *testing.T) {
 	SetCapabilityCatalog(nil)
 
-	if !Capable(RoleOwner, VerbCreate, ResourcePrincipal) {
+	if !CapableFor(context.Background(), Subject{Role: RoleOwner}, VerbCreate, ResourcePrincipal) {
 		t.Fatal("with no catalog installed the compiled mirror must answer for a base role -- " +
 			"the identity node's gates run before the seed is readable")
 	}
@@ -133,10 +136,10 @@ func TestDenyIsResolvedByTheCatalog(t *testing.T) {
 		},
 	})
 
-	if Capable(Role("finance"), VerbExecute, ResourceDeployment) {
+	if CapableFor(context.Background(), Subject{Role: Role("finance")}, VerbExecute, ResourceDeployment) {
 		t.Fatal("a pair the catalog does not report held must not be Capable")
 	}
-	if !Capable(Role("finance"), VerbRead, ResourceData) {
+	if !CapableFor(context.Background(), Subject{Role: Role("finance")}, VerbRead, ResourceData) {
 		t.Fatal("the pairs it does report held must be Capable")
 	}
 }
@@ -159,7 +162,7 @@ func TestADeactivatedRoleAnswersNothingEverywhere(t *testing.T) {
 		off:    map[string]bool{"retired": true},
 	})
 
-	if Capable(Role("retired"), VerbRead, ResourceData) {
+	if CapableFor(context.Background(), Subject{Role: Role("retired")}, VerbRead, ResourceData) {
 		t.Fatal("a deactivated role must hold nothing (D8: deactivate, never delete)")
 	}
 	if got := RoleRank(Role("retired")); got != 0 {
@@ -229,7 +232,7 @@ func TestCanonicalSlugResolvesAnAlias(t *testing.T) {
 // exactly what they have re-enabled.
 func TestAnEmptyCatalogWouldLockOutTheOwner(t *testing.T) {
 	for _, role := range []Role{RoleOwner, RoleDeveloper} {
-		if !Capable(role, VerbCreate, ResourceConstruct) {
+		if !CapableFor(context.Background(), Subject{Role: role}, VerbCreate, ResourceConstruct) {
 			t.Fatalf("precondition: %s must hold create x construct in the compiled mirror", role)
 		}
 	}
@@ -237,7 +240,7 @@ func TestAnEmptyCatalogWouldLockOutTheOwner(t *testing.T) {
 	installFake(t, &fakeCatalog{})
 
 	for _, role := range []Role{RoleOwner, RoleDeveloper} {
-		if Capable(role, VerbCreate, ResourceConstruct) {
+		if CapableFor(context.Background(), Subject{Role: role}, VerbCreate, ResourceConstruct) {
 			t.Fatalf("an empty catalog answered TRUE for %s -- the short-circuit at "+
 				"roleHasCapability is gone, and the empty-catalog guard in "+
 				"component/memql.ReloadCapabilityCatalog is now guarding nothing", role)
@@ -251,10 +254,10 @@ func TestAnEmptyCatalogWouldLockOutTheOwner(t *testing.T) {
 // or a mirror edit ever grants admin that pair, the DSL-deploy gate silently
 // widens to admin and no test in component/packages would notice.
 func TestAdminHoldsNoAuthoringGrant(t *testing.T) {
-	if Capable(RoleAdmin, VerbCreate, ResourceConstruct) {
+	if CapableFor(context.Background(), Subject{Role: RoleAdmin}, VerbCreate, ResourceConstruct) {
 		t.Fatal("admin holds create x construct -- the D9 gate and every CanAuthor site just widened to admin")
 	}
-	if !Capable(RoleAdmin, VerbRead, ResourceConstruct) {
+	if !CapableFor(context.Background(), Subject{Role: RoleAdmin}, VerbRead, ResourceConstruct) {
 		t.Fatal("admin lost read x construct -- expected admin to keep exactly the read grant")
 	}
 	if !CanAuthor(UserContext{Role: RoleDeveloper}) || !CanAuthor(UserContext{Role: RoleOwner}) {

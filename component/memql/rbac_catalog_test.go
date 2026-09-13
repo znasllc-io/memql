@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 	"testing"
@@ -388,7 +389,7 @@ func TestAnEmptyCatalogIsRefusedRatherThanInstalled(t *testing.T) {
 		t.Fatal("a refused catalog was installed anyway -- the mirror is no longer answering")
 	}
 	// The owner must still answer from the mirror, which is the whole point.
-	if !auth.Capable(auth.RoleOwner, auth.VerbCreate, auth.ResourceConstruct) {
+	if !auth.CapableFor(context.Background(), auth.Subject{Role: auth.RoleOwner}, auth.VerbCreate, auth.ResourceConstruct) {
 		t.Fatal("owner lost create x construct after a refused install")
 	}
 

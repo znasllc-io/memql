@@ -200,35 +200,17 @@ const (
 	ResourceRole       = "role"
 )
 
-// Capable is the canonical, single server-side authorization primitive: does
-// the given role hold the (verb x resourceType) capability in the consolidated
-// RBAC model (epic memql#2062)? Every enforcement decision on the request path
-// -- handlers, executor guards, the migrated Can* adapters -- resolves through
-// THIS function, so there is exactly one definition of "may role R do verb V on
-// resource T", and it agrees with the load-tested DSL capability catalog
-// (dsl/rbac/seeds.memql).
+// THERE IS NO ROLE-SHAPED Capable(role, verb, resource) ANY MORE (epic
+// memql#5296). The canonical decision is CapableFor(ctx, subject, verb,
+// resource) in grant_resolver.go, which starts from roleHasCapability below --
+// catalog-first, exactly as the old function was -- and overlays the actor's
+// group and user grants. A role-only question is a Subject carrying a role and
+// nothing else; nothing on the request path should be asking one.
 //
-// THE DECISION IS CATALOG-FIRST, NOT PURE. roleHasCapability below resolves
-// through the INSTALLED ROW CATALOG and reaches the compiled capability sets
-// only when no catalog is installed. It was a pure lookup against the static
-// sets before epic memql#5166, and this comment went on saying so for long
-// enough to mislead: a reader who believes it concludes that a broken or empty
-// catalog cannot affect the answer, when in fact the short-circuit at
-// roleHasCapability skips the mirror the moment a catalog is installed.
-//
-// Consistency across nodes (E1.6 multi-node acceptance) still holds. It is now
-// a property of every replica installing the SAME rows and reloading on the
-// same graph events, rather than of there being no state to diverge --
-// component/memql's ReloadCapabilityCatalog is what keeps it true, and it
-// refuses to install a catalog carrying no roles for exactly this reason.
-//
-// Relational governance (who-can-manage-whom over (actor, target)) is a
-// separate, complementary primitive: GovernPrincipal / CanCreatePrincipal
-// (rbac_governance.go). Capable answers "does this role hold the grant at all";
-// GovernPrincipal narrows the principal-resource verbs by rank + self.
-func Capable(role Role, verb, resourceType string) bool {
-	return roleHasCapability(role, verb, resourceType)
-}
+// Consistency across nodes still holds for the role level as before -- every
+// replica installs the SAME catalog rows and reloads on the same events -- and
+// for the grant levels by construction: grants are read per request, so there
+// is no per-node state to diverge.
 
 // GrantsPrincipalAuthorityBeyond reports whether `target` holds any verb on
 // the `principal` resource that `actor` does not.

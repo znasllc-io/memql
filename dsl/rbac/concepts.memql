@@ -27,6 +27,7 @@
 // minted through a rank-bounded mutation, not free-form writes).
 
 use accounts.concepts.{ account }
+use identity.concepts.{ user }
 
 /// A single authorization GRANT: the right to apply one primitive verb to one resource type,
 /// attached to a role. Capability = (verb x resourceType) for a role. This is the atomic unit of
@@ -79,4 +80,57 @@ concept role {
   aliases      []string  @description("Other slugs that resolve to THIS rung. The legacy five on v1:identity:user.role (owner/admin/developer/writer/reader) are not the five this catalog seeds (owner/developer/admin/user/viewer): `writer` is an alias of `user` and `reader` of `viewer`. Those two facts lived only in prose -- in this file, in seeds.memql, and in component/auth/rbac_model.go's translation table -- which meant every consumer that wanted the ladder needed its own copy of the mapping. That is exactly how the engine and MemQL OS came to ship two ladders that disagreed (epic memql#4832, D1). As DATA the ladder is self-describing: a client reads activeRoles, sorts by rank, resolves its own role slug through slug-or-alias, and carries no table of its own. A custom role may declare aliases too; a slug already taken by a base role wins, so an alias can never re-point an existing rung. And a PREDEFINED role's alias claims are applied before a custom role's (epic memql#5166): `writer` and `reader` are alias-ONLY rungs, so there is no slug to win them back, and without that ordering a custom role could claim `reader` outright and re-rank every viewer in the cluster.")
 
   @relationship(type="references", as="scopedTo", field="accountId", target=account, direction="outgoing")
+}
+
+/// A GRANT TO A PERSON OR A GROUP: one (verb x resourceType) decision, allow or deny, whose
+/// subject is a v1:identity:user or a v1:identity:group rather than a role (epic memql#5294, the
+/// app access grants record, decision D6). It sits BESIDE the role catalog and never inside it:
+/// `capability` says what a ROLE holds and `grant` says what a PERSON or a GROUP holds over and
+/// above their role, and the two have different lifecycles and different caches -- the catalog is
+/// loaded once and reloaded on its events, a grant is read per request and never cached.
+///
+/// A ROLE IS NEVER A SUBJECT HERE. A role's abilities are edited on the role, as capability rows,
+/// and putting them in two places is how they drift: a `deny` on a role written here and an
+/// `allow` written there would be two answers to one question with nothing to say which wins.
+/// `subjectKind` is therefore a closed two-value set, and a resolver that met a third would have
+/// no level to place it at (the record's rule is person over group over role).
+///
+/// THIS ROW IS THE DEPLOYMENT'S, NOT ANYONE'S PROPERTY, and that is why the tier is
+/// `@rowAuthz(clusterOwner, rankFloor="admin")` with no owner field at all. The obvious owner would
+/// be the subject -- and an owned row admits its owner's INSERTS, so scoping a grant to the person
+/// it names would hand every signed-in person a primitive for granting themselves an app. The
+/// granting user is not the owner either: a grant outlives the person who wrote it and is revoked by
+/// whoever holds the authority then, not by whoever held it once. So the row belongs to the
+/// deployment, is READABLE from admin rank (the floor relaxes the read and leaves the write at
+/// clusterOwner, memql#5216), and is WRITTEN only by Go under internal origin through the two
+/// @serverOnly mutations below -- exactly as v1:identity:group and groupMembership are.
+///
+/// THE ROW ID IS DERIVED from (subjectKind, subjectId, verb, resourceType), the way groupMembership
+/// derives its id from (group, user): re-granting writes a new VERSION of one logical row rather
+/// than a second row, and revoking writes `active: false` at the same id so history survives. Every
+/// reader collapses to the newest version per id first, because MemQL rows are append-only.
+///
+/// `subjectId` IS POLYMORPHIC AND STORED BARE, discriminated by `subjectKind` -- the
+/// v1:identity:auditEvent `targetType` / `targetId` shape. A single field cannot carry two
+/// @relationship targets, and a relationship declared for one kind would canonicalize the other
+/// kind's id under the wrong concept; two nullable typed fields would make the derived id and the
+/// resolver branch on which one is set. So the field is exempted from the id-bearing-field gate by
+/// name, and the resolver matches it against both spellings of the actor's ids.
+///
+/// RESOLUTION (component/auth.CapableFor): the role catalog answers first, with its own deny-wins
+/// inside that level; the actor's active GROUP grants overlay it, deny winning if the actor's groups
+/// disagree; the actor's own USER grants overlay that. Most specific wins across levels, deny wins
+/// within a level. No expiry: a stale grant is revoked by a person, not by a clock.
+@displayCard(primary="resourceType", secondary="verb", tertiary="subjectId", status="effect")
+@rowAuthz(clusterOwner, rankFloor="admin")
+concept grant {
+  subjectKind   enum("user", "group")!  @description("What kind of principal the grant names. `user` points subjectId at a v1:identity:user; `group` at a v1:identity:group. A role is deliberately NOT a value here -- a role's abilities live on v1:rbac:capability and nowhere else.")
+  subjectId     string!  @description("The BARE id of the v1:identity:user or v1:identity:group the grant is for, discriminated by subjectKind. Stored bare (the wire spelling) and matched against both spellings on read; a person's or group's own id, never a role slug.")
+  verb          enum("read", "create", "update", "delete", "execute")!  @description("The catalog's five verbs, uniform across every resource type. Opening an app is `read` on `app:<id>`; a named part of an app is `execute` on `app:<id>/<part>`.")
+  resourceType  string!  @description("The open resource string the catalog already uses, so an app (`app:<appId>`) or a part of one (`app:<appId>/<part>`) is written the way `deployment` or `construct` is. A grant may name any resource kind a role can hold.")
+  effect        enum("allow", "deny")!  @description("Whether this grant WIDENS (allow) or NARROWS (deny) what the subject's role answers. Both are legal at every level (D1): a person can be handed an app their role lacks, and a person can be barred from one their role holds.")
+  grantedBy     string   @description("The v1:identity:user who wrote this version of the grant -- the audit answer to 'who decided this'. NOT the owner: the row belongs to the deployment, and the writer's authority was checked in Go before the write.")
+  active        bool     @default("true")  @description("Soft-deactivate flag, as capability.active. Revoking writes a new version with active=false at the same derived id, so the decision and its reversal are both history. Only an ACTIVE grant is consulted at resolution time.")
+
+  @relationship(type="references", as="grantedBy", field="grantedBy", target=user, direction="outgoing")
 }
