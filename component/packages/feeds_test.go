@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -99,6 +101,48 @@ func TestAnUnchangedUpstreamWritesNothing(t *testing.T) {
 	// The reachable positive: the same call against a package that has NOT
 	// seen this version does write, which TestAWebhookFlipsTheTwoFeedOwnedFields
 	// pins -- so the silence above is about the comparison, not about the fake.
+}
+
+// AN ARCHIVED SOURCE IS NOT FED (memql#5293). `packagesByRepoUrl` carried
+// no status filter, so a webhook -- and the poll, which reaches the same
+// read per repository -- went on writing the two feed-owned fields onto a
+// source somebody had archived, and an armed one would have auto-deployed.
+// The read excludes archived packages now, exactly as packagesTrackingRepos
+// does; and the feed checks the status it was handed as well, because the
+// fake here answers whatever it is given and a test over the read alone
+// would pass on an empty table.
+func TestAnArchivedPackageIsNotWrittenByTheFeed(t *testing.T) {
+	archived := trackedPackage("oldsha0000000000", "", false)
+	archived["status"] = "archived"
+	i, engine := feedHarness(t, archived)
+	if _, err := i.handleNoteUpstreamFromWebhook(context.Background(), map[string]any{
+		"source": "github", "body": pushBody,
+	}, 0); err != nil {
+		t.Fatalf("webhook: %v", err)
+	}
+	if engine.sawStatement("mutation ") {
+		t.Fatalf("an archived package must not be written by the feed; statements: %v", engine.statements())
+	}
+	// The reachable positive is TestAWebhookFlipsTheTwoFeedOwnedFields: the
+	// same delivery against the same package at `active` writes.
+}
+
+var packagesByRepoUrlBlock = regexp.MustCompile(`(?s)query package packagesByRepoUrl \{(.*?)\n\}`)
+
+// The read half, held to the file: the DSL query the feed reads through
+// excludes archived packages by the same trait packagesTrackingRepos uses.
+func TestPackagesByRepoUrlExcludesArchivedPackages(t *testing.T) {
+	src, err := os.ReadFile("../../dsl/platform/queries.memql")
+	if err != nil {
+		t.Fatalf("read queries.memql: %v", err)
+	}
+	m := packagesByRepoUrlBlock.FindSubmatch(src)
+	if m == nil {
+		t.Fatal("packagesByRepoUrl not found in dsl/platform/queries.memql")
+	}
+	if !strings.Contains(string(m[1]), "statusIsActive") {
+		t.Fatalf("packagesByRepoUrl must filter on statusIsActive, or the upstream feed keeps writing to archived packages:\n%s", m[1])
+	}
 }
 
 func TestADeliveryMatchingNoPackageIsANoOpNotAnError(t *testing.T) {

@@ -45,7 +45,7 @@ func Rollback(ctx context.Context, d *Deps, req RollbackRequest) (*RestoredState
 		return nil, refuse(CodeSourceUnreadable,
 			"no deployment %q is readable by this caller", req.DeploymentId)
 	}
-	if got := rowString(prior, "packageId"); got != req.PackageId {
+	if !sameShortId(rowString(prior, "packageId"), req.PackageId) {
 		return nil, refuse(CodeSourceUnreadable,
 			"deployment %q belongs to a different package", req.DeploymentId)
 	}

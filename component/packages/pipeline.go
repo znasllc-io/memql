@@ -734,7 +734,7 @@ func (d *Deps) resumeParked(ctx context.Context, deploymentId, packageId string)
 		// openDeployment's own answer is the right one.
 		return nil, nil
 	}
-	if rowString(row, "packageId") != packageId {
+	if !sameShortId(rowString(row, "packageId"), packageId) {
 		return nil, refuse(CodeSourceUnreadable,
 			"deployment %q belongs to a different package", deploymentId)
 	}
@@ -836,7 +836,7 @@ func (d *Deps) fetchFor(ctx context.Context, req DeployRequest, pkg map[string]a
 		return nil, refuse(CodeSourceUnreadable,
 			"no deployment %q is readable by this caller, so there is nothing to retry from", from)
 	}
-	if got := rowString(prior, "packageId"); got != req.PackageId {
+	if !sameShortId(rowString(prior, "packageId"), req.PackageId) {
 		return nil, refuse(CodeSourceUnreadable, "deployment %q belongs to a different package", from)
 	}
 	ref := rowString(prior, "snapshotArtifactId")

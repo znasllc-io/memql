@@ -535,7 +535,7 @@ func (i *Integration) handleCancelDeployment(ctx context.Context, args map[strin
 	// declared argument that decides nothing is worse than no argument,
 	// because it reads as a check.
 	if want := strings.TrimSpace(stringArg(args, "packageId")); want != "" {
-		if got := rowString(run, "packageId"); got != want {
+		if !sameShortId(rowString(run, "packageId"), want) {
 			return nil, refuse(CodeSourceUnreadable,
 				"deployment %q belongs to a different source, so it is not this one's to stop", deploymentId)
 		}
@@ -667,6 +667,40 @@ func (i *Integration) handleArchivePackage(ctx context.Context, args map[string]
 			return nil, err
 		}
 	}
+
+	// A PARKED RUN DOES NOT SURVIVE ITS SOURCE (memql#5293). A run at
+	// awaiting_confirm is a question waiting for a person's answer, and
+	// archiving the source IS the answer -- left open, the list went on
+	// saying "a deploy is waiting for you" on a source nobody could deploy.
+	// It closes `cancelled` through the same path a person's own stop takes:
+	// nothing was built and nothing was published, and `failed` or
+	// `abandoned` would tell somebody the cluster lost a run they archived on
+	// purpose. Only the PARKED rows: a running run is closed by the node
+	// running it and by nothing else, exactly as cancel leaves it.
+	//
+	// Before the package flips, for the reason everything above is: a close
+	// the guard refuses leaves a source that is still active and still says
+	// what happened.
+	parked, err := deps.Store.parkedDeploymentsForPackage(ctx, packageId)
+	if err != nil {
+		return nil, err
+	}
+	for _, run := range parked {
+		if cerr := deps.Store.closeDeployment(ctx, deploymentClose{
+			DeploymentId: rowString(run, "id"),
+			Status:       StatusCancelled,
+			Deployables:  nil,
+			Error: &Problem{
+				Code:    CodeDeploymentCancelled,
+				Message: "This deploy was waiting for you when its source was archived. Nothing was built and nothing was published.",
+				Fatal:   true,
+			},
+			FinishedAt: deps.now(),
+		}); cerr != nil {
+			return nil, cerr
+		}
+	}
+
 	if err := deps.Store.setPackageStatus(ctx, packageId, "archived"); err != nil {
 		return nil, err
 	}
@@ -674,11 +708,12 @@ func (i *Integration) handleArchivePackage(ctx context.Context, args map[string]
 		released = []string{}
 	}
 	return resultNode(map[string]any{
-		"packageId":     packageId,
-		"name":          name,
-		"status":        "archived",
-		"releasedSites": released,
-		"deactivated":   deactivated,
+		"packageId":           packageId,
+		"name":                name,
+		"status":              "archived",
+		"releasedSites":       released,
+		"deactivated":         deactivated,
+		"parkedRunsCancelled": len(parked),
 	}), nil
 }
 

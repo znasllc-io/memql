@@ -122,6 +122,41 @@ func TestARunInFlightIsNotResumed(t *testing.T) {
 	}
 }
 
+// THE SHAPE THE OS ACTUALLY SENDS (memql#5291). The stored packageId is
+// CANONICAL -- `v1:platform:package:<id>`, because the field is an outgoing
+// relationship and the engine canonicalizes it on write -- and the request
+// carries the BARE id, because that is what the wire hands every client and
+// nothing bare-ifies a builtin's arguments on the way in. So every real
+// confirmation from the OS compared "abc" against "v1:platform:package:abc"
+// and was refused as belonging to a different package, and the gate could
+// never be answered. The two spellings meet at exactly this compare, which
+// is why the compare is what changes rather than the request.
+func TestConfirmingAParkedRunWithABareRequestIdResumesIt(t *testing.T) {
+	h := newHarness(t, spaOnlyPackage(), ownerPackage())
+	const parked = "v1:platform:packageDeployment:parked"
+	h.engine.rows["query packageDeploymentById"] = []map[string]any{
+		parkedRun(parked, "v1:platform:package:abc", nil),
+	}
+
+	out, err := Deploy(context.Background(), h.deps, DeployRequest{
+		PackageId:    "abc",
+		Actor:        mayDeployDsl(),
+		Confirmed:    true,
+		DeploymentId: parked,
+		Placements:   firstDeployPlacements(),
+	})
+	if err != nil {
+		t.Fatalf("a bare request id against a canonical row must resume, got: %v", err)
+	}
+	if out.DeploymentId != parked {
+		t.Fatalf("the confirmation ran as %s, not as the run it was confirming (%s)",
+			out.DeploymentId, parked)
+	}
+	if h.engine.sawStatement("mutation openPackageDeployment") {
+		t.Error("a second row was opened instead of resuming the parked one")
+	}
+}
+
 // A deployment id naming somebody else's source is refused before anything is
 // opened, rather than resumed or quietly ignored.
 func TestAParkedRunOfADifferentPackageIsRefused(t *testing.T) {
