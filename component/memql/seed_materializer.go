@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -415,8 +416,95 @@ func (m *SeedMaterializer) materializeGlobal(ctx context.Context, def *SeedDefin
 	}
 	args := buildArgsFromBody(def.Body, def.UseConcept, idVal.str, "")
 	applyOsSiteHostname(def, args)
+	if m.seedRowIsCurrent(ctx, def, idVal.str, args) {
+		return nil
+	}
 	ctx = provenance.ContextWithProvenance(ctx, provenance.Seed(def.Name))
 	return m.invokeCreateMutation(ctx, def.UseConcept, args)
+}
+
+// seedRowIsCurrent reports whether the row a seed is about to write already
+// holds, key for key, everything the write would carry -- in which case the
+// write is skipped. Every boot used to append a fresh VERSION of every seed
+// row regardless (a production instance, 2026-09-13: 215 capability ids carried
+// 19,277 versions, 2,628 of them written during one rollout), and each of
+// those versions raised the catalog-reload event on every node for a change
+// that had not happened. A missing row, an unreadable one, or any key the
+// row lacks or disagrees on answers false, which is the pre-existing
+// behaviour: write.
+func (m *SeedMaterializer) seedRowIsCurrent(ctx context.Context, def *SeedDefinition, rowId string, args map[string]any) bool {
+	if m == nil || m.engine == nil || def == nil || rowId == "" {
+		return false
+	}
+	conceptId, err := m.canonicalSeedConceptID(def)
+	if err != nil || conceptId == "" {
+		return false
+	}
+	id := rowId
+	if !strings.HasPrefix(id, conceptId+":") {
+		id = conceptId + ":" + id
+	}
+	// The raw filter form the dedup lookup already uses; `concept==<rowId>`
+	// alone is a CONCEPT lookup and answers "not found in registry".
+	result, err := m.engine.Execute(systemActorContext(ctx), "concept=="+conceptId+"; row.id=="+dslStringLiteral(id))
+	if err != nil || result == nil || result.Bundle == nil || len(result.Bundle.Nodes) != 1 {
+		return false
+	}
+	node := result.Bundle.Nodes[0]
+	if node == nil || node.GetPayload() == nil {
+		return false
+	}
+	return seedArgsMatchPayload(args, node.GetPayload().AsMap(), def.UseConcept+"Id")
+}
+
+// seedArgsMatchPayload compares every arg the create mutation would receive
+// against the stored payload, both sides normalized through JSON so a Go int
+// and a decoded float64 compare as the number they are. Keys named in skip
+// (the synthetic id arg) are not payload fields and are ignored. A key absent
+// from the payload counts as a difference: the mutation may transform it, and
+// "write" is the safe answer.
+func seedArgsMatchPayload(args, payload map[string]any, skip ...string) bool {
+	skipped := map[string]struct{}{}
+	for _, k := range skip {
+		skipped[k] = struct{}{}
+	}
+	for k, want := range args {
+		if _, ok := skipped[k]; ok {
+			continue
+		}
+		got, ok := payload[k]
+		if !ok {
+			return false
+		}
+		if !jsonEquivalent(want, got) {
+			return false
+		}
+	}
+	return true
+}
+
+func jsonEquivalent(a, b any) bool {
+	na, err := jsonRoundTrip(a)
+	if err != nil {
+		return false
+	}
+	nb, err := jsonRoundTrip(b)
+	if err != nil {
+		return false
+	}
+	return reflect.DeepEqual(na, nb)
+}
+
+func jsonRoundTrip(v any) (any, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // materializePerUser writes one row for a (perUser seed, user)
@@ -437,10 +525,12 @@ func (m *SeedMaterializer) materializePerUser(ctx context.Context, def *SeedDefi
 		return fmt.Errorf("dedup lookup: %w", err)
 	}
 	args := buildArgsFromBody(def.Body, def.UseConcept, rowId, userId)
+	if m.seedRowIsCurrent(ctx, def, rowId, args) {
+		return nil
+	}
 	ctx = provenance.ContextWithProvenance(ctx, provenance.Seed(def.Name))
 	return m.invokeCreateMutation(ctx, def.UseConcept, args)
 }
-
 
 // applyOsSiteHostname rewrites the OS site hostname from MEMQL_DOMAIN on
 // every global rematerialize (memql#4705, and #4222 before it for the portal

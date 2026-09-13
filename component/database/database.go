@@ -112,6 +112,7 @@ type (
 		maxConnRetries           int
 		maxConnRetriesIntervalMs int
 		sqlOpener                SQLOpener
+		migrationOpener          SQLOpener // nil: migrate over the request pool
 		bunFactory               BunFactory
 		bunOptions               []BunOption
 		migrator                 Migrator
@@ -289,77 +290,8 @@ func defaultConfig() *config {
 		maxConnRetries:           3,
 		maxConnRetriesIntervalMs: 1000,
 		driverName:               "bun:pg",
-		sqlOpener: func(_ string, dsn string) (*sql.DB, error) {
-			normalized, serverName, err := normalizeDSN(dsn)
-			if err != nil {
-				return nil, err
-			}
-
-			// Per-connection session safety net (memql#1817). These SET
-			// commands run on EVERY backend pgdriver opens (incl. reconnects),
-			// so a session that gets wedged self-clears at the DB instead of
-			// pinning a connection slot until the process exits -- the missing
-			// "DB-side reaping" leg (epic #1778 child G), done in code so it
-			// holds identically in every environment.
-			opts := []pgdriver.Option{pgdriver.WithDSN(normalized)}
-			if params := sessionConnParams(); len(params) > 0 {
-				opts = append(opts, pgdriver.WithConnParams(params))
-			}
-			// Stamp application_name so pg_stat_activity attributes each
-			// backend to a node type -- turns a future 53300 triage from a
-			// guess into a GROUP BY.
-			if appName := dbApplicationName(); appName != "" {
-				opts = append(opts, pgdriver.WithApplicationName(appName))
-			}
-
-			connector := pgdriver.NewConnector(opts...)
-			cfg := connector.Config()
-
-			// Only configure TLS if sslmode is not explicitly disabled
-			// Check if the DSN contains sslmode=disable
-			if !strings.Contains(strings.ToLower(normalized), "sslmode=disable") {
-				if cfg.TLSConfig == nil {
-					// Verify against the system trust pool by default.
-					// MinVersion: TLS 1.2 matches Go's modern default
-					// and rules out known-broken handshakes. Earlier
-					// versions of this file set
-					// `InsecureSkipVerify: true`, which let a
-					// MITM swap the Postgres certificate for an
-					// attacker-controlled one without the client
-					// noticing. An operator who genuinely needs to
-					// bypass verification (e.g. dev cluster with a
-					// self-signed CA they haven't loaded into the
-					// system pool) can set
-					// `MEMQL_DB_TLS_INSECURE_SKIP_VERIFY=1` and
-					// accept the warning logged at startup.
-					cfg.TLSConfig = &tls.Config{
-						MinVersion:         tls.VersionTLS12,
-						InsecureSkipVerify: dbTLSInsecureSkipVerifyOptIn(),
-					}
-				}
-				if serverName != "" && cfg.TLSConfig != nil {
-					cfg.TLSConfig.ServerName = serverName
-				}
-			}
-
-			// Wrap the connector so Connect() retries transient Postgres
-			// connection-slot exhaustion (SQLSTATE 53300) with jittered
-			// backoff instead of failing the query outright (memql#1076).
-			db := sql.OpenDB(newRetryingConnector(connector, slog.Default()))
-
-			// Configure connection pool limits to prevent exhaustion.
-			// Defaults are conservative so steady+rollout-surge demand across
-			// every node stays under the instance's max_connections (memql#1076:
-			// 25/node x ~20 pods at surge blew past the Tiger Cloud ceiling ->
-			// 53300 storms). Override per env via MAX_OPEN_CONNS / MAX_IDLE_CONNS;
-			// budget = (max_connections - reserved) / max_pods(steady+surge).
-			db.SetMaxOpenConns(10)                 // Max concurrent connections per node
-			db.SetMaxIdleConns(1)                  // Keep ONE idle connection warm (memql#1817)
-			db.SetConnMaxLifetime(1 * time.Hour)   // Rotate connections hourly
-			db.SetConnMaxIdleTime(2 * time.Minute) // Close idle connections after 2min (memql#1817)
-
-			return db, nil
-		},
+		sqlOpener:                pgSQLOpener(sessionConnParams),
+		migrationOpener:          pgSQLOpener(migrationConnParams),
 		bunFactory: func(db *sql.DB) (*bun.DB, error) {
 			if db == nil {
 				return nil, fmt.Errorf("bun factory: nil sql.DB")
@@ -658,6 +590,7 @@ func (d *Database) WithSQLOpener(opener SQLOpener) DatabaseArg {
 	return OptionalCtorArg("sql_opener", func(c *config) {
 		if opener != nil {
 			c.sqlOpener = opener
+			c.migrationOpener = nil
 		}
 	})
 }
@@ -1347,6 +1280,32 @@ func (d *Database) runInitHooks(ctx context.Context, sqlDB *sql.DB) error {
 	return nil
 }
 
+// migrationBunDB answers the *bun.DB the SQL migrations run over: a dedicated
+// single-connection pool opened WITHOUT the statement timeout when the config
+// carries a migration opener and a DSN, else the request pool itself. The
+// fallback keeps a custom opener (tests, sqlmock) on one pool; the warning is
+// what says a long migration on that path is bounded by the request deadline.
+func (d *Database) migrationBunDB(fallback *bun.DB) (*bun.DB, func()) {
+	noop := func() {}
+	if d.config.migrationOpener == nil || d.config.dsn == nil || *d.config.dsn == "" {
+		return fallback, noop
+	}
+	sqlDB, err := d.config.migrationOpener(d.config.driverName, *d.config.dsn)
+	if err != nil {
+		d.Logger.Warn("migration pool unavailable; migrating over the request pool under its statement timeout", "error", err)
+		return fallback, noop
+	}
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
+	migrationDB, err := d.config.bunFactory(sqlDB)
+	if err != nil {
+		_ = sqlDB.Close()
+		d.Logger.Warn("migration pool unavailable; migrating over the request pool under its statement timeout", "error", err)
+		return fallback, noop
+	}
+	return migrationDB, func() { _ = migrationDB.Close() }
+}
+
 func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 	ctx = ensureContext(ctx)
 
@@ -1381,7 +1340,9 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 	}
 
 	if d.config.migrations != nil {
-		migrator := migrate.NewMigrator(bunDB, d.config.migrations, migrate.WithMarkAppliedOnSuccess(true))
+		migrationDB, closeMigrationDB := d.migrationBunDB(bunDB)
+		defer closeMigrationDB()
+		migrator := migrate.NewMigrator(migrationDB, d.config.migrations, migrate.WithMarkAppliedOnSuccess(true))
 		if err := migrator.Init(runCtx); err != nil {
 			d.Logger.Error("failed to initialize migrations", "error", err)
 			d.recordMigrationErr(fmt.Errorf("migration init: %w", err))
@@ -1586,6 +1547,7 @@ func dbTLSInsecureSkipVerifyOptIn() bool {
 const (
 	envDBIdleInTxTimeoutMs    = "MEMQL_DB_IDLE_IN_TX_TIMEOUT_MS"
 	envDBIdleSessionTimeoutMs = "MEMQL_DB_IDLE_SESSION_TIMEOUT_MS"
+	envDBStatementTimeoutMs   = "MEMQL_DB_STATEMENT_TIMEOUT_MS"
 	envDBAppName              = "MEMQL_DB_APP_NAME"
 
 	// 60s: reap a session left idle mid-transaction (a pod that died after
@@ -1600,7 +1562,96 @@ const (
 	// Long-lived holders stay busy (cron leader polls every 10s), so they are
 	// never idle long enough to trip it. Set to 0 to disable.
 	defaultIdleSessionTimeoutMs = 300000
+	// 60s: bound ONE statement on every pooled backend. The pool cap is a
+	// client-side promise the server never hears: a Go context that expires
+	// closes the socket, and the Postgres backend keeps running the statement
+	// until it next tries to write to that socket -- for a 178-second read that
+	// is 178 seconds. On a production instance (2026-09-13) pods capped at 4
+	// connections held 30 backends each that way, and 200 slots ran out. A
+	// statement the server itself abandons frees its slot at the deadline, and
+	// the client sees `canceling statement due to statement timeout` (SQLSTATE
+	// 57014) instead of a slot-exhaustion storm an hour later. Migrations are
+	// exempt (migrationConnParams): an index build on a large hypertable is
+	// the one statement that is meant to run long.
+	defaultStatementTimeoutMs = 60000
 )
+
+// pgSQLOpener builds the default opener over the pgdriver connector. params
+// is read at OPEN time, so the request pool and the migration pool differ
+// only in the session parameters they SET on every backend.
+func pgSQLOpener(params func() map[string]any) SQLOpener {
+	return func(_ string, dsn string) (*sql.DB, error) {
+		normalized, serverName, err := normalizeDSN(dsn)
+		if err != nil {
+			return nil, err
+		}
+
+		// Per-connection session safety net (memql#1817). These SET
+		// commands run on EVERY backend pgdriver opens (incl. reconnects),
+		// so a session that gets wedged self-clears at the DB instead of
+		// pinning a connection slot until the process exits -- the missing
+		// "DB-side reaping" leg (epic #1778 child G), done in code so it
+		// holds identically in every environment.
+		opts := []pgdriver.Option{pgdriver.WithDSN(normalized)}
+		if p := params(); len(p) > 0 {
+			opts = append(opts, pgdriver.WithConnParams(p))
+		}
+		// Stamp application_name so pg_stat_activity attributes each
+		// backend to a node type -- turns a future 53300 triage from a
+		// guess into a GROUP BY.
+		if appName := dbApplicationName(); appName != "" {
+			opts = append(opts, pgdriver.WithApplicationName(appName))
+		}
+
+		connector := pgdriver.NewConnector(opts...)
+		cfg := connector.Config()
+
+		// Only configure TLS if sslmode is not explicitly disabled
+		// Check if the DSN contains sslmode=disable
+		if !strings.Contains(strings.ToLower(normalized), "sslmode=disable") {
+			if cfg.TLSConfig == nil {
+				// Verify against the system trust pool by default.
+				// MinVersion: TLS 1.2 matches Go's modern default
+				// and rules out known-broken handshakes. Earlier
+				// versions of this file set
+				// `InsecureSkipVerify: true`, which let a
+				// MITM swap the Postgres certificate for an
+				// attacker-controlled one without the client
+				// noticing. An operator who genuinely needs to
+				// bypass verification (e.g. dev cluster with a
+				// self-signed CA they haven't loaded into the
+				// system pool) can set
+				// `MEMQL_DB_TLS_INSECURE_SKIP_VERIFY=1` and
+				// accept the warning logged at startup.
+				cfg.TLSConfig = &tls.Config{
+					MinVersion:         tls.VersionTLS12,
+					InsecureSkipVerify: dbTLSInsecureSkipVerifyOptIn(),
+				}
+			}
+			if serverName != "" && cfg.TLSConfig != nil {
+				cfg.TLSConfig.ServerName = serverName
+			}
+		}
+
+		// Wrap the connector so Connect() retries transient Postgres
+		// connection-slot exhaustion (SQLSTATE 53300) with jittered
+		// backoff instead of failing the query outright (memql#1076).
+		db := sql.OpenDB(newRetryingConnector(connector, slog.Default()))
+
+		// Configure connection pool limits to prevent exhaustion.
+		// Defaults are conservative so steady+rollout-surge demand across
+		// every node stays under the instance's max_connections (memql#1076:
+		// 25/node x ~20 pods at surge blew past the Tiger Cloud ceiling ->
+		// 53300 storms). Override per env via MAX_OPEN_CONNS / MAX_IDLE_CONNS;
+		// budget = (max_connections - reserved) / max_pods(steady+surge).
+		db.SetMaxOpenConns(10)                 // Max concurrent connections per node
+		db.SetMaxIdleConns(1)                  // Keep ONE idle connection warm (memql#1817)
+		db.SetConnMaxLifetime(1 * time.Hour)   // Rotate connections hourly
+		db.SetConnMaxIdleTime(2 * time.Minute) // Close idle connections after 2min (memql#1817)
+
+		return db, nil
+	}
+}
 
 // sessionConnParams builds the per-connection SET parameters applied to every
 // backend (memql#1817). A value of 0 (or unset, for the off-by-default knob)
@@ -1614,7 +1665,20 @@ func sessionConnParams() map[string]any {
 	if ms := envIntDefault(envDBIdleSessionTimeoutMs, defaultIdleSessionTimeoutMs); ms > 0 {
 		params["idle_session_timeout"] = strconv.Itoa(ms)
 	}
+	if ms := envIntDefault(envDBStatementTimeoutMs, defaultStatementTimeoutMs); ms > 0 {
+		params["statement_timeout"] = strconv.Itoa(ms)
+	}
 
+	return params
+}
+
+// migrationConnParams is sessionConnParams without the statement timeout: the
+// migration runner gets its own single-connection pool built from these, so a
+// long index build or backfill is never cut off at the request deadline while
+// every request-serving backend still is.
+func migrationConnParams() map[string]any {
+	params := sessionConnParams()
+	delete(params, "statement_timeout")
 	return params
 }
 

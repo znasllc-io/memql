@@ -46,6 +46,64 @@ func (e *MemQLEngine) readinessIdentity() (string, string) {
 // readinessRowID is the deterministic id a rewrite versions. Deterministic so
 // a re-evaluation appends a new VERSION of one logical row rather than a
 // second row -- the same reason the cluster singletons sit at literal ids.
+// readinessRewriteFloor bounds how long an unchanged verdict may stand without
+// being restated. Below it, a rewrite that would carry the same state, core
+// flag and lanes as the row already holds is SKIPPED: the fleet's steady state
+// used to append a version per module per node on every trigger (772k
+// v1:platform:moduleReadiness versions for a few dozen live ids on
+// a production instance, 2026-09-13), and every one of those rows was news to nobody.
+// At or past the floor the row is restated so `reportedAt` never reads as
+// abandoned.
+const readinessRewriteFloor = 10 * time.Minute
+
+// readinessRewriteNeeded decides whether next must be written over prev. A nil
+// prev (no standing row, or the read failed) always writes -- the write is
+// idempotent and the cost of a needless one is a version, while the cost of a
+// missed one is a stale verdict.
+func readinessRewriteNeeded(prev *readiness.NodeReport, next readiness.NodeReport, now time.Time) bool {
+	if prev == nil {
+		return true
+	}
+	if prev.State != next.State || prev.Core != next.Core || !readinessLanesEqual(prev.Lanes, next.Lanes) {
+		return true
+	}
+	return now.Sub(prev.ReportedAt) >= readinessRewriteFloor
+}
+
+func readinessLanesEqual(a, b []readiness.LaneReport) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	ra, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	rb, err := json.Marshal(b)
+	if err != nil {
+		return false
+	}
+	return string(ra) == string(rb)
+}
+
+// standingReadiness reads this node's current verdict per module. A failed
+// read answers an empty map, which makes every module rewrite -- the
+// pre-existing behaviour -- rather than skipping on a guess.
+func (e *MemQLEngine) standingReadiness(ctx context.Context, nodeId string) map[string]*readiness.NodeReport {
+	out := map[string]*readiness.NodeReport{}
+	reports, err := e.readModuleReadinessRows(ctx)
+	if err != nil {
+		e.safeLogger().Warn("module readiness: standing rows unreadable; rewriting every module", "error", err)
+		return out
+	}
+	for i := range reports {
+		if reports[i].NodeId == nodeId {
+			r := reports[i]
+			out[r.Module] = &r
+		}
+	}
+	return out
+}
+
 func readinessRowID(module, nodeId string) string {
 	return ModuleReadinessConcept + ":" + module + "--" + nodeId
 }
@@ -194,8 +252,13 @@ func (e *MemQLEngine) WriteModuleReadiness(ctx context.Context) (int, error) {
 	// resolver -- see the comment there for why this is not a line here.
 	reports := evaluateModules(ctx, e.readinessResolvers(), manifest.Modules, nodeId, nodeType, time.Now().UTC())
 	wctx := readinessWriteContext(ctx)
+	standing := e.standingReadiness(ctx, nodeId)
+	now := time.Now().UTC()
 	written := 0
 	for _, r := range reports {
+		if !readinessRewriteNeeded(standing[r.Module], r, now) {
+			continue
+		}
 		call, err := renderRecordModuleReadiness(r, readinessRowID(r.Module, nodeId))
 		if err != nil {
 			return written, fmt.Errorf("module readiness: render %s: %w", r.Module, err)

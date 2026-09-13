@@ -3,8 +3,10 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/envregistry"
@@ -40,10 +42,15 @@ func readinessRowsForTest(t *testing.T, e *MemQLEngine) []readiness.NodeReport {
 	return rows
 }
 
-func TestBootWritesOneRowPerModuleAndARewriteVersionsThem(t *testing.T) {
+func TestBootWritesOneRowPerModuleAndAnUnchangedSweepWritesNone(t *testing.T) {
 	e := bootReadinessTestEngine(t)
 	ctx := context.Background()
-	e.SetReadinessIdentity("readiness-test-node", "bff")
+	// A FRESH node id per run: an unchanged verdict younger than
+	// readinessRewriteFloor is not restated, so a standing row from an
+	// earlier test (or an earlier run of this one against the same database)
+	// would make the first write below count 0 and read as a failure.
+	nodeId := fmt.Sprintf("readiness-test-node-%d", time.Now().UnixNano())
+	e.SetReadinessIdentity(nodeId, "bff")
 
 	manifest, err := envregistry.LoadManifest("")
 	if err != nil {
@@ -63,7 +70,7 @@ func TestBootWritesOneRowPerModuleAndARewriteVersionsThem(t *testing.T) {
 	first := readinessRowsForTest(t, e)
 	mine := 0
 	for _, r := range first {
-		if r.NodeId == "readiness-test-node" {
+		if r.NodeId == nodeId {
 			mine++
 			switch r.State {
 			case readiness.Configured, readiness.Partial, readiness.Unconfigured, readiness.NotApplicable:
@@ -78,13 +85,20 @@ func TestBootWritesOneRowPerModuleAndARewriteVersionsThem(t *testing.T) {
 
 	// A rewrite is a new VERSION of the same ids, and the read collapses to
 	// one row per id. If the id were not deterministic this would double.
-	if _, err := e.WriteModuleReadiness(ctx); err != nil {
+	// An unchanged, fresh verdict is NOT restated: the second sweep appends no
+	// version at all (a production instance, 2026-09-13 -- 772k versions of this
+	// concept for a few dozen live ids, every one of them news to nobody).
+	rewritten, err := e.WriteModuleReadiness(ctx)
+	if err != nil {
 		t.Fatalf("second write: %v", err)
+	}
+	if rewritten != 0 {
+		t.Fatalf("an unchanged fresh verdict was rewritten for %d modules; want 0", rewritten)
 	}
 	second := readinessRowsForTest(t, e)
 	mine = 0
 	for _, r := range second {
-		if r.NodeId == "readiness-test-node" {
+		if r.NodeId == nodeId {
 			mine++
 		}
 	}
