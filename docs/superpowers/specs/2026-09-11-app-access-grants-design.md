@@ -160,17 +160,44 @@ the actor-shaped one. No new gate.
 
 ### Deployables, the first app to carry the vocabulary
 
-| Resource | Covers |
-|---|---|
-| `app:deployables` | open the app |
-| `app:deployables/sources` | add or edit a source, its credential, its auto-deploy switch |
-| `app:deployables/deploy` | analyze, confirm, retry, cancel a run |
-| `app:deployables/publish` | go live, pause, roll back |
-| `app:deployables/retire` | deactivate an app, archive a source, delete a deployable |
-| `app:deployables/domains` | bind or remove a custom domain |
+| Resource | Covers | Constructs carrying `@requiresCapability("execute", ...)` |
+|---|---|---|
+| `app:deployables` | open the app | none: opening is `read`, and it is the OS's question until epic memql#5289 |
+| `app:deployables/sources` | add or edit a source, its credential, its auto-deploy switch | `createPackage`, `updatePackageSource`, `setPackageAutoDeploy`, `packageSetAutoDeploy`, `sourceCredentialCreate`, `sourceCredentialRevoke` |
+| `app:deployables/deploy` | analyze, confirm, retry, cancel a run; publish a Library zip, which is a deploy with the bundle already built | `packageAnalyze`, `packageDeploy` (confirm and retry ride its `deploymentId` / `fromDeploymentId` arguments), `packageCancelDeployment`, `sitePublishFromArtifact` |
+| `app:deployables/publish` | go live, pause, roll back | `updateSiteStatus`, `packageRollback` |
+| `app:deployables/retire` | deactivate an app, archive a source, delete a deployable, and their plain inverses | `packageDeactivateDeployable`, `disablePackageDeployables`, `enablePackageDeployables`, `siteArchive`, `siteRestore`, `packageArchive`, `packageRestore`, `siteDelete`, `deleteSite` |
+| `app:deployables/domains` | bind or remove a custom domain | `customDomainAdd`, `removeCustomDomain` |
+
+Applied in epic memql#5288 (task memql#5301). Three things the table settles that the
+prose above did not: a restore is filed under `retire` because it is the plain inverse of
+the archive it undoes and a person who may archive may un-archive; `sitePublishFromArtifact`
+is a `deploy`, not a `publish`, because it builds nothing and goes live in one step exactly
+as a confirmed run does; and the `@serverOnly` pipeline writers (`setPackageStatus`,
+`createCustomDomain`, the front-door and outbox mutations) carry no part, since internal
+origin passes every capability gate and a part on them would gate nothing. The shared reads
+-- `sitesAll`, `siteById`, `packagesAll`, `packageById`, `packageDeployments` -- carry none
+(D8), and `TestTheDeployablesPartsAreDeclaredOnTheirConstructs` pins the table to the tree.
+
+**Builtins carry the annotation too.** Most of the actions above are builtins, and until
+this epic a builtin's annotation set was closed to `@requiresCapability`; the language
+registry, the builtin converter and the builtin executor's entry point were opened to it in
+the same change (a top-level builtin call returns before the plan-level gate runs, so the
+executor asks the question itself). `@requiresRank` stays off builtins: nothing asked for it,
+and a rank floor on a Go-served read is applied in its handler, the `logsSearch` precedent.
 
 Other apps declare theirs the same way when they are touched. An app with no parts is just
-`app:<id>`.
+`app:<id>`. One consequence the parts split forces into the pipeline: a retire
+(delete the last app, deactivate it, archive the source) disarms the source's
+auto-deploy, which is a `sources` write, so that inner write is stamped internal
+(`disarmAutoDeployAfterRetire`) after the cascade has resolved the row under the
+caller's own actor -- otherwise a person granted `retire` without `sources` is refused
+after their site is already deleted. The person's own switch stays unstamped and gated.
+
+A floored SECTION inside an app -- Settings -> Cluster, every app's Logs section
+-- is seeded as `read app:<id>/<section>` on the roles its own floor admits, so the OS epic
+has a resource to name for it; a section with no floor of its own is reached through the
+app's door and is not a resource.
 
 ## 3. Governance and audit
 

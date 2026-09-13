@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { Mark } from "../../../chrome/Mark";
 import { Button, Caption, Head, Notice, Panel, useLiveView } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
+import { SELF_ACCOUNT_ID } from "../../accounts/rows";
 import { useAccountOptions } from "../../accounts/tie";
 import { useCreateSite, usePublish, useSiteAccount } from "../actions";
 import { useAddDomain } from "../domainActions";
@@ -43,6 +44,7 @@ import {
   type ComposeDraft,
   type ComposePath,
   type ComposePhase,
+  accountOrSelf,
 } from "./compose";
 import { everyOtherAppSkipped } from "../packages/calls";
 import { Rail } from "./RailView";
@@ -346,6 +348,11 @@ export function ComposePage(props: ComposePageProps) {
         repoRef: draft.choice === "repo" ? draft.repoRef.trim() : "",
         credentialId: draft.choice === "repo" ? draft.credentialId.trim() : "",
         artifactId: draft.choice === "zip" ? draft.artifactId : "",
+        // THE SOURCE IS THE CLUSTER'S OWN (memql#5303, D12). It is registered
+        // here, before the run parks and the Where-it-lives stop can ask
+        // about a client, so there is no pick to honour yet; the per-app
+        // placement is where a client is chosen, and it ties the SITE.
+        accountId: SELF_ACCOUNT_ID,
       });
       if (id === "") return;
       setCreated((held) => ({ ...held, packageId: id }));
@@ -363,11 +370,13 @@ export function ComposePage(props: ComposePageProps) {
     );
     if (siteId === "") return;
     setCreated((held) => ({ ...held, siteId }));
-    // THE TWO OPTIONAL HALVES, applied exactly as the pipeline applies a
-    // placement's: the same two calls, under the same actor, so the same
-    // guards decide. Either being refused leaves the deployable created, and
-    // says so rather than reading as a failed create.
-    if (address.accountId.trim() !== "") await tie.setAccount(siteId, address.accountId.trim());
+    // THE TWO HALVES, applied exactly as the pipeline applies a placement's:
+    // the same two calls, under the same actor, so the same guards decide.
+    // Either being refused leaves the deployable created, and says so rather
+    // than reading as a failed create. The client half always runs: a site
+    // nobody tied to a client is the cluster's own (memql#5303, D12), the
+    // same default `placementsFrom` sends for a package's apps.
+    await tie.setAccount(siteId, accountOrSelf(address.accountId));
     if (address.ownDomain.trim() !== "") await addDomain.add(siteId, address.ownDomain.trim());
   }
 

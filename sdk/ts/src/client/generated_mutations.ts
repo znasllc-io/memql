@@ -2755,7 +2755,8 @@ QueryClient.prototype.createPATIdentity = function (this: QueryClient, args: Cre
 
 /** Register a tracked package. The person's write: they supply the source, the engine supplies the identity and the name.
 `name` is an ARG here and only here, because at registration time no analysis has run yet and the tree has not been read -- so the manifest cannot have supplied it. The first successful analysis overwrites it through recordPackageAnalysis, which is why the field's doc says the name comes from the manifest: this value is a placeholder with a person's guess in it.
-`credentialId` NAMES one of the caller's v1:platform:sourceCredential rows and is a plain string here on purpose (epic memql#4885, D10). There is no arg on this mutation, or anywhere else in the packages surface, that carries a token VALUE: the token crossed the wire once, inside sourceCredentialCreate, and the fetcher resolves the name under THIS package's owner -- so naming somebody else's credential here buys nothing but a credential_not_found at the next fetch. */
+`credentialId` NAMES one of the caller's v1:platform:sourceCredential rows and is a plain string here on purpose (epic memql#4885, D10). There is no arg on this mutation, or anywhere else in the packages surface, that carries a token VALUE: the token crossed the wire once, inside sourceCredentialCreate, and the fetcher resolves the name under THIS package's owner -- so naming somebody else's credential here buys nothing but a credential_not_found at the next fetch.
+`accountId` is the tie the package's tier reads (memql#5303, D12). The compose flow sends the cluster's own account unless a client was picked; absent, the package is untied and its owner's. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["createPackage"] in generated_concepts.ts).
 export interface CreatePackageArgs {
   packageId: string;
@@ -2766,6 +2767,8 @@ export interface CreatePackageArgs {
   repoRef?: string;
   credentialId?: string;
   artifactId?: string;
+  /** The v1:accounts:account this package is for. Absent means untied. */
+  accountId?: string;
 }
 
 export function buildCreatePackage(args: CreatePackageArgs): string {
@@ -2777,6 +2780,7 @@ export function buildCreatePackage(args: CreatePackageArgs): string {
   if (args.repoRef !== undefined) parts.push("repoRef: " + renderMemQLValue(args.repoRef));
   if (args.credentialId !== undefined) parts.push("credentialId: " + renderMemQLValue(args.credentialId));
   if (args.artifactId !== undefined) parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
   return "mutation createPackage(" + parts.join(", ") + ")";
 }
 
@@ -3896,8 +3900,9 @@ QueryClient.prototype.denyDeviceCode = function (this: QueryClient, args: DenyDe
   return this.executeNamed("denyDeviceCode", buildDenyDeviceCode(args), opts);
 };
 
-/** Turn a source's auto-deploy switch on or off (epic memql#4900).
-The PERSON's write, and an owned one: the write guard resolves the target row and admits its owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's decision, which is what makes an auto-run's provenance honest. */
+/** Turn one or more of a source's deployables OFF -- the owner's standing choice not to deploy them.
+NOT @serverOnly, and it is the same shape as setPackageAutoDeploy directly below: a person's standing choice about their own source, so the composite tier's write guard -- the owner, or a cluster owner -- is exactly the right gate and there is no engine writer at all. The pipeline must never touch this field: it writes `declares`, which is what the MANIFEST says, and it rewrites that wholesale on every analysis. Intent kept in the same place would be erased by the next run.
+A MEMBERSHIP CHANGE, not the whole list (memql#4951). It used to take the entire array, because `update{}` read-merges a field and the DSL had no form for removing one member -- @appendFields (memql#2240) adds to an array and had no counterpart. That made every caller read the current list, change one name and write it all back, and left a race nothing declared: two windows toggling two different apps at the same instant clobbered, and the loser was never told. @addToSet is deduped, so disabling the same app twice is disabling it once, which is what makes this and enablePackageDeployables inverses. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["disablePackageDeployables"] in generated_concepts.ts).
 export interface DisablePackageDeployablesArgs {
   packageId: string;
@@ -6830,7 +6835,8 @@ QueryClient.prototype.setPackEnabled = function (this: QueryClient, args: SetPac
   return this.executeNamed("setPackEnabled", buildSetPackEnabled(args), opts);
 };
 
-/** setPackageAutoDeploy wraps the mutation named "setPackageAutoDeploy". */
+/** Turn a source's auto-deploy switch on or off (epic memql#4900).
+The PERSON's write, and an owned one: the write guard resolves the target row and admits its owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's decision, which is what makes an auto-run's provenance honest. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["setPackageAutoDeploy"] in generated_concepts.ts).
 export interface SetPackageAutoDeployArgs {
   packageId: string;

@@ -21,11 +21,12 @@ import { DEPLOYMENT_CONCEPT, PACKAGE_CONCEPT } from "./rows";
 /**
  * Every package the caller may read, live.
  *
- * NO ARGUMENTS, and a constant KEY. `packagesAll` carries the composite tier's
- * own predicate, so the engine decides how far "all" reaches -- a cluster
- * owner sees every package, everyone else sees their own. Folding an actor id
- * into the key would restart the collection from empty the moment access
- * resolved, unmounting whatever was open.
+ * NO ARGUMENTS, and a constant KEY. `packagesAll` carries no caller term; the
+ * concept's tier decides how far "all" reaches (memql#5303, D4) -- a cluster
+ * owner sees every package, everyone else their own plus those tied to an
+ * account whose group they are in. Folding an actor id into the key would
+ * restart the collection from empty the moment access resolved, unmounting
+ * whatever was open.
  */
 export function usePackages(): LiveCollectionHandle<Row> {
   return useLiveCollection<Row>("deployables:packages", (connection) => ({

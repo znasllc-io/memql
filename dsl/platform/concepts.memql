@@ -623,7 +623,21 @@ concept sourceCredential {
 /// cluster-owner escape on the read path, so "list every package in this cluster" would not be
 /// EXPRESSIBLE and an operator would silently read a subset. The composite keeps both statements
 /// true -- a person reads their own packages, an operator reads every one.
-@rowAuthz(owner="ownerUserId", clusterOwner)
+///
+/// AND THE ACCOUNT ARGUMENT, which is a DEPARTURE from the accounts rule and is recorded as one
+/// (memql#5303, design 2026-09-11-app-access-grants D12). The rule -- "an account is a record of
+/// who work is for, never a visibility scope" (accounts D1) -- holds for campaigns, and it held
+/// here until this line. v1:platform:site left it in epic memql#5165, when `account="accountId"`
+/// became an argument of the owned tier: a person whose group ties them to the account this row
+/// names reads it, and may write it if their role holds the verb, without owning it. This finishes
+/// that departure for deployables. A package and its runs are what a client's people, and the
+/// cluster's own, work on together, and the alternative -- every deployable visible to exactly its
+/// creator and the operator -- was two people on one cluster unable to see each other's. Developer
+/// rank and above are standing members of every account-kind group by rule, so the staff read every
+/// TIED package; an untied one stays its owner's and the operator's, exactly as before. The compose
+/// flow ties a new package to the cluster's own account (`v1:accounts:account:self`) unless a
+/// client is picked, which is what makes the departure the default rather than an option.
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="name", secondary="repoUrl", tertiary="deployedVersion", status="status")
 concept package {
   ownerUserId         string  @description("v1:identity:user.id that owns this package, or EMPTY for a cluster-owned one. Stamped from the actor on create, exactly as v1:platform:site stamps its own -- it is the row-authz key the composite tier compares against actor.userId, so a caller-supplied value would record a guarantee nothing provides. NOT `string!`, for the same reason the site's is not: an empty value is the meaningful cluster-owned state.")
@@ -640,8 +654,10 @@ concept package {
   declares            []object @description("What the SOURCE says it contains: one entry per manifest deployable, {name, kind}, rewritten from the analysis report on every run that reaches one. The package is the thing apps come FROM, and until this existed the only record of what a tree declared lived inside a run's report -- so an app that was declared and never deployed had no site row and was invisible everywhere: absent from the list, absent from the source page's own list of the apps it produces. Skipping one at the confirm gate is exactly that case and the commonest, which is how a person could choose not to deploy an app and then be unable to find it again. A SITE row still means DEPLOYED; this means DECLARED, and the difference between the two lists is the set of apps a person can still deploy. Never a placement: no address is stored here, because a skipped app is not asked for one until it is deployed.")
   disabledDeployables []string @description("The manifest deployables this source's OWNER has chosen not to deploy, by name. The OWNER's field, and the pipeline never writes it -- `declares` above is what the manifest says and is rewritten by every analysis, so intent kept there would be erased by the next one. Two fields because there are two authors. A name here means the app is listed and INERT: it appears under its source so it can be found, it is not offered for deploy, and no run builds it. Skipping one at the confirm gate, deactivating a deployable that came from a source (packageDeactivateDeployable) and archiving the source all add to it; activating (enablePackageDeployables) is the deliberate act that removes it, and only then can it be deployed. Before this, a skipped app was merely 'declared with no site' -- indistinguishable from one nobody had got to yet -- so the console offered to deploy it, and discarding the result brought it straight back. A name that no longer appears in `declares` is harmless: it matches nothing, and the manifest is the authority on what exists.")
   status              enum("active", "archived")!  @description("Lifecycle (D10). 'archived' is a PLACE, not a void: archived rows stay listable behind the Archived filter, because the alternative -- the isNotDeleted tradition, which filters rows out of every list -- is precisely what made a deleted deployable unfindable and is why this axis exists at all. Archiving DEACTIVATES every app the package produced first (2026-09-05 design, D3): each app's site is deleted so its address comes free, its name goes on disabledDeployables, and the package flips last. Restoring brings the package back with its apps inactive.")
+  accountId           string   @description("The v1:accounts:account this package is FOR (memql#5303, D12) -- the account argument of the tier above, so a member of that account's group reads this row and its runs without owning them, and a developer or above reads every tied one. The compose flow sets it to the cluster's own account (`self`) unless a client is picked, and copies it onto every packageDeployment it opens. Optional: EMPTY is an untied package, readable by its owner and a cluster owner and nobody else, which is what every row written before this field existed is. Unlike v1:platform:site's field of the same name this one DOES have a read effect, and the concept doc above says why.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
   @relationship(type="references", as="fetchedFrom", field="artifactId", target=artifact, direction="outgoing")
   @relationship(type="references", as="fetchesUnder", field="credentialId", target=sourceCredential, direction="outgoing")
 }
@@ -653,12 +669,15 @@ concept package {
 /// of a package is the literal history of what was attempted and what happened, and it cannot be
 /// rewritten by the next attempt to look like it always went well.
 ///
-/// Same composite tier as its package, and broadcast: the OS watches a deploy advance stage by
-/// stage, which is only true because each stage's status write is a row change the mesh forwards.
-@rowAuthz(owner="ownerUserId", clusterOwner)
+/// Same composite tier as its package -- the account argument included (memql#5303, D12), so a run
+/// is readable by exactly the people its package is -- and broadcast: the OS watches a deploy
+/// advance stage by stage, which is only true because each stage's status write is a row change the
+/// mesh forwards.
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="sourceVersion", secondary="packageId", tertiary="requestedBy", status="status")
 concept packageDeployment {
   ownerUserId    string  @description("Copied from the package row this deployment belongs to, never from the actor. It is the row-authz key, and taking it from the package is what keeps a deployment visible to exactly the people the package is -- including when the pipeline, not the person, writes the row.")
+  accountId      string  @description("Copied from the package row at open, for the reason ownerUserId is (memql#5303): it is the account argument of the tier, and taking it from the package is what keeps the run timeline readable by the people the package is tied to. Written by openPackageDeployment alone and never rewritten; EMPTY for the run of an untied package, and for every run opened before the field existed, which read exactly as they did.")
   packageId      string!  @description("The v1:platform:package this attempt is against.")
   sourceVersion  string   @description("Commit SHA or content hash of the snapshot this attempt analyzed. Empty only while the fetch itself is what failed.")
   status         enum("analyzing", "awaiting_confirm", "building", "staging_dsl", "rolling", "publishing", "succeeded", "refused", "failed", "abandoned", "cancelled")!  @description("Where this attempt is. The stages advance in the D6 order and each write is one @serverOnly mutation under stamped internal origin. FOUR terminal values, and the difference between them is who has work to do: 'refused' is a typed NO the analysis or a gate produced and a person can act on; 'failed' is something that broke; 'succeeded' is live; and 'abandoned' (epic memql#4900) is the sweep's, for a run whose node died mid-flight -- it is deliberately NOT 'failed', because nothing failed that anyone can name and the D6 order guarantees every site is still serving what it was serving. The sweep is the one writer allowed to close a stranded row. FIVE terminal values since epic memql#4937: 'cancelled' is a person's own stop, and it is NOT a flavour of 'failed' for exactly the reason 'abandoned' is not -- nothing broke, nothing was published, and every site is still serving what it was serving. The distinction is who decided: 'abandoned' is a loss this cluster OBSERVED, 'cancelled' is a choice somebody MADE, and a surface that collapsed the two would tell a person their own click was a fault. Only a run that has not started rolling can reach it -- see cancelRequested.")
@@ -683,6 +702,7 @@ concept packageDeployment {
   fromDeploymentId string @description("The run this one was started FROM, when it was (task memql#4902, memql#4955). A retry of a lost run re-analyses the snapshot that run stored rather than fetching the source again -- so it deploys the bytes the lost run was deploying, not whatever the branch has moved to since -- and this records that it did. It was consumed at fetch time and written nowhere, so the run kept no trace of its own provenance: the CONFIRM that followed was a fresh call with no fromDeploymentId at all, which meant a person read a report describing commit A and clicked a button that shipped commit B. Empty for an ordinary run.")
 
   @relationship(type="parent", field="packageId", target=package, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
   @relationship(type="references", as="fetchedFrom", field="snapshotArtifactId", target=artifact, direction="outgoing")
   @relationship(type="references", as="retriedFrom", field="fromDeploymentId", target=packageDeployment, direction="outgoing")
 }

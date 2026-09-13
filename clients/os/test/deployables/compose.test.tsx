@@ -600,6 +600,11 @@ describe("the compose flow: pushed by your CI", () => {
     expect(create).toContain('hostname: "marketing.memql.example.com"');
     expect(create).toContain('status: "draft"');
     expect(create).toContain("/pending/");
+    // ...and tied to the cluster's own account, through the same call the
+    // site detail's picker makes, because no client was picked (memql#5303,
+    // D12).
+    await waitFor(() => expect(connection.callsNamed("updateSiteAccount")).toHaveLength(1));
+    expect(connection.callsNamed("updateSiteAccount")[0]).toContain('accountId: "self"');
 
     expect(await within(region).findByText(/^POST https:\/\/api\.memql\.example\.com\/sites\/[^/]+\/bundles$/)).toBeTruthy();
     expect(
@@ -677,7 +682,9 @@ describe("the compose flow: where each app will live", () => {
 
     const confirmed = connection.callsNamed("packageDeploy")[1] ?? "";
     expect(confirmed).toContain("confirm: true");
-    expect(confirmed).toContain('placements: {storefront: {hostname: "shop.memql.example.com"}}');
+    // The hostname the person chose, and the client half defaulted to the
+    // cluster's own account (memql#5303, D12).
+    expect(confirmed).toContain('placements: {storefront: {accountId: "self", hostname: "shop.memql.example.com"}}');
   });
 
   it("carries a SKIP all the way to packageDeploy", async () => {
@@ -703,9 +710,11 @@ describe("the compose flow: where each app will live", () => {
     const confirmed = connection.callsNamed("packageDeploy").at(-1) ?? "";
     expect(confirmed).toContain("confirm: true");
     expect(confirmed).toContain("skip: true");
-    // ...and the skipped app is not given an address it was never asked for.
-    expect(confirmed).toContain('storefront: {hostname: "shop.memql.example.com"}');
+    // ...and the skipped app is not given an address it was never asked for,
+    // nor the client default the deployed one gets.
+    expect(confirmed).toContain('storefront: {accountId: "self", hostname: "shop.memql.example.com"}');
     expect(confirmed).not.toContain('web: {hostname');
+    expect(confirmed).not.toContain('web: {accountId');
   });
 
   it("records a skip as a STANDING choice, not just a fact about this run", async () => {
@@ -856,10 +865,20 @@ describe("the compose flow: where each app will live", () => {
     await click(await forward("Deploy"));
 
     const confirmed = connection.callsNamed("packageDeploy")[1] ?? "";
-    // The own domain is normalized on the way out; the client half is ABSENT
-    // rather than "", because an explicit empty is a request to tie to nobody.
+    // The own domain is normalized on the way out. The client half was NOT
+    // answered, and that is not an absence: an app nobody tied to a client is
+    // the cluster's own (memql#5303, D12), so the placement names `self`.
     expect(confirmed).toContain('ownDomain: "shop.acme.com"');
-    expect(confirmed).not.toContain("accountId");
+    expect(confirmed).toContain('accountId: "self"');
+  });
+
+  it("ties a new source to the cluster's own account when it is registered", async () => {
+    // The package is registered at Analyze, before any client can be picked
+    // -- the picker is on the Where-it-lives stop, which the parked run
+    // opens. So the source itself is the cluster's own (memql#5303, D12): the
+    // people its group admits, and staff, read it and its runs from now on.
+    const { connection } = await analyzed();
+    expect(connection.callsNamed("createPackage")[0]).toContain('accountId: "self"');
   });
 });
 

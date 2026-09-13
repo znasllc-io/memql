@@ -239,7 +239,27 @@ role matters only where something reads it. Three places do:
 - **`@requiresRank("<slug>")` on a construct** -- an actor-rank FLOOR,
   validated at load and enforced at execution.
 - **`@requiresCapability("<verb>", "<resource>")` on a construct** -- the
-  GRANT half, same lifecycle. Declared together, both must pass.
+  GRANT half, same lifecycle. Declared together, both must pass. Legal on
+  queries, mutations, logic AND builtins (epic memql#5288): most of an app's
+  actions are builtins, so the builtin executor asks the same question the
+  mutation and logic entry points ask.
+
+**Apps are resources too** (epic memql#5288, app access grants design D7). An
+OS app is the resource `app:<appId>` and a named part of one is
+`app:<appId>/<part>`, in the open `resourceType` field. Opening an app is
+`read` on `app:<id>`; a part is `execute` on the part. A part EXISTS by being
+seeded on at least one role in `dsl/rbac/seeds.memql`, which is also what the
+load-time vocabulary check reads -- so `@requiresCapability("execute",
+"app:deployables/publsh")` refuses boot naming the known parts. The `read
+app:<id>` seeds reproduce the MemQL OS registry's hand-written role floors
+exactly, app by app and floored section by floored section, and
+`TestOsRegistryFloorsMatchTheAppSeeds` (`component/memql`) fails the build
+when the two disagree in either direction. Deployables is the first app to
+carry parts (`sources`, `deploy`, `publish`, `retire`, `domains`), seeded on
+owner and developer; the mapping from part to construct is the table in the
+design record. An app grant opens the DOOR; row authorization still decides
+the CONTENTS (D4): a developer holding the deploy part deploys only a package
+they can read.
 
 **A rank is a floor and a capability is a grant, and a cluster can hold one
 without the other.** "developer and above" is a statement about the ladder;

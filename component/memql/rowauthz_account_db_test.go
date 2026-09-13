@@ -375,42 +375,59 @@ func TestAccountGrantAppliesToAReadIssuedAfterTheMembershipLands(t *testing.T) {
 	}
 }
 
-func TestAccountGrantDoesNotWidenAQueryThatNarrowsItself(t *testing.T) {
+func TestAccountGrantReachesTheAccountView(t *testing.T) {
 	// A PROPERTY AUTHORS MUST KNOW, and the one that turns "I declared the
 	// argument and nothing changed" into an explicable answer.
 	//
 	// The tier's predicate is ANDed into a bound read. A query whose own
-	// filter already says `ownerUserId==actor.userId` therefore stays
-	// owner-scoped no matter what the concept declares: the grant widens the
-	// TIER, and an AND with a hand-written owner conjunct cannot be widened
-	// by anything.
+	// filter says `ownerUserId==actor.userId` therefore stays owner-scoped no
+	// matter what the concept declares: the grant widens the TIER, and an AND
+	// with a hand-written owner conjunct cannot be widened by anything.
 	//
-	// sitesForAccount is exactly that shape, and it predates the grant.
+	// sitesForAccount WAS exactly that shape, and this test used to assert
+	// that a member did NOT see the tied site through it. The query was
+	// rewritten deliberately under design D4 of
+	// docs/superpowers/specs/2026-09-11-app-access-grants-design.md
+	// (memql#5303): the account view is the one read whose whole purpose is
+	// the tie, and a hand-written `own || clusterOwner` conjunct there was
+	// the tier's first two arms restated, minus the third. So the assertion
+	// is now the positive one, and the negative control beside it is what
+	// keeps it from proving nothing.
 	eng, _, _ := sharedReadMergeEngine(t)
-	suffix := uniqueSuffix("acctnarrow")
+	suffix := uniqueSuffix("acctview")
 
 	acme := "acme-" + suffix
 	member := "member-" + suffix
+	stranger := "stranger-" + suffix
 	builder := "builder-" + suffix
 	seedPrincipal(t, eng, member, auth.RoleWriter)
+	seedPrincipal(t, eng, stranger, auth.RoleWriter)
 	seedPrincipal(t, eng, builder, auth.RoleWriter)
 	seedGroup(t, eng, "g-"+acme, "Acme", "account", acme)
 	seedMembership(t, eng, "g-"+acme, member, "active")
 	seedSiteFor(t, eng, "site-"+suffix, builder, acme)
 
-	res, err := eng.Execute(rankActorCtx(member, auth.RoleWriter),
-		fmt.Sprintf(`query sitesForAccount(accountId: %s)`, langparser.QuoteString(acme)))
-	if err != nil {
-		// A refusal is an answer too; either way the row must not come back.
-		return
-	}
-	for _, n := range res.Bundle.GetNodes() {
-		if BareShortId(n.GetId()) == "site-"+suffix {
-			t.Fatal("sitesForAccount returned a site to a member -- its own " +
-				"`ownerUserId==actor.userId` conjunct should still narrow it, because the " +
-				"tier is ANDed in rather than replacing the filter. If this now passes " +
-				"deliberately, the query was rewritten and this test should say so.")
+	sees := func(userId string) bool {
+		t.Helper()
+		res, err := eng.Execute(rankActorCtx(userId, auth.RoleWriter),
+			fmt.Sprintf(`query sitesForAccount(accountId: %s)`, langparser.QuoteString(acme)))
+		if err != nil {
+			t.Fatalf("sitesForAccount as %s: %v", userId, err)
 		}
+		for _, n := range res.Bundle.GetNodes() {
+			if BareShortId(n.GetId()) == "site-"+suffix {
+				return true
+			}
+		}
+		return false
+	}
+	if !sees(member) {
+		t.Fatal("sitesForAccount did not return a tied site to a member of that account's group -- " +
+			"the account view narrows past the tier again. If a caller-scope conjunct was re-added " +
+			"to the query, that reverses design D4 and this test should say so.")
+	}
+	if sees(stranger) {
+		t.Fatal("sitesForAccount returned the site to somebody in no group, so the read above proves nothing")
 	}
 }
 

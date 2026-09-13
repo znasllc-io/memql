@@ -280,8 +280,16 @@ func (s *store) openDeployment(ctx context.Context, d deploymentSeed) error {
 	if scoped == nil {
 		scoped = []string{}
 	}
+	// THE ACCOUNT RIDES ALONG ONLY WHEN THERE IS ONE. It is copied off the
+	// package row, never chosen here, and an untied package's run must be
+	// written exactly as it was before the field existed -- an explicit ""
+	// would be a value the row records where the truth is an absence.
+	account := ""
+	if v := strings.TrimSpace(d.AccountId); v != "" {
+		account = fmt.Sprintf(", accountId: %s", langparser.QuoteString(v))
+	}
 	return s.writeInternal(writeCtx, fmt.Sprintf(
-		"mutation openPackageDeployment(deploymentId: %s, packageId: %s, sourceVersion: %s, requestedBy: %s, automatic: %t, nodeId: %s, scopedTo: %s, fromDeploymentId: %s, startedAt: %s)",
+		"mutation openPackageDeployment(deploymentId: %s, packageId: %s, sourceVersion: %s, requestedBy: %s, automatic: %t, nodeId: %s, scopedTo: %s, fromDeploymentId: %s%s, startedAt: %s)",
 		langparser.QuoteString(d.DeploymentId),
 		langparser.QuoteString(d.PackageId),
 		langparser.QuoteString(d.SourceVersion),
@@ -290,6 +298,7 @@ func (s *store) openDeployment(ctx context.Context, d deploymentSeed) error {
 		langparser.QuoteString(d.NodeId),
 		jsonLiteral(scoped),
 		langparser.QuoteString(d.FromDeploymentId),
+		account,
 		langparser.QuoteString(d.StartedAt.UTC().Format(time.RFC3339)),
 	))
 }
@@ -329,6 +338,28 @@ func (s *store) setAutoDeploy(ctx context.Context, packageId string, on bool) er
 		"mutation setPackageAutoDeploy(packageId: %s, autoDeploy: %t)",
 		langparser.QuoteString(packageId), on))
 	return err
+}
+
+// disarmAutoDeployAfterRetire switches auto-deploy OFF as a CONSEQUENCE of a
+// retire -- the last servable app deleted or deactivated, the source
+// archived -- rather than as the person's own act of flipping the switch.
+//
+// STAMPED INTERNAL, and the reason is the part vocabulary (epic memql#5288):
+// setPackageAutoDeploy carries `execute app:deployables/sources`, the
+// switch being a `sources` act, while every cascade that reaches here is a
+// `retire` act. A caller holding retire and not sources would otherwise be
+// refused HERE, after the site row was already stamped deleted -- a retire
+// half done, with an armed source nothing can build for. Owner and
+// developer hold both parts today; a per-person grant (epic memql#5287)
+// need not. What makes the stamp safe is the ORDER every caller keeps: the
+// package or site was resolved under the CALLER's own actor first, through
+// the owner-scoped reads, so ownership is already decided by the time the
+// consequence is written. The person's own switch stays setAutoDeploy
+// above, unstamped, with its guard.
+func (s *store) disarmAutoDeployAfterRetire(ctx context.Context, packageId string) error {
+	return s.writeInternal(ctx, fmt.Sprintf(
+		"mutation setPackageAutoDeploy(packageId: %s, autoDeploy: false)",
+		langparser.QuoteString(packageId)))
 }
 
 func (s *store) advance(ctx context.Context, deploymentId, status string) error {
@@ -751,7 +782,11 @@ type deploymentSeed struct {
 	// FromDeploymentId is the run this one was started from, when it is a
 	// retry (memql#4955).
 	FromDeploymentId string
-	StartedAt        time.Time
+	// AccountId is the package's own account tie, copied onto the run so its
+	// timeline is readable by the people the package is (memql#5303). Empty
+	// for an untied package, and then not rendered at all.
+	AccountId string
+	StartedAt time.Time
 }
 
 type deploymentClose struct {

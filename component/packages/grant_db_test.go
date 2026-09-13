@@ -82,8 +82,8 @@ func TestGithubAppGrantResolutionIsOwnerScopedOverRealRows(t *testing.T) {
 	refreshToken := "ghr_DBREFRESH" + suffix
 	installToken := "ghs_DBINSTALL" + suffix
 
-	ctxA := auth.ContextWithUserActor(context.Background(), userA)
-	ctxB := auth.ContextWithUserActor(context.Background(), userB)
+	ctxA := deployerCtx(userA)
+	ctxB := deployerCtx(userB)
 
 	t.Cleanup(func() {
 		for _, id := range []string{credentialId, packageId} {

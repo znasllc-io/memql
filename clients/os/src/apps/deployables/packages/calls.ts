@@ -33,6 +33,13 @@ export interface NewPackageInput {
   /** A v1:platform:sourceCredential id. This surface never handles a token value. */
   credentialId: string;
   artifactId: string;
+  /**
+   * The v1:accounts:account the source is FOR (memql#5303, D12). The compose
+   * flow sends the cluster's own account, because the source is registered
+   * before any client can be picked; "" registers an untied package, which
+   * is its owner's and the operator's alone.
+   */
+  accountId: string;
 }
 
 export async function createPackage(query: QueryClient, input: NewPackageInput): Promise<string> {
@@ -46,6 +53,7 @@ export async function createPackage(query: QueryClient, input: NewPackageInput):
   if (input.repoRef !== "") parts.push(`repoRef: ${renderMemQLValue(input.repoRef)}`);
   if (input.credentialId !== "") parts.push(`credentialId: ${renderMemQLValue(input.credentialId)}`);
   if (input.artifactId !== "") parts.push(`artifactId: ${renderMemQLValue(input.artifactId)}`);
+  if (input.accountId !== "") parts.push(`accountId: ${renderMemQLValue(input.accountId)}`);
   await query.executeNamed("createPackage", `mutation createPackage(${parts.join(", ")})`);
   return packageId;
 }

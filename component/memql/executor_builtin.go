@@ -146,6 +146,17 @@ func (e *MemQLEngine) evaluateBuiltinFunctionExpression(ctx context.Context, exp
 			return nil, err
 		}
 	}
+	// The capability grant on a BUILTIN (epic memql#5288, task memql#5301).
+	// A top-level builtin call returns from executeWith's own branch before
+	// the plan-level refusal runs, and an inline one reaches the plan gate
+	// only through the validator's expansion -- so this is the one seam
+	// every builtin execution crosses, and it asks the same question the
+	// mutation and logic entry points ask. Internal origin passes here for
+	// the reason it passes there: an automation driving packageDeploy on a
+	// person's behalf is trusted Go, not a principal.
+	if err := e.refuseBuiltinBelowRequiredCapability(ctx, expr.Name); err != nil {
+		return nil, err
+	}
 	handler, ok := e.builtinExecutorHandlers[expr.Executor]
 	if !ok || handler == nil {
 		return nil, fmt.Errorf("unknown builtin executor %q", expr.Executor)

@@ -154,6 +154,95 @@ var capabilitySets = map[Role]map[verbResource]bool{
 	),
 }
 
+// appReadFloors is the mirror of the APP half of the seeds (epic memql#5288,
+// task memql#5300): `read` on `app:<id>` for every OS app, and on
+// `app:<id>/<section>` for every floored section, on exactly the roles the
+// MemQL OS registry's hand-written `roles:` floor admits today. Keyed by the
+// USER-ROW spelling for the reason capabilitySets is (writer is the member
+// tier, reader the viewer tier).
+//
+// It is a TABLE OF ROLE SETS rather than a rule, deliberately. A rule
+// ("min admin means owner, developer, admin") would be a third copy of the
+// floor semantics beside the OS's roleAdmits and the seeds' own reading of
+// it, and the point of a mirror is to be pinned, not to be clever:
+// TestSeedMatchesCompiledMirror holds every pair here equal to the seeds in
+// both directions, and TestOsRegistryFloorsMatchTheAppSeeds holds the seeds
+// equal to the registry. Merged into capabilitySets at init, below.
+var appReadFloors = map[string][]Role{
+	"app:accounts":              {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:accounts/logs":         {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:campaigns":             {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
+	"app:campaigns/logs":        {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:cluster":               {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:cluster/modules":       {RoleOwner, RoleAdmin},
+	"app:cluster/origins":       {RoleOwner},
+	"app:cluster/audit":         {RoleOwner},
+	"app:cluster/logs":          {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:concepts":              {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:concepts/logs":         {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:files":                 {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
+	"app:files/logs":            {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:deployables":           {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
+	"app:deployables/logs":      {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:fleet":                 {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
+	"app:fleet/logs":            {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:logs":                  {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:materializer":          {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
+	"app:materializer/logs":     {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:users":                 {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:users/logs":            {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:training":              {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter},
+	"app:training/logs":         {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:nexus":                 {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
+	"app:nexus/logs":            {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:settings":              {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
+	"app:settings/cluster":      {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:settings/benchmarks":   {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:settings/integrations": {RoleOwner, RoleDeveloper},
+	"app:settings/providers":    {RoleOwner, RoleDeveloper},
+	"app:settings/levels":       {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:settings/rules":        {RoleOwner, RoleDeveloper},
+	"app:settings/decisions":    {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:settings/tokens":       {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:settings/keys":         {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:settings/logs":         {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:stores":                {RoleOwner},
+	"app:stores/stores":         {RoleOwner},
+	"app:stores/logs":           {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:stores/settings":       {RoleOwner},
+	"app:bin":                   {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
+	"app:bin/logs":              {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:ask":                   {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
+	"app:setup":                 {RoleOwner, RoleDeveloper},
+}
+
+// appPartGrants is the mirror of the Deployables PART seeds (task
+// memql#5301): `execute` on each named part, on owner and developer only.
+var appPartGrants = map[string][]Role{
+	"app:deployables/sources": {RoleOwner, RoleDeveloper},
+	"app:deployables/deploy":  {RoleOwner, RoleDeveloper},
+	"app:deployables/publish": {RoleOwner, RoleDeveloper},
+	"app:deployables/retire":  {RoleOwner, RoleDeveloper},
+	"app:deployables/domains": {RoleOwner, RoleDeveloper},
+}
+
+// The app tables fold into capabilitySets before anything reads it, so the
+// mirror stays ONE map to every reader (roleHasCapability, principalGrantsOf,
+// the parity gate) and the tables above are only a more legible way of
+// writing 149 entries.
+func init() {
+	for resource, roles := range appReadFloors {
+		for _, role := range roles {
+			capabilitySets[role][vr(VerbRead, resource)] = true
+		}
+	}
+	for resource, roles := range appPartGrants {
+		for _, role := range roles {
+			capabilitySets[role][vr(VerbExecute, resource)] = true
+		}
+	}
+}
+
 func vr(verb, resource string) verbResource { return verbResource{verb: verb, resource: resource} }
 
 func setOf(keys ...verbResource) map[verbResource]bool {

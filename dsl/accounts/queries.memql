@@ -158,10 +158,19 @@ query account existingSelfAccount {
 
 /// The deployables tied to one account.
 ///
-/// `isNotDeleted` and the composite-tier term are `sitesAll`'s own conjuncts,
-/// repeated here rather than referenced: this is the same read that query
-/// makes, narrowed by the tie field, and a soft-deleted site must stay gone
-/// from a rollup for the reason it is gone from the list.
+/// `isNotDeleted` is `sitesAll`'s own conjunct, repeated here rather than
+/// referenced: this is the same read that query makes, narrowed by the tie
+/// field, and a soft-deleted site must stay gone from a rollup for the reason
+/// it is gone from the list.
+///
+/// NO CALLER TERM, DELIBERATELY (memql#5303, design 2026-09-11-app-access-grants
+/// D4). This is the account VIEW -- the one read whose whole purpose is the tie
+/// -- and it used to carry `(ownerUserId==actor.userId ||
+/// actor.isClusterOwner==true)` beside the tie field, which is the tier's first
+/// two arms restated minus the third: a member of Acme's group was admitted to
+/// Acme's sites by `account="accountId"` and then filtered out by this query.
+/// The tier decides the row set; TestAccountGrantReachesTheAccountView reads it
+/// for a member and a stranger, and tierDecidesTheRead records the construct.
 ///
 /// `isNotArchived` joined them when v1:platform:site gained the archived rung
 /// (epic memql#4794, D10), and it is not optional for a ROLLUP: the band this
@@ -174,7 +183,7 @@ query site sitesForAccount {
   args {
     accountId  string!
   }
-  filter  accountId==args.accountId && isNotDeleted && isNotArchived && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  accountId==args.accountId && isNotDeleted && isNotArchived
   shape   siteFull
   sort    "hostname", "asc"
 }
@@ -260,10 +269,11 @@ query invitation invitationsForAccount {
 
 /// The email campaigns run for one account.
 ///
-/// The composite-tier term is `campaigns`' own conjunct, repeated here rather than referenced, for
-/// the reason `sitesForAccount` repeats `sitesAll`'s: this is the same read that query makes,
-/// narrowed by the tie field, and a rollup that dropped the tier predicate would be the shortest
-/// path in the product to reading every operator's campaigns.
+/// The composite-tier term is `campaigns`' own conjunct, repeated here rather than referenced: this
+/// is the same read that query makes, narrowed by the tie field. `sitesForAccount` above dropped its
+/// copy under memql#5303 (D4) because v1:platform:site declares the account argument; campaigns
+/// keep theirs, because a rollup that dropped the tier predicate would be the shortest path in the
+/// product to reading every operator's campaigns.
 ///
 /// It counts CAMPAIGNS and not sends. A band that said "4,182" would be counting delivery rows,
 /// which is a number about one busy week rather than about the client -- and the delivery ledger is

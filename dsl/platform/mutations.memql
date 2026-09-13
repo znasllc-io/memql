@@ -462,6 +462,7 @@ mutate site updateSiteBundle {
 /// Owner-or-cluster-owner, enforced by guardRowAuthzWrite against v1:platform:site's composite tier
 /// rather than by anything here -- see updateSiteBundle's note for why the split is where it is.
 @description("Set a site's status")
+@requiresCapability("execute", "app:deployables/publish")
 mutate site updateSiteStatus {
   args {
     siteId  string!
@@ -547,6 +548,7 @@ mutate site updateSiteSettings {
 /// the cluster-owner path is rowAuthzWriteEscape's explicit escape -- so one user cannot delete
 /// another's deployable, and an operator can delete any non-systemOwned one.
 @description("Soft-delete a site")
+@requiresCapability("execute", "app:deployables/retire")
 mutate site deleteSite {
   args {
     siteId  string!
@@ -656,6 +658,7 @@ mutate customDomain createCustomDomain {
 /// point -- an operator removing a binding because it is being abused should not have to wait for
 /// kubectl.
 @description("Start removing a custom-domain binding. The row walks to `removing` and the reconciliation sweep takes the Ingress and Certificate away.")
+@requiresCapability("execute", "app:deployables/domains")
 mutate customDomain removeCustomDomain {
   args {
     domainId  string!
@@ -1349,8 +1352,12 @@ mutate syncState setSyncPaused {
 /// packages surface, that carries a token VALUE: the token crossed the wire once, inside
 /// sourceCredentialCreate, and the fetcher resolves the name under THIS package's owner -- so naming
 /// somebody else's credential here buys nothing but a credential_not_found at the next fetch.
+///
+/// `accountId` is the tie the package's tier reads (memql#5303, D12). The compose flow sends the
+/// cluster's own account unless a client was picked; absent, the package is untied and its owner's.
 @actor
 @description("Register a package this cluster tracks and can deploy")
+@requiresCapability("execute", "app:deployables/sources")
 mutate package createPackage {
   args {
     packageId     string!
@@ -1360,9 +1367,11 @@ mutate package createPackage {
     repoRef       string   @maxLength(200)
     credentialId  string
     artifactId    string
+    /// The v1:accounts:account this package is for. Absent means untied.
+    accountId     string
   }
   insert {
-    accept { name, repoUrl, repoRef, credentialId, artifactId }
+    accept { name, repoUrl, repoRef, credentialId, artifactId, accountId }
     stamp {
       id:              args.packageId
       ownerUserId:     actor.userId
@@ -1378,6 +1387,7 @@ mutate package createPackage {
 /// is this write. Minimal arguments deliberately -- update{} has been a read-merge since memql#1628,
 /// so re-supplying every discriminator is dead weight that an undeclared-argument DISCARD hides.
 @description("Update a package's tracked ref or the credential it fetches under")
+@requiresCapability("execute", "app:deployables/sources")
 mutate package updatePackageSource {
   args {
     packageId     string!
@@ -1392,13 +1402,6 @@ mutate package updatePackageSource {
   }
 }
 
-/// Turn a source's auto-deploy switch on or off (epic memql#4900).
-///
-/// The PERSON's write, and an owned one: the write guard resolves the target row and admits its
-/// owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There
-/// is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's
-/// decision, which is what makes an auto-run's provenance honest.
-@description("Turn auto-deploy on or off for a tracked source")
 /// Turn one or more of a source's deployables OFF -- the owner's standing choice not to deploy
 /// them.
 ///
@@ -1418,6 +1421,7 @@ mutate package updatePackageSource {
 /// this and enablePackageDeployables inverses.
 @description("Turn deployables of a source off, by name")
 @addToSet("disabledDeployables")
+@requiresCapability("execute", "app:deployables/retire")
 mutate package disablePackageDeployables {
   args {
     packageId       string!
@@ -1437,6 +1441,7 @@ mutate package disablePackageDeployables {
 /// succeed and a retry is safe.
 @description("Turn deployables of a source back on, by name")
 @removeFromSet("disabledDeployables")
+@requiresCapability("execute", "app:deployables/retire")
 mutate package enablePackageDeployables {
   args {
     packageId       string!
@@ -1448,6 +1453,14 @@ mutate package enablePackageDeployables {
   }
 }
 
+/// Turn a source's auto-deploy switch on or off (epic memql#4900).
+///
+/// The PERSON's write, and an owned one: the write guard resolves the target row and admits its
+/// owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There
+/// is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's
+/// decision, which is what makes an auto-run's provenance honest.
+@description("Turn auto-deploy on or off for a tracked source")
+@requiresCapability("execute", "app:deployables/sources")
 mutate package setPackageAutoDeploy {
   args {
     packageId   string!
@@ -1622,10 +1635,12 @@ mutate packageDeployment openPackageDeployment {
     scopedTo       []string
     /// The run this one was started from, when it is a retry.
     fromDeploymentId string
+    /// The package's account tie, copied by the pipeline off the package row (memql#5303).
+    accountId      string
     startedAt      datetime!
   }
   insert {
-    accept { sourceVersion, requestedBy, nodeId, scopedTo, fromDeploymentId }
+    accept { sourceVersion, requestedBy, nodeId, scopedTo, fromDeploymentId, accountId }
     stamp {
       id:           args.deploymentId
       packageId:    args.packageId

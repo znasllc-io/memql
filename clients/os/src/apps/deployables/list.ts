@@ -19,8 +19,9 @@ import { bundleForm, siteFingerprint, siteName, type SiteRow } from "./rows";
 // ===========================================================================
 // THE SEED IS THE POPULATION, THE FACETS ARE FOLDS
 // ===========================================================================
-// `sitesAll` and `packagesAll` carry the composite tier's own predicate and
-// no other, so one seed of each holds the complete truth the caller may read,
+// `sitesAll` and `packagesAll` carry no caller term -- the concept's tier
+// decides (memql#5303) -- so one seed of each holds the complete truth the
+// caller may read,
 // and search, kind, status, client, source and the archived flip are all
 // client-side folds over it (the rule Files states for its browse). A filter
 // change therefore costs no round trip -- and, because it re-baselines

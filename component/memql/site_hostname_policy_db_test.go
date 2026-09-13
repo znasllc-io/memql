@@ -32,10 +32,18 @@ const siteTestDomain = "policy-test.example"
 
 // userSiteCtx is an ordinary authenticated caller: a person with a deployable,
 // not an operator.
+//
+// A DEVELOPER, not a writer, since epic memql#5288: creating a package and
+// setting a site's status are the `sources` and `publish` parts of
+// Deployables, seeded on owner and developer only, and a writer is refused
+// by the capability gate before any row is touched. What these files
+// measure -- the row's owner against a stranger against a cluster owner --
+// is a tier question the developer rank leaves exactly as it was: a
+// developer is not a cluster owner, and no row here carries an account tie.
 func userSiteCtx(userId string) context.Context {
 	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{
 		UserId: userId,
-		Role:   auth.RoleWriter,
+		Role:   auth.RoleDeveloper,
 	})
 	return auth.ContextWithToken(ctx, &auth.TokenInfo{Subject: userId})
 }

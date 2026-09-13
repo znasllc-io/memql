@@ -36,11 +36,11 @@ import { SITE_CONCEPT } from "./concepts";
 /**
  * Every deployable the caller may read, live.
  *
- * NO ARGUMENTS. `sitesAll` carries `isNotDeleted` and the composite tier's own
- * predicate (`ownerUserId==actor.userId || actor.isClusterOwner==true`), so the
- * engine decides how far "all" reaches: a cluster owner's list is every site in
- * the cluster and an ordinary caller's is their own. Same call, same surface,
- * different population.
+ * NO ARGUMENTS. `sitesAll` carries `isNotDeleted` and NO caller term: the
+ * concept's tier (`owner`, `clusterOwner`, `account="accountId"`) decides how
+ * far "all" reaches (memql#5303, D4). A cluster owner's list is every site in
+ * the cluster; anyone else's is their own plus every site tied to an account
+ * whose group they are in. Same call, same surface, different population.
  *
  * The KEY is a constant. It must encode everything that changes what is READ,
  * and nothing that merely arrives late -- an actor id folded into it would
