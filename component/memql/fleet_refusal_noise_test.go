@@ -63,3 +63,18 @@ func TestFleetUnavailableSanitizesWrongPodStreamLastError(t *testing.T) {
 		t.Fatalf("want sanitized affinity hint, got %q", msg)
 	}
 }
+
+
+func TestFleetUnavailableRegistryMissDoesNotSayRetryConnectedNodeId(t *testing.T) {
+	e := &FleetUnavailable{
+		ModelId:   "qwen3-embedding:0.6b",
+		LastError: `holding replica registry miss for black on agent-pszjr; stream not dispatchable`,
+	}
+	msg := e.Error()
+	if strings.Contains(msg, "retry against connectedNodeId") {
+		t.Fatalf("self-holder registry miss must not tell operator to retry connectedNodeId: %s", msg)
+	}
+	if !strings.Contains(msg, "holding replica registry miss") {
+		t.Fatalf("want registry-miss wording, got %s", msg)
+	}
+}

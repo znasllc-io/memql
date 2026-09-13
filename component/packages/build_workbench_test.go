@@ -70,7 +70,7 @@ func TestTheBuildSurfaceIsAskedForWhatTheManifestSaid(t *testing.T) {
 
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 	}); err != nil {
@@ -111,7 +111,7 @@ func TestTheSecondAppOfARunPrefersTheNodeTheFirstBuiltOn(t *testing.T) {
 
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 	}); err != nil {
@@ -143,7 +143,7 @@ func TestTheBuiltBundleIsWhatThePublisherReceives(t *testing.T) {
 
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 	}); err != nil {
@@ -187,7 +187,7 @@ func TestATypedRefusalFromTheBuildSurfaceKeepsItsCode(t *testing.T) {
 
 			out, err := Deploy(context.Background(), h.deps, DeployRequest{
 				PackageId:  "v1:platform:package:abc",
-				Actor:      clusterOwner(),
+				Actor:      mayDeployDsl(),
 				Confirmed:  true,
 				Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 			})
@@ -226,7 +226,7 @@ func TestAPrebuiltAppRecordsThatNothingRan(t *testing.T) {
 
 	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 	}); err != nil {
@@ -260,7 +260,7 @@ func TestTheOutputIsReadBackUnderThePipelinesOwnCaps(t *testing.T) {
 
 	_, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId:  "v1:platform:package:abc",
-		Actor:      clusterOwner(),
+		Actor:      mayDeployDsl(),
 		Confirmed:  true,
 		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}, "docs": {Hostname: "docs.example.com"}},
 	})

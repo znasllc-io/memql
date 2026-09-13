@@ -257,7 +257,7 @@ func TestSiteOwnerStampIsUndoneForADeploymentWriter(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := applySiteOwnerStamp(tc.ctx, tc.payload, false, tc.actor); err != nil {
+			if err := applySiteOwnerStamp(tc.ctx, tc.payload, false, tc.actor, true); err != nil {
 				t.Fatalf("applySiteOwnerStamp: %v", err)
 			}
 			if got, present := tc.payload["ownerUserId"]; present {
@@ -273,7 +273,7 @@ func TestSiteOwnerStampIsUndoneForADeploymentWriter(t *testing.T) {
 // weakened: it is what makes the declared tier true.
 func TestSiteOwnerStampStandsForAnOrdinaryCaller(t *testing.T) {
 	payload := map[string]any{"hostname": "shop.memql.localhost", "ownerUserId": "user-a"}
-	if err := applySiteOwnerStamp(callerCtx("user-a"), payload, false, "user-a"); err != nil {
+	if err := applySiteOwnerStamp(callerCtx("user-a"), payload, false, "user-a", true); err != nil {
 		t.Fatalf("applySiteOwnerStamp: %v", err)
 	}
 	if got := payload["ownerUserId"]; got != "user-a" {
@@ -290,7 +290,7 @@ func TestSiteOwnerStampStandsForAnOrdinaryCaller(t *testing.T) {
 // ever published to, which is the opposite of what the undo exists for.
 func TestSiteOwnerStampOnlyUndoesTheCallersOwnStamp(t *testing.T) {
 	payload := map[string]any{"hostname": "shop.memql.localhost", "ownerUserId": "user-a"}
-	if err := applySiteOwnerStamp(ownerRoleCtx("root"), payload, true, "root"); err != nil {
+	if err := applySiteOwnerStamp(ownerRoleCtx("root"), payload, true, "root", false); err != nil {
 		t.Fatalf("applySiteOwnerStamp: %v", err)
 	}
 	if got := payload["ownerUserId"]; got != "user-a" {
@@ -306,7 +306,7 @@ func TestSiteOwnerStampOnlyUndoesTheCallersOwnStamp(t *testing.T) {
 // what that gate protects.
 func TestSiteOwnerStampNeverNamesAThirdParty(t *testing.T) {
 	payload := map[string]any{"hostname": "shop.memql.localhost", "ownerUserId": "user-b"}
-	if err := applySiteOwnerStamp(callerCtx("user-a"), payload, false, "user-a"); err != nil {
+	if err := applySiteOwnerStamp(callerCtx("user-a"), payload, false, "user-a", true); err != nil {
 		t.Fatalf("applySiteOwnerStamp: %v", err)
 	}
 	// The value is left as the template rendered it (createSite renders
@@ -323,7 +323,7 @@ func TestSiteOwnerStampNeverNamesAThirdParty(t *testing.T) {
 // updateSiteBundle / updateSiteStatus / deleteSite name no owner at all.
 func TestSiteOwnerStampDoesNotRunOnAnOrdinaryUpdate(t *testing.T) {
 	payload := map[string]any{"hostname": "os.memql.localhost", "ownerUserId": ""}
-	if err := applySiteOwnerStamp(callerCtx("user-a"), payload, true, "user-a"); err != nil {
+	if err := applySiteOwnerStamp(callerCtx("user-a"), payload, true, "user-a", false); err != nil {
 		t.Fatalf("applySiteOwnerStamp: %v", err)
 	}
 	if got := payload["ownerUserId"]; got != "" {
@@ -337,7 +337,7 @@ func TestSiteOwnerStampDoesNotRunOnAnOrdinaryUpdate(t *testing.T) {
 // would mint an operator's row on an unauthenticated call.
 func TestSiteOwnerStampRefusesAnUnauthenticatedCreate(t *testing.T) {
 	payload := map[string]any{"hostname": "shop.memql.localhost", "ownerUserId": ""}
-	err := applySiteOwnerStamp(context.Background(), payload, false, "")
+	err := applySiteOwnerStamp(context.Background(), payload, false, "", true)
 	if err == nil {
 		t.Fatal("an unauthenticated create was admitted; an empty ownerUserId is the cluster-owned " +
 			"state, so this would mint an operator's row")

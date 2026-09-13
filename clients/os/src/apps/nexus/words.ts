@@ -103,7 +103,19 @@ export function runStatusDetail(status: string): string {
   }
 }
 
-/** What a waiting run is waiting on, in the person's terms. */
+/**
+ * What a waiting run is waiting on, in the person's terms.
+ *
+ * THE THREE THE FAILURE PATH WRITES HAD NO WORDS HERE, and the gap was the
+ * whole of a bug report. A run that failed, got classified and parked itself
+ * on a retry, a replan or a repair fell to the default and read "Waiting" --
+ * the same word as a run waiting on a timer, with nothing saying a failure had
+ * happened, that the system had decided what to do about it, or that it was
+ * about to do it on its own. Somebody watched one of those for a long time
+ * believing work was in flight. Each of the three now says what happened and
+ * what is about to happen, and `waitsOnAPerson` still answers false for them
+ * because none of them is a question for anybody.
+ */
 export function waitingWord(kind: string): string {
   switch (kind) {
     case "approval":
@@ -116,6 +128,12 @@ export function waitingWord(kind: string): string {
       return "Waiting for something outside the cluster";
     case "subrun":
       return "Waiting for a run it started";
+    case "retry":
+      return "A step failed and it is going to try that step again";
+    case "replan":
+      return "A step failed and the rest of the plan is being worked out again";
+    case "repair":
+      return "A step did something other than what it promised, and it is being redone";
     default:
       return "Waiting";
   }
@@ -327,7 +345,14 @@ export function approvalKindMeaning(kind: string): string {
     case "scopeElevation":
       return "A step wants more access than it standing has. Approving widens it for this run.";
     case "budget":
-      return "The run reached one of its ceilings. Approving lets it carry on spending.";
+      // TWO THINGS RAISE THIS KIND and the sentence has to be true of both.
+      // One is the run crossing a ceiling the goal declared, where approving
+      // raises it. The other is the money itself running out at the provider,
+      // where approving raises nothing and somebody has to top it up first --
+      // so the old sentence, "approving lets it carry on spending", promised
+      // a button that does not exist in that half of the cases. What is true
+      // of both is that the run stopped over money and is not retrying.
+      return "The run stopped because paid model calls are no longer available to it -- a ceiling it declared, or the balance behind them. It does not retry against that on its own; the reason below says which.";
     case "skillMint":
       return "The run wants to keep what it learned as a skill it can reuse.";
     case "feedback":

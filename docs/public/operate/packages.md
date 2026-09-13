@@ -107,7 +107,7 @@ somebody's mistake.
 | `source_too_large` | Over the per-file, whole-tree or file-count cap |
 | `source_unreadable` | Not an archive this cluster can open, or a repository or a GitHub it cannot reach |
 | `bundle_path_invalid` | An archive entry escaping the package root |
-| `dsl_requires_cluster_owner` | A DSL-carrying deploy by a non-cluster-owner. Raised at the START of the run, before any build |
+| `dsl_requires_authoring` | A DSL-carrying deploy or rollback by an actor who may not author constructs. Raised at the START of the run, before any build |
 | `archive_confirmation_mismatch` | The typed confirmation does not match the package's stored name (or, for a standalone deployable, its address label or hostname). Verified by the server, not just the form |
 | `deactivate_confirmation_mismatch` | The typed confirmation does not match the app's manifest name. Deactivating asks for the app's NAME, never its hostname |
 
@@ -146,13 +146,52 @@ One UX, gated by CONTENTS:
 
 - A package of **web apps only** deploys under the caller's own authority, and
   the sites it creates are theirs (the memql#4344 per-user ownership model).
-- A package that ships **any MemQL DSL** requires the **cluster-owner** actor,
-  and is refused with `dsl_requires_cluster_owner` **at the start of the run**
-  -- before any build and before anything is staged. The What-it-is stop says
-  so before the click rather than after it.
+- A package that ships **any MemQL DSL** requires an actor who may **author
+  constructs** -- an **owner** or a **developer**, and deliberately not an
+  admin -- and is refused with `dsl_requires_authoring` **at the start of the
+  run**, before any build and before anything is staged.
+
+The authoring line is not a second vocabulary: it is exactly `create` x
+`construct`, the capability `auth.CanAuthor` reads, which the MCP `define`
+surface and the two rule-arming gates already use. Deploying a DSL domain IS
+authoring constructs -- a whole domain of them at once -- so it asks the same
+question at a coarser grain. admin is user-management authority and holds only
+`read` on `construct`; developer is engineering authority and holds
+create/update/delete/execute.
+
+**An automatic run answers the same gate.** Auto-deploy resolves the package
+OWNER's authority (nobody is at a keyboard to take one from), so an armed
+source that ships DSL deploys only while its owner may author constructs. It
+is not exempt, and it is not permanently barred either -- which it was, for
+everybody including the cluster owner, until the run started resolving an
+authority at all.
 
 DSL is server-side authority for the whole cluster; multi-tenant DSL sandboxing
 is not built. An operator running their own instance never sees this gate.
+
+### Two consequences of asking for a capability rather than a role
+
+**A custom role holding `create` x `construct` deploys DSL, at any rank.** The
+gate reads the installed role catalog, so it admits a role this cluster
+authored for itself if that role holds the pair -- rank 1 included. Only an
+OWNER can put it there: `roleCreate` bounds a new role to grants the caller
+themselves holds, developer holds no `create` x `role` at all, and admin holds
+`create` x `role` but only `read` x `construct`. So the widening is an owner
+saying "this role authors constructs", which is what the sentence means. It is
+still wider than "owner or developer", and that is worth knowing before
+authoring a role.
+
+**A delegation ceiling cannot narrow developer to admin, and this pair is
+where that shows.** `auth.RoleAtMost` clamps a role to a ceiling only when the
+ceiling's `principal` grants are a superset -- so `RoleAtMost(owner, admin)`
+DOES clamp to admin, while `RoleAtMost(developer, admin)` returns developer,
+because admin holds create/update/delete on `principal` and developer holds
+only read. The effect on a shared terminal pinned at admin (the `class="badge"`
+grant) is that the OWNER is refused a DSL deploy and a lower-ranked DEVELOPER
+is admitted. Recorded rather than fixed: that session can already author
+constructs directly through the MCP `define` surface, which is the same
+authority at a finer grain, so the gate is not what is leaking. The ceiling
+mechanism has a known hole on exactly this pair.
 
 ## The order, and why it never changes
 

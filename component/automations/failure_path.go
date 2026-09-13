@@ -118,6 +118,20 @@ func (j *workJournal) classifyAndAct(ctx context.Context, exec *AutomationExecut
 	sig := signalFor(exec)
 	stepKey := lastStepKey(exec)
 
+	// A FAILURE THAT IS ALREADY OVER IS NOT A SYMPTOM (component/work's
+	// terminal.go). The five symptoms are all answers to "what should the
+	// loop do about this?", and these have no act: the composition wrote its
+	// own terminal row, or a clock this system set for itself ran out and the
+	// next attempt gets the same clock. Asking the table anyway is how the
+	// bug shipped -- it read "deadline exceeded", called it a blip and parked
+	// the run on a retry, while the composition row said `failed`. So the
+	// check is here, ABOVE the table, and the run goes terminal with the
+	// reason on it.
+	if code, ok := work.TerminalFailureCode(sig.ErrorMessage); ok {
+		j.failTerminally(ctx, exec, chainHead, stepKey, code)
+		return true
+	}
+
 	symptom, evidence, ok := work.ClassifyByRules(sig)
 	if !ok {
 		// THE ONE MODEL CALL, and only here.
@@ -169,7 +183,11 @@ func (j *workJournal) classifyAndAct(ctx context.Context, exec *AutomationExecut
 			"ruleId":  evidence.RuleId,
 		})
 	case work.ActHeal, work.ActAsk:
-		kind := work.ApprovalKindFor(act)
+		// The KIND is chosen from the verdict rather than the act alone: an
+		// exhausted budget and "the system cannot decide this" are both
+		// ActAsk and are different questions, and the person deciding reads
+		// the kind's sentence, not the act's.
+		kind := work.ApprovalKindForVerdict(act, evidence)
 		if kind == "" {
 			return false
 		}
@@ -185,6 +203,57 @@ func (j *workJournal) classifyAndAct(ctx context.Context, exec *AutomationExecut
 			"source", evidence.Source, "ruleId", evidence.RuleId)
 	}
 	return true
+}
+
+// failTerminally closes the run as `failed` with the code naming why another
+// attempt is not the answer.
+//
+// IT WRITES THE TERMINAL ROW ITSELF rather than returning false and letting
+// closeRun do it, for the one thing closeRun cannot say: the errorCode. Nexus
+// keys its run notices on that field, so a code is the difference between a
+// reader seeing "the composition recorded its own failure, so the document
+// does not exist" and seeing the generic "this run failed -- the step it
+// stopped at is marked below, with what the classifier made of it", which
+// would point them at a classifier that deliberately never ran.
+//
+// NO SYMPTOM IS RECORDED ON THE STEP. The five are a closed enum and none of
+// them is true here: `transient` promises a retry inside the budget,
+// `contract` promises a repair from the failed step, `human` promises the run
+// parked and asked -- and this run did none of those. Nexus renders each of
+// those promises as a sentence, so writing one to fill the field would put a
+// false sentence on the row. An empty symptom reads as "this build cannot say
+// which of the five", which is exactly right: it is none of them.
+func (j *workJournal) failTerminally(ctx context.Context, exec *AutomationExecution, chainHead, stepKey, code string) {
+	if stepKey != "" {
+		j.call(ctx, "updateWorkStep", map[string]any{
+			"stepId":    workStepId(exec.ID, stepKey),
+			"errorCode": code,
+		})
+	}
+	finished := exec.CompletedAt
+	if finished.IsZero() {
+		finished = time.Now()
+	}
+	args := map[string]any{
+		"runId":      exec.ID,
+		"status":     "failed",
+		"finishedAt": rfc3339(finished),
+		"chainHead":  chainHead,
+		"stepOrder":  exec.StepOrder,
+		"errorCode":  code,
+		"outcome": map[string]any{
+			"executorStatus": exec.Status,
+			"terminalReason": work.TerminalReason(code),
+		},
+	}
+	if exec.Error != "" {
+		args["errorMessage"] = exec.Error
+	}
+	j.call(ctx, "updateWorkRun", args)
+	if j.logger != nil {
+		j.logger.Info("work journal: a failure that cannot end differently was recorded as terminal rather than parked",
+			"component", ComponentName, "run", exec.ID, "step", stepKey, "errorCode", code)
+	}
 }
 
 // classifyByModel makes the single classifySymptom call. It is a separate

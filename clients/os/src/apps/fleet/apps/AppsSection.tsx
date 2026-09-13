@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Button, Check, Chip, Field, Head, Input, Notice, Panel, Row, Select, Subhead } from "../../../kit";
 import { formatFreshness, formatMoment } from "../../../kit/format";
 import { useNow } from "../../../kit/useNow";
-import { Measure } from "../../../kit/Measure";
+import { Measure } from "../../../kit/MeasureView";
 import {
   appLabel,
   DELEGATABLE_KINDS,

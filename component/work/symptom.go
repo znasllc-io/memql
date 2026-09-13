@@ -87,6 +87,57 @@ const (
 	ApprovalKindFeedback   = "feedback"
 )
 
+// Rule ids other code keys on. Most rules are named only in their own row and
+// in the evidence they write, but these two are read by a caller deciding
+// WHICH APPROVAL to raise, so they are constants rather than literals in two
+// files that could drift apart.
+const (
+	// RuleIdBudgetExhausted is the money rule below.
+	RuleIdBudgetExhausted = "human.budgetExhausted"
+	// RuleIdContextExhausted is the context-window rule below.
+	RuleIdContextExhausted = "human.contextExhausted"
+)
+
+// budgetExhaustedMarkers are the ways a NON-LOCAL budget reports that it is
+// spent. Local inference has no bill and reaches none of these.
+//
+// THE ORDER OF THE RULES MATTERS MORE THAN USUAL FOR THIS ONE, because of a
+// detail of how the vendors answer: OpenAI reports an exhausted quota as an
+// HTTP 429 with `insufficient_quota`, the same status it uses for ordinary
+// rate limiting. Below transient.rateLimit this rule would never fire -- the
+// "429" matcher would claim it first, the run would retry against a balance
+// nobody is topping up, spend its whole retry budget, and only then ask a
+// person, with a symptom naming the wrong thing. So it sits above.
+var budgetExhaustedMarkers = []string{
+	"insufficient_quota",
+	"exceeded your current quota",
+	"billing_hard_limit_reached",
+	"credit balance is too low",
+	"budget_exceeded_error",
+	// component/memql's kill-switch, which hard-stops a guarded call with a
+	// 402 once a cumulative cap latches. It says "terminal, not a retryable
+	// provider rate limit" in its own body; this is the work spine agreeing.
+	"llm kill-switch",
+}
+
+// contextExhaustedMarkers are the ways a provider reports that the request no
+// longer fits the model's context window.
+//
+// REACHING THIS TABLE MEANS RECOVERY ALREADY FAILED. The tool loops compress
+// the conversation and hand the work into the next window when a call
+// overflows, so an overflow that gets this far is one where compressing freed
+// nothing -- a single message larger than the window, typically. Retrying
+// sends the same bytes to the same limit, so it is not transient, and the fix
+// is a smaller unit of work, which is a person's call.
+var contextExhaustedMarkers = []string{
+	"context_length_exceeded",
+	"context length exceeded",
+	"maximum context length",
+	"exceeds the context window",
+	"prompt is too long",
+	"reduce the length of the messages",
+}
+
 // Evidence sources. A verdict always says where it came from, because
 // "the rules decided" and "a model decided" have different costs and
 // different trust, and a reader of the row must be able to tell.
@@ -159,6 +210,13 @@ func anyOf(haystack string, needles ...string) bool {
 // looks transient must escalate rather than retry forever, and the
 // contract rule sits above the message matchers because a postcondition
 // failure is a fact about the step rather than a guess about its text.
+//
+// THE TWO EXHAUSTION RULES SIT ABOVE EVERY TRANSIENT MATCHER for the same
+// reason the stall rule does: both conditions wear a transient's clothes and
+// neither clears on its own. An exhausted quota arrives from OpenAI as a 429,
+// which transient.rateLimit would claim; a full context window arrives as a
+// request error that a retry sends again byte for byte. Retrying either one
+// spends the run's budget to rediscover a number only a person changes.
 var rules = []rule{
 	{
 		id: "human.stalled", tier: "escalate", symptom: SymptomHuman,
@@ -169,6 +227,20 @@ var rules = []rule{
 		id: "contract.postcondition", tier: "contract", symptom: SymptomContract,
 		reason: "the step ran and its postcondition did not hold",
 		match:  func(s Signal) bool { return s.PostconditionFailed },
+	},
+	{
+		id: RuleIdBudgetExhausted, tier: "escalate", symptom: SymptomHuman,
+		reason: "the budget for paid model calls is spent, which no retry replenishes -- raising it or letting the run finish on local models is a decision about money",
+		match: func(s Signal) bool {
+			return s.ErrorCode == "budget_exhausted" || anyOf(lower(s.ErrorMessage), budgetExhaustedMarkers...)
+		},
+	},
+	{
+		id: RuleIdContextExhausted, tier: "escalate", symptom: SymptomHuman,
+		reason: "the work no longer fits the model's context window and compressing it freed nothing, so the same bytes would meet the same limit again",
+		match: func(s Signal) bool {
+			return s.ErrorCode == "context_length_exceeded" || anyOf(lower(s.ErrorMessage), contextExhaustedMarkers...)
+		},
 	},
 	{
 		id: "transient.rateLimit", tier: "retryable", symptom: SymptomTransient,
@@ -277,4 +349,21 @@ func ApprovalKindFor(a Act) string {
 	default:
 		return ""
 	}
+}
+
+// ApprovalKindForVerdict is ApprovalKindFor, told which rule fired.
+//
+// Two of the questions ActAsk can raise are not the same question. The generic
+// one is `feedback`, and Nexus says of it "it cannot decide this one on its
+// own" -- which is wrong about an exhausted budget, where the system knows
+// exactly how to proceed and cannot pay for it. That is `budget`, the kind
+// whose sentence is about money.
+//
+// The act is unchanged either way, so this is only ever about which words
+// reach the person deciding.
+func ApprovalKindForVerdict(a Act, ev Evidence) string {
+	if a == ActAsk && ev.RuleId == RuleIdBudgetExhausted {
+		return ApprovalKindBudget
+	}
+	return ApprovalKindFor(a)
 }

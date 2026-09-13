@@ -5,7 +5,7 @@ import { ArrowLeft, RefreshCw } from "lucide-react";
 import { Mark } from "../../chrome/Mark";
 import { Button, Caption, Chips, Fact, Facts, Head, Notice, Panel, Subhead } from "../../kit";
 import { ActionBar, type Act } from "../../kit/ActionBar";
-import { Measure } from "../../kit/Measure";
+import { Measure } from "../../kit/MeasureView";
 import { absent } from "../../kit/measure";
 import { OpenLogsButton } from "../../logs/OpenLogs";
 import type { DomainState, StoreHealth } from "./health";
