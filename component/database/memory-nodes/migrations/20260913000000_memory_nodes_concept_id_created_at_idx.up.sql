@@ -6,7 +6,7 @@
 --
 -- With only (id, "createdAt" DESC) and (concept) to choose from, TimescaleDB
 -- plans that as a SkipScan over the id index and filters concept per row, so a
--- read of one small concept walks EVERY id in the table. On memql.znas.io
+-- read of one small concept walks EVERY id in the table. On a production instance
 -- (2026-09-13) the 274-row staleClusterNodes read touched 1,006,847 rows and
 -- 6.9 GB of buffers per call, took 178 s, was issued on every node heartbeat by
 -- every pod, and exhausted max_connections -- which the edge reported as

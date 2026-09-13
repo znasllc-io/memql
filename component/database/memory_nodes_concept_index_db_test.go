@@ -22,7 +22,7 @@ import (
 //
 // With only (id, "createdAt" DESC) and (concept) indexed, TimescaleDB plans it
 // as a SkipScan over the id index and filters concept per row -- which walks
-// EVERY id in the table for every call (memql.znas.io, 2026-09-13: a
+// EVERY id in the table for every call (a production instance, 2026-09-13: a
 // 274-node query read 1,006,847 rows and 6.9 GB of buffers, 178 s, and the
 // pods issuing it on every heartbeat exhausted max_connections). The composite
 // index below lets the same plan skip within one concept.
