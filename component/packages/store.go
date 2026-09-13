@@ -340,6 +340,28 @@ func (s *store) setAutoDeploy(ctx context.Context, packageId string, on bool) er
 	return err
 }
 
+// disarmAutoDeployAfterRetire switches auto-deploy OFF as a CONSEQUENCE of a
+// retire -- the last servable app deleted or deactivated, the source
+// archived -- rather than as the person's own act of flipping the switch.
+//
+// STAMPED INTERNAL, and the reason is the part vocabulary (epic memql#5288):
+// setPackageAutoDeploy carries `execute app:deployables/sources`, the
+// switch being a `sources` act, while every cascade that reaches here is a
+// `retire` act. A caller holding retire and not sources would otherwise be
+// refused HERE, after the site row was already stamped deleted -- a retire
+// half done, with an armed source nothing can build for. Owner and
+// developer hold both parts today; a per-person grant (epic memql#5287)
+// need not. What makes the stamp safe is the ORDER every caller keeps: the
+// package or site was resolved under the CALLER's own actor first, through
+// the owner-scoped reads, so ownership is already decided by the time the
+// consequence is written. The person's own switch stays setAutoDeploy
+// above, unstamped, with its guard.
+func (s *store) disarmAutoDeployAfterRetire(ctx context.Context, packageId string) error {
+	return s.writeInternal(ctx, fmt.Sprintf(
+		"mutation setPackageAutoDeploy(packageId: %s, autoDeploy: false)",
+		langparser.QuoteString(packageId)))
+}
+
 func (s *store) advance(ctx context.Context, deploymentId, status string) error {
 	return s.writeInternal(ctx, fmt.Sprintf(
 		"mutation advancePackageDeployment(deploymentId: %s, status: %s)",

@@ -449,7 +449,7 @@ func (i *Integration) handleDeleteSite(ctx context.Context, args map[string]any,
 			return nil, lerr
 		}
 		if last {
-			if aerr := deps.Store.setAutoDeploy(ctx, packageId, false); aerr != nil {
+			if aerr := deps.Store.disarmAutoDeployAfterRetire(ctx, packageId); aerr != nil {
 				return nil, aerr
 			}
 			autoDeployDisarmed = true
@@ -663,7 +663,7 @@ func (i *Integration) handleArchivePackage(ctx context.Context, args map[string]
 		return nil, err
 	}
 	if rowBool(pkg, "autoDeploy") {
-		if err := deps.Store.setAutoDeploy(ctx, packageId, false); err != nil {
+		if err := deps.Store.disarmAutoDeployAfterRetire(ctx, packageId); err != nil {
 			return nil, err
 		}
 	}
@@ -795,7 +795,7 @@ func (i *Integration) handleDeactivateDeployable(ctx context.Context, args map[s
 			return nil, derr
 		}
 		if last {
-			if aerr := deps.Store.setAutoDeploy(ctx, packageId, false); aerr != nil {
+			if aerr := deps.Store.disarmAutoDeployAfterRetire(ctx, packageId); aerr != nil {
 				return nil, aerr
 			}
 			autoDeployDisarmed = true

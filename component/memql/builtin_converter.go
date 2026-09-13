@@ -46,6 +46,13 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 	var aliases []string
 	var argAdditionalProperties *bool
 	enabled := true
+	// @requiresCapability (epic memql#5288): read through the same helper
+	// the function loader uses, so a builtin's requirement reaches
+	// Function.RequiresCapability by exactly the path a mutation's does and
+	// the load-time vocabulary check (validateRequiresCapabilitySlugs walks
+	// the whole registry, builtins included) refuses a misspelled part on a
+	// builtin the way it refuses one on a query.
+	requiresCapability := capabilityAttributeValue(decl.Attributes)
 
 	for _, attr := range decl.Attributes {
 		switch attr.Name {
@@ -55,6 +62,8 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 			enabled = false
 		case "sdk":
 			// Generator marker (sdk/gen reads from source). No engine effect.
+		case "requiresCapability":
+			// Consumed above; listed here so it is not an unknown annotation.
 		case "description":
 			val, ok := attr.Value.(string)
 			if !ok {
@@ -95,7 +104,7 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 			// Unknown annotation -- hard-rejected (#990). Closes the
 			// silent-tolerance gap so typos and stale annotations on
 			// builtins fail at load instead of being dropped.
-			return nil, fmt.Errorf("%s: builtin %q: unknown annotation @%s -- supported: @alias, @args, @description, @disabled, @enabled, @executor, @sdk", origin, decl.Name, attr.Name)
+			return nil, fmt.Errorf("%s: builtin %q: unknown annotation @%s -- supported: @alias, @args, @description, @disabled, @enabled, @executor, @requiresCapability, @sdk", origin, decl.Name, attr.Name)
 		}
 	}
 
@@ -164,5 +173,7 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 		BuiltinArgs:    contract,
 		Origin:         origin,
 		Enabled:        enabled,
+
+		RequiresCapability: requiresCapability,
 	}, nil
 }

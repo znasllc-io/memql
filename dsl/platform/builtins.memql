@@ -21,6 +21,7 @@
 @sdk
 @executor("integration.sitePublish.fromArtifact")
 @args(profile="object")
+@requiresCapability("execute", "app:deployables/deploy")
 @description("Deploy a Library zip artifact to one of the caller's hosted sites (memql#4345). The caller must own the site (or be a cluster owner) AND own the artifact, which must be a Library file whose MIME type is a zip. The bundle is read from object storage and validated -- index.html at the ROOT for spa and shopify_storefront, plus the same per-file (25 MB), whole-bundle (500 MB) and file-count (20000) limits POST /sites/{id}/bundles enforces -- then written under a new content-addressed version prefix before bundleRef is flipped, so a failed publish leaves the site serving exactly what it was serving. artifactId is stamped on the site row as provenance and the attempt is recorded on the security audit log. Returns {siteId, artifactId, fileId, version, bundleRef, fileCount, totalBytes}. Rollback is unchanged: updateSiteBundle pointed back at an earlier version's bundleRef.")
 builtin sitePublishFromArtifact {
   siteId      string!  @description("The v1:platform:site row to publish to.")
@@ -48,6 +49,7 @@ builtin sitePublishFromArtifact {
 @sdk
 @executor("integration.customDomain.add")
 @args(profile="object")
+@requiresCapability("execute", "app:deployables/domains")
 @description("Bind a client's own domain to one of this cluster's deployables (epic memql#4805). Mints the ownership token the client publishes at TXT _memql-verify.<hostname>, prefills the account tie from the site when one exists, and lands the row `pending_dns`. Three guards refuse before anything is written: a hostname under the cluster's own domain (that is <slug>.<domain> territory and createSite owns it), a collision with a front-door host or an existing site or binding, and a claim past MEMQL_CUSTOM_DOMAIN_MAX_PER_SITE. Nothing is issued until BOTH DNS checks pass -- Let's Encrypt rate limits are real, and a domain that merely points at this cluster must not be claimable by whoever asks first. Returns {domainId, hostname, siteId, token, status, verifyRecordName, pointsToTarget, pointsToKind}.")
 builtin customDomainAdd {
   siteId    string!  @description("The v1:platform:site row this domain should serve.")
@@ -110,6 +112,7 @@ builtin accountFrontDoorReconcile { }
 @sdk
 @executor("integration.packages.archiveSite")
 @args(profile="object")
+@requiresCapability("execute", "app:deployables/retire")
 @description("Archive one of the caller's standalone deployables (epic memql#4794, D10). Refuses unless the site is already OFFLINE (disabled) -- archiving is the end of a lifecycle, not a shortcut past taking it offline -- and unless confirmHostname matches the site's NAME: its address label under the cluster's domain, or the whole hostname (2026-09-05 design, D9). A systemOwned site (the cluster's own portal and OS) is refused outright: those rows are exempt from the lifecycle entirely. An archived site stops serving (404), stays listed behind the Archived filter, and STILL HOLDS ITS NAME -- siteDelete is the rung that releases it. A source's app is never archived; it is deactivated (packageDeactivateDeployable). Returns {siteId, hostname, status}. Refusals carry stable codes.")
 builtin siteArchive {
   siteId           string!  @description("The v1:platform:site row to archive.")
@@ -119,6 +122,7 @@ builtin siteArchive {
 @sdk
 @executor("integration.packages.restoreSite")
 @args(profile="object")
+@requiresCapability("execute", "app:deployables/retire")
 @description("Bring one of the caller's archived sites back to DISABLED (epic memql#4794, D10). Deliberately not back to live: restoring returns a site to the state it was archived from, and publishing it again is a separate, visible decision. No typed confirmation, because leaving the archive destroys nothing. Returns {siteId, hostname, status}.")
 builtin siteRestore {
   siteId  string!  @description("The archived v1:platform:site row to restore.")
@@ -127,6 +131,7 @@ builtin siteRestore {
 @sdk
 @executor("integration.packages.deleteSite")
 @args(profile="object")
+@requiresCapability("execute", "app:deployables/retire")
 @description("Delete one of the caller's standalone deployables and RELEASE ITS NAME (epic memql#4937). The fourth and last rung of the D10 lifecycle, below archive. Refuses unless the site is `archived` or `draft` -- the two states nothing is served from -- and unless confirmHostname matches the site's name: its address label under the cluster's domain, or the whole hostname (2026-09-05 design, D9). A systemOwned site is refused outright. It walks every custom-domain binding on the site to `removing` so the certificate and route come down on the reconciliation sweep's own schedule, disarms the source's auto-deploy when this was its last live app, and stamps `deleted` LAST: the hostname is free at that instant, because `deleted` is the only field the cluster-wide uniqueness probe reads. Stamping the site last is deliberate -- a failure part-way leaves a deployable that is still findable and still says what state it is in, rather than an invisible row holding a name. Terminal: archive is the reversible step and it is one rung up. Returns {siteId, hostname, domainsReleased, autoDeployDisarmed}. Refusals carry stable codes.")
 builtin siteDelete {
   siteId           string!  @description("The v1:platform:site row to delete.")
@@ -136,6 +141,7 @@ builtin siteDelete {
 @sdk
 @executor("integration.packages.cancelDeployment")
 @args(profile="object")
+@requiresCapability("execute", "app:deployables/deploy")
 @description("Ask a running deployment to stop (epic memql#4937). It flags the row and ends nothing: the node running the attempt reads the flag at its next stage boundary and closes the run `cancelled`, which is what keeps the timeline from claiming a run stopped while its build is still running somewhere. Refuses a run that is already terminal, and refuses one at or past `staging_dsl` -- from the roll on there is no cancel, because a roll restarts the cluster onto staged MemQL and stopping half way through is the one outcome worse than either finishing or not starting. `cancelled` is its own terminal status and NOT a flavour of `failed`: nothing broke and nothing was published. Returns {deploymentId, status, cancelRequested}.")
 builtin packageCancelDeployment {
   packageId     string!  @description("The v1:platform:package the run belongs to.")
@@ -145,6 +151,7 @@ builtin packageCancelDeployment {
 @sdk
 @executor("integration.packages.archivePackage")
 @args(profile="object")
+@requiresCapability("execute", "app:deployables/retire")
 @description("Archive one of the caller's sources AND DEACTIVATE every app it produced (2026-09-05 design, D3). Verifies confirmName against the package's stored name, then for each app the source deployed -- live ones included; the OS names them before it asks -- walks its custom-domain bindings to `removing` and stamps its site `deleted`, so every address it held comes free at that write (the cluster-wide uniqueness probe reads `deleted` alone, which is why the cascade no longer archives sites: an archived site still holds its name). Every declared app then goes on the source's off-list, auto-deploy is disarmed when it was armed, and the package is archived LAST, so a failure part-way leaves a source that is still active and whose page still says what happened. packageRestore does NOT cascade back: a restored source's apps come back inactive, to be activated and deployed at fresh addresses. Archived packages stay listed behind the Archived filter. Returns {packageId, name, status, releasedSites, deactivated}.")
 builtin packageArchive {
   packageId    string!  @description("The v1:platform:package row to archive.")
@@ -154,6 +161,7 @@ builtin packageArchive {
 @sdk
 @executor("integration.packages.deactivateDeployable")
 @args(profile="object")
+@requiresCapability("execute", "app:deployables/retire")
 @description("Deactivate ONE app of a source (2026-09-05 design, D2). A source's app is never archived -- it is reproducible from the source -- so turning it off means giving its address back: its custom-domain bindings walk to `removing`, its site is stamped `deleted` (the address is free at that write), the source's auto-deploy is disarmed when this was its last app, and the name goes on the source's off-list, which is what lists it `inactive` and lets no run build it. Offered from ANY state the app is in, live included: confirmName -- the app's manifest name, not its hostname -- is what stands between a person and an app going offline, and it is verified here. An app the source declares and never deployed only lands on the off-list. Activating it again is enablePackageDeployables followed by a scoped deploy that asks where it should live. Returns {packageId, deployableName, siteId, hostname, domainsReleased, autoDeployDisarmed}.")
 builtin packageDeactivateDeployable {
   packageId       string!  @description("The v1:platform:package the app belongs to.")
@@ -164,6 +172,7 @@ builtin packageDeactivateDeployable {
 @sdk
 @executor("integration.packages.restorePackage")
 @args(profile="object")
+@requiresCapability("execute", "app:deployables/retire")
 @description("Bring one of the caller's archived packages back to active (epic memql#4794, D10). No typed confirmation and no cascade: the package's sites keep whatever status they have, because restoring a source is not a decision to redeploy it. Returns {packageId, name, status}.")
 builtin packageRestore {
   packageId  string!  @description("The archived v1:platform:package row to restore.")
@@ -232,10 +241,24 @@ builtin siteTrafficInWindow {
 // therefore refused by name for a caller who does not own it. The pipeline's
 // own writes are @serverOnly mutations the Go side stamps internal origin on;
 // none of that is expressible here, and none of it needs to be.
+//
+// WHAT IS DECLARED HERE IS THE PART (epic memql#5288, task memql#5301; design
+// section 2). Every Deployables action that belongs to exactly one part of
+// the app carries @requiresCapability("execute", "app:deployables/<part>"):
+// sources (a source, its credential, its auto-deploy switch), deploy
+// (analyze, confirm, retry, cancel a run -- and publishing a Library zip,
+// which is a deploy with the bundle already built), publish (go live, pause,
+// roll back), retire (deactivate, archive, delete, and their plain inverses
+// restore), domains (bind or remove a custom domain). The part is the DOOR
+// -- who may act at all -- and the owner-scoped reads above stay the
+// CONTENTS (D4): a developer holding the deploy part still deploys only a
+// package they can read. A read shared by several apps (sitesAll, siteById)
+// carries no app annotation (D8).
 
 @sdk
 @executor("integration.packages.analyze")
 @args(profile="object")
+@requiresCapability("execute", "app:deployables/deploy")
 @description("Analyze a package source offline and return the report, deploying nothing (epic memql#4794, D12). Fetches the tracked source, walks the manifest, discovers the DSL domains and runs the SAME Init-grade gates strict boot runs -- so 'this DSL would refuse boot' is an answer produced here, before a pod is ever asked to run it. Returns {report, ok}: the report names every deployable with its build plan (or 'prebuilt output found -- build skipped'), every DSL domain with construct counts, any Go pack as reported-not-deployable, and every problem found. A refusal carries one of the stable codes in component/packages/refusal.go.")
 builtin packageAnalyze {
   packageId  string!  @description("The v1:platform:package row to analyze.")
@@ -244,6 +267,7 @@ builtin packageAnalyze {
 @sdk
 @executor("integration.packages.deploy")
 @args(profile="object")
+@requiresCapability("execute", "app:deployables/deploy")
 @description("Run one deployment attempt for a package (epic memql#4794). WITHOUT confirm the run parks at awaiting_confirm with the analysis report on a new deployment row and nothing else happens -- that gate is always present (D12), and a redeploy passes it in one click. WITH confirm the run builds, stages, rolls and publishes in the D6 order: a failure anywhere before publish leaves every site serving exactly what it was serving, and a package with no DSL (or unchanged DSL) skips stage and roll entirely so nothing restarts. A package carrying DSL requires an actor who may author constructs -- an owner or a developer, and deliberately not an admin -- and is refused with dsl_requires_authoring at the START, before any build. placements is read only for a deployable's FIRST deploy (epic memql#4885, D8); later deploys find the site through (packageId, packageDeployableName) and never re-ask. Returns {deploymentId, status, awaitingConfirm, deployables, report}; each deployables entry carries {name, siteId, hostname, bundleRef, version, created} on success, {name, refusal} for a half that was refused or skipped, plus accountId / ownDomain for the placement halves that landed and accountRefusal / domainRefusal for the ones the guards refused.")
 builtin packageDeploy {
   packageId   string!  @description("The v1:platform:package row to deploy.")
@@ -256,6 +280,7 @@ builtin packageDeploy {
 @sdk
 @executor("integration.packages.rollback")
 @args(profile="object")
+@requiresCapability("execute", "app:deployables/publish")
 @description("Restore a package to what an earlier successful deployment left live (epic memql#4794, D7). Executes the D6 order REVERSED -- every site is pointed back at its recorded bundle version FIRST, then the active-set pointer goes back and the cluster rolls -- so the app stops using the old schema before the schema changes, which is the window the forward order closes in the other direction. Restores a tuple recorded on the prior row rather than replaying events, which is why the timeline is append-only. Rolling back to a deployment that carried DSL requires an actor who may author constructs -- an owner or a developer -- for the same reason the forward deploy does, and is refused with dsl_requires_authoring. Returns {restored}.")
 builtin packageRollback {
   packageId     string!  @description("The v1:platform:package to roll back.")
@@ -300,6 +325,7 @@ builtin packageSweepAbandoned {
 @sdk
 @executor("integration.packages.setAutoDeploy")
 @args(profile="object")
+@requiresCapability("execute", "app:deployables/sources")
 @description("Turn a source's auto-deploy switch on or off (epic memql#4900, task memql#4903). With it ON, a push the update feeds notice starts a run by itself, requested by the package's owner and marked automatic; the run CONFIRMS ITSELF only when the new analysis plans exactly what the last confirmed run planned -- the same apps by name, kind and path, the same DSL domains, and every placement already remembered -- and parks at the confirm gate for anything else, which is the same gate a person's deploy passes. Never more than one auto-run is live per package. An automatic run resolves the package OWNER's authority to answer the DSL gate, so an armed source that ships MemQL DSL deploys only while its owner may author constructs -- it is not exempt from the gate, and it is not permanently barred by it either. With it OFF, which is the default and the state of every source that has never been switched, a push lights the update chip and waits for a click, exactly as before. The write is owned: the guard admits the source's owner or a cluster owner. Returns {packageId, autoDeploy}.")
 builtin packageSetAutoDeploy {
   packageId   string!  @description("The v1:platform:package row to switch.")
@@ -323,6 +349,7 @@ builtin packageSetAutoDeploy {
 @sdk
 @executor("integration.packages.sourceCredentialCreate")
 @args(profile="object")
+@requiresCapability("execute", "app:deployables/sources")
 @description("Store a personal source credential (epic memql#4885, D10). The token crosses the wire ONCE, inside this call, is sealed server-side under MEMQL_MASTER_KEY, and lands on a v1:platform:sourceCredential row owned by the caller; it appears in no row, no log line and no reply. Only github.com is admitted as a host today -- any other host is refused with source_host_unsupported, and the answer is to upload the tree as a zip instead. Returns {credentialId, fingerprint}, the fingerprint being the token's last four characters prefixed with '...', for telling two credentials apart. Name the credential on a package through createPackage or updatePackageSource; the fetcher resolves it under that package's OWNER, so a package naming somebody else's credential is refused by name.")
 builtin sourceCredentialCreate {
   host   string!  @description("The host the token authenticates against. github.com is the only value admitted today.")
@@ -333,6 +360,7 @@ builtin sourceCredentialCreate {
 @sdk
 @executor("integration.packages.sourceCredentialRevoke")
 @args(profile="object")
+@requiresCapability("execute", "app:deployables/sources")
 @description("Revoke one of the caller's source credentials (epic memql#4885, D10). Flips status to revoked and stamps revokedAt through the owned revokeSourceCredential mutation, so the write guard admits the row's owner (or a cluster owner) and nobody else. The row is never deleted -- it is the audit history of what fetched under it -- and every source fetching under it refuses at its next fetch with credential_revoked until it is switched to another credential on its Source stop. Returns {credentialId, status}.")
 builtin sourceCredentialRevoke {
   credentialId  string!  @description("The v1:platform:sourceCredential row to revoke.")

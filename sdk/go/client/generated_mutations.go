@@ -7277,8 +7277,9 @@ func DenyDeviceCodeBuild(args DenyDeviceCodeArgs) string {
 	return b.String()
 }
 
-// DisablePackageDeployables -- Turn a source's auto-deploy switch on or off (epic memql#4900).
-// The PERSON's write, and an owned one: the write guard resolves the target row and admits its owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's decision, which is what makes an auto-run's provenance honest.
+// DisablePackageDeployables -- Turn one or more of a source's deployables OFF -- the owner's standing choice not to deploy them.
+// NOT @serverOnly, and it is the same shape as setPackageAutoDeploy directly below: a person's standing choice about their own source, so the composite tier's write guard -- the owner, or a cluster owner -- is exactly the right gate and there is no engine writer at all. The pipeline must never touch this field: it writes `declares`, which is what the MANIFEST says, and it rewrites that wholesale on every analysis. Intent kept in the same place would be erased by the next run.
+// A MEMBERSHIP CHANGE, not the whole list (memql#4951). It used to take the entire array, because `update{}` read-merges a field and the DSL had no form for removing one member -- @appendFields (memql#2240) adds to an array and had no counterpart. That made every caller read the current list, change one name and write it all back, and left a race nothing declared: two windows toggling two different apps at the same instant clobbered, and the loser was never told. @addToSet is deduped, so disabling the same app twice is disabling it once, which is what makes this and enablePackageDeployables inverses.
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["disablePackageDeployables"] in generated_concepts.go).
 type DisablePackageDeployablesArgs struct {
@@ -11954,7 +11955,8 @@ func SetPackEnabledBuild(args SetPackEnabledArgs) string {
 	return b.String()
 }
 
-// SetPackageAutoDeploy wraps the mutation named "setPackageAutoDeploy".
+// SetPackageAutoDeploy -- Turn a source's auto-deploy switch on or off (epic memql#4900).
+// The PERSON's write, and an owned one: the write guard resolves the target row and admits its owner (or a cluster owner), so a caller cannot arm auto-deploy on somebody else's source. There is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's decision, which is what makes an auto-run's provenance honest.
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["setPackageAutoDeploy"] in generated_concepts.go).
 type SetPackageAutoDeployArgs struct {

@@ -1478,7 +1478,20 @@ together, both must pass. They replaced `requiresAdmin`,
 `requiresOwnerOrAdmin` and `requiresDeveloperOrAbove`, which are DELETED -- a
 slug comparison cannot see a role a cluster authored for itself, and dslgate
 recognises gates by NAME, so a misspelled spec name was a missing conjunct
-nothing noticed.
+nothing noticed. **`@requiresCapability` is legal on a BUILTIN too** (epic
+memql#5288): the builtin executor asks the question itself, because a
+top-level builtin call returns before the plan-level gate runs.
+`@requiresRank` still is not.
+
+**Apps are resources** (epic memql#5288, design D7): `read app:<id>` opens an
+OS app, `execute app:<id>/<part>` is a named part, and a part EXISTS by being
+seeded on at least one role in `dsl/rbac/seeds.memql` -- the load-time
+vocabulary reads the seed DECLARATIONS (a first boot has no catalog rows yet),
+so a misspelled part refuses boot naming the known ones. The `read app:<id>`
+seeds reproduce the OS registry's `roles:` floors exactly, pinned both ways by
+`TestOsRegistryFloorsMatchTheAppSeeds`. Deployables carries the first parts
+(`sources`, `deploy`, `publish`, `retire`, `domains`); the part-to-construct
+table is in the design record.
 
 **One role ladder, and the shell holds none of it** (D1). `v1:rbac:role` carries
 `rank` plus `aliases` (the user row's `writer`/`reader` are aliases of the

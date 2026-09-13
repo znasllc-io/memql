@@ -147,6 +147,27 @@ func (e *MemQLEngine) refusePlanBelowRequiredCapability(ctx context.Context, pla
 	return nil
 }
 
+// refuseBuiltinBelowRequiredCapability is the builtin entry point's half of
+// refuseBelowRequiredCapability: resolve the builtin by the name the
+// expression carries and enforce what it declares.
+//
+// A name that resolves to nothing is NOT a refusal. The meta commands
+// (`concepts`, `functions`, `help`) dispatch through the same expression
+// type under names no registry holds, and they carry no requirement by
+// construction; refusing them would take the engine's own introspection
+// dark. A name that resolves to a function with no declaration returns nil
+// from the gate below, exactly as it does for every other construct.
+func (e *MemQLEngine) refuseBuiltinBelowRequiredCapability(ctx context.Context, name string) error {
+	if e == nil || e.functions == nil || strings.TrimSpace(name) == "" {
+		return nil
+	}
+	fn, err := e.functions.Get(name)
+	if err != nil || fn == nil {
+		return nil
+	}
+	return e.refuseBelowRequiredCapability(ctx, fn, name)
+}
+
 // validateRequiresCapabilitySlugs is the LOAD-time half: every declared
 // requirement must name one of the five verbs and a resource this cluster's
 // catalog knows.
@@ -228,11 +249,31 @@ func knownVerbs() []string {
 
 // knownResources reads the resource kinds any role holds a grant on.
 //
-// From the CATALOG when one is installed, so a product bundle's own resource
-// kind is accepted the moment its seeds are readable; from the engine's core
-// constants otherwise, which is what answers on a first boot.
+// THREE SOURCES, UNIONED. The seed DECLARATIONS the tree loads (e.seeds, read
+// before this check runs at Init); the installed CATALOG, when one is; and
+// the engine's core constants. The first is what makes "a part exists by
+// being seeded on at least one role" (app access grants design, D7) true on
+// a FIRST BOOT: the rows the catalog is built from are materialized by the
+// very startup this validates, so a check reading only the catalog refused
+// every `app:deployables/<part>` declaration on a fresh database -- 23
+// constructs skipped, strict boot refused -- while passing on a database
+// that had booted once (epic memql#5288). The declaration is the source of
+// truth and it is readable with no database at all, which is also what lets
+// a product bundle mounted at MEMQL_DSL_PATH gate on a resource kind its own
+// seeds name. The catalog stays in the union for a resource a runtime-authored
+// custom role holds that no seed declares.
 func (e *MemQLEngine) knownResources(_ context.Context) []string {
 	seen := map[string]bool{}
+	if e != nil && e.seeds != nil {
+		for _, def := range e.seeds.All() {
+			if def == nil || def.UseConcept != "capability" {
+				continue
+			}
+			if r := strings.TrimSpace(def.Body.fields["resourceType"].str); r != "" {
+				seen[r] = true
+			}
+		}
+	}
 	if cat := auth.InstalledCapabilityCatalog(); cat != nil {
 		if lister, ok := cat.(interface{ Slugs() []string }); ok {
 			for _, slug := range lister.Slugs() {

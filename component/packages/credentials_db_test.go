@@ -206,6 +206,19 @@ func gitHubTarball(t *testing.T, top string, tree fs.FS) []byte {
 
 // clusterOwnerCtx is a person the envelope resolves as cluster owner -- the
 // operator deploying a colleague's package.
+// deployerCtx is one person as the stream interceptor presents them, at the
+// DEVELOPER rank. Since epic memql#5288 registering a source is the `sources`
+// part of Deployables, seeded on owner and developer only, so the borrowed
+// member-tier actor auth.ContextWithUserActor stamps is refused createPackage
+// by the capability gate before any row is touched. What these tests measure
+// -- credential resolution scoped to the package OWNER -- is a tier question
+// the developer rank leaves exactly as it was: not a cluster owner, and no
+// row here carries an account tie.
+func deployerCtx(userId string) context.Context {
+	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: userId, Role: auth.RoleDeveloper})
+	return auth.ContextWithToken(ctx, &auth.TokenInfo{Subject: userId})
+}
+
 func clusterOwnerCtx(userId string) context.Context {
 	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: userId, Role: auth.RoleOwner})
 	return auth.ContextWithToken(ctx, &auth.TokenInfo{Subject: userId})
@@ -244,8 +257,8 @@ func TestCredentialResolutionIsOwnerScopedOverRealRows(t *testing.T) {
 	repoUrl := "https://github.com/" + repoPath
 	headSha := "0123456789abcdef0123456789abcdef01234567"
 
-	ctxA := auth.ContextWithUserActor(context.Background(), userA)
-	ctxB := auth.ContextWithUserActor(context.Background(), userB)
+	ctxA := deployerCtx(userA)
+	ctxB := deployerCtx(userB)
 	ctxOp := clusterOwnerCtx(operator)
 
 	logger := discardLogger()

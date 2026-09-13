@@ -166,6 +166,29 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	}
 }
 
+// TestTheRetireDisarmIsStampedAndTheSwitchIsNot pins the one construct that
+// runs under BOTH origins (epic memql#5288). setPackageAutoDeploy is the
+// person's own switch -- an owned write the guard decides for the caller,
+// and a `sources` act the capability gate decides too -- and it is also the
+// consequence of a retire, written after the cascade has already resolved
+// the package under the caller's actor. The first must stay unstamped; the
+// second must be stamped, or a caller holding retire without sources is
+// refused after their site is already gone.
+func TestTheRetireDisarmIsStampedAndTheSwitchIsNot(t *testing.T) {
+	e := &originEngine{}
+	s := &store{engine: e}
+	ctx := context.Background()
+
+	_ = s.setAutoDeploy(ctx, "p", true)
+	if got := e.origins["setPackageAutoDeploy"]; got != auth.OriginClient {
+		t.Errorf("the person's own auto-deploy switch must run under the caller's origin, got %v", got)
+	}
+	_ = s.disarmAutoDeployAfterRetire(ctx, "p")
+	if got := e.origins["setPackageAutoDeploy"]; got != auth.OriginInternal {
+		t.Errorf("the disarm that a retire causes must be stamped internal, got %v -- unstamped, a caller holding retire and not sources is refused after the site is already deleted", got)
+	}
+}
+
 // TestTheStampNeverEscapesItsCall pins the memql#2879 escalation shape: a
 // trusted frame stamps internal, binds it to a variable, and a later frame in
 // the same tree runs caller-submitted text on the inherited context.

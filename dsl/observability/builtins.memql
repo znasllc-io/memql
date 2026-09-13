@@ -9,7 +9,9 @@
 // under the one ladder) and the two archive acts at owner -- IN THE GO
 // HANDLER, the integrationConfigure precedent, because a builtin carries no
 // @requiresRank (its annotation set is closed: @alias, @args, @description,
-// @disabled, @enabled, @executor, @sdk). Executors live in component/logstore. Design: docs/superpowers/specs/2026-09-03-logs-design.md.
+// @disabled, @enabled, @executor, @requiresCapability, @sdk -- the capability
+// GRANT is declarable since epic memql#5288, a rank FLOOR is not). Executors
+// live in component/logstore. Design: docs/superpowers/specs/2026-09-03-logs-design.md.
 
 @description("Lines inside [windowStart, windowEnd), newest first, narrowed by every facet given. `apps` and `subjectConcepts` together form ONE scope predicate ORed -- an app's slice is 'lines tagged with me OR about the things I own' -- and every other facet ANDs. `text` is a case-insensitive substring of the message. Keyset-paged: pass the oldest row's occurredAt and id back as beforeAt and beforeId for the next page. `limit` defaults to 200 and is capped at 500. Admin and above; the handler repeats the floor.")
 @sdk

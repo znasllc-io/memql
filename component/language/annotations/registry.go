@@ -57,6 +57,14 @@ var ByReceiver = map[string][]string{
 	},
 	"Builtin": {
 		"description", "enabled", "disabled", "executor", "alias", "args", "sdk",
+		// @requiresCapability (epic memql#5288, task memql#5301): a builtin is
+		// where most of an app's ACTIONS live -- packageDeploy, siteArchive,
+		// customDomainAdd are all builtins -- so the part vocabulary
+		// (`execute` on `app:<id>/<part>`) has to be declarable here or it
+		// gates nothing that matters. @requiresRank stays off builtins: a
+		// rank floor on a Go-served read is applied in its handler (the
+		// logsSearch precedent), and nothing has asked for the annotation.
+		"requiresCapability",
 	},
 	"Prompt": {
 		"description", "enabled", "disabled", "level", "defaultProvider", "templateFile",
