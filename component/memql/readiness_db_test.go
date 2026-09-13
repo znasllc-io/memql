@@ -3,8 +3,10 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/envregistry"
@@ -43,7 +45,11 @@ func readinessRowsForTest(t *testing.T, e *MemQLEngine) []readiness.NodeReport {
 func TestBootWritesOneRowPerModuleAndAnUnchangedSweepWritesNone(t *testing.T) {
 	e := bootReadinessTestEngine(t)
 	ctx := context.Background()
-	e.SetReadinessIdentity("readiness-test-node", "bff")
+	// A FRESH node id per run: an unchanged verdict younger than
+	// readinessRewriteFloor is not restated, so a standing row from an
+	// earlier test (or an earlier run of this one against the same database)
+	// would make the first write below count 0 and read as a failure.
+	e.SetReadinessIdentity(fmt.Sprintf("readiness-test-node-%d", time.Now().UnixNano()), "bff")
 
 	manifest, err := envregistry.LoadManifest("")
 	if err != nil {
