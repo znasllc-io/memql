@@ -191,27 +191,158 @@ func SubjectFromContext(ctx context.Context) (Subject, bool) {
 	return s, true
 }
 
+// The three levels a decision can come from -- the PROVENANCE the effective
+// read reports beside every answer, so a person can be told "inherited from
+// your role", "allowed by a group you are in" or "denied for you" rather than
+// only yes or no (record section 3, "Reads"; epic memql#5298).
+const (
+	SourceRole  = "role"
+	SourceGroup = "group"
+	SourceUser  = "user"
+)
+
+// Decision is one resolved (verb, resource) answer with where it came from.
+//
+// Source names the MOST SPECIFIC level that spoke. A pair no grant names is
+// the role's answer whichever way it points -- "your role does not hold this"
+// is as much a role-level fact as "your role holds this".
+type Decision struct {
+	Verb     string
+	Resource string
+	Held     bool
+	Source   string
+}
+
 // CapableFor is THE capability decision: may this subject do verb on
 // resource? Every enforcement site on the request path -- the requires-
 // capability gates, the data-plane gate, the groups guard -- resolves through
 // this function, so there is exactly one definition of the rule in the header.
 func CapableFor(ctx context.Context, subject Subject, verb, resource string) bool {
-	held := roleHasCapability(Role(normalizeSlug(string(subject.Role))), verb, resource)
+	return DecideFor(ctx, subject, verb, resource).Held
+}
+
+// DecideFor is CapableFor with its provenance: the same rule, reporting which
+// level answered. CapableFor is this function's Held field and nothing else,
+// so the gates and the effective read cannot disagree about one caller.
+func DecideFor(ctx context.Context, subject Subject, verb, resource string) Decision {
+	d := Decision{
+		Verb:     verb,
+		Resource: resource,
+		Held:     roleHasCapability(Role(normalizeSlug(string(subject.Role))), verb, resource),
+		Source:   SourceRole,
+	}
 	if subject.Unranked {
-		return held
+		return d
 	}
 	src := InstalledGrantSource()
 	if src == nil {
-		return held
+		return d
 	}
 	userGrants, groupGrants := grantsFor(ctx, src, subject)
-	if v, decided := overlay(groupGrants, verb, resource); decided {
-		held = v
+	return decideOver(d, userGrants, groupGrants)
+}
+
+// decideOver folds the two grant levels over a role-level answer.
+func decideOver(d Decision, userGrants, groupGrants []Grant) Decision {
+	if v, decided := overlay(groupGrants, d.Verb, d.Resource); decided {
+		d.Held, d.Source = v, SourceGroup
 	}
-	if v, decided := overlay(userGrants, verb, resource); decided {
-		held = v
+	if v, decided := overlay(userGrants, d.Verb, d.Resource); decided {
+		d.Held, d.Source = v, SourceUser
 	}
-	return held
+	return d
+}
+
+// EffectiveCapabilities is the caller's whole resolved set: one Decision per
+// (verb, resource) pair the cluster knows about, with provenance.
+//
+// THE UNIVERSE IS "the pairs any role holds, plus the pairs this subject's own
+// grants name". The first half is what a screen has columns for -- a resource
+// exists by being seeded on at least one role (record section 2) -- and the
+// second half is what keeps a deny visible: a person barred from a resource
+// their role never held would otherwise see no row for it, and a bar nobody
+// can see is a bar nobody can lift. Pairs are sorted by resource then verb so
+// two reads of one caller render identically.
+//
+// ONE READ OF EACH GRANT LEVEL, through the same memo CapableFor uses. The set
+// is meant to be read once per sign-in by every signed-in person, so the cost
+// of resolving it is the cost of one capability question.
+func EffectiveCapabilities(ctx context.Context, subject Subject) []Decision {
+	role := Role(normalizeSlug(string(subject.Role)))
+	universe := map[VerbResource]struct{}{}
+	for _, vr := range catalogUniverse(role) {
+		universe[vr] = struct{}{}
+	}
+	var userGrants, groupGrants []Grant
+	if src := InstalledGrantSource(); src != nil && !subject.Unranked {
+		userGrants, groupGrants = grantsFor(ctx, src, subject)
+		for _, g := range append(append([]Grant(nil), userGrants...), groupGrants...) {
+			if g.Inactive || g.Verb == "" || g.Resource == "" {
+				continue
+			}
+			universe[VerbResource{Verb: g.Verb, Resource: g.Resource}] = struct{}{}
+		}
+	}
+	pairs := make([]VerbResource, 0, len(universe))
+	for vr := range universe {
+		pairs = append(pairs, vr)
+	}
+	sort.Slice(pairs, func(a, b int) bool {
+		if pairs[a].Resource != pairs[b].Resource {
+			return pairs[a].Resource < pairs[b].Resource
+		}
+		return pairs[a].Verb < pairs[b].Verb
+	})
+	out := make([]Decision, 0, len(pairs))
+	for _, vr := range pairs {
+		d := Decision{
+			Verb:     vr.Verb,
+			Resource: vr.Resource,
+			Held:     roleHasCapability(role, vr.Verb, vr.Resource),
+			Source:   SourceRole,
+		}
+		if !subject.Unranked {
+			d = decideOver(d, userGrants, groupGrants)
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// catalogUniverse lists every (verb, resource) pair any role holds: from the
+// installed catalog when it can enumerate its slugs, and from the compiled
+// mirror otherwise -- the same two answers roleHasCapability gives, in the
+// same order of precedence. The subject's OWN role's grants are always in it,
+// so a catalog that cannot enumerate still yields the pairs the person holds.
+func catalogUniverse(role Role) []VerbResource {
+	seen := map[VerbResource]struct{}{}
+	if cat := InstalledCapabilityCatalog(); cat != nil {
+		for _, vr := range cat.Grants(normalizeSlug(string(role))) {
+			if vr.Verb != "" && vr.Resource != "" {
+				seen[vr] = struct{}{}
+			}
+		}
+		if lister, ok := cat.(interface{ Slugs() []string }); ok {
+			for _, slug := range lister.Slugs() {
+				for _, vr := range cat.Grants(slug) {
+					if vr.Verb != "" && vr.Resource != "" {
+						seen[vr] = struct{}{}
+					}
+				}
+			}
+		}
+	} else {
+		for _, set := range capabilitySets {
+			for vr := range set {
+				seen[VerbResource{Verb: vr.verb, Resource: vr.resource}] = struct{}{}
+			}
+		}
+	}
+	out := make([]VerbResource, 0, len(seen))
+	for vr := range seen {
+		out = append(out, vr)
+	}
+	return out
 }
 
 // overlay folds one level's grants over one pair: deny wins within the level,

@@ -90,6 +90,12 @@ func (e *MemQLEngine) subjectFor(ctx context.Context) (auth.Subject, bool) {
 	return s, true
 }
 
+// staged-data: MUST-NOT-GATE -- an AUTHORIZATION read, the membership reads'
+// verdict for the same reason: a staged grant hidden here removes a decision
+// somebody made, which presents as "the app I was given is not there" and
+// reads as a grant problem rather than a staging one -- and a hidden DENY
+// fails OPEN, admitting the person it was written to bar.
+//
 // grantsForSubjects reads the newest version of every grant naming any of the
 // subjects, in either spelling of their ids.
 //

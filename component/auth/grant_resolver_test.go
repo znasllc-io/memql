@@ -354,3 +354,99 @@ func TestGrantRowIDIsDerivedAndInjective(t *testing.T) {
 		t.Fatalf("GrantRowID = %q; want a 64-hex digest a canonical id can carry as its short id", a)
 	}
 }
+
+// TestEffectiveCapabilitiesCarriesProvenance (epic memql#5298): the whole
+// set, one entry per pair the cluster knows, each saying which level answered
+// -- and a pair only a grant names is IN the set, so a deny on something the
+// role never held stays visible.
+func TestEffectiveCapabilitiesCarriesProvenance(t *testing.T) {
+	grantTestCatalog(t)
+	const app = "app:deployables"
+	const part = "app:deployables/publish"
+	src := &countingGrantSource{
+		user: map[string][]Grant{"u1": {
+			deny(VerbRead, app),
+			allow(VerbExecute, part),
+			{Verb: VerbCreate, Resource: "app:other", Effect: GrantAllow, Inactive: true},
+		}},
+		group: map[string][]Grant{"g1": {allow(VerbRead, "app:campaigns")}},
+	}
+	installGrantFake(t, src)
+	subject := Subject{Role: "user", UserId: "u1", GroupIds: []string{"g1"}}
+
+	got := map[string]Decision{}
+	for _, d := range EffectiveCapabilities(ContextWithGrantMemo(context.Background()), subject) {
+		got[d.Verb+" "+d.Resource] = d
+	}
+	// The role held it; the user deny overlays it.
+	if d := got[VerbRead+" "+app]; d.Held || d.Source != SourceUser {
+		t.Fatalf("read app = %+v, want denied from user", d)
+	}
+	// Not in the catalog at all; only the user grant names it.
+	if d := got[VerbExecute+" "+part]; !d.Held || d.Source != SourceUser {
+		t.Fatalf("execute part = %+v, want held from user", d)
+	}
+	// Only a group grant names it.
+	if d := got[VerbRead+" app:campaigns"]; !d.Held || d.Source != SourceGroup {
+		t.Fatalf("read app:campaigns = %+v, want held from group", d)
+	}
+	// An inactive grant neither decides nor widens the universe.
+	if _, present := got[VerbCreate+" app:other"]; present {
+		t.Fatal("an inactive grant's pair entered the effective set")
+	}
+	// One read of each level for the whole set.
+	if src.reads != 2 {
+		t.Fatalf("the effective set cost %d grant reads, want 2", src.reads)
+	}
+
+	// Sorted by resource then verb, so a screen draws the same rows twice.
+	list := EffectiveCapabilities(context.Background(), subject)
+	for i := 1; i < len(list); i++ {
+		a, b := list[i-1], list[i]
+		if a.Resource > b.Resource || (a.Resource == b.Resource && a.Verb > b.Verb) {
+			t.Fatalf("effective set is not sorted at %d: %+v then %+v", i, a, b)
+		}
+	}
+
+	// An Unranked subject is the catalog alone and costs no read.
+	before := src.reads
+	for _, d := range EffectiveCapabilities(context.Background(), Subject{Role: "user", UserId: "u1", Unranked: true}) {
+		if d.Source != SourceRole {
+			t.Fatalf("an Unranked subject's entry came from %s", d.Source)
+		}
+	}
+	if src.reads != before {
+		t.Fatal("an Unranked subject cost a grant read")
+	}
+}
+
+// TestDecideForIsCapableForWithProvenance: the two cannot disagree, because
+// one is the other's Held field.
+func TestDecideForIsCapableForWithProvenance(t *testing.T) {
+	grantTestCatalog(t)
+	const app = "app:deployables"
+	installGrantFake(t, &countingGrantSource{
+		user:  map[string][]Grant{"u1": {allow(VerbRead, app)}},
+		group: map[string][]Grant{"g1": {deny(VerbRead, app)}},
+	})
+	for _, subject := range []Subject{
+		{Role: "user", UserId: "u1", GroupIds: []string{"g1"}},
+		{Role: "user", UserId: "u2", GroupIds: []string{"g1"}},
+		{Role: "user", UserId: "u2"},
+		{Role: "viewer", UserId: "u2"},
+	} {
+		d := DecideFor(context.Background(), subject, VerbRead, app)
+		if d.Held != CapableFor(context.Background(), subject, VerbRead, app) {
+			t.Fatalf("DecideFor and CapableFor disagree for %+v", subject)
+		}
+	}
+	if d := DecideFor(context.Background(), Subject{Role: "user", UserId: "u1", GroupIds: []string{"g1"}}, VerbRead, app); !d.Held || d.Source != SourceUser {
+		t.Fatalf("user over group: %+v", d)
+	}
+	if d := DecideFor(context.Background(), Subject{Role: "user", UserId: "u2", GroupIds: []string{"g1"}}, VerbRead, app); d.Held || d.Source != SourceGroup {
+		t.Fatalf("group over role: %+v", d)
+	}
+	if d := DecideFor(context.Background(), Subject{Role: "user", UserId: "u2"}, VerbRead, app); !d.Held || d.Source != SourceRole {
+		t.Fatalf("role alone: %+v", d)
+	}
+}

@@ -214,6 +214,7 @@ var tierDecidesTheRead = map[string]string{
 	// the real tier.
 	"grantsForSubject":  "memql#5294, as benchRuns: an ownerless clusterOwner-tier concept read at exactly its rankFloor.",
 	"grantsForResource": "memql#5294, as grantsForSubject -- the same concept, tier and annotation.",
+	"grantById":         "memql#5297, as grantsForSubject -- the same concept, tier and annotation; what grantRevoke reads before it acts.",
 }
 
 func TestRowAuthzEnforcementLandGate(t *testing.T) {

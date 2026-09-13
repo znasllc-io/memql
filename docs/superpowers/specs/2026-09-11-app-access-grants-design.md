@@ -4,7 +4,9 @@
 - **Epics:** filed 2026-09-12 from this record, four of them; the numbers are in the plan
   (`docs/superpowers/plans/2026-09-11-app-access-grants-plan.md`) and in each epic's
   body.
-- **Status:** approved in the 2026-09-11 brainstorm. Every fork below was put to the
+- **Status:** approved in the 2026-09-11 brainstorm; **engine shipped** 2026-09-13 (epic
+  memql#5287: sections 1 and 3, decisions D1, D2, D5, D6, D9 -- the concept, the resolver,
+  the seven call sites, governance, audit and the reads). Every fork below was put to the
   owner and answered; the per-section reasoning says what each choice rejected.
 - **Program:** extends the access program (`2026-09-07-access-program.md`). Sub-projects
   A (groups and grants) and B (roles as data) are the mechanisms this record builds on; C

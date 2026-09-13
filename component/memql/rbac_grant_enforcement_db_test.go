@@ -470,3 +470,75 @@ func TestSingleStatementLogicClearsItsFloors(t *testing.T) {
 		t.Fatalf("a single-statement logic carrying @requiresRank(\"admin\") refused an admin: %v", err)
 	}
 }
+
+// TestEffectiveSetReportsAGrantWithItsProvenanceUntilRevoked (epic
+// memql#5298): through the rows, a user grant appears in the caller's
+// effective set with provenance `user`, and after the revoke it does not --
+// the pair falls back to the role's answer.
+func TestEffectiveSetReportsAGrantWithItsProvenanceUntilRevoked(t *testing.T) {
+	eng := grantEngine(t)
+	suffix := uniqueSuffix("grant-effective")
+	member := "member-" + suffix
+
+	find := func(ctx context.Context) (auth.Decision, bool) {
+		subject, ok := eng.subjectFor(ctx)
+		if !ok {
+			t.Fatal("no subject for the member's context")
+		}
+		for _, d := range auth.EffectiveCapabilities(ctx, subject) {
+			if d.Verb == auth.VerbExecute && d.Resource == grantTestResource {
+				return d, true
+			}
+		}
+		return auth.Decision{}, false
+	}
+
+	// decide asks the single-pair form, which answers whether or not the pair
+	// is in the universe: the catalog fake cannot enumerate its slugs, so a
+	// pair nothing grants is absent from the SET here (the graph catalog lists
+	// them, and the pure test covers that row), while the DECISION for it is
+	// always "not held, from the role".
+	decide := func(ctx context.Context) auth.Decision {
+		subject, _ := eng.subjectFor(ctx)
+		return auth.DecideFor(ctx, subject, auth.VerbExecute, grantTestResource)
+	}
+
+	// Before: nothing names the pair for this member.
+	if d := decide(rankActorCtx(member, auth.RoleWriter)); d.Held || d.Source != auth.SourceRole {
+		t.Fatalf("before any grant: %+v, want not held from role", d)
+	}
+	if d, present := find(rankActorCtx(member, auth.RoleWriter)); present && d.Held {
+		t.Fatalf("before any grant the set reported the pair held: %+v", d)
+	}
+
+	id := writeGrant(t, eng, auth.SubjectKindUser, member, auth.VerbExecute, grantTestResource, auth.GrantAllow)
+	if d, present := find(rankActorCtx(member, auth.RoleWriter)); !present || !d.Held || d.Source != auth.SourceUser {
+		t.Fatalf("with a user grant: %+v present=%v, want held from user", d, present)
+	}
+
+	deactivateGrant(t, eng, id)
+	if d := decide(rankActorCtx(member, auth.RoleWriter)); d.Held || d.Source != auth.SourceRole {
+		t.Fatalf("after the revoke: %+v, want not held from role again", d)
+	}
+	if d, present := find(rankActorCtx(member, auth.RoleWriter)); present && d.Held {
+		t.Fatalf("after the revoke the set still reported the pair held: %+v", d)
+	}
+
+	// And grantById, the read grantRevoke acts on, answers the newest version
+	// -- the revocation -- to an admin, and refuses a writer.
+	q := fmt.Sprintf(`query grantById(grantId: %s)`, langparser.QuoteString(id))
+	res, err := eng.Execute(rankActorCtx("admin-"+suffix, auth.RoleAdmin), q)
+	if err != nil {
+		t.Fatalf("grantById as admin: %v", err)
+	}
+	nodes := res.Bundle.GetNodes()
+	if len(nodes) != 1 || BareShortId(nodes[0].GetId()) != id {
+		t.Fatalf("grantById as admin returned %d nodes", len(nodes))
+	}
+	if active := nodes[0].GetPayload().GetFields()["active"]; active == nil || active.GetBoolValue() {
+		t.Fatal("grantById answered the pre-revoke version rather than the newest")
+	}
+	if _, err := eng.Execute(rankActorCtx("writer-"+suffix, auth.RoleWriter), q); err == nil {
+		t.Fatal("grantById as writer was served rather than refused at the admin floor")
+	}
+}

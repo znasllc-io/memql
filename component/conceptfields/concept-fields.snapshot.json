@@ -2065,6 +2065,7 @@
           "deviceCode",
           "enrolmentToken",
           "githubGrant",
+          "grant",
           "group",
           "groupMembership",
           "identity",

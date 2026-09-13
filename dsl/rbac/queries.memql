@@ -135,3 +135,14 @@ query grant grantsForResource {
   sort    "subjectId", "asc"
   shape   grantCard
 }
+
+/// One grant by its derived row id -- what grantRevoke reads before it acts, and the Access
+/// screen's detail read. Answers the newest version whether active or revoked; `active` says which.
+@requiresRank("admin")
+query grant grantById {
+  args {
+    grantId  string!
+  }
+  filter  row.id==args.grantId
+  shape   grantCard
+}
