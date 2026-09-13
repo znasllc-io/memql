@@ -116,12 +116,20 @@ func MayAssignRole(
 	// re-role them (memql#4917). Requiring update here would take invitations
 	// away from every developer in every cluster, through the one function whose
 	// job is deciding which ROLE they may name.
+	//
+	// ROLE-LEVEL, DELIBERATELY (epic memql#5296). This is a statement about
+	// which ROLE may name which role -- the assignment seams hand in a
+	// UserContext, not a request -- and it is not one of the request-path
+	// capability gates CapableFor replaced. A person granted `update` on
+	// `principal` by a v1:rbac:grant does not thereby become a user manager
+	// here; widening that is a governance decision the grants record does not
+	// make, and it would have to be made at both seams together.
 	if kind == AssignOnInvitation {
-		if !Capable(actor.Role, VerbCreate, ResourceAdmission) &&
-			!Capable(actor.Role, VerbCreate, ResourcePrincipal) {
+		if !roleHasCapability(actor.Role, VerbCreate, ResourceAdmission) &&
+			!roleHasCapability(actor.Role, VerbCreate, ResourcePrincipal) {
 			return AssignNotAUserManager
 		}
-	} else if !Capable(actor.Role, VerbUpdate, ResourcePrincipal) {
+	} else if !roleHasCapability(actor.Role, VerbUpdate, ResourcePrincipal) {
 		return AssignNotAUserManager
 	}
 

@@ -114,7 +114,11 @@ func (i *Integration) handleRoleCreate(ctx context.Context, args map[string]any,
 	// 1. The capability. A builtin carries no @requiresRank, so the floor is
 	//    repeated here -- and it is `create` on `role` rather than a rank,
 	//    because "may you author roles at all" is a grant and not a rung.
-	if !componentAuth.Capable(access.Role, componentAuth.VerbCreate, componentAuth.ResourceRole) {
+	//    Asked of the ACTOR, not the role (epic memql#5296): the subject is
+	//    the verified caller plus their groups, so a grant naming them
+	//    widens or narrows this exactly as it does at every other gate.
+	subject, _ := componentAuth.SubjectFromContext(ctx)
+	if !componentAuth.CapableFor(ctx, subject, componentAuth.VerbCreate, componentAuth.ResourceRole) {
 		return decisionNodes(refuse(slug, codeNotAuthorized,
 			"your role does not hold create on role")), nil
 	}
@@ -181,7 +185,8 @@ func (i *Integration) handleRoleUpdate(ctx context.Context, args map[string]any,
 	}
 
 	slug := strings.ToLower(strings.TrimSpace(stringArg(args, "slug")))
-	if !componentAuth.Capable(access.Role, componentAuth.VerbUpdate, componentAuth.ResourceRole) {
+	subject, _ := componentAuth.SubjectFromContext(ctx)
+	if !componentAuth.CapableFor(ctx, subject, componentAuth.VerbUpdate, componentAuth.ResourceRole) {
 		return decisionNodes(refuse(slug, codeNotAuthorized,
 			"your role does not hold update on role")), nil
 	}
@@ -276,7 +281,8 @@ func (i *Integration) handleRoleDeactivate(ctx context.Context, args map[string]
 		return decisionNodes(refuse("", codeNotAuthorized, "this call carries no caller identity")), nil
 	}
 	slug := strings.ToLower(strings.TrimSpace(stringArg(args, "slug")))
-	if !componentAuth.Capable(access.Role, componentAuth.VerbUpdate, componentAuth.ResourceRole) {
+	subject, _ := componentAuth.SubjectFromContext(ctx)
+	if !componentAuth.CapableFor(ctx, subject, componentAuth.VerbUpdate, componentAuth.ResourceRole) {
 		return decisionNodes(refuse(slug, codeNotAuthorized,
 			"your role does not hold update on role")), nil
 	}

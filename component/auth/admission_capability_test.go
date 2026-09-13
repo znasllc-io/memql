@@ -1,6 +1,9 @@
 package auth
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // ADMITTING SOMEBODY IS NOT MANAGING THEM (epic developer-admission, memql#4917).
 //
@@ -45,7 +48,7 @@ func TestAdmissionDoesNotGrantDeveloperUserManagement(t *testing.T) {
 		t.Error("developer passes AtLeastAdmin -- admission has leaked into the user-management gate")
 	}
 	for _, verb := range []string{VerbCreate, VerbUpdate, VerbDelete} {
-		if Capable(RoleDeveloper, verb, ResourcePrincipal) {
+		if CapableFor(context.Background(), Subject{Role: RoleDeveloper}, verb, ResourcePrincipal) {
 			t.Errorf("developer holds %s on principal -- it may now edit accounts, not just admit them", verb)
 		}
 	}

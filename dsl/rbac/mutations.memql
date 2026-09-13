@@ -117,3 +117,56 @@ mutate capability createCapability {
     }
   }
 }
+
+/// Write one v1:rbac:grant row -- a person's or a group's allow or deny over one (verb, resourceType)
+/// -- as a NEW VERSION at the derived id (epic memql#5294). Re-granting the same subject the same
+/// pair writes another version of the same logical row; it never mints a second one.
+///
+/// @serverOnly, and actor.userId scoping is worse than merely unavailable here. The obvious owner
+/// field would be `subjectId`, the person the grant is FOR -- and an owned row admits its owner's
+/// INSERTS, so scoping to actor.userId would hand every signed-in person a primitive for granting
+/// themselves an app. The row is the deployment's record of a decision (the concept declares
+/// @rowAuthz(clusterOwner, rankFloor="admin") and carries no owner field), and the rule that has to
+/// hold before it is written -- the writer holds `update` on `principal`, holds the capability
+/// being granted, outranks the subject, and is not the subject -- is relational, which is Go, which
+/// is the guarded `grantSet` path. A client reaching this directly would skip all four.
+@serverOnly
+mutate grant writeGrant {
+  args {
+    /// The derived row id: auth.GrantRowID(subjectKind, subjectId, verb, resourceType).
+    grantId       string!
+    subjectKind   enum("user", "group")!
+    subjectId     string!
+    verb          enum("read", "create", "update", "delete", "execute")!
+    resourceType  string!
+    effect        enum("allow", "deny")!
+    grantedBy     string
+  }
+  insert {
+    accept { subjectKind, subjectId, verb, resourceType, effect }
+    stamp {
+      id:        args.grantId
+      grantedBy: args.grantedBy ?? ""
+      active:    true
+    }
+  }
+}
+
+/// Revoke one v1:rbac:grant by writing `active: false` at its derived id -- the read-merge keeps
+/// every other field, so the decision and its reversal are both history (epic memql#5294).
+///
+/// @serverOnly for writeGrant's reason: a person may not revoke a deny that bars them, and nothing
+/// about the row says whose it is -- the concept carries no owner field, so there is no
+/// actor.userId conjunct that could distinguish the writer who may from the subject who may not.
+/// The guarded path is `grantRevoke`, which checks the writer's authority in Go and stamps
+/// internal origin.
+@serverOnly
+mutate grant deactivateGrant {
+  args {
+    grantId  string!
+  }
+  update {
+    id:     args.grantId
+    active: false
+  }
+}

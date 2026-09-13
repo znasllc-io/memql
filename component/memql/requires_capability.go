@@ -97,22 +97,29 @@ func (e *MemQLEngine) refuseBelowRequiredCapability(ctx context.Context, fn *Fun
 				"which would admit every caller (epic memql#5166)",
 			name, required.Verb, required.Resource)
 	}
-	ac, _ := auth.AccessFromContext(ctx)
-	if ac == nil {
+	// THE ACTOR-SHAPED QUESTION (epic memql#5296): the subject is the verified
+	// caller plus their memoised memberships, and CapableFor overlays the
+	// actor's group and user grants on the role catalog's answer. A person
+	// handed an app their role lacks is admitted here; a person barred from
+	// one their role holds is refused here.
+	subject, ok := e.subjectFor(ctx)
+	if !ok {
 		return fmt.Errorf(
 			"%q requires the %s capability and this call carries no caller identity",
 			name, required)
 	}
-	if auth.Capable(ac.Role, required.Verb, required.Resource) {
+	if auth.CapableFor(ctx, subject, required.Verb, required.Resource) {
 		return nil
 	}
 	// The refusal names the requirement and the caller's own role, because the
 	// person reading it is usually an operator wondering why a screen is empty.
 	// It does NOT name who could do it: that is a directory disclosure on a
-	// refusal path, and the rank sibling follows the same rule.
+	// refusal path, and the rank sibling follows the same rule. Nor does it say
+	// which level refused -- a deny is a decision about a person, and naming it
+	// on the refusal path would tell them somebody singled them out.
 	return fmt.Errorf(
-		"%q requires the %s capability; the role %q does not hold it",
-		name, required, string(ac.Role))
+		"%q requires the %s capability; the caller (role %q) does not hold it",
+		name, required, string(subject.Role))
 }
 
 // refusePlanBelowRequiredCapability enforces every requirement a plan

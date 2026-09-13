@@ -38,3 +38,19 @@ shape capability capabilityFull {
   active
   row.createdAt
 }
+
+/// One grant as the Access administration screen reads it: who it is for (kind + bare id), what
+/// it says (verb, resourceType, effect), who wrote it and whether it still counts. `row.createdAt`
+/// is when THIS version was written -- a revoked grant's latest version is the revocation.
+@row
+shape grant grantCard {
+  row.id
+  subjectKind
+  subjectId
+  verb
+  resourceType
+  effect
+  grantedBy
+  active
+  row.createdAt
+}

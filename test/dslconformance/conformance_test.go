@@ -494,7 +494,15 @@ var idBearingFieldExemptions = map[string]string{
 	// contract anyway. See the comment on the concept.
 	"identity/group.accountId":             "plain-fk-by-design: the bare name `account` shadows in this file, so a relationship would canonicalize under the WRONG concept (epic memql#5165)",
 	"identity/groupMembership.ownerUserId": "plain-fk-by-design: always empty (epic memql#5165 D2); the owned tier needs a present-and-empty owner key, and the field names no target",
-	"identity/identity.accountId":          "nested under payload.credentials.account_token @variant; canonicalizeRelationshipFields walks top-level fields only, so a concept-level @relationship(field=\"accountId\") is a structural no-op -- and leaving the credential row a graph leaf is the conservative direction here (memql#3322)",
+	// v1:rbac:grant.subjectId is POLYMORPHIC, discriminated by subjectKind
+	// (epic memql#5294) -- the auditEvent targetType / targetId shape. One
+	// field cannot carry two @relationship targets, and a relationship declared
+	// for `user` would canonicalize a group's id under v1:identity:user (and
+	// the reverse), so the resolver's bare-or-canonical match against the
+	// actor's own ids would miss. Stored BARE, matched against both spellings
+	// in component/memql's grant source.
+	"rbac/grant.subjectId":        "polymorphic subject (user OR group, discriminated by subjectKind); a single @relationship target would canonicalize the other kind under the wrong concept (epic memql#5294)",
+	"identity/identity.accountId": "nested under payload.credentials.account_token @variant; canonicalizeRelationshipFields walks top-level fields only, so a concept-level @relationship(field=\"accountId\") is a structural no-op -- and leaving the credential row a graph leaf is the conservative direction here (memql#3322)",
 	// --- deliberate short-form storage by write-side normalization ---
 	"forge/requestEvent.requestId": "bare-by-contract (#1859): recordRequestEvent/recordMentoredEvent store shortId(args.requestId) so the audit trail unifies whether the caller passes a canonical (automation) or short (tool) id; an @relationship would re-canonicalize on insert and re-split the trail (conf_1859_test asserts zero events under the canonical id)",
 	// --- a MODEL TAG that names a row without being one (epic memql#5146) ---

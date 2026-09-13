@@ -166,8 +166,21 @@ overrides an `allow` for the same triple; no v1 path writes one.
 The engine loads both concepts at boot into a runtime CATALOG
 (`component/memql/rbac_catalog.go`), installs it into `component/auth`, and
 reloads it on the two concepts' graph events -- which are broadcast, so a role
-created on one replica is real on all of them. Every `auth.Capable` call and
-every `Can*` adapter resolves through it.
+created on one replica is real on all of them. Every `auth.CapableFor` call
+and every `Can*` adapter resolves through it.
+
+**A grant to a person or a group overlays the role's answer** (epic
+memql#5294, the app access grants record). `v1:rbac:grant` carries one
+`allow` / `deny` over one `(verb, resourceType)` for a `user` or a `group`
+subject -- never a role. `auth.CapableFor(ctx, subject, verb, resource)`
+resolves it: the role catalog first, then the actor's active group grants
+(deny wins if their groups disagree), then the actor's own grants -- most
+specific wins across levels, deny wins within one. Grants are read per
+request and memoised beside the account scope, never cached, so a grant
+written on one replica is honoured everywhere at the next request.
+`MaintenanceActor`, the seed materializer, an automation's system actor and
+borrowed authority are `Unranked` and are not consulted: they resolve as the
+catalog alone. There is no role-shaped `auth.Capable` any more.
 
 **An unknown slug holds nothing and ranks 0.** That is the fail-closed rule and
 it has one consequence worth knowing: a role DEACTIVATED while somebody holds it
@@ -670,8 +683,8 @@ setting the role is the whole of it.
   with `PermissionDenied` by the coarse data-plane capability gate
   (`component/grpc/data_capability_gate.go`, memql#3179): the handler
   resolves the caller's role and asks
-  `auth.Capable(role, "create", "data")` before the engine sees the
-  query. That gate is **partial by construction** -- it sits at the
+  `auth.CapableFor(ctx, subject, "create", "data")` before the engine sees
+  the query. That gate is **partial by construction** -- it sits at the
   handler layer, so it covers `ExecuteQueryMsg` and nothing else, and
   its complete residual-bypass set is enumerated with reasons in
   `dataPlaneGateExemptions` (same file):
