@@ -80,6 +80,8 @@ func cascadeWrites(stmts []string) []string {
 			out = append(out, "package "+argOf(q, "status"))
 		case strings.HasPrefix(q, "mutation setSiteStatus("):
 			out = append(out, "status "+argOf(q, "siteId")+" "+argOf(q, "status"))
+		case strings.HasPrefix(q, "mutation closePackageDeployment("):
+			out = append(out, "close "+argOf(q, "deploymentId")+" "+argOf(q, "status"))
 		}
 	}
 	return out
@@ -231,6 +233,79 @@ func TestPackageArchiveStillVerifiesTheTypedName(t *testing.T) {
 }
 
 var errRefusedByGuard = refuse("site_status_refused", "v1:platform:site: a systemOwned row is exempt from the lifecycle")
+
+// A PARKED RUN DOES NOT SURVIVE ITS SOURCE (memql#5293). A run at
+// awaiting_confirm is a question waiting for a person's answer, and archiving
+// the source is the answer: nothing was built and nothing was published, so
+// it closes `cancelled` -- the same word a person's own stop gets, because a
+// surface that read it as `failed` or `abandoned` would tell somebody the
+// cluster lost a run they archived on purpose. It closes BEFORE the package
+// flips, so a close the guard refuses leaves a source that is still active
+// and still says what happened. A run that is RUNNING is left to the node
+// running it, exactly as cancel leaves it; a finished run is finished.
+func TestPackageArchiveClosesItsParkedRunsCancelledBeforeThePackageFlips(t *testing.T) {
+	i, engine := archiveHarness(t, packageSite("docs", "docs.example.com", siteStatusDisabled))
+	engine.rows["query packageDeployments"] = []map[string]any{
+		parkedRun("v1:platform:packageDeployment:parked", "v1:platform:package:abc", nil),
+		{"id": "v1:platform:packageDeployment:done", "packageId": "v1:platform:package:abc", "status": StatusSucceeded},
+		{"id": "v1:platform:packageDeployment:building", "packageId": "v1:platform:package:abc", "status": StatusBuilding},
+		parkedRun("v1:platform:packageDeployment:parked2", "v1:platform:package:abc", nil),
+	}
+	nodes, err := i.handleArchivePackage(callerCtx("v1:identity:user:someone"), archiveArgs(), 0)
+	if err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	reply := replyPayload(t, nodes)
+	if got := reply["parkedRunsCancelled"]; got != float64(2) {
+		t.Fatalf("the reply must say how many parked runs it closed, want 2, got %v (reply %v)", got, reply)
+	}
+	got := cascadeWrites(engine.statements())
+	want := []string{
+		"release v1:platform:site:docs",
+		"delete v1:platform:site:docs",
+		`disable ["storefront","docs"]`,
+		"close v1:platform:packageDeployment:parked cancelled",
+		"close v1:platform:packageDeployment:parked2 cancelled",
+		"package archived",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("want every parked run closed cancelled before the package flips:\n got %v\nwant %v", got, want)
+	}
+	for _, id := range []string{"v1:platform:packageDeployment:done", "v1:platform:packageDeployment:building"} {
+		if engine.sawStatement(`closePackageDeployment(deploymentId: "` + id + `"`) {
+			t.Fatalf("%s is not parked and must not be closed by the archive", id)
+		}
+	}
+
+	// THE CONTROL: a source with nothing parked closes nothing and says so.
+	j, jengine := archiveHarness(t)
+	nodes, err = j.handleArchivePackage(callerCtx("v1:identity:user:someone"), archiveArgs(), 0)
+	if err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if got := replyPayload(t, nodes)["parkedRunsCancelled"]; got != float64(0) {
+		t.Fatalf("nothing parked, want 0, got %v", got)
+	}
+	if jengine.sawStatement("mutation closePackageDeployment(") {
+		t.Fatal("nothing was parked and a row was closed")
+	}
+}
+
+// A close the guard refuses stops the cascade before the package flips.
+func TestPackageArchiveStopsWhenAParkedRunCannotBeClosed(t *testing.T) {
+	i, engine := archiveHarness(t)
+	engine.rows["query packageDeployments"] = []map[string]any{
+		parkedRun("v1:platform:packageDeployment:parked", "v1:platform:package:abc", nil),
+	}
+	engine.fail = map[string]error{`closePackageDeployment(deploymentId: "v1:platform:packageDeployment:parked"`: errRefusedByGuard}
+	_, err := i.handleArchivePackage(callerCtx("v1:identity:user:someone"), archiveArgs(), 0)
+	if err == nil || !strings.Contains(err.Error(), errRefusedByGuard.Error()) {
+		t.Fatalf("the guard's refusal must surface, got %v", err)
+	}
+	if engine.sawStatement("mutation setPackageStatus") {
+		t.Fatal("the package must not flip over a parked run that did not close")
+	}
+}
 
 // ---------------------------------------------------------------------------
 // packageDeactivateDeployable (design D2)

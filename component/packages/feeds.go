@@ -131,6 +131,16 @@ func noteUpstream(ctx context.Context, d *Deps, repoUrl, version string) (int, e
 		if id == "" {
 			continue
 		}
+		// AN ARCHIVED SOURCE IS NOT FED (memql#5293). The read above excludes
+		// archived packages, as packagesTrackingRepos always did; this is the
+		// feed declining to write what it was handed regardless, because the
+		// two feed-owned fields on an archived source are a cue nobody can
+		// act on, and an armed one would auto-deploy a source somebody
+		// archived. The second check is what makes the read's exclusion a
+		// property of the feed rather than of one query's filter.
+		if rowString(pkg, "status") != "active" {
+			continue
+		}
 		deployed := rowString(pkg, "deployedVersion")
 		known := rowString(pkg, "latestKnownVersion")
 		available := version != "" && version != deployed

@@ -5577,6 +5577,7 @@ func PackagesArchivedBuild(args PackagesArchivedArgs) string {
 }
 
 // PackagesByRepoUrl -- Packages tracking a given repository URL -- the D11 webhook feed's match, and the OS's duplicate check when somebody adds a repo that is already tracked.
+// ACTIVE ONLY, exactly as packagesTrackingRepos (memql#5293). Both feeds reach a package through this read -- the webhook directly, the poll per repository -- and without the filter they went on writing the two feed-owned fields onto an archived source, and an armed one would have auto-deployed it. An archived source is a place, not a feed target; a re-added source is a new row and matches on its own.
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesByRepoUrl"] in generated_concepts.go).
 type PackagesByRepoUrlArgs struct {

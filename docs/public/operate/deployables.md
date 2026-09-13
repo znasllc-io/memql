@@ -480,6 +480,25 @@ Consequences worth stating plainly, because they are surprising:
   argument could not exist without failing the owner-stamp gate or lying about
   why it was exempt.
 
+**The erasure, and its repair (memql#5292).** Between the arrival of
+self-serve deployables and PR #5284, every developer deploy produced a site
+whose owner was then blanked: `createSite` stamped the developer, and the
+pipeline's next write (`recordSitePackageOrigin`, internal origin on the same
+context) tripped the privileged undo above on a value it had not stamped, and
+deleted it. The row read as cluster-owned, so the developer who deployed it
+could neither see it in Deployables, flip it live, nor delete it. PR #5284
+makes the undo fire only on a write whose delta named the owner. The rows it
+already left are repaired by the versioned engine migration
+`20260912000000_site_owner_restamp` (`component/database/`), which runs at boot
+like every other: it selects `v1:platform:site` rows whose LATEST version has
+an empty owner and a non-empty `packageId` (never `systemOwned`, never
+`deleted`), takes the owner from the newest `packageDeployment` for that
+package whose `deployables[]` names the site (its `requestedBy`), falls back
+to the package row's own owner, and appends ONE new version with the owner
+set and nothing else changed. A site neither source can name is left as it
+is and logged by id; that one needs an operator to re-run `createSite` on its
+id as the person who should own it. A second run selects nothing.
+
 Writes need rank 200 and above (`{admin, developer, owner}` under the one
 ladder). A client's own domain and a CI-pushed source are **cluster-owner
 acts** and are offered to nobody else. A source that ships MemQL DSL needs an

@@ -154,6 +154,28 @@ func (s *store) liveDeploymentsForPackage(ctx context.Context, packageId string)
 	return live, nil
 }
 
+// parkedDeploymentsForPackage is every run of this package waiting at the
+// confirm gate -- the rows an archive closes (memql#5293).
+//
+// Folded from the package's own timeline for the reason lastSucceededDeployment
+// gives: packageDeployments is newest-first and bounded at fifty, and a parked
+// run older than fifty newer runs of the same source is a gate somebody left
+// unanswered through fifty deploys. Adding a query for it would regenerate
+// both SDKs for a read nothing outside this package makes.
+func (s *store) parkedDeploymentsForPackage(ctx context.Context, packageId string) ([]map[string]any, error) {
+	rows, err := s.deploymentsForPackage(ctx, packageId)
+	if err != nil {
+		return nil, err
+	}
+	var parked []map[string]any
+	for _, row := range rows {
+		if rowString(row, "status") == StatusAwaitingConfirm {
+			parked = append(parked, row)
+		}
+	}
+	return parked, nil
+}
+
 func (s *store) deploymentsForPackage(ctx context.Context, packageId string) ([]map[string]any, error) {
 	return s.queryAll(ctx, fmt.Sprintf("query packageDeployments(packageId: %s)", langparser.QuoteString(packageId)))
 }

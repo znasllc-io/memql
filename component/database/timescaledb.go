@@ -68,6 +68,11 @@ func registerTimescaleMigrations(m *migrate.Migrations, logger *slog.Logger) {
 		}
 		panic(err)
 	}
+
+	// The one Go migration in the set, versioned and ordered exactly like
+	// the .sql files above; Go because it has to log what it could not
+	// repair, and pgdriver discards a SQL NOTICE (memql#5292).
+	registerSiteOwnerRestamp(m, logger)
 }
 
 func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {
