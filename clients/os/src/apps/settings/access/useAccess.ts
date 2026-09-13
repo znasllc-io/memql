@@ -16,7 +16,7 @@ import {
   type PersonRow,
   type RoleRow,
 } from "../../users/rows";
-import { grantFromRow, type AccessGrant, type GrantRefusal, type Subject } from "./model";
+import { bareId, grantFromRow, type AccessGrant, type GrantRefusal, type Subject } from "./model";
 
 // SETTINGS > ACCESS, THE READS AND THE TWO WRITES (epic memql#5289, task
 // memql#5307).
@@ -150,10 +150,14 @@ export function useSubjectGrants(subject: Subject | null): SubjectGrants {
         let viaGroups: AccessGrant[] = [];
         if (kind === "user") {
           const memberships = await query.groupsForUser({ userId: id, includeRemoved: false }, { signal: controller.signal });
+          // BARE, at the seam: a membership's `groupId` is what the next
+          // `grantsForSubject` filters on, and grant rows store the bare
+          // spelling -- a canonical one matches no row, and the group's
+          // grants would silently read as none.
           ids = (memberships.rows() as Row[])
             .map(membershipFromRow)
             .filter((m) => m.status === "active" && m.groupId !== "")
-            .map((m) => m.groupId);
+            .map((m) => bareId(m.groupId));
           const perGroup = await Promise.all(
             ids.map((groupId) => query.grantsForSubject({ subjectKind: "group", subjectId: groupId }, { signal: controller.signal })),
           );

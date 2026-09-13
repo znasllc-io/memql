@@ -13,7 +13,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { SOURCE_CREDENTIAL_CONCEPT } from "../../src/apps/deployables/sources/rows";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
-import { click, emit, fakeConnection, withSession, type FakeConnection, type FakeSeed } from "./harness";
+import { click, emit, fakeConnection, githubGrantRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
 
 // Settings -> Sources (epic memql#4885, task memql#4891, design section D):
 // every credential this person holds, what fetches under it, and the two acts
@@ -32,12 +32,12 @@ function memStore() {
   });
 }
 
-function mount(connection: FakeConnection | null, role = "owner") {
+function mount(connection: FakeConnection | null, role = "owner", userId = "u-me") {
   h.connection = connection;
   return render(
     withSession(
       <DeployablesApp sectionId="settings" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} />,
-      { role, userId: "u-me" },
+      { role, userId },
     ),
   );
 }
@@ -240,5 +240,40 @@ describe("Settings -> Sources: whose credentials", () => {
     const mine = await screen.findByRole("list", { name: "Your source credentials" });
     expect(within(mine).getByText("acme deploy token")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Other people's connections" })).toBeNull();
+  });
+
+  it("buckets by the person, not by the id's SPELLING: a canonical session id still owns the bare rows", async () => {
+    // THE REGRESSION. A deployed cluster hands the session the canonical
+    // `v1:identity:user:...` id while the rows carry the bare one, and the
+    // cases above cannot see it because every id in them is already bare.
+    // Compared raw, NOTHING is the viewer's: their own tokens fall into the
+    // owner-view list beside a colleague's, and their GitHub connection --
+    // which is on the feed -- reads as "not connected".
+    mount(
+      fakeConnection({
+        credentials: [ADAS, ACME, OLD, githubGrantRow({ id: "cred-grant" })],
+        packages: [PACKAGE],
+        people: [ADA],
+      }),
+      "owner",
+      "v1:identity:user:u-me",
+    );
+
+    const mine = await screen.findByRole("list", { name: "Your source credentials" });
+    expect(within(mine).getByText("acme deploy token")).toBeTruthy();
+    expect(within(mine).getByText("old laptop")).toBeTruthy();
+    expect(within(mine).queryByText("ada's token")).toBeNull();
+
+    // The connection is the viewer's own, so the card is the connected one
+    // and the way in is not offered a second time.
+    expect((await screen.findAllByText("@octocat")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Connect GitHub" })).toBeNull();
+
+    // ...and the owner view holds the colleague's row, and only that.
+    const others = await screen.findByRole("region", { name: "Other people's connections" });
+    const list = within(others).getByRole("list", { name: "Other people's source credentials" });
+    expect(within(list).getByText("ada's token")).toBeTruthy();
+    expect(within(list).queryByText("acme deploy token")).toBeNull();
+    await waitFor(() => expect(within(list).getByText("Ada Lovelace's")).toBeTruthy());
   });
 });
