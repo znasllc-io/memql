@@ -156,6 +156,10 @@ export interface FakeSeed {
   publishError?: string;
   /** v1:platform:sourceCredential CARDS `sourceCredentialsMine` answers with -- never a value. */
   credentials?: Row[];
+  /** v1:identity:user rows `searchUsers` answers with, for "deployed by" (epic memql#5289). */
+  people?: Row[];
+  /** Fails the roster read with this server message -- what a reader gets. */
+  peopleError?: string;
   /**
    * What `sourceProbe` answers, keyed by the credentialId the call carries
    * ("" for an anonymous probe). A key that is not present falls back to
@@ -281,6 +285,10 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       calls.push(call);
 
       if (call === "query sitesAll()") return rowsResult(sites);
+      if (call.startsWith("query searchUsers(")) {
+        if (seed.peopleError !== undefined) throw new Error(seed.peopleError);
+        return rowsResult(seed.people ?? []);
+      }
       if (call === "query libraryArtifacts()") return rowsResult(artifacts);
       if (call === "query customDomainsAll()") return rowsResult(domains);
 

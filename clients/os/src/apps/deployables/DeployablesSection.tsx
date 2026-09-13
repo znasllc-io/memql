@@ -23,6 +23,7 @@ import type { ArrivalKind } from "../../live/arrival";
 import { AccountChip, NO_ACCOUNT_LABEL } from "../accounts/AccountPicker";
 import { accountIsArchived, accountName, accountNameFrom, type AccountRow } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
+import { deployedByLabel, deployerOf, usePeopleNames } from "./people";
 import {
   ACCOUNT_ANY,
   ACCOUNT_NONE,
@@ -147,6 +148,11 @@ export function DeployablesSection({
   // the whole thing is finished.
   const [justGone, setJustGone] = useState<Gone>(null);
   const accounts = useAccountOptions();
+  // THE ROSTER, once, for "deployed by" (epic memql#5289, task memql#5306):
+  // the rows already carry the deployer's id, and this is the one lookup that
+  // turns it into a name -- refusal-tolerant, so a reader's rows simply keep
+  // their ownership chip.
+  const nameOf = usePeopleNames();
 
   const siteRows = sites?.snapshot.rows ?? [];
   const packageRows = packages?.snapshot.rows ?? [];
@@ -264,6 +270,11 @@ export function DeployablesSection({
         onOpenDeclared={(app) => openDeclared(pkg.id, app)}
         onAsk={onAsk}
         attempts={parkedRows.filter((d) => d.packageId === pkg.id).length}
+        deployedBy={deployedByLabel(
+          deployerOf(parkedRows.find((d) => d.packageId === pkg.id) ?? null, null, pkg),
+          viewerUserId,
+          nameOf,
+        )}
       />
     );
   }
@@ -279,6 +290,7 @@ export function DeployablesSection({
         pkg={pkg}
         credentials={credentials}
         viewerUserId={viewerUserId}
+        nameOf={nameOf}
         can={can}
         clusterDomain={clusterDomain}
         onAsk={onAsk}
@@ -443,6 +455,7 @@ export function DeployablesSection({
               figures={figures}
               tick={tick}
               accounts={accounts}
+          deployedByOf={(row) => deployedByLabel(row.deployedBy, viewerUserId, nameOf)}
               selectedSiteId={selectedSiteId}
               onOpenSite={openSite}
               onOpenSource={(packageId) => setView({ kind: "source", packageId })}
@@ -491,6 +504,7 @@ function GroupLine({
   group,
   tick,
   accounts,
+  deployedByOf,
   selectedSiteId,
   onOpenSite,
   onOpenSource,
@@ -501,6 +515,8 @@ function GroupLine({
   group: DeployableListGroup;
   tick: ArrivalKind | null;
   accounts: AccountRow[];
+  /** "you", a name, or "" for a row's deployer (epic memql#5289, task memql#5306). */
+  deployedByOf: (row: DeployableListRow) => string;
   selectedSiteId: string;
   onOpenSite: (siteId: string) => void;
   onOpenSource: (packageId: string) => void;
@@ -524,6 +540,7 @@ function GroupLine({
       tick={rowTick}
       waiting={waiting}
       accounts={accounts}
+      deployedBy={deployedByOf(row)}
       open={row.site !== null && row.site.id === selectedSiteId}
       onOpen={() =>
         row.site !== null
@@ -639,6 +656,7 @@ function DeployableLine({
   tick,
   waiting,
   accounts,
+  deployedBy,
   open,
   onOpen,
   traffic,
@@ -647,6 +665,8 @@ function DeployableLine({
   tick: ArrivalKind | null;
   waiting: boolean;
   accounts: AccountRow[];
+  /** "you", a name, or "" when nothing honest can be said. */
+  deployedBy: string;
   open: boolean;
   onOpen: () => void;
   traffic: TrafficSummary | null;
@@ -672,6 +692,13 @@ function DeployableLine({
               no word reads as broken. */}
           {chip === "" ? null : <Chip tone="muted">{chip}</Chip>}
           <AccountChip name={accountNameFrom(accounts, site?.accountId ?? "")} />
+          {/* WHO DEPLOYED IT, beside who it is for: the two facts the owner
+              asked to see on every row (epic memql#5289, task memql#5306). */}
+          {deployedBy === "" ? null : (
+            <span className="os-deploy-by" data-os-deployed-by>
+              deployed by {deployedBy}
+            </span>
+          )}
           {traffic === null || traffic.lastServedAt === "" ? null : (
             <Chip title={`${traffic.requests.toLocaleString()} requests over the last week`}>
               served {formatFreshness(traffic.lastServedAt, now)}

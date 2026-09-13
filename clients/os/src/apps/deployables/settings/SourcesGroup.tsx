@@ -12,6 +12,7 @@ import { ConnectedAccountCard } from "../sources/ConnectedAccountCard";
 import { ConnectGitHub } from "../sources/ConnectGitHub";
 import { connectSucceeded, returnPathFor, type ConnectReturn } from "../sources/connectReturn";
 import { SOURCE_HOST } from "../sources/probe";
+import { usePeopleNames } from "../people";
 import {
   credentialFingerprint,
   credentialIsRevoked,
@@ -76,6 +77,21 @@ import {
 // credential and adding one are three acts in one group, and each owns its
 // own busy/refusal pair so a server sentence never lands under a button
 // nobody pressed.
+//
+// ===========================================================================
+// THE VIEWER'S OWN FIRST; OTHER PEOPLE'S UNDER AN OWNER-VIEW HEADING
+// ===========================================================================
+// (epic memql#5289, task memql#5306; design section 4 "Attribution".) The
+// `sourceCredential` concept keeps its clusterOwner branch: what an owner
+// sees of somebody else's credential is metadata, never a token, and
+// dropping the branch would leave a departed person's grant -- which
+// auto-deploy still fetches under -- with nobody able to see or revoke it.
+// So a cluster owner's feed carries everybody's cards, and this surface
+// PRESENTS them apart: the viewer's own connection and tokens first, exactly
+// as before, then "Other people's connections", each row naming its owner,
+// shown only to a cluster owner and only when there is somebody to show. A
+// non-owner's feed never carries another person's row, so for them nothing
+// here changes.
 
 /** The SECTION id this group is mounted under, so the connect callback brings
  *  somebody back to the surface that asked. */
@@ -84,10 +100,16 @@ const SETTINGS_SECTION = "settings";
 export function SourcesGroup({
   credentials,
   packages,
+  viewerUserId,
+  isClusterOwner,
   connectResult = null,
 }: {
   /** The app root's one credentials feed. */
   credentials: LiveView<CredentialRow> | null;
+  /** Whose cards come first. */
+  viewerUserId: string;
+  /** Whether other people's cards are on the feed at all (the concept's clusterOwner branch). */
+  isClusterOwner: boolean;
   /** The app root's package rows, for the join. Read-only: this surface writes no package. */
   packages: readonly PackageRow[];
   /** The answer carried back from GitHub, when this window was opened by one. */
@@ -114,13 +136,31 @@ export function SourcesGroup({
   // subscription: a card saying "connected as @octocat" beside a list that
   // had not heard about the grant yet would be one app contradicting itself.
   const held = credentials?.snapshot.rows ?? [];
-  const grant = useMemo(() => githubGrantOf(held), [held]);
+  // THE VIEWER'S OWN GRANT, never somebody else's: a cluster owner's feed
+  // carries every person's cards, and a card saying "connected as @octocat"
+  // about a colleague's grant would be the wrong person's connection.
+  const mine = useMemo(() => held.filter((c) => c.ownerUserId === viewerUserId), [held, viewerUserId]);
+  const grant = useMemo(() => githubGrantOf(mine), [mine]);
   // ...and the list is that same feed NARROWED, because a grant is already
   // the card above and a row that appeared in both would be one credential
   // offering two different acts. `useLiveView` is exactly what LiveList's
   // source seam is for, so the pasted rows keep their arrival cues and their
   // live-state caption.
-  const pasted = useLiveView<CredentialRow, CredentialRow>(credentials, "pasted", pastedCredentials);
+  const pasted = useLiveView<CredentialRow, CredentialRow>(credentials, "pasted", (rows) =>
+    pastedCredentials(rows.filter((c) => c.ownerUserId === viewerUserId)),
+  );
+  // OTHER PEOPLE'S, every kind -- a colleague's GitHub grant is listed here
+  // as a row rather than as a card, because the card's acts (reconnect,
+  // check what it reaches) are the grant-holder's and the one act an owner
+  // has over it is Revoke. Newest first, like the pasted list.
+  const others = useLiveView<CredentialRow, CredentialRow>(credentials, "others", (rows) =>
+    rows
+      .filter((c) => c.ownerUserId !== viewerUserId)
+      .slice()
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+  );
+  const othersCount = others?.snapshot.rows.length ?? 0;
+  const nameOf = usePeopleNames();
 
   const sourceNames = useMemo(
     () =>
@@ -281,6 +321,31 @@ export function SourcesGroup({
           </div>
         )}
       </section>
+
+      {/* THE OWNER VIEW, and only when there is somebody in it: a heading
+          over an empty list would announce a division the page does not
+          have. A non-owner never reaches this branch -- the engine's
+          clusterOwner branch on the concept is what puts other people's rows
+          on the feed, and this surface only says whose they are. */}
+      {isClusterOwner && othersCount > 0 ? (
+        <section className="os-field-group" aria-label="Other people's connections">
+          <Subhead>Other people's connections (owner view)</Subhead>
+          <Caption>
+            Credentials other people hold, as their owner sees them: a name and a fingerprint, never a value.
+            Auto-deploy fetches under these, so a credential whose person has left is still yours to revoke.
+          </Caption>
+          <LiveList<CredentialRow>
+            source={others}
+            rowId={(c) => c.id}
+            fingerprint={credentialFingerprint}
+            label="Other people's source credentials"
+            emptyText="Nobody else holds a credential."
+            renderRow={(card) => (
+              <CredentialLine card={card} packages={packages} now={now} owner={nameOf(card.ownerUserId)} />
+            )}
+          />
+        </section>
+      ) : null}
     </fieldset>
   );
 }
@@ -331,10 +396,13 @@ function CredentialLine({
   card,
   packages,
   now,
+  owner = "",
 }: {
   card: CredentialRow;
   packages: readonly PackageRow[];
   now: Date;
+  /** The owner's name on somebody else's row, "" for the viewer's own or when the roster gave none. */
+  owner?: string;
 }) {
   const actions = useCredentialActions();
   const [confirming, setConfirming] = useState(false);
@@ -363,6 +431,7 @@ function CredentialLine({
         state={
           <>
             <Chip tone="muted">{card.host}</Chip>
+            {owner === "" ? null : <span className="os-deploy-by">{owner}'s</span>}
             {/* A HEARTBEAT, displayed and never fingerprinted. */}
             <span className="os-source-used">used {formatFreshness(card.lastUsedAt, now)}</span>
             {revoked ? (

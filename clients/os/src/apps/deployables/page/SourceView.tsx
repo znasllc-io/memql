@@ -54,6 +54,7 @@ export function SourceView({
   onOpenDeclared,
   onAsk,
   attempts,
+  deployedBy,
 }: {
   pkg: PackageRow;
   /** The apps this source produced, from the root's site feed. */
@@ -69,6 +70,12 @@ export function SourceView({
   onAsk?: (tag: string) => void;
   /** How many runs this source has, for the history line. */
   attempts: number;
+  /**
+   * Who deployed this source last, in words: "you", a name the roster gave,
+   * or "" when nothing honest can be said (epic memql#5289, task memql#5306).
+   * Read off the newest parked run's requester, else the source's owner.
+   */
+  deployedBy: string;
 }) {
   const label = sourceLabel(pkg);
   const live = apps.filter((a) => a.status === "live").length;
@@ -129,6 +136,7 @@ export function SourceView({
               mono
             />
             <Fact label="Added" value={formatMoment(pkg.createdAt)} />
+            {deployedBy === "" ? null : <Fact label="Deployed by" value={deployedBy} />}
           </Facts>
 
           {/* WHAT IT DECLARES, not only what it deployed.

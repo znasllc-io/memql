@@ -259,6 +259,8 @@ export function DeployablesApp({
       <DeployablesSettingsSection
         settings={settings}
         update={update}
+        viewerUserId={viewerUserId}
+        isClusterOwner={isClusterOwner}
         credentials={credentials}
         packages={packageSnapshot.rows}
         connectResult={connectResult}
@@ -332,12 +334,18 @@ export function DeployablesApp({
 function DeployablesSettingsSection({
   settings,
   update,
+  viewerUserId,
+  isClusterOwner,
   credentials,
   packages,
   connectResult,
 }: {
   settings: DeployablesSettings;
   update: (patch: Partial<DeployablesSettings>) => void;
+  /** Whose credentials come first in the Sources group. */
+  viewerUserId: string;
+  /** Whether other people's credentials are listed at all (the concept's clusterOwner branch). */
+  isClusterOwner: boolean;
   /** The app root's one credentials feed, for the Sources group. */
   credentials: LiveView<CredentialRow> | null;
   /** The app root's package rows, joined onto each credential by `credentialId`. */
@@ -418,7 +426,9 @@ function DeployablesSettingsSection({
             else to live, and Settings is where an app keeps what is about
             the app rather than about one row (DESIGN.md rule 4's home, one
             step out). The two above ARE preferences and stay above it. */}
-        <SourcesGroup credentials={credentials} packages={packages} connectResult={connectResult} />
+        <SourcesGroup
+          viewerUserId={viewerUserId}
+          isClusterOwner={isClusterOwner} credentials={credentials} packages={packages} connectResult={connectResult} />
 
         <p className="os-caption">
           These are kept in this browser, separately from your desktop, so an app learning a

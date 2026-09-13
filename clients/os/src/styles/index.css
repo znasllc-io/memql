@@ -6062,6 +6062,14 @@ a.os-button {
   white-space: nowrap;
 }
 
+/* Who deployed it (epic memql#5289): a quiet fact beside the client chip,
+ * in the heartbeat's voice -- a name is a record, not a status. */
+.os-deploy-by {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  white-space: nowrap;
+}
+
 /* ---- one attempt in the timeline --------------------------------------- */
 
 .os-attempt {
