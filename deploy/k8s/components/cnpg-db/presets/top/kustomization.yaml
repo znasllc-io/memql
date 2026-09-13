@@ -35,6 +35,18 @@ patches:
           requests: { cpu: "4", memory: 16Gi }
           limits:   { memory: 16Gi }
       - { op: replace, path: /spec/postgresql/parameters/max_connections, value: "400" }
+      # MEMORY, sized to the limit above (memql.znas.io, 2026-09-13). CNPG
+      # leaves Postgres on its defaults -- 128 MB shared_buffers, 4 MB work_mem
+      # -- so a preset that only raises the pod's memory buys RAM the server
+      # never uses. shared_buffers is a quarter of the limit, effective_cache_size
+      # three quarters (the planner's estimate of what the OS cache holds),
+      # work_mem is per SORT per backend and is kept small against
+      # max_connections. Changing shared_buffers RESTARTS Postgres; the rest
+      # reload.
+      - { op: add, path: /spec/postgresql/parameters/shared_buffers, value: "4GB" }
+      - { op: add, path: /spec/postgresql/parameters/effective_cache_size, value: "12GB" }
+      - { op: add, path: /spec/postgresql/parameters/work_mem, value: "16MB" }
+      - { op: add, path: /spec/postgresql/parameters/maintenance_work_mem, value: "1GB" }
       - op: add
         path: /spec/affinity
         value:

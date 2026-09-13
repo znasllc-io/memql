@@ -170,10 +170,16 @@ func TestPresetsMatchTheirDocumentedTiers(t *testing.T) {
 		data, wal string
 		cpu, mem  string
 		maxConns  string
+		// Postgres MEMORY parameters, sized to the preset's memory limit
+		// (memql.znas.io, 2026-09-13): a preset that raises the pod's memory
+		// and leaves the server on its 128 MB shared_buffers default buys RAM
+		// Postgres never uses, and the first large hypertable read runs off
+		// disk at a 61% cache-hit rate.
+		sharedBuffers, effectiveCache, workMem, maintenanceWorkMem string
 	}{
-		{"entry", 1, false, "32Gi", "32Gi", "1", "4Gi", "200"},
-		{"mid", 2, true, "128Gi", "32Gi", "2", "8Gi", "400"},
-		{"top", 3, true, "256Gi", "64Gi", "4", "16Gi", "400"},
+		{"entry", 1, false, "32Gi", "32Gi", "1", "4Gi", "200", "1GB", "3GB", "8MB", "256MB"},
+		{"mid", 2, true, "128Gi", "32Gi", "2", "8Gi", "400", "2GB", "6GB", "8MB", "512MB"},
+		{"top", 3, true, "256Gi", "64Gi", "4", "16Gi", "400", "4GB", "12GB", "16MB", "1GB"},
 	} {
 		t.Run(tc.preset, func(t *testing.T) {
 			c := clusterFrom(t, renderPreset(t, tc.preset))
@@ -207,6 +213,16 @@ func TestPresetsMatchTheirDocumentedTiers(t *testing.T) {
 			}
 			if got := c.Spec.PostgreSQL.Parameters["max_connections"]; got != tc.maxConns {
 				t.Errorf("max_connections = %s, want %s", got, tc.maxConns)
+			}
+			for name, want := range map[string]string{
+				"shared_buffers":       tc.sharedBuffers,
+				"effective_cache_size": tc.effectiveCache,
+				"work_mem":             tc.workMem,
+				"maintenance_work_mem": tc.maintenanceWorkMem,
+			} {
+				if got := c.Spec.PostgreSQL.Parameters[name]; got != want {
+					t.Errorf("%s = %q, want %q (memory %s)", name, got, want, tc.mem)
+				}
 			}
 		})
 	}

@@ -30,6 +30,10 @@ const (
 	// covers missed events and reconvergence after a transient DB
 	// failure.
 	workerDialerReconcile = 30 * time.Second
+
+	// workerDialerTriggerCoalesce is the window over which event-driven
+	// reconciles collapse into one pass (see WorkerDialer.triggerDelay).
+	workerDialerTriggerCoalesce = 2 * time.Second
 )
 
 // WorkerTarget is a (type, address) pair the WorkerDialer knows to dial.
@@ -238,6 +242,16 @@ type WorkerDialer struct {
 	unsubs  []func()
 	trigger chan struct{} // buffered(1); non-nil once run() has started
 
+	// Event-driven reconciles are COALESCED over triggerDelay: every
+	// v1:cluster:node heartbeat on the mesh lands here on every pod, and each
+	// reconcile re-reads the whole node list (memql.znas.io, 2026-09-13: that
+	// read was the query that exhausted max_connections). A burst of events
+	// inside the window costs one pass, issued when the window closes. Zero
+	// means immediate, which is what the tests that drive triggerReconcile by
+	// hand rely on.
+	triggerDelay time.Duration
+	triggerTimer *time.Timer // pending coalesced trigger, nil when none
+
 	// AI forwarding response sink. Every AiForwardResponse arriving on a
 	// managed connection is dispatched here; on non-BFF binaries or
 	// before SetAiForwardResponseSink is called the messages are
@@ -292,13 +306,14 @@ func NewWorkerDialer(
 	comp, _ := component.New(WorkerDialerComponentName)
 
 	wd := &WorkerDialer{
-		Component: comp,
-		identity:  identity,
-		peerMgr:   peerMgr,
-		eventBus:  eventBus,
-		logger:    logger,
-		seeds:     append([]WorkerTarget(nil), seeds...),
-		conns:     make(map[string]*dialEntry),
+		Component:    comp,
+		identity:     identity,
+		peerMgr:      peerMgr,
+		eventBus:     eventBus,
+		logger:       logger,
+		seeds:        append([]WorkerTarget(nil), seeds...),
+		conns:        make(map[string]*dialEntry),
+		triggerDelay: workerDialerTriggerCoalesce,
 	}
 	if engine != nil {
 		wd.engine = engine
@@ -486,10 +501,28 @@ func (wd *WorkerDialer) triggerReconcile() {
 	}
 	wd.mu.Lock()
 	ch := wd.trigger
+	delay := wd.triggerDelay
+	if ch != nil && delay > 0 {
+		if wd.triggerTimer == nil {
+			wd.triggerTimer = time.AfterFunc(delay, func() {
+				wd.mu.Lock()
+				wd.triggerTimer = nil
+				wd.mu.Unlock()
+				wd.sendTrigger(ch)
+			})
+		}
+		wd.mu.Unlock()
+		return
+	}
 	wd.mu.Unlock()
 	if ch == nil {
 		return // run() has not started yet
 	}
+	wd.sendTrigger(ch)
+}
+
+// sendTrigger queues one reconcile without blocking; a queued one collapses.
+func (wd *WorkerDialer) sendTrigger(ch chan struct{}) {
 	select {
 	case ch <- struct{}{}:
 	default:
