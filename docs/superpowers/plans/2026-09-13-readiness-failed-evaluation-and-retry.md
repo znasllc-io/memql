@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.26 (`component/memql`, `component/database`, `app`), MemQL DSL (`dsl/platform`), TypeScript + vitest (`clients/os`), the concept-field snapshot (`component/conceptfields`).
 
-**Spec:** `the readiness analysis attached as a comment on znasllc-io/memql#5316 (rulings D1-D7)` (rulings D1, D2, D7 only; D3-D6 are a later plan), with the production evidence in `the production evidence attached as a comment on znasllc-io/memql#5316`. Task 8 copies the rulings into the repo as a design record so the argument survives the scratchpad.
+**Spec:** the readiness analysis attached as a comment on znasllc-io/memql#5316 (rulings D1-D7) (rulings D1, D2, D7 only; D3-D6 are a later plan), with the production evidence in the production evidence attached as a comment on znasllc-io/memql#5316. Task 8 copies the rulings into the repo as a design record so the argument survives the scratchpad.
 
 ## Global Constraints
 
