@@ -180,7 +180,7 @@ Two builtins in the `rbac` domain, `grantSet` (allow or deny, one row) and `gran
 `@serverOnly` handlers under `integration.rbac.*` beside `roleCreate` / `roleUpdate` /
 `roleDeactivate`, writing under internal origin after these checks in this order:
 
-1. The caller holds `update` on `principal`. Today that is owner and developer; a custom
+1. The caller holds `update` on `principal`. Today that is owner and admin; a custom
    role can be given it.
 2. The caller holds the capability being granted, resolved through the section 1 rule for
    the caller themselves. Nobody hands out, or denies, an app they do not have.
