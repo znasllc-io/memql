@@ -1,33 +1,41 @@
-# App sessions as full doors, recorded, learned from, and replayed without a model -- the four-epic program
+# App sessions as full doors, recorded, learned from, and replayed without a model -- the five-epic program
 
 - **Date:** 2026-09-13
 - **Status:** agreed with the owner in the 2026-09-13 brainstorm. Every fork below was put
   to the owner as selectable options and answered (the program shape, the atom, the
   certification rule, the replay target, the recording scope, the approach); the
   derived decisions follow from those answers and were presented section by section and
-  approved. Issues are filed by the first epic's plan (`superpowers:writing-plans`), not
-  by this record.
-- **What it is:** the index and the design for a program of four epics. A coding-agent
+  approved. Three requirements the owner added during the same brainstorm -- intervention
+  on any step with versions and branches, feedback and validation on the AI Fluency
+  framework, and decomposition into reusable automations -- were presented as three more
+  sections, approved, and are D18 to D24 and epic E. Issues are filed by the first
+  epic's plan (`superpowers:writing-plans`), not by this record.
+- **What it is:** the index and the design for a program of five epics. A coding-agent
   app on a fleet machine (Claude Code or Codex, headless, with MemQL's tools reachable
   over MCP) becomes a full door that a tool-needing step can be handed to (A); every
   action the app takes is recorded as rows of the work spine (B); recurring, validated
   step sequences are generalized into parameterized constructs by algorithms that spend
-  no model (C); and a construct climbs a certification ladder until it replays without a
-  model, demoting itself when the world drifts (D).
+  no model (C); a construct climbs a certification ladder until it replays without a
+  model, demoting itself when the world drifts (D); and a person can step into any run,
+  re-run a step with a different intelligence or prompt, branch, and say what was wrong
+  in the vocabulary of the AI Fluency framework, while long work is cut into automations
+  that are labelled and reused (E).
 - **Why it is pivotal:** it is the platform's own premise applied to delegated work. A
   person gives a goal; the system works it out once, records the steps as atomic
-  variable-taking units, and from then on replays them without a model unless reasoning
-  is genuinely needed. Today the one place that premise stops is the boundary of an app
-  session, which returns artifacts and an answer and keeps everything it did inside a
-  256 KiB string.
+  variable-taking units, and from then on replays them without a model unless
+  intelligence is genuinely needed. Today the one place that premise stops is the
+  boundary of an app session, which returns artifacts and an answer and keeps everything
+  it did inside a 256 KiB string. Most of what is done in programming is done over and
+  over; the energy and the tokens spent once are worth recording so they are not spent
+  again.
 - **Repositories:** the engine half in `memql` (this record; `component/work`,
   `component/worker`, `component/router`, `component/mcp`, `component/memql`'s authoring
   pipeline, `integrations/agent/worker`, `integrations/work`, `integrations/planner`,
-  `component/grpc/worker.proto`, `dsl/work`, `dsl/authoring`, `dsl/worker`); the cockpit
-  half in `memql-cockpit` (`internal/worker/harness`, `internal/worker/appsession`,
-  `internal/worker/tools` for the policy file). The halves share one proto change per
-  epic that needs one and land proto first, cockpit second, engine use third, as the
-  fleet-inference record did.
+  `component/grpc/worker.proto`, `dsl/work`, `dsl/authoring`, `dsl/worker`, and the OS
+  Work app under `clients/os`); the cockpit half in `memql-cockpit`
+  (`internal/worker/harness`, `internal/worker/appsession`, `internal/worker/tools` for
+  the policy file). The halves share one proto change per epic that needs one and land
+  proto first, cockpit second, engine use third, as the fleet-inference record did.
 - **Predecessors:** the work spine (`2026-09-05-work-spine-design.md`), the fleet
   inference and app door record (`2026-09-06-fleet-inference-and-app-door-design.md`),
   local apps as execution surfaces (`2026-08-22-local-apps-as-execution-surfaces-design.md`),
@@ -37,7 +45,7 @@
 
 ## 1. Problem
 
-Three things the owner wants, in the owner's words made precise:
+Six things the owner wants, in the owner's words made precise:
 
 1. **An app can do far more than answer a prompt.** Through Claude Code or Codex the
    platform reaches every tool those apps have -- a shell, a filesystem, the web, MemQL's
@@ -55,10 +63,25 @@ Three things the owner wants, in the owner's words made precise:
    from, and so the app does not have to be called again for the same or a similar thing.
    The recording is also the starting point for improving the procedure.
 3. **MemQL learns.** A step that is small enough, has been tested enough and whose
-   feedback is good needs no reasoning to run again. Composing such steps gives the
+   feedback is good needs no intelligence to run again. Composing such steps gives the
    results the person wants. The models behind an app are always the vendor's; what
    MemQL keeps is the procedure, in its own vocabulary, translated at the door into each
    app's dialect of model and effort.
+4. **A person can step into any run.** After a goal ran through the fleet, every step is
+   visible. A person who dislikes one step's answer goes back to it, picks a different
+   model or effort or edits the prompt, runs it again, and gets a new version while the
+   previous one stays; or branches from that step into something different. A step that
+   is a conversation between agents is intervened on the same way, with the person
+   between the two agents.
+5. **Feedback is structured and it feeds the system.** A like, a dislike that asks why,
+   and neutral when nobody said anything. The vocabulary of "why" is the AI Fluency
+   framework's, and intelligence is used, in some cases, to validate a response before a
+   person sees it, under the same vocabulary.
+6. **Long work is many automations, cut for reuse.** A goal that runs for days is many
+   automations; intelligence should be used correctly to cut it so the pieces are
+   atomic and reusable, labelled as reusable or unique to a goal or a client, with the
+   unique ones the minority. The library grows with actions and with automations, and
+   both are replayed before intelligence is spent again.
 
 What is NOT asked for: a smaller model trained on the trajectories. Trajectory
 distillation certifies the same way MemQL should (a test passed) but yields a policy that
@@ -87,10 +110,15 @@ The design builds on seams that exist. Verified on 2026-09-13 against `main` at
   a postcondition is refused), `UnionFootprint`, the idempotency key
   `runId:stepKey:attempt`, the three replay modes (`live`, `replay`, `fork`) decided by
   `DecideServe`, and the compile order (`GoalSignature` exact catalog hit, near match at
-  0.82 with a gap list, then one triage call).
+  0.82 with a gap list, then one triage call that answers complexity and sectionability
+  together).
 - The journal (`component/automations/journal.go`, `component/workjournal`) opens a run,
   writes every step at `running` before its body and again with a receipt after, never
-  fails the run, and resumes from the row at `running` with no receipt.
+  fails the run, and resumes from the row at `running` with no receipt. A step's row id
+  is `runId-stepKey`, so a retry is a new VERSION of the same row, and rows are
+  append-only: versions exist already, they are only not surfaced.
+- `v1:work:approval` is the one concept for every human gate, with an artifact hash so
+  an approval can never carry to a modified artifact.
 
 ### 2.2 The catalog and the lift exist; their certification half has no writer
 
@@ -171,6 +199,8 @@ algorithms for generalizing traces). The findings that shaped the decisions:
   least two independent turns behind it. Misevolution (Shao et al., 2025;
   arXiv:2509.26354) shows learned tools and memories eroding safety. CoALA (2023;
   arXiv:2309.02427) names writing to procedural memory the riskiest kind of learning.
+  ExpeL (2023; arXiv:2308.10144) and ACE (2025; arXiv:2510.04618) keep helpful and
+  harmful counters on what they learned, which is the shape feedback takes here.
 - **The algorithms are old, small and well understood.** Robotic process mining (Leno,
   Polyvyanyy, Dumas, La Rosa, Maggi, 2021) is the closest analogue of the whole
   pipeline: a UI log's parameters are split into context parameters, stable across
@@ -195,19 +225,29 @@ algorithms for generalizing traces). The findings that shaped the decisions:
   inputs, content-addressed step inputs so a replay can check "same input as recorded"
   before acting, and idempotency keys on side-effecting steps so a divergence-triggered
   retry cannot double-apply. MemQL already has the third.
+- **The AI Fluency framework** (Dakan and Feller, with Anthropic; the course "AI
+  Fluency: Framework and Foundations") names four competencies: Delegation (problem
+  awareness, platform awareness, task delegation), Description (product, process and
+  performance description), Discernment (product, process and performance discernment,
+  and the description-discernment loop), and Diligence (creation, transparency and
+  deployment diligence). Its Discernment axes are the vocabulary of feedback here, and
+  the other three competencies turn out to be structural in the program already.
 
 ## 3. Decisions
 
-The first six were put to the owner and answered; the rest follow from them.
+The first six were put to the owner and answered; D7 to D17 follow from them; D18 to
+D24 record the three requirements the owner added and the sections approved for them.
 
-### D1 -- One program record, four epics, shipped A to D, one PR each
+### D1 -- One program record, five epics, shipped A to E, one PR each
 
 Recording is useless without the door, learning is useless without recordings,
-certification is meaningless without something to certify. Each epic is one PR, as the
+certification is meaningless without something to certify, and intervention, feedback
+and decomposition act on rows the earlier epics create. Each epic is one PR, as the
 owner asked for every epic since 2026-09-07. Chosen over two larger epics (door, then
 learning) because a two-epic cut lands learning only when the whole loop is proven, and
 over designing B to D first because the door decides what a session is and therefore
-what a recording is.
+what a recording is. The program was agreed as four epics; E was added in the same
+brainstorm when the owner added its three requirements.
 
 ### D2 -- Tool calls are the atoms; sessions compose them
 
@@ -343,7 +383,7 @@ model-free replay under the same postconditions. The one human approval is a
 `v1:work:approval` of kind `procedurePromotion` whose artifact hash pins the construct
 version; a later change of the construct is a new candidate. The record proposes
 `m = 5` and `k = 2` as VALUES, in the ladder's own configuration rows, never as constants
-in code.
+in code. Feedback enters the ladder as D23 says.
 
 ### D16 -- Preconditions are learned initiation sets, and drift is caught three ways
 
@@ -368,7 +408,79 @@ decision, never a default. The recording adds fields to `v1:work:step`,
 `v1:authoring:construct`; the approval kind is new. Every field is additive, so no
 stored row is bricked (memql#5199).
 
-## 4. The four epics
+### D18 -- Every step version is kept; re-running in place moves the run's head
+
+A step re-run with overrides is a new version of the same step row (the journal's
+`runId-stepKey` id, append-only rows). Every step after it becomes stale and re-runs
+from its new upstream, each as a new version. The run carries a head that names the
+current version of every step; going back is a mutation that moves the head to an
+earlier version and marks the downstream receipts stale. Nothing is ever deleted, and
+"the previous version is still there" is a property of the store, not a feature.
+
+### D19 -- Branching from a step is a fork run; a session step branches into a new session
+
+A branch is a new run in the existing `fork` replay mode: the shared prefix is served
+from the journal by reference, the fork step runs live with the person's changes, and
+the original run is untouched. When the fork step is a delegated session step, the
+branch is a new app session started with the edited prompt against a snapshot of the
+workspace as it was before that step, which the Library holds content-addressed. That is
+what a person standing between two agents does in rows.
+
+### D20 -- Overrides are per version, per step, and authored
+
+An override names a level, a model, an effort, a prompt or inputs, and applies to one
+version of one step; it never leaks into the next step. The level, model, effort and
+author of every version are on the row, so a procedure lifted later says which version
+it came from, and a version a person authored is marked as such and is never a
+recording of the app.
+
+### D21 -- Feedback is an observation on Discernment's three axes, and it never overwrites
+
+A verdict on a step version or on a run is a `v1:work:observation` of kind `feedback`:
+like, dislike or neutral, absent meaning unseen. A dislike asks one question before it
+is saved, whose answers are the framework's product, process and performance
+discernment, plus a free-text reason. Feedback is owner-scoped and versioned; a new
+verdict is a new row, never a rewrite of an earlier one.
+
+### D22 -- AI-assisted discernment is a pre-filter, never a certifier
+
+One bounded validation call at the run's level may apply the same three axes to a
+step's answer against its description (prompt, schema, postcondition) before a person
+sees it, and record a `decision` observation with a verdict per axis and a reason. It
+may hold a result for review, raise a repair with the reason as guidance, or annotate.
+It never promotes a procedure and never counts as a like; the person's verdict outranks
+it; a disagreement between the two is kept as the signal that the validator prompt
+needs work. This is the literature's rule (Reflexion, SkillLearnBench, AWM) made
+structural.
+
+### D23 -- Feedback feeds four places, and text reaches only a model call
+
+Certification: a procedure whose corpus contains a disliked step version stays a
+candidate until a liked or neutral version of that step exists in every instance, and a
+like on a replayed step is a reinforcement. Repair: a dislike's axis and reason ride as
+guidance when the step is re-run, branched or handed back to the app. Learning: disliked
+recordings leave the generalization corpus and liked ones rank higher. Description:
+dislike reasons accumulate on the goal signature as description guidance and are
+injected only when a model is genuinely used for that goal again, never into a replay,
+because a replay reads rows and text is not a row it can act on.
+
+### D24 -- Decomposition spends intelligence once, and reusability is decided by evidence
+
+The compile order's triage produces a decomposition: named sections with inputs,
+outputs, a one-line purpose and a reuse intent. Before any section is planned live the
+catalog is asked for it: an exact hit on the section's signature, a near match against
+reusable automations only, then intelligence. A section boundary must coincide with a
+footprint boundary and a postcondition; a section that ends mid-effect is refused.
+`construct.reuse` is a closed enum, `reusable` / `goalSpecific` / `accountSpecific`;
+the decomposer proposes, evidence decides (two or more distinct goal signatures within
+the owner's scope make it reusable; one goal keeps it goal-specific; an account tie
+makes it account-specific), a person may override, and the override is a version while
+the evidence keeps counting. The mining corpus carries symbols at both levels, an
+action inside a session and an automation invocation as a subrun step, so the one
+pipeline lifts repeated automation sequences into higher automations by the same
+compression rule.
+
+## 4. The five epics
 
 Each epic names its change by path, its wire change, its failure modes, its tests and
 its delivery. Numbers written as values are values.
@@ -455,7 +567,9 @@ cockpit's pin moved in the same commit as its go.mod, as the pin file requires.
   stored by the session runner as content-addressed Library files owned by the machine's
   owner, `source` `appSession`, with `producedBy` from epic A; the observation references
   them by id. A content above the Library's per-file cap is referenced by digest only,
-  with `contentOmitted` recorded.
+  with `contentOmitted` recorded. The workspace snapshot before each session step that
+  D19 branches from is the set of those content-addressed files, so a branch costs no
+  copy.
 
 **Cockpit (`memql-cockpit`).**
 
@@ -483,7 +597,7 @@ harness.
 
 ### Epic C -- Learning
 
-**Scope.** D6, D13, D14.
+**Scope.** D6, D13, D14, and the two-level corpus of D24.
 
 **The module.** `component/procedure`, pure, importing only the standard library and
 `component/work`, asserted by the same build-graph test that pins the proving
@@ -491,7 +605,9 @@ sub-packages. Its functions, in pipeline order:
 
 1. `Canonicalize(steps) []Action` -- each step becomes a tree of tool, argument tree,
    result digest and effect digest; argv, JSON and paths are parsed into trees; pure
-   reads whose result nothing later consumed are dropped as noise.
+   reads whose result nothing later consumed are dropped as noise. An automation
+   invocation (a subrun step) canonicalizes to its construct name and its bound
+   arguments, so it is a symbol like any action.
 2. `Symbolize(actions, budget) []Symbol` -- steps with the same tool are anti-unified
    pairwise (objects paired by key, arrays by longest common subsequence, a typed hole
    per mismatch); a step joins a cluster when the generalization distance stays under
@@ -507,10 +623,11 @@ sub-packages. Its functions, in pipeline order:
 
 **The wiring.** `integrations/procedure` runs on `graph.node.updated.v1:work:run`
 reaching `succeeded` for a session subrun, and on a schedule over the corpus of
-recorded sessions per goal signature. It renders the selected template through the
-existing deterministic lift (`renderTranscriptAutomation`, extended to take a template
-with holes) into an automation whose steps call `workbenchDispatchHost` or
-`workerHost` and MemQL's own tools, with the free parameters as its `args` and the
+recorded sessions and runs per goal signature, with disliked recordings excluded and
+liked ones weighted (D23). It renders the selected template through the existing
+deterministic lift (`renderTranscriptAutomation`, extended to take a template with
+holes) into an automation whose steps call `workbenchDispatchHost` or `workerHost`,
+MemQL's own tools, or lower automations, with the free parameters as its `args` and the
 data-flow holes as step references, persists it as a validated bundle with
 `sourceRunId`, `goalSignature` (finally written), and the provenance stamp from D9, and
 runs the compile gate. Nothing auto-activates; the construct enters D15 as a candidate.
@@ -528,13 +645,14 @@ holding on some instances and not others is rejected, and the hole stays free.
 claim: a corpus with no repeats yields no pattern; two traces differing only in a
 literal yield one template with one hole classified free; a trace whose literal equals
 an earlier result yields a data-flow hole; a retry loop yields a loop node and not a
-long pattern. A parity harness (the research sidecar of D6) that runs the same fixtures
+long pattern; two runs sharing a sequence of three automations yield one higher
+automation. A parity harness (the research sidecar of D6) that runs the same fixtures
 through reference implementations and asserts the Go results agree, kept under
 `component/procedure/reference` and skipped when the references are absent.
 
 ### Epic D -- Certification and replay
 
-**Scope.** D3, D4, D15, D16, D14's retirement.
+**Scope.** D3, D4, D15, D16, D14's retirement, and D23's certification half.
 
 **Engine (`memql`).**
 
@@ -551,7 +669,9 @@ through reference implementations and asserts the Go results agree, kept under
   an exact goal signature hit serves the steps from the construct; a shadow one serves
   the app and runs the construct beside it in a sandbox; a canary one serves the
   construct with the app on standby. The comparison function (exact for deterministic
-  actions, by inferred type where the recordings varied) is pure.
+  actions, by inferred type where the recordings varied) is pure. The candidate gate
+  reads feedback: a disliked step version in the corpus holds the construct at
+  candidate (D23).
 - `integrations/procedure`: the replay runner chooses the target by footprint (D4),
   compares the fingerprint and content-addressed inputs before each step, checks the
   postcondition after, keeps the running replay fitness, computes the alignment on a
@@ -573,9 +693,69 @@ idempotency key so the person can see what did and did not run.
 **Tests.** The ladder transitions as a pure state machine with every guard. A shadow
 run that matches `m` times across `k` bindings proposes and one that matches `m` times
 on one binding does not. A trusted procedure whose fingerprint mismatches falls back to
-the app and records the mismatch. The proving suite gains `amortizedCost.replaysServedWithoutModel`
-paired with the negative control that a shadow-only construct serves none, and
-`durability.duplicatedSideEffectsAcrossDivergence` that must read zero.
+the app and records the mismatch. A candidate with a disliked instance step does not
+propose until a liked version of that step exists. The proving suite gains
+`amortizedCost.replaysServedWithoutModel` paired with the negative control that a
+shadow-only construct serves none, and `durability.duplicatedSideEffectsAcrossDivergence`
+that must read zero.
+
+### Epic E -- Intervention, feedback and reusable decomposition
+
+**Scope.** D18 to D24. Its intervention and feedback tasks depend on B (the rows exist);
+its decomposition tasks depend on C (the two-level corpus) and D (the ladder). It ships
+after D as one PR; its plan may start the intervention and feedback tasks beside C.
+
+**Engine (`memql`).**
+
+- `dsl/work/concepts.memql`: `run.head` (an object naming the current version of every
+  step, by step key); `step.version` (the attempt number surfaced as a first-class
+  field), `step.override` (level, model, effort, prompt, inputs, all optional) and
+  `step.authoredBy` (a user id when a person wrote the version's input); `run.forkedFrom`
+  (run id and step key) on a branch. `observation.kind` gains `feedback`, with
+  `data.verdict` (like / dislike / neutral), `data.axes` (product, process, performance,
+  each a boolean), `data.reason`, `data.target` (a step version or the run).
+- `component/work`: `MoveHead(run, stepKey, version) (head, stale)` and
+  `ForkAt(run, stepKey, override) RunSpec` as pure decisions; `DecideServe` reads the
+  head so a re-run serves the prefix from the current versions; the existing
+  `BeforeForkPoint` is the branch. `Decide` (the compile order) gains the decomposition
+  tier: sections with reuse intent, catalog-first per section, the boundary rule
+  (footprint boundary and postcondition, refused mid-effect).
+- `integrations/work`: `rerunStep` (a new version with the override, downstream marked
+  stale and re-run in order), `branchRun` (a fork run; for a session step a new app
+  session against the content-addressed workspace snapshot), `recordFeedback`, and the
+  validation call of D22 as an automation step at the run's level with the schema
+  `{product, process, performance, reason}`.
+- `dsl/authoring/concepts.memql`: `construct.reuse` (closed enum: reusable,
+  goalSpecific, accountSpecific), `construct.reuseEvidence` (distinct goal signatures
+  seen, account ties), `construct.reuseOverride` (a person's label, versioned).
+- `integrations/procedure`: the reuse sweep that decides the label from evidence, in
+  `maintenanceAutomations`; the description-guidance store on the goal signature (D23),
+  read by the prompt assembly only when a model call is made for that goal.
+- The OS Work app: the step timeline with every version selectable, "Run again with"
+  (level, model, effort, prompt, inputs), "Branch from here", the like and dislike
+  controls with the three-axis question and a reason on dislike, the validator's
+  verdict shown beside the person's, the reuse label with an override, and the ratio of
+  reusable to goal-specific constructs on the Work app's overview.
+
+**Cockpit (`memql-cockpit`).** None beyond epic A's level and epic B's events: a re-run
+or a branch of a session step is a new `AppSessionStart`.
+
+**Failure modes.** Moving the head to a version whose downstream receipts are stale
+re-runs only what is stale, never the whole run. A branch of a session step whose
+workspace snapshot has a `contentOmitted` file is refused, naming the file, because a
+branch from a partial snapshot would diverge silently. A dislike saved without an axis
+is refused by the mutation: the question is the point. The validator disagreeing with
+the person is recorded, never resolved automatically. A reuse override contradicting
+the evidence is kept as the person's label and the evidence keeps counting, so the OS
+can show both.
+
+**Tests.** A head-move test that only stale steps re-run. A fork test that the prefix is
+served and the fork step runs live with the override on that version only. A feedback
+test that a dislike without an axis is refused and that a later verdict is a new row. A
+validator test that its verdict never changes the ladder. A decomposition test that a
+section ending mid-effect is refused and that a section with a catalogued reusable
+automation spends no model. A reuse-label test that two goal signatures make a
+construct reusable and an override is a version.
 
 ## 5. Cross-cutting rules
 
@@ -583,17 +763,21 @@ paired with the negative control that a shadow-only construct serves none, and
   ride the routing rules that already carry the work spine's events, and the recording
   writer stamps internal origin the way the journal does. The replay runner runs on the
   agent for a worker target and on the workbench path for a workbench target; neither
-  holds state a sibling replica would need.
+  holds state a sibling replica would need. Feedback is written on the bff by the person
+  and read on the agent by the sweeps, the same hop the other way.
 - **Authorization.** Composite owner tier everywhere; the MCP-recorded step is owned by
-  the session's owner, resolved from the credential label, never from the call.
+  the session's owner, resolved from the credential label, never from the call. Feedback
+  is the owner's; account members' feedback is a later decision.
 - **No environment branching.** Nothing here names a deploy tier; the replay target is a
   footprint fact, and the log-only decisions of other subsystems are untouched.
 - **Vocabulary.** A procedure is a construct. It is not a fourth extension word; a
   library of procedures is the catalog. The literature's word "skill" is not adopted for
-  it, because `v1:skills:*` already means something else in this tree.
+  it, because `v1:skills:*` already means something else in this tree. "Intelligence"
+  in this record means whatever answers a step that rows cannot: a model, an app, or a
+  person; the premise is that it is spent only when necessary.
 - **Values, not constants.** `m`, `k`, the demotion counts, the retention window, the
-  symbolization budget, the mining support and gap, and the argument ceiling are rows or
-  manifest values with the defaults this record names.
+  symbolization budget, the mining support and gap, the argument ceiling and the reuse
+  evidence threshold are rows or manifest values with the defaults this record names.
 
 ## 6. Failure modes of the program
 
@@ -606,12 +790,15 @@ paired with the negative control that a shadow-only construct serves none, and
   fallback, never a blind continuation.
 - **The certifier is the same model that produced the trace.** It is not: certification
   is execution and comparison, the one model call in learning proposes a derivation
-  that must hold on every instance, and the human approval pins a hash.
+  that must hold on every instance, the validator of D22 is a pre-filter, and the human
+  approval pins a hash.
 - **The utility problem.** Retirement by disuse and the compression floor keep the
   library smaller than the traces it explains.
 - **Safety erosion by learned tools.** A procedure runs under the same safety gate,
   footprints and approvals as the steps it was recorded from; it gains no verb by being
   learned.
+- **A library that is mostly goal-specific.** The reuse ratio on the Work app is the
+  gauge; a decomposer cutting in the wrong places shows there before it shows as cost.
 
 ## 7. Testing and proving
 
@@ -619,7 +806,10 @@ Every epic's tests are named in its section. Program-wide: a scenario in the pro
 suite that records a session on a fixture app (a fake harness emitting normalized
 events), lifts it, replays it in shadow twice with two bindings, promotes it through an
 approval, replays it trusted, and measures that the trusted replay reached no model,
-with the negative control that a fresh goal on the same fixture does.
+with the negative control that a fresh goal on the same fixture does; and a second
+scenario that dislikes one step, re-runs it with a different level, and asserts that the
+lifted procedure came from the liked version and that the first version is still
+readable.
 
 ## 8. Delivery
 
@@ -629,6 +819,7 @@ with the negative control that a fresh goal on the same fixture does.
 | B | Recording | memql (engine) + memql-cockpit (cockpit) | A; no proto change |
 | C | Learning | memql | B |
 | D | Certification and replay | memql | C |
+| E | Intervention, feedback and reusable decomposition | memql | B for intervention and feedback; C and D for decomposition |
 
 One PR per epic; the cockpit half of A and B is its own PR in `memql-cockpit` with the
 pin moved in the same commit as its go.mod. The first epic's plan files the issues under
@@ -642,11 +833,11 @@ epic up and deleted in the epic's merge.
 - Running the apps inside the workbench; its credential question stays open in the
   local-apps record.
 - Native image generation through an app (D10).
-- Cross-owner procedure sharing (D17).
+- Cross-owner procedure sharing (D17) and feedback from account members.
 - Codex before its harness parity is verified on the pinned version; the recording
   format is per app from the first PR so nothing is redone.
 - A runtime arrangement surface for procedures in the OS beyond the Work app's ladder
-  state and the approval card.
+  state, the approval card, the step timeline and the reuse label.
 
 ## 10. Facts to re-verify before starting
 
@@ -661,6 +852,11 @@ epic up and deleted in the epic's merge.
   spellings and event item shapes.
 - The 8 KiB observation argument cap and the 256 KiB transcript bound.
 - Which `v1:work:*` events carry broadcast routing rules today.
+- How earlier versions of a step row are read: the standard queries collapse an
+  append-only concept to one row per id, so the step timeline needs the version-history
+  read, whose name and tier must be confirmed.
+- Whether the triage prompt's sectionability answer already carries section boundaries
+  or only a yes.
 
 ## 11. Sources
 
@@ -684,7 +880,10 @@ session that produced this record.
   arXiv:2309.02427.
 - Shinn et al. Reflexion. 2023. arXiv:2303.11366.
 - Zhao et al. ExpeL. 2023. arXiv:2308.10144.
+- Zhang et al. ACE: agentic context engineering. 2025. arXiv:2510.04618.
 - Su et al. Learn-by-Interact. 2025. arXiv:2501.10893.
+- Dakan, Feller, with Anthropic. AI Fluency: Framework and Foundations. 2025. The 4D
+  framework: Delegation, Description, Discernment, Diligence.
 - Leno, Polyvyanyy, Dumas, La Rosa, Maggi. Robotic process mining. Business and
   Information Systems Engineering, 2021; and Discovering executable routine
   specifications from user interaction logs. 2021. arXiv:2106.13446.
