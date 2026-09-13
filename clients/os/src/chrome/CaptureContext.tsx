@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import { setCaptureContext } from "../logs/capture";
-import { sectionsForRole } from "../system/registry";
+import { sectionsFor } from "../system/registry";
 import { useOs } from "./state";
 
 // The capture's answer to "where did this line come from" (epic memql#4895,
@@ -25,13 +25,13 @@ export function CaptureContextInstaller() {
 
   useEffect(() => {
     setCaptureContext(() => {
-      const { state, registry, actorRole } = ref.current;
+      const { state, registry } = ref.current;
       const focusedId = state.shell.focusedWindowId;
       const win = focusedId === null ? undefined : state.shell.windows[focusedId];
       let section = win?.sectionId ?? "";
       if (win !== undefined && section === "") {
         const manifest = registry.apps.find((a) => a.id === win.appId);
-        section = manifest === undefined ? "" : (sectionsForRole(manifest, actorRole)[0]?.id ?? "");
+        section = manifest === undefined ? "" : (sectionsFor(manifest)[0]?.id ?? "");
       }
       const href =
         typeof location === "undefined" ? "" : `${location.pathname}${location.search}${location.hash}`;

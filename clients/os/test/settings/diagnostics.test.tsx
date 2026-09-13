@@ -47,6 +47,7 @@ const { OS_REGISTRY } = await import("../../src/apps/registry");
 const { SettingsApp } = await import("../../src/apps/settings/SettingsApp");
 const { LocalDesktopStore } = await import("../../src/system/store");
 const { UNKNOWN_RUNTIME_CONFIG } = await import("../../src/cluster/config");
+import { installSeededAccess } from "../seededAccess";
 
 const ACCESS = { userId: "u-1", primaryEmail: "owner@example.com", role: "owner", roleName: "", rank: 0 };
 
@@ -76,6 +77,7 @@ function wrap(children: ReactNode, role = "owner") {
 }
 
 function renderDiagnostics(role = "owner") {
+  installSeededAccess(role);
   return render(
     wrap(<SettingsApp sectionId="diagnostics" navigate={vi.fn()} askContext={vi.fn()} />, role),
   );
@@ -127,10 +129,10 @@ describe("the permissions self-view", () => {
     renderDiagnostics("reader");
     const list = screen.getByRole("list", { name: "Hidden from this session" });
     const rows = within(list).getAllByRole("listitem").map((li) => li.textContent ?? "");
-    expect(rows.some((r) => /Users.*requires admin.*you are reader/.test(r))).toBe(true);
-    expect(rows.some((r) => /Training.*requires writer/.test(r))).toBe(true);
+    expect(rows.some((r) => /Users.*needs read on app:users.*you are reader/.test(r))).toBe(true);
+    expect(rows.some((r) => /Training.*needs read on app:training/.test(r))).toBe(true);
     // The informative case: a section gated above an app the reader CAN open.
-    expect(rows.some((r) => /Settings -- Cluster.*requires admin/.test(r))).toBe(true);
+    expect(rows.some((r) => /Settings -- Cluster.*needs read on app:settings\/cluster/.test(r))).toBe(true);
   });
 
   it("tells an owner that nothing is hidden", () => {

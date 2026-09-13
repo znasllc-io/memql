@@ -51,7 +51,7 @@ import {
 const NOT_A_SECRET =
   "Read by the app when it loads, and served to everyone who visits it. Not a place for a secret -- put credentials in the cluster's secrets and name them from the deployable's binding.";
 
-export function RuntimeSettingsPanel({ site, canWrite }: { site: SiteRow; canWrite: boolean }) {
+export function RuntimeSettingsPanel({ site, canEdit }: { site: SiteRow; canEdit: boolean }) {
   const connection = useOsConnection();
   // THE SETTINGS' OWN VALUES, not the object holding them, and the difference
   // is a bug somebody types into. `site` is re-projected whenever the live
@@ -85,7 +85,7 @@ export function RuntimeSettingsPanel({ site, canWrite }: { site: SiteRow; canWri
   // them.
   if (site.systemOwned) return null;
 
-  if (!canWrite) {
+  if (!canEdit) {
     return (
       <section className="os-report-part">
         <h4 className="os-report-heading">Settings</h4>

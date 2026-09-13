@@ -1,0 +1,95 @@
+import { useMemo } from "react";
+
+import { useSessionIfPresent } from "../../chrome/access";
+import { holds } from "../../system/roles";
+
+// THE PARTS OF DEPLOYABLES (epic memql#5289, task memql#5305; app access
+// grants design, section 2's table and section 4 "A missing part").
+//
+// An app is `read app:<id>`; a PART of one is `execute app:<id>/<part>`, and
+// Deployables is the first app to carry the vocabulary. Five parts, each the
+// name of a thing a person does here, each seeded on owner and developer and
+// each grantable to a person or a group by name:
+//
+//   sources   add or edit a source, its credential, its auto-deploy switch
+//   deploy    analyze, confirm, retry, cancel a run; publish a Library zip
+//   publish   go live, pause, roll back
+//   retire    deactivate an app, archive a source, delete a deployable, and
+//             their plain inverses
+//   domains   bind or remove a client's own domain
+//
+// THE OS HIDES; THE ENGINE REFUSES. Every act on this app names the part it
+// needs beside itself (`requires` on an ActSpec, on a HeadAction, on the
+// controls a stop renders), and a control whose part the effective set does
+// not hold is ABSENT -- never disabled, DESIGN.md rule 12. A call that
+// reaches the engine anyway is refused with `capability_not_held`, whose copy
+// `packages/refusals.ts` carries. The engine's part-to-construct table is
+// pinned by TestTheDeployablesPartsAreDeclaredOnTheirConstructs; this file
+// only names the parts, and `partResource` is the one spelling of the name.
+//
+// IT REPLACES `canWrite`, which was rank >= 200 and one answer for every act.
+// A person granted `deploy` and not `publish` can push a build and cannot
+// take a site live, which one boolean could not say.
+
+export const DEPLOYABLE_PARTS = ["sources", "deploy", "publish", "retire", "domains"] as const;
+
+export type DeployablePart = (typeof DEPLOYABLE_PARTS)[number];
+
+/** Which parts the effective set holds, one answer per part. */
+export type PartsHeld = Readonly<Record<DeployablePart, boolean>>;
+
+/** The resource a part is spelled as in the seeds and on the grants. */
+export function partResource(part: DeployablePart): string {
+  return `app:deployables/${part}`;
+}
+
+/** No part held: what a reader, or a shell before its read landed, resolves to. */
+export const NO_PARTS: PartsHeld = Object.freeze({
+  sources: false,
+  deploy: false,
+  publish: false,
+  retire: false,
+  domains: false,
+});
+
+/** Every part held: what the seeds give owner and developer. */
+export const ALL_PARTS: PartsHeld = Object.freeze({
+  sources: true,
+  deploy: true,
+  publish: true,
+  retire: true,
+  domains: true,
+});
+
+/** `ALL_PARTS` minus the named ones, for a surface or a test that withholds some. */
+export function partsWithout(...missing: DeployablePart[]): PartsHeld {
+  const out = { ...ALL_PARTS } as Record<DeployablePart, boolean>;
+  for (const part of missing) out[part] = false;
+  return out;
+}
+
+/**
+ * The parts the effective set holds right now.
+ *
+ * READS MODULE STATE, so a caller that memoises must name `accessEpoch` in
+ * its deps; `useDeployableParts` does that for a component.
+ */
+export function heldParts(): PartsHeld {
+  const out = {} as Record<DeployablePart, boolean>;
+  for (const part of DEPLOYABLE_PARTS) out[part] = holds("execute", partResource(part));
+  return out;
+}
+
+/**
+ * The parts this session holds, recomputed when the effective set changes.
+ *
+ * `useSessionIfPresent` rather than `useSession`, so a page rendered in a
+ * harness with no session around it still answers -- from the module state
+ * the harness installed -- rather than throwing.
+ */
+export function useDeployableParts(): PartsHeld {
+  const epoch = useSessionIfPresent()?.accessEpoch ?? 0;
+  // `epoch` is the reactivity signal, not an input: the parts are read out of
+  // band and this memo has to recompute when the set lands (memql#4857).
+  return useMemo(() => heldParts(), [epoch]);
+}

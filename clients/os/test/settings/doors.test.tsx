@@ -96,8 +96,8 @@ const { OS_REGISTRY } = await import("../../src/apps/registry");
 const { SettingsApp } = await import("../../src/apps/settings/SettingsApp");
 const { LocalDesktopStore } = await import("../../src/system/store");
 const { UNKNOWN_RUNTIME_CONFIG } = await import("../../src/cluster/config");
-const { roleAdmits } = await import("../../src/system/roles");
-const { DOORS_SECTION_ROLE, DOOR_WORDS } = await import(
+const { roleOpens } = await import("../seededAccess");
+const { DOORS_SECTION_RESOURCE, DOOR_WORDS } = await import(
   "../../src/apps/settings/DoorsSection"
 );
 const { doorFor, localityOf, missingFederationFields, summarize } = await import(
@@ -880,11 +880,11 @@ describe("Settings -> Doors: who may see it", () => {
     // floor because the ladder puts admin (200) BELOW developer (300) --
     // `{ min: "developer" }` would admit admin, whose concern is user
     // administration, and offer them a form the engine refuses field by field.
-    expect(roleAdmits("developer", DOORS_SECTION_ROLE)).toBe(true);
-    expect(roleAdmits("owner", DOORS_SECTION_ROLE)).toBe(true);
-    expect(roleAdmits("admin", DOORS_SECTION_ROLE)).toBe(false);
-    expect(roleAdmits("writer", DOORS_SECTION_ROLE)).toBe(false);
-    expect(roleAdmits("reader", DOORS_SECTION_ROLE)).toBe(false);
+    expect(roleOpens("developer", DOORS_SECTION_RESOURCE)).toBe(true);
+    expect(roleOpens("owner", DOORS_SECTION_RESOURCE)).toBe(true);
+    expect(roleOpens("admin", DOORS_SECTION_RESOURCE)).toBe(false);
+    expect(roleOpens("writer", DOORS_SECTION_RESOURCE)).toBe(false);
+    expect(roleOpens("reader", DOORS_SECTION_RESOURCE)).toBe(false);
   });
 
   it("declares the same requirement in the manifest as in the section", () => {
@@ -892,8 +892,8 @@ describe("Settings -> Doors: who may see it", () => {
     // somebody widens one of them. The section id stays `providers` on
     // purpose -- deep links point at it by name.
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
-    expect(settings?.sections?.find((s) => s.id === "providers")?.roles).toEqual(
-      DOORS_SECTION_ROLE,
+    expect(settings?.sections?.find((s) => s.id === "providers")?.requires).toBe(
+      DOORS_SECTION_RESOURCE,
     );
   });
 

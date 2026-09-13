@@ -1,14 +1,15 @@
-// The permissions self-view (memql#4744): everything the ONE role predicate
-// keeps out of this session, and the minimum role each needs.
+// The permissions self-view (memql#4744, re-keyed to capabilities in epic
+// memql#5289): everything the ONE access predicate keeps out of this session,
+// and the resource each asks for.
 //
 // Presentation gating only. The panel says so, because the difference
 // matters: a surface listed here is one this shell declines to DRAW, not
-// one the engine declines to serve. Row admission is the authority on every
-// read, and a person who reads this table as a permission audit would be
-// reading it wrong.
+// one the engine declines to serve. Row admission and the capability gates
+// are the authority on every read and write, and a person who reads this
+// table as a permission audit would be reading it wrong.
 
-import { describeRequirement, roleAdmits } from "../../system/roles";
-import { sectionsForRole } from "../../system/registry";
+import { describeResource } from "../../system/roles";
+import { accessAdmits, sectionsFor } from "../../system/registry";
 import type { OsRegistry } from "../../system/registry";
 
 export interface HiddenSurface {
@@ -16,12 +17,15 @@ export interface HiddenSurface {
   kind: "app" | "section" | "widget";
   /** What to call it: "Users", "Settings -- Cluster", "Ask". */
   label: string;
-  /** The minimum role its manifest asks for. */
+  /** The capability its manifest asks for, in words: "read on app:users". */
   requires: string;
 }
 
 /**
- * Everything the actor cannot see, in registry order.
+ * Everything the effective set does not open, in registry order.
+ *
+ * READS MODULE STATE, so a caller that memoises this must name
+ * `accessEpoch` in its deps (memql#4857).
  *
  * A hidden app's SECTIONS are not enumerated under it. The app is already
  * the answer -- listing "Users -- People", "Users -- Invites" under a hidden
@@ -29,35 +33,29 @@ export interface HiddenSurface {
  * the case that is actually informative: a section gated ABOVE an app the
  * person can otherwise open.
  */
-export function hiddenSurfaces(registry: OsRegistry, actorRole: string): HiddenSurface[] {
+export function hiddenSurfaces(registry: OsRegistry): HiddenSurface[] {
   const hidden: HiddenSurface[] = [];
 
   for (const app of registry.apps) {
-    if (!roleAdmits(actorRole, app.roles)) {
-      hidden.push({ kind: "app", label: app.name, requires: describeRequirement(app.roles) });
+    if (!accessAdmits(app.requires)) {
+      hidden.push({ kind: "app", label: app.name, requires: describeResource(app.requires) });
       continue;
     }
-    const admitted = new Set(sectionsForRole(app, actorRole).map((s) => s.id));
+    const admitted = new Set(sectionsFor(app).map((s) => s.id));
     for (const section of app.sections ?? []) {
       if (admitted.has(section.id)) continue;
       hidden.push({
         kind: "section",
         label: `${app.name} -- ${section.name}`,
-        requires: describeRequirement(section.roles),
+        requires: describeResource(section.requires),
       });
     }
   }
 
   for (const widget of registry.widgets) {
-    if (roleAdmits(actorRole, widget.roles)) continue;
-    hidden.push({ kind: "widget", label: widget.name, requires: describeRequirement(widget.roles) });
+    if (accessAdmits(widget.requires)) continue;
+    hidden.push({ kind: "widget", label: widget.name, requires: describeResource(widget.requires) });
   }
 
   return hidden;
 }
-
-// The wording this file used to own lives in system/roles.ts now, because the
-// refused-window panel had a SECOND spelling of the same question and the two
-// disagreed: this one joined a set ("admin or owner"), that one reported its
-// weakest member ("admin"), and the second is false whenever a set leaves a
-// rung out of the middle. One helper, so there is nothing left to drift.

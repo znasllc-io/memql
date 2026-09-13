@@ -77,7 +77,7 @@ describe("the readiness mapping (design record section 5.1)", () => {
   });
 
   it("the Ask widget requires ai", () => {
-    expect(OS_REGISTRY.widgets.find((w) => w.id === "ask")?.requires).toEqual(["ai"]);
+    expect(OS_REGISTRY.widgets.find((w) => w.id === "ask")?.needs).toEqual(["ai"]);
   });
 
   // A store row, a source, a deployable and a folder are CONTENT, not
@@ -85,10 +85,10 @@ describe("the readiness mapping (design record section 5.1)", () => {
   it("apps that declare nothing declare nothing", () => {
     for (const id of ["stores", "accounts", "bin", "cluster", "concepts", "settings"]) {
       const a = app(id);
-      expect(a.requires ?? []).toEqual([]);
+      expect(a.needs ?? []).toEqual([]);
       expect(a.wants ?? []).toEqual([]);
       for (const s of a.sections ?? []) {
-        expect([...(s.requires ?? []), ...(s.wants ?? [])]).toEqual([]);
+        expect([...(s.needs ?? []), ...(s.wants ?? [])]).toEqual([]);
       }
     }
   });

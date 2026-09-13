@@ -58,10 +58,10 @@ const SAYS: Record<DoorId, string> = {
   openai: "OpenAI serves the model, on their hardware and their bill.",
 };
 
-export function InferenceStop({ role }: { role: string }) {
+export function InferenceStop() {
   const [door, setDoor] = useState<DoorId>("fleet");
-  const fleet = useAppReach("fleet", role);
-  const settings = useAppReach("settings", role);
+  const fleet = useAppReach("fleet");
+  const settings = useAppReach("settings");
 
   const canPair = fleet.sections.includes("machines") && fleet.canOpenWindows;
   const canOpenProviders = settings.sections.includes("providers") && settings.canOpenWindows;

@@ -22,7 +22,7 @@ import type { OsAppSection } from "../../system/registry";
  * picker must offer the SAME set.
  */
 export const LOGS_SECTIONS: OsAppSection[] = [
-  { id: "stream", name: "Stream" },
+  { id: "stream", name: "Stream", requires: "app:logs/stream" },
   { id: "search", name: "Search" },
   { id: "settings", name: "Settings" },
 ];

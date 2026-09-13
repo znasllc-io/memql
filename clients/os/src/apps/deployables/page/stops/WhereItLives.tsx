@@ -20,13 +20,13 @@ import { DomainsContent } from "./Domains";
 export function WhereItLivesStop({
   site,
   accounts,
-  isClusterOwner,
+  canBindDomain,
   clusterDomain,
 }: {
   site: SiteRow;
   accounts: AccountRow[];
-  /** The client's own domain is a cluster owner's act (memql#4805, D1). */
-  isClusterOwner: boolean;
+  /** The `domains` part (epic memql#5289): binding or removing a client's own domain. */
+  canBindDomain: boolean;
   clusterDomain: string;
 }) {
   const tie = useSiteAccount();
@@ -87,10 +87,12 @@ export function WhereItLivesStop({
         />
       )}
 
-      {/* Binding a client's own domain is cluster-owner territory in v1
-          (design D1), enforced by the concept's clusterOwner tier and the
-          three Go guards; rendering it for one is the presentation half. */}
-      {isClusterOwner ? <DomainsContent site={site} domain={clusterDomain} /> : null}
+      {/* Binding a client's own domain is the `domains` part (epic memql#5289),
+          seeded on owner and developer and grantable by name; the engine's
+          capability gate on customDomainAdd / removeCustomDomain and the three
+          Go guards are the authority, and rendering it is the presentation
+          half. */}
+      {canBindDomain ? <DomainsContent site={site} domain={clusterDomain} /> : null}
     </div>
   );
 }

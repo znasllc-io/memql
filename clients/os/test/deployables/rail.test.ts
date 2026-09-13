@@ -246,7 +246,7 @@ describe("the standing reading", () => {
     const settled = statesOf(standing());
     expect(settled).toEqual({ source: "done", whatItIs: "done", whereItLives: "done", build: "skipped", live: "done" });
     expect(stageOf(standing(), "live").reason).toBe("Live at shop.memql.example.com.");
-    expect(headActionFor({ at: "live", updateAvailable: false })).toEqual({ label: "Redeploy", disabled: false, tone: "quiet" });
+    expect(headActionFor({ at: "live", updateAvailable: false })).toEqual({ label: "Redeploy", disabled: false, tone: "quiet", requires: "deploy" });
   });
 
   it("a not-offered target renders its sentence on What it is, and the rest deploys", () => {
@@ -511,16 +511,16 @@ describe("the compose reading", () => {
 
 describe("the Head's action", () => {
   it("follows the design's table, one action per state", () => {
-    expect(headActionFor({ at: "composing", sourceComplete: false })).toEqual({ label: "Analyze", disabled: true, tone: "primary" });
-    expect(headActionFor({ at: "composing", sourceComplete: true })).toEqual({ label: "Analyze", disabled: false, tone: "primary" });
-    expect(headActionFor({ at: "awaiting_confirm", placementsComplete: false })).toEqual({ label: "Deploy", disabled: true, tone: "primary" });
-    expect(headActionFor({ at: "awaiting_confirm", placementsComplete: true })).toEqual({ label: "Deploy", disabled: false, tone: "primary" });
+    expect(headActionFor({ at: "composing", sourceComplete: false })).toEqual({ label: "Analyze", disabled: true, tone: "primary", requires: "deploy" });
+    expect(headActionFor({ at: "composing", sourceComplete: true })).toEqual({ label: "Analyze", disabled: false, tone: "primary", requires: "deploy" });
+    expect(headActionFor({ at: "awaiting_confirm", placementsComplete: false })).toEqual({ label: "Deploy", disabled: true, tone: "primary", requires: "deploy" });
+    expect(headActionFor({ at: "awaiting_confirm", placementsComplete: true })).toEqual({ label: "Deploy", disabled: false, tone: "primary", requires: "deploy" });
     // A run at a non-terminal stage has NO action: the rail is moving.
     expect(headActionFor({ at: "running" })).toBeNull();
-    expect(headActionFor({ at: "draft_with_bundle" })).toEqual({ label: "Go live", disabled: false, tone: "primary" });
-    expect(headActionFor({ at: "live", updateAvailable: true })).toEqual({ label: "Deploy the update", disabled: false, tone: "primary" });
-    expect(headActionFor({ at: "refused_or_failed" })).toEqual({ label: "Retry", disabled: false, tone: "primary" });
-    expect(headActionFor({ at: "live", updateAvailable: false })).toEqual({ label: "Redeploy", disabled: false, tone: "quiet" });
+    expect(headActionFor({ at: "draft_with_bundle" })).toEqual({ label: "Go live", disabled: false, tone: "primary", requires: "publish" });
+    expect(headActionFor({ at: "live", updateAvailable: true })).toEqual({ label: "Deploy the update", disabled: false, tone: "primary", requires: "deploy" });
+    expect(headActionFor({ at: "refused_or_failed" })).toEqual({ label: "Retry", disabled: false, tone: "primary", requires: "deploy" });
+    expect(headActionFor({ at: "live", updateAvailable: false })).toEqual({ label: "Redeploy", disabled: false, tone: "quiet", requires: "deploy" });
   });
 
   it("answers for all nine states, and only the moving one answers nothing", () => {

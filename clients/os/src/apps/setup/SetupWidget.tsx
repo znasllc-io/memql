@@ -38,7 +38,7 @@ export function SetupWidget() {
   const [override, setOverride] = useState<string | null>(null);
   if (facts === null) return null;
 
-  const { stops, readiness, identityUrl, role } = facts;
+  const { stops, readiness, identityUrl } = facts;
   const openStop = openStopFor(stops, override);
   const outstanding = stops.filter((s) => s.state === "waiting").length;
 
@@ -102,7 +102,7 @@ export function SetupWidget() {
     if (stop.state !== "waiting") return undefined;
     if (stop.id === PASSKEY_STOP) return <PasskeyStop identityUrl={identityUrl} />;
     const id = stop.id as ModuleId;
-    if (id === "ai") return <InferenceStop role={role} />;
-    return <ModuleStop id={id} verdict={readiness?.of(id) ?? null} role={role} />;
+    if (id === "ai") return <InferenceStop />;
+    return <ModuleStop id={id} verdict={readiness?.of(id) ?? null} />;
   }
 }

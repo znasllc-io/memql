@@ -2,7 +2,6 @@ import { useState } from "react";
 
 import { Button, Caption, Chip, formatFreshness, Head, Notice, Panel, Row, Subhead, useNow } from "../../kit";
 import { useSession } from "../../chrome/access";
-import type { RoleRequirement } from "../../system/roles";
 import { useTokenFacts, MAX_PEOPLE_SCANNED, type NodeTokenRow, type TokenRow } from "./tokenFacts";
 import { useSettingsWrites } from "./settingsWrites";
 
@@ -37,7 +36,7 @@ import { useSettingsWrites } from "./settingsWrites";
 //     exist.
 
 /** The section's role floor. Presentation only; every gate is server-side. */
-export const TOKENS_SECTION_ROLE: RoleRequirement = { min: "admin" };
+export const TOKENS_SECTION_RESOURCE = "app:settings/tokens";
 
 export function TokensSection() {
   const { access } = useSession();

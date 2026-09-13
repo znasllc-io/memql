@@ -347,6 +347,6 @@ describe("the manifest", () => {
     ]);
     const section = ACCOUNTS_SECTIONS.find((s) => s.id === "credentials");
     expect(section?.name).toBe("Credentials");
-    expect(section?.roles).toBeUndefined();
+    expect(section?.requires).toBeUndefined();
   });
 });

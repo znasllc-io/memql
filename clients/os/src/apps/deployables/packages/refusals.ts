@@ -360,6 +360,22 @@ const COPY: Record<string, RefusalCopy> = {
     title: "You left this one out",
     next: "Nothing was built for it, and anything it already serves is untouched. Deploy it on its own whenever you want it.",
   },
+
+  // -- the capability gate (epic memql#5289, task memql#5305). NOT one of
+  //    component/packages' codes: it is the engine's own, from
+  //    component/memql/requires_capability.go, and the coverage gates read
+  //    that file too. --
+
+  capability_not_held: {
+    // THE OS HIDES A CONTROL WHOSE PART THE PERSON DOES NOT HOLD, so this
+    // only ever meets somebody through a stale shell, a grant revoked
+    // mid-session or a deep link -- never a button they were offered. The
+    // server's sentence names the construct and the part (`execute on
+    // app:deployables/publish`); this says what a part is and who can hand
+    // one out. Not a fault: nothing broke, and the next step is a person.
+    title: "This needs a part of Deployables you have not been granted",
+    next: "An owner or admin can grant it to you in Settings, under Access. Nothing was changed.",
+  },
 };
 
 /**
@@ -412,6 +428,9 @@ export function knownCodes(): string[] {
  * MemQL that would stop a node booting -- are faults with a repair.
  */
 const NOT_A_FAULT: ReadonlySet<string> = new Set([
+  // A part not held is somebody's next step (ask for the grant), not a
+  // fault: the shell hid the control, and the engine kept its promise.
+  "capability_not_held",
   "reconnect_required",
   "installation_pending",
   "repository_not_installed",

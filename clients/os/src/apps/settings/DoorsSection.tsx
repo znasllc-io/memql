@@ -5,7 +5,6 @@ import { findRegion, revealRegion } from "../../kit";
 import { useAppReach } from "../../kit/ReadinessStates";
 import { useSession } from "../../chrome/access";
 import type { OsAppProps } from "../../system/registry";
-import type { RoleRequirement } from "../../system/roles";
 import {
   doorFor,
   federationFields,
@@ -104,7 +103,7 @@ import {
  * Presentation only; every gate is server-side. The manifest declares it and
  * this constant is the one copy of the value.
  */
-export const DOORS_SECTION_ROLE: RoleRequirement = { any: ["owner", "developer"] };
+export const DOORS_SECTION_RESOURCE = "app:settings/providers";
 
 /**
  * The state words, in one place because they are the section's whole
@@ -136,8 +135,7 @@ export function DoorsSection({
   const inference = useInferenceStatus(true);
   const actions = useProviderActions(registry.reload);
   const reach = localityOf(config.domain);
-  const role = access?.role ?? "";
-  const fleetApp = useAppReach("fleet", role);
+  const fleetApp = useAppReach("fleet");
 
   // WHICH VENDOR FORM IS OPEN. Empty means none, which is the standing state:
   // the page is four lines until somebody asks for a form.

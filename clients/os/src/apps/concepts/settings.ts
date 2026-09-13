@@ -19,7 +19,7 @@ export const CONCEPTS_SECTIONS: OsAppSection[] = [
   // The app's slice of the cluster's logs (epic memql#4895). Admin-floored
   // because every read on the log store is (spec L3), and this is the one
   // section whose floor is not this app's to choose.
-  { id: "logs", name: "Logs", roles: { min: "admin" } },
+  { id: "logs", name: "Logs", requires: "app:concepts/logs" },
   { id: "settings", name: "Settings" },
 ];
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { OS_REGISTRY } from "../../src/apps/registry";
+import { rolesOpening } from "../seededAccess";
 import {
   DEFAULT_NEXUS_SETTINGS,
   LocalNexusSettingsStore,
@@ -83,19 +84,22 @@ describe("the section list", () => {
     expect(DEFAULT_NEXUS_SETTINGS.defaultSection).toBe("goals");
   });
 
-  it("floors the Logs section at admin, which is the engine's floor and not this app's choice", () => {
+  it("names the Logs section as its own resource, seeded at the engine's admin floor and not this app's choice", () => {
     const logs = NEXUS_SECTIONS.find((section) => section.id === "logs");
-    expect(logs?.roles).toEqual({ min: "admin" });
+    expect(logs?.requires).toBe("app:nexus/logs");
+    expect(rolesOpening("app:nexus/logs")).toEqual(["owner", "developer", "admin"]);
   });
 
-  it("carries NO app-level role, because the concepts declare the composite tier", () => {
+  it("its door is seeded on every role, because the concepts declare the composite tier", () => {
     // Gating here would be presentation pretending to be authorization: every
     // signed-in person has goals of their own and the engine decides how far
-    // each list reaches.
+    // each list reaches. The manifest names its door and the seeds open it to
+    // everybody.
     const manifest = OS_REGISTRY.apps.find((app) => app.id === "nexus");
-    expect(manifest?.roles).toBeUndefined();
+    expect(manifest?.requires).toBe("app:nexus");
+    expect(rolesOpening("app:nexus")).toEqual(["owner", "developer", "admin", "user", "viewer"]);
     expect(
-      NEXUS_SECTIONS.filter((s) => s.id !== "logs").every((s) => s.roles === undefined),
+      NEXUS_SECTIONS.filter((s) => s.id !== "logs").every((s) => s.requires === undefined),
     ).toBe(true);
   });
 });

@@ -9,8 +9,7 @@ import { browserHandoffPorts, openInVsCode, VSCODE_NO_ANSWER_MESSAGE, type Hando
 import { FileIcon } from "../items/FileIcon";
 import { FolderIcon } from "../items/FolderIcon";
 import type { UploadProvider } from "../items/upload";
-import { widgetById, widgetsForRole } from "../system/registry";
-import { roleAdmits } from "../system/roles";
+import { accessAdmits, widgetById, widgetsFor } from "../system/registry";
 import { placeWindows, type PlacementTokens } from "../system/placement";
 import type { DeskSurface, DesktopItem, GridPos } from "../system/desktop";
 import type { Desk } from "../system/desks";
@@ -419,7 +418,7 @@ export function Desktop({
     // have been offered here to everyone. The action refuses it too -- an
     // offer nobody can take is a worse bug than a missing offer, but a menu
     // that offers it at all is the one the person actually sees.
-    const widgets = widgetsForRole(registry, actorRole);
+    const widgets = widgetsFor(registry);
     return [
       {
         id: "new-folder",
@@ -630,7 +629,7 @@ function DeskPlate({
     // BOTH REASONS THE RENDERER BELOW DRAWS NOTHING, so the two answers
     // cannot disagree: a widget id this build no longer has, and one this
     // role is not admitted to.
-    return manifest !== undefined && roleAdmits(actorRole, manifest.roles);
+    return manifest !== undefined && accessAdmits(manifest.requires);
   });
   const empty = windows.length === 0 && onDesk.length === 0;
 
@@ -731,7 +730,7 @@ function SurfaceItem({
   onFolderHostDrop: (folderId: string, files: readonly File[]) => void;
   onMenu: (x: number, y: number) => void;
 }) {
-  const { actions, registry, actorRole } = useOs();
+  const { actions, registry } = useOs();
   const { presence } = useMachines();
   // The drag carries what the Bin needs to name and archive this, because the
   // dock holds neither the Library feed nor the desktop document (memql#4784).
@@ -831,7 +830,7 @@ function SurfaceItem({
           // person was moved to reader, drew a widget the shell would refuse
           // to add. Inert until the first gated widget shipped (epic
           // memql#5106), which is exactly why it had gone unnoticed.
-          return manifest && roleAdmits(actorRole, manifest.roles) ? (
+          return manifest && accessAdmits(manifest.requires) ? (
             <WidgetHost manifest={manifest} onRemove={() => actions.removeWidget(item.id)} />
           ) : null;
         })()

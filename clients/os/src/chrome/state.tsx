@@ -48,8 +48,7 @@ import {
   type GridSize,
 } from "../system/desktop";
 import { movePin as movePinFn, pin as pinFn, unpin as unpinFn, type DockState } from "../system/dock";
-import { canOpen, widgetById, type OsRegistry } from "../system/registry";
-import { roleAdmits } from "../system/roles";
+import { accessAdmits, canOpen, sectionsFor, widgetById, type OsRegistry } from "../system/registry";
 import {
   documentFromState,
   LocalDesktopStore,
@@ -199,6 +198,15 @@ export interface OsContextValue {
    * A surface that filters by role MUST depend on this.
    */
   ladderLoaded: boolean;
+  /**
+   * The effective capability set's epoch (epic memql#5289). THE REACTIVITY
+   * SIGNAL FOR EVERY CAPABILITY-FILTERING SURFACE, the way `ladderLoaded` is
+   * for the rank questions: `appsFor`, `sectionsFor`, `canOpen` and `holds`
+   * read the set out of band, so a memo that does not name this recomputes
+   * never. It moves on the first read, on every focus re-read and after a
+   * grant written from this browser (D11).
+   */
+  accessEpoch: number;
   grid: GridSize;
   /**
    * Which chrome is drawn. Here because an act that OPENS A WINDOW is only
@@ -423,6 +431,7 @@ export function OsProvider({
   registry,
   actorRole,
   ladderLoaded = true,
+  accessEpoch = 0,
   store,
   grid,
   layout = "desktop",
@@ -437,6 +446,12 @@ export function OsProvider({
    * while the cluster read is in flight.
    */
   ladderLoaded?: boolean;
+  /**
+   * Defaults 0 for the same reason: a harness installs the effective set in
+   * test/setup.ts and never renders the pre-read window. The shell passes
+   * the real epoch from the session scope's read.
+   */
+  accessEpoch?: number;
   store?: DesktopStore;
   grid: GridSize;
   /**
@@ -563,8 +578,8 @@ export function OsProvider({
         // minted inside would advance the counter once per run.
         const intent = payload ? { id: nextId("intent"), payload } : undefined;
         set((s) => {
-          if (!canOpen(registry, actorRoleRef.current, appId)) return s;
-          const target = sectionId ?? defaultSection(registry, actorRoleRef.current, appId);
+          if (!canOpen(registry, appId)) return s;
+          const target = sectionId ?? defaultSection(registry, appId);
           const { state: shell, effect } = openAppFn(s.shell, appId, target, intent);
           lastEffect = effect;
           return { ...s, shell };
@@ -708,7 +723,7 @@ export function OsProvider({
           // Checked HERE rather than only in the menu for the reason openApp
           // is: the menu is one caller, and an action that trusts its callers
           // is an action whose next caller does not know it had to.
-          if (!roleAdmits(actorRoleRef.current, manifest.roles)) return s;
+          if (!accessAdmits(manifest.requires)) return s;
           const deskId = s.shell.activeDeskId;
           const surface = surfaceOf(s, deskId);
           const already = Object.values(surface.items).some(
@@ -738,7 +753,7 @@ export function OsProvider({
           // The role gate addWidget states in full, for the reason it states:
           // an action that trusts its callers is an action whose next caller
           // does not know it had to.
-          if (!roleAdmits(actorRoleRef.current, manifest.roles)) return s;
+          if (!accessAdmits(manifest.requires)) return s;
           const deskId = s.shell.activeDeskId;
           const surface = surfaceOf(s, deskId);
           // `items` is keyed by item id, not a list -- Object.values, the way
@@ -800,8 +815,8 @@ export function OsProvider({
   actorRoleRef.current = actorRole;
 
   const value = useMemo<OsContextValue>(
-    () => ({ state, actions: actionsRef.current!, registry, actorRole, ladderLoaded, grid, layout, notice }),
-    [state, registry, actorRole, ladderLoaded, grid, layout, notice],
+    () => ({ state, actions: actionsRef.current!, registry, actorRole, ladderLoaded, accessEpoch, grid, layout, notice }),
+    [state, registry, actorRole, ladderLoaded, accessEpoch, grid, layout, notice],
   );
 
   // Every installed pack's CSS, in one style element, kept in step with the
@@ -834,11 +849,10 @@ function deskOfItem(s: OsState, itemId: string): DeskId | null {
   return null;
 }
 
-function defaultSection(registry: OsRegistry, actorRole: string, appId: AppId): string {
+function defaultSection(registry: OsRegistry, appId: AppId): string {
   const app = registry.apps.find((a) => a.id === appId);
   if (!app?.sections?.length) return "";
-  const admitted = app.sections.filter((sec) => roleAdmits(actorRole, sec.roles));
-  return admitted[0]?.id ?? "";
+  return sectionsFor(app)[0]?.id ?? "";
 }
 
 /** GC pass exposed for tests: prune desks then surfaces coherently. */

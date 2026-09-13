@@ -39,6 +39,19 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 )
 
+// CodeCapabilityNotHeld is the STABLE CODE a capability refusal carries, and
+// it leads the refusal's sentence as `<code>: <detail>` -- the same shape
+// component/packages' Refusal.Error() writes, and the one the MemQL OS reads
+// a code out of (clients/os/src/apps/deployables/packages/actions.ts,
+// `describe`). The OS hides a control whose part the effective set does not
+// hold; a call that reaches the engine anyway -- a stale shell, a grant
+// revoked mid-session, a deep link -- is refused here, and the code is what
+// lets the shell print its copy beside the control rather than the neutral
+// "something refused this" heading (epic memql#5289, task memql#5305). The
+// detail after the code is unchanged: it names the requirement and the
+// caller's role and nothing else, for the reasons the refusal below states.
+const CodeCapabilityNotHeld = "capability_not_held"
+
 // CapabilityRequirement is one (verb, resource) pair a construct requires.
 //
 // The zero value means "no requirement", which is what nearly every construct
@@ -118,8 +131,8 @@ func (e *MemQLEngine) refuseBelowRequiredCapability(ctx context.Context, fn *Fun
 	// which level refused -- a deny is a decision about a person, and naming it
 	// on the refusal path would tell them somebody singled them out.
 	return fmt.Errorf(
-		"%q requires the %s capability; the caller (role %q) does not hold it",
-		name, required, string(subject.Role))
+		"%s: %q requires the %s capability; the caller (role %q) does not hold it",
+		CodeCapabilityNotHeld, name, required, string(subject.Role))
 }
 
 // refusePlanBelowRequiredCapability enforces every requirement a plan

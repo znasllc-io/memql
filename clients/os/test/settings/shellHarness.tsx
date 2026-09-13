@@ -5,6 +5,7 @@ import { Shell } from "../../src/chrome/Shell";
 import { StubAskTransport } from "../../src/ask/askController";
 import { LocalDesktopStore } from "../../src/system/store";
 import type { OsRuntimeConfig } from "../../src/cluster/config";
+import { installSeededAccess } from "../seededAccess";
 
 // The Settings suite renders the REAL shell against the REAL registry, for
 // the reason the apps index exists: what it does -- open by id, focus an
@@ -37,6 +38,12 @@ export function renderShell({
   access = OWNER,
   storage = memStorage(),
 }: { access?: typeof OWNER; storage?: ReturnType<typeof memStorage> } = {}) {
+  // THE EFFECTIVE SET FOLLOWS THE ROLE THE HARNESS SIGNS IN AS (epic
+  // memql#5289). The shell reads it from the cluster; with the connection
+  // disabled nothing does, so the harness installs the role's seeded set --
+  // what a cluster with no grants resolves for that person -- before the
+  // first render, and a suite that signs in as a reader measures a reader.
+  installSeededAccess(access.role);
   render(
     <Shell
       layout="desktop"

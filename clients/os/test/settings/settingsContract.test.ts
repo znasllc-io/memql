@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { OS_REGISTRY } from "../../src/apps/registry";
 import { settingsSectionProblem, type OsAppManifest } from "../../src/system/registry";
+import { rolesOpening } from "../seededAccess";
 
 // The per-app settings contract (memql#4743). `settingsSection` is REQUIRED
 // on every manifest -- the type enforces its presence, and this enforces
@@ -12,7 +13,8 @@ function fakeApp(over: Partial<OsAppManifest>): OsAppManifest {
     id: "test",
     name: "Test",
     icon: () => null,
-    sections: [{ id: "main", name: "Main" }, { id: "logs", name: "Logs", roles: { min: "admin" } }],
+    requires: "app:test",
+    sections: [{ id: "main", name: "Main" }, { id: "logs", name: "Logs", requires: "app:test/logs" }],
     settingsSection: "main",
     logsSection: "logs",
     component: () => null,
@@ -59,7 +61,7 @@ describe("the settings-section contract", () => {
     // a session that cannot reach the target; a target that exists for
     // nobody is the bug, and only that.
     const app = fakeApp({
-      sections: [{ id: "admin", name: "Admin", roles: { min: "admin" } }],
+      sections: [{ id: "admin", name: "Admin", requires: "app:test/admin" }],
       settingsSection: "admin",
     });
     expect(settingsSectionProblem(app)).toBeNull();
@@ -94,6 +96,9 @@ describe("the settings-section contract", () => {
   // MODULE_SETTINGS_SECTION. Renaming the id buys a nicer string and costs a
   // cross-epic edit to a screen an owner cannot dismiss; the id is not
   // user-visible and the NAME is.
+  //
+  // SIXTEEN since Access (epic memql#5289, task memql#5307), which sits after
+  // Apps: the directory of what is installed, then who may open what.
   it("Settings itself declares its sections", () => {
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
     expect(settings?.sections?.map((s) => s.id)).toEqual([
@@ -101,6 +106,7 @@ describe("the settings-section contract", () => {
       "appearance",
       "ask",
       "apps",
+      "access",
       "cluster",
       "diagnostics",
       "benchmarks",
@@ -113,21 +119,25 @@ describe("the settings-section contract", () => {
       "keys",
       "logs",
     ]);
-    expect(settings?.sections?.find((s) => s.id === "cluster")?.roles).toEqual({ min: "admin" });
+    expect(settings?.sections?.find((s) => s.id === "cluster")?.requires).toBe("app:settings/cluster");
+    expect(rolesOpening("app:settings/cluster")).toEqual(["owner", "developer", "admin"]);
+    // Access (epic memql#5289): seeded on the roles the grant reads admit.
+    expect(settings?.sections?.find((s) => s.id === "access")?.requires).toBe("app:settings/access");
+    expect(rolesOpening("app:settings/access")).toEqual(["owner", "developer", "admin"]);
     // Benchmarks is a MINIMUM and matches Cluster: v1:bench:run and
     // v1:bench:sample declare @rowAuthz(clusterOwner), so a reader below the
     // floor would be shown an empty section with no explanation. The gate here
     // is presentation over one the engine already holds.
-    expect(settings?.sections?.find((s) => s.id === "benchmarks")?.roles).toEqual({ min: "admin" });
+    expect(settings?.sections?.find((s) => s.id === "benchmarks")?.requires).toBe("app:settings/benchmarks");
+    expect(rolesOpening("app:settings/benchmarks")).toEqual(["owner", "developer", "admin"]);
     // THE TWO GATE FORMS ARE PINNED SEPARATELY, because they are different
     // statements and the difference is the point. Cluster is a ladder MINIMUM
     // (admin and above). Integrations is a SET, and it deliberately excludes
     // admin -- a `{ min: "developer" }` here would admit admin and quietly
     // widen a gate the program decided on (P6). A test that only checked
     // "developer can reach it" would pass against exactly that mistake.
-    expect(settings?.sections?.find((s) => s.id === "integrations")?.roles).toEqual({
-      any: ["owner", "developer"],
-    });
+    expect(settings?.sections?.find((s) => s.id === "integrations")?.requires).toBe("app:settings/integrations");
+    expect(rolesOpening("app:settings/integrations")).toEqual(["owner", "developer"]);
     // AI providers is the SECOND set in this app (epic memql#5088, D7), and it
     // is pinned separately from Integrations for the reason the note above
     // gives: the two gate forms are different statements. It was
@@ -147,15 +157,17 @@ describe("the settings-section contract", () => {
     // neither the prompt nor the error message: the engine's projection omits
     // both, so an admin answering "why did this go to a vendor" can have the
     // list without being shown anything they should not see.
-    expect(settings?.sections?.find((s) => s.id === "rules")?.roles).toEqual({
-      any: ["owner", "developer"],
-    });
-    expect(settings?.sections?.find((s) => s.id === "levels")?.roles).toEqual({ min: "admin" });
-    expect(settings?.sections?.find((s) => s.id === "decisions")?.roles).toEqual({ min: "admin" });
-    expect(settings?.sections?.find((s) => s.id === "providers")?.roles).toEqual({
-      any: ["owner", "developer"],
-    });
-    expect(settings?.sections?.find((s) => s.id === "tokens")?.roles).toEqual({ min: "admin" });
-    expect(settings?.sections?.find((s) => s.id === "keys")?.roles).toEqual({ min: "admin" });
+    expect(settings?.sections?.find((s) => s.id === "rules")?.requires).toBe("app:settings/rules");
+    expect(rolesOpening("app:settings/rules")).toEqual(["owner", "developer"]);
+    expect(settings?.sections?.find((s) => s.id === "levels")?.requires).toBe("app:settings/levels");
+    expect(rolesOpening("app:settings/levels")).toEqual(["owner", "developer", "admin"]);
+    expect(settings?.sections?.find((s) => s.id === "decisions")?.requires).toBe("app:settings/decisions");
+    expect(rolesOpening("app:settings/decisions")).toEqual(["owner", "developer", "admin"]);
+    expect(settings?.sections?.find((s) => s.id === "providers")?.requires).toBe("app:settings/providers");
+    expect(rolesOpening("app:settings/providers")).toEqual(["owner", "developer"]);
+    expect(settings?.sections?.find((s) => s.id === "tokens")?.requires).toBe("app:settings/tokens");
+    expect(rolesOpening("app:settings/tokens")).toEqual(["owner", "developer", "admin"]);
+    expect(settings?.sections?.find((s) => s.id === "keys")?.requires).toBe("app:settings/keys");
+    expect(rolesOpening("app:settings/keys")).toEqual(["owner", "developer", "admin"]);
   });
 });

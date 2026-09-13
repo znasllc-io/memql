@@ -11,6 +11,8 @@ import { usePackageActions, useSiteLifecycle } from "../packages/actions";
 import { ProblemNotice } from "../packages/ReportView";
 import { everyOtherAppSkipped, type Placement } from "../packages/calls";
 import { deploymentFromRow, type DeploymentRow, type PackageRow } from "../packages/rows";
+import type { PartsHeld } from "../parts";
+import { deployedByLabel, deployerOf, type NameOf } from "../people";
 import { usePackageDeployments } from "../packages/usePackages";
 import { liveUrlFor, ownerLabel, siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
@@ -64,9 +66,10 @@ export interface DeployablePageProps {
   /** The caller's credential cards, from the root feed. */
   credentials: readonly CredentialRow[];
   viewerUserId: string;
-  /** Rank >= 200; the app computes it once. */
-  canWrite: boolean;
-  isClusterOwner: boolean;
+  /** Resolves a user id to a name the roster gave, "" when it did not (epic memql#5289, task memql#5306). */
+  nameOf: NameOf;
+  /** The parts this session holds (epic memql#5289); the app reads them once. */
+  can: PartsHeld;
   clusterDomain: string;
   onAsk?: (tag: string) => void;
   /** The quiet Back to the list. */
@@ -90,8 +93,8 @@ export function DeployablePage({
   pkg,
   credentials,
   viewerUserId,
-  canWrite,
-  isClusterOwner,
+  nameOf,
+  can,
   clusterDomain,
   onAsk,
   onBack,
@@ -143,7 +146,12 @@ export function DeployablePage({
   const name = siteName(site);
   const url = liveUrlFor(site.hostname);
 
-  const reading = actsFor({ site, pkg, run, siblingRun, canWrite, deleting, releasing: site.hostname });
+  const reading = actsFor({ site, pkg, run, siblingRun, can, deleting, releasing: site.hostname });
+  // WHO DEPLOYED IT, off the rows already here: this app's newest run's
+  // requester, else the site's owner (the deployer since PR #5284), else the
+  // source's. Only the name is looked up, and only where the roster is
+  // readable; a deploy nobody can name says nothing beyond the ownership chip.
+  const deployedBy = deployedByLabel(deployerOf(run, site, pkg), viewerUserId, nameOf);
 
   function act(named: ActName) {
     switch (named) {
@@ -251,7 +259,7 @@ export function DeployablePage({
             site={site}
             pkg={pkg}
             credentials={credentials}
-            canWrite={canWrite}
+            canDeploy={can.deploy}
             flipped={flipped}
             zipOpen={zipOpen}
             onZipOpenChange={setZipOpen}
@@ -266,14 +274,14 @@ export function DeployablePage({
           <WhereItLivesStop
             site={site}
             accounts={accounts}
-            isClusterOwner={isClusterOwner}
+            canBindDomain={can.domains}
             clusterDomain={clusterDomain}
           />
         );
       case "build":
         return <BuildStop run={run} app={site.packageDeployableName} refusal={refusal} />;
       case "live":
-        return <LiveStop site={site} canWrite={canWrite} lifecycle={lifecycle} refusal={refusal} />;
+        return <LiveStop site={site} canPublish={can.publish} lifecycle={lifecycle} refusal={refusal} />;
       default:
         return null;
     }
@@ -321,6 +329,11 @@ export function DeployablePage({
                 system-owned
               </Chip>
             ) : null}
+            {deployedBy === "" ? null : (
+              <span className="os-deploy-by" data-os-deployed-by>
+                deployed by {deployedBy}
+              </span>
+            )}
           </Chips>
 
           {headActions.refusal ? (

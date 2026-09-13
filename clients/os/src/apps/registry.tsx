@@ -63,17 +63,24 @@ const settings: OsAppManifest = {
   id: "settings",
   name: "Settings",
   icon: SettingsIcon,
+  requires: "app:settings",
   sections: [
     { id: "about", name: "About" },
     { id: "appearance", name: "Appearance" },
     { id: "ask", name: "Ask" },
     { id: "apps", name: "Apps" },
+    // Access (epic memql#5289, task memql#5307): who may open which app, and
+    // which parts of one, over and above their role. Seeded on the roles the
+    // grant READS admit (admin, developer, owner); the writes go read-only in
+    // the shell for anybody who does not hold `update` on `principal`, and
+    // the engine refuses them for the same person.
+    { id: "access", name: "Access", requires: "app:settings/access" },
     // Widened by the ladder flip (epic memql#4832, D1): under the shell's
     // old ordering this admitted {admin, owner}, and it now admits
     // {admin, developer, owner}. Correct in the new direction -- cluster
     // diagnostics is engineering surface, and developer is the engineering
     // tier -- so this is a line the flip fixes rather than one it endangers.
-    { id: "cluster", name: "Cluster", roles: { min: "admin" } },
+    { id: "cluster", name: "Cluster", requires: "app:settings/cluster" },
     { id: "diagnostics", name: "Diagnostics" },
     // Benchmarks (epic memql#4993). BESIDE Diagnostics rather than inside it:
     // Diagnostics is three panels about THIS SESSION, and folding a fact about
@@ -84,7 +91,7 @@ const settings: OsAppManifest = {
     // gate the engine already holds: v1:bench:run and v1:bench:sample declare
     // @rowAuthz(clusterOwner), so a reader below the floor would see an empty
     // section with no explanation rather than a refusal.
-    { id: "benchmarks", name: "Benchmarks", roles: { min: "admin" } },
+    { id: "benchmarks", name: "Benchmarks", requires: "app:settings/benchmarks" },
     // OWNER OR DEVELOPER, AND EXPLICITLY NOT ADMIN (program decision P6).
     // This is the first section in the shell whose gate a ladder MINIMUM
     // cannot express: `{ min: "developer" }` would admit admin, and the
@@ -92,7 +99,7 @@ const settings: OsAppManifest = {
     // owner's prerogative rather than a rank. `roleAdmits`' `any` form is what
     // says exactly that, and it is presentation over a gate the status
     // capability's own `statusAuthorized` remains the authority on.
-    { id: "integrations", name: "Integrations", roles: { any: ["owner", "developer"] } },
+    { id: "integrations", name: "Integrations", requires: "app:settings/integrations" },
     // The three that arrived when the portal's admin console was retired
     // (epic memql#4984). Each requirement is the one the ENGINE will
     // actually apply, not a rounder number: the Tokens reads and the revokes
@@ -120,22 +127,22 @@ const settings: OsAppManifest = {
     // the id buys a nicer string and costs a cross-epic edit to a screen an
     // owner cannot dismiss on a cluster with no other door. The id is not
     // user-visible; the name is.
-    { id: "providers", name: "Doors", roles: { any: ["owner", "developer"] } },
+    { id: "providers", name: "Doors", requires: "app:settings/providers" },
     // Levels and Decisions are readable one rung wider than Doors and Rules
     // (D7). `{ min: "admin" }` on this ladder admits admin (200), developer
     // (300) and owner -- so this is WIDER than the owner-or-developer set, not
     // narrower. A decision record carries neither prompt nor error message, so
     // an admin answering "why did this go to a vendor" can have it.
-    { id: "levels", name: "Levels", roles: { min: "admin" } },
-    { id: "rules", name: "Rules", roles: { any: ["owner", "developer"] } },
-    { id: "decisions", name: "Decisions", roles: { min: "admin" } },
-    { id: "tokens", name: "Tokens", roles: { min: "admin" } },
-    { id: "keys", name: "Keys", roles: { min: "admin" } },
+    { id: "levels", name: "Levels", requires: "app:settings/levels" },
+    { id: "rules", name: "Rules", requires: "app:settings/rules" },
+    { id: "decisions", name: "Decisions", requires: "app:settings/decisions" },
+    { id: "tokens", name: "Tokens", requires: "app:settings/tokens" },
+    { id: "keys", name: "Keys", requires: "app:settings/keys" },
     // The shell's own lines (epic memql#4895): what the OS front end
     // recorded under no app, plus everything the Settings surfaces logged.
     // Last rather than before a settings section, because this app HAS no
     // settings section -- every section here is one.
-    { id: "logs", name: "Logs", roles: { min: "admin" } },
+    { id: "logs", name: "Logs", requires: "app:settings/logs" },
   ],
   settingsSection: "appearance",
   logsSection: "logs",
@@ -160,8 +167,9 @@ const files: OsAppManifest = {
   id: "files",
   name: "Files",
   icon: FilesIcon,
+  requires: "app:files",
   sections: FILES_SECTIONS,
-  requires: FILES_REQUIRES,
+  needs: FILES_REQUIRES,
   wants: FILES_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
@@ -192,8 +200,9 @@ const deployables: OsAppManifest = {
   id: "deployables",
   name: "Deployables",
   icon: Rocket,
+  requires: "app:deployables",
   sections: DEPLOYABLES_SECTIONS,
-  requires: DEPLOYABLES_REQUIRES,
+  needs: DEPLOYABLES_REQUIRES,
   wants: DEPLOYABLES_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
@@ -213,6 +222,7 @@ const fleet: OsAppManifest = {
   id: "fleet",
   name: "Fleet",
   icon: MonitorSmartphone,
+  requires: "app:fleet",
   sections: FLEET_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
@@ -239,9 +249,9 @@ const logs: OsAppManifest = {
   id: "logs",
   name: "Logs",
   icon: ScrollText,
-  roles: { min: "admin" },
+  requires: "app:logs",
   sections: LOGS_SECTIONS,
-  requires: LOGS_REQUIRES,
+  needs: LOGS_REQUIRES,
   wants: LOGS_WANTS,
   settingsSection: "settings",
   logsSection: "stream",
@@ -297,7 +307,7 @@ const users: OsAppManifest = {
   id: "users",
   name: "Users",
   icon: Users,
-  roles: { min: "admin" },
+  requires: "app:users",
   sections: USERS_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
@@ -334,9 +344,9 @@ const training: OsAppManifest = {
   id: "training",
   name: "Training",
   icon: GraduationCap,
-  roles: { min: "writer" },
+  requires: "app:training",
   sections: TRAINING_SECTIONS,
-  requires: TRAINING_REQUIRES,
+  needs: TRAINING_REQUIRES,
   wants: TRAINING_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
@@ -383,7 +393,7 @@ const accounts: OsAppManifest = {
   id: "accounts",
   name: "Accounts",
   icon: Building2,
-  roles: { min: "admin" },
+  requires: "app:accounts",
   sections: ACCOUNTS_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
@@ -447,7 +457,7 @@ const cluster: OsAppManifest = {
   id: "cluster",
   name: "Cluster",
   icon: Boxes,
-  roles: { min: "admin" },
+  requires: "app:cluster",
   sections: CLUSTER_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
@@ -495,7 +505,7 @@ const concepts: OsAppManifest = {
   id: "concepts",
   name: "Concepts",
   icon: Shapes,
-  roles: { min: "admin" },
+  requires: "app:concepts",
   sections: CONCEPTS_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
@@ -522,8 +532,9 @@ const campaigns: OsAppManifest = {
   id: "campaigns",
   name: "Campaigns",
   icon: Send,
+  requires: "app:campaigns",
   sections: CAMPAIGNS_SECTIONS,
-  requires: CAMPAIGNS_REQUIRES,
+  needs: CAMPAIGNS_REQUIRES,
   wants: CAMPAIGNS_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
@@ -549,6 +560,10 @@ const bin: OsAppManifest = {
   id: BIN_APP_ID,
   name: "Bin",
   icon: Trash2,
+  // A LITERAL, not `app:${BIN_APP_ID}`: the Go parity gate reads this file
+  // as text and pins the name to the seeds, and a computed name is one it
+  // cannot read. `BIN_APP_ID` is "bin"; test/bin pins the two together.
+  requires: "app:bin",
   sections: BIN_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
@@ -596,6 +611,7 @@ const nexus: OsAppManifest = {
   id: "nexus",
   name: "Nexus",
   icon: Waypoints,
+  requires: "app:nexus",
   sections: NEXUS_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
@@ -625,8 +641,9 @@ const materializer: OsAppManifest = {
   id: "materializer",
   name: "Materializer",
   icon: Layers,
+  requires: "app:materializer",
   sections: MATERIALIZER_SECTIONS,
-  requires: MATERIALIZER_REQUIRES,
+  needs: MATERIALIZER_REQUIRES,
   wants: MATERIALIZER_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
@@ -661,7 +678,7 @@ const stores: OsAppManifest = {
   id: "stores",
   name: "Stores",
   icon: Store,
-  roles: { min: "owner" },
+  requires: "app:stores",
   sections: STORES_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
@@ -694,8 +711,9 @@ const askWidget: OsWidgetManifest = {
   // The widget has no sections and no settings of its own, so an unmet
   // requirement renders the setup sentence in its own body rather than the
   // whole surface.
-  requires: ["ai"] as const,
+  needs: ["ai"] as const,
   icon: Mark,
+  requires: "app:ask",
   // Same desk footprint as Set up -- a smaller Ask card looked unfinished beside it.
   size: SETUP_WIDGET_SIZE,
   component: AskWidgetBody,

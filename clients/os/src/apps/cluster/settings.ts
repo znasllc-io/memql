@@ -51,11 +51,11 @@ import type { OsAppSection } from "../../system/registry";
  */
 export const CLUSTER_SECTIONS: OsAppSection[] = [
   { id: "readiness", name: "Readiness" },
-  { id: "modules", name: "Modules", roles: { any: ["owner", "admin"] } },
-  { id: "origins", name: "Data origins", roles: { min: "owner" } },
+  { id: "modules", name: "Modules", requires: "app:cluster/modules" },
+  { id: "origins", name: "Data origins", requires: "app:cluster/origins" },
   { id: "agents", name: "Agents" },
-  { id: "audit", name: "Audit trail", roles: { min: "owner" } },
-  { id: "logs", name: "Logs", roles: { min: "admin" } },
+  { id: "audit", name: "Audit trail", requires: "app:cluster/audit" },
+  { id: "logs", name: "Logs", requires: "app:cluster/logs" },
   { id: "settings", name: "Settings" },
 ];
 

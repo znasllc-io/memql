@@ -25,7 +25,7 @@ export const USERS_SECTIONS: OsAppSection[] = [
   // tagged and the lines about the things it owns. Admin-floored because
   // every read on the log store is (spec L3), and this is the ONE section
   // whose floor is not this app's to choose.
-  { id: "logs", name: "Logs", roles: { min: "admin" } },
+  { id: "logs", name: "Logs", requires: "app:users/logs" },
   { id: "settings", name: "Settings" },
 ];
 
@@ -164,7 +164,7 @@ export class LocalUsersSettingsStore implements UsersSettingsStore {
 
 /** The union of the section requirements above, for the Set up group. */
 export const USERS_REQUIRES: readonly ModuleId[] = Array.from(
-  new Set(USERS_SECTIONS.flatMap((s) => s.requires ?? [])),
+  new Set(USERS_SECTIONS.flatMap((s) => s.needs ?? [])),
 );
 export const USERS_WANTS: readonly ModuleId[] = Array.from(
   new Set(USERS_SECTIONS.flatMap((s) => s.wants ?? [])),

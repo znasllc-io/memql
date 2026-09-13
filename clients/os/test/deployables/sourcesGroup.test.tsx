@@ -32,12 +32,12 @@ function memStore() {
   });
 }
 
-function mount(connection: FakeConnection | null) {
+function mount(connection: FakeConnection | null, role = "owner") {
   h.connection = connection;
   return render(
     withSession(
       <DeployablesApp sectionId="settings" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} />,
-      { role: "owner", userId: "u-me" },
+      { role, userId: "u-me" },
     ),
   );
 }
@@ -196,5 +196,49 @@ describe("Settings -> Sources", () => {
     expect(
       await screen.findByText(/No credentials yet. A public repository needs none/),
     ).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The viewer's own first; other people's under an owner-view heading
+// (epic memql#5289, task memql#5306)
+// ---------------------------------------------------------------------------
+
+const ADAS = credential({ id: "cred-ada", ownerUserId: "u-ada", label: "ada's token", fingerprint: "...ad4a" });
+const ADA: Row = { id: "u-ada", displayName: "Ada Lovelace", primaryEmail: "ada@example.com", role: "developer", active: true } as Row;
+
+describe("Settings -> Sources: whose credentials", () => {
+  it("lists the viewer's own first, and other people's under the owner-view heading with their names", async () => {
+    // A cluster owner's feed carries everybody's cards (the concept's
+    // clusterOwner branch); the surface presents them apart.
+    mount(fakeConnection({ credentials: [ADAS, ACME, OLD], packages: [PACKAGE], people: [ADA] }));
+    const mine = await screen.findByRole("list", { name: "Your source credentials" });
+    expect(within(mine).getByText("acme deploy token")).toBeTruthy();
+    expect(within(mine).queryByText("ada's token")).toBeNull();
+
+    const others = await screen.findByRole("region", { name: "Other people's connections" });
+    expect(within(others).getByText("Other people's connections (owner view)")).toBeTruthy();
+    const list = within(others).getByRole("list", { name: "Other people's source credentials" });
+    expect(within(list).getByText("ada's token")).toBeTruthy();
+    await waitFor(() => {
+      expect(within(list).getByText("Ada Lovelace's")).toBeTruthy();
+    });
+    // Metadata, never a value: the fingerprint is what tells two cards apart.
+    expect(within(list).getByText("...ad4a")).toBeTruthy();
+  });
+
+  it("shows no heading when nobody else holds a credential", async () => {
+    mount(fakeConnection({ credentials: [ACME], packages: [PACKAGE] }));
+    await screen.findByRole("list", { name: "Your source credentials" });
+    expect(screen.queryByRole("region", { name: "Other people's connections" })).toBeNull();
+  });
+
+  it("shows no heading to a person who is not a cluster owner, whatever the feed carries", async () => {
+    // A developer's feed never carries another person's row; if one arrived
+    // anyway, the heading is the owner's and is not drawn for them.
+    mount(fakeConnection({ credentials: [ACME, ADAS], packages: [PACKAGE], people: [ADA] }), "developer");
+    const mine = await screen.findByRole("list", { name: "Your source credentials" });
+    expect(within(mine).getByText("acme deploy token")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Other people's connections" })).toBeNull();
   });
 });

@@ -2,7 +2,8 @@ import { useMemo } from "react";
 import { ScrollText } from "lucide-react";
 
 import { useOs, type OsActions } from "../chrome/state";
-import { Button, roleAdmits } from "../kit";
+import { Button } from "../kit";
+import { canOpen } from "../system/registry";
 
 // The deep link into the Logs app (epic memql#4895, spec H "Deep links"):
 // a quiet "Logs" action that opens Search narrowed to one subject.
@@ -38,13 +39,15 @@ export function OpenLogsButton({
   /** Names what the logs are OF: "Logs for shop.example.com". */
   ariaLabel: string;
 }) {
-  const { actions, actorRole, ladderLoaded } = useOs();
-  // `ladderLoaded` in the deps for the launcher's reason (memql#4857):
-  // roleAdmits reads the role ladder out of band, so a memo keyed on the
-  // role alone would keep the pre-load refusal after the ladder lands.
+  const { actions, registry, accessEpoch } = useOs();
+  // `accessEpoch` in the deps for the launcher's reason (memql#4857): canOpen
+  // reads the effective capability set out of band, so a memo without it
+  // would keep the pre-read refusal after the set lands. The question is the
+  // one the launcher asks -- may this person open the Logs app -- so the
+  // button and the app can never disagree about it.
   const admitted = useMemo(
-    () => roleAdmits(actorRole, { min: "admin" }),
-    [actorRole, ladderLoaded],
+    () => canOpen(registry, LOGS_APP_ID),
+    [registry, accessEpoch],
   );
   if (!admitted || subject.trim() === "") return null;
   return (

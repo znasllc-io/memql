@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { OS_REGISTRY } from "../../src/apps/registry";
 import { appById, settingsSectionProblem } from "../../src/system/registry";
-import { roleAdmits } from "../../src/system/roles";
+import { roleOpens, rolesOpening } from "../seededAccess";
 import {
   DEFAULT_USERS_SETTINGS,
   USERS_SECTION_IDS,
@@ -35,17 +35,18 @@ describe("the Users manifest", () => {
     // roles.ts states the rule: a set that is really a contiguous top is a
     // `min` written the long way, and it stops admitting whatever rung is
     // added above it.
-    expect(users?.roles).toEqual({ min: "admin" });
+    expect(users?.requires).toBe("app:users");
+    expect(rolesOpening("app:users")).toEqual(["owner", "developer", "admin"]);
   });
 
   it("is offered from admin upward and withheld below it", () => {
     // Asserted through the predicate the launcher actually calls rather than
     // by re-reading the manifest. The ladder is installed by test/setup.ts.
-    expect(roleAdmits("admin", users?.roles)).toBe(true);
-    expect(roleAdmits("developer", users?.roles)).toBe(true);
-    expect(roleAdmits("owner", users?.roles)).toBe(true);
-    expect(roleAdmits("writer", users?.roles)).toBe(false);
-    expect(roleAdmits("reader", users?.roles)).toBe(false);
+    expect(roleOpens("admin", users!.requires)).toBe(true);
+    expect(roleOpens("developer", users!.requires)).toBe(true);
+    expect(roleOpens("owner", users!.requires)).toBe(true);
+    expect(roleOpens("writer", users!.requires)).toBe(false);
+    expect(roleOpens("reader", users!.requires)).toBe(false);
   });
 
   it("carries a settings section the gear can actually reach", () => {

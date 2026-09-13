@@ -1,6 +1,7 @@
 import { packageFingerprint, runCoversApp, sourceLabel, type DeploymentRow, type PackageRow } from "./packages/rows";
 import { isPlaceholderBundle, type StandingInput } from "./page/rail";
 import { bundleForm, siteFingerprint, siteName, type SiteRow } from "./rows";
+import { deployerOf } from "./people";
 
 // The Deployables list's fold (epic memql#4885, design D2): ONE ROW PER THING
 // THAT SERVES OR WILL, grouped under the source it came from.
@@ -118,6 +119,13 @@ export interface DeployableListRow {
   /** The newest parked run of its source, or null: the waiting mark's fact. */
   parked: DeploymentRow | null;
   /**
+   * Who deployed it (epic memql#5289, task memql#5306): the parked run's
+   * requester, else the site's owner -- the deployer since PR #5284 -- else
+   * the source's owner. A bare user id, "" when no row says; the LIST turns
+   * it into a name or "you", because only the list holds the roster.
+   */
+  deployedBy: string;
+  /**
    * The owner turned this one off.
    *
    * TRUE only for a DECLARED app with no site: the site is the fact and the
@@ -202,7 +210,18 @@ function siteRowFor(site: SiteRow, pkg: PackageRow | null, parked: DeploymentRow
   const name = app || site.title.trim() || siteName(site);
   // NEVER disabled: a site row means the app was deployed, and the owner's
   // off-list is a preference about apps that have none.
-  return { key: site.id, site, pkg, app, name, hostname: site.hostname, kind: site.kind, parked, disabled: false };
+  return {
+    key: site.id,
+    site,
+    pkg,
+    app,
+    name,
+    hostname: site.hostname,
+    kind: site.kind,
+    parked,
+    deployedBy: deployerOf(parked, site, pkg),
+    disabled: false,
+  };
 }
 
 function isArchived(row: DeployableListRow): boolean {
@@ -307,6 +326,7 @@ export function foldDeployables(
         hostname: "",
         kind: app.kind,
         parked: run,
+        deployedBy: deployerOf(run, null, pkg),
         // A run is IN FLIGHT for this app; whatever the off-list says, this is
         // happening and the row must not read as inert.
         disabled: false,
@@ -350,6 +370,7 @@ export function foldDeployables(
         hostname: "",
         kind: declared.kind,
         parked: null,
+        deployedBy: deployerOf(null, null, pkg),
         // The owner's standing choice, and it only means anything here --
         // among the apps that have no site. One that HAS a site was deployed,
         // and the site is the fact.

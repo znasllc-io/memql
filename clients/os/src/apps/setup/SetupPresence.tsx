@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 
 import { useOs } from "../../chrome/state";
-import { roleAdmits } from "../../system/roles";
+import { accessAdmits } from "../../system/registry";
 import { useSetupFacts } from "./context";
 import { setupWidget } from "./manifest";
 
@@ -35,7 +35,7 @@ import { setupWidget } from "./manifest";
 // surface gives that the last stop landed. Putting the retire here too would
 // be two owners of one card, and the beat would be the thing that lost.
 export function SetupPresence(): null {
-  const { actions, state, actorRole, ladderLoaded } = useOs();
+  const { actions, state, accessEpoch } = useOs();
   const facts = useSetupFacts();
   // NOT KNOWN IS NOT UNSETTLED. Both hide the card, and only one of them is
   // an answer -- adding it while the feed is still seeding would put a wizard
@@ -44,23 +44,25 @@ export function SetupPresence(): null {
   const deskId = state.shell.activeDeskId;
 
   useEffect(() => {
-    if (!ladderLoaded || !unsettled) return;
-    // The manifest's own gate, asked rather than restated (`roles: { any:
-    // ["owner", "developer"] }`). `ensureWidget` checks it again at the point
+    if (!unsettled) return;
+    // The manifest's own gate, asked rather than restated (`requires:
+    // "app:setup"`, seeded on owner and developer). Fail-closed before the
+    // effective set lands: `accessAdmits` answers false until the read is in,
+    // and `accessEpoch` below re-runs this the moment it is. `ensureWidget` checks it again at the point
     // of action, which is right for the reason `addWidget` gives -- an action
     // that trusts its callers is an action whose next caller does not know it
     // had to -- and asking here as well is what keeps a reader from paying
     // for a state update that would be refused.
-    if (!roleAdmits(actorRole, setupWidget.roles)) return;
+    if (!accessAdmits(setupWidget.requires)) return;
     actions.ensureWidget(setupWidget.id, "ask");
     // `facts` RATHER THAN THE DERIVED BOOLEAN, so this runs whenever the feed
-    // or the ladder CHANGES rather than only when the answer flips. That is
+    // or the effective set CHANGES rather than only when the answer flips. That is
     // what makes "the widget is the state" true for somebody who took the card
     // off by hand: it returns on the next reading, not only when a stop
     // happens to settle. `facts` is memoized on the feed, the passkey reading
     // and the role, so a render that changed none of them re-runs nothing --
     // which is why removing it does not undo itself in the same instant.
-  }, [ladderLoaded, unsettled, facts, actorRole, deskId, actions]);
+  }, [accessEpoch, unsettled, facts, deskId, actions]);
 
   return null;
 }

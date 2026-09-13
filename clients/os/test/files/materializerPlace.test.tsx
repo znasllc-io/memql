@@ -248,11 +248,12 @@ const MATERIALIZER_MANIFEST: OsAppManifest = {
   id: MATERIALIZER_APP,
   name: "Materializer",
   icon: Layers,
+  requires: "app:materializer",
   sections: [
     { id: "composer", name: "Composer" },
     { id: "materialized", name: "Materialized" },
     { id: "settings", name: "Settings" },
-    { id: "logs", name: "Logs", roles: { min: "admin" } },
+    { id: "logs", name: "Logs", requires: "app:materializer/logs" },
   ],
   settingsSection: "settings",
   logsSection: "logs",

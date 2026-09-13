@@ -7,7 +7,7 @@ import { useConnectionStatus } from "../../chrome/connection";
 import { useOs } from "../../chrome/state";
 import { osBridgePath } from "../../live/connection";
 import { readStoredTheme } from "../../app/theme";
-import { appsForRole } from "../../system/registry";
+import { appsFor } from "../../system/registry";
 import { buildDiagnosticsReport } from "./buildDiagnosticsReport";
 import { resolveBridgeEndpoint } from "./endpoint";
 import { hiddenSurfaces } from "./hiddenSurfaces";
@@ -20,14 +20,14 @@ import { useClusterReport } from "./useClusterFacts";
 
 export function DiagnosticsSection() {
   const { access, config } = useSession();
-  const { registry, actorRole, state } = useOs();
+  const { registry, state } = useOs();
   const status = useConnectionStatus();
   const history = useConnectionHistory();
   const cluster = useClusterReport();
 
   const endpoint = resolveBridgeEndpoint(osBridgePath, globalThis.location);
-  const hidden = hiddenSurfaces(registry, actorRole);
-  const admitted = appsForRole(registry, actorRole);
+  const hidden = hiddenSurfaces(registry);
+  const admitted = appsFor(registry);
 
   return (
     <div className="os-settings">
@@ -91,7 +91,7 @@ export function DiagnosticsSection() {
           <ul className="os-hidden-list" aria-label="Hidden from this session">
             {hidden.map((h) => (
               <li key={`${h.kind}:${h.label}`}>
-                {h.label} <span className="os-caption-inline">({h.kind})</span> -- requires{" "}
+                {h.label} <span className="os-caption-inline">({h.kind})</span> -- needs{" "}
                 {h.requires}; you are <RoleIdentity access={access} inline />
               </li>
             ))}

@@ -21,7 +21,7 @@ export const SETUP_WIDGET_SIZE = { w: 4, h: 4 } as const;
 export const setupWidget: OsWidgetManifest = {
   id: "setup",
   name: "Set up",
-  roles: { any: ["owner", "developer"] },
+  requires: "app:setup",
   icon: ListChecks,
   // FOUR CELLS TALL BECAUSE THE INFERENCE STOP IS, and the visual pass is
   // what settled it: at three, the three doors and the act sat below the

@@ -1,5 +1,6 @@
 import type { ActionBarTone } from "../../../kit/ActionBar";
 import { runCoversApp, runIsScopedToApp, type DeploymentRow, type PackageRow } from "../packages/rows";
+import type { DeployablePart, PartsHeld } from "../parts";
 import type { SiteRow } from "../rows";
 import { siteIsBuilt, siteStateDetail, siteStateWord } from "../words";
 import { TERMINAL_RUN_STATUSES } from "./rail";
@@ -34,6 +35,18 @@ import { TERMINAL_RUN_STATUSES } from "./rail";
 // destructive act from every state, Deactivate, which releases the address
 // and puts the app back on the source's off-list -- and it is never archived.
 // The state words are the same on both; the acts beside them differ.
+//
+// ===========================================================================
+// EVERY ACT NAMES THE PART IT NEEDS (epic memql#5289, task memql#5305)
+// ===========================================================================
+// `requires` sits beside each act rather than in a parallel table, so the
+// act and its part cannot drift apart. `actsFor` withholds an act whose part
+// the effective set does not hold -- ABSENT, never disabled, which is rule
+// 12 again: a person granted `deploy` and not `publish` sees Deploy and no
+// Go live, and the engine refuses `capability_not_held` if a stale shell
+// reaches it anyway. The mapping is the design record's table: going live,
+// pausing and rolling back are `publish`; starting, retrying or stopping a
+// run is `deploy`; every destructive act and its plain inverse is `retire`.
 
 /** The act names, as a closed set. One name, one promise, everywhere. */
 export type ActName =
@@ -53,6 +66,8 @@ export type ActName =
 export interface ActSpec {
   name: ActName;
   tone?: "primary" | "danger" | "quiet";
+  /** The part of Deployables this act needs. Withheld when the set lacks it. */
+  requires: DeployablePart;
 }
 
 export interface BarReading {
@@ -94,8 +109,8 @@ export interface ActsInput {
    * disabled, which is rule 12.
    */
   siblingRun?: DeploymentRow | null;
-  /** Rank >= 200. Presentation over a server-side law. */
-  canWrite: boolean;
+  /** The parts this session holds. Presentation over the engine's own gate. */
+  can: PartsHeld;
   /** True while this deployable's own delete is still tearing its domains down. */
   deleting?: boolean;
   /** The domain the teardown is releasing right now, for the progress line. */
@@ -165,6 +180,32 @@ export function siblingRunInFlight(
   );
 }
 
+/** The part each act needs, said once. */
+const PART_OF: Readonly<Record<ActName, DeployablePart>> = {
+  Discard: "retire",
+  "Go live": "publish",
+  "Take offline": "publish",
+  Archive: "retire",
+  Restore: "retire",
+  Delete: "retire",
+  Deactivate: "retire",
+  Deploy: "deploy",
+  "Deploy the update": "deploy",
+  Redeploy: "deploy",
+  "Retry the deploy": "deploy",
+  Cancel: "deploy",
+};
+
+/** An act with its part named, so a reading never lists one without it. */
+function spec(name: ActName, tone?: ActSpec["tone"]): ActSpec {
+  return tone === undefined ? { name, requires: PART_OF[name] } : { name, tone, requires: PART_OF[name] };
+}
+
+/** Withhold every act whose part the set does not hold. Absent, never disabled. */
+function heldOnly(acts: ActSpec[], can: PartsHeld): ActSpec[] {
+  return acts.filter((act) => can[act.requires]);
+}
+
 /**
  * The acts that would start a new run, as a closed set.
  *
@@ -220,7 +261,8 @@ function gateClause(read: BarReading): BarReading {
 
 /** What the bar reads and offers. The whole of DESIGN.md rule 12 for this app. */
 export function actsFor(input: ActsInput): BarReading {
-  const read = holdWhileTheSourceIsBusy(reading(input), input.siblingRun ?? null);
+  const offered = reading(input);
+  const read = holdWhileTheSourceIsBusy({ ...offered, acts: heldOnly(offered.acts, input.can) }, input.siblingRun ?? null);
   // The gate did not get to be the state; it still gets to be mentioned, or a
   // person on this page would have no sign that one is waiting at all.
   const parked =
@@ -252,7 +294,7 @@ function fromSource(site: SiteRow, pkg: PackageRow | null): boolean {
 }
 
 function reading(input: ActsInput): BarReading {
-  const { site, pkg, run, canWrite } = input;
+  const { site, pkg, run } = input;
 
   // A SYSTEM-OWNED ROW GETS NO ACTS AT ALL -- not disabled ones. The seeded
   // portal and OS sites are exempt from the lifecycle entirely and the server
@@ -299,7 +341,7 @@ function reading(input: ActsInput): BarReading {
       state: "Ready to deploy",
       detail: "this deploy is waiting for you -- the report above is what it would do",
       tone: "paused",
-      acts: canWrite ? [{ name: "Cancel", tone: "danger" }, { name: "Deploy", tone: "primary" }] : [],
+      acts: [spec("Cancel", "danger"), spec("Deploy", "primary")],
     };
   }
 
@@ -319,13 +361,13 @@ function reading(input: ActsInput): BarReading {
         ? "stopping is safe until the roll begins"
         : "past the point where stopping is safe -- this cluster is restarting onto the staged MemQL, and it will finish on its own",
       tone: "busy",
-      acts: canWrite && cancellable ? [{ name: "Cancel", tone: "danger" }] : [],
+      acts: cancellable ? [spec("Cancel", "danger")] : [],
     };
   }
 
-  // A READER SEES THE STATE AND NO ACTS. The engine decides the writes; this
-  // only declines to draw controls somebody cannot use.
-  const write = canWrite;
+  // A READER SEES THE STATE AND NO ACTS: every act below names its part, and
+  // `actsFor` withholds the ones the set lacks. The engine decides the
+  // writes; this only declines to draw controls somebody cannot use.
 
   // A REFUSED OR FAILED LAST RUN NAMES THE ACT, whatever the site's own state
   // is. A live deployable whose last deploy broke is still serving the version
@@ -338,7 +380,7 @@ function reading(input: ActsInput): BarReading {
   // state; a standalone climbs Offline -> Archive -> Delete, with Discard for
   // a draft that never served (D5: nobody is using a draft, so the pause that
   // lets people notice has nobody to notify).
-  const off: ActSpec = app ? { name: "Deactivate", tone: "danger" } : { name: "Discard", tone: "danger" };
+  const off: ActSpec = app ? spec("Deactivate", "danger") : spec("Discard", "danger");
 
   switch (site.status) {
     case "live":
@@ -348,9 +390,7 @@ function reading(input: ActsInput): BarReading {
           ? "serving the version before the last attempt, which did not finish"
           : siteStateDetail(word, site.hostname),
         tone: "live",
-        acts: write
-          ? [{ name: "Take offline" }, { name: lastRunBroke ? "Retry the deploy" : nextDeployName(pkg), tone: "primary" }]
-          : [],
+        acts: [spec("Take offline"), spec(lastRunBroke ? "Retry the deploy" : nextDeployName(pkg), "primary")],
       };
     case "disabled":
       return {
@@ -361,7 +401,7 @@ function reading(input: ActsInput): BarReading {
         // existed.
         detail: siteStateDetail(word, site.hostname),
         tone: "paused",
-        acts: write ? [app ? { name: "Deactivate", tone: "danger" } : { name: "Archive" }, { name: "Go live", tone: "primary" }] : [],
+        acts: [app ? spec("Deactivate", "danger") : spec("Archive"), spec("Go live", "primary")],
       };
     case "archived":
       // A source's app is never archived any more (D2); a row that IS -- one
@@ -371,7 +411,7 @@ function reading(input: ActsInput): BarReading {
         state: word,
         detail: siteStateDetail(word, site.hostname),
         tone: "none",
-        acts: write ? [app ? { name: "Deactivate", tone: "danger" } : { name: "Delete", tone: "danger" }, { name: "Restore", tone: "primary" }] : [],
+        acts: [app ? spec("Deactivate", "danger") : spec("Delete", "danger"), spec("Restore", "primary")],
       };
     default: {
       // DRAFT: Not deployed, or Built. Neither serves, and the forward act is
@@ -383,7 +423,7 @@ function reading(input: ActsInput): BarReading {
             ? "the last deploy did not finish; the version before it is in place, not live"
             : siteStateDetail("Built", site.hostname),
           tone: "none",
-          acts: write ? [off, { name: lastRunBroke ? "Retry the deploy" : "Go live", tone: "primary" }] : [],
+          acts: [off, spec(lastRunBroke ? "Retry the deploy" : "Go live", "primary")],
         };
       }
       return {
@@ -392,7 +432,7 @@ function reading(input: ActsInput): BarReading {
           ? "the last deploy did not finish, and nothing is in place"
           : siteStateDetail("Not deployed", site.hostname),
         tone: "none",
-        acts: write ? [off, { name: lastRunBroke ? "Retry the deploy" : "Deploy", tone: "primary" }] : [],
+        acts: [off, spec(lastRunBroke ? "Retry the deploy" : "Deploy", "primary")],
       };
     }
   }

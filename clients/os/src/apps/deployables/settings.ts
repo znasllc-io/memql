@@ -47,7 +47,7 @@ export const DEPLOYABLES_SECTIONS: OsAppSection[] = [
   // restructure (epic memql#4885) kept it while retiring Sites, Packages and
   // Actions: those three were this app's own reading of its subject and were
   // replaced by one, and this one is a shell convention every app carries.
-  { id: "logs", name: "Logs", roles: { min: "admin" } },
+  { id: "logs", name: "Logs", requires: "app:deployables/logs" },
   { id: "settings", name: "Settings" },
 ];
 

@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { OS_REGISTRY } from "../../src/apps/registry";
 import { BIN_APP_ID } from "../../src/apps/bin/concepts";
 import { dockOrder, emptyDock, pin } from "../../src/system/dock";
-import { appById, fixturesForRole, isDockFixture } from "../../src/system/registry";
+import { appById, fixturesFor, isDockFixture } from "../../src/system/registry";
+import { installSeededAccess, rolesOpening } from "../seededAccess";
 
 // THE BIN IS ALWAYS IN THE DOCK AND CANNOT BE TAKEN OUT OF IT (memql#4784).
 //
@@ -15,17 +16,20 @@ import { appById, fixturesForRole, isDockFixture } from "../../src/system/regist
 describe("the Bin as a dock fixture", () => {
   it("is declared as one, and is the only one", () => {
     expect(isDockFixture(OS_REGISTRY, BIN_APP_ID)).toBe(true);
-    expect(fixturesForRole(OS_REGISTRY, "owner").map((a) => a.id)).toEqual([BIN_APP_ID]);
+    installSeededAccess("owner");
+    expect(fixturesFor(OS_REGISTRY).map((a) => a.id)).toEqual([BIN_APP_ID]);
   });
 
-  it("carries no role, so every signed-in person has one", () => {
+  it("its door is seeded on every role, so every signed-in person has one", () => {
     // v1:library:artifact declares the composite tier; the engine decides how
     // far the read goes. Gating here would be presentation pretending to be
     // authorization -- and a reader with no Bin has nowhere for their
     // archives to be.
-    expect(appById(OS_REGISTRY, BIN_APP_ID)?.roles).toBeUndefined();
+    expect(appById(OS_REGISTRY, BIN_APP_ID)?.requires).toBe("app:bin");
+    expect(rolesOpening("app:bin")).toEqual(["owner", "developer", "admin", "user", "viewer"]);
     for (const role of ["reader", "writer", "admin", "owner"]) {
-      expect(fixturesForRole(OS_REGISTRY, role).map((a) => a.id)).toEqual([BIN_APP_ID]);
+      installSeededAccess(role);
+      expect(fixturesFor(OS_REGISTRY).map((a) => a.id)).toEqual([BIN_APP_ID]);
     }
   });
 

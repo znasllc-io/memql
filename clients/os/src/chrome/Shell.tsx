@@ -28,6 +28,7 @@ import { installCapture } from "../logs/capture";
 import type { ProfileAccess } from "../modules/profile/access";
 import { useResolvedAccess } from "../modules/profile/useResolvedAccess";
 import { useRoleLadder } from "../modules/profile/useRoleLadder";
+import { useEffectiveAccess } from "../modules/profile/useEffectiveAccess";
 import type { PlacementTokens } from "../system/placement";
 import { GraphDesktopStore } from "../system/graphStore";
 import { LocalDesktopStore, type DesktopStore } from "../system/store";
@@ -211,12 +212,18 @@ function SessionScope({
   // not reach this" from "the shell does not know yet" -- two states that
   // both hide an app and must not read the same to the person in front of it.
   const ladderLoaded = useRoleLadder();
+  // THE EFFECTIVE CAPABILITY SET (epic memql#5289, D10): what this person may
+  // open, read once per sign-in and again on focus and after a grant write.
+  // It installs module state beside the ladder for the ladder's reason --
+  // `holds` keeps one signature at every call site -- and the EPOCH rides on
+  // the session facts so the roster recomputes the moment the set lands.
+  const accessEpoch = useEffectiveAccess();
   // Readiness is retained HERE and nowhere else, so every window, mark and
   // Set up group reads one answer. See src/live/readiness.tsx.
   const readiness = useReadinessFeed();
   const value = useMemo(
-    () => ({ access: resolved, config, ladderLoaded, readiness }),
-    [resolved, config, ladderLoaded, readiness],
+    () => ({ access: resolved, config, ladderLoaded, accessEpoch, readiness }),
+    [resolved, config, ladderLoaded, accessEpoch, readiness],
   );
   return <SessionProvider value={value}>{children}</SessionProvider>;
 }
@@ -240,11 +247,15 @@ function ShellRoster({
   layout: ChromeLayout;
   children: ReactNode;
 }) {
-  const { access, ladderLoaded } = useSession();
+  const { access, ladderLoaded, accessEpoch } = useSession();
   return (
     <OsProvider
       registry={OS_REGISTRY}
       actorRole={access?.role ?? ""}
+      // The effective set's epoch (epic memql#5289): the roster gates on the
+      // capability set now, and it lands after the role and changes on
+      // focus. Threading it here is what makes every app list recompute.
+      accessEpoch={accessEpoch ?? 0}
       // The role LADDER's load state (memql#4857): the roster gates on the
       // role, and roleAdmits cannot answer until the ladder lands. Threading
       // it through here is what makes the launcher and dock recompute the

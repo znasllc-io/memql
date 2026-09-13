@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 
 import { Button, Caption, Chip, Head, Notice, Refine, Select } from "../../kit";
 import { useSession } from "../../chrome/access";
-import type { RoleRequirement } from "../../system/roles";
 import { LEVELS } from "./routingFacts";
 import { DescribeRulePanel } from "./DescribeRulePanel";
 import { RuleFieldsPanel } from "./RuleFieldsPanel";
@@ -67,7 +66,7 @@ import {
  * is user administration, and the ladder puts admin below developer so a
  * minimum cannot express it.
  */
-export const RULES_SECTION_ROLE: RoleRequirement = { any: ["owner", "developer"] };
+export const RULES_SECTION_RESOURCE = "app:settings/rules";
 
 type Editing = { kind: "none" } | { kind: "describe" } | { kind: "fields"; seed: RuleRow | null };
 

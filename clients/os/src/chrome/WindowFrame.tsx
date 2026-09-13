@@ -14,11 +14,11 @@ import { MODULE_DESCRIPTIONS } from "../system/modules";
 import type { Rect } from "../system/placement";
 import {
   allRequirementsFor,
+  accessAdmits,
   requirementsFor,
-  sectionsForRole,
+  sectionsFor,
   type OsAppManifest,
 } from "../system/registry";
-import { roleAdmits } from "../system/roles";
 import type { OsWindow } from "../system/windows";
 import { useSession } from "./access";
 import { Mark } from "./Mark";
@@ -50,7 +50,7 @@ export function WindowFrame({
     id: `window:${win.id}`,
   });
 
-  const sections = sectionsForRole(manifest, actorRole);
+  const sections = sectionsFor(manifest);
   const current = sections.find((s) => s.id === win.sectionId) ?? sections[0];
 
   // READINESS (design record 2026-09-06-configuration-readiness, 5.3 to 5.5).
@@ -215,10 +215,10 @@ export function WindowFrame({
               screen for a frame; `partial` renders it too, because mid-rollout
               is a state that resolves itself and a screen telling somebody to
               fix a deploy in progress is worse than a page that mostly works. */}
-          {!roleAdmits(actorRole, manifest.roles) ? (
+          {!accessAdmits(manifest.requires) ? (
             <SurfaceRefused
               surface={manifest.name}
-              requirement={manifest.roles}
+              resource={manifest.requires}
               actorRole={actorRole}
             />
           ) : gate.state === "unconfigured" ? (

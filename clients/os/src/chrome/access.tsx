@@ -25,6 +25,19 @@ export interface SessionFacts {
    */
   ladderLoaded?: boolean;
   /**
+   * The EFFECTIVE CAPABILITY SET's epoch (epic memql#5289, D10/D11): a
+   * counter that moves every time the shell installs a fresh answer to
+   * "what may this person open". It rides here for the reason ladderLoaded
+   * does -- a surface that filters by capability names it in a memo's deps
+   * and recomputes the moment the set lands or changes -- and it is a NUMBER
+   * rather than a flag because the set is re-read on focus and after a grant
+   * write, so "loaded" alone would never flip again.
+   *
+   * Optional so every harness that builds SessionFacts by hand keeps
+   * compiling; absent reads as 0, the pre-load epoch.
+   */
+  accessEpoch?: number;
+  /**
    * Module readiness (design record 2026-09-06-configuration-readiness,
    * section 5.2): what the cluster has and has not been set up to do.
    *

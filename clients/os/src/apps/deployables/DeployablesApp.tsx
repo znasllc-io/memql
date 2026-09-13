@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Concepts, type LiveSnapshot, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Head, Panel, roleAdmits, SetupGroup } from "../../kit";
+import { useDeployableParts } from "./parts";
 import { useSession } from "../../chrome/access";
 import { useLiveView, type LiveView } from "../../live/liveView";
 import { useArrivals } from "../../live/useArrivals";
 import { AppLogsSection } from "../../logs/AppLogsSection";
-import type { OsAppProps } from "../../system/registry";
+import { accessAdmits, type OsAppProps } from "../../system/registry";
 import { DeployablesSection } from "./DeployablesSection";
 import { MapSection, NO_SELECTION, type MapSelection } from "./map/MapSection";
 import type { MapNode } from "./map/layout";
@@ -85,15 +86,18 @@ export function DeployablesApp({
   // is still resolving, and the safe one if it never resolves.
   const actorRole = access?.role ?? "";
   const viewerUserId = access?.userId ?? "";
-  // Rank >= 200 under the one ladder (epic memql#4832, D1) -- {admin,
-  // developer, owner}, which is the set the engine's deploy gate already
-  // uses. Before the flip this excluded developer, so the deploy tier saw a
-  // read-only Deployables app.
-  const canWrite = roleAdmits(actorRole, { min: "admin" });
-  // The OWNER rung, under the same ladder: a client's own domain is a
-  // cluster owner's act (memql#4805, D1), and the page renders the Domains
-  // content for one and for nobody else. Presentation; the concept's
-  // clusterOwner tier is the gate.
+  // THE PARTS THIS SESSION HOLDS (epic memql#5289, task memql#5305), read
+  // from the effective capability set: `execute` on each of the five
+  // `app:deployables/<part>` resources. This replaced `canWrite` (rank >=
+  // 200, one answer for every act): a person granted `deploy` and not
+  // `publish` pushes a build and cannot take a site live, and every control
+  // below names the part it needs. Presentation; the engine's capability gate
+  // on each construct is the authority, and refuses `capability_not_held`.
+  const can = useDeployableParts();
+  // The OWNER rung, under the one ladder: a CI-pushed source is a cluster
+  // owner's act (memql#4805, D1) and is NOT a part -- the concept's
+  // clusterOwner tier is its gate. A client's own domain WAS this rung's and
+  // is the `domains` part now.
   const isClusterOwner = roleAdmits(actorRole, { min: "owner" });
 
   const { source: collection, reseed } = useSites();
@@ -255,7 +259,8 @@ export function DeployablesApp({
       <DeployablesSettingsSection
         settings={settings}
         update={update}
-        actorRole={actorRole}
+        viewerUserId={viewerUserId}
+        isClusterOwner={isClusterOwner}
         credentials={credentials}
         packages={packageSnapshot.rows}
         connectResult={connectResult}
@@ -294,7 +299,7 @@ export function DeployablesApp({
           selectedSiteId={selectedSiteId}
           onSelectSite={selectSite}
           viewerUserId={viewerUserId}
-          canWrite={canWrite}
+          can={can}
           isClusterOwner={isClusterOwner}
           clusterDomain={config.domain}
           credentials={credentialRows}
@@ -329,14 +334,18 @@ export function DeployablesApp({
 function DeployablesSettingsSection({
   settings,
   update,
-  actorRole,
+  viewerUserId,
+  isClusterOwner,
   credentials,
   packages,
   connectResult,
 }: {
   settings: DeployablesSettings;
   update: (patch: Partial<DeployablesSettings>) => void;
-  actorRole: string;
+  /** Whose credentials come first in the Sources group. */
+  viewerUserId: string;
+  /** Whether other people's credentials are listed at all (the concept's clusterOwner branch). */
+  isClusterOwner: boolean;
   /** The app root's one credentials feed, for the Sources group. */
   credentials: LiveView<CredentialRow> | null;
   /** The app root's package rows, joined onto each credential by `credentialId`. */
@@ -350,7 +359,7 @@ function DeployablesSettingsSection({
   // back to the first admitted section -- which reads as a broken setting
   // rather than as one that does not apply. No section carries a role today,
   // so this is every one of the three; the filter stays for the day one does.
-  const offered = DEPLOYABLES_SECTIONS.filter((s) => roleAdmits(actorRole, s.roles));
+  const offered = DEPLOYABLES_SECTIONS.filter((s) => accessAdmits(s.requires));
 
   return (
     <div className="os-settings">
@@ -417,7 +426,9 @@ function DeployablesSettingsSection({
             else to live, and Settings is where an app keeps what is about
             the app rather than about one row (DESIGN.md rule 4's home, one
             step out). The two above ARE preferences and stay above it. */}
-        <SourcesGroup credentials={credentials} packages={packages} connectResult={connectResult} />
+        <SourcesGroup
+          viewerUserId={viewerUserId}
+          isClusterOwner={isClusterOwner} credentials={credentials} packages={packages} connectResult={connectResult} />
 
         <p className="os-caption">
           These are kept in this browser, separately from your desktop, so an app learning a

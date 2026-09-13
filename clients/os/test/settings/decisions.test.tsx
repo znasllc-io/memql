@@ -85,8 +85,8 @@ const { OS_REGISTRY } = await import("../../src/apps/registry");
 const { SettingsApp } = await import("../../src/apps/settings/SettingsApp");
 const { LocalDesktopStore } = await import("../../src/system/store");
 const { UNKNOWN_RUNTIME_CONFIG } = await import("../../src/cluster/config");
-const { roleAdmits } = await import("../../src/system/roles");
-const { DECISIONS_SECTION_ROLE } = await import("../../src/apps/settings/DecisionsSection");
+const { DECISIONS_SECTION_RESOURCE } = await import("../../src/apps/settings/DecisionsSection");
+const { roleOpens } = await import("../seededAccess");
 const { decisionFromRow, levelWords } = await import("../../src/apps/settings/decisionFacts");
 
 function memStorage(): Pick<Storage, "getItem" | "setItem"> {
@@ -208,17 +208,17 @@ describe("Settings -> Decisions: who may see it", () => {
     // carries neither the prompt nor the error message: this list answers
     // "why did that go to a vendor" while holding nothing a reader of it
     // should not see.
-    expect(roleAdmits("admin", DECISIONS_SECTION_ROLE)).toBe(true);
-    expect(roleAdmits("developer", DECISIONS_SECTION_ROLE)).toBe(true);
-    expect(roleAdmits("owner", DECISIONS_SECTION_ROLE)).toBe(true);
-    expect(roleAdmits("writer", DECISIONS_SECTION_ROLE)).toBe(false);
-    expect(roleAdmits("reader", DECISIONS_SECTION_ROLE)).toBe(false);
+    expect(roleOpens("admin", DECISIONS_SECTION_RESOURCE)).toBe(true);
+    expect(roleOpens("developer", DECISIONS_SECTION_RESOURCE)).toBe(true);
+    expect(roleOpens("owner", DECISIONS_SECTION_RESOURCE)).toBe(true);
+    expect(roleOpens("writer", DECISIONS_SECTION_RESOURCE)).toBe(false);
+    expect(roleOpens("reader", DECISIONS_SECTION_RESOURCE)).toBe(false);
   });
 
   it("declares the same requirement in the manifest as in the section", () => {
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
-    expect(settings?.sections?.find((s) => s.id === "decisions")?.roles).toEqual(
-      DECISIONS_SECTION_ROLE,
+    expect(settings?.sections?.find((s) => s.id === "decisions")?.requires).toBe(
+      DECISIONS_SECTION_RESOURCE,
     );
   });
 });

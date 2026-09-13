@@ -16,7 +16,8 @@ import {
 import { canConfigure } from "../../src/kit/ReadinessStates";
 import type { Readiness } from "../../src/live/readiness";
 import { MODULE_SETTINGS_SECTION } from "../../src/system/modules";
-import { sectionsForRole } from "../../src/system/registry";
+import { sectionsFor } from "../../src/system/registry";
+import { installSeededAccess } from "../seededAccess";
 import type { Verdict } from "../../src/system/readinessFold";
 
 function verdict(module: string, state: Verdict["state"], lanes: Verdict["lanes"] = []): Verdict {
@@ -281,7 +282,8 @@ describe("SetupGroup", () => {
 
     for (const role of configuringRoles) {
       expect(canConfigure(role), `${role} must be shown the group`).toBe(true);
-      const reachable = new Set(sectionsForRole(settings!, role).map((sec) => sec.id));
+      installSeededAccess(role);
+      const reachable = new Set(sectionsFor(settings!).map((sec) => sec.id));
       for (const [moduleId, target] of targets) {
         expect(
           reachable.has(target!.section),

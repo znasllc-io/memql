@@ -128,7 +128,7 @@ export function Inspector({
   onClose: () => void;
 }) {
   const { config } = useSession();
-  const { actions, registry, actorRole } = useOs();
+  const { actions, registry } = useOs();
   const connection = useOsConnection();
   const authSource = useAuthSource();
 
@@ -454,7 +454,7 @@ export function Inspector({
             <Fact
               label="Made in"
               value={
-                canOpen(registry, actorRole, MATERIALIZER_APP) ? (
+                canOpen(registry, MATERIALIZER_APP) ? (
                   <button
                     type="button"
                     className="os-link"

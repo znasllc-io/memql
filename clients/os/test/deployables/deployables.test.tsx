@@ -14,6 +14,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { SITE_CONCEPT } from "../../src/apps/deployables/concepts";
 import { headStateFor } from "../../src/apps/deployables/page/head";
+import { ALL_PARTS, NO_PARTS, partsWithout } from "../../src/apps/deployables/parts";
 import { HEAD_STATES, headActionFor } from "../../src/apps/deployables/page/rail";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import {
@@ -137,9 +138,9 @@ async function openHistoryView(sourceView: HTMLElement): Promise<HTMLElement> {
 
 async function mountAndOpen(seed: FakeSeed, hostname: string, opts: { role?: string } = {}) {
   const connection = fakeConnection(seed);
-  mount(connection, opts);
+  const view = mount(connection, opts);
   const page = await open(hostname);
-  return { connection, page };
+  return { connection, page, view };
 }
 
 // THE FORWARD ACT MOVED TO THE BAR (epic memql#4937, DESIGN.md rule 12). It
@@ -311,7 +312,7 @@ describe("the Head's action, by state", () => {
         createdAt: "",
       };
     };
-    const base = { site, pkg, run: null, canWrite: true };
+    const base = { site, pkg, run: null, can: ALL_PARTS };
 
     expect(headStateFor({ ...base, run: d({ id: "r", status: "building" }) })).toEqual({ at: "running" });
     expect(headStateFor({ ...base, run: d({ id: "r", status: "analyzing" }) })).toEqual({ at: "running" });
@@ -332,8 +333,15 @@ describe("the Head's action, by state", () => {
     // No action at all: archived, system-owned, an archived source, a reader.
     expect(headStateFor({ ...base, site: { ...site, status: "archived" } })).toBeNull();
     expect(headStateFor({ ...base, site: { ...site, systemOwned: true } })).toBeNull();
+    // THE PART, NOT A RANK (epic memql#5289): a built draft's Go live is
+    // `publish`, a live site's Redeploy is `deploy`, and each is withheld
+    // without its own part while the other stays.
+    expect(headStateFor({ ...base, site: { ...site, status: "draft" }, can: partsWithout("publish") })).toBeNull();
+    expect(headStateFor({ ...base, site: { ...site, status: "draft" }, can: partsWithout("deploy") })).toEqual({ at: "draft_with_bundle" });
+    expect(headStateFor({ ...base, can: partsWithout("deploy") })).toBeNull();
+    expect(headStateFor({ ...base, can: partsWithout("publish") })).toEqual({ at: "live", updateAvailable: false });
     expect(headStateFor({ ...base, pkg: { ...pkg, status: "archived" } })).toBeNull();
-    expect(headStateFor({ ...base, canWrite: false })).toBeNull();
+    expect(headStateFor({ ...base, can: NO_PARTS })).toBeNull();
     // And every derived state is one the rail's table answers.
     for (const state of HEAD_STATES) expect(() => headActionFor(state)).not.toThrow();
   });
@@ -1144,10 +1152,17 @@ describe("redeploying from a zip", () => {
     return page;
   }
 
-  it("is offered to an admin and not to a reader", async () => {
+  it("is offered with the deploy part and not without it", async () => {
+    // A DEVELOPER holds `deploy` (epic memql#5289); an admin holds no part of
+    // Deployables and a reader none, and the picker is a deploy.
+    const developer = await mountAndOpen({ sites: [SHOP] }, "shop.memql.example.com", { role: "developer" });
+    await openStop(developer.page, "Source");
+    expect(within(developer.page).getByRole("button", { name: "Redeploy from a zip" })).toBeTruthy();
+    developer.view.unmount();
+
     const admin = await mountAndOpen({ sites: [SHOP] }, "shop.memql.example.com", { role: "admin" });
     await openStop(admin.page, "Source");
-    expect(within(admin.page).getByRole("button", { name: "Redeploy from a zip" })).toBeTruthy();
+    expect(within(admin.page).queryByRole("button", { name: "Redeploy from a zip" })).toBeNull();
   });
 
   it("offers only the zips, and reads the Library once", async () => {

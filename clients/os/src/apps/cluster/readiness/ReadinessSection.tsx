@@ -102,8 +102,7 @@ function InferenceLine({
   reading: ReturnType<typeof useReading<Row | null>>;
 }) {
   const row = reading.value;
-  const { access } = useSession();
-  const fleet = useAppReach("fleet", access?.role ?? "");
+  const fleet = useAppReach("fleet");
 
   const facts = useMemo(() => {
     if (row === null) return null;

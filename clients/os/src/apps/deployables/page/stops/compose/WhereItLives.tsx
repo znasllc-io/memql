@@ -57,7 +57,7 @@ export function ComposeWhereItLivesStop({
   addresses,
   onAddress,
   accounts,
-  isClusterOwner,
+  canBindDomain,
   clusterDomain,
   outcomes,
   locked,
@@ -71,8 +71,8 @@ export function ComposeWhereItLivesStop({
   addresses: Readonly<Record<string, AddressDraft>>;
   onAddress: (app: string, patch: Partial<AddressDraft>) => void;
   accounts: AccountRow[];
-  /** The client's own domain is a cluster owner's act (memql#4805, D1). */
-  isClusterOwner: boolean;
+  /** The `domains` part (epic memql#5289): a client's own domain may be bound here. */
+  canBindDomain: boolean;
   clusterDomain: string;
   /** The run's outcomes once it has finished: where the two placement refusals live. */
   outcomes: readonly DeployableOutcome[];
@@ -124,7 +124,7 @@ export function ComposeWhereItLivesStop({
           address={addresses[app] ?? EMPTY_ADDRESS}
           onAddress={(patch) => onAddress(app, patch)}
           accounts={accounts}
-          isClusterOwner={isClusterOwner}
+          canBindDomain={canBindDomain}
           clusterDomain={clusterDomain}
           many={apps.length > 1}
           checks={checks}
@@ -142,7 +142,7 @@ function AppAddress({
   address,
   onAddress,
   accounts,
-  isClusterOwner,
+  canBindDomain,
   clusterDomain,
   many,
   checks,
@@ -153,7 +153,7 @@ function AppAddress({
   address: AddressDraft;
   onAddress: (patch: Partial<AddressDraft>) => void;
   accounts: AccountRow[];
-  isClusterOwner: boolean;
+  canBindDomain: boolean;
   clusterDomain: string;
   many: boolean;
   checks: AddressCheckHandle;
@@ -185,13 +185,13 @@ function AppAddress({
 
   // THE CLIENT'S OWN DOMAIN, the same way, only where the field exists.
   useEffect(() => {
-    if (!isClusterOwner || skipped || ownDomain === "") {
+    if (!canBindDomain || skipped || ownDomain === "") {
       clear(domainKey);
       return;
     }
     const timer = setTimeout(() => void check(domainKey, ownDomain, "domain"), CHECK_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [domainKey, ownDomain, isClusterOwner, skipped, check, clear]);
+  }, [domainKey, ownDomain, canBindDomain, skipped, check, clear]);
 
   // GENERATE DRAWS AGAIN UNTIL A FREE NAME COMES BACK. Each draw asks the
   // cluster under the slug's own key, so the field reads "checking" while it
@@ -309,10 +309,10 @@ function AppAddress({
             />
           </Field>
 
-          {/* Binding a client's own domain is cluster-owner territory (design
-              D1), enforced by the concept's clusterOwner tier and the three Go
-              guards; rendering the field for one is the presentation half. */}
-          {isClusterOwner ? (
+          {/* Binding a client's own domain is the `domains` part (epic
+              memql#5289), enforced by the engine's capability gate and the
+              three Go guards; rendering the field is the presentation half. */}
+          {canBindDomain ? (
             <>
               <Field label="Their own domain">
                 <Input

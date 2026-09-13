@@ -173,7 +173,7 @@ export function BrowseSection({
   uploads: UploadProvider;
 }) {
   const { presence } = useMachines();
-  const { actions, registry, actorRole } = useOs();
+  const { actions, registry } = useOs();
   const { config } = useSession();
   const authSource = useAuthSource();
   const connection = useOsConnection();
@@ -472,7 +472,7 @@ export function BrowseSection({
     // silently does nothing is worse than one that is not there.
     const composition = materialized.get(row.id);
     const openInMaterializer =
-      composition && canOpen(registry, actorRole, MATERIALIZER_APP)
+      composition && canOpen(registry, MATERIALIZER_APP)
         ? [
             {
               id: "materializer",

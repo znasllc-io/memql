@@ -15,7 +15,8 @@ vi.mock("../../src/live/connection", () => ({
 const { MachinesProvider } = await import("../../src/live/machines");
 const { FleetApp } = await import("../../src/apps/fleet/FleetApp");
 const { OS_REGISTRY } = await import("../../src/apps/registry");
-const { appById, sectionsForRole } = await import("../../src/system/registry");
+const { appById, sectionsFor } = await import("../../src/system/registry");
+const { installSeededAccess } = await import("../seededAccess");
 const { DEFAULT_FLEET_SETTINGS, FLEET_SECTION_IDS } = await import(
   "../../src/apps/fleet/settings"
 );
@@ -83,7 +84,8 @@ describe("the Fleet manifest", () => {
     // Routing's model preference reorders the ranking Models shows. Apps sits
     // after Workbenches (epic memql#5009): the cluster's own sandbox, then the
     // person's own computer, then the logs about both.
-    expect(sectionsForRole(fleet!, "owner").map((s) => s.id)).toEqual([
+    installSeededAccess("owner");
+    expect(sectionsFor(fleet!).map((s) => s.id)).toEqual([
       "machines",
       "models",
       "routing",
@@ -97,18 +99,19 @@ describe("the Fleet manifest", () => {
     // not would leave the window on Machines with the nav highlighting
     // nothing.
     expect(fleet!.settingsSection).toBe("settings");
-    expect(FLEET_SECTION_IDS).toEqual(sectionsForRole(fleet!, "owner").map((s) => s.id));
+    expect(FLEET_SECTION_IDS).toEqual(sectionsFor(fleet!).map((s) => s.id));
   });
 
   it("admits every signed-in user: the engine's row tiers decide what comes back", () => {
     const fleet = appById(OS_REGISTRY, "fleet")!;
-    expect(fleet.roles).toBeUndefined();
+    expect(fleet.requires).toBe("app:fleet");
     // Everything but Logs for a reader: that is the one section floored at
     // admin (epic memql#4895), because every read on the log store is. Apps
     // is NOT floored -- both concepts behind it declare the composite owner
     // tier -- and neither is Models, whose two readings are caller-scoped
     // projections of the reader's own fleet (epic memql#5096).
-    expect(sectionsForRole(fleet, "reader").map((s) => s.id)).toEqual([
+    installSeededAccess("reader");
+    expect(sectionsFor(fleet).map((s) => s.id)).toEqual([
       "machines",
       "models",
       "routing",

@@ -4,7 +4,6 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 // Type-only, so they are erased before the mock factories run.
 import type { StoresSettingsStore } from "../../src/apps/stores/settings";
-import type { OsAppSection } from "../../src/system/registry";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -104,10 +103,10 @@ describe("the Stores manifest", () => {
     // declared reads carry actor.isClusterOwner as an explicit conjunct, so
     // below owner the list comes back EMPTY and every write is refused --
     // presentation over gates the engine holds, never the boundary itself.
-    expect(STORES_SECTIONS.map((s) => [s.id, floorOf(s.roles)])).toEqual([
-      ["stores", "owner"],
-      ["logs", "admin"],
-      ["settings", "owner"],
+    expect(STORES_SECTIONS.map((s) => [s.id, s.requires ?? ""])).toEqual([
+      ["stores", "app:stores/stores"],
+      ["logs", "app:stores/logs"],
+      ["settings", "app:stores/settings"],
     ]);
     expect(STORES_SECTION_IDS).toEqual(["stores", "logs", "settings"]);
   });
@@ -553,13 +552,6 @@ describe("the Stores app shell", () => {
 });
 
 // ---------------------------------------------------------------------------
-
-/** A section's floor, or "" when it declares none. `RoleRequirement` is a
- *  union -- `{ min }` is the ladder floor, `{ any }` the non-monotonic set --
- *  and every floor this app declares is the first form. */
-function floorOf(roles: OsAppSection["roles"]): string {
-  return roles !== undefined && "min" in roles ? roles.min : "";
-}
 
 /** The label text of a control whose name comes from a `<label for=...>`. */
 function labelTextFor(el: Element): string {

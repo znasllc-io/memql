@@ -1,9 +1,16 @@
-// ONE role predicate for the whole shell (spec D8/E). The launcher grid,
-// the dock, open-by-id, widget placement and section nav all call
-// roleAdmits -- there is deliberately no second spelling of "can this actor
-// see this". Presentation gating only: the engine's row admission stays the
-// authority on every read; hiding an app here is UX, not a security
-// boundary.
+// WHO MAY SEE WHAT, for the whole shell -- and since epic memql#5289 the
+// answer is a CAPABILITY, not a rung.
+//
+// The launcher grid, the dock, open-by-id, widget placement and section nav
+// all ask `holds("read", "app:<id>")` of the effective capability set the
+// cluster reported for this person (`effectiveCapabilitiesForActor`), and
+// there is deliberately no second spelling of "can this actor see this".
+// `roleAdmits` below stays for the questions that are genuinely about the
+// LADDER -- "is this the cluster owner", "may this rung be assigned" -- and
+// for nothing that decides whether a surface is drawn. Presentation gating
+// only, in both cases: the engine's row admission and its capability gates
+// stay the authority on every read and write; hiding an app here is UX, not
+// a security boundary.
 //
 // THE ORDERING IS CLUSTER STATE, NOT A LITERAL IN THIS FILE (epic
 // memql#4832, D1).
@@ -205,28 +212,162 @@ export function roleGrantSlug(rung: RoleRung): string {
   return rung.aliases[0] ?? rung.slug;
 }
 
+// ===========================================================================
+// THE EFFECTIVE CAPABILITY SET (epic memql#5289, design D10 and D11)
+// ===========================================================================
+// One read replaces every hand-written floor. At sign-in the shell calls
+// `effectiveCapabilitiesForActor()` and holds the answer HERE, beside the
+// ladder, for the same reason the ladder lives here: the registry selectors
+// and the shell's actions ask the question out of band, and threading a set
+// through every one of their call sites would be a second spelling of "can
+// this actor see this".
+//
+// WHAT IS HELD IS THE ENGINE'S ANSWER AND NOTHING DERIVED. The engine resolves
+// the role catalog, the person's group grants and their own grants -- most
+// specific wins, deny wins within a level -- and reports one decision per
+// (verb, resource) pair with its provenance. This file never infers a
+// capability from a role: a shell that did would disagree with the engine the
+// first time somebody was granted an app their role lacks, or denied one it
+// holds, which is the whole feature.
+//
+// FAIL-CLOSED UNTIL THE READ LANDS, as the ladder is. `holds` answers false
+// for everything while the set is empty, so nothing gated renders before the
+// cluster has said what this person may open. The `accessEpoch` is the
+// reactivity signal: it increments on every install, and every memo that
+// filters by capability names it in its deps (the memql#4857 lesson, which
+// bit the ladder first).
+//
+// FRESHNESS IS BY RE-READ (D11): on sign-in, on window focus, and after any
+// grant written from this browser (`notifyGrantWritten`). Grant rows are
+// cluster-owner tier and never broadcast, so a grant somebody else writes for
+// this person appears here on the next focus. The engine honours it on the
+// next request regardless, so the lag is a hidden control appearing late --
+// never one that works when it should not.
+
+/** The five verbs, as the engine spells them. */
+export type CapabilityVerb = "read" | "create" | "update" | "delete" | "execute";
+
+/** Where an effective answer came from, as the engine reports it. */
+export type CapabilitySource = "role" | "group" | "user";
+
 /**
- * A requirement written out for somebody who has to READ it -- the two
- * surfaces that name one are the refused-window panel and the permissions
- * self-view.
- *
- * A SET IS RENDERED AS ITS MEMBERS, and this replaced a `requirementFloor`
- * that reported the weakest one instead. That was defensible while every set
- * was a contiguous top of the ladder -- `{owner, developer}` really is
- * "developer and above" -- and it became false the moment one left a rung out
- * of the MIDDLE. `{admin, owner}` skips developer at 300, so naming its floor
- * printed "admin and above" to a developer who outranks admin and still
- * cannot open the app: an explanation that contradicts the refusal it is
- * explaining.
- *
- * An EMPTY set admits nobody, so it is named as such rather than as "" --
- * which would read as "requires nothing", its exact opposite.
+ * One decision out of the effective set: the engine's answer for one
+ * (verb, resource) pair, and which level gave it.
  */
-export function describeRequirement(requirement?: RoleRequirement): string {
-  if (!requirement) return "a recognized role";
-  if ("any" in requirement) {
-    if (requirement.any.length === 0) return "a role this surface does not name";
-    return requirement.any.join(" or ");
+export interface EffectiveCapability {
+  verb: string;
+  resource: string;
+  /** `allow` is held; `deny` is a bar the set keeps visible so it can be lifted. */
+  effect: "allow" | "deny";
+  source: CapabilitySource;
+}
+
+let effective: Map<string, EffectiveCapability> = new Map();
+let effectiveLoaded = false;
+let epoch = 0;
+const grantListeners = new Set<() => void>();
+
+function keyOf(verb: string, resource: string): string {
+  return `${verb.trim()}\u0000${resource.trim()}`;
+}
+
+/**
+ * Install the set the cluster reported. Called from the session scope's read
+ * of `effectiveCapabilitiesForActor`, and again on every re-read.
+ *
+ * LAST-WRITE-WINS, never merged: a grant revoked since the last read has to
+ * disappear here, and merging would keep a capability nothing backs -- the
+ * ladder's own reason for replacing rather than merging.
+ */
+export function setEffectiveCapabilities(entries: readonly EffectiveCapability[]): void {
+  const next = new Map<string, EffectiveCapability>();
+  for (const entry of entries) {
+    if (entry.verb.trim() === "" || entry.resource.trim() === "") continue;
+    next.set(keyOf(entry.verb, entry.resource), entry);
   }
-  return requirement.min;
+  effective = next;
+  effectiveLoaded = true;
+  epoch += 1;
+}
+
+/**
+ * Forget the set. The session scope calls this when the identity is cleared
+ * -- a signed-out or reconnecting shell must not go on drawing a person's
+ * apps from a set that belonged to a connection that is gone.
+ */
+export function clearEffectiveCapabilities(): void {
+  effective = new Map();
+  effectiveLoaded = false;
+  epoch += 1;
+}
+
+/** Whether the cluster read has landed. Every gated surface stays hidden until it has. */
+export function effectiveAccessLoaded(): boolean {
+  return effectiveLoaded;
+}
+
+/**
+ * A counter that advances on every install or clear, so a memo keyed on it
+ * recomputes the moment the set changes. Read it through `useOs().accessEpoch`
+ * or `useSession().accessEpoch` rather than here: a component that reads the
+ * bare counter during render is not re-rendered when it moves.
+ */
+export function effectiveAccessEpoch(): number {
+  return epoch;
+}
+
+/**
+ * THE ONE ACCESS PREDICATE: does the effective set hold `verb` on `resource`?
+ *
+ * Fail-closed on every silence -- an unloaded set, an unknown pair, a blank
+ * argument -- and a `deny` entry is a held bar, not a held capability. Opening
+ * an app is `holds("read", "app:<id>")`; a named part of one is
+ * `holds("execute", "app:<id>/<part>")`.
+ */
+export function holds(verb: string, resource: string): boolean {
+  const entry = effective.get(keyOf(verb, resource));
+  return entry !== undefined && entry.effect === "allow";
+}
+
+/** The whole set, resource then verb, for a surface that RENDERS it (the permissions self-view). */
+export function effectiveCapabilities(): EffectiveCapability[] {
+  return [...effective.values()].sort(
+    (a, b) => a.resource.localeCompare(b.resource) || a.verb.localeCompare(b.verb),
+  );
+}
+
+/**
+ * Tell the session scope a grant was written from this browser, so it re-reads
+ * the set (D11). Called by the Access screen after `grantSet` / `grantRevoke`
+ * -- the one place in the shell that writes one -- and by nothing that merely
+ * reads. A grant written for SOMEBODY ELSE changes this person's set only if
+ * they share a group, which the re-read answers correctly and a local edit
+ * could not.
+ */
+export function notifyGrantWritten(): void {
+  for (const listener of [...grantListeners]) listener();
+}
+
+/** Subscribe to grant writes made in this browser. Returns the unsubscribe. */
+export function onGrantWritten(listener: () => void): () => void {
+  grantListeners.add(listener);
+  return () => {
+    grantListeners.delete(listener);
+  };
+}
+
+/**
+ * What the shell asks of a resource name for somebody who has to READ the
+ * answer -- the refused-window panel and the permissions self-view.
+ *
+ * "read on app:users" is the honest sentence now: what admits a person is a
+ * capability their role, a group or a grant gave them, and the old
+ * "admin or owner" would name a role that may be exactly wrong for a person
+ * granted the app on their own name. The resource is printed as the engine
+ * spells it, because that is the string an operator will look for in the
+ * Access screen and in the seeds.
+ */
+export function describeResource(resource?: string): string {
+  if (resource === undefined || resource.trim() === "") return "nothing beyond signing in";
+  return `read on ${resource.trim()}`;
 }

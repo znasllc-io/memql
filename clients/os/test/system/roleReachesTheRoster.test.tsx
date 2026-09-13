@@ -15,34 +15,31 @@ vi.mock("../../src/live/connection", () => ({
 
 import { Shell } from "../../src/chrome/Shell";
 import { resetIdsForTest } from "../../src/system/desks";
+import { clearEffectiveCapabilities } from "../../src/system/roles";
 import { LocalDesktopStore } from "../../src/system/store";
 import { UNKNOWN_RUNTIME_CONFIG } from "../../src/cluster/config";
+import { installSeededAccess, seededAccessFor } from "../seededAccess";
 
-// THE TEST THAT WAS MISSING (memql#4775).
+// THE TEST THAT WAS MISSING (memql#4775), RE-KEYED TO THE EFFECTIVE SET (epic
+// memql#5289).
 //
 // ===========================================================================
 // WHAT BROKE, AND WHY EVERY EXISTING TEST STAYED GREEN THROUGH IT
 // ===========================================================================
-// The shell read the signed-in role over HTTP from
-// `{identityUrl}/me/api/profile` -- a route registered in no Go file in this
-// repo, which the identity service answers with its own HTML at 200. The read
-// slipped past `!response.ok`, `response.json()` threw on the markup, the
-// try/catch swallowed it, and `role` became "". `roleAdmits` refuses an
-// unrankable role, so EVERY role-gated app was invisible to EVERY user in
-// EVERY cluster -- the owner included. It presented as "the Users app was
-// never built".
+// The shell read the signed-in role over HTTP from a route nothing served,
+// the read failed silently, the role became "" and EVERY role-gated app was
+// invisible to EVERY user in EVERY cluster -- the owner included. The suite
+// did not notice because the only test of that path stubbed the call it was
+// about to make.
 //
-// The suite did not notice because the only test of that path handed
-// `fetchMyAccess` a stub `fetch` returning the JSON it wanted, then asserted
-// the URL STRING. A double that answers the call you are about to make cannot
-// tell you whether anything serves it, and asserting the URL pins the wrong
-// endpoint rather than catching it.
-//
-// So this test asserts the PROPERTY that actually matters and that no unit
-// test covered: a role reported by the cluster reaches the app roster. It
-// drives the real Shell, the real SessionProvider, the real role predicate and
-// the real registry, and it fails against the old code -- which never asked
-// the connection anything at all.
+// The shell no longer decides from the ROLE at all. It asks the cluster what
+// this person may open -- `effectiveCapabilitiesForActor`, the role catalog
+// overlaid with their group and user grants -- and holds the answer as the
+// one access predicate. So the property that matters now is the same one
+// one level up: an answer the cluster gives reaches the app roster, and an
+// answer it does not give admits nothing. This drives the real Shell, the
+// real session scope, the real read hook, the real predicate and the real
+// registry, and it fails against a shell that never asked.
 
 function summary(role: string, over: Partial<AccessSummary> = {}): AccessSummary {
   return {
@@ -55,14 +52,35 @@ function summary(role: string, over: Partial<AccessSummary> = {}): AccessSummary
   } as AccessSummary;
 }
 
-/** A connection whose only job is to answer `getMyAccess`. */
-function fakeConnection(access: AccessSummary | null, opts: { fail?: boolean } = {}) {
+/** The effective read's one reply row, for a role's seeded set. */
+function effectiveRow(role: string) {
+  return { ok: true, code: "", role, userId: "u-42", entries: seededAccessFor(role) };
+}
+
+/**
+ * A connection that answers `getMyAccess` and the effective read.
+ *
+ * The effective read goes through the GENERATED builtin, which lands on
+ * `executeNamed` -- so the fake dispatches on the name, and a stub that
+ * answered only the identity would leave the roster empty for everybody.
+ */
+function fakeConnection(
+  access: AccessSummary | null,
+  opts: { fail?: boolean; effectiveFor?: string | null; failEffective?: boolean } = {},
+) {
+  const effectiveFor = opts.effectiveFor === undefined ? (access?.role ?? null) : opts.effectiveFor;
   const stub = {
     getMyAccess: vi.fn(async () => {
       if (opts.fail) throw new Error("stream refused");
       return access;
     }),
-    executeNamed: vi.fn(async () => ({ rows: () => [], meta: () => null })),
+    executeNamed: vi.fn(async (name: string) => {
+      if (name === "effectiveCapabilitiesForActor") {
+        if (opts.failEffective) throw new Error("stream refused");
+        return { rows: () => (effectiveFor === null ? [] : [effectiveRow(effectiveFor)]), meta: () => null };
+      }
+      return { rows: () => [], meta: () => null };
+    }),
   };
   return {
     query: Object.setPrototypeOf(stub, QueryClient.prototype) as QueryClient,
@@ -102,9 +120,11 @@ async function launcherApps(): Promise<string[]> {
 
 beforeEach(() => {
   h.connection = null;
+  // Start from the production COLD state: nothing the harness pre-seeded.
+  clearEffectiveCapabilities();
 });
 
-describe("the cluster's role reaches the app roster", () => {
+describe("the cluster's answer reaches the app roster", () => {
   it("an OWNER is offered the admin-gated app", async () => {
     h.connection = fakeConnection(summary("owner"));
     mountShell();
@@ -115,9 +135,9 @@ describe("the cluster's role reaches the app roster", () => {
   });
 
   it("a WRITER is offered Training and NOT Users", async () => {
-    // The discriminating case. Both apps are real and both are gated; only the
-    // thresholds differ, so this fails for a shell that resolves no role at
-    // all AND for one that resolves the wrong one.
+    // The discriminating case. Both apps are real and both are gated; only
+    // the seeded sets differ, so this fails for a shell that installs no set
+    // at all AND for one that installs the wrong one.
     h.connection = fakeConnection(summary("writer"));
     mountShell();
 
@@ -127,50 +147,53 @@ describe("the cluster's role reaches the app roster", () => {
     expect(await launcherApps()).not.toContain("Users");
   });
 
-  it("a role the cluster does not report admits NOTHING gated, and says nothing else broke", async () => {
-    // Fail-closed, and the reachable positive is in the same assertion: the
-    // ungated apps are still there, so an empty gated set is evidence about
-    // the role rather than about a shell that failed to render.
-    h.connection = fakeConnection(null);
+  it("a set the cluster does not report admits NOTHING gated", async () => {
+    // Fail-closed. Every app is a resource now, so an empty set is an empty
+    // launcher -- and the identity is what shows the desk at all, so the
+    // shell is drawn (the Launcher button is there) with nothing in it.
+    h.connection = fakeConnection(summary("owner"), { effectiveFor: null });
     mountShell();
 
-    await waitFor(async () => {
-      expect(await launcherApps()).toContain("Settings");
-    });
+    await screen.findByRole("button", { name: "Launcher" });
     const apps = await launcherApps();
     expect(apps).not.toContain("Users");
     expect(apps).not.toContain("Training");
-    expect(apps).toContain("Deployables");
+    expect(apps).not.toContain("Deployables");
   });
 
-  it("a REFUSED read is unknown, not a crash", async () => {
-    h.connection = fakeConnection(null, { fail: true });
+  it("a REFUSED effective read is unknown, not a crash", async () => {
+    h.connection = fakeConnection(summary("owner"), { failEffective: true });
     mountShell();
 
-    await waitFor(async () => {
-      expect(await launcherApps()).toContain("Settings");
-    });
+    await screen.findByRole("button", { name: "Launcher" });
     expect(await launcherApps()).not.toContain("Users");
   });
 
-  it("asks the CLUSTER, rather than composing an identity URL", async () => {
+  it("asks the CLUSTER for the set, through the generated read", async () => {
     // The shape of the original defect: the facts were fetched from a route
-    // nothing served. `getMyAccess` is a message the engine implements and the
-    // SDK is contract-tested against, so "did we ask the right thing" is
-    // answerable here in a way a URL string never was.
+    // nothing served. Both reads here are messages the engine implements and
+    // the SDK is contract-tested against, so "did we ask the right thing" is
+    // answerable in a way a URL string never was.
     const connection = fakeConnection(summary("owner"));
     h.connection = connection;
     mountShell();
 
     await waitFor(() => {
       expect(connection.query.getMyAccess).toHaveBeenCalled();
+      expect(connection.query.executeNamed).toHaveBeenCalledWith(
+        "effectiveCapabilitiesForActor",
+        expect.any(String),
+        expect.anything(),
+      );
     });
   });
 
-  it("an explicitly supplied access WINS and makes no read", async () => {
+  it("an explicitly supplied access WINS for the identity and makes no identity read", async () => {
     // What keeps every existing harness working: a caller that already knows
-    // who is signed in is not asking.
-    const connection = fakeConnection(summary("reader"));
+    // who is signed in is not asking. The EFFECTIVE SET is still the
+    // cluster's to answer -- an identity handed in by a harness says who is
+    // here, never what they may open.
+    const connection = fakeConnection(summary("reader"), { effectiveFor: "owner" });
     h.connection = connection;
     resetIdsForTest();
     render(
@@ -187,5 +210,18 @@ describe("the cluster's role reaches the app roster", () => {
       expect(await launcherApps()).toContain("Users");
     });
     expect(connection.query.getMyAccess).not.toHaveBeenCalled();
+  });
+
+  it("a set already held survives a connection going away", async () => {
+    // The ladder's rule, for the ladder's reason: a dropped connection is
+    // "the shell cannot reach the cluster right now", not "this person lost
+    // access they hold". The desk follows the identity, which IS cleared.
+    installSeededAccess("owner");
+    h.connection = null;
+    mountShell();
+    // No identity, no desk: the core gate draws nothing gated. The set is
+    // simply still there for the reconnect.
+    const { holds } = await import("../../src/system/roles");
+    expect(holds("read", "app:users")).toBe(true);
   });
 });
