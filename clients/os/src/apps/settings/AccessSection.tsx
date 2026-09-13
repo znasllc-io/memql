@@ -430,21 +430,24 @@ function ResourceHolders({
         <Caption>Nobody holds it by name. The roles above are the whole answer.</Caption>
       ) : (
         <ul className="os-access-grant-list" aria-label="Granted by name">
-          {grants.map((grant) => (
-            <li key={grant.id} className="os-access-grant">
-              <span className="os-access-grant-who">{nameOf(grant.subjectId) || grant.subjectId}</span>
-              <Chip tone={grant.effect === "allow" ? "accent" : "muted"}>{grant.effect === "allow" ? "allowed" : "denied"}</Chip>
-              <span className="os-access-from">
-                {grant.subjectKind === "group" ? "a group" : "a person"}
-                {nameOf(grant.grantedBy) === "" ? "" : `, by ${nameOf(grant.grantedBy)}`}
-              </span>
-              {canWrite && !namesTheViewer(grant, viewerUserId) ? (
-                <button type="button" className="os-link" disabled={busy} onClick={() => onRevoke(grant)} aria-label={`Revoke ${grant.effect} for ${nameOf(grant.subjectId) || grant.subjectId}`}>
-                  Revoke
-                </button>
-              ) : null}
-            </li>
-          ))}
+          {grants.map((grant) => {
+            const who = holderLabel(grant, nameOf);
+            return (
+              <li key={grant.id} className="os-access-grant">
+                <span className="os-access-grant-who">{who}</span>
+                <Chip tone={grant.effect === "allow" ? "accent" : "muted"}>{grant.effect === "allow" ? "allowed" : "denied"}</Chip>
+                <span className="os-access-from">
+                  {grant.subjectKind === "group" ? "a group" : "a person"}
+                  {nameOf(grant.grantedBy) === "" ? "" : `, by ${nameOf(grant.grantedBy)}`}
+                </span>
+                {canWrite && !namesTheViewer(grant, viewerUserId) ? (
+                  <button type="button" className="os-link" disabled={busy} onClick={() => onRevoke(grant)} aria-label={`Revoke ${grant.effect} for ${who}`}>
+                    Revoke
+                  </button>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       )}
       {/* THE ABSENT ACT, EXPLAINED ONCE. Rule 12 takes the button away rather
@@ -469,6 +472,20 @@ function ResourceHolders({
  */
 function namesTheViewer(grant: AccessGrant, viewerUserId: string): boolean {
   return viewerUserId !== "" && grant.subjectKind === "user" && bareId(grant.subjectId) === viewerUserId;
+}
+
+/**
+ * Who a grant names, in words -- and NEVER the principal id.
+ *
+ * An opaque id is not a name: nobody can look one up, it tells a reader
+ * nothing the row's own "a person" does not, and printing it here would be
+ * the one place in this shell where an identifier stands in for somebody.
+ * Deployables' attribution settled this already ("a name is offered, never
+ * invented"); an unnamed holder says the roster did not name them, which is
+ * the true thing and also the actionable one.
+ */
+function holderLabel(grant: AccessGrant, nameOf: (id: string) => string): string {
+  return nameOf(grant.subjectId) || "Not on this roster";
 }
 
 // ---------------------------------------------------------------------------

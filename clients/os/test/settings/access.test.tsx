@@ -376,6 +376,23 @@ describe("by app: who holds it", () => {
     expect(within(list).getByRole("button", { name: "Revoke allow for Ada Lovelace" })).toBeTruthy();
   });
 
+  it("never prints a principal id where a name goes", async () => {
+    // A grant naming somebody the roster does not carry -- a person below the
+    // roster's floor, or a row since deactivated. An id names nobody a reader
+    // can look up, and this list is the one place it could leak.
+    const state = freshState({
+      grantsByResource: {
+        "app:stores": [grantRow({ id: "grant-x", subjectId: "u-ghost", resource: "app:stores", verb: "read", effect: "allow" })],
+      },
+    });
+    mount(state);
+    const list = await pickResource("Stores");
+    expect(within(list).getByText("Not on this roster")).toBeTruthy();
+    expect(list.textContent).not.toContain("u-ghost");
+    // The act's label says the same thing, for the same reason.
+    expect(within(list).getByRole("button", { name: "Revoke allow for Not on this roster" })).toBeTruthy();
+  });
+
   it("offers no Revoke on the viewer's own grant, and says why", async () => {
     // The engine's rule 4 refuses a grant naming yourself, revoke included
     // (`checkGrantAuthority`), so the act would only ever be refused.
