@@ -146,6 +146,9 @@ func registerSiteOwnerRestamp(m *migrate.Migrations, logger *slog.Logger) {
 // siteOwnerRestampSelectSQL lists every blanked site with the two candidate
 // owners. No `?` anywhere in it: bun rewrites that character as a placeholder,
 // so the jsonb key-exists operator is spelled through COALESCE instead.
+//
+// staged-data: MUST-NOT-GATE -- a MIGRATION must see every row, by definition
+// (epic memql#3974, task memql#3984).
 const siteOwnerRestampSelectSQL = `
 WITH latest_site AS (
   SELECT DISTINCT ON (id) id, payload
@@ -199,6 +202,9 @@ SELECT b.id,
 // version it copies, since (id, "createdAt") is the primary key. The owner
 // guard in the subquery makes a concurrent engine write that already set an
 // owner turn this into a no-op rather than a second version.
+//
+// staged-data: MUST-NOT-GATE -- a MIGRATION must see every row, by definition
+// (epic memql#3974, task memql#3984).
 const siteOwnerRestampInsertSQL = `
 INSERT INTO "MemoryNodes" (id, "createdAt", "createdBy", concept, type, schema, payload, metadata, provenance)
 SELECT id,
@@ -299,6 +305,9 @@ func siteOwnerRestampCandidates(ctx context.Context, tx bun.Tx) ([]SiteOwnerRest
 // this migration appended, identified by their provenance. Every other
 // version of every site is left as it was, so the rows read as they did
 // before the up ran.
+//
+// staged-data: MUST-NOT-GATE -- a MIGRATION must see every row, by definition
+// (epic memql#3974, task memql#3984).
 func RevertSiteOwnerRestamp(ctx context.Context, db *bun.DB, logger *slog.Logger) error {
 	if logger == nil {
 		logger = slog.Default()
