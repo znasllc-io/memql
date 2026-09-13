@@ -13,9 +13,14 @@
 -- "internal error" on every cold host resolution.
 --
 -- The composite index lets the same plan skip within one concept's ids.
--- transaction_per_chunk keeps the build's lock to one chunk at a time on a
--- live hypertable; this file is NOT transactional (no .tx. suffix), which is
--- what that option requires.
+--
+-- A PLAIN build, deliberately. `WITH (timescaledb.transaction_per_chunk)`
+-- would hold the lock one chunk at a time on a live hypertable, but it is
+-- refused with `unrecognized parameter namespace "timescaledb"` on a database
+-- where the extension is not loaded -- which the round-trip lane is, and
+-- which any install that runs the memory-nodes schema before (or without)
+-- TimescaleDB is. This migration must succeed on both shapes; an operator
+-- with a large live hypertable builds the index by hand first, and the
+-- IF NOT EXISTS then makes this a no-op.
 CREATE INDEX IF NOT EXISTS memory_nodes_concept_id_created_at_desc_idx
-    ON "MemoryNodes" (concept, id, "createdAt" DESC)
-    WITH (timescaledb.transaction_per_chunk);
+    ON "MemoryNodes" (concept, id, "createdAt" DESC);
