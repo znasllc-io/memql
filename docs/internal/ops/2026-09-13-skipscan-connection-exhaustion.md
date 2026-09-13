@@ -1,5 +1,5 @@
 ---
-title: Incident: every concept read walked the whole hypertable (memql.znas.io, 2026-09-13)
+title: Incident: every concept read walked the whole hypertable (a production instance, 2026-09-13)
 audience: internal
 status: current
 area: ops
@@ -9,7 +9,7 @@ owner: platform
 
 # Incident: every concept read walked the whole hypertable
 
-**Where:** memql.znas.io (the `entry` preset: one Postgres instance, 4 GiB,
+**Where:** a production instance (the `entry` preset: one Postgres instance, 4 GiB,
 200 connections). **When:** 16:56 UTC to about 18:05 UTC, 2026-09-13.
 **Seen as:** "internal error" on most cold page loads; `/healthz` fine.
 

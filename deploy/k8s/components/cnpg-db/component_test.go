@@ -171,7 +171,7 @@ func TestPresetsMatchTheirDocumentedTiers(t *testing.T) {
 		cpu, mem  string
 		maxConns  string
 		// Postgres MEMORY parameters, sized to the preset's memory limit
-		// (memql.znas.io, 2026-09-13): a preset that raises the pod's memory
+		// (a production instance, 2026-09-13): a preset that raises the pod's memory
 		// and leaves the server on its 128 MB shared_buffers default buys RAM
 		// Postgres never uses, and the first large hypertable read runs off
 		// disk at a 61% cache-hit rate.

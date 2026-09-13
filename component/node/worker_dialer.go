@@ -244,7 +244,7 @@ type WorkerDialer struct {
 
 	// Event-driven reconciles are COALESCED over triggerDelay: every
 	// v1:cluster:node heartbeat on the mesh lands here on every pod, and each
-	// reconcile re-reads the whole node list (memql.znas.io, 2026-09-13: that
+	// reconcile re-reads the whole node list (a production instance, 2026-09-13: that
 	// read was the query that exhausted max_connections). A burst of events
 	// inside the window costs one pass, issued when the window closes. Zero
 	// means immediate, which is what the tests that drive triggerReconcile by

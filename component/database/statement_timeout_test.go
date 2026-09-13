@@ -8,7 +8,7 @@ import (
 )
 
 // Every request-serving backend carries a statement timeout; the migration
-// pool carries everything else and NOT that (memql.znas.io, 2026-09-13).
+// pool carries everything else and NOT that (a production instance, 2026-09-13).
 func TestEveryPooledBackendCarriesAStatementTimeout(t *testing.T) {
 	t.Setenv(envDBStatementTimeoutMs, "")
 	params := sessionConnParams()

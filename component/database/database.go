@@ -1566,7 +1566,7 @@ const (
 	// client-side promise the server never hears: a Go context that expires
 	// closes the socket, and the Postgres backend keeps running the statement
 	// until it next tries to write to that socket -- for a 178-second read that
-	// is 178 seconds. On memql.znas.io (2026-09-13) pods capped at 4
+	// is 178 seconds. On a production instance (2026-09-13) pods capped at 4
 	// connections held 30 backends each that way, and 200 slots ran out. A
 	// statement the server itself abandons frees its slot at the deadline, and
 	// the client sees `canceling statement due to statement timeout` (SQLSTATE

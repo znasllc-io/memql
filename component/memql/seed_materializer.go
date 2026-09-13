@@ -426,7 +426,7 @@ func (m *SeedMaterializer) materializeGlobal(ctx context.Context, def *SeedDefin
 // seedRowIsCurrent reports whether the row a seed is about to write already
 // holds, key for key, everything the write would carry -- in which case the
 // write is skipped. Every boot used to append a fresh VERSION of every seed
-// row regardless (memql.znas.io, 2026-09-13: 215 capability ids carried
+// row regardless (a production instance, 2026-09-13: 215 capability ids carried
 // 19,277 versions, 2,628 of them written during one rollout), and each of
 // those versions raised the catalog-reload event on every node for a change
 // that had not happened. A missing row, an unreadable one, or any key the

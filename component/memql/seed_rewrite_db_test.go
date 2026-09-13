@@ -6,7 +6,7 @@ import (
 )
 
 // A second boot sweep over an unchanged seed appends NO version. Every boot
-// used to append one per seed row regardless (memql.znas.io, 2026-09-13: 215
+// used to append one per seed row regardless (a production instance, 2026-09-13: 215
 // capability ids carried 19,277 versions), and each raised the catalog-reload
 // event on every node for a change that had not happened.
 func TestASecondSeedSweepAppendsNoVersionToAnUnchangedRow(t *testing.T) {

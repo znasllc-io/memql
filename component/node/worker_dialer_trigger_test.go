@@ -8,7 +8,7 @@ import (
 // A burst of heartbeat events must cost ONE reconcile pass, issued once the
 // coalescing window closes -- not one pass per event. Before this window every
 // v1:cluster:node heartbeat on the mesh queued a full node-list read on every
-// pod (memql.znas.io, 2026-09-13).
+// pod (a production instance, 2026-09-13).
 func TestTriggerReconcileCoalescesABurstIntoOnePass(t *testing.T) {
 	wd := &WorkerDialer{triggerDelay: 20 * time.Millisecond}
 	ch := make(chan struct{}, 1)

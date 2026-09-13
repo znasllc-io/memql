@@ -51,7 +51,7 @@ func (e *MemQLEngine) readinessIdentity() (string, string) {
 // flag and lanes as the row already holds is SKIPPED: the fleet's steady state
 // used to append a version per module per node on every trigger (772k
 // v1:platform:moduleReadiness versions for a few dozen live ids on
-// memql.znas.io, 2026-09-13), and every one of those rows was news to nobody.
+// a production instance, 2026-09-13), and every one of those rows was news to nobody.
 // At or past the floor the row is restated so `reportedAt` never reads as
 // abandoned.
 const readinessRewriteFloor = 10 * time.Minute

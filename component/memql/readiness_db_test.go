@@ -85,7 +85,7 @@ func TestBootWritesOneRowPerModuleAndAnUnchangedSweepWritesNone(t *testing.T) {
 	// A rewrite is a new VERSION of the same ids, and the read collapses to
 	// one row per id. If the id were not deterministic this would double.
 	// An unchanged, fresh verdict is NOT restated: the second sweep appends no
-	// version at all (memql.znas.io, 2026-09-13 -- 772k versions of this
+	// version at all (a production instance, 2026-09-13 -- 772k versions of this
 	// concept for a few dozen live ids, every one of them news to nobody).
 	rewritten, err := e.WriteModuleReadiness(ctx)
 	if err != nil {
