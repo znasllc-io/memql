@@ -1,7 +1,7 @@
 ---
 title: Incident: every concept read walked the whole hypertable (a production instance, 2026-09-13)
 audience: internal
-status: current
+status: stable
 area: ops
 sinceVersion: "0.21.25"
 owner: platform

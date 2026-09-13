@@ -49,7 +49,8 @@ func TestBootWritesOneRowPerModuleAndAnUnchangedSweepWritesNone(t *testing.T) {
 	// readinessRewriteFloor is not restated, so a standing row from an
 	// earlier test (or an earlier run of this one against the same database)
 	// would make the first write below count 0 and read as a failure.
-	e.SetReadinessIdentity(fmt.Sprintf("readiness-test-node-%d", time.Now().UnixNano()), "bff")
+	nodeId := fmt.Sprintf("readiness-test-node-%d", time.Now().UnixNano())
+	e.SetReadinessIdentity(nodeId, "bff")
 
 	manifest, err := envregistry.LoadManifest("")
 	if err != nil {
@@ -69,7 +70,7 @@ func TestBootWritesOneRowPerModuleAndAnUnchangedSweepWritesNone(t *testing.T) {
 	first := readinessRowsForTest(t, e)
 	mine := 0
 	for _, r := range first {
-		if r.NodeId == "readiness-test-node" {
+		if r.NodeId == nodeId {
 			mine++
 			switch r.State {
 			case readiness.Configured, readiness.Partial, readiness.Unconfigured, readiness.NotApplicable:
@@ -97,7 +98,7 @@ func TestBootWritesOneRowPerModuleAndAnUnchangedSweepWritesNone(t *testing.T) {
 	second := readinessRowsForTest(t, e)
 	mine = 0
 	for _, r := range second {
-		if r.NodeId == "readiness-test-node" {
+		if r.NodeId == nodeId {
 			mine++
 		}
 	}
