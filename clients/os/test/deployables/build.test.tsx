@@ -381,9 +381,15 @@ describe("the seams the surface calls", () => {
 // ---------------------------------------------------------------------------
 
 const packagesDir = join(dirname(fileURLToPath(import.meta.url)), "../../../../component/packages");
+// The capability gate's own code (epic memql#5289) lives in component/memql,
+// and a call whose part the caller lacks is refused there.
+const capabilityGatePath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../../component/memql/requires_capability.go",
+);
 
-/** Every code literal the engine can emit: the catalogue's constants, plus the
- *  ones spelled inline at a raise site. */
+/** Every code literal the engine can emit: the catalogue's constants, the
+ *  capability gate's, plus the ones spelled inline at a raise site. */
 function engineCodes(): string[] {
   const out = new Set<string>();
   for (const name of readdirSync(packagesDir)) {
@@ -393,6 +399,7 @@ function engineCodes(): string[] {
     for (const m of source.matchAll(/\b(?:refuse|refuseScoped)\(\s*"([a-z_]+)"/g)) out.add(m[1]!);
     for (const m of source.matchAll(/\bCode:\s*"([a-z_]+)"/g)) out.add(m[1]!);
   }
+  for (const m of readFileSync(capabilityGatePath, "utf8").matchAll(/^\s*const\s+Code\w+\s*=\s*"([a-z_]+)"/gm)) out.add(m[1]!);
   return [...out].sort();
 }
 

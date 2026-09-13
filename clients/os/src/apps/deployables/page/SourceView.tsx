@@ -5,6 +5,7 @@ import { Button, Caption, Chip, Fact, Facts, Head, Panel } from "../../../kit";
 import { formatMoment } from "../../../kit/format";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { shortVersion, sourceLabel, type PackageRow } from "../packages/rows";
+import type { PartsHeld } from "../parts";
 import { siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
 import { siteStateWord, stateChip } from "../words";
@@ -46,7 +47,7 @@ export function SourceView({
   pkg,
   apps,
   credentials,
-  canWrite,
+  can,
   onBack,
   onOpenHistory,
   onOpenApp,
@@ -58,7 +59,8 @@ export function SourceView({
   /** The apps this source produced, from the root's site feed. */
   apps: readonly SiteRow[];
   credentials: readonly CredentialRow[];
-  canWrite: boolean;
+  /** The parts this session holds: the credential and the switch are `sources`, the cascade is `retire`. */
+  can: PartsHeld;
   onBack: () => void;
   onOpenHistory: () => void;
   onOpenApp: (siteId: string) => void;
@@ -189,8 +191,8 @@ export function SourceView({
             ) : null}
           </section>
 
-          {pkg.sourceKind === "repo" && canWrite ? <SwitchCredential pkg={pkg} credentials={credentials} /> : null}
-          {canWrite && pkg.status !== "archived" ? <AutoDeploySwitch pkg={pkg} /> : null}
+          {pkg.sourceKind === "repo" && can.sources ? <SwitchCredential pkg={pkg} credentials={credentials} /> : null}
+          {can.sources && pkg.status !== "archived" ? <AutoDeploySwitch pkg={pkg} /> : null}
 
           <button type="button" className="os-deploy-history-line" onClick={onOpenHistory}>
             <History size={12} aria-hidden />
@@ -203,7 +205,7 @@ export function SourceView({
           {/* THE CASCADE LIVES HERE AND NOWHERE ELSE. It deactivates every app
               the source produced, so the only honest place for it is the page
               whose subject is the source. */}
-          {canWrite ? <PackageLifecycle pkg={pkg} apps={apps} /> : null}
+          {can.retire ? <PackageLifecycle pkg={pkg} apps={apps} /> : null}
         </Panel>
       </div>
 

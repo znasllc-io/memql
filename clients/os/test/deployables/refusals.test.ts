@@ -23,12 +23,21 @@ import { SERVER_SENTENCE_ONLY, copyFor, knownCodes } from "../../src/apps/deploy
 
 const packagesDir = join(dirname(fileURLToPath(import.meta.url)), "../../../../component/packages");
 const cataloguePath = join(packagesDir, "refusal.go");
+// THE CAPABILITY GATE'S CODE IS THE ENGINE'S, NOT THE PIPELINE'S (epic
+// memql#5289): component/memql refuses a call whose part the caller does not
+// hold, and that refusal reaches this app's controls like any other.
+const capabilityGatePath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../../component/memql/requires_capability.go",
+);
 
-/** The `CodeX = "..."` constants the catalogue declares. */
+/** The `CodeX = "..."` constants the catalogue -- and the capability gate -- declare. */
 function cataloguedCodes(): string[] {
-  const source = readFileSync(cataloguePath, "utf8");
   const out = new Set<string>();
-  for (const m of source.matchAll(/^\s*Code\w+\s*=\s*"([a-z_]+)"/gm)) out.add(m[1]!);
+  for (const path of [cataloguePath, capabilityGatePath]) {
+    const source = readFileSync(path, "utf8");
+    for (const m of source.matchAll(/^\s*(?:const\s+)?Code\w+\s*=\s*"([a-z_]+)"/gm)) out.add(m[1]!);
+  }
   return [...out].sort();
 }
 
@@ -56,7 +65,9 @@ describe("refusal copy coverage", () => {
     // silently vacuous the moment the catalogue moved, which is exactly when
     // the two sides are most likely to have diverged.
     expect(existsSync(cataloguePath), `${cataloguePath} is not where this test expects the catalogue`).toBe(true);
+    expect(existsSync(capabilityGatePath), `${capabilityGatePath} is not where this test expects the capability gate`).toBe(true);
     expect(cataloguedCodes().length).toBeGreaterThan(0);
+    expect(cataloguedCodes()).toContain("capability_not_held");
   });
 
   it("still finds the inline codes the pipeline spells at its raise sites", () => {

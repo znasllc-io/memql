@@ -11,6 +11,7 @@ import { usePackageActions, useSiteLifecycle } from "../packages/actions";
 import { ProblemNotice } from "../packages/ReportView";
 import { everyOtherAppSkipped, type Placement } from "../packages/calls";
 import { deploymentFromRow, type DeploymentRow, type PackageRow } from "../packages/rows";
+import type { PartsHeld } from "../parts";
 import { usePackageDeployments } from "../packages/usePackages";
 import { liveUrlFor, ownerLabel, siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
@@ -64,9 +65,8 @@ export interface DeployablePageProps {
   /** The caller's credential cards, from the root feed. */
   credentials: readonly CredentialRow[];
   viewerUserId: string;
-  /** Rank >= 200; the app computes it once. */
-  canWrite: boolean;
-  isClusterOwner: boolean;
+  /** The parts this session holds (epic memql#5289); the app reads them once. */
+  can: PartsHeld;
   clusterDomain: string;
   onAsk?: (tag: string) => void;
   /** The quiet Back to the list. */
@@ -90,8 +90,7 @@ export function DeployablePage({
   pkg,
   credentials,
   viewerUserId,
-  canWrite,
-  isClusterOwner,
+  can,
   clusterDomain,
   onAsk,
   onBack,
@@ -143,7 +142,7 @@ export function DeployablePage({
   const name = siteName(site);
   const url = liveUrlFor(site.hostname);
 
-  const reading = actsFor({ site, pkg, run, siblingRun, canWrite, deleting, releasing: site.hostname });
+  const reading = actsFor({ site, pkg, run, siblingRun, can, deleting, releasing: site.hostname });
 
   function act(named: ActName) {
     switch (named) {
@@ -251,7 +250,7 @@ export function DeployablePage({
             site={site}
             pkg={pkg}
             credentials={credentials}
-            canWrite={canWrite}
+            canDeploy={can.deploy}
             flipped={flipped}
             zipOpen={zipOpen}
             onZipOpenChange={setZipOpen}
@@ -266,14 +265,14 @@ export function DeployablePage({
           <WhereItLivesStop
             site={site}
             accounts={accounts}
-            isClusterOwner={isClusterOwner}
+            canBindDomain={can.domains}
             clusterDomain={clusterDomain}
           />
         );
       case "build":
         return <BuildStop run={run} app={site.packageDeployableName} refusal={refusal} />;
       case "live":
-        return <LiveStop site={site} canWrite={canWrite} lifecycle={lifecycle} refusal={refusal} />;
+        return <LiveStop site={site} canPublish={can.publish} lifecycle={lifecycle} refusal={refusal} />;
       default:
         return null;
     }

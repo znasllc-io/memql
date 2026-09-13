@@ -67,12 +67,13 @@ const SYSTEM_OWNED_NOTE =
 
 export function LiveStop({
   site,
-  canWrite,
+  canPublish,
   lifecycle,
   refusal,
 }: {
   site: SiteRow;
-  canWrite: boolean;
+  /** The `publish` part: rolling back to a version and changing what the app reads at load. */
+  canPublish: boolean;
   /**
    * The page's own status hook, shared with the Head's Make it live so that
    * a refused status write renders HERE, beside the other status controls,
@@ -126,7 +127,7 @@ export function LiveStop({
   // nothing to show such a reader and returned null, which is why the
   // condition grew a term rather than being replaced.
   const hasReadings = site.status !== "draft";
-  if (refusal === null && !live && !canWrite && !hasReadings) return null;
+  if (refusal === null && !live && !canPublish && !hasReadings) return null;
 
   return (
     <div className="os-stop-body">
@@ -143,7 +144,7 @@ export function LiveStop({
           opening a live deployable came to find out. */}
       <TrafficPanel site={site} />
 
-      {canWrite && serving && isPublished(site) ? (
+      {canPublish && serving && isPublished(site) ? (
         <section className="os-report-part">
           <h4 className="os-report-heading">
             <History size={12} aria-hidden /> Versions
@@ -184,7 +185,7 @@ export function LiveStop({
       {/* What the app reads at load. Beneath the history because it is
           configuration rather than status, and above Availability because it
           is a smaller act than pausing. */}
-      <RuntimeSettingsPanel site={site} canWrite={canWrite} />
+      <RuntimeSettingsPanel site={site} canEdit={canPublish} />
 
       {/* THE LIFECYCLE ACTS ARE NOT HERE ANY MORE (epic memql#4937, DESIGN.md
           rule 12). Pause, Resume, Archive and Restore moved to the ACTION BAR,

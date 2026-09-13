@@ -1,6 +1,7 @@
 import type { AnalysisReport, DeploymentRow, PackageRow, ReportDeployable } from "../packages/rows";
 import { runIsScopedToApp, sourceLabel } from "../packages/rows";
 import { bundleForm, bundleFormLabel, type SiteRow } from "../rows";
+import type { DeployablePart } from "../parts";
 import { WEB_TARGET, kindLabel, type StopDef, type StopId } from "../targets";
 import { isPlaceholderBundle, liveStopNote, siteIsBuilt } from "../words";
 
@@ -798,6 +799,12 @@ export interface HeadAction {
   disabled: boolean;
   /** Redeploy is the quiet one: a live site with nothing newer needs no urging. */
   tone: "primary" | "quiet";
+  /**
+   * The part of Deployables the action needs (epic memql#5289). Go live is
+   * `publish`; everything that starts a run is `deploy`. The page withholds
+   * the action when the set lacks the part -- absent, never disabled.
+   */
+  requires: DeployablePart;
 }
 
 /**
@@ -808,19 +815,19 @@ export interface HeadAction {
 export function headActionFor(state: HeadState): HeadAction | null {
   switch (state.at) {
     case "composing":
-      return { label: "Analyze", disabled: !state.sourceComplete, tone: "primary" };
+      return { label: "Analyze", disabled: !state.sourceComplete, tone: "primary", requires: "deploy" };
     case "awaiting_confirm":
-      return { label: "Deploy", disabled: !state.placementsComplete, tone: "primary" };
+      return { label: "Deploy", disabled: !state.placementsComplete, tone: "primary", requires: "deploy" };
     case "running":
       return null;
     case "draft_with_bundle":
-      return { label: "Go live", disabled: false, tone: "primary" };
+      return { label: "Go live", disabled: false, tone: "primary", requires: "publish" };
     case "live":
       return state.updateAvailable
-        ? { label: "Deploy the update", disabled: false, tone: "primary" }
-        : { label: "Redeploy", disabled: false, tone: "quiet" };
+        ? { label: "Deploy the update", disabled: false, tone: "primary", requires: "deploy" }
+        : { label: "Redeploy", disabled: false, tone: "quiet", requires: "deploy" };
     case "refused_or_failed":
-      return { label: "Retry", disabled: false, tone: "primary" };
+      return { label: "Retry", disabled: false, tone: "primary", requires: "deploy" };
   }
 }
 

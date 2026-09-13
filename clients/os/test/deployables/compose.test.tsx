@@ -27,6 +27,8 @@ import {
   type FakeConnection,
   type FakeSeed,
 } from "./harness";
+import { seededAccessWithout } from "../seededAccess";
+import type { EffectiveCapability } from "../../src/system/roles";
 
 // The compose flow (epic memql#4885, task memql#4891): the five stops as
 // INPUTS -- the probes the Source stop runs, the credential picker, the
@@ -70,7 +72,10 @@ function memStore() {
   });
 }
 
-function mount(connection: FakeConnection | null, opts: { role?: string; section?: string } = {}) {
+function mount(
+  connection: FakeConnection | null,
+  opts: { role?: string; section?: string; capabilities?: EffectiveCapability[] } = {},
+) {
   h.connection = connection;
   return render(
     withSession(
@@ -80,7 +85,7 @@ function mount(connection: FakeConnection | null, opts: { role?: string; section
         askContext={vi.fn()}
         store={memStore()}
       />,
-      { role: opts.role ?? "owner", userId: "u-me" },
+      { role: opts.role ?? "owner", userId: "u-me", capabilities: opts.capabilities },
     ),
   );
 }
@@ -95,7 +100,7 @@ function mount(connection: FakeConnection | null, opts: { role?: string; section
  */
 async function compose(
   connection: FakeConnection,
-  opts: { role?: string } = {},
+  opts: { role?: string; capabilities?: EffectiveCapability[] } = {},
 ): Promise<{ region: HTMLElement; view: ReturnType<typeof render> }> {
   const view = mount(connection, opts);
   await click(await screen.findByRole("button", { name: /New deployable/ }));
@@ -578,11 +583,15 @@ describe("the compose flow: pushed by your CI", () => {
     expect(within(owner).getByRole("radio", { name: /Pushed by your CI/ })).toBeTruthy();
     view.unmount();
 
-    const { region: admin } = await compose(fakeConnection({}), { role: "admin" });
-    expect(within(admin).queryByRole("radio", { name: /Pushed by your CI/ })).toBeNull();
+    // A DEVELOPER, not an admin: the parts of Deployables are seeded on owner
+    // and developer (epic memql#5289), so a developer composes and an admin
+    // never reaches this flow at all. CI push is the one answer that stays a
+    // cluster owner's rung rather than a part.
+    const { region: developer } = await compose(fakeConnection({}), { role: "developer" });
+    expect(within(developer).queryByRole("radio", { name: /Pushed by your CI/ })).toBeNull();
     // ...and the other two ARE offered, so the absence is about the rung
     // rather than about the stop having failed to render.
-    expect(within(admin).getByRole("radio", { name: /A repository/ })).toBeTruthy();
+    expect(within(developer).getByRole("radio", { name: /A repository/ })).toBeTruthy();
   });
 
   it("shows the site id, the bundle route and the mint command after Analyze", async () => {
@@ -627,7 +636,7 @@ describe("the compose flow: pushed by your CI", () => {
 /** Compose a repository source through Analyze, and land on the parked run. */
 async function analyzed(
   seed: FakeSeed = {},
-  opts: { role?: string } = {},
+  opts: { role?: string; capabilities?: EffectiveCapability[] } = {},
 ): Promise<{ connection: FakeConnection; region: HTMLElement; view: ReturnType<typeof render> }> {
   const connection = fakeConnection({ sourceProbe: { "": probeReply() }, ...seed });
   const { region, view } = await compose(connection, opts);
@@ -846,15 +855,20 @@ describe("the compose flow: where each app will live", () => {
     expect([...bar().querySelectorAll("button")].map((b) => (b.textContent ?? "").trim())).toEqual(["Done"]);
   });
 
-  it("offers a cluster owner the client AND their own domain; an admin only the client", async () => {
+  it("offers the client to everybody who composes, and their own domain only with the domains part", async () => {
     const { region, view } = await analyzed();
     expect(within(region).getByLabelText("The client storefront is for")).toBeTruthy();
     expect(within(region).getByLabelText("A domain of the client's own for storefront")).toBeTruthy();
     view.unmount();
 
-    const { region: admin } = await analyzed({}, { role: "admin" });
-    expect(within(admin).getByLabelText("The client storefront is for")).toBeTruthy();
-    expect(within(admin).queryByLabelText("A domain of the client's own for storefront")).toBeNull();
+    // A DEVELOPER DENIED `domains` BY NAME (epic memql#5289): the seeds give
+    // developer every part, so the withholding is a grant's, not a rung's.
+    const { region: developer } = await analyzed(
+      {},
+      { role: "developer", capabilities: seededAccessWithout("developer", "app:deployables/domains") },
+    );
+    expect(within(developer).getByLabelText("The client storefront is for")).toBeTruthy();
+    expect(within(developer).queryByLabelText("A domain of the client's own for storefront")).toBeNull();
   });
 
   it("carries every placement half that was answered, and omits every one that was not", async () => {

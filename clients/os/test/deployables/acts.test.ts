@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { actsFor, runIsCancellable, runIsMoving, type ActsInput } from "../../src/apps/deployables/page/acts";
+import { ALL_PARTS, NO_PARTS, partsWithout } from "../../src/apps/deployables/parts";
 import { openStopFor } from "../../src/apps/deployables/page/rail";
 import { siteFromRow } from "../../src/apps/deployables/rows";
 import { deploymentFromRow, packageFromRow } from "../../src/apps/deployables/packages/rows";
@@ -45,7 +46,7 @@ function run(status: string, over: Record<string, unknown> = {}) {
   return deploymentFromRow({ id: "dep-1", packageId: "pkg-1", status, ...over });
 }
 
-const BASE: ActsInput = { site: site(), pkg: null, run: null, canWrite: true };
+const BASE: ActsInput = { site: site(), pkg: null, run: null, can: ALL_PARTS };
 const names = (input: Partial<ActsInput>) => actsFor({ ...BASE, ...input }).acts.map((a) => a.name);
 
 describe("actsFor -- acts follow the state, in one place", () => {
@@ -109,9 +110,9 @@ describe("actsFor -- acts follow the state, in one place", () => {
 
   it("a reader sees the state and no acts", () => {
     for (const status of ["live", "disabled", "archived", "draft"]) {
-      expect(names({ site: site({ status }), canWrite: false })).toEqual([]);
+      expect(names({ site: site({ status }), can: NO_PARTS })).toEqual([]);
     }
-    expect(actsFor({ ...BASE, canWrite: false }).state).toBe("Live");
+    expect(actsFor({ ...BASE, can: NO_PARTS }).state).toBe("Live");
   });
 
   // ---- the run in flight ---------------------------------------------------
@@ -326,5 +327,56 @@ describe("a source's gate, on a deployable that has its own state", () => {
     expect(reading.detail).toContain("the report above is what it would do");
     expect(reading.detail).not.toContain("a deploy for this source");
     expect(openStopFor({ mode: "standing", pkg: pkg(), app: "storefront", run: scoped, site: mine })).toBe("whatItIs");
+  });
+});
+
+describe("every act names its part, and a missing part withholds it (epic memql#5289)", () => {
+  // THE CASE THE DESIGN NAMES: with `publish` missing, Go live is absent while
+  // Deploy remains. A person granted deploy and not publish pushes a build
+  // and cannot take a site live -- absent, never disabled.
+  it("withholds Go live and keeps Deploy when publish is missing", () => {
+    const built = site({ status: "draft", bundleRef: "blob://sites/site-1/v1/" });
+    expect(names({ site: built })).toEqual(["Discard", "Go live"]);
+    expect(names({ site: built, can: partsWithout("publish") })).toEqual(["Discard"]);
+    expect(names({ site: site({ status: "disabled" }), can: partsWithout("publish") })).toEqual(["Archive"]);
+    // ...and the run-starting acts stay with `deploy`.
+    expect(names({ can: partsWithout("publish") })).toEqual(["Deploy"]);
+    expect(names({ can: partsWithout("deploy") })).toEqual(["Take offline"]);
+  });
+
+  it("withholds every destructive act and its inverse without retire", () => {
+    expect(names({ site: site({ status: "archived" }), can: partsWithout("retire") })).toEqual([]);
+    expect(names({ site: site({ status: "disabled" }), can: partsWithout("retire") })).toEqual(["Go live"]);
+    // The fixture's draft carries a bundle, so it is Built: Discard is
+    // withheld and the forward act, Go live, stays.
+    expect(names({ site: site({ status: "draft" }), can: partsWithout("retire") })).toEqual(["Go live"]);
+  });
+
+  it("a parked run's Cancel and Deploy are both deploy", () => {
+    const parked = run("awaiting_confirm");
+    expect(names({ site: site({ status: "draft" }), pkg: pkg(), run: parked, can: partsWithout("publish", "retire") })).toEqual(["Cancel", "Deploy"]);
+    expect(names({ site: site({ status: "draft" }), pkg: pkg(), run: parked, can: partsWithout("deploy") })).toEqual([]);
+  });
+
+  it("every offered act carries the part it needs", () => {
+    const seen = new Map<string, string>();
+    for (const status of ["draft", "live", "disabled", "archived"]) {
+      for (const p of [null, pkg()]) {
+        for (const act of actsFor({ ...BASE, site: site({ status }), pkg: p }).acts) {
+          seen.set(act.name, act.requires);
+        }
+      }
+    }
+    expect(Object.fromEntries(seen)).toEqual({
+      Discard: "retire",
+      Deploy: "deploy",
+      Redeploy: "deploy",
+      "Take offline": "publish",
+      Archive: "retire",
+      Deactivate: "retire",
+      "Go live": "publish",
+      Delete: "retire",
+      Restore: "retire",
+    });
   });
 });

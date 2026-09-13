@@ -41,6 +41,7 @@ import {
 } from "./list";
 import { runIsScopedToApp, sourceLabel, type DeploymentRow, type PackageRow } from "./packages/rows";
 import { ComposePage } from "./page/ComposePage";
+import type { PartsHeld } from "./parts";
 import { DeployablePage } from "./page/DeployablePage";
 import { HistoryView } from "./page/HistoryView";
 import { Rail } from "./page/RailView";
@@ -109,7 +110,7 @@ export function DeployablesSection({
   selectedSiteId,
   onSelectSite,
   viewerUserId,
-  canWrite,
+  can,
   isClusterOwner,
   clusterDomain,
   credentials,
@@ -124,7 +125,8 @@ export function DeployablesSection({
   selectedSiteId: string;
   onSelectSite: (siteId: string) => void;
   viewerUserId: string;
-  canWrite: boolean;
+  /** The parts this session holds (epic memql#5289). */
+  can: PartsHeld;
   isClusterOwner: boolean;
   clusterDomain: string;
   credentials: readonly CredentialRow[];
@@ -217,7 +219,7 @@ export function DeployablesSection({
     return (
       <ComposePage
         clusterDomain={clusterDomain}
-        canWrite={canWrite}
+        can={can}
         isClusterOwner={isClusterOwner}
         viewerUserId={viewerUserId}
         credentials={credentials}
@@ -248,14 +250,14 @@ export function DeployablesSection({
     if (pkg === null) return renderList();
     const apps = siteRows.filter((s) => s.packageId === pkg.id);
     if (view.kind === "history") {
-      return <HistoryView pkg={pkg} canWrite={canWrite} onBack={() => setView({ kind: "source", packageId: pkg.id })} />;
+      return <HistoryView pkg={pkg} can={can} onBack={() => setView({ kind: "source", packageId: pkg.id })} />;
     }
     return (
       <SourceView
         pkg={pkg}
         apps={apps}
         credentials={credentials}
-        canWrite={canWrite}
+        can={can}
         onBack={backToList}
         onOpenHistory={() => setView({ kind: "history", packageId: pkg.id })}
         onOpenApp={openSite}
@@ -277,8 +279,7 @@ export function DeployablesSection({
         pkg={pkg}
         credentials={credentials}
         viewerUserId={viewerUserId}
-        canWrite={canWrite}
-        isClusterOwner={isClusterOwner}
+        can={can}
         clusterDomain={clusterDomain}
         onAsk={onAsk}
         onBack={backToList}
@@ -322,7 +323,7 @@ export function DeployablesSection({
       ? "Nothing archived. Archived deployables stay here, so they can always be found again."
       : filterIsNarrowing(filter)
         ? "Nothing matches. Clear the search or a facet in Refine to see your deployables."
-        : canWrite
+        : can.deploy
           ? "No deployables yet. New deployable is where one starts."
           : "No deployables yet. The engine decides which reach you: your own, or every one of them if you are a cluster owner.";
 
@@ -386,7 +387,9 @@ export function DeployablesSection({
               ACCESSIBLE name keeps the full phrase, because a screen reader
               reaching this button out of context has no Head to read it
               against. */}
-          {canWrite ? (
+          {/* `deploy`, because composing ENDS in a deploy: a person holding
+              only `sources` has nothing to reach here that is theirs. */}
+          {can.deploy ? (
             <Button tone="primary" ariaLabel="New deployable" onClick={() => setView({ kind: "compose" })}>
               <Plus size={13} aria-hidden /> New
             </Button>

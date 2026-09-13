@@ -694,13 +694,12 @@ describe("New deployable", () => {
     expect(await screen.findByText("storefront")).toBeTruthy();
   });
 
-  it("is offered to the DEPLOY TIER, developer included", async () => {
-    // Rank >= 200 under the one ladder is {admin, developer, owner}, which is
-    // the set the engine's own deploy gate uses (epic memql#4832, D1). Under
-    // the shell's old ordering `min: "admin"` excluded developer, and the
-    // deploy tier saw a read-only Deployables app; that case lived on the
-    // retired Actions section's gate and its statement lives here now.
-    for (const role of ["admin", "developer", "owner"]) {
+  it("is offered to whoever holds the deploy PART: owner and developer by the seeds", async () => {
+    // A PART, NOT A RANK (epic memql#5289). Composing ends in a deploy, and
+    // `execute app:deployables/deploy` is seeded on owner and developer --
+    // the engine's own gate on packageAnalyze refuses everybody else, admin
+    // included, so the button follows the seeds rather than the ladder.
+    for (const role of ["developer", "owner"]) {
       const view = mount(fakeConnection(WITH_PACKAGE), { role });
       await screen.findByText("storefront");
       expect(screen.getByRole("button", { name: /New deployable/ })).toBeTruthy();
@@ -708,12 +707,15 @@ describe("New deployable", () => {
     }
   });
 
-  it("is not offered to a reader, disabled or otherwise", async () => {
-    mount(fakeConnection(WITH_PACKAGE), { role: "reader" });
-    await screen.findByText("storefront");
-    expect(screen.queryByRole("button", { name: /New deployable/ })).toBeNull();
-    // ...and the empty state does not tell them to use a control they do not have.
-    expect(screen.queryByText(/New deployable is where one starts/)).toBeNull();
+  it("is not offered to an admin or a reader, disabled or otherwise", async () => {
+    for (const role of ["admin", "reader"]) {
+      const view = mount(fakeConnection(WITH_PACKAGE), { role });
+      await screen.findByText("storefront");
+      expect(screen.queryByRole("button", { name: /New deployable/ })).toBeNull();
+      // ...and the empty state does not tell them to use a control they do not have.
+      expect(screen.queryByText(/New deployable is where one starts/)).toBeNull();
+      view.unmount();
+    }
   });
 
   it("reopens a parked run's reading from the row that will serve, with its report in place", async () => {

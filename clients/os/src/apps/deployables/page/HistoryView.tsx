@@ -3,6 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { Caption, Head, Panel, useLiveView } from "../../../kit";
 import { ActionBar } from "../../../kit/ActionBar";
 import { deploymentFromRow, sourceLabel, type DeploymentRow, type PackageRow } from "../packages/rows";
+import type { PartsHeld } from "../parts";
 import { usePackageDeployments } from "../packages/usePackages";
 import { EveryAttempt } from "./EveryAttempt";
 
@@ -29,11 +30,12 @@ import { EveryAttempt } from "./EveryAttempt";
 
 export function HistoryView({
   pkg,
-  canWrite,
+  can,
   onBack,
 }: {
   pkg: PackageRow;
-  canWrite: boolean;
+  /** The parts this session holds (epic memql#5289). */
+  can: PartsHeld;
   onBack: () => void;
 }) {
   const { source: timeline, reseed } = usePackageDeployments(pkg.id);
@@ -56,7 +58,7 @@ export function HistoryView({
             this is the literal record of what was tried -- it cannot be rewritten by the next attempt to look like it
             always went well.
           </Caption>
-          <EveryAttempt pkg={pkg} deployments={deployments} canWrite={canWrite} reseed={reseed} />
+          <EveryAttempt pkg={pkg} deployments={deployments} can={can} reseed={reseed} />
         </Panel>
       </div>
 

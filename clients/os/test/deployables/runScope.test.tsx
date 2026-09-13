@@ -6,6 +6,7 @@ import {
   type DeploymentRow,
 } from "../../src/apps/deployables/packages/rows";
 import { actsFor, runForApp, siblingRunInFlight } from "../../src/apps/deployables/page/acts";
+import { ALL_PARTS } from "../../src/apps/deployables/parts";
 import { DEFAULT_LIST_FILTER, foldDeployables } from "../../src/apps/deployables/list";
 import type { SiteRow } from "../../src/apps/deployables/rows";
 import type { PackageRow } from "../../src/apps/deployables/packages/rows";
@@ -137,7 +138,7 @@ describe("the bar while a sibling deploys", () => {
   const siblingBuilding = deployment({ id: "dep-web", status: "building", scopedTo: ["web"] });
 
   it("keeps this app's own state and words", () => {
-    const reading = actsFor({ site, pkg, run: null, siblingRun: siblingBuilding, canWrite: true });
+    const reading = actsFor({ site, pkg, run: null, siblingRun: siblingBuilding, can: ALL_PARTS });
     // NOT "Building". A live deployable is still live while another app of
     // its source deploys, and saying otherwise was the defect.
     expect(reading.state).toBe("Live");
@@ -145,7 +146,7 @@ describe("the bar while a sibling deploys", () => {
   });
 
   it("withholds the acts that would start a second run, and says why", () => {
-    const reading = actsFor({ site, pkg, run: null, siblingRun: siblingBuilding, canWrite: true });
+    const reading = actsFor({ site, pkg, run: null, siblingRun: siblingBuilding, can: ALL_PARTS });
     const names = reading.acts.map((a) => a.name);
     // THE PROTECTION THE WRONG READING WAS ACCIDENTALLY PROVIDING. There is no
     // per-source concurrency gate in the engine, and a roll rewrites one
@@ -163,7 +164,7 @@ describe("the bar while a sibling deploys", () => {
   });
 
   it("keeps the acts that only change THIS site", () => {
-    const reading = actsFor({ site, pkg, run: null, siblingRun: siblingBuilding, canWrite: true });
+    const reading = actsFor({ site, pkg, run: null, siblingRun: siblingBuilding, can: ALL_PARTS });
     // Take offline touches this site's own status and no source pointer, so
     // it has no reason to wait for a deploy of a different app.
     expect(reading.acts.map((a) => a.name)).toContain("Take offline");
@@ -172,7 +173,7 @@ describe("the bar while a sibling deploys", () => {
   it("offers everything again once the sibling's run ends", () => {
     // THE CONTROL. Without it "withholds the acts" would pass on a bar that
     // never offers them.
-    const reading = actsFor({ site, pkg, run: null, siblingRun: null, canWrite: true });
+    const reading = actsFor({ site, pkg, run: null, siblingRun: null, can: ALL_PARTS });
     expect(reading.acts.map((a) => a.name)).toContain("Redeploy");
     expect(reading.detail).not.toContain("waiting for");
   });
@@ -181,7 +182,7 @@ describe("the bar while a sibling deploys", () => {
     // Scope narrows whose run a page reads; it does not stop a page reading
     // its own.
     const mine = deployment({ id: "dep-store", status: "building", scopedTo: ["storefront"] });
-    const reading = actsFor({ site, pkg, run: mine, siblingRun: null, canWrite: true });
+    const reading = actsFor({ site, pkg, run: mine, siblingRun: null, can: ALL_PARTS });
     expect(reading.state).toBe("Building");
     expect(reading.acts.map((a) => a.name)).toEqual(["Cancel"]);
   });

@@ -1,6 +1,7 @@
 import type { DeploymentRow, PackageRow } from "../packages/rows";
+import type { PartsHeld } from "../parts";
 import type { SiteRow } from "../rows";
-import { isPublished, type HeadState } from "./rail";
+import { headActionFor, isPublished, type HeadAction, type HeadState } from "./rail";
 
 // The Head's state, derived from what the page holds (design section C).
 //
@@ -17,7 +18,8 @@ export interface HeadInput {
   pkg: PackageRow | null;
   /** The NEWEST run of the source, whatever its status; null with no source. */
   run: DeploymentRow | null;
-  canWrite: boolean;
+  /** The parts this session holds (epic memql#5289); the row's action is withheld without its part. */
+  can: PartsHeld;
 }
 
 /** The stages a run is AT while it moves. Mirrors the pipeline's non-terminal set. */
@@ -37,8 +39,24 @@ const IN_FLIGHT = new Set(["analyzing", "building", "staging_dsl", "rolling", "p
  * construction -- every app of an EXISTING deployable already has its
  * address, so there is nothing left to choose.
  */
-export function headStateFor({ site, pkg, run, canWrite }: HeadInput): HeadState | null {
-  if (!canWrite) return null;
+export function headStateFor({ site, pkg, run, can }: HeadInput): HeadState | null {
+  const state = stateOf(site, pkg, run);
+  if (state === null) return null;
+  // THE PART, NOT A RANK: the row's own action names what it needs, and a
+  // person holding `deploy` but not `publish` gets Deploy the update on a
+  // live site and nothing on a built draft -- absent, never disabled.
+  const action = headActionFor(state);
+  if (action !== null && !can[action.requires]) return null;
+  return state;
+}
+
+/** The Head's action for what the page holds, or null: the table row, withheld without its part. */
+export function headActionHeld(input: HeadInput): HeadAction | null {
+  const state = headStateFor(input);
+  return state === null ? null : headActionFor(state);
+}
+
+function stateOf(site: SiteRow, pkg: PackageRow | null, run: DeploymentRow | null): HeadState | null {
   if (site.systemOwned) return null;
   if (site.status === "archived") return null;
   // A deploy of an archived source is refused server-side; Restore lives on

@@ -8,6 +8,7 @@ import type { LiveView } from "../../../live/liveView";
 import { usePackageActions } from "../packages/actions";
 import { BuildLog, ProblemNotice } from "../packages/ReportView";
 import { deploymentFingerprint, shortVersion, type DeploymentRow, type PackageRow } from "../packages/rows";
+import type { PartsHeld } from "../parts";
 import { Rail } from "./RailView";
 
 // Every attempt: the append-only runs of this deployable's source, each with
@@ -32,13 +33,14 @@ import { Rail } from "./RailView";
 export function EveryAttempt({
   pkg,
   deployments,
-  canWrite,
+  can,
   reseed,
 }: {
   pkg: PackageRow | null;
   /** The page's timeline view, newest first; null before the connection exists. */
   deployments: LiveView<DeploymentRow> | null;
-  canWrite: boolean;
+  /** Rolling back to an attempt is `publish`; retrying a lost one is `deploy`. */
+  can: PartsHeld;
   reseed: () => void;
 }) {
   // Its own write hook: a rollback refused here renders here.
@@ -95,7 +97,7 @@ export function EveryAttempt({
                     subjectConcept={Concepts.PLATFORM_PACKAGE_DEPLOYMENT}
                     ariaLabel={`Logs of the ${d.sourceVersion === "" ? "unversioned" : shortVersion(d.sourceVersion)} deploy`}
                   />
-                  {canWrite && d.status === "succeeded" && d.id !== latest?.id ? (
+                  {can.publish && d.status === "succeeded" && d.id !== latest?.id ? (
                     <Button
                       onClick={() => void actions.rollback(pkg.id, d.id).then(reseed)}
                       busy={actions.busy}
@@ -104,7 +106,7 @@ export function EveryAttempt({
                       <Undo2 size={12} aria-hidden /> Roll back to this
                     </Button>
                   ) : null}
-                  {canWrite && d.status === "abandoned" ? (
+                  {can.deploy && d.status === "abandoned" ? (
                     /* RETRY, not Redeploy, and the two are different
                        promises (memql#4900). This one starts the run that
                        was LOST again, from the bytes it had already fetched,

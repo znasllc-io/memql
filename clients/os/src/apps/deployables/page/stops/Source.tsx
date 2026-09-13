@@ -27,7 +27,7 @@ export function SourceStop({
   site,
   pkg,
   credentials,
-  canWrite,
+  canDeploy,
   flipped,
   zipOpen,
   onZipOpenChange,
@@ -37,7 +37,8 @@ export function SourceStop({
   site: SiteRow;
   pkg: PackageRow | null;
   credentials: readonly CredentialRow[];
-  canWrite: boolean;
+  /** The `deploy` part: a zip picked here goes live through sitePublishFromArtifact, which is a deploy. */
+  canDeploy: boolean;
   /** The bundle reference changed while the page was open. */
   flipped: boolean;
   zipOpen: boolean;
@@ -69,7 +70,7 @@ export function SourceStop({
       ) : null}
       {/* A system-owned row is baked into the image and takes no zip: it
           renders no lifecycle control anywhere, this one included. */}
-      {pkg === null && canWrite && !site.systemOwned ? (
+      {pkg === null && canDeploy && !site.systemOwned ? (
         <ZipPicker site={site} open={zipOpen} onOpenChange={onZipOpenChange} />
       ) : null}
     </div>

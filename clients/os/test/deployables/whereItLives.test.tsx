@@ -30,7 +30,7 @@ function mount(connection: unknown, accountId: string) {
       <WhereItLivesStop
         site={{ ...siteRow({ id: "s1", hostname: "store.example.com" }), accountId } as never}
         accounts={[accountFromRow(accountRow({ id: "acct-acme", name: "Acme" }))]}
-        isClusterOwner={false}
+        canBindDomain={false}
         clusterDomain="memql.example.com"
       />,
     ),

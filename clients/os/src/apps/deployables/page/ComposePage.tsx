@@ -49,6 +49,7 @@ import {
 import { everyOtherAppSkipped } from "../packages/calls";
 import { Rail } from "./RailView";
 import { headActionFor, type ComposeInput, type HeadAction, type RailProblem, type RailStage } from "./rail";
+import type { PartsHeld } from "../parts";
 import { ManifestPreview } from "./stops/compose/ManifestPreview";
 import { ComposeSourceStop } from "./stops/compose/Source";
 import { ComposeWhereItLivesStop } from "./stops/compose/WhereItLives";
@@ -108,9 +109,9 @@ import { ComposeWhereItLivesStop } from "./stops/compose/WhereItLives";
 
 export interface ComposePageProps {
   clusterDomain: string;
-  /** Rank >= 200; the app computes it once. */
-  canWrite: boolean;
-  /** A client's own domain and a CI-pushed source are cluster-owner acts. */
+  /** The parts this session holds (epic memql#5289); the app reads them once. */
+  can: PartsHeld;
+  /** A CI-pushed source is a cluster-owner act, and not a part. */
   isClusterOwner: boolean;
   viewerUserId: string;
   /** The caller's credential cards, from the root feed, for the Source stop's picker. */
@@ -154,7 +155,7 @@ export interface ComposePageProps {
 }
 
 export function ComposePage(props: ComposePageProps) {
-  const { clusterDomain, canWrite, isClusterOwner, credentials, onBack, onAsk, parked, placed, only, source, packages } = props;
+  const { clusterDomain, can, isClusterOwner, credentials, onBack, onAsk, parked, placed, only, source, packages } = props;
 
   const [draft, setDraft] = useState<ComposeDraft>(EMPTY_DRAFT);
   const [addresses, setAddresses] = useState<Record<string, AddressDraft>>({});
@@ -310,8 +311,11 @@ export function ComposePage(props: ComposePageProps) {
   }, [apps, checks.verdicts]);
 
   const placementsDone = placementsComplete(apps, addresses, clusterDomain, verdicts);
+  // Analyzing is `deploy`; registering a NEW source on the way is `sources`
+  // (createPackage), so a flow opened with no source behind it needs both.
+  const canStart = can.deploy && (source !== undefined || parked !== undefined || can.sources);
   const readyToAnalyze =
-    canWrite && !archivedSource && path !== "unknown" && sourceDone && (path !== "handmade" || placementsDone);
+    canStart && !archivedSource && path !== "unknown" && sourceDone && (path !== "handmade" || placementsDone);
   const readyToDeploy = path === "handmade" ? draft.artifactId !== "" : placementsDone;
 
   const action = actionFor(phase, readyToAnalyze, readyToDeploy);
@@ -562,7 +566,7 @@ export function ComposePage(props: ComposePageProps) {
               setAddresses((held) => ({ ...held, [app]: { ...(held[app] ?? EMPTY_ADDRESS), ...patch } }))
             }
             accounts={accounts}
-            isClusterOwner={isClusterOwner}
+            canBindDomain={can.domains}
             clusterDomain={clusterDomain}
             outcomes={outcomes}
             /* CHOSEN ONCE. The moment the flow has written something at these
@@ -589,7 +593,7 @@ export function ComposePage(props: ComposePageProps) {
   const barActs: Act[] = archivedSource
     ? []
     : inactive
-      ? canWrite
+      ? can.retire
         ? [{ label: "Activate", tone: "primary", busy, onAct: () => void activate() }]
         : []
       : action === null || action.disabled
@@ -602,7 +606,7 @@ export function ComposePage(props: ComposePageProps) {
   // must not read a finished flow off a run that never placed this app.
   const held = inactive || archivedSource;
   const finished = phase === "published" && !held;
-  const canGoLive = finished && !wentLive && canWrite && (path !== "handmade" || draft.choice !== "ci");
+  const canGoLive = finished && !wentLive && can.publish && (path !== "handmade" || draft.choice !== "ci");
 
   return (
     <div className="os-deploy-pane">
@@ -691,8 +695,8 @@ export function ComposePage(props: ComposePageProps) {
 
           <Rail input={input} stopBody={stopBody} />
 
-          {canWrite ? null : (
-            <Caption>Composing a deployable is a deploy-tier act, and this cluster has not given you that rank.</Caption>
+          {can.deploy ? null : (
+            <Caption>Composing a deployable takes the deploy part of Deployables, which this cluster has not granted you.</Caption>
           )}
         </Panel>
       </div>

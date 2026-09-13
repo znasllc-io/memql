@@ -81,6 +81,15 @@ export function seededAccessFor(role: string): EffectiveCapability[] {
   return [...byPair.values()];
 }
 
+/**
+ * `role`'s seeded set MINUS the named resources -- what a deny by name
+ * resolves to, for a test that withholds one part or one door.
+ */
+export function seededAccessWithout(role: string, ...resources: string[]): EffectiveCapability[] {
+  const gone = new Set(resources);
+  return seededAccessFor(role).filter((c) => !gone.has(c.resource));
+}
+
 /** Whether `role`'s seeded set opens a surface naming `resource`. */
 export function roleOpens(role: string, resource: string): boolean {
   return seededAccessFor(role).some((c) => c.verb === "read" && c.resource === resource && c.effect === "allow");

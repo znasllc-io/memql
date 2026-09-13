@@ -7,6 +7,8 @@ import { SessionProvider } from "../../src/chrome/access";
 import { OsProvider } from "../../src/chrome/state";
 import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/config";
 import { OS_REGISTRY } from "../../src/apps/registry";
+import { installSeededAccess } from "../seededAccess";
+import { setEffectiveCapabilities, type EffectiveCapability } from "../../src/system/roles";
 
 // The Deployables app's test harness.
 //
@@ -489,13 +491,20 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
 
 export function withSession(
   children: ReactNode,
-  overrides: { userId?: string; role?: string; domain?: string } = {},
+  overrides: { userId?: string; role?: string; domain?: string; capabilities?: EffectiveCapability[] } = {},
 ) {
   const config: OsRuntimeConfig = {
     ...UNKNOWN_RUNTIME_CONFIG,
     domain: overrides.domain ?? "memql.example.com",
   };
   const role = overrides.role ?? "owner";
+  // THE EFFECTIVE SET FOLLOWS THE ROLE (epic memql#5289): the parts this app
+  // gates on are read from it, and a harness with no cluster installs the
+  // role's seeded set -- what a cluster with no grants resolves.
+  // An EXPLICIT set outranks the role's: a test about a grant -- a part
+  // withheld from a developer, say -- names the set it means.
+  if (overrides.capabilities !== undefined) setEffectiveCapabilities(overrides.capabilities);
+  else installSeededAccess(role);
   // THE SHELL PROVIDER TOO, since epic memql#4895: the site and package
   // details carry a "Logs" action that opens another app, and opening an
   // app is the shell's -- `useOs` throws outside its provider, exactly as
