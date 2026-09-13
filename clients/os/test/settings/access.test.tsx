@@ -69,6 +69,8 @@ function grantRow(over: Partial<AccessGrant> & { id: string }): Row {
 }
 
 interface State {
+  /** The roster `searchUsers` answers; the two bare rows unless a case says otherwise. */
+  people: Row[];
   grantsBySubject: Record<string, Row[]>;
   grantsByResource: Record<string, Row[]>;
   memberships: Record<string, Row[]>;
@@ -85,7 +87,7 @@ function fakeConnection(state: State) {
       const rows = (r: Row[]) => ({ rows: () => r, meta: () => null });
       switch (name) {
         case "searchUsers":
-          return rows([ME, ADA]);
+          return rows(state.people);
         case "groupsAll":
           return rows([ACME]);
         case "activeRoles":
@@ -116,6 +118,7 @@ function fakeConnection(state: State) {
 
 function freshState(over: Partial<State> = {}): State {
   return {
+    people: [ME, ADA],
     grantsBySubject: {},
     grantsByResource: {},
     memberships: {},
@@ -131,13 +134,13 @@ function memStorage(): Pick<Storage, "getItem" | "setItem"> {
   return { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) };
 }
 
-function mount(state: State, role = "owner") {
+function mount(state: State, role = "owner", userId = "u-me") {
   installSeededAccess(role);
   h.connection = fakeConnection(state);
   return render(
     <SessionProvider
       value={{
-        access: { userId: "u-me", primaryEmail: "owner@example.com", role, roleName: "", rank: 0 },
+        access: { userId, primaryEmail: "owner@example.com", role, roleName: "", rank: 0 },
         config: { ...UNKNOWN_RUNTIME_CONFIG, domain: "example.com" },
         accessEpoch: 1,
       }}
@@ -161,6 +164,14 @@ function rowFor(resource: string): HTMLElement {
   const row = document.querySelector(`tr[data-resource="${resource}"]`);
   if (row === null) throw new Error(`no row for ${resource}`);
   return row as HTMLElement;
+}
+
+/** Turn to the by-app view, pick a resource, and answer its holder list. */
+async function pickResource(label: string): Promise<HTMLElement> {
+  fireEvent.click(screen.getByRole("radio", { name: "By app" }));
+  const trigger = await screen.findByLabelText("App or part");
+  await waitFor(() => chooseOption(trigger, label));
+  return screen.findByRole("list", { name: "Granted by name" });
 }
 
 beforeEach(() => {
@@ -363,6 +374,112 @@ describe("by app: who holds it", () => {
     expect(within(list).getByText("Ada Lovelace")).toBeTruthy();
     expect(within(list).getByText("allowed")).toBeTruthy();
     expect(within(list).getByRole("button", { name: "Revoke allow for Ada Lovelace" })).toBeTruthy();
+  });
+
+  it("offers no Revoke on the viewer's own grant, and says why", async () => {
+    // The engine's rule 4 refuses a grant naming yourself, revoke included
+    // (`checkGrantAuthority`), so the act would only ever be refused.
+    const state = freshState({
+      grantsByResource: {
+        "app:stores": [grantRow({ id: "grant-me", subjectId: "u-me", resource: "app:stores", verb: "read", effect: "allow" })],
+      },
+    });
+    mount(state);
+    const list = await pickResource("Stores");
+    expect(within(list).getByText("you")).toBeTruthy();
+    expect(within(list).queryByRole("button", { name: /^Revoke/ })).toBeNull();
+    expect(screen.getByText(/Nobody revokes their own grant/)).toBeTruthy();
+  });
+
+  it("still offers Revoke on a group the viewer belongs to", async () => {
+    // Rule 4 is about a USER subject. A group is somebody else's to hold
+    // even when the viewer is in it, so the act stays.
+    const state = freshState({
+      grantsByResource: {
+        "app:stores": [grantRow({ id: "grant-g", subjectKind: "group", subjectId: "g-acme", resource: "app:stores", verb: "read", effect: "allow" })],
+      },
+    });
+    mount(state);
+    const list = await pickResource("Stores");
+    expect(within(list).getByRole("button", { name: "Revoke allow for Acme" })).toBeTruthy();
+    expect(screen.queryByText(/Nobody revokes their own grant/)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The viewer's id SPELLING
+// ---------------------------------------------------------------------------
+// THE REGRESSION. Every case above gives the session a bare `u-me`, which is
+// the one shape that cannot catch this: a deployed cluster's token carries
+// the canonical `v1:identity:user:...` while grant rows and the roster are
+// bare, and compared raw the viewer matches nobody -- including themselves.
+// Each failure is quiet and points the wrong way: the screen offers Allow and
+// Deny on your own row (the engine then refuses `grant_self`, so the act is
+// advertised and cannot be performed), and "by you" degrades into your own
+// display name as though a colleague had written the grant.
+
+const CANONICAL_ME = "v1:identity:user:u-me";
+
+describe("a canonical viewer id against bare subjects", () => {
+  it("knows the viewer is themselves, and offers no act on their own row", async () => {
+    mount(freshState(), "owner", CANONICAL_ME);
+    await pickSubject("Owner");
+    await waitFor(() => expect(rowFor("app:users").textContent).toContain("owner role"));
+    expect(screen.queryByRole("button", { name: /^(Allow|Deny)/ })).toBeNull();
+    expect(screen.getByText(/Nobody grants to themselves/)).toBeTruthy();
+  });
+
+  it("still says 'by you' for a grant the viewer wrote", async () => {
+    const state = freshState({ grantsBySubject: { "user:u-ada": [grantRow({ id: "grant-1" })] } });
+    mount(state, "owner", CANONICAL_ME);
+    await pickSubject("Ada Lovelace");
+    await waitFor(() => expect(rowFor("app:deployables/publish").textContent).toContain("denied, by you"));
+    // ...and not the viewer's own display name, which is what the raw
+    // comparison falls through to: the roster names them, so the provenance
+    // reads as a colleague's decision rather than as the reader's own.
+    expect(rowFor("app:deployables/publish").textContent).not.toContain("by Owner");
+  });
+
+  it("names the group an answer came through, and the viewer who granted it", async () => {
+    const state = freshState({
+      grantsBySubject: { "group:g-acme": [grantRow({ id: "grant-g", subjectKind: "group", subjectId: "g-acme", resource: "app:stores", verb: "read", effect: "allow" })] },
+      memberships: { "u-ada": [{ id: "m-1", groupId: "g-acme", userId: "u-ada", status: "active", origin: "added", createdAt: "" } as Row] },
+    });
+    mount(state, "owner", CANONICAL_ME);
+    await pickSubject("Ada Lovelace");
+    await waitFor(() => expect(rowFor("app:stores").textContent).toContain("allowed, through Acme by you"));
+  });
+
+  it("keeps the viewer's own grant out of the by-app view's acts", async () => {
+    const state = freshState({
+      grantsByResource: {
+        "app:stores": [grantRow({ id: "grant-me", subjectId: "u-me", resource: "app:stores", verb: "read", effect: "allow" })],
+      },
+    });
+    mount(state, "owner", CANONICAL_ME);
+    const list = await pickResource("Stores");
+    expect(within(list).getByText("you")).toBeTruthy();
+    expect(within(list).queryByRole("button", { name: /^Revoke/ })).toBeNull();
+  });
+});
+
+describe("a canonical roster id against a bare session", () => {
+  it("still resolves the person the picker names, id colons and all", async () => {
+    // The mirror case: the ROSTER carries canonical ids. The picker's value
+    // is `<kind>:<id>`, so a canonical id puts three more colons into it --
+    // cut at the second, the key resolves to nobody and choosing a person
+    // selects nothing at all.
+    const state = freshState({
+      people: [ME, { ...ADA, id: "v1:identity:user:u-ada" } as Row],
+      grantsBySubject: { "user:u-ada": [grantRow({ id: "grant-1" })] },
+    });
+    mount(state);
+    await pickSubject("Ada Lovelace");
+    await waitFor(() => expect(rowFor("app:deployables/publish").textContent).toContain("denied, by you"));
+    // The subject reached the wire BARE, which is the spelling grant rows
+    // store: `grantsForSubject` filters on the payload field, so a canonical
+    // argument matches no row and the person reads as holding no grants.
+    expect(state.calls.find((c) => c.name === "grantsForSubject")?.call).toContain('subjectId: "u-ada"');
   });
 });
 

@@ -8,6 +8,7 @@ import { holds } from "../../system/roles";
 import { personName, type GroupRow, type PersonRow } from "../users/rows";
 import {
   accessResources,
+  bareId,
   grantRefusalCopy,
   resolveAnswer,
   rolesHolding,
@@ -62,6 +63,22 @@ import { useAccessRoster, useGrantWrites, useResourceGrants, useSubjectGrants } 
 // beside the mark. Everything else -- the table, the marks, the select, the
 // notice -- is the kit's, so the screen reads as the Users grid's sibling
 // rather than as a second permissions language.
+//
+// ===========================================================================
+// EVERY "IS THIS YOU" COMPARISON IS MADE ON BARE IDS
+// ===========================================================================
+// Two id spellings reach this screen. Grant rows arrive bare (`grantFromRow`
+// bare-ifies `subjectId` and `grantedBy`), and so does the roster -- but the
+// session's own `access.userId` is whatever the token carried, which in a
+// deployed cluster is routinely the canonical `v1:identity:user:...`. A raw
+// `===` between the two forms is false for the one person it most needs to be
+// true for, and it fails QUIETLY in both directions: Allow and Deny stay
+// offered beside your own name (the engine then refuses `grant_self`, so the
+// screen advertises an act the cluster will not perform), and "by you"
+// degrades to your own display name as though a colleague had written it.
+// `bareId` is applied on BOTH sides of every self/you decision here, the way
+// `integrations/rbac/grants.go` compares with `sameUser` and Deployables'
+// attribution compares with `bare`.
 
 export const ACCESS_SECTION_RESOURCE = "app:settings/access";
 
@@ -70,7 +87,9 @@ type View = "subject" | "resource";
 export function AccessSection() {
   const { access, accessEpoch } = useSession();
   const { registry } = useOs();
-  const viewerUserId = access?.userId ?? "";
+  // BARE, ONCE, AT THE SOURCE: the session's spelling is the token's, and
+  // every comparison below is against a bare grant or roster id.
+  const viewerUserId = bareId(access?.userId ?? "");
   // WHETHER THE VIEWER WRITES GRANTS: `update` on `principal`, read off the
   // effective set (governance rule 1). Presentation -- the engine checks it
   // again on every write -- but a control that can only be refused is not
@@ -97,6 +116,9 @@ export function AccessSection() {
   const writes = useGrantWrites(onWritten);
 
   const nameOf = useMemo(() => namer(roster.people, roster.groups, viewerUserId), [roster.people, roster.groups, viewerUserId]);
+  // THE SUBJECT IS THE VIEWER: the one state in which no act is offered,
+  // because rule 4 of the engine's governance (`grant_self`) refuses it.
+  const viewingSelf = subject !== null && subject.kind === "user" && bareId(subject.id) === viewerUserId;
 
   return (
     <div className="os-settings">
@@ -184,16 +206,16 @@ export function AccessSection() {
                 catalog={roster.catalog}
                 groupGrants={subjectGrants.groupLevel}
                 ownGrants={subjectGrants.own}
-                groupNameOf={(id) => roster.groups.find((g) => g.id === id)?.name ?? "a group"}
+                groupNameOf={(id) => roster.groups.find((g) => bareId(g.id) === bareId(id))?.name ?? "a group"}
                 nameOf={nameOf}
-                canWrite={canWrite && !(subject.kind === "user" && subject.id === viewerUserId)}
+                canWrite={canWrite && !viewingSelf}
                 busy={writes.busy || subjectGrants.state === "loading"}
                 refusal={writes.refusal}
                 onAllow={(r) => void writes.set(subject, r.verb, r.resource, "allow")}
                 onDeny={(r) => void writes.set(subject, r.verb, r.resource, "deny")}
                 onRevoke={(grant, r) => void writes.revoke(grant.id, r.resource)}
               />
-              {subject.kind === "user" && subject.id === viewerUserId && canWrite ? (
+              {viewingSelf && canWrite ? (
                 <Caption>This is you. Nobody grants to themselves; ask a colleague who holds the app.</Caption>
               ) : null}
             </>
@@ -222,6 +244,7 @@ export function AccessSection() {
               state={resourceGrants.state}
               error={resourceGrants.error}
               nameOf={nameOf}
+              viewerUserId={viewerUserId}
               canWrite={canWrite}
               busy={writes.busy}
               refusal={writes.refusal}
@@ -375,6 +398,7 @@ function ResourceHolders({
   state,
   error,
   nameOf,
+  viewerUserId,
   canWrite,
   busy,
   refusal,
@@ -386,12 +410,15 @@ function ResourceHolders({
   state: "idle" | "loading" | "ready" | "error";
   error: string;
   nameOf: (id: string) => string;
+  /** The viewer, bare: the one holder whose grant offers no act. */
+  viewerUserId: string;
   canWrite: boolean;
   busy: boolean;
   refusal: (GrantRefusal & { resource: string }) | null;
   onRevoke: (grant: AccessGrant) => void;
 }) {
   if (resource === null) return null;
+  const yours = grants.some((g) => namesTheViewer(g, viewerUserId));
   return (
     <div className="os-access-holders">
       <Subhead>{resource.part === "" ? `Who may open ${resource.label}` : `Who holds ${resource.label}`}</Subhead>
@@ -411,7 +438,7 @@ function ResourceHolders({
                 {grant.subjectKind === "group" ? "a group" : "a person"}
                 {nameOf(grant.grantedBy) === "" ? "" : `, by ${nameOf(grant.grantedBy)}`}
               </span>
-              {canWrite ? (
+              {canWrite && !namesTheViewer(grant, viewerUserId) ? (
                 <button type="button" className="os-link" disabled={busy} onClick={() => onRevoke(grant)} aria-label={`Revoke ${grant.effect} for ${nameOf(grant.subjectId) || grant.subjectId}`}>
                   Revoke
                 </button>
@@ -420,9 +447,28 @@ function ResourceHolders({
           ))}
         </ul>
       )}
+      {/* THE ABSENT ACT, EXPLAINED ONCE. Rule 12 takes the button away rather
+          than disabling it, and a control that vanishes with no sentence
+          reads as a rendering fault. Said here, under the list, rather than
+          on the row: it is the same rule the by-person view states, and one
+          sentence about a policy is not per-row news. */}
+      {yours && canWrite ? (
+        <Caption>One of these is yours. Nobody revokes their own grant; ask a colleague who holds the app.</Caption>
+      ) : null}
       {refusal !== null && refusal.resource === resource.resource ? <RefusalNotice refusal={refusal} /> : null}
     </div>
   );
+}
+
+/**
+ * Whether a grant names the viewer themselves.
+ *
+ * A USER grant only: a group the viewer belongs to is still theirs to revoke,
+ * and the engine's rule 4 says the same -- `grant_self` is checked for
+ * `SubjectKindUser` and nothing else.
+ */
+function namesTheViewer(grant: AccessGrant, viewerUserId: string): boolean {
+  return viewerUserId !== "" && grant.subjectKind === "user" && bareId(grant.subjectId) === viewerUserId;
 }
 
 // ---------------------------------------------------------------------------
@@ -441,14 +487,26 @@ function RefusalNotice({ refusal }: { refusal: GrantRefusal }) {
   );
 }
 
+/**
+ * The picker's `<kind>:<id>` value, resolved against the roster.
+ *
+ * The id is everything after the FIRST colon, because a roster row carrying a
+ * canonical `v1:identity:user:...` id would otherwise be cut at its own second
+ * segment and match nobody -- the picker would silently select nothing. The
+ * subject's id is kept BARE, which is both what the grant rows store (so
+ * `grantsForSubject` matches) and what the engine resolves on the way in.
+ */
 function subjectFromKey(key: string, people: readonly PersonRow[], groups: readonly GroupRow[]): Subject | null {
-  const [kind, id] = key.split(":", 2) as ["user" | "group" | "", string?];
-  if (id === undefined || id === "") return null;
+  const at = key.indexOf(":");
+  if (at < 0) return null;
+  const kind = key.slice(0, at);
+  const id = bareId(key.slice(at + 1));
+  if (id === "") return null;
   if (kind === "group") {
-    const group = groups.find((g) => g.id === id);
+    const group = groups.find((g) => bareId(g.id) === id);
     return group === undefined ? null : { kind: "group", id, name: group.name, role: "" };
   }
-  const person = people.find((p) => p.id === id);
+  const person = people.find((p) => bareId(p.id) === id);
   return person === undefined ? null : { kind: "user", id, name: personName(person), role: person.role };
 }
 
@@ -464,19 +522,28 @@ function subjectSentence(
   }
   const rung = roles.find((r) => r.slug === subject.role || r.aliases.includes(subject.role));
   const roleName = rung?.name ?? subject.role ?? "no role";
-  const names = groupIds.map((id) => groups.find((g) => g.id === id)?.name ?? "").filter((n) => n !== "");
+  const names = groupIds.map((id) => groups.find((g) => bareId(g.id) === bareId(id))?.name ?? "").filter((n) => n !== "");
   const inGroups = names.length === 0 ? "in no group" : `in ${names.join(", ")}`;
   return `${subject.name} holds the ${roleName} role and is ${inGroups}.`;
 }
 
+/**
+ * A principal id to the name a person reads, "" when nothing names it.
+ *
+ * Bare on both sides -- the map's keys and the id asked about -- so a roster
+ * row and a grant that spell the same person differently still meet. The
+ * viewer is "you": the one name every session can give without a roster read,
+ * and the whole point of the provenance line.
+ */
 function namer(people: readonly PersonRow[], groups: readonly GroupRow[], viewerUserId: string): (id: string) => string {
   const byId = new Map<string, string>();
-  for (const p of people) byId.set(p.id, personName(p));
-  for (const g of groups) byId.set(g.id, g.name);
+  for (const p of people) byId.set(bareId(p.id), personName(p));
+  for (const g of groups) byId.set(bareId(g.id), g.name);
   return (id: string) => {
-    if (id === "") return "";
-    if (id === viewerUserId) return "you";
-    return byId.get(id) ?? "";
+    const who = bareId(id);
+    if (who === "") return "";
+    if (who === viewerUserId) return "you";
+    return byId.get(who) ?? "";
   };
 }
 

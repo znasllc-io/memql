@@ -12,7 +12,7 @@ import { ConnectedAccountCard } from "../sources/ConnectedAccountCard";
 import { ConnectGitHub } from "../sources/ConnectGitHub";
 import { connectSucceeded, returnPathFor, type ConnectReturn } from "../sources/connectReturn";
 import { SOURCE_HOST } from "../sources/probe";
-import { usePeopleNames } from "../people";
+import { bare, usePeopleNames } from "../people";
 import {
   credentialFingerprint,
   credentialIsRevoked,
@@ -92,6 +92,16 @@ import {
 // shown only to a cluster owner and only when there is somebody to show. A
 // non-owner's feed never carries another person's row, so for them nothing
 // here changes.
+//
+// MINE AND THEIRS IS DECIDED ON BARE IDS. The split is the whole of this
+// presentation, and the two values it compares reach the browser by different
+// routes: a credential's `ownerUserId` off the row, the viewer's id off the
+// session token, which in a deployed cluster routinely carries the canonical
+// `v1:identity:user:...` spelling. A raw `===` between the two forms is false
+// for every card, which puts the viewer's OWN connection under "Other
+// people's connections" -- with their own name beside it -- and leaves the
+// GitHub card saying "not connected" to somebody who is. `bare` (../people)
+// is applied to both sides, as the attribution line already does.
 
 /** The SECTION id this group is mounted under, so the connect callback brings
  *  somebody back to the surface that asked. */
@@ -136,10 +146,11 @@ export function SourcesGroup({
   // subscription: a card saying "connected as @octocat" beside a list that
   // had not heard about the grant yet would be one app contradicting itself.
   const held = credentials?.snapshot.rows ?? [];
+  const viewer = bare(viewerUserId);
   // THE VIEWER'S OWN GRANT, never somebody else's: a cluster owner's feed
   // carries every person's cards, and a card saying "connected as @octocat"
   // about a colleague's grant would be the wrong person's connection.
-  const mine = useMemo(() => held.filter((c) => c.ownerUserId === viewerUserId), [held, viewerUserId]);
+  const mine = useMemo(() => held.filter((c) => bare(c.ownerUserId) === viewer), [held, viewer]);
   const grant = useMemo(() => githubGrantOf(mine), [mine]);
   // ...and the list is that same feed NARROWED, because a grant is already
   // the card above and a row that appeared in both would be one credential
@@ -147,7 +158,7 @@ export function SourcesGroup({
   // source seam is for, so the pasted rows keep their arrival cues and their
   // live-state caption.
   const pasted = useLiveView<CredentialRow, CredentialRow>(credentials, "pasted", (rows) =>
-    pastedCredentials(rows.filter((c) => c.ownerUserId === viewerUserId)),
+    pastedCredentials(rows.filter((c) => bare(c.ownerUserId) === viewer)),
   );
   // OTHER PEOPLE'S, every kind -- a colleague's GitHub grant is listed here
   // as a row rather than as a card, because the card's acts (reconnect,
@@ -155,7 +166,7 @@ export function SourcesGroup({
   // has over it is Revoke. Newest first, like the pasted list.
   const others = useLiveView<CredentialRow, CredentialRow>(credentials, "others", (rows) =>
     rows
-      .filter((c) => c.ownerUserId !== viewerUserId)
+      .filter((c) => bare(c.ownerUserId) !== viewer)
       .slice()
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
   );
