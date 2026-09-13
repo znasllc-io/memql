@@ -43,6 +43,7 @@ export function AccountPicker({
   accounts,
   id,
   label,
+  emptyLabel = NO_ACCOUNT_LABEL,
   disabled = false,
 }: {
   value: string;
@@ -50,6 +51,13 @@ export function AccountPicker({
   accounts: AccountRow[];
   id: string;
   label: string;
+  /**
+   * What the empty value MEANS on this surface. "No client" is the truth on
+   * a tie that can be cleared; on the compose flow an empty pick is the
+   * cluster's own account (memql#5303, D12), and the option has to say so
+   * rather than promise an untied row it will not make.
+   */
+  emptyLabel?: string;
   disabled?: boolean;
 }) {
   const options = useMemo(() => {
@@ -69,7 +77,7 @@ export function AccountPicker({
       {/* The empty value is FIRST and is a real choice, not a prompt. Clearing
           a tie is something people do, and a picker whose only untie is
           "scroll back to the top and hope" is one that cannot express it. */}
-      <option value="">{NO_ACCOUNT_LABEL}</option>
+      <option value="">{emptyLabel}</option>
       {options.map((o) => (
         <option key={o.id} value={o.id} disabled={disabled}>
           {o.label}

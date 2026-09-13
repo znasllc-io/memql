@@ -715,8 +715,12 @@ concept enrolmentToken {
 /// inserts -- so both concepts here are unowned and written only by the Go builtins in
 /// integrations/groups under internal origin.
 ///
-/// A GROUP WITH NO ACCOUNT GRANTS NOTHING (D8) and exists to organize. `kind` says which of the
+/// A GROUP WITH NO ACCOUNT GRANTS NO ROWS (D8) and exists to organize. `kind` says which of the
 /// two a row is: `account` for the one the automation makes per account, `custom` for any other.
+/// It can still be a GRANT SUBJECT (design 2026-09-11-app-access-grants, D13): a group with no
+/// account grants apps -- it is a subject an app capability can name, and its members open that
+/// app's door -- and still grants no rows, because the rows a person then sees are decided by the
+/// tier of each concept, and a group with no account ties them to nothing.
 @displayCard(primary="name", secondary="description", status="status")
 @rowAuthz(owner="ownerUserId", rankVisible, unowned="admin", clusterOwner)
 concept group {

@@ -389,9 +389,14 @@ func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, er
 			}
 		}
 	} else if err := d.Store.openDeployment(ctx, deploymentSeed{
-		DeploymentId:     deploymentId,
-		PackageId:        req.PackageId,
-		OwnerUserId:      ownerUserId,
+		DeploymentId: deploymentId,
+		PackageId:    req.PackageId,
+		OwnerUserId:  ownerUserId,
+		// THE ACCOUNT TIE RIDES ALONG WITH THE OWNER (memql#5303), off the
+		// same package row the starting caller resolved under their own
+		// actor, so the run's timeline is readable by the people the
+		// package is. Empty for an untied package, and then not written.
+		AccountId:        rowString(pkg, "accountId"),
 		RequestedBy:      req.Actor.UserId,
 		Automatic:        req.Automatic,
 		NodeId:           selfNodeId(),

@@ -3936,6 +3936,7 @@
       "concept": "v1:platform:package",
       "file": "platform/concepts.memql",
       "fields": [
+        "accountId",
         "artifactId",
         "autoDeploy",
         "credentialId",
@@ -3971,6 +3972,7 @@
       "concept": "v1:platform:packageDeployment",
       "file": "platform/concepts.memql",
       "fields": [
+        "accountId",
         "automatic",
         "buildLogTail",
         "builtOn",

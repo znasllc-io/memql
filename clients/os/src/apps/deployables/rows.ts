@@ -221,12 +221,13 @@ export function siteIsClusterOwned(site: SiteRow): boolean {
 /**
  * Who a row belongs to, in a word.
  *
- * A cluster owner's list is every deployable in the cluster and an ordinary
- * caller's is their own (`sitesAll`'s filter is
- * `ownerUserId==actor.userId || actor.isClusterOwner==true`), so "yours" is
- * only informative in the first case. It is still rendered in both, because a
- * list that changes its columns with the reader's role is one that cannot be
- * described to somebody over a call.
+ * A cluster owner's list is every deployable in the cluster; everyone else's
+ * is their own plus every site tied to an account whose group they are in
+ * (`sitesAll` carries no caller term -- the concept's tier decides, memql#5303
+ * D4). So "yours" is informative for both, and "another owner" is a row the
+ * tie admitted. It is rendered in every case, because a list that changes its
+ * columns with the reader's role is one that cannot be described to somebody
+ * over a call.
  */
 export function ownerLabel(site: SiteRow, viewerUserId: string): string {
   if (siteIsClusterOwned(site)) return "cluster-owned";

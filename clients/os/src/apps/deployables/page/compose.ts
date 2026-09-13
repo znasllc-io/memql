@@ -1,3 +1,4 @@
+import { SELF_ACCOUNT_ID } from "../../accounts/rows";
 import { hostnameFor, validateSlug } from "../hostname";
 import { normalizeHostname } from "../domains";
 import { generateNickname } from "../packages/nickname";
@@ -248,12 +249,16 @@ export function placementsComplete(
 }
 
 /**
- * The wire form of the addresses: hostnames composed, blank halves OMITTED.
+ * The wire form of the addresses: hostnames composed, the own domain
+ * normalized, and the client half DEFAULTED.
  *
- * An explicit "" would be a value the pipeline reads and acts on -- an empty
- * accountId is a request to tie the site to nothing, an empty ownDomain a
- * request to bind nothing -- so a half nobody answered is absent rather than
- * empty, exactly as `createSite`'s own omitBlank does.
+ * An unanswered ownDomain stays blank and is omitted on the wire, exactly as
+ * `createSite`'s own omitBlank does. The client half is different (memql#5303,
+ * design 2026-09-11-app-access-grants D12): an app nobody tied to a client is
+ * the CLUSTER'S OWN, so a blank picker sends `self` -- the singleton the
+ * cluster's own group grants -- and the site lands where the people on this
+ * cluster can see it rather than where only its creator can. A picked client
+ * wins. A skipped app is asked nothing and sends nothing, including this.
  */
 export function placementsFrom(
   apps: readonly string[],
@@ -270,12 +275,22 @@ export function placementsFrom(
     const skipped = held.skip === true;
     out[app] = {
       hostname: skipped ? "" : hostnameFor(held.slug, clusterDomain),
-      accountId: held.accountId.trim(),
+      accountId: skipped ? "" : accountOrSelf(held.accountId),
       ownDomain: normalizeHostname(held.ownDomain),
       ...(held.skip === true ? { skip: true } : {}),
     };
   }
   return out;
+}
+
+/**
+ * The client a deployable is tied to: the one picked, else the cluster's own
+ * (D12). One spelling of the default, shared by the package path's placements
+ * and the hand-made path's site tie.
+ */
+export function accountOrSelf(accountId: string): string {
+  const picked = accountId.trim();
+  return picked === "" ? SELF_ACCOUNT_ID : picked;
 }
 
 /**

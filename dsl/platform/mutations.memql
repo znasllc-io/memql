@@ -1349,6 +1349,9 @@ mutate syncState setSyncPaused {
 /// packages surface, that carries a token VALUE: the token crossed the wire once, inside
 /// sourceCredentialCreate, and the fetcher resolves the name under THIS package's owner -- so naming
 /// somebody else's credential here buys nothing but a credential_not_found at the next fetch.
+///
+/// `accountId` is the tie the package's tier reads (memql#5303, D12). The compose flow sends the
+/// cluster's own account unless a client was picked; absent, the package is untied and its owner's.
 @actor
 @description("Register a package this cluster tracks and can deploy")
 mutate package createPackage {
@@ -1360,9 +1363,11 @@ mutate package createPackage {
     repoRef       string   @maxLength(200)
     credentialId  string
     artifactId    string
+    /// The v1:accounts:account this package is for. Absent means untied.
+    accountId     string
   }
   insert {
-    accept { name, repoUrl, repoRef, credentialId, artifactId }
+    accept { name, repoUrl, repoRef, credentialId, artifactId, accountId }
     stamp {
       id:              args.packageId
       ownerUserId:     actor.userId
@@ -1622,10 +1627,12 @@ mutate packageDeployment openPackageDeployment {
     scopedTo       []string
     /// The run this one was started from, when it is a retry.
     fromDeploymentId string
+    /// The package's account tie, copied by the pipeline off the package row (memql#5303).
+    accountId      string
     startedAt      datetime!
   }
   insert {
-    accept { sourceVersion, requestedBy, nodeId, scopedTo, fromDeploymentId }
+    accept { sourceVersion, requestedBy, nodeId, scopedTo, fromDeploymentId, accountId }
     stamp {
       id:           args.deploymentId
       packageId:    args.packageId

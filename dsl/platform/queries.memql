@@ -251,13 +251,22 @@ query site siteByHostname {
 /// != is null-safe against a non-empty literal (memql#1685) -- while an allow-list would silently
 /// drop a row the day a fifth value is added.
 ///
-/// The name predates self-serve deployables and is kept: it is the same read, and the composite tier
-/// is what decides how far "all" reaches for a given actor. The caller term is that tier's own
-/// predicate written out -- see siteByHostname for why the bare admin gate it replaced would now
-/// collapse the read to cluster owners alone.
+/// The name predates self-serve deployables and is kept: it is the same read, and the concept's tier
+/// is what decides how far "all" reaches for a given actor.
+///
+/// NO CALLER TERM, DELIBERATELY (memql#5303, design 2026-09-11-app-access-grants D4 / D12). The
+/// tier `@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")` is the whole answer for
+/// every caller -- their own rows, every row for a cluster owner, and the rows tied to an account
+/// whose group they are in. This read used to restate the tier's first two arms as
+/// `(ownerUserId==actor.userId || actor.isClusterOwner==true)`, and an AND with that conjunct can
+/// never be widened by the third: a member of Acme's group was admitted to Acme's sites by the tier
+/// and then filtered back out by the query, so the list showed the tie to nobody. The engine ANDs
+/// the tier in from the declaration; tierDecidesTheRead (component/memql) records this construct as
+/// one the tier decides, and TestAPackageTiedToTheSelfAccountIsReadableByItsGroupAndByStaff reads
+/// it against a real database for a member, a developer and a stranger.
 @actor
 query site sitesAll {
-  filter  isNotDeleted && isNotArchived && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  isNotDeleted && isNotArchived
   shape   siteFull
   sort    "hostname", "asc"
 }
@@ -267,16 +276,17 @@ query site sitesAll {
 /// single query that returns every version at once (D10 / #2880), so re-issuing this one under each
 /// prior `createdAt` IS the walk. Deliberately carries NO `asOf latest`: that would make the query
 /// unwrappable by a caller's own `asOf`, which is exactly the capability the walk needs
-/// (dsl/deployment/queries.memql:78-97 documents the same reasoning). Owner-or-cluster-owner per
-/// v1:platform:site's composite tier -- see siteByHostname for why the bare admin gate this
-/// replaced would now collapse the read to cluster owners alone.
+/// (dsl/deployment/queries.memql:78-97 documents the same reasoning). No caller term: the concept's
+/// tier decides the row, for the reason sitesAll gives (memql#5303, D4) -- a site tied to an account
+/// is readable by that account's group, and this is the read every site builtin resolves its target
+/// through before writing, so the gate a write runs behind admits the same people the list does.
 @unbounded("site by id -- bounded to a single row (id is the row's own primary key)")
 @actor
 query site siteById {
   args {
     siteId  string!
   }
-  filter  row.id==args.siteId && isNotDeleted && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row.id==args.siteId && isNotDeleted
   shape   siteFull
 }
 
@@ -582,17 +592,29 @@ query syncState syncStatesAll {
 // archive listings deliberately do NOT: they select archived rows and return
 // them, marked.
 //
-// The caller term is the composite tier's own predicate written out, exactly as
-// v1:platform:site's queries write it (memql#4344): the engine ANDs the same
-// term in from the concept's declaration, and restating it is what lets a
-// reader see the scope without resolving the concept. It is an OWNERSHIP floor
-// rather than a fail-open selection -- a false admin gate leaves precisely the
-// caller's own rows.
+// NO CALLER TERM ON THE READS THE APP AND THE BUILTINS MAKE (memql#5303,
+// design 2026-09-11-app-access-grants D4 / D12). Both concepts declare
+// `@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")`, and
+// that tier is the whole answer for every caller: own rows, every row for a
+// cluster owner, and the rows tied to an account whose group the caller is in.
+// These reads used to restate the first two arms as
+// `(ownerUserId==actor.userId || actor.isClusterOwner==true)`, exactly as
+// v1:platform:site's did (memql#4344) -- and an AND with that conjunct cannot
+// be widened by the third arm, so a package tied to the cluster's own account
+// was admitted by the tier and filtered out by the query, for everyone but its
+// owner. The engine ANDs the tier in from the declaration; each construct below
+// is recorded in tierDecidesTheRead (component/memql/rowauthz_enforce_gate_test.go)
+// and read against a real database by
+// TestAPackageTiedToTheSelfAccountIsReadableByItsGroupAndByStaff.
+//
+// The two FEED reads (packagesByRepoUrl, packagesTrackingRepos) keep the
+// written-out term: they run under the engine's own operator identity and are
+// not a person's view.
 
 /// The packages this caller may see, active only. The OS packages list.
 @actor
 query package packagesAll {
-  filter  statusIsActive && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  statusIsActive
   sort    "name", "asc"
   shape   packageFull
 }
@@ -601,7 +623,7 @@ query package packagesAll {
 /// rows instead of inheriting a filter that would hide them; see the note above.
 @actor
 query package packagesArchived {
-  filter  statusIsArchived && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  statusIsArchived
   sort    "name", "asc"
   shape   packageFull
 }
@@ -613,7 +635,7 @@ query package packageById {
   args {
     packageId  string!
   }
-  filter  row.id==args.packageId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row.id==args.packageId
   shape   packageFull
 }
 
@@ -654,7 +676,7 @@ query packageDeployment packageDeployments {
   args {
     packageId  string!
   }
-  filter    packageId==args.packageId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter    packageId==args.packageId
   sort      "row.createdAt", "desc"
   paginate  50
   shape     packageDeploymentFull
@@ -673,7 +695,7 @@ query packageDeployment packageDeployments {
 /// somebody has half-composed. The sort is what keeps the read a bounded one for the parser.
 @actor
 query packageDeployment packageDeploymentsAwaitingConfirm {
-  filter  status=="awaiting_confirm" && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  status=="awaiting_confirm"
   sort    "row.createdAt", "desc"
   shape   packageDeploymentFull
 }
@@ -685,7 +707,7 @@ query packageDeployment packageDeploymentById {
   args {
     deploymentId  string!
   }
-  filter  row.id==args.deploymentId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row.id==args.deploymentId
   shape   packageDeploymentFull
 }
 
@@ -695,8 +717,9 @@ query packageDeployment packageDeploymentById {
 /// CLUSTER-OWNER TIER BY ITS ACTOR rather than by a spec: the concept's composite tier already
 /// admits a cluster owner to every row, and the sweep runs under the maintenance actor, which IS
 /// one. So the filter says only what it is looking for -- a run at a non-terminal status -- and the
-/// tier decides who may see it. The same query read by an ordinary caller answers their own
-/// stranded runs, which is correct and is not a second code path.
+/// tier decides who may see it (memql#5303, D4: no caller term, as every read in this section). The
+/// same query read by an ordinary caller answers their own stranded runs and those of the packages
+/// they are tied to, which is correct and is not a second code path.
 ///
 /// TWO EXCLUSIONS THAT ARE NOT TERMINAL STATUSES, and both were bugs.
 ///
@@ -719,7 +742,7 @@ query packageDeployment packageDeploymentById {
 /// bounded page keeps ONE answer to "how old is too old" rather than two that can disagree.
 @actor
 query packageDeployment packageDeploymentsInFlight {
-  filter    status!="succeeded" && status!="refused" && status!="failed" && status!="abandoned" && status!="cancelled" && status!="awaiting_confirm" && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter    status!="succeeded" && status!="refused" && status!="failed" && status!="abandoned" && status!="cancelled" && status!="awaiting_confirm"
   sort      "row.createdAt", "asc"
   paginate  500
   shape     packageDeploymentFull
@@ -734,7 +757,7 @@ query site sitesForPackage {
   args {
     packageId  string!
   }
-  filter  packageId==args.packageId && isNotDeleted && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  packageId==args.packageId && isNotDeleted
   sort    "hostname", "asc"
   shape   siteFull
 }
@@ -744,7 +767,7 @@ query site sitesForPackage {
 /// together are the whole population.
 @actor
 query site sitesArchived {
-  filter  statusIsArchived && isNotDeleted && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  statusIsArchived && isNotDeleted
   sort    "hostname", "asc"
   shape   siteFull
 }
@@ -756,7 +779,9 @@ query site sitesArchived {
 // that projects `encryptedValue`, and the one query that does is @serverOnly,
 // resolved under the PACKAGE OWNER's actor from inside a fetch. The caller term
 // on the two people-facing reads is the composite tier's own predicate written
-// out, exactly as the package queries above write it.
+// out -- UNLIKE the package queries above since memql#5303: a credential is a
+// personal token, the concept declares no account argument, and the record
+// keeps these reads owner-or-cluster-owner.
 
 /// Every credential this caller holds, revoked ones included and marked -- the Settings Sources
 /// group. A cluster owner reads every row's metadata, which is the oversight the composite tier

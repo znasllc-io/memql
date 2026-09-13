@@ -280,8 +280,16 @@ func (s *store) openDeployment(ctx context.Context, d deploymentSeed) error {
 	if scoped == nil {
 		scoped = []string{}
 	}
+	// THE ACCOUNT RIDES ALONG ONLY WHEN THERE IS ONE. It is copied off the
+	// package row, never chosen here, and an untied package's run must be
+	// written exactly as it was before the field existed -- an explicit ""
+	// would be a value the row records where the truth is an absence.
+	account := ""
+	if v := strings.TrimSpace(d.AccountId); v != "" {
+		account = fmt.Sprintf(", accountId: %s", langparser.QuoteString(v))
+	}
 	return s.writeInternal(writeCtx, fmt.Sprintf(
-		"mutation openPackageDeployment(deploymentId: %s, packageId: %s, sourceVersion: %s, requestedBy: %s, automatic: %t, nodeId: %s, scopedTo: %s, fromDeploymentId: %s, startedAt: %s)",
+		"mutation openPackageDeployment(deploymentId: %s, packageId: %s, sourceVersion: %s, requestedBy: %s, automatic: %t, nodeId: %s, scopedTo: %s, fromDeploymentId: %s%s, startedAt: %s)",
 		langparser.QuoteString(d.DeploymentId),
 		langparser.QuoteString(d.PackageId),
 		langparser.QuoteString(d.SourceVersion),
@@ -290,6 +298,7 @@ func (s *store) openDeployment(ctx context.Context, d deploymentSeed) error {
 		langparser.QuoteString(d.NodeId),
 		jsonLiteral(scoped),
 		langparser.QuoteString(d.FromDeploymentId),
+		account,
 		langparser.QuoteString(d.StartedAt.UTC().Format(time.RFC3339)),
 	))
 }
@@ -751,7 +760,11 @@ type deploymentSeed struct {
 	// FromDeploymentId is the run this one was started from, when it is a
 	// retry (memql#4955).
 	FromDeploymentId string
-	StartedAt        time.Time
+	// AccountId is the package's own account tie, copied onto the run so its
+	// timeline is readable by the people the package is (memql#5303). Empty
+	// for an untied package, and then not rendered at all.
+	AccountId string
+	StartedAt time.Time
 }
 
 type deploymentClose struct {

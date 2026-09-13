@@ -2755,7 +2755,8 @@ QueryClient.prototype.createPATIdentity = function (this: QueryClient, args: Cre
 
 /** Register a tracked package. The person's write: they supply the source, the engine supplies the identity and the name.
 `name` is an ARG here and only here, because at registration time no analysis has run yet and the tree has not been read -- so the manifest cannot have supplied it. The first successful analysis overwrites it through recordPackageAnalysis, which is why the field's doc says the name comes from the manifest: this value is a placeholder with a person's guess in it.
-`credentialId` NAMES one of the caller's v1:platform:sourceCredential rows and is a plain string here on purpose (epic memql#4885, D10). There is no arg on this mutation, or anywhere else in the packages surface, that carries a token VALUE: the token crossed the wire once, inside sourceCredentialCreate, and the fetcher resolves the name under THIS package's owner -- so naming somebody else's credential here buys nothing but a credential_not_found at the next fetch. */
+`credentialId` NAMES one of the caller's v1:platform:sourceCredential rows and is a plain string here on purpose (epic memql#4885, D10). There is no arg on this mutation, or anywhere else in the packages surface, that carries a token VALUE: the token crossed the wire once, inside sourceCredentialCreate, and the fetcher resolves the name under THIS package's owner -- so naming somebody else's credential here buys nothing but a credential_not_found at the next fetch.
+`accountId` is the tie the package's tier reads (memql#5303, D12). The compose flow sends the cluster's own account unless a client was picked; absent, the package is untied and its owner's. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["createPackage"] in generated_concepts.ts).
 export interface CreatePackageArgs {
   packageId: string;
@@ -2766,6 +2767,8 @@ export interface CreatePackageArgs {
   repoRef?: string;
   credentialId?: string;
   artifactId?: string;
+  /** The v1:accounts:account this package is for. Absent means untied. */
+  accountId?: string;
 }
 
 export function buildCreatePackage(args: CreatePackageArgs): string {
@@ -2777,6 +2780,7 @@ export function buildCreatePackage(args: CreatePackageArgs): string {
   if (args.repoRef !== undefined) parts.push("repoRef: " + renderMemQLValue(args.repoRef));
   if (args.credentialId !== undefined) parts.push("credentialId: " + renderMemQLValue(args.credentialId));
   if (args.artifactId !== undefined) parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
   return "mutation createPackage(" + parts.join(", ") + ")";
 }
 

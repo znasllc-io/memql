@@ -288,9 +288,27 @@ describe("the wire form of a placement", () => {
     );
     expect(made["storefront"]).toEqual({
       hostname: "shop.memql.example.com",
-      accountId: "",
+      // Nobody picked a client, so the app is the cluster's own (D12 below).
+      accountId: "self",
       ownDomain: "shop.acme.com",
     });
+  });
+
+  // THE CLUSTER'S OWN ACCOUNT IS THE DEFAULT, NOT NOBODY (memql#5303, design
+  // 2026-09-11-app-access-grants D12). A placement whose client half was left
+  // blank ties the app to `self`, the singleton the cluster's own group
+  // grants -- so two people on one cluster see each other's deployables from
+  // the day they are made. A picked client wins, and a skipped app is asked
+  // nothing and sends nothing.
+  it("ties an app to the cluster's own account unless a client was picked", () => {
+    const blank = placementsFrom(["web"], { web: address({ slug: "web" }) }, DOMAIN);
+    expect(blank["web"]!.accountId).toBe("self");
+
+    const picked = placementsFrom(["web"], { web: address({ slug: "web", accountId: "acct-acme" }) }, DOMAIN);
+    expect(picked["web"]!.accountId).toBe("acct-acme");
+
+    const skipped = placementsFrom(["web"], { web: { ...address({ slug: "web" }), skip: true } }, DOMAIN);
+    expect(skipped["web"]!.accountId).toBe("");
   });
 
   it("OMITS a half nobody answered rather than sending an empty one", () => {

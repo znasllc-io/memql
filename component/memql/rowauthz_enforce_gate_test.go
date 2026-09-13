@@ -215,6 +215,64 @@ var tierDecidesTheRead = map[string]string{
 	"grantsForSubject":  "memql#5294, as benchRuns: an ownerless clusterOwner-tier concept read at exactly its rankFloor.",
 	"grantsForResource": "memql#5294, as grantsForSubject -- the same concept, tier and annotation.",
 	"grantById":         "memql#5297, as grantsForSubject -- the same concept, tier and annotation; what grantRevoke reads before it acts.",
+
+	// The Deployables reads (memql#5303, design
+	// docs/superpowers/specs/2026-09-11-app-access-grants-design.md, D4 /
+	// D12), and the argument is of a THIRD shape: not a rank floor bounding
+	// the callers, not an always-empty owner, but a tier that carries a
+	// branch NO FILTER CAN SPELL.
+	//
+	// v1:platform:site, v1:platform:package and v1:platform:packageDeployment
+	// declare `@rowAuthz(owner="ownerUserId", clusterOwner,
+	// account="accountId")`. That tier is the WHOLE answer for every caller:
+	// their own rows (owner arm), every row for a cluster owner (clusterOwner
+	// arm), and the rows tied to an account whose group they are in (account
+	// arm -- resolved per request from v1:identity:groupMembership, with
+	// developer rank and above standing members of every account group by
+	// rule). Each of these reads used to carry
+	// `(ownerUserId==actor.userId || actor.isClusterOwner==true)`, which is
+	// the tier's first two arms WRITTEN OUT and the third omitted -- because
+	// the third has no author spelling, exactly as the rank arm has none. An
+	// AND with that conjunct can never be widened by the tier: a member of
+	// Acme's group was admitted to Acme's sites by the declaration and
+	// filtered back out by the query, so the tie was visible to nobody but
+	// the owner, and design D4 ("granting Deployables shows a person the
+	// deployables they are admitted to by owner, account or rank") was
+	// unreachable through the app that exists to show them.
+	//
+	// DROPPING THE CONJUNCT IS THE DESIGN DECISION, NOT A FIX. What the gate
+	// sees is accurate -- the injected predicate is not implied by the filter
+	// -- and what it concludes ("the result set changes for the callers") is
+	// exactly the change D4 / D12 asks for. The property this entry claims,
+	// that the tier already decides the whole row set for every caller, is
+	// what the tier's DEFINITION says: there is no caller for whom a stricter
+	// answer than "own, or cluster owner, or account-admitted" is correct.
+	//
+	// The test that fails if this reasoning is wrong is
+	// TestAPackageTiedToTheSelfAccountIsReadableByItsGroupAndByStaff
+	// (component/packages), which reads packagesAll, packageDeployments,
+	// sitesAll and packageById against a real database for a developer, a
+	// group member and a stranger -- and asserts BOTH halves, admission and
+	// refusal -- plus TestAccountGrantReachesTheAccountView for the account
+	// view.
+	//
+	// DELIBERATELY NOT HERE: siteByHostname (the edge's read under its own
+	// synthetic cluster-owner actor), packagesByRepoUrl and
+	// packagesTrackingRepos (the update feeds, under the engine's operator
+	// identity), and every sourceCredential read (a personal token, and the
+	// concept declares no account argument). Each keeps the written-out term.
+	"sitesAll":                          "memql#5303, D4 / D12. The tier's account arm has no author spelling, so the written-out `own || clusterOwner` conjunct was the tier minus one arm and an AND with it filtered out every account-admitted row. The tier decides.",
+	"siteById":                          "memql#5303, as sitesAll -- and the by-id read every site builtin gates a write on.",
+	"sitesForPackage":                   "memql#5303, as sitesAll.",
+	"sitesArchived":                     "memql#5303, as sitesAll.",
+	"sitesForAccount":                   "memql#5303, as sitesAll -- the account VIEW, whose whole purpose is the tie the conjunct filtered out. TestAccountGrantReachesTheAccountView.",
+	"packagesAll":                       "memql#5303, D4 / D12, as sitesAll over v1:platform:package.",
+	"packagesArchived":                  "memql#5303, as packagesAll.",
+	"packageById":                       "memql#5303, as packagesAll -- and the by-id read every packages builtin (packageDeploy among them) resolves its target through under the caller's actor.",
+	"packageDeployments":                "memql#5303, D4 / D12, as sitesAll over v1:platform:packageDeployment, whose account is copied from its package at open.",
+	"packageDeploymentsAwaitingConfirm": "memql#5303, as packageDeployments.",
+	"packageDeploymentById":             "memql#5303, as packageDeployments -- the confirm gate's read.",
+	"packageDeploymentsInFlight":        "memql#5303, as packageDeployments -- the abandoned sweep's read, under the maintenance actor the clusterOwner arm admits.",
 }
 
 func TestRowAuthzEnforcementLandGate(t *testing.T) {

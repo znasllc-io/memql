@@ -5037,6 +5037,7 @@ func CreatePATIdentityBuild(args CreatePATIdentityArgs) string {
 // CreatePackage -- Register a tracked package. The person's write: they supply the source, the engine supplies the identity and the name.
 // `name` is an ARG here and only here, because at registration time no analysis has run yet and the tree has not been read -- so the manifest cannot have supplied it. The first successful analysis overwrites it through recordPackageAnalysis, which is why the field's doc says the name comes from the manifest: this value is a placeholder with a person's guess in it.
 // `credentialId` NAMES one of the caller's v1:platform:sourceCredential rows and is a plain string here on purpose (epic memql#4885, D10). There is no arg on this mutation, or anywhere else in the packages surface, that carries a token VALUE: the token crossed the wire once, inside sourceCredentialCreate, and the fetcher resolves the name under THIS package's owner -- so naming somebody else's credential here buys nothing but a credential_not_found at the next fetch.
+// `accountId` is the tie the package's tier reads (memql#5303, D12). The compose flow sends the cluster's own account unless a client was picked; absent, the package is untied and its owner's.
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["createPackage"] in generated_concepts.go).
 type CreatePackageArgs struct {
@@ -5048,6 +5049,8 @@ type CreatePackageArgs struct {
 	RepoRef      string
 	CredentialId string
 	ArtifactId   string
+	// The v1:accounts:account this package is for. Absent means untied.
+	AccountId string
 }
 
 // CreatePackage calls the engine mutation createPackage.
@@ -5098,6 +5101,13 @@ func CreatePackageBuild(args CreatePackageArgs) string {
 		}
 		b.WriteString("artifactId: ")
 		b.WriteString(quoteMemQL(args.ArtifactId))
+	}
+	if args.AccountId != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
 	}
 	b.WriteString(")")
 	return b.String()
