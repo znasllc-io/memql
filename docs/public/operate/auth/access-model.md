@@ -251,10 +251,12 @@ OS app is the resource `app:<appId>` and a named part of one is
 seeded on at least one role in `dsl/rbac/seeds.memql`, which is also what the
 load-time vocabulary check reads -- so `@requiresCapability("execute",
 "app:deployables/publsh")` refuses boot naming the known parts. The `read
-app:<id>` seeds reproduce the MemQL OS registry's hand-written role floors
-exactly, app by app and floored section by floored section, and
-`TestOsRegistryFloorsMatchTheAppSeeds` (`component/memql`) fails the build
-when the two disagree in either direction. Deployables is the first app to
+app:<id>` seeds were written to reproduce the MemQL OS registry's hand-written
+role floors exactly, app by app and floored section by floored section; the
+registry now NAMES those resources (`requires: "app:<id>"`) rather than
+stating floors, and `TestOsRegistryRequiresMatchTheAppSeeds`
+(`component/memql`) fails the build when a manifest names a resource no seed
+declares or a seeded app resource has no manifest. Deployables is the first app to
 carry parts (`sources`, `deploy`, `publish`, `retire`, `domains`), seeded on
 owner and developer; the mapping from part to construct is the table in the
 design record. An app grant opens the DOOR; row authorization still decides
@@ -799,6 +801,31 @@ The engine itself never reads through the admin-floored queries. Resolution
 reads the rows through the engine's own graph-backed source under its own
 identity, exactly as the role catalog is read -- a read floored at admin could
 not serve a user-role actor their own deny.
+
+### The OS
+
+MemQL OS reads `effectiveCapabilitiesForActor()` once at sign-in and holds the
+answer beside the role ladder (`clients/os/src/system/roles.ts`). Every app,
+floored section and widget in the registry names a resource (`requires:
+"app:<id>"`, `"app:<id>/<section>"`), and the shell draws it when the set
+holds `read` on that name; a part of an app (`execute app:<id>/<part>`) hides
+its control when missing -- Deployables names the part beside every act on
+its action bar, its Head and its stops -- and a call that reaches the engine
+anyway is refused with the `capability_not_held` code, which the shell prints
+copy for beside the control. The registry is therefore a list of names and
+never a second copy of the policy: which roles hold a name is the seeds'
+business, and `TestOsRegistryRequiresMatchTheAppSeeds` pins the two.
+
+**Settings > Access** (`app:settings/access`, seeded on owner, developer and
+admin -- the grant reads' floor) is the administration surface, minimal by
+decision: by person or group, one row per app and part with the engine's
+answer restated for that subject (role, then their groups with deny winning
+between them, then their own grants) and the level that decided it printed
+beside the mark; by app, the roles that hold it and everyone granted it by
+name. Only the act that changes an answer is offered, plus "Use role" beside
+a grant; nothing is offered to a viewer whose role lacks `update` on
+`principal`, or for the viewer themselves. The governance refusal codes
+render beside the row that asked.
 
 ### Deliberately not in the model
 

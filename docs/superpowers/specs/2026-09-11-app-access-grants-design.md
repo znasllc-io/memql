@@ -6,8 +6,11 @@
   body.
 - **Status:** approved in the 2026-09-11 brainstorm; **engine shipped** 2026-09-13 (epic
   memql#5287: sections 1 and 3, decisions D1, D2, D5, D6, D9 -- the concept, the resolver,
-  the seven call sites, governance, audit and the reads). Every fork below was put to the
-  owner and answered; the per-section reasoning says what each choice rejected.
+  the seven call sites, governance, audit and the reads); **apps as resources shipped**
+  2026-09-13 (epic memql#5288: section 2 and 5, D7, D8, D12, D13); **the OS shipped**
+  2026-09-13 (epic memql#5289: section 4, D10, D11 -- the registry names resources, the
+  effective read, Deployables' parts, attribution, Settings > Access). Every fork below was
+  put to the owner and answered; the per-section reasoning says what each choice rejected.
 - **Program:** extends the access program (`2026-09-07-access-program.md`). Sub-projects
   A (groups and grants) and B (roles as data) are the mechanisms this record builds on; C
   (the Users app) is where the administration surface will eventually live. This record

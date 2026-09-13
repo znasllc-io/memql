@@ -1520,8 +1520,9 @@ campaign's `lastError`.
 
 `src/logs/` is the reading surface over the cluster's log store, `src/apps/logs/`
 is the app (Stream, Search, Settings), and every app's `*_SECTIONS` now carries
-`{ id: "logs", name: "Logs", roles: { min: "admin" } }` right before its
-settings section. Five things about it are rules the next live surface gets
+`{ id: "logs", name: "Logs", requires: "app:<id>/logs" }` right before its
+settings section -- a capability RESOURCE seeded at the log store's admin
+floor (epic memql#5289), not a role floor. Five things about it are rules the next live surface gets
 wrong by default.
 
 - **THIS CONCEPT DOES NOT BROADCAST, AND THE TAIL POLLS.** `v1:observability:logLine`

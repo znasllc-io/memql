@@ -1463,10 +1463,11 @@ peer-write and stops.
 **`@requiresRank("<role>")` is the SURFACE half** (D6): an actor-rank FLOOR on a
 query / mutation / logic, enforced at execution and validated at LOAD. It gates
 WHO MAY CALL; `@rowAuthz` still decides WHICH ROWS come back. It is the enforced
-counterpart to MemQL OS's per-surface `roles: { min }`, which stays and is now a
-mirror -- both permanent, neither a stand-in for the other. Declared on the
-CONSTRUCT because a surface is a set of constructs and an app id from a browser
-is a claim, not a fact.
+counterpart to MemQL OS's per-surface `requires: "app:<id>"` (a capability
+RESOURCE the shell asks its effective set about, epic memql#5289), which stays
+and is a mirror -- both permanent, neither a stand-in for the other. Declared
+on the CONSTRUCT because a surface is a set of constructs and an app id from a
+browser is a claim, not a fact.
 
 **`@requiresCapability("<verb>", "<resource>")` is its SIBLING** (epic
 memql#5166, D11), same lifecycle -- validated at LOAD against the five verbs and
@@ -1487,11 +1488,24 @@ top-level builtin call returns before the plan-level gate runs.
 OS app, `execute app:<id>/<part>` is a named part, and a part EXISTS by being
 seeded on at least one role in `dsl/rbac/seeds.memql` -- the load-time
 vocabulary reads the seed DECLARATIONS (a first boot has no catalog rows yet),
-so a misspelled part refuses boot naming the known ones. The `read app:<id>`
-seeds reproduce the OS registry's `roles:` floors exactly, pinned both ways by
-`TestOsRegistryFloorsMatchTheAppSeeds`. Deployables carries the first parts
-(`sources`, `deploy`, `publish`, `retire`, `domains`); the part-to-construct
-table is in the design record.
+so a misspelled part refuses boot naming the known ones. **The OS registry
+names resources, never floors** (epic memql#5289, D10): every manifest, floored
+section and widget carries `requires: "app:<id>"` / `"app:<id>/<part>"`, the
+shell reads `effectiveCapabilitiesForActor()` once at sign-in (again on window
+focus and after a grant written in that browser, D11) and draws a surface when
+the set holds `read` on its name -- `holds()` in `clients/os/src/system/roles.ts`
+is the one predicate, `accessEpoch` the reactivity signal every roster memo
+must name, and `roles: { min }` is REFUSED by the gate.
+`TestOsRegistryRequiresMatchTheAppSeeds` (`component/memql`) pins every
+`requires:` name to a seeded `read app:*` row in both directions; the module
+lists that used to be spelled `requires:` are `needs:`. A missing PART hides
+its control (Deployables' `parts.ts`); a call that reaches the engine anyway
+is refused `capability_not_held:`-prefixed, which is the code the OS prints
+copy for. Deployables carries the first parts (`sources`, `deploy`, `publish`,
+`retire`, `domains`); the part-to-construct table is in the design record.
+Settings > Access (`requires: "app:settings/access"`, seeded on the grant
+reads' admin floor) is where a grant to a person or a group is written and
+read back.
 
 **One role ladder, and the shell holds none of it** (D1). `v1:rbac:role` carries
 `rank` plus `aliases` (the user row's `writer`/`reader` are aliases of the
