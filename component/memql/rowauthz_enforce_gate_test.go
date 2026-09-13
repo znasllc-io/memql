@@ -203,6 +203,18 @@ var tierDecidesTheRead = map[string]string{
 	"benchRunById":          "memql#5216, as benchRuns -- the same concept, tier and annotation.",
 	"benchSamplesForRun":    "memql#5216, as benchRuns, over v1:bench:sample, which is ownerless for the same reason.",
 	"benchSamplesForMetric": "memql#5216, as benchSamplesForRun.",
+
+	// The two grant reads (epic memql#5294), the bench argument exactly:
+	// v1:rbac:grant has no owner field, its tier's arms are clusterOwner OR
+	// rankFloor="admin", and @requiresRank("admin") bounds the callers to
+	// exactly the second -- so the tier decides every row for every admitted
+	// caller. The test that fails if this reasoning is wrong is
+	// TestGrantReadsAnswerForAdminAndRefuseBelowTheFloor
+	// (rbac_grant_enforcement_db_test.go), which asserts BOTH halves against
+	// the real tier.
+	"grantsForSubject":  "memql#5294, as benchRuns: an ownerless clusterOwner-tier concept read at exactly its rankFloor.",
+	"grantsForResource": "memql#5294, as grantsForSubject -- the same concept, tier and annotation.",
+	"grantById":         "memql#5297, as grantsForSubject -- the same concept, tier and annotation; what grantRevoke reads before it acts.",
 }
 
 func TestRowAuthzEnforcementLandGate(t *testing.T) {

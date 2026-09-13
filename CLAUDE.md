@@ -1510,6 +1510,16 @@ grants-a-subset-of-the-caller's and predefined-immutable; `auth.MayAssignRole`
 is the ONE rule both assignment seams call. Operator doc:
 [access-model.md](docs/public/operate/auth/access-model.md).
 
+**A GRANT is what a person or a group holds over and above their role** (epic
+memql#5287): `v1:rbac:grant`, one `allow` / `deny` per `(verb, resource)`,
+resolved by `auth.CapableFor(ctx, subject, verb, resource)` at every gate --
+most specific wins across role, group and user, deny wins within a level, read
+per request and never cached. Written only through `grantSet` / `grantRevoke`
+under four governance rules, audited as `targetType: grant`, and read back by
+every signed-in person through `effectiveCapabilitiesForActor()`; the rules
+are stated once in
+[access-model.md](docs/public/operate/auth/access-model.md#grants-to-people-and-groups).
+
 The partition dimension that historically gated tenant isolation is retired in
 #56 (phases 1-7 landed; phase 8 sweeps the remaining cross-repo stragglers + the
 DSL `partition="*"` automation kwarg). The `partition` wire field is already

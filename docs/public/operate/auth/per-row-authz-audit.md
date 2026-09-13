@@ -98,6 +98,31 @@ The two `@serverOnly` writers and the five admin-floored reads are listed in
 `test/dslconformance/server_only_parsed_test.go`, each with the argument for
 why caller-scoping is not the fix.
 
+### The grant concept (epic memql#5294)
+
+`v1:rbac:grant` -- a person's or a group's `allow` / `deny` over one
+`(verb, resourceType)`, beside the role catalog -- declares
+`@rowAuthz(clusterOwner, rankFloor="admin")` and carries **no owner field at
+all**: the deployment's record of a decision, readable from admin rank, written
+only by Go under internal origin through `writeGrant` / `deactivateGrant`, both
+`@serverOnly`. A role is never a subject; a role's abilities stay on
+`v1:rbac:capability`.
+
+The reasoning is the group concepts' D2 taken one step further. The obvious
+owner would be `subjectId`, the person the grant is FOR, and an owned row
+admits its owner's inserts -- so a self-scoped writer would be a primitive for
+granting yourself an app, and a self-scoped revoke would let a person clear a
+deny that bars them. The four relational checks a write needs (the writer holds
+`update` on `principal`, holds the capability being granted, outranks the
+subject, and is not the subject) are Go, not a filter.
+
+The two admin-floored reads (`grantsForSubject`, `grantsForResource`) are the
+administration screen's. **The engine does not resolve through them**:
+`auth.CapableFor` reads the rows per request through `component/memql`'s
+graph-backed `GrantSource` under the engine's own identity, as the role catalog
+is read -- a read floored at admin could not serve a user-role actor their own
+deny.
+
 The two reported states that are not buckets: **`srvOnly`**, checked
 first as above, and **`other`** — everything the classifier did not
 place. `other` is by far the largest column and is not a finding.

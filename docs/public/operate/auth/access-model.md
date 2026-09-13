@@ -166,8 +166,21 @@ overrides an `allow` for the same triple; no v1 path writes one.
 The engine loads both concepts at boot into a runtime CATALOG
 (`component/memql/rbac_catalog.go`), installs it into `component/auth`, and
 reloads it on the two concepts' graph events -- which are broadcast, so a role
-created on one replica is real on all of them. Every `auth.Capable` call and
-every `Can*` adapter resolves through it.
+created on one replica is real on all of them. Every `auth.CapableFor` call
+and every `Can*` adapter resolves through it.
+
+**A grant to a person or a group overlays the role's answer** (epic
+memql#5294, the app access grants record). `v1:rbac:grant` carries one
+`allow` / `deny` over one `(verb, resourceType)` for a `user` or a `group`
+subject -- never a role. `auth.CapableFor(ctx, subject, verb, resource)`
+resolves it: the role catalog first, then the actor's active group grants
+(deny wins if their groups disagree), then the actor's own grants -- most
+specific wins across levels, deny wins within one. Grants are read per
+request and memoised beside the account scope, never cached, so a grant
+written on one replica is honoured everywhere at the next request.
+`MaintenanceActor`, the seed materializer, an automation's system actor and
+borrowed authority are `Unranked` and are not consulted: they resolve as the
+catalog alone. There is no role-shaped `auth.Capable` any more.
 
 **An unknown slug holds nothing and ranks 0.** That is the fail-closed rule and
 it has one consequence worth knowing: a role DEACTIVATED while somebody holds it
@@ -658,6 +671,123 @@ binary itself is now just its sign-in pages plus an `/admin/` root that
 answers `410 Gone`. There is no separate partition-grant mutation to run:
 setting the role is the whole of it.
 
+## Grants to people and groups
+
+A role says what everyone holding it may do. A **grant** says what one person,
+or one group, may do over and above that -- or may not, whatever their role
+says. It is the one axis the role catalog cannot express, and it is the
+mechanism MemQL OS decides a desktop from (design record:
+`docs/superpowers/specs/2026-09-11-app-access-grants-design.md`; epic
+memql#5287).
+
+### The concept
+
+`v1:rbac:grant` sits beside `v1:rbac:role` and `v1:rbac:capability` and never
+inside them. One row is one decision:
+
+| Field | Meaning |
+|---|---|
+| `subjectKind` | `user` or `group`. **A role is never a subject** -- a role's abilities are edited on the role, and two places for one fact is how they drift |
+| `subjectId` | the `v1:identity:user` or `v1:identity:group`, stored bare |
+| `verb` | one of the catalog's five verbs |
+| `resourceType` | the catalog's open string: `principal`, `deployment`, `app:deployables`, `app:deployables/publish`, or any kind a role can hold |
+| `effect` | `allow` widens the role's answer, `deny` narrows it. Both are legal at every level |
+| `grantedBy` | who wrote this version -- the audit answer, not the owner |
+| `active` | revoking writes `false` as a new version at the same id, so the decision and its reversal are both history |
+
+The row id is derived from `(subjectKind, subjectId, verb, resourceType)`, the
+way a membership derives its id from `(group, user)`: re-granting writes a new
+version of one logical row, never a second row. The tier is
+`@rowAuthz(clusterOwner, rankFloor="admin")` with **no owner field at all** --
+the row is the deployment's record of a decision, readable from admin rank
+and written only by Go under internal origin. The obvious owner would be the
+subject, and an owned row admits its owner's inserts, which would hand every
+signed-in person a primitive for granting themselves an app.
+
+### How a decision is resolved
+
+One function answers every "may this actor do verb on resource" question --
+`auth.CapableFor(ctx, subject, verb, resource)` -- at the requires-capability
+gates, the data-plane gate, the groups guard and the role builtins. There is
+no role-shaped `auth.Capable` any more. The rule, stated once:
+
+1. The role catalog answers first, with its own deny-wins rule inside that
+   level.
+2. The actor's active **group** grants overlay it. If their groups disagree,
+   deny wins, because no group is more specific than another.
+3. The actor's own **user** grants overlay that.
+
+**Most specific wins across levels; deny wins within a level.** A person can
+therefore be handed an app their role lacks, or barred from one their role
+holds, and a bar on a group can be lifted for one person in it. The
+alternative -- deny anywhere wins -- was rejected because it makes "give this
+one person access" fail silently whenever any group they are in says no.
+
+Grants are read **per request** and memoised beside the account scope; there
+is no cache and no cross-node reload, so a grant written on one replica is
+honoured everywhere at the next request. An unknown role, or a person with no
+grants, resolves exactly as the catalog alone answers. `MaintenanceActor`, the
+seed materializer, an automation's system actor and borrowed authority are
+`Unranked` and are not consulted: a deny naming the person a worker borrows
+must not stop the worker's own write on that person's behalf.
+
+### Who may write one
+
+Two `@sdk` builtins, `grantSet` and `grantRevoke`
+(`integration.rbac.*`, beside the role builtins), write under internal origin
+after four checks, in this order. Each refusal is a typed code the OS prints
+beside the control.
+
+1. The caller holds `update` on `principal` (`grant_caller_not_permitted`).
+2. The caller holds the capability being granted or denied, resolved for
+   themselves through the rule above (`grant_capability_not_held`). Nobody
+   hands out, or takes away, an app they do not have.
+3. The subject ranks no higher than the caller
+   (`grant_subject_outranks_caller`). A user ranks as their role; a group as
+   its highest-ranked active member, so a developer cannot deny an app to a
+   group that contains the owner; an empty group ranks zero. An unresolvable
+   rank -- the caller's or the subject's -- denies.
+4. Nobody grants to themselves (`grant_self`), mirroring the membership rule
+   that nobody adds themselves to a group.
+
+A subject that is not an active user or group is `grant_unknown_subject`; a
+malformed call is `grant_invalid`; a revoke naming no active grant is
+`grant_not_found`. A revoke applies the same four rules as a set, because
+lifting a deny is handing somebody the app and lifting an allow is barring
+them from it. Only the owner can therefore write a grant whose subject is an
+owner, and not for themselves, so **no grant ever bars the cluster owner**.
+
+Every write lands on `v1:identity:auditEvent` with `targetType: "grant"`,
+action `grant_set` or `grant_revoked`, `targetId` the grant row, and the
+subject, verb, resource and effect in `detail`.
+
+### The reads
+
+- `grantsForSubject(subjectKind, subjectId)` and `grantsForResource(resourceType)`
+  -- the by-person and by-app views of an administration screen, floored at
+  admin through `@requiresRank`. `grantById(grantId)` is the detail read and
+  what `grantRevoke` acts on.
+- `effectiveCapabilitiesForActor()` -- the **caller's** resolved set and
+  nobody else's: one entry per `(verb, resource)` the cluster knows (every
+  pair any role holds, plus every pair a grant naming the caller adds), each
+  `allow` or `deny` with a `source` naming the level that answered -- `role`,
+  `group` or `user`. It takes no subject, so nobody can name anybody else, and
+  it is deliberately **not** admin-floored: every signed-in person needs their
+  own answer, because this is the read MemQL OS decides what to show from.
+
+The engine itself never reads through the admin-floored queries. Resolution
+reads the rows through the engine's own graph-backed source under its own
+identity, exactly as the role catalog is read -- a read floored at admin could
+not serve a user-role actor their own deny.
+
+### Deliberately not in the model
+
+No expiry: a stale grant is revoked by a person, not by a clock. No role as a
+subject. No live subscription to grant rows: the shell re-reads the effective
+set on sign-in, on window focus and after a grant write in that browser, and
+the engine honours a grant on the next request regardless -- so the lag is a
+hidden control appearing late, never one that works when it should not.
+
 ## Out of scope (deferred)
 
 - **Per-concept ACL beyond `@rowAuthz`.** Today access is at the granularity
@@ -670,8 +800,8 @@ setting the role is the whole of it.
   with `PermissionDenied` by the coarse data-plane capability gate
   (`component/grpc/data_capability_gate.go`, memql#3179): the handler
   resolves the caller's role and asks
-  `auth.Capable(role, "create", "data")` before the engine sees the
-  query. That gate is **partial by construction** -- it sits at the
+  `auth.CapableFor(ctx, subject, "create", "data")` before the engine sees
+  the query. That gate is **partial by construction** -- it sits at the
   handler layer, so it covers `ExecuteQueryMsg` and nothing else, and
   its complete residual-bypass set is enumerated with reasons in
   `dataPlaneGateExemptions` (same file):

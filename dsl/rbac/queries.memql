@@ -100,3 +100,49 @@ query capability capabilitiesForResourceType {
   filter  resourceType==args.resourceType && isActiveRecord
   shape   capabilityFull
 }
+
+// GRANTS (epic memql#5294): ADMIN AND ABOVE, on both halves, the bench
+// discipline. v1:rbac:grant declares `@rowAuthz(clusterOwner, rankFloor="admin")`
+// -- administrative to write, readable from admin down -- and every read here
+// carries the surface floor to match. Neither read is @public: a grant is a
+// decision about a named person, and the catalog's "every principal reads the
+// whole ladder" argument does not extend to who has been singled out.
+//
+// THE ENGINE DOES NOT READ THESE. Resolution (component/auth.CapableFor) reads
+// v1:rbac:grant rows through component/memql's graph-backed GrantSource under
+// the engine's own identity, per request, exactly as the role catalog is read
+// -- a read floored at admin could not serve a user-role actor their own deny.
+
+/// Every active grant naming one subject -- the by-person / by-group view of the Access screen.
+@requiresRank("admin")
+query grant grantsForSubject {
+  args {
+    subjectKind  enum("user", "group")!
+    subjectId    string!
+  }
+  filter  subjectKind==args.subjectKind && subjectId==args.subjectId && isActiveRecord
+  sort    "resourceType", "asc"
+  shape   grantCard
+}
+
+/// Every active grant over one resource -- the by-app view: who currently holds it, or is barred.
+@requiresRank("admin")
+query grant grantsForResource {
+  args {
+    resourceType  string!
+  }
+  filter  resourceType==args.resourceType && isActiveRecord
+  sort    "subjectId", "asc"
+  shape   grantCard
+}
+
+/// One grant by its derived row id -- what grantRevoke reads before it acts, and the Access
+/// screen's detail read. Answers the newest version whether active or revoked; `active` says which.
+@requiresRank("admin")
+query grant grantById {
+  args {
+    grantId  string!
+  }
+  filter  row.id==args.grantId
+  shape   grantCard
+}

@@ -69,6 +69,10 @@ type caller struct {
 	role    auth.Role
 	rank    int
 	isOwner bool
+	// subject is the caller as the capability resolver sees them: the same
+	// role and id, plus their groups (epic memql#5296). Built from the
+	// VERIFIED caller by auth.SubjectFromContext and nothing else.
+	subject auth.Subject
 }
 
 // resolveCaller reads the acting principal and refuses anything that is not a
@@ -92,17 +96,20 @@ func resolveCaller(ctx context.Context) (caller, error) {
 	// the same slip on a TARGET would fail open, which is why both sides of
 	// the rank rule fold.
 	slug := strings.ToLower(strings.TrimSpace(string(ac.Role)))
+	subject, _ := auth.SubjectFromContext(ctx)
 	return caller{
 		userID:  strings.TrimSpace(ac.UserId),
 		role:    auth.Role(slug),
 		rank:    auth.RoleRank(auth.Role(slug)),
 		isOwner: slug == string(auth.RoleOwner),
+		subject: subject,
 	}, nil
 }
 
-// requireCapability refuses a caller whose role does not hold (verb, group).
-func (c caller) requireCapability(verb string) error {
-	if auth.Capable(c.role, verb, auth.ResourceGroup) {
+// requireCapability refuses a caller who does not hold (verb, group) -- by
+// role, or by a group or user grant overlaying it (epic memql#5296).
+func (c caller) requireCapability(ctx context.Context, verb string) error {
+	if auth.CapableFor(ctx, c.subject, verb, auth.ResourceGroup) {
 		return nil
 	}
 	return refusal(CodeCapabilityMissing,

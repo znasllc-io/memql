@@ -168,10 +168,85 @@ func (s *accountScope) admitsAny(value any) bool {
 }
 
 // accountScopeMemo is the per-request holder, the rankScopeMemo pattern.
+//
+// IT ALSO CARRIES THE MEMBERSHIP READ (epic memql#5295, D9). The account scope
+// and the grant resolver both start from "which groups is this person in",
+// and a second membership query per request is exactly what the record
+// refuses: "the grant resolver reads the same memo rather than issuing a
+// second membership query, so a request costs one membership read whichever
+// gates it passes". The memberships are keyed BY USER rather than held as one
+// value because a nested call under borrowed or system authority shares the
+// request's context, and a memo that remembered the outer caller's groups
+// would hand them to the inner one.
 type accountScopeMemo struct {
 	once   sync.Once
 	engine *MemQLEngine
 	scope  *accountScope
+
+	mu      sync.Mutex
+	members map[string]*membershipsEntry
+}
+
+// memberships is one actor's resolved membership facts: the ACTIVE groups an
+// active membership places them in, and the accounts those groups are tied
+// to. Both come from the same two reads, which is the point of resolving them
+// together.
+type memberships struct {
+	groupIds   []string
+	accountIds []string
+}
+
+type membershipsEntry struct {
+	once sync.Once
+	m    memberships
+}
+
+func (m *accountScopeMemo) membershipsEntry(userId string) *membershipsEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.members == nil {
+		m.members = map[string]*membershipsEntry{}
+	}
+	entry, ok := m.members[userId]
+	if !ok {
+		entry = &membershipsEntry{}
+		m.members[userId] = entry
+	}
+	return entry
+}
+
+// membershipsFor resolves one actor's memberships, once per request per user
+// when the memo is installed, and correctly without it -- the rankScopeFor
+// rule: the memo is a cost measure, never a correctness input.
+func (e *MemQLEngine) membershipsFor(ctx context.Context, userId string) memberships {
+	userId = strings.TrimSpace(userId)
+	if userId == "" {
+		return memberships{}
+	}
+	memo, _ := ctx.Value(accountScopeMemoKey{}).(*accountScopeMemo)
+	if memo == nil {
+		return e.resolveMemberships(ctx, userId)
+	}
+	entry := memo.membershipsEntry(userId)
+	entry.once.Do(func() { entry.m = e.resolveMemberships(ctx, userId) })
+	return entry.m
+}
+
+// resolveMemberships is the two reads: the actor's ACTIVE memberships, then
+// the ACTIVE groups those name. An archived group places nobody (design
+// section K) and grants nobody anything, so it is dropped from BOTH answers
+// here rather than trusted from the membership row.
+func (e *MemQLEngine) resolveMemberships(ctx context.Context, userId string) memberships {
+	db := e.database()
+	if db == nil {
+		return memberships{}
+	}
+	memberOf := activeGroupIdsForUser(ctx, db, userId)
+	if len(memberOf) == 0 {
+		return memberships{}
+	}
+	groupIds, accountIds := activeGroupsAndAccounts(ctx, db, memberOf)
+	return memberships{groupIds: groupIds, accountIds: accountIds}
 }
 
 type accountScopeMemoKey struct{}
@@ -245,39 +320,11 @@ func (e *MemQLEngine) resolveAccountScope(ctx context.Context) *accountScope {
 		return scope
 	}
 
-	for _, accountId := range e.accountIdsForActor(ctx, ac.UserId) {
+	for _, accountId := range e.membershipsFor(ctx, ac.UserId).accountIds {
 		addAccountSpellings(scope.accounts, accountId)
 	}
 	scope.fingerprint = fingerprintAccountSet(ac.UserId, scope.accounts)
 	return scope
-}
-
-// accountIdsForActor reads the actor's ACTIVE memberships, then the ACTIVE
-// groups those name, and returns each group's non-empty accountId.
-//
-// staged-data: MUST-NOT-GATE -- this is an AUTHORIZATION read, and gating it
-// produces a false denial rather than a false disclosure. A staged membership
-// row hidden here does not leak anything; it removes a grant the operator
-// believes they made, which presents as "I cannot see my client's work" and
-// looks like a membership problem rather than a staging one.
-//
-// Two queries rather than a join, because both are keyed and small: a person
-// belongs to a handful of groups, and a cluster holds one group per account.
-func (e *MemQLEngine) accountIdsForActor(ctx context.Context, userId string) []string {
-	userId = strings.TrimSpace(userId)
-	if userId == "" {
-		return nil
-	}
-	db := e.database()
-	if db == nil {
-		return nil
-	}
-
-	groupIds := activeGroupIdsForUser(ctx, db, userId)
-	if len(groupIds) == 0 {
-		return nil
-	}
-	return accountIdsForActiveGroups(ctx, db, groupIds)
 }
 
 // staged-data: MUST-NOT-GATE -- an AUTHORIZATION read, and gating it produces
@@ -339,14 +386,20 @@ func activeGroupIdsForUser(ctx context.Context, db *bun.DB, userId string) []str
 // client's people lose their access at once rather than one person losing
 // theirs.
 //
-// accountIdsForActiveGroups reads the named groups and returns the non-empty
-// accountId of each ACTIVE one.
+// activeGroupsAndAccounts reads the named groups and returns, of each ACTIVE
+// one, its id and (when non-empty) its accountId.
 //
 // An archived group grants nothing (design section K): the membership row is
 // history, and a group under an archived account was archived by the cascade.
 // Both facts are read here rather than trusted from the membership, because a
 // group's status changes without its memberships being rewritten.
-func accountIdsForActiveGroups(ctx context.Context, db *bun.DB, groupIds []string) []string {
+//
+// TWO ANSWERS FROM ONE READ. The account scope wants the accounts; the grant
+// resolver wants the groups themselves (a custom group with no account can be
+// a grant subject, D13, "it grants apps and still grants no rows"). Reading
+// the groups once and answering both is what keeps a request at one
+// membership read whichever gates it passes.
+func activeGroupsAndAccounts(ctx context.Context, db *bun.DB, groupIds []string) (activeGroupIds, accountIds []string) {
 	wanted := make(map[string]struct{}, len(groupIds)*2)
 	for _, g := range groupIds {
 		wanted[g] = struct{}{}
@@ -361,10 +414,11 @@ func accountIdsForActiveGroups(ctx context.Context, db *bun.DB, groupIds []strin
 		Where("concept = ?", conceptIdentityGroup).
 		OrderExpr(`id ASC, "createdAt" DESC`).
 		Scan(ctx); err != nil {
-		return nil
+		return nil, nil
 	}
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(groupIds))
+	seenAccount := map[string]struct{}{}
+	activeGroupIds = make([]string, 0, len(groupIds))
+	accountIds = make([]string, 0, len(groupIds))
 	for i := range nodes {
 		id := strings.TrimSpace(nodes[i].ID)
 		if id == "" {
@@ -382,19 +436,20 @@ func accountIdsForActiveGroups(ctx context.Context, db *bun.DB, groupIds []strin
 		if strings.TrimSpace(stringFromAny(payload["status"])) != "active" {
 			continue
 		}
+		activeGroupIds = append(activeGroupIds, id)
 		accountId := strings.TrimSpace(stringFromAny(payload["accountId"]))
 		if accountId == "" {
 			// A group with no account grants nothing and exists to
 			// organize (design D8). Not an error, and not a warning.
 			continue
 		}
-		if _, dup := seen[accountId]; dup {
+		if _, dup := seenAccount[accountId]; dup {
 			continue
 		}
-		seen[accountId] = struct{}{}
-		out = append(out, accountId)
+		seenAccount[accountId] = struct{}{}
+		accountIds = append(accountIds, accountId)
 	}
-	return out
+	return activeGroupIds, accountIds
 }
 
 // accountRowPayload unmarshals a row's payload, answering nil on failure.

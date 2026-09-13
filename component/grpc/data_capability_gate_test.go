@@ -118,10 +118,10 @@ func TestExecuteQueryGate_ReaderRefusedMutation(t *testing.T) {
 	eng := gateTestEngine(t)
 
 	// Precondition, straight from the consolidated RBAC model.
-	if auth.Capable(auth.RoleReader, auth.VerbCreate, auth.ResourceData) {
+	if auth.CapableFor(context.Background(), auth.Subject{Role: auth.RoleReader}, auth.VerbCreate, auth.ResourceData) {
 		t.Fatal("precondition: reader must not hold create-on-data")
 	}
-	if !auth.Capable(auth.RoleWriter, auth.VerbCreate, auth.ResourceData) {
+	if !auth.CapableFor(context.Background(), auth.Subject{Role: auth.RoleWriter}, auth.VerbCreate, auth.ResourceData) {
 		t.Fatal("precondition: writer must hold create-on-data")
 	}
 

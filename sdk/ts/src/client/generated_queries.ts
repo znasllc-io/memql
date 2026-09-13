@@ -3533,6 +3533,75 @@ QueryClient.prototype.globalVariables = function (this: QueryClient, args: Globa
   return this.executeNamed("globalVariables", buildGlobalVariables(args), opts);
 };
 
+/** One grant by its derived row id -- what grantRevoke reads before it acts, and the Access screen's detail read. Answers the newest version whether active or revoked; `active` says which. */
+// Bound concept: v1:rbac:grant (machine-readable: BoundConcepts["grantById"] in generated_concepts.ts).
+export interface GrantByIdArgs {
+  grantId: string;
+}
+
+export function buildGrantById(args: GrantByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("grantId: " + renderMemQLValue(args.grantId));
+  return "query grantById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    grantById(args: GrantByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.grantById = function (this: QueryClient, args: GrantByIdArgs = {} as GrantByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("grantById", buildGrantById(args), opts);
+};
+
+/** Every active grant over one resource -- the by-app view: who currently holds it, or is barred. */
+// Bound concept: v1:rbac:grant (machine-readable: BoundConcepts["grantsForResource"] in generated_concepts.ts).
+export interface GrantsForResourceArgs {
+  resourceType: string;
+}
+
+export function buildGrantsForResource(args: GrantsForResourceArgs): string {
+  const parts: string[] = [];
+  parts.push("resourceType: " + renderMemQLValue(args.resourceType));
+  return "query grantsForResource(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    grantsForResource(args: GrantsForResourceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.grantsForResource = function (this: QueryClient, args: GrantsForResourceArgs = {} as GrantsForResourceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("grantsForResource", buildGrantsForResource(args), opts);
+};
+
+/** Every active grant naming one subject -- the by-person / by-group view of the Access screen. */
+// Bound concept: v1:rbac:grant (machine-readable: BoundConcepts["grantsForSubject"] in generated_concepts.ts).
+export interface GrantsForSubjectArgs {
+  // Enum: user | group
+  subjectKind: string;
+  subjectId: string;
+}
+
+export function buildGrantsForSubject(args: GrantsForSubjectArgs): string {
+  const parts: string[] = [];
+  parts.push("subjectKind: " + renderMemQLValue(args.subjectKind));
+  parts.push("subjectId: " + renderMemQLValue(args.subjectId));
+  return "query grantsForSubject(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    grantsForSubject(args: GrantsForSubjectArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.grantsForSubject = function (this: QueryClient, args: GrantsForSubjectArgs = {} as GrantsForSubjectArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("grantsForSubject", buildGrantsForSubject(args), opts);
+};
+
 /** One group by id, for its page. */
 // Bound concept: v1:identity:group (machine-readable: BoundConcepts["groupById"] in generated_concepts.ts).
 export interface GroupByIdArgs {

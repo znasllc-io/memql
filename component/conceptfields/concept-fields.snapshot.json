@@ -2065,6 +2065,7 @@
           "deviceCode",
           "enrolmentToken",
           "githubGrant",
+          "grant",
           "group",
           "groupMembership",
           "identity",
@@ -4282,6 +4283,43 @@
         "effect": [
           "allow",
           "deny"
+        ],
+        "verb": [
+          "create",
+          "delete",
+          "execute",
+          "read",
+          "update"
+        ]
+      }
+    },
+    {
+      "concept": "v1:rbac:grant",
+      "file": "rbac/concepts.memql",
+      "fields": [
+        "active",
+        "effect",
+        "grantedBy",
+        "resourceType",
+        "subjectId",
+        "subjectKind",
+        "verb"
+      ],
+      "required": [
+        "effect",
+        "resourceType",
+        "subjectId",
+        "subjectKind",
+        "verb"
+      ],
+      "enums": {
+        "effect": [
+          "allow",
+          "deny"
+        ],
+        "subjectKind": [
+          "group",
+          "user"
         ],
         "verb": [
           "create",
