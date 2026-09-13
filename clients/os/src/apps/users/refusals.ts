@@ -1,9 +1,9 @@
-// What this cluster's group and role refusals mean, said once.
+// What this cluster's group, role, and grant refusals mean, said once.
 //
 // ===========================================================================
 // KEYED BY CODE, RENDERED AS A SENTENCE, AND NEVER INVENTED
 // ===========================================================================
-// `integrations/groups` and `integrations/rbac` refuse with a TYPED CODE and a
+// `integrations/groups` and `integrations/rbac` (roles + grants) refuse with a TYPED CODE and a
 // sentence, joined as `"<code>: <sentence>"` on the error a builtin call
 // throws (integrations/groups/guards.go, `refusal`). The codes are the
 // contract -- guards.go says so in its own header: "a refusal that reworded
@@ -118,6 +118,39 @@ const COPY: Record<string, RefusalCopy> = {
   role_held: {
     title: "People still hold this role",
     next: "Move them to another role first. Deactivating one somebody holds would leave them with a role the cluster no longer offers.",
+  },
+
+  // ---- app access grants (integrations/rbac grantSet / grantRevoke) -------
+  //
+  // Same decision-ROW shape as the role builtins: the surface reads `code`
+  // out of the reply. Headlines mirror the four governance rules.
+  grant_caller_not_permitted: {
+    title: "Your role does not carry that",
+    next: "Writing or revoking a grant needs update on principal. An owner can grant it in Roles.",
+  },
+  grant_capability_not_held: {
+    title: "You do not hold what you are trying to grant",
+    next: "A grant can only hand on — or deny — a capability you hold yourself.",
+  },
+  grant_subject_outranks_caller: {
+    title: "That subject ranks above you",
+    next: "A grant may only name somebody you outrank or equal. For a group, that is its highest-ranked active member.",
+  },
+  grant_self: {
+    title: "Nobody writes a grant naming themselves",
+    next: "Ask somebody who ranks above you. The same rule that stops you adding yourself to a group.",
+  },
+  grant_unknown_subject: {
+    title: "No such person or group",
+    next: "",
+  },
+  grant_invalid: {
+    title: "That grant is not a shape this cluster accepts",
+    next: "Subject must be a user or group, effect allow or deny, and the verb one of the five this cluster gates.",
+  },
+  grant_not_found: {
+    title: "No active grant by that id",
+    next: "",
   },
 };
 
