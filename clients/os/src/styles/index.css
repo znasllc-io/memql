@@ -13082,6 +13082,118 @@ a.os-button {
   color: var(--os-muted);
 }
 
+/* ---- Settings > Access (epic memql#5289) ------------------------------- */
+
+/* The matrix is the Users grid's sibling: same table, same marks, one
+ * column instead of five -- an app is opened or it is not -- and beside the
+ * mark the one thing the role grid cannot say, where the answer came from. */
+.os-access-grid tbody th {
+  font-weight: 500;
+}
+
+/* A part sits under its app: indented, in the muted ink, so the app's door
+ * and the things inside it read as a tree without a second table. */
+.os-access-part {
+  display: inline-block;
+  padding-left: 16px;
+  color: var(--os-muted);
+  font-weight: 400;
+}
+
+.os-access-answer {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.os-access-answer .os-access-mark {
+  vertical-align: middle;
+  margin-right: 8px;
+  cursor: default;
+}
+
+/* A GRANT'S ANSWER IS DRAWN SOLID, an inherited one hairline: the mark says
+ * which level decided at a glance, and the sentence beside it says who. A
+ * denied-by-grant mark is the solid ring with nothing in it -- a bar, not an
+ * absence. */
+.os-grid-cell[data-state="grantedOn"] .os-grid-mark {
+  border-color: var(--os-accent);
+  background: var(--os-accent-soft);
+}
+
+.os-grid-cell[data-state="grantedOff"] .os-grid-mark {
+  border-color: var(--os-ink);
+  border-style: solid;
+}
+
+.os-access-from {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+
+.os-access-acts {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.os-access-acts > * + * {
+  margin-left: 12px;
+}
+
+.os-access-acts .os-link,
+.os-access-grant .os-link {
+  font: inherit;
+  font-size: var(--os-text-sm);
+}
+
+.os-access-acts .os-link:disabled,
+.os-access-grant .os-link:disabled {
+  color: var(--os-muted);
+  cursor: default;
+}
+
+.os-access-refusal td {
+  text-align: left;
+  padding: 6px 10px 10px;
+}
+
+.os-access-holders {
+  display: grid;
+  gap: 8px;
+}
+
+.os-access-roles {
+  margin: 0;
+  font-size: var(--os-text-sm);
+}
+
+.os-access-grant-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.os-access-grant {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.os-access-grant + .os-access-grant {
+  border-top: 1px solid var(--os-line);
+}
+
+.os-access-grant-who {
+  flex: none;
+}
+
+.os-access-grant > .os-access-from {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* ---- the pickers -------------------------------------------------------- */
 
 .os-people-picker,

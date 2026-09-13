@@ -8,6 +8,7 @@ import { readStoredTheme, setTheme, type ThemeChoice } from "../../app/theme";
 import { themePacks } from "../../themes/registry";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
+import { AccessSection } from "./AccessSection";
 import { AppsIndexSection } from "./AppsIndexSection";
 import { ClusterSection } from "./ClusterSection";
 import { BenchmarksSection } from "./BenchmarksSection";
@@ -52,6 +53,9 @@ function sectionFor(sectionId: string, intent: OsAppProps["intent"], consumeInte
   if (sectionId === "appearance") return <AppearanceSection />;
   if (sectionId === "ask") return <AskSection />;
   if (sectionId === "apps") return <AppsIndexSection />;
+  // Access (epic memql#5289): who may open which app over and above their
+  // role -- the two grant builtins' one surface.
+  if (sectionId === "access") return <AccessSection />;
   if (sectionId === "cluster") return <ClusterSection />;
   if (sectionId === "diagnostics") return <DiagnosticsSection />;
   if (sectionId === "benchmarks") return <BenchmarksSection />;

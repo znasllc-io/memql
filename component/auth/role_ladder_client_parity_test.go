@@ -267,40 +267,53 @@ var appFloorMirrors = []struct {
 	{appID: "accounts", dslFile: "../../dsl/accounts/queries.memql", construct: "clientAccountsAll"},
 }
 
-// TestAppManifestMirrorsTheEngineFloor pins the OS manifest's `roles.min`
-// against the `@requiresRank` its constructs declare (epic memql#4832, D6).
+// TestAppManifestMirrorsTheEngineFloor pins the roles that may OPEN an app
+// against the `@requiresRank` its constructs declare (epic memql#4832, D6;
+// re-keyed by epic memql#5289).
 //
-// The presentation gate and the enforced gate are BOTH permanent and neither
-// stands in for the other -- hiding an app somebody cannot reach beats letting
-// them open it and read a refusal, and that is a different job from refusing
-// it. What must never happen is the two disagreeing, because each failure is
-// invisible from the other side: a manifest stricter than the engine hides an
-// app people may use, and a manifest looser than the engine offers an app that
-// refuses every read inside it.
+// The manifest no longer states a floor. It names a RESOURCE (`requires:
+// "app:accounts"`), and which roles hold `read` on that resource is the
+// seeds' business (dsl/rbac/seeds.memql) -- so the mirror this gate holds is
+// the seeded role set against the rungs at or above the engine's floor, with
+// the manifest checked only for naming the resource the seeds were written
+// for. The presentation gate and the enforced gate are BOTH permanent and
+// neither stands in for the other: a seed set narrower than the engine hides
+// an app people may use, and one wider offers an app that refuses every read
+// inside it.
 func TestAppManifestMirrorsTheEngineFloor(t *testing.T) {
 	registry := readClientFile(t, osAppRegistryPath)
+	seeds := readClientFile(t, "../../dsl/rbac/seeds.memql")
+	rungs := fixtureRungs(t)
 	for _, m := range appFloorMirrors {
-		manifestFloor := appManifestFloor(t, registry, m.appID)
+		resource := appManifestResource(t, registry, m.appID)
+		if resource != "app:"+m.appID {
+			t.Fatalf("app %q requires %q in %s; an app's door is app:<id>", m.appID, resource, osAppRegistryPath)
+		}
 		engineFloor := requiresRankFloor(t, readClientFile(t, m.dslFile), m.construct)
-		if manifestFloor != engineFloor {
-			t.Fatalf("app %q declares roles.min=%q in %s, and %s declares @requiresRank(%q) in %s.\n"+
-				"The manifest is the PRESENTATION MIRROR of the engine's floor; when they disagree "+
+		floorRank, ok := rungs[engineFloor]
+		if !ok {
+			t.Fatalf("%s declares @requiresRank(%q), which the ladder fixture does not rank", m.construct, engineFloor)
+		}
+		var want []string
+		for slug, rank := range rungs {
+			if rank >= floorRank {
+				want = append(want, slug)
+			}
+		}
+		sort.Strings(want)
+		got := seededReaders(t, seeds, resource)
+		if strings.Join(want, ",") != strings.Join(got, ",") {
+			t.Fatalf("the seeds open %s to %v and %s declares @requiresRank(%q) (= %v) in %s.\n"+
+				"The seeded read set is the PRESENTATION MIRROR of the engine's floor; when they disagree "+
 				"one of two invisible things is true -- an app people may use is hidden, or an app "+
 				"that refuses every read inside it is offered.",
-				m.appID, manifestFloor, osAppRegistryPath, m.construct, engineFloor, m.dslFile)
+				resource, got, m.construct, engineFloor, want, m.dslFile)
 		}
-	}
-
-	// THE COUNT. Every app carrying a role requirement needs a mirror entry,
-	// or this gate quietly measures a shrinking subset of the registry.
-	gated := regexp.MustCompile(`roles:\s*\{\s*min:\s*"[^"]+"\s*\}`).FindAllString(stripComments(registry), -1)
-	if len(gated) < len(appFloorMirrors) {
-		t.Fatalf("%s declares %d role requirements but appFloorMirrors names %d apps -- "+
-			"the table is ahead of the registry", osAppRegistryPath, len(gated), len(appFloorMirrors))
 	}
 }
 
-func appManifestFloor(t *testing.T, registry, appID string) string {
+// appManifestResource reads the `requires:` an OsAppManifest names.
+func appManifestResource(t *testing.T, registry, appID string) string {
 	t.Helper()
 	block := regexp.MustCompile(
 		`(?s)const \w+: OsAppManifest = \{\s*\n\s*id: "` + regexp.QuoteMeta(appID) + `",(.*?)\n\};`,
@@ -309,12 +322,28 @@ func appManifestFloor(t *testing.T, registry, appID string) string {
 		t.Fatalf("no OsAppManifest with id %q in %s -- if the app was renamed, update "+
 			"appFloorMirrors; a mirror pointing at nothing checks nothing", appID, osAppRegistryPath)
 	}
-	m := regexp.MustCompile(`roles:\s*\{\s*min:\s*"([^"]+)"\s*\}`).FindStringSubmatch(stripComments(block[1]))
+	m := regexp.MustCompile(`(?m)^  requires:\s*"([^"]+)"`).FindStringSubmatch(stripComments(block[1]))
 	if m == nil {
-		t.Fatalf("app %q declares no roles.min, but appFloorMirrors expects it to mirror an "+
+		t.Fatalf("app %q names no `requires:` resource, but appFloorMirrors expects it to mirror an "+
 			"engine floor. Either add the requirement or drop the mirror entry", appID)
 	}
 	return m[1]
+}
+
+// seededReaders answers the catalog slugs whose seed row grants `read` on
+// `resource`, sorted, so the set can be compared with the ladder's.
+func seededReaders(t *testing.T, seeds, resource string) []string {
+	t.Helper()
+	re := regexp.MustCompile(`roleSlug:\s*"([a-z]+)"\s+verb:\s*"read"\s+resourceType:\s*"` + regexp.QuoteMeta(resource) + `"`)
+	var out []string
+	for _, m := range re.FindAllStringSubmatch(seeds, -1) {
+		out = append(out, m[1])
+	}
+	if len(out) == 0 {
+		t.Fatalf("dsl/rbac/seeds.memql seeds no `read` on %s; the app is hidden from everybody", resource)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func requiresRankFloor(t *testing.T, dsl, construct string) string {
