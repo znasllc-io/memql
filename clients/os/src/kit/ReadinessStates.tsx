@@ -3,7 +3,7 @@ import { useOsIfPresent } from "../chrome/state";
 import type { Readiness } from "../live/readiness";
 import { MODULE_NAMES, MODULE_SETTINGS_SECTION, type ModuleId } from "../system/modules";
 import type { Verdict } from "../system/readinessFold";
-import { sectionsForRole } from "../system/registry";
+import { sectionsFor } from "../system/registry";
 import { Button, Panel, Subhead } from "./controls";
 import { Caption } from "./Caption";
 import { ProvenanceDot, type DotTone } from "./index";
@@ -208,10 +208,7 @@ export function moduleActFor(args: {
  * its destination in WORDS as well as in a button, which is the discipline
  * this hook exists to force.
  */
-export function useAppReach(
-  appId: string,
-  role: string,
-): {
+export function useAppReach(appId: string): {
   sections: string[];
   canOpenWindows: boolean;
   open: (section: string, payload?: Record<string, unknown>) => void;
@@ -219,7 +216,7 @@ export function useAppReach(
   const os = useOsIfPresent();
   const app = os?.registry.apps.find((a) => a.id === appId) ?? null;
   return {
-    sections: app === null ? [] : sectionsForRole(app, role).map((sec) => sec.id),
+    sections: app === null ? [] : sectionsFor(app).map((sec) => sec.id),
     canOpenWindows: os !== null && os.layout !== "phone",
     open: (section, payload) => {
       os?.actions.openApp(appId, section, payload);
@@ -241,7 +238,7 @@ export function SetupGroup({
 }) {
   const { access } = useSession();
   const role = access?.role ?? "";
-  const reach = useAppReach("settings", role);
+  const reach = useAppReach("settings");
   if (!canConfigure(role)) return null;
   const ids = Array.from(new Set([...requires, ...wants]));
   if (ids.length === 0) return null;

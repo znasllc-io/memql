@@ -11,6 +11,7 @@ import { SetupPresence } from "../../src/apps/setup/SetupPresence";
 import { OS_REGISTRY } from "../../src/apps/registry";
 import { seedDocument, useOs } from "../../src/chrome/state";
 import type { Readiness } from "../../src/live/readiness";
+import { installSeededAccess } from "../seededAccess";
 
 afterEach(() => {
   cleanup();
@@ -67,6 +68,7 @@ function Remover() {
 }
 
 function mounted(role: string, feed: Readiness) {
+  installSeededAccess(role);
   return withSession(
     <SetupFactsScope>
       {withOs(

@@ -14,9 +14,10 @@ function fakeApp(over: Partial<OsAppManifest>): OsAppManifest {
     id: "test",
     name: "Test",
     icon: () => null,
+    requires: "app:test",
     sections: [
       { id: "main", name: "Main" },
-      { id: "logs", name: "Logs", roles: { min: "admin" } },
+      { id: "logs", name: "Logs", requires: "app:test/logs" },
       { id: "settings", name: "Settings" },
     ],
     settingsSection: "settings",
@@ -38,15 +39,15 @@ describe("the readiness contract", () => {
   it("at least one shipped app declares a requirement, so the sweep examined something", () => {
     const declared = OS_REGISTRY.apps.filter(
       (a) =>
-        (a.requires?.length ?? 0) > 0 ||
+        (a.needs?.length ?? 0) > 0 ||
         (a.wants?.length ?? 0) > 0 ||
-        (a.sections ?? []).some((s) => (s.requires?.length ?? 0) > 0 || (s.wants?.length ?? 0) > 0),
+        (a.sections ?? []).some((s) => (s.needs?.length ?? 0) > 0 || (s.wants?.length ?? 0) > 0),
     );
     expect(declared.length).toBeGreaterThan(0);
   });
 
   it("fails an app naming an unknown module", () => {
-    expect(readinessProblem(fakeApp({ requires: ["storagee"] as never }))).toMatch(/storagee/);
+    expect(readinessProblem(fakeApp({ needs: ["storagee"] as never }))).toMatch(/storagee/);
     expect(
       readinessProblem(
         fakeApp({
@@ -58,11 +59,11 @@ describe("the readiness contract", () => {
     ).toMatch(/nope/);
   });
 
-  it("fails an app that requires on its settings or logs section", () => {
+  it("fails an app that needs a module on its settings or logs section", () => {
     const app = fakeApp({
       sections: [
-        { id: "settings", name: "Settings", requires: ["storage"] },
-        { id: "logs", name: "Logs", roles: { min: "admin" } },
+        { id: "settings", name: "Settings", needs: ["storage"] },
+        { id: "logs", name: "Logs", requires: "app:test/logs" },
       ],
     });
     expect(readinessProblem(app)).toMatch(/settings/);
@@ -70,10 +71,10 @@ describe("the readiness contract", () => {
 
   it("folds app-level and section-level requirements for a section", () => {
     const app = fakeApp({
-      requires: ["email"],
+      needs: ["email"],
       sections: [
-        { id: "main", name: "Main", requires: ["storage"], wants: ["ai"] },
-        { id: "logs", name: "Logs", roles: { min: "admin" } },
+        { id: "main", name: "Main", needs: ["storage"], wants: ["ai"] },
+        { id: "logs", name: "Logs", requires: "app:test/logs" },
         { id: "settings", name: "Settings" },
       ],
     });
@@ -84,10 +85,10 @@ describe("the readiness contract", () => {
 
   it("does not repeat a module named by both the app and the section", () => {
     const app = fakeApp({
-      requires: ["ai"],
+      needs: ["ai"],
       sections: [
-        { id: "main", name: "Main", requires: ["ai"] },
-        { id: "logs", name: "Logs", roles: { min: "admin" } },
+        { id: "main", name: "Main", needs: ["ai"] },
+        { id: "logs", name: "Logs", requires: "app:test/logs" },
         { id: "settings", name: "Settings" },
       ],
     });

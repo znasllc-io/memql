@@ -86,12 +86,13 @@ const { SessionProvider } = await import("../../src/chrome/access");
 const { OsProvider } = await import("../../src/chrome/state");
 const { OS_REGISTRY } = await import("../../src/apps/registry");
 const { SettingsApp } = await import("../../src/apps/settings/SettingsApp");
-const { INTEGRATIONS_SECTION_ROLE } = await import(
+const { INTEGRATIONS_SECTION_RESOURCE } = await import(
   "../../src/apps/settings/IntegrationsSection"
 );
 const { LocalDesktopStore } = await import("../../src/system/store");
 const { UNKNOWN_RUNTIME_CONFIG } = await import("../../src/cluster/config");
 const { roleAdmits, roleLadder } = await import("../../src/system/roles");
+const { roleOpens } = await import("../seededAccess");
 const { readConfigureOutcome, readIntegrationsReport, stateOf } = await import(
   "../../src/apps/settings/integrationsReport"
 );
@@ -934,13 +935,13 @@ describe("the role gate", () => {
     // P6: gated owner-or-developer, explicitly NOT admin. `{ min: "developer" }`
     // would admit admin, so this requirement is a role SET -- and the whole
     // reason system/roles.ts grew one.
-    expect(INTEGRATIONS_SECTION_ROLE).toEqual({ any: ["owner", "developer"] });
-    expect(roleAdmits("owner", INTEGRATIONS_SECTION_ROLE)).toBe(true);
-    expect(roleAdmits("developer", INTEGRATIONS_SECTION_ROLE)).toBe(true);
-    expect(roleAdmits("admin", INTEGRATIONS_SECTION_ROLE)).toBe(false);
-    expect(roleAdmits("writer", INTEGRATIONS_SECTION_ROLE)).toBe(false);
-    expect(roleAdmits("reader", INTEGRATIONS_SECTION_ROLE)).toBe(false);
-    expect(roleAdmits("", INTEGRATIONS_SECTION_ROLE)).toBe(false);
+    expect(INTEGRATIONS_SECTION_RESOURCE).toBe("app:settings/integrations");
+    expect(roleOpens("owner", INTEGRATIONS_SECTION_RESOURCE)).toBe(true);
+    expect(roleOpens("developer", INTEGRATIONS_SECTION_RESOURCE)).toBe(true);
+    expect(roleOpens("admin", INTEGRATIONS_SECTION_RESOURCE)).toBe(false);
+    expect(roleOpens("writer", INTEGRATIONS_SECTION_RESOURCE)).toBe(false);
+    expect(roleOpens("reader", INTEGRATIONS_SECTION_RESOURCE)).toBe(false);
+    expect(roleOpens("", INTEGRATIONS_SECTION_RESOURCE)).toBe(false);
     // The reachable positive: every one of those roles is admitted somewhere,
     // so the five falses above are about this requirement rather than about a
     // predicate that refuses everything.
@@ -962,7 +963,7 @@ describe("the role gate", () => {
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
     const section = (settings?.sections ?? []).find((s) => s.id === "integrations");
     if (!section) return;
-    expect(section.roles).toEqual(INTEGRATIONS_SECTION_ROLE);
+    expect(section.requires).toBe(INTEGRATIONS_SECTION_RESOURCE);
   });
 });
 

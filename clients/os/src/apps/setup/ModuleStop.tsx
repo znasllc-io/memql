@@ -16,13 +16,11 @@ import type { Verdict } from "../../system/readinessFold";
 export function ModuleStop({
   id,
   verdict,
-  role,
 }: {
   id: ModuleId;
   verdict: Verdict | null;
-  role: string;
 }) {
-  const reach = useAppReach("settings", role);
+  const reach = useAppReach("settings");
   const act = moduleActFor({
     id,
     verdict,

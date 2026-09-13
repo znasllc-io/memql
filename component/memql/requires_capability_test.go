@@ -106,6 +106,14 @@ func TestRequiresCapabilityAdmitsAHolderAndRefusesEverybodyElse(t *testing.T) {
 		if !tc.refused && err != nil {
 			t.Errorf("%s was refused: %v", tc.role, err)
 		}
+		// THE CODE LEADS THE SENTENCE (epic memql#5289). The OS reads a
+		// refusal's code out of the message as `<code>: <detail>`, so a
+		// refusal that carried no code would render under the neutral
+		// heading beside a control the shell had already hidden for the
+		// same reason.
+		if tc.refused && err != nil && !strings.HasPrefix(err.Error(), CodeCapabilityNotHeld+": ") {
+			t.Errorf("%s's refusal does not lead with %s: %v", tc.role, CodeCapabilityNotHeld, err)
+		}
 	}
 }
 

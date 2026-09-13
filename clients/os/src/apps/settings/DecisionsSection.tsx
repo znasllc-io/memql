@@ -3,7 +3,6 @@ import { useState } from "react";
 import { Button, Caption, Chip, Head, Measure, Notice, Refine, Select } from "../../kit";
 import { formatDuration, formatMoment } from "../../kit/format";
 import { useSession } from "../../chrome/access";
-import type { RoleRequirement } from "../../system/roles";
 import { LEVELS } from "./routingFacts";
 import {
   NO_FILTERS,
@@ -51,7 +50,7 @@ import {
  * omission is what makes the admin floor safe, and it is the reason the floor
  * is admin rather than developer.
  */
-export const DECISIONS_SECTION_ROLE: RoleRequirement = { min: "admin" };
+export const DECISIONS_SECTION_RESOURCE = "app:settings/decisions";
 
 export function DecisionsSection() {
   const { access } = useSession();

@@ -1,4 +1,5 @@
 import { setRoleLadder } from "../src/system/roles";
+import { installSeededAccess } from "./seededAccess";
 import { SEEDED_LADDER } from "./seededLadder";
 
 // THE ROLE LADDER IS CLUSTER STATE NOW (epic memql#4832, D1), and in
@@ -11,6 +12,15 @@ import { SEEDED_LADDER } from "./seededLadder";
 // test that wants the pre-load state clears it explicitly, which reads as the
 // deliberate act it is.
 setRoleLadder(SEEDED_LADDER);
+
+// THE EFFECTIVE CAPABILITY SET IS CLUSTER STATE TOO (epic memql#5289, D10),
+// and the shell draws nothing gated until it lands. The default here is the
+// OWNER's seeded set -- the role most harnesses sign in as -- read from the
+// seeds rather than written down (see seededAccess.ts). A suite that renders
+// as another role installs that role's set with `installSeededAccess(role)`
+// before it renders, which reads as the deliberate act it is; a suite about
+// the pre-read window clears it explicitly.
+installSeededAccess("owner");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

@@ -13,6 +13,7 @@ import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settin
 import { useOs } from "../../src/chrome/state";
 import { resetIdsForTest } from "../../src/system/desks";
 import { SHOP, click, fakeConnection, withSession, type FakeConnection } from "../deployables/harness";
+import { installSeededAccess } from "../seededAccess";
 
 // The deep links (epic memql#4895, spec H "Deep links"): Deployables' site
 // and package details carry a quiet "Logs" action that opens the Logs app on
@@ -81,6 +82,7 @@ const DONE: Row = {
 
 function mount(connection: FakeConnection, section: string, role = "owner") {
   h.connection = connection;
+  installSeededAccess(role);
   return render(
     withSession(
       <>

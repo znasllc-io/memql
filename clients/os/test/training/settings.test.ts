@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { OS_REGISTRY } from "../../src/apps/registry";
-import { appById, sectionsForRole, settingsSectionProblem } from "../../src/system/registry";
+import { appById, sectionsFor, settingsSectionProblem } from "../../src/system/registry";
+import { installSeededAccess, rolesOpening } from "../seededAccess";
 import {
   DEFAULT_TRAINING_SETTINGS,
   LocalTrainingSettingsStore,
@@ -100,17 +101,20 @@ describe("the Training manifest", () => {
     // section (epic memql#4895), whose floor is the log store's and not this
     // app's to choose.
     const app = appById(OS_REGISTRY, "training");
-    expect(app?.roles).toEqual({ min: "writer" });
+    expect(app?.requires).toBe("app:training");
+    // Seeded on user (the writer alias) and above, viewer left out.
+    expect(rolesOpening("app:training")).toEqual(["owner", "developer", "admin", "user"]);
     for (const section of app?.sections ?? []) {
       if (section.id === "logs") {
-        expect(section.roles).toEqual({ min: "admin" });
+        expect(section.requires).toBe("app:training/logs");
         continue;
       }
-      expect(section.roles).toBeUndefined();
+      expect(section.requires).toBeUndefined();
     }
     // A writer therefore sees the four that are this app's, and a reader sees
     // the app not at all.
-    expect(sectionsForRole(app!, "writer")).toHaveLength(4);
+    installSeededAccess("writer");
+    expect(sectionsFor(app!)).toHaveLength(4);
   });
 
   it("opens on Upload", () => {

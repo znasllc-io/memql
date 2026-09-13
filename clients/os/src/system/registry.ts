@@ -7,19 +7,48 @@ import type { ComponentType, ReactNode } from "react";
 
 import type { ModuleId } from "./modules";
 import { isModuleId } from "./modules";
-import type { RoleRequirement } from "./roles";
-import { roleAdmits, roleRank } from "./roles";
+import { holds } from "./roles";
+
+// WHAT A MANIFEST ASKS OF THE PERSON (epic memql#5289, design D10): a
+// capability RESOURCE, named. `requires: "app:<id>"` on an app or widget,
+// `requires: "app:<id>/<section>"` on a section that is gated above its
+// app's door. The shell draws a surface when the effective capability set
+// the cluster reported holds `read` on that name, and nothing here says
+// which roles those are -- the seeds do (dsl/rbac/seeds.memql), a grant to
+// a person or a group can widen or narrow them, and the registry is a list
+// of names rather than a second copy of the policy.
+//
+// IT USED TO BE `roles: { min }` / `roles: { any }`, a hand-written floor
+// per surface. component/memql/app_resource_os_parity_test.go pins every
+// `requires:` here to a seeded resource and refuses the retired form.
+
+/** A capability resource name: `app:<id>` or `app:<id>/<part>`. */
+export type AccessResource = string;
+
+/** The verb that opens a surface. A named PART of an app is `execute`. */
+export const OPEN_VERB = "read";
+
+/** Whether the effective set opens a surface naming `resource`. Absent = every signed-in person. */
+export function accessAdmits(resource?: AccessResource): boolean {
+  if (resource === undefined) return true;
+  return holds(OPEN_VERB, resource);
+}
 
 export interface OsAppSection {
   id: string;
   name: string;
-  roles?: RoleRequirement;
+  /**
+   * The resource this section is gated on, when it is gated ABOVE its app's
+   * door. Absent, the section is reached through the app and is not a
+   * resource of its own.
+   */
+  requires?: AccessResource;
   /**
    * Modules this section cannot work without. Unmet, the section shows the
    * setup surface in place of its body -- a quiet "not set up yet" rather
    * than a wall of refusals from an engine that has nothing to answer with.
    */
-  requires?: readonly ModuleId[];
+  needs?: readonly ModuleId[];
   /**
    * Modules this section works without but is diminished by. Unmet, they
    * mark Settings and add a Set up row; they NEVER gate. The distinction is
@@ -55,14 +84,19 @@ export interface OsAppManifest {
   name: string;
   /** Lucide icon component (kept as a plain component type -- no coupling). */
   icon: ComponentType<{ size?: number | string; "aria-hidden"?: boolean }>;
-  roles?: RoleRequirement;
+  /**
+   * The app's own door: `app:<id>`. REQUIRED on every app -- opening one is
+   * a question the effective set has to answer, and the parity gate refuses
+   * a manifest that does not name its resource.
+   */
+  requires: AccessResource;
   sections?: OsAppSection[];
   /**
    * Modules the WHOLE app cannot work without: every section but Settings
    * and Logs shows the setup surface. Those two stay reachable on purpose --
    * Settings is where the fix is, and Logs is how an admin sees why.
    */
-  requires?: readonly ModuleId[];
+  needs?: readonly ModuleId[];
   /** As the section verb, for the whole app. Marks and rows, never a gate. */
   wants?: readonly ModuleId[];
   /**
@@ -84,14 +118,13 @@ export interface OsAppManifest {
    * window, and a Logs section some apps happen not to have is a section
    * somebody looks for and cannot find.
    *
-   * It must name a section this manifest declares, and that section must be
-   * floored at admin -- on the section itself (`roles: { min: "admin" }`),
-   * or on the whole app when the app's own floor is at or above it (the
-   * Logs app names its Stream and carries the floor itself). Reads on the
-   * log store are admin-and-above in the engine (spec L3); a section
-   * offered below that floor would open on a refusal for everyone in it.
-   * `logsSectionProblem` is the check; `test/logs/logsContract.test.ts`
-   * runs it over the real registry.
+   * It must name a section this manifest declares, and that section must
+   * carry a resource of its own (`requires: "app:<id>/<section>"`), seeded
+   * at the log store's admin floor. Reads on the log store are
+   * admin-and-above in the engine (spec L3); a section reached through an
+   * app's door alone would open on a refusal for everyone the door admits
+   * below that floor. `logsSectionProblem` is the check;
+   * `test/logs/logsContract.test.ts` runs it over the real registry.
    */
   logsSection: string;
   /**
@@ -116,14 +149,15 @@ export interface OsWidgetManifest {
   id: string;
   name: string;
   icon: ComponentType<{ size?: number | string; "aria-hidden"?: boolean }>;
-  roles?: RoleRequirement;
+  /** The widget's door: `app:<id>`. A widget is an app for this purpose. */
+  requires: AccessResource;
   /**
    * Modules this widget cannot work without. A widget has no sections and no
    * settings of its own, so an unmet requirement renders the setup surface's
    * SENTENCE in its own body rather than the whole surface -- a desktop
    * widget is too small to carry a headline and an act.
    */
-  requires?: readonly ModuleId[];
+  needs?: readonly ModuleId[];
   /** Size in desktop grid cells. */
   size: { w: number; h: number };
   component: ComponentType;
@@ -153,9 +187,9 @@ export function appById(registry: OsRegistry, id: string): OsAppManifest | undef
   return registry.apps.find((a) => a.id === id);
 }
 
-/** The always-docked apps the actor may see, in registry order. */
-export function fixturesForRole(registry: OsRegistry, actorRole: string): OsAppManifest[] {
-  return registry.apps.filter((a) => a.dockFixture === true && roleAdmits(actorRole, a.roles));
+/** The always-docked apps the effective set opens, in registry order. */
+export function fixturesFor(registry: OsRegistry): OsAppManifest[] {
+  return registry.apps.filter((a) => a.dockFixture === true && accessAdmits(a.requires));
 }
 
 /** Whether an app is a dock fixture -- what the pin menu and the pin strip
@@ -168,27 +202,33 @@ export function widgetById(registry: OsRegistry, id: string): OsWidgetManifest |
   return registry.widgets.find((w) => w.id === id);
 }
 
-/** Apps the actor may see, in registry order. */
-export function appsForRole(registry: OsRegistry, actorRole: string): OsAppManifest[] {
-  return registry.apps.filter((a) => roleAdmits(actorRole, a.roles));
+/**
+ * Apps the effective set opens, in registry order.
+ *
+ * THESE SELECTORS READ MODULE STATE (`holds`), so a memo over one of them
+ * must name `accessEpoch` -- from `useOs()` or `useSession()` -- in its deps,
+ * or it keeps the empty-set answer (every app hidden) after the read lands.
+ */
+export function appsFor(registry: OsRegistry): OsAppManifest[] {
+  return registry.apps.filter((a) => accessAdmits(a.requires));
 }
 
-export function widgetsForRole(registry: OsRegistry, actorRole: string): OsWidgetManifest[] {
-  return registry.widgets.filter((w) => roleAdmits(actorRole, w.roles));
+export function widgetsFor(registry: OsRegistry): OsWidgetManifest[] {
+  return registry.widgets.filter((w) => accessAdmits(w.requires));
 }
 
-/** Sections of an app the actor may open; the first is the default. */
-export function sectionsForRole(app: OsAppManifest, actorRole: string): OsAppSection[] {
-  return (app.sections ?? []).filter((s) => roleAdmits(actorRole, s.roles));
+/** Sections of an app the effective set opens; the first is the default. */
+export function sectionsFor(app: OsAppManifest): OsAppSection[] {
+  return (app.sections ?? []).filter((s) => accessAdmits(s.requires));
 }
 
 /**
- * The one launch admission check: an app the actor cannot see cannot be
+ * The one launch admission check: an app the person cannot see cannot be
  * opened by id either (dock, launcher and deep entry all go through this).
  */
-export function canOpen(registry: OsRegistry, actorRole: string, appId: string): boolean {
+export function canOpen(registry: OsRegistry, appId: string): boolean {
   const app = appById(registry, appId);
-  return !!app && roleAdmits(actorRole, app.roles);
+  return !!app && accessAdmits(app.requires);
 }
 
 /**
@@ -212,39 +252,25 @@ export function settingsSectionProblem(app: OsAppManifest): string | null {
   return null;
 }
 
-/** The rank floor every log read carries in the engine (spec L3). */
-export const LOGS_ROLE_FLOOR = "admin";
-
 /**
- * Whether a requirement admits nobody below the logs floor.
- *
- * `{ min: "admin" }` is accepted by name, so the check holds before the
- * cluster's ladder has loaded; any other minimum is ranked against the floor
- * and an unrankable one FAILS -- a floor that cannot be resolved is not a
- * floor that admits everyone, which is the fail-closed reading `roleAdmits`
- * takes too. A set form must name only rungs at or above the floor.
+ * The rank floor every log read carries in the engine (spec L3). The
+ * seeds put `read app:<id>/<logs section>` on exactly the roles at or above
+ * it; the manifest names the resource and the parity gate pins it to the
+ * seeds.
  */
-function flooredAtLogs(requirement?: RoleRequirement): boolean {
-  if (!requirement) return false;
-  const floor = roleRank(LOGS_ROLE_FLOOR);
-  if ("any" in requirement) {
-    if (requirement.any.length === 0 || floor < 0) return false;
-    return requirement.any.every((slug) => roleRank(slug) >= floor);
-  }
-  if (requirement.min === LOGS_ROLE_FLOOR) return true;
-  const rank = roleRank(requirement.min);
-  return floor >= 0 && rank >= floor;
-}
+export const LOGS_ROLE_FLOOR = "admin";
 
 /**
  * The logs-section contract, the way `settingsSectionProblem` is: a
  * function rather than a test assertion, returning null when the manifest
  * is well-formed and otherwise the sentence to show.
  *
- * Over DECLARED sections, like its sibling. The floor is checked as well as
- * the existence, because a Logs section a writer can open is a section that
- * opens on the engine's refusal -- and "this app is broken" is what that
- * reads as from inside the window.
+ * Over DECLARED sections, like its sibling. The resource is checked as well
+ * as the existence, because a Logs section reached through an app's door
+ * alone is a section that opens on the engine's refusal for everyone the
+ * door admits below the log store's floor -- and "this app is broken" is
+ * what that reads as from inside the window. The section's resource is
+ * `app:<id>/<section>`, and which roles hold it is the seeds' business.
  */
 export function logsSectionProblem(app: OsAppManifest): string | null {
   const target = app.logsSection.trim();
@@ -255,8 +281,9 @@ export function logsSectionProblem(app: OsAppManifest): string | null {
     const declared = sections.map((s) => s.id).join(", ") || "none";
     return `${app.id}: logsSection "${target}" names no declared section (declared: ${declared})`;
   }
-  if (!flooredAtLogs(section.roles) && !flooredAtLogs(app.roles)) {
-    return `${app.id}: logsSection "${target}" is not floored at ${LOGS_ROLE_FLOOR} on the section or the app`;
+  const want = `${app.requires}/${target}`;
+  if (section.requires !== want) {
+    return `${app.id}: logsSection "${target}" must carry requires: "${want}" (seeded at the ${LOGS_ROLE_FLOOR} floor); it carries ${section.requires === undefined ? "none" : `"${section.requires}"`}`;
   }
   return null;
 }
@@ -267,10 +294,11 @@ export function logsSectionProblem(app: OsAppManifest): string | null {
  * the rule per app. (`settingsSectionProblem` goes further and is rendered by
  * the apps index; this one and the logs one are not, yet.)
  *
- * A requirement on the settings or logs section is REFUSED. Those two are the
+ * A module need on the settings or logs section is REFUSED. Those two are the
  * exemptions the window frame keeps reachable while an app is unconfigured, so
- * a requirement there would lock a person out of the one place they can fix it
- * -- an app that gates its own repair.
+ * a need there would lock a person out of the one place they can fix it -- an
+ * app that gates its own repair. (An ACCESS requirement on the logs section is
+ * a different thing and is required, by `logsSectionProblem`.)
  */
 export function readinessProblem(app: OsAppManifest): string | null {
   const bad = (ids: readonly string[] | undefined, where: string): string | null => {
@@ -279,23 +307,26 @@ export function readinessProblem(app: OsAppManifest): string | null {
     }
     return null;
   };
-  const top = bad(app.requires, "requires") ?? bad(app.wants, "wants");
+  const top = bad(app.needs, "needs") ?? bad(app.wants, "wants");
   if (top) return top;
   for (const section of app.sections ?? []) {
     const p =
-      bad(section.requires, `section ${section.id} requires`) ??
+      bad(section.needs, `section ${section.id} needs`) ??
       bad(section.wants, `section ${section.id} wants`);
     if (p) return p;
     const exempt = section.id === app.settingsSection || section.id === app.logsSection;
-    if (exempt && ((section.requires?.length ?? 0) > 0 || (section.wants?.length ?? 0) > 0)) {
-      return `${app.id}: section ${section.id} is the settings or logs section and cannot carry a requirement`;
+    if (exempt && ((section.needs?.length ?? 0) > 0 || (section.wants?.length ?? 0) > 0)) {
+      return `${app.id}: section ${section.id} is the settings or logs section and cannot carry a module need`;
     }
   }
   return null;
 }
 
 /**
- * The requirements that gate one section: the app's, then the section's own.
+ * The module needs that gate one section: the app's, then the section's own.
+ * The keys are still `requires` / `wants` -- they are what the readiness
+ * surfaces read -- while the manifest FIELD is `needs`, because `requires`
+ * on a manifest names an access resource now.
  *
  * Settings and Logs answer empty whatever the app declares, which is the same
  * exemption `readinessProblem` enforces at the declaration -- stated twice
@@ -312,7 +343,7 @@ export function requirementsFor(
   const section = (app.sections ?? []).find((s) => s.id === sectionId);
   const dedupe = (ids: readonly ModuleId[]) => Array.from(new Set(ids));
   return {
-    requires: dedupe([...(app.requires ?? []), ...(section?.requires ?? [])]),
+    requires: dedupe([...(app.needs ?? []), ...(section?.needs ?? [])]),
     wants: dedupe([...(app.wants ?? []), ...(section?.wants ?? [])]),
   };
 }
@@ -334,11 +365,11 @@ export function allRequirementsFor(app: OsAppManifest): {
   requires: ModuleId[];
   wants: ModuleId[];
 } {
-  const requires = new Set<ModuleId>(app.requires ?? []);
+  const requires = new Set<ModuleId>(app.needs ?? []);
   const wants = new Set<ModuleId>(app.wants ?? []);
   for (const section of app.sections ?? []) {
     if (section.id === app.settingsSection || section.id === app.logsSection) continue;
-    for (const id of section.requires ?? []) requires.add(id);
+    for (const id of section.needs ?? []) requires.add(id);
     for (const id of section.wants ?? []) wants.add(id);
   }
   return { requires: Array.from(requires), wants: Array.from(wants) };

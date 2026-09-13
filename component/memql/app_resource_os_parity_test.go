@@ -17,30 +17,30 @@ import (
 )
 
 // THE OS REGISTRY AND THE APP SEEDS ARE PINNED TO EACH OTHER (epic
-// memql#5288, task memql#5302; app access grants design, sections 4 and 5).
+// memql#5288, task memql#5302; epic memql#5289, task memql#5304; app access
+// grants design, sections 4 and 5).
 //
-// dsl/rbac/seeds.memql seeds `read app:<id>` for every MemQL OS app on
-// exactly the roles the registry's hand-written `roles:` floor admits today,
-// and `read app:<id>/<section>` for every floored section. That is the whole
-// promise of the migration: the day the shell stops asking `roleAdmits(role,
-// { min })` and asks the effective capability set instead (epic memql#5289),
-// nobody's desktop changes. A promise like that is worth exactly the gate
-// that holds it, so this reads the registry SOURCE -- the way
+// The MemQL OS registry (clients/os/src/apps/registry.tsx) names every app,
+// floored section and widget as a capability RESOURCE -- `requires:
+// "app:<id>"` on the manifest, `requires: "app:<id>/<section>"` on a
+// section -- and the shell decides what to draw by asking whether the
+// signed-in person's effective capability set holds `read` on that name.
+// dsl/rbac/seeds.memql is where the names come from: a resource EXISTS by
+// being seeded on at least one role, and the seeds were written to
+// reproduce the registry's hand-written `roles:` floors exactly, so the
+// switch from floors to names changed nobody's desktop.
+//
+// This gate reads the registry SOURCE -- the way
 // TestSiteKindEnumMatchesOsOfferedKinds reads the offered kinds -- and fails
-// the build when a floor and its seeded role set differ in EITHER direction:
+// the build when the two sides disagree in EITHER direction:
 //
-//   - an app (or floored section) the registry has and the seeds do not is
-//     a surface the switch would take away from everybody;
-//   - a seeded app the registry does not have is a resource that gates
-//     nothing and will drift;
-//   - a role set that differs is a person who gains or loses an app on the
-//     day of the switch, silently.
-//
-// WRITTEN SO THE OS EPIC CHANGES ONE FUNCTION. osRegistryResources is the
-// extraction: today it reads each entry's `roles:` floor and derives the
-// admitted set from the seeded ladder; the OS epic replaces its body with
-// one that reads `requires: "app:<id>"` and asserts every named resource is
-// seeded. The comparison below does not change.
+//   - a `requires:` naming a resource no seed declares is a surface NOBODY
+//     can open: the shell hides what the effective set does not hold, and
+//     no role holds a name the catalog never seeded;
+//   - a seeded `read app:*` the registry does not ask for is a resource that
+//     gates nothing and will drift;
+//   - a manifest or section still carrying `roles:` is the retired form, and
+//     the shell no longer reads it -- a floor written there gates nothing.
 //
 // The seeds are read through the REAL loader (LoadUnifiedSeeds) and lowered
 // through the REAL catalog builder, so what is compared is the catalog a
@@ -50,32 +50,43 @@ import (
 const osRegistryPath = "../../clients/os/src/apps/registry.tsx"
 
 // osRegistryResources reads every app and widget manifest the registry lists
-// and answers, per capability resource, the sorted catalog slugs the
-// registry's own floor admits: `app:<id>` for the manifest and
-// `app:<id>/<section>` for every section that declares a floor of its own.
+// and answers the set of capability resources it names: the manifest's own
+// `requires:` and every section's.
 //
-// A section with NO floor of its own is not a resource: it is reached
+// A section with NO `requires:` of its own is not a resource: it is reached
 // through its app's door, and seeding it would be a second row saying what
-// the app row already says.
-func osRegistryResources(t *testing.T, ladder seededLadder) map[string][]string {
+// the app row already says. A MANIFEST with no `requires:` is a defect --
+// every app is a resource, because opening it is a question the effective
+// set has to answer -- and the parser refuses it below.
+func osRegistryResources(t *testing.T) map[string]bool {
 	t.Helper()
 	reg := newOsRegistrySource(t, osRegistryPath)
-	out := map[string][]string{}
+	out := map[string]bool{}
 	for _, m := range reg.manifests(t) {
-		out["app:"+m.id] = ladder.admitted(t, m.roles)
+		if m.requires == "" {
+			t.Errorf("manifest %q declares no `requires:`; every app and widget is a capability resource (`requires: \"app:%s\"`), or the shell can never decide whether to draw it", m.id, m.id)
+			continue
+		}
+		if m.requires != "app:"+m.id {
+			t.Errorf("manifest %q requires %q; an app's own door is `app:<id>` and the seeds name it that way", m.id, m.requires)
+		}
+		out[m.requires] = true
 		for _, s := range m.sections {
-			if s.roles == nil {
+			if s.requires == "" {
 				continue
 			}
-			out["app:"+m.id+"/"+s.id] = ladder.admitted(t, s.roles)
+			if !strings.HasPrefix(s.requires, "app:"+m.id+"/") {
+				t.Errorf("manifest %q section %q requires %q; a section's resource is `app:<id>/<section>` under its own app", m.id, s.id, s.requires)
+			}
+			out[s.requires] = true
 		}
 	}
 	return out
 }
 
-func TestOsRegistryFloorsMatchTheAppSeeds(t *testing.T) {
-	ladder, seeded := seededAppResources(t)
-	registry := osRegistryResources(t, ladder)
+func TestOsRegistryRequiresMatchTheAppSeeds(t *testing.T) {
+	_, seeded := seededAppResources(t)
+	registry := osRegistryResources(t)
 
 	// THE REACHABLE POSITIVE, on both sides. Two empty maps compare equal, and
 	// that is the exact failure mode this gate exists to refuse.
@@ -86,24 +97,16 @@ func TestOsRegistryFloorsMatchTheAppSeeds(t *testing.T) {
 		t.Fatal("the seeds carry no `read app:*` capability; the app block of dsl/rbac/seeds.memql is gone")
 	}
 
-	for _, resource := range sortedResourceKeys(registry) {
-		want := registry[resource]
-		got, ok := seeded[resource]
-		if !ok {
-			t.Errorf("the OS registry admits %s on %v and dsl/rbac/seeds.memql seeds no `read` on it.\n"+
-				"Add one cap-<role>-read-%s row per admitted role, or the switch to `requires:` takes the surface away from everybody.",
-				resource, want, strings.NewReplacer(":", "-", "/", "-").Replace(resource))
-			continue
-		}
-		if strings.Join(want, ",") != strings.Join(got, ",") {
-			t.Errorf("%s: the OS registry floor admits %v and the seeds grant `read` to %v.\n"+
-				"These must be the SAME set: the seeds reproduce today's floors exactly, so that the day the shell reads the effective set instead of the floor, nobody's desktop changes.",
-				resource, want, got)
+	for _, resource := range sortedResourceNames(registry) {
+		if _, ok := seeded[resource]; !ok {
+			t.Errorf("the OS registry requires %s and dsl/rbac/seeds.memql seeds no `read` on it.\n"+
+				"Add one cap-<role>-read-%s row per role that may open it, or the surface is hidden from everybody: the shell draws what the effective set holds, and no role holds a name the catalog never seeded.",
+				resource, strings.NewReplacer(":", "-", "/", "-").Replace(resource))
 		}
 	}
 	for _, resource := range sortedResourceKeys(seeded) {
-		if _, ok := registry[resource]; !ok {
-			t.Errorf("dsl/rbac/seeds.memql seeds `read` on %s for %v and the OS registry has no such app or floored section.\n"+
+		if !registry[resource] {
+			t.Errorf("dsl/rbac/seeds.memql seeds `read` on %s for %v and the OS registry has no manifest or section requiring it.\n"+
 				"A seeded resource the shell never asks for gates nothing and drifts; take the rows out or add the surface.",
 				resource, seeded[resource])
 		}
@@ -137,8 +140,7 @@ func TestKnownResourcesListEveryAppOnAFirstBoot(t *testing.T) {
 
 func assertKnownResourcesNameEveryApp(t *testing.T, known []string) {
 	t.Helper()
-	ladder, _ := seededAppResources(t)
-	for _, resource := range sortedResourceKeys(osRegistryResources(t, ladder)) {
+	for _, resource := range sortedResourceNames(osRegistryResources(t)) {
 		if !vocabularyHas(known, resource) {
 			t.Errorf("knownResources does not list %s", resource)
 		}
@@ -274,46 +276,6 @@ type seededLadder struct {
 	aliases map[string]string
 }
 
-// admitted answers the catalog slugs a registry floor admits, sorted by rank
-// descending. nil (no floor) is every seeded role.
-func (l seededLadder) admitted(t *testing.T, r *osRoleRequirement) []string {
-	t.Helper()
-	var out []string
-	switch {
-	case r == nil:
-		for slug := range l.rank {
-			out = append(out, slug)
-		}
-	case r.min != "":
-		floor, ok := l.rank[l.resolve(r.min)]
-		if !ok {
-			t.Fatalf("the registry floor names %q, which the seeds neither seed nor alias", r.min)
-		}
-		for slug, rank := range l.rank {
-			if rank >= floor {
-				out = append(out, slug)
-			}
-		}
-	default:
-		for _, name := range r.any {
-			slug := l.resolve(name)
-			if _, ok := l.rank[slug]; !ok {
-				t.Fatalf("the registry's `any` set names %q, which the seeds neither seed nor alias", name)
-			}
-			out = append(out, slug)
-		}
-	}
-	l.sortByRank(out)
-	return out
-}
-
-func (l seededLadder) resolve(name string) string {
-	if slug, ok := l.aliases[name]; ok {
-		return slug
-	}
-	return name
-}
-
 func (l seededLadder) sortByRank(slugs []string) {
 	sort.Slice(slugs, func(i, j int) bool {
 		if l.rank[slugs[i]] != l.rank[slugs[j]] {
@@ -405,20 +367,16 @@ func installSeededCatalog(t *testing.T) {
 // the registry, read as text
 // ---------------------------------------------------------------------
 
-// osRoleRequirement is the registry's RoleRequirement: `{ min }` or `{ any }`.
-type osRoleRequirement struct {
-	min string
-	any []string
-}
-
 type osSection struct {
-	id    string
-	roles *osRoleRequirement
+	id string
+	// requires is the section's own capability resource, "" when it is
+	// reached through its app's door.
+	requires string
 }
 
 type osManifest struct {
 	id       string
-	roles    *osRoleRequirement
+	requires string
 	sections []osSection
 }
 
@@ -437,9 +395,8 @@ var (
 	osImportRe   = regexp.MustCompile(`import\s*\{([^}]*)\}\s*from\s*"(\./[^"]+)"`)
 	osRegistryRe = regexp.MustCompile(`export const OS_REGISTRY: OsRegistry = `)
 	osIdRe       = regexp.MustCompile(`id:\s*"([^"]+)"`)
-	osMinRe      = regexp.MustCompile(`min:\s*"([^"]+)"`)
-	osAnyRe      = regexp.MustCompile(`any:\s*\[([^\]]*)\]`)
-	osQuotedRe   = regexp.MustCompile(`"([^"]+)"`)
+	osRequiresRe = regexp.MustCompile(`requires:\s*"([^"]+)"`)
+	osRolesRe    = regexp.MustCompile(`\broles:`)
 )
 
 func newOsRegistrySource(t *testing.T, path string) *osRegistrySource {
@@ -533,8 +490,13 @@ func (r *osRegistrySource) manifest(t *testing.T, ident string) osManifest {
 			t.Fatalf("manifest %s declares no id", ident)
 		}
 		m := osManifest{id: r.resolveId(t, strings.TrimSpace(idField))}
-		if rolesField, ok := tsTopLevelField(t, block, "roles"); ok {
-			m.roles = parseOsRoles(t, rolesField)
+		// THE RETIRED FORM IS REFUSED, not skipped: a `roles:` floor the shell
+		// no longer reads is one that gates nothing while looking like a gate.
+		if _, ok := tsTopLevelField(t, block, "roles"); ok {
+			t.Errorf("manifest %s still carries `roles:`; the shell reads `requires: \"app:<id>\"` (epic memql#5289) and a floor written here gates nothing", ident)
+		}
+		if reqField, ok := tsTopLevelField(t, block, "requires"); ok {
+			m.requires = parseOsRequires(t, ident, reqField)
 		}
 		if sec, ok := tsTopLevelField(t, block, "sections"); ok {
 			sec = strings.TrimSpace(sec)
@@ -579,23 +541,19 @@ func (r *osRegistrySource) resolveId(t *testing.T, field string) string {
 	return m[1]
 }
 
-func parseOsRoles(t *testing.T, txt string) *osRoleRequirement {
+// parseOsRequires reads a `requires:` value, which must be one string literal
+// naming a resource. The module lists that used to be spelled `requires:`
+// are `needs:` now, and a list here is the one shape this would misread.
+func parseOsRequires(t *testing.T, where, txt string) string {
 	t.Helper()
-	if m := osMinRe.FindStringSubmatch(txt); m != nil {
-		return &osRoleRequirement{min: m[1]}
+	txt = strings.TrimSpace(txt)
+	if !strings.HasPrefix(txt, `"`) {
+		t.Fatalf("%s: a `requires:` value this gate cannot read: %s (a resource is one string literal; module lists are `needs:`)", where, txt)
 	}
-	if m := osAnyRe.FindStringSubmatch(txt); m != nil {
-		var any []string
-		for _, q := range osQuotedRe.FindAllStringSubmatch(m[1], -1) {
-			any = append(any, q[1])
-		}
-		return &osRoleRequirement{any: any}
-	}
-	t.Fatalf("a `roles:` value this gate cannot read: %s", txt)
-	return nil
+	return strings.Trim(txt, `"`)
 }
 
-// parseOsSections reads the `{ id, name, roles? }` entries of a section
+// parseOsSections reads the `{ id, name, requires? }` entries of a section
 // array literal.
 func parseOsSections(t *testing.T, arr string) []osSection {
 	t.Helper()
@@ -612,8 +570,11 @@ func parseOsSections(t *testing.T, arr string) []osSection {
 			t.Fatalf("a section entry with no id: %s", entry)
 		}
 		s := osSection{id: idm[1]}
-		if k := strings.Index(entry, "roles:"); k >= 0 {
-			s.roles = parseOsRoles(t, tsBlock(t, entry, k+len("roles:")+strings.Index(entry[k+len("roles:"):], "{")))
+		if osRolesRe.MatchString(entry) {
+			t.Errorf("section %s still carries `roles:`; a section's floor is `requires: \"app:<id>/<section>\"` now (epic memql#5289)", idm[1])
+		}
+		if m := osRequiresRe.FindStringSubmatch(entry); m != nil {
+			s.requires = m[1]
 		}
 		out = append(out, s)
 		i = i + j + len(entry)
@@ -717,6 +678,15 @@ func stripTsComments(s string) string {
 }
 
 func sortedResourceKeys(m map[string][]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sortedResourceNames(m map[string]bool) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)

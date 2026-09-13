@@ -27,7 +27,7 @@ export const MATERIALIZER_SECTIONS: OsAppSection[] = [
   { id: "templates", name: "Templates" },
   // Admin-floored because every read on the log store is (spec L3). The
   // one section whose floor is not this app's to choose.
-  { id: "logs", name: "Logs", roles: { min: "admin" } },
+  { id: "logs", name: "Logs", requires: "app:materializer/logs" },
   { id: "settings", name: "Settings" },
 ];
 

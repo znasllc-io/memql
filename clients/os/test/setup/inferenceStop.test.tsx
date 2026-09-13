@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { OS_REGISTRY } from "../../src/apps/registry";
+import { rolesOpening } from "../seededAccess";
 import { OsProvider, useOs } from "../../src/chrome/state";
 import { InferenceStop } from "../../src/apps/setup/InferenceStop";
 
@@ -38,7 +39,7 @@ function mount(role: string) {
   render(
     <OsProvider registry={OS_REGISTRY} actorRole={role} grid={{ cols: 12, rows: 8 }} layout="desktop">
       <Spy onOpen={(c) => calls.push(c)} />
-      <InferenceStop role={role} />
+      <InferenceStop />
     </OsProvider>,
   );
   return calls;
@@ -145,19 +146,18 @@ describe("the doors a developer is offered", () => {
     // memql#5088 and the developer got the button with no edit to the stop.
     // That is the whole reason the check is a lookup.
     //
-    // A SET, not a floor. This repo's ladder ranks developer (300) ABOVE admin
-    // (200), so `{ min: "developer" }` would admit admin -- exactly the role
-    // the engine's own gate refuses. The manifest has to say the set.
+    // A RESOURCE, seeded on owner and developer and NOT admin: this repo's
+    // ladder ranks developer (300) ABOVE admin (200), so a floor could never
+    // say "developer but not admin", and the seeds say it row by row.
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
-    expect(settings?.sections?.find((s) => s.id === "providers")?.roles).toEqual({
-      any: ["owner", "developer"],
-    });
+    expect(settings?.sections?.find((s) => s.id === "providers")?.requires).toBe("app:settings/providers");
+    expect(rolesOpening("app:settings/providers")).toEqual(["owner", "developer"]);
   });
 });
 
 describe("with no shell to open into", () => {
   it("names both destinations in words", () => {
-    render(<InferenceStop role="owner" />);
+    render(<InferenceStop />);
     expect(screen.getByText("Pair a machine in Fleet, under Machines.")).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: /Anthropic/ }));
     expect(screen.getByText("An owner can set Anthropic up in Settings, under Doors.")).toBeTruthy();

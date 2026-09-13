@@ -175,8 +175,8 @@ export function CoreGate({ onSignOut, children }: { onSignOut: () => void; child
     if (stop.state !== "waiting") return undefined;
     if (stop.id === PASSKEY_STOP) return <PasskeyStop identityUrl={facts?.identityUrl ?? ""} />;
     const id = stop.id as ModuleId;
-    if (id === "ai") return <InferenceStop role={role} />;
-    return <ModuleStop id={id} verdict={feed.of(id)} role={role} />;
+    if (id === "ai") return <InferenceStop />;
+    return <ModuleStop id={id} verdict={feed.of(id)} />;
   }
 }
 

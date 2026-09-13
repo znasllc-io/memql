@@ -7,6 +7,7 @@ import { resetIdsForTest } from "../src/system/desks";
 import { LocalDesktopStore } from "../src/system/store";
 import type { OsRuntimeConfig } from "../src/cluster/config";
 import { artifactHandoffUrl, openInVsCode } from "../src/items/vscode";
+import { installSeededAccess } from "./seededAccess";
 
 // The shell behavior suite (spec K): rendered against the REAL registry,
 // an in-memory store per test, and the stub transports PR A ships.
@@ -36,6 +37,10 @@ function renderShell({
   layout?: "desktop" | "ipad" | "phone";
   storage?: Pick<Storage, "getItem" | "setItem">;
 } = {}) {
+  // The effective set follows the role the harness signs in as (epic
+  // memql#5289): the cluster's answer for that role on a cluster with no
+  // grants, installed before the first render.
+  installSeededAccess(access.role);
   const view = render(
     <Shell
       layout={layout}

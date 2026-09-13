@@ -1,6 +1,6 @@
 import { Caption } from "../../kit";
 import { useOs } from "../../chrome/state";
-import { appsForRole, sectionsForRole, settingsSectionProblem } from "../../system/registry";
+import { appsFor, sectionsFor, settingsSectionProblem } from "../../system/registry";
 import type { OsAppManifest } from "../../system/registry";
 
 // The apps index (memql#4743): a DIRECTORY of every installed app's own
@@ -18,7 +18,7 @@ export function AppsIndexSection() {
   // The one role predicate, through the registry's selector -- the same call
   // the launcher grid and the dock make. An app hidden from this session is
   // hidden here too, and for exactly one reason rather than two.
-  const apps = appsForRole(registry, actorRole);
+  const apps = appsFor(registry);
 
   return (
     <div className="os-settings">
@@ -67,7 +67,7 @@ function AppEntry({
   onOpen: (app: OsAppManifest) => void;
 }) {
   const Icon = app.icon;
-  const admitted = sectionsForRole(app, actorRole);
+  const admitted = sectionsFor(app);
   const target = admitted.find((s) => s.id === app.settingsSection);
   // A manifest defect and a role gate look identical from here -- both end
   // with no reachable target -- so they are told apart and worded apart. The

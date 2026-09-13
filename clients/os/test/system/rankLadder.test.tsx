@@ -4,15 +4,19 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { RankMark, RoleTag } from "../../src/kit/RankMark";
 import { PeerRowReadOnly, SurfaceRefused } from "../../src/kit/RankStates";
 import { OS_REGISTRY } from "../../src/apps/registry";
-import { appsForRole, sectionsForRole, widgetsForRole } from "../../src/system/registry";
-import { roleAdmits, roleRank, setRoleLadder } from "../../src/system/roles";
-import type { RoleRequirement } from "../../src/system/roles";
+import { appsFor, sectionsFor, widgetsFor } from "../../src/system/registry";
+import { clearEffectiveCapabilities, roleAdmits, roleRank, setRoleLadder } from "../../src/system/roles";
+import { installSeededAccess, seededAppResources } from "../seededAccess";
 import { SEEDED_LADDER } from "../seededLadder";
 
 // THE LADDER AS CLUSTER STATE (epic memql#4832, D1), and the surfaces that
-// read it.
+// read it -- and, since epic memql#5289, the EFFECTIVE SET as cluster state
+// beside it, which is what the app roster reads now.
 
-beforeEach(() => setRoleLadder(SEEDED_LADDER));
+beforeEach(() => {
+  setRoleLadder(SEEDED_LADDER);
+  installSeededAccess("owner");
+});
 
 describe("the ladder is cluster state", () => {
   // The whole point of D1: the shell holds no ordering of its own, so a
@@ -39,98 +43,112 @@ describe("the ladder is cluster state", () => {
   });
 });
 
-describe("every shipped role requirement names a real rung", () => {
-  // THE CLIENT-SIDE TWIN of the engine's load-time @requiresRank validation.
-  //
-  // `RoleRequirement.min` is a plain string now -- it has to be, since the set
-  // of roles is cluster state -- so a typo cannot be caught by the type
-  // system. It is caught here instead: a floor naming no rung admits NOBODY,
-  // so the surface would vanish for everyone including the owner, which is a
-  // silent and total outage of one app.
-  it("resolves every app, section and widget requirement", () => {
+describe("every shipped requirement names a seeded resource", () => {
+  // THE CLIENT-SIDE TWIN of the Go parity gate
+  // (component/memql/app_resource_os_parity_test.go). `requires:` is a plain
+  // string, so a typo cannot be caught by the type system. It is caught here
+  // instead: a resource no seed declares is held by nobody, so the surface
+  // would vanish for everyone including the owner -- a silent and total
+  // outage of one app.
+  it("resolves every app, section and widget requirement against the seeds", () => {
+    const seeded = new Set(seededAppResources());
     const unresolved: string[] = [];
-    // BOTH FORMS. `{ min }` names one slug; `{ any }` names a set, and every
-    // member has to resolve -- a set with one unresolvable member silently
-    // narrows rather than failing, which is the quieter of the two bugs.
-    const check = (label: string, requirement: RoleRequirement | undefined) => {
-      if (requirement === undefined) return;
-      const slugs = "any" in requirement ? [...requirement.any] : [requirement.min];
-      for (const slug of slugs) {
-        if (roleRank(slug) < 0) unresolved.push(`${label} -> ${slug}`);
-      }
+    const check = (label: string, resource: string | undefined) => {
+      if (resource === undefined) return;
+      if (!seeded.has(resource)) unresolved.push(`${label} -> ${resource}`);
     };
     for (const app of OS_REGISTRY.apps) {
-      check(`app ${app.id}`, app.roles);
+      check(`app ${app.id}`, app.requires);
+      expect(app.requires, `app ${app.id} names its own door`).toBe(`app:${app.id}`);
       for (const section of app.sections ?? []) {
-        check(`section ${app.id}/${section.id}`, section.roles);
+        check(`section ${app.id}/${section.id}`, section.requires);
+        if (section.requires !== undefined) {
+          expect(section.requires, `section ${app.id}/${section.id}`).toBe(`app:${app.id}/${section.id}`);
+        }
       }
     }
     for (const widget of OS_REGISTRY.widgets) {
-      check(`widget ${widget.id}`, widget.roles);
+      check(`widget ${widget.id}`, widget.requires);
+      expect(widget.requires, `widget ${widget.id} names its own door`).toBe(`app:${widget.id}`);
     }
     expect(unresolved).toEqual([]);
   });
 
-  // A REACHABLE POSITIVE for the case above: the check can fail. Without this,
-  // a registry that stopped declaring requirements at all would pass it.
+  // The other direction: a seeded app resource nobody asks for gates
+  // nothing and drifts.
+  it("every seeded app resource is named by some manifest or section", () => {
+    const named = new Set<string>();
+    for (const app of OS_REGISTRY.apps) {
+      named.add(app.requires);
+      for (const section of app.sections ?? []) if (section.requires) named.add(section.requires);
+    }
+    for (const widget of OS_REGISTRY.widgets) named.add(widget.requires);
+    expect(seededAppResources().filter((r) => !named.has(r))).toEqual([]);
+  });
+
+  // A REACHABLE POSITIVE for the cases above: the check can fail. Without
+  // this, a registry that stopped declaring requirements would pass it.
   it("the check above can actually fail", () => {
-    expect(roleRank("definitely-not-a-role")).toBeLessThan(0);
-    const gated = OS_REGISTRY.apps.filter((a) => a.roles !== undefined);
-    expect(gated.length).toBeGreaterThan(0);
+    expect(seededAppResources()).not.toContain("app:definitely-not-an-app");
+    expect(seededAppResources().length).toBeGreaterThan(0);
+  });
+
+  // NO `roles:` ANYWHERE. The retired form is not a type any more, but a
+  // manifest object can still carry an extra key, and the Go gate refuses
+  // the key by name -- this is the same refusal one language over.
+  it("no manifest or section carries the retired roles floor", () => {
+    const carrying: string[] = [];
+    for (const app of OS_REGISTRY.apps) {
+      if ("roles" in app) carrying.push(`app ${app.id}`);
+      for (const section of app.sections ?? []) if ("roles" in section) carrying.push(`section ${app.id}/${section.id}`);
+    }
+    for (const widget of OS_REGISTRY.widgets) if ("roles" in widget) carrying.push(`widget ${widget.id}`);
+    expect(carrying).toEqual([]);
   });
 });
 
-describe("the flipped ordering reaches the registry", () => {
-  // The defect, measured where it was visible: a developer could not see an
-  // app the engine considered them MORE privileged for.
-  it("offers a developer the admin-floored apps", () => {
-    const forDeveloper = appsForRole(OS_REGISTRY, "developer").map((a) => a.name);
-    expect(forDeveloper).toContain("Users");
-    expect(forDeveloper).toContain("Accounts");
-  });
+describe("each seeded role's desktop is the one the floors used to draw", () => {
+  // THE PROMISE OF THE SWITCH (design section 5): the seeds reproduce the
+  // hand-written floors exactly, so the day the shell reads the effective
+  // set instead, nobody's desktop changes. These are the floors as the
+  // registry stated them before the switch, written out per role, so a seed
+  // that drifts fails here by name.
+  const expected: Record<string, { apps: string[]; not: string[] }> = {
+    owner: { apps: ["Users", "Accounts", "Training", "Logs", "Stores", "Cluster", "Concepts"], not: [] },
+    developer: { apps: ["Users", "Accounts", "Training", "Logs", "Cluster", "Concepts"], not: ["Stores"] },
+    admin: { apps: ["Users", "Accounts", "Training", "Logs", "Cluster", "Concepts"], not: ["Stores"] },
+    writer: { apps: ["Training", "Deployables", "Files", "Settings"], not: ["Users", "Accounts", "Logs", "Stores"] },
+    reader: { apps: ["Deployables", "Files", "Settings"], not: ["Users", "Accounts", "Training", "Logs", "Stores"] },
+  };
+  for (const [role, want] of Object.entries(expected)) {
+    it(`draws ${role}'s desktop`, () => {
+      installSeededAccess(role);
+      const names = appsFor(OS_REGISTRY).map((a) => a.name);
+      for (const name of want.apps) expect(names, `${role} should see ${name}`).toContain(name);
+      for (const name of want.not) expect(names, `${role} should not see ${name}`).not.toContain(name);
+    });
+  }
 
-  // WHY USERS IS ON THAT LIST IS A SERVER FACT, NOT A LADDER ONE. When the
-  // ladder flipped, `min: "admin"` started admitting developer while every
-  // gate inside the app was create-on-principal, which developer does not
-  // hold -- the app was offered and served nothing. It is correct now because
-  // the SERVER changed: developer holds create-on-admission. If that is ever
-  // taken back, this line must change with it, and a floor cannot express
-  // "rank >= 200 except developer".
-  it("admits admin and owner to Users as well", () => {
-    expect(appsForRole(OS_REGISTRY, "admin").map((a) => a.name)).toContain("Users");
-    expect(appsForRole(OS_REGISTRY, "owner").map((a) => a.name)).toContain("Users");
-  });
-
-  it("still withholds them from a writer and a reader", () => {
-    for (const role of ["writer", "reader"]) {
-      const apps = appsForRole(OS_REGISTRY, role).map((a) => a.name);
-      expect(apps).not.toContain("Users");
-      expect(apps).not.toContain("Accounts");
-    }
-  });
-
-  // The section this case used to name was Deployables' Actions, gated
-  // `{ min: "admin" }`: under the old ordering that excluded DEVELOPER, so the
-  // launcher hid deploy actions from the deploy tier. Actions retired with the
-  // compose epic (memql#4885) and Deployables' gate moved INSIDE its one
-  // section -- New deployable renders at rank >= 200 -- so the registry-level
-  // statement is made here against a gate that still exists, and the rendered
-  // half lives in `test/deployables/list.test.tsx`.
-  it("offers the deploy tier an admin-floored SECTION", () => {
+  // The defect the ladder flip measured, now a fact about the seeds: a
+  // developer opens the apps the engine considers them MORE privileged for.
+  it("offers a developer the admin-floored SECTION as well", () => {
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
     expect(settings).toBeTruthy();
-    const ids = sectionsForRole(settings!, "developer").map((s) => s.id);
-    expect(ids).toContain("cluster");
-    expect(sectionsForRole(settings!, "reader").map((s) => s.id)).not.toContain("cluster");
+    installSeededAccess("developer");
+    expect(sectionsFor(settings!).map((s) => s.id)).toContain("cluster");
+    installSeededAccess("reader");
+    expect(sectionsFor(settings!).map((s) => s.id)).not.toContain("cluster");
   });
 
-  // Widgets are role-gated the same way apps are, and the desk context menu
-  // reads the FILTERED list now -- it read the raw registry, so a gated widget
-  // would have been offered to everyone.
-  it("filters widgets by role", () => {
-    expect(widgetsForRole(OS_REGISTRY, "").length).toBe(
-      OS_REGISTRY.widgets.filter((w) => w.roles === undefined).length,
-    );
+  // Widgets are gated the same way apps are, and the desk context menu
+  // reads the FILTERED list.
+  it("filters widgets by the effective set", () => {
+    installSeededAccess("owner");
+    expect(widgetsFor(OS_REGISTRY).map((w) => w.id)).toEqual(["ask", "setup"]);
+    installSeededAccess("reader");
+    expect(widgetsFor(OS_REGISTRY).map((w) => w.id)).toEqual(["ask"]);
+    clearEffectiveCapabilities();
+    expect(widgetsFor(OS_REGISTRY)).toEqual([]);
   });
 });
 
@@ -184,49 +202,29 @@ describe("the rung mark", () => {
 });
 
 describe("the refused surface", () => {
-  it("names the surface, the floor and where the viewer stands", () => {
-    render(<SurfaceRefused surface="Accounts" requirement={{ min: "admin" }} actorRole="reader" />);
-    expect(screen.getByRole("heading", { name: /Accounts needs a higher role/ })).toBeTruthy();
-    const body = screen.getByText(/This app is open to/);
-    expect(within(body).getByText("admin")).toBeTruthy();
+  it("names the surface, the resource and where the viewer stands", () => {
+    render(<SurfaceRefused surface="Accounts" resource="app:accounts" actorRole="reader" />);
+    expect(screen.getByRole("heading", { name: /Accounts is not open to you/ })).toBeTruthy();
+    const body = screen.getByText(/Opening it takes/);
+    expect(within(body).getByText("read on app:accounts")).toBeTruthy();
     expect(within(body).getByText("viewer")).toBeTruthy();
-    // A FLOOR really is "and above", so it keeps saying so.
-    expect(body.textContent).toContain("and above");
-  });
-
-  // A SET IS NOT "AND ABOVE", and this is the case that was wrong.
-  //
-  // The panel used to receive `requirementFloor(manifest.roles)`, which
-  // reports a set's WEAKEST member. The live set form in the registry is
-  // Settings > Integrations, `{ any: ["owner", "developer"] }` -- whose
-  // weakest member is developer, so collapsing it told a refused ADMIN the
-  // surface was "open to developer and above" while refusing them. The
-  // explanation contradicted the refusal it existed to explain.
-  it("names every member of a set and never says 'and above'", () => {
-    render(
-      <SurfaceRefused
-        surface="Users"
-        requirement={{ any: ["admin", "owner"] }}
-        actorRole="developer"
-      />,
-    );
-    const body = screen.getByText(/This app is open to/);
-    expect(body.textContent).toContain("admin or owner");
+    // NEVER "and above": what opens a surface is a capability, which a role,
+    // a group or a grant to this person by name may hold, so no rung is the
+    // answer and none is named.
     expect(body.textContent).not.toContain("and above");
-    expect(within(body).getByText("developer")).toBeTruthy();
   });
 
-  // It says what resolves it. "Access denied" describes what already happened;
-  // the person needs the next move.
+  // It says what resolves it. "Access denied" describes what already
+  // happened; the person needs the next move, and the next move is a grant.
   it("names the action that resolves it", () => {
-    render(<SurfaceRefused surface="Accounts" requirement={{ min: "admin" }} actorRole="reader" />);
-    expect(screen.getByText(/An owner can change your role in Users\./)).toBeTruthy();
+    render(<SurfaceRefused surface="Accounts" resource="app:accounts" actorRole="reader" />);
+    expect(screen.getByText(/An owner or admin can grant it to you in Settings, under Access\./)).toBeTruthy();
   });
 
   // An unreported role is not a refusal about the person -- it is the shell
   // not knowing yet, and it must not be phrased as a verdict on them.
   it("distinguishes an unreported role from a low one", () => {
-    render(<SurfaceRefused surface="Accounts" requirement={{ min: "admin" }} actorRole="" />);
+    render(<SurfaceRefused surface="Accounts" resource="app:accounts" actorRole="" />);
     expect(screen.getByText(/has not been reported by the cluster/)).toBeTruthy();
   });
 });

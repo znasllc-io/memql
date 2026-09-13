@@ -111,6 +111,7 @@ vi.mock("../../src/live/useLiveCollection", async () => {
 const { SessionProvider } = await import("../../src/chrome/access");
 const { OsProvider } = await import("../../src/chrome/state");
 const { OS_REGISTRY } = await import("../../src/apps/registry");
+const { installSeededAccess } = await import("../seededAccess");
 const { SettingsApp } = await import("../../src/apps/settings/SettingsApp");
 const { LocalDesktopStore } = await import("../../src/system/store");
 const { UNKNOWN_RUNTIME_CONFIG } = await import("../../src/cluster/config");
@@ -221,12 +222,14 @@ describe("Benchmarks", () => {
   });
 
   it("is hidden from a reader, and says so in Diagnostics rather than vanishing", () => {
-    const hidden = hiddenSurfaces(OS_REGISTRY, "reader");
+    installSeededAccess("reader");
+    const hidden = hiddenSurfaces(OS_REGISTRY);
     expect(hidden.some((s) => s.label.includes("Benchmarks"))).toBe(true);
   });
 
   it("is reachable by an admin, because the rows are cluster-owner tier", () => {
-    const hidden = hiddenSurfaces(OS_REGISTRY, "admin");
+    installSeededAccess("admin");
+    const hidden = hiddenSurfaces(OS_REGISTRY);
     expect(hidden.some((s) => s.label.includes("Benchmarks"))).toBe(false);
   });
 });

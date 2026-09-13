@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { Button, Caption, Chip, Chips, Fact, Facts, Field, Input, Notice, findRegion, revealRegion } from "../../kit";
 import { useSession } from "../../chrome/access";
 import type { OsAppProps } from "../../system/registry";
-import type { RoleRequirement } from "../../system/roles";
 import {
   configurableCards,
   lanesOf,
@@ -71,7 +70,7 @@ import { useIntegrations, type IntegrationsFacts } from "./useIntegrations";
 //     failing, and there the engine's reason is the whole message.
 
 /** The section's role floor. Presentation only; every gate is server-side. */
-export const INTEGRATIONS_SECTION_ROLE: RoleRequirement = { any: ["owner", "developer"] };
+export const INTEGRATIONS_SECTION_RESOURCE = "app:settings/integrations";
 
 export function IntegrationsSection({
   intent,

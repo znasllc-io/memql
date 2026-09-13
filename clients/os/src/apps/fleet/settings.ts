@@ -42,7 +42,7 @@ export const FLEET_SECTIONS: OsAppSection[] = [
   // their own fleet.
   { id: "models", name: "Models" },
   { id: "routing", name: "Routing" },
-  { id: "workbenches", name: "Workbenches", requires: ["workbench"] },
+  { id: "workbenches", name: "Workbenches", needs: ["workbench"] },
   // When work is handed to a local app on one of the caller's own machines,
   // and what happened when it was (epic memql#5009). It follows Workbenches
   // because the three read as one progression -- the cluster's own sandbox,
@@ -54,12 +54,12 @@ export const FLEET_SECTIONS: OsAppSection[] = [
   // person has a policy and runs of their own and the engine decides how far
   // the read reaches -- exactly the reasoning that leaves Machines, Routing
   // and Workbenches ungated.
-  { id: "apps", name: "Apps", requires: ["localApps"] },
+  { id: "apps", name: "Apps", needs: ["localApps"] },
   // The app's slice of the cluster's logs (epic memql#4895): the lines it
   // tagged and the lines about the things it owns. Admin-floored because
   // every read on the log store is (spec L3), and this is the ONE section
   // whose floor is not this app's to choose.
-  { id: "logs", name: "Logs", roles: { min: "admin" } },
+  { id: "logs", name: "Logs", requires: "app:fleet/logs" },
   { id: "settings", name: "Settings" },
 ];
 
@@ -161,7 +161,7 @@ export class LocalFleetSettingsStore implements FleetSettingsStore {
 
 /** The union of the section requirements above, for the Set up group. */
 export const FLEET_REQUIRES: readonly ModuleId[] = Array.from(
-  new Set(FLEET_SECTIONS.flatMap((s) => s.requires ?? [])),
+  new Set(FLEET_SECTIONS.flatMap((s) => s.needs ?? [])),
 );
 export const FLEET_WANTS: readonly ModuleId[] = Array.from(
   new Set(FLEET_SECTIONS.flatMap((s) => s.wants ?? [])),

@@ -5,6 +5,7 @@
 import { deriveProvenance, type MachinePresence, type ProvenanceFacts, type ProvenanceTone } from "../items/provenance";
 import type { FileEntry } from "../system/desktop";
 import {
+  holds,
   roleAdmits,
   roleGrantSlug,
   roleLadder,
@@ -93,7 +94,7 @@ export {
 } from "./measure";
 
 export { boolOr, flatten, stringsOf } from "./rows";
-export { deriveProvenance, roleAdmits, roleGrantSlug, roleLadder, roleLadderLoaded, roleRank, roleRungOf };
+export { deriveProvenance, holds, roleAdmits, roleGrantSlug, roleLadder, roleLadderLoaded, roleRank, roleRungOf };
 export type { ClusterRole, MachinePresence, ProvenanceFacts, ProvenanceTone, RoleRequirement, RoleRung };
 
 /**

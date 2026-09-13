@@ -1,6 +1,5 @@
 import { Caption, Head, Measure, Notice } from "../../kit";
 import { useSession } from "../../chrome/access";
-import type { RoleRequirement } from "../../system/roles";
 import { doorFor } from "./providerFacts";
 import { useProviderRegistry } from "./providerFacts";
 import {
@@ -57,7 +56,7 @@ import {
  * "why did this go to a vendor" needs to see what the levels resolve to, and
  * this page carries no prompt content and no credential.
  */
-export const LEVELS_SECTION_ROLE: RoleRequirement = { min: "admin" };
+export const LEVELS_SECTION_RESOURCE = "app:settings/levels";
 
 export function LevelsSection() {
   const { access } = useSession();

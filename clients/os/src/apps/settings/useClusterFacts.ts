@@ -6,7 +6,7 @@ import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 import { useSession } from "../../chrome/access";
 import { useOsConnection } from "../../live/connection";
 import { useLiveCollection } from "../../live/useLiveCollection";
-import { roleAdmits } from "../../system/roles";
+import { accessAdmits } from "../../system/registry";
 import {
   clusterFromRow,
   databaseFromRow,
@@ -45,8 +45,8 @@ import type { ClusterReport } from "./buildDiagnosticsReport";
 // here, and the panel says so. This is the same deliberate downgrade
 // the portal's `useProviders.ts` documented before epic memql#4984 retired it.
 
-/** The section's role floor. Presentation only; every gate is server-side. */
-export const CLUSTER_SECTION_ROLE = { min: "admin" } as const;
+/** The section's resource (epic memql#5289). Presentation only; every gate is server-side. */
+export const CLUSTER_SECTION_RESOURCE = "app:settings/cluster";
 
 export interface AsyncFacts<T> {
   value: T | null;
@@ -294,8 +294,12 @@ function useRequestReply<T>(
  * into an absent section would tell its reader neither.
  */
 export function useClusterReport(): ClusterReport {
-  const { access } = useSession();
-  const admitted = roleAdmits(access?.role ?? "", CLUSTER_SECTION_ROLE);
+  // `accessEpoch` is read so this recomputes when the effective set lands
+  // (memql#4857); the reads below are keyed on `admitted`, which is what
+  // moves.
+  const { accessEpoch } = useSession();
+  void accessEpoch;
+  const admitted = accessAdmits(CLUSTER_SECTION_RESOURCE);
   const identity = useClusterIdentity();
   const deployment = useDeploymentFacts(admitted ? (identity.cluster?.id ?? "") : "");
   const mail = useMailStatus(admitted);

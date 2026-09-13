@@ -21,7 +21,7 @@ export const FILES_SECTIONS: OsAppSection[] = [
   // tagged and the lines about the things it owns. Admin-floored because
   // every read on the log store is (spec L3), and this is the ONE section
   // whose floor is not this app's to choose.
-  { id: "logs", name: "Logs", roles: { min: "admin" } },
+  { id: "logs", name: "Logs", requires: "app:files/logs" },
   { id: "settings", name: "Settings" },
 ];
 

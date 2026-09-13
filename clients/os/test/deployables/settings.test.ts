@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { sectionsForRole, settingsSectionProblem } from "../../src/system/registry";
+import { sectionsFor, settingsSectionProblem } from "../../src/system/registry";
+import { installSeededAccess, rolesOpening } from "../seededAccess";
 import { OS_REGISTRY } from "../../src/apps/registry";
 import {
   DEFAULT_DEPLOYABLES_SETTINGS,
@@ -38,8 +39,10 @@ describe("the manifest", () => {
     // The gated one is offered to an admin and withheld below, so the window
     // nav genuinely differs by role -- the assertion the three-section version
     // of this file could not make, because it had nothing gated.
-    expect(sectionsForRole(deployables!, "reader").map((s) => s.id)).toEqual(["map", "deployables", "settings"]);
-    expect(sectionsForRole(deployables!, "admin").map((s) => s.id)).toEqual(["map", "deployables", "logs", "settings"]);
+    installSeededAccess("reader");
+    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "settings"]);
+    installSeededAccess("admin");
+    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "logs", "settings"]);
   });
 
   it("opens on the MAP", () => {
@@ -60,16 +63,14 @@ describe("the manifest", () => {
     // engine (epic memql#4895, spec L3), so the section's floor is the store's.
     // Actions used to sit here too and retired with the three-section
     // restructure (epic memql#4885).
-    expect(deployables?.roles).toBeUndefined();
-    const gated = (deployables?.sections ?? []).filter((s) => s.roles !== undefined);
+    expect(deployables?.requires).toBe("app:deployables");
+    expect(rolesOpening("app:deployables")).toEqual(["owner", "developer", "admin", "user", "viewer"]);
+    const gated = (deployables?.sections ?? []).filter((s) => s.requires !== undefined);
     expect(gated.map((s) => s.id)).toEqual(["logs"]);
-    // Whole-requirement equality rather than `?.min`: RoleRequirement is a
-    // union since issue #4826 gave it a set form, and reading `.min` off it
-    // no longer typechecks. The assertion is the same one and is stricter --
-    // it would also catch this becoming a set that happens to contain admin.
     for (const section of gated) {
-      expect(section.roles).toEqual({ min: "admin" });
+      expect(section.requires).toBe("app:deployables/logs");
     }
+    expect(rolesOpening("app:deployables/logs")).toEqual(["owner", "developer", "admin"]);
   });
 
   it("declares the settings section its gear points at", () => {

@@ -6,7 +6,7 @@ import { useSession } from "../../chrome/access";
 import { useLiveView, type LiveView } from "../../live/liveView";
 import { useArrivals } from "../../live/useArrivals";
 import { AppLogsSection } from "../../logs/AppLogsSection";
-import type { OsAppProps } from "../../system/registry";
+import { accessAdmits, type OsAppProps } from "../../system/registry";
 import { DeployablesSection } from "./DeployablesSection";
 import { MapSection, NO_SELECTION, type MapSelection } from "./map/MapSection";
 import type { MapNode } from "./map/layout";
@@ -255,7 +255,6 @@ export function DeployablesApp({
       <DeployablesSettingsSection
         settings={settings}
         update={update}
-        actorRole={actorRole}
         credentials={credentials}
         packages={packageSnapshot.rows}
         connectResult={connectResult}
@@ -329,14 +328,12 @@ export function DeployablesApp({
 function DeployablesSettingsSection({
   settings,
   update,
-  actorRole,
   credentials,
   packages,
   connectResult,
 }: {
   settings: DeployablesSettings;
   update: (patch: Partial<DeployablesSettings>) => void;
-  actorRole: string;
   /** The app root's one credentials feed, for the Sources group. */
   credentials: LiveView<CredentialRow> | null;
   /** The app root's package rows, joined onto each credential by `credentialId`. */
@@ -350,7 +347,7 @@ function DeployablesSettingsSection({
   // back to the first admitted section -- which reads as a broken setting
   // rather than as one that does not apply. No section carries a role today,
   // so this is every one of the three; the filter stays for the day one does.
-  const offered = DEPLOYABLES_SECTIONS.filter((s) => roleAdmits(actorRole, s.roles));
+  const offered = DEPLOYABLES_SECTIONS.filter((s) => accessAdmits(s.requires));
 
   return (
     <div className="os-settings">

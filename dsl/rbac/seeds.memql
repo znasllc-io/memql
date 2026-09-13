@@ -273,9 +273,11 @@ seed capability cap-viewer-read-group { roleSlug: "viewer"  verb: "read"  resour
 //   (component/auth) pins these rows to the compiled mirror in
 //   rbac_model.go; TestOsRegistryFloorsMatchTheAppSeeds
 //   (component/memql/app_resource_os_parity_test.go) reads the registry
-//   source and fails the build when a floor and its seeded role set differ
-//   in EITHER direction -- so the day the OS switches from `roles:` to
-//   `requires: "app:<id>"` (epic memql#5289), nobody's desktop changes.
+//   source and fails the build when it names a resource no row here seeds,
+//   or a row here names a resource no manifest asks for. The registry
+//   switched from `roles:` to `requires: "app:<id>"` in epic memql#5289;
+//   these rows are what its floors became, and the day of the switch
+//   changed nobody's desktop because they reproduced the floors exactly.
 //
 //   The rows are ordered app by app, in registry order, role by rank. The
 //   naming is mechanical: cap-<role>-read-app-<appId>[-<section>] and, for a
@@ -412,6 +414,18 @@ seed capability cap-developer-read-app-logs { roleSlug: "developer"  verb: "read
 @description("admin: open the logs app -- reproduces the OS registry floor min admin (memql#5300).")
 seed capability cap-admin-read-app-logs { roleSlug: "admin"  verb: "read"  resourceType: "app:logs"  predefined: true }
 
+// The Logs app's Stream is its own logs section (registry.tsx: `logsSection:
+// "stream"`), and the OS logs-section contract asks every app to name its
+// logs section as a resource of its own (epic memql#5289) -- the floor was
+// carried by the app's door before, and the contract now reads one shape
+// for every app rather than one for fourteen and another for this one.
+@description("owner: open the stream section of the logs app -- the Logs app's own logs section, at the log store's admin floor (memql#5304).")
+seed capability cap-owner-read-app-logs-stream { roleSlug: "owner"  verb: "read"  resourceType: "app:logs/stream"  predefined: true }
+@description("developer: open the stream section of the logs app -- the Logs app's own logs section, at the log store's admin floor (memql#5304).")
+seed capability cap-developer-read-app-logs-stream { roleSlug: "developer"  verb: "read"  resourceType: "app:logs/stream"  predefined: true }
+@description("admin: open the stream section of the logs app -- the Logs app's own logs section, at the log store's admin floor (memql#5304).")
+seed capability cap-admin-read-app-logs-stream { roleSlug: "admin"  verb: "read"  resourceType: "app:logs/stream"  predefined: true }
+
 // ---- app:materializer (registry floor: no floor) ----
 @description("owner: open the materializer app -- reproduces the OS registry floor no floor (memql#5300).")
 seed capability cap-owner-read-app-materializer { roleSlug: "owner"  verb: "read"  resourceType: "app:materializer"  predefined: true }
@@ -543,6 +557,20 @@ seed capability cap-owner-read-app-settings-logs { roleSlug: "owner"  verb: "rea
 seed capability cap-developer-read-app-settings-logs { roleSlug: "developer"  verb: "read"  resourceType: "app:settings/logs"  predefined: true }
 @description("admin: open the logs section of the settings app -- reproduces the OS registry floor min admin (memql#5300).")
 seed capability cap-admin-read-app-settings-logs { roleSlug: "admin"  verb: "read"  resourceType: "app:settings/logs"  predefined: true }
+
+// Settings -> Access (epic memql#5289, task memql#5307): the screen where a
+// grant to a person or a group is written and read back. Seeded on the roles
+// the grant READS admit -- grantsForSubject and grantsForResource are floored
+// at admin, so admin, developer and owner -- rather than on the roles that
+// may WRITE one (update on principal: owner and admin). A developer opens the
+// screen and reads it; the writes go read-only in the shell and are refused
+// in Go (grant_caller_not_permitted) for anybody below that grant.
+@description("owner: open the access section of the settings app -- the grant reads' admin floor (memql#5307).")
+seed capability cap-owner-read-app-settings-access { roleSlug: "owner"  verb: "read"  resourceType: "app:settings/access"  predefined: true }
+@description("developer: open the access section of the settings app -- the grant reads' admin floor (memql#5307).")
+seed capability cap-developer-read-app-settings-access { roleSlug: "developer"  verb: "read"  resourceType: "app:settings/access"  predefined: true }
+@description("admin: open the access section of the settings app -- the grant reads' admin floor (memql#5307).")
+seed capability cap-admin-read-app-settings-access { roleSlug: "admin"  verb: "read"  resourceType: "app:settings/access"  predefined: true }
 
 // ---- app:stores (registry floor: min owner) ----
 @description("owner: open the stores app -- reproduces the OS registry floor min owner (memql#5300).")

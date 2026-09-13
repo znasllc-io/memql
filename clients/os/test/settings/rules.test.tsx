@@ -107,8 +107,8 @@ const { OS_REGISTRY } = await import("../../src/apps/registry");
 const { SettingsApp } = await import("../../src/apps/settings/SettingsApp");
 const { LocalDesktopStore } = await import("../../src/system/store");
 const { UNKNOWN_RUNTIME_CONFIG } = await import("../../src/cluster/config");
-const { roleAdmits } = await import("../../src/system/roles");
-const { RULES_SECTION_ROLE } = await import("../../src/apps/settings/RulesSection");
+const { RULES_SECTION_RESOURCE } = await import("../../src/apps/settings/RulesSection");
+const { roleOpens } = await import("../seededAccess");
 
 function memStorage(): Pick<Storage, "getItem" | "setItem"> {
   const data = new Map<string, string>();
@@ -255,17 +255,17 @@ describe("Settings -> Rules: who may see it", () => {
     // admin (200) BELOW developer (300), so `{ min: "developer" }` would admit
     // admin -- whose concern is user administration, not what the cluster
     // talks to.
-    expect(roleAdmits("owner", RULES_SECTION_ROLE)).toBe(true);
-    expect(roleAdmits("developer", RULES_SECTION_ROLE)).toBe(true);
-    expect(roleAdmits("admin", RULES_SECTION_ROLE)).toBe(false);
-    expect(roleAdmits("writer", RULES_SECTION_ROLE)).toBe(false);
-    expect(roleAdmits("reader", RULES_SECTION_ROLE)).toBe(false);
+    expect(roleOpens("owner", RULES_SECTION_RESOURCE)).toBe(true);
+    expect(roleOpens("developer", RULES_SECTION_RESOURCE)).toBe(true);
+    expect(roleOpens("admin", RULES_SECTION_RESOURCE)).toBe(false);
+    expect(roleOpens("writer", RULES_SECTION_RESOURCE)).toBe(false);
+    expect(roleOpens("reader", RULES_SECTION_RESOURCE)).toBe(false);
   });
 
   it("declares the same requirement in the manifest as in the section", () => {
     // Two copies of a gate is how they drift.
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
-    expect(settings?.sections?.find((s) => s.id === "rules")?.roles).toEqual(RULES_SECTION_ROLE);
+    expect(settings?.sections?.find((s) => s.id === "rules")?.requires).toBe(RULES_SECTION_RESOURCE);
   });
 });
 

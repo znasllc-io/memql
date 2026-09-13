@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Button, Caption, Fact, Facts, Head, Notice, Panel, Subhead, roleAdmits, useNow, SetupGroup } from "../../kit";
+import { accessAdmits } from "../../system/registry";
 import { formatBytes, formatFreshness, formatMoment } from "../../kit/format";
 import { boolOr, flatten } from "../../kit/rows";
 import { useOsConnection } from "../../live/connection";
@@ -133,7 +134,7 @@ export function LogsSettingsSection({
   const now = useNow();
   const isOwner = roleAdmits(actorRole, { min: "owner" });
   // OFFER ONLY WHAT THIS SESSION CAN OPEN, and never Settings itself.
-  const offered = LOGS_SECTIONS.filter((s) => s.id !== "settings" && roleAdmits(actorRole, s.roles));
+  const offered = LOGS_SECTIONS.filter((s) => s.id !== "settings" && accessAdmits(s.requires));
 
   const [status, setStatus] = useState<LogsStatus | null>(null);
   const [statusError, setStatusError] = useState("");

@@ -41,13 +41,13 @@ export const NEXUS_SECTIONS: OsAppSection[] = [
   // the compile produced, and an approval is a gate on one. Automations is the
   // exception and is deliberately NOT gated -- an authored automation is rows,
   // and reading and arming one asks nothing of a provider.
-  { id: "goals", name: "Goals", requires: ["ai"] },
-  { id: "runs", name: "Runs", requires: ["ai"] },
+  { id: "goals", name: "Goals", needs: ["ai"] },
+  { id: "runs", name: "Runs", needs: ["ai"] },
   { id: "automations", name: "Automations" },
-  { id: "approvals", name: "Approvals", requires: ["ai"] },
+  { id: "approvals", name: "Approvals", needs: ["ai"] },
   // Admin-floored because every read on the log store is (spec L3). The one
   // section whose floor is not this app's to choose.
-  { id: "logs", name: "Logs", roles: { min: "admin" } },
+  { id: "logs", name: "Logs", requires: "app:nexus/logs" },
   { id: "settings", name: "Settings" },
 ];
 
@@ -157,7 +157,7 @@ export class LocalNexusSettingsStore implements NexusSettingsStore {
 
 /** The union of the section requirements above, for the Set up group. */
 export const NEXUS_REQUIRES: readonly ModuleId[] = Array.from(
-  new Set(NEXUS_SECTIONS.flatMap((s) => s.requires ?? [])),
+  new Set(NEXUS_SECTIONS.flatMap((s) => s.needs ?? [])),
 );
 export const NEXUS_WANTS: readonly ModuleId[] = Array.from(
   new Set(NEXUS_SECTIONS.flatMap((s) => s.wants ?? [])),

@@ -12,10 +12,10 @@ import {
 import { MODULE_DESCRIPTIONS } from "../system/modules";
 import {
   allRequirementsFor,
-  appsForRole,
+  appsFor,
   canOpen,
   requirementsFor,
-  sectionsForRole,
+  sectionsFor,
 } from "../system/registry";
 import { useSession } from "./access";
 import { Mark } from "./Mark";
@@ -32,9 +32,9 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
   const [currentAppId, setCurrentAppId] = useState<string | null>(null);
   const [sectionId, setSectionId] = useState("");
 
-  const apps = appsForRole(registry, actorRole);
+  const apps = appsFor(registry);
   const current = currentAppId ? apps.find((a) => a.id === currentAppId) ?? null : null;
-  const sections = current ? sectionsForRole(current, actorRole) : [];
+  const sections = current ? sectionsFor(current) : [];
   const activeSection = sections.find((s) => s.id === sectionId) ?? sections[0];
 
   // The same two gates the window frame computes, for the same reasons -- see
@@ -53,10 +53,10 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
   // accessible name, so "Settings" would announce as "Settings Campaigns is
   // not set up" -- the right information in a shape nothing can match on.
   const settingsStatePhrase = settingsTone === "needsSetup" ? "not set up" : "partly set up";
-  const unmetIsSectionOnly = gate.unmet.some((id) => !(current?.requires ?? []).includes(id));
+  const unmetIsSectionOnly = gate.unmet.some((id) => !(current?.needs ?? []).includes(id));
 
   function open(appId: string) {
-    if (!canOpen(registry, actorRole, appId)) return;
+    if (!canOpen(registry, appId)) return;
     setCurrentAppId(appId);
     setSectionId("");
   }

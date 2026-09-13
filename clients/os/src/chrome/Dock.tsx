@@ -10,7 +10,7 @@ import { LocalFilesSettingsStore } from "../apps/files/settings";
 import { useOsConnection } from "../live/connection";
 import { Button, Notice } from "../kit";
 import { dockOrder, isPinned } from "../system/dock";
-import { appById, appsForRole, canOpen, fixturesForRole, isDockFixture } from "../system/registry";
+import { appById, appsFor, canOpen, fixturesFor, isDockFixture } from "../system/registry";
 import { useActiveDrag, useShellDragClaim } from "./dragScope";
 import { readStoredTheme, setTheme, type ThemeChoice } from "../app/theme";
 import type { OsAppManifest } from "../system/registry";
@@ -289,29 +289,29 @@ export function Dock({
   onOpenLauncher: () => void;
   onSignOut: () => void;
 }) {
-  const { state, actions, registry, actorRole, ladderLoaded, notice } = useOs();
+  const { state, actions, registry, accessEpoch, notice } = useOs();
   const { openAsk, availability } = useAsk();
   const connection = useConnectionStatus();
   const connectionTone = connectionDotTone(connection, availability);
   const [menu, setMenu] = useState<{ x: number; y: number; appId: AppId } | null>(null);
 
-  // `ladderLoaded` in the deps for the launcher's reason (memql#4857):
-  // fixturesForRole reads the role ladder out of band, so a fixture gated
-  // above the pre-load answer would otherwise stay hidden after the ladder
-  // lands. The unmemoized filters below recompute on the same re-render.
+  // `accessEpoch` in the deps for the launcher's reason (memql#4857):
+  // fixturesFor reads the effective capability set out of band, so a fixture
+  // gated above the pre-read answer would otherwise stay hidden after the
+  // set lands. The unmemoized filters below recompute on the same re-render.
   const fixtures = useMemo(
-    () => fixturesForRole(registry, actorRole),
-    [registry, actorRole, ladderLoaded],
+    () => fixturesFor(registry),
+    [registry, accessEpoch],
   );
   const fixtureIds = useMemo(() => fixtures.map((a) => a.id), [fixtures]);
 
   const runningIds = Object.values(state.shell.windows).map((w) => w.appId);
   const visible = dockOrder(state.dock, runningIds, fixtureIds).filter((id) =>
-    canOpen(registry, actorRole, id),
+    canOpen(registry, id),
   );
   const pinnedVisible = state.dock.pinned.filter(
     (id) =>
-      !fixtureIds.includes(id) && appsForRole(registry, actorRole).some((a) => a.id === id),
+      !fixtureIds.includes(id) && appsFor(registry).some((a) => a.id === id),
   );
 
   // --- the drop onto the Bin (memql#4784) ---

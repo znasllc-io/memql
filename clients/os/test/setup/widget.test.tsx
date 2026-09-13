@@ -12,6 +12,7 @@ import { fakeConnection, passkeyRow, withSession } from "../cluster/harness";
 import { EXIT_HOLD_MS, SetupGate } from "../../src/apps/setup/SetupGate";
 import { SetupWidget } from "../../src/apps/setup/SetupWidget";
 import { setupWidget } from "../../src/apps/setup/manifest";
+import { rolesOpening } from "../seededAccess";
 import { WidgetHost } from "../../src/widgets/WidgetFrame";
 
 // THE WIDGET, THROUGH ITS REAL HOST. Mounted as the desk mounts it -- gate,
@@ -211,8 +212,9 @@ describe("who gets the wizard", () => {
     expect(screen.getByRole("button", { name: "Open Fleet" })).toBeTruthy();
   });
 
-  it("the manifest gates it to owner and developer, which is what the desk enforces", () => {
-    expect(setupWidget.roles).toEqual({ any: ["owner", "developer"] });
+  it("the manifest names its resource, seeded on owner and developer, which is what the desk enforces", () => {
+    expect(setupWidget.requires).toBe("app:setup");
+    expect(rolesOpening("app:setup")).toEqual(["owner", "developer"]);
   });
 });
 

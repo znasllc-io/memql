@@ -1,6 +1,5 @@
 import { Button, Caption, Chip, CopyValue, Fact, Facts, Head, Notice, Panel, Row, Subhead } from "../../kit";
 import { useSession } from "../../chrome/access";
-import type { RoleRequirement } from "../../system/roles";
 import { agreementOf, PROBE_READS, useKeyFacts } from "./keyFacts";
 
 // Signing keys (epic memql#4984): what the identity service is publishing,
@@ -26,9 +25,6 @@ import { agreementOf, PROBE_READS, useKeyFacts } from "./keyFacts";
 // every deployed environment the key arrives sealed in the env envelope, where
 // RotationSupported() is false and rotating is a re-seal plus a roll. A
 // control that could only ever refuse would teach nobody that.
-
-/** The section's role floor. Presentation only; every gate is server-side. */
-export const KEYS_SECTION_ROLE: RoleRequirement = { min: "admin" };
 
 export function KeysSection() {
   const { access, config } = useSession();
