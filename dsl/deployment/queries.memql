@@ -11,7 +11,7 @@
 // the cockpit Deployments view, and the SDK keep resolving them by name.
 //
 // SCOPE NOTE. The `query node` topology lookups that filter on a node's
-// payload.deploymentId (nodesForDeployment / nodesNotInDeployment) stay in
+// row.deploymentId (nodesForDeployment / nodesNotInDeployment) stay in
 // dsl/cluster/queries.memql -- they read the v1:cluster:node concept (cluster
 // topology), not the deployment record, so they belong with the cluster
 // concept they project. Only the deployment-RECORD reads move here.
@@ -54,7 +54,7 @@ query deployment deploymentsForCluster {
 // id against the query's bound concept, which ensureBoundConceptFilter
 // folds into the filter of every signature-bound struct-form query.
 //
-// This previously filtered payload.deploymentId, justified by a comment
+// This previously filtered row.deploymentId, justified by a comment
 // claiming the row id "would need partition+concept prefixing". That was
 // stale on both counts: the {partition}: prefix was retired in #56, and
 // the concept prefix is composed by the engine, not the caller (#2784).
@@ -129,7 +129,7 @@ query deployment deploymentById {
 // topology within seconds of promotion completing, instead of waiting on the
 // liveness lapse or the 30-min prune.
 //
-// Why status-driven (not "deploymentId != currentId"): keying off the
+// Why status-driven (not `row.deploymentId != <current id>`): keying off the
 // deployment's recorded status avoids cutting an OLD deployment's pods while
 // they are still in-flight during a rollover overlap -- a node is only an
 // orphan once its deployment is explicitly marked superseded/failed/
@@ -137,7 +137,7 @@ query deployment deploymentById {
 // deployment row (e.g. the dev "local" id) never matches, so local/dev
 // clusters are untouched by the orphan path.
 //
-// Authz: filters on payload.status only (infrastructure topology, no
+// Authz: filters on row.status only (infrastructure topology, no
 // user-scope field) -> conformance "other" bucket, same as
 // nodesNotInDeployment / deploymentsForCluster.
 
@@ -161,13 +161,13 @@ query deployment supersededDeployments {
 // under the same composite concept id), so a plain scan would return
 // every transition; asOf latest collapses to the current spec per node
 // type. The caller passes the bare deploymentId (filter is on
-// payload.deploymentId, NOT the canonical row id).
+// row.deploymentId, NOT the canonical row id).
 //
 // Engine-as-spine resolution (empty version -> the deployment's engine
 // version) is the CONSUMER's job: this query returns the raw per-node
 // pins; the deploy pack resolves "" against the lockfile engineVersion.
 //
-// Authz: filters on payload.deploymentId only (infrastructure topology,
+// Authz: filters on row.deploymentId only (infrastructure topology,
 // no user-scope field) -> conformance "other" bucket, same as
 // nodesForDeployment / deploymentsForCluster.
 

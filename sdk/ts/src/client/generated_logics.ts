@@ -5,7 +5,7 @@ import { QueryClient, type QueryCallOptions } from "./query.js";
 import type { Result } from "./types.js";
 import { renderMemQLValue } from "./memqlValue.js";
 
-/** Pure decide for the access-request expiry sweep (#2369, cluster pruneStaleClusterNodes pattern): reads IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, and returns expiredPendingAccessRequests({createdBefore: cutoff}).nodes() -- the pending rows past the window, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's forEach is unconditional. */
+/** Pure decide for the access-request expiry sweep (#2369, cluster pruneStaleClusterNodes pattern): reads IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, reads `query expiredPendingAccessRequests(createdBefore: cutoff)` and returns its nodes() -- the pending rows past the window, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's forEach is unconditional. */
 export interface AccessRequestExpirySweepArgs {
   event: Record<string, unknown>;
 }
@@ -68,7 +68,7 @@ QueryClient.prototype.accountDeletionReminder7Days = function (this: QueryClient
   return this.executeNamed("accountDeletionReminder7Days", buildAccountDeletionReminder7Days(args), opts);
 };
 
-/** Pure decide for the account-deletion sweep (#2369, cluster pattern): reads MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS (default 30), computes cutoff = now - cooldown via addDuration with a negative ISO duration, and returns usersScheduledForDeletion({scheduledBefore: cutoff}).nodes() -- users whose cooldown has elapsed, filtered by QUERY PUSHDOWN; the automation's forEach hard-deletes each unconditionally. Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail. */
+/** Pure decide for the account-deletion sweep (#2369, cluster pattern): reads MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS (default 30), computes cutoff = now - cooldown via addDuration with a negative ISO duration, reads `query usersScheduledForDeletion(scheduledBefore: cutoff)` and returns its nodes() -- users whose cooldown has elapsed, filtered by QUERY PUSHDOWN; the automation's forEach hard-deletes each unconditionally. Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail. */
 export interface AccountDeletionSweepArgs {
   event: Record<string, unknown>;
 }
@@ -670,7 +670,7 @@ QueryClient.prototype.transitionEventKind = function (this: QueryClient, args: T
   return this.executeNamed("transitionEventKind", buildTransitionEventKind(args), opts);
 };
 
-/** Pure decide for the worker-invocation retention sweep (#2369, cluster pruneStaleClusterNodes pattern): reads WORKER_INVOCATION_RETENTION_DAYS (default 90), computes cutoff = now - window via addDuration with a negative ISO duration, and returns expiredWorkerInvocations({createdBefore: cutoff}).nodes() -- rows past retention, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's forEach soft-deletes each unconditionally. */
+/** Pure decide for the worker-invocation retention sweep (#2369, cluster pruneStaleClusterNodes pattern): reads WORKER_INVOCATION_RETENTION_DAYS (default 90), computes cutoff = now - window via addDuration with a negative ISO duration, reads `query expiredWorkerInvocations(createdBefore: cutoff)` and returns its nodes() -- rows past retention, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's forEach soft-deletes each unconditionally. */
 export interface WorkerInvocationRetentionSweepArgs {
   event: Record<string, unknown>;
 }

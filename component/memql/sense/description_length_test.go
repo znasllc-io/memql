@@ -113,7 +113,7 @@ func TestDescriptionLengthRule(t *testing.T) {
 			"/// " + long + "\n" +
 			"logic lengthProbe {\n" +
 			"  args {\n    a string @required\n  }\n" +
-			"  body {\n    return coalesce(args.a, \"\")\n  }\n" +
+			"  body {\n    return args.a ?? \"\"\n  }\n" +
 			"}\n"
 		file := parseWithDocs(t, src)
 		diags := descriptionLengthRule(file, src)
@@ -148,7 +148,7 @@ func TestDescriptionLengthRule(t *testing.T) {
 			"    /// " + long + "\n" +
 			"    a string @required\n" +
 			"  }\n" +
-			"  body {\n    return coalesce(args.a, \"\")\n  }\n" +
+			"  body {\n    return args.a ?? \"\"\n  }\n" +
 			"}\n"
 		file := parseWithDocs(t, src)
 		diags := descriptionLengthRule(file, src)

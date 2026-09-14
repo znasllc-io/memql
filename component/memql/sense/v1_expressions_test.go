@@ -486,6 +486,61 @@ func TestCompletionOffersTheTierOfThePosition(t *testing.T) {
 	})
 }
 
+// A clause written as a lambda -- a query's filter and refine, a trigger
+// @filter -- is offered its lambda header while it has none, and nothing else:
+// the parser refuses every other spelling of it, so a bare field name offered
+// there would teach a form that cannot load. Once the header is written, the
+// body's vocabulary is offered as before.
+func TestHeaderlessLambdaClauseOffersOnlyTheHeader(t *testing.T) {
+	s := New(v1Registry())
+	trigger := "@trigger(event=\"graph.node.updated.v1:todos:todo\")\n"
+	paged := v1Query + "  filter row => row.done == false\n  paginate 20\n"
+	for _, c := range []struct{ name, src, detail string }{
+		{"a filter", v1Query + "  filter ", "filter lambda header"},
+		{"a filter whose parameter is being typed", v1Query + "  filter ro", "filter lambda header"},
+		{"a refine clause", paged + "  refine ", "refine lambda header"},
+		{"a trigger filter", trigger + "@filter(", "trigger filter lambda header"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := completionItems(t, s, c.src)
+			it, ok := got["row => ..."]
+			if !ok || !it.IsSnippet || it.Detail != c.detail || it.InsertText != "row => row.$0" {
+				t.Fatalf("want the lambda header snippet (%s), got %+v among %v", c.detail, it, keys(got))
+			}
+			if len(got) != 1 {
+				t.Errorf("before its header the clause offers the header and nothing else, got %v", keys(got))
+			}
+		})
+	}
+	// Past where the header goes, a clause without one is offered nothing: the
+	// parser refuses it whatever follows.
+	for name, src := range map[string]string{
+		"a bare field being typed":              v1Query + "  filter st",
+		"mid-way through a filter":              v1Query + "  filter status == ",
+		"a payload. member of a filter":         v1Query + "  filter payload.",
+		"a row. member with no header":          v1Query + "  filter row.",
+		"mid-way through a refine clause":       paged + "  refine lower(",
+		"a row. member of a refine clause":      paged + "  refine row.",
+		"mid-way through a trigger filter":      trigger + "@filter(status == ",
+		"a payload. member of a trigger filter": trigger + "@filter(payload.",
+		"the pre-v1 filter block":               v1Query + "  filter {\n    ",
+	} {
+		if got := completionItems(t, s, src); len(got) != 0 {
+			t.Errorf("%s: want nothing, got %v", name, keys(got))
+		}
+	}
+	// With the header written, the body's vocabulary is back.
+	for name, src := range map[string]string{
+		"a filter":         v1Query + "  filter row => row.",
+		"a refine clause":  paged + "  refine row => row.",
+		"a trigger filter": trigger + "@filter(row => row.",
+	} {
+		if _, ok := completionItems(t, s, src)["title"]; !ok {
+			t.Errorf("%s: row. must offer the concept's fields once the header is written", name)
+		}
+	}
+}
+
 // completionAt runs completion at the <|> marker in src -- for a cursor with
 // source below it -- and indexes the items by label.
 func completionAt(t *testing.T, s *Service, src string) map[string]CompletionItem {
@@ -770,16 +825,21 @@ func TestRetiredHoverIsTheParsersTable(t *testing.T) {
 			src: filter("status == args.owner && isActiveRecord\n}"), needle: "filter",
 			example: "filter row => row.status == args.owner && isActiveRecord(row)",
 		},
+		// The three sources below are retired on purpose: they are what the
+		// hover is for, so the fixture migration leaves them as they are.
 		"retired_spec_return_body": {
-			src: "use todos.concepts.{ todo }\n\nspec todo isOverdue = row => row.done == false", needle: "return",
+			// memqlmigrate:keep
+			src: "use todos.concepts.{ todo }\n\nspec todo isOverdue {\n  return done == false\n}", needle: "return",
 			example: "spec todo isOverdue = row => row.done == false",
 		},
 		"retired_trait_return_body": {
-			src: "trait isOpen = row => row.status == \"open\"", needle: "return",
+			// memqlmigrate:keep
+			src: "trait isOpen {\n  return status == \"open\"\n}", needle: "return",
 			example: "trait isOpen = row => row.status == \"open\"",
 		},
 		"retired_filter_annotation": {
-			src:    "@trigger(event=\"graph.node.updated.v1:todos:todo\")\n@filter(row => row.status == \"archived\")\nautomation onTodo {\n}",
+			// memqlmigrate:keep
+			src:    "@trigger(event=\"graph.node.updated.v1:todos:todo\")\n@filter(payload.status == \"archived\")\nautomation onTodo {\n}",
 			needle: "@filter", example: "@filter(row => row.status == \"archived\")",
 		},
 	}
@@ -901,19 +961,26 @@ func TestHoverOnAPredicate(t *testing.T) {
 // rewrite writes it -- or the table's form, when the rewrite refuses it.
 func TestRetiredPredicateHover(t *testing.T) {
 	s := New(v1Registry())
-	spec := "use todos.concepts.{ todo }\n\nspec todo isOverdue = row => row.done == false"
+	// Every src in the first table is a retired form on purpose, so the
+	// fixture migration leaves each as it is.
+	// memqlmigrate:keep
+	spec := "use todos.concepts.{ todo }\n\nspec todo isOverdue {\n  return done == false\n}"
 	for _, c := range []struct {
 		name, src, needle, code string
 	}{
 		{"the header of a brace-bodied spec", spec, "spec", "spec todo isOverdue = row => row.done == false"},
-		{"the header of a brace-bodied trait", "trait isOpen = row => row.status == \"open\"", "trait", "trait isOpen = row => row.status == \"open\""},
+		// memqlmigrate:keep
+		{"the header of a brace-bodied trait", "trait isOpen { return status == \"open\" }", "trait", "trait isOpen = row => row.status == \"open\""},
 		// requiresOwner is a loaded context spec: its parameter is the actor.
-		{"a spec the registry knows reads the actor", "use common.shapes.{ actorEnvelope }\n\nspec actorEnvelope requiresOwner = actor => actor.role == \"owner\"",
+		// memqlmigrate:keep
+		{"a spec the registry knows reads the actor", "use common.shapes.{ actorEnvelope }\n\nspec actorEnvelope requiresOwner {\n  return role == \"owner\"\n}",
 			"return", "spec actorEnvelope requiresOwner = actor => actor.role == \"owner\""},
 		// isAdmin is not loaded, but a loaded context spec binds actorEnvelope.
-		{"a new spec over an @actor shape reads the actor", "spec actorEnvelope isAdmin = actor => actor.role == \"admin\"",
+		// memqlmigrate:keep
+		{"a new spec over an @actor shape reads the actor", "spec actorEnvelope isAdmin {\n  return role == \"admin\"\n}",
 			"return", "spec actorEnvelope isAdmin = actor => actor.role == \"admin\""},
-		{"the @ of a lambda-less @filter", "@filter(row => row.done == true)\nautomation onTodo {\n}", "@", "@filter(row => row.done == true)"},
+		// memqlmigrate:keep
+		{"the @ of a lambda-less @filter", "@filter(payload.done == true)\nautomation onTodo {\n}", "@", "@filter(row => row.done == true)"},
 		// The rewrite keeps the author's line breaks; the card keeps its lines.
 		{"a filter continued over several lines", v1Query + "  filter status == args.owner\n    && isActiveRecord\n}", "filter",
 			"filter row => row.status == args.owner\n           && isActiveRecord(row)"},

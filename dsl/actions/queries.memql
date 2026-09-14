@@ -4,7 +4,7 @@
 // ships actionCandidatesForPlan -- list the captured candidate traces
 // for a plan, so the trace capture is inspectable end to end.
 //
-// Authorization (owned tier): the filter pins payload.ownerUserId ==
+// Authorization (owned tier): the filter pins row.ownerUserId ==
 // actor.userId, so a caller only ever reads its own captured traces.
 
 use common.traits.{ statusIsActive }

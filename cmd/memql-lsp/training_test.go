@@ -427,8 +427,8 @@ func TestTrainingState_UnsavedBufferEditReportsDrifted(t *testing.T) {
 	// A whole-document didChange, with no didSave after it: exactly the state a
 	// buffer is in between a keystroke and Ctrl-S.
 	edited := strings.Replace(trainingDoc,
-		"query participant trainedQuery {\n  filter  isActiveRecord",
-		"query participant trainedQuery {\n  filter  isActiveRecord && status==\"open\"", 1)
+		"query participant trainedQuery {\n  filter  row => isActiveRecord(row)",
+		"query participant trainedQuery {\n  filter  row => isActiveRecord(row) && row.status == \"open\"", 1)
 	if edited == trainingDoc {
 		t.Fatal("the fixture edit matched nothing: this test would assert on an unchanged buffer")
 	}

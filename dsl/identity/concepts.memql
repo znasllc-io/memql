@@ -356,7 +356,7 @@ concept delegation {
 //     component/identity/pat/verifier.go says it outright: "This is a pre-actor
 //     read, so it cannot be caller-scoped (#2800, #2984)." enforceRowAuthzOnPlan
 //     takes NO context and has no escape (the write path's rowAuthzWriteEscape
-//     has no read-side counterpart), so a tier ANDs userId==actor.userId into
+//     has no read-side counterpart), so a tier ANDs `row.userId == actor.userId` into
 //     credential verification itself and every PAT / worker-token / badge /
 //     node-token login fails. Measured: TestRowAuthzEnforcementLandGate reports
 //     NINE of the eleven reads undecidable with the tier declared.
@@ -790,7 +790,7 @@ concept groupMembership {
 /// sub-clients is N sibling accounts sharing an operator, not a tree. Per-row authz: OWNED, and
 /// engine-enforced rather than author-enforced -- ownerUserId is @serverSet and stamped from
 /// actor.userId on every write, and the @rowAuthz declaration makes the engine AND
-/// ownerUserId==actor.userId into every read (component/memql/rowauthz_enforce.go, memql#3172) and
+/// `row.ownerUserId == actor.userId` into every read (component/memql/rowauthz_enforce.go, memql#3172) and
 /// refuse any update whose target row the actor does not own
 /// (component/memql/rowauthz_write_guard.go, memql#3174). The model, and the three places it is
 /// NOT sufficient, are recorded in docs/internal/design/account-isolation-model.md.

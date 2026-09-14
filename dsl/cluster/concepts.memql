@@ -170,7 +170,7 @@ concept spawnEvent {
 // so every consumer (the deployEngineCluster trigger, the createDeployment /
 // updateDeploymentStatus mutations, component/deploycontrol, the cockpit deploy
 // command, the SDK) is unaffected. The cluster topology queries that read a
-// node's payload.deploymentId (nodesForDeployment / nodesNotInDeployment) stay
+// node's row.deploymentId (nodesForDeployment / nodesNotInDeployment) stay
 // here with the v1:cluster:node concept they project.
 
 /// One release cut of MemQL itself: the tag and published GitHub Release that make the CI cascade
