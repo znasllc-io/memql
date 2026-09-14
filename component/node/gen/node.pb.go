@@ -1467,14 +1467,20 @@ func (x *SpawnResult) GetError() string {
 }
 
 type EventForward struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	EventId       string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
-	Topic         string                 `protobuf:"bytes,2,opt,name=topic,proto3" json:"topic,omitempty"`
-	Kind          int32                  `protobuf:"varint,3,opt,name=kind,proto3" json:"kind,omitempty"`
-	Ts            *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=ts,proto3" json:"ts,omitempty"`
-	Payload       *structpb.Struct       `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
-	OriginNodeId  string                 `protobuf:"bytes,6,opt,name=origin_node_id,json=originNodeId,proto3" json:"origin_node_id,omitempty"`
-	Ttl           int32                  `protobuf:"varint,7,opt,name=ttl,proto3" json:"ttl,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	EventId      string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
+	Topic        string                 `protobuf:"bytes,2,opt,name=topic,proto3" json:"topic,omitempty"`
+	Kind         int32                  `protobuf:"varint,3,opt,name=kind,proto3" json:"kind,omitempty"`
+	Ts           *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=ts,proto3" json:"ts,omitempty"`
+	Payload      *structpb.Struct       `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
+	OriginNodeId string                 `protobuf:"bytes,6,opt,name=origin_node_id,json=originNodeId,proto3" json:"origin_node_id,omitempty"`
+	Ttl          int32                  `protobuf:"varint,7,opt,name=ttl,proto3" json:"ttl,omitempty"`
+	// The event's causal lineage (component/events.Cause, epic memql#5380).
+	// Additive and optional: an old node in a mixed-version rollout sends no
+	// cause, which the receiver reads as the zero cause -- a root event, never
+	// a refusal. ForwardInboundToPeers relays it untouched on the TTL-decremented
+	// relay, the way OriginNodeId and Payload already ride through unchanged.
+	Cause         *EventCause `protobuf:"bytes,8,opt,name=cause,proto3" json:"cause,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1558,6 +1564,13 @@ func (x *EventForward) GetTtl() int32 {
 	return 0
 }
 
+func (x *EventForward) GetCause() *EventCause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
 type EventAck struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	EventId       string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
@@ -1602,6 +1615,134 @@ func (x *EventAck) GetEventId() string {
 	return ""
 }
 
+// EventCause carries an event's causal lineage across the mesh hop
+// (component/events.Cause, epic memql#5380): the automation run that caused
+// it, the chain of runs it belongs to, and how deep that chain is.
+// Structurally identical to component/bus/bus.proto's message of the same
+// name, and deliberately duplicated rather than shared -- the two protos are
+// independent wire contracts for independent hops (the mesh vs. the
+// in-process channel bus), and bus.proto is not imported here.
+type EventCause struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CausationId   string                 `protobuf:"bytes,1,opt,name=causation_id,json=causationId,proto3" json:"causation_id,omitempty"`
+	CorrelationId string                 `protobuf:"bytes,2,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
+	Depth         int32                  `protobuf:"varint,3,opt,name=depth,proto3" json:"depth,omitempty"`
+	Chain         []*EventCauseLink      `protobuf:"bytes,4,rep,name=chain,proto3" json:"chain,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EventCause) Reset() {
+	*x = EventCause{}
+	mi := &file_node_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EventCause) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EventCause) ProtoMessage() {}
+
+func (x *EventCause) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EventCause.ProtoReflect.Descriptor instead.
+func (*EventCause) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *EventCause) GetCausationId() string {
+	if x != nil {
+		return x.CausationId
+	}
+	return ""
+}
+
+func (x *EventCause) GetCorrelationId() string {
+	if x != nil {
+		return x.CorrelationId
+	}
+	return ""
+}
+
+func (x *EventCause) GetDepth() int32 {
+	if x != nil {
+		return x.Depth
+	}
+	return 0
+}
+
+func (x *EventCause) GetChain() []*EventCauseLink {
+	if x != nil {
+		return x.Chain
+	}
+	return nil
+}
+
+// EventCauseLink is one automation run in a Cause's chain, oldest first.
+type EventCauseLink struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Automation    string                 `protobuf:"bytes,1,opt,name=automation,proto3" json:"automation,omitempty"`
+	RunId         string                 `protobuf:"bytes,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EventCauseLink) Reset() {
+	*x = EventCauseLink{}
+	mi := &file_node_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EventCauseLink) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EventCauseLink) ProtoMessage() {}
+
+func (x *EventCauseLink) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EventCauseLink.ProtoReflect.Descriptor instead.
+func (*EventCauseLink) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *EventCauseLink) GetAutomation() string {
+	if x != nil {
+		return x.Automation
+	}
+	return ""
+}
+
+func (x *EventCauseLink) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
 type CapabilityQuery struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	RequestId      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
@@ -1612,7 +1753,7 @@ type CapabilityQuery struct {
 
 func (x *CapabilityQuery) Reset() {
 	*x = CapabilityQuery{}
-	mi := &file_node_proto_msgTypes[11]
+	mi := &file_node_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1624,7 +1765,7 @@ func (x *CapabilityQuery) String() string {
 func (*CapabilityQuery) ProtoMessage() {}
 
 func (x *CapabilityQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[11]
+	mi := &file_node_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1637,7 +1778,7 @@ func (x *CapabilityQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CapabilityQuery.ProtoReflect.Descriptor instead.
 func (*CapabilityQuery) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{11}
+	return file_node_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *CapabilityQuery) GetRequestId() string {
@@ -1666,7 +1807,7 @@ type CapabilityResponse struct {
 
 func (x *CapabilityResponse) Reset() {
 	*x = CapabilityResponse{}
-	mi := &file_node_proto_msgTypes[12]
+	mi := &file_node_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1678,7 +1819,7 @@ func (x *CapabilityResponse) String() string {
 func (*CapabilityResponse) ProtoMessage() {}
 
 func (x *CapabilityResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[12]
+	mi := &file_node_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1691,7 +1832,7 @@ func (x *CapabilityResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CapabilityResponse.ProtoReflect.Descriptor instead.
 func (*CapabilityResponse) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{12}
+	return file_node_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *CapabilityResponse) GetRequestId() string {
@@ -1756,7 +1897,7 @@ type AiForwardRequest struct {
 
 func (x *AiForwardRequest) Reset() {
 	*x = AiForwardRequest{}
-	mi := &file_node_proto_msgTypes[13]
+	mi := &file_node_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1768,7 +1909,7 @@ func (x *AiForwardRequest) String() string {
 func (*AiForwardRequest) ProtoMessage() {}
 
 func (x *AiForwardRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[13]
+	mi := &file_node_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1781,7 +1922,7 @@ func (x *AiForwardRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AiForwardRequest.ProtoReflect.Descriptor instead.
 func (*AiForwardRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{13}
+	return file_node_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *AiForwardRequest) GetRequestId() string {
@@ -1873,7 +2014,7 @@ type ForwardedAuthority struct {
 
 func (x *ForwardedAuthority) Reset() {
 	*x = ForwardedAuthority{}
-	mi := &file_node_proto_msgTypes[14]
+	mi := &file_node_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1885,7 +2026,7 @@ func (x *ForwardedAuthority) String() string {
 func (*ForwardedAuthority) ProtoMessage() {}
 
 func (x *ForwardedAuthority) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[14]
+	mi := &file_node_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1898,7 +2039,7 @@ func (x *ForwardedAuthority) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardedAuthority.ProtoReflect.Descriptor instead.
 func (*ForwardedAuthority) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{14}
+	return file_node_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ForwardedAuthority) GetContractVersion() string {
@@ -2017,7 +2158,7 @@ type AiForwardResponse struct {
 
 func (x *AiForwardResponse) Reset() {
 	*x = AiForwardResponse{}
-	mi := &file_node_proto_msgTypes[15]
+	mi := &file_node_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2029,7 +2170,7 @@ func (x *AiForwardResponse) String() string {
 func (*AiForwardResponse) ProtoMessage() {}
 
 func (x *AiForwardResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[15]
+	mi := &file_node_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2042,7 +2183,7 @@ func (x *AiForwardResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AiForwardResponse.ProtoReflect.Descriptor instead.
 func (*AiForwardResponse) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{15}
+	return file_node_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *AiForwardResponse) GetRequestId() string {
@@ -2078,7 +2219,7 @@ type AiForwardCancel struct {
 
 func (x *AiForwardCancel) Reset() {
 	*x = AiForwardCancel{}
-	mi := &file_node_proto_msgTypes[16]
+	mi := &file_node_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2090,7 +2231,7 @@ func (x *AiForwardCancel) String() string {
 func (*AiForwardCancel) ProtoMessage() {}
 
 func (x *AiForwardCancel) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[16]
+	mi := &file_node_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2103,7 +2244,7 @@ func (x *AiForwardCancel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AiForwardCancel.ProtoReflect.Descriptor instead.
 func (*AiForwardCancel) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{16}
+	return file_node_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *AiForwardCancel) GetRequestId() string {
@@ -2168,7 +2309,7 @@ type WorkbenchForwardRequest struct {
 
 func (x *WorkbenchForwardRequest) Reset() {
 	*x = WorkbenchForwardRequest{}
-	mi := &file_node_proto_msgTypes[17]
+	mi := &file_node_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2180,7 +2321,7 @@ func (x *WorkbenchForwardRequest) String() string {
 func (*WorkbenchForwardRequest) ProtoMessage() {}
 
 func (x *WorkbenchForwardRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[17]
+	mi := &file_node_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2193,7 +2334,7 @@ func (x *WorkbenchForwardRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkbenchForwardRequest.ProtoReflect.Descriptor instead.
 func (*WorkbenchForwardRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{17}
+	return file_node_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *WorkbenchForwardRequest) GetRequestId() string {
@@ -2268,7 +2409,7 @@ type WorkbenchForwardResponse struct {
 
 func (x *WorkbenchForwardResponse) Reset() {
 	*x = WorkbenchForwardResponse{}
-	mi := &file_node_proto_msgTypes[18]
+	mi := &file_node_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2280,7 +2421,7 @@ func (x *WorkbenchForwardResponse) String() string {
 func (*WorkbenchForwardResponse) ProtoMessage() {}
 
 func (x *WorkbenchForwardResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[18]
+	mi := &file_node_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2293,7 +2434,7 @@ func (x *WorkbenchForwardResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkbenchForwardResponse.ProtoReflect.Descriptor instead.
 func (*WorkbenchForwardResponse) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{18}
+	return file_node_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *WorkbenchForwardResponse) GetRequestId() string {
@@ -2337,7 +2478,7 @@ type WorkbenchForwardCancel struct {
 
 func (x *WorkbenchForwardCancel) Reset() {
 	*x = WorkbenchForwardCancel{}
-	mi := &file_node_proto_msgTypes[19]
+	mi := &file_node_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2349,7 +2490,7 @@ func (x *WorkbenchForwardCancel) String() string {
 func (*WorkbenchForwardCancel) ProtoMessage() {}
 
 func (x *WorkbenchForwardCancel) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[19]
+	mi := &file_node_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2362,7 +2503,7 @@ func (x *WorkbenchForwardCancel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkbenchForwardCancel.ProtoReflect.Descriptor instead.
 func (*WorkbenchForwardCancel) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{19}
+	return file_node_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *WorkbenchForwardCancel) GetRequestId() string {
@@ -2415,7 +2556,7 @@ type DeployControlForwardRequest struct {
 
 func (x *DeployControlForwardRequest) Reset() {
 	*x = DeployControlForwardRequest{}
-	mi := &file_node_proto_msgTypes[20]
+	mi := &file_node_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2427,7 +2568,7 @@ func (x *DeployControlForwardRequest) String() string {
 func (*DeployControlForwardRequest) ProtoMessage() {}
 
 func (x *DeployControlForwardRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[20]
+	mi := &file_node_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2440,7 +2581,7 @@ func (x *DeployControlForwardRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployControlForwardRequest.ProtoReflect.Descriptor instead.
 func (*DeployControlForwardRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{20}
+	return file_node_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *DeployControlForwardRequest) GetRequestId() string {
@@ -2487,7 +2628,7 @@ type DeployControlForwardResponse struct {
 
 func (x *DeployControlForwardResponse) Reset() {
 	*x = DeployControlForwardResponse{}
-	mi := &file_node_proto_msgTypes[21]
+	mi := &file_node_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2499,7 +2640,7 @@ func (x *DeployControlForwardResponse) String() string {
 func (*DeployControlForwardResponse) ProtoMessage() {}
 
 func (x *DeployControlForwardResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[21]
+	mi := &file_node_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2512,7 +2653,7 @@ func (x *DeployControlForwardResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployControlForwardResponse.ProtoReflect.Descriptor instead.
 func (*DeployControlForwardResponse) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{21}
+	return file_node_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *DeployControlForwardResponse) GetRequestId() string {
@@ -2553,7 +2694,7 @@ type NodeShutdown struct {
 
 func (x *NodeShutdown) Reset() {
 	*x = NodeShutdown{}
-	mi := &file_node_proto_msgTypes[22]
+	mi := &file_node_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2565,7 +2706,7 @@ func (x *NodeShutdown) String() string {
 func (*NodeShutdown) ProtoMessage() {}
 
 func (x *NodeShutdown) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[22]
+	mi := &file_node_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2578,7 +2719,7 @@ func (x *NodeShutdown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeShutdown.ProtoReflect.Descriptor instead.
 func (*NodeShutdown) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{22}
+	return file_node_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *NodeShutdown) GetReason() string {
@@ -2651,7 +2792,7 @@ type WorkerForwardRequest struct {
 
 func (x *WorkerForwardRequest) Reset() {
 	*x = WorkerForwardRequest{}
-	mi := &file_node_proto_msgTypes[23]
+	mi := &file_node_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2663,7 +2804,7 @@ func (x *WorkerForwardRequest) String() string {
 func (*WorkerForwardRequest) ProtoMessage() {}
 
 func (x *WorkerForwardRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[23]
+	mi := &file_node_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2676,7 +2817,7 @@ func (x *WorkerForwardRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerForwardRequest.ProtoReflect.Descriptor instead.
 func (*WorkerForwardRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{23}
+	return file_node_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *WorkerForwardRequest) GetRequestId() string {
@@ -2798,7 +2939,7 @@ type WorkerForwardResponse struct {
 
 func (x *WorkerForwardResponse) Reset() {
 	*x = WorkerForwardResponse{}
-	mi := &file_node_proto_msgTypes[24]
+	mi := &file_node_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2810,7 +2951,7 @@ func (x *WorkerForwardResponse) String() string {
 func (*WorkerForwardResponse) ProtoMessage() {}
 
 func (x *WorkerForwardResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[24]
+	mi := &file_node_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2823,7 +2964,7 @@ func (x *WorkerForwardResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerForwardResponse.ProtoReflect.Descriptor instead.
 func (*WorkerForwardResponse) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{24}
+	return file_node_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *WorkerForwardResponse) GetRequestId() string {
@@ -2909,7 +3050,7 @@ type WorkerForwardStream struct {
 
 func (x *WorkerForwardStream) Reset() {
 	*x = WorkerForwardStream{}
-	mi := &file_node_proto_msgTypes[25]
+	mi := &file_node_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2921,7 +3062,7 @@ func (x *WorkerForwardStream) String() string {
 func (*WorkerForwardStream) ProtoMessage() {}
 
 func (x *WorkerForwardStream) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[25]
+	mi := &file_node_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2934,7 +3075,7 @@ func (x *WorkerForwardStream) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerForwardStream.ProtoReflect.Descriptor instead.
 func (*WorkerForwardStream) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{25}
+	return file_node_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *WorkerForwardStream) GetRequestId() string {
@@ -3012,7 +3153,7 @@ type WorkerForwardCancel struct {
 
 func (x *WorkerForwardCancel) Reset() {
 	*x = WorkerForwardCancel{}
-	mi := &file_node_proto_msgTypes[26]
+	mi := &file_node_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3024,7 +3165,7 @@ func (x *WorkerForwardCancel) String() string {
 func (*WorkerForwardCancel) ProtoMessage() {}
 
 func (x *WorkerForwardCancel) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[26]
+	mi := &file_node_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3037,7 +3178,7 @@ func (x *WorkerForwardCancel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerForwardCancel.ProtoReflect.Descriptor instead.
 func (*WorkerForwardCancel) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{26}
+	return file_node_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *WorkerForwardCancel) GetRequestId() string {
@@ -3084,7 +3225,7 @@ type ModelForwardRequest struct {
 
 func (x *ModelForwardRequest) Reset() {
 	*x = ModelForwardRequest{}
-	mi := &file_node_proto_msgTypes[27]
+	mi := &file_node_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3096,7 +3237,7 @@ func (x *ModelForwardRequest) String() string {
 func (*ModelForwardRequest) ProtoMessage() {}
 
 func (x *ModelForwardRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[27]
+	mi := &file_node_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3109,7 +3250,7 @@ func (x *ModelForwardRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelForwardRequest.ProtoReflect.Descriptor instead.
 func (*ModelForwardRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{27}
+	return file_node_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ModelForwardRequest) GetRequestId() string {
@@ -3179,7 +3320,7 @@ type ModelForwardResponse struct {
 
 func (x *ModelForwardResponse) Reset() {
 	*x = ModelForwardResponse{}
-	mi := &file_node_proto_msgTypes[28]
+	mi := &file_node_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3191,7 +3332,7 @@ func (x *ModelForwardResponse) String() string {
 func (*ModelForwardResponse) ProtoMessage() {}
 
 func (x *ModelForwardResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[28]
+	mi := &file_node_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3204,7 +3345,7 @@ func (x *ModelForwardResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelForwardResponse.ProtoReflect.Descriptor instead.
 func (*ModelForwardResponse) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{28}
+	return file_node_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ModelForwardResponse) GetRequestId() string {
@@ -3267,7 +3408,7 @@ type ModelForwardDelta struct {
 
 func (x *ModelForwardDelta) Reset() {
 	*x = ModelForwardDelta{}
-	mi := &file_node_proto_msgTypes[29]
+	mi := &file_node_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3279,7 +3420,7 @@ func (x *ModelForwardDelta) String() string {
 func (*ModelForwardDelta) ProtoMessage() {}
 
 func (x *ModelForwardDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[29]
+	mi := &file_node_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3292,7 +3433,7 @@ func (x *ModelForwardDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelForwardDelta.ProtoReflect.Descriptor instead.
 func (*ModelForwardDelta) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{29}
+	return file_node_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ModelForwardDelta) GetRequestId() string {
@@ -3334,7 +3475,7 @@ type ModelForwardCancel struct {
 
 func (x *ModelForwardCancel) Reset() {
 	*x = ModelForwardCancel{}
-	mi := &file_node_proto_msgTypes[30]
+	mi := &file_node_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3346,7 +3487,7 @@ func (x *ModelForwardCancel) String() string {
 func (*ModelForwardCancel) ProtoMessage() {}
 
 func (x *ModelForwardCancel) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[30]
+	mi := &file_node_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3359,7 +3500,7 @@ func (x *ModelForwardCancel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelForwardCancel.ProtoReflect.Descriptor instead.
 func (*ModelForwardCancel) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{30}
+	return file_node_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ModelForwardCancel) GetRequestId() string {
@@ -3410,7 +3551,7 @@ type ModelPullForwardRequest struct {
 
 func (x *ModelPullForwardRequest) Reset() {
 	*x = ModelPullForwardRequest{}
-	mi := &file_node_proto_msgTypes[31]
+	mi := &file_node_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3422,7 +3563,7 @@ func (x *ModelPullForwardRequest) String() string {
 func (*ModelPullForwardRequest) ProtoMessage() {}
 
 func (x *ModelPullForwardRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[31]
+	mi := &file_node_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3435,7 +3576,7 @@ func (x *ModelPullForwardRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelPullForwardRequest.ProtoReflect.Descriptor instead.
 func (*ModelPullForwardRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{31}
+	return file_node_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ModelPullForwardRequest) GetRequestId() string {
@@ -3498,7 +3639,7 @@ type ModelPullForwardResponse struct {
 
 func (x *ModelPullForwardResponse) Reset() {
 	*x = ModelPullForwardResponse{}
-	mi := &file_node_proto_msgTypes[32]
+	mi := &file_node_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3510,7 +3651,7 @@ func (x *ModelPullForwardResponse) String() string {
 func (*ModelPullForwardResponse) ProtoMessage() {}
 
 func (x *ModelPullForwardResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[32]
+	mi := &file_node_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3523,7 +3664,7 @@ func (x *ModelPullForwardResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelPullForwardResponse.ProtoReflect.Descriptor instead.
 func (*ModelPullForwardResponse) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{32}
+	return file_node_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ModelPullForwardResponse) GetRequestId() string {
@@ -3588,7 +3729,7 @@ type ModelPullForwardProgress struct {
 
 func (x *ModelPullForwardProgress) Reset() {
 	*x = ModelPullForwardProgress{}
-	mi := &file_node_proto_msgTypes[33]
+	mi := &file_node_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3600,7 +3741,7 @@ func (x *ModelPullForwardProgress) String() string {
 func (*ModelPullForwardProgress) ProtoMessage() {}
 
 func (x *ModelPullForwardProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[33]
+	mi := &file_node_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3613,7 +3754,7 @@ func (x *ModelPullForwardProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelPullForwardProgress.ProtoReflect.Descriptor instead.
 func (*ModelPullForwardProgress) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{33}
+	return file_node_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ModelPullForwardProgress) GetRequestId() string {
@@ -3669,7 +3810,7 @@ type ModelPullForwardCancel struct {
 
 func (x *ModelPullForwardCancel) Reset() {
 	*x = ModelPullForwardCancel{}
-	mi := &file_node_proto_msgTypes[34]
+	mi := &file_node_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3681,7 +3822,7 @@ func (x *ModelPullForwardCancel) String() string {
 func (*ModelPullForwardCancel) ProtoMessage() {}
 
 func (x *ModelPullForwardCancel) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[34]
+	mi := &file_node_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3694,7 +3835,7 @@ func (x *ModelPullForwardCancel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelPullForwardCancel.ProtoReflect.Descriptor instead.
 func (*ModelPullForwardCancel) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{34}
+	return file_node_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ModelPullForwardCancel) GetRequestId() string {
@@ -3743,7 +3884,7 @@ type ModelProbeForwardRequest struct {
 
 func (x *ModelProbeForwardRequest) Reset() {
 	*x = ModelProbeForwardRequest{}
-	mi := &file_node_proto_msgTypes[35]
+	mi := &file_node_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3755,7 +3896,7 @@ func (x *ModelProbeForwardRequest) String() string {
 func (*ModelProbeForwardRequest) ProtoMessage() {}
 
 func (x *ModelProbeForwardRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[35]
+	mi := &file_node_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3768,7 +3909,7 @@ func (x *ModelProbeForwardRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelProbeForwardRequest.ProtoReflect.Descriptor instead.
 func (*ModelProbeForwardRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{35}
+	return file_node_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ModelProbeForwardRequest) GetRequestId() string {
@@ -3843,7 +3984,7 @@ type ModelProbeForwardResponse struct {
 
 func (x *ModelProbeForwardResponse) Reset() {
 	*x = ModelProbeForwardResponse{}
-	mi := &file_node_proto_msgTypes[36]
+	mi := &file_node_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3855,7 +3996,7 @@ func (x *ModelProbeForwardResponse) String() string {
 func (*ModelProbeForwardResponse) ProtoMessage() {}
 
 func (x *ModelProbeForwardResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[36]
+	mi := &file_node_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3868,7 +4009,7 @@ func (x *ModelProbeForwardResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelProbeForwardResponse.ProtoReflect.Descriptor instead.
 func (*ModelProbeForwardResponse) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{36}
+	return file_node_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ModelProbeForwardResponse) GetRequestId() string {
@@ -3937,7 +4078,7 @@ type ModelProbeForwardProgress struct {
 
 func (x *ModelProbeForwardProgress) Reset() {
 	*x = ModelProbeForwardProgress{}
-	mi := &file_node_proto_msgTypes[37]
+	mi := &file_node_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3949,7 +4090,7 @@ func (x *ModelProbeForwardProgress) String() string {
 func (*ModelProbeForwardProgress) ProtoMessage() {}
 
 func (x *ModelProbeForwardProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[37]
+	mi := &file_node_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3962,7 +4103,7 @@ func (x *ModelProbeForwardProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelProbeForwardProgress.ProtoReflect.Descriptor instead.
 func (*ModelProbeForwardProgress) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{37}
+	return file_node_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ModelProbeForwardProgress) GetRequestId() string {
@@ -4025,7 +4166,7 @@ type ModelProbeForwardCancel struct {
 
 func (x *ModelProbeForwardCancel) Reset() {
 	*x = ModelProbeForwardCancel{}
-	mi := &file_node_proto_msgTypes[38]
+	mi := &file_node_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4037,7 +4178,7 @@ func (x *ModelProbeForwardCancel) String() string {
 func (*ModelProbeForwardCancel) ProtoMessage() {}
 
 func (x *ModelProbeForwardCancel) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[38]
+	mi := &file_node_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4050,7 +4191,7 @@ func (x *ModelProbeForwardCancel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelProbeForwardCancel.ProtoReflect.Descriptor instead.
 func (*ModelProbeForwardCancel) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{38}
+	return file_node_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ModelProbeForwardCancel) GetRequestId() string {
@@ -4191,7 +4332,7 @@ const file_node_proto_rawDesc = "" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x17\n" +
 	"\anode_id\x18\x03 \x01(\tR\x06nodeId\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"\xea\x01\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\xa3\x02\n" +
 	"\fEventForward\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x14\n" +
 	"\x05topic\x18\x02 \x01(\tR\x05topic\x12\x12\n" +
@@ -4199,9 +4340,21 @@ const file_node_proto_rawDesc = "" +
 	"\x02ts\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\x121\n" +
 	"\apayload\x18\x05 \x01(\v2\x17.google.protobuf.StructR\apayload\x12$\n" +
 	"\x0eorigin_node_id\x18\x06 \x01(\tR\foriginNodeId\x12\x10\n" +
-	"\x03ttl\x18\a \x01(\x05R\x03ttl\"%\n" +
+	"\x03ttl\x18\a \x01(\x05R\x03ttl\x127\n" +
+	"\x05cause\x18\b \x01(\v2!.znasllc.memql.node.v1.EventCauseR\x05cause\"%\n" +
 	"\bEventAck\x12\x19\n" +
-	"\bevent_id\x18\x01 \x01(\tR\aeventId\"Y\n" +
+	"\bevent_id\x18\x01 \x01(\tR\aeventId\"\xa9\x01\n" +
+	"\n" +
+	"EventCause\x12!\n" +
+	"\fcausation_id\x18\x01 \x01(\tR\vcausationId\x12%\n" +
+	"\x0ecorrelation_id\x18\x02 \x01(\tR\rcorrelationId\x12\x14\n" +
+	"\x05depth\x18\x03 \x01(\x05R\x05depth\x12;\n" +
+	"\x05chain\x18\x04 \x03(\v2%.znasllc.memql.node.v1.EventCauseLinkR\x05chain\"G\n" +
+	"\x0eEventCauseLink\x12\x1e\n" +
+	"\n" +
+	"automation\x18\x01 \x01(\tR\n" +
+	"automation\x12\x15\n" +
+	"\x06run_id\x18\x02 \x01(\tR\x05runId\"Y\n" +
 	"\x0fCapabilityQuery\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
@@ -4450,7 +4603,7 @@ func file_node_proto_rawDescGZIP() []byte {
 }
 
 var file_node_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
 var file_node_proto_goTypes = []any{
 	(NodeHealthStatus)(0),                // 0: znasllc.memql.node.v1.NodeHealthStatus
 	(ForwardedPrincipalKind)(0),          // 1: znasllc.memql.node.v1.ForwardedPrincipalKind
@@ -4465,47 +4618,49 @@ var file_node_proto_goTypes = []any{
 	(*SpawnResult)(nil),                  // 10: znasllc.memql.node.v1.SpawnResult
 	(*EventForward)(nil),                 // 11: znasllc.memql.node.v1.EventForward
 	(*EventAck)(nil),                     // 12: znasllc.memql.node.v1.EventAck
-	(*CapabilityQuery)(nil),              // 13: znasllc.memql.node.v1.CapabilityQuery
-	(*CapabilityResponse)(nil),           // 14: znasllc.memql.node.v1.CapabilityResponse
-	(*AiForwardRequest)(nil),             // 15: znasllc.memql.node.v1.AiForwardRequest
-	(*ForwardedAuthority)(nil),           // 16: znasllc.memql.node.v1.ForwardedAuthority
-	(*AiForwardResponse)(nil),            // 17: znasllc.memql.node.v1.AiForwardResponse
-	(*AiForwardCancel)(nil),              // 18: znasllc.memql.node.v1.AiForwardCancel
-	(*WorkbenchForwardRequest)(nil),      // 19: znasllc.memql.node.v1.WorkbenchForwardRequest
-	(*WorkbenchForwardResponse)(nil),     // 20: znasllc.memql.node.v1.WorkbenchForwardResponse
-	(*WorkbenchForwardCancel)(nil),       // 21: znasllc.memql.node.v1.WorkbenchForwardCancel
-	(*DeployControlForwardRequest)(nil),  // 22: znasllc.memql.node.v1.DeployControlForwardRequest
-	(*DeployControlForwardResponse)(nil), // 23: znasllc.memql.node.v1.DeployControlForwardResponse
-	(*NodeShutdown)(nil),                 // 24: znasllc.memql.node.v1.NodeShutdown
-	(*WorkerForwardRequest)(nil),         // 25: znasllc.memql.node.v1.WorkerForwardRequest
-	(*WorkerForwardResponse)(nil),        // 26: znasllc.memql.node.v1.WorkerForwardResponse
-	(*WorkerForwardStream)(nil),          // 27: znasllc.memql.node.v1.WorkerForwardStream
-	(*WorkerForwardCancel)(nil),          // 28: znasllc.memql.node.v1.WorkerForwardCancel
-	(*ModelForwardRequest)(nil),          // 29: znasllc.memql.node.v1.ModelForwardRequest
-	(*ModelForwardResponse)(nil),         // 30: znasllc.memql.node.v1.ModelForwardResponse
-	(*ModelForwardDelta)(nil),            // 31: znasllc.memql.node.v1.ModelForwardDelta
-	(*ModelForwardCancel)(nil),           // 32: znasllc.memql.node.v1.ModelForwardCancel
-	(*ModelPullForwardRequest)(nil),      // 33: znasllc.memql.node.v1.ModelPullForwardRequest
-	(*ModelPullForwardResponse)(nil),     // 34: znasllc.memql.node.v1.ModelPullForwardResponse
-	(*ModelPullForwardProgress)(nil),     // 35: znasllc.memql.node.v1.ModelPullForwardProgress
-	(*ModelPullForwardCancel)(nil),       // 36: znasllc.memql.node.v1.ModelPullForwardCancel
-	(*ModelProbeForwardRequest)(nil),     // 37: znasllc.memql.node.v1.ModelProbeForwardRequest
-	(*ModelProbeForwardResponse)(nil),    // 38: znasllc.memql.node.v1.ModelProbeForwardResponse
-	(*ModelProbeForwardProgress)(nil),    // 39: znasllc.memql.node.v1.ModelProbeForwardProgress
-	(*ModelProbeForwardCancel)(nil),      // 40: znasllc.memql.node.v1.ModelProbeForwardCancel
-	nil,                                  // 41: znasllc.memql.node.v1.NodeClientMessage.MetadataEntry
-	nil,                                  // 42: znasllc.memql.node.v1.NodeServerMessage.MetadataEntry
-	nil,                                  // 43: znasllc.memql.node.v1.NodeHello.LabelsEntry
-	nil,                                  // 44: znasllc.memql.node.v1.NodeHeartbeat.MetricsEntry
-	nil,                                  // 45: znasllc.memql.node.v1.PeerInfo.LabelsEntry
-	nil,                                  // 46: znasllc.memql.node.v1.SpawnRequest.LabelsEntry
-	nil,                                  // 47: znasllc.memql.node.v1.SpawnRequest.EnvEntry
-	nil,                                  // 48: znasllc.memql.node.v1.AiForwardRequest.AuthEntry
-	(*timestamppb.Timestamp)(nil),        // 49: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),              // 50: google.protobuf.Struct
+	(*EventCause)(nil),                   // 13: znasllc.memql.node.v1.EventCause
+	(*EventCauseLink)(nil),               // 14: znasllc.memql.node.v1.EventCauseLink
+	(*CapabilityQuery)(nil),              // 15: znasllc.memql.node.v1.CapabilityQuery
+	(*CapabilityResponse)(nil),           // 16: znasllc.memql.node.v1.CapabilityResponse
+	(*AiForwardRequest)(nil),             // 17: znasllc.memql.node.v1.AiForwardRequest
+	(*ForwardedAuthority)(nil),           // 18: znasllc.memql.node.v1.ForwardedAuthority
+	(*AiForwardResponse)(nil),            // 19: znasllc.memql.node.v1.AiForwardResponse
+	(*AiForwardCancel)(nil),              // 20: znasllc.memql.node.v1.AiForwardCancel
+	(*WorkbenchForwardRequest)(nil),      // 21: znasllc.memql.node.v1.WorkbenchForwardRequest
+	(*WorkbenchForwardResponse)(nil),     // 22: znasllc.memql.node.v1.WorkbenchForwardResponse
+	(*WorkbenchForwardCancel)(nil),       // 23: znasllc.memql.node.v1.WorkbenchForwardCancel
+	(*DeployControlForwardRequest)(nil),  // 24: znasllc.memql.node.v1.DeployControlForwardRequest
+	(*DeployControlForwardResponse)(nil), // 25: znasllc.memql.node.v1.DeployControlForwardResponse
+	(*NodeShutdown)(nil),                 // 26: znasllc.memql.node.v1.NodeShutdown
+	(*WorkerForwardRequest)(nil),         // 27: znasllc.memql.node.v1.WorkerForwardRequest
+	(*WorkerForwardResponse)(nil),        // 28: znasllc.memql.node.v1.WorkerForwardResponse
+	(*WorkerForwardStream)(nil),          // 29: znasllc.memql.node.v1.WorkerForwardStream
+	(*WorkerForwardCancel)(nil),          // 30: znasllc.memql.node.v1.WorkerForwardCancel
+	(*ModelForwardRequest)(nil),          // 31: znasllc.memql.node.v1.ModelForwardRequest
+	(*ModelForwardResponse)(nil),         // 32: znasllc.memql.node.v1.ModelForwardResponse
+	(*ModelForwardDelta)(nil),            // 33: znasllc.memql.node.v1.ModelForwardDelta
+	(*ModelForwardCancel)(nil),           // 34: znasllc.memql.node.v1.ModelForwardCancel
+	(*ModelPullForwardRequest)(nil),      // 35: znasllc.memql.node.v1.ModelPullForwardRequest
+	(*ModelPullForwardResponse)(nil),     // 36: znasllc.memql.node.v1.ModelPullForwardResponse
+	(*ModelPullForwardProgress)(nil),     // 37: znasllc.memql.node.v1.ModelPullForwardProgress
+	(*ModelPullForwardCancel)(nil),       // 38: znasllc.memql.node.v1.ModelPullForwardCancel
+	(*ModelProbeForwardRequest)(nil),     // 39: znasllc.memql.node.v1.ModelProbeForwardRequest
+	(*ModelProbeForwardResponse)(nil),    // 40: znasllc.memql.node.v1.ModelProbeForwardResponse
+	(*ModelProbeForwardProgress)(nil),    // 41: znasllc.memql.node.v1.ModelProbeForwardProgress
+	(*ModelProbeForwardCancel)(nil),      // 42: znasllc.memql.node.v1.ModelProbeForwardCancel
+	nil,                                  // 43: znasllc.memql.node.v1.NodeClientMessage.MetadataEntry
+	nil,                                  // 44: znasllc.memql.node.v1.NodeServerMessage.MetadataEntry
+	nil,                                  // 45: znasllc.memql.node.v1.NodeHello.LabelsEntry
+	nil,                                  // 46: znasllc.memql.node.v1.NodeHeartbeat.MetricsEntry
+	nil,                                  // 47: znasllc.memql.node.v1.PeerInfo.LabelsEntry
+	nil,                                  // 48: znasllc.memql.node.v1.SpawnRequest.LabelsEntry
+	nil,                                  // 49: znasllc.memql.node.v1.SpawnRequest.EnvEntry
+	nil,                                  // 50: znasllc.memql.node.v1.AiForwardRequest.AuthEntry
+	(*timestamppb.Timestamp)(nil),        // 51: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),              // 52: google.protobuf.Struct
 }
 var file_node_proto_depIdxs = []int32{
-	41, // 0: znasllc.memql.node.v1.NodeClientMessage.metadata:type_name -> znasllc.memql.node.v1.NodeClientMessage.MetadataEntry
+	43, // 0: znasllc.memql.node.v1.NodeClientMessage.metadata:type_name -> znasllc.memql.node.v1.NodeClientMessage.MetadataEntry
 	4,  // 1: znasllc.memql.node.v1.NodeClientMessage.node_hello:type_name -> znasllc.memql.node.v1.NodeHello
 	6,  // 2: znasllc.memql.node.v1.NodeClientMessage.heartbeat:type_name -> znasllc.memql.node.v1.NodeHeartbeat
 	8,  // 3: znasllc.memql.node.v1.NodeClientMessage.peer_intro:type_name -> znasllc.memql.node.v1.PeerIntroduction
@@ -4513,22 +4668,22 @@ var file_node_proto_depIdxs = []int32{
 	10, // 5: znasllc.memql.node.v1.NodeClientMessage.spawn_result:type_name -> znasllc.memql.node.v1.SpawnResult
 	11, // 6: znasllc.memql.node.v1.NodeClientMessage.event_forward:type_name -> znasllc.memql.node.v1.EventForward
 	12, // 7: znasllc.memql.node.v1.NodeClientMessage.event_ack:type_name -> znasllc.memql.node.v1.EventAck
-	13, // 8: znasllc.memql.node.v1.NodeClientMessage.capability_query:type_name -> znasllc.memql.node.v1.CapabilityQuery
-	14, // 9: znasllc.memql.node.v1.NodeClientMessage.capability_response:type_name -> znasllc.memql.node.v1.CapabilityResponse
-	15, // 10: znasllc.memql.node.v1.NodeClientMessage.ai_forward_request:type_name -> znasllc.memql.node.v1.AiForwardRequest
-	18, // 11: znasllc.memql.node.v1.NodeClientMessage.ai_forward_cancel:type_name -> znasllc.memql.node.v1.AiForwardCancel
-	19, // 12: znasllc.memql.node.v1.NodeClientMessage.workbench_forward_request:type_name -> znasllc.memql.node.v1.WorkbenchForwardRequest
-	21, // 13: znasllc.memql.node.v1.NodeClientMessage.workbench_forward_cancel:type_name -> znasllc.memql.node.v1.WorkbenchForwardCancel
-	22, // 14: znasllc.memql.node.v1.NodeClientMessage.deploy_control_forward_request:type_name -> znasllc.memql.node.v1.DeployControlForwardRequest
-	25, // 15: znasllc.memql.node.v1.NodeClientMessage.worker_forward_request:type_name -> znasllc.memql.node.v1.WorkerForwardRequest
-	28, // 16: znasllc.memql.node.v1.NodeClientMessage.worker_forward_cancel:type_name -> znasllc.memql.node.v1.WorkerForwardCancel
-	29, // 17: znasllc.memql.node.v1.NodeClientMessage.model_forward_request:type_name -> znasllc.memql.node.v1.ModelForwardRequest
-	32, // 18: znasllc.memql.node.v1.NodeClientMessage.model_forward_cancel:type_name -> znasllc.memql.node.v1.ModelForwardCancel
-	33, // 19: znasllc.memql.node.v1.NodeClientMessage.model_pull_forward_request:type_name -> znasllc.memql.node.v1.ModelPullForwardRequest
-	36, // 20: znasllc.memql.node.v1.NodeClientMessage.model_pull_forward_cancel:type_name -> znasllc.memql.node.v1.ModelPullForwardCancel
-	37, // 21: znasllc.memql.node.v1.NodeClientMessage.model_probe_forward_request:type_name -> znasllc.memql.node.v1.ModelProbeForwardRequest
-	40, // 22: znasllc.memql.node.v1.NodeClientMessage.model_probe_forward_cancel:type_name -> znasllc.memql.node.v1.ModelProbeForwardCancel
-	42, // 23: znasllc.memql.node.v1.NodeServerMessage.metadata:type_name -> znasllc.memql.node.v1.NodeServerMessage.MetadataEntry
+	15, // 8: znasllc.memql.node.v1.NodeClientMessage.capability_query:type_name -> znasllc.memql.node.v1.CapabilityQuery
+	16, // 9: znasllc.memql.node.v1.NodeClientMessage.capability_response:type_name -> znasllc.memql.node.v1.CapabilityResponse
+	17, // 10: znasllc.memql.node.v1.NodeClientMessage.ai_forward_request:type_name -> znasllc.memql.node.v1.AiForwardRequest
+	20, // 11: znasllc.memql.node.v1.NodeClientMessage.ai_forward_cancel:type_name -> znasllc.memql.node.v1.AiForwardCancel
+	21, // 12: znasllc.memql.node.v1.NodeClientMessage.workbench_forward_request:type_name -> znasllc.memql.node.v1.WorkbenchForwardRequest
+	23, // 13: znasllc.memql.node.v1.NodeClientMessage.workbench_forward_cancel:type_name -> znasllc.memql.node.v1.WorkbenchForwardCancel
+	24, // 14: znasllc.memql.node.v1.NodeClientMessage.deploy_control_forward_request:type_name -> znasllc.memql.node.v1.DeployControlForwardRequest
+	27, // 15: znasllc.memql.node.v1.NodeClientMessage.worker_forward_request:type_name -> znasllc.memql.node.v1.WorkerForwardRequest
+	30, // 16: znasllc.memql.node.v1.NodeClientMessage.worker_forward_cancel:type_name -> znasllc.memql.node.v1.WorkerForwardCancel
+	31, // 17: znasllc.memql.node.v1.NodeClientMessage.model_forward_request:type_name -> znasllc.memql.node.v1.ModelForwardRequest
+	34, // 18: znasllc.memql.node.v1.NodeClientMessage.model_forward_cancel:type_name -> znasllc.memql.node.v1.ModelForwardCancel
+	35, // 19: znasllc.memql.node.v1.NodeClientMessage.model_pull_forward_request:type_name -> znasllc.memql.node.v1.ModelPullForwardRequest
+	38, // 20: znasllc.memql.node.v1.NodeClientMessage.model_pull_forward_cancel:type_name -> znasllc.memql.node.v1.ModelPullForwardCancel
+	39, // 21: znasllc.memql.node.v1.NodeClientMessage.model_probe_forward_request:type_name -> znasllc.memql.node.v1.ModelProbeForwardRequest
+	42, // 22: znasllc.memql.node.v1.NodeClientMessage.model_probe_forward_cancel:type_name -> znasllc.memql.node.v1.ModelProbeForwardCancel
+	44, // 23: znasllc.memql.node.v1.NodeServerMessage.metadata:type_name -> znasllc.memql.node.v1.NodeServerMessage.MetadataEntry
 	5,  // 24: znasllc.memql.node.v1.NodeServerMessage.node_welcome:type_name -> znasllc.memql.node.v1.NodeWelcome
 	6,  // 25: znasllc.memql.node.v1.NodeServerMessage.heartbeat:type_name -> znasllc.memql.node.v1.NodeHeartbeat
 	8,  // 26: znasllc.memql.node.v1.NodeServerMessage.peer_intro:type_name -> znasllc.memql.node.v1.PeerIntroduction
@@ -4536,48 +4691,50 @@ var file_node_proto_depIdxs = []int32{
 	10, // 28: znasllc.memql.node.v1.NodeServerMessage.spawn_result:type_name -> znasllc.memql.node.v1.SpawnResult
 	11, // 29: znasllc.memql.node.v1.NodeServerMessage.event_forward:type_name -> znasllc.memql.node.v1.EventForward
 	12, // 30: znasllc.memql.node.v1.NodeServerMessage.event_ack:type_name -> znasllc.memql.node.v1.EventAck
-	13, // 31: znasllc.memql.node.v1.NodeServerMessage.capability_query:type_name -> znasllc.memql.node.v1.CapabilityQuery
-	14, // 32: znasllc.memql.node.v1.NodeServerMessage.capability_response:type_name -> znasllc.memql.node.v1.CapabilityResponse
-	24, // 33: znasllc.memql.node.v1.NodeServerMessage.node_shutdown:type_name -> znasllc.memql.node.v1.NodeShutdown
-	17, // 34: znasllc.memql.node.v1.NodeServerMessage.ai_forward_response:type_name -> znasllc.memql.node.v1.AiForwardResponse
-	20, // 35: znasllc.memql.node.v1.NodeServerMessage.workbench_forward_response:type_name -> znasllc.memql.node.v1.WorkbenchForwardResponse
-	23, // 36: znasllc.memql.node.v1.NodeServerMessage.deploy_control_forward_response:type_name -> znasllc.memql.node.v1.DeployControlForwardResponse
-	26, // 37: znasllc.memql.node.v1.NodeServerMessage.worker_forward_response:type_name -> znasllc.memql.node.v1.WorkerForwardResponse
-	27, // 38: znasllc.memql.node.v1.NodeServerMessage.worker_forward_stream:type_name -> znasllc.memql.node.v1.WorkerForwardStream
-	30, // 39: znasllc.memql.node.v1.NodeServerMessage.model_forward_response:type_name -> znasllc.memql.node.v1.ModelForwardResponse
-	31, // 40: znasllc.memql.node.v1.NodeServerMessage.model_forward_delta:type_name -> znasllc.memql.node.v1.ModelForwardDelta
-	34, // 41: znasllc.memql.node.v1.NodeServerMessage.model_pull_forward_response:type_name -> znasllc.memql.node.v1.ModelPullForwardResponse
-	35, // 42: znasllc.memql.node.v1.NodeServerMessage.model_pull_forward_progress:type_name -> znasllc.memql.node.v1.ModelPullForwardProgress
-	38, // 43: znasllc.memql.node.v1.NodeServerMessage.model_probe_forward_response:type_name -> znasllc.memql.node.v1.ModelProbeForwardResponse
-	39, // 44: znasllc.memql.node.v1.NodeServerMessage.model_probe_forward_progress:type_name -> znasllc.memql.node.v1.ModelProbeForwardProgress
-	43, // 45: znasllc.memql.node.v1.NodeHello.labels:type_name -> znasllc.memql.node.v1.NodeHello.LabelsEntry
+	15, // 31: znasllc.memql.node.v1.NodeServerMessage.capability_query:type_name -> znasllc.memql.node.v1.CapabilityQuery
+	16, // 32: znasllc.memql.node.v1.NodeServerMessage.capability_response:type_name -> znasllc.memql.node.v1.CapabilityResponse
+	26, // 33: znasllc.memql.node.v1.NodeServerMessage.node_shutdown:type_name -> znasllc.memql.node.v1.NodeShutdown
+	19, // 34: znasllc.memql.node.v1.NodeServerMessage.ai_forward_response:type_name -> znasllc.memql.node.v1.AiForwardResponse
+	22, // 35: znasllc.memql.node.v1.NodeServerMessage.workbench_forward_response:type_name -> znasllc.memql.node.v1.WorkbenchForwardResponse
+	25, // 36: znasllc.memql.node.v1.NodeServerMessage.deploy_control_forward_response:type_name -> znasllc.memql.node.v1.DeployControlForwardResponse
+	28, // 37: znasllc.memql.node.v1.NodeServerMessage.worker_forward_response:type_name -> znasllc.memql.node.v1.WorkerForwardResponse
+	29, // 38: znasllc.memql.node.v1.NodeServerMessage.worker_forward_stream:type_name -> znasllc.memql.node.v1.WorkerForwardStream
+	32, // 39: znasllc.memql.node.v1.NodeServerMessage.model_forward_response:type_name -> znasllc.memql.node.v1.ModelForwardResponse
+	33, // 40: znasllc.memql.node.v1.NodeServerMessage.model_forward_delta:type_name -> znasllc.memql.node.v1.ModelForwardDelta
+	36, // 41: znasllc.memql.node.v1.NodeServerMessage.model_pull_forward_response:type_name -> znasllc.memql.node.v1.ModelPullForwardResponse
+	37, // 42: znasllc.memql.node.v1.NodeServerMessage.model_pull_forward_progress:type_name -> znasllc.memql.node.v1.ModelPullForwardProgress
+	40, // 43: znasllc.memql.node.v1.NodeServerMessage.model_probe_forward_response:type_name -> znasllc.memql.node.v1.ModelProbeForwardResponse
+	41, // 44: znasllc.memql.node.v1.NodeServerMessage.model_probe_forward_progress:type_name -> znasllc.memql.node.v1.ModelProbeForwardProgress
+	45, // 45: znasllc.memql.node.v1.NodeHello.labels:type_name -> znasllc.memql.node.v1.NodeHello.LabelsEntry
 	7,  // 46: znasllc.memql.node.v1.NodeWelcome.peers:type_name -> znasllc.memql.node.v1.PeerInfo
-	49, // 47: znasllc.memql.node.v1.NodeHeartbeat.ts:type_name -> google.protobuf.Timestamp
+	51, // 47: znasllc.memql.node.v1.NodeHeartbeat.ts:type_name -> google.protobuf.Timestamp
 	0,  // 48: znasllc.memql.node.v1.NodeHeartbeat.health:type_name -> znasllc.memql.node.v1.NodeHealthStatus
-	44, // 49: znasllc.memql.node.v1.NodeHeartbeat.metrics:type_name -> znasllc.memql.node.v1.NodeHeartbeat.MetricsEntry
+	46, // 49: znasllc.memql.node.v1.NodeHeartbeat.metrics:type_name -> znasllc.memql.node.v1.NodeHeartbeat.MetricsEntry
 	0,  // 50: znasllc.memql.node.v1.PeerInfo.health:type_name -> znasllc.memql.node.v1.NodeHealthStatus
-	45, // 51: znasllc.memql.node.v1.PeerInfo.labels:type_name -> znasllc.memql.node.v1.PeerInfo.LabelsEntry
+	47, // 51: znasllc.memql.node.v1.PeerInfo.labels:type_name -> znasllc.memql.node.v1.PeerInfo.LabelsEntry
 	7,  // 52: znasllc.memql.node.v1.PeerIntroduction.peers:type_name -> znasllc.memql.node.v1.PeerInfo
-	46, // 53: znasllc.memql.node.v1.SpawnRequest.labels:type_name -> znasllc.memql.node.v1.SpawnRequest.LabelsEntry
-	47, // 54: znasllc.memql.node.v1.SpawnRequest.env:type_name -> znasllc.memql.node.v1.SpawnRequest.EnvEntry
-	49, // 55: znasllc.memql.node.v1.EventForward.ts:type_name -> google.protobuf.Timestamp
-	50, // 56: znasllc.memql.node.v1.EventForward.payload:type_name -> google.protobuf.Struct
-	48, // 57: znasllc.memql.node.v1.AiForwardRequest.auth:type_name -> znasllc.memql.node.v1.AiForwardRequest.AuthEntry
-	16, // 58: znasllc.memql.node.v1.AiForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	1,  // 59: znasllc.memql.node.v1.ForwardedAuthority.principal_kind:type_name -> znasllc.memql.node.v1.ForwardedPrincipalKind
-	16, // 60: znasllc.memql.node.v1.WorkbenchForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	16, // 61: znasllc.memql.node.v1.DeployControlForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	16, // 62: znasllc.memql.node.v1.WorkerForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	16, // 63: znasllc.memql.node.v1.ModelForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	16, // 64: znasllc.memql.node.v1.ModelPullForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	16, // 65: znasllc.memql.node.v1.ModelProbeForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
-	2,  // 66: znasllc.memql.node.v1.NodeService.Stream:input_type -> znasllc.memql.node.v1.NodeClientMessage
-	3,  // 67: znasllc.memql.node.v1.NodeService.Stream:output_type -> znasllc.memql.node.v1.NodeServerMessage
-	67, // [67:68] is the sub-list for method output_type
-	66, // [66:67] is the sub-list for method input_type
-	66, // [66:66] is the sub-list for extension type_name
-	66, // [66:66] is the sub-list for extension extendee
-	0,  // [0:66] is the sub-list for field type_name
+	48, // 53: znasllc.memql.node.v1.SpawnRequest.labels:type_name -> znasllc.memql.node.v1.SpawnRequest.LabelsEntry
+	49, // 54: znasllc.memql.node.v1.SpawnRequest.env:type_name -> znasllc.memql.node.v1.SpawnRequest.EnvEntry
+	51, // 55: znasllc.memql.node.v1.EventForward.ts:type_name -> google.protobuf.Timestamp
+	52, // 56: znasllc.memql.node.v1.EventForward.payload:type_name -> google.protobuf.Struct
+	13, // 57: znasllc.memql.node.v1.EventForward.cause:type_name -> znasllc.memql.node.v1.EventCause
+	14, // 58: znasllc.memql.node.v1.EventCause.chain:type_name -> znasllc.memql.node.v1.EventCauseLink
+	50, // 59: znasllc.memql.node.v1.AiForwardRequest.auth:type_name -> znasllc.memql.node.v1.AiForwardRequest.AuthEntry
+	18, // 60: znasllc.memql.node.v1.AiForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	1,  // 61: znasllc.memql.node.v1.ForwardedAuthority.principal_kind:type_name -> znasllc.memql.node.v1.ForwardedPrincipalKind
+	18, // 62: znasllc.memql.node.v1.WorkbenchForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	18, // 63: znasllc.memql.node.v1.DeployControlForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	18, // 64: znasllc.memql.node.v1.WorkerForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	18, // 65: znasllc.memql.node.v1.ModelForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	18, // 66: znasllc.memql.node.v1.ModelPullForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	18, // 67: znasllc.memql.node.v1.ModelProbeForwardRequest.authority:type_name -> znasllc.memql.node.v1.ForwardedAuthority
+	2,  // 68: znasllc.memql.node.v1.NodeService.Stream:input_type -> znasllc.memql.node.v1.NodeClientMessage
+	3,  // 69: znasllc.memql.node.v1.NodeService.Stream:output_type -> znasllc.memql.node.v1.NodeServerMessage
+	69, // [69:70] is the sub-list for method output_type
+	68, // [68:69] is the sub-list for method input_type
+	68, // [68:68] is the sub-list for extension type_name
+	68, // [68:68] is the sub-list for extension extendee
+	0,  // [0:68] is the sub-list for field type_name
 }
 
 func init() { file_node_proto_init() }
@@ -4632,7 +4789,7 @@ func file_node_proto_init() {
 		(*NodeServerMessage_ModelProbeForwardResponse)(nil),
 		(*NodeServerMessage_ModelProbeForwardProgress)(nil),
 	}
-	file_node_proto_msgTypes[25].OneofWrappers = []any{
+	file_node_proto_msgTypes[27].OneofWrappers = []any{
 		(*WorkerForwardStream_StdoutChunk)(nil),
 		(*WorkerForwardStream_StderrChunk)(nil),
 		(*WorkerForwardStream_DataChunk)(nil),
@@ -4643,7 +4800,7 @@ func file_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   47,
+			NumMessages:   49,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

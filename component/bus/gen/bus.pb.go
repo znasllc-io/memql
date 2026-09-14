@@ -1832,6 +1832,11 @@ type EventPublish struct {
 	EventMetadata map[string]string      `protobuf:"bytes,5,rep,name=event_metadata,json=eventMetadata,proto3" json:"event_metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	OriginNodeId  string                 `protobuf:"bytes,6,opt,name=origin_node_id,json=originNodeId,proto3" json:"origin_node_id,omitempty"`
 	Partition     string                 `protobuf:"bytes,7,opt,name=partition,proto3" json:"partition,omitempty"`
+	// The event's causal lineage (component/events.Cause, epic memql#5380).
+	// Additive and optional: an old node in a mixed-version rollout sends no
+	// cause, which the receiver reads as the zero cause -- a root event, never
+	// a refusal.
+	Cause         *EventCause `protobuf:"bytes,8,opt,name=cause,proto3" json:"cause,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1913,6 +1918,13 @@ func (x *EventPublish) GetPartition() string {
 		return x.Partition
 	}
 	return ""
+}
+
+func (x *EventPublish) GetCause() *EventCause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
 }
 
 type EventSubscribe struct {
@@ -2071,6 +2083,134 @@ func (x *EventNotify) GetEvent() *EventPublish {
 	return nil
 }
 
+// EventCause carries an event's causal lineage across the component-bus
+// channel hop (component/events.Cause, epic memql#5380): the automation run
+// that caused it, the chain of runs it belongs to, and how deep that chain
+// is. Structurally identical to component/node/node.proto's message of the
+// same name, and deliberately duplicated rather than shared -- the two
+// protos are independent wire contracts for independent hops (the in-process
+// channel bus vs. the mesh), and node.proto is not imported here.
+type EventCause struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CausationId   string                 `protobuf:"bytes,1,opt,name=causation_id,json=causationId,proto3" json:"causation_id,omitempty"`
+	CorrelationId string                 `protobuf:"bytes,2,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
+	Depth         int32                  `protobuf:"varint,3,opt,name=depth,proto3" json:"depth,omitempty"`
+	Chain         []*EventCauseLink      `protobuf:"bytes,4,rep,name=chain,proto3" json:"chain,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EventCause) Reset() {
+	*x = EventCause{}
+	mi := &file_bus_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EventCause) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EventCause) ProtoMessage() {}
+
+func (x *EventCause) ProtoReflect() protoreflect.Message {
+	mi := &file_bus_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EventCause.ProtoReflect.Descriptor instead.
+func (*EventCause) Descriptor() ([]byte, []int) {
+	return file_bus_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *EventCause) GetCausationId() string {
+	if x != nil {
+		return x.CausationId
+	}
+	return ""
+}
+
+func (x *EventCause) GetCorrelationId() string {
+	if x != nil {
+		return x.CorrelationId
+	}
+	return ""
+}
+
+func (x *EventCause) GetDepth() int32 {
+	if x != nil {
+		return x.Depth
+	}
+	return 0
+}
+
+func (x *EventCause) GetChain() []*EventCauseLink {
+	if x != nil {
+		return x.Chain
+	}
+	return nil
+}
+
+// EventCauseLink is one automation run in a Cause's chain, oldest first.
+type EventCauseLink struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Automation    string                 `protobuf:"bytes,1,opt,name=automation,proto3" json:"automation,omitempty"`
+	RunId         string                 `protobuf:"bytes,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EventCauseLink) Reset() {
+	*x = EventCauseLink{}
+	mi := &file_bus_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EventCauseLink) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EventCauseLink) ProtoMessage() {}
+
+func (x *EventCauseLink) ProtoReflect() protoreflect.Message {
+	mi := &file_bus_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EventCauseLink.ProtoReflect.Descriptor instead.
+func (*EventCauseLink) Descriptor() ([]byte, []int) {
+	return file_bus_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *EventCauseLink) GetAutomation() string {
+	if x != nil {
+		return x.Automation
+	}
+	return ""
+}
+
+func (x *EventCauseLink) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
 type ConfigSnapshot struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Database
@@ -2121,7 +2261,7 @@ type ConfigSnapshot struct {
 
 func (x *ConfigSnapshot) Reset() {
 	*x = ConfigSnapshot{}
-	mi := &file_bus_proto_msgTypes[24]
+	mi := &file_bus_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2133,7 +2273,7 @@ func (x *ConfigSnapshot) String() string {
 func (*ConfigSnapshot) ProtoMessage() {}
 
 func (x *ConfigSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_bus_proto_msgTypes[24]
+	mi := &file_bus_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2146,7 +2286,7 @@ func (x *ConfigSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigSnapshot.ProtoReflect.Descriptor instead.
 func (*ConfigSnapshot) Descriptor() ([]byte, []int) {
-	return file_bus_proto_rawDescGZIP(), []int{24}
+	return file_bus_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ConfigSnapshot) GetDbDsn() string {
@@ -2348,7 +2488,7 @@ type ConfigUpdate struct {
 
 func (x *ConfigUpdate) Reset() {
 	*x = ConfigUpdate{}
-	mi := &file_bus_proto_msgTypes[25]
+	mi := &file_bus_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2360,7 +2500,7 @@ func (x *ConfigUpdate) String() string {
 func (*ConfigUpdate) ProtoMessage() {}
 
 func (x *ConfigUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_bus_proto_msgTypes[25]
+	mi := &file_bus_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2373,7 +2513,7 @@ func (x *ConfigUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigUpdate.ProtoReflect.Descriptor instead.
 func (*ConfigUpdate) Descriptor() ([]byte, []int) {
-	return file_bus_proto_rawDescGZIP(), []int{25}
+	return file_bus_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ConfigUpdate) GetField() string {
@@ -2404,7 +2544,7 @@ type ChannelMetrics struct {
 
 func (x *ChannelMetrics) Reset() {
 	*x = ChannelMetrics{}
-	mi := &file_bus_proto_msgTypes[26]
+	mi := &file_bus_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2416,7 +2556,7 @@ func (x *ChannelMetrics) String() string {
 func (*ChannelMetrics) ProtoMessage() {}
 
 func (x *ChannelMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_bus_proto_msgTypes[26]
+	mi := &file_bus_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2429,7 +2569,7 @@ func (x *ChannelMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChannelMetrics.ProtoReflect.Descriptor instead.
 func (*ChannelMetrics) Descriptor() ([]byte, []int) {
-	return file_bus_proto_rawDescGZIP(), []int{26}
+	return file_bus_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ChannelMetrics) GetChannelName() string {
@@ -2489,7 +2629,7 @@ type ComponentMetrics struct {
 
 func (x *ComponentMetrics) Reset() {
 	*x = ComponentMetrics{}
-	mi := &file_bus_proto_msgTypes[27]
+	mi := &file_bus_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2501,7 +2641,7 @@ func (x *ComponentMetrics) String() string {
 func (*ComponentMetrics) ProtoMessage() {}
 
 func (x *ComponentMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_bus_proto_msgTypes[27]
+	mi := &file_bus_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2514,7 +2654,7 @@ func (x *ComponentMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ComponentMetrics.ProtoReflect.Descriptor instead.
 func (*ComponentMetrics) Descriptor() ([]byte, []int) {
-	return file_bus_proto_rawDescGZIP(), []int{27}
+	return file_bus_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ComponentMetrics) GetComponentName() string {
@@ -2575,7 +2715,7 @@ type ReadySignal struct {
 
 func (x *ReadySignal) Reset() {
 	*x = ReadySignal{}
-	mi := &file_bus_proto_msgTypes[28]
+	mi := &file_bus_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2587,7 +2727,7 @@ func (x *ReadySignal) String() string {
 func (*ReadySignal) ProtoMessage() {}
 
 func (x *ReadySignal) ProtoReflect() protoreflect.Message {
-	mi := &file_bus_proto_msgTypes[28]
+	mi := &file_bus_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2600,7 +2740,7 @@ func (x *ReadySignal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadySignal.ProtoReflect.Descriptor instead.
 func (*ReadySignal) Descriptor() ([]byte, []int) {
-	return file_bus_proto_rawDescGZIP(), []int{28}
+	return file_bus_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ReadySignal) GetComponentName() string {
@@ -2620,7 +2760,7 @@ type ShutdownSignal struct {
 
 func (x *ShutdownSignal) Reset() {
 	*x = ShutdownSignal{}
-	mi := &file_bus_proto_msgTypes[29]
+	mi := &file_bus_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2632,7 +2772,7 @@ func (x *ShutdownSignal) String() string {
 func (*ShutdownSignal) ProtoMessage() {}
 
 func (x *ShutdownSignal) ProtoReflect() protoreflect.Message {
-	mi := &file_bus_proto_msgTypes[29]
+	mi := &file_bus_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2645,7 +2785,7 @@ func (x *ShutdownSignal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownSignal.ProtoReflect.Descriptor instead.
 func (*ShutdownSignal) Descriptor() ([]byte, []int) {
-	return file_bus_proto_rawDescGZIP(), []int{29}
+	return file_bus_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ShutdownSignal) GetReason() string {
@@ -2672,7 +2812,7 @@ type DrainComplete struct {
 
 func (x *DrainComplete) Reset() {
 	*x = DrainComplete{}
-	mi := &file_bus_proto_msgTypes[30]
+	mi := &file_bus_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2684,7 +2824,7 @@ func (x *DrainComplete) String() string {
 func (*DrainComplete) ProtoMessage() {}
 
 func (x *DrainComplete) ProtoReflect() protoreflect.Message {
-	mi := &file_bus_proto_msgTypes[30]
+	mi := &file_bus_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2697,7 +2837,7 @@ func (x *DrainComplete) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DrainComplete.ProtoReflect.Descriptor instead.
 func (*DrainComplete) Descriptor() ([]byte, []int) {
-	return file_bus_proto_rawDescGZIP(), []int{30}
+	return file_bus_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *DrainComplete) GetComponentName() string {
@@ -2860,7 +3000,7 @@ const file_bus_proto_rawDesc = "" +
 	"\x06scopes\x18\t \x03(\tR\x06scopes\x129\n" +
 	"\n" +
 	"expires_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\x8e\x03\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\xcb\x03\n" +
 	"\fEventPublish\x12\x14\n" +
 	"\x05topic\x18\x01 \x01(\tR\x05topic\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\x05R\x04kind\x128\n" +
@@ -2868,7 +3008,8 @@ const file_bus_proto_rawDesc = "" +
 	"\apayload\x18\x04 \x01(\v2\x17.google.protobuf.StructR\apayload\x12a\n" +
 	"\x0eevent_metadata\x18\x05 \x03(\v2:.znasllc.memql.internal.v1.EventPublish.EventMetadataEntryR\reventMetadata\x12$\n" +
 	"\x0eorigin_node_id\x18\x06 \x01(\tR\foriginNodeId\x12\x1c\n" +
-	"\tpartition\x18\a \x01(\tR\tpartition\x1a@\n" +
+	"\tpartition\x18\a \x01(\tR\tpartition\x12;\n" +
+	"\x05cause\x18\b \x01(\v2%.znasllc.memql.internal.v1.EventCauseR\x05cause\x1a@\n" +
 	"\x12EventMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"|\n" +
@@ -2880,7 +3021,18 @@ const file_bus_proto_rawDesc = "" +
 	"\x0fsubscription_id\x18\x01 \x01(\tR\x0esubscriptionId\"u\n" +
 	"\vEventNotify\x12'\n" +
 	"\x0fsubscription_id\x18\x01 \x01(\tR\x0esubscriptionId\x12=\n" +
-	"\x05event\x18\x02 \x01(\v2'.znasllc.memql.internal.v1.EventPublishR\x05event\"\xc9\n" +
+	"\x05event\x18\x02 \x01(\v2'.znasllc.memql.internal.v1.EventPublishR\x05event\"\xad\x01\n" +
+	"\n" +
+	"EventCause\x12!\n" +
+	"\fcausation_id\x18\x01 \x01(\tR\vcausationId\x12%\n" +
+	"\x0ecorrelation_id\x18\x02 \x01(\tR\rcorrelationId\x12\x14\n" +
+	"\x05depth\x18\x03 \x01(\x05R\x05depth\x12?\n" +
+	"\x05chain\x18\x04 \x03(\v2).znasllc.memql.internal.v1.EventCauseLinkR\x05chain\"G\n" +
+	"\x0eEventCauseLink\x12\x1e\n" +
+	"\n" +
+	"automation\x18\x01 \x01(\tR\n" +
+	"automation\x12\x15\n" +
+	"\x06run_id\x18\x02 \x01(\tR\x05runId\"\xc9\n" +
 	"\n" +
 	"\x0eConfigSnapshot\x12\x15\n" +
 	"\x06db_dsn\x18\x01 \x01(\tR\x05dbDsn\x12)\n" +
@@ -2961,7 +3113,7 @@ func file_bus_proto_rawDescGZIP() []byte {
 	return file_bus_proto_rawDescData
 }
 
-var file_bus_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
+var file_bus_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
 var file_bus_proto_goTypes = []any{
 	(*InternalMessage)(nil),               // 0: znasllc.memql.internal.v1.InternalMessage
 	(*DbQueryRequest)(nil),                // 1: znasllc.memql.internal.v1.DbQueryRequest
@@ -2987,24 +3139,26 @@ var file_bus_proto_goTypes = []any{
 	(*EventSubscribe)(nil),                // 21: znasllc.memql.internal.v1.EventSubscribe
 	(*EventUnsubscribe)(nil),              // 22: znasllc.memql.internal.v1.EventUnsubscribe
 	(*EventNotify)(nil),                   // 23: znasllc.memql.internal.v1.EventNotify
-	(*ConfigSnapshot)(nil),                // 24: znasllc.memql.internal.v1.ConfigSnapshot
-	(*ConfigUpdate)(nil),                  // 25: znasllc.memql.internal.v1.ConfigUpdate
-	(*ChannelMetrics)(nil),                // 26: znasllc.memql.internal.v1.ChannelMetrics
-	(*ComponentMetrics)(nil),              // 27: znasllc.memql.internal.v1.ComponentMetrics
-	(*ReadySignal)(nil),                   // 28: znasllc.memql.internal.v1.ReadySignal
-	(*ShutdownSignal)(nil),                // 29: znasllc.memql.internal.v1.ShutdownSignal
-	(*DrainComplete)(nil),                 // 30: znasllc.memql.internal.v1.DrainComplete
-	nil,                                   // 31: znasllc.memql.internal.v1.InternalMessage.MetadataEntry
-	nil,                                   // 32: znasllc.memql.internal.v1.EventPublish.EventMetadataEntry
-	nil,                                   // 33: znasllc.memql.internal.v1.ConfigSnapshot.FeatureFlagsEntry
-	nil,                                   // 34: znasllc.memql.internal.v1.ComponentMetrics.LabelsEntry
-	(*timestamppb.Timestamp)(nil),         // 35: google.protobuf.Timestamp
-	(*structpb.Value)(nil),                // 36: google.protobuf.Value
-	(*structpb.Struct)(nil),               // 37: google.protobuf.Struct
+	(*EventCause)(nil),                    // 24: znasllc.memql.internal.v1.EventCause
+	(*EventCauseLink)(nil),                // 25: znasllc.memql.internal.v1.EventCauseLink
+	(*ConfigSnapshot)(nil),                // 26: znasllc.memql.internal.v1.ConfigSnapshot
+	(*ConfigUpdate)(nil),                  // 27: znasllc.memql.internal.v1.ConfigUpdate
+	(*ChannelMetrics)(nil),                // 28: znasllc.memql.internal.v1.ChannelMetrics
+	(*ComponentMetrics)(nil),              // 29: znasllc.memql.internal.v1.ComponentMetrics
+	(*ReadySignal)(nil),                   // 30: znasllc.memql.internal.v1.ReadySignal
+	(*ShutdownSignal)(nil),                // 31: znasllc.memql.internal.v1.ShutdownSignal
+	(*DrainComplete)(nil),                 // 32: znasllc.memql.internal.v1.DrainComplete
+	nil,                                   // 33: znasllc.memql.internal.v1.InternalMessage.MetadataEntry
+	nil,                                   // 34: znasllc.memql.internal.v1.EventPublish.EventMetadataEntry
+	nil,                                   // 35: znasllc.memql.internal.v1.ConfigSnapshot.FeatureFlagsEntry
+	nil,                                   // 36: znasllc.memql.internal.v1.ComponentMetrics.LabelsEntry
+	(*timestamppb.Timestamp)(nil),         // 37: google.protobuf.Timestamp
+	(*structpb.Value)(nil),                // 38: google.protobuf.Value
+	(*structpb.Struct)(nil),               // 39: google.protobuf.Struct
 }
 var file_bus_proto_depIdxs = []int32{
-	31, // 0: znasllc.memql.internal.v1.InternalMessage.metadata:type_name -> znasllc.memql.internal.v1.InternalMessage.MetadataEntry
-	35, // 1: znasllc.memql.internal.v1.InternalMessage.created_at:type_name -> google.protobuf.Timestamp
+	33, // 0: znasllc.memql.internal.v1.InternalMessage.metadata:type_name -> znasllc.memql.internal.v1.InternalMessage.MetadataEntry
+	37, // 1: znasllc.memql.internal.v1.InternalMessage.created_at:type_name -> google.protobuf.Timestamp
 	1,  // 2: znasllc.memql.internal.v1.InternalMessage.db_query:type_name -> znasllc.memql.internal.v1.DbQueryRequest
 	2,  // 3: znasllc.memql.internal.v1.InternalMessage.db_query_response:type_name -> znasllc.memql.internal.v1.DbQueryResponse
 	3,  // 4: znasllc.memql.internal.v1.InternalMessage.db_exec:type_name -> znasllc.memql.internal.v1.DbExecRequest
@@ -3027,42 +3181,44 @@ var file_bus_proto_depIdxs = []int32{
 	21, // 21: znasllc.memql.internal.v1.InternalMessage.event_subscribe:type_name -> znasllc.memql.internal.v1.EventSubscribe
 	22, // 22: znasllc.memql.internal.v1.InternalMessage.event_unsubscribe:type_name -> znasllc.memql.internal.v1.EventUnsubscribe
 	23, // 23: znasllc.memql.internal.v1.InternalMessage.event_notify:type_name -> znasllc.memql.internal.v1.EventNotify
-	24, // 24: znasllc.memql.internal.v1.InternalMessage.config_snapshot:type_name -> znasllc.memql.internal.v1.ConfigSnapshot
-	25, // 25: znasllc.memql.internal.v1.InternalMessage.config_update:type_name -> znasllc.memql.internal.v1.ConfigUpdate
-	26, // 26: znasllc.memql.internal.v1.InternalMessage.channel_metrics:type_name -> znasllc.memql.internal.v1.ChannelMetrics
-	27, // 27: znasllc.memql.internal.v1.InternalMessage.component_metrics:type_name -> znasllc.memql.internal.v1.ComponentMetrics
-	28, // 28: znasllc.memql.internal.v1.InternalMessage.ready_signal:type_name -> znasllc.memql.internal.v1.ReadySignal
-	29, // 29: znasllc.memql.internal.v1.InternalMessage.shutdown_signal:type_name -> znasllc.memql.internal.v1.ShutdownSignal
-	30, // 30: znasllc.memql.internal.v1.InternalMessage.drain_complete:type_name -> znasllc.memql.internal.v1.DrainComplete
-	36, // 31: znasllc.memql.internal.v1.DbQueryRequest.args:type_name -> google.protobuf.Value
-	37, // 32: znasllc.memql.internal.v1.DbQueryResponse.rows:type_name -> google.protobuf.Struct
-	36, // 33: znasllc.memql.internal.v1.DbExecRequest.args:type_name -> google.protobuf.Value
-	37, // 34: znasllc.memql.internal.v1.EngineExecuteRequest.variables:type_name -> google.protobuf.Struct
+	26, // 24: znasllc.memql.internal.v1.InternalMessage.config_snapshot:type_name -> znasllc.memql.internal.v1.ConfigSnapshot
+	27, // 25: znasllc.memql.internal.v1.InternalMessage.config_update:type_name -> znasllc.memql.internal.v1.ConfigUpdate
+	28, // 26: znasllc.memql.internal.v1.InternalMessage.channel_metrics:type_name -> znasllc.memql.internal.v1.ChannelMetrics
+	29, // 27: znasllc.memql.internal.v1.InternalMessage.component_metrics:type_name -> znasllc.memql.internal.v1.ComponentMetrics
+	30, // 28: znasllc.memql.internal.v1.InternalMessage.ready_signal:type_name -> znasllc.memql.internal.v1.ReadySignal
+	31, // 29: znasllc.memql.internal.v1.InternalMessage.shutdown_signal:type_name -> znasllc.memql.internal.v1.ShutdownSignal
+	32, // 30: znasllc.memql.internal.v1.InternalMessage.drain_complete:type_name -> znasllc.memql.internal.v1.DrainComplete
+	38, // 31: znasllc.memql.internal.v1.DbQueryRequest.args:type_name -> google.protobuf.Value
+	39, // 32: znasllc.memql.internal.v1.DbQueryResponse.rows:type_name -> google.protobuf.Struct
+	38, // 33: znasllc.memql.internal.v1.DbExecRequest.args:type_name -> google.protobuf.Value
+	39, // 34: znasllc.memql.internal.v1.EngineExecuteRequest.variables:type_name -> google.protobuf.Struct
 	19, // 35: znasllc.memql.internal.v1.EngineExecuteRequest.delegation:type_name -> znasllc.memql.internal.v1.DelegationInfo
-	36, // 36: znasllc.memql.internal.v1.EngineExecuteResponse.result:type_name -> google.protobuf.Value
-	37, // 37: znasllc.memql.internal.v1.EngineAIInvokeRequest.data:type_name -> google.protobuf.Struct
+	38, // 36: znasllc.memql.internal.v1.EngineExecuteResponse.result:type_name -> google.protobuf.Value
+	39, // 37: znasllc.memql.internal.v1.EngineAIInvokeRequest.data:type_name -> google.protobuf.Struct
 	19, // 38: znasllc.memql.internal.v1.EngineAIInvokeRequest.delegation:type_name -> znasllc.memql.internal.v1.DelegationInfo
-	36, // 39: znasllc.memql.internal.v1.EngineAIInvokeResponse.result:type_name -> google.protobuf.Value
-	37, // 40: znasllc.memql.internal.v1.EngineToolExecRequest.arguments:type_name -> google.protobuf.Struct
-	37, // 41: znasllc.memql.internal.v1.EngineRenderPromptRequest.data:type_name -> google.protobuf.Struct
-	37, // 42: znasllc.memql.internal.v1.IntegrationDispatchRequest.args:type_name -> google.protobuf.Struct
+	38, // 39: znasllc.memql.internal.v1.EngineAIInvokeResponse.result:type_name -> google.protobuf.Value
+	39, // 40: znasllc.memql.internal.v1.EngineToolExecRequest.arguments:type_name -> google.protobuf.Struct
+	39, // 41: znasllc.memql.internal.v1.EngineRenderPromptRequest.data:type_name -> google.protobuf.Struct
+	39, // 42: znasllc.memql.internal.v1.IntegrationDispatchRequest.args:type_name -> google.protobuf.Struct
 	19, // 43: znasllc.memql.internal.v1.IntegrationDispatchRequest.delegation:type_name -> znasllc.memql.internal.v1.DelegationInfo
-	36, // 44: znasllc.memql.internal.v1.IntegrationDispatchResponse.result:type_name -> google.protobuf.Value
-	35, // 45: znasllc.memql.internal.v1.DelegationInfo.expires_at:type_name -> google.protobuf.Timestamp
-	35, // 46: znasllc.memql.internal.v1.EventPublish.timestamp:type_name -> google.protobuf.Timestamp
-	37, // 47: znasllc.memql.internal.v1.EventPublish.payload:type_name -> google.protobuf.Struct
-	32, // 48: znasllc.memql.internal.v1.EventPublish.event_metadata:type_name -> znasllc.memql.internal.v1.EventPublish.EventMetadataEntry
-	20, // 49: znasllc.memql.internal.v1.EventNotify.event:type_name -> znasllc.memql.internal.v1.EventPublish
-	33, // 50: znasllc.memql.internal.v1.ConfigSnapshot.feature_flags:type_name -> znasllc.memql.internal.v1.ConfigSnapshot.FeatureFlagsEntry
-	36, // 51: znasllc.memql.internal.v1.ConfigUpdate.value:type_name -> google.protobuf.Value
-	35, // 52: znasllc.memql.internal.v1.ChannelMetrics.sampled_at:type_name -> google.protobuf.Timestamp
-	35, // 53: znasllc.memql.internal.v1.ComponentMetrics.sampled_at:type_name -> google.protobuf.Timestamp
-	34, // 54: znasllc.memql.internal.v1.ComponentMetrics.labels:type_name -> znasllc.memql.internal.v1.ComponentMetrics.LabelsEntry
-	55, // [55:55] is the sub-list for method output_type
-	55, // [55:55] is the sub-list for method input_type
-	55, // [55:55] is the sub-list for extension type_name
-	55, // [55:55] is the sub-list for extension extendee
-	0,  // [0:55] is the sub-list for field type_name
+	38, // 44: znasllc.memql.internal.v1.IntegrationDispatchResponse.result:type_name -> google.protobuf.Value
+	37, // 45: znasllc.memql.internal.v1.DelegationInfo.expires_at:type_name -> google.protobuf.Timestamp
+	37, // 46: znasllc.memql.internal.v1.EventPublish.timestamp:type_name -> google.protobuf.Timestamp
+	39, // 47: znasllc.memql.internal.v1.EventPublish.payload:type_name -> google.protobuf.Struct
+	34, // 48: znasllc.memql.internal.v1.EventPublish.event_metadata:type_name -> znasllc.memql.internal.v1.EventPublish.EventMetadataEntry
+	24, // 49: znasllc.memql.internal.v1.EventPublish.cause:type_name -> znasllc.memql.internal.v1.EventCause
+	20, // 50: znasllc.memql.internal.v1.EventNotify.event:type_name -> znasllc.memql.internal.v1.EventPublish
+	25, // 51: znasllc.memql.internal.v1.EventCause.chain:type_name -> znasllc.memql.internal.v1.EventCauseLink
+	35, // 52: znasllc.memql.internal.v1.ConfigSnapshot.feature_flags:type_name -> znasllc.memql.internal.v1.ConfigSnapshot.FeatureFlagsEntry
+	38, // 53: znasllc.memql.internal.v1.ConfigUpdate.value:type_name -> google.protobuf.Value
+	37, // 54: znasllc.memql.internal.v1.ChannelMetrics.sampled_at:type_name -> google.protobuf.Timestamp
+	37, // 55: znasllc.memql.internal.v1.ComponentMetrics.sampled_at:type_name -> google.protobuf.Timestamp
+	36, // 56: znasllc.memql.internal.v1.ComponentMetrics.labels:type_name -> znasllc.memql.internal.v1.ComponentMetrics.LabelsEntry
+	57, // [57:57] is the sub-list for method output_type
+	57, // [57:57] is the sub-list for method input_type
+	57, // [57:57] is the sub-list for extension type_name
+	57, // [57:57] is the sub-list for extension extendee
+	0,  // [0:57] is the sub-list for field type_name
 }
 
 func init() { file_bus_proto_init() }
@@ -3107,7 +3263,7 @@ func file_bus_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_bus_proto_rawDesc), len(file_bus_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   35,
+			NumMessages:   37,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

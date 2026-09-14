@@ -75,6 +75,7 @@ func (b *Bus) handleChannelMessage(msg *busv1.InternalMessage) {
 		Payload:      payload,
 		Metadata:     pub.EventMetadata,
 		OriginNodeId: pub.OriginNodeId,
+		Cause:        CauseFromBusProto(pub.Cause),
 	}
 
 	b.Publish(event)

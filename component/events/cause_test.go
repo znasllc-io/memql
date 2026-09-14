@@ -101,3 +101,54 @@ func TestCauseContextRoundTrip(t *testing.T) {
 		t.Fatal("the context holds the caller's array: a change after stamping reached it")
 	}
 }
+
+// TestEventCloneCopiesCauseWithoutAliasing guards the fact Clone() is built
+// on: component/bus.Bus.Publish clones the event once per subscriber, so a
+// field Clone forgets is lost for every subscriber, not just one. Cause is
+// exactly that kind of field -- an automation run's whole causal lineage,
+// silently reset to the zero (root) cause for every fan-out.
+func TestEventCloneCopiesCauseWithoutAliasing(t *testing.T) {
+	original := NewEvent("test", KindNodeCreated, map[string]any{"a": 1})
+	original.Cause = Cause{
+		CausationId:   "run-1",
+		CorrelationId: "evt-1",
+		Depth:         2,
+		Chain:         []Link{{Automation: "a", RunId: "run-1"}, {Automation: "b", RunId: "run-2"}},
+	}
+
+	cloned := original.Clone()
+
+	if cloned.Cause.CausationId != original.Cause.CausationId ||
+		cloned.Cause.CorrelationId != original.Cause.CorrelationId ||
+		cloned.Cause.Depth != original.Cause.Depth {
+		t.Fatalf("Clone did not copy Cause: got %+v, want %+v", cloned.Cause, original.Cause)
+	}
+	if len(cloned.Cause.Chain) != len(original.Cause.Chain) {
+		t.Fatalf("Clone dropped chain entries: got %+v, want %+v", cloned.Cause.Chain, original.Cause.Chain)
+	}
+
+	// The clone must not share the original's backing array: one
+	// subscriber's copy must not be mutable by way of another's.
+	cloned.Cause.Chain[0].Automation = "mutated"
+	if original.Cause.Chain[0].Automation != "a" {
+		t.Fatal("Clone shares the Cause chain's backing array with the original")
+	}
+}
+
+// TestEventWithCauseReturnsACopy guards WithCause's value-receiver contract:
+// every publish path calls it as event = event.WithCause(c), so a version
+// that mutated in place would still work there, but would also let a shared
+// event value leak a cause across two callers that both hold a copy.
+func TestEventWithCauseReturnsACopy(t *testing.T) {
+	original := NewEvent("test", KindNodeCreated, nil)
+	cause := Cause{CausationId: "run-1", CorrelationId: "evt-1", Depth: 1, Chain: []Link{{Automation: "a", RunId: "run-1"}}}
+
+	withCause := original.WithCause(cause)
+
+	if !original.Cause.IsZero() {
+		t.Fatal("WithCause mutated the receiver: the original must stay a root event")
+	}
+	if withCause.Cause.CausationId != "run-1" || withCause.Cause.Depth != 1 {
+		t.Fatalf("WithCause did not set the cause: got %+v", withCause.Cause)
+	}
+}
