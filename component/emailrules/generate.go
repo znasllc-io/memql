@@ -237,12 +237,17 @@ const conditionExample = `row.role == "admin"`
 //
 // The order of the checks is the point:
 //
-//  1. The INJECTION guards run on the raw text, before anything reads it. A
-//     newline, a brace, an `@` or a `;` does not make a bad filter; in the
-//     legacy text it closed the annotation and turned the rest of the condition
-//     into source. The generated construct no longer carries the raw text --
-//     it carries the parsed condition, re-printed -- but the guards stay, so a
-//     condition that could only ever have been an attack is refused as one.
+//  1. The INJECTION guards run before anything parses the text. A newline, a
+//     brace, an `@` or a `;` did not make a bad filter; spliced raw into the
+//     legacy construct it closed the annotation and turned the rest of the
+//     condition into source. The generated construct no longer carries the
+//     raw text -- it carries the parsed condition, re-printed -- but the
+//     guards stay, so a condition that could only ever have been an attack is
+//     refused as one. They read the text OUTSIDE string literals only (a
+//     newline or a NUL is refused anywhere). Inside a literal those characters
+//     are text: the printer writes a literal back through QuoteString, so
+//     `row.email == "boss@acme.com"` is an address, not an annotation, and
+//     refusing it refused the conditions email rules exist for.
 //  2. The condition is PARSED with the edition-2026 grammar, and a parse error
 //     is refused with the parser's own words.
 //  3. What it may READ is exactly what the generated filter's scope binds:
@@ -260,8 +265,11 @@ func canonicalCondition(condition string) (string, error) {
 	if c == "" {
 		return "", nil
 	}
-	if strings.ContainsAny(c, "\r\n\x00{}@;") {
-		return "", conditionErr("The condition has to fit on one line and can't contain braces, @ or semicolons. Write it like %s.", conditionExample)
+	if strings.ContainsAny(c, "\r\n\x00") {
+		return "", conditionErr("The condition has to fit on one line. Write it like %s.", conditionExample)
+	}
+	if strings.ContainsAny(maskConditionStrings(c), "{}@;") {
+		return "", conditionErr(`Braces, @ and semicolons can only appear inside quotes, like row.email == "boss@acme.com".`)
 	}
 	src := c
 	if legacyPayloadRoot.MatchString(maskConditionStrings(c)) {
