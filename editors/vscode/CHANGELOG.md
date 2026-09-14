@@ -19,6 +19,30 @@ someone deciding whether to install rather than for someone reading the repo.
 - A cluster whose engine predates the comparison does not report its MemQL, and
   the extension says nothing about it.
 
+**Writing edition 2026**
+- Filters, specs, traits and trigger filters are written as a lambda over a
+  named parameter: `filter row => row.status == "open" && isActiveRecord(row)`.
+  After `row.`, completion offers the fields of the concept the query, spec or
+  trigger is bound to, each with its declared type, then the fields every row
+  carries, such as `id` and `createdAt`.
+- Completion offers only what the cursor's position accepts. A filter or a
+  condition is not offered query or mutation calls, the middle of an
+  expression is not offered statement keywords, and a list field of the row in
+  a filter is offered only the methods the database can run.
+- Hovering a function, an operator, or a spec or trait applied in an
+  expression shows its signature, whether it runs in the database or in the
+  engine at that position, and the spellings it replaced: `x.count()` replaces
+  `len(x)` and `count(x)`.
+- Retired spellings are underlined, and the message names the replacement and
+  the command that rewrites a whole tree, `memqlmigrate --rewrite=expressions`.
+  Hovering one shows your own construct rewritten: on
+  `filter status == args.owner`, the hover shows
+  `filter row => row.status == args.owner`.
+<!-- Quick fix, pending its landing in cmd/memql-lsp. When it does, add:
+- An underlined spelling offers a quick fix, **Rewrite to edition 2026**, which
+  rewrites the file the same way.
+-->
+
 ## 0.3.1
 
 First published release. The extension has been built and installed from source
