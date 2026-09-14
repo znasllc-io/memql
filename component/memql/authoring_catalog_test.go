@@ -101,3 +101,37 @@ func TestFindCatalogMatch(t *testing.T) {
 		t.Errorf("expected no cross-kind match, got %+v", m3)
 	}
 }
+
+// TestCatalogKey_EditionTwentySix: a brace-less spec or trait (epic
+// memql#5363) keys by its predicate, whatever it calls the row -- a legacy
+// predicate named no parameter, so the parameter is a degree of freedom the
+// dedup layer must not read as a difference -- and still keys differently when
+// the predicate differs.
+func TestCatalogKey_EditionTwentySix(t *testing.T) {
+	key := func(kind, src string) string {
+		t.Helper()
+		k, err := CatalogKey(kind, src)
+		if err != nil {
+			t.Fatalf("CatalogKey(%q): %v", src, err)
+		}
+		return k
+	}
+	a := key("spec", `spec actorEnvelope foo = actor => actor.role == "admin"`)
+	b := key("spec", "// the admin check\nspec actorEnvelope bar = a =>\n  a.role==\"admin\"")
+	if a != b {
+		t.Errorf("same predicate, different name, parameter and layout -> different keys:\n a=%s\n b=%s", a, b)
+	}
+	if c := key("spec", `spec actorEnvelope foo = actor => actor.role == "owner"`); c == a {
+		t.Error("a different predicate keyed the same")
+	}
+	// A string that spells the parameter is data, not the parameter.
+	d := key("trait", `trait t = row => row.kind == "row.kind"`)
+	e := key("trait", `trait t = r => r.kind == "row.kind"`)
+	f := key("trait", `trait t = r => r.kind == "r.kind"`)
+	if d != e {
+		t.Errorf("renaming the parameter changed the key:\n d=%s\n e=%s", d, e)
+	}
+	if d == f {
+		t.Error("a string literal's contents were renamed with the parameter")
+	}
+}

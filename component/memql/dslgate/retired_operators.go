@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/language/dslclause"
 )
 
 var hasOperatorRe = regexp.MustCompile(`\bhas\b`)
@@ -89,23 +91,42 @@ func HasTopLevelComma(s string) bool {
 }
 
 // scanRetiredOperators reports every filter clause naming a retired operator.
+//
+// THE WHOLE CLAUSE IS READ, continuation lines included. This read the line
+// that opens the clause and nothing else, from before memql#4123 made the
+// normaliser fold continuation lines -- so from then on the retired `,` was
+// one line break away from both the engine honouring it and this gate never
+// seeing it, which is the memql#3612 bypass with a newline in it. Comments are
+// blanked by the lexer's own blanker rather than cut at the first `//`, which
+// truncated a clause at the `//` inside a URL literal and hid whatever
+// followed it.
+//
+// An edition-2026 clause (a lambda) goes to the v1 parser instead of these
+// text checks; see v1RetiredFormViolation.
 func scanRetiredOperators(path, src string) []Violation {
 	var out []Violation
-	for i, line := range strings.Split(src, "\n") {
-		if idx := strings.Index(line, "//"); idx >= 0 {
-			line = line[:idx]
-		}
-		trim := strings.TrimSpace(line)
+	lines := strings.Split(BlankComments(src), "\n")
+	for i := 0; i < len(lines); i++ {
+		trim := strings.TrimSpace(lines[i])
 		if !strings.HasPrefix(trim, "filter ") && !strings.HasPrefix(trim, "filter\t") {
 			continue
 		}
-		clause := strings.TrimSpace(strings.TrimPrefix(trim, "filter"))
+		parts, last := filterClauseLines(lines, i)
+		line := i + 1
+		i = last
+		if multiline := strings.Join(parts, "\n"); dslclause.OpensLambda(multiline) {
+			if v, ok := v1RetiredFormViolation(path, line, multiline); ok {
+				out = append(out, v)
+			}
+			continue
+		}
+		clause := joinClauseLines(parts)
 		add := func(msg string) {
 			out = append(out, Violation{
 				Gate:   GateRetiredOperator,
 				File:   path,
-				Line:   i + 1,
-				Detail: fmt.Sprintf("retired filter operator (%s): %s", msg, trim),
+				Line:   line,
+				Detail: fmt.Sprintf("retired filter operator (%s): filter  %s", msg, clause),
 			})
 		}
 		if strings.Contains(clause, "?.") {

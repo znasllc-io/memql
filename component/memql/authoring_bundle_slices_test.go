@@ -199,3 +199,43 @@ action badArgs {
 		t.Errorf("the broken action must be a reported hard failure, got %+v (ok=%v)", d, ok)
 	}
 }
+
+// TestSplitBundleSource_BraceLessPredicates: an edition-2026 spec or trait
+// (epic memql#5363) has no brace, and the splitter used to drop it -- a
+// pure-spec bundle reported "no recognizable constructs" and a mixed one
+// failed its sibling query with "spec not found". A misspelled brace-less
+// keyword must reach the fail-loud backstop rather than vanish.
+func TestSplitBundleSource_BraceLessPredicates(t *testing.T) {
+	src := `use agents.concepts.{ agent }
+
+/// Assistants only, on a wrapped line.
+spec agent isAssistantV1 = row => row.role == "assistant"
+                           && row.kind != "system"
+
+/// Active rows.
+trait isActiveV1 = row => row.active == true
+
+triat isMisspelledV1 = row => row.active == true
+                     && row.kind == "x"
+`
+	got := SplitBundleSource(src)
+	byName := map[string]SandboxConstruct{}
+	for _, c := range got {
+		byName[c.Name] = c
+	}
+	if c := byName["isAssistantV1"]; c.Kind != "spec" || !strings.Contains(c.Source, `row.kind != "system"`) {
+		t.Errorf("the wrapped brace-less spec was not sliced whole: %+v", c)
+	}
+	if c := byName["isActiveV1"]; c.Kind != "trait" {
+		t.Errorf("the brace-less trait was not sliced: %+v (all %+v)", c, got)
+	}
+	var unrecognized []SandboxConstruct
+	for _, c := range got {
+		if c.Kind == unrecognizedConstructKind {
+			unrecognized = append(unrecognized, c)
+		}
+	}
+	if len(unrecognized) != 1 || !strings.Contains(unrecognized[0].Source, `row.kind == "x"`) {
+		t.Fatalf("the misspelled brace-less declaration did not reach the backstop whole: %+v", unrecognized)
+	}
+}

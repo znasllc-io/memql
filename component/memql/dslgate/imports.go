@@ -95,7 +95,13 @@ var flatKinds = map[string]bool{
 // a field named `provider` whose type is an enum -- then registers a bogus
 // `provider enum`, after which every `@enum(...)` annotation in the tree reads
 // as a cross-namespace provider call. That mistake cost 45 phantom findings.
-var declLineRe = regexp.MustCompile(`(?m)^(query|mutate|mutation|logic|spec|trait|shape|tool|prompt|provider|builtin|policy|rule|seed|concept|automation|action|capability)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+([A-Za-z_][A-Za-z0-9_]*))?\s*[{(]`)
+//
+// The declaration ends at `{`, `(` or `=`. The `=` is edition 2026's brace-less
+// predicate (epic memql#5363): `spec agent isX = row => ...` and `trait isY =
+// row => ...` carry no brace at all, and without it every spec and trait in a
+// migrated tree is declared nowhere -- after which pass 1 has no namespace for
+// them and every cross-namespace use of one is silently passed over.
+var declLineRe = regexp.MustCompile(`(?m)^(query|mutate|mutation|logic|spec|trait|shape|tool|prompt|provider|builtin|policy|rule|seed|concept|automation|action|capability)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+([A-Za-z_][A-Za-z0-9_]*))?\s*[{(=]`)
 
 var useLineRe = regexp.MustCompile(`(?m)^\s*use\s+([a-zA-Z0-9_.]+)\.\{([^}]*)\}`)
 
@@ -104,8 +110,38 @@ var useLineRe = regexp.MustCompile(`(?m)^\s*use\s+([a-zA-Z0-9_.]+)\.\{([^}]*)\}`
 var callRe = regexp.MustCompile(`(^|[^@\w.])([a-z][A-Za-z0-9_]*)\s*\(`)
 
 var shapeClauseRe = regexp.MustCompile(`(?m)^\s*shape\s+([a-z][A-Za-z0-9_]*)\s*$`)
-var filterLineRe = regexp.MustCompile(`(?m)^\s*filter\s+(.+)$`)
+
+// identRe matches a bare identifier. A name right after a `.` is a member --
+// `args.x`, `row.status`, `credentials.accountId` -- and never a reference to
+// a construct, so filterClauseIdents skips it: in an edition-2026 filter every
+// field is spelled `row.<field>`, and a field sharing a name with some other
+// namespace's trait would otherwise refuse a boot.
 var identRe = regexp.MustCompile(`\b([a-z][A-Za-z0-9_]*)\b`)
+
+// filterClauseIdents returns every bare identifier in every filter clause of
+// src, continuation lines included -- the edition-2026 codemod wraps a long
+// filter at its top-level `&&`, and a legacy clause has been allowed to wrap
+// since memql#4123, so a line-oriented read sees one conjunct of several.
+func filterClauseIdents(src string) []string {
+	var out []string
+	lines := strings.Split(src, "\n")
+	for i := 0; i < len(lines); i++ {
+		if !isFilterOpener(strings.TrimSpace(lines[i])) {
+			continue
+		}
+		parts, last := filterClauseLines(lines, i)
+		i = last
+		clause := joinClauseLines(parts)
+		for _, m := range identRe.FindAllStringSubmatchIndex(clause, -1) {
+			if m[2] > 0 && clause[m[2]-1] == '.' {
+				continue
+			}
+			out = append(out, clause[m[2]:m[3]])
+		}
+	}
+	return out
+}
+
 var lineCommentRe = regexp.MustCompile(`(?m)//.*$`)
 var stringLitRe = regexp.MustCompile(`"(\\.|[^"\\])*"`)
 
@@ -265,13 +301,12 @@ func scanCrossNamespaceImports(files []SourceFile, opts Options) []Violation {
 		for _, m := range shapeClauseRe.FindAllStringSubmatch(src, -1) {
 			report(m[1])
 		}
-		for _, m := range filterLineRe.FindAllStringSubmatch(src, -1) {
-			for _, id := range identRe.FindAllStringSubmatch(m[1], -1) {
-				// A bare conjunct is a spec or a trait; any other bare
-				// identifier on a filter line is a payload property.
-				if d, ok := declared[id[1]]; ok && (d.kind == "spec" || d.kind == "trait") {
-					report(id[1])
-				}
+		for _, id := range filterClauseIdents(src) {
+			// A bare conjunct is a spec or a trait; any other bare
+			// identifier in a filter is a payload property. (An edition-2026
+			// use is a call, `isX(row)`, which callRe above already read.)
+			if d, ok := declared[id]; ok && (d.kind == "spec" || d.kind == "trait") {
+				report(id)
 			}
 		}
 	}

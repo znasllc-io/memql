@@ -38,7 +38,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/dslclause"
+	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/baseparser"
 )
 
@@ -169,7 +171,18 @@ func classifyQuery(file string, line int, name, concept, preamble, body string) 
 	// equality is conditional on the arg being present, so it does NOT
 	// guarantee a single-row read (the query returns the full set when
 	// the arg is omitted) and must stay classified as a list.
-	if uniqueKeyFilterRe.MatchString(stripWhenGuards(filter)) {
+	//
+	// An edition-2026 filter carries no `when` block to strip: the codemod
+	// writes the guard as `(args.x == nil || row.id == args.x)`, where a
+	// text match for `row.id ==` would read the conditional equality as
+	// unconditional and exempt a full-set read. It is read as a tree
+	// instead (v1SingleRow).
+	if single, isV1 := v1SingleRow(filter); isV1 {
+		if single {
+			f.Class = SingleRow
+			return f
+		}
+	} else if uniqueKeyFilterRe.MatchString(stripWhenGuards(filter)) {
 		f.Class = SingleRow
 		return f
 	}
@@ -191,40 +204,68 @@ func classifyQuery(file string, line int, name, concept, preamble, body string) 
 	return f
 }
 
-// filterClause returns the text of the query body's `filter` line(s):
-// the `filter` directive plus any indented continuation lines that
-// belong to it (the same clause grammar the conformance test's
-// walkFilterPredicates uses). Returns "" when the query has no filter.
+// filterClause returns the text of the query body's `filter` clause: the
+// `filter` directive plus every continuation line dslclause.ClauseExtent folds
+// into it -- the fold the struct-query normaliser applies, so a blank line
+// inside a wrapped clause neither ends it here nor anywhere else. Returns ""
+// when the query has no filter.
 func filterClause(body string) string {
-	var sb strings.Builder
-	inFilter := false
+	// DELEGATES to the shared scanner (memql#3190). This file carried a
+	// private copy of it -- byte-identical to the ones in
+	// component/memql/dependency_validator.go and test/dslconformance/conformance_test.go
+	// -- and all three inferred escape state from the preceding byte, so a
+	// literal ending in a completed `\\` escape swallowed the `//` after
+	// it. Delegating fits here: a line-oriented `"`-only strip that keeps
+	// no offsets into the original is exactly StripLineComment's contract.
+	var lines []string
 	for _, raw := range strings.Split(body, "\n") {
-		// DELEGATES to the shared scanner (memql#3190). This file carried a
-		// private copy of it -- byte-identical to the ones in
-		// component/memql/dependency_validator.go and test/dslconformance/conformance_test.go
-		// -- and all three inferred escape state from the preceding byte, so a
-		// literal ending in a completed `\\` escape swallowed the `//` after
-		// it. Delegating fits here: a line-oriented `"`-only strip that keeps
-		// no offsets into the original is exactly StripLineComment's contract.
-		line := baseparser.StripLineComment(raw)
-		trim := strings.TrimSpace(line)
-		if !inFilter {
-			if dslclause.StartsWith(trim, "filter") {
-				inFilter = true
-				sb.WriteString(" ")
-				sb.WriteString(strings.TrimSpace(strings.TrimPrefix(trim, "filter")))
-			}
-			continue
-		}
-		// Continuation: stop at the next directive / annotation / blank.
-		if trim == "" || startsWithDirective(trim) || strings.HasPrefix(trim, "@") {
-			inFilter = false
-			continue
-		}
-		sb.WriteString(" ")
-		sb.WriteString(trim)
+		lines = append(lines, baseparser.StripLineComment(raw))
 	}
-	return sb.String()
+	for i, line := range lines {
+		trim := strings.TrimSpace(line)
+		if !dslclause.StartsWith(trim, "filter") {
+			continue
+		}
+		var sb strings.Builder
+		sb.WriteString(strings.TrimSpace(strings.TrimPrefix(trim, "filter")))
+		for j, last := i+1, dslclause.ClauseExtent(lines, i); j <= last; j++ {
+			if t := strings.TrimSpace(lines[j]); t != "" {
+				sb.WriteString(" ")
+				sb.WriteString(t)
+			}
+		}
+		return sb.String()
+	}
+	return ""
+}
+
+// v1SingleRow reports whether an edition-2026 filter guarantees a unique-key
+// equality -- every row it admits satisfies `<param>.id == <expr>` -- and
+// whether the filter was an edition-2026 one at all.
+//
+// ast.Guarantees carries the rule: a conjunct narrows, so `row.id == args.x
+// && ...` is single-row; the optional-argument guard `(args.x == nil ||
+// row.id == args.x)` is a disjunction one arm of which is no id equality, so
+// the query stays a list exactly as a guarded legacy equality does. A v1
+// filter that does not parse is not single-row: that direction demands a
+// bound, which is the conservative answer for this rule.
+func v1SingleRow(filter string) (single, isV1 bool) {
+	if !dslclause.OpensLambda(filter) {
+		return false, false
+	}
+	lam, err := parser.ParseV1Lambda(filter)
+	if err != nil || len(lam.Params) != 1 {
+		return false, true
+	}
+	param := lam.Params[0]
+	isRowID := func(n ast.ExpressionNode) bool {
+		root, fields, ok := ast.MemberPath(ast.Unparen(n))
+		return ok && root == param && len(fields) == 1 && fields[0] == "id"
+	}
+	return ast.Guarantees(lam.Body, func(n ast.ExpressionNode) bool {
+		b, ok := n.(*ast.BinaryExpr)
+		return ok && b.Op == "==" && (isRowID(b.Left) || isRowID(b.Right))
+	}), true
 }
 
 // whenGuardRe matches a `when(...) { ... }` guard block so it can be
