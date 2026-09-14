@@ -306,26 +306,3 @@ func sortedSet(set map[string]bool) []string {
 	sort.Strings(out)
 	return out
 }
-
-// receiverKeyToConstructKeywords maps an annotations-registry receiver key to
-// the author-facing construct keyword(s) it governs, derived from
-// constructs(): a construct receiver governs the constructs naming it as
-// their AnnotationReceiver (the "Spec" receiver backs both `spec` and
-// `trait`); a field receiver governs the constructs whose field list it
-// checks; ConceptBody governs the concept. An unknown key maps to nothing,
-// which the drift test reports.
-func receiverKeyToConstructKeywords(receiverKey string) []string {
-	set := map[string]bool{}
-	if receiverKey == string(annotations.ConceptBody) {
-		set["concept"] = true
-	}
-	for _, c := range constructs() {
-		if c.AnnotationReceiver == receiverKey && receiverKey != "" {
-			set[c.Keyword] = true
-		}
-		if string(fieldReceiverFor(c)) == receiverKey && receiverKey != "" {
-			set[c.Keyword] = true
-		}
-	}
-	return sortedSet(set)
-}
