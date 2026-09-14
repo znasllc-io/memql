@@ -5,7 +5,10 @@ import (
 )
 
 func TestLexer_SimpleQuery(t *testing.T) {
-	input := `concept==v1:crm:lead&&payload.active==true`
+	// `&&` between the terms, `;` trailing. Epic memql#5375 retired `;` as
+	// the AND CONNECTIVE, not as a token: the lexer still emits it and a
+	// trailing one is tolerated, which is what this lexer test measures.
+	input := `concept==v1:crm:lead&&payload.active==true;`
 
 	lexer := NewLexer(input)
 	tokens, err := lexer.Tokenize()
@@ -38,6 +41,10 @@ func TestLexer_SimpleQuery(t *testing.T) {
 	if !foundConceptName {
 		t.Error("Expected to find 'v1:crm:lead' token")
 	}
+	// `;` is still a TOKEN -- the lexer emits it and a TRAILING one is
+	// tolerated. What epic memql#5375 retired is its use as the AND
+	// connective, which parseLogicalAnd refuses, so the fixture writes `&&`
+	// between the two terms and keeps a trailing `;` for this assertion.
 	if !foundSemicolon {
 		t.Error("Expected to find ';' token")
 	}
@@ -47,7 +54,11 @@ func TestLexer_SimpleQuery(t *testing.T) {
 }
 
 func TestLexer_ConditionalFilter(t *testing.T) {
-	input := `concept==v1:user;?.payload.role==args.role`
+	// `?.` is refused at the PARSE level (epic memql#5375) and still LEXES,
+	// which is the layer this test is about -- the refusal in
+	// expression_entry.go recognises the token in order to name `??` as the
+	// replacement, so the token has to keep existing.
+	input := `concept==v1:user&&owner?.role==args.role`
 
 	lexer := NewLexer(input)
 	tokens, err := lexer.Tokenize()
@@ -249,6 +260,7 @@ func TestLexer_TypeReceivers(t *testing.T) {
 
 func TestLexer_Attributes(t *testing.T) {
 	input := `
+@disabled
 @description("Test function")
 @trigger(event="test.event")`
 
@@ -259,7 +271,9 @@ func TestLexer_Attributes(t *testing.T) {
 	}
 
 	// Expected token pattern: @ identifier ( string/args )
-	// @enabled -> @ enabled
+	// @disabled -> @ disabled (was @enabled until epic memql#5375 retired it;
+	// this test is about the LEXER's @-identifier tokenisation, so any live
+	// annotation serves)
 	// @description("Test function") -> @ description ( string )
 	// @trigger(event="test.event") -> @ trigger ( identifier = string )
 
@@ -271,12 +285,12 @@ func TestLexer_Attributes(t *testing.T) {
 		t.Errorf("Expected '@', got %q", tokens[0].Literal)
 	}
 
-	// Second token should be identifier "enabled"
+	// Second token should be identifier "disabled"
 	if tokens[1].Type != TokenIdentifier {
 		t.Errorf("Token 1: expected TokenIdentifier, got %v (%q)", tokens[1].Type, tokens[1].Literal)
 	}
-	if tokens[1].Literal != "enabled" {
-		t.Errorf("Expected 'enabled', got %q", tokens[1].Literal)
+	if tokens[1].Literal != "disabled" {
+		t.Errorf("Expected 'disabled', got %q", tokens[1].Literal)
 	}
 }
 
@@ -594,7 +608,7 @@ func (Automation) testAutomation(_ any) {
 func TestParser_QueryFunction(t *testing.T) {
 	input := `
 func (Query) activeUsers(args any) (any, error) {
-	return concept==v1:user;?.payload.role==args.role, nil
+	return concept==v1:user&&payload.role==args.role, nil
 }`
 
 	lexer := NewLexer(input)
@@ -1199,7 +1213,10 @@ func (Automation) bootstrap(ctx any) {
 }
 
 func TestParser_AttributeSimple(t *testing.T) {
-	input := `
+	// @disabled: the fixture carried @enabled until epic memql#5375 retired
+	// it, and this test is about the parser FOLDING a single lifecycle
+	// annotation onto the FunctionDef -- so it flips to the flag that exists.
+	input := `@disabled
 func (Automation) myAutomation(_ any) {
   checkUser := query {
     concept==v1:user
@@ -1241,13 +1258,14 @@ func (Automation) myAutomation(_ any) {
 	if len(funcDef.Attributes) != 1 {
 		t.Fatalf("Expected 1 attribute, got %d", len(funcDef.Attributes))
 	}
-	if funcDef.Attributes[0].Name != "enabled" {
-		t.Errorf("Expected attribute name 'enabled', got %q", funcDef.Attributes[0].Name)
+	if funcDef.Attributes[0].Name != "disabled" {
+		t.Errorf("Expected attribute name 'disabled', got %q", funcDef.Attributes[0].Name)
 	}
 
-	// Should be enabled
-	if !funcDef.Enabled {
-		t.Error("Expected function to be enabled due to @enabled attribute")
+	// Should be DISABLED -- the fold this measures is the off direction now.
+	// Enabled-by-default is covered by TestParser_GoStyleDefaultEnabled.
+	if funcDef.Enabled {
+		t.Error("Expected function to be disabled due to the @disabled attribute")
 	}
 }
 
@@ -1284,9 +1302,10 @@ func (Automation) bootstrapUser(_ any) {
 		t.Fatalf("Expected FunctionDef, got %T", file.Definitions[0])
 	}
 
-	// Should have 3 attributes
-	if len(funcDef.Attributes) != 3 {
-		t.Fatalf("Expected 3 attributes, got %d", len(funcDef.Attributes))
+	// Should have 2 attributes. It was 3 until epic memql#5375 retired
+	// @enabled, which this fixture carried beside the two that remain.
+	if len(funcDef.Attributes) != 2 {
+		t.Fatalf("Expected 2 attributes, got %d", len(funcDef.Attributes))
 	}
 
 	// Check enabled
@@ -1316,7 +1335,7 @@ func TestParser_GoStyleQuery(t *testing.T) {
 	input := `
 @description("Returns active users")
 func (Query) activeUsers(args any) (any, error) {
-  return concept==v1:user; payload.active==true, nil
+  return concept==v1:user && payload.active==true, nil
 }
 `
 	lexer := NewLexer(input)
@@ -1367,8 +1386,11 @@ func (Query) activeUsers(args any) (any, error) {
 }
 
 func TestParser_GoStyleSchedule(t *testing.T) {
+	// @trigger(schedule=), not @schedule(cron=): epic memql#5375 collapsed
+	// the pair, and both folded to the same AutomationDef.Schedule field --
+	// which is what this test measures.
 	input := `
-@schedule(cron="*/30 * * * *")
+@trigger(schedule="*/30 * * * *")
 func (Automation) scheduledTask(_ any) {
   doWork := query {
     concept==v1:task
@@ -1486,9 +1508,10 @@ func (Automation) myAutomation(_ any) {
 
 func TestParser_ArgsAttribute(t *testing.T) {
 	input := `
+@disabled
 @args({ "userId": { "type": "string", "required": true }, "limit": { "type": "number", "default": 10 } })
 func (Query) searchUsers(args any) (any, error) {
-  return concept==v1:user; ?.payload.userId==args.userId, nil
+  return concept==v1:user && payload.userId==args.userId, nil
 }
 `
 	lexer := NewLexer(input)
@@ -1767,8 +1790,8 @@ args {
   status   string
 }
 func (Query) spaceParticipants(args any) (any, error) {
-  return concept==v1:cognition:participant;
-  ?.payload.partitionId==args.partitionId;
+  return concept==v1:cognition:participant &&
+  ?.payload.partitionId==args.partitionId &&
   ?.payload.status==args.status, nil
 }
 `

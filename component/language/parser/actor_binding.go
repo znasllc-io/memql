@@ -110,7 +110,7 @@ func stripCommentsAndStrings(source string) string {
 
 // actorConstructHeaderRe matches the declaration line of the four
 // actor-capable construct kinds. Group 1 is the indentation.
-var actorConstructHeaderRe = regexp.MustCompile(`(?m)^([ \t]*)(?:query|mutate|logic|automation)[ \t]+[A-Za-z_]`)
+var actorConstructHeaderRe = regexp.MustCompile(`(?m)^([ \t]*)(?:query|mutation|logic|automation)[ \t]+[A-Za-z_]`)
 
 // RewriteActorBinding inserts a bare `@actor` line above every
 // query/mutate/logic/automation whose body reads the actor envelope

@@ -340,8 +340,10 @@ concept thing {
 	if len(got) != 1 {
 		t.Fatalf("expected the detached file header to be reported once, got %d: %+v", len(got), got)
 	}
-	if !strings.Contains(got[0].Attributes, "@version") ||
-		!strings.Contains(got[0].Attributes, "@namespace") {
+	// @version alone: the header carried @namespace beside it until epic
+	// memql#5375 retired the annotation, and @version is the id-bearing
+	// attribute a file header has left.
+	if !strings.Contains(got[0].Attributes, "@version") {
 		t.Errorf("Attributes must name what the file lost, got %q", got[0].Attributes)
 	}
 

@@ -22,7 +22,7 @@ query provider queryAllProviders {
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := "paginate(concept==provider;isActiveRecord, " + strconv.Itoa(UnboundedPaginateWindow) + ")"
+	want := "paginate(concept==provider&&isActiveRecord, " + strconv.Itoa(UnboundedPaginateWindow) + ")"
 	if !strings.Contains(out, want) {
 		t.Errorf("expected injected paginate %q, got:\n%s", want, out)
 	}

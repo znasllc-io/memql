@@ -296,7 +296,7 @@ func TestRewriteDocComments_AdditiveLongHeaderKept(t *testing.T) {
 // have been synthetically validated but not yet confirmed by a human
 // identity, and may be usable if the concept's policy allows it; see the
 // isConfirmed sibling for the human-confirmed tier and the usage example
-// concept==v1:data:record;isChecked() for filter composition.
+// concept==v1:data:record&&isChecked() for filter composition.
 @description("Matches active data records in checked validation state.")
 trait probeChecked {
   return validationState == "checked"

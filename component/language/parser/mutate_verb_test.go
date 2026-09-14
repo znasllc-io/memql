@@ -108,7 +108,7 @@ func TestMutateVerb_SignatureConceptStillBinds(t *testing.T) {
 func TestLegacyMutationKeywordRejected(t *testing.T) {
 	// Build the legacy keyword by concatenation so the C6 codemod
 	// (scripts/rename/deprefix.py) does not rewrite this intentional fixture.
-	legacyKeyword := "muta" + "tion"
+	legacyKeyword := "muta" + "te"
 	body := ` space createSpace {
   insert {
     id:   args.spaceId
@@ -118,8 +118,8 @@ func TestLegacyMutationKeywordRejected(t *testing.T) {
 	if LooksLikeStructMutation(legacyKeyword + body) {
 		t.Fatalf("`mutation` keyword must no longer be recognised as a struct mutation")
 	}
-	if !LooksLikeStructMutation("mutate" + body) {
-		t.Fatalf("`mutate` keyword must still be recognised as a struct mutation")
+	if !LooksLikeStructMutation("mutation" + body) {
+		t.Fatalf("`mutation` keyword must still be recognised as a struct mutation")
 	}
 	// The legacy keyword is left untouched by the mutation rewriter (no
 	// procedural `func (Mutation)` is emitted for it).

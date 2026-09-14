@@ -179,7 +179,7 @@ func TestParseDefinition_UnknownKeyword_ListsRewriterHandledKinds(t *testing.T) 
 		t.Fatal("expected an error for the typo'd `conept` keyword, got nil")
 	}
 	msg := err.Error()
-	for _, want := range []string{"'query'", "'mutate'", "'logic'", "'automation'"} {
+	for _, want := range []string{"'query'", "'mutation'", "'logic'", "'automation'"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("expected-keyword hint should list %s (it omitted these before #2358)\n  full: %s", want, msg)
 		}
@@ -196,7 +196,7 @@ func TestParseDefinition_UnknownKeyword_SuggestsNearest(t *testing.T) {
 	}{
 		{"@description(\"x\")\nquer participant qFoo { }", "did you mean 'query'?"},
 		{"use cognition.concepts.{ space }\n\nshaep space s { row.id }", "did you mean 'shape'?"},
-		{"mutaton space createSpace { }", "did you mean 'mutate'?"},
+		{"mutaton space createSpace { }", "did you mean 'mutation'?"},
 	}
 	for _, tc := range cases {
 		_, err := ParseFile(tc.src)

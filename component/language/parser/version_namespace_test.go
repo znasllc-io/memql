@@ -43,11 +43,12 @@ concept participant {
 		t.Errorf("@version value = %v (%T), want int64(1)", versionAttr.Value, versionAttr.Value)
 	}
 
-	if namespaceAttr == nil {
-		t.Fatal("missing @namespace attribute")
-	}
-	if v, ok := namespaceAttr.Value.(string); !ok || v != "cognition" {
-		t.Errorf("@namespace value = %v (%T), want string \"cognition\"", namespaceAttr.Value, namespaceAttr.Value)
+	// @namespace is RETIRED (epic memql#5375): a concept's namespace is its
+	// domain directory, or that directory's namespace.pin. @version stays --
+	// it is the "v1" of every canonical id -- so this test keeps the half
+	// that is still an attribute.
+	if namespaceAttr != nil {
+		t.Errorf("@namespace parsed as an attribute (%v); it is retired", namespaceAttr.Value)
 	}
 }
 

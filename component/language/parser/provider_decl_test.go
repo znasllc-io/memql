@@ -147,7 +147,7 @@ provider testProvider {
 func TestParseProviderDecl_Disabled(t *testing.T) {
 	source := `@disabled
 @base
-@type("Acme")
+@vendor("Acme")
 provider acme {
   auth {
     apiKey  env("MEMQL_SI_ACME_API_KEY")

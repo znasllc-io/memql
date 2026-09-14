@@ -10,7 +10,12 @@ import (
 // TestRetiredCascadeFormsRefuse is one negative cell per form D17 removes
 // from the parse cascade (issue #5376's acceptance criterion).
 //
-// Two of the four ALREADY failed before memql#5375, and that is the point of
+// `,` AS OR IS DEFERRED, not retired, so it has no cell here: it is still
+// live grammar (two filters folding into one traversal argument) and its
+// codemod is `--rewrite=expressions`, which epic memql#5363 owns. See
+// parseLogicalOr.
+//
+// Two of the three ALREADY failed before memql#5375, and that is the point of
 // testing all four together: `?.` failed as "unexpected token" and
 // `import (...)` as "expected import path string", neither of which names the
 // form or the fix -- and the second actively misleads, reading as though the
@@ -24,11 +29,6 @@ func TestRetiredCascadeFormsRefuse(t *testing.T) {
 			name:   "semicolon-as-AND",
 			source: "active==true ; deleted==false",
 			wants:  "`&&`",
-		},
-		{
-			name:   "comma-as-OR",
-			source: `status=="a" , status=="b"`,
-			wants:  "`||`",
 		},
 		{
 			name:   "optional-chain",
@@ -109,7 +109,7 @@ func TestLoweredQueryUsesAndAnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormaliseAll: %v", err)
 	}
-	if strings.Contains(out, "&&active==true") {
+	if strings.Contains(out, ";active==true") {
 		t.Errorf("the lowering still glues the concept term with `;`, which the parser now refuses:\n%s", out)
 	}
 	if !strings.Contains(out, "&&active==true") {

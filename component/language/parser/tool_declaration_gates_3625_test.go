@@ -86,11 +86,21 @@ tool todosCreate {
 // identical defect twice over: an unrecognised name was dropped, and so was a
 // value that did not parse as an integer. Either way the author declared a
 // ceiling and got none.
-func TestToolRateLimitRejectsTypoAndNonInteger(t *testing.T) {
-	for _, tc := range []struct{ name, annotation, want string }{
-		{"typo'd kwarg", `@rateLimit(maxCals=10, periodSeconds=60)`, "maxCals"},
-		{"non-integer maxCalls", `@rateLimit(maxCalls="ten", periodSeconds=60)`, "maxCalls"},
-		{"non-integer period", `@rateLimit(maxCalls=10, periodSeconds="a minute")`, "periodSeconds"},
+// TestToolRateLimitIsRetiredWhateverItsArguments supersedes the memql#3625
+// argument-name gates.
+//
+// Those gates existed because a typo'd kwarg or a non-integer value was
+// SILENTLY DISCARDED, leaving "the tool runs unthrottled" -- and epic
+// memql#5375 found that the well-formed annotation left the tool unthrottled
+// too, because Tool.RateLimit was cloned, advertised and enforced nowhere. So
+// the whole annotation is retired, and the three cases collapse into one: the
+// refusal does not depend on the arguments, because there is nothing left to
+// get right about them.
+func TestToolRateLimitIsRetiredWhateverItsArguments(t *testing.T) {
+	for _, tc := range []struct{ name, annotation string }{
+		{"well-formed", `@rateLimit(maxCalls=10, periodSeconds=60)`},
+		{"typo'd kwarg", `@rateLimit(maxCals=10, periodSeconds=60)`},
+		{"non-integer maxCalls", `@rateLimit(maxCalls="ten", periodSeconds=60)`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := `@description("create a todo")
@@ -102,11 +112,13 @@ tool todosCreate {
 `
 			_, err := ParseToolDecl(src)
 			if err == nil {
-				t.Fatalf("%s was accepted -- the declared rate limit is silently discarded and "+
-					"the tool runs unthrottled", tc.name)
+				t.Fatalf("%s was accepted; @rateLimit is retired", tc.name)
 			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("the error must name %q; got: %v", tc.want, err)
+			if !strings.Contains(err.Error(), "retired") {
+				t.Errorf("the refusal should say retired; got: %v", err)
+			}
+			if !strings.Contains(err.Error(), "memqlmigrate --rewrite=attributes") {
+				t.Errorf("the refusal should name the rewrite; got: %v", err)
 			}
 		})
 	}
@@ -161,7 +173,7 @@ tool hookIt {
 `},
 		{"rate limit", `@description("d")
 @handler(type="function", name="createTodo")
-@rateLimit(maxCalls=10, periodSeconds=60)
+@destructive
 tool todosCreate {
   title string @required
 }

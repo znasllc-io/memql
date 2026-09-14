@@ -331,13 +331,24 @@ func TestRetiredOperators_ParserAcceptsToTreeScanGate(t *testing.T) {
 	// what rejects them across the live .memql tree.
 	acceptedByParser := []string{
 		`tags has "x"`, // `has` -> enforced by test/dslconformance/no_retired_operators_test.go
-		`a == 1 ; b == 2`,
+		// `,` as OR stays accepted: still live grammar, and its codemod is
+		// `--rewrite=expressions`, which epic memql#5363 owns.
 		`a == 1 , b == 2`,
 	}
 	for _, src := range acceptedByParser {
 		if _, err := ParseExpression(src); err != nil {
 			t.Errorf("LAYER PIN: parser rejects %q now (err=%v).\n  If a story intentionally added parser-level rejection, move this case to an active negative test and update test/dslconformance/no_retired_operators_test.go's role note.", src, err)
 		}
+	}
+
+	// `;` as AND MOVED DOWN A LAYER, which is exactly what this pin exists to
+	// force: epic memql#5375 added the parser-level rejection the comment
+	// above anticipated, so the case is active rather than accepted -- and it
+	// names the replacement, which the tree-scan gate never did.
+	if _, err := ParseExpression(`a == 1 ; b == 2`); err == nil {
+		t.Error("`;` as AND must be refused at the parser level (epic memql#5375)")
+	} else if !strings.Contains(err.Error(), "`&&`") {
+		t.Errorf("the `;` refusal must name `&&` as the replacement, got: %v", err)
 	}
 }
 

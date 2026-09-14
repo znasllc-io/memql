@@ -194,7 +194,7 @@ func TestQueryStructFormCountDirective(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := `count(concept==user;isActiveRecord)`
+	want := `count(concept==user&&isActiveRecord)`
 	if !strings.Contains(out, want) {
 		t.Errorf("expected count wrap %q, got:\n%s", want, out)
 	}

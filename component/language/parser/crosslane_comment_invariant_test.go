@@ -40,7 +40,7 @@ func TestCrossLane_CommentInAnOuterHeaderDoesNotRefuseTheLoad(t *testing.T) {
 		{
 			name: "mutation",
 			ctl:  "mutation space createSpace {\n  args {\n    id string @required\n  }\n  insert { id: args.id }\n}",
-			with: "mutate space /*c*/ createSpace {\n  args {\n    id string @required\n  }\n  insert { id: args.id }\n}",
+			with: "mutation space /*c*/ createSpace {\n  args {\n    id string @required\n  }\n  insert { id: args.id }\n}",
 			fn:   NormaliseMutationSource,
 		},
 		{

@@ -234,7 +234,10 @@ automation consolidateMemory @trigger(schedule="0 45 2 * * *") => logic consolid
 	if !strings.Contains(s.Source, "/// Nightly consolidation.") {
 		t.Errorf("the doc-comment preamble is part of the declaration and must be in the slice: %q", s.Source)
 	}
-	if !strings.Contains(s.Source, "@enabled") {
+	// @trigger is the annotation the slice carries. It was @enabled until
+	// epic memql#5375 retired it; a terse automation writes its trigger
+	// inline, so this asserts the same property on a line the fixture has.
+	if !strings.Contains(s.Source, "@trigger(schedule=") {
 		t.Errorf("the annotation preamble must be in the slice: %q", s.Source)
 	}
 	if src[s.Start:s.End] != s.Source {
