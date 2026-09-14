@@ -17,8 +17,13 @@ import (
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
+// ruleWith is a rule on the CHANGED event carrying condition, so its filter is
+// the condition alone -- which is what the condition tests below pin. A created
+// rule's filter is the same condition behind the first-version guard, pinned in
+// first_version_test.go.
 func ruleWith(condition string) Rule {
 	r := baseRule()
+	r.EventKind = "updated"
 	r.Condition = condition
 	return r
 }

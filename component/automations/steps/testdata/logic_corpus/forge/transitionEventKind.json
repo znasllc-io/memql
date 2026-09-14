@@ -1,0 +1,861 @@
+{
+  "construct": "forge/logic.memql transitionEventKind",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "oldStatus": "s-oldStatus",
+          "status": "s-status"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "oldStatus": "s-oldStatus",
+          "status": "s-status"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "oldStatus": "s-oldStatus",
+          "status": "s-status"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "oldStatus": "s-oldStatus",
+          "status": "s-status"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "oldStatus": "s-oldStatus",
+          "status": "s-status"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "oldStatus": "s-oldStatus",
+          "status": "s-status"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "oldStatus": "s-oldStatus",
+          "status": "s-status"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "oldStatus": "s-oldStatus",
+          "status": "s-status"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "variant 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "oldStatus": "draft",
+          "status": "needs_approval"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "validated"
+      }
+    },
+    "variant 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "oldStatus": "draft",
+          "status": "needs_approval"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "validated"
+      }
+    },
+    "variant 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "oldStatus": "draft",
+          "status": "needs_approval"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "validated"
+      }
+    },
+    "variant 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "oldStatus": "draft",
+          "status": "needs_approval"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "validated"
+      }
+    },
+    "variant 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "oldStatus": "draft",
+          "status": "needs_approval"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "validated"
+      }
+    },
+    "variant 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "oldStatus": "draft",
+          "status": "needs_approval"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "validated"
+      }
+    },
+    "variant 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "oldStatus": "draft",
+          "status": "needs_approval"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "validated"
+      }
+    },
+    "variant 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "oldStatus": "draft",
+          "status": "needs_approval"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "validated"
+      }
+    },
+    "variant 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "oldStatus": "needs_approval",
+          "status": "queued"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "approved"
+      }
+    },
+    "variant 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "oldStatus": "needs_approval",
+          "status": "queued"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "approved"
+      }
+    },
+    "variant 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "oldStatus": "needs_approval",
+          "status": "queued"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "approved"
+      }
+    },
+    "variant 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "oldStatus": "needs_approval",
+          "status": "queued"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "approved"
+      }
+    },
+    "variant 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "oldStatus": "needs_approval",
+          "status": "queued"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "approved"
+      }
+    },
+    "variant 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "oldStatus": "needs_approval",
+          "status": "queued"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "approved"
+      }
+    },
+    "variant 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "oldStatus": "needs_approval",
+          "status": "queued"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "approved"
+      }
+    },
+    "variant 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "oldStatus": "needs_approval",
+          "status": "queued"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "approved"
+      }
+    },
+    "variant 2 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "oldStatus": "queued",
+          "status": "rejected"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "rejected"
+      }
+    },
+    "variant 2 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "oldStatus": "queued",
+          "status": "rejected"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "rejected"
+      }
+    },
+    "variant 2 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "oldStatus": "queued",
+          "status": "rejected"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "rejected"
+      }
+    },
+    "variant 2 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "oldStatus": "queued",
+          "status": "rejected"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "rejected"
+      }
+    },
+    "variant 2 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "oldStatus": "queued",
+          "status": "rejected"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "rejected"
+      }
+    },
+    "variant 2 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "oldStatus": "queued",
+          "status": "rejected"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "rejected"
+      }
+    },
+    "variant 2 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "oldStatus": "queued",
+          "status": "rejected"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "rejected"
+      }
+    },
+    "variant 2 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "oldStatus": "queued",
+          "status": "rejected"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "rejected"
+      }
+    },
+    "variant 3 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "oldStatus": "queued",
+          "status": "changes_requested"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "changes_requested"
+      }
+    },
+    "variant 3 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "oldStatus": "queued",
+          "status": "changes_requested"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "changes_requested"
+      }
+    },
+    "variant 3 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "oldStatus": "queued",
+          "status": "changes_requested"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "changes_requested"
+      }
+    },
+    "variant 3 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "oldStatus": "queued",
+          "status": "changes_requested"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "changes_requested"
+      }
+    },
+    "variant 3 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "oldStatus": "queued",
+          "status": "changes_requested"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "changes_requested"
+      }
+    },
+    "variant 3 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "oldStatus": "queued",
+          "status": "changes_requested"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "changes_requested"
+      }
+    },
+    "variant 3 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "oldStatus": "queued",
+          "status": "changes_requested"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "changes_requested"
+      }
+    },
+    "variant 3 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "oldStatus": "queued",
+          "status": "changes_requested"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "changes_requested"
+      }
+    },
+    "variant 4 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "oldStatus": "queued",
+          "status": "queued"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "the legacy compiler turns `old == st` into `old == \"st\"`, a comparison with the literal text, so an unchanged status reads as a transition",
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "variant 4 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "oldStatus": "queued",
+          "status": "queued"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "the legacy compiler turns `old == st` into `old == \"st\"`, a comparison with the literal text, so an unchanged status reads as a transition",
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "variant 4 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "oldStatus": "queued",
+          "status": "queued"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "the legacy compiler turns `old == st` into `old == \"st\"`, a comparison with the literal text, so an unchanged status reads as a transition",
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "variant 4 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "oldStatus": "queued",
+          "status": "queued"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "the legacy compiler turns `old == st` into `old == \"st\"`, a comparison with the literal text, so an unchanged status reads as a transition",
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "variant 4 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "oldStatus": "queued",
+          "status": "queued"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "the legacy compiler turns `old == st` into `old == \"st\"`, a comparison with the literal text, so an unchanged status reads as a transition",
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "variant 4 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "oldStatus": "queued",
+          "status": "queued"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "the legacy compiler turns `old == st` into `old == \"st\"`, a comparison with the literal text, so an unchanged status reads as a transition",
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "variant 4 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "oldStatus": "queued",
+          "status": "queued"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "the legacy compiler turns `old == st` into `old == \"st\"`, a comparison with the literal text, so an unchanged status reads as a transition",
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "variant 4 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "oldStatus": "queued",
+          "status": "queued"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "the legacy compiler turns `old == st` into `old == \"st\"`, a comparison with the literal text, so an unchanged status reads as a transition",
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "variant 5 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "variant 5 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "variant 5 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "variant 5 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "variant 5 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "variant 5 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "variant 5 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    },
+    "variant 5 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": ""
+      }
+    }
+  }
+}

@@ -1,0 +1,809 @@
+{
+  "construct": "identity/logic.memql revokeExpiredDelegations",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "asOf": "s-asOf"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "s-asOf"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "asOf": "s-asOf"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "s-asOf"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "asOf": "s-asOf"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "s-asOf"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "asOf": "s-asOf"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "s-asOf"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "asOf": "s-asOf"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "s-asOf"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "asOf": "s-asOf"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "s-asOf"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "asOf": "s-asOf"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "s-asOf"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "asOf": "s-asOf"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "s-asOf"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "asOf": "s-asOf"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "s-asOf"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "asOf": "s-asOf"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "s-asOf"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "asOf": "s-asOf"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "s-asOf"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "asOf": "s-asOf"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "s-asOf"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "asOf": "s-asOf"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "s-asOf"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "asOf": "s-asOf"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "s-asOf"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "asOf": "s-asOf"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "s-asOf"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "asOf": "s-asOf"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "s-asOf"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "variant 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "asOf": "2026-09-01T00:00:00Z"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "variant 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "asOf": "2026-09-01T00:00:00Z"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "variant 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "asOf": "2026-09-01T00:00:00Z"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "variant 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "asOf": "2026-09-01T00:00:00Z"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "variant 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "asOf": "2026-09-01T00:00:00Z"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "variant 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "asOf": "2026-09-01T00:00:00Z"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "variant 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "asOf": "2026-09-01T00:00:00Z"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "variant 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "asOf": "2026-09-01T00:00:00Z"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredActiveDelegations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredActiveDelegations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredActiveDelegations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

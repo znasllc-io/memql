@@ -948,6 +948,54 @@ export function conditionRowIs(rule: { triggerConcept: string; eventKind: string
   return rule.eventKind === "updated" ? `the ${noun} that changed` : `the ${noun} that was created`;
 }
 
+/** The calls the rules surface makes. Only THESE frames come off a refusal,
+ *  so an engine sentence that opens with its own package name ("emailrules:
+ *  ...", "authoring: ...") is never mistaken for one. */
+const RULE_CALLS = [
+  "createEmailRule",
+  "updateEmailRule",
+  "campaignActivateEmailRule",
+  "campaignRetireEmailRule",
+  "setEmailRuleStatus",
+];
+
+/** The server's frame around an engine error it classifies as internal. */
+const ENGINE_FRAME = "MemQL engine failed to execute query.";
+
+/**
+ * The engine's own sentence out of a refused call on the rules surface.
+ *
+ * A refusal arrives in two frames, neither of which is the refusal: the SDK's
+ * `executeNamed` prefixes the call's name (`campaignActivateEmailRule: `) and
+ * the server prefixes "MemQL engine failed to execute query. Details: "
+ * (`buildEngineErrorMessage` in component/grpc/server.go). Shown as they came,
+ * one refusal read twice on the rule's page -- plainly in the rule's notice,
+ * which renders what the engine recorded, and again inside its wrapping.
+ *
+ * Both frames come off and nothing else does: what is left is the sentence the
+ * engine recorded on the rule, so the two can be compared and it can be said
+ * once. Never a paraphrase. A server frame with nothing inside it is kept as
+ * it is -- it is then the whole of what the cluster said, and dropping it
+ * would hide that the call failed at all.
+ */
+export function engineSentence(message: string): string {
+  let text = message.trim();
+  for (const call of RULE_CALLS) {
+    if (text.startsWith(call + ":")) {
+      text = text.slice(call.length + 1).trim();
+      break;
+    }
+  }
+  if (text.startsWith(ENGINE_FRAME)) {
+    const inside = text
+      .slice(ENGINE_FRAME.length)
+      .trim()
+      .replace(/^Details:\s*/, "");
+    if (inside !== "") text = inside;
+  }
+  return text;
+}
+
 // ---------------------------------------------------------------------------
 // Deliveries
 // ---------------------------------------------------------------------------

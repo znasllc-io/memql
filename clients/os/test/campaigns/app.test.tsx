@@ -731,6 +731,108 @@ describe("the rules builder", () => {
 });
 
 // ===========================================================================
+// A REFUSAL, SAID ONCE
+// ===========================================================================
+// A refused activation reaches the page twice: the engine records its
+// sentence on the rule (`lastError`, the rule's notice) and the call fails
+// with the same sentence inside two transport frames -- the SDK's call name
+// and the server's "MemQL engine failed to execute query. Details:". Measured
+// in a browser against a real engine, the page showed both. The two orders the
+// record and the error can arrive in are both pinned, because neither is
+// guaranteed.
+
+describe("a refused activation", () => {
+  const RULE_CONCEPT = "v1:campaigns:emailRule";
+  const RULE = ruleRow({
+    id: "v1:campaigns:emailRule:r1",
+    condition: "row.primaryEmail.includes(@acme.com)",
+  });
+  const REFUSED =
+    'Braces, @ and semicolons can only appear inside quotes, like row.email == "boss@acme.com".';
+  const CALL_ERROR = `campaignActivateEmailRule: MemQL engine failed to execute query. Details: ${REFUSED}`;
+
+  /** Once, and without the frames. Counted over the page's text rather than
+   *  matched as a node, so a copy inside its wrapping counts too. */
+  function expectSaidOnce() {
+    const text = document.body.textContent ?? "";
+    expect(text.split(REFUSED).length - 1).toBe(1);
+    expect(text).not.toContain("MemQL engine failed to execute query");
+    expect(text).not.toContain("campaignActivateEmailRule");
+  }
+
+  async function turnOn(conn: Conn) {
+    mount(conn, "rules");
+    fireEvent.click(await screen.findByText("Tell the owner about new admins"));
+    fireEvent.click(await screen.findByText("Turn it on"));
+    await act(async () => {
+      fireEvent.click(screen.getByText("Turn it on", { selector: ".os-button" }));
+    });
+  }
+
+  it("is said once, in the rule's notice, when the engine has recorded it", async () => {
+    const conn = fakeConnection({ emailRules: [RULE], templates: [], concepts: [] });
+    conn.query.campaignActivateEmailRule.mockImplementation(async () => {
+      // What the engine does: record the refusal on the rule, then refuse.
+      conn.subscriptions.emit(RULE_CONCEPT, { ...RULE, status: "failed", lastError: REFUSED });
+      throw new Error(CALL_ERROR);
+    });
+    await turnOn(conn);
+
+    expect(await screen.findByText("This rule is not running. The cluster refused it.")).toBeTruthy();
+    expectSaidOnce();
+    // The panel the person clicked in says where the reason is, not what it is.
+    expect(screen.getByText("Not running -- the cluster refused it. The reason is above.")).toBeTruthy();
+  });
+
+  it("is said once, unframed, where it was asked -- and steps aside when the record lands", async () => {
+    const conn = fakeConnection({ emailRules: [RULE], templates: [], concepts: [] });
+    conn.query.campaignActivateEmailRule.mockImplementation(async () => {
+      throw new Error(CALL_ERROR);
+    });
+    await turnOn(conn);
+
+    // The rule does not carry it yet, so the panel says it -- once, plainly.
+    await waitFor(() => expect(document.body.textContent).toContain(REFUSED));
+    expectSaidOnce();
+    expect(screen.getByText("The cluster refused that.")).toBeTruthy();
+
+    // The record arrives: the rule's notice says it, and the panel's copy goes.
+    await act(async () => {
+      conn.subscriptions.emit(RULE_CONCEPT, { ...RULE, status: "failed", lastError: REFUSED });
+    });
+    expectSaidOnce();
+    expect(screen.getByText("This rule is not running. The cluster refused it.")).toBeTruthy();
+    expect(screen.queryByText("The cluster refused that.")).toBeNull();
+  });
+
+  it("frames nothing on a refused save either", async () => {
+    const conn = fakeConnection({
+      emailRules: [],
+      templates: [templateRow({ id: "v1:campaigns:template:t1", name: "Welcome" })],
+      concepts: [{ id: "v1:identity:user", domain: "identity", entity: "user" }],
+    });
+    const said = "recipientRoles must be a list of role slugs";
+    conn.query.createEmailRule.mockImplementation(async () => {
+      throw new Error(`createEmailRule: MemQL engine failed to execute query. Details: ${said}`);
+    });
+    mount(conn, "rules");
+    fireEvent.click(await screen.findByText("New rule"));
+    fireEvent.change(screen.getByLabelText("Rule name"), { target: { value: "Welcome new users" } });
+    chooseOption(screen.getByLabelText("The kind of thing that fires this rule"), "user (identity)");
+    chooseOption(screen.getByLabelText("Template to send"), "Welcome");
+    await act(async () => {
+      fireEvent.click(screen.getByText("Create rule"));
+    });
+
+    expect(await screen.findByText(said)).toBeTruthy();
+    expect(screen.getByText("This rule was not created.")).toBeTruthy();
+    const text = document.body.textContent ?? "";
+    expect(text).not.toContain("MemQL engine failed to execute query");
+    expect(text).not.toContain("createEmailRule");
+  });
+});
+
+// ===========================================================================
 // THE CLUSTER-WIDE KILL SWITCH
 // ===========================================================================
 // With `authoredAutomationsEnabled` off, the scheduler's global gate refuses
